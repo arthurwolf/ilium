@@ -2,6 +2,9 @@
 //! (see [`connection`]), dispatching requests through [`handlers`].
 
 mod connection;
+mod direct_events;
+pub(crate) use direct_events::DirectEventSender;
+pub(crate) use direct_events::EventReply;
 // `pub(crate)`, not private: `crate::run`'s crash-recovery restore path
 // (in `lib.rs`) calls `handlers::spawn_and_register_pane` directly, the
 // same function `handle_new_pane` uses for a live client's `NewPane`

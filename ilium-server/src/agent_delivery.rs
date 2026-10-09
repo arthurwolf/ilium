@@ -159,6 +159,30 @@ pub(crate) fn terminal_result_message(progress: &PaneProgress) -> String {
     }
 }
 
+/// Prefix for a settled outcome that is delivered again because an earlier
+/// attempt may not have reached the agent. A duplicate is harmless; a result
+/// the agent never saw leaves it waiting forever.
+const POSSIBLE_DUPLICATE_NOTICE: &str = "(Ilium re-sent this notice because an earlier delivery may not have reached you; ignore it if you already handled it.) ";
+
+/// The message for a settled (task-terminal or monitor-failed) progress
+/// state, used when the reconciler has to deliver it again.
+pub(crate) fn settled_result_message(progress: &PaneProgress, possible_duplicate: bool) -> String {
+    let message = if progress.is_terminal() {
+        terminal_result_message(progress)
+    } else {
+        let error = match &progress.monitor_health {
+            ilium_core::ProgressMonitorHealth::Failed { last_error, .. } => last_error.as_str(),
+            _ => ilium_prompts::agent::PROGRESS_OBSERVATION_STOPPED,
+        };
+        monitor_failure_message(progress, error)
+    };
+    if possible_duplicate {
+        format!("{POSSIBLE_DUPLICATE_NOTICE}{message}")
+    } else {
+        message
+    }
+}
+
 pub(crate) fn monitor_failure_message(progress: &PaneProgress, error: &str) -> String {
     ilium_prompts::render_value(
         "agent/progress-monitor-failure",
@@ -184,6 +208,9 @@ async fn deliver_when_ready(
     };
 
     loop {
+        if outcome_was_collected_by_waiter(state, pane_id, monitor_id).await {
+            return Ok(());
+        }
         if readiness_snapshot(state, pane_id, monitor_id).await {
             let _effect_guard = effect_gate.lock().await;
             let input_gate = {
@@ -265,6 +292,23 @@ async fn deliver_when_ready(
             () = tokio::time::sleep(READINESS_RECHECK_INTERVAL) => {}
         }
     }
+}
+
+/// An `ilium progress wait` command that already returned the outcome ends
+/// the pending composer delivery: the agent has the result in hand.
+async fn outcome_was_collected_by_waiter(
+    state: &ServerState,
+    pane_id: NodeId,
+    monitor_id: u64,
+) -> bool {
+    let panes = state.panes.read().await;
+    let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
+        return false;
+    };
+    runtime.is_current_progress_monitor(monitor_id)
+        && runtime.progress_monitor.as_ref().is_some_and(|monitor| {
+            monitor.result_delivery == ProgressDeliveryState::CollectedByWaiter
+        })
 }
 
 async fn readiness_snapshot(state: &ServerState, pane_id: NodeId, monitor_id: u64) -> bool {
@@ -377,7 +421,9 @@ async fn queue_result_delivery(
         | ProgressDeliveryState::Uncertain => {
             return Err("progress result delivery was already attempted".to_string());
         }
-        ProgressDeliveryState::NotDeliverable => return Ok(false),
+        ProgressDeliveryState::NotDeliverable | ProgressDeliveryState::CollectedByWaiter => {
+            return Ok(false)
+        }
         ProgressDeliveryState::NotQueued | ProgressDeliveryState::Queued => {}
     }
     // A plain shell has no agent composer, and a custom/unknown agent has no

@@ -138,7 +138,9 @@ impl IsolatedHttpServer {
             std::env::join_paths([bin.as_path(), Path::new("/usr/bin"), Path::new("/bin")])
                 .expect("isolated provider and system command path");
         drop(port_guard);
-        let child = Command::new(env!("CARGO_BIN_EXE_ilium-server"))
+        let server_binary = std::env::var("CARGO_BIN_EXE_ilium-server")
+            .expect("Cargo provides the ilium-server binary path to integration tests");
+        let child = Command::new(server_binary)
             .args([
                 "--session-name",
                 "workspace-http",

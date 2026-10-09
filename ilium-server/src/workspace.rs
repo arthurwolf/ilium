@@ -10,13 +10,14 @@ use std::sync::Arc;
 use ilium_core::{
     AgentProvider, BuiltinAgentProvider, NodeId, PaneContentKind, PaneWorkspace, ROOT_ID,
 };
+use ilium_execution::{JobCost, Lane, Retained};
 use ilium_ipc::{
     RepoFacts, ServerEvent, WorkspaceClosePolicy, WorkspaceCreateSpec, WorkspaceCreateStage,
     WorkspaceGitStatus, WorkspaceGitVersion, WorkspaceWorktreeFact,
 };
 use ilium_platform::{paths, secure_fs};
-use tokio::sync::mpsc;
 
+use crate::execution::ExecutionClient;
 use crate::ipc::handlers::{
     broadcast_and_persist, spawn_and_register_pane_in_directory, RegisterPaneError,
 };
@@ -28,14 +29,18 @@ pub(crate) mod prune;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum RestoreTarget {
-    Ready(PathBuf),
+    Ready,
     Missing(String),
 }
 
 /// Validates a saved workspace before any provider resume or automatic input
 /// can run there. A missing or replaced worktree must get a harmless fallback
 /// shell; its original agent command stays in the snapshot for later recovery.
-pub(crate) async fn restore_target(saved_cwd: &Path, workspace: &PaneWorkspace) -> RestoreTarget {
+pub(crate) async fn restore_target(
+    client: &ExecutionClient,
+    saved_cwd: &Path,
+    workspace: &PaneWorkspace,
+) -> RestoreTarget {
     let subpath = match saved_cwd.strip_prefix(&workspace.worktree_root) {
         Ok(subpath) => subpath,
         Err(_) => {
@@ -55,31 +60,39 @@ pub(crate) async fn restore_target(saved_cwd: &Path, workspace: &PaneWorkspace) 
         );
     }
 
-    let root = match paths::canonicalize(&workspace.worktree_root) {
+    let root = match crate::workspace_owner::canonical_path(client, &workspace.worktree_root).await
+    {
         Ok(root) => root,
         Err(error) => {
             return RestoreTarget::Missing(format!("worktree directory is unavailable: {error}"));
         }
     };
-    if root != workspace.worktree_root {
+    if root.view() != &workspace.worktree_root {
         return RestoreTarget::Missing(
             "worktree directory no longer resolves to its saved path".into(),
         );
     }
 
-    let cwd = match paths::canonicalize(saved_cwd) {
-        Ok(cwd) if cwd.is_dir() && cwd.starts_with(&root) => cwd,
-        Ok(_) => {
-            return RestoreTarget::Missing(
-                "launch directory now resolves outside the worktree".into(),
-            );
-        }
+    let cwd = match crate::workspace_owner::canonical_path(client, saved_cwd).await {
+        Ok(cwd) => cwd,
         Err(error) => {
             return RestoreTarget::Missing(format!("launch directory is unavailable: {error}"));
         }
     };
+    if !cwd.view().starts_with(root.view()) {
+        return RestoreTarget::Missing("launch directory now resolves outside the worktree".into());
+    }
+    match crate::workspace_owner::is_directory(client, cwd.view()).await {
+        Ok(true) => {}
+        Ok(false) => {
+            return RestoreTarget::Missing("launch directory is not a directory".into());
+        }
+        Err(error) => {
+            return RestoreTarget::Missing(format!("launch directory is unavailable: {error}"));
+        }
+    }
 
-    let repository = match ilium_git::discover(&root).await {
+    let repository = match ilium_git::discover(root.view()).await {
         Ok(repository) => repository,
         Err(error) => {
             return RestoreTarget::Missing(format!(
@@ -88,7 +101,7 @@ pub(crate) async fn restore_target(saved_cwd: &Path, workspace: &PaneWorkspace) 
         }
     };
     if repository.is_bare
-        || repository.worktree_root != root
+        || repository.worktree_root != *root.view()
         || repository.common_dir != workspace.repo_common_dir
     {
         return RestoreTarget::Missing(
@@ -96,7 +109,7 @@ pub(crate) async fn restore_target(saved_cwd: &Path, workspace: &PaneWorkspace) 
         );
     }
 
-    let entries = match ilium_git::list_worktrees(&root).await {
+    let entries = match ilium_git::list_worktrees(root.view()).await {
         Ok(entries) => entries,
         Err(error) => {
             return RestoreTarget::Missing(format!(
@@ -104,15 +117,22 @@ pub(crate) async fn restore_target(saved_cwd: &Path, workspace: &PaneWorkspace) 
             ));
         }
     };
-    let is_listed = entries
-        .iter()
-        .filter(|entry| !entry.is_bare)
-        .any(|entry| paths::canonicalize(&entry.path).ok().as_deref() == Some(root.as_path()));
+    let mut is_listed = false;
+    for entry in entries.iter().filter(|entry| !entry.is_bare) {
+        if crate::workspace_owner::canonical_path(client, &entry.path)
+            .await
+            .ok()
+            .is_some_and(|candidate| candidate.view() == root.view())
+        {
+            is_listed = true;
+            break;
+        }
+    }
     if !is_listed {
         return RestoreTarget::Missing("directory is absent from Git's worktree list".into());
     }
 
-    RestoreTarget::Ready(cwd)
+    RestoreTarget::Ready
 }
 
 async fn project_directory(state: &ServerState, node_id: NodeId) -> Result<PathBuf, String> {
@@ -175,6 +195,10 @@ pub(crate) async fn default_new_worktree_spec(
 
 /// Collects one bounded dialog snapshot. Every mutation is revalidated later.
 pub(crate) async fn repo_facts(state: &ServerState, project: NodeId) -> Result<RepoFacts, String> {
+    let execution = state
+        .execution
+        .get()
+        .ok_or_else(|| "workspace execution service is unavailable".to_string())?;
     if !secure_fs::supports_nofollow_directories() {
         return Err("agent worktrees are unavailable: this platform cannot secure workspace ownership paths".into());
     }
@@ -257,15 +281,19 @@ pub(crate) async fn repo_facts(state: &ServerState, project: NodeId) -> Result<R
             if entry.path == main_directory || entry.is_prunable || !entry.path.is_dir() {
                 false
             } else {
-                crate::workspace_owner::read_registered_marker(&repository.common_dir, &entry.path)
-                    .await
-                    .map_err(|error| {
-                        format!(
-                            "cannot inspect worktree ownership at {}: {error}",
-                            entry.path.display()
-                        )
-                    })?
-                    .is_some()
+                crate::workspace_owner::read_registered_marker(
+                    &execution.client,
+                    &repository.common_dir,
+                    &entry.path,
+                )
+                .await
+                .map_err(|error| {
+                    format!(
+                        "cannot inspect worktree ownership at {}: {error}",
+                        entry.path.display()
+                    )
+                })?
+                .is_some()
             };
         worktrees.push(WorkspaceWorktreeFact {
             path: entry.path,
@@ -297,7 +325,7 @@ pub(crate) async fn repo_facts(state: &ServerState, project: NodeId) -> Result<R
 }
 
 async fn progress(
-    direct_tx: Option<&mpsc::Sender<ServerEvent>>,
+    direct_tx: Option<&crate::ipc::EventReply<'_>>,
     request_id: u64,
     stage: WorkspaceCreateStage,
 ) {
@@ -363,11 +391,13 @@ fn canonical_new_path(path: &Path) -> Result<(PathBuf, Option<PathBuf>), String>
 /// Roll back only when include preparation wrote no path and Git finds no
 /// other changes. File identity does not prove copied contents are unchanged.
 enum CreatedIncludes {
-    Complete(crate::worktree_include::IncludeCopyReport),
-    Partial(crate::worktree_include::IncludeCopyError),
+    None,
+    Complete(Retained<crate::worktree_include::IncludeCopyReport>),
+    Partial(Retained<crate::worktree_include::IncludeCopyError>),
 }
 
 async fn rollback_pre_pane_workspace(
+    state: &ServerState,
     control_directory: &Path,
     workspace: &PaneWorkspace,
     created_parent: Option<&Path>,
@@ -375,8 +405,9 @@ async fn rollback_pre_pane_workspace(
 ) -> String {
     let path = workspace.worktree_root.clone();
     let copied_paths_exist = match &created_includes {
-        CreatedIncludes::Complete(report) => !report.created_paths.is_empty(),
-        CreatedIncludes::Partial(error) => !error.created_paths.is_empty(),
+        CreatedIncludes::None => false,
+        CreatedIncludes::Complete(report) => !report.view().created_paths.is_empty(),
+        CreatedIncludes::Partial(error) => !error.view().created_paths.is_empty(),
     };
     if copied_paths_exist {
         return format!(
@@ -384,27 +415,44 @@ async fn rollback_pre_pane_workspace(
             path.display()
         );
     }
+    let Some(execution) = state.execution.get() else {
+        return format!(
+            "worktree retained at {}: execution service unavailable for include rollback",
+            path.display()
+        );
+    };
     let cleanup_path = path.clone();
-    match tokio::task::spawn_blocking(move || match created_includes {
-        CreatedIncludes::Complete(report) => {
-            crate::worktree_include::remove_created_report(&cleanup_path, &report)
-        }
-        CreatedIncludes::Partial(error) => {
-            crate::worktree_include::remove_created_files(&cleanup_path, &error)
-        }
-    })
-    .await
+    match execution
+        .client
+        .run(
+            Lane::Io,
+            JobCost {
+                input_bytes: 1,
+                result_bytes: 1,
+            },
+            move |_| match created_includes {
+                CreatedIncludes::None => Ok(()),
+                CreatedIncludes::Complete(report) => {
+                    crate::worktree_include::remove_created_report(&cleanup_path, report.view())
+                }
+                CreatedIncludes::Partial(error) => {
+                    crate::worktree_include::remove_created_files(&cleanup_path, error.view())
+                }
+            },
+        )
+        .await
     {
-        Ok(Ok(())) => {}
-        Ok(Err(problem)) => {
+        Ok(result) if result.view().is_ok() => {}
+        Ok(result) => {
             return format!(
-                "worktree retained at {}: copied-file rollback is unsafe: {problem}",
-                path.display()
+                "worktree retained at {}: copied-file rollback is unsafe: {}",
+                path.display(),
+                result.view().as_ref().expect_err("checked rollback result")
             );
         }
         Err(problem) => {
             return format!(
-                "worktree retained at {}: copied-file rollback task failed: {problem}",
+                "worktree retained at {}: copied-file rollback job failed: {problem}",
                 path.display()
             );
         }
@@ -436,7 +484,14 @@ async fn rollback_pre_pane_workspace(
             path.display()
         );
     }
-    if let Err(problem) = crate::workspace_owner::verify_marker(workspace).await {
+    let Some(execution) = state.execution.get() else {
+        return format!(
+            "worktree retained at {}: execution service unavailable for ownership verification",
+            path.display()
+        );
+    };
+    if let Err(problem) = crate::workspace_owner::verify_marker(&execution.client, workspace).await
+    {
         return format!(
             "worktree retained at {}: ownership cannot be verified: {problem}",
             path.display()
@@ -462,12 +517,13 @@ async fn rollback_pre_pane_workspace(
     // Setup hooks and filters may leave descendants behind even when Git and
     // the checkout are pristine. Keep the checkout unless the OS can prove
     // that no process still uses it.
-    match directory_users(path.clone()).await {
-        Ok(users) if users.is_empty() => {}
+    match crate::workspace_prune::directory_users(&execution.client, &path).await {
+        Ok(users) if users.view().is_empty() => {}
         Ok(users) => {
             return format!(
-                "worktree retained at {}: processes still use its directory: {users:?}",
-                path.display()
+                "worktree retained at {}: processes still use its directory: {:?}",
+                path.display(),
+                users.view()
             );
         }
         Err(problem) => {
@@ -515,7 +571,7 @@ async fn rollback_uncommitted_creation(
     control_directory: &Path,
     workspace: &PaneWorkspace,
     created_parent: Option<&Path>,
-    included_files: Option<crate::worktree_include::IncludeCopyReport>,
+    included_files: Option<Retained<crate::worktree_include::IncludeCopyReport>>,
 ) -> String {
     let Some(report) = included_files else {
         return "existing worktree left unchanged".into();
@@ -531,6 +587,7 @@ async fn rollback_uncommitted_creation(
         }
     };
     rollback_pre_pane_workspace(
+        state,
         control_directory,
         workspace,
         created_parent,
@@ -555,7 +612,7 @@ pub(crate) struct CreateAgentOptions {
 pub(crate) async fn create_agent_in_workspace(
     state: &Arc<ServerState>,
     options: CreateAgentOptions,
-    direct_tx: Option<&mpsc::Sender<ServerEvent>>,
+    direct_tx: Option<&crate::ipc::EventReply<'_>>,
 ) -> Result<NodeId, String> {
     if !secure_fs::supports_nofollow_directories() {
         return Err("agent worktrees are unavailable: this platform cannot secure workspace ownership paths".into());
@@ -683,7 +740,8 @@ pub(crate) async fn create_agent_in_workspace(
                 WorkspaceCreateStage::CreatingWorktree,
             )
             .await;
-            if !state.accepts_workspace_creation() || direct_tx.is_some_and(mpsc::Sender::is_closed)
+            if !state.accepts_workspace_creation()
+                || direct_tx.is_some_and(|reply| reply.is_closed())
             {
                 if let Some(parent) = created_parent {
                     let _ = std::fs::remove_dir(parent);
@@ -733,7 +791,10 @@ pub(crate) async fn create_agent_in_workspace(
                 created_by_ilium: true,
                 created_at_unix: chrono::Utc::now().timestamp(),
             };
-            crate::workspace_owner::create_marker(&mut workspace)
+            let execution = state.execution.get().ok_or_else(|| {
+                "execution service unavailable before marker creation".to_string()
+            })?;
+            crate::workspace_owner::create_marker(&execution.client, &mut workspace)
                 .await
                 .map_err(|error| {
                     format!(
@@ -743,10 +804,11 @@ pub(crate) async fn create_agent_in_workspace(
                 })?;
             if !launch_cwd.is_dir() {
                 let rollback = rollback_pre_pane_workspace(
+                    state,
                     &project_cwd,
                     &workspace,
                     created_parent.as_deref(),
-                    CreatedIncludes::Complete(Default::default()),
+                    CreatedIncludes::None,
                 )
                 .await;
                 return Err(format!(
@@ -754,36 +816,74 @@ pub(crate) async fn create_agent_in_workspace(
                     source.project_subpath.display()
                 ));
             }
-            if !state.accepts_workspace_creation() || direct_tx.is_some_and(mpsc::Sender::is_closed)
+            if !state.accepts_workspace_creation()
+                || direct_tx.is_some_and(|reply| reply.is_closed())
             {
                 let rollback = rollback_pre_pane_workspace(
+                    state,
                     &project_cwd,
                     &workspace,
                     created_parent.as_deref(),
-                    CreatedIncludes::Complete(Default::default()),
+                    CreatedIncludes::None,
                 )
                 .await;
                 return Err(format!(
                     "workspace creation cancelled before pane commit; {rollback}"
                 ));
             }
+            let Some(execution) = state.execution.get() else {
+                return Err(format!(
+                    "worktree retained at {}: execution service unavailable for include preparation",
+                    path.display()
+                ));
+            };
             let source_project = project_cwd.clone();
             let target_project = launch_cwd.clone();
-            let include_result = tokio::task::spawn_blocking(move || {
-                crate::worktree_include::copy_worktree_includes(&source_project, &target_project)
-            })
-            .await
-            .map_err(|error| {
-                format!(
-                    "worktree retained at {}: include task failed: {error}",
-                    path.display()
+            let include_result = execution
+                .client
+                .run(
+                    Lane::Io,
+                    JobCost {
+                        input_bytes: 16 * 1024 * 1024,
+                        result_bytes: 16 * 1024 * 1024,
+                    },
+                    move |context| {
+                        let result = crate::worktree_include::copy_worktree_includes_with_stop(
+                            &source_project,
+                            &target_project,
+                            || context.stop_requested(),
+                        );
+                        if !context.stop_requested() {
+                            return result;
+                        }
+                        match result {
+                            Ok(report) => match crate::worktree_include::remove_created_report(
+                                &target_project,
+                                &report,
+                            ) {
+                                Ok(()) => Err(crate::worktree_include::cancelled_error()),
+                                Err(error) => Err(crate::worktree_include::report_as_error(
+                                    format!("cancelled copy rollback failed: {error}"),
+                                    report,
+                                )),
+                            },
+                            Err(error) => match crate::worktree_include::remove_created_files(
+                                &target_project,
+                                &error,
+                            ) {
+                                Ok(()) => Err(crate::worktree_include::cancelled_error()),
+                                Err(_) => Err(error),
+                            },
+                        }
+                    },
                 )
-            })?;
+                .await;
             let include_report = match include_result {
                 Ok(report) => report,
-                Err(error) => {
-                    let reason = error.to_string();
+                Err(crate::execution::ExecutionError::Failed(error)) => {
+                    let reason = error.view().to_string();
                     let rollback = rollback_pre_pane_workspace(
+                        state,
                         &project_cwd,
                         &workspace,
                         created_parent.as_deref(),
@@ -792,13 +892,52 @@ pub(crate) async fn create_agent_in_workspace(
                     .await;
                     return Err(format!("include preparation failed: {reason}; {rollback}"));
                 }
+                Err(crate::execution::ExecutionError::Rejected(reason)) => {
+                    let rollback = rollback_pre_pane_workspace(
+                        state,
+                        &project_cwd,
+                        &workspace,
+                        created_parent.as_deref(),
+                        CreatedIncludes::None,
+                    )
+                    .await;
+                    return Err(format!(
+                        "include preparation was not admitted ({reason:?}); {rollback}"
+                    ));
+                }
+                Err(
+                    reason @ (crate::execution::ExecutionError::Panicked
+                    | crate::execution::ExecutionError::Lost),
+                ) => {
+                    return Err(format!(
+                        "include preparation outcome is uncertain ({reason}); worktree retained at {}",
+                        path.display()
+                    ));
+                }
+                Err(crate::execution::ExecutionError::Cancelled) => {
+                    let rollback = rollback_pre_pane_workspace(
+                        state,
+                        &project_cwd,
+                        &workspace,
+                        created_parent.as_deref(),
+                        CreatedIncludes::None,
+                    )
+                    .await;
+                    return Err(format!("include preparation cancelled; {rollback}"));
+                }
             };
             if let Some(command) = setup_command.as_deref() {
                 progress(direct_tx, request_id, WorkspaceCreateStage::RunningSetup).await;
-                crate::workspace_setup::run(command, &launch_cwd, &workspace.worktree_root, || {
-                    !state.accepts_workspace_creation()
-                        || direct_tx.is_some_and(mpsc::Sender::is_closed)
-                })
+                crate::workspace_setup::run(
+                    &execution.client,
+                    command,
+                    &launch_cwd,
+                    &workspace.worktree_root,
+                    || {
+                        !state.accepts_workspace_creation()
+                            || direct_tx.is_some_and(|reply| reply.is_closed())
+                    },
+                )
                 .await
                 .map_err(|error| {
                     format!(
@@ -806,7 +945,7 @@ pub(crate) async fn create_agent_in_workspace(
                         path.display()
                     )
                 })?;
-                crate::workspace_owner::verify_marker(&workspace)
+                crate::workspace_owner::verify_marker(&execution.client, &workspace)
                     .await
                     .map_err(|error| {
                         format!(
@@ -868,9 +1007,16 @@ pub(crate) async fn create_agent_in_workspace(
             if !launch_cwd.is_dir() {
                 return Err("project subdirectory is absent in the selected worktree".into());
             }
-            let marker = crate::workspace_owner::read_registered_marker(&source.common_dir, &path)
-                .await
-                .map_err(|error| format!("cannot inspect existing worktree ownership: {error}"))?;
+            let execution = state.execution.get().ok_or_else(|| {
+                "execution service unavailable for ownership inspection".to_string()
+            })?;
+            let marker = crate::workspace_owner::read_registered_marker(
+                &execution.client,
+                &source.common_dir,
+                &path,
+            )
+            .await
+            .map_err(|error| format!("cannot inspect existing worktree ownership: {error}"))?;
             let workspace = if let Some(marker) = marker {
                 PaneWorkspace {
                     workspace_id: Some(marker.workspace_id),
@@ -914,14 +1060,20 @@ pub(crate) async fn create_agent_in_workspace(
             return Err("workspace options were not normalized".into());
         }
     };
-    if let RestoreTarget::Missing(error) = restore_target(&launch_cwd, &workspace).await {
+    let execution = state
+        .execution
+        .get()
+        .ok_or_else(|| "execution service unavailable for workspace validation".to_string())?;
+    if let RestoreTarget::Missing(error) =
+        restore_target(&execution.client, &launch_cwd, &workspace).await
+    {
         return Err(format!(
             "worktree retained at {}: launch target cannot be verified: {error}",
             workspace.worktree_root.display()
         ));
     }
     progress(direct_tx, request_id, WorkspaceCreateStage::Starting).await;
-    if !state.accepts_workspace_creation() || direct_tx.is_some_and(mpsc::Sender::is_closed) {
+    if !state.accepts_workspace_creation() || direct_tx.is_some_and(|reply| reply.is_closed()) {
         drop(repository_lease.take());
         drop(repo_guard.take());
         let rollback = if setup_started {
@@ -947,7 +1099,7 @@ pub(crate) async fn create_agent_in_workspace(
     let publish_guard = state.workspace_spawn_lock.lock().await;
     let pane_result: Result<NodeId, String> = async {
         let mut tree = state.tree.write().await;
-        if !state.accepts_workspace_creation() || direct_tx.is_some_and(mpsc::Sender::is_closed) {
+        if !state.accepts_workspace_creation() || direct_tx.is_some_and(|reply| reply.is_closed()) {
             return Err("workspace creation cancelled before pane commit".into());
         }
         let parent_group = if parent_group == ROOT_ID || project_override.is_some() {
@@ -1103,7 +1255,11 @@ pub(crate) async fn refresh_pane_git_status(
         (workspace, cwd)
     };
     let now = chrono::Utc::now().timestamp_millis().max(0) as u64;
-    if let RestoreTarget::Missing(_) = restore_target(&cwd, &workspace).await {
+    let execution = state
+        .execution
+        .get()
+        .ok_or_else(|| "workspace execution service is unavailable".to_string())?;
+    if let RestoreTarget::Missing(_) = restore_target(&execution.client, &cwd, &workspace).await {
         return Ok(WorkspaceGitStatus {
             branch: Some(workspace.branch),
             detached: false,
@@ -1158,15 +1314,6 @@ pub(crate) enum WorkspaceRemovalOutcome {
     },
 }
 
-async fn directory_users(path: PathBuf) -> Result<Vec<u32>, String> {
-    tokio::task::spawn_blocking(move || {
-        ilium_platform::process_control::processes_using_directory(&path)
-    })
-    .await
-    .map_err(|error| format!("process directory probe failed: {error}"))?
-    .map_err(|error| format!("process directory probe is unavailable: {error}"))
-}
-
 /// Legacy pane-addressed caller. Retained checkout pruning uses the
 /// identity-fenced path transaction in `prune` directly.
 pub(crate) async fn remove_workspace(
@@ -1196,6 +1343,11 @@ mod tests {
     use super::*;
     use std::process::Command;
     use tempfile::TempDir;
+
+    async fn restore_target(saved_cwd: &Path, workspace: &PaneWorkspace) -> RestoreTarget {
+        let client = crate::execution::test_general_client();
+        super::restore_target(&client, saved_cwd, workspace).await
+    }
 
     fn git(directory: &Path, arguments: &[&str]) {
         let output = Command::new("git")
@@ -1272,10 +1424,7 @@ mod tests {
             created_by_ilium: true,
             created_at_unix: 1_790_380_800,
         };
-        assert_eq!(
-            restore_target(&cwd, &workspace).await,
-            RestoreTarget::Ready(cwd.clone())
-        );
+        assert_eq!(restore_target(&cwd, &workspace).await, RestoreTarget::Ready);
         assert!(matches!(
             restore_target(main, &workspace).await,
             RestoreTarget::Missing(_)

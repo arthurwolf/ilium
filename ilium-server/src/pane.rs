@@ -140,6 +140,29 @@ pub enum ProgressDeliveryState {
     /// The pane had no supported agent composer when the result arrived.
     /// The task result remains visible in its persisted progress report.
     NotDeliverable,
+    /// An `ilium progress wait` command already returned this outcome to
+    /// the agent, so typing it into the composer would only cost a second,
+    /// redundant agent turn.
+    CollectedByWaiter,
+}
+
+/// What the progress reconciler (`crate::progress_watchdog`) must do for one
+/// pane so that an agent waiting on a monitor can never wait on nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProgressReconcileAction {
+    /// Nothing is wrong, or work is still legitimately in flight.
+    None,
+    /// A nonterminal monitor has no live coordinator, so no future report,
+    /// outcome, or notification can ever arrive for it.
+    ObservationStopped { monitor_id: u64 },
+    /// A settled outcome (task terminal or monitor failed) is not in the
+    /// agent's composer and no task is working on putting it there.
+    /// `possible_duplicate` is set when an earlier attempt may already have
+    /// reached the agent.
+    Redeliver {
+        monitor_id: u64,
+        possible_duplicate: bool,
+    },
 }
 
 impl From<ProgressDeliveryState> for crate::persistence::PersistedProgressDeliveryState {
@@ -151,6 +174,7 @@ impl From<ProgressDeliveryState> for crate::persistence::PersistedProgressDelive
             ProgressDeliveryState::DeliveredToPty => Self::DeliveredToPty,
             ProgressDeliveryState::Uncertain => Self::Uncertain,
             ProgressDeliveryState::NotDeliverable => Self::NotDeliverable,
+            ProgressDeliveryState::CollectedByWaiter => Self::CollectedByWaiter,
         }
     }
 }
@@ -167,6 +191,9 @@ impl From<crate::persistence::PersistedProgressDeliveryState> for ProgressDelive
             crate::persistence::PersistedProgressDeliveryState::Uncertain => Self::Uncertain,
             crate::persistence::PersistedProgressDeliveryState::NotDeliverable => {
                 Self::NotDeliverable
+            }
+            crate::persistence::PersistedProgressDeliveryState::CollectedByWaiter => {
+                Self::CollectedByWaiter
             }
         }
     }
@@ -340,6 +367,10 @@ pub struct TerminalPaneRuntime {
     /// may safely use its own startup arguments even when the previous agent
     /// invalidated launch-time identity with an in-process session command.
     pub session_process_id: Option<u32>,
+    /// Transcript path verified alongside `session_id` by an exact-PID
+    /// descriptor. Replayed to clients as a hint; never trusted without
+    /// client-side re-verification.
+    pub session_transcript_path: Option<std::path::PathBuf>,
     /// A generation-bound attempt. Unconfirmed or partial delivery suppresses
     /// repeats; only a verified zero-byte failure can permit one retry.
     pub auto_answer_attempt: Option<AutoAnswerAttempt>,
@@ -355,6 +386,9 @@ pub struct TerminalPaneRuntime {
     /// the pane so closing the pane or manually typing into it cannot leave a
     /// delayed prompt writing into a reused terminal.
     initial_prompt_task: Option<JoinHandle<()>>,
+    /// Waits for an `ilium new-pane` command to exit, then hands the actual
+    /// close to a separate task. Pane-owned so closing the pane cancels it.
+    close_on_exit_task: Option<JoinHandle<()>>,
     /// This pane's active progress-monitor loop (see
     /// `crate::progress_monitor`), if `SetPaneProgressMonitor` started one.
     /// Owned here so replacing it (a fresh `SetPaneProgressMonitor` call) or
@@ -365,6 +399,13 @@ pub struct TerminalPaneRuntime {
     /// probe task so terminal probing can stop while a safe composer is still
     /// pending. Replacement and clear cancel both.
     progress_delivery_task: Option<JoinHandle<()>>,
+    /// Held `ilium progress wait` requests. Each waiter's reply channel ends
+    /// with its client connection, which is how a settle detects that no
+    /// waiter is left to receive the outcome.
+    progress_waiters: Vec<ProgressWaiter>,
+    /// Live status-line delivery for the current Antigravity invocation.
+    pub antigravity_statusline_generation: u64,
+    antigravity_statusline_delivery_task: Option<JoinHandle<()>>,
     /// Atomic generation fence shared with the probe and delivery tasks.
     pub progress_monitor_generation: ProgressMonitorGeneration,
     /// Serializes registration replacement/clear with the final readiness
@@ -436,12 +477,17 @@ impl TerminalPaneRuntime {
             prompt_transcript_epoch: None,
             session_process_started_at_unix_seconds: None,
             session_process_id: None,
+            session_transcript_path: None,
             auto_answer_attempt: None,
             auto_answer_task: None,
             forward_task: None,
             initial_prompt_task: None,
+            close_on_exit_task: None,
             progress_monitor_task: None,
             progress_delivery_task: None,
+            progress_waiters: Vec::new(),
+            antigravity_statusline_generation: 0,
+            antigravity_statusline_delivery_task: None,
             progress_monitor_generation: ProgressMonitorGeneration::default(),
             progress_effect_gate: std::sync::Arc::new(Mutex::new(())),
             progress_monitor: None,
@@ -526,6 +572,9 @@ impl TerminalPaneRuntime {
         self.cancel_initial_prompt_delivery();
         self.cancel_progress_delivery_task();
         self.cancel_auto_answer_task();
+        if let Some(task) = self.antigravity_statusline_delivery_task.take() {
+            task.abort();
+        }
         if let Some(monitor) = self.progress_monitor.as_mut() {
             monitor.result_delivery = match monitor.result_delivery {
                 ProgressDeliveryState::Queued => ProgressDeliveryState::NotDeliverable,
@@ -587,6 +636,13 @@ impl TerminalPaneRuntime {
         }
     }
 
+    /// Installs the pane-owned waiter that closes the pane after its command exits.
+    pub fn set_close_on_exit_task(&mut self, task: JoinHandle<()>) {
+        if let Some(previous_task) = self.close_on_exit_task.replace(task) {
+            previous_task.abort();
+        }
+    }
+
     /// Installs the pane-owned waiter for a one-shot initial agent prompt.
     pub fn set_initial_prompt_task(&mut self, task: JoinHandle<()>) {
         if let Some(previous_task) = self.initial_prompt_task.replace(task) {
@@ -614,6 +670,19 @@ impl TerminalPaneRuntime {
         }
     }
 
+    pub fn set_antigravity_statusline_delivery(&mut self, task: JoinHandle<()>) {
+        if let Some(previous) = self.antigravity_statusline_delivery_task.replace(task) {
+            previous.abort();
+        }
+    }
+
+    pub fn cancel_antigravity_statusline_delivery(&mut self, generation: u64) {
+        self.antigravity_statusline_generation = generation;
+        if let Some(task) = self.antigravity_statusline_delivery_task.take() {
+            task.abort();
+        }
+    }
+
     /// Installs this pane's progress-monitor loop task, aborting any
     /// previous one -- a fresh `SetPaneProgressMonitor` call always replaces
     /// rather than stacking a second concurrent loop on the same pane.
@@ -626,6 +695,71 @@ impl TerminalPaneRuntime {
     pub fn set_progress_delivery_task(&mut self, task: JoinHandle<()>) {
         if let Some(previous_task) = self.progress_delivery_task.replace(task) {
             previous_task.abort();
+        }
+    }
+
+    fn is_task_live(task: Option<&JoinHandle<()>>) -> bool {
+        task.is_some_and(|task| !task.is_finished())
+    }
+
+    /// Classifies this pane's progress monitor for the periodic reconciler.
+    /// Pure and cheap: it only reads task liveness and persisted delivery
+    /// state, so it can run under the pane registry read guard and be
+    /// re-evaluated under the write guard before acting.
+    pub(crate) fn progress_reconcile_action(&self) -> ProgressReconcileAction {
+        let Some(monitor) = self.progress_monitor.as_ref() else {
+            return ProgressReconcileAction::None;
+        };
+        let monitor_id = monitor.monitor_id;
+        if !self.is_current_progress_monitor(monitor_id) {
+            return ProgressReconcileAction::None;
+        }
+        let progress = &monitor.latest_progress;
+        let is_settled = progress.is_terminal() || progress.monitor_health.is_failed();
+        let is_monitor_task_live = Self::is_task_live(self.progress_monitor_task.as_ref());
+        if !is_settled {
+            return if is_monitor_task_live {
+                ProgressReconcileAction::None
+            } else {
+                ProgressReconcileAction::ObservationStopped { monitor_id }
+            };
+        }
+        // The monitor task also awaits the live delivery of its own outcome.
+        if is_monitor_task_live || Self::is_task_live(self.progress_delivery_task.as_ref()) {
+            return ProgressReconcileAction::None;
+        }
+        let has_supported_composer = self
+            .detected_agent_class
+            .as_ref()
+            .and_then(ilium_core::AgentClass::provider)
+            .is_some();
+        if !has_supported_composer {
+            return ProgressReconcileAction::None;
+        }
+        match monitor.result_delivery {
+            ProgressDeliveryState::DeliveredToPty | ProgressDeliveryState::CollectedByWaiter => {
+                ProgressReconcileAction::None
+            }
+            ProgressDeliveryState::NotQueued
+            | ProgressDeliveryState::Queued
+            | ProgressDeliveryState::NotDeliverable => ProgressReconcileAction::Redeliver {
+                monitor_id,
+                possible_duplicate: false,
+            },
+            ProgressDeliveryState::Attempted | ProgressDeliveryState::Uncertain => {
+                ProgressReconcileAction::Redeliver {
+                    monitor_id,
+                    possible_duplicate: true,
+                }
+            }
+        }
+    }
+
+    /// Makes an unfinished delivery retryable again. Only the reconciler
+    /// calls this, after `progress_reconcile_action` said `Redeliver`.
+    pub(crate) fn requeue_progress_delivery(&mut self) {
+        if let Some(monitor) = self.progress_monitor.as_mut() {
+            monitor.result_delivery = ProgressDeliveryState::Queued;
         }
     }
 
@@ -665,6 +799,11 @@ impl TerminalPaneRuntime {
         if let Some(task) = self.progress_delivery_task.take() {
             task.abort();
         }
+        let new_monitor_id = registration.monitor_id;
+        self.end_progress_waiters(
+            |waited_monitor_id| waited_monitor_id != new_monitor_id,
+            ilium_ipc::ProgressWaitEnd::Superseded,
+        );
         self.progress_monitor = Some(ProgressMonitorRuntimeState {
             monitor_id: registration.monitor_id,
             command: registration.command,
@@ -696,6 +835,50 @@ impl TerminalPaneRuntime {
         };
         monitor.latest_progress = progress;
         true
+    }
+
+    /// Records that an `ilium progress wait` command returned this settled
+    /// outcome to the agent. Returns whether the composer notification was
+    /// suppressed: `false` when it was already written (or may have been),
+    /// so the agent must treat a later notice as a duplicate.
+    pub fn collect_progress_outcome_by_waiter(&mut self, monitor_id: u64) -> Result<bool, String> {
+        if !self.is_current_progress_monitor(monitor_id) {
+            return Err(format!(
+                "progress monitor {monitor_id} is not this pane's current monitor"
+            ));
+        }
+        let Some(monitor) = self.progress_monitor.as_mut() else {
+            return Err("progress monitor was cleared".to_string());
+        };
+        let progress = &monitor.latest_progress;
+        if !progress.is_terminal() && !progress.monitor_health.is_failed() {
+            return Err(format!("progress monitor {monitor_id} has not settled yet"));
+        }
+        match monitor.result_delivery {
+            ProgressDeliveryState::NotQueued
+            | ProgressDeliveryState::Queued
+            | ProgressDeliveryState::NotDeliverable
+            | ProgressDeliveryState::CollectedByWaiter => {
+                monitor.result_delivery = ProgressDeliveryState::CollectedByWaiter;
+                Ok(true)
+            }
+            ProgressDeliveryState::Attempted
+            | ProgressDeliveryState::DeliveredToPty
+            | ProgressDeliveryState::Uncertain => Ok(false),
+        }
+    }
+
+    /// Undoes a waiter claim when every waiter disconnected before the
+    /// outcome reached it, so the normal composer delivery runs instead.
+    pub(crate) fn release_progress_outcome_from_waiter(&mut self, monitor_id: u64) {
+        if !self.is_current_progress_monitor(monitor_id) {
+            return;
+        }
+        if let Some(monitor) = self.progress_monitor.as_mut() {
+            if monitor.result_delivery == ProgressDeliveryState::CollectedByWaiter {
+                monitor.result_delivery = ProgressDeliveryState::NotQueued;
+            }
+        }
     }
 
     pub fn claim_progress_outcome_notification(&mut self, monitor_id: u64) -> bool {
@@ -765,6 +948,55 @@ impl TerminalPaneRuntime {
             self.progress_monitor_generation
                 .clear_if_current(monitor.monitor_id);
         }
+        self.end_progress_waiters(|_| true, ilium_ipc::ProgressWaitEnd::Cleared);
+    }
+
+    /// Holds a `wait` request until its monitor settles, is replaced, or is
+    /// cleared. Waiters whose client already disconnected are dropped here.
+    pub(crate) fn add_progress_waiter(&mut self, waiter: ProgressWaiter) {
+        self.progress_waiters
+            .retain(|existing| !existing.reply.is_closed());
+        self.progress_waiters.push(waiter);
+    }
+
+    /// Removes the still-connected waiters for `monitor_id` so the settle
+    /// path can hand them the outcome.
+    pub(crate) fn take_progress_waiters(&mut self, monitor_id: u64) -> Vec<ProgressWaiter> {
+        let (taken, kept) = std::mem::take(&mut self.progress_waiters)
+            .into_iter()
+            .partition(|waiter| waiter.monitor_id == monitor_id);
+        self.progress_waiters = kept;
+        taken
+            .into_iter()
+            .filter(|waiter: &ProgressWaiter| !waiter.reply.is_closed())
+            .collect()
+    }
+
+    fn end_progress_waiters(
+        &mut self,
+        is_ended: impl Fn(u64) -> bool,
+        end: ilium_ipc::ProgressWaitEnd,
+    ) {
+        let (ended, kept) = std::mem::take(&mut self.progress_waiters)
+            .into_iter()
+            .partition(|waiter: &ProgressWaiter| is_ended(waiter.monitor_id));
+        self.progress_waiters = kept;
+        for waiter in ended {
+            // A full or closed reply channel means the waiter is gone or
+            // stalled; its CLI falls back to its periodic status check.
+            waiter
+                .reply
+                .try_send(ilium_ipc::ServerEvent::ProgressWaitCompleted {
+                    request_id: waiter.request_id,
+                    pane_id: waiter.pane_id,
+                    result: Ok(ilium_ipc::ProgressWaitOutcome {
+                        monitor_id: waiter.monitor_id,
+                        end,
+                        progress: None,
+                        composer_notice_suppressed: false,
+                    }),
+                });
+        }
     }
 
     /// Cancels this pane's background forwarder task. Called when the pane
@@ -777,9 +1009,23 @@ impl TerminalPaneRuntime {
             forward_task.abort();
         }
         self.cancel_initial_prompt_delivery();
+        if let Some(task) = self.close_on_exit_task.take() {
+            task.abort();
+        }
         self.cancel_auto_answer_task();
         self.cancel_progress_monitor();
+        if let Some(task) = self.antigravity_statusline_delivery_task.take() {
+            task.abort();
+        }
     }
+}
+
+/// One held `WaitPaneProgressMonitor` request.
+pub(crate) struct ProgressWaiter {
+    pub(crate) pane_id: NodeId,
+    pub(crate) monitor_id: u64,
+    pub(crate) request_id: u64,
+    pub(crate) reply: crate::ipc::DirectEventSender,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

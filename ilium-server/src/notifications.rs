@@ -291,18 +291,14 @@ impl PendingNotification {
 }
 
 /// Shows a desktop notification for `pending`. `notify-rust`'s `show()` is
-/// synchronous, blocking I/O (a D-Bus round trip via `zbus` on Linux) even
-/// though this crate's own call sites are async, so the actual call runs on
-/// a `spawn_blocking` thread rather than inline on a tokio worker thread --
-/// see `CLAUDE.md`'s async-task rule and `detection.rs`'s identical
-/// treatment of the `sysinfo` refresh for the same reason. The returned
+/// synchronous, blocking I/O (a D-Bus round trip via `zbus` on Linux), so
+/// the actual call runs on the server's bounded I/O lane rather than inline
+/// on a tokio worker thread. The returned
 /// `NotificationHandle` is dropped inside the closure (not returned out of
 /// it): on macOS's default `NSUserNotificationCenter` backend, `show()`
 /// only stages the notification and the actual OS delivery call happens in
-/// the handle's `Drop` impl, so letting the handle escape `spawn_blocking`
-/// would move that same blocking delivery call onto the tokio worker thread
-/// that awaits this function -- exactly the foot-gun `spawn_blocking` exists
-/// to avoid.
+/// the handle's `Drop` impl, so `deliver` drops the handle before returning
+/// from the I/O-lane callback.
 ///
 /// Never propagates a failure: no notification daemon/D-Bus session (this
 /// sandboxed environment, most containers, some window managers) is a
@@ -314,26 +310,93 @@ impl PendingNotification {
 /// mean asserting a notification daemon is present, which is exactly the
 /// environment-dependent flakiness the pure `is_finished_transition` above
 /// exists to keep out of the test suite.
-pub async fn send(pending: PendingNotification) {
-    let result = tokio::task::spawn_blocking(move || {
-        notify_rust::Notification::new()
-            .summary(&pending.summary())
-            .body(&pending.body())
-            .show()
-            .map(drop)
-    })
-    .await;
+pub(crate) fn send(client: &crate::execution::ExecutionClient, pending: PendingNotification) {
+    let _ = send_with(client, pending, deliver);
+}
 
-    match result {
-        Ok(Ok(())) => {}
-        Ok(Err(error)) => {
+fn deliver(summary: &str, body: &str) -> Result<(), &'static str> {
+    notify_rust::Notification::new()
+        .summary(summary)
+        .body(body)
+        .show()
+        .map(drop)
+        .map_err(|error| {
+            tracing::warn!(%error, "desktop notification backend rejected delivery");
+            "desktop notification backend rejected delivery"
+        })
+}
+
+fn send_with(
+    client: &crate::execution::ExecutionClient,
+    pending: PendingNotification,
+    deliver: impl FnOnce(&str, &str) -> Result<(), &'static str> + Send + 'static,
+) -> bool {
+    let input_bytes = match pending
+        .retained_text_bytes()
+        .checked_mul(6)
+        .and_then(|bytes| bytes.checked_add(2048))
+    {
+        Some(bytes) if bytes <= MAX_NOTIFICATION_JOB_BYTES => bytes,
+        _ => {
             tracing::warn!(
-                "desktop notification failed (no notification daemon? continuing): {error}"
+                "desktop notification refused because its text exceeds the bounded job size"
             );
+            return false;
         }
-        Err(join_error) => {
-            tracing::warn!("desktop notification task panicked (continuing): {join_error}");
+    };
+    let job = notification_job(pending, deliver);
+    let reservation = match client.foundation.try_reserve(
+        ilium_execution::Lane::Io,
+        ilium_execution::JobCost {
+            input_bytes,
+            result_bytes: 0,
+        },
+    ) {
+        Ok(reservation) => reservation,
+        Err(error) => {
+            tracing::warn!(?error, "desktop notification was not admitted (continuing)");
+            return false;
         }
+    };
+    let client = client.clone();
+    tokio::spawn(async move {
+        match client.run_reserved(reservation, job).await {
+            Ok(result) => {
+                if let Err(error) = result.view() {
+                    tracing::warn!(%error, "desktop notification failed (no notification daemon? continuing)");
+                }
+            }
+            Err(error) => tracing::warn!(?error, "desktop notification worker failed (continuing)"),
+        }
+    });
+    true
+}
+
+/// An unavailable desktop backend is a delivery result, while the execution
+/// bank reports cancellation, panic, and lost completion separately.
+fn notification_job(
+    pending: PendingNotification,
+    deliver: impl FnOnce(&str, &str) -> Result<(), &'static str> + Send + 'static,
+) -> impl ilium_execution::Job<Output = Result<(), &'static str>, Error = std::convert::Infallible>
+{
+    move |_context: ilium_execution::JobContext| Ok(deliver(&pending.summary(), &pending.body()))
+}
+
+const MAX_NOTIFICATION_JOB_BYTES: usize = 64 * 1024;
+
+impl PendingNotification {
+    fn retained_text_bytes(&self) -> usize {
+        let mut bytes = self
+            .session_name
+            .capacity()
+            .saturating_add(self.pane_name.capacity());
+        if let Some(description) = &self.agent_description {
+            bytes = bytes.saturating_add(description.capacity());
+        }
+        if let PendingKind::Task(outcome) = &self.kind {
+            bytes = bytes.saturating_add(outcome.job_id.capacity());
+        }
+        bytes.saturating_add(std::mem::size_of::<Self>())
     }
 }
 
@@ -341,6 +404,7 @@ pub async fn send(pending: PendingNotification) {
 mod tests {
     use super::*;
     use ilium_core::{AgentActivity, AgentClass};
+    use std::time::Duration;
 
     fn working() -> PaneStatus {
         PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Working, None)
@@ -348,6 +412,120 @@ mod tests {
     fn idle() -> PaneStatus {
         PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Idle, None)
     }
+
+    #[tokio::test]
+    async fn backend_refusal_remains_a_delivery_result() {
+        let execution = crate::execution::ServerExecution::start().expect("execution bank");
+        let reservation = execution
+            .client
+            .foundation
+            .try_reserve(
+                ilium_execution::Lane::Io,
+                ilium_execution::JobCost {
+                    input_bytes: 4096,
+                    result_bytes: 0,
+                },
+            )
+            .expect("notification admission");
+        let pending = PendingNotification::from_pane_titles("session".into(), "pane".into(), None);
+        let result = execution
+            .client
+            .run_reserved(
+                reservation,
+                notification_job(pending, |_, _| Err("backend unavailable")),
+            )
+            .await
+            .expect("the execution job completes despite backend refusal");
+        assert_eq!(result.view(), &Err("backend unavailable"));
+    }
+
+    #[tokio::test]
+    async fn notification_delivery_is_owned_by_the_bounded_execution_bank() {
+        let execution = crate::execution::ServerExecution::start().expect("execution bank");
+        let monitor = execution.test_monitor();
+        let (entered_tx, entered_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::sync_channel(1);
+        let admitted = send_with(
+            &execution.client,
+            PendingNotification::from_pane_titles(
+                "session".into(),
+                "A long task".into(),
+                Some("Task".into()),
+            ),
+            move |_, _| {
+                let _ = entered_tx.send(std::thread::current().id());
+                release_rx
+                    .recv_timeout(Duration::from_secs(5))
+                    .expect("release notification delivery");
+                Ok(())
+            },
+        );
+        assert!(admitted, "bounded I/O admission accepts the notification");
+
+        let delivery_thread = tokio::time::timeout(Duration::from_secs(2), entered_rx)
+            .await
+            .expect("notification delivery starts")
+            .expect("delivery reports its thread");
+        let health = monitor.health();
+        assert_eq!(health.quota.jobs, 1);
+        assert!(health.quota.worker_threads > 0);
+        assert_ne!(delivery_thread, std::thread::current().id());
+
+        release_tx.send(()).expect("release worker");
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while monitor.health().quota.jobs != 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("notification receipt retires after delivery");
+    }
+
+    #[tokio::test]
+    async fn oversized_notification_is_refused_before_execution_admission() {
+        let execution = crate::execution::ServerExecution::start().expect("execution bank");
+        let monitor = execution.test_monitor();
+        let mut oversized_session = String::with_capacity(MAX_NOTIFICATION_JOB_BYTES);
+        oversized_session.push('x');
+
+        let admitted = send_with(
+            &execution.client,
+            PendingNotification::from_pane_titles(oversized_session, "pane".into(), None),
+            |_, _| panic!("oversized notification must not be delivered"),
+        );
+
+        assert!(!admitted, "oversized notification is refused");
+        assert_eq!(monitor.health().quota.jobs, 0);
+    }
+
+    #[tokio::test]
+    async fn notification_is_dropped_when_io_admission_is_saturated() {
+        let execution = crate::execution::ServerExecution::start().expect("execution bank");
+        let monitor = execution.test_monitor();
+        let limits = monitor.health().quota.limits;
+        let occupied = execution
+            .client
+            .foundation
+            .try_reserve(
+                ilium_execution::Lane::Io,
+                ilium_execution::JobCost {
+                    input_bytes: limits.input_bytes,
+                    result_bytes: 0,
+                },
+            )
+            .expect("fill the shared input-byte admission budget");
+
+        let admitted = send_with(
+            &execution.client,
+            PendingNotification::from_pane_titles("session".into(), "pane".into(), None),
+            |_, _| panic!("a refused notification must not reach the I/O lane"),
+        );
+
+        assert!(!admitted, "admission pressure drops advisory notifications");
+        assert_eq!(monitor.health().quota.jobs, 1);
+        drop(occupied);
+    }
+
     fn done() -> PaneStatus {
         PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Done, None)
     }

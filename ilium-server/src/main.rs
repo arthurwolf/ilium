@@ -157,6 +157,13 @@ async fn async_main(
     server_config: ilium_server::config::ServerConfig,
     resources: ilium_server::ServerResources,
 ) -> ExitCode {
+    let relay = match ilium_logging::start_log_relay(&launch.log_path).await {
+        Ok(relay) => relay,
+        Err(error) => {
+            tracing::error!(%error, "failed to start session log relay");
+            return ExitCode::FAILURE;
+        }
+    };
     let options = ilium_server::ServerOptions {
         session_name: launch.session_name,
         socket_path: launch.socket_path,
@@ -183,13 +190,18 @@ async fn async_main(
         progress_monitor_enabled: server_config.progress_monitor_enabled,
         session_backups_enabled: server_config.session_backups_enabled,
     };
-    match ilium_server::run_with_resources(options, resources).await {
+    let mut exit_code = match ilium_server::run_with_resources(options, resources).await {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             tracing::error!("server exited with an error: {error}");
             ExitCode::FAILURE
         }
+    };
+    if let Err(error) = relay.shutdown().await {
+        eprintln!("session log relay shutdown was not confirmed: {error}");
+        exit_code = ExitCode::FAILURE;
     }
+    exit_code
 }
 
 fn parse_command(argv: Vec<String>) -> Result<ServerCommand, String> {

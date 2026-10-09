@@ -18,11 +18,12 @@ use std::collections::HashSet;
 use std::sync::Mutex;
 use std::time::Duration;
 
+use crate::ipc::DirectEventSender;
 use ilium_ipc::{
     normalize_voice_sentences, ServerEvent, VoiceTextRejection, VoiceTextRejectionCode,
     VoiceTextResult,
 };
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::oneshot;
 
 /// How long one client may take to answer an offer. Answering includes
 /// starting the voice session when `start_voice` is set, which opens audio
@@ -33,7 +34,7 @@ pub(crate) struct VoiceTextRelay {
     /// Direct-reply channels of connections that host a voice session, in
     /// registration order (the newest is the most likely to be the TUI the
     /// user is looking at).
-    receivers: Mutex<Vec<mpsc::Sender<ServerEvent>>>,
+    receivers: Mutex<Vec<DirectEventSender>>,
     /// Request ids currently being brokered, so a reused id cannot steal
     /// another request's answer.
     active_requests: Mutex<HashSet<u64>>,
@@ -74,7 +75,7 @@ impl VoiceTextRelay {
 
     /// Records a connection as able to host voice. Idempotent per connection;
     /// closed connections are dropped at the same time.
-    pub(crate) fn register_receiver(&self, receiver: mpsc::Sender<ServerEvent>) {
+    pub(crate) fn register_receiver(&self, receiver: DirectEventSender) {
         let mut receivers = lock(&self.receivers);
         receivers.retain(|existing| !existing.is_closed() && !existing.same_channel(&receiver));
         receivers.push(receiver);
@@ -153,7 +154,7 @@ impl VoiceTextRelay {
         ))
     }
 
-    fn live_receivers_newest_first(&self) -> Vec<mpsc::Sender<ServerEvent>> {
+    fn live_receivers_newest_first(&self) -> Vec<DirectEventSender> {
         let mut receivers = lock(&self.receivers);
         receivers.retain(|receiver| !receiver.is_closed());
         receivers.iter().rev().cloned().collect()
@@ -161,7 +162,7 @@ impl VoiceTextRelay {
 
     async fn offer(
         &self,
-        receiver: &mpsc::Sender<ServerEvent>,
+        receiver: &DirectEventSender,
         request_id: u64,
         sentences: &[String],
         start_voice: bool,
@@ -266,7 +267,7 @@ mod tests {
         relay: &Arc<VoiceTextRelay>,
         reply: impl Fn(bool) -> Option<VoiceTextResult> + Send + 'static,
     ) -> FakeClient {
-        let (direct_tx, mut direct_rx) = mpsc::channel(8);
+        let (direct_tx, mut direct_rx) = DirectEventSender::channel(8);
         relay.register_receiver(direct_tx);
         let offers = Arc::new(Mutex::new(Vec::new()));
         let recorded = Arc::clone(&offers);
@@ -434,7 +435,7 @@ mod tests {
     #[tokio::test]
     async fn disconnected_clients_are_forgotten() {
         let relay = relay();
-        let (direct_tx, direct_rx) = mpsc::channel(1);
+        let (direct_tx, direct_rx) = DirectEventSender::channel(1);
         relay.register_receiver(direct_tx);
         drop(direct_rx);
         let rejection = relay.submit(10, sentences(), false).await.unwrap_err();
@@ -445,7 +446,7 @@ mod tests {
     #[tokio::test]
     async fn registering_the_same_connection_twice_keeps_one_entry() {
         let relay = relay();
-        let (direct_tx, _direct_rx) = mpsc::channel(1);
+        let (direct_tx, _direct_rx) = DirectEventSender::channel(1);
         relay.register_receiver(direct_tx.clone());
         relay.register_receiver(direct_tx);
         assert_eq!(lock(&relay.receivers).len(), 1);

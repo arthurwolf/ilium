@@ -45,7 +45,7 @@ async fn all_inference_apply_lanes_preserve_an_unasked_agent_bundle() {
     let injected = serde_json::json!({"type":"event_msg","payload":{"type":"user_message","message":"Ilium progress monitor 1 reports completion"}});
     std::fs::write(path, format!("{meta}\n{injected}\n")).unwrap();
     let original = state.tree.read().await.get(pane_id).unwrap().clone();
-    let (direct_tx, mut direct_rx) = mpsc::channel(16);
+    let (direct_tx, mut direct_rx) = DirectEventSender::channel(16);
     for lane in 0..3 {
         let (observations, revisions, animation_generation) = {
             let tree = state.tree.read().await;

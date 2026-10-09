@@ -9,7 +9,7 @@
 //! every call site that needs both takes `tree` first, does its
 //! `panes`-locked work, and drops both before returning.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -208,6 +208,9 @@ pub struct ServerState {
     /// This mutex does not exclude arbitrary external file access or tree edits.
     /// Acquire after a workspace repository lock, before tree/pane locks.
     pub(crate) workspace_spawn_lock: Mutex<()>,
+    /// Pane IDs currently undergoing replacement. The standard mutex is held
+    /// only for set membership changes, never across an await.
+    pub(crate) replacing_panes: std::sync::Mutex<HashSet<NodeId>>,
     /// Runtime-only Git facts. The tree stores creation provenance, never
     /// potentially stale dirty counts or upstream information.
     pub(crate) workspace_git_status_cache: RwLock<HashMap<NodeId, WorkspaceGitStatus>>,
@@ -413,6 +416,7 @@ impl ServerState {
             prompt_queue_transaction: Mutex::new(()),
             workspace_repository_locks: Mutex::new(HashMap::new()),
             workspace_spawn_lock: Mutex::new(()),
+            replacing_panes: std::sync::Mutex::new(HashSet::new()),
             workspace_git_status_cache: RwLock::new(HashMap::new()),
             workspace_close_preferences: std::sync::Arc::new(RwLock::new(HashMap::new())),
             workspace_git_full_requests,

@@ -18,9 +18,10 @@ mod agent_debug;
 mod agent_delivery;
 mod agent_identity_guard;
 mod agent_prompt;
+mod antigravity_statusline_delivery;
+mod chatroom_router;
 pub mod config;
 mod config_refresh;
-mod chatroom_router;
 mod detection;
 pub mod error;
 mod execution;
@@ -35,6 +36,7 @@ mod pane;
 pub mod paths;
 mod persistence;
 mod progress_monitor;
+mod progress_watchdog;
 mod prompt_queue;
 mod ready_log;
 mod recovery;
@@ -298,6 +300,8 @@ pub async fn run_with_resources(
     let http_api_task =
         AbortOnDropHandle::new(http_api::spawn(Arc::clone(&state), options.http_api));
     let scheduled_input_task = AbortOnDropHandle::new(scheduled_input::spawn(Arc::clone(&state)));
+    let progress_watchdog_task =
+        AbortOnDropHandle::new(progress_watchdog::spawn(Arc::clone(&state)));
     let chatroom_router_task = AbortOnDropHandle::new(chatroom_router::spawn(Arc::clone(&state)));
     let mut snapshot_writer_task =
         AbortOnDropHandle::new(persistence::spawn_snapshot_writer(Arc::clone(&state)));
@@ -321,6 +325,7 @@ pub async fn run_with_resources(
     git_status_task.abort();
     http_api_task.abort();
     scheduled_input_task.abort();
+    progress_watchdog_task.abort();
     chatroom_router_task.abort();
     if let Some(task) = sound_config_watcher_task {
         task.abort();
@@ -680,6 +685,7 @@ async fn restore_snapshot_data(
                     kind,
                     &cwd,
                     Some(deferred),
+                    None,
                 )
                 .await
             }

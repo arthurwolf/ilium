@@ -187,6 +187,31 @@ fn execution_error(error: impl std::fmt::Display) -> crate::error::ServerError {
     std::io::Error::other(format!("detection evidence execution: {error}")).into()
 }
 
+fn collect_shell_ownership<T>(
+    pane_ids: Vec<NodeId>,
+    observers: Vec<(NodeId, T)>,
+    mut observe: impl FnMut(T) -> Option<bool>,
+    mut is_cancelled: impl FnMut() -> bool,
+) -> Result<Vec<(NodeId, Option<bool>)>, std::io::Error> {
+    let mut observations = Vec::with_capacity(pane_ids.len());
+    let mut observers = observers.into_iter().peekable();
+    for pane_id in pane_ids {
+        if is_cancelled() {
+            return Err(std::io::Error::from(std::io::ErrorKind::Interrupted));
+        }
+        let ownership = if observers
+            .peek()
+            .is_some_and(|(observer_pane_id, _)| *observer_pane_id == pane_id)
+        {
+            observers.next().and_then(|(_, observer)| observe(observer))
+        } else {
+            Some(false)
+        };
+        observations.push((pane_id, ownership));
+    }
+    Ok(observations)
+}
+
 async fn run_loop(state: std::sync::Arc<ServerState>) {
     let Some(owner) = state.execution.get() else {
         tracing::error!("detection requires bootstrap-owned server execution");
@@ -712,14 +737,32 @@ async fn run_due_panes_with_hook(
         .ok_or_else(|| execution_error("server bank not started"))?
         .client
         .clone();
+    let notification_execution = execution.clone();
     // Reserve before cloning classification inputs or formatting screens.
     let reservation = execution
         .foundation
         .try_reserve(
-            Lane::Io,
+            Lane::Cpu,
             JobCost {
                 input_bytes: EVIDENCE_INPUT_BYTES,
                 result_bytes: EVIDENCE_RESULT_BYTES,
+            },
+        )
+        .map_err(|error| execution_error(format!("{error:?}")))?;
+    // Foreground ownership can require native OS inspection (ToolHelp on
+    // Windows), so admit it before collecting the observer handles and run it
+    // on the I/O bank rather than inside process-tree classification.
+    let shell_reservation = execution
+        .foundation
+        .try_reserve(
+            Lane::Io,
+            JobCost {
+                input_bytes: MAX_DUE_PANES.saturating_mul(
+                    std::mem::size_of::<ilium_pty::PtyShellObserver>()
+                        .saturating_add(std::mem::size_of::<NodeId>()),
+                ),
+                result_bytes: MAX_DUE_PANES
+                    .saturating_mul(std::mem::size_of::<(NodeId, Option<bool>)>()),
             },
         )
         .map_err(|error| execution_error(format!("{error:?}")))?;
@@ -734,6 +777,7 @@ async fn run_due_panes_with_hook(
         agent_generation: u64,
         title_generation: u64,
         shell_pid: Option<u32>,
+        shell_was_plain: bool,
         shell_observer: Option<ilium_pty::PtyShellObserver>,
         screen_generation: u64,
         request_generation: u64,
@@ -757,7 +801,7 @@ async fn run_due_panes_with_hook(
     // claimed transcript from another due pane's admissible candidates), the
     // starting point for `claimed_session_ids` phase 2 mutates as it
     // resolves each due pane in turn.
-    let (due_panes, mut claimed_session_ids, ambiguous_session_ids): (
+    let (due_panes, claimed_session_ids, ambiguous_session_ids): (
         Vec<DuePane>,
         std::collections::HashMap<String, NodeId>,
         std::collections::HashSet<String>,
@@ -796,17 +840,16 @@ async fn run_due_panes_with_hook(
             if runtime.detection_schedule.next_due > now {
                 continue;
             }
-            if due_panes.len() == MAX_DUE_PANES {
-                break;
-            }
+            let shell_observer = matches!(&runtime.origin, crate::pane::TerminalOrigin::PlainShell)
+                .then(|| runtime.session.shell_observer());
             due_panes.push(DuePane {
                 pane_id: *pane_id,
                 input: runtime.session.input_handle(),
                 agent_generation: runtime.agent_generation,
                 title_generation: runtime.title_generation,
                 shell_pid: runtime.session.process_id(),
-                shell_observer: matches!(&runtime.origin, crate::pane::TerminalOrigin::PlainShell)
-                    .then(|| runtime.session.shell_observer()),
+                shell_was_plain: shell_observer.is_some(),
+                shell_observer,
                 screen_generation: runtime.session.screen_generation(),
                 request_generation: runtime.detection_schedule.request_generation,
                 confirmed_goal_owner: runtime.confirmed_goal_owner.clone(),
@@ -827,12 +870,54 @@ async fn run_due_panes_with_hook(
                     .clone(),
             });
         }
+        due_panes.sort_by_key(|pane| pane.pane_id.0);
+        due_panes.truncate(MAX_DUE_PANES);
         (due_panes, claimed_session_ids, ambiguous_session_ids)
     };
 
     if due_panes.is_empty() {
         return Ok(());
     }
+
+    let evidence_deadline = tokio::time::Instant::now() + EVIDENCE_DEADLINE;
+    let shell_observers: Vec<_> = due_panes
+        .iter_mut()
+        .filter_map(|pane| {
+            pane.shell_observer
+                .take()
+                .map(|observer| (pane.pane_id, observer))
+        })
+        .collect();
+    let shell_pane_ids: Vec<_> = due_panes.iter().map(|pane| pane.pane_id).collect();
+    let shell_evidence = tokio::time::timeout_at(
+        evidence_deadline,
+        execution.run_reserved(
+            shell_reservation,
+            move |context: ilium_execution::JobContext| {
+                collect_shell_ownership(
+                    shell_pane_ids,
+                    shell_observers,
+                    |observer| observer.shell_owns_terminal(),
+                    || context.stop_requested(),
+                )
+            },
+        ),
+    )
+    .await
+    .map_err(|_| execution_error("shell ownership observation deadline expired"))?
+    .map_err(execution_error)?;
+    let shell_ownership: std::collections::HashMap<NodeId, Option<bool>> =
+        shell_evidence.view().iter().copied().collect();
+    let mut pane_cwds: std::collections::HashMap<NodeId, std::path::PathBuf> = {
+        let tree = state.tree.read().await;
+        due_panes
+            .iter()
+            .filter_map(|pane| {
+                tree.pane_cwd(pane.pane_id)
+                    .map(|path| (pane.pane_id, path.to_path_buf()))
+            })
+            .collect()
+    };
 
     #[derive(Clone)]
     struct ClassifiedPane {
@@ -851,10 +936,11 @@ async fn run_due_panes_with_hook(
         is_session_identity_invalidated: bool,
         invalidated_session_id: Option<String>,
         session_process_id: Option<u32>,
+        session_process_started_at_unix_seconds: Option<u64>,
+        session_agent_class: Option<ilium_core::AgentClass>,
         pending_generated_session_id: Option<String>,
         needs_session_discovery: bool,
         shell_pid: Option<u32>,
-        shell_observer: Option<ilium_pty::PtyShellObserver>,
         shell_was_plain: bool,
         shell_ownership: Option<bool>,
         activity_evidence: Option<ilium_detect::ActivityEvidence>,
@@ -875,300 +961,756 @@ async fn run_due_panes_with_hook(
     let evidence_state = Arc::clone(state);
     let process_table = Arc::clone(system);
     let handle = tokio::runtime::Handle::current();
-    let evidence = tokio::time::timeout(EVIDENCE_DEADLINE, execution.run_reserved(reservation, move |context: ilium_execution::JobContext| -> Result<_, std::io::Error> {
-        before_evidence();
-        let mut system = process_table.system.lock().map_err(|_| std::io::Error::other("process table lock poisoned"))?;
-        let children_index = ilium_detect::ProcessChildrenIndex::build(&system);
-        let state = evidence_state;
-        let stop = context.stop_token();
-        handle.block_on(async move {
-        let (detection_settings_revision, detection_config, custom_signatures) = {
-            let settings = state.agent_detection_settings.read().await;
-            let bytes = settings.custom_signatures.iter().fold(settings.custom_signatures.capacity().saturating_mul(std::mem::size_of::<ilium_detect::AgentSignature>()), |bytes, signature| bytes.saturating_add(signature.name_substring.len().saturating_mul(2)));
-            if bytes > 16 * 1024 * 1024 { return Err(std::io::Error::other("detection signature settings exceed evidence admission")); }
-            (settings.revision, settings.detection, settings.custom_signatures.clone())
-        };
+    let evidence = tokio::time::timeout_at(
+        evidence_deadline,
+        execution.run_reserved(
+            reservation,
+            move |context: ilium_execution::JobContext| -> Result<_, std::io::Error> {
+                before_evidence();
+                let mut system = process_table
+                    .system
+                    .lock()
+                    .map_err(|_| std::io::Error::other("process table lock poisoned"))?;
+                let children_index = ilium_detect::ProcessChildrenIndex::build(&system);
+                let state = evidence_state;
+                let stop = context.stop_token();
+                handle.block_on(async move {
+                    let (detection_settings_revision, detection_config, custom_signatures) = {
+                        let settings = state.agent_detection_settings.read().await;
+                        let bytes =
+                            settings.custom_signatures.iter().fold(
+                                settings.custom_signatures.capacity().saturating_mul(
+                                    std::mem::size_of::<ilium_detect::AgentSignature>(),
+                                ),
+                                |bytes, signature| {
+                                    bytes.saturating_add(
+                                        signature.name_substring.len().saturating_mul(2),
+                                    )
+                                },
+                            );
+                        if bytes > 16 * 1024 * 1024 {
+                            return Err(std::io::Error::other(
+                                "detection signature settings exceed evidence admission",
+                            ));
+                        }
+                        (
+                            settings.revision,
+                            settings.detection,
+                            settings.custom_signatures.clone(),
+                        )
+                    };
 
-    // Phase 2a: identify process trees with no lock held. Screen contents
-    // are not captured until identity succeeds, so ordinary shell panes do
-    // not allocate a full vt100 text snapshot on every slow-tier check.
-    struct IdentifiedPane {
-        due: DuePane,
-        agent_launcher_ancestors: Vec<AgentProcessKey>,
-        identity: Option<ilium_detect::AgentIdentity>,
-        cached_screen_classification: Option<ScreenClassificationCache>,
-    }
-    let identified_panes: Vec<IdentifiedPane> = due_panes
-        .into_iter()
-        .map(|due| {
-            let mut agent_launcher_ancestors = ilium_detect::retain_current_agent_launchers(
-                &system, &due.agent_launcher_ancestors,
-            );
-            // Changing exclusions invalidates an otherwise generation-matched
-            // identity cache; ordinary panes retain their existing fast path.
-            let cached = if agent_launcher_ancestors.is_empty() && due.agent_launcher_ancestors.is_empty() {
-                cached_identity_for_generation(due.identity_system_generation, system_generation, &due.cached_identity)
-            } else { None };
-            let identity = cached.unwrap_or_else(|| {
-                due.shell_pid.and_then(|shell_pid| {
-                    ilium_detect::identify_agent_with_extra_excluding(
-                        &system, Pid::from_u32(shell_pid), &children_index,
-                        &custom_signatures, &agent_launcher_ancestors,
-                    )
+                    // Phase 2a: identify process trees with no lock held. Screen contents
+                    // are not captured until identity succeeds, so ordinary shell panes do
+                    // not allocate a full vt100 text snapshot on every slow-tier check.
+                    struct IdentifiedPane {
+                        due: DuePane,
+                        agent_launcher_ancestors: Vec<AgentProcessKey>,
+                        identity: Option<ilium_detect::AgentIdentity>,
+                        cached_screen_classification: Option<ScreenClassificationCache>,
+                    }
+                    let identified_panes: Vec<IdentifiedPane> = due_panes
+                        .into_iter()
+                        .map(|due| {
+                            let mut agent_launcher_ancestors =
+                                ilium_detect::retain_current_agent_launchers(
+                                    &system,
+                                    &due.agent_launcher_ancestors,
+                                );
+                            // Changing exclusions invalidates an otherwise generation-matched
+                            // identity cache; ordinary panes retain their existing fast path.
+                            let cached = if agent_launcher_ancestors.is_empty()
+                                && due.agent_launcher_ancestors.is_empty()
+                            {
+                                cached_identity_for_generation(
+                                    due.identity_system_generation,
+                                    system_generation,
+                                    &due.cached_identity,
+                                )
+                            } else {
+                                None
+                            };
+                            let identity = cached.unwrap_or_else(|| {
+                                due.shell_pid.and_then(|shell_pid| {
+                                    ilium_detect::identify_agent_with_extra_excluding(
+                                        &system,
+                                        Pid::from_u32(shell_pid),
+                                        &children_index,
+                                        &custom_signatures,
+                                        &agent_launcher_ancestors,
+                                    )
+                                })
+                            });
+                            if let (Some(root), Some(owner)) = (due.shell_pid, identity.as_ref()) {
+                                for launcher in ilium_detect::agent_launcher_ancestors(
+                                    &system,
+                                    Pid::from_u32(root),
+                                    owner,
+                                    &custom_signatures,
+                                ) {
+                                    if !agent_launcher_ancestors.contains(&launcher) {
+                                        agent_launcher_ancestors.push(launcher);
+                                    }
+                                }
+                            }
+                            let cached_screen_classification =
+                                (!crate::agent_debug::is_any_debug_sink_enabled(&state))
+                                    .then(|| {
+                                        reusable_screen_classification(
+                                            due.cached_screen_classification.as_ref(),
+                                            due.screen_generation,
+                                            due.request_generation,
+                                            identity.as_ref(),
+                                            due.confirmed_goal_owner.as_ref(),
+                                        )
+                                    })
+                                    .flatten();
+                            IdentifiedPane {
+                                due,
+                                agent_launcher_ancestors,
+                                identity,
+                                cached_screen_classification,
+                            }
+                        })
+                        .collect();
+
+                    let screen_snapshots: std::collections::HashMap<
+                        NodeId,
+                        ilium_pty::ScreenSnapshot,
+                    > = {
+                        let panes = state.panes.read().await;
+                        let mut snapshots =
+                            std::collections::HashMap::with_capacity(identified_panes.len());
+                        for pane in &identified_panes {
+                            if pane.identity.is_none()
+                                || pane.cached_screen_classification.is_some()
+                            {
+                                continue;
+                            }
+                            let Some(PaneResource::Terminal(runtime)) =
+                                panes.get(&pane.due.pane_id)
+                            else {
+                                continue;
+                            };
+                            let Ok(snapshot) =
+                                runtime.session.screen_snapshot_with_limit(2 * 1024 * 1024)
+                            else {
+                                return Err(std::io::Error::other(
+                                    "detection screen evidence admission limit reached",
+                                ));
+                            };
+                            snapshots.insert(pane.due.pane_id, snapshot);
+                        }
+                        snapshots
+                    };
+
+                    let mut classifications: Vec<ClassifiedPane> = identified_panes
+                        .into_iter()
+                        .map(|identified| {
+                            let due_pane = identified.due;
+                            let identity = identified.identity;
+                            let (
+                                screen_generation,
+                                classified_identity,
+                                is_fresh_agent_screen,
+                                interstitial_prompt_response,
+                                screen_classification_cache,
+                            ) = if let Some(cache) = identified.cached_screen_classification {
+                                (
+                                    cache.screen_generation,
+                                    cache.classification.clone(),
+                                    cache.is_fresh_agent_screen,
+                                    cache.interstitial_prompt_response,
+                                    cache,
+                                )
+                            } else {
+                                let screen_snapshot = screen_snapshots
+                                    .get(&due_pane.pane_id)
+                                    .cloned()
+                                    .unwrap_or_else(|| ilium_pty::ScreenSnapshot {
+                                        generation: due_pane.screen_generation,
+                                        text: String::new(),
+                                        cursor_position: (0, 0),
+                                        dimmed_cells: Vec::new(),
+                                    });
+                                let classification = classify_identity(
+                                    identity.as_ref(),
+                                    &screen_snapshot.text,
+                                    due_pane.confirmed_goal_owner.as_ref(),
+                                );
+                                let is_fresh = identity.as_ref().is_some_and(|identity| {
+                                    ilium_detect::is_fresh_agent_screen(
+                                        &identity.class,
+                                        &screen_snapshot.text,
+                                    )
+                                });
+                                let interstitial = identity.as_ref().and_then(|identity| {
+                                    ilium_detect::interstitial_prompt_response(
+                                        &identity.class,
+                                        &screen_snapshot.text,
+                                    )
+                                });
+                                let cache = ScreenClassificationCache {
+                                    screen_generation: screen_snapshot.generation,
+                                    request_generation: due_pane.request_generation,
+                                    identity: identity_key(identity.as_ref()),
+                                    input_goal_owner: due_pane.confirmed_goal_owner.clone(),
+                                    classification: classification.clone(),
+                                    is_fresh_agent_screen: is_fresh,
+                                    interstitial_prompt_response: interstitial,
+                                };
+                                (
+                                    screen_snapshot.generation,
+                                    classification,
+                                    is_fresh,
+                                    interstitial,
+                                    cache,
+                                )
+                            };
+                            let has_stable_session_owner =
+                                identity.as_ref().is_some_and(|identity| {
+                                    session_owner_is_stable(
+                                        due_pane.session_id.as_deref(),
+                                        due_pane.session_agent_class.as_ref(),
+                                        due_pane.session_process_id,
+                                        due_pane.session_process_started_at_unix_seconds,
+                                        due_pane.is_session_identity_invalidated,
+                                        identity,
+                                        &ambiguous_session_ids,
+                                    )
+                                });
+                            let needs_session_discovery =
+                                identity.is_some() && !has_stable_session_owner;
+                            ClassifiedPane {
+                                pane_id: due_pane.pane_id,
+                                input: due_pane.input,
+                                agent_generation: due_pane.agent_generation,
+                                title_generation: due_pane.title_generation,
+                                captured_session_id: due_pane.session_id,
+                                agent_launcher_ancestors: identified.agent_launcher_ancestors,
+                                status: classified_identity.status,
+                                identity,
+                                screen_generation,
+                                request_generation: due_pane.request_generation,
+                                confirmed_goal_owner: classified_identity.confirmed_goal_owner,
+                                is_fresh_agent_screen,
+                                is_session_identity_invalidated: due_pane
+                                    .is_session_identity_invalidated,
+                                invalidated_session_id: due_pane.invalidated_session_id,
+                                session_process_id: due_pane.session_process_id,
+                                session_process_started_at_unix_seconds: due_pane
+                                    .session_process_started_at_unix_seconds,
+                                session_agent_class: due_pane.session_agent_class,
+                                pending_generated_session_id: due_pane.pending_generated_session_id,
+                                needs_session_discovery,
+                                shell_pid: due_pane.shell_pid,
+                                shell_was_plain: due_pane.shell_was_plain,
+                                shell_ownership: shell_ownership
+                                    .get(&due_pane.pane_id)
+                                    .copied()
+                                    .flatten(),
+                                activity_evidence: classified_identity.activity_evidence,
+                                activity_evidence_line: classified_identity.activity_evidence_line,
+                                goal_evidence: classified_identity.goal_evidence,
+                                goal_evidence_line: classified_identity.goal_evidence_line,
+                                goal_evidence_rule: classified_identity.goal_evidence_rule,
+                                goal_evidence_pattern: classified_identity.goal_evidence_pattern,
+                                goal_was_retained: classified_identity.goal_was_retained,
+                                interstitial_prompt_response,
+                                screen_classification_cache,
+                            }
+                        })
+                        .collect();
+
+                    pane_cwds.retain(|pane_id, _| {
+                        classifications
+                            .iter()
+                            .any(|pane| pane.pane_id == *pane_id && pane.needs_session_discovery)
+                    });
+
+                    // CPU work only reads the immutable process-tree snapshot. Native
+                    // discovery refreshes and identity probes run after this receipt on I/O.
+                    drop(system);
+                    if stop.is_stopped() {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::Interrupted,
+                            "detection evidence cancelled",
+                        ));
+                    }
+                    let optional =
+                        |value: &Option<String>| value.as_ref().map_or(0, String::capacity);
+                    let mut result_bytes = classifications.len().saturating_mul(8192);
+                    for pane in &classifications {
+                        result_bytes = result_bytes.saturating_add(
+                            pane.agent_launcher_ancestors
+                                .capacity()
+                                .saturating_mul(std::mem::size_of::<AgentProcessKey>()),
+                        );
+                        for key in &pane.agent_launcher_ancestors {
+                            if let ilium_core::AgentClass::Other(name) = &key.class {
+                                result_bytes = result_bytes.saturating_add(name.capacity());
+                            }
+                        }
+                        if stop.is_stopped() {
+                            return Err(std::io::Error::new(
+                                std::io::ErrorKind::Interrupted,
+                                "detection evidence cancelled",
+                            ));
+                        }
+                        for amount in [
+                            optional(&pane.activity_evidence_line),
+                            optional(&pane.goal_evidence_line),
+                            optional(
+                                &pane
+                                    .screen_classification_cache
+                                    .classification
+                                    .activity_evidence_line,
+                            ),
+                            optional(
+                                &pane
+                                    .screen_classification_cache
+                                    .classification
+                                    .goal_evidence_line,
+                            ),
+                            optional(&pane.captured_session_id),
+                            optional(&pane.invalidated_session_id),
+                            optional(&pane.pending_generated_session_id),
+                        ] {
+                            result_bytes = result_bytes.saturating_add(amount);
+                        }
+                        for goal in [
+                            pane.confirmed_goal_owner.as_ref(),
+                            pane.screen_classification_cache.input_goal_owner.as_ref(),
+                            pane.screen_classification_cache
+                                .classification
+                                .confirmed_goal_owner
+                                .as_ref(),
+                        ]
+                        .into_iter()
+                        .flatten()
+                        {
+                            result_bytes =
+                                result_bytes.saturating_add(optional(&goal.evidence_line));
+                        }
+                        if let Some(identity) = &pane.identity {
+                            result_bytes = result_bytes
+                                .saturating_add(identity.process_name.capacity())
+                                .saturating_add(identity.matched_signature.capacity());
+                        }
+                    }
+                    for path in pane_cwds.values() {
+                        result_bytes =
+                            result_bytes.saturating_add(path.capacity().saturating_mul(2));
+                    }
+                    for session_id in claimed_session_ids.keys() {
+                        result_bytes = result_bytes.saturating_add(session_id.capacity());
+                    }
+                    for session_id in &ambiguous_session_ids {
+                        result_bytes = result_bytes.saturating_add(session_id.capacity());
+                    }
+                    if result_bytes > EVIDENCE_RESULT_BYTES {
+                        return Err(std::io::Error::other(
+                            "detection evidence result exceeds retained admission",
+                        ));
+                    }
+                    Ok((
+                        classifications,
+                        pane_cwds,
+                        claimed_session_ids,
+                        ambiguous_session_ids,
+                        detection_settings_revision,
+                        detection_config,
+                        result_bytes,
+                    ))
                 })
-            });
-            if let (Some(root), Some(owner)) = (due.shell_pid, identity.as_ref()) {
-                for launcher in ilium_detect::agent_launcher_ancestors(&system, Pid::from_u32(root), owner, &custom_signatures) {
-                    if !agent_launcher_ancestors.contains(&launcher) {
-                        agent_launcher_ancestors.push(launcher);
+            },
+        ),
+    )
+    .await
+    .map_err(|_| {
+        execution_error(
+            "detection evidence deadline expired; native callback remains owned until it exits",
+        )
+    })?
+    .map_err(execution_error)?;
+    let (cpu_evidence, _cpu_retention) = evidence.into_parts();
+    let (
+        mut classifications,
+        pane_cwds,
+        captured_claims,
+        captured_ambiguous_session_ids,
+        detection_settings_revision,
+        detection_config,
+        captured_result_bytes,
+    ) = cpu_evidence;
+
+    // Process refresh, cwd fallback and current-identity checks are native I/O.
+    // Run them after CPU classification and before any transcript lookup, with
+    // a separate retained receipt so cancellation cannot release their buffers.
+    let mut discovery_input_bytes = classifications.len().saturating_mul(std::mem::size_of::<(
+        NodeId,
+        ilium_detect::AgentIdentity,
+        Option<std::path::PathBuf>,
+        bool,
+    )>());
+    for pane in &classifications {
+        let Some(identity) = pane.identity.as_ref() else {
+            continue;
+        };
+        discovery_input_bytes = discovery_input_bytes
+            .saturating_add(identity.process_name.capacity())
+            .saturating_add(identity.matched_signature.capacity());
+        if let ilium_core::AgentClass::Other(name) = &identity.class {
+            discovery_input_bytes = discovery_input_bytes.saturating_add(name.capacity());
+        }
+        if pane.needs_session_discovery {
+            discovery_input_bytes = discovery_input_bytes.saturating_add(
+                pane_cwds
+                    .get(&pane.pane_id)
+                    .unwrap_or(&state.session_cwd)
+                    .capacity()
+                    .saturating_mul(2),
+            );
+        }
+    }
+    discovery_input_bytes = discovery_input_bytes
+        .saturating_add(MAX_DUE_PANES.saturating_mul(std::mem::size_of::<Pid>()));
+    if classifications
+        .iter()
+        .any(|pane| pane.needs_session_discovery && pane.identity.is_some())
+    {
+        discovery_input_bytes =
+            discovery_input_bytes.saturating_add(state.session_cwd.capacity().saturating_mul(2));
+    }
+    if discovery_input_bytes > EVIDENCE_INPUT_BYTES {
+        return Err(execution_error(
+            "detection process discovery inputs exceed admitted bytes",
+        ));
+    }
+    let discovery_reservation = execution
+        .foundation
+        .try_reserve(
+            Lane::Io,
+            JobCost {
+                input_bytes: discovery_input_bytes,
+                result_bytes: if classifications
+                    .iter()
+                    .any(|pane| pane.needs_session_discovery && pane.identity.is_some())
+                {
+                    EVIDENCE_RESULT_BYTES
+                } else {
+                    1024 * 1024
+                },
+            },
+        )
+        .map_err(|error| execution_error(format!("{error:?}")))?;
+    let discovery_requests: Vec<_> = classifications
+        .iter()
+        .filter_map(|pane| {
+            pane.identity.clone().map(|identity| {
+                let project_cwd = pane.needs_session_discovery.then(|| {
+                    pane_cwds
+                        .get(&pane.pane_id)
+                        .unwrap_or(&state.session_cwd)
+                        .clone()
+                });
+                (
+                    pane.pane_id,
+                    identity,
+                    project_cwd,
+                    pane.needs_session_discovery,
+                )
+            })
+        })
+        .collect();
+    let discovery_process_table = Arc::clone(system);
+    let discovery_session_cwd = state.session_cwd.clone();
+    let discovery_evidence = tokio::time::timeout_at(
+        evidence_deadline,
+        execution.run_reserved(
+            discovery_reservation,
+            move |context: ilium_execution::JobContext| -> Result<_, std::io::Error> {
+                let mut discovery_pids: Vec<Pid> = discovery_requests
+                    .iter()
+                    .filter(|(_, _, _, needs_discovery)| *needs_discovery)
+                    .map(|(_, identity, _, _)| Pid::from_u32(identity.pid))
+                    .collect();
+                discovery_pids.sort_unstable();
+                discovery_pids.dedup();
+                let mut process_table = discovery_process_table
+                    .system
+                    .lock()
+                    .map_err(|_| std::io::Error::other("process table lock poisoned"))?;
+                crate::session_id::refresh_for_discovery(&mut process_table, &discovery_pids);
+                let mut snapshots = std::collections::HashMap::with_capacity(discovery_pids.len());
+                for (pane_id, identity, project_cwd, needs_discovery) in &discovery_requests {
+                    if context.stop_requested() {
+                        return Err(std::io::Error::from(std::io::ErrorKind::Interrupted));
+                    }
+                    if *needs_discovery {
+                        let cwd = project_cwd.as_deref().unwrap_or(&discovery_session_cwd);
+                        snapshots.insert(
+                            *pane_id,
+                            crate::session_id::capture_process_discovery(
+                                &process_table,
+                                Pid::from_u32(identity.pid),
+                                cwd,
+                            ),
+                        );
                     }
                 }
-            }
-            let cached_screen_classification =
-                (!crate::agent_debug::is_any_debug_sink_enabled(&state))
-                    .then(|| {
-                        reusable_screen_classification(
-                            due.cached_screen_classification.as_ref(),
-                            due.screen_generation,
-                            due.request_generation,
-                            identity.as_ref(),
-                            due.confirmed_goal_owner.as_ref(),
-                        )
-                    })
-                    .flatten();
-            IdentifiedPane {
-                due,
-                agent_launcher_ancestors,
-                identity,
-                cached_screen_classification,
-            }
-        })
-        .collect();
-
-    let screen_snapshots: std::collections::HashMap<NodeId, ilium_pty::ScreenSnapshot> = {
-        let panes = state.panes.read().await;
-        let mut snapshots = std::collections::HashMap::with_capacity(identified_panes.len());
-        for pane in &identified_panes {
-            if pane.identity.is_none() || pane.cached_screen_classification.is_some() {
-                continue;
-            }
-            let Some(PaneResource::Terminal(runtime)) = panes.get(&pane.due.pane_id) else {
-                continue;
-            };
-            let Ok(snapshot) = runtime.session.screen_snapshot_with_limit(2 * 1024 * 1024) else {
-                return Err(std::io::Error::other("detection screen evidence admission limit reached"));
-            };
-            snapshots.insert(pane.due.pane_id, snapshot);
-        }
-        snapshots
-    };
-
-    let mut classifications: Vec<ClassifiedPane> = identified_panes
-        .into_iter()
-        .map(|identified| {
-            let due_pane = identified.due;
-            let identity = identified.identity;
-            let (
-                screen_generation,
-                classified_identity,
-                is_fresh_agent_screen,
-                interstitial_prompt_response,
-                screen_classification_cache,
-            ) = if let Some(cache) = identified.cached_screen_classification {
-                (
-                    cache.screen_generation,
-                    cache.classification.clone(),
-                    cache.is_fresh_agent_screen,
-                    cache.interstitial_prompt_response,
-                    cache,
-                )
-            } else {
-                let screen_snapshot = screen_snapshots
-                    .get(&due_pane.pane_id)
-                    .cloned()
-                    .unwrap_or_else(|| ilium_pty::ScreenSnapshot {
-                        generation: due_pane.screen_generation,
-                        text: String::new(),
-                        cursor_position: (0, 0),
-                        dimmed_cells: Vec::new(),
-                    });
-                let classification = classify_identity(
-                    identity.as_ref(),
-                    &screen_snapshot.text,
-                    due_pane.confirmed_goal_owner.as_ref(),
+                drop(process_table);
+                let mut stale_panes = std::collections::HashSet::new();
+                for (pane_id, identity, _, _) in &discovery_requests {
+                    if context.stop_requested() {
+                        return Err(std::io::Error::from(std::io::ErrorKind::Interrupted));
+                    }
+                    if !crate::agent_identity_guard::matches_current_agent_identity(identity) {
+                        stale_panes.insert(*pane_id);
+                    }
+                }
+                let mut result_bytes = snapshots.capacity().saturating_mul(std::mem::size_of::<(
+                    NodeId,
+                    Option<crate::session_id::ProcessDiscoverySnapshot>,
+                )>());
+                result_bytes = result_bytes.saturating_add(
+                    stale_panes
+                        .capacity()
+                        .saturating_mul(std::mem::size_of::<NodeId>()),
                 );
-                let is_fresh = identity.as_ref().is_some_and(|identity| {
-                    ilium_detect::is_fresh_agent_screen(&identity.class, &screen_snapshot.text)
-                });
-                let interstitial = identity.as_ref().and_then(|identity| {
-                    ilium_detect::interstitial_prompt_response(
-                        &identity.class,
-                        &screen_snapshot.text,
-                    )
-                });
-                let cache = ScreenClassificationCache {
-                    screen_generation: screen_snapshot.generation,
-                    request_generation: due_pane.request_generation,
-                    identity: identity_key(identity.as_ref()),
-                    input_goal_owner: due_pane.confirmed_goal_owner.clone(),
-                    classification: classification.clone(),
-                    is_fresh_agent_screen: is_fresh,
-                    interstitial_prompt_response: interstitial,
-                };
-                (
-                    screen_snapshot.generation,
-                    classification,
-                    is_fresh,
-                    interstitial,
-                    cache,
-                )
-            };
-            let has_stable_session_owner = identity.as_ref().is_some_and(|identity| {
-                session_owner_is_stable(
-                    due_pane.session_id.as_deref(),
-                    due_pane.session_agent_class.as_ref(),
-                    due_pane.session_process_id,
-                    due_pane.session_process_started_at_unix_seconds,
-                    due_pane.is_session_identity_invalidated,
-                    identity,
-                    &ambiguous_session_ids,
-                )
-            });
-            let needs_session_discovery = identity.is_some() && !has_stable_session_owner;
-            ClassifiedPane {
-                pane_id: due_pane.pane_id,
-                input: due_pane.input,
-                agent_generation: due_pane.agent_generation,
-                title_generation: due_pane.title_generation,
-                captured_session_id: due_pane.session_id,
-                agent_launcher_ancestors: identified.agent_launcher_ancestors,
-                status: classified_identity.status,
-                identity,
-                screen_generation,
-                request_generation: due_pane.request_generation,
-                confirmed_goal_owner: classified_identity.confirmed_goal_owner,
-                is_fresh_agent_screen,
-                is_session_identity_invalidated: due_pane.is_session_identity_invalidated,
-                invalidated_session_id: due_pane.invalidated_session_id,
-                session_process_id: due_pane.session_process_id,
-                pending_generated_session_id: due_pane.pending_generated_session_id,
-                needs_session_discovery,
-                shell_pid: due_pane.shell_pid,
-                shell_was_plain: due_pane.shell_observer.is_some(),
-                shell_observer: due_pane.shell_observer,
-                shell_ownership: None,
-                activity_evidence: classified_identity.activity_evidence,
-                activity_evidence_line: classified_identity.activity_evidence_line,
-                goal_evidence: classified_identity.goal_evidence,
-                goal_evidence_line: classified_identity.goal_evidence_line,
-                goal_evidence_rule: classified_identity.goal_evidence_rule,
-                goal_evidence_pattern: classified_identity.goal_evidence_pattern,
-                goal_was_retained: classified_identity.goal_was_retained,
-                interstitial_prompt_response,
-                screen_classification_cache,
-            }
-        })
-        .collect();
-
-    // Refresh command/cwd fields only for identified process IDs. Discovery
-    // itself accepts only built-in provider classes; custom signatures do
-    // not have a transcript format with a project-verifiable ownership
-    // contract, so they intentionally receive no session ID.
-    let discovery_pids: Vec<Pid> = classifications
+                for snapshot in snapshots.values().flatten() {
+                    result_bytes = result_bytes
+                        .saturating_add(
+                            snapshot
+                                .process_cwd
+                                .as_ref()
+                                .map_or(0, |path| path.capacity().saturating_mul(2)),
+                        )
+                        .saturating_add(
+                            snapshot
+                                .arguments
+                                .capacity()
+                                .saturating_mul(std::mem::size_of::<String>()),
+                        );
+                    for argument in &snapshot.arguments {
+                        result_bytes = result_bytes.saturating_add(argument.capacity());
+                    }
+                }
+                if result_bytes > EVIDENCE_RESULT_BYTES {
+                    return Err(std::io::Error::other(
+                        "detection process discovery result exceeds retained admission",
+                    ));
+                }
+                Ok((snapshots, stale_panes, result_bytes))
+            },
+        ),
+    )
+    .await
+    .map_err(|_| execution_error("detection process discovery deadline expired"))?
+    .map_err(execution_error)?;
+    let (discovery_result, _discovery_retention) = discovery_evidence.into_parts();
+    let (discovery_snapshots, stale_classifications, _) = discovery_result;
+    for pane in &mut classifications {
+        if !stale_classifications.contains(&pane.pane_id) {
+            continue;
+        }
+        // Keep stale rows so reconciliation revokes the current input epoch,
+        // while preventing them from contributing transcript evidence.
+        pane.identity = None;
+        pane.needs_session_discovery = false;
+        pane.confirmed_goal_owner = None;
+        pane.is_fresh_agent_screen = false;
+        pane.interstitial_prompt_response = None;
+        pane.activity_evidence = None;
+        pane.activity_evidence_line = None;
+        pane.goal_evidence = None;
+        pane.goal_evidence_line = None;
+        pane.goal_evidence_rule = None;
+        pane.goal_evidence_pattern = None;
+        pane.goal_was_retained = false;
+        let unavailable = classify_identity(None, "", None);
+        pane.status = unavailable.status.clone();
+        pane.screen_classification_cache = ScreenClassificationCache {
+            screen_generation: pane.screen_generation,
+            request_generation: pane.request_generation,
+            identity: None,
+            input_goal_owner: None,
+            classification: unavailable,
+            is_fresh_agent_screen: false,
+            interstitial_prompt_response: None,
+        };
+    }
+    // The coordinator is the only owner of exclusive claims. Filesystem reads
+    // and JSON decoding yield typed evidence; neither worker lane may claim a
+    // session. The sorted due-pane order is stable across map iteration order.
+    // Reserve enough of the retained 64 MiB result before duplicating claims
+    // or formatting exclusions. The factor covers the temporary excluded set,
+    // sorted trace list, joined trace text and persistent debug exclusions;
+    // 512 KiB per attempt covers bounded descriptor identities and phase text.
+    let map_bytes = |capacity: usize, entry_bytes: usize| {
+        capacity
+            .saturating_mul(entry_bytes.saturating_add(1))
+            .saturating_add(16)
+    };
+    let claim_count = captured_claims
+        .len()
+        .saturating_add(captured_ambiguous_session_ids.len());
+    let claim_key_bytes = captured_claims
+        .keys()
+        .chain(captured_ambiguous_session_ids.iter())
+        .fold(0usize, |bytes, session_id| {
+            bytes.saturating_add(session_id.capacity())
+        });
+    let per_attempt_claim_bytes = claim_key_bytes
+        .saturating_mul(6)
+        .saturating_add(claim_count.saturating_mul(6 * std::mem::size_of::<String>() + 256));
+    let mut preflight_bytes = captured_result_bytes
+        .saturating_add(map_bytes(
+            captured_claims.capacity(),
+            std::mem::size_of::<(String, NodeId)>(),
+        ))
+        .saturating_add(map_bytes(
+            captured_ambiguous_session_ids.capacity(),
+            std::mem::size_of::<String>(),
+        ))
+        .saturating_add(map_bytes(
+            discovery_snapshots.capacity(),
+            std::mem::size_of::<(NodeId, Option<crate::session_id::ProcessDiscoverySnapshot>)>(),
+        ))
+        .saturating_add(map_bytes(
+            stale_classifications.capacity(),
+            std::mem::size_of::<NodeId>(),
+        ))
+        .saturating_add(map_bytes(
+            pane_cwds.capacity(),
+            std::mem::size_of::<(NodeId, std::path::PathBuf)>(),
+        ))
+        .saturating_add(map_bytes(
+            captured_claims.capacity(),
+            std::mem::size_of::<(String, NodeId)>(),
+        ))
+        .saturating_add(claim_key_bytes);
+    for pane in classifications
         .iter()
         .filter(|pane| pane.needs_session_discovery)
-        .filter_map(|pane| pane.identity.as_ref())
-        .map(|identity| Pid::from_u32(identity.pid))
-        .collect();
-    crate::session_id::refresh_for_discovery(&mut system, &discovery_pids);
-    // Sequential (not a one-shot `filter_map`/`collect`) so `claimed_session_ids`
-    // accumulates *within* this same tick: once pane A resolves to session
-    // S, pane B -- classified later in this same due-batch -- must never
-    // also resolve to S. See `crate::session_id`'s module docs on why that
-    // invariant is what actually fixes the same-project-directory
-    // misattribution, independent of which tier finds the answer.
-    let mut discovered_session_ids: std::collections::HashMap<NodeId, String> =
-        std::collections::HashMap::new();
+    {
+        let pane_text_bytes = pane
+            .pending_generated_session_id
+            .as_ref()
+            .map_or(0, String::capacity)
+            .saturating_add(
+                pane.invalidated_session_id
+                    .as_ref()
+                    .map_or(0, String::capacity),
+            )
+            .saturating_add(
+                pane_cwds
+                    .get(&pane.pane_id)
+                    .unwrap_or(&state.session_cwd)
+                    .capacity(),
+            )
+            .saturating_add(
+                match pane.identity.as_ref().map(|identity| &identity.class) {
+                    Some(ilium_core::AgentClass::Other(name)) => name.capacity(),
+                    _ => 0,
+                },
+            );
+        preflight_bytes = preflight_bytes
+            .saturating_add(512 * 1024)
+            .saturating_add(per_attempt_claim_bytes)
+            .saturating_add(pane_text_bytes.saturating_mul(6));
+    }
+    if preflight_bytes > EVIDENCE_RESULT_BYTES {
+        return Err(execution_error(
+            "staged detection coordinator would exceed retained admission",
+        ));
+    }
+    let mut claimed_session_ids = captured_claims.clone();
+    let mut discovered_session_ids: std::collections::HashMap<
+        NodeId,
+        crate::session_id::DiscoveredSession,
+    > = std::collections::HashMap::new();
     let mut session_discovery_traces: std::collections::HashMap<
         NodeId,
         Vec<crate::session_id::SessionDiscoveryPhase>,
     > = std::collections::HashMap::new();
     let mut session_discovery_exclusions: std::collections::HashMap<NodeId, Vec<String>> =
         std::collections::HashMap::new();
-    let pane_cwds: std::collections::HashMap<NodeId, std::path::PathBuf> = {
-        let tree = state.tree.read().await;
-        classifications
-            .iter()
-            .filter(|pane| pane.needs_session_discovery)
-            .filter_map(|pane| {
-                tree.pane_cwd(pane.pane_id)
-                    .map(|path| (pane.pane_id, path.to_path_buf()))
-            })
-            .collect()
-    };
-    for pane in &classifications {
-        if !pane.needs_session_discovery {
-            continue;
-        }
-        let Some(identity) = pane.identity.as_ref() else {
-            continue;
-        };
-        let mut exclusion_details: Vec<String> = claimed_session_ids
-            .iter()
-            .filter(|(_, owner)| **owner != pane.pane_id)
-            .map(|(session_id, owner)| format!("{session_id} (already owned by pane {})", owner.0))
-            .collect();
-        exclusion_details.extend(
-            ambiguous_session_ids
+    tokio::time::timeout_at(evidence_deadline, async {
+        for pane in &classifications {
+            if !pane.needs_session_discovery {
+                continue;
+            }
+            let Some(identity) = pane.identity.as_ref() else {
+                continue;
+            };
+            let mut exclusion_details: Vec<String> = claimed_session_ids
                 .iter()
-                .map(|session_id| format!("{session_id} (claimed by multiple panes)")),
-        );
-        let mut excluded_session_ids: std::collections::HashSet<String> = claimed_session_ids
-            .iter()
-            .filter(|(_, owner)| **owner != pane.pane_id)
-            .map(|(session_id, _)| session_id.clone())
-            .collect();
-        let project_cwd = pane_cwds.get(&pane.pane_id).unwrap_or(&state.session_cwd);
-        let transcript_locator = TranscriptLocator::new_bounded(&state.home_dir, project_cwd, crate::session_id::TRANSCRIPT_READ_LIMITS);
-        excluded_session_ids.extend(ambiguous_session_ids.iter().cloned());
-        // `/resume` can leave the old transcript descriptor open until the
-        // CLI finishes switching. For the same process, that old ID is known
-        // stale even though the open-file evidence would otherwise be exact.
-        if pane.is_session_identity_invalidated
-            && pane
-                .session_process_id
-                .is_some_and(|owner_pid| owner_pid == identity.pid)
-        {
-            excluded_session_ids.extend(pane.invalidated_session_id.iter().cloned());
-            exclusion_details.extend(pane.invalidated_session_id.iter().map(|session_id| {
-                format!(
-                    "{session_id} (invalidated for the still-running process {})",
-                    identity.pid
+                .filter(|(_, owner)| **owner != pane.pane_id)
+                .map(|(session_id, owner)| {
+                    format!("{session_id} (already owned by pane {})", owner.0)
+                })
+                .collect();
+            exclusion_details.extend(
+                captured_ambiguous_session_ids
+                    .iter()
+                    .map(|session_id| format!("{session_id} (claimed by multiple panes)")),
+            );
+            let mut excluded_session_ids: std::collections::HashSet<String> = claimed_session_ids
+                .iter()
+                .filter(|(_, owner)| **owner != pane.pane_id)
+                .map(|(session_id, _)| session_id.clone())
+                .collect();
+            excluded_session_ids.extend(captured_ambiguous_session_ids.iter().cloned());
+            let project_cwd = pane_cwds.get(&pane.pane_id).unwrap_or(&state.session_cwd);
+            let transcript_locator = TranscriptLocator::new_bounded(
+                &state.home_dir,
+                project_cwd,
+                crate::session_id::TRANSCRIPT_READ_LIMITS,
+            );
+            // A resumed process can keep the old descriptor open until its
+            // transition finishes. That identity stays excluded on every rank.
+            if pane.is_session_identity_invalidated
+                && pane
+                    .session_process_id
+                    .is_some_and(|pid| pid == identity.pid)
+            {
+                excluded_session_ids.extend(pane.invalidated_session_id.iter().cloned());
+                exclusion_details.extend(pane.invalidated_session_id.iter().map(|session_id| {
+                    format!(
+                        "{session_id} (invalidated for the still-running process {})",
+                        identity.pid
+                    )
+                }));
+            }
+            exclusion_details.sort();
+            exclusion_details.dedup();
+            session_discovery_exclusions.insert(pane.pane_id, exclusion_details);
+            let generated_candidate = if let Some(session_id) = pane
+                .pending_generated_session_id
+                .as_ref()
+                .filter(|session_id| {
+                    identity.class == ilium_core::AgentClass::Claude
+                        && !excluded_session_ids.contains(*session_id)
+                }) {
+                crate::session_id::verify_session_staged(
+                    &execution,
+                    &transcript_locator,
+                    &identity.class,
+                    session_id,
                 )
-            }));
-        }
-        exclusion_details.sort();
-        exclusion_details.dedup();
-        session_discovery_exclusions.insert(pane.pane_id, exclusion_details);
-        let generated_candidate = pane
-            .pending_generated_session_id
-            .as_ref()
-            .filter(|session_id| {
-                identity.class == ilium_core::AgentClass::Claude
-                    && !excluded_session_ids.contains(*session_id)
-                    // Supplying `--session-id` proves what ilium requested;
-                    // transcript metadata proves the launched CLI accepted it
-                    // for this canonical project. Until then, no ID is safer.
-                    && transcript_locator
-                        .transcript_for_session(&identity.class, session_id)
-                        .is_some()
-            })
-            .map(|session_id| crate::session_id::DiscoveredSession {
-                session_id: session_id.clone(),
-                source: crate::session_id::DiscoverySource::GeneratedAtLaunch,
-            });
-        let (discovered_session, mut discovery_phases) =
-            if let Some(generated_session) = generated_candidate {
+                .await?
+                .map(|_| crate::session_id::DiscoveredSession {
+                    session_id: session_id.clone(),
+                    source: crate::session_id::DiscoverySource::GeneratedAtLaunch,
+                    transcript_path: None,
+                })
+            } else {
+                None
+            };
+            let (discovered_session, mut discovery_phases) = if let Some(generated_session) =
+                generated_candidate
+            {
                 (
                     Some(generated_session.clone()),
                     vec![crate::session_id::SessionDiscoveryPhase {
@@ -1193,18 +1735,22 @@ async fn run_due_panes_with_hook(
                         "pending identity {session_id} has no verified project transcript yet"
                     ),
                 };
-                let attempt = crate::session_id::discover_with_trace_bounded(
-                    &system,
-                    Pid::from_u32(identity.pid),
+                let attempt = crate::session_id::discover_with_trace_staged(
+                    &execution,
+                    discovery_snapshots
+                        .get(&pane.pane_id)
+                        .and_then(Option::as_ref),
+                    identity.pid,
                     &identity.class,
                     &transcript_locator,
                     project_cwd,
                     pane.is_session_identity_invalidated
                         && pane
                             .session_process_id
-                            .is_none_or(|owner_pid| owner_pid == identity.pid),
+                            .is_none_or(|pid| pid == identity.pid),
                     &excluded_session_ids,
-                );
+                )
+                .await?;
                 let mut phases = vec![crate::session_id::SessionDiscoveryPhase {
                     phase: "generated launch identity",
                     outcome: "unresolved",
@@ -1213,116 +1759,185 @@ async fn run_due_panes_with_hook(
                 phases.extend(attempt.phases);
                 (attempt.discovered, phases)
             };
-        discovery_phases.push(crate::session_id::SessionDiscoveryPhase {
-            phase: "overall result",
-            outcome: if discovered_session.is_some() {
-                "resolved"
+            // A budget exhausted in any rank invalidates earlier evidence too.
+            let discovered_session = if transcript_locator.read_limit_reached() {
+                None
             } else {
-                "unresolved"
-            },
-            detail: discovered_session.as_ref().map_or_else(
-                || "no admissible ownership evidence resolved a session".to_string(),
-                |session| format!("selected {} from {:?}", session.session_id, session.source),
-            ),
-        });
-        session_discovery_traces.insert(pane.pane_id, discovery_phases);
-        let Some(discovered_session) = discovered_session else {
-            continue;
-        };
-        let session_id = discovered_session.session_id;
-        tracing::debug!(
-            pane_id = ?pane.pane_id,
-            session_id,
-            source = ?discovered_session.source,
-            "resolved project-verified agent session"
-        );
-        claimed_session_ids.insert(session_id.clone(), pane.pane_id);
-        discovered_session_ids.insert(pane.pane_id, session_id);
-    }
-
-        // All work needing the cached process table is complete. A native
-        // ToolHelp foreground scan can block, so it must not hold this mutex.
-        drop(system);
-        if stop.is_stopped() { return Err(std::io::Error::new(std::io::ErrorKind::Interrupted, "detection evidence cancelled")); }
-        // All filesystem ranks have finished. Reject PID reuse/exec/exit
-        // against fresh single-process evidence before returning a claim.
-        for pane in &mut classifications {
-            if pane.identity.as_ref().is_some_and(|identity| {
-                !crate::agent_identity_guard::matches_current_agent_identity(identity)
-            }) {
-                // Keep the row so phase 3 revokes its existing input epoch and
-                // cancels already queued agent-owned writes. Dropping it would
-                // leave the last admitted identity active until another tick.
-                pane.identity = None;
-                pane.needs_session_discovery = false;
-                pane.confirmed_goal_owner = None;
-                pane.is_fresh_agent_screen = false;
-                pane.interstitial_prompt_response = None;
-                pane.activity_evidence = None;
-                pane.activity_evidence_line = None;
-                pane.goal_evidence = None;
-                pane.goal_evidence_line = None;
-                pane.goal_evidence_rule = None;
-                pane.goal_evidence_pattern = None;
-                pane.goal_was_retained = false;
-                let unavailable = classify_identity(None, "", None);
-                pane.status = unavailable.status.clone();
-                pane.screen_classification_cache = ScreenClassificationCache {
-                    screen_generation: pane.screen_generation,
-                    request_generation: pane.request_generation,
-                    identity: None,
-                    input_goal_owner: None,
-                    classification: unavailable,
-                    is_fresh_agent_screen: false,
-                    interstitial_prompt_response: None,
-                };
-                discovered_session_ids.remove(&pane.pane_id);
-            }
-        }
-        for pane in &mut classifications {
-            if stop.is_stopped() {
-                return Err(std::io::Error::new(std::io::ErrorKind::Interrupted, "detection foreground observation cancelled"));
-            }
-            pane.shell_ownership = pane.shell_observer.take().map_or(Some(false), |observer| {
-                observer.shell_owns_terminal()
+                discovered_session
+            };
+            discovery_phases.push(crate::session_id::SessionDiscoveryPhase {
+                phase: "overall result",
+                outcome: if discovered_session.is_some() {
+                    "resolved"
+                } else {
+                    "unresolved"
+                },
+                detail: discovered_session.as_ref().map_or_else(
+                    || "no admissible ownership evidence resolved a session".to_string(),
+                    |session| format!("selected {} from {:?}", session.session_id, session.source),
+                ),
             });
-        }
-        discovered_session_ids.retain(|pane_id, _| classifications.iter().any(|pane| pane.pane_id == *pane_id));
-        let optional = |value: &Option<String>| value.as_ref().map_or(0, String::capacity);
-        let mut result_bytes = classifications.len().saturating_mul(8192);
-        for pane in &classifications {
-            result_bytes = result_bytes.saturating_add(pane.agent_launcher_ancestors.capacity().saturating_mul(std::mem::size_of::<AgentProcessKey>()));
-            for key in &pane.agent_launcher_ancestors {
-                if let ilium_core::AgentClass::Other(name) = &key.class { result_bytes = result_bytes.saturating_add(name.capacity()); }
+            session_discovery_traces.insert(pane.pane_id, discovery_phases);
+            if let Some(discovered_session) = discovered_session {
+                tracing::debug!(
+                    pane_id = ?pane.pane_id,
+                    session_id = discovered_session.session_id,
+                    source = ?discovered_session.source,
+                    "resolved project-verified agent session"
+                );
+                claimed_session_ids.insert(discovered_session.session_id.clone(), pane.pane_id);
+                discovered_session_ids.insert(pane.pane_id, discovered_session);
             }
-            if stop.is_stopped() { return Err(std::io::Error::new(std::io::ErrorKind::Interrupted, "detection evidence cancelled")); }
-            for amount in [optional(&pane.activity_evidence_line), optional(&pane.goal_evidence_line), optional(&pane.screen_classification_cache.classification.activity_evidence_line), optional(&pane.screen_classification_cache.classification.goal_evidence_line), optional(&pane.captured_session_id), optional(&pane.invalidated_session_id), optional(&pane.pending_generated_session_id)] { result_bytes = result_bytes.saturating_add(amount); }
-            for goal in [pane.confirmed_goal_owner.as_ref(), pane.screen_classification_cache.input_goal_owner.as_ref(), pane.screen_classification_cache.classification.confirmed_goal_owner.as_ref()].into_iter().flatten() { result_bytes = result_bytes.saturating_add(optional(&goal.evidence_line)); }
-            if let Some(identity) = &pane.identity { result_bytes = result_bytes.saturating_add(identity.process_name.capacity()).saturating_add(identity.matched_signature.capacity()); }
         }
-        for phases in session_discovery_traces.values() { result_bytes = result_bytes.saturating_add(phases.capacity().saturating_mul(std::mem::size_of::<crate::session_id::SessionDiscoveryPhase>())); for phase in phases { result_bytes = result_bytes.saturating_add(phase.detail.capacity()); } }
-        for exclusions in session_discovery_exclusions.values() { for exclusion in exclusions { result_bytes = result_bytes.saturating_add(exclusion.capacity()); } }
-        for session_id in discovered_session_ids.values() { result_bytes = result_bytes.saturating_add(session_id.capacity()); }
-        for path in pane_cwds.values() { result_bytes = result_bytes.saturating_add(path.capacity().saturating_mul(2)); }
-        result_bytes = result_bytes.saturating_add(ambiguous_session_ids.capacity().saturating_mul(std::mem::size_of::<String>()));
-        for session_id in &ambiguous_session_ids { result_bytes = result_bytes.saturating_add(session_id.capacity()); }
-        if result_bytes > EVIDENCE_RESULT_BYTES { return Err(std::io::Error::other("detection evidence result exceeds retained admission")); }
-        Ok((classifications, discovered_session_ids, session_discovery_traces, session_discovery_exclusions, pane_cwds, ambiguous_session_ids, detection_settings_revision, detection_config))
+        Ok::<(), crate::error::ServerError>(())
+    })
+    .await
+    .map_err(|_| {
+        execution_error(
+            "staged detection evidence deadline expired; callbacks remain owned until exit",
+        )
+    })??;
+
+    // Staged discovery can outlive its process snapshot. A final admitted
+    // native probe fences a PID that exited, execed, or was reused while the
+    // coordinator was awaiting I/O and CPU receipts. It cannot grant claims.
+    let identity_check_reservation = execution
+        .foundation
+        .try_reserve(
+            Lane::Io,
+            JobCost {
+                input_bytes: 8 * 1024 * 1024,
+                result_bytes: 1024 * 1024,
+            },
+        )
+        .map_err(|error| execution_error(format!("{error:?}")))?;
+    let identity_checks: Vec<(
+        NodeId,
+        ilium_detect::AgentIdentity,
+        Option<std::path::PathBuf>,
+    )> = classifications
+        .iter()
+        .filter_map(|pane| {
+            pane.identity.clone().map(|identity| {
+                let project_cwd = discovered_session_ids
+                    .get(&pane.pane_id)
+                    .filter(|discovered| {
+                        discovered.source != crate::session_id::DiscoverySource::GeneratedAtLaunch
+                    })
+                    .map(|_| {
+                        pane_cwds
+                            .get(&pane.pane_id)
+                            .unwrap_or(&state.session_cwd)
+                            .clone()
+                    });
+                (pane.pane_id, identity, project_cwd)
+            })
         })
-    })).await
-        .map_err(|_| execution_error("detection evidence deadline expired; native callback remains owned until it exits"))?
-        .map_err(execution_error)?;
-    let (
-        classifications,
-        gathered_session_ids,
-        session_discovery_traces,
-        session_discovery_exclusions,
-        pane_cwds,
-        captured_ambiguous_session_ids,
-        detection_settings_revision,
-        detection_config,
-    ) = evidence.view();
-    let mut discovered_session_ids = gathered_session_ids.clone();
+        .collect();
+    let stale_panes = tokio::time::timeout_at(
+        evidence_deadline,
+        execution.run_reserved(
+            identity_check_reservation,
+            move |context: ilium_execution::JobContext| -> Result<_, std::io::Error> {
+                let mut stale = std::collections::HashSet::new();
+                for (pane_id, identity, project_cwd) in identity_checks {
+                    if context.stop_requested() {
+                        return Err(std::io::Error::from(std::io::ErrorKind::Interrupted));
+                    }
+                    if !crate::agent_identity_guard::matches_current_agent_identity(&identity)
+                        || !ilium_platform::process_control::is_running(identity.pid)
+                        || project_cwd.as_deref().is_some_and(|project_cwd| {
+                            !crate::session_id::current_process_project_matches(
+                                identity.pid,
+                                project_cwd,
+                            )
+                        })
+                    {
+                        stale.insert(pane_id);
+                    }
+                }
+                Ok(stale)
+            },
+        ),
+    )
+    .await
+    .map_err(|_| execution_error("staged detection final identity check deadline expired"))?
+    .map_err(execution_error)?;
+    discovered_session_ids.retain(|pane_id, _| !stale_panes.view().contains(pane_id));
+
+    // The first receipt remains retained while the coordinator copies claims
+    // and accumulates traces. Include both map storage and cloned key buffers
+    // in its existing result reservation, not only each stored value.
+    let mut staged_result_bytes = map_bytes(
+        captured_claims.capacity(),
+        std::mem::size_of::<(String, NodeId)>(),
+    )
+    .saturating_add(map_bytes(
+        captured_ambiguous_session_ids.capacity(),
+        std::mem::size_of::<String>(),
+    ))
+    .saturating_add(map_bytes(
+        discovery_snapshots.capacity(),
+        std::mem::size_of::<(NodeId, Option<crate::session_id::ProcessDiscoverySnapshot>)>(),
+    ))
+    .saturating_add(map_bytes(
+        pane_cwds.capacity(),
+        std::mem::size_of::<(NodeId, std::path::PathBuf)>(),
+    ))
+    .saturating_add(map_bytes(
+        claimed_session_ids.capacity(),
+        std::mem::size_of::<(String, NodeId)>(),
+    ))
+    .saturating_add(map_bytes(
+        session_discovery_traces.capacity(),
+        std::mem::size_of::<(NodeId, Vec<crate::session_id::SessionDiscoveryPhase>)>(),
+    ))
+    .saturating_add(map_bytes(
+        session_discovery_exclusions.capacity(),
+        std::mem::size_of::<(NodeId, Vec<String>)>(),
+    ))
+    .saturating_add(map_bytes(
+        discovered_session_ids.capacity(),
+        std::mem::size_of::<(NodeId, crate::session_id::DiscoveredSession)>(),
+    ));
+    for session_id in claimed_session_ids.keys() {
+        staged_result_bytes = staged_result_bytes.saturating_add(session_id.capacity());
+    }
+    for phases in session_discovery_traces.values() {
+        staged_result_bytes = staged_result_bytes.saturating_add(
+            phases
+                .capacity()
+                .saturating_mul(std::mem::size_of::<crate::session_id::SessionDiscoveryPhase>()),
+        );
+        for phase in phases {
+            staged_result_bytes = staged_result_bytes.saturating_add(phase.detail.capacity());
+        }
+    }
+    for exclusions in session_discovery_exclusions.values() {
+        staged_result_bytes = staged_result_bytes.saturating_add(
+            exclusions
+                .capacity()
+                .saturating_mul(std::mem::size_of::<String>()),
+        );
+        for exclusion in exclusions {
+            staged_result_bytes = staged_result_bytes.saturating_add(exclusion.capacity());
+        }
+    }
+    for discovered in discovered_session_ids.values() {
+        staged_result_bytes = staged_result_bytes
+            .saturating_add(discovered.session_id.capacity())
+            .saturating_add(
+                discovered
+                    .transcript_path
+                    .as_ref()
+                    .map_or(0, |path| path.capacity()),
+            );
+    }
+    if captured_result_bytes.saturating_add(staged_result_bytes) > EVIDENCE_RESULT_BYTES {
+        return Err(execution_error(
+            "staged detection result exceeds retained admission",
+        ));
+    }
 
     // Phase 3: brief write-locked critical section applying results.
     // Hold the settings read lock through the tree/pane update. If an update
@@ -1366,10 +1981,10 @@ async fn run_due_panes_with_hook(
                     _ => None,
                 }
             }));
-        discovered_session_ids.retain(|pane_id, session_id| {
-            !current_ambiguous.contains(session_id)
+        discovered_session_ids.retain(|pane_id, discovered| {
+            !current_ambiguous.contains(&discovered.session_id)
                 && current_claims
-                    .get(session_id)
+                    .get(&discovered.session_id)
                     .is_none_or(|owner| owner == pane_id)
         });
 
@@ -1393,21 +2008,33 @@ async fn run_due_panes_with_hook(
                     != classified_pane.is_session_identity_invalidated
                 || runtime.invalidated_session_id != classified_pane.invalidated_session_id
                 || runtime.session_process_id != classified_pane.session_process_id
+                || runtime.session_process_started_at_unix_seconds
+                    != classified_pane.session_process_started_at_unix_seconds
+                || runtime.session_agent_class != classified_pane.session_agent_class
+                || runtime.pending_generated_session_id
+                    != classified_pane.pending_generated_session_id
+                || (classified_pane.needs_session_discovery
+                    && tree.pane_cwd(pane_id)
+                        != pane_cwds.get(&pane_id).map(std::path::PathBuf::as_path))
             {
-                continue;
-            }
-            if classified_pane
-                .identity
-                .as_ref()
-                .is_some_and(|identity| !ilium_platform::process_control::is_running(identity.pid))
-            {
-                runtime.detection_schedule.next_due = runtime.detection_schedule.next_due.min(now);
                 continue;
             }
             // A user-triggered force request that arrived after phase 2's
             // snapshot explicitly asks for a newer sample. Never let this stale
             // pass overwrite that request's due deadline or status.
             if runtime.detection_schedule.request_generation != classified_pane.request_generation {
+                runtime.detection_schedule.next_due = runtime.detection_schedule.next_due.min(now);
+                continue;
+            }
+
+            if stale_panes.view().contains(&pane_id) {
+                if runtime.agent_input_available {
+                    runtime
+                        .agent_input_cancel
+                        .send_modify(|generation| *generation = generation.wrapping_add(1));
+                }
+                runtime.agent_input_available = false;
+                runtime.cancel_agent_owned_delivery();
                 runtime.detection_schedule.next_due = runtime.detection_schedule.next_due.min(now);
                 continue;
             }
@@ -1728,7 +2355,10 @@ async fn run_due_panes_with_hook(
                         || Some(identity.started_at_unix_seconds)
                             != runtime.session_process_started_at_unix_seconds
                 })
-                && discovered_session_ids.get(&pane_id) != runtime.session_id.as_ref();
+                && discovered_session_ids
+                    .get(&pane_id)
+                    .map(|discovered| &discovered.session_id)
+                    != runtime.session_id.as_ref();
             let session_is_ambiguously_claimed = runtime
                 .session_id
                 .as_ref()
@@ -1748,6 +2378,7 @@ async fn run_due_panes_with_hook(
                     runtime.is_session_identity_invalidated = true;
                 }
                 runtime.session_id = None;
+                runtime.session_transcript_path = None;
                 session_was_cleared = true;
                 runtime.title_generation = runtime.title_generation.saturating_add(1);
                 runtime.session_agent_class = None;
@@ -1764,11 +2395,13 @@ async fn run_due_panes_with_hook(
             }
 
             let mut newly_resolved_session = None;
-            if let Some(session_id) = discovered_session_ids.get(&pane_id) {
+            if let Some(discovered) = discovered_session_ids.get(&pane_id) {
+                let session_id = &discovered.session_id;
                 if runtime.session_id.as_ref() != Some(session_id) {
                     let invalidated_session_id = runtime.invalidated_session_id.clone();
                     let correlation_id = runtime.pending_session_transition_correlation_id.take();
                     runtime.session_id = Some(session_id.clone());
+                    runtime.session_transcript_path = discovered.transcript_path.clone();
                     runtime.session_agent_class = detected_agent_class.clone();
                     runtime.session_process_id = classified_pane
                         .identity
@@ -1789,10 +2422,13 @@ async fn run_due_panes_with_hook(
                         session_id: session_id.clone(),
                         process_id: runtime.session_process_id,
                         title_generation: runtime.title_generation,
+                        transcript_path: runtime.session_transcript_path.clone(),
                     });
                 } else {
                     let previous_process_id = runtime.session_process_id;
                     let previous_process_start = runtime.session_process_started_at_unix_seconds;
+                    let previous_transcript_path = runtime.session_transcript_path.clone();
+                    runtime.session_transcript_path = discovered.transcript_path.clone();
                     runtime.session_agent_class = detected_agent_class;
                     runtime.session_process_id = classified_pane
                         .identity
@@ -1804,6 +2440,7 @@ async fn run_due_panes_with_hook(
                         .map(|identity| identity.started_at_unix_seconds);
                     if runtime.session_process_id != previous_process_id
                         || runtime.session_process_started_at_unix_seconds != previous_process_start
+                        || runtime.session_transcript_path != previous_transcript_path
                         || process_was_replaced
                     {
                         state.request_snapshot_save();
@@ -1812,6 +2449,7 @@ async fn run_due_panes_with_hook(
                             session_id: session_id.clone(),
                             process_id: runtime.session_process_id,
                             title_generation: runtime.title_generation,
+                            transcript_path: runtime.session_transcript_path.clone(),
                         });
                     }
                 }
@@ -2242,7 +2880,7 @@ async fn run_due_panes_with_hook(
     }
 
     for pending in pending_notifications {
-        notifications::send(pending).await;
+        notifications::send(&notification_execution, pending);
     }
     for pending in pending_sounds {
         sounds::enqueue_prepared(state, pending);
@@ -3035,6 +3673,37 @@ mod tests {
     use crate::config::DetectionConfig;
     use ilium_core::{AgentActivity, AgentClass};
 
+    #[tokio::test]
+    async fn shell_ownership_observation_uses_the_admitted_io_worker() {
+        let execution = crate::execution::ServerExecution::start().expect("execution bank");
+        let result = execution
+            .client
+            .run(
+                Lane::Io,
+                JobCost {
+                    input_bytes: std::mem::size_of::<NodeId>(),
+                    result_bytes: std::mem::size_of::<(NodeId, Option<bool>)>(),
+                },
+                |context| {
+                    collect_shell_ownership(
+                        vec![NodeId(1)],
+                        vec![(NodeId(1), ())],
+                        |_| {
+                            Some(
+                                std::thread::current()
+                                    .name()
+                                    .is_some_and(|name| name.starts_with("ilium-exec-io-")),
+                            )
+                        },
+                        || context.stop_requested(),
+                    )
+                },
+            )
+            .await
+            .expect("shell observation job");
+        assert_eq!(result.view().as_slice(), &[(NodeId(1), Some(true))]);
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn blocked_evidence_cannot_reclassify_a_replaced_pty() {
@@ -3117,12 +3786,13 @@ mod tests {
         let task_state = Arc::clone(&state);
         let task = tokio::spawn(async move {
             run_due_panes_with_hook(&task_state, &process_table, 0, move || {
-                let _ = started_tx.send(());
+                let _ =
+                    started_tx.send(std::thread::current().name().unwrap_or_default().to_owned());
                 release_rx.recv().expect("release evidence fixture");
             })
             .await
         });
-        started_rx.await.expect("native job started");
+        let evidence_thread = started_rx.await.expect("native job started");
         // Actual mutation stays responsive while evidence is blocked. The new
         // PTY deliberately keeps generation zero, isolating instance fencing.
         let previous = tokio::time::timeout(Duration::from_secs(2), state.panes.write())
@@ -3134,6 +3804,10 @@ mod tests {
         task.await
             .expect("coordinator")
             .expect("evidence applied or fenced");
+        assert!(
+            evidence_thread.starts_with("ilium-exec-cpu-"),
+            "process and screen classification ran on {evidence_thread:?}, not the CPU bank"
+        );
         assert!(
             matches!(&state.tree.read().await.get(pane_id).expect("pane").kind, ilium_core::NodeKind::Pane { status, .. } if status == &marker)
         );

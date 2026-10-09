@@ -12,12 +12,14 @@
 //! one logical connection.
 
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
 use std::sync::Arc;
 
 use ilium_ipc::{ClientRequest, FrameReader, FrameWriter, ServerEvent};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{mpsc, oneshot, watch};
 
+use super::direct_events::{DirectEventReceiver, DirectEventSender, QueuedServerEvent};
 use crate::ipc::handlers;
 use crate::state::ServerState;
 
@@ -69,6 +71,43 @@ fn stream_control_requires_request_barrier(control: &StreamControl) -> bool {
 struct StreamControlCommand {
     control: StreamControl,
     applied: oneshot::Sender<()>,
+}
+
+enum VisibleRecoveryWait<T> {
+    Prefix(T),
+    Superseded {
+        pane_ids: Vec<ilium_core::NodeId>,
+        applied: oneshot::Sender<()>,
+    },
+}
+
+/// Waits for a bounded recovery prefix while allowing a newer visible-pane
+/// selection to replace the current replay. Other controls are retained and
+/// applied after the current selection reaches its captured watermark, so
+/// their FIFO semantics and frame boundaries stay intact.
+async fn wait_for_visible_recovery_prefix<T>(
+    prefix: impl Future<Output = T>,
+    stream_control_rx: &mut mpsc::Receiver<StreamControlCommand>,
+    pending_stream_control: &mut Option<StreamControlCommand>,
+    is_stream_control_open: &mut bool,
+) -> VisibleRecoveryWait<T> {
+    tokio::pin!(prefix);
+    loop {
+        tokio::select! {
+            biased;
+            command = stream_control_rx.recv(), if *is_stream_control_open && pending_stream_control.is_none() => {
+                match command {
+                    Some(StreamControlCommand {
+                        control: StreamControl::SetVisiblePanes(pane_ids),
+                        applied,
+                    }) => return VisibleRecoveryWait::Superseded { pane_ids, applied },
+                    Some(command) => *pending_stream_control = Some(command),
+                    None => *is_stream_control_open = false,
+                }
+            }
+            result = &mut prefix => return VisibleRecoveryWait::Prefix(result),
+        }
+    }
 }
 
 enum TerminalStreamSelection {
@@ -159,7 +198,7 @@ where
     S: AsyncRead + AsyncWrite + Send + 'static,
 {
     let (read_half, write_half) = tokio::io::split(stream);
-    let (direct_tx, direct_rx) = mpsc::channel::<ServerEvent>(DIRECT_CHANNEL_CAPACITY);
+    let (direct_tx, direct_rx) = DirectEventSender::channel(DIRECT_CHANNEL_CAPACITY);
     let (stream_control_tx, stream_control_rx) = mpsc::channel(STREAM_CONTROL_CHANNEL_CAPACITY);
     let broadcast_rx = state.events.subscribe();
     // A connection subscribes to broadcasts before its Attach request is
@@ -199,7 +238,7 @@ where
 async fn read_requests<R>(
     state: Arc<ServerState>,
     read_half: R,
-    direct_tx: mpsc::Sender<ServerEvent>,
+    direct_tx: DirectEventSender,
     attach_phase_tx: watch::Sender<AttachPhase>,
     stream_control_tx: mpsc::Sender<StreamControlCommand>,
 ) where
@@ -391,7 +430,7 @@ async fn read_requests<R>(
 async fn write_replies<W>(
     write_half: W,
     mut broadcast_rx: tokio::sync::broadcast::Receiver<ServerEvent>,
-    mut direct_rx: mpsc::Receiver<ServerEvent>,
+    mut direct_rx: DirectEventReceiver,
     mut attach_phase_rx: watch::Receiver<AttachPhase>,
     mut stream_control_rx: mpsc::Receiver<StreamControlCommand>,
     resynchronization_state: Option<Arc<ServerState>>,
@@ -407,9 +446,11 @@ async fn write_replies<W>(
     // switches this to `All` before its full replay is assembled.
     let mut terminal_stream_selection = TerminalStreamSelection::None;
     let mut is_stream_control_open = true;
+    let mut pending_stream_control = None;
     let mut frame_writer = FrameWriter::new(write_half);
 
     loop {
+        let has_pending_stream_control = pending_stream_control.is_some();
         // While an Attach handler is building its replay batch, drain direct
         // events but leave broadcasts queued. A later Attach returns to this
         // phase because reattachment has the same ordering contract.
@@ -422,11 +463,11 @@ async fn write_replies<W>(
                     }
                     continue;
                 },
-                direct_event = direct_rx.recv() => match direct_event {
-                    Some(event) => {
-                        if let Err(error) = write_server_event(
+                direct_event = direct_rx.recv_queued() => match direct_event {
+                    Some(queued) => {
+                        if let Err(error) = write_queued_server_event(
                             &mut frame_writer,
-                            event,
+                            queued,
                             &mut delivered_terminal_sequences,
                             resynchronization_state.as_deref(),
                         )
@@ -442,7 +483,7 @@ async fn write_replies<W>(
             }
         }
 
-        let (event, is_broadcast) = tokio::select! {
+        let (event, is_broadcast, producer_storage) = tokio::select! {
             biased;
             // Checked ahead of `attach_changed`: this connection's reader
             // task owns both `direct_tx` and `attach_phase_tx` and drops
@@ -454,8 +495,10 @@ async fn write_replies<W>(
             // every single disconnect -- listing it first previously made
             // the `None` arm below (and its broadcast drain) unreachable.
             // Draining `direct_rx` first guarantees that never happens.
-            direct_event = direct_rx.recv() => match direct_event {
-                Some(event) => (event, false),
+            direct_event = direct_rx.recv_queued() => match direct_event {
+                Some(QueuedServerEvent { event, producer_storage }) => {
+                    (event, false, producer_storage)
+                },
                 // The reader loop ended (Detach/KillSession/EOF/decode
                 // error): no more requests will ever be dispatched on this
                 // connection, so no more direct replies are coming either.
@@ -509,22 +552,32 @@ async fn write_replies<W>(
                 }
                 continue;
             },
-            stream_control = stream_control_rx.recv(), if is_stream_control_open => {
+            stream_control = async {
+                if let Some(command) = pending_stream_control.take() {
+                    Some(command)
+                } else {
+                    stream_control_rx.recv().await
+                }
+            }, if is_stream_control_open || has_pending_stream_control => {
                 match stream_control {
                     Some(command) => {
-                        let can_continue = match command.control {
+                        let StreamControlCommand { control, applied } = command;
+                        let can_continue = match control {
                             StreamControl::StreamAllTerminals => {
                                 terminal_stream_selection = TerminalStreamSelection::All;
+                                let _ = applied.send(());
                                 true
                             }
                             StreamControl::StreamNoTerminals => {
                                 terminal_stream_selection = TerminalStreamSelection::None;
+                                let _ = applied.send(());
                                 true
                             }
                             StreamControl::DiscardDelivery(pane_ids) => {
                                 for pane_id in pane_ids {
                                     delivered_terminal_sequences.remove(&pane_id);
                                 }
+                                let _ = applied.send(());
                                 true
                             }
                             StreamControl::SetVisiblePanes(pane_ids) => {
@@ -535,6 +588,10 @@ async fn write_replies<W>(
                                         &mut delivered_terminal_sequences,
                                         &mut terminal_stream_selection,
                                         pane_ids,
+                                        applied,
+                                        &mut stream_control_rx,
+                                        &mut pending_stream_control,
+                                        &mut is_stream_control_open,
                                     )
                                     .await
                                 } else {
@@ -544,11 +601,11 @@ async fn write_replies<W>(
                                             .take(MAX_VISIBLE_TERMINAL_SUBSCRIPTIONS)
                                             .collect(),
                                     );
+                                    let _ = applied.send(());
                                     true
                                 }
                             }
                         };
-                        let _ = command.applied.send(());
                         if !can_continue {
                             break;
                         }
@@ -558,7 +615,7 @@ async fn write_replies<W>(
                 continue;
             },
             broadcast_result = broadcast_rx.recv() => match broadcast_result {
-                Ok(event) => (event, true),
+                Ok(event) => (event, true, None),
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
                     tracing::warn!("connection lagged behind the session broadcast, skipped {skipped} event(s)");
                     if let Some(state) = &resynchronization_state {
@@ -600,19 +657,23 @@ async fn write_replies<W>(
         // Direct Attach replays never pass through this branch.
         // An Attach phase change can race this select's direct reply. Origin,
         // rather than the sampled phase, keeps the full direct replay intact.
-        let event = if is_broadcast {
-            let Some(event) = normalize_broadcast_terminal_replay(
+        let (event, producer_storage) = if is_broadcast {
+            match normalize_broadcast_terminal_replay(
                 event,
                 &delivered_terminal_sequences,
                 resynchronization_state.as_deref(),
             )
             .await
-            else {
-                continue;
-            };
-            event
+            {
+                Ok(Some(event)) => event,
+                Ok(None) => continue,
+                Err(error) => {
+                    tracing::warn!(%error, "broadcast replay recovery failed; closing connection to preserve byte ordering");
+                    break;
+                }
+            }
         } else {
-            event
+            (event, producer_storage)
         };
 
         // A merged frame can overlap a recovery watermark while still ending
@@ -637,9 +698,10 @@ async fn write_replies<W>(
             }
         }
 
-        if let Err(error) = write_server_event(
+        if let Err(error) = write_server_event_with_storage(
             &mut frame_writer,
             event,
+            producer_storage,
             &mut delivered_terminal_sequences,
             resynchronization_state.as_deref(),
         )
@@ -655,20 +717,67 @@ async fn normalize_broadcast_terminal_replay(
     event: ServerEvent,
     delivered_terminal_sequences: &HashMap<ilium_core::NodeId, u64>,
     state: Option<&ServerState>,
-) -> Option<ServerEvent> {
+) -> Result<Option<(ServerEvent, Option<Arc<ilium_execution::StorageAdmission>>)>, String> {
     let ServerEvent::TerminalReplay { pane_id, .. } = event else {
-        return Some(event);
+        return Ok(Some((event, None)));
     };
     let Some(state) = state else {
         // Only isolated writer tests lack a server authority; production
         // connections always receive one when they attach.
-        return Some(event);
+        return Ok(Some((event, None)));
     };
     let after_sequence = delivered_terminal_sequences
         .get(&pane_id)
         .copied()
         .unwrap_or_default();
-    handlers::terminal_recovery_event(state, pane_id, after_sequence).await
+    match handlers::admitted_terminal_recovery_event(state, pane_id, after_sequence).await {
+        Ok(recovered) => Ok(recovered),
+        Err(error) => Err(format!("pane {pane_id:?}: {error}")),
+    }
+    .map(|recovered| recovered.map(|(event, storage)| (event, storage)))
+}
+
+async fn write_queued_server_event<W>(
+    frame_writer: &mut FrameWriter<W>,
+    queued: QueuedServerEvent,
+    delivered_terminal_sequences: &mut HashMap<ilium_core::NodeId, u64>,
+    state: Option<&ServerState>,
+) -> Result<(), ilium_ipc::IpcError>
+where
+    W: AsyncWrite + Unpin,
+{
+    let QueuedServerEvent {
+        event,
+        producer_storage,
+    } = queued;
+    write_server_event_with_storage(
+        frame_writer,
+        event,
+        producer_storage,
+        delivered_terminal_sequences,
+        state,
+    )
+    .await
+}
+
+async fn write_server_event_with_storage<W>(
+    frame_writer: &mut FrameWriter<W>,
+    event: ServerEvent,
+    producer_storage: Option<Arc<ilium_execution::StorageAdmission>>,
+    delivered_terminal_sequences: &mut HashMap<ilium_core::NodeId, u64>,
+    state: Option<&ServerState>,
+) -> Result<(), ilium_ipc::IpcError>
+where
+    W: AsyncWrite + Unpin,
+{
+    write_server_event_admitted(
+        frame_writer,
+        event,
+        producer_storage,
+        delivered_terminal_sequences,
+        state,
+    )
+    .await
 }
 
 /// Rebuilds a lagging attached client's render cache from the current server
@@ -684,18 +793,44 @@ async fn write_resynchronization<W>(
 where
     W: AsyncWrite + Unpin,
 {
-    for event in handlers::resynchronization_events(state, delivered_terminal_sequences).await {
+    let (events, producer_storage) = match handlers::admitted_resynchronization_events(
+        state,
+        delivered_terminal_sequences,
+    )
+    .await
+    {
+        Ok(batch) => batch,
+        Err(error) => {
+            tracing::warn!(%error, "terminal output admission failed during lag resynchronization");
+            return false;
+        }
+    };
+    for event in events {
         if !should_forward_terminal_event(&event, terminal_stream_selection) {
             continue;
         }
-        if let Err(error) = write_server_event(
-            frame_writer,
+        let result = if matches!(
             event,
-            delivered_terminal_sequences,
-            Some(state),
-        )
-        .await
-        {
+            ServerEvent::ScreenUpdate { .. } | ServerEvent::TerminalReplay { .. }
+        ) {
+            write_server_event_with_storage(
+                frame_writer,
+                event,
+                producer_storage.clone(),
+                delivered_terminal_sequences,
+                Some(state),
+            )
+            .await
+        } else {
+            write_server_event(
+                frame_writer,
+                event,
+                delivered_terminal_sequences,
+                Some(state),
+            )
+            .await
+        };
+        if let Err(error) = result {
             tracing::warn!(
                 "connection write failed during lag resynchronization, closing: {error}"
             );
@@ -716,66 +851,159 @@ async fn apply_visible_pane_selection<W>(
     delivered_terminal_sequences: &mut HashMap<ilium_core::NodeId, u64>,
     terminal_stream_selection: &mut TerminalStreamSelection,
     pane_ids: Vec<ilium_core::NodeId>,
+    applied: oneshot::Sender<()>,
+    stream_control_rx: &mut mpsc::Receiver<StreamControlCommand>,
+    pending_stream_control: &mut Option<StreamControlCommand>,
+    is_stream_control_open: &mut bool,
 ) -> bool
 where
     W: AsyncWrite + Unpin,
 {
-    let visible_pane_ids: HashSet<_> = pane_ids
-        .into_iter()
-        .take(MAX_VISIBLE_TERMINAL_SUBSCRIPTIONS)
-        .collect();
-    *terminal_stream_selection = TerminalStreamSelection::Visible(visible_pane_ids.clone());
-    tracing::info!(panes = ?visible_pane_ids, "applying visible pane selection");
-    let activity_revisions: HashMap<_, _> = {
-        let tree = state.tree.read().await;
-        visible_pane_ids
-            .iter()
-            .filter_map(|pane_id| {
-                tree.get(*pane_id)
-                    .map(|node| (*pane_id, node.activity_revision))
-            })
-            .collect()
-    };
-    for pane_id in &visible_pane_ids {
-        if let Some(activity_revision) = activity_revisions.get(pane_id) {
-            let activity_event = ServerEvent::NodeActivityChanged {
-                node_id: *pane_id,
-                activity_revision: *activity_revision,
-            };
-            if let Err(error) = write_server_event(
-                frame_writer,
-                activity_event,
-                delivered_terminal_sequences,
-                Some(state),
-            )
-            .await
-            {
-                tracing::warn!("connection write failed during activity synchronization: {error}");
-                return false;
+    let mut applied_controls = vec![applied];
+    let mut next_selection = Some(pane_ids);
+    'selection: while let Some(pane_ids) = next_selection.take() {
+        let ordered_pane_ids = ordered_visible_pane_ids(pane_ids);
+        let visible_pane_ids: HashSet<_> = ordered_pane_ids.iter().copied().collect();
+        *terminal_stream_selection = TerminalStreamSelection::Visible(visible_pane_ids);
+        tracing::info!(panes = ?ordered_pane_ids, "applying visible pane selection");
+        let activity_revisions: HashMap<_, _> = {
+            let tree = state.tree.read().await;
+            ordered_pane_ids
+                .iter()
+                .filter_map(|pane_id| {
+                    tree.get(*pane_id)
+                        .map(|node| (*pane_id, node.activity_revision))
+                })
+                .collect()
+        };
+        let mut target_sequences = HashMap::new();
+        for pane_id in &ordered_pane_ids {
+            if let Some(activity_revision) = activity_revisions.get(pane_id) {
+                let activity_event = ServerEvent::NodeActivityChanged {
+                    node_id: *pane_id,
+                    activity_revision: *activity_revision,
+                };
+                if let Err(error) = write_server_event(
+                    frame_writer,
+                    activity_event,
+                    delivered_terminal_sequences,
+                    Some(state),
+                )
+                .await
+                {
+                    tracing::warn!(
+                        "connection write failed during activity synchronization: {error}"
+                    );
+                    for applied in applied_controls {
+                        let _ = applied.send(());
+                    }
+                    return false;
+                }
+            }
+            if let Some(sequence) = handlers::terminal_output_sequence(state, *pane_id).await {
+                target_sequences.insert(*pane_id, sequence);
             }
         }
-        let after_sequence = delivered_terminal_sequences
-            .get(pane_id)
+
+        // Send one bounded frame per visible pane per round. A newer
+        // selection can replace this replay while it waits for admission;
+        // once a frame write begins, it always finishes before cancellation.
+        let mut pending_panes: Vec<_> = ordered_pane_ids
+            .iter()
             .copied()
-            .unwrap_or_default();
-        let Some(event) = handlers::terminal_recovery_event(state, *pane_id, after_sequence).await
-        else {
-            continue;
-        };
-        if let Err(error) = write_server_event(
-            frame_writer,
-            event,
-            delivered_terminal_sequences,
-            Some(state),
-        )
-        .await
-        {
-            tracing::warn!("connection write failed during pane subscription: {error}");
-            return false;
+            .filter(|pane_id| target_sequences.contains_key(pane_id))
+            .collect();
+        while !pending_panes.is_empty() {
+            let mut next_round = Vec::with_capacity(pending_panes.len());
+            for pane_id in pending_panes {
+                let after_sequence = delivered_terminal_sequences
+                    .get(&pane_id)
+                    .copied()
+                    .unwrap_or_default();
+                let Some(target_sequence) = target_sequences.get(&pane_id).copied() else {
+                    continue;
+                };
+                if after_sequence >= target_sequence {
+                    continue;
+                }
+                let admitted = wait_for_visible_recovery_prefix(
+                    handlers::admitted_terminal_recovery_prefix(
+                        state,
+                        pane_id,
+                        after_sequence,
+                        target_sequence,
+                    ),
+                    stream_control_rx,
+                    pending_stream_control,
+                    is_stream_control_open,
+                )
+                .await;
+                let admitted = match admitted {
+                    VisibleRecoveryWait::Prefix(Ok(admitted)) => admitted,
+                    VisibleRecoveryWait::Prefix(Err(error)) => {
+                        tracing::warn!(%error, pane_id = ?pane_id, "pane subscription output admission failed");
+                        for applied in applied_controls {
+                            let _ = applied.send(());
+                        }
+                        return false;
+                    }
+                    VisibleRecoveryWait::Superseded { pane_ids, applied } => {
+                        applied_controls.push(applied);
+                        next_selection = Some(pane_ids);
+                        break;
+                    }
+                };
+                let Some((event, producer_storage)) = admitted else {
+                    tracing::warn!(pane_id = ?pane_id, after_sequence, target_sequence, "pane subscription replay ended before its captured sequence");
+                    for applied in applied_controls {
+                        let _ = applied.send(());
+                    }
+                    return false;
+                };
+                let result = write_server_event_with_storage(
+                    frame_writer,
+                    event,
+                    producer_storage,
+                    delivered_terminal_sequences,
+                    Some(state),
+                )
+                .await;
+                if let Err(error) = result {
+                    tracing::warn!("connection write failed during pane subscription: {error}");
+                    for applied in applied_controls {
+                        let _ = applied.send(());
+                    }
+                    return false;
+                }
+                if delivered_terminal_sequences
+                    .get(&pane_id)
+                    .copied()
+                    .unwrap_or_default()
+                    < target_sequence
+                {
+                    next_round.push(pane_id);
+                }
+            }
+            if next_selection.is_some() {
+                continue 'selection;
+            }
+            pending_panes = next_round;
         }
+        tracing::info!(panes = ?ordered_pane_ids, "applied visible pane selection");
     }
-    tracing::info!(panes = ?visible_pane_ids, "applied visible pane selection");
+    for applied in applied_controls {
+        let _ = applied.send(());
+    }
     true
+}
+
+fn ordered_visible_pane_ids(pane_ids: Vec<ilium_core::NodeId>) -> Vec<ilium_core::NodeId> {
+    let mut seen = HashSet::with_capacity(MAX_VISIBLE_TERMINAL_SUBSCRIPTIONS);
+    pane_ids
+        .into_iter()
+        .filter(|pane_id| seen.insert(*pane_id))
+        .take(MAX_VISIBLE_TERMINAL_SUBSCRIPTIONS)
+        .collect()
 }
 
 fn should_forward_terminal_event(
@@ -914,6 +1142,26 @@ async fn write_server_event<W>(
 where
     W: AsyncWrite + Unpin,
 {
+    write_server_event_admitted(
+        frame_writer,
+        event,
+        None,
+        delivered_terminal_sequences,
+        state,
+    )
+    .await
+}
+
+async fn write_server_event_admitted<W>(
+    frame_writer: &mut FrameWriter<W>,
+    mut event: ServerEvent,
+    producer_storage: Option<Arc<ilium_execution::StorageAdmission>>,
+    delivered_terminal_sequences: &mut HashMap<ilium_core::NodeId, u64>,
+    state: Option<&ServerState>,
+) -> Result<(), ilium_ipc::IpcError>
+where
+    W: AsyncWrite + Unpin,
+{
     // Authority replacement is still raw-input preparation. Producers must arrange
     // producer custody for the displaced value and for snapshot cancellation.
     if matches!(&event, ServerEvent::TextTriggersChanged { .. }) {
@@ -985,14 +1233,23 @@ where
     drop(result_retention);
     #[cfg(test)]
     encoded_storage_tests::observe_storage_wait(&stored);
-    let storage = preparation
-        .reserve_storage(stored.storage_bytes)
-        .await
-        .map_err(|error| {
-            ilium_ipc::IpcError::Io(std::io::Error::other(format!(
-                "server encoded storage admission: {error:?}"
-            )))
-        })?;
+    let storage = match producer_storage {
+        Some(storage) if storage.resident_bytes() >= stored.storage_bytes => storage,
+        Some(storage) => {
+            drop(storage);
+            return Err(ilium_ipc::IpcError::Io(std::io::Error::other(
+                "producer storage admission is smaller than encoded output",
+            )));
+        }
+        None => preparation
+            .reserve_storage(stored.storage_bytes)
+            .await
+            .map_err(|error| {
+                ilium_ipc::IpcError::Io(std::io::Error::other(format!(
+                    "server encoded storage admission: {error:?}"
+                )))
+            })?,
+    };
     stored.set_storage_guard(storage);
     stored.clear_retention();
     frame_writer
@@ -1127,10 +1384,19 @@ async fn drain_pending_broadcasts<W>(
         {
             continue;
         }
-        let Some(event) =
-            normalize_broadcast_terminal_replay(event, delivered_terminal_sequences, state).await
-        else {
-            continue;
+        let event = match normalize_broadcast_terminal_replay(
+            event,
+            delivered_terminal_sequences,
+            state,
+        )
+        .await
+        {
+            Ok(Some(event)) => event.0,
+            Ok(None) => continue,
+            Err(error) => {
+                tracing::warn!(%error, "final broadcast replay recovery failed; closing connection");
+                return;
+            }
         };
         if let Err(error) =
             write_server_event(frame_writer, event, delivered_terminal_sequences, state).await
@@ -1166,6 +1432,97 @@ mod tests {
         ));
     }
 
+    #[tokio::test]
+    async fn newer_visible_selection_cancels_waiting_recovery_admission() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        struct DropNotice(Arc<AtomicBool>);
+        impl Drop for DropNotice {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+
+        let admission_dropped = Arc::new(AtomicBool::new(false));
+        let admission_guard = DropNotice(Arc::clone(&admission_dropped));
+        let (control_tx, mut control_rx) = mpsc::channel(2);
+        let (applied_tx, _applied_rx) = oneshot::channel();
+        control_tx
+            .send(StreamControlCommand {
+                control: StreamControl::SetVisiblePanes(vec![NodeId(8)]),
+                applied: applied_tx,
+            })
+            .await
+            .expect("writer is still receiving stream controls");
+        let mut pending_control = None;
+        let mut control_channel_open = true;
+
+        let result = wait_for_visible_recovery_prefix(
+            async move {
+                let _guard = admission_guard;
+                std::future::pending::<()>().await;
+            },
+            &mut control_rx,
+            &mut pending_control,
+            &mut control_channel_open,
+        )
+        .await;
+
+        assert!(matches!(
+            result,
+            VisibleRecoveryWait::Superseded { pane_ids, .. } if pane_ids == vec![NodeId(8)]
+        ));
+        assert!(admission_dropped.load(Ordering::SeqCst));
+        assert!(pending_control.is_none());
+        assert!(control_channel_open);
+    }
+
+    #[tokio::test]
+    async fn non_visible_stream_control_stays_queued_until_recovery_finishes() {
+        let (control_tx, mut control_rx) = mpsc::channel(2);
+        let (applied_tx, _applied_rx) = oneshot::channel();
+        control_tx
+            .send(StreamControlCommand {
+                control: StreamControl::StreamNoTerminals,
+                applied: applied_tx,
+            })
+            .await
+            .expect("writer is still receiving stream controls");
+        let mut pending_control = None;
+        let mut control_channel_open = true;
+
+        let result = wait_for_visible_recovery_prefix(
+            async { 42 },
+            &mut control_rx,
+            &mut pending_control,
+            &mut control_channel_open,
+        )
+        .await;
+
+        assert!(matches!(result, VisibleRecoveryWait::Prefix(42)));
+        assert!(matches!(
+            pending_control.map(|command| command.control),
+            Some(StreamControl::StreamNoTerminals)
+        ));
+        assert!(control_channel_open);
+    }
+
+    #[test]
+    fn visible_pane_recovery_keeps_client_slot_order_and_deduplicates() {
+        assert_eq!(
+            ordered_visible_pane_ids(vec![
+                NodeId(9),
+                NodeId(7),
+                NodeId(9),
+                NodeId(8),
+                NodeId(7),
+                NodeId(6),
+                NodeId(5),
+            ]),
+            vec![NodeId(9), NodeId(7), NodeId(8), NodeId(6)],
+        );
+    }
+
     /// A live chunk produced during Attach must remain behind the replay
     /// cutover even when it reaches the broadcast receiver first. If it
     /// overtakes replay, `TerminalView::apply_replay` resets the parser and
@@ -1174,7 +1531,7 @@ mod tests {
     async fn live_broadcast_waits_for_complete_attach_replay() {
         let (server_stream, mut client_stream) = duplex(4096);
         let (broadcast_tx, broadcast_rx) = broadcast::channel(8);
-        let (direct_tx, direct_rx) = mpsc::channel(8);
+        let (direct_tx, direct_rx) = DirectEventSender::channel(8);
         // A normal Attach queues its all-pane subscription before it starts
         // the replay barrier. Model that ordering here: otherwise the
         // writer correctly holds the subscription control while replaying
@@ -1265,7 +1622,7 @@ mod tests {
     async fn broadcast_before_attach_is_forwarded() {
         let (server_stream, mut client_stream) = duplex(4096);
         let (broadcast_tx, broadcast_rx) = broadcast::channel(8);
-        let (_direct_tx, direct_rx) = mpsc::channel(8);
+        let (_direct_tx, direct_rx) = DirectEventSender::channel(8);
         let (_attach_phase_tx, attach_phase_rx) = watch::channel(AttachPhase::Open);
         let writer = tokio::spawn(write_replies(
             server_stream,
@@ -1299,7 +1656,7 @@ mod tests {
     async fn terminal_broadcast_before_subscription_is_not_forwarded() {
         let (server_stream, mut client_stream) = duplex(4096);
         let (broadcast_tx, broadcast_rx) = broadcast::channel(8);
-        let (_direct_tx, direct_rx) = mpsc::channel(8);
+        let (_direct_tx, direct_rx) = DirectEventSender::channel(8);
         let (_attach_phase_tx, attach_phase_rx) = watch::channel(AttachPhase::Open);
         let writer = tokio::spawn(write_replies(
             server_stream,
@@ -1362,7 +1719,7 @@ mod tests {
         }));
         let (server_stream, mut client_stream) = duplex(4096);
         let (broadcast_tx, broadcast_rx) = broadcast::channel(1);
-        let (direct_tx, direct_rx) = mpsc::channel(8);
+        let (direct_tx, direct_rx) = DirectEventSender::channel(8);
         let (attach_phase_tx, attach_phase_rx) = watch::channel(AttachPhase::Ready);
         let writer = tokio::spawn(write_replies(
             server_stream,
@@ -1476,13 +1833,16 @@ mod tests {
             is_complete: true,
         };
         let delivered = HashMap::from([(NodeId(9), 7)]);
-        assert_eq!(
-            normalize_broadcast_terminal_replay(replay.clone(), &delivered, Some(&state)).await,
-            None,
+        assert!(
+            normalize_broadcast_terminal_replay(replay.clone(), &delivered, Some(&state))
+                .await
+                .is_err()
         );
-        assert_eq!(
-            normalize_broadcast_terminal_replay(replay.clone(), &delivered, None).await,
-            Some(replay),
+        let normalized = normalize_broadcast_terminal_replay(replay.clone(), &delivered, None)
+            .await
+            .expect("isolated writer tests have no recovery errors");
+        assert!(
+            matches!(normalized, Some((event, None)) if event == replay),
             "isolated writer tests without authority retain their supplied event"
         );
         sound_task.abort();
@@ -1515,7 +1875,7 @@ mod tests {
             .await
             .add_group(ilium_core::ROOT_ID, "writer test")
             .expect("root accepts a group");
-        let (request_tx, _request_rx) = mpsc::channel(128);
+        let (request_tx, _request_rx) = DirectEventSender::channel(128);
         // Each `read` blocks the owned command until this test sends input.
         // This provides two stable, real PTY journal boundaries without a
         // timing-based flood or a synthetic journal mutation.
@@ -1618,7 +1978,7 @@ mod tests {
 
         let (server_stream, mut client_stream) = duplex(64 * 1024);
         let (broadcast_tx, broadcast_rx) = broadcast::channel(8);
-        let (direct_tx, direct_rx) = mpsc::channel(8);
+        let (direct_tx, direct_rx) = DirectEventSender::channel(8);
         let (phase_tx, phase_rx) = watch::channel(AttachPhase::Replaying);
         let (control_tx, control_rx) = mpsc::channel(1);
         let (applied_tx, applied_rx) = oneshot::channel();
@@ -1872,7 +2232,7 @@ mod text_trigger_writer_tests {
         accept(&state, "B", 2).await;
         let (server, mut client) = duplex(4096);
         let (broadcast_tx, broadcast_rx) = tokio::sync::broadcast::channel(8);
-        let (direct_tx, direct_rx) = mpsc::channel(8);
+        let (direct_tx, direct_rx) = DirectEventSender::channel(8);
         let (phase_tx, phase_rx) = watch::channel(AttachPhase::Replaying);
         direct_tx.send(event("A")).await.unwrap();
         broadcast_tx.send(event("A")).unwrap();
@@ -1898,7 +2258,7 @@ mod text_trigger_writer_tests {
         accept(&state, "B", 2).await;
         let (server, mut client) = duplex(4096);
         let (broadcast_tx, broadcast_rx) = tokio::sync::broadcast::channel(8);
-        let (direct_tx, direct_rx) = mpsc::channel(8);
+        let (direct_tx, direct_rx) = DirectEventSender::channel(8);
         let (_phase_tx, phase_rx) = watch::channel(AttachPhase::Ready);
         direct_tx.send(event("A")).await.unwrap();
         broadcast_tx.send(event("A")).unwrap();
@@ -2046,7 +2406,7 @@ mod text_trigger_ordering_regressions {
         }
         let (server_stream, mut client_stream) = duplex(16384);
         let (broadcast_tx, broadcast_rx) = tokio::sync::broadcast::channel(if lag { 2 } else { 8 });
-        let (direct_tx, direct_rx) = mpsc::channel(32);
+        let (direct_tx, direct_rx) = DirectEventSender::channel(32);
         let (phase_tx, phase_rx) = watch::channel(AttachPhase::Ready);
         // Queue an older accepted broadcast before constructing the newer
         // authoritative attach snapshot. In the lag case force exactly one

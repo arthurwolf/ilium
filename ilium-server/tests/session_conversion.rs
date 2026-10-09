@@ -165,6 +165,55 @@ async fn terminate_keeps_the_pane_and_replace_swaps_it_in_place() {
 }
 
 #[tokio::test]
+async fn freeze_rejects_generic_command_without_stopping_the_pane() {
+    let fixtures = tempfile::tempdir().expect("fixture dir");
+    let legacy_command = echo_fixture(fixtures.path(), "legacy-agent");
+    let server = TestServer::start("legacy-unfreeze-test").await;
+    let mut client = server.connect().await;
+    write_frame(
+        &mut client,
+        &ClientRequest::Attach {
+            session: "legacy-unfreeze-test".to_string(),
+        },
+    )
+    .await
+    .expect("attach");
+    read_initial_state(&mut client, Duration::from_secs(5)).await;
+
+    let tree = new_command_pane(&mut client, legacy_command.clone(), 1).await;
+    let pane_id = pane_ids_in_order(&tree)[0];
+    write_frame(
+        &mut client,
+        &ClientRequest::FreezePane {
+            pane_id,
+            resume_command: legacy_command,
+        },
+    )
+    .await
+    .expect("send FreezePane");
+    let event = expect_event(&mut client, Duration::from_secs(10), |event| {
+        matches!(event, ServerEvent::PaneFrozen { .. })
+    })
+    .await;
+    assert_eq!(
+        event,
+        ServerEvent::PaneFrozen {
+            pane_id,
+            result: Err("freeze requires the pane's current provider session identity".into()),
+        }
+    );
+
+    write_frame(&mut client, &ClientRequest::UnfreezePane { pane_id })
+        .await
+        .expect("send UnfreezePane");
+    let event = expect_event(&mut client, Duration::from_secs(5), |event| {
+        matches!(event, ServerEvent::Error { .. })
+    })
+    .await;
+    assert!(matches!(event, ServerEvent::Error { message } if message.contains("is not frozen")));
+}
+
+#[tokio::test]
 async fn terminating_an_unknown_pane_reports_the_failure() {
     let mut server = TestServer::start("conversion-unknown-test").await;
     let mut client = server.connect().await;

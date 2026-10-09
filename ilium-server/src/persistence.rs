@@ -159,6 +159,7 @@ pub(crate) enum PersistedProgressDeliveryState {
     DeliveredToPty,
     Uncertain,
     NotDeliverable,
+    CollectedByWaiter,
 }
 
 impl PersistedProgressDeliveryState {
@@ -1582,6 +1583,7 @@ mod tests {
             PersistedProgressDeliveryState::DeliveredToPty,
             PersistedProgressDeliveryState::Uncertain,
             PersistedProgressDeliveryState::NotDeliverable,
+            PersistedProgressDeliveryState::CollectedByWaiter,
         ] {
             assert!(!state.may_retry_after_restart(), "{state:?}");
         }

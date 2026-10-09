@@ -5,6 +5,9 @@
 //! when spawning or finalizing the command fails. Output is drained without
 //! being retained, logged, or included in IPC errors: setup may print secrets.
 
+use crate::execution::ExecutionClient;
+#[cfg(target_os = "linux")]
+use ilium_execution::{JobCost, Lane};
 use std::path::Path;
 use std::time::Duration;
 
@@ -46,6 +49,7 @@ impl Default for Limits {
 }
 
 pub(super) async fn run<F>(
+    client: &ExecutionClient,
     command: &str,
     cwd: &Path,
     worktree_root: &Path,
@@ -54,11 +58,20 @@ pub(super) async fn run<F>(
 where
     F: Fn() -> bool + Send + Sync,
 {
-    run_with_limits(command, cwd, worktree_root, cancelled, Limits::default()).await
+    run_with_limits(
+        client,
+        command,
+        cwd,
+        worktree_root,
+        cancelled,
+        Limits::default(),
+    )
+    .await
 }
 
 #[cfg(not(target_os = "linux"))]
 async fn run_with_limits<F>(
+    _client: &ExecutionClient,
     _command: &str,
     _cwd: &Path,
     _worktree_root: &Path,
@@ -81,6 +94,7 @@ where
 
 #[cfg(target_os = "linux")]
 async fn run_with_limits<F>(
+    client: &ExecutionClient,
     command: &str,
     cwd: &Path,
     worktree_root: &Path,
@@ -203,7 +217,7 @@ where
             }
         }
     };
-    let cleanup = finalize(&mut child, &mut guard, process_id, limits.cleanup).await;
+    let cleanup = finalize(client, &mut child, &mut guard, process_id, limits.cleanup).await;
     match outcome {
         Err(reason) => Err(with_cleanup(reason, cleanup)),
         Ok(()) => {
@@ -267,6 +281,7 @@ async fn drain<R: tokio::io::AsyncRead + Unpin>(
 
 #[cfg(target_os = "linux")]
 async fn finalize(
+    client: &ExecutionClient,
     child: &mut tokio::process::Child,
     guard: &mut ilium_platform::process_control::ProcessTreeGuard,
     process_id: u32,
@@ -296,13 +311,14 @@ async fn finalize(
             None
         }
     };
-    let observed = tokio::task::spawn_blocking(move || {
-        ilium_platform::process_control::wait_for_process_group_exit(process_id, timeout)
-    });
-    match tokio::time::timeout(timeout + Duration::from_millis(100), observed).await {
-        Ok(Ok(Ok(()))) => {}
-        Ok(Ok(Err(error))) => problems.push(format!("setup group exit is unverified: {error}")),
-        Ok(Err(error)) => problems.push(format!("setup exit probe failed: {error}")),
+    match tokio::time::timeout(
+        timeout + Duration::from_millis(100),
+        wait_for_process_group_exit(client, process_id, timeout),
+    )
+    .await
+    {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => problems.push(format!("setup group exit is unverified: {error}")),
         Err(_) => problems.push("setup exit probe timed out".into()),
     }
     if problems.is_empty() {
@@ -310,6 +326,35 @@ async fn finalize(
     } else {
         Err(problems.join("; "))
     }
+}
+
+#[cfg(target_os = "linux")]
+async fn wait_for_process_group_exit(
+    client: &ExecutionClient,
+    process_id: u32,
+    timeout: Duration,
+) -> Result<(), String> {
+    let reservation = client
+        .reserve(
+            Lane::Io,
+            JobCost {
+                input_bytes: std::mem::size_of::<u32>() + std::mem::size_of::<Duration>(),
+                result_bytes: 1,
+            },
+        )
+        .await
+        .map_err(|error| format!("setup exit-probe admission failed: {error:?}"))?;
+    let result = client
+        .run_reserved(reservation, move |_| {
+            ilium_platform::process_control::wait_for_process_group_exit(process_id, timeout)
+        })
+        .await
+        .map_err(|error| format!("setup exit-probe worker failed: {error}"))?;
+    result
+        .view()
+        .as_ref()
+        .map(|_| ())
+        .map_err(|error| format!("setup exit-probe worker failed: {error}"))
 }
 
 #[cfg(target_os = "linux")]
@@ -350,6 +395,56 @@ mod tests {
     }
 
     #[cfg(target_os = "linux")]
+    async fn run_with_test_client<F>(
+        command: &str,
+        cwd: &Path,
+        worktree_root: &Path,
+        cancelled: F,
+        limits: Limits,
+    ) -> Result<(), String>
+    where
+        F: Fn() -> bool + Send + Sync,
+    {
+        let execution = crate::execution::ServerExecution::start().expect("execution bank");
+        run_with_limits(
+            &execution.client,
+            command,
+            cwd,
+            worktree_root,
+            cancelled,
+            limits,
+        )
+        .await
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn process_group_exit_probe_is_admitted_to_the_shared_io_bank() {
+        let execution = crate::execution::ServerExecution::start().expect("execution bank");
+        let before = execution.test_monitor().health().lanes[1].enqueued;
+        let temporary = tempfile::tempdir().expect("temporary worktree");
+        let root = ilium_platform::paths::canonicalize(temporary.path()).expect("canonical root");
+
+        run_with_limits(
+            &execution.client,
+            "exit 0",
+            &root,
+            &root,
+            || false,
+            limits(),
+        )
+        .await
+        .expect("successful setup");
+
+        let after = execution.test_monitor().health().lanes[1].enqueued;
+        assert_eq!(
+            after,
+            before + 1,
+            "process-group exit probe bypassed the shared I/O bank"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
     #[tokio::test]
     async fn setup_uses_the_project_subdirectory_and_worktree_environment() {
         let temp = tempfile::tempdir().unwrap();
@@ -357,7 +452,7 @@ mod tests {
         let cwd = root.join("sub");
         std::fs::create_dir(&cwd).unwrap();
         std::fs::write(cwd.join("copied"), "input").unwrap();
-        run_with_limits(
+        run_with_test_client(
             "test \"$PWD\" = \"$ILIUM_WORKTREE/sub\" && test -r copied && printf ready > result",
             &cwd,
             &root,
@@ -376,7 +471,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let root = ilium_platform::paths::canonicalize(temp.path()).unwrap();
         std::fs::write(root.join("copied"), "before").unwrap();
-        let error = run_with_limits(
+        let error = run_with_test_client(
             "printf after > copied; printf token-value >&2; printf user-data > ignored; exit 7",
             &root,
             &root,
@@ -398,7 +493,7 @@ mod tests {
         let root = ilium_platform::paths::canonicalize(temp.path()).unwrap();
         let mut bounds = limits();
         bounds.execution = Duration::from_millis(100);
-        let error = run_with_limits(
+        let error = run_with_test_client(
             "printf started > result; exec sleep 30",
             &root,
             &root,
@@ -432,7 +527,7 @@ mod tests {
             }
             writer.store(true, Ordering::Release);
         });
-        let error = run_with_limits(
+        let error = run_with_test_client(
             "printf yes > ready; exec sleep 30",
             &root,
             &root,
@@ -453,7 +548,7 @@ mod tests {
         let root = ilium_platform::paths::canonicalize(temp.path()).unwrap();
         let mut bounds = limits();
         bounds.stdout_bytes = 16;
-        let error = run_with_limits("printf '%080d' 0", &root, &root, || false, bounds)
+        let error = run_with_test_client("printf '%080d' 0", &root, &root, || false, bounds)
             .await
             .unwrap_err();
         assert!(error.contains("output limit"), "{error}");

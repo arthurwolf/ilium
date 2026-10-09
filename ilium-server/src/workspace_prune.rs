@@ -1,6 +1,7 @@
 //! Retained-worktree inventory and identity-fenced removal, independent of pane lifetime.
 //! Lock order is repository, spawn admission, tree, panes. No Git runs under tree/panes.
 //! The spawn fence is process-local; external writers must be quiescent during removal.
+use crate::execution::ExecutionClient;
 use crate::pane::PaneResource;
 use crate::state::ServerState;
 use crate::workspace_owner::OwnershipMarker;
@@ -14,23 +15,48 @@ use ilium_ipc::{
 use ilium_platform::paths; // Canonical path resolution remains platform-owned.
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tokio::sync::mpsc;
+
+pub(crate) struct AdmittedRepositoryLease {
+    _lease: ilium_platform::process_control::WorkspaceRepositoryLease,
+    _retention: ilium_execution::Retention,
+}
+
 /// Acquire after the process-local repository mutex and before spawn/tree/pane locks.
 pub(crate) async fn repository_lease(
+    client: &ExecutionClient,
     common_dir: &Path,
-) -> Result<ilium_platform::process_control::WorkspaceRepositoryLease, String> {
+) -> Result<AdmittedRepositoryLease, String> {
+    const MAX_PATH_BYTES: usize = 4096;
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
     loop {
         let common_dir = common_dir.to_path_buf();
-        let lease = tokio::task::spawn_blocking(move || {
-            ilium_platform::process_control::try_workspace_repository_lease(&common_dir)
-        })
-        .await
-        .map_err(|error| format!("repository lease worker failed: {error}"))?
-        .map_err(|error| format!("repository lease unavailable: {error}"))?;
-        if let Some(lease) = lease {
-            return Ok(lease);
+        let path_bytes = common_dir.as_os_str().len();
+        if path_bytes > MAX_PATH_BYTES {
+            return Err("repository common-directory path exceeds its size limit".into());
         }
+        let cost = ilium_execution::JobCost {
+            input_bytes: path_bytes.max(1),
+            result_bytes: 4096,
+        };
+        let reservation =
+            tokio::time::timeout_at(deadline, client.reserve(ilium_execution::Lane::Io, cost))
+                .await
+                .map_err(|_| "repository lease admission timed out".to_string())?
+                .map_err(|error| format!("repository lease admission failed: {error:?}"))?;
+        let retained = client
+            .run_reserved(reservation, move |_| {
+                ilium_platform::process_control::try_workspace_repository_lease(&common_dir)
+            })
+            .await
+            .map_err(|error| format!("repository lease worker failed: {error}"))?;
+        let (lease, retention) = retained.into_parts();
+        if let Some(lease) = lease {
+            return Ok(AdmittedRepositoryLease {
+                _lease: lease,
+                _retention: retention,
+            });
+        }
+        drop(retention);
         if tokio::time::Instant::now() >= deadline {
             return Err(
                 "repository is busy in another Ilium operation; retry after it finishes".into(),
@@ -42,15 +68,18 @@ pub(crate) async fn repository_lease(
 /// Holding both guards makes spawn and prune share the same cross-process order.
 pub(crate) struct SpawnRepositoryAdmission {
     _repository_guard: tokio::sync::OwnedMutexGuard<()>,
-    _repository_lease: ilium_platform::process_control::WorkspaceRepositoryLease,
+    _repository_lease: AdmittedRepositoryLease,
     owned_marker: Option<OwnershipMarker>,
+    execution_client: ExecutionClient,
 }
 impl SpawnRepositoryAdmission {
     pub(crate) async fn begin_custody(
         &self,
     ) -> Result<Option<crate::workspace_custody::CustodyTicket>, String> {
         match &self.owned_marker {
-            Some(marker) => crate::workspace_custody::begin(marker).await.map(Some),
+            Some(marker) => crate::workspace_custody::begin(&self.execution_client, marker)
+                .await
+                .map(Some),
             None => Ok(None),
         }
     }
@@ -61,6 +90,10 @@ pub(crate) async fn spawn_repository_admission(
     cwd: &Path,
     is_terminal: bool,
 ) -> Result<Option<SpawnRepositoryAdmission>, String> {
+    let execution = state
+        .execution
+        .get()
+        .ok_or_else(|| "workspace execution service is unavailable".to_string())?;
     let canonical_cwd = ilium_platform::paths::canonicalize(cwd)
         .map_err(|error| format!("launch directory cannot be resolved: {error}"))?;
     if canonical_cwd != cwd {
@@ -92,7 +125,7 @@ pub(crate) async fn spawn_repository_admission(
         .await
         .lock_owned()
         .await;
-    let repository_lease = repository_lease(&repository.common_dir).await?;
+    let repository_lease = repository_lease(&execution.client, &repository.common_dir).await?;
     let current = ilium_git::discover(&canonical_cwd)
         .await
         .map_err(|error| format!("launch repository changed while waiting: {error}"))?;
@@ -115,6 +148,7 @@ pub(crate) async fn spawn_repository_admission(
             .any(|entry| entry.path == current.worktree_root)
         {
             crate::workspace_owner::read_registered_marker(
+                &execution.client,
                 &current.common_dir,
                 &current.worktree_root,
             )
@@ -130,10 +164,33 @@ pub(crate) async fn spawn_repository_admission(
         _repository_guard: repository_guard,
         _repository_lease: repository_lease,
         owned_marker,
+        execution_client: execution.client.clone(),
     }))
 }
 
+fn execution_client(state: &ServerState) -> Result<&ExecutionClient, String> {
+    state
+        .execution
+        .get()
+        .map(|execution| &execution.client)
+        .ok_or_else(|| "workspace execution service is unavailable".to_string())
+}
+
 const MAX_INVENTORY_ROWS: usize = 128;
+const PROCESS_SCAN_WORKING_BYTES: usize = 8 * 1024 * 1024;
+const PROCESS_SCAN_RESULT_BYTES: usize = 64 * 1024;
+const MAX_PROCESS_USERS: usize = 4096;
+
+fn process_scan_cost(root: &Path) -> Result<ilium_execution::JobCost, String> {
+    let input_bytes = PROCESS_SCAN_WORKING_BYTES
+        .checked_add(root.as_os_str().len().saturating_mul(4))
+        .ok_or_else(|| "worktree process scan size overflowed".to_string())?;
+    Ok(ilium_execution::JobCost {
+        input_bytes,
+        result_bytes: PROCESS_SCAN_RESULT_BYTES,
+    })
+}
+
 /// A refusal before the removal command is not a claim about concurrent external edits.
 pub(crate) fn blocked(reason: impl Into<String>) -> WorkspacePruneResult {
     WorkspacePruneResult {
@@ -163,8 +220,11 @@ pub(crate) fn directory_generation(path: &Path) -> Result<(u64, u64), String> {
     ilium_platform::secure_fs::directory_generation(path)
         .map_err(|error| format!("directory generation unavailable: {error}"))
 }
-async fn target_for(workspace: &PaneWorkspace) -> Result<WorkspacePruneTarget, String> {
-    crate::workspace_owner::verify_marker(workspace)
+async fn target_for(
+    state: &ServerState,
+    workspace: &PaneWorkspace,
+) -> Result<WorkspacePruneTarget, String> {
+    crate::workspace_owner::verify_marker(execution_client(state)?, workspace)
         .await
         .map_err(|error| error.to_string())?;
     let dot_git = std::fs::symlink_metadata(workspace.worktree_root.join(".git"))
@@ -204,8 +264,12 @@ async fn target_for(workspace: &PaneWorkspace) -> Result<WorkspacePruneTarget, S
         expected_head,
     })
 }
-async fn verify_target(target: &WorkspacePruneTarget) -> Result<PaneWorkspace, String> {
+async fn verify_target(
+    state: &ServerState,
+    target: &WorkspacePruneTarget,
+) -> Result<PaneWorkspace, String> {
     let marker = crate::workspace_owner::read_registered_marker(
+        execution_client(state)?,
         &target.repo_common_dir,
         &target.worktree_root,
     )
@@ -213,7 +277,7 @@ async fn verify_target(target: &WorkspacePruneTarget) -> Result<PaneWorkspace, S
     .map_err(|error| format!("ownership is unavailable: {error}"))?
     .ok_or("worktree was not created by Ilium")?;
     let workspace = workspace_from_marker(marker);
-    if target_for(&workspace).await? != *target {
+    if target_for(state, &workspace).await? != *target {
         return Err("stale target: ownership, directory generation, or HEAD changed; refresh and confirm again".into());
     }
     Ok(workspace)
@@ -385,7 +449,7 @@ fn registration_gate(
     }
     Ok(())
 }
-async fn clean_gate(workspace: &PaneWorkspace) -> Result<(), String> {
+async fn clean_gate(state: &ServerState, workspace: &PaneWorkspace) -> Result<(), String> {
     let status = ilium_git::status(&workspace.worktree_root)
         .await
         .map_err(|error| format!("cannot inspect worktree changes: {error}"))?;
@@ -409,7 +473,7 @@ async fn snapshot_gate(
     mode: &WorkspacePruneMode,
     permitted_pane: Option<NodeId>,
 ) -> Result<(PaneWorkspace, PathBuf), String> {
-    let workspace = verify_target(target).await?;
+    let workspace = verify_target(state, target).await?;
     let (control, listed) = control_directory(&workspace).await?;
     registration_gate(&workspace, &listed)?;
     let (_, _, reasons) = admission_facts(state, &workspace.worktree_root, permitted_pane).await;
@@ -418,6 +482,7 @@ async fn snapshot_gate(
     }
     if permitted_pane.is_none() {
         crate::workspace_custody::require_no_tickets(
+            execution_client(state)?,
             &workspace.repo_common_dir,
             &workspace.worktree_root,
         )
@@ -441,7 +506,7 @@ async fn snapshot_gate(
         .map_err(|error| error.to_string())?;
     match mode {
         WorkspacePruneMode::Safe => {
-            clean_gate(&workspace).await?;
+            clean_gate(state, &workspace).await?;
             ilium_git::verify_removal_branch(
                 &control,
                 &workspace.branch,
@@ -460,12 +525,38 @@ async fn snapshot_gate(
     }
     Ok((workspace, control))
 }
+/// Process enumeration is blocking procfs I/O; its bounded result remains charged
+/// until the caller has made its custody decision.
+pub(crate) async fn directory_users(
+    client: &ExecutionClient,
+    root: &Path,
+) -> Result<ilium_execution::Retained<Vec<u32>>, String> {
+    let reservation = client
+        .reserve(ilium_execution::Lane::Io, process_scan_cost(root)?)
+        .await
+        .map_err(|error| format!("worktree process scan admission failed: {error:?}"))?;
+    let root = root.to_path_buf();
+    client
+        .run_reserved(reservation, move |_| {
+            ilium_platform::process_control::processes_using_directory_bounded(
+                &root,
+                MAX_PROCESS_USERS,
+            )
+        })
+        .await
+        .map_err(|error| format!("worktree process scan job failed: {error}"))
+}
+
 /// This observation never kills an unrelated process and force never bypasses failure.
-async fn unused_directory(root: &Path) -> Result<(), String> {
-    let users = super::directory_users(root.to_path_buf()).await?;
+async fn unused_directory(client: &ExecutionClient, root: &Path) -> Result<(), String> {
+    let retained = directory_users(client, root).await?;
+    let users = retained.view();
     if !users.is_empty() {
-        return Err(format!("processes still use the worktree: {users:?}"));
+        let error = format!("processes still use the worktree: {users:?}");
+        drop(retained);
+        return Err(error);
     }
+    drop(retained);
     Ok(())
 }
 /// Retained inventory is read-only and intentionally reports invalid/foreign rows.
@@ -473,6 +564,7 @@ pub(crate) async fn inventory(
     state: &ServerState,
     project: NodeId,
 ) -> Result<WorkspaceInventory, String> {
+    let client = execution_client(state)?;
     let project_cwd = super::project_directory(state, project).await?;
     let source = ilium_git::discover(&project_cwd)
         .await
@@ -532,7 +624,8 @@ pub(crate) async fn inventory(
             continue;
         }
         let marker =
-            crate::workspace_owner::read_registered_marker(&source.common_dir, &entry.path).await;
+            crate::workspace_owner::read_registered_marker(client, &source.common_dir, &entry.path)
+                .await;
         let workspace = match marker {
             Ok(Some(marker)) => workspace_from_marker(marker),
             Ok(None) => {
@@ -558,7 +651,7 @@ pub(crate) async fn inventory(
             }
         };
         row.owner = WorkspaceInventoryOwner::Owned;
-        match target_for(&workspace).await {
+        match target_for(state, &workspace).await {
             Ok(target) => row.target = Some(target),
             Err(error) => common_blockers.push(error),
         }
@@ -568,10 +661,11 @@ pub(crate) async fn inventory(
         if let Err(error) = ilium_git::verify_removal_index(&workspace.worktree_root).await {
             common_blockers.push(error.to_string());
         }
-        if let Err(error) = unused_directory(&workspace.worktree_root).await {
+        if let Err(error) = unused_directory(client, &workspace.worktree_root).await {
             common_blockers.push(error);
         }
         if let Err(error) = crate::workspace_custody::require_no_tickets(
+            client,
             &workspace.repo_common_dir,
             &workspace.worktree_root,
         )
@@ -581,7 +675,7 @@ pub(crate) async fn inventory(
         }
         row.discard_blockers = common_blockers.clone();
         row.safe_blockers = common_blockers;
-        if let Err(error) = clean_gate(&workspace).await {
+        if let Err(error) = clean_gate(state, &workspace).await {
             row.safe_blockers.push(error);
         }
         if let Some(target) = &row.target {
@@ -723,6 +817,22 @@ async fn stop_pane(
     pane_id: NodeId,
     workspace: &PaneWorkspace,
 ) -> Result<(), (String, bool)> {
+    let execution = state
+        .execution
+        .get()
+        .map(|execution| execution.client.clone())
+        .ok_or_else(|| ("workspace execution service is unavailable".into(), false))?;
+    let cost = process_scan_cost(&workspace.worktree_root).map_err(|error| (error, false))?;
+    let reservation = execution
+        .reserve(ilium_execution::Lane::Io, cost)
+        .await
+        .map_err(|error| {
+            (
+                format!("PTY custody I/O admission failed: {error:?}"),
+                false,
+            )
+        })?;
+
     let tree = state.tree.read().await;
     if tree.pane_workspace(pane_id) != Some(workspace) {
         return Err((
@@ -741,59 +851,83 @@ async fn stop_pane(
     };
     drop(panes);
     drop(tree);
-    let joined = tokio::task::spawn_blocking(move || {
-        let mut resource = resource;
-        let termination = match &mut resource {
-            PaneResource::Terminal(runtime) => runtime
-                .session
-                .terminate_process_tree(std::time::Duration::from_secs(5)),
-            _ => unreachable!("resource was checked before transfer"),
-        };
-        (resource, termination)
-    })
-    .await;
-    let (mut resource, termination) =
+
+    let joined = execution
+        .run_reserved(reservation, move |context: ilium_execution::JobContext| {
+            let mut resource = resource;
+            let mut restore_resource = false;
+            let outcome = match &mut resource {
+                PaneResource::Terminal(runtime) => {
+                    match runtime
+                        .session
+                        .terminate_process_tree(std::time::Duration::from_secs(5))
+                    {
+                        Err(error) => {
+                            restore_resource = true;
+                            Err(format!("PTY descendants cannot be proven stopped: {error}"))
+                        }
+                        Ok(()) => match runtime.custody_ticket.take() {
+                            Some(ticket) => {
+                                let users = ilium_platform::process_control::
+                                    processes_using_directory_bounded(
+                                        ticket.worktree_root(),
+                                        MAX_PROCESS_USERS,
+                                    )
+                                .map_err(|error| {
+                                    format!("worktree process scan unavailable: {error}")
+                                });
+                                users
+                                    .and_then(|users| {
+                                        if !users.is_empty() {
+                                            return Err(format!(
+                                                "worktree still has process users: {users:?}"
+                                            ));
+                                        }
+                                        ticket.clear_after_proof_in_worker(&context)
+                                    })
+                                    .map_err(|error| {
+                                        format!("worktree custody clear failed: {error}")
+                                    })
+                            }
+                            None => Ok(()),
+                        },
+                    }
+                }
+                PaneResource::Editor { .. } => Err("workspace pane has no terminal process".into()),
+            };
+            Ok::<_, std::convert::Infallible>((resource, outcome, restore_resource))
+        })
+        .await;
+    let completion =
         joined.map_err(|error| (format!("PTY custody worker failed: {error}"), true))?;
-    if let Err(error) = termination {
-        let tree = state.tree.read().await;
-        let mut panes = state.panes.write().await;
-        if tree.pane_workspace(pane_id) == Some(workspace) && !panes.contains_key(&pane_id) {
-            panes.insert(pane_id, resource);
-            return Err((
-                format!("PTY descendants cannot be proven stopped: {error}"),
-                false,
-            ));
+    let ((mut resource, outcome, restore_resource), retention) = completion.into_parts();
+    drop(retention);
+    if let Err(error) = outcome {
+        if restore_resource {
+            let tree = state.tree.read().await;
+            let mut panes = state.panes.write().await;
+            if tree.pane_workspace(pane_id) == Some(workspace) && !panes.contains_key(&pane_id) {
+                panes.insert(pane_id, resource);
+                return Err((
+                    format!("PTY descendants cannot be proven stopped: {error}"),
+                    false,
+                ));
+            }
+            drop(panes);
+            drop(tree);
         }
-        drop(panes);
-        drop(tree);
         resource.abort_background_tasks();
         return Err((
-            format!("pane disappeared and PTY custody remains uncertain: {error}"),
+            format!("PTY stopped but worktree custody remains: {error}"),
             true,
         ));
-    }
-    if let PaneResource::Terminal(runtime) = &mut resource {
-        if let Some(ticket) = runtime.custody_ticket.take() {
-            if let Err(error) = unused_directory(ticket.worktree_root()).await {
-                resource.abort_background_tasks();
-                return Err((format!("PTY stopped but custody remains: {error}"), true));
-            }
-            let cleared = tokio::task::spawn_blocking(move || ticket.clear_after_proof()).await;
-            if let Err(error) = cleared
-                .map_err(|error| format!("custody clear worker failed: {error}"))
-                .and_then(|result| result)
-            {
-                resource.abort_background_tasks();
-                return Err((format!("PTY stopped but custody remains: {error}"), true));
-            }
-        }
     }
     resource.abort_background_tasks();
     drop(resource);
     Ok(())
 }
-fn cancelled(state: &ServerState, reply: Option<&mpsc::Sender<ServerEvent>>) -> bool {
-    !state.accepts_workspace_creation() || reply.is_some_and(mpsc::Sender::is_closed)
+fn cancelled(state: &ServerState, reply: Option<&crate::ipc::EventReply<'_>>) -> bool {
+    !state.accepts_workspace_creation() || reply.is_some_and(crate::ipc::EventReply::is_closed)
 }
 /// Caller owns repository then spawn guards for the whole transaction, including postconditions.
 async fn execute_locked(
@@ -802,7 +936,7 @@ async fn execute_locked(
     mode: &WorkspacePruneMode,
     branch_policy: WorkspacePruneBranchPolicy,
     permitted_pane: Option<NodeId>,
-    reply: Option<&mpsc::Sender<ServerEvent>>,
+    reply: Option<&crate::ipc::EventReply<'_>>,
 ) -> (WorkspacePruneResult, bool) {
     if cancelled(state, reply) {
         return (blocked("removal cancelled before mutation"), false);
@@ -813,7 +947,11 @@ async fn execute_locked(
     };
     // With a live owned pane, only availability is checked before stopping it.
     // Its own process is expected to appear. The final scan requires an empty result.
-    if let Err(error) = super::directory_users(target.worktree_root.clone()).await {
+    let client = match execution_client(state) {
+        Ok(client) => client,
+        Err(error) => return (blocked(error), false),
+    };
+    if let Err(error) = unused_directory(client, &target.worktree_root).await {
         return (blocked(error), false);
     }
     let pane_closed = if let Some(pane_id) = permitted_pane {
@@ -834,10 +972,15 @@ async fn execute_locked(
         Ok(value) => value,
         Err(error) => return (blocked(error), pane_closed),
     };
-    if let Err(error) = unused_directory(&target.worktree_root).await {
+    let client = match execution_client(state) {
+        Ok(client) => client,
+        Err(error) => return (blocked(error), pane_closed),
+    };
+    if let Err(error) = unused_directory(client, &target.worktree_root).await {
         return (blocked(error), pane_closed);
     }
     if let Err(error) = crate::workspace_custody::require_no_tickets(
+        client,
         &workspace.repo_common_dir,
         &workspace.worktree_root,
     )
@@ -846,7 +989,7 @@ async fn execute_locked(
         return (blocked(error), pane_closed);
     }
     // Last ownership/generation recheck is inside the process-admission fence.
-    if let Err(error) = verify_target(target).await {
+    if let Err(error) = verify_target(state, target).await {
         return (blocked(error), pane_closed);
     }
     if cancelled(state, reply) {
@@ -866,7 +1009,7 @@ pub(crate) async fn remove_retained(
     target: &WorkspacePruneTarget,
     mode: &WorkspacePruneMode,
     branch_policy: WorkspacePruneBranchPolicy,
-    reply: Option<&mpsc::Sender<ServerEvent>>,
+    reply: Option<&crate::ipc::EventReply<'_>>,
 ) -> WorkspacePruneResult {
     let project_cwd = match super::project_directory(state, project).await {
         Ok(cwd) => cwd,
@@ -882,7 +1025,11 @@ pub(crate) async fn remove_retained(
     };
     let repository_lock = state.workspace_repository_lock(&source.common_dir).await;
     let _repository_guard = repository_lock.lock().await;
-    let _repository_lease = match repository_lease(&source.common_dir).await {
+    let client = match execution_client(state) {
+        Ok(client) => client,
+        Err(error) => return blocked(error),
+    };
+    let _repository_lease = match repository_lease(client, &source.common_dir).await {
         Ok(lease) => lease,
         Err(error) => return blocked(error),
     };
@@ -916,12 +1063,16 @@ pub(crate) async fn remove_pane(
         .workspace_repository_lock(&workspace.repo_common_dir)
         .await;
     let _repository_guard = repository_lock.lock().await;
-    let _repository_lease = match repository_lease(&workspace.repo_common_dir).await {
+    let client = match execution_client(state) {
+        Ok(client) => client,
+        Err(error) => return (blocked(error), false),
+    };
+    let _repository_lease = match repository_lease(client, &workspace.repo_common_dir).await {
         Ok(lease) => lease,
         Err(error) => return (blocked(error), false),
     };
     let _spawn_guard = state.workspace_spawn_lock.lock().await;
-    let target = match target_for(&workspace).await {
+    let target = match target_for(state, &workspace).await {
         Ok(target) => target,
         Err(error) => return (blocked(error), false),
     };
@@ -974,20 +1125,24 @@ pub(crate) async fn can_offer_close(state: &Arc<ServerState>, pane_id: NodeId) -
         .workspace_repository_lock(&workspace.repo_common_dir)
         .await;
     let _repository_guard = repository_lock.lock().await;
-    let marker = match crate::workspace_owner::verify_marker(&workspace).await {
+    let client = match execution_client(state) {
+        Ok(client) => client,
+        Err(_) => return false,
+    };
+    let marker = match crate::workspace_owner::verify_marker(client, &workspace).await {
         Ok(marker) => marker,
         Err(_) => return false,
     };
-    if crate::workspace_custody::require_only_ticket(&marker, &ticket)
+    if crate::workspace_custody::require_only_ticket(client, &marker, &ticket)
         .await
         .is_err()
-        || super::directory_users(workspace.worktree_root.clone())
+        || unused_directory(client, &workspace.worktree_root)
             .await
             .is_err()
     {
         return false;
     }
-    let target = match target_for(&workspace).await {
+    let target = match target_for(state, &workspace).await {
         Ok(target) => target,
         Err(_) => return false,
     };
@@ -1005,6 +1160,19 @@ pub(crate) async fn can_offer_close(state: &Arc<ServerState>, pane_id: NodeId) -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn directory_users_runs_through_bounded_io_and_retains_process_evidence() {
+        let client = crate::execution::test_general_client();
+        let root = std::env::current_dir().unwrap();
+        let users = directory_users(&client, &root).await.unwrap();
+        assert!(
+            users.view().contains(&std::process::id()),
+            "the live test process cwd must be reported by the admitted scan"
+        );
+    }
+
     #[test]
     fn removal_requires_all_three_absence_observations() {
         assert_eq!(

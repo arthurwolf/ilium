@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use ilium_sound::{SoundEvent, SoundSettings};
+use ilium_sound::{SoundEvent, SoundSettings, SoundSourceKind};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
@@ -29,6 +29,28 @@ pub trait SoundPlayer: Send + Sync {
         settings: &SoundSettings,
         event: Option<SoundEvent>,
     ) -> Result<(), ilium_sound::SoundError>;
+
+    /// Prepare generated PCM/WAV content before entering the ordered blocking
+    /// playback lane. Existing players need not handle generated sounds until
+    /// they opt into this split boundary.
+    fn prepare_generated(
+        &self,
+        _settings: &SoundSettings,
+    ) -> Result<Option<Vec<u8>>, ilium_sound::SoundError> {
+        Ok(None)
+    }
+
+    /// Play a request whose generated content may already have been rendered
+    /// by the bounded CPU lane. The default keeps injectable legacy players
+    /// source-compatible while production can consume the prepared bytes.
+    fn play_prepared(
+        &self,
+        settings: &SoundSettings,
+        event: Option<SoundEvent>,
+        _generated_wav: Option<&[u8]>,
+    ) -> Result<(), ilium_sound::SoundError> {
+        self.play(settings, event)
+    }
 }
 
 /// Real operating-system player used by `ilium-server`'s binary entrypoint.
@@ -41,6 +63,28 @@ impl SoundPlayer for SystemSoundPlayer {
         _event: Option<SoundEvent>,
     ) -> Result<(), ilium_sound::SoundError> {
         ilium_sound::play(settings)
+    }
+
+    fn prepare_generated(
+        &self,
+        settings: &SoundSettings,
+    ) -> Result<Option<Vec<u8>>, ilium_sound::SoundError> {
+        Ok((settings.source == SoundSourceKind::Generated)
+            .then(|| ilium_sound::render_wav(&settings.design)))
+    }
+
+    fn play_prepared(
+        &self,
+        settings: &SoundSettings,
+        event: Option<SoundEvent>,
+        generated_wav: Option<&[u8]>,
+    ) -> Result<(), ilium_sound::SoundError> {
+        if settings.source == SoundSourceKind::Generated {
+            if let Some(wav) = generated_wav {
+                return ilium_sound::play_prepared_wav(wav);
+            }
+        }
+        self.play(settings, event)
     }
 }
 
@@ -68,6 +112,7 @@ pub(crate) struct PlaybackRequest {
 // keep the original request charged through queueing, playback and cancellation.
 pub(crate) struct AdmittedPlaybackRequest {
     request: PlaybackRequest,
+    preview_reply: Option<crate::ipc::DirectEventSender>,
     _admission: Arc<StorageAdmission>,
 }
 impl std::ops::Deref for AdmittedPlaybackRequest {
@@ -139,6 +184,7 @@ impl PlaybackSender {
                 event,
                 pane_name,
             },
+            preview_reply: None,
             _admission: admission,
         }))
     }
@@ -158,6 +204,14 @@ impl PlaybackSender {
     }
 
     fn try_send(&self, request: PlaybackRequest) -> Result<(), PlaybackSendError> {
+        self.try_send_with_preview_reply(request, None)
+    }
+
+    fn try_send_with_preview_reply(
+        &self,
+        request: PlaybackRequest,
+        preview_reply: Option<crate::ipc::DirectEventSender>,
+    ) -> Result<(), PlaybackSendError> {
         let Some(bytes) = request_bytes(&request) else {
             return Err(PlaybackSendError::Admission {
                 reason: ilium_execution::RejectReason::InvalidCost,
@@ -170,7 +224,7 @@ impl PlaybackSender {
                 return Err(PlaybackSendError::Admission {
                     reason,
                     _request: request,
-                })
+                });
             }
         };
         // Capacity and byte refusal retain the sole original request in the
@@ -178,6 +232,7 @@ impl PlaybackSender {
         self.sender
             .try_send(Arc::new(AdmittedPlaybackRequest {
                 request,
+                preview_reply,
                 _admission: admission,
             }))
             .map_err(PlaybackSendError::Queue)
@@ -196,12 +251,13 @@ impl PlaybackSender {
                 return Err(PlaybackSendError::Admission {
                     reason,
                     _request: request,
-                })
+                });
             }
         };
         self.sender
             .send(Arc::new(AdmittedPlaybackRequest {
                 request,
+                preview_reply: None,
                 _admission: admission,
             }))
             .await
@@ -227,13 +283,30 @@ pub(crate) fn test_channel(
 struct PlaybackJob {
     player: Arc<dyn SoundPlayer>,
     request: Arc<AdmittedPlaybackRequest>,
+    generated_wav: Option<Vec<u8>>,
+    _generated_retention: Option<ilium_execution::Retention>,
 }
 impl ilium_execution::Job for PlaybackJob {
     type Output = ();
     type Error = ilium_sound::SoundError;
     fn run(self, _context: ilium_execution::JobContext) -> Result<(), Self::Error> {
-        self.player
-            .play(&self.request.request.settings, self.request.request.event)
+        self.player.play_prepared(
+            &self.request.request.settings,
+            self.request.request.event,
+            self.generated_wav.as_deref(),
+        )
+    }
+}
+
+struct GeneratedSoundPreparation {
+    player: Arc<dyn SoundPlayer>,
+    settings: Arc<SharedSoundSettings>,
+}
+impl ilium_execution::Job for GeneratedSoundPreparation {
+    type Output = Option<Vec<u8>>;
+    type Error = ilium_sound::SoundError;
+    fn run(self, _context: ilium_execution::JobContext) -> Result<Self::Output, Self::Error> {
+        self.player.prepare_generated(&self.settings)
     }
 }
 
@@ -250,9 +323,58 @@ pub(crate) fn spawn(
     };
     let task = tokio::spawn(async move {
         while let Some(request) = receiver.recv().await {
+            let (generated_wav, generated_retention) =
+                if request.request.settings.source == SoundSourceKind::Generated {
+                    let preparation = execution
+                        .reserve(
+                            Lane::Cpu,
+                            JobCost {
+                                // Three seconds of mono 44.1kHz PCM plus its
+                                // WAV output fit under this fixed admitted cap.
+                                input_bytes: 1024 * 1024,
+                                result_bytes: 512 * 1024,
+                            },
+                        )
+                        .await;
+                    let preparation = match preparation {
+                        Ok(reservation) => reservation,
+                        Err(reason) => {
+                            tracing::warn!(?reason, event = ?request.request.event,
+                                pane = ?request.request.pane_name,
+                                "generated sound CPU admission refused");
+                            complete_preview(&request, false).await;
+                            continue;
+                        }
+                    };
+                    let prepared = execution
+                        .run_reserved(
+                            preparation,
+                            GeneratedSoundPreparation {
+                                player: Arc::clone(&player),
+                                settings: Arc::clone(&request.request.settings),
+                            },
+                        )
+                        .await;
+                    match prepared {
+                        Ok(retained) => {
+                            let (wav, retention) = retained.into_parts();
+                            (wav, Some(retention))
+                        }
+                        Err(error) => {
+                            tracing::warn!(%error, event = ?request.request.event,
+                                pane = ?request.request.pane_name,
+                                "generated sound preparation failed");
+                            complete_preview(&request, false).await;
+                            continue;
+                        }
+                    }
+                } else {
+                    (None, None)
+                };
             let Some(cost) = playback_cost(&request.request) else {
                 tracing::warn!(event = ?request.request.event, pane = ?request.request.pane_name,
                     "sound playback allocation declaration overflow");
+                complete_preview(&request, false).await;
                 continue;
             };
             // Wait with the original request still owned by this sole actor.
@@ -262,6 +384,7 @@ pub(crate) fn spawn(
                 Err(reason) => {
                     tracing::warn!(?reason, event = ?request.request.event, pane = ?request.request.pane_name,
                         "sound playback admission closed or permanently refused");
+                    complete_preview(&request, false).await;
                     continue;
                 }
             };
@@ -273,26 +396,45 @@ pub(crate) fn spawn(
                     PlaybackJob {
                         player,
                         request: native_request,
+                        generated_wav,
+                        _generated_retention: generated_retention,
                     },
                 )
                 .await;
             match result {
-                Ok(completion) => drop(completion),
-                Err(ExecutionError::Failed(error)) => tracing::warn!(
-                    "sound playback failed for {:?} in pane {:?}: {}",
-                    request.request.event,
-                    request.request.pane_name,
-                    error.view()
-                ),
-                Err(error) => tracing::warn!(
-                    "sound playback worker outcome for {:?} in pane {:?}: {error}",
-                    request.request.event,
-                    request.request.pane_name
-                ),
+                Ok(completion) => {
+                    drop(completion);
+                    complete_preview(&request, true).await;
+                }
+                Err(ExecutionError::Failed(error)) => {
+                    tracing::warn!(
+                        "sound playback failed for {:?} in pane {:?}: {}",
+                        request.request.event,
+                        request.request.pane_name,
+                        error.view()
+                    );
+                    complete_preview(&request, false).await;
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        "sound playback worker outcome for {:?} in pane {:?}: {error}",
+                        request.request.event,
+                        request.request.pane_name
+                    );
+                    complete_preview(&request, false).await;
+                }
             }
         }
     });
     (sender, task)
+}
+
+async fn complete_preview(request: &AdmittedPlaybackRequest, succeeded: bool) {
+    if let Some(reply) = &request.preview_reply {
+        let _ = reply
+            .send(ilium_ipc::ServerEvent::SoundPreviewCompleted { succeeded })
+            .await;
+    }
 }
 
 /// Declare simultaneous bounded PCM/WAV and native command/error preparation.
@@ -316,6 +458,24 @@ fn playback_cost(request: &PlaybackRequest) -> Option<JobCost> {
 pub(crate) fn enqueue(state: &ServerState, request: PlaybackRequest) {
     if let Err(error) = state.sound_requests.try_send(request) {
         tracing::warn!("dropping sound request because the playback queue is unavailable: {error}");
+    }
+}
+
+/// Preview is a semantic request: unlike replaceable detection alerts, queue
+/// refusal must produce a truthful completion for the requesting client.
+pub(crate) async fn enqueue_preview(
+    state: &ServerState,
+    request: PlaybackRequest,
+    reply: crate::ipc::DirectEventSender,
+) {
+    if let Err(error) = state
+        .sound_requests
+        .try_send_with_preview_reply(request, Some(reply.clone()))
+    {
+        tracing::warn!("sound preview queue refused request: {error}");
+        let _ = reply
+            .send(ilium_ipc::ServerEvent::SoundPreviewCompleted { succeeded: false })
+            .await;
     }
 }
 
@@ -428,8 +588,22 @@ pub(crate) fn enqueue_prepared(state: &ServerState, request: Arc<AdmittedPlaybac
 }
 #[cfg(test)]
 pub(crate) fn test_settings(settings: SoundSettings) -> Arc<SharedSoundSettings> {
-    SharedSoundSettings::try_new(&crate::execution::test_general_client(), settings)
-        .expect("admit fixture settings on existing server bank")
+    // `try_new` is non-blocking: parallel tests share one server bank, so a
+    // reservation can transiently report `Busy`. Production callers retry the
+    // same way (`ExecutionClient::reserve_storage`); only a hard rejection fails.
+    let client = crate::execution::test_general_client();
+    let mut settings = settings;
+    for _ in 0..10_000 {
+        match SharedSoundSettings::try_new(&client, settings) {
+            Ok(shared) => return shared,
+            Err((ilium_execution::RejectReason::Busy, returned)) => {
+                settings = returned;
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            Err((reason, _)) => panic!("admit fixture settings on shared server bank: {reason:?}"),
+        }
+    }
+    panic!("fixture settings stayed busy on the shared server bank for 10 s");
 }
 
 #[cfg(test)]
@@ -494,6 +668,152 @@ mod tests {
                 (second, Some(SoundEvent::ApprovalRequired)),
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn preview_completion_follows_the_playback_receipt() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let player = Arc::new(RecordingPlayer {
+            calls: Arc::clone(&calls),
+        });
+        let (sender, task) = spawn(player, crate::execution::test_general_client());
+        let (reply, mut events) = crate::ipc::DirectEventSender::channel(2);
+        sender
+            .try_send_with_preview_reply(
+                PlaybackRequest {
+                    settings: test_settings(SoundSettings::default()),
+                    event: None,
+                    pane_name: None,
+                },
+                Some(reply),
+            )
+            .unwrap();
+
+        assert_eq!(
+            events.recv().await,
+            Some(ilium_ipc::ServerEvent::SoundPreviewCompleted { succeeded: true })
+        );
+        drop(sender);
+        task.await.unwrap();
+        assert_eq!(calls.lock().unwrap().len(), 1);
+    }
+
+    struct FailingPreviewPlayer;
+
+    impl SoundPlayer for FailingPreviewPlayer {
+        fn play(
+            &self,
+            _settings: &SoundSettings,
+            _event: Option<SoundEvent>,
+        ) -> Result<(), ilium_sound::SoundError> {
+            Err(ilium_sound::SoundError::MissingFile(PathBuf::from(
+                "missing-preview.ogg",
+            )))
+        }
+    }
+
+    #[tokio::test]
+    async fn preview_failure_is_sent_after_the_playback_receipt_fails() {
+        let (sender, task) = spawn(
+            Arc::new(FailingPreviewPlayer),
+            crate::execution::test_general_client(),
+        );
+        let (reply, mut events) = crate::ipc::DirectEventSender::channel(2);
+        sender
+            .try_send_with_preview_reply(
+                PlaybackRequest {
+                    settings: test_settings(SoundSettings::default()),
+                    event: None,
+                    pane_name: None,
+                },
+                Some(reply),
+            )
+            .unwrap();
+
+        assert_eq!(
+            events.recv().await,
+            Some(ilium_ipc::ServerEvent::SoundPreviewCompleted { succeeded: false })
+        );
+        drop(sender);
+        task.await.unwrap();
+    }
+
+    struct PreparedRecordingPlayer {
+        calls: Arc<Mutex<Vec<(Option<SoundEvent>, Option<Vec<u8>>)>>>,
+    }
+
+    impl SoundPlayer for PreparedRecordingPlayer {
+        fn play(
+            &self,
+            settings: &SoundSettings,
+            event: Option<SoundEvent>,
+        ) -> Result<(), ilium_sound::SoundError> {
+            self.play_prepared(settings, event, None)
+        }
+
+        fn prepare_generated(
+            &self,
+            settings: &SoundSettings,
+        ) -> Result<Option<Vec<u8>>, ilium_sound::SoundError> {
+            assert!(
+                std::thread::current()
+                    .name()
+                    .is_some_and(|name| name.starts_with("ilium-exec-cpu-")),
+                "generated sound preparation must run on the bounded CPU bank"
+            );
+            Ok(Some(ilium_sound::render_wav(&settings.design)))
+        }
+
+        fn play_prepared(
+            &self,
+            _settings: &SoundSettings,
+            event: Option<SoundEvent>,
+            generated_wav: Option<&[u8]>,
+        ) -> Result<(), ilium_sound::SoundError> {
+            assert!(
+                std::thread::current()
+                    .name()
+                    .is_some_and(|name| name.starts_with("ilium-exec-io-")),
+                "generated sound playback must remain on the bounded I/O bank"
+            );
+            self.calls
+                .lock()
+                .unwrap()
+                .push((event, generated_wav.map(<[u8]>::to_vec)));
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn generated_sound_is_prepared_before_ordered_playback() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let player = Arc::new(PreparedRecordingPlayer {
+            calls: Arc::clone(&calls),
+        });
+        let (sender, task) = spawn(player, crate::execution::test_general_client());
+        let settings = SoundSettings {
+            source: ilium_sound::SoundSourceKind::Generated,
+            ..SoundSettings::default()
+        };
+
+        sender
+            .send(PlaybackRequest {
+                settings: test_settings(settings),
+                event: Some(SoundEvent::ApprovalRequired),
+                pane_name: Some("prepared-generated".to_string()),
+            })
+            .await
+            .unwrap();
+        drop(sender);
+        task.await.unwrap();
+
+        let calls = calls.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, Some(SoundEvent::ApprovalRequired));
+        let wav = calls[0].1.as_deref().expect("generated sound is prepared");
+        assert_eq!(&wav[..4], b"RIFF");
+        assert_eq!(&wav[8..12], b"WAVE");
+        assert!(wav.len() <= 44 + ilium_sound::synthesis::MAX_PCM_SAMPLES * 2);
     }
 
     #[tokio::test]
@@ -631,8 +951,12 @@ mod tests {
         })
         .await
         .unwrap();
-        assert!(while_blocked.jobs == 1 && after_abort.jobs == 1,
-            "audio callback must remain admitted while native player is blocked: before={:?}, after={:?}", while_blocked, after_abort);
+        assert!(
+            while_blocked.jobs == 1 && after_abort.jobs == 1,
+            "audio callback must remain admitted while native player is blocked: before={:?}, after={:?}",
+            while_blocked,
+            after_abort
+        );
     }
 
     #[tokio::test]

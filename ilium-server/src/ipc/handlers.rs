@@ -8,7 +8,7 @@
 //! are wired together on the write side.
 
 use ilium_core::animation_recommendation::RecommendedRestructurePlan;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use ilium_agent_debug::{
@@ -25,10 +25,13 @@ use ilium_ipc::{
     PromptSubmissionSource, ServerEvent,
 };
 use ilium_platform::paths;
-use ilium_pty::{OwnerStatus, PtyError, PtyInput, ShutdownReason};
+use ilium_pty::{
+    OwnerStatus, PtyError, PtyInput, PtyOutputRecovery, PtyOutputRecoveryEstimate, ShutdownReason,
+};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::foreground_observation::{self, ProbeObservation, ProbeRequest};
+use crate::ipc::DirectEventSender;
 use crate::mouse::to_crossterm_event;
 use crate::pane;
 use crate::pane::{PaneResource, PaneSnapshotKind, TerminalOrigin};
@@ -39,6 +42,10 @@ use crate::state::{
 use crate::title_eligibility::{
     self, CollectedTitleEvidence, TitleEvidenceCandidate, TitleRuntimeSnapshot,
 };
+
+/// Limits each selected-pane replay write so the client can parse and publish
+/// useful content before the full retained journal has crossed the socket.
+const TERMINAL_RECOVERY_EVENT_MAX_BYTES: usize = 256 * 1024;
 
 /// Caps activity-revision mutations during one continuous PTY output burst.
 struct OutputActivityGate {
@@ -87,7 +94,7 @@ struct SessionTransitionObservation {
 pub async fn handle_request(
     state: &Arc<ServerState>,
     request: ClientRequest,
-    direct_tx: &mpsc::Sender<ServerEvent>,
+    direct_tx: &DirectEventSender,
 ) -> bool {
     match request {
         ClientRequest::Attach { session } => {
@@ -246,12 +253,13 @@ pub async fn handle_request(
             // disconnect cancels only at safe coordinator boundaries; it
             // must never drop a future while Git has an in-flight mutation.
             let creation_state = Arc::clone(state);
-            let reply = direct_tx.clone();
+            let reply_sender = direct_tx.clone();
             let (start_tx, start_rx) = oneshot::channel();
             let handle = tokio::spawn(async move {
                 if start_rx.await.is_err() {
                     return;
                 }
+                let reply = crate::ipc::EventReply::Direct(&reply_sender);
                 let result = crate::workspace::create_agent_in_workspace(
                     &creation_state,
                     crate::workspace::CreateAgentOptions {
@@ -407,11 +415,23 @@ pub async fn handle_request(
             handle_freeze_pane(state, pane_id, resume_command, direct_tx).await;
             false
         }
+        ClientRequest::UnfreezePane { pane_id } => {
+            handle_unfreeze_pane(state, pane_id, direct_tx).await;
+            false
+        }
+        ClientRequest::UpdateAntigravityStatusline { generation, action } => {
+            crate::antigravity_statusline_delivery::update_running_panes(
+                state, generation, action, direct_tx,
+            )
+            .await;
+            false
+        }
         ClientRequest::ReplacePaneWithCommand {
             pane_id,
             command_line,
         } => {
-            handle_replace_pane_with_command(state, pane_id, command_line, direct_tx).await;
+            handle_replace_pane_with_command(state, pane_id, command_line, direct_tx, None, None)
+                .await;
             false
         }
         ClientRequest::MoveNode { node_id, direction } => {
@@ -535,6 +555,15 @@ pub async fn handle_request(
         }
         ClientRequest::UpdateProgressMonitorEnabled { enabled } => {
             handle_update_progress_monitor_enabled(state, enabled).await;
+            false
+        }
+        ClientRequest::WaitPaneProgressMonitor {
+            request_id,
+            pane_id,
+            monitor_id,
+        } => {
+            handle_wait_pane_progress_monitor(state, request_id, pane_id, monitor_id, direct_tx)
+                .await;
             false
         }
         ClientRequest::RecordNodeActivity { node_id } => {
@@ -754,14 +783,16 @@ pub async fn handle_request(
                     return false;
                 }
             };
-            crate::sounds::enqueue(
+            crate::sounds::enqueue_preview(
                 state,
                 crate::sounds::PlaybackRequest {
                     settings,
                     event: None,
                     pane_name: None,
                 },
-            );
+                direct_tx.clone(),
+            )
+            .await;
             false
         }
         ClientRequest::SchedulePaneInput {
@@ -953,7 +984,7 @@ async fn handle_get_pane_debug_log(
     state: &ServerState,
     pane_id: NodeId,
     after_sequence: Option<u64>,
-    direct_tx: &mpsc::Sender<ServerEvent>,
+    direct_tx: &DirectEventSender,
 ) {
     let is_terminal_pane = state.tree.read().await.get(pane_id).is_some_and(|node| {
         matches!(
@@ -990,14 +1021,26 @@ async fn handle_get_pane_debug_log(
 /// Awaits capacity on this connection's bounded direct-reply queue before
 /// enqueuing. A stalled client backpressures the connection's own request
 /// handling instead of letting replies pile up in memory without bound.
-async fn send_direct(direct_tx: &mpsc::Sender<ServerEvent>, event: ServerEvent) {
+async fn send_direct(direct_tx: &DirectEventSender, event: ServerEvent) {
     // An error here only means this connection's writer task has already
     // ended (client disconnected mid-request); nothing left to do with the
     // reply.
     let _ = direct_tx.send(event).await;
 }
 
-async fn send_direct_error(direct_tx: &mpsc::Sender<ServerEvent>, message: impl Into<String>) {
+pub(crate) async fn send_antigravity_statusline_completed(
+    direct_tx: &DirectEventSender,
+    generation: u64,
+    result: Result<(), String>,
+) {
+    send_direct(
+        direct_tx,
+        ServerEvent::AntigravityStatuslineCompleted { generation, result },
+    )
+    .await;
+}
+
+async fn send_direct_error(direct_tx: &DirectEventSender, message: impl Into<String>) {
     let message = message.into();
     tracing::error!(%message, "request failed");
     send_direct(direct_tx, ServerEvent::Error { message }).await;
@@ -1127,7 +1170,7 @@ async fn handle_schedule_pane_input(
     delay_seconds: u64,
     text: String,
     send_enter: bool,
-    direct_tx: &mpsc::Sender<ServerEvent>,
+    direct_tx: &DirectEventSender,
 ) {
     let execute_at_unix_millis = match crate::scheduled_input::deadline_from_delay(delay_seconds) {
         Ok(deadline) => deadline,
@@ -1198,7 +1241,7 @@ async fn handle_enqueue_prompt(
     pane_id: NodeId,
     text: String,
     delivery: PromptQueueDelivery,
-    direct_tx: &mpsc::Sender<ServerEvent>,
+    direct_tx: &DirectEventSender,
 ) {
     let event_text = text.clone();
     let event_delivery = format!("{delivery:?}");
@@ -1236,7 +1279,7 @@ async fn handle_enqueue_prompt(
 async fn handle_clear_prompt_queue(
     state: &Arc<ServerState>,
     pane_id: NodeId,
-    direct_tx: &mpsc::Sender<ServerEvent>,
+    direct_tx: &DirectEventSender,
 ) {
     let _transaction = state.prompt_queue_transaction.lock().await;
     let result = {
@@ -1278,7 +1321,7 @@ async fn handle_clear_prompt_queue(
 async fn handle_attach(
     state: &ServerState,
     session: &str,
-    direct_tx: &mpsc::Sender<ServerEvent>,
+    direct_tx: &DirectEventSender,
     include_terminal_output: bool,
 ) {
     if session != state.session_name {
@@ -1348,11 +1391,26 @@ async fn handle_attach(
 /// always observes the same state boundary.
 async fn send_initial_state(
     state: &ServerState,
-    direct_tx: &mpsc::Sender<ServerEvent>,
+    direct_tx: &DirectEventSender,
     include_terminal_output: bool,
 ) {
-    for event in initial_state_events(state, true, include_terminal_output).await {
-        send_direct(direct_tx, event).await;
+    let synchronization = if include_terminal_output {
+        TerminalOutputSynchronization::All
+    } else {
+        TerminalOutputSynchronization::None
+    };
+    let (events, producer_storage) =
+        match admitted_state_synchronization_events(state, synchronization, true).await {
+            Ok(batch) => batch,
+            Err(error) => {
+                send_direct_error(direct_tx, error).await;
+                return;
+            }
+        };
+    for event in events {
+        let _ = direct_tx
+            .send_with_storage(event, producer_storage.clone())
+            .await;
     }
 }
 
@@ -1365,8 +1423,75 @@ enum TerminalOutputSynchronization<'a> {
     RecoverAfter(&'a HashMap<NodeId, u64>),
 }
 
+struct TerminalOutputEstimate {
+    input: PtyInput,
+    estimate: PtyOutputRecoveryEstimate,
+    after_sequence: u64,
+}
+
+impl TerminalOutputSynchronization<'_> {
+    fn estimate_for(
+        &self,
+        pane_id: NodeId,
+        session: &ilium_pty::PtySession,
+    ) -> Option<TerminalOutputEstimate> {
+        let (after_sequence, estimate) = match self {
+            Self::All => (
+                0,
+                PtyOutputRecoveryEstimate::Replay(session.output_replay_estimate()),
+            ),
+            Self::None => return None,
+            Self::RecoverAfter(delivered_sequences) => {
+                let after_sequence = delivered_sequences
+                    .get(&pane_id)
+                    .copied()
+                    .unwrap_or_default();
+                (
+                    after_sequence,
+                    session.output_recovery_estimate_after(after_sequence)?,
+                )
+            }
+        };
+        Some(TerminalOutputEstimate {
+            input: session.input_handle(),
+            estimate,
+            after_sequence,
+        })
+    }
+
+    fn event_from_estimate(
+        &self,
+        pane_id: NodeId,
+        session: &ilium_pty::PtySession,
+        estimated: &TerminalOutputEstimate,
+    ) -> Option<ServerEvent> {
+        match self {
+            Self::All => {
+                let PtyOutputRecoveryEstimate::Replay(replay_estimate) = estimated.estimate else {
+                    return None;
+                };
+                let replay = session.output_replay_through_if_retained(replay_estimate)?;
+                Some(terminal_replay_event(pane_id, replay))
+            }
+            Self::None => None,
+            Self::RecoverAfter(_) => match session
+                .output_recovery_if_unchanged(estimated.after_sequence, estimated.estimate)?
+            {
+                PtyOutputRecovery::Delta(chunk) => Some(ServerEvent::ScreenUpdate {
+                    pane_id,
+                    first_sequence: estimated.after_sequence.saturating_add(1),
+                    sequence: chunk.sequence,
+                    bytes: chunk.bytes.to_vec(),
+                }),
+                PtyOutputRecovery::Replay(replay) => Some(terminal_replay_event(pane_id, replay)),
+            },
+        }
+    }
+}
+
 impl TerminalOutputSynchronization<'_> {
     /// Builds the smallest event that makes one terminal parser current.
+    #[cfg(test)]
     fn event_for(&self, pane_id: NodeId, session: &ilium_pty::PtySession) -> Option<ServerEvent> {
         match self {
             Self::All => Some(terminal_replay_event(pane_id, session.output_replay())),
@@ -1384,6 +1509,7 @@ impl TerminalOutputSynchronization<'_> {
 
 /// Builds the complete attach stream. Startup alone gets the explicit
 /// completion boundary used by automatic triggers.
+#[cfg(test)]
 pub(crate) async fn initial_state_events(
     state: &ServerState,
     include_initial_sync_complete: bool,
@@ -1405,6 +1531,7 @@ pub(crate) async fn initial_state_events(
 /// this exact connection has already received. Tree and pane metadata remain
 /// full snapshots because they are small and replaceable; raw PTY history is
 /// the expensive, parser-resetting state that must stay pane-scoped.
+#[cfg(test)]
 pub(crate) async fn resynchronization_events(
     state: &ServerState,
     delivered_terminal_sequences: &HashMap<NodeId, u64>,
@@ -1417,7 +1544,433 @@ pub(crate) async fn resynchronization_events(
     .await
 }
 
+pub(crate) async fn admitted_resynchronization_events(
+    state: &ServerState,
+    delivered_terminal_sequences: &HashMap<NodeId, u64>,
+) -> Result<
+    (
+        Vec<ServerEvent>,
+        Option<Arc<ilium_execution::StorageAdmission>>,
+    ),
+    String,
+> {
+    admitted_state_synchronization_events(
+        state,
+        TerminalOutputSynchronization::RecoverAfter(delivered_terminal_sequences),
+        false,
+    )
+    .await
+}
+
+pub(crate) async fn admitted_terminal_recovery_prefix(
+    state: &ServerState,
+    pane_id: NodeId,
+    after_sequence: u64,
+    through_sequence: u64,
+) -> Result<Option<(ServerEvent, Option<Arc<ilium_execution::StorageAdmission>>)>, String> {
+    if through_sequence <= after_sequence {
+        return Ok(None);
+    }
+    for _attempt in 0..8 {
+        let (expected_input, estimate) = {
+            let panes = state.panes.read().await;
+            let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
+                return Ok(None);
+            };
+            let Some(estimate) = runtime
+                .session
+                .output_recovery_estimate_after(after_sequence)
+            else {
+                return Ok(None);
+            };
+            (runtime.session.input_handle(), estimate)
+        };
+        let byte_len = match estimate {
+            PtyOutputRecoveryEstimate::Delta { byte_len, .. } => byte_len,
+            PtyOutputRecoveryEstimate::Replay(replay) => replay.byte_len,
+        }
+        .min(TERMINAL_RECOVERY_EVENT_MAX_BYTES);
+        let producer_storage = reserve_connection_event_storage(
+            state,
+            byte_len,
+            1,
+            "visible-pane-recovery-prefix",
+            Some(pane_id),
+        )
+        .await?;
+        let event = {
+            let panes = state.panes.read().await;
+            let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
+                return Ok(None);
+            };
+            if !expected_input.same_session(&runtime.session.input_handle()) {
+                None
+            } else {
+                let recovery = runtime
+                    .session
+                    .output_recovery_prefix_through(
+                        after_sequence,
+                        through_sequence,
+                        TERMINAL_RECOVERY_EVENT_MAX_BYTES,
+                    )
+                    .or_else(|| {
+                        // Retention can advance past the captured target while
+                        // other selected panes are being written. Rebase to
+                        // the current retained journal instead of failing the
+                        // whole connection for a stale watermark.
+                        runtime.session.output_recovery_prefix_after(
+                            after_sequence,
+                            TERMINAL_RECOVERY_EVENT_MAX_BYTES,
+                        )
+                    });
+                match recovery {
+                    Some(PtyOutputRecovery::Delta(chunk)) => Some(ServerEvent::ScreenUpdate {
+                        pane_id,
+                        first_sequence: after_sequence.saturating_add(1),
+                        sequence: chunk.sequence,
+                        bytes: chunk.bytes.to_vec(),
+                    }),
+                    Some(PtyOutputRecovery::Replay(replay)) => {
+                        Some(terminal_replay_event(pane_id, replay))
+                    }
+                    None => None,
+                }
+            }
+        };
+        if let Some(event) = event {
+            return Ok(Some((event, producer_storage)));
+        }
+        drop(producer_storage);
+    }
+    Err("terminal output changed repeatedly; retry recovery".to_owned())
+}
+
+pub(crate) async fn admitted_terminal_recovery_event(
+    state: &ServerState,
+    pane_id: NodeId,
+    after_sequence: u64,
+) -> Result<Option<(ServerEvent, Option<Arc<ilium_execution::StorageAdmission>>)>, String> {
+    for _attempt in 0..8 {
+        let (expected_input, estimate) = {
+            let panes = state.panes.read().await;
+            let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
+                return Ok(None);
+            };
+            let Some(estimate) = runtime
+                .session
+                .output_recovery_estimate_after(after_sequence)
+            else {
+                return Ok(None);
+            };
+            (runtime.session.input_handle(), estimate)
+        };
+        let byte_len = match estimate {
+            PtyOutputRecoveryEstimate::Delta { byte_len, .. } => byte_len,
+            PtyOutputRecoveryEstimate::Replay(replay) => replay.byte_len,
+        };
+        let producer_storage = reserve_connection_event_storage(
+            state,
+            byte_len,
+            1,
+            "terminal-recovery-event",
+            Some(pane_id),
+        )
+        .await?;
+        let event = {
+            let panes = state.panes.read().await;
+            let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
+                return Ok(None);
+            };
+            if !expected_input.same_session(&runtime.session.input_handle()) {
+                None
+            } else {
+                runtime
+                    .session
+                    .output_recovery_if_unchanged(after_sequence, estimate)
+                    .map(|recovery| match recovery {
+                        PtyOutputRecovery::Delta(chunk) => ServerEvent::ScreenUpdate {
+                            pane_id,
+                            first_sequence: after_sequence.saturating_add(1),
+                            sequence: chunk.sequence,
+                            bytes: chunk.bytes.to_vec(),
+                        },
+                        PtyOutputRecovery::Replay(replay) => terminal_replay_event(pane_id, replay),
+                    })
+            }
+        };
+        if let Some(event) = event {
+            return Ok(Some((event, producer_storage)));
+        }
+        drop(producer_storage);
+    }
+    Err("terminal output changed repeatedly; retry recovery".to_owned())
+}
+
+pub(crate) async fn terminal_output_sequence(state: &ServerState, pane_id: NodeId) -> Option<u64> {
+    let panes = state.panes.read().await;
+    let PaneResource::Terminal(runtime) = panes.get(&pane_id)? else {
+        return None;
+    };
+    Some(runtime.session.output_replay_estimate().through_sequence)
+}
+
+async fn reserve_connection_event_storage(
+    state: &ServerState,
+    payload_bytes: usize,
+    event_count: usize,
+    admission_context: &'static str,
+    pane_id: Option<NodeId>,
+) -> Result<Option<Arc<ilium_execution::StorageAdmission>>, String> {
+    if event_count == 0 {
+        return Ok(None);
+    }
+    // The prepared events and encoded frame coexist until socket flush.
+    // Reserve both payload copies plus per-event metadata before materializing.
+    let metadata = event_count
+        .checked_mul(16 * 1024)
+        .ok_or_else(|| "connection event admission size overflow".to_owned())?;
+    let reservation_bytes = payload_bytes
+        .checked_mul(2)
+        .and_then(|bytes| bytes.checked_add(metadata))
+        .ok_or_else(|| "connection event admission size overflow".to_owned())?;
+    let execution = state
+        .execution
+        .get()
+        .ok_or_else(|| "server execution is not initialized".to_owned())?;
+    let reservation_bytes = reservation_bytes.max(1);
+    let waiting_started_at = std::time::Instant::now();
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        execution.client.reserve_storage(reservation_bytes),
+    )
+    .await;
+    let result = match result {
+        Ok(result) => result,
+        Err(_) => {
+            let ledger = execution.quota_group().snapshot();
+            let waited_ms =
+                u64::try_from(waiting_started_at.elapsed().as_millis()).unwrap_or(u64::MAX);
+            tracing::warn!(
+                admission_context,
+                pane_id = ?pane_id,
+                payload_bytes,
+                event_count,
+                reservation_bytes,
+                waited_ms,
+                worker_bytes = ledger.worker_bytes,
+                worker_byte_limit = ledger.limits.worker_bytes,
+                "connection event storage admission is still waiting"
+            );
+            execution.client.reserve_storage(reservation_bytes).await
+        }
+    };
+    result
+        .map(Some)
+        .map_err(|error| format!("connection event admission refused: {error:?}"))
+}
+
+async fn admitted_state_synchronization_events(
+    state: &ServerState,
+    synchronization: TerminalOutputSynchronization<'_>,
+    include_initial_sync_complete: bool,
+) -> Result<
+    (
+        Vec<ServerEvent>,
+        Option<Arc<ilium_execution::StorageAdmission>>,
+    ),
+    String,
+> {
+    for _attempt in 0..8 {
+        let (estimates, snapshot_bytes) = {
+            let tree = state.tree.read().await;
+            let panes = state.panes.read().await;
+            let estimates = panes
+                .iter()
+                .filter_map(|(pane_id, resource)| match resource {
+                    PaneResource::Terminal(runtime) => synchronization
+                        .estimate_for(*pane_id, &runtime.session)
+                        .map(|estimate| (*pane_id, estimate)),
+                    PaneResource::Editor { .. } => None,
+                })
+                .collect::<HashMap<_, _>>();
+            let snapshot_bytes = crate::snapshot_io::estimated_tree_bytes(&tree)
+                .checked_mul(2)
+                .and_then(|bytes| {
+                    // Detection evidence duplicates status and transcript-derived
+                    // strings in the tree snapshot. Reserve a bounded allowance
+                    // per pane before cloning either snapshot representation.
+                    panes
+                        .len()
+                        .checked_mul(128 * 1024)
+                        .and_then(|evidence| bytes.checked_add(evidence))
+                });
+            let Some(snapshot_bytes) = snapshot_bytes else {
+                return Err("state snapshot admission size overflow".to_owned());
+            };
+            (estimates, snapshot_bytes)
+        };
+        let estimated_payload_bytes = estimates.values().try_fold(0usize, |total, estimate| {
+            let bytes = match estimate.estimate {
+                PtyOutputRecoveryEstimate::Delta { byte_len, .. } => byte_len,
+                PtyOutputRecoveryEstimate::Replay(replay) => replay.byte_len,
+            };
+            total.checked_add(bytes)
+        });
+        let estimated_payload_bytes = estimated_payload_bytes
+            .and_then(|bytes| bytes.checked_add(snapshot_bytes))
+            .ok_or_else(|| "state synchronization admission size overflow".to_owned())?;
+        let producer_storage = reserve_connection_event_storage(
+            state,
+            estimated_payload_bytes,
+            estimates.len().saturating_add(1),
+            "connection-state-synchronization",
+            None,
+        )
+        .await?;
+
+        // Revalidate the current tree's measured retained size against the
+        // reservation before cloning the retry fence or the queued snapshot.
+        // If it grew while admission waited, release and estimate again.
+        let expected_tree = {
+            let tree = state.tree.read().await;
+            let current_tree_bytes = crate::snapshot_io::estimated_tree_bytes(&tree);
+            if current_tree_bytes > snapshot_bytes / 2 {
+                drop(tree);
+                drop(producer_storage);
+                continue;
+            }
+            tree.clone()
+        };
+
+        let built = {
+            let tree = state.tree.read().await;
+            if *tree != expected_tree {
+                None
+            } else {
+                let panes = state.panes.read().await;
+                let snapshot = tree.clone();
+                let detection_evidence = panes
+                    .iter()
+                    .filter_map(|(pane_id, resource)| match resource {
+                        PaneResource::Terminal(runtime) => runtime
+                            .detection_evidence
+                            .clone()
+                            .map(|evidence| (*pane_id, evidence)),
+                        PaneResource::Editor { .. } => None,
+                    })
+                    .collect();
+                let mut matched_estimates = HashSet::new();
+                let mut replay_events = Vec::new();
+                let mut stale = false;
+                for (pane_id, resource) in panes.iter() {
+                    match resource {
+                        PaneResource::Terminal(runtime) => {
+                            if matches!(runtime.origin, TerminalOrigin::Frozen { .. }) {
+                                replay_events.push(ServerEvent::PaneFrozen {
+                                    pane_id: *pane_id,
+                                    result: Ok(()),
+                                });
+                            }
+                            if let Some(estimate) = estimates.get(pane_id) {
+                                if !estimate.input.same_session(&runtime.session.input_handle()) {
+                                    stale = true;
+                                    break;
+                                }
+                                matched_estimates.insert(*pane_id);
+                                match synchronization.event_from_estimate(
+                                    *pane_id,
+                                    &runtime.session,
+                                    estimate,
+                                ) {
+                                    Some(event) => replay_events.push(event),
+                                    None => {
+                                        stale = true;
+                                        break;
+                                    }
+                                }
+                            }
+                            if let Some(session_id) = runtime.session_id.clone() {
+                                replay_events.push(ServerEvent::PaneSessionIdResolved {
+                                    pane_id: *pane_id,
+                                    session_id,
+                                    process_id: runtime.session_process_id,
+                                    title_generation: runtime.title_generation,
+                                    transcript_path: runtime.session_transcript_path.clone(),
+                                });
+                            }
+                        }
+                        PaneResource::Editor { path } => {
+                            replay_events.push(ServerEvent::PaneEditorPathResolved {
+                                pane_id: *pane_id,
+                                path: path.clone(),
+                            });
+                        }
+                    }
+                }
+                if stale || matched_estimates.len() != estimates.len() {
+                    None
+                } else {
+                    let mut events = vec![ServerEvent::PaneStateSnapshot {
+                        tree: snapshot,
+                        detection_evidence,
+                    }];
+                    events.extend(replay_events);
+                    drop(panes);
+                    drop(tree);
+                    let statuses = state.workspace_git_status_cache.read().await;
+                    let status_replays: Vec<_> = match &events[0] {
+                        ServerEvent::PaneStateSnapshot { tree, .. } => statuses
+                            .iter()
+                            .filter_map(|(pane_id, status)| {
+                                tree.pane_workspace(*pane_id).map(|_| {
+                                    ServerEvent::PaneGitStatusChanged {
+                                        pane_id: *pane_id,
+                                        status: status.clone(),
+                                    }
+                                })
+                            })
+                            .collect(),
+                        _ => Vec::new(),
+                    };
+                    events.extend(status_replays);
+                    drop(statuses);
+                    let settings = state.text_trigger_settings.read().await.settings.clone();
+                    events.push(ServerEvent::TextTriggersChanged { settings });
+                    if include_initial_sync_complete {
+                        let (detection, custom_signatures) =
+                            state.agent_detection_settings_snapshot().await;
+                        events.push(ServerEvent::AgentDetectionSettingsChanged {
+                            request_id: None,
+                            result: Ok(crate::config::agent_detection_settings(
+                                &detection,
+                                &custom_signatures,
+                            )),
+                        });
+                        events.push(ServerEvent::InitialStateSyncComplete);
+                    }
+                    Some(events)
+                }
+            }
+        };
+        if let Some(events) = built {
+            let retained_event_bytes = events.iter().try_fold(0usize, |total, event| {
+                total.checked_add(event.retained_bytes())
+            });
+            let admitted_bytes = producer_storage
+                .as_ref()
+                .map_or(0, |storage| storage.resident_bytes());
+            if retained_event_bytes.is_none_or(|bytes| bytes > admitted_bytes) {
+                return Err("state synchronization exceeded byte admission".to_owned());
+            }
+            return Ok((events, producer_storage));
+        }
+        drop(producer_storage);
+    }
+    Err("state synchronization changed repeatedly; retry attach".to_owned())
+}
+
 /// Builds one ordered render-cache seed from current server authority.
+#[cfg(test)]
 async fn state_synchronization_events(
     state: &ServerState,
     terminal_output_synchronization: TerminalOutputSynchronization<'_>,
@@ -1475,6 +2028,7 @@ async fn state_synchronization_events(
                             session_id,
                             process_id: runtime.session_process_id,
                             title_generation: runtime.title_generation,
+                            transcript_path: runtime.session_transcript_path.clone(),
                         });
                     }
                     events
@@ -1529,7 +2083,7 @@ async fn state_synchronization_events(
 pub(crate) async fn handle_session_recovery_resolution(
     state: &Arc<ServerState>,
     restore: bool,
-    direct_tx: &mpsc::Sender<ServerEvent>,
+    direct_tx: &DirectEventSender,
 ) {
     let completion = match state.recovery.admit(Arc::clone(state), restore).await {
         Ok(completion) => completion,
@@ -1563,7 +2117,7 @@ pub(crate) async fn handle_session_recovery_resolution(
 /// the `TreeError`.
 async fn handle_tree_mutation(
     state: &Arc<ServerState>,
-    direct_tx: &mpsc::Sender<ServerEvent>,
+    direct_tx: &DirectEventSender,
     mutate: impl FnOnce(&mut Tree) -> Result<(), TreeError>,
 ) {
     // A new or moved project root can protect a worktree from pruning.
@@ -1585,7 +2139,7 @@ async fn handle_tree_mutation(
 async fn handle_new_project(
     state: &Arc<ServerState>,
     path: std::path::PathBuf,
-    direct_tx: &mpsc::Sender<ServerEvent>,
+    direct_tx: &DirectEventSender,
 ) {
     let path = match canonical_project_directory(path) {
         Ok(path) => path,
@@ -1601,7 +2155,7 @@ async fn handle_change_project_folder(
     state: &Arc<ServerState>,
     project_id: NodeId,
     path: std::path::PathBuf,
-    direct_tx: &mpsc::Sender<ServerEvent>,
+    direct_tx: &DirectEventSender,
 ) {
     let path = match canonical_project_directory(path) {
         Ok(path) => path,
@@ -1637,7 +2191,7 @@ fn canonical_project_directory(path: std::path::PathBuf) -> Result<std::path::Pa
 async fn collect_observed_title_evidence(
     state: &ServerState,
     observations: &[PaneTitleObservation],
-) -> Vec<CollectedTitleEvidence> {
+) -> title_eligibility::CollectedTitleEvidenceBatch {
     let candidates = {
         let tree = state.tree.read().await;
         let panes = state.panes.read().await;
@@ -1660,7 +2214,12 @@ async fn collect_observed_title_evidence(
             })
             .collect()
     };
-    title_eligibility::collect_title_evidence(state.home_dir.clone(), candidates).await
+    title_eligibility::collect_title_evidence(
+        state.execution.get().map(|execution| &execution.client),
+        state.home_dir.clone(),
+        candidates,
+    )
+    .await
 }
 
 /// Resets legacy AI text only when the exact current conversation is proven
@@ -1845,7 +2404,7 @@ async fn handle_apply_restructure_plan(
     state: &Arc<ServerState>,
     plan: RestructurePlan,
     title_observations: &[PaneTitleObservation],
-    direct_tx: &mpsc::Sender<ServerEvent>,
+    direct_tx: &DirectEventSender,
 ) {
     let transaction = state.restructure_transaction.lock().await;
     let evidence = collect_observed_title_evidence(state, title_observations).await;
@@ -1892,10 +2451,7 @@ async fn handle_apply_restructure_plan(
 /// still sitting in `state.panes` with nothing left to ever remove it --
 /// exactly like the descendant teardown `handle_close_pane` does, this
 /// tears those orphaned resources down before returning.
-async fn handle_revert_last_restructure(
-    state: &Arc<ServerState>,
-    direct_tx: &mpsc::Sender<ServerEvent>,
-) {
+async fn handle_revert_last_restructure(state: &Arc<ServerState>, direct_tx: &DirectEventSender) {
     let project_ids = state.tree.read().await.project_ids();
     if project_ids.len() != 1 {
         send_direct_error(direct_tx, "select a project to revert its restructure").await;
@@ -1910,7 +2466,7 @@ async fn handle_apply_project_restructure_plan(
     plan: RestructurePlan,
     inference_activity_revisions: &[ilium_core::NodeActivityRevision],
     title_observations: &[PaneTitleObservation],
-    direct_tx: &mpsc::Sender<ServerEvent>,
+    direct_tx: &DirectEventSender,
 ) {
     let transaction = state.restructure_transaction.lock().await;
     let evidence = collect_observed_title_evidence(state, title_observations).await;
@@ -1934,7 +2490,7 @@ async fn handle_apply_recommended_project_restructure_plan(
     plan: RecommendedRestructurePlan,
     inference_activity_revisions: &[ilium_core::NodeActivityRevision],
     title_observations: &[PaneTitleObservation],
-    direct_tx: &mpsc::Sender<ServerEvent>,
+    direct_tx: &DirectEventSender,
 ) {
     let transaction = state.restructure_transaction.lock().await;
     let evidence = collect_observed_title_evidence(state, title_observations).await;
@@ -1955,7 +2511,7 @@ async fn handle_apply_recommended_project_restructure_plan(
 async fn handle_revert_project_restructure(
     state: &Arc<ServerState>,
     project_id: NodeId,
-    direct_tx: &mpsc::Sender<ServerEvent>,
+    direct_tx: &DirectEventSender,
 ) {
     let transaction = state.restructure_transaction.lock().await;
     let publish_guard = state.workspace_spawn_lock.lock().await;
@@ -2353,7 +2909,7 @@ async fn handle_check_pane_progress_monitor(
     request_id: u64,
     pane_id: NodeId,
     command: &str,
-    direct_tx: &mpsc::Sender<ServerEvent>,
+    direct_tx: &DirectEventSender,
 ) {
     let result = if !state.is_progress_monitor_enabled() {
         Err(progress_rejection(
@@ -2400,7 +2956,7 @@ async fn handle_set_pane_progress_monitor(
     pane_id: NodeId,
     command: String,
     interval_seconds: u32,
-    direct_tx: &mpsc::Sender<ServerEvent>,
+    direct_tx: &DirectEventSender,
 ) {
     let identity = ProgressSetRequestIdentity {
         pane_id,
@@ -2744,7 +3300,7 @@ async fn repair_rejected_staged_progress_monitor(
 /// toggles, suppression when the pane's agent is idle or parked (its own
 /// "agent finished" alert follows), and per-pane coalescing of bursts. The
 /// sidebar signal is unaffected by any of this.
-async fn alert_task_outcome(
+pub(crate) async fn alert_task_outcome(
     state: &Arc<ServerState>,
     pane_id: NodeId,
     progress: &ilium_core::PaneProgress,
@@ -2816,10 +3372,13 @@ async fn alert_task_outcome(
             progress.report.job_id.clone(),
             is_agent_working,
         );
-        // `send` never fails and runs the blocking D-Bus call on its own
-        // blocking thread; result delivery waits for a ready composer anyway,
-        // so this short await does not delay it.
-        crate::notifications::send(pending).await;
+        if let Some(execution) = state.execution.get() {
+            crate::notifications::send(&execution.client, pending);
+        } else {
+            tracing::warn!(
+                "desktop notification skipped because the execution bank is unavailable"
+            );
+        }
     }
 }
 
@@ -2850,6 +3409,9 @@ async fn handle_progress_monitor_outcome(
         if is_first_outcome_notification {
             alert_task_outcome(state, pane_id, &progress).await;
         }
+        if hand_outcome_to_progress_waiters(state, pane_id, monitor_id, &progress).await {
+            return;
+        }
     }
     let message = match outcome {
         crate::progress_monitor::ProgressMonitorOutcome::TaskTerminal(progress) => {
@@ -2873,7 +3435,7 @@ async fn handle_get_pane_progress_monitor_status(
     state: &Arc<ServerState>,
     request_id: u64,
     pane_id: NodeId,
-    direct_tx: &mpsc::Sender<ServerEvent>,
+    direct_tx: &DirectEventSender,
 ) {
     let result = match state.panes.read().await.get(&pane_id) {
         Some(PaneResource::Terminal(runtime)) => Ok(runtime.progress_monitor_status(pane_id)),
@@ -2893,6 +3455,165 @@ async fn handle_get_pane_progress_monitor_status(
     .await;
 }
 
+/// Holds an `ilium progress wait` request. An already-settled monitor is
+/// answered at once; otherwise the waiter is parked on the pane and answered
+/// by the settle, replacement, or clear path. Holding the effect gate orders
+/// the already-settled claim against a delivery's final validation, so a
+/// `composer_notice_suppressed: true` reply really means no composer write.
+async fn handle_wait_pane_progress_monitor(
+    state: &Arc<ServerState>,
+    request_id: u64,
+    pane_id: NodeId,
+    monitor_id: u64,
+    direct_tx: &DirectEventSender,
+) {
+    let effect_gate = match state.panes.read().await.get(&pane_id) {
+        Some(PaneResource::Terminal(runtime)) => Some(Arc::clone(&runtime.progress_effect_gate)),
+        _ => None,
+    };
+    let Some(effect_gate) = effect_gate else {
+        let rejection = progress_rejection(
+            ilium_ipc::ProgressMonitorRejectionCode::PaneNotFound,
+            format!("pane {pane_id:?} is not a live terminal pane"),
+        );
+        send_progress_wait_completed(direct_tx, request_id, pane_id, Err(rejection)).await;
+        return;
+    };
+    let _effect_guard = effect_gate.lock().await;
+    let mut panes = state.panes.write().await;
+    let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) else {
+        drop(panes);
+        let rejection = progress_rejection(
+            ilium_ipc::ProgressMonitorRejectionCode::PaneNotFound,
+            format!("pane {pane_id:?} closed before the wait started"),
+        );
+        send_progress_wait_completed(direct_tx, request_id, pane_id, Err(rejection)).await;
+        return;
+    };
+    let current = runtime
+        .progress_monitor
+        .as_ref()
+        .map(|monitor| (monitor.monitor_id, monitor.latest_progress.clone()));
+    let immediate = match current {
+        None => Some(ilium_ipc::ProgressWaitOutcome {
+            monitor_id,
+            end: ilium_ipc::ProgressWaitEnd::Cleared,
+            progress: None,
+            composer_notice_suppressed: false,
+        }),
+        Some((current_id, _)) if current_id != monitor_id => Some(ilium_ipc::ProgressWaitOutcome {
+            monitor_id,
+            end: ilium_ipc::ProgressWaitEnd::Superseded,
+            progress: None,
+            composer_notice_suppressed: false,
+        }),
+        Some((_, progress)) if progress.is_terminal() || progress.monitor_health.is_failed() => {
+            let composer_notice_suppressed = runtime
+                .collect_progress_outcome_by_waiter(monitor_id)
+                .unwrap_or(false);
+            Some(ilium_ipc::ProgressWaitOutcome {
+                monitor_id,
+                end: ilium_ipc::ProgressWaitEnd::Settled,
+                progress: Some(progress),
+                composer_notice_suppressed,
+            })
+        }
+        Some(_) => {
+            runtime.add_progress_waiter(crate::pane::ProgressWaiter {
+                pane_id,
+                monitor_id,
+                request_id,
+                reply: direct_tx.clone(),
+            });
+            None
+        }
+    };
+    drop(panes);
+    let Some(outcome) = immediate else {
+        return;
+    };
+    if outcome.composer_notice_suppressed {
+        state.request_snapshot_save();
+    }
+    send_progress_wait_completed(direct_tx, request_id, pane_id, Ok(outcome)).await;
+}
+
+async fn send_progress_wait_completed(
+    direct_tx: &DirectEventSender,
+    request_id: u64,
+    pane_id: NodeId,
+    result: Result<ilium_ipc::ProgressWaitOutcome, ilium_ipc::ProgressMonitorRejection>,
+) {
+    send_direct(
+        direct_tx,
+        ServerEvent::ProgressWaitCompleted {
+            request_id,
+            pane_id,
+            result,
+        },
+    )
+    .await;
+}
+
+/// Hands a settled outcome to every still-connected `wait` for it. Returns
+/// whether at least one waiter accepted it, in which case the composer
+/// notification is skipped: the agent already has the result.
+async fn hand_outcome_to_progress_waiters(
+    state: &Arc<ServerState>,
+    pane_id: NodeId,
+    monitor_id: u64,
+    progress: &ilium_core::PaneProgress,
+) -> bool {
+    let effect_gate = match state.panes.read().await.get(&pane_id) {
+        Some(PaneResource::Terminal(runtime)) => Arc::clone(&runtime.progress_effect_gate),
+        _ => return false,
+    };
+    let _effect_guard = effect_gate.lock().await;
+    let (waiters, is_marked) = {
+        let mut panes = state.panes.write().await;
+        let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) else {
+            return false;
+        };
+        let waiters = runtime.take_progress_waiters(monitor_id);
+        if waiters.is_empty() {
+            return false;
+        }
+        // Mark before sending so no delivery can start in between; undone
+        // below if every waiter turns out to be gone.
+        let is_marked = runtime
+            .collect_progress_outcome_by_waiter(monitor_id)
+            .unwrap_or(false);
+        (waiters, is_marked)
+    };
+    let mut accepted = 0_usize;
+    for waiter in waiters {
+        let event = ServerEvent::ProgressWaitCompleted {
+            request_id: waiter.request_id,
+            pane_id,
+            result: Ok(ilium_ipc::ProgressWaitOutcome {
+                monitor_id,
+                end: ilium_ipc::ProgressWaitEnd::Settled,
+                progress: Some(progress.clone()),
+                composer_notice_suppressed: is_marked,
+            }),
+        };
+        if waiter.reply.send(event).await.is_ok() {
+            accepted += 1;
+        }
+    }
+    if accepted > 0 && is_marked {
+        state.request_snapshot_save();
+        return true;
+    }
+    if is_marked {
+        let mut panes = state.panes.write().await;
+        if let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) {
+            runtime.release_progress_outcome_from_waiter(monitor_id);
+        }
+    }
+    false
+}
+
 /// Stops one generation and clears its sticky presentation. A supplied ID is
 /// an optimistic-concurrency fence, so an old agent cannot clear a replacement.
 async fn handle_clear_pane_progress_monitor(
@@ -2900,7 +3621,7 @@ async fn handle_clear_pane_progress_monitor(
     request_id: u64,
     pane_id: NodeId,
     expected_monitor_id: Option<u64>,
-    direct_tx: &mpsc::Sender<ServerEvent>,
+    direct_tx: &DirectEventSender,
 ) {
     let effect_gate = {
         let panes = state.panes.read().await;
@@ -2981,9 +3702,6 @@ pub(crate) async fn restore_persisted_progress_monitor(
     state: &Arc<ServerState>,
     persisted: crate::persistence::PersistedProgressMonitor,
 ) -> Result<(), String> {
-    if !state.is_progress_monitor_enabled() {
-        return Err("progress monitoring is disabled".to_string());
-    }
     let pane_id = persisted.pane_id;
     let effect_gate = {
         let panes = state.panes.read().await;
@@ -2998,7 +3716,17 @@ pub(crate) async fn restore_persisted_progress_monitor(
         Arc::clone(&runtime.progress_effect_gate)
     };
     let monitor_id = state.allocate_progress_monitor_id();
-    let (fresh_preflight, restoration_failure) = if persisted.requires_probe_before_restore() {
+    let (fresh_preflight, restoration_failure) = if persisted.requires_probe_before_restore()
+        && !state.is_progress_monitor_enabled()
+    {
+        // Dropping the record would leave its agent waiting forever. Keep it
+        // as sticky failed evidence; the reconciler tells the agent once
+        // monitoring is enabled again.
+        (
+            None,
+            Some(crate::progress_watchdog::OBSERVATION_DISABLED.to_string()),
+        )
+    } else if persisted.requires_probe_before_restore() {
         match crate::progress_monitor::preflight(&persisted.command).await {
             Ok(preflight) if persisted.accepts_restored_preflight(&preflight) => {
                 (Some(preflight), None)
@@ -3046,7 +3774,8 @@ pub(crate) async fn restore_persisted_progress_monitor(
     let should_deliver = (persisted.result_delivery
         == crate::persistence::PersistedProgressDeliveryState::NotQueued
         || persisted.result_delivery.may_retry_after_restart())
-        && (progress.is_terminal() || progress.monitor_health.is_failed());
+        && (progress.is_terminal() || progress.monitor_health.is_failed())
+        && state.is_progress_monitor_enabled();
 
     let _effect_guard = effect_gate.lock().await;
     let mut tree = state.tree.write().await;
@@ -3130,7 +3859,8 @@ fn bounded_restoration_failure(message: &str) -> String {
 }
 
 /// Applies a live kill switch. Nonterminal registrations are cancelled and
-/// removed; terminal task evidence and failed-monitor evidence remain sticky
+/// converted to sticky failed evidence ("outcome unknown") rather than
+/// removed, so their agent is told once monitoring is enabled again; terminal task evidence and failed-monitor evidence remain sticky
 /// until explicit clear, but all of their pending automated delivery work is
 /// stopped. Thus `false` always means no probe or progress-owned PTY task is
 /// executing without destroying already-observed outcomes.
@@ -3143,7 +3873,7 @@ async fn handle_update_progress_monitor_enabled(state: &Arc<ServerState>, enable
 
     let mut tree = state.tree.write().await;
     let mut panes = state.panes.write().await;
-    let mut cleared_pane_ids = Vec::new();
+    let mut stopped_progress = Vec::new();
     for (pane_id, resource) in panes.iter_mut() {
         let PaneResource::Terminal(runtime) = resource else {
             continue;
@@ -3155,17 +3885,26 @@ async fn handle_update_progress_monitor_enabled(state: &Arc<ServerState>, enable
         if preserve_evidence {
             runtime.stop_progress_tasks_preserving_state();
         } else if runtime.progress_monitor.is_some() {
-            runtime.cancel_progress_monitor();
-            let _ = tree.set_pane_progress(*pane_id, None);
-            cleared_pane_ids.push(*pane_id);
+            // Removing the registration would leave its agent waiting for a
+            // result that can never arrive. Keep sticky failed evidence
+            // instead; the reconciler tells the agent once monitoring is
+            // enabled again.
+            if let Some(failed) = crate::progress_watchdog::mark_observation_stopped(
+                &mut tree,
+                *pane_id,
+                runtime,
+                crate::progress_watchdog::OBSERVATION_DISABLED,
+            ) {
+                stopped_progress.push((*pane_id, failed));
+            }
         }
     }
     drop(panes);
     drop(tree);
-    for pane_id in cleared_pane_ids {
+    for (pane_id, progress) in stopped_progress {
         state.broadcast(ServerEvent::PaneProgressChanged {
             pane_id,
-            progress: None,
+            progress: Some(progress),
         });
     }
     state.request_snapshot_save();
@@ -3175,7 +3914,7 @@ async fn handle_update_agent_detection_settings(
     state: &Arc<ServerState>,
     settings: ilium_ipc::AgentDetectionSettings,
     request_id: Option<u64>,
-    direct_tx: &mpsc::Sender<ServerEvent>,
+    direct_tx: &DirectEventSender,
 ) {
     let config_dir = match crate::paths::config_dir() {
         Ok(path) => path,
@@ -3230,26 +3969,47 @@ async fn apply_agent_detection_settings(
     settings: ilium_ipc::AgentDetectionSettings,
     config_dir: std::path::PathBuf,
 ) -> Result<ilium_ipc::AgentDetectionSettings, ilium_ipc::AgentDetectionSettingsError> {
-    let mut validated = crate::config::validate_agent_detection_settings(&settings)?;
-
     // Serialize accepted writes, then preserve the server-only automation
     // switch while replacing observation settings. Persistence precedes live
     // application so a failed write never leaves a success-shaped runtime
     // state that disappears on restart.
     let _transaction = state.agent_detection_settings_transaction.lock().await;
     let (current_detection, _) = state.agent_detection_settings_snapshot().await;
+
+    // Reserve bounded I/O capacity before validation and copies create the
+    // immutable writer input. The reader and serializer both cap config.toml
+    // at MAX_CONFIG_BYTES, while this declaration also covers path and
+    // settings copies retained by the callback and its error result.
+    let cost = agent_detection_settings_save_cost(&config_dir, &settings)?;
+    let execution =
+        state
+            .execution
+            .get()
+            .ok_or_else(|| ilium_ipc::AgentDetectionSettingsError {
+                message: "settings persistence worker is unavailable".to_string(),
+            })?;
+    let reservation = execution
+        .client
+        .reserve(ilium_execution::Lane::Io, cost)
+        .await
+        .map_err(|reason| ilium_ipc::AgentDetectionSettingsError {
+            message: format!("settings persistence admission failed: {reason:?}"),
+        })?;
+
+    let mut validated = crate::config::validate_agent_detection_settings(&settings)?;
     validated.detection.auto_answer_interstitial_prompts =
         current_detection.auto_answer_interstitial_prompts;
     let accepted_settings =
         crate::config::agent_detection_settings(&validated.detection, &validated.custom_signatures);
     let persisted_settings = accepted_settings.clone();
-    tokio::task::spawn_blocking(move || {
-        crate::config::save_agent_detection_settings(&config_dir, &persisted_settings)
-    })
-    .await
-    .map_err(|error| ilium_ipc::AgentDetectionSettingsError {
-        message: format!("settings persistence task failed: {error}"),
-    })??;
+    save_agent_detection_settings_reserved(
+        &execution.client,
+        reservation,
+        config_dir,
+        persisted_settings,
+        crate::config::save_agent_detection_settings,
+    )
+    .await?;
 
     state
         .replace_agent_detection_settings(validated.detection, validated.custom_signatures)
@@ -3265,6 +4025,84 @@ async fn apply_agent_detection_settings(
     }
     state.detection_schedule_changed.notify_one();
     Ok(accepted_settings)
+}
+
+fn agent_detection_settings_save_cost(
+    config_dir: &std::path::PathBuf,
+    settings: &ilium_ipc::AgentDetectionSettings,
+) -> Result<ilium_execution::JobCost, ilium_ipc::AgentDetectionSettingsError> {
+    use std::mem::size_of;
+
+    const TOML_DOCUMENT_ALLOCATION_FACTOR: usize = 16;
+    const SETTINGS_CAPTURE_FACTOR: usize = 8;
+    let invalid = || ilium_ipc::AgentDetectionSettingsError {
+        message: "settings persistence input exceeds its bounded allocation limit".to_string(),
+    };
+    let path_bytes = config_dir.capacity();
+    if path_bytes > 64 * 1024 {
+        return Err(invalid());
+    }
+    let mut settings_bytes = settings
+        .custom_signatures
+        .capacity()
+        .checked_mul(size_of::<ilium_ipc::CustomAgentSignature>())
+        .ok_or_else(invalid)?;
+    for signature in &settings.custom_signatures {
+        settings_bytes = settings_bytes
+            .checked_add(signature.name_substring.capacity())
+            .and_then(|bytes| match &signature.class {
+                AgentClass::Other(label) => bytes.checked_add(label.capacity()),
+                _ => Some(bytes),
+            })
+            .ok_or_else(invalid)?;
+    }
+    if settings_bytes > crate::config::MAX_CONFIG_BYTES {
+        return Err(invalid());
+    }
+    let input_bytes = path_bytes
+        .checked_mul(4)
+        .and_then(|bytes| bytes.checked_add(settings_bytes.checked_mul(SETTINGS_CAPTURE_FACTOR)?))
+        // Parsing TOML constructs tables and value nodes in addition to the
+        // bounded source string; reserve room for that representation and
+        // the subsequent serialized document together.
+        .and_then(|bytes| {
+            bytes.checked_add(crate::config::MAX_CONFIG_BYTES * TOML_DOCUMENT_ALLOCATION_FACTOR)
+        })
+        .and_then(|bytes| bytes.checked_add(16 * 1024))
+        .ok_or_else(invalid)?;
+    let result_bytes = crate::config::MAX_CONFIG_BYTES
+        .checked_add(path_bytes.checked_mul(4).ok_or_else(invalid)?)
+        .and_then(|bytes| bytes.checked_add(16 * 1024))
+        .ok_or_else(invalid)?;
+    Ok(ilium_execution::JobCost {
+        input_bytes,
+        result_bytes,
+    })
+}
+
+async fn save_agent_detection_settings_reserved(
+    client: &crate::execution::ExecutionClient,
+    reservation: ilium_execution::Reservation,
+    config_dir: std::path::PathBuf,
+    settings: ilium_ipc::AgentDetectionSettings,
+    write: impl FnOnce(
+            &std::path::Path,
+            &ilium_ipc::AgentDetectionSettings,
+        ) -> Result<(), ilium_ipc::AgentDetectionSettingsError>
+        + Send
+        + 'static,
+) -> Result<(), ilium_ipc::AgentDetectionSettingsError> {
+    match client
+        .run_reserved(reservation, move |_context| {
+            Ok::<_, std::convert::Infallible>(write(&config_dir, &settings))
+        })
+        .await
+    {
+        Ok(completion) => completion.view().clone(),
+        Err(error) => Err(ilium_ipc::AgentDetectionSettingsError {
+            message: format!("settings persistence worker failed: {error}"),
+        }),
+    }
 }
 
 /// Records whether the attached client currently has `pane_id` as its active
@@ -3395,6 +4233,8 @@ struct NewPanePlan {
     name: String,
     content_kind: PaneContentKind,
     initial_input: Option<String>,
+    /// Close the pane once its command exits (`ilium new-pane` default).
+    close_on_exit: bool,
 }
 
 /// Turns a client's `NewPaneKind` into the one server-owned creation plan used
@@ -3409,6 +4249,7 @@ fn new_pane_plan(kind: NewPaneKind) -> NewPanePlan {
                 name,
                 content_kind: PaneContentKind::Editor,
                 initial_input: None,
+                close_on_exit: false,
             }
         }
         NewPaneKind::PlainShell => {
@@ -3419,6 +4260,7 @@ fn new_pane_plan(kind: NewPaneKind) -> NewPanePlan {
                 name,
                 content_kind: PaneContentKind::Terminal,
                 initial_input: None,
+                close_on_exit: false,
             }
         }
         NewPaneKind::Command(command_line) => {
@@ -3429,6 +4271,18 @@ fn new_pane_plan(kind: NewPaneKind) -> NewPanePlan {
                 name,
                 content_kind: PaneContentKind::Terminal,
                 initial_input: None,
+                close_on_exit: false,
+            }
+        }
+        NewPaneKind::CommandClosingOnExit(command_line) => {
+            let origin = TerminalOrigin::Command(command_line);
+            let name = origin.default_pane_name().to_string();
+            NewPanePlan {
+                spawn_kind: PaneSnapshotKind::Terminal(origin),
+                name,
+                content_kind: PaneContentKind::Terminal,
+                initial_input: None,
+                close_on_exit: true,
             }
         }
         NewPaneKind::CommandWithInitialInput {
@@ -3442,6 +4296,7 @@ fn new_pane_plan(kind: NewPaneKind) -> NewPanePlan {
                 name,
                 content_kind: PaneContentKind::Terminal,
                 initial_input: Some(initial_input),
+                close_on_exit: false,
             }
         }
     }
@@ -3452,7 +4307,7 @@ async fn handle_new_pane(
     parent_group: NodeId,
     kind: NewPaneKind,
     working_directory: NewPaneWorkingDirectory,
-    direct_tx: &mpsc::Sender<ServerEvent>,
+    direct_tx: &DirectEventSender,
 ) {
     let plan = new_pane_plan(kind);
     let spawn_description = format!("{:?}", plan.spawn_kind);
@@ -3571,6 +4426,76 @@ async fn handle_new_pane(
         let _completion =
             crate::initial_prompt::start(Arc::clone(state), pane_id, initial_input).await;
     }
+    if plan.close_on_exit {
+        start_close_on_exit_watcher(state, pane_id).await;
+    }
+}
+
+/// A closing pane must live at least this long, so the creating CLI can
+/// observe it in a tree snapshot even when its command exits immediately.
+const CLOSE_ON_EXIT_MINIMUM_LIFETIME: std::time::Duration = std::time::Duration::from_secs(3);
+const CLOSE_ON_EXIT_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// Why a close-on-exit watcher should keep waiting or stop.
+enum CloseOnExitCheck {
+    Gone,
+    Running,
+    Exited,
+}
+
+async fn check_close_on_exit(state: &Arc<ServerState>, pane_id: NodeId) -> CloseOnExitCheck {
+    let panes = state.panes.read().await;
+    let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
+        return CloseOnExitCheck::Gone;
+    };
+    if runtime.session.child_exit().is_none() {
+        return CloseOnExitCheck::Running;
+    }
+    // A live progress monitor still owes its agent a final report; closing
+    // the pane now would cancel it. Wait until the monitor reaches an outcome.
+    let is_monitor_live = runtime
+        .progress_monitor
+        .as_ref()
+        .is_some_and(|monitor| monitor.latest_progress.is_live());
+    if is_monitor_live {
+        CloseOnExitCheck::Running
+    } else {
+        CloseOnExitCheck::Exited
+    }
+}
+
+/// Installs the pane-owned task that closes an `ilium new-pane` pane after its
+/// command exits. The task ends when the pane disappears (the pane aborts it on
+/// close). The close itself runs in a separate short task from the server's
+/// drained registry, so aborting the watcher during teardown cannot cut the
+/// close short.
+async fn start_close_on_exit_watcher(state: &Arc<ServerState>, pane_id: NodeId) {
+    let watcher_state = Arc::clone(state);
+    let handle = tokio::spawn(async move {
+        tokio::time::sleep(CLOSE_ON_EXIT_MINIMUM_LIFETIME).await;
+        loop {
+            match check_close_on_exit(&watcher_state, pane_id).await {
+                CloseOnExitCheck::Gone => return,
+                CloseOnExitCheck::Exited => break,
+                CloseOnExitCheck::Running => {}
+            }
+            tokio::time::sleep(CLOSE_ON_EXIT_POLL_INTERVAL).await;
+        }
+        let close_state = Arc::clone(&watcher_state);
+        let close = tokio::spawn(async move {
+            // No client asked for this close, so errors have nowhere to go.
+            let (silent_sender, _silent_receiver) = DirectEventSender::channel(1);
+            handle_close_pane(&close_state, pane_id, &silent_sender).await;
+        });
+        if !watcher_state.track_workspace_mutation_task(close) {
+            tracing::warn!("server is shutting down; pane {pane_id:?} will not auto-close");
+        }
+    });
+    let mut panes = state.panes.write().await;
+    match panes.get_mut(&pane_id) {
+        Some(PaneResource::Terminal(runtime)) => runtime.set_close_on_exit_task(handle),
+        _ => handle.abort(),
+    }
 }
 
 /// Native process-tree termination timeout; no registry guard spans this wait.
@@ -3583,7 +4508,7 @@ const TERMINATE_PANE_PROCESS_TIMEOUT: std::time::Duration = std::time::Duration:
 async fn handle_terminate_pane_process(
     state: &Arc<ServerState>,
     pane_id: NodeId,
-    direct_tx: &mpsc::Sender<ServerEvent>,
+    direct_tx: &DirectEventSender,
 ) {
     let outcome = terminate_pane_process_with_work(state, pane_id, |control| {
         match control.terminate_process_tree(TERMINATE_PANE_PROCESS_TIMEOUT) {
@@ -3623,8 +4548,40 @@ async fn handle_freeze_pane(
     state: &Arc<ServerState>,
     pane_id: NodeId,
     resume_command: String,
-    direct_tx: &mpsc::Sender<ServerEvent>,
+    direct_tx: &DirectEventSender,
 ) {
+    let requested_binding = BuiltinAgentProvider::resume_binding(&resume_command);
+    let matches_authoritative_session =
+        if let Some((requested_provider, requested_session_id)) = requested_binding {
+            let tree = state.tree.read().await;
+            let panes = state.panes.read().await;
+            match (tree.get(pane_id), panes.get(&pane_id)) {
+                (Some(node), Some(PaneResource::Terminal(runtime))) => {
+                    let snapshot = TitleRuntimeSnapshot::capture(node, runtime, false);
+                    snapshot
+                        .observation
+                        .agent_class
+                        .as_ref()
+                        .and_then(|class| class.provider())
+                        == Some(requested_provider)
+                        && snapshot.observation.session_id.as_deref()
+                            == Some(requested_session_id.as_str())
+                }
+                _ => false,
+            }
+        } else {
+            false
+        };
+    if !matches_authoritative_session {
+        let _ = direct_tx
+            .send(ServerEvent::PaneFrozen {
+                pane_id,
+                result: Err("freeze requires the pane's current provider session identity".into()),
+            })
+            .await;
+        return;
+    }
+
     let outcome = terminate_pane_process_with_work(state, pane_id, |control| {
         control
             .terminate_process_tree(TERMINATE_PANE_PROCESS_TIMEOUT)
@@ -3647,6 +4604,93 @@ async fn handle_freeze_pane(
             result: outcome,
         })
         .await;
+}
+
+/// Resumes only an authoritative frozen runtime. Saved session IDs come from
+/// the server origin; older bare provider origins use a provider-owned picker
+/// when available, so recovery never guesses the most recent conversation.
+async fn handle_unfreeze_pane(
+    state: &Arc<ServerState>,
+    pane_id: NodeId,
+    direct_tx: &DirectEventSender,
+) {
+    let Some(reservation) = PaneReplacementReservation::try_new(state, pane_id) else {
+        send_direct_error(
+            direct_tx,
+            format!("pane {pane_id:?} is already being replaced"),
+        )
+        .await;
+        return;
+    };
+
+    let resume_command = {
+        let panes = state.panes.read().await;
+        match panes.get(&pane_id) {
+            Some(PaneResource::Terminal(runtime)) => match &runtime.origin {
+                TerminalOrigin::Frozen { resume_command } => {
+                    if BuiltinAgentProvider::resume_binding(resume_command).is_some() {
+                        Ok(resume_command.clone())
+                    } else if let Some(provider) =
+                        BuiltinAgentProvider::from_command_line(resume_command.trim())
+                    {
+                        match provider.resume_picker_command() {
+                            Some(command) => Ok(command.to_string()),
+                            None => Err(format!(
+                                "is a legacy frozen {} pane without a saved session ID; no safe session picker is available",
+                                provider.label()
+                            )),
+                        }
+                    } else {
+                        Err("has no recognized session-specific resume command".to_string())
+                    }
+                }
+                _ => Err("is not frozen".to_string()),
+            },
+            _ => Err("is not a live terminal pane".to_string()),
+        }
+    };
+    let resume_command = match resume_command {
+        Ok(command) => command,
+        Err(reason) => {
+            send_direct_error(direct_tx, format!("pane {pane_id:?} {reason}")).await;
+            return;
+        }
+    };
+    handle_replace_pane_with_command(
+        state,
+        pane_id,
+        resume_command,
+        direct_tx,
+        Some(reservation),
+        None,
+    )
+    .await;
+}
+
+struct PaneReplacementReservation<'a> {
+    state: &'a Arc<ServerState>,
+    pane_id: NodeId,
+}
+
+impl<'a> PaneReplacementReservation<'a> {
+    fn try_new(state: &'a Arc<ServerState>, pane_id: NodeId) -> Option<Self> {
+        let inserted = state
+            .replacing_panes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(pane_id);
+        inserted.then_some(Self { state, pane_id })
+    }
+}
+
+impl Drop for PaneReplacementReservation<'_> {
+    fn drop(&mut self) {
+        self.state
+            .replacing_panes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&self.pane_id);
+    }
 }
 
 /// Native termination owns the captured child handle until physical return.
@@ -3690,24 +4734,50 @@ where
     let panes = state.panes.read().await;
     let same_session = matches!(panes.get(&pane_id), Some(PaneResource::Terminal(runtime)) if control.same_session(&runtime.session.termination_handle()));
     if !same_session {
-        return Err(format!("pane {pane_id:?} changed during termination; result belongs to the original child and does not establish replacement termination ({outcome:?})"));
+        return Err(format!(
+            "pane {pane_id:?} changed during termination; result belongs to the original child and does not establish replacement termination ({outcome:?})"
+        ));
     }
     outcome
 }
 
 /// Replaces one terminal pane with a new pane running `command_line` in the
-/// same parent, position, and launch directory. The new pane is spawned
-/// before the old one is closed, so a spawn failure leaves the old pane
-/// intact; worktree panes are refused because their custody ticket and
-/// removal policy belong to the original pane.
+/// same parent, position, launch directory, and worktree ownership. The new
+/// pane is spawned before the old one is closed, so a spawn failure leaves
+/// the old pane intact. A worktree custody ticket moves to the new runtime.
 async fn handle_replace_pane_with_command(
     state: &Arc<ServerState>,
     pane_id: NodeId,
     command_line: String,
-    direct_tx: &mpsc::Sender<ServerEvent>,
+    direct_tx: &DirectEventSender,
+    reservation: Option<PaneReplacementReservation<'_>>,
+    custody_ticket: Option<crate::workspace_custody::CustodyTicket>,
 ) {
+    let Some(_reservation) =
+        reservation.or_else(|| PaneReplacementReservation::try_new(state, pane_id))
+    else {
+        send_direct_error(
+            direct_tx,
+            format!("pane {pane_id:?} is already being replaced"),
+        )
+        .await;
+        return;
+    };
     let origin = TerminalOrigin::Command(command_line.clone());
     let publish_guard = state.workspace_spawn_lock.lock().await;
+    let custody_ticket = if custody_ticket.is_some() {
+        custody_ticket
+    } else {
+        state
+            .panes
+            .read()
+            .await
+            .get(&pane_id)
+            .and_then(|resource| match resource {
+                PaneResource::Terminal(runtime) => runtime.custody_ticket.clone(),
+                PaneResource::Editor { .. } => None,
+            })
+    };
     let continuity_observation = {
         let tree = state.tree.read().await;
         let panes = state.panes.read().await;
@@ -3735,6 +4805,12 @@ async fn handle_replace_pane_with_command(
         &continuity_observation.into_iter().collect::<Vec<_>>(),
     )
     .await;
+    let close_preference = state
+        .workspace_close_preferences
+        .read()
+        .await
+        .get(&pane_id)
+        .cloned();
     let mut tree = state.tree.write().await;
     let Some(parent) = tree.parent_of(pane_id) else {
         drop(tree);
@@ -3751,16 +4827,17 @@ async fn handle_replace_pane_with_command(
             }
         )
     });
-    if !is_terminal || tree.pane_workspace(pane_id).is_some() {
+    if !is_terminal {
         drop(tree);
         drop(publish_guard);
         send_direct_error(
             direct_tx,
-            "only a plain terminal or agent pane outside a worktree can be replaced".to_string(),
+            "only a terminal pane can be replaced".to_string(),
         )
         .await;
         return;
     }
+    let workspace = tree.pane_workspace(pane_id).cloned();
     let position = tree
         .children_of(parent)
         .ok()
@@ -3793,6 +4870,7 @@ async fn handle_replace_pane_with_command(
     let placed = tree
         .move_node(new_pane_id, parent, position)
         .and_then(|()| tree.set_pane_launch_cwd(new_pane_id, cwd.clone()))
+        .and_then(|()| tree.set_pane_workspace(new_pane_id, workspace.clone()))
         .and_then(|()| {
             tree.inherit_pane_title_with_verified_continuity(
                 pane_id,
@@ -3812,22 +4890,43 @@ async fn handle_replace_pane_with_command(
         return;
     }
     drop(tree);
+    if let Some(mut preference) = close_preference {
+        preference.pane_id = new_pane_id;
+        state
+            .workspace_close_preferences
+            .write()
+            .await
+            .insert(new_pane_id, preference);
+    }
     drop(publish_guard);
 
-    match spawn_and_register_pane_in_directory(
+    match spawn_and_register_pane_in_directory_with_custody_ticket(
         state,
         new_pane_id,
         PaneSnapshotKind::Terminal(origin),
         &cwd,
+        custody_ticket.clone(),
     )
     .await
     {
         Ok(()) => {}
-        Err(RegisterPaneError::NodeRemoved(_)) => return,
+        Err(RegisterPaneError::NodeRemoved(_)) => {
+            state
+                .workspace_close_preferences
+                .write()
+                .await
+                .remove(&new_pane_id);
+            return;
+        }
         Err(RegisterPaneError::Spawn(error)) => {
             let mut tree = state.tree.write().await;
             let _ = tree.remove_node(new_pane_id);
             drop(tree);
+            state
+                .workspace_close_preferences
+                .write()
+                .await
+                .remove(&new_pane_id);
             broadcast_and_persist(state).await;
             send_direct_error(
                 direct_tx,
@@ -3852,9 +4951,27 @@ async fn handle_replace_pane_with_command(
         ]),
     )
     .await;
-    // `handle_close_pane` removes the old node and broadcasts one snapshot
-    // containing both the removal and the replacement.
-    handle_close_pane(state, pane_id, direct_tx).await;
+    // Serialize completion with close requests. If a close removed the old
+    // pane while the replacement was starting, remove the replacement too;
+    // otherwise close the old pane atomically with publishing the swap.
+    let _close_spawn_guard = state.workspace_spawn_lock.lock().await;
+    let old_pane_is_live = state.tree.read().await.get(pane_id).is_some();
+    if old_pane_is_live && custody_ticket.is_some() {
+        let mut panes = state.panes.write().await;
+        if let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) {
+            // The replacement runtime already owns a clone of this durable
+            // ticket. Drop the old in-memory handle before closing the frozen
+            // PTY so teardown cannot try to clear custody while the resumed
+            // process is using the worktree.
+            drop(runtime.custody_ticket.take());
+        }
+    }
+    let completed_pane_id = if old_pane_is_live {
+        pane_id
+    } else {
+        new_pane_id
+    };
+    handle_close_pane_with_spawn_guard(state, completed_pane_id, direct_tx).await;
 }
 
 /// Creates one built-in coding agent inside the project represented by
@@ -4088,7 +5205,21 @@ pub(crate) async fn spawn_and_register_pane_in_directory(
     kind: PaneSnapshotKind,
     cwd: &std::path::Path,
 ) -> Result<(), RegisterPaneError> {
-    spawn_and_register_pane_with_deferred_workspace(state, pane_id, kind, cwd, None).await
+    spawn_and_register_pane_with_deferred_workspace(state, pane_id, kind, cwd, None, None).await
+}
+
+/// Registers a replacement runtime that inherits an existing worktree
+/// custody ticket. The caller retains the original ticket until the new
+/// runtime has been registered successfully.
+async fn spawn_and_register_pane_in_directory_with_custody_ticket(
+    state: &Arc<ServerState>,
+    pane_id: NodeId,
+    kind: PaneSnapshotKind,
+    cwd: &std::path::Path,
+    custody_ticket: Option<crate::workspace_custody::CustodyTicket>,
+) -> Result<(), RegisterPaneError> {
+    spawn_and_register_pane_with_deferred_workspace(state, pane_id, kind, cwd, None, custody_ticket)
+        .await
 }
 
 /// A missing saved worktree is restored as a project-root shell while its
@@ -4099,6 +5230,7 @@ pub(crate) async fn spawn_and_register_pane_with_deferred_workspace(
     kind: PaneSnapshotKind,
     cwd: &std::path::Path,
     deferred_workspace: Option<(TerminalOrigin, String)>,
+    inherited_custody_ticket: Option<crate::workspace_custody::CustodyTicket>,
 ) -> Result<(), RegisterPaneError> {
     let (detection_config, _) = state.agent_detection_settings_snapshot().await;
     let before_admission = ilium_platform::secure_fs::spawn_directory_generation(cwd);
@@ -4140,9 +5272,13 @@ pub(crate) async fn spawn_and_register_pane_with_deferred_workspace(
     // Reserve custody only after both admission and the node-generation
     // fence pass. It is still durable before the PTY launch begins.
     let custody_ticket = if is_terminal {
-        match repository_admission.as_ref().ok().and_then(Option::as_ref) {
-            Some(admission) => admission.begin_custody().await,
-            None => Ok(None),
+        if inherited_custody_ticket.is_some() {
+            Ok(inherited_custody_ticket)
+        } else {
+            match repository_admission.as_ref().ok().and_then(Option::as_ref) {
+                Some(admission) => admission.begin_custody().await,
+                None => Ok(None),
+            }
         }
     } else {
         Ok(None)
@@ -4655,56 +5791,151 @@ pub(crate) fn teardown_pane_resource(_pane_id: NodeId, mut resource: PaneResourc
     }
 }
 
-async fn teardown_closed_pane_resource(pane_id: NodeId, resource: PaneResource) {
+async fn teardown_closed_pane_resource(
+    state: &Arc<ServerState>,
+    pane_id: NodeId,
+    resource: PaneResource,
+) {
     let has_custody =
         matches!(&resource, PaneResource::Terminal(runtime) if runtime.custody_ticket.is_some());
     if !has_custody {
         teardown_pane_resource(pane_id, resource);
         return;
     }
-    let result = tokio::task::spawn_blocking(move || {
-        let mut resource = resource;
-        let proof = match &mut resource {
-            PaneResource::Terminal(runtime) => {
-                let terminated = runtime
-                    .session
-                    .terminate_process_tree(std::time::Duration::from_secs(5))
-                    .map_err(|error| format!("PTY descendants cannot be proven stopped: {error}"));
-                terminated.and_then(|_| {
-                    let Some(ticket) = runtime.custody_ticket.take() else {
-                        return Err("custody ticket disappeared during close".into());
-                    };
-                    let users = ilium_platform::process_control::processes_using_directory(
-                        ticket.worktree_root(),
-                    )
-                    .map_err(|error| format!("worktree process scan unavailable: {error}"))?;
-                    if !users.is_empty() {
-                        return Err(format!("worktree still has process users: {users:?}"));
-                    }
-                    ticket.clear_after_proof()
-                })
-            }
-            PaneResource::Editor { .. } => Err("custody resource was not terminal".into()),
-        };
+
+    const MAX_CUSTODY_PROCESS_USERS: usize = 4096;
+    const CUSTODY_SCAN_WORKING_BYTES: usize = 8 * 1024 * 1024;
+    const CUSTODY_SCAN_RESULT_BYTES: usize = 64 * 1024;
+    let Some(execution) = state
+        .execution
+        .get()
+        .map(|execution| execution.client.clone())
+    else {
+        tracing::warn!(
+            "pane {pane_id:?} closed while custody worker was unavailable; custody retained"
+        );
         teardown_pane_resource(pane_id, resource);
-        proof
-    })
-    .await;
-    match result {
-        Ok(Ok(())) => {}
-        Ok(Err(error)) => {
-            tracing::warn!("pane {pane_id:?} closed with worktree custody retained: {error}")
+        return;
+    };
+    let path_bytes = match &resource {
+        PaneResource::Terminal(runtime) => runtime
+            .custody_ticket
+            .as_ref()
+            .map(|ticket| ticket.worktree_root().as_os_str().len()),
+        PaneResource::Editor { .. } => None,
+    };
+    let Some(input_bytes) = path_bytes
+        .and_then(|bytes| CUSTODY_SCAN_WORKING_BYTES.checked_add(bytes.saturating_mul(4)))
+    else {
+        tracing::warn!("pane {pane_id:?} closed with invalid custody scan input; custody retained");
+        teardown_pane_resource(pane_id, resource);
+        return;
+    };
+    let reservation = match execution
+        .reserve(
+            ilium_execution::Lane::Io,
+            ilium_execution::JobCost {
+                input_bytes,
+                result_bytes: CUSTODY_SCAN_RESULT_BYTES,
+            },
+        )
+        .await
+    {
+        Ok(reservation) => reservation,
+        Err(error) => {
+            tracing::warn!(
+                "pane {pane_id:?} custody I/O admission failed: {error:?}; custody retained"
+            );
+            teardown_pane_resource(pane_id, resource);
+            return;
         }
-        Err(error) => tracing::warn!("pane {pane_id:?} custody worker failed: {error}"),
+    };
+
+    let result = execution
+        .run_reserved(reservation, move |context: ilium_execution::JobContext| {
+            let mut resource = resource;
+            let proof = match &mut resource {
+                PaneResource::Terminal(runtime) => {
+                    let terminated = runtime
+                        .session
+                        .terminate_process_tree(std::time::Duration::from_secs(5))
+                        .map_err(|error| {
+                            format!("PTY descendants cannot be proven stopped: {error}")
+                        });
+                    terminated.and_then(|_| {
+                        if context.stop_requested() {
+                            return Err("custody close cancelled after PTY termination".into());
+                        }
+                        let Some(ticket) = runtime.custody_ticket.take() else {
+                            return Err("custody ticket disappeared during close".into());
+                        };
+                        let users =
+                            ilium_platform::process_control::processes_using_directory_bounded(
+                                ticket.worktree_root(),
+                                MAX_CUSTODY_PROCESS_USERS,
+                            )
+                            .map_err(|error| {
+                                format!("worktree process scan unavailable: {error}")
+                            })?;
+                        if !users.is_empty() {
+                            return Err(format!("worktree still has process users: {users:?}"));
+                        }
+                        ticket
+                            .clear_after_proof_in_worker(&context)
+                            .map_err(|error| format!("worktree custody clear failed: {error}"))
+                    })
+                }
+                PaneResource::Editor { .. } => Err("custody resource was not terminal".into()),
+            };
+            Ok::<_, std::convert::Infallible>((resource, proof))
+        })
+        .await;
+    match result {
+        Ok(completion) => {
+            let ((resource, proof), retention) = completion.into_parts();
+            if let Err(error) = proof {
+                tracing::warn!(
+                    "pane {pane_id:?} could not complete worktree custody cleanup; marker may remain: {error}"
+                );
+            }
+            teardown_pane_resource(pane_id, resource);
+            drop(retention);
+        }
+        Err(error) => {
+            tracing::warn!("pane {pane_id:?} custody worker failed: {error}; custody retained");
+        }
     }
 }
 
 async fn handle_close_pane(
     state: &Arc<ServerState>,
     pane_id: NodeId,
-    direct_tx: &mpsc::Sender<ServerEvent>,
+    direct_tx: &DirectEventSender,
 ) {
     let _close_spawn_guard = state.workspace_spawn_lock.lock().await;
+    let is_replacing = state
+        .replacing_panes
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .contains(&pane_id);
+    if is_replacing {
+        send_direct_error(
+            direct_tx,
+            format!("pane {pane_id:?} is already being replaced"),
+        )
+        .await;
+        return;
+    }
+    handle_close_pane_with_spawn_guard(state, pane_id, direct_tx).await;
+}
+
+/// Removes a pane while the caller holds `workspace_spawn_lock`, making the
+/// tree removal atomic with respect to replacement publication.
+async fn handle_close_pane_with_spawn_guard(
+    state: &Arc<ServerState>,
+    pane_id: NodeId,
+    direct_tx: &DirectEventSender,
+) {
     let mut tree = state.tree.write().await;
     if tree.get(pane_id).is_none() {
         drop(tree);
@@ -4734,7 +5965,7 @@ async fn handle_close_pane(
     drop(panes);
     drop(tree);
     for (id, resource) in closed_resources {
-        teardown_closed_pane_resource(id, resource).await;
+        teardown_closed_pane_resource(state, id, resource).await;
     }
     let mut preferences = state.workspace_close_preferences.write().await;
     for id in &descendant_pane_ids {
@@ -4759,16 +5990,17 @@ async fn start_retained_workspace_prune(
     target: ilium_ipc::WorkspacePruneTarget,
     mode: ilium_ipc::WorkspacePruneMode,
     branch_policy: ilium_ipc::WorkspacePruneBranchPolicy,
-    direct_tx: &mpsc::Sender<ServerEvent>,
+    direct_tx: &DirectEventSender,
 ) {
     let mutation_state = Arc::clone(state);
-    let reply = direct_tx.clone();
+    let reply_sender = direct_tx.clone();
     let rejection_target = target.clone();
     let (start_tx, start_rx) = oneshot::channel();
     let handle = tokio::spawn(async move {
         if start_rx.await.is_err() {
             return;
         }
+        let reply = crate::ipc::EventReply::Direct(&reply_sender);
         let result = crate::workspace::prune::remove_retained(
             &mutation_state,
             project,
@@ -4806,7 +6038,7 @@ async fn handle_workspace_removal(
     pane_id: NodeId,
     force_path: Option<std::path::PathBuf>,
     remove_branch: bool,
-    direct_tx: &mpsc::Sender<ServerEvent>,
+    direct_tx: &DirectEventSender,
 ) {
     let mutation_state = Arc::clone(state);
     let reply = direct_tx.clone();
@@ -4847,7 +6079,7 @@ async fn complete_workspace_removal(
     pane_id: NodeId,
     force_path: Option<std::path::PathBuf>,
     remove_branch: bool,
-    direct_tx: &mpsc::Sender<ServerEvent>,
+    direct_tx: &DirectEventSender,
 ) {
     let outcome =
         crate::workspace::remove_workspace(state, pane_id, force_path, remove_branch).await;
@@ -4908,7 +6140,7 @@ async fn handle_resize_pane(
     rows: u16,
     cols: u16,
     cause: PaneResizeCause,
-    direct_tx: &mpsc::Sender<ServerEvent>,
+    direct_tx: &DirectEventSender,
 ) {
     let input = {
         let panes = state.panes.read().await;
@@ -5025,7 +6257,7 @@ async fn handle_key_input(
     submission: Option<PromptSubmissionSource>,
     is_user_directed: bool,
     prompt_epoch: Option<String>,
-    direct_tx: &mpsc::Sender<ServerEvent>,
+    direct_tx: &DirectEventSender,
 ) {
     let expected_input = {
         let panes = state.panes.read().await;
@@ -5126,6 +6358,8 @@ async fn write_key_input_with_origin(
             is_user_directed,
             prompt_epoch,
             expected_invocation: None,
+            required_ready_agent_class: None,
+            required_statusline_generation: None,
         },
         &input_gate,
     )
@@ -5166,6 +6400,8 @@ pub(crate) async fn write_scheduled_key_input(
             is_user_directed: false,
             prompt_epoch: None,
             expected_invocation: None,
+            required_ready_agent_class: None,
+            required_statusline_generation: None,
         },
         &input_gate,
     )
@@ -5390,6 +6626,8 @@ pub(crate) async fn submit_terminal_body_locked(
                 is_user_directed: false,
                 prompt_epoch: None,
                 expected_invocation: Some(&expected_invocation),
+                required_ready_agent_class: None,
+                required_statusline_generation: None,
             },
             input_gate,
         )
@@ -5428,6 +6666,8 @@ pub(crate) async fn submit_terminal_body_locked(
             is_user_directed: false,
             prompt_epoch: None,
             expected_invocation: Some(&expected_invocation),
+            required_ready_agent_class: None,
+            required_statusline_generation: None,
         },
         input_gate,
     )
@@ -5581,23 +6821,25 @@ async fn invalidate_uncertain_agent_input(
 
 /// One automatic submission's body and Enter belong to the same invocation,
 /// even when detection replaces the agent without replacing its PTY.
-struct AgentInputInvocation {
-    generation: u64,
-    process: Option<AgentProcessKey>,
-    input_cancel_generation: u64,
+pub(crate) struct AgentInputInvocation {
+    pub(crate) generation: u64,
+    pub(crate) process: Option<AgentProcessKey>,
+    pub(crate) input_cancel_generation: u64,
 }
 
 /// Provenance retained across admission and the ordered delivery receipt.
-struct InputWriteOrigin<'a> {
-    is_initial_prompt: bool,
-    is_user_directed: bool,
-    prompt_epoch: Option<&'a str>,
-    expected_invocation: Option<&'a AgentInputInvocation>,
+pub(crate) struct InputWriteOrigin<'a> {
+    pub(crate) is_initial_prompt: bool,
+    pub(crate) is_user_directed: bool,
+    pub(crate) prompt_epoch: Option<&'a str>,
+    pub(crate) expected_invocation: Option<&'a AgentInputInvocation>,
+    pub(crate) required_ready_agent_class: Option<ilium_core::AgentClass>,
+    pub(crate) required_statusline_generation: Option<u64>,
 }
 
 /// The established title, session-identity, activity and event path for one
 /// physical PTY write. Call only while holding this pane's `input_gate`.
-async fn write_key_input_unlocked(
+pub(crate) async fn write_key_input_unlocked(
     state: &ServerState,
     pane_id: NodeId,
     bytes: &[u8],
@@ -5631,11 +6873,63 @@ where
     ProbeFuture:
         std::future::Future<Output = Result<ProbeObservation, foreground_observation::ProbeError>>,
 {
+    write_key_input_unlocked_with_marker(
+        state,
+        pane_id,
+        bytes,
+        submission,
+        origin,
+        expected_input_gate,
+        probe,
+        None,
+    )
+    .await
+}
+
+pub(crate) async fn write_key_input_unlocked_with_screen_marker(
+    state: &ServerState,
+    pane_id: NodeId,
+    bytes: &[u8],
+    submission: Option<PromptSubmissionSource>,
+    origin: InputWriteOrigin<'_>,
+    expected_input_gate: &std::sync::Arc<tokio::sync::Mutex<()>>,
+    screen_changed: &mut tokio::sync::watch::Receiver<()>,
+) -> Result<(), String> {
+    write_key_input_unlocked_with_marker(
+        state,
+        pane_id,
+        bytes,
+        submission,
+        origin,
+        expected_input_gate,
+        |request| foreground_observation::observe(state, request),
+        Some(screen_changed),
+    )
+    .await
+}
+
+async fn write_key_input_unlocked_with_marker<Probe, ProbeFuture>(
+    state: &ServerState,
+    pane_id: NodeId,
+    bytes: &[u8],
+    submission: Option<PromptSubmissionSource>,
+    origin: InputWriteOrigin<'_>,
+    expected_input_gate: &std::sync::Arc<tokio::sync::Mutex<()>>,
+    probe: Probe,
+    mut screen_changed: Option<&mut tokio::sync::watch::Receiver<()>>,
+) -> Result<(), String>
+where
+    Probe: FnOnce(ProbeRequest) -> ProbeFuture,
+    ProbeFuture:
+        std::future::Future<Output = Result<ProbeObservation, foreground_observation::ProbeError>>,
+{
     let InputWriteOrigin {
         is_initial_prompt,
         is_user_directed,
         prompt_epoch,
         expected_invocation,
+        required_ready_agent_class,
+        required_statusline_generation,
     } = origin;
     // The tracker below decides whether these bytes actually completed a
     // semantic line. Looking for CR/LF here would misclassify newlines inside
@@ -5680,6 +6974,7 @@ where
         expected_process,
         prewrite_agent_class,
         mut cancel_automated,
+        statusline_receipt,
     ) = {
         let tree = state.tree.read().await;
         let mut panes = state.panes.write().await;
@@ -5708,6 +7003,23 @@ where
         };
         let is_automatic_plain_shell =
             matches!(status, PaneStatus::PlainShell) && *title_source == PaneTitleSource::Automatic;
+        if let (Some(agent_class), Some(statusline_generation)) = (
+            required_ready_agent_class.as_ref(),
+            required_statusline_generation,
+        ) {
+            if runtime.antigravity_statusline_generation != statusline_generation
+                || runtime
+                    .agent_process_key
+                    .as_ref()
+                    .is_none_or(|process| process.class != *agent_class)
+                || runtime.verified_agent_exit.is_some()
+                || !crate::agent_delivery::runtime_has_ready_composer(runtime)
+            {
+                return Err(format!(
+                    "Antigravity status-line delivery refused for pane {pane_id:?}: composer or generation changed"
+                ));
+            }
+        }
         let cancelled_during_preflight =
             *runtime.agent_input_cancel.borrow() != preflight_cancel_generation;
         let rejection = if cancelled_during_preflight && runtime.agent_process_key.is_some() {
@@ -5734,6 +7046,22 @@ where
                 .as_ref()
                 .filter(|observed| observed.same_runtime(runtime))
                 .is_some_and(|observed| observed.shell_owns_terminal() == Some(true));
+        let statusline_receipt = if required_statusline_generation.is_some() {
+            if let Some(screen_changed) = screen_changed.as_deref_mut() {
+                let _ = *screen_changed.borrow_and_update();
+            }
+            Some(
+                runtime
+                    .session
+                    .input_handle()
+                    .write(bytes)
+                    .map_err(|error| {
+                        format!("failed to admit status-line input for pane {pane_id:?}: {error}")
+                    })?,
+            )
+        } else {
+            None
+        };
         (
             runtime.session.input_handle(),
             shell_foreground,
@@ -5742,11 +7070,15 @@ where
             runtime.agent_process_key.clone(),
             prewrite_agent_class,
             runtime.agent_input_cancel.subscribe(),
+            statusline_receipt,
         )
     };
-    let receipt = input
-        .write(bytes)
-        .map_err(|error| format!("failed to admit input for pane {pane_id:?}: {error}"))?;
+    let receipt = match statusline_receipt {
+        Some(receipt) => receipt,
+        None => input
+            .write(bytes)
+            .map_err(|error| format!("failed to admit input for pane {pane_id:?}: {error}"))?,
+    };
     let delivered = if is_user_directed || expected_process.is_none() {
         Some(receipt.wait().await)
     } else {
@@ -6306,7 +7638,7 @@ async fn handle_mouse_input(
     column: u16,
     row: u16,
     modifiers: ilium_ipc::MouseModifiers,
-    direct_tx: &mpsc::Sender<ServerEvent>,
+    direct_tx: &DirectEventSender,
 ) {
     // Same rationale as `handle_resize_pane`/`handle_key_input`: resolve the
     // outcome under the lock, send only after dropping it.
@@ -6542,6 +7874,8 @@ mod tests {
                     is_user_directed: false,
                     prompt_epoch: None,
                     expected_invocation: None,
+                    required_ready_agent_class: None,
+                    required_statusline_generation: None,
                 },
                 &input_gate,
                 move |request| async move {
@@ -6666,6 +8000,8 @@ mod tests {
                     is_user_directed: false,
                     prompt_epoch: None,
                     expected_invocation: None,
+                    required_ready_agent_class: None,
+                    required_statusline_generation: None,
                 },
                 &input_gate,
                 move |request| async move {
@@ -7194,7 +8530,7 @@ mod tests {
     async fn missing_pane_resize_reports_the_rejected_geometry() {
         let directory = tempfile::tempdir().expect("isolated directory");
         let state = snapshot_io_handler_state(&directory);
-        let (direct_tx, mut direct_rx) = mpsc::channel(1);
+        let (direct_tx, mut direct_rx) = DirectEventSender::channel(1);
         let pane_id = NodeId(u64::MAX);
         handle_resize_pane(
             &state,
@@ -7268,7 +8604,7 @@ mod tests {
             .expect("readback")
             .expect("saved snapshot");
         assert!(state.recovery.install_initial(snapshot).await.is_ok());
-        let (direct_tx, _direct_rx) = tokio::sync::mpsc::channel(128);
+        let (direct_tx, _direct_rx) = DirectEventSender::channel(128);
         handle_session_recovery_resolution(&state, false, &direct_tx).await;
         assert!(!state.snapshot_path.exists());
         assert!(!state.is_session_killed(), "discard is not a session kill");
@@ -7766,6 +9102,107 @@ mod tests {
     use ilium_core::{NodeId, RestructureNode, SplitOrientation};
     use std::time::Duration;
 
+    #[tokio::test]
+    async fn detector_settings_writer_uses_admitted_io_owner_and_reads_back() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let settings = ilium_ipc::AgentDetectionSettings {
+            working_poll_seconds: 3,
+            idle_poll_seconds: 12,
+            custom_signatures: vec![ilium_ipc::CustomAgentSignature {
+                name_substring: "owned-agent".to_string(),
+                class: AgentClass::Claude,
+            }],
+        };
+        let execution = crate::execution::ServerExecution::start().expect("execution bank");
+        let cost = agent_detection_settings_save_cost(&directory.path().to_path_buf(), &settings)
+            .expect("save cost");
+        let reservation = execution
+            .client
+            .reserve(ilium_execution::Lane::Io, cost)
+            .await
+            .expect("I/O admission");
+        let caller_thread = std::thread::current().id();
+        let (thread_sender, thread_receiver) = std::sync::mpsc::channel();
+
+        save_agent_detection_settings_reserved(
+            &execution.client,
+            reservation,
+            directory.path().to_path_buf(),
+            settings,
+            move |config_dir, settings| {
+                thread_sender
+                    .send(std::thread::current().id())
+                    .expect("observe the physical I/O owner");
+                crate::config::save_agent_detection_settings(config_dir, settings)
+            },
+        )
+        .await
+        .expect("persist detector settings");
+
+        assert_ne!(
+            thread_receiver.recv().expect("writer thread identity"),
+            caller_thread
+        );
+        let loaded = crate::config::load(directory.path()).expect("read back config");
+        assert_eq!(
+            loaded.detection.working_poll_interval,
+            Duration::from_secs(3)
+        );
+        assert_eq!(loaded.detection.idle_poll_interval, Duration::from_secs(12));
+        assert_eq!(loaded.custom_signatures[0].name_substring, "owned-agent");
+        execution.request_shutdown();
+    }
+
+    #[test]
+    fn detector_settings_save_admission_covers_config_and_rejects_oversized_inputs() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let valid = ilium_ipc::AgentDetectionSettings {
+            working_poll_seconds: 2,
+            idle_poll_seconds: 10,
+            custom_signatures: vec![ilium_ipc::CustomAgentSignature {
+                name_substring: "agent".to_string(),
+                class: AgentClass::Codex,
+            }],
+        };
+        let cost = agent_detection_settings_save_cost(&directory.path().to_path_buf(), &valid)
+            .expect("bounded settings fit the admitted save");
+        assert!(cost.input_bytes >= crate::config::MAX_CONFIG_BYTES * 16);
+        assert!(cost.result_bytes >= crate::config::MAX_CONFIG_BYTES);
+
+        let oversized_settings = ilium_ipc::AgentDetectionSettings {
+            custom_signatures: vec![ilium_ipc::CustomAgentSignature {
+                name_substring: "x".repeat(crate::config::MAX_CONFIG_BYTES + 1),
+                class: AgentClass::Codex,
+            }],
+            ..valid.clone()
+        };
+        assert!(agent_detection_settings_save_cost(
+            &directory.path().to_path_buf(),
+            &oversized_settings,
+        )
+        .is_err());
+
+        let oversized_path = std::path::PathBuf::from("x".repeat(64 * 1024 + 1));
+        assert!(agent_detection_settings_save_cost(&oversized_path, &valid).is_err());
+    }
+
+    #[test]
+    fn pane_replacement_reservations_are_per_pane_and_released_on_drop() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let state = snapshot_io_handler_state(&directory);
+        let pane_id = NodeId(17);
+
+        let reservation = PaneReplacementReservation::try_new(&state, pane_id)
+            .expect("first replacement claims pane");
+        assert!(PaneReplacementReservation::try_new(&state, pane_id).is_none());
+        let other_reservation = PaneReplacementReservation::try_new(&state, NodeId(18))
+            .expect("unrelated pane can replace independently");
+
+        drop(reservation);
+        assert!(PaneReplacementReservation::try_new(&state, pane_id).is_some());
+        drop(other_reservation);
+    }
+
     #[test]
     fn same_epoch_exact_transcript_repairs_unknown_historical_prompt() {
         let mut recovery = ilium_core::AgentRecovery {
@@ -8133,6 +9570,8 @@ mod tests {
                 is_user_directed: false,
                 prompt_epoch: None,
                 expected_invocation: Some(&expected),
+                required_ready_agent_class: None,
+                required_statusline_generation: None,
             },
             &input_gate,
         )
@@ -8162,6 +9601,8 @@ mod tests {
                 is_user_directed: false,
                 prompt_epoch: None,
                 expected_invocation: Some(&expected),
+                required_ready_agent_class: None,
+                required_statusline_generation: None,
             },
             &input_gate,
         )
@@ -8181,6 +9622,8 @@ mod tests {
                 is_user_directed: false,
                 prompt_epoch: None,
                 expected_invocation: None,
+                required_ready_agent_class: None,
+                required_statusline_generation: None,
             },
             &input_gate,
         )
@@ -8367,7 +9810,7 @@ mod tests {
                 .expect("launch project accepts a group")
         };
         let mut events = state.events.subscribe();
-        let (direct_tx, mut direct_rx) = mpsc::channel(1);
+        let (direct_tx, mut direct_rx) = DirectEventSender::channel(1);
 
         assert!(
             !handle_request(
@@ -8428,7 +9871,7 @@ mod tests {
                 .expect("group accepts a folder")
         };
         let mut events = state.events.subscribe();
-        let (direct_tx, mut direct_rx) = mpsc::channel(1);
+        let (direct_tx, mut direct_rx) = DirectEventSender::channel(1);
 
         assert!(
             !handle_request(
@@ -8878,10 +10321,50 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn initial_state_snapshot_stays_byte_admitted_until_direct_queue_consumes_it() {
+        let (state, _pane_id, _directory) =
+            state_with_one_terminal_pane("initial-state-snapshot-storage").await;
+        assert!(state
+            .execution
+            .set(crate::execution::ServerExecution::start().expect("finite server bank"))
+            .is_ok());
+        let (direct_tx, mut direct_rx) = DirectEventSender::channel(16);
+
+        send_initial_state(&state, &direct_tx, false).await;
+        drop(direct_tx);
+
+        let mut snapshot_storage = None;
+        let mut batch_storage = None;
+        let mut queued_events = 0;
+        while let Some(queued) = direct_rx.recv_queued().await {
+            let storage = queued
+                .producer_storage
+                .expect("every state synchronization event retains byte admission");
+            if let Some(batch_storage) = &batch_storage {
+                assert!(std::sync::Arc::ptr_eq(batch_storage, &storage));
+            } else {
+                batch_storage = Some(std::sync::Arc::clone(&storage));
+            }
+            queued_events += 1;
+            if matches!(queued.event, ServerEvent::PaneStateSnapshot { .. }) {
+                snapshot_storage = Some(storage);
+            }
+        }
+        assert!(queued_events > 0);
+        let storage = snapshot_storage.expect("snapshot queue entry retains byte admission");
+        assert!(std::sync::Arc::ptr_eq(
+            &storage,
+            batch_storage.as_ref().expect("batch has a storage lease")
+        ));
+        assert!(storage.resident_bytes() > 0);
+        teardown_state_panes(&state);
+    }
+
+    #[tokio::test]
     async fn invalid_agent_detection_update_is_rejected_without_changing_live_settings() {
         let (state, _pane_id, _directory) =
             state_with_one_terminal_pane("agent-detection-invalid-settings").await;
-        let (direct_tx, mut direct_rx) = mpsc::channel(1);
+        let (direct_tx, mut direct_rx) = DirectEventSender::channel(1);
         let before = state.agent_detection_settings_snapshot().await;
         let before_wire = crate::config::agent_detection_settings(&before.0, &before.1);
 
@@ -8916,7 +10399,7 @@ mod tests {
     async fn correlated_agent_detection_rejection_echoes_id_without_changing_live_settings() {
         let (state, _pane_id, _directory) =
             state_with_one_terminal_pane("agent-detection-invalid-settings").await;
-        let (direct_tx, mut direct_rx) = mpsc::channel(1);
+        let (direct_tx, mut direct_rx) = DirectEventSender::channel(1);
         let before = state.agent_detection_settings_snapshot().await;
         let before_wire = crate::config::agent_detection_settings(&before.0, &before.1);
 
@@ -9017,6 +10500,169 @@ mod tests {
         }
     }
 
+    fn wait_test_progress(
+        monitor_id: u64,
+        status: ilium_core::ProgressTaskStatus,
+    ) -> ilium_core::PaneProgress {
+        ilium_core::PaneProgress::new(
+            monitor_id,
+            ilium_core::ProgressTaskReport::new(
+                "wait-job".to_string(),
+                status,
+                if status.is_terminal() { 100.0 } else { 10.0 },
+                "step".to_string(),
+                String::new(),
+                None,
+            )
+            .unwrap(),
+            1,
+        )
+        .unwrap()
+    }
+
+    async fn install_wait_test_monitor(state: &Arc<ServerState>, pane_id: NodeId, monitor_id: u64) {
+        let mut panes = state.panes.write().await;
+        let PaneResource::Terminal(runtime) = panes.get_mut(&pane_id).unwrap() else {
+            panic!("fixture pane must remain terminal");
+        };
+        runtime.detected_agent_class = Some(ilium_core::AgentClass::Codex);
+        runtime
+            .install_progress_monitor(crate::progress_monitor::ProgressMonitorRegistration {
+                monitor_id,
+                pane_id,
+                command: "true".to_string(),
+                interval: Duration::from_secs(60),
+                initial_progress: wait_test_progress(
+                    monitor_id,
+                    ilium_core::ProgressTaskStatus::Running,
+                ),
+            })
+            .unwrap();
+    }
+
+    async fn settle_wait_test_monitor(
+        state: &Arc<ServerState>,
+        pane_id: NodeId,
+        monitor_id: u64,
+    ) -> ilium_core::PaneProgress {
+        let done = wait_test_progress(monitor_id, ilium_core::ProgressTaskStatus::Done);
+        let mut panes = state.panes.write().await;
+        let PaneResource::Terminal(runtime) = panes.get_mut(&pane_id).unwrap() else {
+            panic!("fixture pane must remain terminal");
+        };
+        assert!(runtime.update_progress_monitor_progress(monitor_id, done.clone()));
+        done
+    }
+
+    async fn wait_test_delivery(
+        state: &Arc<ServerState>,
+        pane_id: NodeId,
+    ) -> crate::pane::ProgressDeliveryState {
+        let panes = state.panes.read().await;
+        let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
+            panic!("fixture pane must remain terminal");
+        };
+        runtime.progress_monitor.as_ref().unwrap().result_delivery
+    }
+
+    async fn next_wait_reply(
+        receiver: &mut crate::ipc::direct_events::DirectEventReceiver,
+    ) -> Option<ilium_ipc::ProgressWaitOutcome> {
+        match tokio::time::timeout(Duration::from_millis(200), receiver.recv()).await {
+            Ok(Some(ServerEvent::ProgressWaitCompleted { result, .. })) => Some(result.unwrap()),
+            Ok(other) => panic!("unexpected reply {other:?}"),
+            Err(_) => None,
+        }
+    }
+
+    #[tokio::test]
+    async fn held_progress_wait_takes_the_outcome_instead_of_the_composer() {
+        let (state, pane_id, _directory) = state_with_one_terminal_pane("progress-held-wait").await;
+
+        // A connected waiter receives the settled outcome; no composer
+        // notification may follow.
+        install_wait_test_monitor(&state, pane_id, 7).await;
+        let (reply, mut receiver) = DirectEventSender::channel(8);
+        handle_wait_pane_progress_monitor(&state, 41, pane_id, 7, &reply).await;
+        assert!(
+            next_wait_reply(&mut receiver).await.is_none(),
+            "running monitor holds the wait"
+        );
+        let done = settle_wait_test_monitor(&state, pane_id, 7).await;
+        assert!(hand_outcome_to_progress_waiters(&state, pane_id, 7, &done).await);
+        let outcome = next_wait_reply(&mut receiver).await.expect("settled reply");
+        assert_eq!(outcome.end, ilium_ipc::ProgressWaitEnd::Settled);
+        assert!(outcome.composer_notice_suppressed);
+        assert_eq!(outcome.progress, Some(done));
+        assert_eq!(
+            wait_test_delivery(&state, pane_id).await,
+            crate::pane::ProgressDeliveryState::CollectedByWaiter
+        );
+        {
+            let panes = state.panes.read().await;
+            let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
+                panic!("fixture pane must remain terminal");
+            };
+            assert_eq!(
+                runtime.progress_reconcile_action(),
+                crate::pane::ProgressReconcileAction::None,
+                "a collected outcome is never redelivered"
+            );
+        }
+
+        // A waiter whose process died leaves the normal notification intact.
+        install_wait_test_monitor(&state, pane_id, 8).await;
+        let (reply, receiver) = DirectEventSender::channel(8);
+        handle_wait_pane_progress_monitor(&state, 42, pane_id, 8, &reply).await;
+        drop(receiver);
+        let done = settle_wait_test_monitor(&state, pane_id, 8).await;
+        assert!(!hand_outcome_to_progress_waiters(&state, pane_id, 8, &done).await);
+        assert_eq!(
+            wait_test_delivery(&state, pane_id).await,
+            crate::pane::ProgressDeliveryState::NotQueued
+        );
+
+        // Waiting on an already-settled monitor answers at once and claims it.
+        let (reply, mut receiver) = DirectEventSender::channel(8);
+        handle_wait_pane_progress_monitor(&state, 43, pane_id, 8, &reply).await;
+        let outcome = next_wait_reply(&mut receiver)
+            .await
+            .expect("immediate reply");
+        assert_eq!(outcome.end, ilium_ipc::ProgressWaitEnd::Settled);
+        assert!(outcome.composer_notice_suppressed);
+
+        // Replacement and clear both end a held wait.
+        install_wait_test_monitor(&state, pane_id, 9).await;
+        let (reply, mut receiver) = DirectEventSender::channel(8);
+        handle_wait_pane_progress_monitor(&state, 44, pane_id, 9, &reply).await;
+        install_wait_test_monitor(&state, pane_id, 10).await;
+        let outcome = next_wait_reply(&mut receiver)
+            .await
+            .expect("superseded reply");
+        assert_eq!(outcome.end, ilium_ipc::ProgressWaitEnd::Superseded);
+        assert!(!outcome.composer_notice_suppressed);
+
+        let (reply, mut receiver) = DirectEventSender::channel(8);
+        handle_wait_pane_progress_monitor(&state, 45, pane_id, 10, &reply).await;
+        {
+            let mut panes = state.panes.write().await;
+            let PaneResource::Terminal(runtime) = panes.get_mut(&pane_id).unwrap() else {
+                panic!("fixture pane must remain terminal");
+            };
+            runtime.cancel_progress_monitor();
+        }
+        let outcome = next_wait_reply(&mut receiver).await.expect("cleared reply");
+        assert_eq!(outcome.end, ilium_ipc::ProgressWaitEnd::Cleared);
+
+        // Waiting with a stale ID reports the replacement immediately.
+        install_wait_test_monitor(&state, pane_id, 11).await;
+        let (reply, mut receiver) = DirectEventSender::channel(8);
+        handle_wait_pane_progress_monitor(&state, 46, pane_id, 9, &reply).await;
+        let outcome = next_wait_reply(&mut receiver).await.expect("stale reply");
+        assert_eq!(outcome.end, ilium_ipc::ProgressWaitEnd::Superseded);
+        teardown_state_panes(&state);
+    }
+
     fn persisted_running_progress_monitor(
         pane_id: NodeId,
         command: String,
@@ -9041,6 +10687,87 @@ mod tests {
             .unwrap(),
             result_delivery: crate::persistence::PersistedProgressDeliveryState::NotQueued,
         }
+    }
+
+    #[tokio::test]
+    async fn reconcile_action_redelivers_unreceived_outcomes_only_to_supported_agents() {
+        use crate::pane::ProgressReconcileAction as Action;
+        use crate::persistence::PersistedProgressDeliveryState as Persisted;
+
+        let (state, pane_id, _directory) =
+            state_with_one_terminal_pane("progress-reconcile-action").await;
+        let mut panes = state.panes.write().await;
+        let PaneResource::Terminal(runtime) = panes.get_mut(&pane_id).unwrap() else {
+            panic!("fixture pane must remain terminal");
+        };
+        let report = |status| {
+            ilium_core::ProgressTaskReport::new(
+                "job".to_string(),
+                status,
+                100.0,
+                "finished".to_string(),
+                String::new(),
+                None,
+            )
+            .unwrap()
+        };
+        runtime
+            .install_progress_monitor(crate::progress_monitor::ProgressMonitorRegistration {
+                monitor_id: 7,
+                pane_id,
+                command: "true".to_string(),
+                interval: Duration::from_secs(60),
+                initial_progress: ilium_core::PaneProgress::new(
+                    7,
+                    report(ilium_core::ProgressTaskStatus::Running),
+                    1,
+                )
+                .unwrap(),
+            })
+            .unwrap();
+        // Running with no coordinator task: nothing can ever settle it.
+        assert_eq!(
+            runtime.progress_reconcile_action(),
+            Action::ObservationStopped { monitor_id: 7 }
+        );
+        let done =
+            ilium_core::PaneProgress::new(7, report(ilium_core::ProgressTaskStatus::Done), 2)
+                .unwrap();
+        assert!(runtime.update_progress_monitor_progress(7, done));
+
+        runtime
+            .restore_progress_delivery_state(Persisted::NotDeliverable)
+            .unwrap();
+        assert_eq!(
+            runtime.progress_reconcile_action(),
+            Action::None,
+            "a plain shell has no composer, so nothing may be typed into it"
+        );
+
+        runtime.detected_agent_class = Some(ilium_core::AgentClass::Codex);
+        for (persisted, expected) in [
+            (Persisted::NotDeliverable, false),
+            (Persisted::NotQueued, false),
+            (Persisted::Queued, false),
+            (Persisted::Attempted, true),
+            (Persisted::Uncertain, true),
+        ] {
+            runtime.restore_progress_delivery_state(persisted).unwrap();
+            assert_eq!(
+                runtime.progress_reconcile_action(),
+                Action::Redeliver {
+                    monitor_id: 7,
+                    possible_duplicate: expected
+                },
+                "{persisted:?}"
+            );
+        }
+        runtime
+            .restore_progress_delivery_state(Persisted::DeliveredToPty)
+            .unwrap();
+        assert_eq!(runtime.progress_reconcile_action(), Action::None);
+        drop(panes);
+        teardown_state_panes(&state);
     }
 
     #[tokio::test]
@@ -9137,7 +10864,7 @@ mod tests {
         let (state, pane_id, _directory) =
             state_with_one_terminal_pane("progress-monitor-set-and-report").await;
         let mut events = state.events.subscribe();
-        let (direct_tx, mut direct_rx) = mpsc::channel(1);
+        let (direct_tx, mut direct_rx) = DirectEventSender::channel(1);
 
         assert!(
             !handle_request(
@@ -9193,7 +10920,7 @@ mod tests {
     async fn failed_replacement_and_stale_clear_preserve_the_accepted_monitor() {
         let (state, pane_id, _directory) =
             state_with_one_terminal_pane("progress-monitor-transactional-replacement").await;
-        let (direct_tx, mut direct_rx) = mpsc::channel(4);
+        let (direct_tx, mut direct_rx) = DirectEventSender::channel(4);
         handle_request(
             &state,
             ClientRequest::SetPaneProgressMonitor {
@@ -9289,7 +11016,7 @@ mod tests {
             &invocation_log,
             r#"{"job_id":"idempotent-job","status":"running","percent":12,"message":"running"}"#,
         );
-        let (direct_tx, mut direct_rx) = mpsc::channel(2);
+        let (direct_tx, mut direct_rx) = DirectEventSender::channel(2);
         let request = || ClientRequest::SetPaneProgressMonitor {
             request_id: 19,
             pane_id,
@@ -9357,7 +11084,7 @@ mod tests {
     async fn progress_set_acknowledges_only_after_snapshot_contains_the_monitor() {
         let (state, pane_id, _directory) =
             state_with_one_terminal_pane("progress-monitor-durable-ack").await;
-        let (direct_tx, mut direct_rx) = mpsc::channel(1);
+        let (direct_tx, mut direct_rx) = DirectEventSender::channel(1);
         handle_request(
             &state,
             ClientRequest::SetPaneProgressMonitor {
@@ -9416,7 +11143,7 @@ mod tests {
     async fn failed_progress_snapshot_write_rejects_replacement_and_preserves_old_monitor() {
         let (state, pane_id, _directory) =
             state_with_one_terminal_pane("progress-monitor-persistence-failure").await;
-        let (direct_tx, mut direct_rx) = mpsc::channel(3);
+        let (direct_tx, mut direct_rx) = DirectEventSender::channel(3);
         handle_request(
             &state,
             ClientRequest::SetPaneProgressMonitor {
@@ -9523,6 +11250,7 @@ mod tests {
                 | crate::pane::ProgressDeliveryState::Attempted
                 | crate::pane::ProgressDeliveryState::DeliveredToPty
                 | crate::pane::ProgressDeliveryState::NotDeliverable
+                | crate::pane::ProgressDeliveryState::CollectedByWaiter
         ));
         assert_eq!(
             state.tree.read().await.pane_progress(pane_id),
@@ -9583,7 +11311,7 @@ mod tests {
         let (state, pane_id, _directory) =
             state_with_one_terminal_pane("progress-monitor-clear-stops-loop").await;
         let mut events = state.events.subscribe();
-        let (direct_tx, mut direct_rx) = mpsc::channel(1);
+        let (direct_tx, mut direct_rx) = DirectEventSender::channel(1);
 
         handle_request(
             &state,
@@ -9684,7 +11412,7 @@ mod tests {
     async fn set_pane_progress_monitor_rejects_an_empty_command_and_a_non_terminal_pane() {
         let (state, pane_id, _directory) =
             state_with_one_terminal_pane("progress-monitor-rejects-bad-requests").await;
-        let (direct_tx, mut direct_rx) = mpsc::channel(1);
+        let (direct_tx, mut direct_rx) = DirectEventSender::channel(1);
 
         handle_request(
             &state,
@@ -9737,11 +11465,81 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn reconciler_fails_a_monitor_whose_observation_task_vanished() {
+        let (state, pane_id, _directory) =
+            state_with_one_terminal_pane("progress-monitor-reconcile-lost-task").await;
+        let mut events = state.events.subscribe();
+        let (direct_tx, mut direct_rx) = DirectEventSender::channel(8);
+
+        handle_request(
+            &state,
+            ClientRequest::SetPaneProgressMonitor {
+                request_id: 51,
+                pane_id,
+                command: crate::progress_monitor::test_probes::emit_text(
+                    r#"{"job_id":"render-51","status":"running","percent":5,"message":"running"}"#,
+                ),
+                interval_seconds: 1,
+            },
+            &direct_tx,
+        )
+        .await;
+        assert!(matches!(
+            direct_rx.recv().await,
+            Some(ServerEvent::ProgressMonitorSetCompleted {
+                request_id: 51,
+                result: Ok(_),
+                ..
+            })
+        ));
+
+        // Replace the coordinator with a task that has already ended, as a
+        // panicked or lost coordinator would leave it.
+        {
+            let mut panes = state.panes.write().await;
+            let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) else {
+                panic!("fixture pane must be a terminal");
+            };
+            let finished = tokio::spawn(async {});
+            while !finished.is_finished() {
+                tokio::task::yield_now().await;
+            }
+            runtime.set_progress_monitor_task(finished);
+        }
+
+        let mut attempts = std::collections::HashMap::new();
+        crate::progress_watchdog::reconcile(&state, &mut attempts).await;
+
+        let failed = tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                match events.recv().await {
+                    Ok(ServerEvent::PaneProgressChanged {
+                        pane_id: event_pane_id,
+                        progress: Some(progress),
+                    }) if event_pane_id == pane_id && progress.monitor_health.is_failed() => {
+                        return true;
+                    }
+                    Ok(_) => {}
+                    Err(error) => panic!("progress event stream closed: {error}"),
+                }
+            }
+        })
+        .await
+        .unwrap_or(false);
+        assert!(
+            failed,
+            "a monitor that lost its observation task must become failed evidence"
+        );
+
+        teardown_state_panes(&state);
+    }
+
+    #[tokio::test]
     async fn disabling_progress_monitor_setting_rejects_new_requests_and_stops_running_ones() {
         let (state, pane_id, _directory) =
             state_with_one_terminal_pane("progress-monitor-disable-setting").await;
         let mut events = state.events.subscribe();
-        let (direct_tx, mut direct_rx) = mpsc::channel(1);
+        let (direct_tx, mut direct_rx) = DirectEventSender::channel(1);
 
         handle_request(
             &state,
@@ -9790,8 +11588,10 @@ mod tests {
                     Ok(ServerEvent::ProgressMonitorEnabledChanged { enabled: false }) => {}
                     Ok(ServerEvent::PaneProgressChanged {
                         pane_id: event_pane_id,
-                        progress: None,
-                    }) if event_pane_id == pane_id => return true,
+                        progress: Some(progress),
+                    }) if event_pane_id == pane_id && progress.monitor_health.is_failed() => {
+                        return true;
+                    }
                     Ok(_) => {}
                     Err(error) => panic!("progress event stream closed: {error}"),
                 }
@@ -9801,7 +11601,7 @@ mod tests {
         .unwrap_or(false);
         assert!(
             cleared,
-            "disabling the setting must clear the running monitor's progress"
+            "disabling the setting must turn the running monitor into failed evidence"
         );
         assert!(!state.is_progress_monitor_enabled());
 
@@ -10077,7 +11877,7 @@ mod tests {
             .expect("terminal activity is recorded while inference runs");
         let before_apply = state.tree.read().await.clone();
         let mut events = state.events.subscribe();
-        let (direct_tx, mut direct_rx) = mpsc::channel(8);
+        let (direct_tx, mut direct_rx) = DirectEventSender::channel(8);
 
         handle_apply_project_restructure_plan(
             &state,
@@ -10295,7 +12095,7 @@ mod tests {
             .await
             .insert(project_id, previous_tree);
 
-        let (direct_tx, mut direct_rx) = mpsc::channel(8);
+        let (direct_tx, mut direct_rx) = DirectEventSender::channel(8);
         handle_revert_project_restructure(&state, project_id, &direct_tx).await;
         drop(direct_tx);
         assert!(
@@ -10381,7 +12181,7 @@ mod tests {
                 recommendation,
             }],
         };
-        let (direct_tx, mut direct_rx) = mpsc::channel(8);
+        let (direct_tx, mut direct_rx) = DirectEventSender::channel(8);
         let held_undo = state.restructure_undo.lock().await;
         let apply = handle_apply_recommended_project_restructure_plan(
             &state,

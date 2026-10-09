@@ -532,7 +532,7 @@ mod tests {
         let reached = state.recovery.before_restore_publication.notified();
         tokio::pin!(reached);
         reached.as_mut().enable();
-        let (direct_tx, _direct_rx) = mpsc::channel(1);
+        let (direct_tx, _direct_rx) = crate::ipc::DirectEventSender::channel(1);
         let request_state = Arc::clone(&state);
         let request = tokio::spawn(async move {
             handle_session_recovery_resolution(&request_state, true, &direct_tx).await;
@@ -678,7 +678,7 @@ mod tests {
         persistence::shutdown_snapshot_service(&first)
             .await
             .expect("close disk owner");
-        let (direct_tx, mut direct_rx) = mpsc::channel(128);
+        let (direct_tx, mut direct_rx) = crate::ipc::DirectEventSender::channel(128);
         handle_session_recovery_resolution(&first, false, &direct_tx).await;
         assert!(matches!(
             direct_rx.recv().await,
@@ -728,7 +728,7 @@ mod tests {
         let directory = tempfile::tempdir().expect("directory");
         let state = state(&directory);
         install_saved_tree(&state).await;
-        let (direct_tx, mut direct_rx) = mpsc::channel(1);
+        let (direct_tx, mut direct_rx) = crate::ipc::DirectEventSender::channel(1);
         let request_state = Arc::clone(&state);
         let request = tokio::spawn(async move {
             handle_session_recovery_resolution(&request_state, true, &direct_tx).await;
@@ -848,7 +848,7 @@ mod tests {
             state.recovery.admit(Arc::clone(&state), false).await,
             Err(Refusal::Failed(_))
         ));
-        let (direct_tx, mut direct_rx) = mpsc::channel(8);
+        let (direct_tx, mut direct_rx) = crate::ipc::DirectEventSender::channel(8);
         assert!(
             !crate::ipc::handlers::handle_request(
                 &state,

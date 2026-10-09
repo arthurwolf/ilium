@@ -11,6 +11,7 @@ use walkdir::WalkDir;
 const MAX_INCLUDE_FILE_BYTES: u64 = 64 * 1024;
 const MAX_COPIED_FILES: usize = 1_000;
 const MAX_COPIED_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_VISITED_SOURCE_ENTRIES: usize = 10_000;
 
 /// Paths created by the copy, in creation order. Remove them in reverse order
 /// if the enclosing worktree operation fails. Paths that existed beforehand are
@@ -36,6 +37,20 @@ fn failure(reason: impl Into<String>, report: IncludeCopyReport) -> IncludeCopyE
         created_paths: report.created_paths,
         created_files: report.created_files,
     }
+}
+
+pub(crate) fn cancelled_error() -> IncludeCopyError {
+    failure(
+        "include preparation cancelled",
+        IncludeCopyReport::default(),
+    )
+}
+
+pub(crate) fn report_as_error(
+    reason: impl Into<String>,
+    report: IncludeCopyReport,
+) -> IncludeCopyError {
+    failure(reason, report)
 }
 
 /// Undo only files whose original open handles still identify the destination
@@ -109,9 +124,21 @@ fn regular_file_metadata(path: &Path) -> io::Result<fs::Metadata> {
 /// worktree. A missing `.worktreeinclude` is an empty selection. The destination
 /// root must already exist; neither existing files nor symbolic links are
 /// followed or replaced. Run this blocking function on a blocking worker.
+#[cfg(test)]
 pub(crate) fn copy_worktree_includes(
     source_root: &Path,
     target_root: &Path,
+) -> Result<IncludeCopyReport, IncludeCopyError> {
+    copy_worktree_includes_with_stop(source_root, target_root, || false)
+}
+
+/// Copies a bounded selection while checking cooperative cancellation between
+/// directory entries and files. Individual files are capped at 64 KiB, so a
+/// cancellation check cannot be delayed by an unbounded copy.
+pub(crate) fn copy_worktree_includes_with_stop(
+    source_root: &Path,
+    target_root: &Path,
+    mut stop_requested: impl FnMut() -> bool,
 ) -> Result<IncludeCopyReport, IncludeCopyError> {
     let mut report = IncludeCopyReport::default();
     // The platform helper, not `std::fs::canonicalize`: on Windows the latter
@@ -238,17 +265,25 @@ pub(crate) fn copy_worktree_includes(
     // path errors without leaving a half-populated worktree in common cases.
     let mut selected = Vec::new();
     let mut total_bytes = 0_u64;
+    let mut visited_entries = 0;
     for entry in WalkDir::new(&source)
         .follow_links(false)
         .into_iter()
         .filter_entry(|entry| entry.depth() == 0 || entry.file_name() != ".git")
     {
+        if stop_requested() {
+            return Err(failure("include preparation cancelled", report));
+        }
         let entry = entry.map_err(|error| {
             failure(
                 format!("source walk: {error}"),
                 IncludeCopyReport::default(),
             )
         })?;
+        visited_entries += 1;
+        if visited_entries > MAX_VISITED_SOURCE_ENTRIES {
+            return Err(failure("source entry limit exceeded", report));
+        }
         let path = entry.path();
         let relative = path
             .strip_prefix(&source)
@@ -285,6 +320,9 @@ pub(crate) fn copy_worktree_includes(
     selected.sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
     for (relative, expected_bytes) in selected {
+        if stop_requested() {
+            return Err(failure("include preparation cancelled", report));
+        }
         if !relative
             .components()
             .all(|component| matches!(component, Component::Normal(_)))
@@ -409,6 +447,9 @@ pub(crate) fn copy_worktree_includes(
             )
         })?;
     }
+    if stop_requested() {
+        return Err(failure("include preparation cancelled", report));
+    }
     Ok(report)
 }
 
@@ -451,6 +492,20 @@ mod tests {
         assert!(!target.join("config/secret").exists());
         assert_eq!(report.created_paths.len(), 3);
         assert!(report.created_paths.contains(&target.join("config")));
+    }
+
+    #[test]
+    fn cancellation_before_discovery_writes_nothing() {
+        let (_temp, source, target) = roots();
+        fs::write(source.join(".worktreeinclude"), ".env\n").expect("include");
+        fs::write(source.join(".env"), "TOKEN=sample\n").expect("env");
+
+        let error = copy_worktree_includes_with_stop(&source, &target, || true)
+            .expect_err("cancelled copy");
+
+        assert_eq!(error.reason, "include preparation cancelled");
+        assert!(error.created_paths.is_empty());
+        assert!(!target.join(".env").exists());
     }
 
     #[test]
@@ -524,5 +579,21 @@ mod tests {
         let error = copy_worktree_includes(&source, &target).expect_err("limit");
         assert!(error.created_paths.is_empty());
         assert!(!target.join("huge").exists());
+    }
+
+    #[test]
+    fn discovery_refuses_excess_source_entries_before_copying() {
+        let (_temp, source, target) = roots();
+        fs::write(source.join(".worktreeinclude"), "missing-selected-file\n").expect("include");
+        for index in 0..10_001 {
+            fs::write(source.join(format!("unselected-{index}")), b"x")
+                .expect("unselected source entry");
+        }
+
+        match copy_worktree_includes(&source, &target) {
+            Err(error) => assert!(error.reason.contains("source entry limit"), "{error}"),
+            Ok(_) => panic!("expected source entry limit rejection before copy"),
+        }
+        assert!(!target.join("missing-selected-file").exists());
     }
 }

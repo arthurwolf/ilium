@@ -3,11 +3,12 @@
 //! The marker lives in Git's per-worktree metadata, not the checkout. Git
 //! chooses that directory name, so always resolve it through `head_paths`.
 
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
-use tokio::fs;
 
+use crate::execution::{ExecutionClient, ExecutionError};
 use ilium_core::PaneWorkspace;
+use ilium_execution::{JobCost, Lane, Retained};
 use ilium_platform::secure_fs::NoFollowDirectory;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -15,6 +16,9 @@ use uuid::Uuid;
 
 const MARKER_FILE: &str = "ilium-workspace-owner.json";
 const MAX_MARKER_BYTES: u64 = 4096;
+const MAX_PATH_BYTES: usize = 4096;
+const MAX_IO_INPUT_BYTES: usize = MAX_MARKER_BYTES as usize + MAX_PATH_BYTES;
+const MAX_REGISTERED_WORKTREES: usize = 1024;
 
 #[derive(Debug, Error)]
 pub(crate) enum WorkspaceOwnerError {
@@ -49,12 +53,13 @@ pub(crate) struct OwnershipMarker {
 /// generated ID is copied into the pane snapshot. A failed write leaves the
 /// snapshot untouched; callers must handle any incomplete file explicitly.
 pub(crate) async fn create_marker(
+    client: &ExecutionClient,
     workspace: &mut PaneWorkspace,
 ) -> Result<OwnershipMarker, WorkspaceOwnerError> {
     if workspace.workspace_id.is_some() {
         return Err(WorkspaceOwnerError::Invalid("workspace already has an ID"));
     }
-    let marker_path = validated_marker_path(workspace).await?;
+    let marker_path = validated_marker_path(client, workspace).await?;
     let head = ilium_git::head_probe(&workspace.worktree_root).await?;
     if head.branch.as_deref() != Some(workspace.branch.as_str()) {
         return Err(WorkspaceOwnerError::Invalid(
@@ -84,40 +89,86 @@ pub(crate) async fn create_marker(
         &workspace.worktree_root,
     )?;
     let bytes = serde_json::to_vec(&marker)?;
-    tokio::task::spawn_blocking(move || {
-        let parent = marker_path
+    if bytes.len() > MAX_MARKER_BYTES as usize {
+        return Err(WorkspaceOwnerError::Invalid(
+            "marker exceeds its size limit",
+        ));
+    }
+    let input_bytes = marker_path.view().as_os_str().as_encoded_bytes().len() + bytes.len();
+    let cost = io_cost(input_bytes, 1)?;
+    let marker_path_for_job = marker_path.view().clone();
+    let write = run_io(client, cost, move |context| {
+        if context.stop_requested() {
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "marker creation cancelled",
+            ));
+        }
+        let parent = marker_path_for_job
             .parent()
-            .ok_or_else(|| std::io::Error::other("marker has no parent"))?;
+            .ok_or_else(|| io::Error::other("marker has no parent"))?;
         let directory = NoFollowDirectory::open_root(parent)?;
         let mut file = directory.create_regular(MARKER_FILE.as_ref())?;
         if let Err(error) = file.write_all(&bytes).and_then(|()| file.sync_all()) {
             let _ = directory.remove_regular(MARKER_FILE.as_ref(), &file);
             return Err(error);
         }
-        Ok::<(), std::io::Error>(())
+        Ok(())
     })
     .await
-    .map_err(|error| std::io::Error::other(format!("marker write task failed: {error}")))?
-    .map_err(|error| {
-        if error.kind() == std::io::ErrorKind::AlreadyExists {
-            WorkspaceOwnerError::AlreadyExists
-        } else {
-            WorkspaceOwnerError::Io(error)
-        }
+    .map_err(|error| match error.kind() {
+        io::ErrorKind::AlreadyExists => WorkspaceOwnerError::AlreadyExists,
+        _ => WorkspaceOwnerError::Io(error),
     })?;
+    drop(write);
     workspace.workspace_id = Some(marker.workspace_id.clone());
     Ok(marker)
+}
+
+fn io_cost(input_bytes: usize, result_bytes: usize) -> io::Result<JobCost> {
+    if input_bytes > MAX_IO_INPUT_BYTES || result_bytes > MAX_MARKER_BYTES as usize {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "workspace marker I/O exceeds its bounded size",
+        ));
+    }
+    Ok(JobCost {
+        input_bytes: input_bytes.max(1),
+        result_bytes: result_bytes.max(1),
+    })
+}
+
+async fn run_io<T: Send + 'static>(
+    client: &ExecutionClient,
+    cost: JobCost,
+    operation: impl FnOnce(ilium_execution::JobContext) -> io::Result<T> + Send + 'static,
+) -> io::Result<Retained<T>> {
+    let reservation = client.reserve(Lane::Io, cost).await.map_err(|error| {
+        io::Error::other(format!("workspace marker I/O admission failed: {error:?}"))
+    })?;
+    let retained =
+        client
+            .run_reserved(reservation, operation)
+            .await
+            .map_err(|error| match error {
+                ExecutionError::Failed(error) => {
+                    io::Error::new(error.view().kind(), error.view().to_string())
+                }
+                other => io::Error::other(format!("workspace marker I/O worker failed: {other:?}")),
+            })?;
+    Ok(retained)
 }
 
 /// Confirms that a saved pane still owns the registered linked worktree.
 /// Switching the live branch does not change the creation identity.
 pub(crate) async fn verify_marker(
+    client: &ExecutionClient,
     workspace: &PaneWorkspace,
 ) -> Result<OwnershipMarker, WorkspaceOwnerError> {
-    let marker_path = validated_marker_path(workspace).await?;
+    let marker_path = validated_marker_path(client, workspace).await?;
     let marker = expected_marker(workspace)?;
-    let bytes = read_marker_bytes(&marker_path).await?;
-    if bytes != serde_json::to_vec(&marker)? {
+    let bytes = read_marker_bytes(client, marker_path.view()).await?;
+    if bytes.view() != &serde_json::to_vec(&marker)? {
         return Err(WorkspaceOwnerError::Mismatch);
     }
     Ok(marker)
@@ -127,28 +178,32 @@ pub(crate) async fn verify_marker(
 /// must already be canonical. `None` means only that the exact marker file is
 /// absent in a registered linked worktree; invalid Git metadata, symlinks,
 /// malformed markers, and mismatched identities fail closed.
-///
-/// Pre-provenance markers (without `base_ref` and `base_commit`) are invalid:
-/// their creation base cannot be reconstructed safely from a branch's current
-/// tip, so they require explicit manual handling rather than automatic prune.
 pub(crate) async fn read_registered_marker(
+    client: &ExecutionClient,
     repo_common_dir: &Path,
     worktree_root: &Path,
 ) -> Result<Option<OwnershipMarker>, WorkspaceOwnerError> {
-    let marker_path = validated_marker_path_for(repo_common_dir, worktree_root).await?;
-    let Some(bytes) = read_marker_bytes_if_present(&marker_path).await? else {
+    let marker_path = validated_marker_path_for(client, repo_common_dir, worktree_root).await?;
+    let retained_bytes = read_marker_bytes_if_present(client, marker_path.view()).await?;
+    let Some(bytes) = retained_bytes.view().as_ref() else {
         return Ok(None);
     };
-    let marker: OwnershipMarker = serde_json::from_slice(&bytes)
+    let marker: OwnershipMarker = serde_json::from_slice(bytes)
         .map_err(|_| WorkspaceOwnerError::Invalid("marker JSON or schema is invalid"))?;
     validate_marker_identity(&marker, repo_common_dir, worktree_root)?;
-    if serde_json::to_vec(&marker)? != bytes {
+    if serde_json::to_vec(&marker)?.as_slice() != bytes.as_slice() {
         return Err(WorkspaceOwnerError::Invalid(
             "marker is not in the original canonical form",
         ));
     }
     Ok(Some(marker))
 }
+
+/*
+ * The remainder of the ownership validation logic stays synchronous only
+ * where it is pure; filesystem canonicalization and marker reads/writes are
+ * admitted to the shared bounded I/O lane above.
+ */
 
 fn expected_marker(workspace: &PaneWorkspace) -> Result<OwnershipMarker, WorkspaceOwnerError> {
     let workspace_id = workspace
@@ -173,14 +228,17 @@ fn expected_marker(workspace: &PaneWorkspace) -> Result<OwnershipMarker, Workspa
     Ok(marker)
 }
 
-async fn validated_marker_path(workspace: &PaneWorkspace) -> Result<PathBuf, WorkspaceOwnerError> {
+async fn validated_marker_path(
+    client: &ExecutionClient,
+    workspace: &PaneWorkspace,
+) -> Result<PathBuf, WorkspaceOwnerError> {
     if !workspace.created_by_ilium || workspace.branch.is_empty() || workspace.created_at_unix <= 0
     {
         return Err(WorkspaceOwnerError::Invalid(
             "pane has no Ilium creation identity",
         ));
     }
-    validated_marker_path_for(&workspace.repo_common_dir, &workspace.worktree_root).await
+    validated_marker_path_for(client, &workspace.repo_common_dir, &workspace.worktree_root).await
 }
 
 fn validate_marker_identity(
@@ -223,37 +281,91 @@ fn validate_marker_identity(
 /// it. `std::fs::canonicalize` would return a `\\?\` extended-length path on
 /// Windows, which never equals the saved (simplified) form and would make every
 /// saved path look non-canonical.
-async fn canonical(path: &Path) -> std::io::Result<PathBuf> {
+pub(crate) async fn canonical_path(
+    client: &ExecutionClient,
+    path: &Path,
+) -> std::io::Result<Retained<PathBuf>> {
     let path = path.to_path_buf();
-    tokio::task::spawn_blocking(move || ilium_platform::paths::canonicalize(&path))
-        .await
-        .map_err(|error| std::io::Error::other(format!("canonicalize task failed: {error}")))?
+    let cost = io_cost(path.as_os_str().as_encoded_bytes().len(), MAX_PATH_BYTES)?;
+    run_io(client, cost, move |context| {
+        if context.stop_requested() {
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "path canonicalization cancelled",
+            ));
+        }
+        ilium_platform::paths::canonicalize(&path)
+    })
+    .await
+}
+
+pub(crate) async fn is_directory(client: &ExecutionClient, path: &Path) -> io::Result<bool> {
+    let path = path.to_path_buf();
+    let cost = io_cost(path.as_os_str().as_encoded_bytes().len(), 1)?;
+    run_io(client, cost, move |context| {
+        if context.stop_requested() {
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "directory check cancelled",
+            ));
+        }
+        std::fs::metadata(path).map(|metadata| metadata.is_dir())
+    })
+    .await
+    .map(|result| *result.view())
+}
+
+async fn is_regular_file(client: &ExecutionClient, path: &Path) -> io::Result<bool> {
+    let path = path.to_path_buf();
+    let cost = io_cost(path.as_os_str().as_encoded_bytes().len(), 1)?;
+    run_io(client, cost, move |context| {
+        if context.stop_requested() {
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "file check cancelled",
+            ));
+        }
+        std::fs::symlink_metadata(path).map(|metadata| metadata.file_type().is_file())
+    })
+    .await
+    .map(|result| *result.view())
 }
 
 pub(crate) async fn validated_marker_path_for(
+    client: &ExecutionClient,
     repo_common_dir: &Path,
     worktree_root: &Path,
-) -> Result<PathBuf, WorkspaceOwnerError> {
-    let common_dir = canonical(repo_common_dir).await?;
-    let root = canonical(worktree_root).await?;
-    if common_dir != repo_common_dir || root != worktree_root {
+) -> Result<Retained<PathBuf>, WorkspaceOwnerError> {
+    let common_dir = canonical_path(client, repo_common_dir).await?;
+    let root = canonical_path(client, worktree_root).await?;
+    if common_dir.view() != repo_common_dir || root.view() != worktree_root {
         return Err(WorkspaceOwnerError::Invalid(
             "saved paths are not canonical",
         ));
     }
-    let repository = ilium_git::discover(&root).await?;
-    if repository.is_bare || repository.common_dir != common_dir || repository.worktree_root != root
+    let repository = ilium_git::discover(root.view()).await?;
+    if repository.is_bare
+        || repository.common_dir != *common_dir.view()
+        || repository.worktree_root != *root.view()
     {
         return Err(WorkspaceOwnerError::Invalid("repository identity changed"));
     }
-    let listed = ilium_git::list_worktrees(&root).await?;
+    let listed = ilium_git::list_worktrees(root.view()).await?;
+    if listed.len() > MAX_REGISTERED_WORKTREES {
+        return Err(WorkspaceOwnerError::Invalid(
+            "repository has too many registered worktrees to verify safely",
+        ));
+    }
     let mut registered = false;
     for worktree in listed
         .iter()
         .skip(1)
         .filter(|worktree| !worktree.is_bare && !worktree.is_prunable)
     {
-        if canonical(&worktree.path).await.ok().as_deref() == Some(root.as_path()) {
+        if canonical_path(client, &worktree.path)
+            .await
+            .is_ok_and(|candidate| candidate.view() == root.view())
+        {
             registered = true;
             break;
         }
@@ -263,49 +375,69 @@ pub(crate) async fn validated_marker_path_for(
             "not a registered linked worktree",
         ));
     }
-    let head_path = ilium_git::head_paths(&root).await?.head;
+    let head_path = ilium_git::head_paths(root.view()).await?.head;
     if head_path.file_name().is_none_or(|name| name != "HEAD") {
         return Err(WorkspaceOwnerError::Invalid("Git HEAD path is unexpected"));
     }
-    let head_metadata = fs::symlink_metadata(&head_path).await?;
-    if !head_metadata.file_type().is_file() {
+    if !is_regular_file(client, &head_path).await? {
         return Err(WorkspaceOwnerError::Invalid(
             "Git HEAD is not a regular file",
         ));
     }
-    let metadata_dir = canonical(
+    let metadata_dir = canonical_path(
+        client,
         head_path
             .parent()
             .ok_or(WorkspaceOwnerError::Invalid("Git HEAD has no parent"))?,
     )
     .await?;
-    let worktrees_dir = canonical(&common_dir.join("worktrees")).await?;
-    if worktrees_dir.parent() != Some(common_dir.as_path())
-        || metadata_dir.parent() != Some(worktrees_dir.as_path())
+    let worktrees_path = common_dir.view().join("worktrees");
+    let worktrees_dir = canonical_path(client, &worktrees_path).await?;
+    if worktrees_dir.view().parent() != Some(common_dir.view().as_path())
+        || metadata_dir.view().parent() != Some(worktrees_dir.view().as_path())
     {
         return Err(WorkspaceOwnerError::Invalid(
             "Git metadata is outside worktrees directory",
         ));
     }
-    Ok(metadata_dir.join(MARKER_FILE))
+    Ok(metadata_dir.map(|path| path.join(MARKER_FILE)))
 }
 
-async fn read_marker_bytes(path: &Path) -> Result<Vec<u8>, WorkspaceOwnerError> {
-    read_marker_bytes_if_present(path)
-        .await?
-        .ok_or_else(|| WorkspaceOwnerError::Io(std::io::Error::from(std::io::ErrorKind::NotFound)))
+async fn read_marker_bytes(
+    client: &ExecutionClient,
+    path: &Path,
+) -> Result<Retained<Vec<u8>>, WorkspaceOwnerError> {
+    let retained = read_marker_bytes_if_present(client, path).await?;
+    let (value, retention) = retained.into_parts();
+    let bytes = value.ok_or_else(|| {
+        WorkspaceOwnerError::Io(std::io::Error::from(std::io::ErrorKind::NotFound))
+    })?;
+    Ok(retention.retain(bytes))
 }
 
-async fn read_marker_bytes_if_present(path: &Path) -> Result<Option<Vec<u8>>, WorkspaceOwnerError> {
+async fn read_marker_bytes_if_present(
+    client: &ExecutionClient,
+    path: &Path,
+) -> Result<Retained<Option<Vec<u8>>>, WorkspaceOwnerError> {
     let path = path.to_path_buf();
-    let bytes = tokio::task::spawn_blocking(move || {
+    let cost = io_cost(
+        path.as_os_str().as_encoded_bytes().len(),
+        MAX_MARKER_BYTES as usize,
+    )?;
+    let bytes = run_io(client, cost, move |context| {
+        if context.stop_requested() {
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "marker read cancelled",
+            ));
+        }
         let parent = path
             .parent()
-            .ok_or_else(|| std::io::Error::other("marker has no parent"))?;
+            .ok_or_else(|| io::Error::other("marker has no parent"))?;
         let directory = NoFollowDirectory::open_root(parent)?;
         let file = match directory.open_regular(MARKER_FILE.as_ref()) {
             Ok(file) => file,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(error),
         };
         let metadata = file.metadata()?;
@@ -314,11 +446,11 @@ async fn read_marker_bytes_if_present(path: &Path) -> Result<Option<Vec<u8>>, Wo
         }
         let mut bytes = Vec::with_capacity(metadata.len() as usize);
         file.take(MAX_MARKER_BYTES + 1).read_to_end(&mut bytes)?;
-        Ok::<Option<Vec<u8>>, std::io::Error>(Some(bytes))
+        Ok(Some(bytes))
     })
-    .await
-    .map_err(|error| std::io::Error::other(format!("marker read task failed: {error}")))??;
+    .await?;
     if bytes
+        .view()
         .as_ref()
         .is_some_and(|bytes| bytes.len() as u64 > MAX_MARKER_BYTES)
     {
@@ -333,6 +465,35 @@ mod tests {
     use std::fs as std_fs;
     use std::process::Command;
     use tempfile::TempDir;
+
+    fn client() -> ExecutionClient {
+        crate::execution::test_general_client()
+    }
+
+    async fn create_marker(
+        workspace: &mut PaneWorkspace,
+    ) -> Result<OwnershipMarker, WorkspaceOwnerError> {
+        super::create_marker(&client(), workspace).await
+    }
+
+    async fn verify_marker(
+        workspace: &PaneWorkspace,
+    ) -> Result<OwnershipMarker, WorkspaceOwnerError> {
+        super::verify_marker(&client(), workspace).await
+    }
+
+    async fn read_registered_marker(
+        repo_common_dir: &Path,
+        worktree_root: &Path,
+    ) -> Result<Option<OwnershipMarker>, WorkspaceOwnerError> {
+        super::read_registered_marker(&client(), repo_common_dir, worktree_root).await
+    }
+
+    async fn validated_marker_path(
+        workspace: &PaneWorkspace,
+    ) -> Result<PathBuf, WorkspaceOwnerError> {
+        super::validated_marker_path(&client(), workspace).await
+    }
 
     fn git(directory: &Path, args: &[&str]) {
         let output = Command::new("git")
@@ -375,6 +536,63 @@ mod tests {
             created_at_unix: 1_700_000_000,
         };
         (temp, workspace)
+    }
+
+    #[tokio::test]
+    async fn marker_reads_wait_for_shared_io_capacity() {
+        let execution = crate::execution::ServerExecution::start().expect("execution bank");
+        let client = execution.client.clone();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(3));
+        let started = std::sync::Arc::new(tokio::sync::Semaphore::new(0));
+        let mut blockers = Vec::new();
+        for _ in 0..2 {
+            let reservation = client
+                .reserve(
+                    ilium_execution::Lane::Io,
+                    ilium_execution::JobCost {
+                        input_bytes: 1,
+                        result_bytes: 1,
+                    },
+                )
+                .await
+                .expect("I/O reservation");
+            let worker_barrier = std::sync::Arc::clone(&barrier);
+            let worker_started = std::sync::Arc::clone(&started);
+            let worker_client = client.clone();
+            blockers.push(tokio::spawn(async move {
+                worker_client
+                    .run_reserved(reservation, move |_| {
+                        worker_started.add_permits(1);
+                        worker_barrier.wait();
+                        Ok::<_, std::convert::Infallible>(())
+                    })
+                    .await
+                    .expect("blocking I/O job");
+            }));
+        }
+        let _started = started.acquire_many(2).await.expect("both workers started");
+
+        let temporary = TempDir::new().expect("temporary marker directory");
+        let marker_path = temporary.path().join(MARKER_FILE);
+        std_fs::write(&marker_path, b"{}").expect("write marker fixture");
+        let client = client();
+        let mut read =
+            tokio::spawn(async move { read_marker_bytes_if_present(&client, &marker_path).await });
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(50), &mut read)
+                .await
+                .is_err(),
+            "marker read bypassed the saturated shared I/O bank"
+        );
+
+        barrier.wait();
+        for blocker in blockers {
+            blocker.await.expect("blocking job task");
+        }
+        assert_eq!(
+            read.await.expect("marker read task").unwrap(),
+            Some(b"{}".to_vec())
+        );
     }
 
     #[tokio::test]
@@ -510,6 +728,22 @@ mod tests {
             std_fs::read(&marker_path).expect("marker remains"),
             b"foreign content"
         );
+    }
+
+    #[tokio::test]
+    async fn oversized_marker_creation_refuses_without_publishing_ownership() {
+        let (_temp, mut workspace) = linked_workspace().await;
+        workspace.base_ref = "x".repeat(MAX_MARKER_BYTES as usize);
+        let marker_path = validated_marker_path(&workspace)
+            .await
+            .expect("marker path");
+
+        assert!(matches!(
+            create_marker(&mut workspace).await,
+            Err(WorkspaceOwnerError::Invalid(_))
+        ));
+        assert!(workspace.workspace_id.is_none());
+        assert!(!marker_path.exists());
     }
 
     #[tokio::test]

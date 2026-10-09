@@ -156,8 +156,8 @@ async fn create_agent(
             if start_rx.await.is_err() {
                 return;
             }
-            let result =
-                create_agent_in_workspace(&creation_state, options, Some(&request_tx)).await;
+            let reply = crate::ipc::EventReply::Legacy(&request_tx);
+            let result = create_agent_in_workspace(&creation_state, options, Some(&reply)).await;
             let _ = result_tx.send(result);
         });
         if !state.track_workspace_creation_task(handle) {

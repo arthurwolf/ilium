@@ -1249,6 +1249,112 @@ async fn reparent_node_moves_a_pane_into_a_different_group_at_an_index() {
     let _ = tokio::time::timeout(Duration::from_secs(5), &mut server.server_task).await;
 }
 
+/// Creates one `Command`-style pane and returns its node id once the server
+/// has broadcast the tree containing it.
+async fn create_command_pane(
+    client: &mut ilium_transport::SessionStream,
+    kind: NewPaneKind,
+) -> NodeId {
+    write_frame(
+        client,
+        &ClientRequest::NewPane {
+            parent_group: ROOT_ID,
+            kind,
+            working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
+        },
+    )
+    .await
+    .expect("write NewPane request");
+    let event = expect_event(
+        client,
+        Duration::from_secs(5),
+        |event| matches!(event, ServerEvent::TreeSnapshot(tree) if tree.panes().count() > 0),
+    )
+    .await;
+    let ServerEvent::TreeSnapshot(tree) = event else {
+        unreachable!("predicate only matches TreeSnapshot");
+    };
+    first_launch_project_pane(&tree)
+}
+
+#[tokio::test]
+async fn command_pane_closing_on_exit_disappears_after_its_command_ends() {
+    let mut server = TestServer::start("close-on-exit-test").await;
+    let mut client = server.connect().await;
+    write_frame(
+        &mut client,
+        &ClientRequest::Attach {
+            session: "close-on-exit-test".to_string(),
+        },
+    )
+    .await
+    .unwrap();
+    read_initial_state(&mut client, Duration::from_secs(5)).await;
+
+    let pane_id = create_command_pane(
+        &mut client,
+        NewPaneKind::CommandClosingOnExit("exit 0".to_string()),
+    )
+    .await;
+
+    // The server holds the pane for a minimum lifetime, then removes it.
+    let event = expect_event(
+        &mut client,
+        Duration::from_secs(15),
+        |event| matches!(event, ServerEvent::TreeSnapshot(tree) if tree.get(pane_id).is_none()),
+    )
+    .await;
+    let ServerEvent::TreeSnapshot(tree) = event else {
+        unreachable!()
+    };
+    assert_eq!(tree.panes().count(), 0, "the exited pane must be gone");
+
+    write_frame(&mut client, &ClientRequest::KillSession)
+        .await
+        .expect("write KillSession request");
+    let _ = tokio::time::timeout(Duration::from_secs(5), &mut server.server_task).await;
+}
+
+#[tokio::test]
+async fn plain_command_pane_stays_after_its_command_exits() {
+    let mut server = TestServer::start("keep-open-test").await;
+    let mut client = server.connect().await;
+    write_frame(
+        &mut client,
+        &ClientRequest::Attach {
+            session: "keep-open-test".to_string(),
+        },
+    )
+    .await
+    .unwrap();
+    read_initial_state(&mut client, Duration::from_secs(5)).await;
+
+    let pane_id =
+        create_command_pane(&mut client, NewPaneKind::Command("exit 0".to_string())).await;
+
+    // Wait well past the closing variant's minimum lifetime plus poll interval.
+    tokio::time::sleep(Duration::from_secs(6)).await;
+    let mut observer = server.connect().await;
+    write_frame(
+        &mut observer,
+        &ClientRequest::Attach {
+            session: "keep-open-test".to_string(),
+        },
+    )
+    .await
+    .unwrap();
+    let (tree, _events) = read_initial_state(&mut observer, Duration::from_secs(5)).await;
+    assert!(
+        tree.get(pane_id).is_some(),
+        "a plain Command pane must remain after its command exits"
+    );
+
+    write_frame(&mut client, &ClientRequest::KillSession)
+        .await
+        .expect("write KillSession request");
+    let _ = tokio::time::timeout(Duration::from_secs(5), &mut server.server_task).await;
+}
+
 #[tokio::test]
 async fn close_pane_removes_it_and_a_second_client_sees_the_update() {
     let mut server = TestServer::start("close-pane-test").await;

@@ -3,6 +3,7 @@
 //! the same lock order immediately before granting a presentation mutation.
 //! Neither a client eligibility claim nor generic `last_prompt` is evidence.
 
+use std::ops::Deref;
 use std::path::PathBuf;
 
 use ilium_agent_session::{GenuineRequestEvidence, TranscriptLocator};
@@ -10,7 +11,14 @@ use ilium_core::{
     AgentProcessKey, BuiltinAgentProvider, Node, NodeKind, NodePresentationRevision,
     PaneContentKind, PaneTitleSource,
 };
+use ilium_execution::{JobCost, Lane};
 use ilium_ipc::PaneTitleObservation;
+
+use crate::execution::ExecutionClient;
+
+const MAX_TITLE_EVIDENCE_CANDIDATES: usize = 64;
+const TITLE_EVIDENCE_JOB_CANDIDATES: usize = 4;
+const MAX_TITLE_CANDIDATE_BYTES: usize = 64 * 1024;
 
 use crate::pane::{TerminalOrigin, TerminalPaneRuntime};
 
@@ -177,6 +185,21 @@ pub(crate) struct CollectedTitleEvidence {
     transcript: GenuineRequestEvidence,
 }
 
+pub(crate) struct CollectedTitleEvidenceBatch {
+    entries: Vec<CollectedTitleEvidence>,
+    // The flattened vector is admitted separately and remains charged through
+    // caller reconciliation after each worker result is consumed.
+    _storage: Option<std::sync::Arc<ilium_execution::StorageAdmission>>,
+}
+
+impl Deref for CollectedTitleEvidenceBatch {
+    type Target = [CollectedTitleEvidence];
+
+    fn deref(&self) -> &Self::Target {
+        &self.entries
+    }
+}
+
 impl CollectedTitleEvidence {
     pub(crate) fn observation(&self) -> &PaneTitleObservation {
         &self.candidate.observation
@@ -206,43 +229,232 @@ impl CollectedTitleEvidence {
     }
 }
 
-/// `home_dir` is ServerState's platform-resolved home. This owns its blocking
-/// task and awaits its handle. Call with no tree/panes locks held. Missing cwd,
-/// unreadable history and task failure all decline history-based authorization.
+/// `home_dir` is ServerState's platform-resolved home. Transcript reads run on
+/// the shared bounded I/O bank. Call with no tree/panes locks held. Missing cwd,
+/// unreadable history and worker failure all decline history-based authorization.
 pub(crate) async fn collect_title_evidence(
+    execution: Option<&ExecutionClient>,
     home_dir: PathBuf,
     candidates: Vec<TitleEvidenceCandidate>,
-) -> Vec<CollectedTitleEvidence> {
-    let fallback = candidates.clone();
-    match tokio::task::spawn_blocking(move || {
-        ilium_platform::thread_priority::lower_current_thread(
-            ilium_platform::thread_priority::WorkerPriority::BelowNormal,
-        );
-        candidates
-            .into_iter()
-            .map(|candidate| {
-                let transcript = collect_one(&home_dir, &candidate);
-                CollectedTitleEvidence {
-                    candidate,
-                    transcript,
-                }
-            })
-            .collect()
-    })
-    .await
+) -> CollectedTitleEvidenceBatch {
+    let Some(execution) = execution else {
+        return CollectedTitleEvidenceBatch {
+            entries: Vec::new(),
+            _storage: None,
+        };
+    };
+    if candidates.len() > MAX_TITLE_EVIDENCE_CANDIDATES {
+        return unavailable_batch(execution, candidates).await;
+    }
+    if candidates
+        .iter()
+        .any(|candidate| candidate_cost(candidate).is_none())
     {
-        Ok(evidence) => evidence,
+        return CollectedTitleEvidenceBatch {
+            entries: Vec::new(),
+            _storage: None,
+        };
+    }
+    let output_bytes = candidates
+        .iter()
+        .map(|candidate| {
+            candidate_cost(candidate)
+                .unwrap_or_default()
+                .saturating_add(std::mem::size_of::<CollectedTitleEvidence>())
+        })
+        .sum::<usize>()
+        .max(1);
+    let output_storage = match execution.reserve_storage(output_bytes).await {
+        Ok(storage) => storage,
         Err(error) => {
-            tracing::warn!(%error, "title eligibility transcript collection failed");
-            fallback
-                .into_iter()
-                .map(|candidate| CollectedTitleEvidence {
-                    candidate,
-                    transcript: GenuineRequestEvidence::Unavailable,
-                })
-                .collect()
+            tracing::warn!(?error, "title evidence result storage admission failed");
+            return CollectedTitleEvidenceBatch {
+                entries: Vec::new(),
+                _storage: None,
+            };
+        }
+    };
+
+    let mut entries = Vec::with_capacity(candidates.len());
+    let mut candidates = candidates.into_iter();
+    loop {
+        let batch = candidates
+            .by_ref()
+            .take(TITLE_EVIDENCE_JOB_CANDIDATES)
+            .collect::<Vec<_>>();
+        if batch.is_empty() {
+            break;
+        }
+        let metadata_bytes = batch
+            .iter()
+            .map(|candidate| candidate_cost(candidate).expect("validated candidate"))
+            .sum::<usize>();
+        let transcript_bytes = batch.len().saturating_mul(
+            crate::session_id::TRANSCRIPT_READ_LIMITS
+                .total_read_bytes
+                .saturating_add(crate::session_id::TRANSCRIPT_READ_LIMITS.retained_path_bytes),
+        );
+        let reservation = match execution
+            .reserve(
+                Lane::Io,
+                JobCost {
+                    input_bytes: metadata_bytes.saturating_add(transcript_bytes).max(1),
+                    result_bytes: metadata_bytes
+                        .saturating_add(
+                            batch
+                                .len()
+                                .saturating_mul(std::mem::size_of::<CollectedTitleEvidence>()),
+                        )
+                        .max(1),
+                },
+            )
+            .await
+        {
+            Ok(reservation) => reservation,
+            Err(error) => {
+                tracing::warn!(?error, "title transcript evidence admission failed");
+                append_unavailable(&mut entries, batch);
+                append_unavailable(&mut entries, candidates.collect());
+                return CollectedTitleEvidenceBatch {
+                    entries,
+                    _storage: Some(output_storage),
+                };
+            }
+        };
+        let job_home = home_dir.clone();
+        let result = execution
+            .run_reserved(reservation, move |context| {
+                let mut collected = Vec::with_capacity(batch.len());
+                for candidate in batch {
+                    if context.stop_requested() {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::Interrupted,
+                            "title transcript collection cancelled",
+                        ));
+                    }
+                    let transcript = collect_one(&job_home, &candidate);
+                    collected.push(CollectedTitleEvidence {
+                        candidate,
+                        transcript,
+                    });
+                }
+                Ok::<_, std::io::Error>(collected)
+            })
+            .await;
+        match result {
+            Ok(retained) => {
+                let (mut batch_entries, retention) = retained.into_parts();
+                entries.append(&mut batch_entries);
+                drop(retention);
+            }
+            Err(error) => {
+                tracing::warn!(%error, "title transcript evidence worker failed");
+                return CollectedTitleEvidenceBatch {
+                    entries: Vec::new(),
+                    _storage: None,
+                };
+            }
         }
     }
+    CollectedTitleEvidenceBatch {
+        entries,
+        _storage: Some(output_storage),
+    }
+}
+
+fn candidate_cost(candidate: &TitleEvidenceCandidate) -> Option<usize> {
+    let mut bytes = std::mem::size_of::<TitleEvidenceCandidate>()
+        .checked_add(candidate.project_cwd.as_os_str().as_encoded_bytes().len())?;
+    bytes = bytes.checked_add(
+        candidate
+            .observation
+            .session_id
+            .as_ref()
+            .map_or(0, String::len),
+    )?;
+    bytes = bytes.checked_add(
+        candidate
+            .observation
+            .agent_class
+            .as_ref()
+            .and_then(agent_class_bytes)
+            .unwrap_or(0),
+    )?;
+    if let Some(runtime) = &candidate.runtime {
+        bytes = bytes.checked_add(
+            runtime
+                .observation
+                .session_id
+                .as_ref()
+                .map_or(0, String::len),
+        )?;
+        if let Some(class) = &runtime.observation.agent_class {
+            bytes = bytes.checked_add(agent_class_bytes(class)?)?;
+        }
+        if let Some(process) = &runtime.process_key {
+            bytes = bytes.checked_add(agent_class_bytes(&process.class)?)?;
+        }
+    }
+    (bytes <= MAX_TITLE_CANDIDATE_BYTES).then_some(bytes.max(1))
+}
+
+fn agent_class_bytes(class: &ilium_core::AgentClass) -> Option<usize> {
+    match class {
+        ilium_core::AgentClass::Other(name) => Some(name.len()),
+        _ => Some(0),
+    }
+}
+
+async fn unavailable_batch(
+    execution: &ExecutionClient,
+    candidates: Vec<TitleEvidenceCandidate>,
+) -> CollectedTitleEvidenceBatch {
+    if candidates.len() > MAX_TITLE_EVIDENCE_CANDIDATES + 1 {
+        return CollectedTitleEvidenceBatch {
+            entries: Vec::new(),
+            _storage: None,
+        };
+    }
+    let Some(output_bytes) = candidates.iter().try_fold(0_usize, |total, candidate| {
+        total.checked_add(
+            candidate_cost(candidate)?.checked_add(std::mem::size_of::<CollectedTitleEvidence>())?,
+        )
+    }) else {
+        return CollectedTitleEvidenceBatch {
+            entries: Vec::new(),
+            _storage: None,
+        };
+    };
+    let storage = match execution.reserve_storage(output_bytes.max(1)).await {
+        Ok(storage) => storage,
+        Err(error) => {
+            tracing::warn!(?error, "title fallback result storage admission failed");
+            return CollectedTitleEvidenceBatch {
+                entries: Vec::new(),
+                _storage: None,
+            };
+        }
+    };
+    let mut entries = Vec::with_capacity(candidates.len());
+    append_unavailable(&mut entries, candidates);
+    CollectedTitleEvidenceBatch {
+        entries,
+        _storage: Some(storage),
+    }
+}
+
+fn append_unavailable(
+    entries: &mut Vec<CollectedTitleEvidence>,
+    candidates: Vec<TitleEvidenceCandidate>,
+) {
+    entries.extend(
+        candidates
+            .into_iter()
+            .map(|candidate| CollectedTitleEvidence {
+                candidate,
+                transcript: GenuineRequestEvidence::Unavailable,
+            }),
+    );
 }
 
 fn collect_one(
@@ -267,7 +479,11 @@ fn collect_one(
     let Ok(project_cwd) = candidate.project_cwd.canonicalize() else {
         return GenuineRequestEvidence::Unavailable;
     };
-    TranscriptLocator::new(home_dir, &project_cwd)
+    TranscriptLocator::new_bounded(
+        home_dir,
+        &project_cwd,
+        crate::session_id::TRANSCRIPT_READ_LIMITS,
+    )
         .genuine_request_evidence(class, session_id)
         .unwrap_or_else(|error| {
             tracing::debug!(pane_id = candidate.observation.pane_id.0, %error, "title eligibility history unavailable");
@@ -394,6 +610,108 @@ mod tests {
             },
         };
         (node, runtime, evidence)
+    }
+
+    #[tokio::test]
+    async fn over_limit_transcript_batch_fails_closed_without_partial_authorization() {
+        const SESSION_ID: &str = "22222222-2222-4222-8222-222222222222";
+        const MAX_TITLE_EVIDENCE_CANDIDATES: usize = 64;
+
+        let home = tempfile::tempdir().unwrap();
+        let project = home.path().join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        let transcript_dir = home.path().join(".codex/sessions/2026/10/08");
+        std::fs::create_dir_all(&transcript_dir).unwrap();
+        let metadata = serde_json::json!({
+            "type": "session_meta",
+            "payload": {"id": SESSION_ID, "cwd": project},
+        });
+        let authored = serde_json::json!({
+            "type": "event_msg",
+            "payload": {"type": "user_message", "message": "rename this terminal"},
+        });
+        std::fs::write(
+            transcript_dir.join(format!("rollout-2026-10-08T00-00-00-{SESSION_ID}.jsonl")),
+            format!("{metadata}\n{authored}\n"),
+        )
+        .unwrap();
+
+        let (_, runtime, mut evidence) = fixture();
+        let mut runtime = runtime;
+        runtime.observation.session_id = Some(SESSION_ID.to_owned());
+        evidence.candidate.observation = runtime.observation.clone();
+        evidence.candidate.project_cwd = project;
+        evidence.candidate.runtime = Some(runtime);
+        let candidates = vec![evidence.candidate; MAX_TITLE_EVIDENCE_CANDIDATES + 1];
+
+        let execution = crate::execution::test_general_client();
+        let collected =
+            collect_title_evidence(Some(&execution), home.path().to_path_buf(), candidates).await;
+
+        assert_eq!(collected.len(), MAX_TITLE_EVIDENCE_CANDIDATES + 1);
+        assert!(collected
+            .iter()
+            .all(|evidence| evidence.transcript == GenuineRequestEvidence::Unavailable));
+    }
+
+    #[tokio::test]
+    async fn oversized_transcript_line_fails_closed_without_partial_authorization() {
+        const SESSION_ID: &str = "33333333-3333-4333-8333-333333333333";
+        const MAX_LINE_BYTES: usize = 1024 * 1024;
+
+        let home = tempfile::tempdir().unwrap();
+        let project = home.path().join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        let transcript_dir = home.path().join(".codex/sessions/2026/10/08");
+        std::fs::create_dir_all(&transcript_dir).unwrap();
+        let metadata = serde_json::json!({
+            "type": "session_meta",
+            "payload": {"id": SESSION_ID, "cwd": project},
+        });
+        let authored = serde_json::json!({
+            "type": "event_msg",
+            "payload": {"type": "user_message", "message": "rename this terminal"},
+        });
+        let oversized = serde_json::json!({
+            "type": "event_msg",
+            "payload": {
+                "type": "user_message",
+                "message": "x".repeat(MAX_LINE_BYTES),
+            },
+        });
+        let path = transcript_dir.join(format!("rollout-2026-10-08T00-00-00-{SESSION_ID}.jsonl"));
+        std::fs::write(
+            path,
+            format!(
+                "{}\n{}\n{}\n",
+                serde_json::to_string(&metadata).unwrap(),
+                serde_json::to_string(&authored).unwrap(),
+                serde_json::to_string(&oversized).unwrap(),
+            ),
+        )
+        .unwrap();
+
+        let (_, runtime, mut evidence) = fixture();
+        let mut runtime = runtime;
+        runtime.observation.session_id = Some(SESSION_ID.to_owned());
+        evidence.candidate.observation = runtime.observation.clone();
+        evidence.candidate.project_cwd = project;
+        evidence.candidate.runtime = Some(runtime);
+
+        let execution = crate::execution::test_general_client();
+        let collected = collect_title_evidence(
+            Some(&execution),
+            home.path().to_path_buf(),
+            vec![evidence.candidate],
+        )
+        .await;
+
+        assert_eq!(collected.len(), 1);
+        assert_eq!(
+            collected[0].transcript,
+            GenuineRequestEvidence::Unavailable,
+            "an oversized real transcript must not authorize from its readable prefix",
+        );
     }
 
     #[test]

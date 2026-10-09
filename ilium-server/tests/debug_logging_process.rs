@@ -69,7 +69,9 @@ async fn detached_server_process_logs_major_ipc_actions_and_errors() {
     )
     .expect("debug config");
 
-    let child = Command::new(env!("CARGO_BIN_EXE_ilium-server"))
+    let server_binary = std::env::var("CARGO_BIN_EXE_ilium-server")
+        .expect("Cargo provides the ilium-server binary path to integration tests");
+    let child = Command::new(server_binary)
         .args([
             "--session-name",
             "debug-session",
