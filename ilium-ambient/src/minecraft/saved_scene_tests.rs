@@ -4,6 +4,28 @@ use std::cell::RefCell;
 use std::time::{Duration, Instant};
 
 #[test]
+fn allocated_proto_chunks_are_rejected_before_full_route_decode() {
+    let support = BTreeSet::from([[-18, -7], [-18, -6]]);
+    let allocated = BTreeSet::from([[-18, -7], [-18, -6]]);
+    let full = BTreeSet::from([[-18, -6]]);
+
+    assert!(
+        !route_support_is_eligible(&support, &allocated, |position| {
+            Ok(full.contains(&position))
+        })
+        .unwrap(),
+        "an allocated chunk with Status=structure_starts must not reach full viewport decode"
+    );
+    assert!(route_support_is_eligible(&support, &allocated, |position| {
+        Ok(support.contains(&position))
+    })
+    .unwrap());
+    assert!(
+        !route_support_is_eligible(&support, &BTreeSet::from([[-18, -6]]), |_| Ok(true)).unwrap()
+    );
+}
+
+#[test]
 fn saved_scene_status_exposes_phase_elapsed_time_and_unknown_eta_while_preparing() {
     let env = SceneEnv::for_test(
         std::env::temp_dir().join("saved-status-progress"),

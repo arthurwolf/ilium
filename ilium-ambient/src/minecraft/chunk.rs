@@ -476,3 +476,15 @@ pub fn decode(
     check(cancel)?;
     Ok(decoded)
 }
+
+/// Check the persisted world-generation gate without decoding sections.
+/// Projected rendering still runs the full decoder after this inexpensive
+/// candidate filter has established that Minecraft marked the chunk complete.
+pub fn has_full_generation_status(document: &Document, expected: [i32; 2]) -> DecodeResult<bool> {
+    region::verify_identity(document, expected)?;
+    let (_, _, body) = region::chunk_body(document)?;
+    let Some(Tag::String(status)) = nbt::get(body, "Status") else {
+        return Ok(false);
+    };
+    Ok(status.0 == Text::from("full").0 || status.0 == Text::from("minecraft:full").0)
+}

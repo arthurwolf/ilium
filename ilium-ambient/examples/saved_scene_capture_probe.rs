@@ -6,15 +6,17 @@
 
 use ilium_ambient::{
     minecraft::{
-        pack_profiles::FULL_PACKS,
         saved_runtime::SavedRuntime,
         saved_scene::{PinnedSceneSource, SavedScene},
         settings::WorldSource,
     },
     raster::{self, DitherMode, Raster},
     registry::AmbientSettings,
-    scene::{Frame, Scene, SceneEnv},
-    voxel_landscape::assets::identity::{AssetPath, Digest256},
+    scene::{Frame, SavedWorldFrameEvidence, Scene, SceneEnv},
+    voxel_landscape::{
+        assets::identity::{AssetPath, Digest256},
+        pack_profiles::FULL_PACKS,
+    },
 };
 use serde_json::{json, Value};
 use std::{
@@ -23,7 +25,7 @@ use std::{
     path::{Component, Path, PathBuf},
     sync::Arc,
     thread,
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, UNIX_EPOCH},
 };
 
 struct Arguments {
@@ -45,7 +47,7 @@ fn parse_arguments() -> Result<Arguments, String> {
     parse_arguments_from(std::env::args().skip(1))
 }
 
-fn parse_arguments_from(arguments: impl Iterator<Item = String>) -> Result<Arguments, String> {
+fn parse_arguments_from(mut arguments: impl Iterator<Item = String>) -> Result<Arguments, String> {
     let mut values = BTreeMap::<String, String>::new();
     while let Some(key) = arguments.next() {
         if ![
@@ -195,6 +197,17 @@ fn render_metadata(width: u16, height: u16, zoom: u16) -> Value {
     })
 }
 
+fn frame_evidence_matches(
+    evidence: &SavedWorldFrameEvidence,
+    native_digest: Digest256,
+    selected_digest: Option<Digest256>,
+) -> bool {
+    evidence.is_qualified()
+        && evidence.source_profile == ilium_ambient::minecraft::native_assets::PROFILE
+        && evidence.native_archive_sha256 == native_digest
+        && evidence.selected_archive_sha256 == selected_digest
+}
+
 fn paint_png(
     raster: &Raster,
     cell_colors: &[[u8; 3]],
@@ -226,7 +239,7 @@ fn paint_png(
     )
     .ok_or("invalid raster dimensions")?;
     image.save(path)?;
-    let digest = Digest256::of(fs::read(path)?);
+    let digest = Digest256::of(&fs::read(path)?);
     Ok((lit_dots, digest))
 }
 
@@ -244,7 +257,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let native_jar = Arc::new(ilium_platform::animation_files::PinnedFile::from_host(
         fs::File::open(&arguments.native_jar)?,
     )?);
-    let native_digest = Digest256::of(fs::read(&arguments.native_jar)?);
+    let native_digest = Digest256::of(&fs::read(&arguments.native_jar)?);
     fs::create_dir_all(arguments.output.join("history"))?;
 
     let quota = ilium_execution::QuotaGroup::new(ilium_execution::QuotaLimits {
@@ -275,12 +288,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             },
         },
     )?;
-    let client = execution.client(ilium_execution::ClientLimits {
-        jobs: 8,
-        service_jobs: 0,
-        input_bytes: 512 * 1024 * 1024,
-        result_bytes: 512 * 1024 * 1024,
-    })?;
+    let client = execution
+        .client(ilium_execution::ClientLimits {
+            jobs: 8,
+            service_jobs: 0,
+            input_bytes: 512 * 1024 * 1024,
+            result_bytes: 512 * 1024 * 1024,
+        })
+        .map_err(|reason| {
+            std::io::Error::other(format!("capture client admission failed: {reason:?}"))
+        })?;
     let env = SceneEnv::for_test(
         arguments.output.join("cache"),
         ilium_ambient::resources::AmbientResources::new(client),
@@ -295,7 +312,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         settings.voxel_landscape.pack_profile = *index;
         settings.voxel_landscape.pack_path = path.to_string_lossy().into_owned();
         settings.voxel_landscape.pack_root = arguments.pack_root.clone().unwrap_or_default();
-        (FULL_PACKS[*index].id, Some(Digest256::of(fs::read(path)?)))
+        (FULL_PACKS[*index].id, Some(Digest256::of(&fs::read(path)?)))
     } else {
         settings.voxel_landscape.pack_path.clear();
         settings.voxel_landscape.pack_root.clear();
@@ -303,7 +320,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     };
     let source = PinnedSceneSource {
         root_label: arguments.saves_root.clone(),
-        selected_world: Some(PathBuf::from(&arguments.world)),
+        selected_world: Some(arguments.saves_root.join(&arguments.world)),
         selected_identity: Some(selected_directory.identity()),
         root: pinned_root,
         native_jar,
@@ -347,10 +364,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         attempts += 1;
 
         if let Some(evidence) = scene.saved_world_frame_evidence() {
-            let evidence_matches = evidence.is_qualified()
-                && evidence.source_profile == profile_id
-                && evidence.native_archive_sha256 == native_digest
-                && evidence.selected_archive_sha256 == selected_digest;
+            let evidence_matches =
+                frame_evidence_matches(&evidence, native_digest, selected_digest);
             if !evidence_matches {
                 return Err(
                     format!("frame asset receipt failed qualification: {evidence:?}").into(),
@@ -477,6 +492,43 @@ mod tests {
         assert_eq!(render["viewport_pixels"]["width"], 160);
         assert_eq!(render["viewport_pixels"]["height"], 96);
         assert_eq!(render["zoom_percent"], 150);
+    }
+
+    #[test]
+    fn frame_evidence_matches_java_default_and_selected_texture_packs() {
+        let native_digest = Digest256::of(b"native archive");
+        let selected_digest = Digest256::of(b"selected archive");
+        let evidence = SavedWorldFrameEvidence {
+            bank_epoch: Digest256::of(b"bank epoch"),
+            source_profile: ilium_ambient::minecraft::native_assets::PROFILE,
+            native_archive_sha256: native_digest,
+            selected_archive_sha256: None,
+            required_materials: 1,
+            required_materials_satisfied: 1,
+            visible_pixels: 1,
+        };
+
+        assert!(frame_evidence_matches(&evidence, native_digest, None,));
+        assert!(!frame_evidence_matches(
+            &evidence,
+            Digest256::of(b"other native archive"),
+            None,
+        ));
+
+        let selected_evidence = SavedWorldFrameEvidence {
+            selected_archive_sha256: Some(selected_digest),
+            ..evidence
+        };
+        assert!(frame_evidence_matches(
+            &selected_evidence,
+            native_digest,
+            Some(selected_digest),
+        ));
+        assert!(!frame_evidence_matches(
+            &selected_evidence,
+            native_digest,
+            None,
+        ));
     }
 
     fn arguments(directory: &Path, selected_pack: bool, root: Option<&str>) -> Vec<String> {

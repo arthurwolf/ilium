@@ -360,6 +360,8 @@ pub enum SceneReadiness {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct SavedWorldFrameEvidence {
     pub bank_epoch: crate::voxel_landscape::assets::identity::Digest256,
+    /// Native base-asset profile; selected texture-pack identity is reported by
+    /// `selected_archive_sha256` and is intentionally independent of this ID.
     pub source_profile: &'static str,
     pub native_archive_sha256: crate::voxel_landscape::assets::identity::Digest256,
     pub selected_archive_sha256: Option<crate::voxel_landscape::assets::identity::Digest256>,

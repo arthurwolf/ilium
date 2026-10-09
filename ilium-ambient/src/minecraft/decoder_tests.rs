@@ -470,6 +470,10 @@ fn full_proto_unknown_and_missing_remain_distinct() {
         }
         let decoded = decode(&doc).unwrap();
         let full = matches!(status, Some("full" | "minecraft:full"));
+        assert_eq!(
+            chunk::has_full_generation_status(&doc, [-1, -2]).unwrap(),
+            full
+        );
         assert_eq!(decoded.status.as_deref(), status);
         assert_eq!(decoded.is_full(), full);
         assert_eq!(decoded.has_full_coverage(-4, -4), full);

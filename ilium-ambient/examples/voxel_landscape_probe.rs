@@ -358,7 +358,7 @@ fn capture_matrix(values: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
         pack_profile: arguments.profile.unwrap_or_default(),
         generated_texture_source: arguments.texture_source.setting_index(),
         seed: arguments.seed,
-        zoom_percent: arguments.zoom,
+        zoom_percent: i32::try_from(arguments.zoom)?,
         vegetation_percent: arguments.vegetation,
         atmosphere: arguments.atmosphere,
         ..VoxelLandscapeSettings::default()

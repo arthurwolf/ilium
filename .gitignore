@@ -6,7 +6,12 @@ target/
 # Working notes, plans, and scratch tooling stay local to each checkout.
 # Published documentation lives at the repository root (README.md,
 # ARCHITECTURE.md, CLAUDE.md) so a clone never depends on this directory.
-/docs/
+/docs/*
+!/docs/
+/docs/*
+!/docs/tasks/
+/docs/tasks/*
+!/docs/tasks/01-overworld-texture-pack-shipping.md
 /data/
 /CHATROOM.md
 

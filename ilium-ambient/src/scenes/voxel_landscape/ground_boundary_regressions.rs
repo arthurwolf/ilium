@@ -842,7 +842,7 @@ fn generated_ground_cancellation_and_revision_drop_incomplete_candidates() {
         box_model([0; 3], [16; 3], true),
         &[20, 190, 40, 0, 20, 190, 40, 255],
     );
-    sources.pack_owner.packs()[0].fixture_cancel_on_read(Arc::clone(&stop), 6);
+    sources.pack_owner.packs_mut().unwrap()[0].fixture_cancel_on_read(Arc::clone(&stop), 6);
     let baseline = budget.used();
     let mut world = filled_world([-2, -2, 0], [5, 5, 5]);
     for z in 1..=4 {

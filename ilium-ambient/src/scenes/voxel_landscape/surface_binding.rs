@@ -791,6 +791,14 @@ impl BindingPackOwner {
             Self::InstalledNative(sources) => sources.packs(),
         }
     }
+
+    #[cfg(test)]
+    fn packs_mut(&mut self) -> Option<&mut [LayeredPack]> {
+        match self {
+            Self::Selected(packs) => Some(packs),
+            Self::InstalledNative(_) => None,
+        }
+    }
 }
 
 impl BindingSources {
