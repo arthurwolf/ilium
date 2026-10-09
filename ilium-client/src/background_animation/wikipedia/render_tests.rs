@@ -1009,10 +1009,11 @@ fn braille_uses_the_real_font_and_changes_with_zoom() {
     let first = r.render(40, 0.0).unwrap().to_vec();
     assert!(first.iter().any(RenderCell::is_ink));
     assert!(first.iter().any(|c| !c.is_ink()));
-    assert!(first.iter().filter(|c| c.is_ink()).all(|c| c
-        .symbol()
-        .chars()
-        .all(|g| ('\u{2801}'..='\u{28ff}').contains(&g))));
+    assert!(first.iter().filter(|c| c.is_ink()).all(|c| {
+        c.symbol()
+            .chars()
+            .all(|g| ('\u{2801}'..='\u{28ff}').contains(&g))
+    }));
     let work = r.work_stats();
     r.render(40, 0.10).unwrap();
     assert_eq!(r.work_stats(), work);
@@ -1197,7 +1198,9 @@ fn wikipedia_renderer_preview() {
                 };
                 let mut r = WikipediaRenderer::new();
                 r.prepare(Arc::clone(&doc), columns, &settings).unwrap();
-                println!("\n--- renderer only: {mode:?} {columns}x40 grey={grey} {palette:?} zoom={zoom} offset={offset} ---");
+                println!(
+                    "\n--- renderer only: {mode:?} {columns}x40 grey={grey} {palette:?} zoom={zoom} offset={offset} ---"
+                );
                 let cells = r.render(40, offset).unwrap();
                 for row in cells.chunks(usize::from(columns)) {
                     for cell in row {

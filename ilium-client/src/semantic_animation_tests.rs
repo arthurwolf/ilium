@@ -122,7 +122,7 @@ fn all_concrete_ids_and_descriptions_are_present_once_without_aliases() {
         assert_eq!(kind_for(&id).unwrap(), kind);
     }
     assert_eq!(
-        count, 41,
+        count, 59,
         "Review the frozen inventory when concrete scenes change"
     );
     assert!(

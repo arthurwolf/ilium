@@ -26,7 +26,7 @@ use ilium_animation_js::{
     clip_chunk_store::ClipChunkStore,
     clock::AnimationClock,
     engine::HostRequest,
-    engine::{ArraySpec, CreateState, EngineLimits, TypedArrayKind},
+    engine::{ArraySpec, CreateState, EngineLimits, ServicePhase, TypedArrayKind},
     helper::HelperLimits,
     http::SystemDns,
     manifest::AnimationMode,
@@ -56,14 +56,15 @@ use ilium_animation_js::{
     native_world_host::NativeWorldHost,
     permissions::{Capability, Ceiling, Invalidation, Selection},
     replay::{
-        ClipSpec, ClipSpecification, FrozenEvidence, FrozenInputs, Playback, PlaybackMode,
+        ClipSpec, ClipSpecification, FrozenEvidence, FrozenInputSnapshot, FrozenInputs,
+        FrozenSourceFrame, FrozenSourceSequence, InputFamily, Playback, PlaybackMode,
         PlaybackSettings, Preparation, ReplayAuthority, ReplayAuthorization, ReplayCache,
         ReplayClip, ReplayLimits, ReplayPlayer, ReplayPreparationOwner,
     },
     runtime::VerifiedPreparation,
     runtime::{InstancePreparation, PackageInstance, RetainedFrameAuthority},
     sources::SourceClock,
-    surface::{Data, Format, FrameMeta, Mode, Planes, Shape, Snapshot, Surface},
+    surface::{Data, Format, FrameMeta, Mode, Planes, Shape, Snapshot, SourceToken, Surface},
 };
 use ilium_execution::{
     Job, JobContext, JobCost, JobOutcome, JobPoll, Lane, QuotaGroup, Receipt, Retention,
@@ -85,6 +86,7 @@ use std::{
 const ARCHIVE_BYTES: usize = 32 * 1024 * 1024;
 static NEXT_INSTANCE: AtomicU64 = AtomicU64::new(1);
 static NEXT_SOURCE_FEED: AtomicU64 = AtomicU64::new(1);
+static NEXT_REPLAY_CAPTURE: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PluginFrameIdentity {
@@ -103,6 +105,15 @@ pub(super) struct PluginFrame {
     pub frames_per_second: u32,
     pub resident_bytes: usize,
     pub replay: Option<ilium_animation_js::replay::PlaybackLease>,
+    pub world_provenance: Option<Arc<WorldFrameProvenance>>,
+}
+/// Native-only ownership aligned with the exact packed Braille dot plane.
+/// Tokens and bindings never cross into JavaScript or terminal cell data.
+pub(super) struct WorldFrameProvenance {
+    pub bindings: Vec<Arc<ilium_animation_js::native_worlds::WorldDotBinding>>,
+    pub tokens: Vec<Option<SourceToken>>,
+    pub resident_bytes: usize,
+    _storage: StorageAdmission,
 }
 struct Presentation {
     surface: Surface,
@@ -164,16 +175,217 @@ struct SourceFeedRecord {
     terminal: Option<SourceFeedTerminal>,
     closing: Option<HostRequest>,
     closing_state: SourcePublishState,
+    sequence_capture_finished: bool,
 }
 struct NativeSourceOwner {
     active: BTreeMap<u64, NativeSourceHost>,
     terminal: BTreeMap<u64, SourceTerminal>,
     feeds: BTreeMap<String, SourceFeedRecord>,
+    recordings: BTreeMap<String, NativeReplayRecording>,
+    pending_sequences: BTreeMap<u64, PendingReplaySequence>,
     client: ilium_execution::Client,
     cadence: Arc<SourceCadence>,
+    #[cfg(feature = "qualification-test-support")]
+    offline_http: Option<Arc<ilium_animation_js::native_source_host::OfflineSourceHttp>>,
     closed: bool,
     _metadata: StorageAdmission,
 }
+struct NativeReplayRecording {
+    digest: [u8; 32],
+    captures: Vec<Arc<ilium_animation_js::native_source_capture::NativeCapturedFeed>>,
+    sequence_captures: Vec<(
+        String,
+        Arc<ilium_animation_js::native_source_capture::NativeCapturedFeed>,
+    )>,
+    frozen: Arc<FrozenInputs>,
+    sequence: Option<Arc<FrozenSourceSequence>>,
+    _admission: StorageAdmission,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct ReplaySequenceCaptureOptions {
+    sources: Vec<(String, String)>,
+    duration_ms: u64,
+    sample_hz: u64,
+    max_frames: usize,
+    max_bytes: usize,
+}
+
+impl ReplaySequenceCaptureOptions {
+    fn parse(value: &serde_json::Value) -> ilium_animation_js::error::Result<Self> {
+        use ilium_animation_js::error::AnimationError;
+
+        let fields = value.as_object().ok_or_else(|| {
+            AnimationError::Runtime("replay sequence options must be an object".into())
+        })?;
+        if fields.len() != 5
+            || !fields.contains_key("sources")
+            || !fields.contains_key("duration_ms")
+            || !fields.contains_key("sample_hz")
+            || !fields.contains_key("max_frames")
+            || !fields.contains_key("max_bytes")
+        {
+            return Err(AnimationError::Runtime(
+                "replay sequence options have unknown or missing fields".into(),
+            ));
+        }
+
+        let duration_ms = fields["duration_ms"]
+            .as_u64()
+            .ok_or_else(|| AnimationError::Budget("replay sequence duration is invalid".into()))?;
+        let sample_hz = fields["sample_hz"]
+            .as_u64()
+            .filter(|rate| (1..=60).contains(rate))
+            .ok_or_else(|| AnimationError::Budget("replay sequence sample rate".into()))?;
+        let max_frames = fields["max_frames"]
+            .as_u64()
+            .and_then(|frames| usize::try_from(frames).ok())
+            .filter(|frames| (1..=512).contains(frames))
+            .ok_or_else(|| AnimationError::Budget("replay sequence frame limit".into()))?;
+        let max_bytes = fields["max_bytes"]
+            .as_u64()
+            .and_then(|bytes| usize::try_from(bytes).ok())
+            .filter(|bytes| (1..=32_000_000).contains(bytes))
+            .ok_or_else(|| AnimationError::Budget("replay sequence byte limit".into()))?;
+        if duration_ms == 0 || duration_ms > 120_000 {
+            return Err(AnimationError::Budget(
+                "replay sequence duration limit".into(),
+            ));
+        }
+        let required_frames = u128::from(duration_ms)
+            .checked_mul(u128::from(sample_hz))
+            .and_then(|samples| samples.checked_add(999))
+            .map(|samples| samples / 1_000)
+            .ok_or_else(|| AnimationError::Budget("replay sequence frame count overflow".into()))?;
+        if required_frames > max_frames as u128 {
+            return Err(AnimationError::Budget(
+                "replay sequence frame capacity".into(),
+            ));
+        }
+
+        let raw_sources = fields["sources"].as_array().ok_or_else(|| {
+            AnimationError::Runtime("replay sequence sources must be an array".into())
+        })?;
+        if raw_sources.is_empty() || raw_sources.len() > 32 {
+            return Err(AnimationError::Budget(
+                "replay sequence source count".into(),
+            ));
+        }
+        let mut sources = Vec::new();
+        sources
+            .try_reserve_exact(raw_sources.len())
+            .map_err(|_| AnimationError::Budget("replay sequence source allocation".into()))?;
+        let mut seen = std::collections::BTreeSet::new();
+        for source in raw_sources {
+            let fields = source.as_object().ok_or_else(|| {
+                AnimationError::Runtime("replay sequence source must be an object".into())
+            })?;
+            if fields.len() != 2 || !fields.contains_key("id") || !fields.contains_key("kind") {
+                return Err(AnimationError::Runtime(
+                    "replay sequence source fields".into(),
+                ));
+            }
+            let id = fields["id"].as_str().filter(|id| {
+                id.starts_with("source-feed-")
+                    && id.len() > "source-feed-".len()
+                    && id.len() <= 128
+                    && !id.chars().any(char::is_control)
+            });
+            let kind = fields["kind"].as_str().filter(|kind| {
+                matches!(
+                    *kind,
+                    "sources.series"
+                        | "sources.earthquakes"
+                        | "sources.aircraft"
+                        | "sources.boats"
+                        | "sources.chess"
+                        | "sources.weather"
+                )
+            });
+            let (Some(id), Some(kind)) = (id, kind) else {
+                return Err(AnimationError::PermissionDenied(
+                    "replay sequence source identity or kind is invalid".into(),
+                ));
+            };
+            if !seen.insert(id.to_owned()) {
+                return Err(AnimationError::PermissionDenied(
+                    "replay sequence source is duplicated".into(),
+                ));
+            }
+            sources.push((id.to_owned(), kind.to_owned()));
+        }
+
+        Ok(Self {
+            sources,
+            duration_ms,
+            sample_hz,
+            max_frames,
+            max_bytes,
+        })
+    }
+}
+
+fn replay_source_family(kind: &str) -> Option<InputFamily> {
+    match kind {
+        "sources.series" => Some(InputFamily::Series),
+        "sources.earthquakes" => Some(InputFamily::Earthquakes),
+        "sources.aircraft" => Some(InputFamily::Aircraft),
+        "sources.boats" => Some(InputFamily::Boats),
+        "sources.chess" => Some(InputFamily::Chess),
+        "sources.weather" => Some(InputFamily::Weather),
+        _ => None,
+    }
+}
+
+struct PendingReplaySequence {
+    request: HostRequest,
+    options: ReplaySequenceCaptureOptions,
+    started_at: Option<Instant>,
+    next_sample_index: u64,
+    stopping_sources: bool,
+    frames: Vec<FrozenSourceFrame>,
+    initial_captures: Vec<Arc<ilium_animation_js::native_source_capture::NativeCapturedFeed>>,
+    captures: Vec<(
+        String,
+        Arc<ilium_animation_js::native_source_capture::NativeCapturedFeed>,
+    )>,
+    revisions: BTreeMap<String, u64>,
+    resident_bytes: usize,
+    civil_anchor_ms: Option<i64>,
+    _admission: StorageAdmission,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReplaySequenceRetirement {
+    StopSources,
+    WaitForDrain,
+    Discard,
+    Finish,
+}
+
+fn replay_sequence_retirement(
+    cancelled: bool,
+    stopping_sources: bool,
+    sources_drained: bool,
+) -> Option<ReplaySequenceRetirement> {
+    if cancelled {
+        return Some(if stopping_sources {
+            if sources_drained {
+                ReplaySequenceRetirement::Discard
+            } else {
+                ReplaySequenceRetirement::WaitForDrain
+            }
+        } else {
+            ReplaySequenceRetirement::StopSources
+        });
+    }
+    stopping_sources.then_some(if sources_drained {
+        ReplaySequenceRetirement::Finish
+    } else {
+        ReplaySequenceRetirement::WaitForDrain
+    })
+}
+
 fn source_clock() -> Result<SourceClock, String> {
     static ORIGIN: OnceLock<Instant> = OnceLock::new();
     let monotonic_ms = ORIGIN.get_or_init(Instant::now).elapsed().as_millis();
@@ -206,8 +418,12 @@ impl NativeSourceOwner {
             active: BTreeMap::new(),
             terminal: BTreeMap::new(),
             feeds: BTreeMap::new(),
+            recordings: BTreeMap::new(),
+            pending_sequences: BTreeMap::new(),
             client,
             cadence,
+            #[cfg(feature = "qualification-test-support")]
+            offline_http: None,
             closed: false,
             _metadata: metadata,
         })
@@ -339,10 +555,725 @@ impl NativeSourceOwner {
                     media: MediaLimits::default(),
                 },
                 credentials: None,
+                #[cfg(feature = "qualification-test-support")]
+                offline_http: self.offline_http.clone(),
             },
         )?;
         self.active.insert(id, host);
         Ok(None)
+    }
+    fn capture_published_feed(
+        &self,
+        instance: &PackageInstance,
+        feed_id: &str,
+        max_resident_bytes: usize,
+    ) -> ilium_animation_js::error::Result<
+        Arc<ilium_animation_js::native_source_capture::NativeCapturedFeed>,
+    > {
+        let record = self.feeds.get(feed_id).ok_or_else(|| {
+            ilium_animation_js::error::AnimationError::PermissionDenied(
+                "replay source handle has no original native feed".into(),
+            )
+        })?;
+        if record.terminal.is_some() || record.closing.is_some() {
+            return Err(ilium_animation_js::error::AnimationError::PermissionDenied(
+                "replay source feed has an unsettled publication or close".into(),
+            ));
+        }
+        let descriptor = record.descriptor.metadata();
+        let latest = &descriptor["latest"];
+        if descriptor["status"]["state"] != "ready"
+            || latest["available"] != true
+            || latest["status"] != "ready"
+        {
+            return Err(ilium_animation_js::error::AnimationError::PermissionDenied(
+                "replay source feed has no acknowledged ready snapshot".into(),
+            ));
+        }
+        let published_revision = latest["revision"].as_u64().ok_or_else(|| {
+            ilium_animation_js::error::AnimationError::Runtime(
+                "replay source descriptor revision missing".into(),
+            )
+        })?;
+        let captured = record.host.capture_latest(instance, max_resident_bytes)?;
+        let summary = captured.summary(instance)?;
+        if summary.source_revision != published_revision {
+            return Err(ilium_animation_js::error::AnimationError::PermissionDenied(
+                "replay source payload does not match its acknowledged revision".into(),
+            ));
+        }
+        Ok(captured)
+    }
+    fn start_sequence_capture(
+        &mut self,
+        request: HostRequest,
+        options: ReplaySequenceCaptureOptions,
+    ) -> ilium_animation_js::error::Result<()> {
+        use ilium_animation_js::error::AnimationError;
+
+        if self.closed
+            || self.recordings.len() + self.pending_sequences.len() >= 32
+            || !self.pending_sequences.is_empty()
+            || !self.recordings.is_empty()
+            || self.pending_sequences.contains_key(&request.id)
+        {
+            return Err(AnimationError::Budget(
+                "replay sequence registry closed or full".into(),
+            ));
+        }
+        for (id, kind) in &options.sources {
+            let record = self.feeds.get(id).ok_or_else(|| {
+                AnimationError::PermissionDenied(
+                    "replay sequence handle has no original native feed".into(),
+                )
+            })?;
+            if record.descriptor.metadata()["kind"] != kind.as_str() || record.closing.is_some() {
+                return Err(AnimationError::PermissionDenied(
+                    "replay sequence feed kind changed or feed is closing".into(),
+                ));
+            }
+        }
+        let per_frame = std::mem::size_of::<FrozenSourceFrame>()
+            .checked_add(
+                options
+                    .sources
+                    .len()
+                    .checked_mul(
+                        std::mem::size_of::<FrozenInputSnapshot>()
+                            + std::mem::size_of::<
+                                Arc<ilium_animation_js::native_source_capture::NativeCapturedFeed>,
+                            >()
+                            + 128,
+                    )
+                    .ok_or_else(|| {
+                        AnimationError::Budget("replay sequence metadata bound".into())
+                    })?,
+            )
+            .ok_or_else(|| AnimationError::Budget("replay sequence metadata bound".into()))?;
+        let metadata_bound = options
+            .max_frames
+            .checked_mul(per_frame)
+            .and_then(|bytes| bytes.checked_add(64 * 1024))
+            .ok_or_else(|| AnimationError::Budget("replay sequence metadata bound".into()))?;
+        let admission = self
+            .client
+            .quota_group()
+            .reserve_external_storage(metadata_bound)
+            .map_err(|error| {
+                AnimationError::Budget(format!("replay sequence admission: {error:?}"))
+            })?;
+        let mut frames = Vec::new();
+        frames
+            .try_reserve_exact(options.max_frames)
+            .map_err(|_| AnimationError::Budget("replay sequence frame allocation".into()))?;
+        let capture_bound = options
+            .max_frames
+            .checked_mul(options.sources.len())
+            .ok_or_else(|| AnimationError::Budget("replay sequence capture bound".into()))?;
+        let mut captures = Vec::new();
+        captures
+            .try_reserve_exact(capture_bound)
+            .map_err(|_| AnimationError::Budget("replay sequence capture allocation".into()))?;
+        let mut initial_captures = Vec::new();
+        initial_captures
+            .try_reserve_exact(options.sources.len())
+            .map_err(|_| AnimationError::Budget("replay initial capture allocation".into()))?;
+        self.pending_sequences.insert(
+            request.id,
+            PendingReplaySequence {
+                request,
+                options,
+                started_at: None,
+                next_sample_index: 1,
+                stopping_sources: false,
+                frames,
+                initial_captures,
+                captures,
+                revisions: BTreeMap::new(),
+                resident_bytes: 0,
+                civil_anchor_ms: None,
+                _admission: admission,
+            },
+        );
+        Ok(())
+    }
+    fn advance_sequence_captures(
+        &mut self,
+        instance: &mut PackageInstance,
+        drawing: &mut NativeDrawHost,
+    ) -> ilium_animation_js::error::Result<()> {
+        if self
+            .pending_sequences
+            .values()
+            .any(|pending| pending.stopping_sources)
+        {
+            self.on_completion_wake(instance, drawing)
+                .map_err(ilium_animation_js::error::AnimationError::Runtime)?;
+        }
+        let pending_ids: Vec<u64> = self.pending_sequences.keys().copied().collect();
+        for request_id in pending_ids {
+            let Some(mut pending) = self.pending_sequences.remove(&request_id) else {
+                continue;
+            };
+            let cancelled = pending.request.is_cancelled();
+            let sources_drained =
+                pending
+                    .options
+                    .sources
+                    .iter()
+                    .all(|(feed_id, _)| match self.feeds.get(feed_id) {
+                        Some(feed) => feed.host.is_drained() && feed.terminal.is_none(),
+                        None => cancelled,
+                    });
+            match replay_sequence_retirement(cancelled, pending.stopping_sources, sources_drained) {
+                Some(ReplaySequenceRetirement::StopSources) => {
+                    for (feed_id, _) in &pending.options.sources {
+                        if let Some(feed) = self.feeds.get_mut(feed_id) {
+                            feed.sequence_capture_finished = true;
+                            feed.host.cancel();
+                        }
+                    }
+                    pending.stopping_sources = true;
+                    self.pending_sequences.insert(request_id, pending);
+                    continue;
+                }
+                Some(ReplaySequenceRetirement::WaitForDrain) => {
+                    self.pending_sequences.insert(request_id, pending);
+                    continue;
+                }
+                Some(ReplaySequenceRetirement::Discard) => continue,
+                Some(ReplaySequenceRetirement::Finish) => {
+                    self.finish_sequence_capture(instance, pending)?;
+                    continue;
+                }
+                None => {}
+            }
+            if pending.started_at.is_none() {
+                if !self.sample_sequence(instance, &mut pending, true, 0)? {
+                    self.pending_sequences.insert(request_id, pending);
+                    continue;
+                }
+                pending.started_at = Some(Instant::now());
+                pending.civil_anchor_ms = Some(
+                    source_clock()
+                        .map_err(ilium_animation_js::error::AnimationError::Runtime)?
+                        .epoch_ms,
+                );
+                pending.next_sample_index = 1;
+                self.pending_sequences.insert(request_id, pending);
+                continue;
+            }
+            let started_at = pending.started_at.ok_or_else(|| {
+                ilium_animation_js::error::AnimationError::Runtime(
+                    "replay sequence start clock missing".into(),
+                )
+            })?;
+            let elapsed_ms = u64::try_from(started_at.elapsed().as_millis()).map_err(|_| {
+                ilium_animation_js::error::AnimationError::Budget(
+                    "replay sequence elapsed time overflow".into(),
+                )
+            })?;
+            if elapsed_ms >= pending.options.duration_ms {
+                for (feed_id, _) in &pending.options.sources {
+                    let feed = self.feeds.get_mut(feed_id).ok_or_else(|| {
+                        ilium_animation_js::error::AnimationError::PermissionDenied(
+                            "replay sequence source disappeared while stopping".into(),
+                        )
+                    })?;
+                    feed.sequence_capture_finished = true;
+                    feed.host.cancel();
+                }
+                pending.stopping_sources = true;
+                self.pending_sequences.insert(request_id, pending);
+                continue;
+            }
+            let due_index = u64::try_from(
+                (u128::from(elapsed_ms) * u128::from(pending.options.sample_hz)) / 1_000,
+            )
+            .map_err(|_| {
+                ilium_animation_js::error::AnimationError::Budget(
+                    "replay sequence sample index overflow".into(),
+                )
+            })?;
+            if due_index < pending.next_sample_index {
+                self.pending_sequences.insert(request_id, pending);
+                continue;
+            }
+            let frame_offset_ms = elapsed_ms.min(pending.options.duration_ms - 1);
+            self.sample_sequence(instance, &mut pending, false, frame_offset_ms)?;
+            pending.next_sample_index = due_index.checked_add(1).ok_or_else(|| {
+                ilium_animation_js::error::AnimationError::Budget(
+                    "replay sequence sample index exhausted".into(),
+                )
+            })?;
+            self.pending_sequences.insert(request_id, pending);
+        }
+        Ok(())
+    }
+    fn sample_sequence(
+        &self,
+        instance: &PackageInstance,
+        pending: &mut PendingReplaySequence,
+        initial: bool,
+        offset_ms: u64,
+    ) -> ilium_animation_js::error::Result<bool> {
+        use ilium_animation_js::error::AnimationError;
+
+        for (id, kind) in &pending.options.sources {
+            let record = self.feeds.get(id).ok_or_else(|| {
+                AnimationError::PermissionDenied(
+                    "replay sequence original source feed disappeared".into(),
+                )
+            })?;
+            if record.closing.is_some() || record.descriptor.metadata()["kind"] != kind.as_str() {
+                return Err(AnimationError::PermissionDenied(
+                    "replay sequence source closed or changed kind".into(),
+                ));
+            }
+            if record.terminal.is_some()
+                || record.descriptor.metadata()["status"]["state"] != "ready"
+                || record.descriptor.metadata()["latest"]["available"] != true
+                || record.descriptor.metadata()["latest"]["status"] != "ready"
+            {
+                return Ok(false);
+            }
+        }
+
+        let mut frame_snapshots = Vec::new();
+        frame_snapshots
+            .try_reserve_exact(pending.options.sources.len())
+            .map_err(|_| AnimationError::Budget("replay sequence frame allocation".into()))?;
+        let mut newly_captured = Vec::new();
+        newly_captured
+            .try_reserve_exact(pending.options.sources.len())
+            .map_err(|_| AnimationError::Budget("replay sequence capture allocation".into()))?;
+        for (id, kind) in &pending.options.sources {
+            let remaining = pending
+                .options
+                .max_bytes
+                .checked_sub(pending.resident_bytes)
+                .ok_or_else(|| AnimationError::Budget("replay sequence byte limit".into()))?;
+            let capture = self.capture_published_feed(instance, id, remaining)?;
+            let summary = capture.summary(instance)?;
+            let expected_family = replay_source_family(kind).ok_or_else(|| {
+                AnimationError::PermissionDenied("replay sequence source kind changed".into())
+            })?;
+            if summary.family != expected_family {
+                return Err(AnimationError::PermissionDenied(
+                    "replay sequence source kind does not match its feed".into(),
+                ));
+            }
+            if let Some(previous) = pending.revisions.get(id) {
+                if summary.source_revision < *previous {
+                    return Err(AnimationError::PermissionDenied(
+                        "replay sequence source revision moved backward".into(),
+                    ));
+                }
+                if summary.source_revision == *previous {
+                    continue;
+                }
+            }
+            let next_resident = pending
+                .resident_bytes
+                .checked_add(summary.total_accounted_bytes)
+                .ok_or_else(|| {
+                    AnimationError::Budget("replay sequence byte count overflow".into())
+                })?;
+            if next_resident > pending.options.max_bytes {
+                return Err(AnimationError::Budget(
+                    "replay sequence exceeds requested resident byte limit".into(),
+                ));
+            }
+            let scratch_bytes = summary
+                .payload_bytes
+                .checked_mul(3)
+                .and_then(|bytes| bytes.checked_add(64 * 1024))
+                .ok_or_else(|| AnimationError::Budget("replay sequence scratch bound".into()))?;
+            let _scratch = self
+                .client
+                .quota_group()
+                .reserve_external_storage(scratch_bytes)
+                .map_err(|error| {
+                    AnimationError::Budget(format!("replay sequence scratch admission: {error:?}"))
+                })?;
+            let snapshot = FrozenInputSnapshot::from_native_with_images(
+                expected_family,
+                id,
+                summary.source_revision,
+                capture.to_frozen_service_value(instance)?,
+                capture.replay_images(instance)?,
+            )?;
+            capture.verify_frozen_snapshot(instance, &snapshot)?;
+            pending
+                .revisions
+                .insert(id.clone(), summary.source_revision);
+            pending.resident_bytes = next_resident;
+            frame_snapshots.push(snapshot);
+            newly_captured.push((id.clone(), capture));
+        }
+        if initial && frame_snapshots.len() != pending.options.sources.len() {
+            return Err(AnimationError::PermissionDenied(
+                "replay sequence initial frame lacks a source revision".into(),
+            ));
+        }
+        if frame_snapshots.is_empty() {
+            return Ok(false);
+        }
+        if pending.frames.len() >= pending.options.max_frames {
+            return Err(AnimationError::Budget(
+                "replay sequence frame capacity exceeded".into(),
+            ));
+        }
+        if initial {
+            pending.initial_captures.extend(
+                newly_captured
+                    .iter()
+                    .map(|(_, capture)| Arc::clone(capture)),
+            );
+        }
+        pending.captures.extend(newly_captured);
+        pending
+            .frames
+            .push(FrozenSourceFrame::from_native(offset_ms, frame_snapshots));
+        Ok(true)
+    }
+    fn finish_sequence_capture(
+        &mut self,
+        instance: &mut PackageInstance,
+        mut pending: PendingReplaySequence,
+    ) -> ilium_animation_js::error::Result<()> {
+        use ilium_animation_js::error::AnimationError;
+
+        let initial_snapshots = pending
+            .frames
+            .first()
+            .map(|frame| frame.snapshots().to_vec())
+            .filter(|snapshots| snapshots.len() == pending.options.sources.len())
+            .ok_or_else(|| {
+                AnimationError::PermissionDenied("replay sequence initial frame missing".into())
+            })?;
+        if pending.initial_captures.len() != initial_snapshots.len() || pending.captures.is_empty()
+        {
+            return Err(AnimationError::PermissionDenied(
+                "replay sequence original capture inventory changed".into(),
+            ));
+        }
+        let mut lineage_by_id = BTreeMap::new();
+        for (_, capture) in &pending.captures {
+            for lineage in capture.replay_lineage() {
+                match lineage_by_id.get(&lineage.request_id) {
+                    Some(existing) if existing != lineage => {
+                        return Err(AnimationError::PermissionDenied(
+                            "replay sequence source grant lineage changed".into(),
+                        ));
+                    }
+                    Some(_) => {}
+                    None => {
+                        lineage_by_id.insert(lineage.request_id.clone(), lineage.clone());
+                    }
+                }
+            }
+        }
+        let sequence = Arc::new(FrozenSourceSequence::from_native(
+            self.client.quota_group(),
+            pending.options.duration_ms,
+            std::mem::take(&mut pending.frames),
+            pending.options.max_frames,
+            pending.options.max_bytes,
+        )?);
+        let sequence_digest = sequence.digest();
+        let sequence_number = NEXT_REPLAY_CAPTURE
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+                current.checked_add(1)
+            })
+            .map_err(|_| AnimationError::Budget("replay capture identity exhausted".into()))?;
+        let recording_id = format!("replay-sequence-{sequence_number}");
+        let frozen = FrozenInputs::from_capture(
+            self.client.quota_group(),
+            &recording_id,
+            initial_snapshots,
+            pending.options.max_bytes,
+            pending.civil_anchor_ms,
+            "native-source-sequence-replay",
+            &lineage_by_id.into_values().collect::<Vec<_>>(),
+        )?;
+        let frame_count = sequence.frames().len();
+        let sha256 = sequence_digest
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        let value = ilium_animation_js::engine::ServiceValue::copy_from_host(
+            &json!({"ok":true,"value":{"recording_id":recording_id,"sha256":sha256,"frame_count":frame_count}}),
+            &[],
+            &BTreeMap::new(),
+            instance.engine_limits(),
+            self.client.quota_group(),
+        )?;
+        self.recordings.insert(
+            recording_id,
+            NativeReplayRecording {
+                digest: sequence_digest,
+                captures: pending.initial_captures,
+                sequence_captures: pending.captures,
+                frozen,
+                sequence: Some(sequence),
+                _admission: pending._admission,
+            },
+        );
+        let delivery = instance.complete_native_replay_sequence(&pending.request, value)?;
+        if delivery != ilium_animation_js::engine::CompletionState::Delivered {
+            return Err(AnimationError::Runtime(format!(
+                "Replay sequence receipt delivery ended as {delivery:?}; native capture remains retained"
+            )));
+        }
+        Ok(())
+    }
+    fn freeze_sources(
+        &mut self,
+        instance: &PackageInstance,
+        options: &serde_json::Value,
+    ) -> ilium_animation_js::error::Result<(String, [u8; 32])> {
+        use ilium_animation_js::{error::AnimationError, replay::InputFamily};
+
+        let fields = options.as_object().ok_or_else(|| {
+            AnimationError::Runtime("replay freeze options must be an object".into())
+        })?;
+        if fields.len() != 2 || !fields.contains_key("sources") || !fields.contains_key("max_bytes")
+        {
+            return Err(AnimationError::Runtime(
+                "replay freeze options have unknown or missing fields".into(),
+            ));
+        }
+        let max_bytes = fields["max_bytes"]
+            .as_u64()
+            .ok_or_else(|| AnimationError::Budget("replay freeze byte limit is invalid".into()))?;
+        let max_bytes = usize::try_from(max_bytes)
+            .map_err(|_| AnimationError::Budget("replay freeze byte limit overflow".into()))?;
+        if max_bytes == 0 || max_bytes > 32_000_000 {
+            return Err(AnimationError::Budget("replay freeze byte limit".into()));
+        }
+        let sources = fields["sources"].as_array().ok_or_else(|| {
+            AnimationError::Runtime("replay freeze sources must be an array".into())
+        })?;
+        if sources.len() > 32 || self.recordings.len() >= 32 {
+            return Err(AnimationError::Budget(
+                "replay freeze recording capacity".into(),
+            ));
+        }
+        let admission = self
+            .client
+            .quota_group()
+            .reserve_external_storage(16 * 1024)
+            .map_err(|error| {
+                AnimationError::Budget(format!("replay registry admission: {error:?}"))
+            })?;
+
+        let mut seen = std::collections::BTreeSet::new();
+        let mut captures = Vec::new();
+        captures
+            .try_reserve_exact(sources.len())
+            .map_err(|_| AnimationError::Budget("replay capture list allocation".into()))?;
+        let mut identities = Vec::new();
+        identities
+            .try_reserve_exact(sources.len())
+            .map_err(|_| AnimationError::Budget("replay identity list allocation".into()))?;
+        let mut resident_bytes = 0usize;
+        for source in sources {
+            let source = source.as_object().ok_or_else(|| {
+                AnimationError::Runtime("replay freeze source handle must be an object".into())
+            })?;
+            if source.len() != 2 || !source.contains_key("id") || !source.contains_key("kind") {
+                return Err(AnimationError::Runtime(
+                    "replay freeze source handle fields".into(),
+                ));
+            }
+            let id = source["id"]
+                .as_str()
+                .ok_or_else(|| AnimationError::Runtime("replay freeze source id".into()))?;
+            let kind = source["kind"]
+                .as_str()
+                .ok_or_else(|| AnimationError::Runtime("replay freeze source kind".into()))?;
+            if !seen.insert(id.to_owned()) {
+                return Err(AnimationError::Runtime(
+                    "replay freeze source handle is duplicated".into(),
+                ));
+            }
+            let family = match kind {
+                "sources.series" => InputFamily::Series,
+                "sources.earthquakes" => InputFamily::Earthquakes,
+                "sources.aircraft" => InputFamily::Aircraft,
+                "sources.boats" => InputFamily::Boats,
+                "sources.chess" => InputFamily::Chess,
+                "sources.weather" => InputFamily::Weather,
+                _ => {
+                    return Err(AnimationError::PermissionDenied(
+                        "replay freeze source kind is not a capturable feed".into(),
+                    ));
+                }
+            };
+            let capture = self.capture_published_feed(instance, id, max_bytes)?;
+            let summary = capture.summary(instance)?;
+            if summary.family != family {
+                return Err(AnimationError::PermissionDenied(
+                    "replay freeze source kind does not match its native handle".into(),
+                ));
+            }
+            resident_bytes = resident_bytes
+                .checked_add(summary.total_accounted_bytes)
+                .ok_or_else(|| {
+                    AnimationError::Budget("replay freeze resident size overflow".into())
+                })?;
+            if resident_bytes > max_bytes {
+                return Err(AnimationError::Budget(
+                    "replay freeze exceeds requested resident byte limit".into(),
+                ));
+            }
+            identities.push((id.to_owned(), kind.to_owned(), summary));
+            captures.push(capture);
+        }
+
+        let sequence = NEXT_REPLAY_CAPTURE
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+                current.checked_add(1)
+            })
+            .map_err(|_| AnimationError::Budget("replay capture identity exhausted".into()))?;
+        let recording_id = format!("replay-capture-{sequence}");
+        let mut frozen_snapshots = Vec::new();
+        frozen_snapshots
+            .try_reserve_exact(captures.len())
+            .map_err(|_| AnimationError::Budget("replay frozen snapshot list allocation".into()))?;
+        let mut lineage_by_id = std::collections::BTreeMap::new();
+        for ((handle_id, kind, summary), capture) in identities.iter().zip(&captures) {
+            let scratch_bytes = summary
+                .payload_bytes
+                .checked_mul(3)
+                .and_then(|bytes| bytes.checked_add(64 * 1024))
+                .ok_or_else(|| AnimationError::Budget("replay snapshot scratch size".into()))?;
+            let _scratch = self
+                .client
+                .quota_group()
+                .reserve_external_storage(scratch_bytes)
+                .map_err(|error| {
+                    AnimationError::Budget(format!("replay snapshot scratch admission: {error:?}"))
+                })?;
+            let value = capture.to_frozen_service_value(instance)?;
+            let family = match kind.as_str() {
+                "sources.series" => InputFamily::Series,
+                "sources.earthquakes" => InputFamily::Earthquakes,
+                "sources.aircraft" => InputFamily::Aircraft,
+                "sources.boats" => InputFamily::Boats,
+                "sources.chess" => InputFamily::Chess,
+                "sources.weather" => InputFamily::Weather,
+                _ => {
+                    return Err(AnimationError::PermissionDenied(
+                        "replay source kind changed".into(),
+                    ));
+                }
+            };
+            frozen_snapshots.push(FrozenInputSnapshot::from_native_with_images(
+                family,
+                handle_id,
+                summary.source_revision,
+                value,
+                capture.replay_images(instance)?,
+            )?);
+            for lineage in capture.replay_lineage() {
+                match lineage_by_id.get(&lineage.request_id) {
+                    Some(existing) if existing != lineage => {
+                        return Err(AnimationError::PermissionDenied(
+                            "replay source grant lineage changed".into(),
+                        ));
+                    }
+                    Some(_) => {}
+                    None => {
+                        lineage_by_id.insert(lineage.request_id.clone(), lineage.clone());
+                    }
+                }
+            }
+        }
+        let civil_anchor = if captures.is_empty() {
+            None
+        } else {
+            Some(source_clock().map_err(AnimationError::Runtime)?.epoch_ms)
+        };
+        let frozen = FrozenInputs::from_capture(
+            self.client.quota_group(),
+            &recording_id,
+            frozen_snapshots,
+            max_bytes,
+            civil_anchor,
+            "native-source-replay",
+            &lineage_by_id.into_values().collect::<Vec<_>>(),
+        )?;
+
+        let digest = frozen.digest();
+        self.recordings.insert(
+            recording_id.clone(),
+            NativeReplayRecording {
+                digest,
+                captures,
+                sequence_captures: Vec::new(),
+                frozen,
+                sequence: None,
+                _admission: admission,
+            },
+        );
+        let committed = self.recordings.get(&recording_id).ok_or_else(|| {
+            AnimationError::Runtime("replay recording registry insertion failed".into())
+        })?;
+        if committed.captures.len() != identities.len() {
+            return Err(AnimationError::Runtime(
+                "replay recording source inventory changed".into(),
+            ));
+        }
+        Ok((recording_id, committed.digest))
+    }
+    fn frozen_inputs_for(
+        &self,
+        instance: &PackageInstance,
+        recording_id: &str,
+        quota: QuotaGroup,
+        max_bytes: usize,
+    ) -> ilium_animation_js::error::Result<Arc<FrozenInputs>> {
+        use ilium_animation_js::error::AnimationError;
+
+        if max_bytes == 0 || max_bytes > 32_000_000 {
+            return Err(AnimationError::Budget(
+                "frozen source replay byte limit".into(),
+            ));
+        }
+        if !self.client.quota_group().shares_root(&quota) {
+            return Err(AnimationError::PermissionDenied(
+                "frozen source replay original root mismatch".into(),
+            ));
+        }
+        let recording = self.recordings.get(recording_id).ok_or_else(|| {
+            AnimationError::PermissionDenied(
+                "frozen source replay recording belongs to another presentation".into(),
+            )
+        })?;
+        let mut resident_bytes = 0usize;
+        for capture in &recording.captures {
+            let summary = capture.summary(instance)?;
+            resident_bytes = resident_bytes
+                .checked_add(summary.total_accounted_bytes)
+                .ok_or_else(|| {
+                    AnimationError::Budget("frozen source replay size overflow".into())
+                })?;
+            if resident_bytes > max_bytes {
+                return Err(AnimationError::Budget(
+                    "frozen source replay exceeds byte limit".into(),
+                ));
+            }
+        }
+        if recording.frozen.recording() != Some(recording_id)
+            || recording.frozen.digest() != recording.digest
+        {
+            return Err(AnimationError::PermissionDenied(
+                "frozen source recording identity changed".into(),
+            ));
+        }
+        Ok(Arc::clone(&recording.frozen))
     }
     fn on_completion_wake(
         &mut self,
@@ -440,6 +1371,7 @@ impl NativeSourceOwner {
                                 terminal: None,
                                 closing: None,
                                 closing_state: SourcePublishState::Pending,
+                                sequence_capture_finished: false,
                             },
                         );
                     }
@@ -629,7 +1561,10 @@ impl NativeSourceOwner {
     fn begin_due(&mut self, instance: &PackageInstance) -> Result<(), String> {
         let clock = source_clock()?;
         for record in self.feeds.values_mut() {
-            if record.closing.is_none() && record.terminal.is_none() {
+            if record.closing.is_none()
+                && record.terminal.is_none()
+                && !record.sequence_capture_finished
+            {
                 if let Err(error) = record.host.begin_due(instance, clock) {
                     record
                         .descriptor
@@ -758,6 +1693,10 @@ impl NativeSourceOwner {
     }
     fn cancel_all(&mut self) {
         self.closed = true;
+        for pending in self.pending_sequences.values() {
+            pending.request.stop_token().stop();
+        }
+        self.pending_sequences.clear();
         for host in self.active.values_mut() {
             host.cancel();
         }
@@ -882,7 +1821,8 @@ impl NativeSourceOwner {
         }
     }
     fn is_drained(&self) -> bool {
-        self.active.is_empty()
+        self.pending_sequences.is_empty()
+            && self.active.is_empty()
             && self.terminal.is_empty()
             && self
                 .feeds
@@ -904,6 +1844,40 @@ struct PreparedSelection {
 struct SetupJob {
     request: RenderRequest,
     quota: QuotaGroup,
+}
+struct AdmittedAnimationArchive {
+    bytes: Vec<u8>,
+    _admission: StorageAdmission,
+}
+fn read_admitted_animation_archive(
+    mut archive: impl Read,
+    expected_size: usize,
+    quota: &QuotaGroup,
+) -> Result<AdmittedAnimationArchive, String> {
+    if expected_size > ARCHIVE_BYTES {
+        return Err("Animation archive exceeds 32 MiB".into());
+    }
+    let reserved_size = expected_size
+        .checked_add(1)
+        .ok_or_else(|| "Animation archive read size overflow".to_owned())?;
+    let admission = quota
+        .reserve_external_storage(reserved_size)
+        .map_err(|error| format!("Animation archive admission: {error:?}"))?;
+    let mut bytes = Vec::new();
+    bytes
+        .try_reserve_exact(reserved_size)
+        .map_err(|error| format!("Animation archive allocation: {error}"))?;
+    archive
+        .take(reserved_size as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|error| error.to_string())?;
+    if bytes.len() != expected_size {
+        return Err("Animation archive changed size during activation".into());
+    }
+    Ok(AdmittedAnimationArchive {
+        bytes,
+        _admission: admission,
+    })
 }
 struct PickerJob {
     path: PathBuf,
@@ -1003,15 +1977,7 @@ impl Job for SetupJob {
         if size > ARCHIVE_BYTES {
             return Err("Animation archive exceeds 32 MiB".into());
         }
-        let mut bytes = Vec::with_capacity(size + 1);
-        archive
-            .by_ref()
-            .take((size + 1) as u64)
-            .read_to_end(&mut bytes)
-            .map_err(|error| error.to_string())?;
-        if bytes.len() != size {
-            return Err("Animation archive changed size during activation".into());
-        }
+        let admitted_archive = read_admitted_animation_archive(archive, size, &self.quota)?;
         stopped(&stop)?;
         let verifier =
             ilium_animation_js::release::verifier().map_err(|error| error.to_string())?;
@@ -1023,7 +1989,7 @@ impl Job for SetupJob {
             && ilium_platform::audio_backend::selected_pulse_capture_supported();
         let environment = json!({"viewport":{"cell_width":request.width,"cell_height":request.height,"dot_width":u32::from(request.width)*2,"dot_height":u32::from(request.height)*4,"revision":request.revision},"available":{"pointer":true,"audio":audio_selectable,"gpu":false,"location":true}});
         let verified = PackageInstance::verify(InstancePreparation {
-            archive: &bytes,
+            archive: &admitted_archive.bytes,
             verifier: &verifier,
             helper_executable: &helper,
             trusted_bootstrap: ilium_animation_js::TRUSTED_BOOTSTRAP,
@@ -1036,6 +2002,7 @@ impl Job for SetupJob {
             quota: self.quota.clone(),
         })
         .map_err(|error| error.to_string())?;
+        drop(admitted_archive);
 
         if verified.package().manifest().id != selection.package_id {
             return Err("Installed package identity changed during activation".into());
@@ -1310,6 +2277,8 @@ impl Job for PreRenderJob {
                         &mut preparation,
                         &self.quota,
                         &self.stop,
+                        self.spec.frozen_inputs(),
+                        self.spec.source_sequence().map(Arc::as_ref),
                     )?;
                 }
                 stopped(&self.stop)?;
@@ -1318,7 +2287,9 @@ impl Job for PreRenderJob {
             }
             // A complete cold index still requires THIS activation's helper to
             // physically retire before original-broker playback is possible.
-            if self.store.open_procedural(&self.spec.key().hex()).is_ok() {
+            if self.spec.can_stream_procedural()
+                && self.store.open_procedural(&self.spec.key().hex()).is_ok()
+            {
                 owner.retire().map_err(|error| error.to_string())?;
                 stopped(&self.stop)?;
                 stopped(&context.stop_token())?;
@@ -1348,9 +2319,8 @@ impl Job for PreRenderJob {
                 stopped(&self.stop)?;
                 stopped(&context.stop_token())?;
                 let owner_factory: Arc<dyn ReplayPreparationOwner> = owner.clone();
-                return match self
-                    .cache
-                    .begin_streaming(
+                let cached_preparation = if self.spec.can_stream_procedural() {
+                    self.cache.begin_streaming(
                         Arc::clone(&self.spec),
                         self.authority.clone(),
                         Arc::clone(&self.authorization),
@@ -1358,8 +2328,17 @@ impl Job for PreRenderJob {
                         Arc::clone(&self.store),
                         || Ok(owner_factory),
                     )
-                    .map_err(|error| error.to_string())?
-                {
+                } else {
+                    self.cache.begin(
+                        Arc::clone(&self.spec),
+                        self.authority.clone(),
+                        Arc::clone(&self.authorization),
+                        self.stop.clone(),
+                        || Ok(owner_factory),
+                    )
+                }
+                .map_err(|error| error.to_string())?;
+                return match cached_preparation {
                     Preparation::Cached(clip) => {
                         stopped(&self.stop)?;
                         stopped(&context.stop_token())?;
@@ -1379,9 +2358,8 @@ impl Job for PreRenderJob {
                 };
             }
             let owner_factory: Arc<dyn ReplayPreparationOwner> = owner.clone();
-            let mut preparation = match self
-                .cache
-                .begin_streaming(
+            let preparation_result = if self.spec.can_stream_procedural() {
+                self.cache.begin_streaming(
                     Arc::clone(&self.spec),
                     self.authority.clone(),
                     Arc::clone(&self.authorization),
@@ -1389,8 +2367,17 @@ impl Job for PreRenderJob {
                     Arc::clone(&self.store),
                     || Ok(owner_factory),
                 )
-                .map_err(|error| error.to_string())?
-            {
+            } else {
+                self.cache.begin(
+                    Arc::clone(&self.spec),
+                    self.authority.clone(),
+                    Arc::clone(&self.authorization),
+                    self.stop.clone(),
+                    || Ok(owner_factory),
+                )
+            }
+            .map_err(|error| error.to_string())?;
+            let mut preparation = match preparation_result {
                 Preparation::Started(preparation) => preparation,
                 Preparation::Cached(clip) => {
                     // A cache hit still leaves this newly accepted helper alive.
@@ -1400,7 +2387,7 @@ impl Job for PreRenderJob {
                     return Ok(clip);
                 }
                 Preparation::InProgress => {
-                    return Err("Original replay preparation already running".into())
+                    return Err("Original replay preparation already running".into());
                 }
             };
             for _ in 0..self.spec.frame_count() {
@@ -1424,6 +2411,8 @@ impl Job for PreRenderJob {
                     &mut preparation,
                     &self.quota,
                     &self.stop,
+                    self.spec.frozen_inputs(),
+                    self.spec.source_sequence().map(Arc::as_ref),
                 )?;
             }
             stopped(&self.stop)?;
@@ -1498,6 +2487,8 @@ struct Workflow {
     update_applied: bool,
     cancellation: Option<PermissionCancellation>,
     halted: bool,
+    unsettled_world_emissions:
+        std::collections::VecDeque<ilium_animation_js::native_worlds::WorldEmission>,
     _setup_retention: Retention,
 }
 pub(super) struct PluginBackend {
@@ -1514,6 +2505,56 @@ pub(super) struct PluginBackend {
     saved_runtime: Option<Arc<ilium_ambient::minecraft::saved_runtime::SavedRuntime>>,
 }
 impl PluginBackend {
+    pub(super) fn settle_world_emissions(
+        &mut self,
+        emissions: Vec<ilium_animation_js::native_worlds::WorldEmission>,
+    ) -> Result<(), String> {
+        let Some(workflow) = self.workflow.as_mut() else {
+            return if emissions.is_empty() {
+                Ok(())
+            } else {
+                Err("World emission has no original plugin workflow".into())
+            };
+        };
+        workflow.unsettled_world_emissions.extend(emissions);
+        if workflow.unsettled_world_emissions.is_empty() {
+            return Ok(());
+        }
+        let presentation = workflow
+            .presentation
+            .as_mut()
+            .ok_or_else(|| "World emission has no original native presentation".to_owned())?;
+        if presentation.presentation.is_none() {
+            while let Some(emission) = workflow.unsettled_world_emissions.pop_front() {
+                if let Err((emission, error)) = emission.settle() {
+                    workflow.unsettled_world_emissions.push_front(emission);
+                    return Err(error.to_string());
+                }
+            }
+            return Ok(());
+        }
+        let receipts = presentation
+            .presentation
+            .as_mut()
+            .ok_or_else(|| "World presentation receipt host disappeared".to_owned())?;
+        let instance = workflow
+            .controller
+            .package_instance_mut()
+            .ok_or_else(|| "World emission package instance is unavailable".to_owned())?;
+        while let Some(emission) = workflow.unsettled_world_emissions.pop_front() {
+            match emission.settle() {
+                Ok(receipt) => receipts
+                    .publish(instance, receipt)
+                    .map_err(|error| error.to_string())?,
+                Err((emission, error)) => {
+                    workflow.unsettled_world_emissions.push_front(emission);
+                    return Err(error.to_string());
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Bind the worker's existing saved-world authority before any package
     /// activation.  A package can request a saved world later, but it can
     /// never supply a replacement runtime or history namespace.
@@ -1695,6 +2736,7 @@ impl PluginBackend {
             update_applied: false,
             cancellation: None,
             halted: false,
+            unsettled_world_emissions: std::collections::VecDeque::new(),
             _setup_retention: retention,
         });
         Ok(())
@@ -1843,7 +2885,7 @@ impl PluginBackend {
                 None
             }
             JobOutcome::Panicked => {
-                return Err("Native picker panicked; job effects unknown".into())
+                return Err("Native picker panicked; job effects unknown".into());
             }
         };
         let revision = pick
@@ -2097,28 +3139,93 @@ impl PluginBackend {
             if presentation.video.pre_render_video_attempted() && recorded_count == 0 {
                 return Err("Video acquisition has not produced a finite recorded source".into());
             }
-            let certification = if recorded_count == 0 {
-                instance.certify_procedural_replay()
-            } else {
-                instance.certify_recorded_video_replay(recorded_count)
-            }
-            .map_err(|error| error.to_string())?;
             let verifier =
                 ilium_animation_js::release::verifier().map_err(|error| error.to_string())?;
             let package = verifier.verify(instance.package());
-            let frozen = FrozenInputs::from_host(
-                quota.clone(),
-                None,
-                &[],
-                Sha256::digest([]).into(),
-                None,
-                if recorded_count == 0 {
-                    "procedural"
-                } else {
-                    "recorded-video"
-                },
-                &[],
-            )
+            let frozen = match presentation.sources.recordings.len() {
+                0 => FrozenInputs::from_host(
+                    quota.clone(),
+                    None,
+                    &[],
+                    Sha256::digest([]).into(),
+                    None,
+                    if recorded_count == 0 {
+                        "procedural"
+                    } else {
+                        "recorded-video"
+                    },
+                    &[],
+                ),
+                1 => {
+                    let recording_id = presentation
+                        .sources
+                        .recordings
+                        .keys()
+                        .next()
+                        .ok_or("Replay recording inventory changed")?;
+                    presentation.sources.frozen_inputs_for(
+                        instance,
+                        recording_id,
+                        quota.clone(),
+                        32_000_000,
+                    )
+                }
+                _ => {
+                    return Err("Pre-render requires exactly one native replay recording".into());
+                }
+            }
+            .map_err(|error| error.to_string())?;
+            let source_captures: &[Arc<
+                ilium_animation_js::native_source_capture::NativeCapturedFeed,
+            >] = if frozen.snapshots().is_empty() {
+                &[]
+            } else {
+                let recording_id = frozen
+                    .recording()
+                    .ok_or("Frozen source recording identity missing")?;
+                presentation
+                    .sources
+                    .recordings
+                    .get(recording_id)
+                    .ok_or("Frozen source recording left its native owner")?
+                    .captures
+                    .as_slice()
+            };
+            let source_sequence = if frozen.snapshots().is_empty() {
+                None
+            } else {
+                let recording_id = frozen
+                    .recording()
+                    .ok_or("Frozen source recording identity missing")?;
+                presentation
+                    .sources
+                    .recordings
+                    .get(recording_id)
+                    .ok_or("Frozen source recording left its native owner")?
+                    .sequence
+                    .clone()
+            };
+            let certification = if recorded_count != 0 {
+                instance.certify_recorded_video_replay(recorded_count)
+            } else if frozen.snapshots().is_empty() {
+                instance.certify_procedural_replay()
+            } else if let Some(sequence) = source_sequence.as_deref() {
+                let recording_id = frozen
+                    .recording()
+                    .ok_or("Frozen source recording identity missing")?;
+                let recording = presentation
+                    .sources
+                    .recordings
+                    .get(recording_id)
+                    .ok_or("Frozen source recording left its native owner")?;
+                instance.certify_source_sequence_replay(
+                    &frozen,
+                    sequence,
+                    &recording.sequence_captures,
+                )
+            } else {
+                instance.certify_source_capture_replay(&frozen, &source_captures)
+            }
             .map_err(|error| error.to_string())?;
             let native_evidence = if recorded_count == 0 {
                 Vec::new()
@@ -2158,6 +3265,7 @@ impl PluginBackend {
                     appearance_digest,
                     certification,
                     frozen,
+                    source_sequence,
                     evidence,
                 },
             )
@@ -2380,6 +3488,13 @@ impl PluginBackend {
         if let Err(error) = early {
             // A picker or controller failure can share this wake with HTTP,
             // source, asset, or audio retirement. Preserve the original hint.
+            self.fail_current(&error);
+            return match self.settle_retirement(true) {
+                Ok(()) => Err(error),
+                Err(retirement) => Err(format!("{error}; retirement: {retirement}")),
+            };
+        }
+        if let Err(error) = self.settle_world_emissions(Vec::new()) {
             self.fail_current(&error);
             return match self.settle_retirement(true) {
                 Ok(()) => Err(error),
@@ -2627,6 +3742,7 @@ impl PluginBackend {
             }
         }
         if !workflow.controller.is_physically_settled()
+            || !workflow.unsettled_world_emissions.is_empty()
             || workflow
                 .presentation
                 .as_ref()
@@ -2796,6 +3912,7 @@ impl PluginBackend {
                 frames_per_second: instance.plan().fps.ceil().clamp(1., 120.) as u32,
                 resident_bytes,
                 replay: Some(lease),
+                world_provenance: None,
             }));
         }
         let Some(presentation) = &mut workflow.presentation else {
@@ -2835,10 +3952,10 @@ fn observe_http_events(events: Vec<HttpEvent>) -> Result<(), String> {
     for event in events {
         match event.observation {
             HttpObservation::Lost => {
-                return Err("Original native HTTP receipt lost; retirement is unproven".into())
+                return Err("Original native HTTP receipt lost; retirement is unproven".into());
             }
             HttpObservation::CleanupFailed => {
-                return Err("Original native HTTP ticket cleanup failed; owner retained".into())
+                return Err("Original native HTTP ticket cleanup failed; owner retained".into());
             }
             HttpObservation::Refused(code) => {
                 tracing::debug!(
@@ -2996,7 +4113,147 @@ impl Presentation {
 struct WorkerInputProvider<'a> {
     request: &'a RenderRequest,
     audio: &'a mut AudioOwner,
+    replay_civil_anchor_ms: Option<i64>,
 }
+
+fn replay_source_metadata(
+    instance: &mut PackageInstance,
+    drawing: &mut NativeDrawHost,
+    snapshot: &FrozenInputSnapshot,
+) -> Result<serde_json::Value, String> {
+    replay_source_metadata_with(snapshot, |image| {
+        drawing
+            .retain_source_image(instance, image)
+            .map_err(|error| error.to_string())
+    })
+}
+
+fn replay_source_metadata_with(
+    snapshot: &FrozenInputSnapshot,
+    mut register_image: impl FnMut(
+        &ilium_animation_js::sources::NativeSourceImage,
+    ) -> Result<serde_json::Value, String>,
+) -> Result<serde_json::Value, String> {
+    let mut latest = snapshot.value().metadata().clone();
+    let images = snapshot.native_images();
+    if images.is_empty() {
+        if contains_native_image_slot(&latest) {
+            return Err(
+                "Frozen source metadata references an image without a retained image".into(),
+            );
+        }
+        return Ok(latest);
+    }
+    if snapshot.family() != InputFamily::Weather {
+        return Err("Frozen native images are supported only by weather feeds".into());
+    }
+    let mut projected = BTreeMap::new();
+    let layers = latest
+        .get_mut("layers")
+        .and_then(serde_json::Value::as_array_mut)
+        .ok_or("Frozen weather source layers are malformed")?;
+    for layer in layers {
+        if let Some(tiles) = layer
+            .get_mut("tiles")
+            .and_then(serde_json::Value::as_array_mut)
+        {
+            for tile in tiles {
+                rebind_replay_image_slot(
+                    &mut tile["image"],
+                    images,
+                    &mut projected,
+                    &mut register_image,
+                )?;
+            }
+        }
+        if let Some(frames) = layer
+            .get_mut("frames")
+            .and_then(serde_json::Value::as_array_mut)
+        {
+            for frame in frames {
+                if frame.get("image").is_some() {
+                    rebind_replay_image_slot(
+                        &mut frame["image"],
+                        images,
+                        &mut projected,
+                        &mut register_image,
+                    )?;
+                }
+                if let Some(tiles) = frame
+                    .get_mut("tiles")
+                    .and_then(serde_json::Value::as_array_mut)
+                {
+                    for tile in tiles {
+                        rebind_replay_image_slot(
+                            &mut tile["image"],
+                            images,
+                            &mut projected,
+                            &mut register_image,
+                        )?;
+                    }
+                }
+            }
+        }
+    }
+    if projected.len() != images.len() {
+        return Err("Frozen weather image inventory does not match its source slots".into());
+    }
+    if contains_native_image_slot(&latest) {
+        return Err("Frozen weather metadata contains an unsupported image slot".into());
+    }
+    Ok(latest)
+}
+
+fn contains_native_image_slot(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Object(fields) => {
+            fields.contains_key("native_image_slot")
+                || fields.values().any(contains_native_image_slot)
+        }
+        serde_json::Value::Array(values) => values.iter().any(contains_native_image_slot),
+        _ => false,
+    }
+}
+
+fn rebind_replay_image_slot(
+    marker: &mut serde_json::Value,
+    images: &[ilium_animation_js::sources::NativeSourceImage],
+    projected: &mut BTreeMap<usize, serde_json::Value>,
+    register_image: &mut impl FnMut(
+        &ilium_animation_js::sources::NativeSourceImage,
+    ) -> Result<serde_json::Value, String>,
+) -> Result<(), String> {
+    let source = marker
+        .as_object()
+        .ok_or("Frozen weather image slot is malformed")?;
+    if source.len() != 3 {
+        return Err("Frozen weather image slot fields changed".into());
+    }
+    let slot = source
+        .get("native_image_slot")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|value| usize::try_from(value).ok())
+        .ok_or("Frozen weather image slot index is malformed")?;
+    let image = images
+        .get(slot)
+        .ok_or("Frozen weather image slot is outside its retained inventory")?;
+    let pixels = image.admitted_pixels().view();
+    if source.get("width").and_then(serde_json::Value::as_u64) != Some(u64::from(pixels.width))
+        || source.get("height").and_then(serde_json::Value::as_u64)
+            != Some(u64::from(pixels.height))
+    {
+        return Err("Frozen weather image dimensions changed".into());
+    }
+    if let Some(descriptor) = projected.get(&slot) {
+        *marker = descriptor.clone();
+        return Ok(());
+    }
+    let descriptor = register_image(image)?;
+    projected.insert(slot, descriptor.clone());
+    *marker = descriptor;
+    Ok(())
+}
+
 impl CachedInputProvider for WorkerInputProvider<'_> {
     fn pointer(&mut self) -> ilium_animation_js::error::Result<Option<PointerObservation>> {
         Ok(self.request.pointer.map(|normalized| PointerObservation {
@@ -3022,17 +4279,22 @@ impl CachedInputProvider for WorkerInputProvider<'_> {
         if !civil {
             return Ok(None);
         }
-        let millis = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|_| {
-                ilium_animation_js::error::AnimationError::Runtime(
-                    "Civil clock precedes Unix epoch".into(),
-                )
-            })?
-            .as_millis();
-        let epoch_ms = i64::try_from(millis).map_err(|_| {
-            ilium_animation_js::error::AnimationError::Runtime("Civil clock range".into())
-        })?;
+        let epoch_ms = match self.replay_civil_anchor_ms {
+            Some(epoch_ms) => epoch_ms,
+            None => {
+                let millis = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map_err(|_| {
+                        ilium_animation_js::error::AnimationError::Runtime(
+                            "Civil clock precedes Unix epoch".into(),
+                        )
+                    })?
+                    .as_millis();
+                i64::try_from(millis).map_err(|_| {
+                    ilium_animation_js::error::AnimationError::Runtime("Civil clock range".into())
+                })?
+            }
+        };
         Ok(Some(ClockObservation {
             epoch_ms: Some(epoch_ms),
             timezone: Some("UTC".into()),
@@ -3062,6 +4324,9 @@ impl Presentation {
         // A completion can synchronously queue the next native request during
         // the one authorized pump. Drain that chain in bounded actor turns so
         // a task next issued after open does not wait for an unrelated frame.
+        self.sources
+            .advance_sequence_captures(instance, &mut self.drawing)
+            .map_err(|error| error.to_string())?;
         for _ in 0..64 {
             if self.unhandled.is_some() {
                 return Err(
@@ -3074,6 +4339,49 @@ impl Presentation {
             }
             let mut requests = requests.into_iter();
             while let Some(request) = requests.next() {
+                if request.method == "replay.capture_sequence" {
+                    if !matches!(request.phase, ServicePhase::Create | ServicePhase::Async) {
+                        return Err(
+                            "Replay sequence capture is only admitted during package creation"
+                                .into(),
+                        );
+                    }
+                    let options = ReplaySequenceCaptureOptions::parse(request.payload.metadata())
+                        .map_err(|error| error.to_string())?;
+                    self.sources
+                        .start_sequence_capture(request, options)
+                        .map_err(|error| error.to_string())?;
+                    continue;
+                }
+                if request.method == "replay.freeze" {
+                    {
+                        let (recording_id, digest) = self
+                            .sources
+                            .freeze_sources(instance, request.payload.metadata())
+                            .map_err(|error| error.to_string())?;
+                        let sha256 = digest
+                            .iter()
+                            .map(|byte| format!("{byte:02x}"))
+                            .collect::<String>();
+                        let result = ilium_animation_js::engine::ServiceValue::copy_from_host(
+                            &json!({"ok":true,"value":{"recording_id":recording_id,"sha256":sha256}}),
+                            &[],
+                            &BTreeMap::new(),
+                            instance.engine_limits(),
+                            self.sources.client.quota_group(),
+                        )
+                        .map_err(|error| error.to_string())?;
+                        let delivery = instance
+                            .complete_native_replay_freeze(&request, result)
+                            .map_err(|error| error.to_string())?;
+                        if delivery != ilium_animation_js::engine::CompletionState::Delivered {
+                            return Err(format!(
+                                "Replay capture receipt delivery ended as {delivery:?}; native capture remains retained"
+                            ));
+                        }
+                        continue;
+                    }
+                }
                 // Each actual adapter consumes only its own method. Unrelated
                 // original requests move intact to the next owner, never copied
                 // into JSON/fabricated demand IDs or replaced with fake responses.
@@ -3286,12 +4594,17 @@ impl Presentation {
         stop: &StopToken,
     ) -> Result<Option<PluginFrame>, String> {
         stopped(stop)?;
+        self.sources
+            .advance_sequence_captures(instance, &mut self.drawing)
+            .map_err(|error| error.to_string())?;
+        // Native feeds must keep advancing while async create is pending: a
+        // create hook may be collecting a finite replay sequence from them.
+        self.sources.begin_due(instance)?;
         // Retain one accepted native instance through asynchronous create. A
         // pending promise does not become a failure or launch a replacement.
         if self.creation != CreateState::Ready {
             return Ok(None);
         }
-        self.sources.begin_due(instance)?;
 
         self.clock
             .set_speed(
@@ -3436,6 +4749,7 @@ impl Presentation {
                 &mut WorkerInputProvider {
                     request,
                     audio: &mut self.audio,
+                    replay_civil_anchor_ms: None,
                 },
             )
             .map_err(|error| error.to_string())?;
@@ -3512,6 +4826,8 @@ impl Presentation {
         .map_err(|error| error.to_string())?;
         let planes = decode_planes(&mut output.planes, seed.shape.format, seed.shape.cell_rgb)?;
         stopped(stop)?;
+        let world_bindings = self.drawing.world_bindings();
+        let provenance_quota = self.sources.client.quota_group().clone();
         let mut prepared = None;
         let outcome = self
             .drawing
@@ -3523,8 +4839,14 @@ impl Presentation {
                 stop,
                 |snapshot, _| {
                     prepared = Some(
-                        pack_cells(snapshot, &request.settings, request.elapsed)
-                            .map_err(|_| ilium_animation_js::surface::SurfaceError::Capacity)?,
+                        pack_cells_with_provenance(
+                            snapshot,
+                            &request.settings,
+                            request.elapsed,
+                            &world_bindings,
+                            &provenance_quota,
+                        )
+                        .map_err(|_| ilium_animation_js::surface::SurfaceError::Capacity)?,
                     );
                     Ok(())
                 },
@@ -3538,7 +4860,7 @@ impl Presentation {
             return Ok(None);
         }
         stopped(stop)?;
-        let cells =
+        let (cells, world_provenance) =
             prepared.ok_or_else(|| "Native plugin publication was not staged".to_owned())?;
         let authority = instance
             .frame_authority()
@@ -3566,6 +4888,13 @@ impl Presentation {
                         + identity.package_digest.capacity(),
                 )
             })
+            .and_then(|bytes| {
+                bytes.checked_add(
+                    world_provenance
+                        .as_ref()
+                        .map_or(0, |provenance| provenance.resident_bytes),
+                )
+            })
             .ok_or_else(|| "Plugin publication size overflow".to_owned())?;
         Ok(Some(PluginFrame {
             identity,
@@ -3574,6 +4903,7 @@ impl Presentation {
             frames_per_second: instance.plan().fps.ceil().clamp(1., 120.) as u32,
             resident_bytes: bytes,
             replay: None,
+            world_provenance,
         }))
     }
     fn render_prepared(
@@ -3584,6 +4914,8 @@ impl Presentation {
         preparation: &mut ilium_animation_js::replay::ClipPreparation,
         quota: &QuotaGroup,
         stop: &StopToken,
+        frozen_inputs: &FrozenInputs,
+        source_sequence: Option<&FrozenSourceSequence>,
     ) -> Result<(), String> {
         stopped(stop)?;
         // Retain one accepted native instance through asynchronous create. A
@@ -3628,6 +4960,19 @@ impl Presentation {
             .map_err(|error| error.to_string())?;
         let video_position = Duration::try_from_secs_f64(sample.time)
             .map_err(|_| "Recorded Video playback position is invalid".to_owned())?;
+        let replay_offset_ms = source_sequence.map(|sequence| {
+            u64::try_from(video_position.as_millis())
+                .unwrap_or(u64::MAX)
+                .min(sequence.duration_ms().saturating_sub(1))
+        });
+        let replay_snapshots: Vec<&FrozenInputSnapshot> = match (source_sequence, replay_offset_ms)
+        {
+            (Some(sequence), Some(offset_ms)) => sequence
+                .snapshots_at(offset_ms)
+                .ok_or("Recorded source sequence has no state at this playback offset")?
+                .collect(),
+            _ => frozen_inputs.snapshots().iter().collect(),
+        };
         let video_status = self
             .video
             .snapshots(instance, &mut self.drawing, video_position)
@@ -3635,11 +4980,19 @@ impl Presentation {
         let service_copy_bytes = native_status
             .wire_bytes()
             .checked_add(video_status.wire_bytes())
+            .and_then(|bytes| {
+                replay_snapshots.iter().try_fold(bytes, |total, snapshot| {
+                    total
+                        .checked_add(snapshot.value().wire_bytes())?
+                        .checked_add(snapshot.handle_id().len())?
+                        .checked_add(256)
+                })
+            })
             .and_then(|bytes| bytes.checked_add(64 * 1024))
-            .ok_or("Recorded Video replay service seed size overflow")?;
+            .ok_or("Replay service seed size overflow")?;
         let _service_seed_storage = quota
             .reserve_external_storage(service_copy_bytes)
-            .map_err(|error| format!("Recorded Video replay service seed admission: {error:?}"))?;
+            .map_err(|error| format!("Replay service seed admission: {error:?}"))?;
         let mut services = native_status
             .metadata()
             .as_array()
@@ -3653,6 +5006,33 @@ impl Presentation {
                 .iter()
                 .cloned(),
         );
+        let frame_revision = u64::try_from(sample.index())
+            .ok()
+            .and_then(|index| index.checked_add(1))
+            .ok_or("Replay source frame revision overflow")?;
+        for snapshot in replay_snapshots {
+            let kind = match snapshot.family() {
+                InputFamily::Series => "sources.series",
+                InputFamily::Earthquakes => "sources.earthquakes",
+                InputFamily::Aircraft => "sources.aircraft",
+                InputFamily::Boats => "sources.boats",
+                InputFamily::Chess => "sources.chess",
+                InputFamily::Weather => "sources.weather",
+                _ => return Err("Frozen input family is not a native source feed".into()),
+            };
+            let revision = snapshot
+                .revision()
+                .checked_add(frame_revision)
+                .ok_or("Replay source revision overflow")?;
+            let latest = replay_source_metadata(instance, &mut self.drawing, snapshot)?;
+            services.push(json!({
+                "id": snapshot.handle_id(),
+                "kind": kind,
+                "revision": revision,
+                "status": {"state": "ready"},
+                "latest": latest,
+            }));
+        }
         if services.len() > 64 {
             return Err("Recorded Video replay service inventory exceeds helper bound".into());
         }
@@ -3666,6 +5046,7 @@ impl Presentation {
                 &mut WorkerInputProvider {
                     request,
                     audio: &mut self.audio,
+                    replay_civil_anchor_ms: frozen_inputs.civil_anchor(),
                 },
             )
             .map_err(|error| error.to_string())?;
@@ -3836,6 +5217,8 @@ impl Presentation {
         }
         if self.video.recording_ready() {
             instance.check_recorded_video_replay_requests(self.video.recorded_count())
+        } else if !frozen_inputs.snapshots().is_empty() {
+            instance.check_source_capture_replay_requests(frozen_inputs.snapshots().len())
         } else {
             instance.check_procedural_replay_requests()
         }
@@ -3964,11 +5347,21 @@ fn pack_cells(
     settings: &AnimationSettings,
     elapsed: Duration,
 ) -> Result<Vec<SnapshotCell>, String> {
-    if snapshot.owners().iter().any(Option::is_some) {
+    let (cells, provenance) = pack_cells_with_provenance(snapshot, settings, elapsed, &[], None)?;
+    if provenance.is_some() {
         return Err(
             "Prepared native source publication requires its authenticated owner adapter".into(),
         );
     }
+    Ok(cells)
+}
+fn pack_cells_with_provenance(
+    snapshot: &Snapshot,
+    settings: &AnimationSettings,
+    elapsed: Duration,
+    world_bindings: &[Arc<ilium_animation_js::native_worlds::WorldDotBinding>],
+    quota: Option<&QuotaGroup>,
+) -> Result<(Vec<SnapshotCell>, Option<Arc<WorldFrameProvenance>>), String> {
     let shape = snapshot.shape();
     let width = shape.cell_width as usize * 2;
     let height = shape.cell_height as usize * 4;
@@ -4002,9 +5395,66 @@ fn pack_cells(
             })
             .map_err(|error| error.to_string())?
     };
-    let mut cells = cells_from_packed(shape, &packed, settings, elapsed)?;
+    let mut cells = cells_from_validated_packed(shape, &packed, settings, elapsed)?;
     overlay_native_text(&mut cells, shape, snapshot.text())?;
-    Ok(cells)
+    let provenance = if packed.owners.iter().any(Option::is_some) {
+        let quota = quota
+            .ok_or_else(|| "Native source provenance has no original quota authority".to_owned())?;
+        let layout = shape.layout().map_err(|error| error.to_string())?;
+        if packed.owners.len() != layout.dots {
+            return Err("Native source provenance dot count mismatch".into());
+        }
+        let mut bindings = world_bindings.to_vec();
+        bindings.sort_unstable_by_key(|binding| binding.range_start());
+        if bindings
+            .windows(2)
+            .any(|pair| pair[0].range_start() == pair[1].range_start())
+        {
+            return Err("Native world source binding identity was duplicated".into());
+        }
+        let mut used = vec![false; bindings.len()];
+        for token in packed.owners.iter().flatten() {
+            let insertion =
+                bindings.partition_point(|binding| binding.range_start() <= token.evidence_key());
+            if insertion == 0 || bindings[insertion - 1].source_index(*token).is_none() {
+                return Err(
+                    "Prepared native source token has no retained original world binding".into(),
+                );
+            }
+            used[insertion - 1] = true;
+        }
+        let bindings = bindings
+            .into_iter()
+            .zip(used)
+            .filter_map(|(binding, used)| used.then_some(binding))
+            .collect::<Vec<_>>();
+        let resident_bytes = packed
+            .owners
+            .capacity()
+            .checked_mul(std::mem::size_of::<Option<SourceToken>>())
+            .and_then(|bytes| bytes.checked_add(std::mem::size_of::<WorldFrameProvenance>()))
+            .and_then(|bytes| {
+                bindings
+                    .capacity()
+                    .checked_mul(std::mem::size_of::<
+                        Arc<ilium_animation_js::native_worlds::WorldDotBinding>,
+                    >())
+                    .and_then(|binding_bytes| bytes.checked_add(binding_bytes))
+            })
+            .ok_or_else(|| "Native source provenance size overflow".to_owned())?;
+        let storage = quota
+            .reserve_external_storage(resident_bytes)
+            .map_err(|error| format!("Native source provenance admission: {error:?}"))?;
+        Some(Arc::new(WorldFrameProvenance {
+            bindings,
+            tokens: packed.owners,
+            resident_bytes,
+            _storage: storage,
+        }))
+    } else {
+        None
+    };
+    Ok((cells, provenance))
 }
 fn snapshot_cells_bytes(cells: &[SnapshotCell], capacity: usize) -> Option<usize> {
     capacity
@@ -4148,6 +5598,379 @@ fn cells_from_validated_packed(
 mod tests {
     use super::*;
     use ilium_animation_js::surface::{ColourSpace, Update};
+    use std::io::Cursor;
+
+    fn archive_test_quota(worker_bytes: usize) -> QuotaGroup {
+        QuotaGroup::new(ilium_execution::QuotaLimits {
+            clients: 0,
+            jobs: 0,
+            service_jobs: 0,
+            input_bytes: 0,
+            result_bytes: 0,
+            worker_threads: 0,
+            worker_bytes,
+        })
+    }
+
+    #[test]
+    fn animation_archive_admission_precedes_read_and_covers_buffer_lifetime() {
+        struct ReadCounter(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+        impl std::io::Read for ReadCounter {
+            fn read(&mut self, _buffer: &mut [u8]) -> std::io::Result<usize> {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                Ok(0)
+            }
+        }
+
+        let quota = archive_test_quota(4);
+        let reads = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let result =
+            read_admitted_animation_archive(ReadCounter(std::sync::Arc::clone(&reads)), 4, &quota);
+
+        assert!(
+            result.is_err(),
+            "the size-plus-one reservation exceeds quota"
+        );
+        assert_eq!(
+            reads.load(Ordering::SeqCst),
+            0,
+            "refusal must precede reading"
+        );
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+
+        let quota = archive_test_quota(5);
+        let admitted = read_admitted_animation_archive(Cursor::new(b"pack"), 4, &quota)
+            .expect("the bounded archive is admitted");
+        assert_eq!(admitted.bytes.as_slice(), b"pack");
+        assert_eq!(quota.snapshot().worker_bytes, 5);
+        drop(admitted);
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+    }
+
+    #[test]
+    fn oversized_animation_archive_is_rejected_before_read_or_admission() {
+        struct ReadCounter(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+        impl std::io::Read for ReadCounter {
+            fn read(&mut self, _buffer: &mut [u8]) -> std::io::Result<usize> {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                Ok(0)
+            }
+        }
+
+        let quota = archive_test_quota(64 * 1024 * 1024);
+        let reads = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let result = read_admitted_animation_archive(
+            ReadCounter(std::sync::Arc::clone(&reads)),
+            ARCHIVE_BYTES + 1,
+            &quota,
+        );
+
+        assert_eq!(
+            result.err().expect("oversized archive must be refused"),
+            "Animation archive exceeds 32 MiB"
+        );
+        assert_eq!(reads.load(Ordering::SeqCst), 0);
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+    }
+
+    #[test]
+    fn changed_animation_archive_size_releases_its_admission() {
+        let quota = archive_test_quota(16);
+        let result = read_admitted_animation_archive(Cursor::new(b"larger"), 4, &quota);
+
+        assert!(
+            result.is_err(),
+            "growth beyond metadata size must be rejected"
+        );
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+    }
+
+    #[test]
+    fn cancelled_replay_capture_stops_waits_for_drain_and_discards() {
+        assert_eq!(
+            replay_sequence_retirement(true, false, true),
+            Some(ReplaySequenceRetirement::StopSources)
+        );
+        assert_eq!(
+            replay_sequence_retirement(true, true, false),
+            Some(ReplaySequenceRetirement::WaitForDrain)
+        );
+        assert_eq!(
+            replay_sequence_retirement(true, true, true),
+            Some(ReplaySequenceRetirement::Discard)
+        );
+        assert_eq!(
+            replay_sequence_retirement(false, true, false),
+            Some(ReplaySequenceRetirement::WaitForDrain)
+        );
+        assert_eq!(
+            replay_sequence_retirement(false, true, true),
+            Some(ReplaySequenceRetirement::Finish)
+        );
+        assert_eq!(replay_sequence_retirement(false, false, false), None);
+    }
+
+    #[test]
+    fn replay_sequence_options_accept_the_bounded_carpet_capture_contract() {
+        let options = ReplaySequenceCaptureOptions::parse(&json!({
+            "sources": [{"id":"source-feed-1", "kind":"sources.chess"}],
+            "duration_ms": 12_000,
+            "sample_hz": 1,
+            "max_frames": 13,
+            "max_bytes": 8_000_000
+        }))
+        .expect("the declared Carpet TV capture fits the native limits");
+
+        assert_eq!(options.duration_ms, 12_000);
+        assert_eq!(options.sample_hz, 1);
+        assert_eq!(options.max_frames, 13);
+        assert_eq!(options.max_bytes, 8_000_000);
+        assert_eq!(
+            options.sources,
+            [("source-feed-1".into(), "sources.chess".into())]
+        );
+    }
+
+    #[test]
+    fn replay_sequence_options_reject_malformed_or_unbounded_capture_requests() {
+        let valid = json!({
+            "sources": [{"id":"source-feed-1", "kind":"sources.chess"}],
+            "duration_ms": 12_000,
+            "sample_hz": 1,
+            "max_frames": 13,
+            "max_bytes": 8_000_000
+        });
+        let mut duplicate_source = valid.clone();
+        duplicate_source["sources"] = json!([
+            {"id":"source-feed-1", "kind":"sources.chess"},
+            {"id":"source-feed-1", "kind":"sources.chess"}
+        ]);
+        let mut too_many_frames = valid.clone();
+        too_many_frames["max_frames"] = json!(12);
+        let mut unknown_kind = valid.clone();
+        unknown_kind["sources"][0]["kind"] = json!("worlds.frame");
+        let mut malformed_id = valid.clone();
+        malformed_id["sources"][0]["id"] = json!("source-feed-");
+        let mut overlong_capture = valid.clone();
+        overlong_capture["duration_ms"] = json!(120_000);
+        overlong_capture["sample_hz"] = json!(60);
+        let mut unknown_field = valid;
+        unknown_field["timeout"] = json!(12_000);
+
+        for invalid in [
+            duplicate_source,
+            too_many_frames,
+            unknown_kind,
+            malformed_id,
+            overlong_capture,
+            unknown_field,
+        ] {
+            assert!(ReplaySequenceCaptureOptions::parse(&invalid).is_err());
+        }
+    }
+
+    #[test]
+    fn replay_recording_retains_exact_frozen_handles_and_source_values() {
+        let quota = QuotaGroup::new(ilium_execution::QuotaLimits {
+            clients: 0,
+            jobs: 0,
+            service_jobs: 0,
+            input_bytes: 0,
+            result_bytes: 0,
+            worker_threads: 0,
+            worker_bytes: 2 * 1024 * 1024,
+        });
+        let value = |game_id: &str| {
+            ilium_animation_js::engine::ServiceValue::copy_from_host(
+                &json!({"revision": 1, "available": true, "game_id": game_id}),
+                &[],
+                &BTreeMap::new(),
+                &ilium_animation_js::engine::EngineLimits::default(),
+                &quota,
+            )
+            .unwrap()
+        };
+        let frozen = FrozenInputs::from_capture(
+            quota.clone(),
+            "recording-test",
+            vec![
+                FrozenInputSnapshot::from_native(InputFamily::Chess, "feed-tv", 1, value("tv"))
+                    .unwrap(),
+                FrozenInputSnapshot::from_native(
+                    InputFamily::Series,
+                    "feed-series",
+                    1,
+                    value("series"),
+                )
+                .unwrap(),
+            ],
+            4096,
+            Some(1_800_000_000_000),
+            "native-source-replay",
+            &[],
+        )
+        .unwrap();
+        let recording = NativeReplayRecording {
+            digest: frozen.digest(),
+            captures: Vec::new(),
+            sequence_captures: Vec::new(),
+            frozen,
+            sequence: None,
+            _admission: quota.reserve_external_storage(256).unwrap(),
+        };
+
+        assert_eq!(recording.frozen.recording(), Some("recording-test"));
+        assert_eq!(recording.digest, recording.frozen.digest());
+        assert_eq!(recording.frozen.snapshots()[0].handle_id(), "feed-tv");
+        assert_eq!(recording.frozen.snapshots()[0].family(), InputFamily::Chess);
+        assert_eq!(
+            recording.frozen.snapshots()[0].value().metadata()["game_id"],
+            "tv"
+        );
+        assert_eq!(recording.frozen.snapshots()[1].handle_id(), "feed-series");
+        assert_eq!(
+            recording.frozen.snapshots()[1].family(),
+            InputFamily::Series
+        );
+        assert_eq!(recording.frozen.civil_anchor(), Some(1_800_000_000_000));
+    }
+
+    #[test]
+    fn replay_weather_images_rebind_tiles_and_frames_once_per_slot() {
+        use ilium_animation_js::{
+            engine::{EngineLimits, ServiceValue},
+            native_media::{MediaLimits, NativeMedia},
+            replay::FrozenInputSnapshot,
+            sources::NativeSourceImage,
+        };
+
+        let quota = QuotaGroup::new(ilium_execution::QuotaLimits {
+            clients: 0,
+            jobs: 0,
+            service_jobs: 0,
+            input_bytes: 0,
+            result_bytes: 0,
+            worker_threads: 0,
+            worker_bytes: 2 * 1024 * 1024,
+        });
+        let mut media = NativeMedia::new(quota.clone(), MediaLimits::default()).unwrap();
+        let images = [[10, 20, 30, 255], [40, 50, 60, 255], [70, 80, 90, 255]]
+            .into_iter()
+            .map(|rgba| {
+                let handle = media.solid_image(rgba).unwrap();
+                NativeSourceImage::from_native(&media, handle).unwrap()
+            })
+            .collect::<Vec<_>>();
+        let slot = |index: usize| {
+            json!({
+                "native_image_slot": index,
+                "width": 1,
+                "height": 1
+            })
+        };
+        let metadata = json!({
+            "layers": [{
+                "tiles": [{"image": slot(0)}, {"image": slot(0)}],
+                "frames": [
+                    {"image": slot(1)},
+                    {"tiles": [{"image": slot(2)}]}
+                ]
+            }]
+        });
+        let freeze = |metadata, images| {
+            let value = ServiceValue::copy_from_host(
+                &metadata,
+                &[],
+                &BTreeMap::new(),
+                &EngineLimits::default(),
+                quota.clone(),
+            )
+            .unwrap();
+            FrozenInputSnapshot::from_native_with_images(
+                InputFamily::Weather,
+                "weather:tiles",
+                9,
+                value,
+                images,
+            )
+            .unwrap()
+        };
+        let snapshot = freeze(metadata.clone(), images.clone());
+        let mut registrations = 0;
+        let projected = replay_source_metadata_with(&snapshot, |image| {
+            registrations += 1;
+            Ok(json!({"id": format!("image-{}", image.native_handle().id()), "kind":"image"}))
+        })
+        .unwrap();
+
+        assert_eq!(registrations, 3, "each source image slot registers once");
+        assert_eq!(
+            projected["layers"][0]["tiles"][0]["image"]["id"],
+            projected["layers"][0]["tiles"][1]["image"]["id"],
+            "repeated slots share one native descriptor"
+        );
+        assert_eq!(
+            projected["layers"][0]["frames"][0]["image"]["id"],
+            format!("image-{}", images[1].native_handle().id())
+        );
+        assert_eq!(
+            projected["layers"][0]["frames"][1]["tiles"][0]["image"]["id"],
+            format!("image-{}", images[2].native_handle().id())
+        );
+        assert!(serde_json::to_string(&projected)
+            .unwrap()
+            .find("native_image_slot")
+            .is_none());
+
+        let missing_inventory = freeze(
+            json!({"layers":[{"tiles":[{"image":slot(0)}]}]}),
+            Vec::new(),
+        );
+        assert!(
+            replay_source_metadata_with(&missing_inventory, |_| Ok(json!({"id":"missing"})))
+                .unwrap_err()
+                .contains("without a retained image")
+        );
+
+        let unsupported_location = freeze(
+            json!({
+                "layers":[{"tiles":[{"image":slot(0)}],"frames":[
+                    {"image":slot(1),"tiles":[{"image":slot(2)}]}
+                ]}],
+                "extension":[{"image":slot(0)}]
+            }),
+            images.clone(),
+        );
+        assert!(
+            replay_source_metadata_with(&unsupported_location, |_| Ok(json!({"id":"x"})))
+                .unwrap_err()
+                .contains("unsupported image slot")
+        );
+
+        let unused_image = freeze(json!({"layers":[{"tiles":[{"image":slot(0)}]}]}), images);
+        let error =
+            replay_source_metadata_with(&unused_image, |_| Ok(json!({"id":"unused"}))).unwrap_err();
+        assert!(error.contains("inventory"));
+
+        for (marker, expected_error) in [
+            (
+                json!({"native_image_slot":3,"width":1,"height":1}),
+                "outside its retained inventory",
+            ),
+            (
+                json!({"native_image_slot":0,"width":2,"height":1}),
+                "dimensions changed",
+            ),
+        ] {
+            let malformed = freeze(
+                json!({"layers":[{"tiles":[{"image":marker}]}]}),
+                vec![images[0].clone()],
+            );
+            let error =
+                replay_source_metadata_with(&malformed, |_| Ok(json!({"id":"bad"}))).unwrap_err();
+            assert!(error.contains(expected_error), "unexpected error: {error}");
+        }
+    }
 
     #[test]
     fn playback_host_tick_rejects_backward_requests() {

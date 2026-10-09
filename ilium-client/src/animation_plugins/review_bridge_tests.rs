@@ -354,7 +354,27 @@ fn mouse_choice_shared_geometry_and_cancel_return_original_native_action() {
     bridge.publish(1, &package, &principal, native).unwrap();
     let mut session = bridge.session().unwrap().unwrap();
     let area = Rect::new(10, 20, 70, 18);
-    let rect = permissions::permission_choice_rect(area, PermissionChoice::DenyRemembered).unwrap();
+    let content = review_content_area(area);
+    let before = session.view.choice(0);
+    session
+        .handle_mouse(
+            &bridge,
+            area,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: area.x,
+                row: content.y,
+                modifiers: crossterm::event::KeyModifiers::NONE,
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        session.view.choice(0),
+        before,
+        "frame clicks must not choose consent"
+    );
+    let rect =
+        permissions::permission_choice_rect(content, PermissionChoice::DenyRemembered).unwrap();
     session
         .handle_mouse(
             &bridge,
@@ -395,7 +415,9 @@ fn protected_render_keeps_host_scope_choices_and_submit_geometry() {
     terminal
         .draw(|frame| session.draw(frame, area, Style::default()))
         .unwrap();
+    crate::ui_capture::save("plugin-permissions-framed", &terminal);
     let buffer = terminal.backend().buffer();
+    assert_eq!(buffer[(area.x, area.y)].symbol(), "╭");
     let all: String = (0..area.height)
         .flat_map(|y| (0..area.width).map(move |x| buffer[(x, y)].symbol()))
         .collect();
@@ -403,21 +425,73 @@ fn protected_render_keeps_host_scope_choices_and_submit_geometry() {
     assert!(all.contains("Animation viewport only"));
     assert!(all.contains("No consent recorded"));
     for choice in PermissionChoice::ALL {
-        let rect = permissions::permission_choice_rect(area, choice).unwrap();
+        let content = review_content_area(area);
+        let rect = permissions::permission_choice_rect(content, choice).unwrap();
         let row: String = (rect.x..rect.right())
             .map(|x| buffer[(x, rect.y)].symbol())
             .collect();
         assert_eq!(row.trim_end(), choice.label());
         assert_eq!(
-            permissions::permission_choice_at(area, Position::new(rect.x, rect.y)),
+            permissions::permission_choice_at(content, Position::new(rect.x, rect.y)),
             Some(choice)
         );
     }
-    let footer = review_submit_rect(area).unwrap();
+    let footer = review_submit_rect(review_content_area(area)).unwrap();
     let row: String = (footer.x..footer.right())
         .map(|x| buffer[(x, footer.y)].symbol())
         .collect();
     assert!(row.contains("Enter submits"));
+}
+
+#[test]
+fn permission_detail_scroll_returns_immediately_from_the_end() {
+    use ratatui::{backend::TestBackend, Terminal};
+    let (package, principal, mut broker) = fixture();
+    let bridge = bridge(quota(2 * REVIEW_BYTES));
+    bridge.select(1, true).unwrap();
+    bridge
+        .publish(1, &package, &principal, review(&mut broker, 1))
+        .unwrap();
+    let mut session = bridge.session().unwrap().unwrap();
+    let area = Rect::new(0, 0, 40, 12);
+    let limit =
+        permissions::permission_detail_scroll_limit(review_content_area(area), &session.view);
+    assert!(limit > 0, "the compact fixture must overflow");
+    session.view.detail_scroll = u16::MAX;
+    let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
+    terminal
+        .draw(|frame| session.draw(frame, area, Style::default()))
+        .unwrap();
+    assert_eq!(session.view.detail_scroll, limit);
+    session.handle_key(&bridge, KeyCode::PageUp).unwrap();
+    terminal
+        .draw(|frame| session.draw(frame, area, Style::default()))
+        .unwrap();
+    assert_eq!(session.view.detail_scroll, limit.saturating_sub(4));
+}
+
+#[test]
+fn permission_frame_regions_stay_bounded_at_compact_sizes() {
+    for (width, height) in [(120, 40), (80, 24), (40, 12), (12, 6), (2, 2), (1, 1)] {
+        let area = Rect::new(0, 0, width, height);
+        let content = review_content_area(area);
+        assert!(content.right() <= area.right());
+        assert!(content.bottom() <= area.bottom());
+        let details = permissions::permission_detail_area(content);
+        assert!(details.right() <= content.right());
+        assert!(details.bottom() <= content.bottom());
+        for choice in PermissionChoice::ALL {
+            if let Some(rect) = permissions::permission_choice_rect(content, choice) {
+                assert!(details.bottom() <= rect.y);
+                assert!(rect.right() <= content.right());
+                assert!(rect.bottom() <= content.bottom());
+                assert_eq!(
+                    permissions::permission_choice_at(content, Position::new(area.x, rect.y)),
+                    None
+                );
+            }
+        }
+    }
 }
 #[test]
 fn unicode_status_snapshot_admission_refuses_before_copy_and_retains_its_owner() {
@@ -444,4 +518,44 @@ fn unicode_status_snapshot_admission_refuses_before_copy_and_retains_its_owner()
     assert_eq!(original.snapshot().worker_bytes, STATUS_BYTES);
     drop(snapshot);
     assert_eq!(original.snapshot().worker_bytes, 0);
+}
+
+#[test]
+fn export_permission_review_visual_matrix() {
+    use ratatui::{backend::TestBackend, Terminal};
+    for (width, height) in [(120, 40), (80, 24), (60, 20), (40, 12)] {
+        for variant in ["required-top", "required-bottom", "optional", "save-error"] {
+            let (package, principal, mut broker) = fixture();
+            let bridge = bridge(quota(2 * REVIEW_BYTES));
+            bridge.select(1, true).unwrap();
+            bridge
+                .publish(1, &package, &principal, review(&mut broker, 1))
+                .unwrap();
+            let mut session = bridge.session().unwrap().unwrap();
+            // Presentation-only mutations: no consent submission or persistent decision.
+            session.view.requests[0].required = variant != "optional";
+            session.view.requests[0].reason = "Synthetic explanation: pointer input steers the animation within its viewport. 界\n".repeat(24);
+            if variant == "required-bottom" {
+                session.view.detail_scroll = u16::MAX;
+            }
+            if variant == "save-error" {
+                session.set_error("Synthetic permission save failed; no decision was persisted");
+            }
+            let area = Rect::new(0, 0, width, height);
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal
+                .draw(|frame| session.draw(frame, area, Style::default()))
+                .unwrap();
+            assert_eq!(terminal.backend().buffer()[(0, 0)].symbol(), "╭");
+            let content = review_content_area(area);
+            let details = permissions::permission_detail_area(content);
+            for choice in PermissionChoice::ALL {
+                if let Some(rect) = permissions::permission_choice_rect(content, choice) {
+                    assert!(rect.y >= details.bottom());
+                    assert!(rect.right() <= content.right() && rect.bottom() <= content.bottom());
+                }
+            }
+            crate::ui_capture::save(&format!("permission-{variant}-{width}x{height}"), &terminal);
+        }
+    }
 }

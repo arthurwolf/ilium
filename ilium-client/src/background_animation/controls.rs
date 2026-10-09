@@ -72,7 +72,8 @@ impl AnimationSettings {
         }
         if self.kind == AnimationKind::Semantic {
             return vec![Control::choice(
-                "semantic_scope", "Recommendation scope",
+                "semantic_scope",
+                "Recommendation scope",
                 usize::from(self.semantic_scope == SemanticScope::Entry),
                 &["Project", "Entry"],
                 "Use the selected project's recommendation or the focused entry's recommendation from the last tree reorganization.",

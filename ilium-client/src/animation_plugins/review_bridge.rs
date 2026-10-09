@@ -828,6 +828,7 @@ impl ReviewSession {
         if !bridge.is_current(self) {
             return Err("Permission review changed; await native refresh".into());
         }
+        let area = review_content_area(area);
         match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
                 if let Some(choice) =
@@ -860,6 +861,17 @@ impl ReviewSession {
     }
     pub(crate) fn draw(&mut self, frame: &mut Frame<'_>, area: Rect, style: Style) {
         frame.render_widget(Clear, area);
+        frame.render_widget(
+            crate::theme::block(true).title(crate::theme::chrome_title("Plugin permissions")),
+            area,
+        );
+        let area = review_content_area(area);
+        self.view.detail_scroll =
+            self.view
+                .detail_scroll
+                .min(permissions::permission_detail_scroll_limit(
+                    area, &self.view,
+                ));
         permissions::draw_permission_review(frame, area, &self.view, style);
         if area.height >= 8 {
             let availability = match self.envelope.verdicts.get(self.view.cursor) {
@@ -873,7 +885,12 @@ impl ReviewSession {
             };
             frame.render_widget(
                 Paragraph::new(availability).style(style),
-                Rect::new(area.x, area.y + 2, area.width, 1),
+                Rect::new(
+                    area.x,
+                    area.y + 2,
+                    permissions::permission_detail_area(area).width,
+                    1,
+                ),
             );
         }
         if let Some(choice) = PermissionChoice::ALL.get(self.choice_cursor).copied() {
@@ -911,6 +928,10 @@ impl ReviewSession {
             .collect();
     }
 }
+fn review_content_area(area: Rect) -> Rect {
+    crate::theme::block(true).inner(area)
+}
+
 pub(crate) fn review_submit_rect(area: Rect) -> Option<Rect> {
     (area.width > 0 && area.height > 0)
         .then(|| Rect::new(area.x, area.bottom().saturating_sub(1), area.width, 1))

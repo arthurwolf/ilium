@@ -1513,25 +1513,42 @@ fn look_and_panel_settings_are_global_normalized_and_persist_through_serde() {
 }
 
 #[test]
-fn look_changes_never_rebuild_the_loop_cache_but_pattern_changes_do() {
+fn look_changes_retain_ready_loop_frames_and_pattern_changes_rebuild_them() {
     let mut cache = AnimationLoopCache::new(ilium_ambient::resources::AmbientResources::new(
         crate::execution::test_client(),
     ));
     let mut settings = AnimationSettings {
         enabled: true,
+        loop_seconds: 1,
         ..Default::default()
     };
-    cache.begin(&settings, 20, 8);
-    let first = cache.status().total_frames;
-    assert!(first > 0);
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while !cache.step(&settings, 20, 8, 12) {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "small deterministic loop cache must become ready"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    let ready = cache.status();
+    assert!(ready.is_ready);
+    assert_eq!(ready.total_frames, 30);
+
     settings.appearance.brightness_percent = 30;
     settings.appearance.palette = 3;
     settings.panels = PanelTarget::Left;
     settings.fps_limit = 5;
     cache.begin(&settings, 20, 8);
     assert!(
-        cache.status().completed_frames > 0 || cache.status().is_ready || first > 0,
-        "same cache identity: nothing restarts"
+        cache.status().is_ready,
+        "look-only changes retain packed frames"
+    );
+
+    settings.density_percent = settings.density_percent.saturating_sub(1);
+    cache.begin(&settings, 20, 8);
+    assert!(
+        !cache.status().is_ready,
+        "a geometry-setting change invalidates the packed frames"
     );
 }
 

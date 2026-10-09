@@ -1,18 +1,20 @@
 //! One persistent scene owner. Time requests replace pending time requests;
 //! emitted-frame receipts are ordered and are never silently discarded.
-use super::plugin_backend::{PluginBackend, PluginFrameIdentity};
+use super::plugin_backend::{PluginBackend, PluginFrameIdentity, WorldFrameProvenance};
 use super::{AnimationCacheStatus, AnimationFrame, AnimationLoopCache, AnimationSettings};
 use crate::animation_plugins::AnimationSourceTab;
 use ilium_ambient::raster::PaintedOwner;
 use ilium_ambient::scene::{FrameReceiptId, MAX_SCENE_RECEIPT_SLOTS};
 use ilium_animation_js::helper::HelperAuthority;
-use ilium_animation_js::replay::{PendingEmission, PlaybackLease};
+use ilium_animation_js::replay::{PendingEmission, PlaybackLease, TerminalFrameStamp};
 use ilium_animation_js::runtime::{CommittedFrameEmission, RetainedFrameAuthority};
 #[cfg(test)]
 use ilium_execution::{Job, JobContext, JobCost, JobOutcome, JobPoll, Lane, Receipt};
 use ilium_execution::{QuotaGroup, StorageAdmission, WorkerAdmission};
-use ilium_platform::owned_worker::{spawn_owned, OwnedWorker, StopToken, WorkerKind, WorkerTicket};
-use std::collections::{BTreeMap, VecDeque};
+use ilium_platform::owned_worker::{
+    reserve_owned_worker, OwnedWorker, StopToken, WorkerKind, WorkerReservation, WorkerTicket,
+};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::io;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 #[cfg(test)]
@@ -27,6 +29,7 @@ const MAX_RECEIPTS: usize = 16;
 const MAX_SERVICES: usize = 4;
 const MAX_SETTINGS_BYTES: usize = 64 * 1024;
 const MAX_SETTINGS_RETAINED_BYTES: usize = 256 * 1024;
+const ANIMATION_STACK_BYTES: usize = 2 * 1024 * 1024;
 static SERVICES: AtomicUsize = AtomicUsize::new(0);
 static ADMISSION_READY: OnceLock<Arc<tokio::sync::Notify>> = OnceLock::new();
 
@@ -132,6 +135,7 @@ pub struct FrameSnapshot {
     cells: Vec<SnapshotCell>,
     plugin_identity: Option<PluginFrameIdentity>,
     plugin_authority: Option<RetainedFrameAuthority>,
+    world_provenance: Option<Arc<WorldFrameProvenance>>,
     replay: Option<PlaybackLease>,
     scene_generation: Option<u64>,
     scene_receipt_id: Option<FrameReceiptId>,
@@ -186,6 +190,8 @@ impl FrameSnapshot {
         Ok(PresentationLease {
             frame: Arc::clone(self),
             shared,
+            terminal_stamp: TerminalFrameStamp::for_native_presentation(),
+            output_started: false,
         })
     }
 }
@@ -193,6 +199,10 @@ impl FrameSnapshot {
 pub struct PresentationLease {
     frame: Arc<FrameSnapshot>,
     shared: Arc<Shared>,
+    /// One opaque identity per physical presentation lease. A flush proof
+    /// minted for this output cannot settle another queued frame's sources.
+    terminal_stamp: Arc<TerminalFrameStamp>,
+    output_started: bool,
 }
 impl std::fmt::Debug for PresentationLease {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -214,25 +224,205 @@ impl PresentationLease {
     }
     /// The exact queued frame retains the original native channel. The
     /// presenter holds the returned non-cloneable permit through backend flush.
-    pub fn begin_output(&self) -> Result<Option<CommittedFrameEmission>, String> {
+    pub fn begin_output(&mut self) -> Result<Option<CommittedFrameEmission>, String> {
         match (&self.frame.plugin_identity, &self.frame.plugin_authority) {
             (None, None) => Ok(None),
             (Some(identity), Some(authority)) => {
+                if self.output_started {
+                    return Err("Plugin presentation output was already started".into());
+                }
                 if identity.revision != self.frame.revision {
                     return Err("Plugin frame revision changed before output".into());
                 }
-                authority
-                    .begin_output(&HelperAuthority {
-                        package_digest: identity.package_digest.clone(),
-                        instance_id: identity.instance_id,
-                        plan_generation: identity.plan_generation,
-                        authorization_epoch: identity.authorization_epoch,
-                    })
-                    .map(Some)
-                    .map_err(|error| error.to_string())
+                let emission = authority
+                    .begin_output_for_presentation(
+                        &HelperAuthority {
+                            package_digest: identity.package_digest.clone(),
+                            instance_id: identity.instance_id,
+                            plan_generation: identity.plan_generation,
+                            authorization_epoch: identity.authorization_epoch,
+                        },
+                        Arc::clone(&self.terminal_stamp),
+                    )
+                    .map_err(|error| error.to_string())?;
+                self.output_started = true;
+                Ok(Some(emission))
             }
             _ => Err("Plugin frame native authority missing".into()),
         }
+    }
+    pub fn terminal_stamp(&self) -> &Arc<TerminalFrameStamp> {
+        &self.terminal_stamp
+    }
+    pub(crate) fn validate_output_proof(
+        &self,
+        proof: &ilium_animation_js::replay::ReplayFlushedProof,
+    ) -> Result<(), String> {
+        let (Some(identity), Some(authority)) =
+            (&self.frame.plugin_identity, &self.frame.plugin_authority)
+        else {
+            return Err("Terminal proof has no matching plugin frame".into());
+        };
+        if identity.revision != self.frame.revision || !self.output_started {
+            return Err("Terminal proof does not match an emitted plugin frame".into());
+        }
+        authority
+            .validate_flushed_proof(
+                &HelperAuthority {
+                    package_digest: identity.package_digest.clone(),
+                    instance_id: identity.instance_id,
+                    plan_generation: identity.plan_generation,
+                    authorization_epoch: identity.authorization_epoch,
+                },
+                &self.terminal_stamp,
+                proof,
+            )
+            .map_err(|error| error.to_string())
+    }
+    pub(crate) fn world_emissions(
+        &self,
+        surviving: &[u8],
+        proof: &ilium_animation_js::replay::ReplayFlushedProof,
+    ) -> Result<Vec<ilium_animation_js::native_worlds::WorldEmission>, String> {
+        let Some(provenance) = &self.frame.world_provenance else {
+            return Ok(Vec::new());
+        };
+        self.validate_output_proof(proof)?;
+        if surviving.len() != self.frame.cells.len()
+            || surviving
+                .iter()
+                .zip(&self.frame.cells)
+                .any(|(bits, cell)| bits & !cell.packed_bits != 0)
+        {
+            return Err("World receipt mask does not match the packed frame".into());
+        }
+        let width = usize::from(self.frame.width);
+        let expected_dots = self
+            .frame
+            .cells
+            .len()
+            .checked_mul(8)
+            .ok_or("World receipt dot count overflow")?;
+        if width == 0 || provenance.tokens.len() != expected_dots {
+            return Err("World receipt provenance geometry mismatch".into());
+        }
+        struct Accumulator {
+            binding: Arc<ilium_animation_js::native_worlds::WorldDotBinding>,
+            source_indices: BTreeSet<usize>,
+            emitted_owner_dots: BTreeMap<u32, u32>,
+        }
+        const BITS: [[u8; 2]; 4] = [[1, 8], [2, 16], [4, 32], [64, 128]];
+        let mut source_dot_count = 0usize;
+        for (cell_index, (&bits, cell)) in surviving.iter().zip(&self.frame.cells).enumerate() {
+            if cell.article_symbol.is_some() || cell.article_is_continuation {
+                continue;
+            }
+            for (dy, row) in BITS.iter().enumerate() {
+                for (dx, bit) in row.iter().enumerate() {
+                    if bits & bit == 0 {
+                        continue;
+                    }
+                    let dot_index =
+                        (cell_index / width * 4 + dy) * width * 2 + cell_index % width * 2 + dx;
+                    if provenance.tokens[dot_index].is_some() {
+                        source_dot_count = source_dot_count
+                            .checked_add(1)
+                            .ok_or("World receipt source-dot count overflow")?;
+                    }
+                }
+            }
+        }
+        if source_dot_count == 0 {
+            return Ok(Vec::new());
+        }
+        let scratch_bytes = source_dot_count
+            .checked_mul(256)
+            .and_then(|bytes| bytes.checked_add(1024))
+            .ok_or("World receipt scratch size overflow")?;
+        let _scratch = self
+            .frame
+            .plugin_authority
+            .as_ref()
+            .ok_or("World receipt authority missing")?
+            .reserve_world_receipt_scratch(scratch_bytes)
+            .map_err(|error| error.to_string())?;
+
+        let mut emissions = BTreeMap::<u64, Accumulator>::new();
+        for (cell_index, (&bits, cell)) in surviving.iter().zip(&self.frame.cells).enumerate() {
+            if cell.article_symbol.is_some() || cell.article_is_continuation {
+                continue;
+            }
+            for (dy, row) in BITS.iter().enumerate() {
+                for (dx, bit) in row.iter().enumerate() {
+                    if bits & bit == 0 {
+                        continue;
+                    }
+                    let dot_index =
+                        (cell_index / width * 4 + dy) * width * 2 + cell_index % width * 2 + dx;
+                    let Some(token) = provenance.tokens[dot_index] else {
+                        continue;
+                    };
+                    let insertion = provenance
+                        .bindings
+                        .partition_point(|binding| binding.range_start() <= token.evidence_key());
+                    if insertion == 0 {
+                        return Err("World output token has no original binding".into());
+                    }
+                    let binding = &provenance.bindings[insertion - 1];
+                    let source_index = binding
+                        .source_index(token)
+                        .ok_or("World output token escaped its original binding")?;
+                    let owner = binding
+                        .owner_id(source_index)
+                        .ok_or("World output owner index is outside its source frame")?;
+                    let entry =
+                        emissions
+                            .entry(binding.range_start())
+                            .or_insert_with(|| Accumulator {
+                                binding: Arc::clone(binding),
+                                source_indices: BTreeSet::new(),
+                                emitted_owner_dots: BTreeMap::new(),
+                            });
+                    entry.source_indices.insert(source_index);
+                    let count = entry.emitted_owner_dots.entry(owner).or_default();
+                    *count = count
+                        .checked_add(1)
+                        .ok_or("World emitted owner-dot count overflow")?;
+                }
+            }
+        }
+        let identity = self
+            .frame
+            .plugin_identity
+            .as_ref()
+            .ok_or("World output identity missing")?;
+        let authority = self
+            .frame
+            .plugin_authority
+            .as_ref()
+            .ok_or("World output authority missing")?;
+        let helper = HelperAuthority {
+            package_digest: identity.package_digest.clone(),
+            instance_id: identity.instance_id,
+            plan_generation: identity.plan_generation,
+            authorization_epoch: identity.authorization_epoch,
+        };
+        emissions
+            .into_values()
+            .map(|emission| {
+                authority
+                    .world_emission_after_proof(
+                        &helper,
+                        &self.terminal_stamp,
+                        proof,
+                        &emission.binding,
+                        &emission.source_indices.into_iter().collect::<Vec<_>>(),
+                        &emission.emitted_owner_dots,
+                        self.frame.revision,
+                    )
+                    .map_err(|error| error.to_string())
+            })
+            .collect()
     }
     /// The playback lease belongs to this exact worker snapshot. A second
     /// presentation of the same replay receipt cannot silently duplicate
@@ -253,6 +443,27 @@ impl PresentationLease {
     /// Convert only after successful actual emission. Invalid masks return
     /// lease ownership too, so semantic acknowledgements cannot disappear.
     pub fn receipt(self, surviving: Vec<u8>) -> Result<EmissionReceipt, Rejected<(Self, Vec<u8>)>> {
+        self.receipt_with_world_emissions(surviving, Vec::new())
+            .map_err(|rejected| {
+                let (lease, surviving, _) = rejected.value;
+                Rejected {
+                    reason: rejected.reason,
+                    value: (lease, surviving),
+                }
+            })
+    }
+    pub(crate) fn receipt_with_world_emissions(
+        self,
+        surviving: Vec<u8>,
+        world_emissions: Vec<ilium_animation_js::native_worlds::WorldEmission>,
+    ) -> Result<
+        EmissionReceipt,
+        Rejected<(
+            Self,
+            Vec<u8>,
+            Vec<ilium_animation_js::native_worlds::WorldEmission>,
+        )>,
+    > {
         if surviving.capacity() > MAX_CELLS
             || surviving.len() != self.frame.cells.len()
             || surviving
@@ -262,12 +473,13 @@ impl PresentationLease {
         {
             return Err(Rejected {
                 reason: AdmissionError::Invalid,
-                value: (self, surviving),
+                value: (self, surviving, world_emissions),
             });
         }
         Ok(EmissionReceipt {
             lease: self,
             surviving,
+            world_emissions,
         })
     }
 }
@@ -276,6 +488,7 @@ impl PresentationLease {
 pub struct EmissionReceipt {
     lease: PresentationLease,
     surviving: Vec<u8>,
+    world_emissions: Vec<ilium_animation_js::native_worlds::WorldEmission>,
 }
 
 impl EmissionReceipt {
@@ -422,7 +635,7 @@ pub(super) fn admission_notification() -> Arc<tokio::sync::Notify> {
 
 pub(super) struct AnimationAdmission {
     quota: QuotaGroup,
-    _permit: ServicePermit,
+    worker: WorkerReservation<ServicePermit>,
 }
 
 pub struct AnimationService {
@@ -469,26 +682,30 @@ impl AnimationService {
     fn reserve_in(quota: QuotaGroup) -> io::Result<AnimationAdmission> {
         // Engine/library heaps keep their existing domain bounds; this adapter
         // charges the actual owner thread and independently owned frame storage.
-        let physical = quota.reserve_external_worker(1, 0).map_err(|reason| {
-            let kind = match reason {
-                ilium_execution::RejectReason::Busy
-                | ilium_execution::RejectReason::WorkerLimit
-                | ilium_execution::RejectReason::WorkerBytes => io::ErrorKind::WouldBlock,
-                _ => io::ErrorKind::Other,
-            };
-            io::Error::new(kind, format!("animation worker admission: {reason:?}"))
-        })?;
+        let physical = quota
+            .reserve_external_worker(1, ANIMATION_STACK_BYTES)
+            .map_err(|reason| {
+                let kind = match reason {
+                    ilium_execution::RejectReason::Busy
+                    | ilium_execution::RejectReason::WorkerLimit
+                    | ilium_execution::RejectReason::WorkerBytes => io::ErrorKind::WouldBlock,
+                    _ => io::ErrorKind::Other,
+                };
+                io::Error::new(kind, format!("animation worker admission: {reason:?}"))
+            })?;
         SERVICES
             .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
                 (count < MAX_SERVICES).then_some(count + 1)
             })
             .map_err(|_| io::Error::new(io::ErrorKind::WouldBlock, "animation services full"))?;
-        Ok(AnimationAdmission {
-            quota,
-            _permit: ServicePermit {
+        let worker = reserve_owned_worker(
+            Some(ANIMATION_STACK_BYTES),
+            ServicePermit {
                 _physical: physical,
             },
-        })
+        )
+        .map_err(io::Error::other)?;
+        Ok(AnimationAdmission { quota, worker })
     }
 
     pub(super) fn start_admitted(
@@ -532,14 +749,11 @@ impl AnimationService {
             .map_err(|_| io::Error::other("Native permission bridge already initialized"))?;
         let wake = Arc::clone(&shared);
         let engine = Arc::clone(&shared);
-        let worker = spawn_owned(
+        let worker = admission.worker.spawn(
             "ilium-animation",
             WorkerKind::Cooperative,
             shared.stop.clone(),
             move || {
-                // The platform supervisor retains wake state through actual
-                // join/TLS exit; a retiring engine keeps its admission debit.
-                let _retained_admission = &admission;
                 wake.changed.notify_all();
             },
             move |stop| {
@@ -1088,6 +1302,17 @@ fn run(
                                 .error = Some("Animation receipt exceeds owner limit".into());
                         }
                     }
+                    if !receipt.world_emissions.is_empty() {
+                        if let Err(error) = plugin.settle_world_emissions(receipt.world_emissions) {
+                            shared
+                                .mailbox
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .status
+                                .error =
+                                Some(format!("World presentation receipt failed: {error}"));
+                        }
+                    }
                 }
                 SceneCommand::Pause => {
                     let _configuration = ConfigurationGuard(shared);
@@ -1522,6 +1747,7 @@ fn render_plugin_request(
                 cells: frame.cells,
                 plugin_identity: Some(frame.identity),
                 plugin_authority: Some(frame.authority),
+                world_provenance: frame.world_provenance,
                 replay: frame.replay,
                 scene_generation: None,
                 scene_receipt_id: None,
@@ -1647,6 +1873,7 @@ impl AnimationFrame {
             cells,
             plugin_identity: None,
             plugin_authority: None,
+            world_provenance: None,
             replay: None,
             scene_generation: self.last_ambient.map(|key| key.generation),
             scene_receipt_id,
@@ -1970,15 +2197,19 @@ mod tests {
     #[test]
     #[ignore = "run explicitly with matching ILIUM_ANIMATION_HELPER and delegated sandbox"]
     fn real_scene_actor_combines_finite_wake_task_due_and_reconfigures() {
-        isolated_native_task_scene(false,
-            "background_animation::worker::tests::real_scene_actor_combines_finite_wake_task_due_and_reconfigures");
+        isolated_native_task_scene(
+            false,
+            "background_animation::worker::tests::real_scene_actor_combines_finite_wake_task_due_and_reconfigures",
+        );
     }
 
     #[test]
     #[ignore = "run explicitly with matching ILIUM_ANIMATION_HELPER and delegated sandbox"]
     fn real_scene_actor_error_retires_revoked_task_on_same_finite_wake() {
-        isolated_native_task_scene(true,
-            "background_animation::worker::tests::real_scene_actor_error_retires_revoked_task_on_same_finite_wake");
+        isolated_native_task_scene(
+            true,
+            "background_animation::worker::tests::real_scene_actor_error_retires_revoked_task_on_same_finite_wake",
+        );
     }
 
     struct ControlledScene {
@@ -2160,15 +2391,64 @@ mod tests {
     }
 
     #[test]
+    fn animation_worker_stack_is_charged_before_native_start() {
+        let _owner = TEST_OWNER.lock().unwrap();
+        const STACK_BYTES: usize = 2 * 1024 * 1024;
+        let quota = QuotaGroup::new(ilium_execution::QuotaLimits {
+            worker_threads: 1,
+            worker_bytes: STACK_BYTES - 1,
+            clients: 0,
+            jobs: 0,
+            service_jobs: 0,
+            input_bytes: 0,
+            result_bytes: 0,
+        });
+
+        match AnimationService::reserve_in(quota) {
+            Err(error) => assert!(
+                error.to_string().contains("WorkerBytes"),
+                "expected byte-ledger refusal for animation stack, got: {error}"
+            ),
+            Ok(_) => panic!("animation owner admission omitted its declared native stack"),
+        }
+
+        let quota = QuotaGroup::new(ilium_execution::QuotaLimits {
+            worker_threads: 1,
+            worker_bytes: STACK_BYTES,
+            clients: 0,
+            jobs: 0,
+            service_jobs: 0,
+            input_bytes: 0,
+            result_bytes: 0,
+        });
+        let admission = AnimationService::reserve_in(quota.clone()).unwrap();
+        assert_eq!(quota.snapshot().worker_bytes, STACK_BYTES);
+        drop(admission);
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+    }
+
+    #[test]
     fn shared_thread_credit_survives_blocked_retirement_until_actual_join() {
         let _owner = TEST_OWNER.lock().unwrap();
         let quota = isolated_quota();
         let (service, entered, release, _) = controlled_in(Some(quota.clone()));
+        assert_eq!(
+            service.ticket().metadata().requested_stack_bytes,
+            Some(2 * 1024 * 1024),
+            "animation worker must request the stack charged during admission"
+        );
         submit(&service, request(1, 0));
         entered.recv_timeout(Duration::from_secs(3)).unwrap();
+        let admitted_bytes = quota.snapshot().worker_bytes;
+        assert!(admitted_bytes >= 2 * 1024 * 1024);
         let ticket = service.ticket();
         drop(service);
         assert_eq!(quota.snapshot().worker_threads, 1);
+        assert_eq!(
+            quota.snapshot().worker_bytes,
+            admitted_bytes,
+            "the stack debit remains while the OS thread is still blocked"
+        );
         assert!(AnimationService::reserve_in(quota.clone()).is_err());
         release.send(()).unwrap();
         ticket
@@ -2179,6 +2459,7 @@ mod tests {
         assert_eq!(quota.snapshot().worker_threads, 1);
         drop(ticket);
         assert_eq!(quota.snapshot().worker_threads, 0);
+        assert_eq!(quota.snapshot().worker_bytes, 0);
         assert!(AnimationService::reserve_in(quota).is_ok());
     }
 
@@ -2280,6 +2561,34 @@ mod tests {
         let owners = receipts.recv_timeout(Duration::from_secs(3)).unwrap();
         assert_eq!(owners[0].id, 7);
         assert!(owners[0].dots > 0 && owners[0].dots <= 8);
+        let ticket = service.ticket();
+        drop(service);
+        assert!(ticket
+            .join_until(Instant::now() + Duration::from_secs(3))
+            .is_ok());
+    }
+
+    #[test]
+    fn same_size_scene_revision_fences_an_in_flight_old_frame() {
+        let _owner = TEST_OWNER.lock().unwrap();
+        let (service, entered, release, _receipts) = controlled();
+        submit(&service, request(1, 0));
+        entered.recv_timeout(Duration::from_secs(3)).unwrap();
+
+        submit(&service, request(2, 1));
+        release.send(()).unwrap();
+        entered.recv_timeout(Duration::from_secs(3)).unwrap();
+        assert!(
+            service.try_snapshot().is_none(),
+            "same-size scene revision must fence the old frame"
+        );
+
+        release.send(()).unwrap();
+        let frame = snapshot(&service);
+        assert_eq!(frame.revision, 2);
+        assert_eq!((frame.width, frame.height), (2, 1));
+        assert_eq!(frame.elapsed, Duration::from_secs(1));
+
         let ticket = service.ticket();
         drop(service);
         assert!(ticket

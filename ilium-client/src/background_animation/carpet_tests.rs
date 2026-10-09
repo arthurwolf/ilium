@@ -81,10 +81,22 @@ fn real_nonnetwork_carpet_modes_render_braille_and_clear_when_released() {
 
 struct PointerProbe(Arc<Mutex<Vec<Option<[f32; 2]>>>>);
 impl Scene for PointerProbe {
+    fn wants_pointer(&self) -> bool {
+        true
+    }
+
     fn pointer(&mut self, position: Option<[f32; 2]>) {
         self.0.lock().unwrap().push(position);
     }
     fn render(&mut self, frame: &mut Frame<'_>) {
+        frame.raster.dots.fill(1.0);
+    }
+}
+
+struct PointerInsensitiveProbe(Arc<Mutex<usize>>);
+impl Scene for PointerInsensitiveProbe {
+    fn render(&mut self, frame: &mut Frame<'_>) {
+        *self.0.lock().unwrap() += 1;
         frame.raster.dots.fill(1.0);
     }
 }
@@ -108,6 +120,64 @@ fn pointer_coordinates_reach_host_once_per_render_and_invalid_values_clear() {
     frame.pointer(Some([f32::NAN, 0.5]));
     frame.render(&settings, 80, 24, Duration::from_millis(50));
     assert_eq!(*positions.lock().unwrap(), vec![Some([1.0, 0.0]), None]);
+}
+
+#[test]
+fn pointer_change_at_same_animation_time_invalidates_cached_host_frame() {
+    let positions = Arc::new(Mutex::new(Vec::new()));
+    let shared = Arc::clone(&positions);
+    let mut frame = AnimationFrame::default();
+    *frame.host_mut() = AmbientHost::with_factory(Box::new(move |_, _, _| {
+        Box::new(PointerProbe(Arc::clone(&shared)))
+    }));
+    let settings = AnimationSettings {
+        kind: AnimationKind::Carpet,
+        ..Default::default()
+    };
+    let elapsed = Duration::from_secs(1);
+
+    frame.pointer(Some([0.25, 0.5]));
+    frame.render(&settings, 80, 24, elapsed);
+    frame.pointer(Some([0.75, 0.5]));
+    frame.render(&settings, 80, 24, elapsed);
+
+    assert_eq!(
+        *positions.lock().unwrap(),
+        vec![Some([0.25, 0.5]), Some([0.75, 0.5])]
+    );
+}
+
+#[test]
+fn pointer_change_does_not_rerender_pointer_insensitive_scene() {
+    let render_count = Arc::new(Mutex::new(0));
+    let shared = Arc::clone(&render_count);
+    let mut frame = AnimationFrame::default();
+    *frame.host_mut() = AmbientHost::with_factory(Box::new(move |_, _, _| {
+        Box::new(PointerInsensitiveProbe(Arc::clone(&shared)))
+    }));
+    let settings = AnimationSettings {
+        kind: AnimationKind::Carpet,
+        ..Default::default()
+    };
+    let elapsed = Duration::from_secs(1);
+    frame.render(&settings, 80, 24, elapsed);
+    frame.pointer(Some([0.25, 0.5]));
+    frame.render(&settings, 80, 24, elapsed);
+    assert_eq!(*render_count.lock().unwrap(), 1);
+}
+
+#[test]
+fn production_wind_scene_declares_pointer_sensitive_rendering() {
+    let settings = AnimationSettings {
+        kind: AnimationKind::Wind,
+        ..Default::default()
+    };
+    let mut frame = AnimationFrame::default();
+    frame.render(&settings, 80, 24, Duration::from_secs(1));
+    assert!(
+        frame.host().wants_pointer(),
+        "Wind's mouse force changes the rendered particle positions"
+    );
 }
 
 #[test]

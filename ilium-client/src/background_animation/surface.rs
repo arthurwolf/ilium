@@ -67,6 +67,12 @@ enum UnsettledReplay {
     History { _emitted: PendingEmission },
 }
 
+struct UnsettledOutput {
+    _presentation: ComposedPresentation,
+    _proof: Option<ReplayFlushedProof>,
+    _world_emissions: Vec<ilium_animation_js::native_worlds::WorldEmission>,
+}
+
 pub struct AnimationSurface {
     resources: Option<ilium_ambient::resources::AmbientResources>,
     service: Option<AnimationService>,
@@ -76,6 +82,7 @@ pub struct AnimationSurface {
     configurations: VecDeque<Configuration>,
     receipts: VecDeque<EmissionReceipt>,
     blocked_replay: Option<UnsettledReplay>,
+    blocked_output: Option<UnsettledOutput>,
     display: Option<Arc<FrameSnapshot>>,
     last_request: Option<(u64, Duration, Option<[f32; 2]>, u64)>,
     occupancy: Option<Arc<ilium_ambient::OccupancyMask>>,
@@ -111,6 +118,7 @@ impl Default for AnimationSurface {
             configurations: VecDeque::new(),
             receipts: VecDeque::new(),
             blocked_replay: None,
+            blocked_output: None,
             display: None,
             last_request: None,
             occupancy: None,
@@ -219,7 +227,9 @@ impl AnimationSurface {
         self.desired.is_some()
     }
     pub fn can_queue_configuration(&self) -> bool {
-        self.configurations.len() < MAX_PENDING_CONFIGURATIONS
+        // `release_hosts` is an ordered lifecycle transition that must remain
+        // enqueueable after the latest accepted render configuration.
+        self.configurations.len() < MAX_PENDING_CONFIGURATIONS - 1
     }
 
     /// Configuration changes are ordered; only time updates are replaceable.
@@ -415,6 +425,7 @@ impl AnimationSurface {
         self.composition = None;
         self.composed_bits.clear();
         if self.blocked_replay.is_some()
+            || self.blocked_output.is_some()
             || !self.configurations.is_empty()
             || !self.receipts.is_empty()
         {
@@ -451,10 +462,11 @@ impl AnimationSurface {
     pub fn acknowledge(
         &mut self,
         mut presentation: ComposedPresentation,
-        proof: Option<ReplayFlushedProof>,
+        mut proof: Option<ReplayFlushedProof>,
     ) {
+        let mut world_emissions = Vec::new();
         if let Some(mut pending) = presentation.pending_replay.take() {
-            let Some(proof) = proof else {
+            let Some(proof) = proof.take() else {
                 self.blocked_replay = Some(UnsettledReplay::Uncertain { _pending: pending });
                 self.reject_output("replay flush proof missing after output");
                 return;
@@ -471,24 +483,85 @@ impl AnimationSurface {
             }
         } else {
             if presentation.lease.snapshot().plugin_identity().is_some() != proof.is_some() {
-                self.reject_output("terminal proof did not match its original frame");
+                self.retain_unsettled_output(
+                    presentation,
+                    proof,
+                    Vec::new(),
+                    "terminal proof did not match its original frame",
+                );
                 return;
             }
+            if let Some(error) = proof
+                .as_ref()
+                .and_then(|proof| presentation.lease.validate_output_proof(proof).err())
+            {
+                self.retain_unsettled_output(
+                    presentation,
+                    proof,
+                    Vec::new(),
+                    &format!("terminal proof validation failed: {error}"),
+                );
+                return;
+            }
+            let emission_result = match (presentation.surviving.as_deref(), proof.as_ref()) {
+                (Some(bits), Some(proof)) => Some(presentation.lease.world_emissions(bits, proof)),
+                _ => None,
+            };
+            match emission_result {
+                Some(Ok(emissions)) => world_emissions = emissions,
+                Some(Err(error)) => {
+                    self.retain_unsettled_output(
+                        presentation,
+                        proof,
+                        Vec::new(),
+                        &format!("world emission validation failed: {error}"),
+                    );
+                    return;
+                }
+                None => {}
+            }
             // Live plugin frames have no replay source projection. Their broker
-            // proof remains charged until this exact terminal acknowledgement.
-            drop(proof);
+            // proof remains owned until receipt construction succeeds.
         }
         if let Some(bits) = presentation.surviving {
-            match presentation.lease.receipt(bits) {
-                Ok(receipt) => self.receipts.push_back(receipt),
-                Err(_) => self.error = Some("Invalid animation emission receipt".into()),
+            let composed_at = presentation.composed_at;
+            match presentation
+                .lease
+                .receipt_with_world_emissions(bits, world_emissions)
+            {
+                Ok(receipt) => {
+                    drop(proof);
+                    self.receipts.push_back(receipt);
+                }
+                Err(rejected) => {
+                    let (lease, surviving, world_emissions) = rejected.value;
+                    self.retain_unsettled_output(
+                        ComposedPresentation {
+                            lease,
+                            surviving: Some(surviving),
+                            pending_replay: None,
+                            composed_at,
+                        },
+                        proof,
+                        world_emissions,
+                        "invalid animation emission receipt after terminal output",
+                    );
+                }
             }
+        } else {
+            drop(proof);
         }
         self.flush();
     }
     pub fn uncertain_output(&mut self, mut presentation: ComposedPresentation, reason: &str) {
         if let Some(pending) = presentation.pending_replay.take() {
             self.blocked_replay = Some(UnsettledReplay::Uncertain { _pending: pending });
+        } else {
+            self.blocked_output = Some(UnsettledOutput {
+                _presentation: presentation,
+                _proof: None,
+                _world_emissions: Vec::new(),
+            });
         }
         self.reject_output(reason);
     }
@@ -497,14 +570,32 @@ impl AnimationSurface {
         self.composition = None;
         self.display = None;
         self.composed_bits.clear();
-        self.error = Some(format!(
-            "Animation frame rejected before terminal output: {reason}"
-        ));
+        self.error = Some(format!("Animation output could not be confirmed: {reason}"));
         self.ready.notify_one();
+    }
+
+    fn retain_unsettled_output(
+        &mut self,
+        presentation: ComposedPresentation,
+        proof: Option<ReplayFlushedProof>,
+        world_emissions: Vec<ilium_animation_js::native_worlds::WorldEmission>,
+        reason: &str,
+    ) {
+        self.blocked_output = Some(UnsettledOutput {
+            _presentation: presentation,
+            _proof: proof,
+            _world_emissions: world_emissions,
+        });
+        self.reject_output(reason);
     }
 
     pub async fn shutdown(&mut self) -> io::Result<()> {
         self.composition = None;
+        if self.blocked_output.is_some() {
+            return Err(io::Error::other(
+                "Original animation output remains unsettled",
+            ));
+        }
         if self.service.is_none() && !self.configurations.is_empty() && !self.start() {
             return Err(io::Error::other(
                 "Animation admission unavailable while accepted configurations remain",
@@ -513,9 +604,9 @@ impl AnimationSurface {
         loop {
             self.flush();
             let Some(service) = &self.service else {
-                return if self.blocked_replay.is_some() {
+                return if self.blocked_replay.is_some() || self.blocked_output.is_some() {
                     Err(io::Error::other(
-                        "Original replay emission remains unsettled",
+                        "Original animation output remains unsettled",
                     ))
                 } else {
                     Ok(())
@@ -541,9 +632,9 @@ impl AnimationSurface {
             self.ready.notified().await;
         }
         self.service = None;
-        if self.blocked_replay.is_some() {
+        if self.blocked_replay.is_some() || self.blocked_output.is_some() {
             return Err(io::Error::other(
-                "Original replay emission remains unsettled",
+                "Original animation output remains unsettled",
             ));
         }
         Ok(())
@@ -848,6 +939,28 @@ mod tests {
         assert!(result.is_ok() || result == Err(AdmissionError::Full));
         (surface, observed, release, receipts)
     }
+
+    #[test]
+    fn render_admission_reserves_capacity_for_the_ordered_pause_transition() {
+        let mut surface = AnimationSurface {
+            desired: Some((AnimationSettings::default(), 1, 1)),
+            ..Default::default()
+        };
+        surface
+            .configurations
+            .extend((0..MAX_PENDING_CONFIGURATIONS - 1).map(Configuration::Pause));
+
+        assert!(!surface.can_queue_configuration());
+        surface.release_hosts();
+
+        assert_eq!(surface.configurations.len(), MAX_PENDING_CONFIGURATIONS);
+        assert!(surface.desired.is_none());
+        assert!(matches!(
+            surface.configurations.back(),
+            Some(Configuration::Pause(1))
+        ));
+    }
+
     fn entered(
         surface: &mut AnimationSurface,
         observed: &mpsc::Receiver<std::thread::ThreadId>,
@@ -1015,6 +1128,32 @@ mod tests {
             );
         }
         presenter.shutdown().await.unwrap();
+        surface.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn uncertain_live_output_retains_lease_and_blocks_next_composition() {
+        let (mut surface, observed, release, _receipts) = fixture();
+        entered(&mut surface, &observed);
+        release.send(()).unwrap();
+        surface.wait_for_frame_for_test(Duration::ZERO);
+        assert!(surface.begin_composition());
+        let surviving = surface.packed_bit(0, 0);
+        let presentation = surface.capture(Some(vec![surviving, 0])).unwrap();
+
+        surface.uncertain_output(presentation, "test-only uncertain flush");
+
+        assert!(surface.blocked_output.is_some());
+        assert!(!surface.begin_composition());
+        assert!(surface
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("could not be confirmed"));
+
+        // The real owner remains held through the assertions above. Release it
+        // here so the fixture can shut its worker down cleanly.
+        surface.blocked_output.take();
         surface.shutdown().await.unwrap();
     }
 

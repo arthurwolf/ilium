@@ -722,7 +722,7 @@ fn observe(
                     return Err(format!(
                         "Incompatible conditional control schemas: {}",
                         row.id
-                    ))
+                    ));
                 }
             }
             // Catalog choices are the union of available choices across modes.
@@ -771,31 +771,48 @@ fn inventory(kind: AnimationKind) -> Result<BTreeMap<&'static str, Control>, Str
 
 fn notes(kind: AnimationKind) -> &'static str {
     match kind {
-        AnimationKind::VoxelLandscape => "World source, saved-map folder, seed, pack profiles, custom overrides, mounts, edition, addon and duplicate policy remain authored. Only listed visual controls adapt. Saved-world mode hides generated detail, direction, vegetation, structures and terrain toggles; controls must be active for the authored source.",
-        AnimationKind::Clouds => "Coverage precedes projection; rotation requires global globe projection. history_hours greater than zero exposes playback_fps and smoothing. land_underlay exposes underlay_brightness. refresh_minutes is authored provider cadence, not rendering FPS.",
-        AnimationKind::NightLights => "Projection precedes rotation; terminator and coastline expose their dependent visual controls. refresh_hours is authored provider cadence.",
-        AnimationKind::OpenStreetMap =>
-            "Require source, place and tour. source=0 only. Paris uses place=0,tour=0. Local/custom map inputs are never selected.",
-        AnimationKind::Carpet =>
-            "Require carpet_mode. Mode-specific controls: hunters=0; snake=1; life=2; AI chess=3; piece heights/chess_easing=3 or 4; dvd=5; orbit=6; UTC offset/seconds=7 or 8; 24h=7; tubes=8. Snake grid must be even; initial length <= min(32,grid*grid-1). Easing <= snake step in mode 1, <= min(3000,Life generation) in mode 2, <=900 in mode 7; otherwise <=3000.",
-        AnimationKind::Graph =>
-            "Apply source before mode. OHLC candles require that source's enabled candle choice; rising/falling hues apply only to candles. Poll settings remain authored.",
-        AnimationKind::Wikipedia =>
-            "wiki_zoom applies only to Braille. This is today's English Main Page feed, not a selectable topic.",
-        AnimationKind::Shoreline =>
-            "shoreline_* controls other than shoreline_style require Rich; the four scene_control_* sliders apply to both styles.",
-        AnimationKind::TopographicMaps =>
-            "tide_seconds requires tide_range_m > 0. The listed envelope is not permission to use inactive controls.",
-        AnimationKind::Stars =>
-            "Panorama hides lens; Patch exposes look_altitude. Realistic star_style exposes star_size/star_colors. Fixed start requires resources=authored and a usable saved timestamp; start_datetime is never writable.",
-        AnimationKind::Images =>
-            "resources=catalog selects Single/Built-in, default picture 0. resources=authored keeps the current authored mode and source. order/transition require slideshow; shuffle_seed also requires Shuffle. display_seconds requires slideshow or motion. motion_strength/easing require motion. transition_seconds <= display_seconds/2.",
-        AnimationKind::Video =>
-            "Requires resources=authored and existing video input. Slowed exposes slowed_percent; Random scenes exposes scene_seconds and hides shuffle/repeat_one. seed requires Random scenes or shuffle.",
-        AnimationKind::Spectrum =>
-            "Input/device are unchanged. Waveform hides band/frequency/FFT/tilt/floor/ceiling controls. Radial/Pulse rings hide orientation. Bars expose bar_width/bar_gap. Spectrogram exposes spectrogram_speed. Peak markers apply to Bars/Mirrored bars/Line/Area/Radial; mirror excludes Waveform/Pulse rings. ceiling_db >= floor_db+10.",
-        AnimationKind::Boats =>
-            "The supplied description is older than the boat_source control: that control offers broader OpenSeaFeed or Finnish-water Digitraffic. Selection and coverage follow the actual control, not the older description.",
+        AnimationKind::VoxelLandscape => {
+            "World source, saved-map folder, seed, pack profiles, custom overrides, mounts, edition, addon and duplicate policy remain authored. Only listed visual controls adapt. Saved-world mode hides generated detail, direction, vegetation, structures and terrain toggles; controls must be active for the authored source."
+        }
+        AnimationKind::Clouds => {
+            "Coverage precedes projection; rotation requires global globe projection. history_hours greater than zero exposes playback_fps and smoothing. land_underlay exposes underlay_brightness. refresh_minutes is authored provider cadence, not rendering FPS."
+        }
+        AnimationKind::NightLights => {
+            "Projection precedes rotation; terminator and coastline expose their dependent visual controls. refresh_hours is authored provider cadence."
+        }
+        AnimationKind::OpenStreetMap => {
+            "Require source, place and tour. source=0 only. Paris uses place=0,tour=0. Local/custom map inputs are never selected."
+        }
+        AnimationKind::Carpet => {
+            "Require carpet_mode. Mode-specific controls: hunters=0; snake=1; life=2; AI chess=3; piece heights/chess_easing=3 or 4; dvd=5; orbit=6; UTC offset/seconds=7 or 8; 24h=7; tubes=8. Snake grid must be even; initial length <= min(32,grid*grid-1). Easing <= snake step in mode 1, <= min(3000,Life generation) in mode 2, <=900 in mode 7; otherwise <=3000."
+        }
+        AnimationKind::Graph => {
+            "Apply source before mode. OHLC candles require that source's enabled candle choice; rising/falling hues apply only to candles. Poll settings remain authored."
+        }
+        AnimationKind::Wikipedia => {
+            "wiki_zoom applies only to Braille. This is today's English Main Page feed, not a selectable topic."
+        }
+        AnimationKind::Shoreline => {
+            "shoreline_* controls other than shoreline_style require Rich; the four scene_control_* sliders apply to both styles."
+        }
+        AnimationKind::TopographicMaps => {
+            "tide_seconds requires tide_range_m > 0. The listed envelope is not permission to use inactive controls."
+        }
+        AnimationKind::Stars => {
+            "Panorama hides lens; Patch exposes look_altitude. Realistic star_style exposes star_size/star_colors. Fixed start requires resources=authored and a usable saved timestamp; start_datetime is never writable."
+        }
+        AnimationKind::Images => {
+            "resources=catalog selects Single/Built-in, default picture 0. resources=authored keeps the current authored mode and source. order/transition require slideshow; shuffle_seed also requires Shuffle. display_seconds requires slideshow or motion. motion_strength/easing require motion. transition_seconds <= display_seconds/2."
+        }
+        AnimationKind::Video => {
+            "Requires resources=authored and existing video input. Slowed exposes slowed_percent; Random scenes exposes scene_seconds and hides shuffle/repeat_one. seed requires Random scenes or shuffle."
+        }
+        AnimationKind::Spectrum => {
+            "Input/device are unchanged. Waveform hides band/frequency/FFT/tilt/floor/ceiling controls. Radial/Pulse rings hide orientation. Bars expose bar_width/bar_gap. Spectrogram exposes spectrogram_speed. Peak markers apply to Bars/Mirrored bars/Line/Area/Radial; mirror excludes Waveform/Pulse rings. ceiling_db >= floor_db+10."
+        }
+        AnimationKind::Boats => {
+            "The supplied description is older than the boat_source control: that control offers broader OpenSeaFeed or Finnish-water Digitraffic. Selection and coverage follow the actual control, not the older description."
+        }
         _ => "",
     }
 }

@@ -274,8 +274,12 @@ impl AnimationKind {
             return kind.description();
         }
         match self {
-            Self::Semantic => "Use the animation recommended during tree reorganization for the selected project or entry.",
-            Self::Wikipedia => "Today's Wikipedia articles, slowly scrolling as readable text or font-rendered Braille, with images and infoboxes.",
+            Self::Semantic => {
+                "Use the animation recommended during tree reorganization for the selected project or entry."
+            }
+            Self::Wikipedia => {
+                "Today's Wikipedia articles, slowly scrolling as readable text or font-rendered Braille, with images and infoboxes."
+            }
             Self::Shoreline => "A diagonal wash with fine foam, wet sand and scattered grains.",
             Self::MoonlitWater => "Crossing wavelets fracture a widening moonlit reflection.",
             Self::SleepingRidge => "Layered clouds and valley mist drift over quiet ridges.",
@@ -630,9 +634,22 @@ impl AnimationFrame {
 
     /// Record normalized field position without consuming any UI mouse input.
     pub fn pointer(&mut self, position: Option<[f32; 2]>) {
-        self.pointer = position
+        let position = position
             .filter(|point| point.iter().all(|coordinate| coordinate.is_finite()))
             .map(|point| point.map(|coordinate| coordinate.clamp(0.0, 1.0)));
+        if self.pointer != position {
+            self.pointer = position;
+            if self.host.wants_pointer() {
+                // Pointer position is scene input but intentionally not part of
+                // AmbientRenderKey; invalidate only scenes that consume it.
+                self.last_ambient = None;
+                #[cfg(test)]
+                {
+                    self.composed_key = None;
+                    self.composed_bits.fill(0);
+                }
+            }
+        }
     }
 
     /// Screen occupancy for mask-aware scenes. `revision` changes with the mask.

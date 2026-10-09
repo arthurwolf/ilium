@@ -87,19 +87,7 @@ fn actual_plugin_issue_hover_dismisses_when_pointer_leaves_content() {
     }
 }
 
-fn install_metadata(app: &mut App) {
-    let manifest: Manifest = serde_json::from_value(json!({
-        "api_version":1,"id":"carpet","name":"Carpet","version":"1.0.0",
-        "entry":"entry.mjs","modes":["live","pre_rendered"],"files":[],
-        "settings":{"type":"object","properties":{"speed":{"type":"integer","minimum":1,"maximum":10,"default":3}}}
-    })).expect("manifest");
-    let catalogue = PluginCatalogue {
-        entries: vec![PluginDescriptor {
-            archive_path: PathBuf::from("not-an-installed-runtime-package.iliumanim"),
-            manifest,
-        }],
-        issues: vec![],
-    };
+fn retain_catalogue(app: &mut App, catalogue: PluginCatalogue) {
     app.plugin_catalogue = Some(
         crate::execution::test_client()
             .try_reserve_external(ilium_execution::JobCost {
@@ -110,6 +98,43 @@ fn install_metadata(app: &mut App) {
             .retain(catalogue)
             .expect("retained catalogue"),
     );
+}
+
+fn install_metadata(app: &mut App) {
+    let catalogue = PluginCatalogue {
+        entries: [("beach", "Beach"), ("carpet", "Carpet")]
+            .into_iter()
+            .map(|(id, name)| PluginDescriptor {
+                archive_path: PathBuf::from(format!("not-installed/{id}.iliumanim")),
+                manifest: serde_json::from_value(json!({
+                    "api_version":1,"id":id,"name":name,"version":"1.0.0",
+                    "entry":"entry.mjs","modes":["live","pre_rendered"],"files":[],
+                    "settings":{"type":"object","properties":{"speed":{"type":"integer","minimum":1,"maximum":10,"default":3}}}
+                }))
+                .expect("animation manifest"),
+            })
+            .collect(),
+        issues: vec![],
+    };
+    retain_catalogue(app, catalogue);
+}
+
+fn install_official_catalogue(app: &mut App) {
+    let bundled =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../ilium-animation-js/assets/packages");
+    let catalogue = PluginCatalogue::discover_with_bundled_and_stop(
+        std::slice::from_ref(&bundled),
+        Some(&bundled),
+        || false,
+    );
+    assert!(catalogue.issues.is_empty(), "{:?}", catalogue.issues);
+    for &(id, _, _) in release::PACKAGES {
+        assert!(
+            catalogue.find(id).is_some(),
+            "official package {id} must be discoverable from its archive"
+        );
+    }
+    retain_catalogue(app, catalogue);
 }
 
 #[test]
@@ -157,7 +182,7 @@ fn actual_keyboard_and_pointer_subtabs_browse_without_changing_source() {
 fn actual_plugin_panel_renders_catalogue_and_shared_controls_at_terminal_sizes() {
     for (width, height) in [(40, 16), (80, 24), (120, 40)] {
         let (mut app, _project) = app();
-        install_metadata(&mut app);
+        install_official_catalogue(&mut app);
         app.set_screen_area(Rect::new(0, 0, width, height));
         let Mode::Settings(state) = &mut app.mode else {
             panic!("settings");
@@ -168,10 +193,17 @@ fn actual_plugin_panel_renders_catalogue_and_shared_controls_at_terminal_sizes()
             .rows
             .iter()
             .any(|row| matches!(row, PluginPanelRow::Common(_))));
-        assert!(model
-            .rows
-            .iter()
-            .any(|row| row == &PluginPanelRow::Package("carpet".into())));
+        for id in ["beach", "carpet"] {
+            assert_eq!(
+                model
+                    .rows
+                    .iter()
+                    .filter(|row| *row == &PluginPanelRow::Package(id.into()))
+                    .count(),
+                1,
+                "each requested animation must appear once"
+            );
+        }
         let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("terminal");
         terminal
             .draw(|frame| {
@@ -190,8 +222,107 @@ fn actual_plugin_panel_renders_catalogue_and_shared_controls_at_terminal_sizes()
             .collect();
         assert!(text.contains("Native"));
         assert!(text.contains("Plugin"));
+        assert!(text.contains("Beach"));
         assert!(text.contains("Carpet"));
         assert_eq!(app.animation_settings.source, AnimationSourceTab::Native);
+    }
+}
+
+#[test]
+fn actual_package_row_click_selects_and_persists_official_beach_and_carpet() {
+    for package_id in ["beach", "carpet"] {
+        let (mut app, project) = app();
+        install_official_catalogue(&mut app);
+        app.set_screen_area(Rect::new(0, 0, 80, 24));
+        let content_area = {
+            let Mode::Settings(state) = &app.mode else {
+                panic!("settings");
+            };
+            crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, &app, state)
+                .content_area
+        };
+        let tabs = source_tabs(crate::animation_settings_ui::source_tab_area(content_area));
+        crate::mouse::handle_mouse_event(
+            &mut app,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: tabs.plugin.x,
+                row: tabs.plugin.y,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+        let Mode::Settings(state) = &app.mode else {
+            panic!("settings");
+        };
+        assert_eq!(state.animation_source_tab, AnimationSourceTab::Plugin);
+        let row = app
+            .plugin_panel_model()
+            .rows
+            .iter()
+            .position(|row| row == &PluginPanelRow::Package(package_id.into()))
+            .expect("official package row");
+        let package_row = crate::animation_plugins::plugin_row_rect(
+            crate::animation_settings_ui::plugin_panel_area(content_area),
+            0,
+            row,
+        )
+        .expect("visible package row");
+        crate::mouse::handle_mouse_event(
+            &mut app,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: package_row.x,
+                row: package_row.y,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+
+        assert_eq!(app.animation_settings.source, AnimationSourceTab::Plugin);
+        assert_eq!(
+            app.animation_settings
+                .plugin
+                .selected
+                .as_ref()
+                .map(|selection| selection.package_id.as_str()),
+            Some(package_id)
+        );
+        let tabs = source_tabs(crate::animation_settings_ui::source_tab_area(content_area));
+        crate::mouse::handle_mouse_event(
+            &mut app,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: tabs.native.x,
+                row: tabs.native.y,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+        let Mode::Settings(state) = &app.mode else {
+            panic!("settings");
+        };
+        assert_eq!(state.animation_source_tab, AnimationSourceTab::Native);
+        assert_eq!(app.animation_settings.source, AnimationSourceTab::Plugin);
+        assert_eq!(
+            app.animation_settings
+                .plugin
+                .selected
+                .as_ref()
+                .map(|selection| selection.package_id.as_str()),
+            Some(package_id)
+        );
+
+        app.settle_filesystem_for_test();
+        let saved = crate::project_config::load(project.path())
+            .expect("authoritative saved settings")
+            .animation;
+        assert_eq!(saved.source, AnimationSourceTab::Plugin);
+        assert_eq!(
+            saved
+                .plugin
+                .selected
+                .as_ref()
+                .map(|selection| selection.package_id.as_str()),
+            Some(package_id)
+        );
     }
 }
 

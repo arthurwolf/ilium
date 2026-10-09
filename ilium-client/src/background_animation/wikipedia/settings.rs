@@ -72,9 +72,26 @@ impl SceneSettings for WikipediaSettings {
 
     fn controls(&self) -> Vec<Control> {
         let mut controls = vec![
-            Control::choice("wiki_render_mode", "Page rendering", usize::from(self.render_mode == RenderMode::Text), &["Braille", "Text"], "Braille draws real font outlines as dots; Text uses readable terminal characters."),
-            Control::toggle("wiki_greyscale", "Greyscale", self.greyscale, "Neutral ink and images. Turn off to use the selected color palette."),
-            Control::choice("wiki_palette", "Page palette", self.palette as usize, &["Wikipedia", "Pastel", "Sepia", "Night"], "A palette for article ink, links, rules and images. Color sliders adjust every preset."),
+            Control::choice(
+                "wiki_render_mode",
+                "Page rendering",
+                usize::from(self.render_mode == RenderMode::Text),
+                &["Braille", "Text"],
+                "Braille draws real font outlines as dots; Text uses readable terminal characters.",
+            ),
+            Control::toggle(
+                "wiki_greyscale",
+                "Greyscale",
+                self.greyscale,
+                "Neutral ink and images. Turn off to use the selected color palette.",
+            ),
+            Control::choice(
+                "wiki_palette",
+                "Page palette",
+                self.palette as usize,
+                &["Wikipedia", "Pastel", "Sepia", "Night"],
+                "A palette for article ink, links, rules and images. Color sliders adjust every preset.",
+            ),
         ];
         if self.render_mode == RenderMode::Braille {
             controls.push(Control::slider("wiki_zoom", "Page zoom", i32::from(self.zoom_percent), (50, 300, 5), "%", "Scale the page's real font, headings and images. Reflow keeps the page within the terminal width."));

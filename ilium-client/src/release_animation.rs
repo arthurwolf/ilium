@@ -8,25 +8,26 @@ use crate::{
         PermissionCompletion, PersistenceStamp, PluginPermissionFiles,
     },
 };
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use ilium_animation_js::{
-    TRUSTED_BOOTSTRAP,
     engine::{ArraySpec, CreateState, TypedArrayKind},
     helper::HelperLimits,
     manifest::AnimationMode,
+    package::PackageLimits,
     permissions::{Ceiling, PlanReview},
     release,
     runtime::{InstancePreparation, PackageInstance, VerifiedPreparation},
     surface::{Data, Format, FrameMeta, NoNativeRenderer, Planes, Shape, Surface},
+    TRUSTED_BOOTSTRAP,
 };
-use ilium_execution::{Client, ClientLimits};
+use ilium_execution::{Client, ClientLimits, QuotaGroup, StorageAdmission};
 use ilium_platform::{animation_files::PinnedDirectory, secure_fs::NoFollowDirectory};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
     fs,
-    io::{self, Write},
+    io::{self, Read, Write},
     path::Path,
     sync::Arc,
     time::Duration,
@@ -85,16 +86,84 @@ async fn prepare_with_native_ledger(
     Ok(prepared)
 }
 
-fn regular_bytes(path: &Path) -> Result<Vec<u8>> {
-    let metadata = fs::symlink_metadata(path)
-        .with_context(|| format!("inspect installed member {}", path.display()))?;
-    if !metadata.file_type().is_file() {
-        bail!(
-            "installed animation member is not a regular file: {}",
-            path.display()
-        );
+fn open_installed_file(path: &Path) -> Result<fs::File> {
+    let parent = path
+        .parent()
+        .context("installed member has no parent directory")?;
+    let leaf = path
+        .file_name()
+        .context("installed member has no filename")?;
+    let directory = NoFollowDirectory::open_root(parent)
+        .with_context(|| format!("open installed directory {}", parent.display()))?;
+    directory
+        .open_regular(leaf)
+        .with_context(|| format!("open installed regular file {}", path.display()))
+}
+
+fn digest_installed_file(path: &Path) -> Result<String> {
+    let mut file = open_installed_file(path)?;
+    let mut digest = Sha256::new();
+    let mut buffer = [0_u8; 32 * 1024];
+    loop {
+        let read = file
+            .read(&mut buffer)
+            .with_context(|| format!("read installed member {}", path.display()))?;
+        if read == 0 {
+            break;
+        }
+        digest.update(&buffer[..read]);
     }
-    fs::read(path).with_context(|| format!("read installed member {}", path.display()))
+    Ok(format!("{digest:x}"))
+}
+
+struct AdmittedArchive {
+    bytes: Vec<u8>,
+    _admission: StorageAdmission,
+}
+
+fn read_admitted_archive(
+    mut archive: impl Read,
+    expected_size: usize,
+    quota: &QuotaGroup,
+) -> Result<AdmittedArchive> {
+    let maximum = usize::try_from(PackageLimits::default().archive_bytes)
+        .context("animation archive size limit")?;
+    if expected_size > maximum {
+        bail!("installed animation archive exceeds {maximum} bytes");
+    }
+    let reserved_size = expected_size
+        .checked_add(1)
+        .context("installed animation archive read size overflow")?;
+    let admission = quota
+        .reserve_external_storage(reserved_size)
+        .map_err(|error| anyhow::anyhow!("installed archive admission: {error:?}"))?;
+    let mut bytes = Vec::new();
+    bytes
+        .try_reserve_exact(reserved_size)
+        .context("installed animation archive allocation")?;
+    archive
+        .take(reserved_size as u64)
+        .read_to_end(&mut bytes)
+        .context("read installed animation archive")?;
+    if bytes.len() != expected_size {
+        bail!("installed animation archive changed size during read");
+    }
+    Ok(AdmittedArchive {
+        bytes,
+        _admission: admission,
+    })
+}
+
+fn admitted_archive_from_path(path: &Path, quota: &QuotaGroup) -> Result<AdmittedArchive> {
+    let archive = open_installed_file(path)?;
+    let metadata = archive
+        .metadata()
+        .with_context(|| format!("inspect opened animation archive {}", path.display()))?;
+    let expected_size = usize::try_from(metadata.len()).context("installed archive size")?;
+    if expected_size > usize::try_from(PackageLimits::default().archive_bytes)? {
+        bail!("installed animation archive exceeds 32 MiB");
+    }
+    read_admitted_archive(archive, expected_size, quota)
 }
 
 fn digest(bytes: &[u8]) -> String {
@@ -143,12 +212,118 @@ pub async fn probe() -> Result<()> {
     }
 }
 
+#[cfg(test)]
+mod archive_admission_tests {
+    use super::*;
+    use ilium_execution::QuotaLimits;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    fn quota(worker_bytes: usize) -> QuotaGroup {
+        QuotaGroup::new(QuotaLimits {
+            clients: 0,
+            jobs: 0,
+            service_jobs: 0,
+            input_bytes: 0,
+            result_bytes: 0,
+            worker_threads: 0,
+            worker_bytes,
+        })
+    }
+
+    struct ReadCounter(Arc<AtomicUsize>);
+    impl Read for ReadCounter {
+        fn read(&mut self, _buffer: &mut [u8]) -> io::Result<usize> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Ok(0)
+        }
+    }
+
+    #[test]
+    fn installed_archive_admission_precedes_read_and_covers_buffer_lifetime() {
+        let quota = quota(4);
+        let reads = Arc::new(AtomicUsize::new(0));
+        let result = read_admitted_archive(ReadCounter(Arc::clone(&reads)), 4, &quota);
+        assert!(
+            result.is_err(),
+            "size-plus-one reservation should exceed quota"
+        );
+        assert_eq!(reads.load(Ordering::SeqCst), 0);
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+
+        let quota = quota(5);
+        let admitted = read_admitted_archive(io::Cursor::new(b"pack"), 4, &quota)
+            .expect("archive read is admitted");
+        assert_eq!(admitted.bytes.as_slice(), b"pack");
+        assert_eq!(quota.snapshot().worker_bytes, 5);
+        drop(admitted);
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+    }
+
+    #[test]
+    fn changed_or_oversized_installed_archive_releases_admission() {
+        let quota = quota(16);
+        assert!(read_admitted_archive(io::Cursor::new(b"larger"), 4, &quota).is_err());
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+
+        let maximum = usize::try_from(PackageLimits::default().archive_bytes).unwrap();
+        assert!(read_admitted_archive(io::Cursor::new([]), maximum + 1, &quota).is_err());
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+    }
+
+    #[test]
+    fn installed_archive_path_rejects_non_files_and_keeps_file_admission() {
+        let directory = tempfile::tempdir().expect("temporary archive directory");
+        let quota = quota(5);
+        assert!(admitted_archive_from_path(directory.path(), &quota).is_err());
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+
+        let path = directory.path().join("package.iliumanim");
+        fs::write(&path, b"pack").expect("write temporary archive");
+        assert_eq!(
+            digest_installed_file(&path).expect("stream installed-file digest"),
+            digest(b"pack")
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            let link = directory.path().join("linked-package.iliumanim");
+            symlink(&path, &link).expect("create symlink fixture");
+            assert!(admitted_archive_from_path(&link, &quota).is_err());
+            assert!(digest_installed_file(&link).is_err());
+            assert_eq!(quota.snapshot().worker_bytes, 0);
+        }
+        let archive = admitted_archive_from_path(&path, &quota).expect("admit archive file");
+        assert_eq!(archive.bytes.as_slice(), b"pack");
+        assert_eq!(quota.snapshot().worker_bytes, 5);
+        drop(archive);
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+    }
+
+    #[test]
+    fn multiple_installed_archive_leases_remain_charged_together() {
+        let quota = quota(10);
+        let first = read_admitted_archive(io::Cursor::new(b"one!"), 4, &quota)
+            .expect("first archive is admitted");
+        let second = read_admitted_archive(io::Cursor::new(b"two!"), 4, &quota)
+            .expect("second archive is admitted");
+        assert_eq!(quota.snapshot().worker_bytes, 10);
+
+        drop(first);
+        assert_eq!(quota.snapshot().worker_bytes, 5);
+        drop(second);
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+    }
+}
+
 async fn probe_with_bank(bank: &execution::ClientExecution) -> Result<()> {
     let client = std::env::current_exe().context("installed client executable")?;
-    let client_bytes = regular_bytes(&client)?;
+    let client_digest = digest_installed_file(&client)?;
     let helper = ilium_platform::animation_sandbox::helper_executable_path(&client)
         .context("platform helper path")?;
-    let helper_bytes = regular_bytes(&helper)?;
+    let helper_digest = digest_installed_file(&helper)?;
     let bundled = helper
         .parent()
         .context("installed helper has no parent directory")?;
@@ -173,7 +348,6 @@ async fn probe_with_bank(bank: &execution::ClientExecution) -> Result<()> {
     let permission_root = Arc::new(PinnedDirectory::from_host(Arc::new(
         NoFollowDirectory::open_root(&permission_path)?,
     ))?);
-    let baseline = quota.snapshot();
     let mut archives = Vec::with_capacity(release::PACKAGES.len());
     for &(id, filename, expected_digest) in release::PACKAGES {
         let descriptor = catalogue
@@ -183,24 +357,25 @@ async fn probe_with_bank(bank: &execution::ClientExecution) -> Result<()> {
         if descriptor.archive_path != expected_path {
             bail!("{id} resolved outside the installed helper directory");
         }
-        let bytes = regular_bytes(&descriptor.archive_path)?;
-        if digest(&bytes) != expected_digest {
+        let archive = admitted_archive_from_path(&descriptor.archive_path, &quota)?;
+        if digest(&archive.bytes) != expected_digest {
             bail!("installed {id} differs from compiled official archive digest");
         }
-        archives.push((id, expected_digest, bytes));
+        archives.push((id, expected_digest, archive));
     }
+    let baseline = quota.snapshot();
     emit(json!({"type":"artifact","gate":"installed_catalogue",
-        "client_path":client,"client_sha256":digest(&client_bytes),
-        "helper_path":helper,"helper_sha256":digest(&helper_bytes),
+        "client_path":client,"client_sha256":client_digest,
+        "helper_path":helper,"helper_sha256":helper_digest,
         "packages":release::PACKAGES.iter().map(|item| item.0).collect::<Vec<_>>(),
         "worker_threads_before":baseline.worker_threads,
         "worker_bytes_before":baseline.worker_bytes}))?;
 
-    for (index, (id, expected_digest, bytes)) in archives.iter().enumerate() {
+    for (index, (id, expected_digest, archive)) in archives.iter().enumerate() {
         let environment =
             json!({"cell_width": 24, "cell_height": 12, "dot_width": 48, "dot_height": 48});
         let verified = PackageInstance::verify(InstancePreparation {
-            archive: bytes,
+            archive: &archive.bytes,
             verifier: &verifier,
             helper_executable: &helper,
             trusted_bootstrap: TRUSTED_BOOTSTRAP,
@@ -354,7 +529,7 @@ async fn probe_with_bank(bank: &execution::ClientExecution) -> Result<()> {
         render_result?;
         emit(
             json!({"type":"artifact","gate":"installed_render","package":id,
-            "archive_sha256":expected_digest,"helper_sha256":digest(&helper_bytes),
+            "archive_sha256":expected_digest,"helper_sha256":helper_digest,
             "rendered_frames":2,"physical_retirement":true,
             "worker_threads_before":baseline.worker_threads,
             "worker_threads_after":after.worker_threads,

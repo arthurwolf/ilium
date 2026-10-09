@@ -2,7 +2,7 @@
 // These test complete frames after pause/replacement, not interruption within
 // one renderer call (that remains the separately allocated G04 mechanism).
 use super::*;
-use crate::background_animation::{AnimationKind, scenes};
+use crate::background_animation::{scenes, AnimationKind};
 
 const KINDS: &[AnimationKind] = &[
     AnimationKind::Cloudlets,
@@ -197,16 +197,17 @@ fn replacements_discard_a_completed_but_unpolled_old_generation() {
 
 #[test]
 fn cancelling_a_build_retires_its_owned_worker_before_release_is_reported() {
-    let mut cache = AnimationLoopCache::new(ilium_ambient::resources::AmbientResources::new(
-        crate::execution::test_client(),
-    ));
+    let client = crate::execution::test_client();
+    let quota = client.quota_group();
+    let baseline_quota = quota.snapshot();
+    let mut cache =
+        AnimationLoopCache::new(ilium_ambient::resources::AmbientResources::new(client));
     // ClientExecution bootstrap owns several platform workers; snapshot only
     // after that shared test fixture exists so this test measures its delta.
     let before = ilium_platform::owned_worker::supervisor_status()
         .expect("the shared test client initializes the worker supervisor");
     let baseline_registered = before.registered_workers;
     let baseline_reserved = before.reserved_workers;
-    let baseline_builders = BUILDERS.load(Ordering::Acquire);
     let settings = AnimationSettings {
         kind: AnimationKind::Kelp,
         loop_seconds: 120,
@@ -229,6 +230,16 @@ fn cancelling_a_build_retires_its_owned_worker_before_release_is_reported() {
                 current.registered_workers,
                 baseline_registered + 1,
                 "isolated cache fixture must add exactly one owned worker"
+            );
+            let admitted = quota.snapshot();
+            assert_eq!(
+                admitted.worker_threads,
+                baseline_quota.worker_threads + 1,
+                "cache worker must hold its shared physical-thread credit"
+            );
+            assert!(
+                admitted.worker_bytes > baseline_quota.worker_bytes,
+                "cache worker and retained frames must hold shared storage credits"
             );
             break;
         }
@@ -253,16 +264,18 @@ fn cancelling_a_build_retires_its_owned_worker_before_release_is_reported() {
     loop {
         let current = ilium_platform::owned_worker::supervisor_status()
             .expect("the worker supervisor remains installed after cancellation");
+        let quota_now = quota.snapshot();
         if current.registered_workers == baseline_registered
             && current.reserved_workers == baseline_reserved
             && current.joining_worker == before.joining_worker
-            && BUILDERS.load(Ordering::Acquire) == baseline_builders
+            && quota_now.worker_threads == baseline_quota.worker_threads
+            && quota_now.worker_bytes == baseline_quota.worker_bytes
         {
             break;
         }
         assert!(
             Instant::now() < retirement_deadline,
-            "cache worker or its builder permit must remain accounted until real retirement"
+            "cache worker or its shared quota credits must remain accounted until real retirement"
         );
         std::thread::sleep(Duration::from_millis(1));
     }

@@ -1,7 +1,9 @@
 //! Packed loop generation runs away from input/rendering. A receiver belongs
 //! to one settings generation, so cancelled work can never publish stale frames.
 use super::{AnimationFrame, AnimationSettings};
+use ilium_ambient::resources::WorkerCost;
 use ilium_ambient::source::Worker;
+use ilium_execution::StorageAdmission;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
@@ -9,7 +11,9 @@ use std::time::{Duration, Instant};
 pub(crate) const CACHE_FPS: u32 = 30;
 const MAX_CACHE_BYTES: usize = 128 * 1024 * 1024;
 const MAX_CACHE_CELLS: usize = 131_072;
-static BUILDERS: AtomicUsize = AtomicUsize::new(0);
+// Two working AnimationFrames, scene scratch and the worker's bounded state.
+// Packed output storage is charged separately for as long as frames are cached.
+const CACHE_WORKER_BYTES: usize = 32 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct AnimationCacheStatus {
@@ -33,25 +37,15 @@ struct BuildProgress {
 }
 struct Build {
     worker: Worker,
-    receiver: mpsc::Receiver<Vec<Vec<u8>>>,
+    receiver: mpsc::Receiver<CompletedCache>,
     progress: Arc<BuildProgress>,
     started: Instant,
 }
-struct BuilderPermit;
-impl BuilderPermit {
-    fn acquire() -> Option<Self> {
-        BUILDERS
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
-                (count < 2).then_some(count + 1)
-            })
-            .ok()
-            .map(|_| Self)
-    }
-}
-impl Drop for BuilderPermit {
-    fn drop(&mut self) {
-        BUILDERS.fetch_sub(1, Ordering::AcqRel);
-    }
+struct CompletedCache {
+    // Keep the payload before its storage lease so the allocation is freed
+    // before its quota credit is released.
+    frames: Vec<Vec<u8>>,
+    storage: Arc<StorageAdmission>,
 }
 
 pub struct AnimationLoopCache {
@@ -60,6 +54,7 @@ pub struct AnimationLoopCache {
     height: u16,
     settings: Option<AnimationSettings>,
     frames: Vec<Vec<u8>>,
+    _frame_storage: Option<Arc<StorageAdmission>>,
     build: Option<Build>,
     status: AnimationCacheStatus,
 }
@@ -85,6 +80,7 @@ impl AnimationLoopCache {
             height: 0,
             settings: None,
             frames: Vec::new(),
+            _frame_storage: None,
             build: None,
             status: AnimationCacheStatus::default(),
         }
@@ -106,6 +102,8 @@ impl AnimationLoopCache {
         self.status.resident_bytes = 0;
         self.status.elapsed = Duration::ZERO;
         self.status.eta = None;
+        self.frames = Vec::new();
+        self._frame_storage = None;
     }
 
     pub fn begin(&mut self, settings: &AnimationSettings, width: u16, height: u16) {
@@ -124,12 +122,19 @@ impl AnimationLoopCache {
         };
         settings.panels = super::PanelTarget::Both;
         settings.fps_limit = 0;
+        // This cache is exclusively for built-in scenes. Package selection,
+        // mode, and package settings are consumed by the separate package
+        // runner and cannot change these packed native frames.
+        settings.source = crate::animation_plugins::AnimationSourceTab::Native;
+        settings.plugin = crate::animation_plugins::PluginPreferences::default();
+        settings.semantic_scope = super::SemanticScope::Project;
         if self.settings.as_ref() == Some(&settings) && self.width == width && self.height == height
         {
             return;
         }
         self.cancel_build();
         self.frames = Vec::new();
+        self._frame_storage = None;
         self.width = width;
         self.height = height;
         let total_frames = usize::from(settings.loop_seconds) * CACHE_FPS as usize;
@@ -159,19 +164,29 @@ impl AnimationLoopCache {
         {
             return;
         }
-        let Some(permit) = BuilderPermit::acquire() else {
-            return;
+        // Admission is shared with every client and retained before cloning
+        // settings/resources or allocating the packed frame batch.
+        let storage = match self.resources.reserve_storage(self.status.estimated_bytes) {
+            Ok(storage) => storage,
+            Err(_) => return,
+        };
+        let worker_reservation = match self.resources.reserve_worker(WorkerCost {
+            threads: 1,
+            resident_bytes: CACHE_WORKER_BYTES,
+        }) {
+            Ok(reservation) => reservation,
+            Err(_) => return,
         };
         let Some(settings) = self.settings.clone() else {
             return;
         };
         let (width, height, total) = (self.width, self.height, self.status.total_frames);
         let resources = self.resources.clone();
+        let worker_storage = Arc::clone(&storage);
         let progress = Arc::new(BuildProgress::default());
         let worker_progress = Arc::clone(&progress);
         let (sender, receiver) = mpsc::sync_channel(1);
-        let worker = Worker::try_spawn("loop-cache", move |stop| {
-            let _permit = permit;
+        let worker = Worker::start_admitted("loop-cache", worker_reservation, move |stop| {
             ilium_platform::thread_priority::lower_current_thread(
                 ilium_platform::thread_priority::WorkerPriority::Lowest,
             );
@@ -198,7 +213,10 @@ impl AnimationLoopCache {
                     .completed
                     .store(index + 1, Ordering::Release);
             }
-            let _ = sender.send(frames);
+            let _ = sender.send(CompletedCache {
+                frames,
+                storage: worker_storage,
+            });
         });
         match worker {
             Ok(worker) => {
@@ -229,9 +247,10 @@ impl AnimationLoopCache {
         let result = self.build.as_ref().map(|build| build.receiver.try_recv());
         if let Some(result) = result {
             match result {
-                Ok(frames) => {
+                Ok(completed) => {
                     self.status = self.status();
-                    self.frames = frames;
+                    self.frames = completed.frames;
+                    self._frame_storage = Some(completed.storage);
                     self.status.is_ready = true;
                     self.status.eta = Some(Duration::ZERO);
                     self.cancel_build();
@@ -314,6 +333,139 @@ fn render_loop_sample(
 mod tests {
     use super::*;
     use crate::background_animation::AnimationKind;
+    use ilium_execution::{
+        ClientLimits, Execution, ExecutionConfig, LaneConfig, QuotaGroup, QuotaLimits, ShutdownMode,
+    };
+
+    fn isolated_resources() -> (
+        Execution,
+        ilium_ambient::resources::AmbientResources,
+        QuotaGroup,
+    ) {
+        let quota = QuotaGroup::new(QuotaLimits {
+            clients: 4,
+            jobs: 8,
+            service_jobs: 0,
+            input_bytes: 1024 * 1024,
+            result_bytes: 1024 * 1024,
+            worker_threads: 4,
+            worker_bytes: 64 * 1024 * 1024,
+        });
+        let cpu = LaneConfig {
+            threads: 1,
+            queue_slots: 2,
+            priority: None,
+            resident_bytes_per_thread: 1024 * 1024,
+        };
+        let execution = Execution::start(
+            quota.clone(),
+            ExecutionConfig {
+                cpu,
+                io: LaneConfig {
+                    threads: 1,
+                    queue_slots: 2,
+                    priority: None,
+                    resident_bytes_per_thread: 1024 * 1024,
+                },
+                service: LaneConfig {
+                    threads: 0,
+                    queue_slots: 0,
+                    priority: None,
+                    resident_bytes_per_thread: 0,
+                },
+            },
+        )
+        .unwrap();
+        let client = execution
+            .client(ClientLimits {
+                jobs: 8,
+                service_jobs: 0,
+                input_bytes: 1024 * 1024,
+                result_bytes: 1024 * 1024,
+            })
+            .unwrap();
+        (
+            execution,
+            ilium_ambient::resources::AmbientResources::new(client),
+            quota,
+        )
+    }
+
+    fn wait_for_quota(
+        quota: &QuotaGroup,
+        predicate: impl Fn(&ilium_execution::QuotaSnapshot) -> bool,
+    ) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !predicate(&quota.snapshot()) {
+            assert!(
+                Instant::now() < deadline,
+                "worker quota did not reach expected state"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    #[test]
+    fn loop_cache_waits_for_shared_admission_and_retains_frame_storage_credit() {
+        let (mut execution, resources, quota) = isolated_resources();
+        let baseline = quota.snapshot();
+        let blocker = resources
+            .reserve_storage(baseline.limits.worker_bytes - baseline.worker_bytes)
+            .unwrap();
+        let mut cache = AnimationLoopCache::new(resources.clone());
+        let settings = AnimationSettings {
+            loop_seconds: 1,
+            ..Default::default()
+        };
+
+        cache.begin(&settings, 24, 12);
+
+        assert!(
+            cache.build.is_none(),
+            "cache worker must wait for shared byte admission"
+        );
+        assert!(
+            !cache.status().has_error,
+            "temporary quota pressure is retryable"
+        );
+        drop(blocker);
+
+        let available_threads = quota
+            .snapshot()
+            .limits
+            .worker_threads
+            .saturating_sub(quota.snapshot().worker_threads);
+        assert!(
+            available_threads > 0,
+            "isolated quota must leave a worker slot"
+        );
+        let thread_blocker = quota.reserve_external_worker(available_threads, 1).unwrap();
+        assert!(!cache.step(&settings, 24, 12, usize::MAX));
+        assert!(
+            cache.build.is_none(),
+            "cache worker must wait for shared thread admission"
+        );
+        drop(thread_blocker);
+
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !cache.step(&settings, 24, 12, usize::MAX) {
+            assert!(Instant::now() < deadline, "admitted cache must complete");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+
+        wait_for_quota(&quota, |snapshot| {
+            snapshot.worker_threads == baseline.worker_threads
+        });
+        assert!(quota.snapshot().worker_bytes > baseline.worker_bytes);
+        drop(cache);
+        wait_for_quota(&quota, |snapshot| {
+            snapshot.worker_bytes == baseline.worker_bytes
+        });
+        execution.request_shutdown(ShutdownMode::Cancel);
+        execution
+            .join_until_background(Instant::now() + Duration::from_secs(5))
+            .unwrap();
+    }
 
     fn ready_cache(settings: &AnimationSettings) -> AnimationLoopCache {
         let mut cache = AnimationLoopCache::new(ilium_ambient::resources::AmbientResources::new(
@@ -325,6 +477,34 @@ mod tests {
             std::thread::sleep(Duration::from_millis(1));
         }
         cache
+    }
+
+    #[test]
+    fn returning_to_native_scene_reuses_cache_after_plugin_selection() {
+        let native = AnimationSettings {
+            loop_seconds: 1,
+            ..Default::default()
+        };
+        let mut cache = ready_cache(&native);
+        let cached_cells = cache.frames.as_ptr();
+
+        let mut returned = native.clone();
+        returned.source = crate::animation_plugins::AnimationSourceTab::Plugin;
+        returned.plugin.selected = Some(crate::animation_plugins::PluginSelection {
+            package_id: "example-animation".into(),
+            mode: ilium_animation_js::manifest::AnimationMode::Live,
+            settings: serde_json::json!({"density": 64}),
+        });
+        returned.semantic_scope = super::SemanticScope::Entry;
+
+        cache.begin(&returned, 24, 12);
+
+        assert!(cache.status().is_ready, "native cache should remain ready");
+        assert!(
+            cache.build.is_none(),
+            "identical native frames must not rebuild"
+        );
+        assert_eq!(cache.frames.as_ptr(), cached_cells);
     }
 
     #[test]

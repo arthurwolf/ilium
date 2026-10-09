@@ -306,6 +306,13 @@ impl AmbientHost {
         }
     }
 
+    /// True when the hosted scene uses pointer position to render its frame.
+    pub fn wants_pointer(&self) -> bool {
+        self.scene
+            .as_ref()
+            .is_some_and(|hosted| hosted.scene.wants_pointer())
+    }
+
     /// True when the hosted scene reacts to what the workspace draws.
     pub fn wants_occupancy(&self) -> bool {
         self.scene

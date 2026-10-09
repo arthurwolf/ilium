@@ -7,7 +7,7 @@ use ratatui::{
     layout::{Position, Rect},
     style::{Modifier, Style},
     text::Line,
-    widgets::{Paragraph, Wrap},
+    widgets::{Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap},
     Frame,
 };
 use serde::{Deserialize, Serialize};
@@ -231,17 +231,50 @@ impl PermissionReview {
 /// Titles and authority descriptions are compiled host text, never supplied by JS.
 pub fn permission_description(capability_id: &str) -> Option<(&'static str, &'static str)> {
     Some(match capability_id {
-        "network.http" => ("HTTPS connections", "Download only from the listed HTTPS origins. Local-network access requires a separate right; redirects and DNS addresses are checked."),
-        "network.local" => ("Local-network connections", "Connect to explicitly listed local/private HTTPS origins. This is separate from ordinary Internet access."),
-        "disk.read" => ("Read selected files", "Read or list only files in the host-selected file/folder handle. No arbitrary paths or symlink escape."),
-        "disk.write" => ("Write selected output", "Create or update bounded output in the host-selected handle. Read permission does not grant writes or deletion."),
-        "audio.loopback" => ("System audio", "Observe the selected system-output source and requested analysis products. This does not grant microphone access."),
-        "audio.microphone" => ("Microphone", "Capture the selected microphone source and requested analysis products."),
-        "location.observer" => ("Observer location", "Read the location configured by the user for the animation. This does not grant device location tracking."),
-        "input.pointer" => ("Animation pointer", "Observe coordinates/buttons inside the animation viewport. No global keyboard or text-input capture."),
-        "screen.occlusion" => ("Screen occupancy", "Read occupancy masks for the animation viewport. No glyphs, styles, terminal text, pane titles or application tree."),
-        "device.gpu" => ("Bounded graphics backend", "Use admitted host graphics kernels. No arbitrary native execution or raw device handles."),
-        "state.persist" => ("Animation storage", "Save bounded state in this plugin's private namespace. No other plugin or application data."),
+        "network.http" => (
+            "HTTPS connections",
+            "Download only from the listed HTTPS origins. Local-network access requires a separate right; redirects and DNS addresses are checked.",
+        ),
+        "network.local" => (
+            "Local-network connections",
+            "Connect to explicitly listed local/private HTTPS origins. This is separate from ordinary Internet access.",
+        ),
+        "disk.read" => (
+            "Read selected files",
+            "Read or list only files in the host-selected file/folder handle. No arbitrary paths or symlink escape.",
+        ),
+        "disk.write" => (
+            "Write selected output",
+            "Create or update bounded output in the host-selected handle. Read permission does not grant writes or deletion.",
+        ),
+        "audio.loopback" => (
+            "System audio",
+            "Observe the selected system-output source and requested analysis products. This does not grant microphone access.",
+        ),
+        "audio.microphone" => (
+            "Microphone",
+            "Capture the selected microphone source and requested analysis products.",
+        ),
+        "location.observer" => (
+            "Observer location",
+            "Read the location configured by the user for the animation. This does not grant device location tracking.",
+        ),
+        "input.pointer" => (
+            "Animation pointer",
+            "Observe coordinates/buttons inside the animation viewport. No global keyboard or text-input capture.",
+        ),
+        "screen.occlusion" => (
+            "Screen occupancy",
+            "Read occupancy masks for the animation viewport. No glyphs, styles, terminal text, pane titles or application tree.",
+        ),
+        "device.gpu" => (
+            "Bounded graphics backend",
+            "Use admitted host graphics kernels. No arbitrary native execution or raw device handles.",
+        ),
+        "state.persist" => (
+            "Animation storage",
+            "Save bounded state in this plugin's private namespace. No other plugin or application data.",
+        ),
         _ => return None,
     })
 }
@@ -313,21 +346,18 @@ pub fn permission_choice_at(area: Rect, position: Position) -> Option<Permission
     })
 }
 
-/// Render into a protected modal surface after composing the animation.
-/// The parent uses a real dialog/action handler for the four explicit choices.
-pub fn draw_permission_review(
-    frame: &mut Frame<'_>,
-    area: Rect,
-    review: &PermissionReview,
-    style: Style,
-) {
-    let Some(request) = review.requests.get(review.cursor) else {
-        frame.render_widget(
-            Paragraph::new("No unresolved permission requests").style(style),
-            area,
-        );
-        return;
-    };
+pub(crate) fn permission_detail_area(area: Rect) -> Rect {
+    let reserved_rows = PermissionChoice::ALL.len() as u16 + 2;
+    Rect::new(
+        area.x,
+        area.y,
+        area.width.saturating_sub(u16::from(area.width >= 2)),
+        area.height.saturating_sub(reserved_rows),
+    )
+}
+
+fn permission_detail_paragraph(review: &PermissionReview, style: Style) -> Option<Paragraph<'_>> {
+    let request = review.requests.get(review.cursor)?;
     let (title, description) = permission_description(&request.capability.id).unwrap_or((
         "Unsupported right",
         "This capability cannot be granted by this host.",
@@ -337,7 +367,6 @@ pub fn draw_permission_review(
         PackageOrigin::Unverified => "Unverified package",
     };
     let scope = scope_description(&request.capability).unwrap_or_else(|_| "Invalid scope".into());
-    let choice = review.choice(review.cursor).unwrap_or_default();
     let lines = vec![
         Line::from(format!(
             "{} · right {}/{}",
@@ -362,21 +391,64 @@ pub fn draw_permission_review(
         Line::from("Application explanation:"),
         Line::from(request.reason.as_str()),
     ];
-    // Keep a spacer between scrollable details and the fixed action/footer rows.
-    let reserved_rows = PermissionChoice::ALL.len() as u16 + 2;
-    let details = Rect::new(
-        area.x,
-        area.y,
-        area.width,
-        area.height.saturating_sub(reserved_rows),
-    );
-    frame.render_widget(
+    Some(
         Paragraph::new(lines)
             .style(style)
-            .wrap(Wrap { trim: false })
-            .scroll((review.detail_scroll, 0)),
+            .wrap(Wrap { trim: false }),
+    )
+}
+
+pub(crate) fn permission_detail_scroll_limit(area: Rect, review: &PermissionReview) -> u16 {
+    let details = permission_detail_area(area);
+    let Some(paragraph) = permission_detail_paragraph(review, Style::default()) else {
+        return 0;
+    };
+    u16::try_from(
+        paragraph
+            .line_count(details.width.max(1))
+            .saturating_sub(usize::from(details.height)),
+    )
+    .unwrap_or(u16::MAX)
+}
+
+/// Render into a protected modal surface after composing the animation.
+/// The parent uses a real dialog/action handler for the four explicit choices.
+pub fn draw_permission_review(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    review: &PermissionReview,
+    style: Style,
+) {
+    let Some(paragraph) = permission_detail_paragraph(review, style) else {
+        frame.render_widget(
+            Paragraph::new("No unresolved permission requests").style(style),
+            area,
+        );
+        return;
+    };
+    let choice = review.choice(review.cursor).unwrap_or_default();
+    // Keep a spacer between scrollable details and the fixed action/footer rows.
+    let details = permission_detail_area(area);
+    let total_lines = paragraph.line_count(details.width.max(1));
+    let visible_lines = usize::from(details.height);
+    let top = usize::from(review.detail_scroll).min(total_lines.saturating_sub(visible_lines));
+    frame.render_widget(
+        paragraph.scroll((u16::try_from(top).unwrap_or(u16::MAX), 0)),
         details,
     );
+    if total_lines > visible_lines && details.height > 0 && area.width >= 2 {
+        let mut scrollbar = ScrollbarState::new(total_lines)
+            .position(top)
+            .viewport_content_length(visible_lines);
+        frame.render_stateful_widget(
+            Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                .begin_symbol(None)
+                .end_symbol(None)
+                .track_symbol(Some("│")),
+            Rect::new(details.right(), details.y, 1, details.height),
+            &mut scrollbar,
+        );
+    }
     for candidate in PermissionChoice::ALL {
         if let Some(rectangle) = permission_choice_rect(area, candidate) {
             let candidate_style = if candidate == choice {

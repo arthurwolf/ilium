@@ -7,6 +7,8 @@ use crate::{
     animation_plugins::review_bridge::ReviewBridge,
     filesystem::plugin_permissions::PluginPermissionFiles,
 };
+#[cfg(feature = "qualification-test-support")]
+use ilium_animation_js::permissions::{Capability, HttpMethod, Right, Scope, UserChoice};
 use ilium_animation_js::{
     engine::CreateState,
     helper::HelperAuthority,
@@ -30,6 +32,401 @@ const FAILING_SCRIPT: &str = "export function plan(){return {fps:2,output:{mode:
 const FRAME_BYTES: &[u8] = br#"{"masks":[0],"rgb":[null],"text":[]}"#;
 const PRE_RENDER_NATIVE_TEXT_SCRIPT: &str = r#"export function plan(){return {fps:2,output:{mode:'cells',format:'mask8',update:'replace'},inputs:{},replay:{seed:3,duration_seconds:1,seamless:false}}} export async function create(host){return {render(context,frame){const glyph=context.time<0.25?'界':'e\u0301';const result=host.text.spans({frame,x:0,y:0,max_cells:2,spans:[{text:glyph,foreground:{r:255,g:0,b:0},background:{r:0,g:64,b:0},bold:true,italic:true,underline:true}]});if(!result.ok)throw Error(result.error.code);frame.present()},dispose(){}}}"#;
 const RECORDED_BUNDLE_VIDEO_SCRIPT: &str = r#"export function plan(){return {fps:2,output:{mode:'pixels',format:'rgba8',update:'replace'},inputs:{},replay:{seed:3,duration_seconds:1,seamless:false}}} export async function create(host){const opened=await host.media.video.open({asset:host.assets.bundle,relative_path:'assets/frame.ppm',max_pixels:8,max_fps:2});if(!opened.ok)throw Error(opened.error.code);const video=opened.value;return {render(context,frame){const latest=video.latest();if(!latest.ok||!latest.value)throw Error('recorded_video_frame_missing');const drawn=host.media.images.blit({frame,image:latest.value.image,rectangle:{unit:'pixels',x:0,y:0,width:2,height:4},fit:'stretch'});if(!drawn.ok)throw Error(drawn.error.code);frame.present()},dispose(){}}}"#;
+const LIVE_EMPTY_REPLAY_FREEZE_SCRIPT: &str = r#"export function plan(){return {fps:2,output:{mode:'cells',format:'mask8',update:'replace'},inputs:{},replay:{seed:3,duration_seconds:1,seamless:false}}} export async function create(host){const frozen=await host.replay.freeze({sources:[],max_bytes:1024});if(!frozen.ok)throw Error('replay_freeze_refused:'+frozen.error.code);return {render(context,frame){frame.cells.set_cell(0,0,{mask:1});frame.present()},dispose(){}}}"#;
+#[cfg(feature = "qualification-test-support")]
+const LIVE_SOURCE_SEQUENCE_SCRIPT: &str = r#"export function plan(){return {fps:2,output:{mode:'cells',format:'mask8',update:'replace'},inputs:{},permissions:[{request_id:'source',id:'network.http',scope:{kind:'network',origins:['https://earthquake.usgs.gov'],methods:['GET']},required:true,reason:'Read the local offline replay qualification response'}],replay:{seed:3,duration_seconds:2,seamless:false}}} export async function create(host){const opened=await host.sources.earthquakes.open({bounds:{west:-180,east:180,south:-90,north:90},max_entities:2,max_hz:4,fields:['magnitude']});if(!opened.ok)throw Error('source_open:'+opened.error.code);const captured=await host.replay.capture_sequence({sources:[opened.value],duration_ms:1500,sample_hz:2,max_frames:3,max_bytes:1048576});if(!captured.ok)throw Error('capture_sequence:'+captured.error.code);return {render(context,frame){const latest=opened.value.latest();if(!latest.ok||!latest.value||!latest.value.entities.length)throw Error('replay_feed_missing');frame.cells.set_cell(0,0,{mask:latest.value.entities[0].magnitude>=3?2:1});frame.present()},dispose(){opened.value.close()}}}"#;
+#[cfg(feature = "qualification-test-support")]
+const USGS_URL: &str = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson";
+#[cfg(feature = "qualification-test-support")]
+const USGS_BODY_LOW: &[u8] = br#"{"type":"FeatureCollection","features":[{"id":"replay-fixture","type":"Feature","properties":{"mag":1,"time":1000,"place":"low"},"geometry":{"type":"Point","coordinates":[1,1,1]}}]}"#;
+#[cfg(feature = "qualification-test-support")]
+const USGS_BODY_HIGH: &[u8] = br#"{"type":"FeatureCollection","features":[{"id":"replay-fixture","type":"Feature","properties":{"mag":5,"time":2000,"place":"high"},"geometry":{"type":"Point","coordinates":[1,1,1]}}]}"#;
+
+#[cfg(feature = "qualification-test-support")]
+fn prepared_live_source_sequence() -> (
+    Fixture,
+    ilium_animation_js::runtime::PackageInstance,
+    Presentation,
+) {
+    use ilium_animation_js::native_source_host::OfflineSourceHttp;
+
+    let fixture = Fixture::new_with_capabilities(
+        LIVE_SOURCE_SEQUENCE_SCRIPT,
+        AnimationMode::PreRendered,
+        vec![json!({
+            "id":"network.http",
+            "scope":{"origins":["https://earthquake.usgs.gov"],"methods":["GET"]}
+        })],
+    );
+    let (mut instance, review) = fixture
+        .verified_with_policy(
+            AnimationMode::PreRendered,
+            Ceiling {
+                permissions: vec![Right {
+                    id: Capability::NetworkHttp,
+                    scope: Scope::Network {
+                        origins: std::collections::BTreeSet::from([
+                            "https://earthquake.usgs.gov".into()
+                        ]),
+                        methods: std::collections::BTreeSet::from([HttpMethod::Get]),
+                    },
+                }],
+            },
+        )
+        .prepare(None)
+        .unwrap();
+    assert_eq!(review.items().len(), 1);
+    let pending = instance
+        .begin_resolution(
+            review,
+            BTreeMap::from([("source".into(), UserChoice::AllowSession)]),
+        )
+        .unwrap();
+    let resolution = instance.finish_resolution(pending).unwrap();
+    assert!(resolution.denied_required.is_empty());
+    let mut presentation = Presentation::new(
+        &mut instance,
+        &fixture.request,
+        &fixture.quota,
+        fixture.resources.clone(),
+        Arc::clone(&fixture.state_root),
+        None,
+        false,
+        resolution.accepted_creation().expect("accepted creation"),
+        Arc::new({
+            let sender = fixture.wake_sender.clone();
+            move || {
+                let _ = sender.send(());
+            }
+        }),
+    )
+    .unwrap();
+    presentation.sources.offline_http = Some(
+        OfflineSourceHttp::new(
+            USGS_URL.into(),
+            "93.184.216.34:443".parse().unwrap(),
+            vec![
+                USGS_BODY_LOW.to_vec(),
+                USGS_BODY_HIGH.to_vec(),
+                USGS_BODY_LOW.to_vec(),
+                USGS_BODY_HIGH.to_vec(),
+                USGS_BODY_LOW.to_vec(),
+                USGS_BODY_HIGH.to_vec(),
+                USGS_BODY_LOW.to_vec(),
+                USGS_BODY_HIGH.to_vec(),
+            ],
+        )
+        .unwrap(),
+    );
+    (fixture, instance, presentation)
+}
+
+#[test]
+#[cfg(feature = "qualification-test-support")]
+#[ignore = "run explicitly with matching ILIUM_ANIMATION_HELPER and delegated sandbox"]
+fn client_replay_sequence_renders_captured_feed_revisions_after_helper_retirement() {
+    let (fixture, mut instance, mut presentation) = prepared_live_source_sequence();
+
+    let mut ready = false;
+    for _ in 0..800 {
+        while fixture.wake_receiver.try_recv().is_ok() {
+            presentation
+                .sources
+                .on_completion_wake(&mut instance, &mut presentation.drawing)
+                .unwrap();
+        }
+        presentation.dispatch_requests(&mut instance).unwrap();
+        presentation.creation = instance.pump().unwrap();
+        if presentation.creation == CreateState::Ready {
+            presentation.dispatch_requests(&mut instance).unwrap();
+            ready = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(ready, "the real client replay capture did not settle");
+    let recording = presentation
+        .sources
+        .recordings
+        .values()
+        .next()
+        .expect("client dispatcher must retain its native sequence");
+    let sequence = recording
+        .sequence
+        .as_ref()
+        .expect("capture_sequence must retain a source timeline");
+    assert!(
+        sequence.frames().len() >= 2,
+        "a later source revision is required"
+    );
+    assert_eq!(
+        sequence.frames()[0].snapshots()[0].family(),
+        ilium_animation_js::replay::InputFamily::Earthquakes
+    );
+    assert!(sequence.frames()[1].snapshots()[0].revision() > 1);
+    let captured_magnitudes: Vec<_> = sequence
+        .frames()
+        .iter()
+        .filter_map(|frame| {
+            frame.snapshots()[0].value().metadata()["entities"][0]["magnitude"].as_f64()
+        })
+        .collect();
+    assert!(captured_magnitudes.contains(&1.0));
+    assert!(captured_magnitudes.contains(&5.0));
+    let certification = instance
+        .certify_source_sequence_replay(&recording.frozen, sequence, &recording.sequence_captures)
+        .expect("actual client-captured source timeline must satisfy the pre-render certificate");
+    let verifier = ilium_animation_js::release::verifier().unwrap();
+    let package_identity = verifier.verify(instance.package());
+    let evidence = FrozenEvidence::from_native(fixture.quota.clone(), &package_identity, &[])
+        .expect("source replay has no recorded-video evidence");
+    let appearance_digest: [u8; 32] =
+        Sha256::digest(serde_json::to_vec(instance.settings()).unwrap()).into();
+    let source_spec = ClipSpec::from_accepted(
+        &fixture.quota,
+        ClipSpecification {
+            package: instance.package(),
+            verifier: &verifier,
+            plan: instance.plan(),
+            settings: instance.settings(),
+            shape: shape(
+                instance.plan(),
+                fixture.request.width,
+                fixture.request.height,
+            )
+            .unwrap(),
+            backend: "native-v8",
+            api_version: instance.package().manifest().api_version,
+            appearance_digest,
+            certification,
+            frozen: Arc::clone(&recording.frozen),
+            source_sequence: Some(Arc::clone(
+                recording
+                    .sequence
+                    .as_ref()
+                    .expect("captured native sequence"),
+            )),
+            evidence,
+        },
+    )
+    .expect("captured source timeline must form an accepted ClipSpec");
+    assert!(
+        !source_spec.can_stream_procedural(),
+        "native source replay must not enter the source-free disk cache"
+    );
+    let frozen = presentation
+        .sources
+        .frozen_inputs_for(
+            &instance,
+            recording.frozen.recording().unwrap(),
+            fixture.quota.clone(),
+            1024 * 1024,
+        )
+        .expect("the captured initial feed must resolve through the presentation owner");
+    assert_eq!(frozen.snapshots().len(), 1);
+    assert_eq!(
+        frozen.snapshots()[0].family(),
+        ilium_animation_js::replay::InputFamily::Earthquakes
+    );
+    let (authority, authorization) = instance
+        .retain_procedural_replay_authorization()
+        .expect("the original pre-render activation authorizes its captured clip");
+    let instance = Arc::new(Mutex::new(instance));
+    let presentation = Arc::new(Mutex::new(presentation));
+    let cache = Arc::new(ReplayCache::new(fixture.quota.clone(), ReplayLimits::default()).unwrap());
+    let store = fixture.store();
+    match cache.begin_streaming(
+        Arc::clone(&source_spec),
+        authority.clone(),
+        Arc::clone(&authorization),
+        StopToken::default(),
+        Arc::clone(&store),
+        || panic!("a source-backed clip must be refused before owner admission"),
+    ) {
+        Err(ilium_animation_js::error::AnimationError::PermissionDenied(_)) => {}
+        Err(error) => panic!("source-backed streaming refusal was unexpected: {error}"),
+        Ok(_) => panic!("source-backed clips must be rejected by the cache API"),
+    }
+    let mut receipt = fixture
+        .client
+        .try_reserve(
+            Lane::Cpu,
+            JobCost {
+                input_bytes: 1024 * 1024,
+                result_bytes: 1024 * 1024,
+            },
+        )
+        .unwrap()
+        .submit(PreRenderJob {
+            request: fixture.request.clone(),
+            instance: Arc::clone(&instance),
+            presentation: Arc::clone(&presentation),
+            cache: Arc::clone(&cache),
+            store: Arc::clone(&store),
+            spec: Arc::clone(&source_spec),
+            authority: authority.clone(),
+            authorization: Arc::clone(&authorization),
+            quota: fixture.quota.clone(),
+            stop: StopToken::default(),
+        })
+        .unwrap();
+    let outcome = loop {
+        fixture.await_wake();
+        if let JobPoll::Ready(outcome) = receipt.try_take() {
+            break outcome;
+        }
+    };
+    assert!(matches!(outcome.view(), JobOutcome::Finished(Ok(_))));
+    assert!(instance.lock().unwrap().is_physically_retired());
+    assert!(presentation_is_drained(&presentation.lock().unwrap()));
+    match cache.open_procedural_from_disk(
+        Arc::clone(&source_spec),
+        authority.clone(),
+        Arc::clone(&authorization),
+        &store,
+    ) {
+        Err(ilium_animation_js::error::AnimationError::PermissionDenied(_)) => {}
+        Err(error) => panic!("source-backed cold-open refusal was unexpected: {error}"),
+        Ok(_) => panic!("source-backed clips must be rejected by the cold disk API"),
+    }
+
+    let clip = match cache
+        .begin(
+            Arc::clone(&source_spec),
+            authority.clone(),
+            Arc::clone(&authorization),
+            StopToken::default(),
+            || {
+                Err(ilium_animation_js::error::AnimationError::Runtime(
+                    "source replay must already be cached".into(),
+                ))
+            },
+        )
+        .unwrap()
+    {
+        Preparation::Cached(clip) => clip,
+        Preparation::Started(_) | Preparation::InProgress => {
+            panic!("source replay was not published to the in-memory cache")
+        }
+    };
+    match clip.archive_procedural(&store, &StopToken::default()) {
+        Err(ilium_animation_js::error::AnimationError::PermissionDenied(_)) => {}
+        Err(error) => panic!("source-backed archive refusal was unexpected: {error}"),
+        Ok(_) => panic!("source-backed clips must be rejected by the archive API"),
+    }
+    let mut player = ReplayPlayer::new(
+        clip,
+        authority,
+        authorization,
+        PlaybackSettings {
+            now: Duration::ZERO,
+            speed: 1.0,
+            mode: PlaybackMode::Once,
+            max_leases: 1,
+            stop: StopToken::default(),
+        },
+    )
+    .unwrap();
+    let mut rendered_masks = Vec::new();
+    for frame_index in 0..source_spec.frame_count() {
+        let now = Duration::from_millis((frame_index * 500 + 1) as u64);
+        let (playback, _) = player.sample(now).unwrap();
+        let Playback::Frame(lease) = playback else {
+            panic!("source replay ended before its accepted frame count");
+        };
+        rendered_masks.push(lease.packed().unwrap().masks[0]);
+    }
+    assert!(
+        rendered_masks.contains(&1),
+        "low magnitude should render mask 1"
+    );
+    assert!(
+        rendered_masks.contains(&2),
+        "high magnitude should render mask 2"
+    );
+}
+
+#[test]
+#[cfg(feature = "qualification-test-support")]
+#[ignore = "run explicitly with matching ILIUM_ANIMATION_HELPER and delegated sandbox"]
+fn client_replay_sequence_cancellation_drains_source_and_discards_partial_recording() {
+    let (fixture, mut instance, mut presentation) = prepared_live_source_sequence();
+    let mut capture_id = None;
+    for _ in 0..800 {
+        while fixture.wake_receiver.try_recv().is_ok() {
+            presentation
+                .sources
+                .on_completion_wake(&mut instance, &mut presentation.drawing)
+                .unwrap();
+        }
+        presentation.dispatch_requests(&mut instance).unwrap();
+        presentation.creation = instance.pump().unwrap();
+        capture_id = presentation
+            .sources
+            .pending_sequences
+            .iter()
+            .find(|(_, pending)| pending.frames.len() >= 2)
+            .map(|(id, _)| *id);
+        if capture_id.is_some() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let capture_id = capture_id.expect("capture must retain partial frames before cancellation");
+    presentation
+        .sources
+        .pending_sequences
+        .get(&capture_id)
+        .expect("pending source capture")
+        .request
+        .stop_token()
+        .stop();
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let drained = loop {
+        while fixture.wake_receiver.try_recv().is_ok() {
+            presentation
+                .sources
+                .on_completion_wake(&mut instance, &mut presentation.drawing)
+                .unwrap();
+        }
+        presentation
+            .sources
+            .advance_sequence_captures(&mut instance, &mut presentation.drawing)
+            .unwrap();
+        let source_drained = presentation
+            .sources
+            .feeds
+            .values()
+            .all(|feed| feed.host.is_drained() && feed.terminal.is_none());
+        if !presentation
+            .sources
+            .pending_sequences
+            .contains_key(&capture_id)
+            && source_drained
+        {
+            break true;
+        }
+        if Instant::now() >= deadline {
+            break false;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    assert!(
+        drained,
+        "cancelled capture must wait for source worker drain"
+    );
+    assert!(presentation.sources.recordings.is_empty());
+    assert!(presentation.sources.pending_sequences.is_empty());
+    assert!(
+        instance.pump().is_err(),
+        "the helper must settle the cancelled capture request"
+    );
+
+    presentation.sources.cancel_all();
+    instance.retire_helper().unwrap();
+    assert!(instance.is_physically_retired());
+}
 
 #[test]
 fn presentation_settles_two_pure_create_yields_before_procedural_replay() {
@@ -99,7 +496,78 @@ fn presentation_settles_two_pure_create_yields_before_procedural_replay() {
     assert!(stopped.cancellation.is_ok());
 }
 
+#[test]
+fn live_replay_freeze_acknowledges_an_explicit_empty_source_set() {
+    let fixture = Fixture::new(&LIVE_EMPTY_REPLAY_FREEZE_SCRIPT, AnimationMode::Live);
+    let (mut instance, review) = fixture
+        .verified(AnimationMode::Live)
+        .prepare_without_rights()
+        .unwrap();
+    let pending = instance.begin_resolution(review, BTreeMap::new()).unwrap();
+    let resolution = instance.finish_resolution(pending).unwrap();
+    let mut presentation = Presentation::new(
+        &mut instance,
+        &fixture.request,
+        &fixture.quota,
+        fixture.resources.clone(),
+        Arc::clone(&fixture.state_root),
+        None,
+        true,
+        resolution.accepted_creation().expect("accepted creation"),
+        Arc::new(|| {}),
+    )
+    .unwrap();
+    for _ in 0..100 {
+        presentation.dispatch_requests(&mut instance).unwrap();
+        presentation.creation = instance.pump().unwrap();
+        if presentation.creation == CreateState::Ready {
+            presentation.dispatch_requests(&mut instance).unwrap();
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(presentation.creation, CreateState::Ready);
+    let recording_id = presentation
+        .sources
+        .recordings
+        .keys()
+        .next()
+        .expect("native replay freeze retained its recording")
+        .clone();
+    assert!(presentation
+        .sources
+        .frozen_inputs_for(
+            &instance,
+            "replay-capture-foreign",
+            fixture.quota.clone(),
+            1024,
+        )
+        .is_err());
+    assert!(presentation
+        .sources
+        .frozen_inputs_for(&instance, &recording_id, fixture.quota.clone(), 0)
+        .is_err());
+    let frozen = presentation
+        .sources
+        .frozen_inputs_for(&instance, &recording_id, fixture.quota.clone(), 1024)
+        .expect("retained capture must become the inputs used by replay preparation");
+    assert_eq!(frozen.recording(), Some(recording_id.as_str()));
+    assert!(frozen.snapshots().is_empty());
+    revoke_presentation(&mut presentation);
+    let stopped = instance.stop();
+    assert!(stopped.authority_error.is_none());
+    assert!(stopped.cancellation.is_ok());
+}
+
 fn archive(source: &str, mode: AnimationMode) -> Vec<u8> {
+    archive_with_capabilities(source, mode, Vec::new())
+}
+
+fn archive_with_capabilities(
+    source: &str,
+    mode: AnimationMode,
+    capabilities: Vec<serde_json::Value>,
+) -> Vec<u8> {
     let mode_name = match mode {
         AnimationMode::Live => "live",
         AnimationMode::PreRendered => "pre_rendered",
@@ -107,6 +575,7 @@ fn archive(source: &str, mode: AnimationMode) -> Vec<u8> {
     let manifest = json!({
         "api_version":1,"id":"native-replay-custody","name":"Native replay custody",
         "version":"1.0.0","entry":"entry.mjs","modes":[mode_name],
+        "capabilities":capabilities,
         "settings":{"type":"object","properties":{}},
         "files":[{"path":"entry.mjs","bytes":source.len(),
             "sha256":format!("{:x}", Sha256::digest(source.as_bytes()))}]
@@ -172,6 +641,19 @@ struct Fixture {
 }
 impl Fixture {
     fn new(source: &str, mode: AnimationMode) -> Self {
+        Self::build(archive(source, mode))
+    }
+
+    #[cfg(feature = "qualification-test-support")]
+    fn new_with_capabilities(
+        source: &str,
+        mode: AnimationMode,
+        capabilities: Vec<serde_json::Value>,
+    ) -> Self {
+        Self::build(archive_with_capabilities(source, mode, capabilities))
+    }
+
+    fn build(archive: Vec<u8>) -> Self {
         // Presentation's process-wide SourceCadence is bound to this exact
         // original quota root even when this fixture requests no sources.
         let quota = crate::execution::process_quota();
@@ -250,7 +732,7 @@ impl Fixture {
                 occupancy: None,
                 occupancy_revision: 0,
             },
-            archive: archive(source, mode),
+            archive,
         }
     }
     fn verified(&self, mode: AnimationMode) -> VerifiedPreparation {
@@ -394,7 +876,7 @@ impl Fixture {
         let evidence = FrozenEvidence::from_native(self.quota.clone(), &package, &[]).unwrap();
         let appearance_digest: [u8; 32] =
             Sha256::digest(serde_json::to_vec(&self.request.settings).unwrap()).into();
-        ClipSpec::from_accepted(
+        let spec = ClipSpec::from_accepted(
             &self.quota,
             ClipSpecification {
                 package: instance.package(),
@@ -407,10 +889,13 @@ impl Fixture {
                 appearance_digest,
                 certification: instance.certify_procedural_replay().unwrap(),
                 frozen,
+                source_sequence: None,
                 evidence,
             },
         )
-        .unwrap()
+        .unwrap();
+        assert!(spec.can_stream_procedural());
+        spec
     }
     fn store(&self) -> Arc<ClipChunkStore> {
         Arc::new(
@@ -771,7 +1256,9 @@ fn decoded_image_allocation_survives_until_physical_helper_exit() {
     let mut encoded = Cursor::new(Vec::new());
     bitmap.write_to(&mut encoded, ImageFormat::Png).unwrap();
     let literal = serde_json::to_string(&encoded.into_inner()).unwrap();
-    let script = format!("export function plan(){{return {{fps:30,output:{{mode:'pixels',format:'gray8',update:'replace'}},inputs:{{}},permissions:[]}}}} export async function create(host){{const raw=new Uint8Array({literal});const opened=await host.media.images.decode({{bytes:raw,max_pixels:4}});if(!opened.ok)throw Error('decode_fixture_failure');return {{render(context,frame){{frame.gray.fill(0);frame.present()}},dispose(){{}}}}}}");
+    let script = format!(
+        "export function plan(){{return {{fps:30,output:{{mode:'pixels',format:'gray8',update:'replace'}},inputs:{{}},permissions:[]}}}} export async function create(host){{const raw=new Uint8Array({literal});const opened=await host.media.images.decode({{bytes:raw,max_pixels:4}});if(!opened.ok)throw Error('decode_fixture_failure');return {{render(context,frame){{frame.gray.fill(0);frame.present()}},dispose(){{}}}}}}"
+    );
     let fixture = Fixture::new(&script, AnimationMode::Live);
     let (instance, presentation) = fixture.accepted_direct(AnimationMode::Live);
     assert!(!presentation.images.is_drained());
@@ -794,7 +1281,7 @@ fn decoded_image_allocation_survives_until_physical_helper_exit() {
 fn actual_live_native_text_publication_keeps_wide_glyph_and_continuation() {
     // Exercise the public family C adapter through the real package review,
     // helper, retained activation, and terminal publication path.
-    let script="export function plan(){return {fps:2,output:{mode:'cells',format:'mask8',update:'replace'},inputs:{}}} export async function create(host){return {render(context,frame){const result=host.text.spans({frame,x:0,y:0,max_cells:2,spans:[{text:'界',foreground:{r:255,g:0,b:0},background:{r:0,g:64,b:0},bold:true,italic:true,underline:true}]});if(!result.ok)throw Error(result.error.code);frame.present()},dispose(){}}}";
+    let script = "export function plan(){return {fps:2,output:{mode:'cells',format:'mask8',update:'replace'},inputs:{}}} export async function create(host){return {render(context,frame){const result=host.text.spans({frame,x:0,y:0,max_cells:2,spans:[{text:'界',foreground:{r:255,g:0,b:0},background:{r:0,g:64,b:0},bold:true,italic:true,underline:true}]});if(!result.ok)throw Error(result.error.code);frame.present()},dispose(){}}}";
     let mut fixture = Fixture::new(script, AnimationMode::Live);
     fixture.request.width = 2;
     fixture.request.settings.source = crate::animation_plugins::AnimationSourceTab::Plugin;
