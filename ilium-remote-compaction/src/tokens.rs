@@ -6,7 +6,7 @@ use std::path::Path;
 
 use serde_json::Value;
 
-use crate::transcript_io::read_tail_values;
+use crate::transcript_io::{read_tail_values, MAX_PARSED_TRANSCRIPT_BYTES};
 use crate::AgentKind;
 
 /// How much of the end of a transcript the probes inspect.
@@ -28,7 +28,12 @@ pub fn latest_context_usage(
     agent: AgentKind,
     transcript_path: &Path,
 ) -> Option<(u64, Option<u64>)> {
-    let values = read_tail_values(transcript_path, PROBE_WINDOW_BYTES).ok()?;
+    let values = read_tail_values(
+        transcript_path,
+        PROBE_WINDOW_BYTES,
+        MAX_PARSED_TRANSCRIPT_BYTES,
+    )
+    .ok()?;
     match agent {
         AgentKind::Claude => claude_usage(&values),
         AgentKind::Codex => codex_usage(&values),

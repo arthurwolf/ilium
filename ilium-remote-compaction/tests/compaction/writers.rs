@@ -21,9 +21,21 @@ fn long_text(marker: &str) -> String {
 
 fn append_lines(path: &Path, lines: &[Value]) {
     let mut file = std::fs::OpenOptions::new()
+        .read(true)
         .append(true)
         .open(path)
         .expect("open");
+    let mut last_byte = [0_u8; 1];
+    let file_length = file.metadata().expect("metadata").len();
+    if file_length > 0 {
+        use std::io::{Read, Seek, SeekFrom};
+        file.seek(SeekFrom::End(-1)).expect("seek to final byte");
+        file.read_exact(&mut last_byte).expect("read final byte");
+        if last_byte[0] != b'\n' {
+            file.write_all(b"\n")
+                .expect("separate appended JSONL record");
+        }
+    }
     for line in lines {
         writeln!(file, "{line}").expect("append");
     }
@@ -179,6 +191,7 @@ fn a_transcript_that_changes_during_compaction_is_refused() {
     for agent in [AgentKind::Claude, AgentKind::Codex] {
         let dir = tempfile::tempdir().expect("dir");
         let path = install_fixture(dir.path(), agent);
+        let original = std::fs::read(&path).expect("read original transcript");
         let appended_path = path.clone();
         let summarizer = Fake::always(&good_reply(Technique::default_for(agent))).on_call(move || {
             let line = match agent {
@@ -202,8 +215,23 @@ fn a_transcript_that_changes_during_compaction_is_refused() {
             "{agent:?}: {:?}",
             finished.result
         );
-        let text = std::fs::read_to_string(&path).expect("read");
-        assert!(text.ends_with("still running\"}}\n") || text.ends_with("still running\"}\n"));
+        let bytes = std::fs::read(&path).expect("read");
+        assert!(
+            bytes.starts_with(&original),
+            "{agent:?}: original bytes changed"
+        );
+        let appended_bytes = bytes
+            .get(original.len()..)
+            .and_then(|bytes| bytes.strip_suffix(b"\n"))
+            .expect("the complete concurrent append remains after the original bytes");
+        let appended_record: Value =
+            serde_json::from_slice(appended_bytes).expect("concurrent append is valid JSON");
+        let append_is_preserved = match agent {
+            AgentKind::Claude => appended_record["lastPrompt"] == "still running",
+            AgentKind::Codex => appended_record["payload"]["message"] == "still running",
+        };
+        assert!(append_is_preserved, "{agent:?}: {appended_record}");
+        let text = String::from_utf8_lossy(&bytes);
         assert!(
             !text.contains("compact_boundary")
                 || agent == AgentKind::Claude && text.matches("compact_boundary").count() == 1

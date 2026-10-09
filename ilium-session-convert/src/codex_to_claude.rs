@@ -3,6 +3,7 @@
 
 use ilium_agent_session::TranscriptLocator;
 use ilium_core::AgentClass;
+use std::io::Read;
 
 use crate::claude_writer::{build_transcript, validate_transcript, write_atomically, BuildInput};
 use crate::codex_rollout::parse_rollout;
@@ -130,10 +131,34 @@ fn verify_and_register(
 ) -> Result<(), ConvertError> {
     // Step 5: structural validation of the written file.
     reporter.step(5, "Verify the transcript", 0.80);
-    let content = std::fs::read_to_string(path).map_err(|error| ConvertError::TargetWrite {
-        path: path.to_path_buf(),
-        error,
+    let file = ilium_platform::secure_fs::open_regular_file(path).map_err(|error| {
+        ConvertError::TargetWrite {
+            path: path.to_path_buf(),
+            error,
+        }
     })?;
+    let size = file.metadata().map(|metadata| metadata.len()).unwrap_or(0);
+    if size > crate::MAX_TRANSCRIPT_BYTES {
+        return Err(ConvertError::FileTooLarge {
+            path: path.to_path_buf(),
+            bytes: size,
+            maximum: crate::MAX_TRANSCRIPT_BYTES,
+        });
+    }
+    let mut content = String::new();
+    file.take(crate::MAX_TRANSCRIPT_BYTES + 1)
+        .read_to_string(&mut content)
+        .map_err(|error| ConvertError::TargetWrite {
+            path: path.to_path_buf(),
+            error,
+        })?;
+    if content.len() as u64 > crate::MAX_TRANSCRIPT_BYTES {
+        return Err(ConvertError::FileTooLarge {
+            path: path.to_path_buf(),
+            bytes: content.len() as u64,
+            maximum: crate::MAX_TRANSCRIPT_BYTES,
+        });
+    }
     let summary =
         validate_transcript(&content, session_id).map_err(ConvertError::TargetVerification)?;
     reporter.log(format!(

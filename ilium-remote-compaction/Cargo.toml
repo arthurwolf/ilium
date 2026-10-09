@@ -9,8 +9,8 @@ description = "Compacts a Claude Code or Codex session transcript by summarizing
 
 [dependencies]
 chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
-ilium-agent-session = { version = "0.1.0", path = "../ilium-agent-session" }
-ilium-prompts = { version = "0.1.0", path = "../ilium-prompts" }
+ilium-agent-session = { version = "0.1.1", path = "../ilium-agent-session" }
+ilium-prompts = { version = "0.1.1", path = "../ilium-prompts" }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 thiserror = "2.0.18"

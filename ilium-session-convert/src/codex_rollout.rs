@@ -11,7 +11,7 @@
 
 use serde_json::Value;
 use std::collections::BTreeMap;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
 
 use crate::error::ConvertError;
@@ -98,13 +98,22 @@ pub(crate) fn parse_rollout(
     path: &Path,
     on_progress: &mut dyn FnMut(f32) -> bool,
 ) -> Result<ParsedRollout, ConvertError> {
-    let file = std::fs::File::open(path).map_err(|error| ConvertError::SourceUnreadable {
-        path: path.to_path_buf(),
-        error,
+    let file = ilium_platform::secure_fs::open_regular_file(path).map_err(|error| {
+        ConvertError::SourceUnreadable {
+            path: path.to_path_buf(),
+            error,
+        }
     })?;
     let total_bytes = file.metadata().map(|metadata| metadata.len()).unwrap_or(0);
+    if total_bytes > crate::MAX_TRANSCRIPT_BYTES {
+        return Err(ConvertError::FileTooLarge {
+            path: path.to_path_buf(),
+            bytes: total_bytes,
+            maximum: crate::MAX_TRANSCRIPT_BYTES,
+        });
+    }
     let mut bytes_read = 0u64;
-    let mut reader = BufReader::new(file);
+    let mut reader = BufReader::new(file).take(crate::MAX_TRANSCRIPT_BYTES + 1);
     let mut parsed = ParsedRollout::default();
     let mut buffer = Vec::new();
     let mut line_count = 0usize;
@@ -121,6 +130,13 @@ pub(crate) fn parse_rollout(
         }
         line_count += 1;
         bytes_read += read as u64;
+        if bytes_read > crate::MAX_TRANSCRIPT_BYTES {
+            return Err(ConvertError::FileTooLarge {
+                path: path.to_path_buf(),
+                bytes: bytes_read,
+                maximum: crate::MAX_TRANSCRIPT_BYTES,
+            });
+        }
         if line_count.is_multiple_of(PROGRESS_INTERVAL_LINES) {
             let fraction = if total_bytes == 0 {
                 0.0
@@ -410,5 +426,17 @@ mod tests {
             parsed.items.as_slice(),
             [SourceItem::ToolCall { name, .. }] if name == "shell"
         ));
+    }
+
+    #[test]
+    fn oversized_rollout_is_rejected_from_metadata_before_parsing() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("large.jsonl");
+        std::fs::File::create(&path)
+            .unwrap()
+            .set_len(crate::MAX_TRANSCRIPT_BYTES + 1)
+            .unwrap();
+        let error = parse_rollout(&path, &mut |_| true).unwrap_err();
+        assert!(matches!(error, ConvertError::FileTooLarge { .. }));
     }
 }

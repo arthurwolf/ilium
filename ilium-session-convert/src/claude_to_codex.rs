@@ -12,6 +12,7 @@
 //! thread recorded in `external_agent_session_imports.json` is then reused.
 
 use std::ffi::OsString;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -150,17 +151,41 @@ fn build_launch(request: &ConversionRequest) -> AppServerLaunch {
     }
 }
 
+#[derive(Debug)]
 struct TranscriptCounts {
     messages: usize,
     other: usize,
 }
 
 fn count_transcript_lines(path: &Path) -> Result<TranscriptCounts, ConvertError> {
-    let content =
-        std::fs::read_to_string(path).map_err(|error| ConvertError::SourceUnreadable {
+    let file = ilium_platform::secure_fs::open_regular_file(path).map_err(|error| {
+        ConvertError::SourceUnreadable {
+            path: path.to_path_buf(),
+            error,
+        }
+    })?;
+    let size = file.metadata().map(|metadata| metadata.len()).unwrap_or(0);
+    if size > crate::MAX_TRANSCRIPT_BYTES {
+        return Err(ConvertError::FileTooLarge {
+            path: path.to_path_buf(),
+            bytes: size,
+            maximum: crate::MAX_TRANSCRIPT_BYTES,
+        });
+    }
+    let mut content = String::new();
+    file.take(crate::MAX_TRANSCRIPT_BYTES + 1)
+        .read_to_string(&mut content)
+        .map_err(|error| ConvertError::SourceUnreadable {
             path: path.to_path_buf(),
             error,
         })?;
+    if content.len() as u64 > crate::MAX_TRANSCRIPT_BYTES {
+        return Err(ConvertError::FileTooLarge {
+            path: path.to_path_buf(),
+            bytes: content.len() as u64,
+            maximum: crate::MAX_TRANSCRIPT_BYTES,
+        });
+    }
     let mut counts = TranscriptCounts {
         messages: 0,
         other: 0,
@@ -492,7 +517,7 @@ fn reuse_previous_import(
         "The importer imported nothing new; looking for the earlier import of this transcript",
     );
     let ledger_path = codex_home.join("external_agent_session_imports.json");
-    let thread_id = recorded_thread_for(&ledger_path, transcript_path).ok_or_else(|| {
+    let thread_id = recorded_thread_for(&ledger_path, transcript_path)?.ok_or_else(|| {
         ConvertError::ImportSkipped(format!(
             "it was already handled but {} has no record of it",
             ledger_path.display()
@@ -505,25 +530,56 @@ fn reuse_previous_import(
 }
 
 /// Thread id Codex recorded for `transcript_path` in its import ledger.
-pub(crate) fn recorded_thread_for(ledger_path: &Path, transcript_path: &Path) -> Option<String> {
-    let content = std::fs::read_to_string(ledger_path).ok()?;
-    let ledger: Value = serde_json::from_str(&content).ok()?;
+pub(crate) fn recorded_thread_for(
+    ledger_path: &Path,
+    transcript_path: &Path,
+) -> Result<Option<String>, ConvertError> {
+    let file = match ilium_platform::secure_fs::open_regular_file(ledger_path) {
+        Ok(file) => file,
+        Err(_) => return Ok(None),
+    };
+    let size = file.metadata().map(|metadata| metadata.len()).unwrap_or(0);
+    if size > crate::MAX_IMPORT_LEDGER_BYTES {
+        return Err(ConvertError::FileTooLarge {
+            path: ledger_path.to_path_buf(),
+            bytes: size,
+            maximum: crate::MAX_IMPORT_LEDGER_BYTES,
+        });
+    }
+    let mut content = String::new();
+    file.take(crate::MAX_IMPORT_LEDGER_BYTES + 1)
+        .read_to_string(&mut content)
+        .map_err(|error| ConvertError::SourceUnreadable {
+            path: ledger_path.to_path_buf(),
+            error,
+        })?;
+    if content.len() as u64 > crate::MAX_IMPORT_LEDGER_BYTES {
+        return Err(ConvertError::FileTooLarge {
+            path: ledger_path.to_path_buf(),
+            bytes: content.len() as u64,
+            maximum: crate::MAX_IMPORT_LEDGER_BYTES,
+        });
+    }
+    let Ok(ledger) = serde_json::from_str::<Value>(&content) else {
+        return Ok(None);
+    };
     let expected = canonical_or_original(transcript_path);
     // Later records win: a changed transcript is re-imported and re-recorded.
-    ledger
-        .get("records")?
-        .as_array()?
-        .iter()
-        .rev()
-        .find(|record| {
-            record
-                .get("source_path")
-                .and_then(Value::as_str)
-                .is_some_and(|source| canonical_or_original(Path::new(source)) == expected)
-        })?
-        .get("imported_thread_id")?
-        .as_str()
-        .map(str::to_string)
+    let thread_id = ledger
+        .get("records")
+        .and_then(Value::as_array)
+        .and_then(|records| {
+            records.iter().rev().find(|record| {
+                record
+                    .get("source_path")
+                    .and_then(Value::as_str)
+                    .is_some_and(|source| canonical_or_original(Path::new(source)) == expected)
+            })
+        })
+        .and_then(|record| record.get("imported_thread_id"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    Ok(thread_id)
 }
 
 fn wait_for_rollout(
@@ -618,12 +674,38 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            recorded_thread_for(&ledger, Path::new("/a/b.jsonl")).as_deref(),
+            recorded_thread_for(&ledger, Path::new("/a/b.jsonl"))
+                .unwrap()
+                .as_deref(),
             Some("new")
         );
         assert_eq!(
-            recorded_thread_for(&ledger, Path::new("/a/none.jsonl")),
+            recorded_thread_for(&ledger, Path::new("/a/none.jsonl")).unwrap(),
             None
         );
+    }
+
+    #[test]
+    fn oversized_claude_transcript_is_rejected_before_reading() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("large.jsonl");
+        std::fs::File::create(&path)
+            .unwrap()
+            .set_len(crate::MAX_TRANSCRIPT_BYTES + 1)
+            .unwrap();
+        let error = count_transcript_lines(&path).unwrap_err();
+        assert!(matches!(error, ConvertError::FileTooLarge { .. }));
+    }
+
+    #[test]
+    fn oversized_import_ledger_is_rejected_before_parsing() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("ledger.json");
+        std::fs::File::create(&path)
+            .unwrap()
+            .set_len(crate::MAX_IMPORT_LEDGER_BYTES + 1)
+            .unwrap();
+        let error = recorded_thread_for(&path, Path::new("/a/b.jsonl")).unwrap_err();
+        assert!(matches!(error, ConvertError::FileTooLarge { .. }));
     }
 }

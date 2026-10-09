@@ -28,6 +28,10 @@ pub enum CompactionError {
         #[source]
         error: std::io::Error,
     },
+    #[error("the transcript {} is larger than the {max_bytes}-byte compaction limit", path.display())]
+    TooLarge { path: PathBuf, max_bytes: u64 },
+    #[error("parsing the transcript {} would exceed the {max_bytes}-byte memory budget", path.display())]
+    ParseMemoryLimit { path: PathBuf, max_bytes: usize },
     #[error("cannot write {}: {error}", path.display())]
     Write {
         path: PathBuf,

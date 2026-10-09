@@ -21,6 +21,10 @@ const PROGRESS_START: f32 = 0.10;
 const PROGRESS_END: f32 = 0.90;
 /// How many times a chunk is re-split in half after `ContextTooLong`.
 const MAX_HALVINGS: usize = 3;
+/// Bound the concatenated merge prompt independently of transcript chunk count.
+const MAX_RETAINED_MERGE_SUMMARY_BYTES: usize = 16 * 1024 * 1024;
+/// Empty summaries still occupy a `String` header in the retained vector.
+const MAX_RETAINED_MERGE_SUMMARIES: usize = 256;
 /// Smallest chunk the pipeline plans, however small the summarizer window.
 const MINIMUM_CHUNK_TOKENS: u64 = 256;
 /// Reserve for the user-prompt wrapper text and estimation error.
@@ -190,6 +194,8 @@ pub(crate) fn summarize_history(
     let mut chunks_done = 0;
     let mut running = prepared.prior_summary.clone();
     let mut partials: Vec<String> = Vec::new();
+    let mut partial_bytes = 0usize;
+    let mut merge_partials_exceeded_limit = false;
 
     while next < rendered.len() {
         context.check_cancel()?;
@@ -219,8 +225,24 @@ pub(crate) fn summarize_history(
         })?;
         match outcome {
             CallOutcome::Summary(text) => {
-                running = Some(text.clone());
-                partials.push(text);
+                if !merge_partials_exceeded_limit {
+                    let next_partial_bytes = partial_bytes.saturating_add(text.capacity());
+                    if partials.len() >= MAX_RETAINED_MERGE_SUMMARIES
+                        || next_partial_bytes > MAX_RETAINED_MERGE_SUMMARY_BYTES
+                    {
+                        partials = Vec::new();
+                        partial_bytes = 0;
+                        merge_partials_exceeded_limit = true;
+                        reporter.log(
+                            "Retained summaries reached the memory limit; keeping the latest progressive summary and skipping the final merge"
+                                .to_string(),
+                        );
+                    } else {
+                        partial_bytes = next_partial_bytes;
+                        partials.push(text.clone());
+                    }
+                }
+                running = Some(text);
                 chunks_done += 1;
                 next = end;
                 let calls_total = total_chunks + usize::from(total_chunks > 1);
@@ -232,11 +254,12 @@ pub(crate) fn summarize_history(
                     reporter.log(format!(
                         "The summarizer rejected the input {MAX_HALVINGS} times after halving it ({message}); using the deterministic fallback summary"
                     ));
-                    return fallback_result(
-                        prepared,
-                        partials.last().map(String::as_str),
-                        chunks_done,
-                    );
+                    let partial_summary = partials.last().map(String::as_str).or_else(|| {
+                        merge_partials_exceeded_limit
+                            .then(|| running.as_deref())
+                            .flatten()
+                    });
+                    return fallback_result(prepared, partial_summary, chunks_done);
                 }
                 budget = (budget / 2).max(MINIMUM_CHUNK_TOKENS);
                 reporter.log(format!(
@@ -247,9 +270,23 @@ pub(crate) fn summarize_history(
                 reporter.log(format!(
                     "The summarizer could not produce a usable summary ({message}); using the deterministic fallback summary"
                 ));
-                return fallback_result(prepared, partials.last().map(String::as_str), chunks_done);
+                let partial_summary = partials.last().map(String::as_str).or_else(|| {
+                    merge_partials_exceeded_limit
+                        .then(|| running.as_deref())
+                        .flatten()
+                });
+                return fallback_result(prepared, partial_summary, chunks_done);
             }
         }
+    }
+
+    if merge_partials_exceeded_limit {
+        publish_progress(reporter, chunks_done, chunks_done);
+        return Ok(SummaryResult {
+            text: running.unwrap_or_default(),
+            chunks: chunks_done,
+            used_fallback: false,
+        });
     }
 
     let Some(last) = partials.last().cloned() else {

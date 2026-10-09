@@ -25,6 +25,12 @@ pub enum ConvertError {
         #[source]
         error: io::Error,
     },
+    #[error("file {} is {bytes} bytes; the maximum supported size is {maximum} bytes", path.display())]
+    FileTooLarge {
+        path: PathBuf,
+        bytes: u64,
+        maximum: u64,
+    },
     #[error("the source transcript {} holds no conversation that can be converted", path.display())]
     EmptyConversation { path: PathBuf },
     #[error("cannot write the converted transcript {}: {error}", path.display())]
@@ -58,11 +64,46 @@ pub enum ConvertError {
 /// Collapses arbitrary text (process stderr, JSON-RPC messages) into one
 /// bounded line so it can be embedded in an error `Display`.
 pub(crate) fn single_line(text: &str, limit: usize) -> String {
-    let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    if collapsed.chars().count() <= limit {
-        return collapsed;
+    let capacity = limit.saturating_mul(4).min(text.len()).saturating_add(3);
+    let mut output = String::with_capacity(capacity);
+    let mut characters = 0usize;
+    let mut pending_space = false;
+    let mut truncated = false;
+    for character in text.chars() {
+        if character.is_whitespace() {
+            pending_space |= !output.is_empty();
+            continue;
+        }
+        if pending_space {
+            if characters == limit {
+                truncated = true;
+                break;
+            }
+            output.push(' ');
+            characters += 1;
+            pending_space = false;
+        }
+        if characters == limit {
+            truncated = true;
+            break;
+        }
+        output.push(character);
+        characters += 1;
     }
-    let mut shortened: String = collapsed.chars().take(limit).collect();
-    shortened.push('…');
-    shortened
+    if truncated {
+        output.push('…');
+    }
+    output
+}
+
+#[cfg(test)]
+mod tests {
+    use super::single_line;
+
+    #[test]
+    fn single_line_bounds_unicode_without_copying_the_complete_input() {
+        assert_eq!(single_line("a\n  b", 3), "a b");
+        assert_eq!(single_line("é 🦀 x", 3), "é 🦀…");
+        assert_eq!(single_line("only", 0), "…");
+    }
 }

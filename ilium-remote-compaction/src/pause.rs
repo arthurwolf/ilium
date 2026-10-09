@@ -5,7 +5,7 @@ use std::path::Path;
 
 use serde_json::Value;
 
-use crate::transcript_io::read_tail_values;
+use crate::transcript_io::{read_tail_values, MAX_PARSED_PAUSE_TAIL_BYTES};
 use crate::AgentKind;
 
 /// How much of the end of a transcript the probe inspects.
@@ -15,7 +15,11 @@ const PROBE_WINDOW_BYTES: u64 = 4 * 1024 * 1024;
 /// and no tool call is waiting for a result. A transcript that cannot be read
 /// is not at a pause point.
 pub fn transcript_is_at_pause_point(agent: AgentKind, transcript_path: &Path) -> bool {
-    let Ok(values) = read_tail_values(transcript_path, PROBE_WINDOW_BYTES) else {
+    let Ok(values) = read_tail_values(
+        transcript_path,
+        PROBE_WINDOW_BYTES,
+        MAX_PARSED_PAUSE_TAIL_BYTES,
+    ) else {
         return false;
     };
     match agent {

@@ -10,8 +10,7 @@ use serde_json::{json, Value};
 use crate::error::CompactionError;
 use crate::neutral::{CodexTail, Role, Turn};
 use crate::tokens::estimate_tokens;
-use crate::transcript_io::load_transcript;
-use crate::writer_common::iso_timestamp;
+use crate::writer_common::{iso_timestamp, read_appended_records};
 
 pub(crate) struct CodexPlan<'a> {
     pub(crate) transcript_path: &'a Path,
@@ -135,16 +134,13 @@ pub(crate) fn build_codex_records(plan: &CodexPlan<'_>) -> Result<CodexRecords, 
 /// Re-reads the rewritten rollout and checks the structure Codex relies on.
 pub(crate) fn verify_codex(
     path: &Path,
+    appended_offset: u64,
+    appended_bytes: &[u8],
     expected_new: usize,
     has_ordinals: bool,
     previous_ordinal: Option<u64>,
 ) -> Result<(), String> {
-    let loaded = load_transcript(path).map_err(|error| error.to_string())?;
-    let values = &loaded.values;
-    if values.len() < expected_new {
-        return Err("the rewritten rollout is shorter than the appended records".to_string());
-    }
-    let appended = &values[values.len() - expected_new..];
+    let appended = read_appended_records(path, appended_offset, expected_new, appended_bytes)?;
     let compacted = &appended[0];
     if compacted.get("type").and_then(Value::as_str) != Some("compacted") {
         return Err("the compacted record is not where it was appended".to_string());

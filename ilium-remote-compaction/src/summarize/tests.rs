@@ -84,7 +84,7 @@ struct Outcome {
 }
 
 fn run(
-    summarizer: &ScriptedSummarizer,
+    summarizer: &impl Summarizer,
     history: &[Turn],
     options: &CompactionOptions,
     cancel: &AtomicBool,
@@ -162,6 +162,59 @@ fn a_long_history_runs_anchored_chunks_then_one_merge() {
     assert_eq!(merge.label, "merge");
     assert!(merge.user.contains("[part 1]") && merge.user.contains("[part 2]"));
     assert_eq!(result.text, GOOD);
+}
+
+struct BoundedRetentionSummarizer {
+    replies: RefCell<VecDeque<String>>,
+    default_reply: String,
+    labels: RefCell<Vec<String>>,
+}
+
+impl Summarizer for BoundedRetentionSummarizer {
+    fn summarize(&self, request: &SummaryRequest) -> Result<SummaryResponse, SummarizerError> {
+        self.labels.borrow_mut().push(request.label.clone());
+        let text = self
+            .replies
+            .borrow_mut()
+            .pop_front()
+            .unwrap_or_else(|| self.default_reply.clone());
+        Ok(SummaryResponse {
+            text,
+            input_tokens: Some(100),
+            output_tokens: Some(10),
+        })
+    }
+}
+
+#[test]
+fn excessive_retained_chunk_summaries_skip_merge_and_keep_latest_progressive_summary() {
+    let first = format!("Handoff summary: {}", "a".repeat(9 * 1024 * 1024));
+    let latest = format!("Handoff summary: {}", "b".repeat(9 * 1024 * 1024));
+    let summarizer = BoundedRetentionSummarizer {
+        replies: RefCell::new(vec![first, latest.clone()].into()),
+        default_reply: latest.clone(),
+        labels: RefCell::new(Vec::new()),
+    };
+    let outcome = run(
+        &summarizer,
+        &turns(12, 600),
+        &options(1_700),
+        &AtomicBool::new(false),
+    );
+
+    let result = outcome.result.expect("progressive summary remains usable");
+    let labels = summarizer.labels.borrow();
+    assert!(result.chunks >= 2, "chunks: {}", result.chunks);
+    assert_eq!(
+        labels.len(),
+        result.chunks,
+        "bounded retention must skip the merge request"
+    );
+    assert_ne!(labels.last().unwrap(), "merge");
+    assert_eq!(result.text, latest);
+    assert!(outcome.logs.iter().any(|line| line
+        .to_ascii_lowercase()
+        .contains("retained summaries reached the memory limit")));
 }
 
 #[test]

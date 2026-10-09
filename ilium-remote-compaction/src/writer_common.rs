@@ -2,13 +2,15 @@
 //! backup, temp file, verification, atomic rename and backup pruning.
 
 use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use chrono::{Duration, SecondsFormat, Utc};
 
 use crate::error::CompactionError;
 use crate::transcript_io::{read_transcript_bytes, FileSnapshot, TailShape};
+
+const MAX_APPENDED_VERIFY_BYTES: usize = 16 * 1024 * 1024;
 
 /// What a successful rewrite produced.
 pub(crate) struct Committed {
@@ -75,6 +77,61 @@ fn write_new_file(
     Ok(())
 }
 
+/// Parses only records written by the current rewrite. The retained prefix was
+/// already parsed before planning, so reparsing it would duplicate the largest
+/// allocation without strengthening these new-record checks.
+pub(crate) fn read_appended_records(
+    path: &Path,
+    appended_offset: u64,
+    expected_records: usize,
+    expected_bytes: &[u8],
+) -> Result<Vec<serde_json::Value>, String> {
+    if expected_bytes.len() > MAX_APPENDED_VERIFY_BYTES {
+        return Err(format!(
+            "appended records exceed the {} MiB verification limit",
+            MAX_APPENDED_VERIFY_BYTES / (1024 * 1024)
+        ));
+    }
+    let mut file = fs::File::open(path).map_err(|error| error.to_string())?;
+    file.seek(SeekFrom::Start(appended_offset))
+        .map_err(|error| error.to_string())?;
+    let mut remaining = expected_bytes;
+    let mut buffer = [0_u8; 16 * 1024];
+    while !remaining.is_empty() {
+        let amount = remaining.len().min(buffer.len());
+        file.read_exact(&mut buffer[..amount])
+            .map_err(|error| format!("could not read appended records back: {error}"))?;
+        if buffer[..amount] != remaining[..amount] {
+            return Err("the rewritten appended bytes differ from the prepared records".into());
+        }
+        remaining = &remaining[amount..];
+    }
+    let mut trailing = [0_u8; 1];
+    if file
+        .read(&mut trailing)
+        .map_err(|error| error.to_string())?
+        != 0
+    {
+        return Err("the rewritten transcript has unexpected trailing bytes".into());
+    }
+    let mut records = Vec::with_capacity(expected_records);
+    for line in expected_bytes.split(|byte| *byte == b'\n') {
+        if line.iter().all(u8::is_ascii_whitespace) {
+            continue;
+        }
+        let record = serde_json::from_slice(line)
+            .map_err(|error| format!("an appended record is invalid JSON: {error}"))?;
+        records.push(record);
+    }
+    if records.len() != expected_records {
+        return Err(format!(
+            "expected {expected_records} appended records, found {}",
+            records.len()
+        ));
+    }
+    Ok(records)
+}
+
 /// Removes the oldest backups of `file_name` beyond `keep` (at least one).
 fn prune_backups(directory: &Path, file_name: &str, keep: usize) -> usize {
     let prefix = backup_prefix(file_name);
@@ -102,7 +159,7 @@ fn prune_backups(directory: &Path, file_name: &str, keep: usize) -> usize {
 
 /// Replaces the transcript at `path` with its first `shape.keep_len` bytes
 /// followed by `appended`, after the original proved unchanged since it was
-/// read and the new content passed `verify`.
+/// read and the persisted appended bytes passed `verify`.
 ///
 /// On any error the original is untouched and the files this call created
 /// (temp file, backup) are removed.
@@ -112,7 +169,7 @@ pub(crate) fn commit_rewrite(
     shape: TailShape,
     appended: &[u8],
     keep_backups: usize,
-    verify: &dyn Fn(&Path) -> Result<(), String>,
+    verify: &dyn Fn(&Path, u64, &[u8]) -> Result<(), String>,
 ) -> Result<Committed, CompactionError> {
     let current = read_transcript_bytes(path)?;
     if FileSnapshot::of(&current) != snapshot {
@@ -169,16 +226,29 @@ fn write_and_swap(
     shape: TailShape,
     appended: &[u8],
     permissions: &fs::Permissions,
-    verify: &dyn Fn(&Path) -> Result<(), String>,
+    verify: &dyn Fn(&Path, u64, &[u8]) -> Result<(), String>,
 ) -> Result<(), CompactionError> {
-    let mut content = Vec::with_capacity(shape.keep_len + 1 + appended.len());
-    content.extend_from_slice(&current[..shape.keep_len]);
-    if shape.needs_newline {
-        content.push(b'\n');
+    if appended.len() > MAX_APPENDED_VERIFY_BYTES {
+        return Err(CompactionError::Verification(format!(
+            "appended records exceed the {} MiB verification limit",
+            MAX_APPENDED_VERIFY_BYTES / (1024 * 1024)
+        )));
     }
-    content.extend_from_slice(appended);
-    write_new_file(temp_path, &content, permissions)?;
-    verify(temp_path).map_err(CompactionError::Verification)?;
+    let appended_offset = shape.keep_len + usize::from(shape.needs_newline);
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(temp_path)
+        .map_err(write_error(temp_path))?;
+    fs::set_permissions(temp_path, permissions.clone()).map_err(write_error(temp_path))?;
+    file.write_all(&current[..shape.keep_len])
+        .map_err(write_error(temp_path))?;
+    if shape.needs_newline {
+        file.write_all(b"\n").map_err(write_error(temp_path))?;
+    }
+    file.write_all(appended).map_err(write_error(temp_path))?;
+    file.sync_all().map_err(write_error(temp_path))?;
+    verify(temp_path, appended_offset as u64, appended).map_err(CompactionError::Verification)?;
 
     // Last stale check before the swap: the agent must not have appended.
     let length_now = fs::metadata(path)
@@ -212,8 +282,9 @@ mod tests {
         fs::write(&path, "{\"a\":1}\n").expect("write");
         for round in 0..4 {
             let (snapshot, shape) = snapshot_of(&path);
-            let committed = commit_rewrite(&path, snapshot, shape, b"{\"n\":1}\n", 2, &|_| Ok(()))
-                .unwrap_or_else(|error| panic!("round {round}: {error}"));
+            let committed =
+                commit_rewrite(&path, snapshot, shape, b"{\"n\":1}\n", 2, &|_, _, _| Ok(()))
+                    .unwrap_or_else(|error| panic!("round {round}: {error}"));
             assert!(committed.backup_path.exists());
         }
         let backups = fs::read_dir(dir.path())
@@ -236,7 +307,8 @@ mod tests {
         let torn = dir.path().join("torn.jsonl");
         fs::write(&torn, "{\"a\":1}\n{\"b\":").expect("write");
         let (snapshot, shape) = snapshot_of(&torn);
-        commit_rewrite(&torn, snapshot, shape, b"{\"n\":1}\n", 3, &|_| Ok(())).expect("commit");
+        commit_rewrite(&torn, snapshot, shape, b"{\"n\":1}\n", 3, &|_, _, _| Ok(()))
+            .expect("commit");
         assert_eq!(
             fs::read_to_string(&torn).expect("read"),
             "{\"a\":1}\n{\"n\":1}\n"
@@ -245,7 +317,8 @@ mod tests {
         let bare = dir.path().join("bare.jsonl");
         fs::write(&bare, "{\"a\":1}").expect("write");
         let (snapshot, shape) = snapshot_of(&bare);
-        commit_rewrite(&bare, snapshot, shape, b"{\"n\":1}\n", 3, &|_| Ok(())).expect("commit");
+        commit_rewrite(&bare, snapshot, shape, b"{\"n\":1}\n", 3, &|_, _, _| Ok(()))
+            .expect("commit");
         assert_eq!(
             fs::read_to_string(&bare).expect("read"),
             "{\"a\":1}\n{\"n\":1}\n"
@@ -259,7 +332,7 @@ mod tests {
         fs::write(&path, "{\"a\":1}\n").expect("write");
         let (snapshot, shape) = snapshot_of(&path);
         fs::write(&path, "{\"a\":1}\n{\"late\":true}\n").expect("agent appends");
-        let error = commit_rewrite(&path, snapshot, shape, b"{}\n", 3, &|_| Ok(()))
+        let error = commit_rewrite(&path, snapshot, shape, b"{}\n", 3, &|_, _, _| Ok(()))
             .err()
             .expect("refused");
         assert!(matches!(error, CompactionError::TranscriptChanged { .. }));
@@ -272,18 +345,44 @@ mod tests {
         let path = dir.path().join("s.jsonl");
         fs::write(&path, "{\"a\":1}\n").expect("write");
         let (snapshot, shape) = snapshot_of(&path);
-        let error = commit_rewrite(
-            &path,
-            snapshot,
-            shape,
-            b"{}\n",
-            3,
-            &|_| Err("broken".into()),
-        )
+        let error = commit_rewrite(&path, snapshot, shape, b"{}\n", 3, &|_, _, _| {
+            Err("broken".into())
+        })
         .err()
         .expect("refused");
         assert!(matches!(error, CompactionError::Verification(_)));
         assert_eq!(fs::read_to_string(&path).expect("read"), "{\"a\":1}\n");
         assert_eq!(fs::read_dir(dir.path()).expect("list").count(), 1);
+    }
+
+    #[test]
+    fn appended_readback_checks_only_the_new_suffix() {
+        let dir = tempfile::tempdir().expect("dir");
+        let path = dir.path().join("s.jsonl");
+        let prefix = vec![b'x'; 4 * 1024 * 1024];
+        let appended = b"{\"type\":\"compacted\"}\n";
+        let mut file = fs::File::create(&path).expect("create");
+        file.write_all(&prefix).expect("write prefix");
+        file.write_all(appended).expect("write suffix");
+        drop(file);
+
+        let records = read_appended_records(&path, prefix.len() as u64, 1, appended)
+            .expect("read back appended suffix");
+        assert_eq!(records[0]["type"], "compacted");
+        assert!(read_appended_records(&path, prefix.len() as u64, 1, b"{}\n").is_err());
+    }
+
+    #[test]
+    fn appended_verification_refuses_oversized_payloads() {
+        let dir = tempfile::tempdir().expect("dir");
+        let path = dir.path().join("s.jsonl");
+        fs::write(&path, "{}\n").expect("write");
+        let (snapshot, shape) = snapshot_of(&path);
+        let appended = vec![b' '; MAX_APPENDED_VERIFY_BYTES + 1];
+        let error = commit_rewrite(&path, snapshot, shape, &appended, 1, &|_, _, _| Ok(()))
+            .err()
+            .expect("oversized suffix must be refused");
+        assert!(matches!(error, CompactionError::Verification(_)));
+        assert_eq!(fs::read_to_string(&path).expect("original remains"), "{}\n");
     }
 }

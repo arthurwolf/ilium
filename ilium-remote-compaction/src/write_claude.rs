@@ -10,8 +10,7 @@ use uuid::Uuid;
 
 use crate::input::result_lookup;
 use crate::neutral::{ClaudeHead, Part, Role, Turn};
-use crate::transcript_io::load_transcript;
-use crate::writer_common::iso_timestamp;
+use crate::writer_common::{iso_timestamp, read_appended_records};
 
 pub(crate) struct ClaudePlan<'a> {
     pub(crate) head: &'a ClaudeHead,
@@ -235,20 +234,19 @@ pub(crate) fn build_claude_records(plan: &ClaudePlan<'_>) -> Vec<Value> {
 /// relies on when resuming. `expected_new` is the number of appended records.
 pub(crate) fn verify_claude(
     path: &Path,
+    appended_offset: u64,
+    appended_bytes: &[u8],
     expected_new: usize,
     session_id: &str,
 ) -> Result<(), String> {
-    let loaded = load_transcript(path).map_err(|error| error.to_string())?;
-    let values = &loaded.values;
-    let boundary_index = values
-        .iter()
-        .rposition(|value| value.get("subtype").and_then(Value::as_str) == Some("compact_boundary"))
-        .ok_or("the compact boundary record is missing")?;
-    if values.len() - boundary_index != expected_new {
-        return Err(format!(
-            "expected {expected_new} appended records, found {}",
-            values.len() - boundary_index
-        ));
+    let values = read_appended_records(path, appended_offset, expected_new, appended_bytes)?;
+    let boundary_index = 0;
+    if values[boundary_index]
+        .get("subtype")
+        .and_then(Value::as_str)
+        != Some("compact_boundary")
+    {
+        return Err("the compact boundary record is missing".to_string());
     }
     let by_uuid: HashMap<&str, usize> = values
         .iter()

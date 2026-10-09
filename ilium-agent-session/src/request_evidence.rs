@@ -3,8 +3,7 @@
 //! title eligibility. An unreadable or incomplete history is indeterminate,
 //! never proof that a conversation was empty.
 
-use std::fs::File;
-use std::io::{self, BufRead, BufReader};
+use std::io::{self, BufReader};
 use std::path::Path;
 
 use ilium_core::AgentClass;
@@ -30,6 +29,21 @@ pub(crate) fn request_evidence_from_path(
     transcript_path: &Path,
     session_id: &str,
 ) -> io::Result<GenuineRequestEvidence> {
+    let budget = super::TranscriptReadBudget::new(super::TranscriptReadLimits {
+        line_bytes: 1024 * 1024,
+        total_read_bytes: 16 * 1024 * 1024,
+        scanned_entries: usize::MAX,
+        retained_path_bytes: usize::MAX,
+    });
+    request_evidence_from_path_with_budget(class, transcript_path, session_id, &budget)
+}
+
+pub(crate) fn request_evidence_from_path_with_budget(
+    class: &AgentClass,
+    transcript_path: &Path,
+    session_id: &str,
+    budget: &super::TranscriptReadBudget,
+) -> io::Result<GenuineRequestEvidence> {
     if matches!(class, AgentClass::Other(_)) {
         return Ok(GenuineRequestEvidence::Unavailable);
     }
@@ -41,18 +55,20 @@ pub(crate) fn request_evidence_from_path(
     } else {
         transcript_path.to_path_buf()
     };
-    let file = File::open(source_path)?;
+    let file = ilium_platform::secure_fs::open_regular_file(&source_path)?;
     let mut reader = BufReader::new(file);
-    let mut record = Vec::new();
     let mut end_offset = 0_u64;
     let mut latest_request = None;
     loop {
-        record.clear();
-        let read = reader.read_until(b'\n', &mut record)?;
-        if read == 0 {
-            break;
-        }
-        end_offset = end_offset.saturating_add(read as u64);
+        let record = match super::bounded_line(&mut reader, budget) {
+            Ok(Some(record)) => record,
+            Ok(None) => break,
+            Err(_) if budget.exhausted.load(std::sync::atomic::Ordering::Acquire) => {
+                return Ok(GenuineRequestEvidence::Unavailable);
+            }
+            Err(error) => return Err(error),
+        };
+        end_offset = end_offset.saturating_add(record.len() as u64);
         // An append in progress can neither revoke earlier positive proof
         // nor establish that an otherwise empty conversation has no task.
         let Ok(entry) = serde_json::from_slice::<Value>(&record) else {

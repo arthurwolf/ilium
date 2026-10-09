@@ -2,14 +2,12 @@
 //! goes through one place that keeps progress monotonic and polls
 //! cancellation.
 
-use std::sync::atomic::{AtomicBool, Ordering};
-
 use crate::error::ConvertError;
 use crate::ConversionEvent;
 
 pub(crate) struct Reporter<'a> {
     sink: &'a mut (dyn FnMut(ConversionEvent) + 'a),
-    cancel: &'a AtomicBool,
+    is_cancelled: &'a dyn Fn() -> bool,
     total_steps: usize,
     last_progress: f32,
 }
@@ -17,19 +15,19 @@ pub(crate) struct Reporter<'a> {
 impl<'a> Reporter<'a> {
     pub(crate) fn new(
         sink: &'a mut (dyn FnMut(ConversionEvent) + 'a),
-        cancel: &'a AtomicBool,
+        is_cancelled: &'a dyn Fn() -> bool,
         total_steps: usize,
     ) -> Self {
         Self {
             sink,
-            cancel,
+            is_cancelled,
             total_steps,
             last_progress: 0.0,
         }
     }
 
     pub(crate) fn is_cancelled(&self) -> bool {
-        self.cancel.load(Ordering::Relaxed)
+        (self.is_cancelled)()
     }
 
     /// Returns `Err(Cancelled)` once cancellation was requested.

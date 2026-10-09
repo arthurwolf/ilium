@@ -32,6 +32,11 @@ pub use error::ConvertError;
 
 use report::Reporter;
 
+/// Hard ceiling for source transcripts, parser buffers, and generated output.
+/// Reads use this limit before allocating complete transcript strings.
+pub(crate) const MAX_TRANSCRIPT_BYTES: u64 = 128 * 1024 * 1024;
+pub(crate) const MAX_IMPORT_LEDGER_BYTES: u64 = 16 * 1024 * 1024;
+
 /// What to convert and where the agents keep their data.
 #[derive(Debug, Clone)]
 pub struct ConversionRequest {
@@ -90,6 +95,21 @@ pub fn convert_session(
     cancel: &AtomicBool,
     sink: &mut dyn FnMut(ConversionEvent),
 ) -> Result<ConversionOutcome, ConvertError> {
+    convert_session_with_cancel(
+        request,
+        &|| cancel.load(std::sync::atomic::Ordering::Relaxed),
+        sink,
+    )
+}
+
+/// Converts while consulting an owner-provided cancellation predicate at each
+/// domain checkpoint. This lets execution-bank shutdown reach the same cleanup
+/// paths as explicit user cancellation.
+pub fn convert_session_with_cancel(
+    request: &ConversionRequest,
+    is_cancelled: &dyn Fn() -> bool,
+    sink: &mut dyn FnMut(ConversionEvent),
+) -> Result<ConversionOutcome, ConvertError> {
     let direction = match (request.source, request.target) {
         (BuiltinAgentProvider::Claude, BuiltinAgentProvider::Codex) => Direction::ClaudeToCodex,
         (BuiltinAgentProvider::Codex, BuiltinAgentProvider::Claude) => Direction::CodexToClaude,
@@ -109,7 +129,7 @@ pub fn convert_session(
         Direction::ClaudeToCodex => claude_to_codex::TOTAL_STEPS,
         Direction::CodexToClaude => codex_to_claude::TOTAL_STEPS,
     };
-    let mut reporter = Reporter::new(sink, cancel, total_steps);
+    let mut reporter = Reporter::new(sink, is_cancelled, total_steps);
     reporter.log(format!(
         "Converting {} session {} to {} in {}",
         request.source.label(),

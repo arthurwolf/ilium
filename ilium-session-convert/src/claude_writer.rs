@@ -528,6 +528,14 @@ pub(crate) fn write_atomically(
     lines: &[String],
     should_cancel: &dyn Fn() -> bool,
 ) -> Result<PathBuf, ConvertError> {
+    let serialized_bytes = serialized_bytes(lines);
+    if serialized_bytes > crate::MAX_TRANSCRIPT_BYTES {
+        return Err(ConvertError::FileTooLarge {
+            path: directory.join(format!("{session_id}.jsonl")),
+            bytes: serialized_bytes,
+            maximum: crate::MAX_TRANSCRIPT_BYTES,
+        });
+    }
     let final_path = directory.join(format!("{session_id}.jsonl"));
     let temporary_path = directory.join(format!(".{session_id}.jsonl.tmp"));
     let write_error = |path: &Path, error: std::io::Error| ConvertError::TargetWrite {
@@ -558,6 +566,15 @@ pub(crate) fn write_atomically(
     outcome.map(|()| final_path)
 }
 
+fn serialized_bytes(lines: &[String]) -> u64 {
+    lines
+        .iter()
+        .try_fold(0u64, |total, line| {
+            total.checked_add(line.len() as u64)?.checked_add(1)
+        })
+        .unwrap_or(u64::MAX)
+}
+
 fn write_temporary(path: &Path, lines: &[String]) -> std::io::Result<()> {
     let file = std::fs::OpenOptions::new()
         .write(true)
@@ -582,6 +599,12 @@ mod tests {
         assert_eq!(sanitize_tool_name("mcp__a.b/c d"), "mcp__a_b_c_d");
         assert_eq!(sanitize_tool_name(""), "tool");
         assert_eq!(sanitize_tool_name(&"x".repeat(100)).len(), 64);
+    }
+
+    #[test]
+    fn serialized_size_includes_newlines_and_detects_overflow() {
+        assert_eq!(serialized_bytes(&["abc".into(), "x".into()]), 6);
+        assert_eq!(serialized_bytes(&[String::new()]), 1);
     }
 
     #[test]
