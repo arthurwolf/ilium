@@ -5,12 +5,12 @@ use std::{
 };
 
 use ratatui::{
-    Terminal,
     backend::TermwizBackend,
     termwiz::{input::*, terminal::Terminal as TermwizTerminal},
+    Terminal,
 };
 
-use crate::{App, ui};
+use crate::{ui, App};
 
 pub fn run() -> Result<(), Box<dyn Error>> {
     let backend = TermwizBackend::new()?;

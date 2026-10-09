@@ -8,9 +8,9 @@ use ratatui::{
 };
 use std::{cmp::min, fmt::Write, io::Cursor};
 
-use crate::{Result, picker::cap_parser::Parser, protocol::UNIT_WIDTH};
+use crate::{picker::cap_parser::Parser, protocol::UNIT_WIDTH, Result};
 
-use super::{ProtocolTrait, StatefulProtocolTrait, clear_area};
+use super::{clear_area, ProtocolTrait, StatefulProtocolTrait};
 
 #[derive(Clone, Default)]
 pub struct Iterm2 {

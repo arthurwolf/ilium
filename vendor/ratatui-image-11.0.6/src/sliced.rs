@@ -1,10 +1,10 @@
 //! Sliced image widget and protocol wrapper.
 use crate::{
-    FontSize, Resize,
     errors::Errors,
     picker::{Picker, ProtocolType},
-    protocol::{Protocol, ProtocolTrait, halfblocks::Halfblocks, kitty::Kitty, sixel::Sixel},
+    protocol::{halfblocks::Halfblocks, kitty::Kitty, sixel::Sixel, Protocol, ProtocolTrait},
     sliced::sixel_slice::SlicedSixel,
+    FontSize, Resize,
 };
 use image::DynamicImage;
 use ratatui::{
@@ -459,10 +459,10 @@ mod sixel_slice {
         use ratatui::layout::Size;
 
         use crate::{
-            FontSize, Resize,
             picker::{Picker, ProtocolType},
             protocol::sixel::Sixel,
-            sliced::{SlicedProtocol, sixel_slice::SlicedSixel},
+            sliced::{sixel_slice::SlicedSixel, SlicedProtocol},
+            FontSize, Resize,
         };
 
         #[test]

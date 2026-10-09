@@ -1,7 +1,6 @@
 use std::{error::Error, io, sync::mpsc, thread, time::Duration};
 
 use ratatui::{
-    Terminal,
     backend::{Backend, TermionBackend},
     termion::{
         event::Key,
@@ -9,9 +8,10 @@ use ratatui::{
         raw::IntoRawMode,
         screen::IntoAlternateScreen,
     },
+    Terminal,
 };
 
-use crate::{App, ui};
+use crate::{ui, App};
 
 pub fn run() -> Result<(), Box<dyn Error>> {
     // setup terminal
@@ -67,14 +67,12 @@ fn events(tick_rate: Duration) -> mpsc::Receiver<Event> {
             }
         }
     });
-    thread::spawn(move || {
-        loop {
-            if let Err(err) = tx.send(Event::Tick) {
-                eprintln!("{err}");
-                break;
-            }
-            thread::sleep(tick_rate);
+    thread::spawn(move || loop {
+        if let Err(err) = tx.send(Event::Tick) {
+            eprintln!("{err}");
+            break;
         }
+        thread::sleep(tick_rate);
     });
     rx
 }

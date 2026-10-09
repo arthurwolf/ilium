@@ -2,11 +2,11 @@ use std::{fs, time::Duration};
 
 use image::GenericImageView;
 use ratatui::{
-    Frame,
     crossterm::event::{self, Event, KeyCode, KeyEventKind},
     layout::{Rect, Size},
     style::{Color, Stylize},
     widgets::{Block, Borders, Paragraph},
+    Frame,
 };
 use ratatui_image::{
     picker::Picker,

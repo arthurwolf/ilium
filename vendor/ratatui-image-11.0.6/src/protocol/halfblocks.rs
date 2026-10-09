@@ -125,11 +125,11 @@ impl StatefulProtocolTrait for Halfblocks {
 mod tests {
     use image::{Rgb, RgbImage};
     use insta::assert_snapshot;
-    use ratatui::{Terminal, backend::TestBackend, layout::Size};
+    use ratatui::{backend::TestBackend, layout::Size, Terminal};
 
     use crate::{
+        protocol::{halfblocks::Halfblocks, Protocol},
         Image,
-        protocol::{Protocol, halfblocks::Halfblocks},
     };
 
     #[test]

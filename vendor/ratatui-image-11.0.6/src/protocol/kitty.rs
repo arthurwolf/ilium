@@ -6,11 +6,11 @@
 //! [unicode-placeholders]: https://sw.kovidgoyal.net/kitty/graphics-protocol/#unicode-placeholders
 //! [kitty protocol]: https://sw.kovidgoyal.net/kitty/graphics-protocol
 use std::fmt::Write;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use crate::protocol::UNIT_WIDTH;
-use crate::{Result, picker::cap_parser::Parser};
+use crate::{picker::cap_parser::Parser, Result};
 use image::DynamicImage;
 use ratatui::buffer::CellDiffOption;
 use ratatui::layout::Size;

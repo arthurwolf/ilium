@@ -7,15 +7,15 @@ use std::{
 };
 
 use crate::{
-    FontSize, Resize, Result,
     errors::Errors,
     protocol::{
-        Protocol, StatefulProtocol, StatefulProtocolType,
         halfblocks::Halfblocks,
         iterm2::Iterm2,
         kitty::{Kitty, StatefulKitty},
         sixel::Sixel,
+        Protocol, StatefulProtocol, StatefulProtocolType,
     },
+    FontSize, Resize, Result,
 };
 use cap_parser::{Parser, QueryStdioOptions, Response};
 use image::{DynamicImage, Rgba};
@@ -384,6 +384,7 @@ fn enable_raw_mode() -> Result<impl FnOnce() -> Result<()>> {
 #[cfg(windows)]
 fn enable_raw_mode() -> Result<impl FnOnce() -> Result<()>> {
     use windows::{
+        core::PCWSTR,
         Win32::{
             Foundation::{GENERIC_READ, GENERIC_WRITE, HANDLE},
             Storage::FileSystem::{
@@ -393,7 +394,6 @@ fn enable_raw_mode() -> Result<impl FnOnce() -> Result<()>> {
                 self, CONSOLE_MODE, ENABLE_ECHO_INPUT, ENABLE_LINE_INPUT, ENABLE_PROCESSED_INPUT,
             },
         },
-        core::PCWSTR,
     };
 
     let utf16: Vec<u16> = "CONIN$\0".encode_utf16().collect();

@@ -1,7 +1,7 @@
 //! Primitive halfblocks implementation using unicode character `▀`.
 
-use image::DynamicImage;
 use image::imageops::FilterType;
+use image::DynamicImage;
 use ratatui::{layout::Size, style::Color};
 
 use super::HalfBlock;

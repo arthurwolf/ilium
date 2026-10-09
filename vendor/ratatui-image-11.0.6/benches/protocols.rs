@@ -1,13 +1,13 @@
 #![expect(clippy::unwrap_used)]
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::{criterion_group, criterion_main, Criterion};
 use ratatui::{
     buffer::Buffer,
     layout::{Rect, Size},
     widgets::StatefulWidget as _,
 };
 use ratatui_image::{
-    Resize, ResizeEncodeRender, StatefulImage,
     picker::{Picker, ProtocolType},
+    Resize, ResizeEncodeRender, StatefulImage,
 };
 use std::hint::black_box;
 

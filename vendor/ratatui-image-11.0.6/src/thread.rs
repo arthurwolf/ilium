@@ -16,9 +16,9 @@ use ratatui::{
 };
 
 use crate::{
-    Resize, ResizeEncodeRender,
     errors::Errors,
     protocol::{StatefulProtocol, StatefulProtocolType},
+    Resize, ResizeEncodeRender,
 };
 
 /// The only usage of this struct is to call `perform()` on it and pass the completed resize to `ThreadProtocols` `update_protocol()`

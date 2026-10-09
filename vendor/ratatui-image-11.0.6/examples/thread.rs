@@ -6,17 +6,17 @@ use std::{
 };
 
 use ratatui::{
-    Frame,
     crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind},
     layout::{Position, Rect, Size},
     style::{Color, Stylize},
     widgets::{Block, Borders, Clear, Paragraph},
+    Frame,
 };
 use ratatui_image::{
-    Resize, StatefulImage,
     errors::Errors,
     picker::Picker,
     thread::{ResizeRequest, ResizeResponse, ThreadProtocol},
+    Resize, StatefulImage,
 };
 
 struct App {
@@ -48,13 +48,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Resize and encode in background thread.
     let tx_main_render = tx_main.clone();
-    thread::spawn(move || {
-        loop {
-            if let Ok(request) = rec_worker.recv() {
-                tx_main_render
-                    .send(AppEvent::Redraw(request.resize_encode()))
-                    .unwrap();
-            }
+    thread::spawn(move || loop {
+        if let Ok(request) = rec_worker.recv() {
+            tx_main_render
+                .send(AppEvent::Redraw(request.resize_encode()))
+                .unwrap();
         }
     });
 

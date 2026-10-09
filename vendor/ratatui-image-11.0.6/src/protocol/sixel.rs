@@ -6,15 +6,15 @@
 //! [`icy_sixel`]: https://github.com/mkrueger/icy_sixel
 //! [supports]: https://arewesixelyet.com
 //! [Sixel]: https://en.wikipedia.org/wiki/Sixel
-use icy_sixel::{EncodeOptions, sixel_encode};
+use icy_sixel::{sixel_encode, EncodeOptions};
 use image::DynamicImage;
 use ratatui::{
     buffer::{Buffer, CellDiffOption},
     layout::{Position, Rect, Size},
 };
 
-use super::{ProtocolTrait, StatefulProtocolTrait, clear_area};
-use crate::{Result, errors::Errors, picker::cap_parser::Parser, protocol::UNIT_WIDTH};
+use super::{clear_area, ProtocolTrait, StatefulProtocolTrait};
+use crate::{errors::Errors, picker::cap_parser::Parser, protocol::UNIT_WIDTH, Result};
 
 #[derive(Clone, Default)]
 pub struct Sixel {

@@ -2,17 +2,17 @@ use color_eyre::eyre::Result;
 use crossterm::event::{Event, EventStream};
 use image::ImageReader;
 use ratatui::{
-    DefaultTerminal, Frame,
     widgets::{Block, Borders, Paragraph},
+    DefaultTerminal, Frame,
 };
 use ratatui_image::{
-    StatefulImage,
     picker::Picker,
     thread::{ResizeRequest, ThreadProtocol},
+    StatefulImage,
 };
 use tokio::{
     select,
-    sync::mpsc::{UnboundedReceiver, unbounded_channel},
+    sync::mpsc::{unbounded_channel, UnboundedReceiver},
 };
 
 use futures::{FutureExt, StreamExt};
