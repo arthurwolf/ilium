@@ -51,7 +51,7 @@ The full text is in [AGENTS.md](../../AGENTS.md). The essentials:
 - Use the `directories` crate for configuration and data paths; never hardcode `~`.
 - Do not replace normal UTF-8 icons with plain glyphs to fix a rendering problem; fix the width or rendering behaviour instead.
 - Background animations must use the shared look controls (colour, palette, dither, display) and add only scene-specific settings. A new animation is not done until it appears in the Settings list, round-trips its controls, has a help topic and is mentioned in the documentation.
-- Scope: do not build a plugin system, remote or SSH sharing, or an agent-driving SDK (see the non-goals in ARCHITECTURE.md). The project is new, so there are no compatibility shims or version-two files.
+- Scope: preserve the existing JavaScript animation-package extension runtime; worker/service work does not add another user-extension runtime or loader. Remote or SSH sharing and an agent-driving SDK are also outside scope (see the non-goals in ARCHITECTURE.md). The project is new, so there are no compatibility shims or version-two files.
 - Process custody: never restart or kill a user's running Ilium server from a contribution workflow; build and verify the artefact and report that a running server still has the old executable.
 
 ## Testing policy

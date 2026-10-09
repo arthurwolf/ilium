@@ -212,7 +212,7 @@ See [Editors and boards](editors-and-boards.md) for the editor itself.
 
 The progress monitor lets a long-running job report percentage and status to the Ilium footer of the pane that started it, and tells the agent when the job ends, so the agent does not have to poll.
 
-How it works in one paragraph: the job (or an agent on its behalf) registers a **probe**, a shell command that prints one JSON object describing the job. The **server** runs the probe on an interval, validates the output, updates a footer in that pane, and, when the job reaches `done` or `error`, types a short result message into the pane when its composer is ready. After registration nobody else needs to poll.
+How it works in one paragraph: the job (or an agent on its behalf) registers a **probe**, a shell command that prints one JSON object describing the job. The **server** runs the probe on an interval, validates the output and updates a footer in that pane. When the job reaches `done` or `error`, the result goes to whoever is waiting for it: an `ilium progress wait` command that is still running gets it as its output and exit status; otherwise Ilium types a short result message into the pane when its composer is ready. After registration nobody needs to poll.
 
 ### Requirements
 
@@ -222,14 +222,42 @@ How it works in one paragraph: the job (or an agent on its behalf) registers a *
 
 ### Commands
 
-All four commands print **one JSONL record** to stdout on success (one JSON object on a single line) so a script or agent can read the result without scraping prose. Failures print a JSONL `progress_request_failed` record carrying the operation, `request_id`, `pane_id`, a machine-readable `code` (lower-case with hyphens, for example `probe-timed-out`) and a `message`.
+Every command prints **one JSONL record** to stdout on success (one JSON object on a single line) so a script or agent can read the result without scraping prose. Failures print a JSONL `progress_request_failed` record carrying the operation, `request_id`, `pane_id`, a machine-readable `code` (lower-case with hyphens, for example `probe-timed-out`) and a `message`.
 
 | Command | Purpose | Output `type` |
 | --- | --- | --- |
 | `ilium progress check --command '<probe>'` | Run the probe once through the server and validate it. Installs nothing. | `progress_check` |
-| `ilium progress set --command '<probe>' [--interval-seconds N]` | Validate, then atomically start or replace this pane's monitor. Waits for a server acknowledgement that contains the monitor id and the accepted first report. | `progress_set` |
+| `ilium progress set --command '<probe>' [--interval-seconds N] [--wait [--timeout-seconds S]] [--replace]` | Validate, then atomically start this pane's monitor. Waits for a server acknowledgement that contains the monitor id and the accepted first report. With `--wait`, then blocks exactly like `ilium progress wait` and prints a second line. Refuses (code `monitor-active`) while the pane's current monitor is still running, unless `--replace` is given. | `progress_set` (then `progress_wait`) |
+| `ilium progress wait [MONITOR_ID] [--timeout-seconds S]` | Block until the monitor (default: the pane's current one) reports `done` or `error`, fails, is replaced or is cleared. `ilium wait` is the same command. | `progress_wait` |
 | `ilium progress status` | Current registration, latest report and monitor health for this pane. | `progress_status` |
 | `ilium progress clear [--monitor-id ID]` | Stop the monitor and clear its retained progress. With `--monitor-id`, only clears that exact monitor, so a stale agent cannot clear a newer replacement. | (clear result) |
+
+
+### Waiting for a monitor
+
+`ilium progress wait` lets an agent wait for a job the same way it waits for any other long command: it runs until the job settles, prints one line, and exits with a status that names the outcome.
+
+| Exit status | `outcome` | Meaning |
+| --- | --- | --- |
+| 0 | `done` | The task reported `done`. |
+| 3 | `error` | The task reported `error`; the record carries the error text. |
+| 4 | `monitor-failed` | The probe stopped working, so the task outcome is unknown. |
+| 5 | `replaced`, `cleared`, `no-monitor` | A newer `set` replaced the monitor, it was cleared, monitoring was switched off, or the pane has no monitor. |
+| 6 | `still-running` | `--timeout-seconds` elapsed. Run the same command again to keep waiting. |
+| 1 | (failure record) | The command could not reach the server or the connection broke. |
+
+The record also carries `composer_notice`: `suppressed` means the server did not, and will not, type a result message for this monitor, because this command delivered it. `may-also-arrive` means a message was already typed (or may be) and is a duplicate of this record. If the wait command is killed or the agent stops it, the server falls back to typing the message, so nothing is lost.
+
+Without `--timeout-seconds` the command waits as long as the job takes. Agent tools that limit a command's run time either move it to the background (Claude Code) or need a timeout that fits the tool: pick a `--timeout-seconds` below the tool's limit and run the command again on exit status 6.
+
+The usual way to run a long job is one command that registers the monitor and waits for it:
+
+```sh
+# Start the job first and confirm it is alive, then:
+ilium progress set --command '/home/me/bin/build-progress.sh' --interval-seconds 5 --wait
+```
+
+If no completion message arrives after the task should have finished, run `ilium progress status`: Ilium re-sends undelivered outcomes every 20 s and marks a monitor that lost its observation task as failed (outcome unknown), but `status` is the authoritative manual check.
 
 `--interval-seconds` defaults to `1`, minimum 1, maximum 86400 (24 hours). Raise it when the probe is heavy.
 
@@ -239,14 +267,17 @@ Typical flow:
 # 1. Start the long job first and confirm it is alive (not shown).
 # 2. Validate the probe.
 ilium progress check --command '/home/me/bin/build-progress.sh'
-# 3. Register it. Wait for the acknowledgement line before assuming it is active.
+# 3. Register it and wait for the result in one command.
+ilium progress set --command '/home/me/bin/build-progress.sh' --interval-seconds 5 --wait
+# Or register now and wait later:
 ilium progress set --command '/home/me/bin/build-progress.sh' --interval-seconds 5
-# Later, if needed:
+ilium progress wait
+# If needed:
 ilium progress status
 ilium progress clear --monitor-id 7
 ```
 
-`set` never silently succeeds: if the server does not acknowledge within the request timeout, it reports a failure. Calling `set` again on the same pane **replaces** the monitor.
+`set` never silently succeeds: if the server does not acknowledge within the request timeout, it reports a failure. A pane has one monitor. Calling `set` again after the current monitor settled replaces it; while it is still running, `set` refuses with code `monitor-active` so a second job cannot silently discard the first job's monitor and its result. Prefer one probe that covers a whole multi-step pipeline; pass `--replace` only to deliberately discard the running monitor.
 
 ### The probe contract
 
@@ -328,7 +359,7 @@ When the job ends, Ilium types a message into the pane once its composer is read
 | Monitor failed | "Ilium progress monitor N could no longer observe JOB. The task outcome is unknown. Last progress: P%. Monitor error: ..." |
 | Stopped before a final status | "Ilium progress monitor N stopped before JOB reached a terminal task status. The task outcome is unknown. ..." |
 
-This is how an agent that registered a probe learns the job is finished without polling.
+This is how an agent that registered a probe learns the job is finished without polling. No message is typed for a result that a running `ilium progress wait` already returned.
 
 ### Settings
 
@@ -351,6 +382,8 @@ Under Settings, **Agent Monitoring** (the same rows are also reachable from **Us
 | `invalid-probe-report` | Not exactly one JSON object, an unknown field, percent out of range, an `error` without `status:"error"` (or the reverse), or `job_id` changed. |
 | Stuck at 0 percent while the job runs | A relative path in the probe. Use absolute paths. |
 | `stale-monitor` on `clear --monitor-id` | A newer monitor replaced yours; the clear was refused on purpose. |
+| `monitor-active` on `set` | The pane's current monitor is still running. Wait for it (`ilium progress wait`), use one probe for the whole pipeline, or pass `--replace`. |
+| `ilium progress wait` fails with "closed the connection" | The server restarted, or the running server is older than the `wait` command. The normal typed result message still arrives. |
 | Footer shows "monitor failed" | Three probe failures in a row. Fix the probe and register again with `ilium progress set`. |
 
 ---

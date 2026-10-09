@@ -38,7 +38,7 @@ Open **Settings -> Inference** (`Ctrl+B :`, then the Inference tab). Five provid
 | Kilo Gateway (default) | none | built in | Chosen from Kilo's live free-model catalogue | Yes; fallback list if offline |
 | Ollama (local) | none | `http://127.0.0.1:11434` | Type or choose an installed model | Yes |
 | OpenAI-compatible | API key | `https://api.openai.com/v1` (editable) | Loaded catalogue or typed ID | Yes (needs a key) |
-| Anthropic | API key | `https://api.anthropic.com` (editable) | Type the model name | No |
+| Anthropic | API key | `https://api.anthropic.com` (editable) | Loaded catalogue or typed ID | Yes (needs a key) |
 | OpenRouter | API key | `https://openrouter.ai/api/v1` | Type the model name; default `openrouter/free` | No |
 
 Only the fields relevant to the selected provider are shown. Switching providers never discards another provider's saved endpoint, key or model, so you can switch back and forth.
@@ -60,7 +60,7 @@ Requests ask for the model's maximum output allowance when it is known; response
 3. Fill in the rows that appear:
    - Ollama: **URL** (if not the default), then **Load available models**, then choose a **Model**.
    - OpenAI-compatible: **URL**, **API key**, **Load available models**, **Model**.
-   - Anthropic: **URL**, **API key**, **Model**.
+   - Anthropic: **URL**, **API key**, **Load available models**, **Model**.
    - OpenRouter: **API key**, **Model**.
    - Kilo Gateway: choose a **Model** with Left and Right.
 4. Press `Enter` on a text row to edit it, type, and press `Enter` again. The editor stays open until the value has been written to disk; if writing fails your input stays with an error and `Enter` retries.
@@ -81,13 +81,13 @@ The catalogue shows every model your key exposes; some IDs belong to other APIs 
 
 ## Loading models
 
-**Load available models** appears for Ollama, Kilo Gateway and OpenAI-compatible (OpenAI needs a key). While it runs the button shows a spinner; on failure it reads **Retry model discovery**.
+**Load available models** appears for Ollama, Kilo Gateway, OpenAI-compatible and Anthropic (the last two need a key). While it runs the button shows a spinner; on failure it reads **Retry model discovery**.
 
-- The catalogue is requested with `GET <base>/models` using your credentials where required. Ilium returns sorted exact IDs and does not invent capabilities.
+- The catalogue is requested with `GET <base>/models` for OpenAI-compatible providers and `GET <base>/v1/models` for Anthropic, using your credentials where required. Ilium returns sorted exact IDs and does not invent capabilities.
 - Refreshing preserves your saved model even if it is not in the new list.
 - Ilium keeps the last good catalogue, and results that arrive after you have changed the provider, URL or key are discarded, so an old request cannot overwrite newer settings.
 - For Kilo Gateway, the catalogue is public and unauthenticated; stable fallback models are shown when discovery fails.
-- Anthropic and OpenRouter have no discovery row: type the model name.
+- OpenRouter has no discovery row: type the model name.
 
 ## Test provider
 

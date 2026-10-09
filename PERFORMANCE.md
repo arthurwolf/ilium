@@ -13,6 +13,35 @@ instantaneous process sample is never used as evidence.
 - Scheduling: every build, test, benchmark, and controlled Ilium process runs
   under `nice -n 19 ionice -c 3`.
 - Process CPU: `pidstat -u -w`, one-second intervals, at least 20 intervals.
+- Animation acceptance records input-to-visible-marker latency on isolated real
+  PTYs, animation `completed_frame_age_us` and terminal `frame_age_us` from
+  successful client presentation traces, and matched client/server CPU plus
+  peak RSS. Cached and live playback
+  use the same scene, terminal geometry, fixture input and warm-up; the large
+  document case uses the same immutable document corpus on both builds. Report
+  latency and frame-age distributions (p50/p95), not only means. No before/after
+  result for the worker-architecture change is accepted until both release
+  binaries are bound to source hashes and run through this protocol.
+- Current-source qualification note (2026-10-07): the owner of release benchmark
+  monitor 82 reported at 19:09 that `ilium-client/src/filesystem/tests.rs` and
+  `ilium-client/src/editor_input_backlog.rs` changed after the run began. The
+  monitor's final source manifest and terminal receipt must determine whether
+  the run is usable; do not accept its measurements without that readback.
+- Instrumentation readiness (2026-10-08): the client now emits successful-frame
+  trace fields for animation request-to-emission, completed-frame age, prepared
+  frame age and output duration (`ilium-client/src/lib.rs`). These are per-frame
+  trace events, not yet a source-hash-bound harness reporting distributions or
+  associating a marked input with its successful visible presentation. Capture
+  requires `[debug].file_logging_enabled = true` and `RUST_LOG=ilium_client=trace`
+  in the isolated run; file logging defaults off, so measurements cannot assume
+  these events are present. Use synthetic fixture data because the same logger
+  can retain provider request/response text. The
+  `animation_pipeline_probe` uses a memory writer rather than a real PTY; current
+  PTY responsiveness tests do not report input-to-visible p50/p95, and the
+  40 MiB PTY case measures input custody rather than a large editor document.
+  There is also no paired client/server peak-RSS and CPU run for the requested
+  cached-animation, live-animation and large-document workloads. The trace
+  fields improve instrumentation readiness but do not establish those results.
 - Microbenchmarks: optimized Rust test build, one warm-up, seven fixed-size
   samples, median reported in nanoseconds per operation.
 - TUI process workload: isolated XDG state and runtime directories under

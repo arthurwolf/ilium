@@ -149,7 +149,7 @@ To end a session from inside the interface use `Ctrl+B` `&`, which does the same
 ## ilium new-pane
 
 ```sh
-ilium new-pane [--session-name <name>] -- <cmd> [args...]
+ilium new-pane [--keep-open] [--session-name <name>] -- <cmd> [args...]
 ilium new-pane --worktree --branch <branch> [--base <ref>] [--session-name <name>] -- <agent>
 ```
 
@@ -158,6 +158,7 @@ Adds a pane to a running or starting session without attaching the interface. Ru
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `--session-name <name>` | `default` | Project-local session that receives the pane. |
+| `--keep-open` | off | Keep the pane open after the command exits. Without it, a plain `new-pane` command pane closes itself shortly after its command ends (at least 3 seconds after creation, and not while a live progress monitor is registered on it). Cannot be combined with `--worktree`. |
 | `--worktree` | off | Start a built-in agent in a new Git worktree on its own branch. Requires `--branch`. |
 | `--branch <branch>` | | New branch for `--worktree`. Must not already exist. Requires `--worktree`. |
 | `--base <ref>` | the repository's default base | Starting ref for `--worktree`. Requires `--worktree`. |

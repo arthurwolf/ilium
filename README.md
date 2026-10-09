@@ -8,7 +8,7 @@
 
 ## Quick start
 
-For now, [build from source](src/docs/building-from-source.md). We have not published the release downloads or hosted installers yet.
+The commands and download links below require a published release. If release downloads are unavailable, [build from source](src/docs/building-from-source.md).
 
 Linux and macOS:
 
@@ -35,6 +35,8 @@ Direct release downloads (one package per system):
 | Windows x86_64 | [setup `.exe`](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-windows-x86_64-setup.exe) · [MSI](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-windows-x86_64.msi) · [ZIP](https://github.com/arthurwolf/ilium/releases/latest/download/ilium-windows-x86_64.zip) |
 
 Verify downloads against [`SHA256SUMS`](https://github.com/arthurwolf/ilium/releases/latest/download/SHA256SUMS). Details: [Installation](src/docs/installation.md).
+
+After a qualified tag release completes, its [GitHub Packages release bundle](https://github.com/users/arthurwolf/packages/container/package/ilium-release) contains the same published assets in an OCI artifact. With [ORAS](https://oras.land/docs/installation/), run `oras pull ghcr.io/arthurwolf/ilium-release:VERSION --output ilium-release`, replacing `VERSION` with the release tag (for example, `v0.1.1`). The bundle includes the installers and five native archives; use the system installer above to install Ilium. The release's `SHA256SUMS` covers the native archives, while the published release asset digests cover every bundled file.
 
 Open a new terminal in your project and run `ilium`. First-run setup walks through AI providers, notification sounds, keyboard practice and an optional voice test. Reopen it with `ilium --onboarding` or **Settings → Guided setup**. Re-run the installer to upgrade.
 
@@ -134,7 +136,7 @@ After a restart, Ilium restores the layout and relaunches pane programs, resumin
 | --- | --- |
 | `ilium` | Attach to or create the current project's `default` session. |
 | `ilium new-session <name>` / `ilium ls` | Create or attach to a named session / list sessions. |
-| `ilium new-pane -- <cmd>` | Add a terminal pane without attaching the TUI. |
+| `ilium new-pane [--keep-open] -- <cmd>` | Add a terminal pane without attaching the TUI. The pane closes when the command exits unless `--keep-open` is given. |
 | `ilium chat --help` / `ilium progress --help` | Chatroom and progress commands. |
 | `ilium voice say --help` | Typed voice input. |
 
