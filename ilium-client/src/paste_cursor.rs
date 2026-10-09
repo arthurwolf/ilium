@@ -1,7 +1,7 @@
 //! Incremental mapping of one immutable paste into its existing key contract.
 //! The dispatch owner retains the original input envelope across bounded turns.
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ilium_execution::{RejectReason, RetirementHandle, RetirementReservation, Retiring};
+use ilium_execution::{RejectReason, RetirementHandle, RetirementReservation};
 use std::mem::size_of;
 
 use crate::terminal_input_owner::InputEvent;
@@ -38,6 +38,8 @@ impl PasteCursor {
 pub(crate) struct PasteReplay {
     original: InputEvent,
     cursor: PasteCursor,
+    replay_end_bytes: usize,
+    policy: ReplayPolicy,
     retirement: Option<RetirementReservation<RetiredPasteInput>>,
     #[cfg(test)]
     drop_probe: Option<std::sync::mpsc::Sender<std::thread::ThreadId>>,
@@ -59,15 +61,37 @@ impl Drop for RetiredPasteInput {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ReplayPolicy {
+    KeyEvents,
+    TextCharacters,
+}
+
 impl PasteReplay {
     pub(crate) fn new(original: InputEvent) -> Self {
-        assert!(
-            matches!(original.view(), crossterm::event::Event::Paste(_)),
-            "paste replay requires an original Paste input"
-        );
+        let replay_end_bytes = match original.view() {
+            crossterm::event::Event::Paste(text) => text.len(),
+            _ => panic!("paste replay requires an original Paste input"),
+        };
+        Self::with_policy(original, replay_end_bytes, ReplayPolicy::KeyEvents)
+    }
+
+    /// Animation text prompts trim terminal line endings and insert every
+    /// remaining Unicode scalar as text, including tabs and embedded controls.
+    pub(crate) fn new_animation_text_prompt(original: InputEvent) -> Self {
+        let replay_end_bytes = match original.view() {
+            crossterm::event::Event::Paste(text) => text.trim_end_matches(['\r', '\n']).len(),
+            _ => panic!("paste replay requires an original Paste input"),
+        };
+        Self::with_policy(original, replay_end_bytes, ReplayPolicy::TextCharacters)
+    }
+
+    fn with_policy(original: InputEvent, replay_end_bytes: usize, policy: ReplayPolicy) -> Self {
         Self {
             original,
             cursor: PasteCursor::default(),
+            replay_end_bytes,
+            policy,
             retirement: None,
             #[cfg(test)]
             drop_probe: None,
@@ -92,7 +116,21 @@ impl PasteReplay {
         };
         let mut keys = Vec::with_capacity(maximum);
         for _ in 0..maximum {
-            let Some(key) = self.cursor.next_key(text) else {
+            if self.cursor.consumed_bytes >= self.replay_end_bytes {
+                break;
+            }
+            let key = match self.policy {
+                ReplayPolicy::KeyEvents => self.cursor.next_key(text),
+                ReplayPolicy::TextCharacters => {
+                    let suffix = &text[self.cursor.consumed_bytes..self.replay_end_bytes];
+                    let Some(character) = suffix.chars().next() else {
+                        break;
+                    };
+                    self.cursor.consumed_bytes += character.len_utf8();
+                    Some(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE))
+                }
+            };
+            let Some(key) = key else {
                 break;
             };
             keys.push(key);
@@ -108,7 +146,7 @@ impl PasteReplay {
         let crossterm::event::Event::Paste(text) = self.original.view() else {
             unreachable!("PasteReplay retains its original Paste event")
         };
-        self.cursor.consumed_bytes == text.len()
+        self.cursor.consumed_bytes == self.replay_end_bytes
     }
 
     pub(crate) fn into_parts(self) -> (InputEvent, usize) {
@@ -249,6 +287,28 @@ mod tests {
         assert!(!replay.is_complete());
         assert_eq!(replay.next_keys(crate::MAX_PASTE_KEYS_PER_TURN).len(), 1);
         assert!(replay.is_complete());
+    }
+
+    #[test]
+    fn animation_text_prompt_replay_is_bounded_and_trims_only_trailing_line_endings() {
+        let (original, _quota) = crate::terminal_input_owner::paste_fixture("é\tb\r\n".into());
+        let mut replay = PasteReplay::new_animation_text_prompt(original);
+
+        assert_eq!(
+            replay.next_keys(2),
+            vec![
+                KeyEvent::new(KeyCode::Char('é'), KeyModifiers::NONE),
+                KeyEvent::new(KeyCode::Char('\t'), KeyModifiers::NONE),
+            ]
+        );
+        assert_eq!(replay.consumed_bytes(), 3);
+        assert!(!replay.is_complete());
+        assert_eq!(
+            replay.next_keys(2),
+            vec![KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE)]
+        );
+        assert!(replay.is_complete());
+        assert_eq!(replay.consumed_bytes(), 4);
     }
 
     #[test]

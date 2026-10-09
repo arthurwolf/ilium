@@ -311,14 +311,14 @@ pub(crate) fn handle_event_after_intercept(app: &mut App, event: Event) {
     }
 }
 
-/// Modes outside this set inherit the same character-oriented paste behavior
-/// as ordinary keys. The interactive owner uses this predicate to schedule
-/// that work over bounded turns while retaining the admitted input envelope.
+/// Key-oriented modes use this predicate to schedule character replay over
+/// bounded turns while retaining the admitted input envelope. Normal tree and
+/// editor focus use this path too; terminal panes are intercepted earlier as
+/// one native paste. Leader prefixes stay direct so paste cancels them whole.
 pub(crate) fn requires_key_paste_replay(app: &App) -> bool {
     !matches!(
         &app.mode,
-        Mode::Normal
-            | Mode::LeaderPending
+        Mode::LeaderPending
             | Mode::NavigationLeaderPending
             | Mode::SchedulePaneInput(_)
             | Mode::QueuePrompt(_)
@@ -330,6 +330,62 @@ pub(crate) fn requires_key_paste_replay(app: &App) -> bool {
             | Mode::LocationPicker(_)
             | Mode::AgentSetupPrompt(_)
     )
+}
+
+/// The event loop also owns modes whose atomic-paste semantics need a
+/// specialized replay policy instead of the synchronous fallback above.
+pub(crate) fn requires_bounded_key_paste_replay(app: &App) -> bool {
+    requires_key_paste_replay(app) || matches!(&app.mode, Mode::AnimationTextPrompt(..))
+}
+
+#[cfg(test)]
+mod bounded_normal_paste_tests {
+    use super::*;
+
+    #[test]
+    fn normal_tree_paste_uses_the_retained_bounded_replay() {
+        let mut app = App::new("bounded-normal-paste".into(), std::env::temp_dir());
+        app.mode = Mode::Normal;
+        app.focus = crate::app::FocusTarget::Tree;
+
+        assert!(
+            requires_key_paste_replay(&app),
+            "tree-focused paste must not replay its whole body in one event-loop turn"
+        );
+
+        app.mode = Mode::LeaderPending;
+        assert!(
+            !requires_key_paste_replay(&app),
+            "paste after a leader must keep the existing cancel-prefix behavior"
+        );
+
+        app.mode = Mode::AnimationTextPrompt(
+            crate::app::AnimationPromptTarget {
+                control: "example",
+                label: "Example".into(),
+                hint: "text",
+                error: None,
+            },
+            crate::text_prompt::TextPromptState::new(""),
+        );
+        assert!(
+            !requires_key_paste_replay(&app),
+            "the direct dispatcher must keep the original text-paste handler"
+        );
+        assert!(
+            requires_bounded_key_paste_replay(&app),
+            "the interactive loop must schedule animation text paste in bounded turns"
+        );
+
+        app.mode = Mode::AgentSetupPathPrompt(
+            crate::agent_feature_setup::AgentFeature::Chatroom,
+            crate::text_prompt::TextPromptState::new(""),
+        );
+        assert!(
+            requires_bounded_key_paste_replay(&app),
+            "path prompt pastes need bounded validation before atomic character replay"
+        );
+    }
 }
 
 fn handle_smart_copy_event(app: &mut App, event: &Event) {
