@@ -41,6 +41,15 @@ Native foreground and process-identity preflights run on the existing finite I/O
 
 PTY destruction and ordinary pane teardown only request cancellation. The existing owned child reaper performs one termination attempt through the original child-control handle and keeps that handle and its admission until actual exit is observed. A blocked native child mutex therefore cannot delay the Tokio caller or start the shutdown deadline late; an expired deadline retains the physical reaper as pending custody rather than claiming that it joined. Native termination failures are logged by that reaper.
 
+Server-created PTYs reserve their full persistent worker set before starting the child: five OS threads on Unix and six on Windows, each with a requested 2 MiB stack. The shared server quota holds the charge through physical join, including timed-out shutdown; insufficient admission refuses the launch before a child exists. The 512 MiB process worker-byte limit and 256-thread ceiling also cover the execution banks and other admitted services, so actual pane capacity is lower when those workers are resident.
+
+Each PTY state owner serializes input, resize, mouse and parsed output through
+one bounded per-session queue. Native writes run on the transport worker; its
+published completion wakes the owner, which waits on the queue condition until
+new eligible output, another queued event, the write deadline or cancellation
+grace. This avoids millisecond receipt polling while preserving output-before-
+command barriers and write deadlines.
+
 ### Left panel — the tree
 
 The left panel renders this tree via `tui-tree-widget`: expand/collapse groups, select a pane to focus it on the right, reorder entries one step at a time (hover an entry's up/down arrows, or leader `m` for keyboard move-mode), drag-and-drop a row onto any other row or the empty space below the tree to reparent it there, double-click a real tree entry to open the same Rename prompt as the context menu, and right-click an entry for create/rename/move/close actions.
@@ -204,7 +213,7 @@ Client/server, like Zellij and tmux itself — this is what makes detach/reattac
 ## Crate roles
 
 - **ilium-core** — pure domain types: one `Tree` of `Node`s, with `NodeKind::Container(ContainerNode)` for normal groups and split views, `NodeKind::Pane` for terminals/editors/boards, and `NodeKind::Folder` for persisted filesystem roots. `ContainerNode` owns child-kind and split-capacity policy; `Tree::create_split_view` validates and moves selected panes atomically. No I/O, fully unit-testable.
-- **ilium-pty** — adapter around `portable-pty` (spawn, resize, write) + `vt100` (parse the byte stream into a screen grid you can read text/cells from), plus xterm mouse-protocol encoding (`mouse.rs`) so a pane's foreground app (`vim`, `htop`, `lazygit`, …) receives clicks/drags/scrolls in whatever encoding it negotiated. One state owner per pane orders parser mutation, geometry, mouse encoding, input and terminal replies; platform workers move bytes.
+- **ilium-pty** — adapter around `portable-pty` (spawn, resize, write) + `vt100` (parse the byte stream into a screen grid you can read text/cells from), plus xterm mouse-protocol encoding (`mouse.rs`) so a pane's foreground app (`vim`, `htop`, `lazygit`, …) receives clicks/drags/scrolls in whatever encoding it negotiated. One state owner per pane orders parser mutation, geometry, mouse encoding, input and terminal replies; platform workers move bytes. Server-created sessions reserve the complete persistent worker set before spawning the child and retain its shared process-quota debit through actual OS-thread retirement; standalone PTY callers keep the existing unmetered API.
 - **ilium-detect** — the agent-detection engine. Two independent signals, combined:
   - **Identity** (which CLI, if any): walk the PTY's child process tree via `sysinfo` and match process names against the shared built-in provider registry (`claude`, `codex`, `agy`/`antigravity`), plus generic/custom signatures (`opencode`, `aider`, …). This is the primary signal — robust against UI redesigns, unlike text scraping.
   - **Activity** (thinking vs. idle vs. blocked): scan the vt100 screen's visible text for markers. A literal `"esc to interrupt"` substring is one recognized "working" trigger, but real Claude Code builds also render a present-tense status line ending in an ellipsis alongside a live elapsed-time token (e.g. `"✢ Moonwalking… (running stop hooks… 1/2 · 6s · ↓ 4 tokens)"`) — `looks_like_live_status_line` catches that shape instead of matching exact wording, so it survives whichever whimsical verb is showing. A `y/n`-style confirmation line or a numbered selection menu with a `❯` cursor means blocked (`WaitingApproval`); anything else with no agent CLI detected, or an agent CLI with no such marker, is idle.
@@ -248,6 +257,13 @@ preparation. Reserved publication remains valid during a concurrent drain;
 explicit cancellation returns work that never started. Callback panics produce
 failed receipts and leave subsequent finite jobs runnable.
 
+Client provider calls also share a process-scoped two-call limiter across
+naming, Smart Copy and remote compaction. Each provider body runs inside its
+already-admitted I/O job and requires a nonblocking host-level admission lock
+as well. Refusal before the body preserves the original request for retry, so
+adding client instances does not multiply the process provider quota or create
+detached provider workers.
+
 Server chatroom reference routing now reads `CHATROOM.md` through the existing
 finite I/O bank. Each sequential job admits a bounded input/result cost and
 returns at most 64 KiB and 64 records from a newline-aligned offset; a single
@@ -269,16 +285,36 @@ status. Both paths cap snapshots at 128 MiB. FIFO responsiveness, durable
 readback, distinct CPU/I/O ownership, and stale-pane regressions are authored;
 current-source tests and runtime behavior remain unqualified.
 
-New-worktree include preparation caps the include file, selected file count,
-copied bytes, and refuses after 10,000 visited source entries before copying.
-Discovery, copying and identity-checked rollback now use the bounded server I/O
-lane with declared working/result costs; retained receipts keep copied-path
+New-worktree target-path normalization, canonical-parent verification,
+metadata checks, and exact parent-directory creation run on the bounded server
+I/O lane. Encoded path input is capped at 4 KiB to match workspace ownership
+validation; its working and retained result costs are admitted before
+execution, and the retained path receipt stays alive
+through Git creation, include preparation, rollback, and pane publication.
+`repo_facts` probes registered checkout directories and `.gitmodules` in
+fixed batches of 32 on that same admitted lane. It reserves against borrowed
+paths before cloning each batch, preserving the former `is_dir`/`is_file`
+failure-as-absent behavior without a job per checkout. Repository inspection
+and restore verification share the existing 1,024-worktree ceiling and refuse
+larger Git listings before launching per-checkout probes.
+Include preparation caps the include file, selected file count, and copied
+bytes, and refuses after 10,000 visited source entries before copying.
+Discovery, copying and identity-checked rollback also use the bounded server
+I/O lane with declared working/result costs; retained receipts keep copied-path
 identity alive until pane commit or rollback. The worker checks cancellation
 between source entries and files, and attempts identity-safe cleanup before
 returning a cancelled copy. The rollback process-use scan also uses bounded I/O
 admission and retains its capped process evidence until the deletion decision.
 Source changes are unqualified pending current-source server tests, strict lint
 and release checks.
+
+The filesystem Explorer submits directory reads to the client's shared bounded
+I/O lane. Each job declares 32 MiB of working input and 4 MiB of result space;
+the scan also caps a listing at 8,192 entries and 4 MiB of retained paths and
+names, checks cancellation between entries, and canonicalizes manually entered
+paths on the worker. The UI retains the prior listing until a receipt matching
+the current revision arrives; transient admission refusal keeps the request for
+retry, while stale results cannot replace a newer navigation.
 
 Text-trigger preview preparation uses the shared CPU bank. The dialog owner
 admits CPU, source-retirement and result-retirement capacity before copying any
@@ -886,11 +922,15 @@ monitor82 also remains until its final manifest and receipt are audited.
 The full producer boundary remains an internal owned-event envelope: admission
 must precede every payload clone, and its byte lease must travel with the event
 through the direct or broadcast queue and the socket writer until flush or
-retirement. Broadcast consumers should share immutable event payloads rather than
-deep-clone them per subscriber; queue entry limits still bound per-connection
-handles, while a process-wide byte budget bounds retained payloads. The current
-direct envelope carries an optional lease, used for admitted terminal attach and
-recovery output; general direct events and broadcast events do not yet carry one.
+retirement. The server broadcast ring and production connection writers now
+share immutable `Arc<ServerEvent>` payloads, avoiding a deep clone for every
+subscriber. This does not yet admit the retained broadcast bytes: the ring is
+still bounded by entries only, and each writer conservatively accounts for the
+event backing again while retaining its encoded frame. Queue entry limits still
+bound handles, while the process-wide byte budget bounds individually admitted
+writer and producer allocations. The current direct envelope carries an optional
+lease, used for admitted terminal attach and recovery output; general direct
+events and broadcast events do not yet carry one.
 The legacy `state_synchronization_events` test builder and the live PTY forwarder
 recovery broadcast still call copy-producing replay helpers without producer
 admission. Client projection maps progress, prompt, status, evidence and Git
@@ -1864,6 +1904,12 @@ disabled before initialization. Two nonblocking OS lock slots in the shared
 model-cache namespace limit concurrent engines across clients sharing that cache;
 separate cache namespaces remain independent. The512 MiB native declaration
 and cold/warm model memory still require measured qualification.
+Production currently constructs one icon owner, but the public constructor does
+not enforce process-singleton ownership: separately constructed instances retain
+independent worker slots while the composition-root declaration budgets one.
+Treat additional in-process owners as unsupported until they share an explicit
+owner/admission token; duplicate-owner execution and its bound are not currently
+qualified.
 
 Media pause/resume effects have one persistent OS-thread owner. Normal voice
 and demonstration mode publish bounded desired-state leases; the owner keeps
@@ -1934,14 +1980,21 @@ threads require their own domain accounting and do not have an RSS guarantee.
 A composed frame retains its exact sealed
 scene receipt until terminal emission succeeds. Time requests may replace older
 render requests without invalidating the latest complete frame; semantic scene
-and settings changes remain ordered. One supervised OS thread owns the terminal
-backend, diff base, encoding, output, flush and restoration. The UI composes on an
+and settings changes remain ordered. The surface configuration queue is capped
+at 16 entries and reserves its final slot for the ordered pause emitted when a
+scene host is released; when its 15 ordinary entries are occupied, a new
+semantic change is refused without advancing desired settings or revision. One
+supervised OS thread owns the terminal backend, diff base, encoding, output,
+flush and restoration. The UI composes on an
 inert buffer and admits at most two complete immutable frames, each with its
 cursor and layout revision, before handing them to that owner. A frame is diffed
 against the last successfully flushed buffer; a size change clears the terminal
-and establishes a full-frame base. The output writer and retained frame storage
-have explicit byte ceilings. Only a successful flush advances the diff base and
-returns a presentation acknowledgement; an uncertain partial write is reported
+and establishes a full-frame base. `PreparedFrame` transfers the existing cell
+vector without compacting it on the interactive thread; admission charges its
+retained capacity and a conservative allowance for visible symbol bytes. The
+output writer and retained frame storage have explicit byte ceilings. Only a
+successful flush advances the diff base and returns a presentation
+acknowledgement; an uncertain partial write is reported
 without retrying its prefix. The UI commits mouse geometry from that exact
 acknowledged frame, including its viewport and terminal instance, so provisional
 layout or pane replacement cannot redirect admitted input. Shutdown drains
@@ -2271,6 +2324,10 @@ allocations keep a separate process-root storage admission after job retirement.
 Provider error strings follow that same storage contract through display.
 Query capture is bounded at 64 KiB without truncating the authored input; configured
 address-provider validation and cooldowns stay in their existing adapters.
+The address-search 429/503 cooldown is currently process-local; the shared host
+lease coordinates request spacing across processes but does not publish that
+cooldown. Cross-process cooldown propagation is not currently guaranteed or
+qualified.
 The new real-bank forcing tests and private prompt reconciliation are unqualified.
 The shared `ilium-http` adapter now keeps DNS on the already admitted caller at
 all nine existing construction sites (seven formerly using the default resolver,
@@ -2432,7 +2489,15 @@ synchronous `tokio::sync::broadcast` send used by many producers, so it cannot
 await bounded admission; some payloads, including merged `ScreenUpdate` bytes,
 are already assembled or cloned before reaching that method. Replacing this path
 requires an ordered, bounded publication contract and producer-specific overload
-handling, not just a larger queue. Existing provider/library workers also need
+handling, not just a larger queue. Its lag recovery rebuilds current tree and
+pane state and replays retained terminal journals, but it does not replay every
+semantic event already skipped by the broadcast receiver; for example,
+`PanePromptSubmitted` is consumed as a trigger and has no snapshot equivalent.
+Therefore byte admission cannot be implemented by silently dropping an event
+when a slow receiver exhausts the budget: reliable semantic delivery needs its
+own bounded retention/acknowledgement contract, while replaceable state and
+terminal bytes can use their existing snapshot/journal recovery paths. Existing
+provider/library workers also need
 shared admission wired through actual retirement. Focused foundation tests do not
 establish whole-workspace, release, live PTY or performance acceptance.
 
@@ -2551,6 +2616,101 @@ Text-scraping a banner is what most "detect the AI tool" hacks do, and it breaks
 - Panes `Idle`/`Done`/`PlainShell` poll slow (~30–60s) — none of those change on their own between polls, no reason to burn CPU reading their screen buffer.
 - All intervals configurable in `~/.config/ilium/config.toml`.
 
+## Scaling to hundreds of agents
+
+Ilium has to stay responsive with 200 or more agent panes in one session. This section is the
+design target for that scale: what the design would be if it were started today, and the rules
+that keep the existing code moving towards it. The measured before/after numbers for each pass
+are in `PERFORMANCE.md` ("Many-agent scale pass"); `tools/scale-bench/` reproduces them.
+
+### Principle: cost proportional to change, not to population
+
+At 200 panes, anything done per pane per tick, per pane per frame, or per host process per tick
+dominates. Each subsystem therefore has to satisfy one rule: **steady-state work is proportional
+to what changed, and the rest of the population costs nothing.** Concretely:
+
+| Subsystem | Cost must scale with | Must never scale with |
+| --- | --- | --- |
+| Detection | panes whose deadline expired, and their own process trees | all host processes or threads, every tick |
+| PTY transport | bytes moved | number of idle panes (no timed wake-ups per pane) |
+| Server to client | panes whose visible state changed | whole-tree snapshots for a single-pane change |
+| Client rendering | rows on screen that changed | panes in collapsed groups or off screen |
+| Project maintenance | files that changed | number of projects multiplied by a fixed clock |
+
+### Detection
+
+- **One host process snapshot per interval, shared by every pane.** The snapshot is taken without
+  per-thread entries (`sysinfo` `without_tasks()`): Linux otherwise lists every thread of every
+  process, which multiplied the scan by about eight on a workstation running agents. Snapshot reuse
+  is bounded in age (5 s), and a forced refresh (user focus, Enter, a new pane) is rate-limited:
+  the tick waits for the minimum refresh spacing instead of rescanning the host several times a
+  second.
+- **A failing tick must still make progress.** A detection tick that is refused (admission,
+  deadline, an unexpected error) backs off exponentially. It never retries every 250 ms with a
+  full host scan, and its reservations are sized so the normal case cannot exceed the shared
+  execution budget. (Before this pass, one agent pane without a discoverable transcript made the
+  evidence and discovery reservations add up to the whole 128 MiB budget. Every tick failed, three
+  times a second, and each failure rescanned the host.)
+- **Fair, deadline-ordered batches.** At most 32 panes are classified per tick, chosen
+  oldest-deadline first. Choosing by pane ID made high-ID panes (the newest agents) wait until
+  every lower ID was idle. A batch larger than the cap is a normal condition, not a reason to
+  rescan the host.
+- **Liveness without rescans.** Between snapshots, cached agent PIDs are checked with a signal-0
+  probe, which is a syscall per due pane rather than a host walk.
+- Future step (not needed for the measured targets): on Linux, walk only each pane's descendants
+  (`/proc/<pid>/task/<tid>/children`) and refresh just those PIDs, falling back to the host
+  snapshot elsewhere.
+
+### PTY transport
+
+- Each pane currently owns a small set of OS threads (reader, write pump, owner/state machine,
+  queued-input deadline worker, child reaper). Idle threads must **block on an event**, never on a
+  short timer. The write pump blocks until it receives a job or its cancellation wake (it used to
+  wake every 10 ms). The child reaper backs off from 50 ms to 1 s while the child keeps running
+  and is woken at once on cancellation; it is not on the exit-detection path, because the
+  detection loop reads the child's exit status itself. A 10 ms receive timeout across 200 panes
+  alone is 20,000 wake-ups a second for no work.
+- The worker ledger caps total owned threads (`MAX_OWNED_WORKERS`) and their stack bytes; both are
+  sized for a 512-pane target. The previous 1,024-thread cap stopped pane creation at about 195
+  panes.
+- From-scratch target: one readiness reactor (epoll/kqueue/IOCP) for all PTY masters and one small
+  parser pool, so thread count is O(1) in panes. The current per-pane thread model stays until
+  that reactor exists for all three platforms; the rules above remove its idle cost.
+
+### Server to client
+
+- State changes that concern one pane travel as per-pane events. Status, prompt, progress, git
+  state and detection evidence already did; title changes now send `PaneNodeChanged` (that one
+  node) instead of a full `TreeSnapshot`. A full snapshot is reserved for structural changes
+  (create, close, move, regroup), for title resets that may also move the pane, and for attaching
+  clients. Remaining single-pane snapshot senders (prompt queue, scheduled input, freeze) are the
+  next candidates.
+- A detection tick publishes at most one status change per pane, so a pane's status cannot
+  produce more events than ticks.
+
+### Client
+
+- **Redraws are frame-capped and damage-driven.** Receiving a server event no longer marks the
+  frame dirty by itself; the applied event's damage does. Per-pane state that background agents
+  report continuously (status, detected state, evidence, prompt, progress, git) redraws in the next
+  capped frame (at most about 30 per second) instead of forcing an immediate draw each, and
+  terminal output for panes that are not displayed marks nothing. Input and structural events stay
+  immediate.
+- **The sidebar does not descend into collapsed groups.** Children of a closed container become
+  placeholder rows (enough for the open/closed affordance) without sorting or formatting their
+  subtree, and name-based sort orders lower-case each name once per sort instead of once per
+  comparison. Design target, not built yet: a retained row model cached behind a structural and a
+  presentation revision, so a status change re-renders one row. Animated rows (working spinners)
+  bound how much such a cache can save.
+- **Periodic work stays off the population clock.** Codex screen copies for model icons are taken
+  only when the one-second model scan is due (not every tick), the client executable path is
+  resolved once, auto-freeze returns before walking panes when it is disabled, and cost tracking
+  covers up to 1,024 panes (it silently stopped above 128) with sorted-slice membership checks
+  instead of an O(n²) `retain`/`contains`. Project maintenance (Chatroom, agent instructions,
+  hooks) still re-checks each project once a second on a background worker; its cost scales with
+  projects, not agents. Design target: drive it from file-change notifications with a slow safety
+  rescan.
+
 ## Key crates
 
 | Crate | Role |
@@ -2637,7 +2797,7 @@ Each milestone is meant to be independently runnable/demoable, not a big-bang in
 
      `ILIUM_VOICE_REALTIME_URL` (a loopback `ws://` URL only, parsed rather than prefix-matched so `ws://127.0.0.1:1@host` is refused) points the provider adapter at a scripted local server, and `ILIUM_VOICE_AUDIO=none` skips opening audio devices. They are test and demo seams: `ilium-voice/tests/typed_text_mock.rs` drives the adapter, and `ilium/tests/voice_say_e2e.rs` runs the real server, the real PTY client, and the CLI against a scripted model whose tool call types into a real terminal pane, with no network, key, or audio hardware.
    - *Kanban board.* Persists a global 1–10-line card-preview height (four lines by default) and minimum column width (45 cells by default) under `[kanban_board]`; narrower viewports page complete columns behind a horizontal scrollbar. Cards render contiguously without redundant top labels, show their source and insertion target throughout mouse drags, and expose clickable Markdown task checkboxes. Clicking the remaining card surface opens an aerated title/notes editor in the rightmost third; each keystroke is committed immediately through either the single-Markdown-file or folder-of-Markdown-files storage adapter.
-   - *Sound.* Discovers only folders/files that exist on the current system (XDG/Linux distributions, macOS, and Windows), offers an attributed embedded chirping sound, a selected system file, deterministic synthesized PCM, system beep or mute with preview, and independently enables Agent finished, approval-needed, started-working, and waiting-background events. Changes persist under `[sound]`, reach the current detached server immediately over IPC, and are picked up by other running project servers through a low-frequency global-config watcher. Generated PCM/WAV preparation runs on the shared bounded CPU lane; its retained result passes to the actor's ordered bounded I/O playback job, while other sources go directly to that actor. Playback therefore works with no client attached, never duplicates per attached client, preserves event order, and cannot block detection or IPC. Sound Studio preview status is updated from a requester-only completion event after playback settles; file validation stays on the server path.
+   - *Sound.* Discovers only folders/files that exist on the current system (XDG/Linux distributions, macOS, and Windows), offers an attributed embedded chirping sound, a selected system file, deterministic synthesized PCM, system beep or mute with preview, and independently enables Agent finished, approval-needed, started-working, and waiting-background events. Changes persist under `[sound]`, reach the current detached server immediately over IPC, and are picked up by other running project servers through a low-frequency global-config watcher. Generated PCM/WAV preparation runs on the shared bounded CPU lane; its retained result passes to the actor's ordered bounded I/O playback job, while other sources go directly to that actor. Playback therefore works with no client attached, never duplicates per attached client, preserves event order, and cannot block detection or IPC. Sound Studio preview status is updated from a requester-only completion event after playback settles; file existence checks run inside the same bounded playback job.
    - *Persistence and notifications.* Each project session persists independently in `.ilium/sessions/<name>.json`; detected Claude, Codex, and Antigravity IDs are converted into their provider-specific resume commands when saved, so restored panes resume their own agent conversations. Desktop notifications are submitted as pre-admitted, size-bounded jobs to the shared server I/O lane, so detection and task-outcome coordination never waits for the notification daemon; an oversized alert or saturated lane is logged and skipped. Two distinct kinds exist: *agent* events (finished turn, approval needed; raised by the detection loop from the same projected signals as the sidebar) and *task* events (a progress monitor's `done`/`error`/lost outcome, raised by `handlers::alert_task_outcome`). `ilium_sound::NotificationSettings` is the one shared `[notifications]` type: master `enabled`, per-event flags (`agent_finished`, `approval_required`, `task_succeeded`, `task_failed`), `suppress_redundant_task_outcomes` and `task_coalesce_seconds`. Defaults notify on everything but task success, because a task finishing while its agent keeps working is routine progress already visible as the sidebar ✅. Task sounds and notifications share one policy: the per-event flag, suppression while the agent is idle or parked (its own finished alert follows; panes with no agent are never suppressed), and per-pane, per-kind coalescing (`TaskOutcomeCoalescer`). Notification text names the kind ("background task finished (agent still working)") and leads with the pane title. The client edits the table in Settings → Sound and writes it to `config.toml`; running servers reload it through the existing config watcher, so there is no IPC request. Detection refreshes and size-checks its whole-host process table on the bounded I/O bank, then reserves bounded CPU for process-tree and screen classification. Foreground ownership probes, per-PID discovery refresh/cwd capture and the pre-transcript identity recheck run on bounded I/O workers. CPU callbacks classify process trees and screens from immutable snapshots. A final admitted I/O identity stage checks PID liveness and project ownership before tree/pane reconciliation. Transcript lookup alternates bounded path/file work on the I/O bank with bounded metadata decoding on the CPU bank; each raw line and cursor moves through retained receipts, and callbacks never wait on another job. The coordinator applies generated-session priority and exclusive claims in stable pane order, then rechecks pane generations and process identity before applying results. *Reconciliation.* `ilium-server/src/progress_watchdog.rs` runs every 20 s as the last defence behind the event-driven paths: a nonterminal monitor whose coordinator task is gone becomes sticky failed evidence (sidebar "lost", task alert), and a settled outcome that never reached a supported agent composer (queued result orphaned by an agent exit, attempt left uncertain by a restart) is delivered again, marked as a possible duplicate, at most five times per monitor. Disabling progress monitoring or restoring with it disabled keeps failed "outcome unknown" evidence instead of silently dropping the monitor.
 7. **Split views. Done.** `ContainerNode` generalizes tree ownership without duplicating membership in client state. Leader `"`, the tree footer split button, or a context action opens an orientation dialog and an optional eligible-pane picker; the server applies one atomic `CreateSplitView` mutation. `RightPanelTarget` and the pure `split_layout` allocator render zero to four panes, resize each visible PTY to its own viewport, and route keyboard/mouse/editor/board interactions only to the active slot.
 

@@ -11,14 +11,44 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 
 ## [Unreleased]
 
+- Sessions with hundreds of agents stay responsive (many-agent scale pass, see `PERFORMANCE.md`):
+  - Detection no longer fails every tick once an agent has no discoverable session yet. The evidence and discovery reservations previously filled the shared 128 MiB result budget, so every tick failed and rescanned the whole host about three times a second, and new agents were never identified.
+  - Host process scans skip per-thread entries, which cut each scan by roughly ten times on a workstation running agents.
+  - Forced process-table refreshes are rate-limited, and failing detection ticks back off exponentially instead of retrying at full speed.
+  - Detection batches now take the panes with the oldest deadlines first. Newer, high-numbered panes are no longer starved behind lower IDs.
+  - The server can host more than about 195 panes; the owned-worker thread and memory ceilings are sized for 512 panes.
+  - Idle panes no longer wake their PTY write pump every 10 ms, and the child reaper backs off to one check a second.
+  - Title changes send only the changed pane to clients instead of the whole tree.
+  - The client redraws background status, evidence, prompt, progress and git updates at the normal 30 fps frame cap instead of forcing an immediate full redraw for each event. It no longer redraws for events that change nothing visible.
+  - The sidebar no longer sorts and formats the contents of collapsed groups. Name sorting lower-cases each name once per sort instead of once per comparison.
+  - Cost tracking now covers up to 1,024 agent panes; it previously stopped silently above 128.
+  - Per-tick model-icon, auto-freeze and cost housekeeping no longer copies every Codex screen or walks every pane when that work is not due or is disabled.
+
+- Animation text prompt pastes now replay in bounded turns while preserving trailing-line-ending trimming and text-character semantics.
+- Normal tree and editor paste now uses the existing bounded key-replay path, keeping large pastes from monopolizing the interactive loop while preserving native terminal paste and leader cancellation.
+- The server now reserves 64 MiB within its existing 2 GiB worker-memory ceiling for selected-terminal recovery frames, so unrelated storage pressure cannot indefinitely starve visible pane output.
+- Animation Settings now reclaim footer rows on compact terminals so scene, global, and control sections remain visible and independently scrollable.
+- Server-created PTY sessions now reserve their persistent transport and ownership workers against the shared process quota before launching a child.
 - Dense gusted Wind scenes now use runtime-dispatched SIMD integration when supported, with a portable scalar fallback and cached canonical particle state.
+- Wind integration now uses FMA on AVX2 and AVX-512 CPUs when runtime feature detection confirms support, retaining non-FMA vector and scalar fallbacks.
+- Dense Wind gust updates reuse per-column and per-row interpolation coordinates when rebuilding the cached cell-force field, reducing repeated per-cell indexing arithmetic.
+- Dense Wind gust-cache rebuilds reuse horizontally interpolated field rows across screen rows, reducing repeated interpolation work without changing operation order.
+- Dense Wind rasterization switches to deduplicated writes near the measured 16k-dot crossover, avoiding bitset overhead at lower densities.
+- Wind collision sweeps now scalarize only the high-displacement SIMD lanes while unaffected particles remain vectorized.
+- Wind SIMD collision fallback now visits only flagged lanes and skips the AVX-512 lane scan when no fallback is needed.
+- Wind SIMD avoids collision-boundary conversions for empty-screen wrapping steps.
+- Wind pointer forces keep integration vectorized and evaluate only SIMD-identified hit lanes with the exact scalar force.
+- Dense gusted Wind validates cached force samples during generation, avoiding a second full-field scan before SIMD integration while retaining scalar fallback for non-finite fields.
 - Help keyboard summaries now adapt to the available dialog width and mark clipped descriptions.
 - Confirmation dialogs now shorten their keyboard guidance to fit compact widths while retaining the Y/N, Enter, and Esc actions.
 - Appearance sizing guidance now wraps to the available Settings content width without losing its wording.
 - Animation output errors now report that terminal output could not be confirmed, and uncertain post-flush receipts retain their original presentation ownership until settlement is known.
+- Animation configuration admission now reserves queue capacity for the ordered scene-pause transition when a view is hidden.
+- Terminal frame handoff no longer compacts the cell vector on the interactive thread; byte admission accounts for its retained capacity.
 - Saved-world preparation now estimates remaining time from measured overall progress and keeps elapsed time and measured stage ETA visible in the activity footer.
 - Visible terminal subscriptions now replay retained output in bounded frames, rotating across selected panes so one large history cannot hold the other panes' first content behind it.
 - A newer visible-pane selection now supersedes an older replay while it waits for storage admission, so stale history cannot delay content for the pane the user just selected.
+- Focus changes within a split now reprioritize recovery so the clicked pane's retained terminal content is sent before other visible panes.
 - Terminal presentation now charges and requests an explicit 2 MiB native output-thread stack alongside its bounded encoder and resize storage.
 - Worktree rollback now checks process users through bounded I/O admission and retains the capped evidence until it decides whether removal is safe.
 - Session detection now alternates bounded transcript reads on the I/O bank with metadata decoding on the CPU bank; the coordinator alone reconciles ordered exclusive session claims.
@@ -34,6 +64,8 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 
 ### Fixed
 
+- Sidebar directory scans now reject per-entry I/O errors instead of publishing a partial folder listing.
+- Saved Minecraft worlds no longer render chunks that Minecraft has not finished generating; a cheap generation-status check rejects them before the full decode.
 - Parser pool Off now removes the aggregate parser-memory ceiling; initialized panes remain available for faster revisits at higher RAM use, while an explicit positive budget retains finite pooling and hidden-pane eviction.
 - Chatroom reference routing now acknowledges delivered records individually, avoiding replay of a completed prefix when a later record in the same bounded batch fails.
 - Antigravity status-line restoration now recovers saved custom fields when `/statusline off` normalizes the setting and adds metadata, while preserving newly changed fields.
@@ -41,6 +73,7 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 
 ### Changed
 
+- Dense Wind rasterization now checks finite coordinate bounds directly before mapping dots to raster bins, avoiding per-dot cell flooring.
 - The startup progress dialog now carries Ilium's shared chrome title in its rounded frame, matching the rest of the interface.
 - Voice Studio settings now use rounded titled cards with breathing room and independent overflow bars for settings and transcript panes.
 - Sound Studio waveform and envelope previews now use shared titled frames with room for their plots at compact and wide terminal sizes.
@@ -54,6 +87,7 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 - Animation Settings now uses its existing gutter to separate shared controls from scene-specific controls without narrowing either column.
 - Shared value-selector dialogs now put their clipped title in the rounded top border and give the option list back the former title row, while retaining an interior title on panels too narrow for the chrome.
 - Terminal parser pooling now defaults Off, retaining initialized hidden parsers to avoid aggregate pool waits; users can opt into a finite pool to trade lower retained memory for possible eviction and slower replay on revisit.
+- Server PTY worker admission now has capacity for at least 128 Unix sessions while retaining a shared process-wide safety budget and replay-storage headroom.
 - Parser-pool settings help now explains the no-pool memory and revisit trade-off alongside the bounded-pool memory, eviction and replay trade-off.
 - Panes and layout documentation now reflects the default-off parser pool and explains its RAM, eviction, and replay trade-offs.
 - Server logs now include the requested and process-wide storage bytes when visible-terminal event admission waits longer than two seconds.
