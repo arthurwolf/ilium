@@ -115,6 +115,16 @@ pub(super) struct WorldFrameProvenance {
     pub resident_bytes: usize,
     _storage: StorageAdmission,
 }
+impl std::fmt::Debug for WorldFrameProvenance {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("WorldFrameProvenance")
+            .field("binding_count", &self.bindings.len())
+            .field("token_count", &self.tokens.len())
+            .field("resident_bytes", &self.resident_bytes)
+            .finish()
+    }
+}
 struct Presentation {
     surface: Surface,
     clock: AnimationClock,
@@ -4844,7 +4854,7 @@ impl Presentation {
                             &request.settings,
                             request.elapsed,
                             &world_bindings,
-                            &provenance_quota,
+                            Some(&provenance_quota),
                         )
                         .map_err(|_| ilium_animation_js::surface::SurfaceError::Capacity)?,
                     );
@@ -5786,7 +5796,7 @@ mod tests {
                 &[],
                 &BTreeMap::new(),
                 &ilium_animation_js::engine::EngineLimits::default(),
-                &quota,
+                quota.clone(),
             )
             .unwrap()
         };
@@ -5947,7 +5957,10 @@ mod tests {
                 .contains("unsupported image slot")
         );
 
-        let unused_image = freeze(json!({"layers":[{"tiles":[{"image":slot(0)}]}]}), images);
+        let unused_image = freeze(
+            json!({"layers":[{"tiles":[{"image":slot(0)}]}]}),
+            images.clone(),
+        );
         let error =
             replay_source_metadata_with(&unused_image, |_| Ok(json!({"id":"unused"}))).unwrap_err();
         assert!(error.contains("inventory"));

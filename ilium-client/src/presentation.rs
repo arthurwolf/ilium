@@ -157,15 +157,14 @@ impl PreparedFrame {
 
     pub fn new(
         reservation: FrameReservation,
-        mut buffer: Buffer,
+        buffer: Buffer,
         cursor: Option<Position>,
         frame_id: u64,
         layout_revision: u64,
     ) -> io::Result<Self> {
-        buffer.content.shrink_to_fit();
-        // Charge the Vec's observable retained capacity. CompactString does
-        // not expose its capacity through Cell; twice visible symbol bytes is
-        // an explicit conservative allowance, not an allocator hard bound.
+        // Do not compact on the UI thread: retain and charge the actual Vec
+        // capacity. CompactString does not expose its capacity through Cell;
+        // twice visible symbol bytes is a conservative observable allowance.
         let bytes = buffer
             .content
             .capacity()
@@ -325,7 +324,7 @@ impl Presenter {
                     drop(restoration);
                     let _ = done.send(result);
                 },
-                Arc::new(move || exit_wake.notify_one()),
+                Some(Arc::new(move || exit_wake.notify_one())),
             )
             .map_err(|error| guarded_failure(error, slots.allocation.clone()))?;
         Ok(Self {
@@ -841,7 +840,7 @@ mod tests {
                 .await
                 .is_err(),
             "body completion must not acknowledge physical presenter shutdown"
-        )?;
+        );
         // The timeout drops the shutdown future. Its real callback result and
         // sole observer must remain on the original presenter through retry.
         assert!(matches!(presenter.shutdown_emission, Some(Ok(()))));
@@ -1400,6 +1399,26 @@ mod tests {
         assert!(presenter.shutdown().await.is_err());
         assert!(presenter.try_reserve().is_none());
     }
+    #[test]
+    fn prepared_frame_retains_existing_cell_vector_capacity() {
+        let slots = Arc::new(FrameSlots {
+            used: AtomicUsize::new(1),
+            allocation: Arc::new(
+                test_quota()
+                    .reserve_external_storage(FRAME_STORAGE_BYTES)
+                    .unwrap(),
+            ),
+        });
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 1, 1));
+        buffer.content.reserve_exact(64);
+        let capacity = buffer.content.capacity();
+        assert!(capacity > buffer.content.len());
+
+        let frame = PreparedFrame::new(FrameReservation(slots), buffer, None, 1, 1).unwrap();
+
+        assert_eq!(frame.buffer.content.capacity(), capacity);
+    }
+
     #[test]
     fn oversized_graphics_symbol_releases_reserved_capacity() {
         let slots = Arc::new(FrameSlots {

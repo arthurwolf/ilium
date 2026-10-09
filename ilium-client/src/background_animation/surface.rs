@@ -942,22 +942,51 @@ mod tests {
 
     #[test]
     fn render_admission_reserves_capacity_for_the_ordered_pause_transition() {
+        let settings = AnimationSettings::default();
         let mut surface = AnimationSurface {
-            desired: Some((AnimationSettings::default(), 1, 1)),
+            revision: (MAX_PENDING_CONFIGURATIONS - 1) as u64,
+            desired: Some((settings.clone(), 1, 1)),
+            // Keep collection from starting a real worker; this test exercises
+            // the surface's queue boundary, not worker admission.
+            resources: None,
             ..Default::default()
         };
         surface
             .configurations
-            .extend((0..MAX_PENDING_CONFIGURATIONS - 1).map(Configuration::Pause));
+            .extend((0..MAX_PENDING_CONFIGURATIONS - 1).map(|index| {
+                Configuration::Render(Box::new(RenderRequest {
+                    revision: (index + 1) as u64,
+                    settings: settings.clone(),
+                    width: 1,
+                    height: 1,
+                    elapsed: Duration::from_millis(index as u64),
+                    requested_at: Instant::now(),
+                    pointer: None,
+                    occupancy: None,
+                    occupancy_revision: 0,
+                }))
+            }));
 
         assert!(!surface.can_queue_configuration());
+        assert_eq!(
+            surface.request(&settings, 2, 1, Duration::ZERO, None),
+            Err(AdmissionError::Full)
+        );
+        assert_eq!(surface.configurations.len(), MAX_PENDING_CONFIGURATIONS - 1);
+        assert_eq!(surface.revision, (MAX_PENDING_CONFIGURATIONS - 1) as u64);
+        assert!(matches!(
+            surface.desired.as_ref(),
+            Some((_, width, height)) if *width == 1 && *height == 1
+        ));
+
         surface.release_hosts();
 
         assert_eq!(surface.configurations.len(), MAX_PENDING_CONFIGURATIONS);
         assert!(surface.desired.is_none());
         assert!(matches!(
             surface.configurations.back(),
-            Some(Configuration::Pause(1))
+            Some(Configuration::Pause(revision))
+                if *revision == MAX_PENDING_CONFIGURATIONS as u64
         ));
     }
 

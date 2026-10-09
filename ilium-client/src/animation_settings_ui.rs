@@ -348,17 +348,21 @@ fn credit_footer_rows(area: Rect, model: &RowModel) -> u16 {
 
 fn footer_rows(area: Rect, model: &RowModel) -> u16 {
     let credits = credit_footer_rows(area, model);
+    // The left column needs seven body rows to show its headings, navigation,
+    // and at least one row in both independently scrollable sections. Reclaim
+    // footer space on compact terminals before either section disappears.
+    let maximum_footer = area.height.saturating_sub(7);
     let Some(report) = saved_scene_activity_report(model) else {
-        return FOOTER_ROWS + credits;
+        return (FOOTER_ROWS + credits).min(maximum_footer);
     };
     let (summary, activity) = saved_scene_activity_sections(&report);
     let summary_rows = wrapped_rows(&summary, layout(area).panel.width);
     let activity_rows =
         wrapped_rows(&activity, layout(area).panel.width).min(MAX_ACTIVITY_VIEW_ROWS);
     let requested = summary_rows + activity_rows + PINNED_CONTROL_HELP_ROWS + 2 + credits;
-    // Keep at least six rows of the settings panel usable on short terminals;
-    // PageUp/PageDown makes the bounded live-log viewport fully navigable.
-    requested.min(area.height.saturating_sub(6).max(FOOTER_ROWS))
+    // PageUp/PageDown makes the bounded live-log viewport fully navigable;
+    // on short terminals the settings regions take priority over its footer.
+    requested.min(maximum_footer)
 }
 
 fn geometry(area: Rect, model: &RowModel) -> AnimationLayout {
@@ -2494,7 +2498,7 @@ mod tests {
     }
 
     #[test]
-    fn narrow_scene_heading_stays_inside_its_column() {
+    fn narrow_scene_heading_respects_the_column_divider() {
         if std::env::var_os("ILIUM_DUMP_ANIMATION_UI").is_some() {
             let project = tempfile::tempdir().unwrap();
             let app = App::new("dump".into(), project.path().into());
@@ -2515,7 +2519,7 @@ mod tests {
                 .draw(|frame| render(frame, area, &app, &SettingsState::default()))
                 .unwrap();
             let buffer = terminal.backend().buffer();
-            assert_eq!(buffer[(columns.scenes.right(), 0)].symbol(), " ");
+            assert_eq!(buffer[(columns.scenes.right(), 0)].symbol(), "│");
             assert_eq!(buffer[(columns.controls.right() - 1, 0)].symbol(), " ");
         }
     }
@@ -2597,7 +2601,13 @@ mod tests {
         assert!(footer_rows(area, &model) >= required_rows);
 
         let short_area = Rect::new(0, 0, 80, 16);
-        assert!(footer_rows(short_area, &model) <= short_area.height - 6);
+        assert!(footer_rows(short_area, &model) <= short_area.height - 7);
+        for region in [Region::Scenes, Region::Global, Region::Controls] {
+            assert!(
+                visible_rows(short_area, &model, region) > 0,
+                "compact live-activity footer leaves {region:?} without a visible row"
+            );
+        }
     }
 
     #[test]
@@ -2795,7 +2805,7 @@ mod tests {
         let (mut app, probe, _project) = settings_app(100, 30);
         app.animation_settings.kind = AnimationKind::VoxelLandscape;
         *probe.status.lock().unwrap() = Some(
-            "Saved worlds [====..] phase 4/6\nNow: Reading region 12 of 30\nElapsed: 00:42\nETA: 00:18 for this scan\nRecent activity:\n+00:08 Found 420 allocated chunks\n+00:19 Loaded 64 covered chunks"
+            "Saved worlds [====..] phase 4/6\nNow: Reading region 12 of 30\nElapsed: 00:42\nETA: 00:18 for this scan\nTotal ETA: incomplete; route checks remain\nRecent activity:\n+00:08 Found 420 allocated chunks\n+00:19 Loaded 64 covered chunks"
                 .to_owned(),
         );
 
@@ -2807,6 +2817,7 @@ mod tests {
             "Now: Reading region 12 of 30",
             "Elapsed: 00:42",
             "ETA: 00:18 for this scan",
+            "Total ETA: incomplete; route checks remain",
             "+00:08 Found 420 allocated chunks",
             "+00:19 Loaded 64 covered chunks",
         ] {
@@ -4098,6 +4109,28 @@ mod tests {
     }
 
     #[test]
+    fn compact_composed_settings_keeps_all_animation_regions_reachable() {
+        for (width, height) in [(40, 12), (60, 20)] {
+            let (app, _probe, _project) = settings_app(width, height);
+            let area = content_area(&app);
+            let model = app.animation_row_model();
+            for region in [Region::Scenes, Region::Global, Region::Controls] {
+                assert!(
+                    visible_rows(area, &model, region) > 0,
+                    "{width}x{height} gives {region:?} no visible rows in {area:?}"
+                );
+            }
+            for row in 0..model.len() {
+                let scrolls = follow_selection(area, &model, row, Scrolls::default());
+                assert!(
+                    row_rect(area, &model, row, scrolls).is_some(),
+                    "{width}x{height} cannot reveal animation row {row} in {area:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn scroll_and_scrollbar_derive_from_the_row_count() {
         let area = Rect::new(0, 0, 60, 20);
         let model = RowModel::new(&AnimationSettings::default(), &RowContext::default());
@@ -4471,11 +4504,11 @@ mod tests {
         for (width, height) in [(80, 24), (120, 40), (160, 50)] {
             let (mut app, _probe, _project) = settings_app(width, height);
             let terminal = draw(&mut app, width, height);
-            let area = Rect::new(0, 0, width, height);
-            let columns = layout(area);
+            let area = content_area(&app);
+            let columns = geometry(area, &app.animation_row_model());
             let model = app.animation_row_model();
-            let footer_start = height.saturating_sub(footer_rows(area, &model));
-            for y in 0..footer_start {
+            let footer_start = area.bottom().saturating_sub(footer_rows(area, &model));
+            for y in area.y..footer_start {
                 assert_eq!(
                     terminal.backend().buffer()[(columns.scenes.right(), y)].symbol(),
                     "│",

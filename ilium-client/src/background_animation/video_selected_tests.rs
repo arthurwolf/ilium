@@ -87,6 +87,7 @@ fn selected_video_backend_before_review(fixture: &Fixture) -> PluginBackend {
         update_applied: false,
         cancellation: None,
         halted: false,
+        unsettled_world_emissions: Default::default(),
         _setup_retention: setup_retention(fixture),
     });
     backend

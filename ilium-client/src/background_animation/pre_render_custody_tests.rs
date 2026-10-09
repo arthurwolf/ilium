@@ -1023,6 +1023,7 @@ fn backend_with_accepted_workflow(fixture: &Fixture) -> PluginBackend {
         update_applied: true,
         cancellation: None,
         halted: false,
+        unsettled_world_emissions: Default::default(),
         _setup_retention: retention,
     });
     backend

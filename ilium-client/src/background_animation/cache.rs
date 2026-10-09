@@ -495,7 +495,7 @@ mod tests {
             mode: ilium_animation_js::manifest::AnimationMode::Live,
             settings: serde_json::json!({"density": 64}),
         });
-        returned.semantic_scope = super::SemanticScope::Entry;
+        returned.semantic_scope = crate::background_animation::SemanticScope::Entry;
 
         cache.begin(&returned, 24, 12);
 
