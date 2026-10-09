@@ -60,6 +60,12 @@ pub mod native_saved_factory;
     feature = "native-network"
 ))]
 mod native_source_baseline;
+#[cfg(all(
+    feature = "v8-runtime",
+    feature = "native-host",
+    feature = "native-network"
+))]
+pub mod native_source_capture;
 pub mod native_source_host;
 pub mod native_storage;
 #[cfg(all(feature = "native-host", feature = "v8-runtime"))]

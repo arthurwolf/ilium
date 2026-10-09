@@ -353,6 +353,22 @@ pub struct Channel {
     issuer: Arc<()>,
     stamp: Stamp,
 } // Never reconstruct from helper-supplied IDs.
+/// Read-only identity fence for an asynchronous capture producer. It carries
+/// no grant and can only prove that the exact original channel is still live.
+#[derive(Debug, Clone)]
+pub(crate) struct SourceCaptureFence {
+    issuer: Arc<()>,
+    stamp: Stamp,
+}
+impl SourceCaptureFence {
+    pub(crate) fn coordinates(&self) -> (u64, u64, u64) {
+        (
+            self.stamp.instance_id,
+            self.stamp.plan_revision,
+            self.stamp.epoch,
+        )
+    }
+}
 #[derive(Debug)] // The caller receives a channel and an informational plan copy.
 pub struct Activation {
     pub channel: Channel,
@@ -937,6 +953,26 @@ impl PermissionBroker {
             active.plan.plan_revision,
             active.plan.authorization_epoch,
         ))
+    }
+    pub(crate) fn source_capture_fence(&self, channel: &Channel) -> Result<SourceCaptureFence> {
+        self.active(channel)?;
+        Ok(SourceCaptureFence {
+            issuer: Arc::clone(&self.issuer),
+            stamp: channel.stamp,
+        })
+    }
+    pub(crate) fn check_source_capture_fence(
+        &self,
+        fence: &SourceCaptureFence,
+    ) -> Result<(u64, u64, u64)> {
+        if !Arc::ptr_eq(&fence.issuer, &self.issuer) {
+            return Err(PermissionError::WrongBroker);
+        }
+        let channel = Channel {
+            issuer: Arc::clone(&fence.issuer),
+            stamp: fence.stamp,
+        };
+        self.channel_coordinates(&channel)
     }
     /// Commit a trusted host frame to the terminal owner before its first
     /// backend call. This operation uses the current private channel, not a
@@ -1852,6 +1888,32 @@ mod tests {
             .settle_without_delivery(&ticket)
             .expect("original physical completion cleanup");
         assert_eq!(original.pending_operations(), 0);
+    }
+    #[test]
+    fn source_capture_fence_is_private_read_only_and_revocation_sensitive() {
+        let mut original = broker(true, vec![net()]);
+        let active = net_active(&mut original, 1, 1);
+        let fence = original
+            .source_capture_fence(&active.channel)
+            .expect("current channel yields capture fence");
+        assert_eq!(
+            original
+                .check_source_capture_fence(&fence)
+                .expect("current fence remains readable"),
+            (1, 1, 1)
+        );
+
+        let foreign = broker(true, vec![net()]);
+        assert!(matches!(
+            foreign.check_source_capture_fence(&fence),
+            Err(PermissionError::WrongBroker)
+        ));
+
+        original.revoke(net()).expect("revoke original channel");
+        assert!(matches!(
+            original.check_source_capture_fence(&fence),
+            Err(PermissionError::Stale)
+        ));
     }
     #[test] // Canonical origins are stable but ports/methods are not widened.
     fn canonical_scopes_and_exact_containment() {

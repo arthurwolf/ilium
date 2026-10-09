@@ -2,6 +2,15 @@
 use crate::error::{AnimationError, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
+use std::{
+    io::{self, Write},
+    mem::{size_of, size_of_val},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+};
 
 pub(crate) fn fail<T>(message: &str) -> Result<T> {
     Err(AnimationError::Runtime(format!("sources: {message}")))
@@ -418,6 +427,133 @@ pub struct WeatherSnapshot {
     pub attribution: String,
 }
 
+/// Fingerprint and resident-size accounting computed on the source CPU owner
+/// when the immutable snapshot is admitted. Replay capture only reads this
+/// fixed-size value; it never hashes provider data while holding the broker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SourceSnapshotFingerprint {
+    pub payload_digest: [u8; 32],
+    pub image_digest: [u8; 32],
+    pub content_digest: [u8; 32],
+    pub payload_bytes: usize,
+    pub image_bytes: usize,
+    pub resident_bytes: usize,
+}
+
+struct SnapshotDigestWriter<'a> {
+    digest: &'a mut Sha256,
+    stop: &'a AtomicBool,
+}
+
+impl Write for SnapshotDigestWriter<'_> {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        if self.stop.load(Ordering::Acquire) {
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "source capture cancelled",
+            ));
+        }
+        self.digest.update(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+fn fingerprint_snapshot(
+    snapshot: &SourceSnapshot,
+    images: &Vec<super::NativeSourceImage>,
+    stop: &AtomicBool,
+) -> Result<SourceSnapshotFingerprint> {
+    let payload_bytes = snapshot.owned_bytes()?;
+    super::cancelled(stop)?;
+
+    let mut payload_hasher = Sha256::new();
+    payload_hasher.update(b"ilium-native-source-payload-v1\0");
+    serde_json::to_writer(
+        &mut SnapshotDigestWriter {
+            digest: &mut payload_hasher,
+            stop,
+        },
+        snapshot,
+    )?;
+    super::cancelled(stop)?;
+    let payload_digest = payload_hasher.finalize().into();
+
+    let mut image_hasher = Sha256::new();
+    image_hasher.update(b"ilium-native-source-images-v1\0");
+    image_hasher.update(
+        u64::try_from(images.len())
+            .map_err(|_| AnimationError::Budget("source image count overflow".into()))?
+            .to_le_bytes(),
+    );
+    let image_slots_bytes = images
+        .capacity()
+        .checked_mul(size_of::<super::NativeSourceImage>())
+        .ok_or_else(|| AnimationError::Budget("source image slot bytes overflow".into()))?;
+    let mut image_bytes = size_of::<Vec<super::NativeSourceImage>>()
+        .checked_add(image_slots_bytes)
+        .ok_or_else(|| AnimationError::Budget("source image bytes overflow".into()))?;
+
+    for (index, image) in images.iter().enumerate() {
+        super::cancelled(stop)?;
+        let pixels_owner = image.admitted_pixels();
+        let pixels = pixels_owner.view();
+        image_hasher.update(
+            u64::try_from(index)
+                .map_err(|_| AnimationError::Budget("source image index overflow".into()))?
+                .to_le_bytes(),
+        );
+        image_hasher.update(pixels.width.to_le_bytes());
+        image_hasher.update(pixels.height.to_le_bytes());
+        image_hasher.update(
+            u64::try_from(pixels.rgba.len())
+                .map_err(|_| AnimationError::Budget("source pixel length overflow".into()))?
+                .to_le_bytes(),
+        );
+        for chunk in pixels.rgba.chunks(64 * 1024) {
+            super::cancelled(stop)?;
+            image_hasher.update(chunk);
+        }
+
+        if images[..index]
+            .iter()
+            .any(|previous| Arc::ptr_eq(previous.admitted_pixels(), pixels_owner))
+        {
+            continue;
+        }
+        let allocation_bytes = size_of_val(pixels)
+            .checked_add(pixels.rgba.capacity())
+            .ok_or_else(|| AnimationError::Budget("source admitted pixel bytes overflow".into()))?;
+        image_bytes = image_bytes
+            .checked_add(allocation_bytes)
+            .ok_or_else(|| AnimationError::Budget("source image resident bytes overflow".into()))?;
+    }
+    let image_digest = image_hasher.finalize().into();
+    let inline_bytes = size_of::<AdmittedSourceSnapshot>()
+        .checked_sub(size_of::<SourceSnapshot>() + size_of::<Vec<super::NativeSourceImage>>())
+        .ok_or_else(|| AnimationError::Budget("source snapshot inline bytes overflow".into()))?;
+    let resident_bytes = payload_bytes
+        .checked_add(image_bytes)
+        .and_then(|bytes| bytes.checked_add(inline_bytes))
+        .ok_or_else(|| AnimationError::Budget("source capture resident bytes overflow".into()))?;
+    let mut content_hasher = Sha256::new();
+    content_hasher.update(b"ilium-native-source-content-v1\0");
+    content_hasher.update(payload_digest);
+    content_hasher.update(image_digest);
+    let content_digest = content_hasher.finalize().into();
+    Ok(SourceSnapshotFingerprint {
+        payload_digest,
+        image_digest,
+        content_digest,
+        payload_bytes,
+        image_bytes,
+        resident_bytes,
+    })
+}
+
 /// Immutable cache/delivery ownership. Arc cloning shares this SAME debit;
 /// deep copying the payload requires a newly reserved snapshot admission.
 #[derive(Debug, Serialize)]
@@ -428,6 +564,8 @@ pub struct AdmittedSourceSnapshot {
     _admission: ilium_execution::StorageAdmission,
     #[serde(skip)]
     images: Vec<super::NativeSourceImage>,
+    #[serde(skip)]
+    capture_fingerprint: SourceSnapshotFingerprint,
 }
 impl AdmittedSourceSnapshot {
     pub fn view(&self) -> &SourceSnapshot {
@@ -436,19 +574,33 @@ impl AdmittedSourceSnapshot {
     pub fn native_images(&self) -> &[super::NativeSourceImage] {
         &self.images
     }
+    pub(crate) fn capture_fingerprint(&self) -> SourceSnapshotFingerprint {
+        self.capture_fingerprint
+    }
     pub(crate) fn new(
         snapshot: SourceSnapshot,
         admission: ilium_execution::StorageAdmission,
         images: Vec<super::NativeSourceImage>,
-    ) -> Self {
-        Self {
+        stop: &AtomicBool,
+    ) -> Result<Self> {
+        let capture_fingerprint = fingerprint_snapshot(&snapshot, &images, stop)?;
+        Ok(Self {
             snapshot,
             _admission: admission,
             images,
-        }
+            capture_fingerprint,
+        })
     }
 }
 impl SourceSnapshot {
+    pub(crate) fn revision(&self) -> u64 {
+        match self {
+            Self::Series(snapshot) => snapshot.metadata.revision,
+            Self::Geographic(snapshot) => snapshot.metadata.revision,
+            Self::Chess(snapshot) => snapshot.metadata.revision,
+            Self::Weather(snapshot) => snapshot.metadata.revision,
+        }
+    }
     /// Compact full-feed vector capacity before publishing projected results.
     /// This runs while the separate fetch peak debit is still held.
     pub(crate) fn compact(&mut self) {

@@ -182,6 +182,7 @@ fn actual_prepared_helper_issues_opaque_source_free_replay_certificate() {
             appearance_digest: [6; 32],
             certification,
             frozen,
+            source_sequence: None,
             evidence,
         },
     )

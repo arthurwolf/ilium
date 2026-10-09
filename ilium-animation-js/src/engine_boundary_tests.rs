@@ -111,8 +111,15 @@ fn gray_spec() -> [ArraySpec; 1] {
 fn boundary_inventory_is_private_getter_free_deduplicated_and_phase_is_restored() {
     // Observe actual intrinsic buffer identities and lifecycle phases.
     let (_serial, quota) = fixture_lock(); // Serialize the shared V8 platform and root-accounting fixture.
-    let bootstrap = format!("{SIMPLE}\n__ilium_make_frame=()=>{{globalThis.data=new Float32Array(4);return {{get gray(){{throw Error('DRAWING_GETTER_EXECUTED')}},present(){{}}}}}};\n__ilium_frame_buffers=()=>{{if(__ilium_service_phase()!==4)throw Error('inventory_phase');return {{first:data,second:new Uint8Array(data.buffer)}}}};"); // The private inventory includes two views of one real backing buffer.
-    let mut engine = engine("export async function create(){return {render(c,f){globalThis.render_phase=__ilium_service_phase();f.present()},dispose(){}}}", &bootstrap, EngineLimits::default(), quota);
+    let bootstrap = format!(
+        "{SIMPLE}\n__ilium_make_frame=()=>{{globalThis.data=new Float32Array(4);return {{get gray(){{throw Error('DRAWING_GETTER_EXECUTED')}},present(){{}}}}}};\n__ilium_frame_buffers=()=>{{if(__ilium_service_phase()!==4)throw Error('inventory_phase');return {{first:data,second:new Uint8Array(data.buffer)}}}};"
+    ); // The private inventory includes two views of one real backing buffer.
+    let mut engine = engine(
+        "export async function create(){return {render(c,f){globalThis.render_phase=__ilium_service_phase();f.present()},dispose(){}}}",
+        &bootstrap,
+        EngineLimits::default(),
+        quota,
+    );
     let records = observe(&mut engine); // Test globals drop before the isolate even on failure.
     assert_eq!(
         engine
@@ -135,20 +142,58 @@ fn boundary_inventory_is_private_getter_free_deduplicated_and_phase_is_restored(
 fn boundary_bad_inventory_never_falls_back_and_partial_inventory_detaches() {
     // Cover wrong values, hidden accessors, symbols, and whole-inventory overflow.
     let (_serial, quota) = fixture_lock(); // Use only the existing original-root fixture.
-    for (inventory, reason, retained) in [("({first:data,bad:null})", "frame inventory view type", 1), ("Object.defineProperty({first:data},'bad',{get(){throw Error('PRIVATE_GETTER_EXECUTED')}})", "service accessor properties", 1), ("({[Symbol('bad')]:data})", "frame inventory symbol key", 0), ("Object.fromEntries(Array.from({length:49},(_,index)=>['p'+index,data]))", "frame inventory plane count", 0)] { // Each counterexample is independently constructed and bounded.
-        let bootstrap = format!("{SIMPLE}\n__ilium_make_frame=()=>{{globalThis.data=new Float32Array(4);return {{get gray(){{throw Error('DRAWING_GETTER_EXECUTED')}},present(){{}}}}}};\n__ilium_frame_buffers=()=>{inventory};"); // A fallback would produce a different error instead of the specific native inventory rejection.
-        let mut engine = engine("export async function create(){return {render(){throw Error('RENDER_MUST_NOT_RUN')},dispose(){}}}", &bootstrap, EngineLimits::default(), quota.clone()); let records = observe(&mut engine); // Keep actual collected buffers visible to native test code after failure.
-        assert_eq!(engine.start_create(&serde_json::json!({}), &serde_json::json!({})).unwrap(), CreateState::Ready); // The fixture fails only at the intended inventory boundary.
-        let error = engine.render(&serde_json::json!({}), &gray_spec()).unwrap_err().to_string(); assert!(error.contains(reason), "{error}"); // Never accept fallback, render execution, or a misleading generic getter error.
-        assert_eq!(records.borrow().len(), retained); assert!(detached(&mut engine, &records).iter().all(|value| *value)); // Buffers discovered before a later malformed entry are detached by the actual finally path.
-        assert!(engine.is_invalid()); assert_eq!(engine.bridge.borrow().phase, Phase::Idle); // Failure closes the native inventory phase instead of leaving a callable private-data window.
+    for (inventory, reason, retained) in [
+        ("({first:data,bad:null})", "frame inventory view type", 1),
+        (
+            "Object.defineProperty({first:data},'bad',{get(){throw Error('PRIVATE_GETTER_EXECUTED')}})",
+            "service accessor properties",
+            1,
+        ),
+        ("({[Symbol('bad')]:data})", "frame inventory symbol key", 0),
+        (
+            "Object.fromEntries(Array.from({length:49},(_,index)=>['p'+index,data]))",
+            "frame inventory plane count",
+            0,
+        ),
+    ] {
+        // Each counterexample is independently constructed and bounded.
+        let bootstrap = format!(
+            "{SIMPLE}\n__ilium_make_frame=()=>{{globalThis.data=new Float32Array(4);return {{get gray(){{throw Error('DRAWING_GETTER_EXECUTED')}},present(){{}}}}}};\n__ilium_frame_buffers=()=>{inventory};"
+        ); // A fallback would produce a different error instead of the specific native inventory rejection.
+        let mut engine = engine(
+            "export async function create(){return {render(){throw Error('RENDER_MUST_NOT_RUN')},dispose(){}}}",
+            &bootstrap,
+            EngineLimits::default(),
+            quota.clone(),
+        );
+        let records = observe(&mut engine); // Keep actual collected buffers visible to native test code after failure.
+        assert_eq!(
+            engine
+                .start_create(&serde_json::json!({}), &serde_json::json!({}))
+                .unwrap(),
+            CreateState::Ready
+        ); // The fixture fails only at the intended inventory boundary.
+        let error = engine
+            .render(&serde_json::json!({}), &gray_spec())
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains(reason), "{error}"); // Never accept fallback, render execution, or a misleading generic getter error.
+        assert_eq!(records.borrow().len(), retained);
+        assert!(detached(&mut engine, &records).iter().all(|value| *value)); // Buffers discovered before a later malformed entry are detached by the actual finally path.
+        assert!(engine.is_invalid());
+        assert_eq!(engine.bridge.borrow().phase, Phase::Idle); // Failure closes the native inventory phase instead of leaving a callable private-data window.
     } // Each failed isolate is physically owned and dropped before the next case.
 } // No absent-hook fallback may be triggered by malformed present data.
 #[test] // Original absence is immutable and only that absence selects the legacy path.
 fn boundary_optional_inventory_absence_is_sealed_before_package_evaluation() {
     // A guest cannot install a fake empty inventory to evade cleanup.
     let (_serial, quota) = fixture_lock();
-    let mut engine = engine("globalThis.replaced=false;try{Object.defineProperty(globalThis,'__ilium_frame_buffers',{value:()=>({})});replaced=true}catch{} export async function create(){return {render(c,f){f.present()},dispose(){}}}", SIMPLE, EngineLimits::default(), quota);
+    let mut engine = engine(
+        "globalThis.replaced=false;try{Object.defineProperty(globalThis,'__ilium_frame_buffers',{value:()=>({})});replaced=true}catch{} export async function create(){return {render(c,f){f.present()},dispose(){}}}",
+        SIMPLE,
+        EngineLimits::default(),
+        quota,
+    );
     let records = observe(&mut engine); // The package attempts substitution before creation.
     assert_eq!(engine.evaluate_json("(()=>{const d=Object.getOwnPropertyDescriptor(globalThis,'__ilium_frame_buffers');return [replaced,typeof d.value,d.writable,d.configurable,d.enumerable]})()").unwrap(), serde_json::json!([false,"undefined",false,false,false])); // Sealed undefined is a concrete original absence, not permission for later package registration.
     assert_eq!(
@@ -165,7 +210,12 @@ fn boundary_optional_inventory_absence_is_sealed_before_package_evaluation() {
 fn boundary_production_render_throw_detaches_all_private_working_and_sealed_buffers() {
     // Use the complete production bootstrap, not a fake buffer-length field.
     let (_serial, quota) = fixture_lock();
-    let mut engine = engine("export async function create(){return {render(c,f){f.gray[0]=0.5;f.present();throw Error('expected_render_failure')},dispose(){}}}", crate::TRUSTED_BOOTSTRAP, EngineLimits::default(), quota);
+    let mut engine = engine(
+        "export async function create(){return {render(c,f){f.gray[0]=0.5;f.present();throw Error('expected_render_failure')},dispose(){}}}",
+        crate::TRUSTED_BOOTSTRAP,
+        EngineLimits::default(),
+        quota,
+    );
     let records = observe(&mut engine); // The observer reads only native buffer bits after failure.
     assert_eq!(
         engine
@@ -212,7 +262,12 @@ fn boundary_deadline_and_cancel_aliases_retain_original_quota_and_do_not_execute
         pending_requests: 1,
         ..EngineLimits::default()
     }; // Tighten one fixture dimension without raising any quota.
-    let mut engine = engine("export async function create(){globalThis.answer=await __ilium_dispatch('fixture.bytes',{data:new Uint8Array([1,2,3])});return {render(){},dispose(){}}}", SIMPLE, limits.clone(), quota.clone()); // Dispatch actual typed input through the native callback.
+    let mut engine = engine(
+        "export async function create(){globalThis.answer=await __ilium_dispatch('fixture.bytes',{data:new Uint8Array([1,2,3])});return {render(){},dispose(){}}}",
+        SIMPLE,
+        limits.clone(),
+        quota.clone(),
+    ); // Dispatch actual typed input through the native callback.
     assert_eq!(
         engine
             .start_create(&serde_json::json!({}), &serde_json::json!({}))
@@ -299,7 +354,12 @@ fn own_number(engine: &mut Engine, name: &str) -> f64 {
 fn boundary_completion_is_inert_even_with_poisoned_then_and_runs_only_on_later_pump() {
     // Native result copying and JS continuation execution are distinct boundaries.
     let (_serial, quota) = fixture_lock();
-    let mut engine=engine("export async function create(){globalThis.then_hits=0;globalThis.continuations=0;const pending=__ilium_dispatch('fixture.result',{});Object.defineProperty(Object.prototype,'then',{configurable:true,get(){then_hits++;throw Error('then_getter')}});globalThis.received=await pending;continuations++;delete Object.prototype.then;return {render(){},dispose(){}}}",SIMPLE,EngineLimits::default(),quota.clone()); // A inherited root typed-array then getter would run synchronously without the native shield.
+    let mut engine = engine(
+        "export async function create(){globalThis.then_hits=0;globalThis.continuations=0;const pending=__ilium_dispatch('fixture.result',{});Object.defineProperty(Object.prototype,'then',{configurable:true,get(){then_hits++;throw Error('then_getter')}});globalThis.received=await pending;continuations++;delete Object.prototype.then;return {render(){},dispose(){}}}",
+        SIMPLE,
+        EngineLimits::default(),
+        quota.clone(),
+    ); // A inherited root typed-array then getter would run synchronously without the native shield.
     assert_eq!(
         engine
             .start_create(&serde_json::json!({}), &serde_json::json!({}))

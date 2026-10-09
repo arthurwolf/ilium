@@ -351,6 +351,39 @@ fn actual_helper_original_source_feed_open_ack_refresh_seed_and_retirement() {
     );
     assert_eq!(instance.pump().unwrap(), CreateState::Ready);
     seed(&mut instance, &descriptor, &quota);
+    let first_capture = feed.capture_latest(&instance, 2 * 1024 * 1024).unwrap();
+    let first_summary = first_capture.summary(&instance).unwrap();
+    assert_eq!(
+        first_summary.family,
+        crate::replay::InputFamily::Earthquakes
+    );
+    assert_eq!(first_summary.source_revision, 1);
+    assert!(!first_capture.replay_lineage().is_empty());
+    let first_frozen = crate::replay::FrozenInputSnapshot::from_native(
+        first_summary.family,
+        native_id,
+        first_summary.source_revision,
+        first_capture.to_frozen_service_value(&instance).unwrap(),
+    )
+    .unwrap();
+    first_capture
+        .verify_frozen_snapshot(&instance, &first_frozen)
+        .unwrap();
+    let frozen_recording = crate::replay::FrozenInputs::from_capture(
+        quota.clone(),
+        "native-feed-recording",
+        vec![first_frozen],
+        2 * 1024 * 1024,
+        Some(1_700_000_000_000),
+        "native feed source capture",
+        first_capture.replay_lineage(),
+    )
+    .unwrap();
+    assert_eq!(frozen_recording.snapshots().len(), 1);
+    assert_eq!(
+        frozen_recording.snapshots()[0].revision(),
+        first_summary.source_revision
+    );
 
     let due = feed.next_due_ms().unwrap().unwrap();
     assert!(feed
@@ -362,6 +395,10 @@ fn actual_helper_original_source_feed_open_ack_refresh_seed_and_retirement() {
             }
         )
         .unwrap());
+    assert!(
+        feed.capture_latest(&instance, 2 * 1024 * 1024).is_err(),
+        "capture must refuse while a real feed refresh is unsettled"
+    );
     let mut refreshed = None;
     for _ in 0..8 {
         wake(&rx);
@@ -389,6 +426,44 @@ fn actual_helper_original_source_feed_open_ack_refresh_seed_and_retirement() {
     feed.resume(refresh).unwrap();
     assert_eq!(descriptor.metadata()["revision"], 2);
     seed(&mut instance, &descriptor, &quota);
+    let second_capture = feed.capture_latest(&instance, 2 * 1024 * 1024).unwrap();
+    let second_summary = second_capture.summary(&instance).unwrap();
+    assert_eq!(
+        second_summary.family,
+        crate::replay::InputFamily::Earthquakes
+    );
+    assert_eq!(second_summary.source_revision, 2);
+    assert_eq!(second_summary.payload_digest, first_summary.payload_digest);
+    assert_eq!(
+        second_capture.replay_lineage().len(),
+        first_capture.replay_lineage().len()
+    );
+    let second_frozen = crate::replay::FrozenInputSnapshot::from_native(
+        second_summary.family,
+        native_id,
+        second_summary.source_revision,
+        second_capture.to_frozen_service_value(&instance).unwrap(),
+    )
+    .unwrap();
+    second_capture
+        .verify_frozen_snapshot(&instance, &second_frozen)
+        .unwrap();
+    let sequence = crate::replay::FrozenSourceSequence::from_native(
+        quota.clone(),
+        2_000,
+        vec![
+            crate::replay::FrozenSourceFrame::from_native(0, frozen_recording.snapshots().to_vec()),
+            crate::replay::FrozenSourceFrame::from_native(1_000, vec![second_frozen]),
+        ],
+        8,
+        2 * 1024 * 1024,
+    )
+    .unwrap();
+    assert_eq!(sequence.frame_at(0).unwrap().snapshots()[0].revision(), 1);
+    assert_eq!(
+        sequence.frame_at(1_000).unwrap().snapshots()[0].revision(),
+        2
+    );
     assert!(
         offline.bodies.lock().unwrap().is_empty(),
         "two real IO jobs consumed exactly two local bodies"
@@ -402,6 +477,8 @@ fn actual_helper_original_source_feed_open_ack_refresh_seed_and_retirement() {
     assert!(stopped.authority_error.is_none());
     stopped.cancellation.unwrap();
     assert!(instance.is_physically_retired());
+    assert!(first_capture.summary(&instance).is_err());
+    assert!(second_capture.summary(&instance).is_err());
     execution.request_shutdown(ShutdownMode::Drain);
     let joined = execution
         .join_until_background(Instant::now() + Duration::from_secs(3))
@@ -651,6 +728,19 @@ export async function create(host){
     assert_eq!(imported.len(), 1);
     let image_id = &imported[0];
     assert!(drawing.owns_source_image(image_id));
+    let original_image = completion
+        .authorized_output(&instance)
+        .unwrap()
+        .native_images()[0]
+        .clone();
+    let repeated_descriptor = drawing
+        .retain_source_image(&mut instance, &original_image)
+        .unwrap();
+    assert_eq!(
+        repeated_descriptor["id"].as_str(),
+        Some(image_id.as_str()),
+        "replay reuse of one admitted image must not allocate duplicate native handles"
+    );
     assert_eq!(
         completion.publish(&mut instance, value).unwrap(),
         CompletionState::Delivered
@@ -687,6 +777,12 @@ export async function create(host){
     assert!(
         completion.authorized_output(&instance).is_err(),
         "the copied terminal cannot revive source rights after revocation"
+    );
+    assert!(
+        drawing
+            .retain_source_image(&mut instance, &original_image)
+            .is_err(),
+        "a cached image alias cannot cross a revoked activation"
     );
     drop(completion);
     drop(actor);

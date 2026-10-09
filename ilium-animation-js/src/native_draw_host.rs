@@ -24,6 +24,7 @@ use std::{
 };
 static NEXT_WORLD_FRAME_KEY: AtomicU64 = AtomicU64::new(1);
 const MAX_PREPARED: usize = 64;
+const MAX_RETAINED_WORLD_BINDINGS: usize = 8192;
 struct GuardedDraw<'a> {
     binding: &'a DrawBinding,
     prepared: &'a BTreeMap<String, PreparedBlit>,
@@ -54,8 +55,12 @@ pub struct NativeDrawHost {
     media: NativeMedia,
     prepared: BTreeMap<String, PreparedBlit>,
     source_images: BTreeMap<String, crate::native_media::ImageHandle>,
+    source_image_aliases: BTreeMap<(usize, String, u64, u64, u64), String>,
     video_images: BTreeMap<String, crate::native_media::ImageHandle>,
     world_frames: BTreeSet<String>,
+    /// Bindings for tokens still present in the canonical Surface survive a
+    /// guest-side frame close. The final plugin snapshot may be emitted later.
+    retained_world_bindings: Vec<Arc<WorldDotBinding>>,
     quota: QuotaGroup,
     limits: DrawLimits,
     _metadata: StorageAdmission,
@@ -63,15 +68,25 @@ pub struct NativeDrawHost {
 impl NativeDrawHost {
     pub fn new(quota: QuotaGroup, media_limits: MediaLimits, limits: DrawLimits) -> Result<Self> {
         let metadata = quota
-            .reserve_external_storage(MAX_PREPARED * 1024)
+            .reserve_external_storage(
+                MAX_PREPARED * 1024
+                    + MAX_RETAINED_WORLD_BINDINGS * 8
+                    + (MAX_RETAINED_WORLD_BINDINGS + MAX_PREPARED) * 16,
+            )
             .map_err(|error| AnimationError::Budget(format!("native draw registry: {error:?}")))?;
         let media = NativeMedia::new(quota.clone(), media_limits)?;
+        let mut retained_world_bindings = Vec::new();
+        retained_world_bindings
+            .try_reserve_exact(MAX_RETAINED_WORLD_BINDINGS)
+            .map_err(|_| AnimationError::Budget("world binding retention admission".into()))?;
         Ok(Self {
             media,
             prepared: BTreeMap::new(),
             source_images: BTreeMap::new(),
+            source_image_aliases: BTreeMap::new(),
             video_images: BTreeMap::new(),
             world_frames: BTreeSet::new(),
+            retained_world_bindings,
             quota,
             limits,
             _metadata: metadata,
@@ -275,19 +290,17 @@ impl NativeDrawHost {
         })?;
         Ok(())
     }
-    /// Retain only the bindings whose native prepared entries still exist.
-    /// The caller stores them with an accepted frame until terminal receipt.
+    /// Current handles and bindings still named by canonical Surface owners.
+    /// Closed handles may remain here until their retained pixels are replaced.
     pub fn world_bindings(&self) -> Vec<Arc<WorldDotBinding>> {
-        let mut bindings: Vec<_> = self
-            .world_frames
-            .iter()
-            .filter_map(|key| {
-                self.prepared
-                    .get(key)
-                    .and_then(PreparedBlit::world_dot_binding)
-            })
-            .collect();
+        let mut bindings = self.retained_world_bindings.clone();
+        bindings.extend(self.world_frames.iter().filter_map(|key| {
+            self.prepared
+                .get(key)
+                .and_then(PreparedBlit::world_dot_binding)
+        }));
         bindings.sort_unstable_by_key(|binding| binding.range_start());
+        bindings.dedup_by_key(|binding| binding.range_start());
         bindings
     }
     pub fn release_video_image(&mut self, key: &str) -> Result<()> {
@@ -347,6 +360,28 @@ impl NativeDrawHost {
         let authority = instance.frame_authority().ok_or_else(|| {
             AnimationError::PermissionDenied("source image activation missing".into())
         })?;
+        let alias = (
+            image.allocation_key(),
+            authority.package_digest.clone(),
+            authority.instance_id,
+            authority.plan_generation,
+            authority.authorization_epoch,
+        );
+        if let Some(key) = self.source_image_aliases.get(&alias) {
+            if let Some(handle) = self.source_images.get(key).copied() {
+                instance.with_source_registration_authority(&authority, || ())?;
+                let pixels = self.media.snapshot(handle)?;
+                let pixels = pixels.view();
+                return Ok(json!({
+                    "id": key,
+                    "kind": "image",
+                    "width": pixels.width,
+                    "height": pixels.height,
+                    "format": "rgba8",
+                    "sha256": format!("{:x}", Sha256::digest(&pixels.rgba)),
+                }));
+            }
+        }
         let binding = DrawBinding {
             package_digest: authority.package_digest.clone(),
             instance_id: authority.instance_id,
@@ -381,6 +416,7 @@ impl NativeDrawHost {
         let pixels = image.admitted_pixels().view();
         let sha256 = format!("{:x}", Sha256::digest(&pixels.rgba));
         self.source_images.insert(key.clone(), handle);
+        self.source_image_aliases.insert(alias, key.clone());
         Ok(
             json!({"id":key,"kind":"image","width":pixels.width,"height":pixels.height,"format":"rgba8","sha256":sha256}),
         )
@@ -397,6 +433,8 @@ impl NativeDrawHost {
             .source_images
             .remove(key)
             .ok_or_else(|| AnimationError::Runtime("unknown admitted source image".into()))?;
+        self.source_image_aliases
+            .retain(|_, registered| registered != key);
         self.prepared.remove(key);
         self.media.close(handle)
     }
@@ -421,7 +459,7 @@ impl NativeDrawHost {
             authorization_epoch: authority.authorization_epoch,
         };
         let shape = metadata.shape;
-        instance
+        let outcome = instance
             .with_frame_authority(&authority, || {
                 // Procedural typed-plane frames need no native geometry scratch.
                 // Still commit their canonical frame under the same real guard.
@@ -443,11 +481,34 @@ impl NativeDrawHost {
                 )?;
                 surface.finish_with(metadata, planes, &mut renderer, publish)
             })?
-            .map_err(|error| AnimationError::Runtime(format!("native drawing: {error}")))
+            .map_err(|error| AnimationError::Runtime(format!("native drawing: {error}")))?;
+        self.retain_world_bindings_for_surface(surface);
+        Ok(outcome)
+    }
+    fn retain_world_bindings_for_surface(&mut self, surface: &Surface) {
+        let mut bindings = self.world_bindings();
+        let mut used = vec![false; bindings.len()];
+        for token in surface.snapshot().owners().iter().flatten() {
+            let insertion =
+                bindings.partition_point(|binding| binding.range_start() <= token.evidence_key());
+            if insertion > 0 && bindings[insertion - 1].owns_token_range(*token) {
+                used[insertion - 1] = true;
+            }
+        }
+        self.retained_world_bindings.clear();
+        self.retained_world_bindings.extend(
+            bindings
+                .drain(..)
+                .zip(used)
+                .filter_map(|(binding, is_used)| is_used.then_some(binding)),
+        );
+        debug_assert!(self.retained_world_bindings.len() <= MAX_RETAINED_WORLD_BINDINGS);
     }
     pub fn revoke(&mut self) {
         self.prepared.clear();
         self.world_frames.clear();
+        self.retained_world_bindings.clear();
+        self.source_image_aliases.clear();
         for (_, handle) in std::mem::take(&mut self.source_images) {
             let _ = self.media.close(handle);
         }

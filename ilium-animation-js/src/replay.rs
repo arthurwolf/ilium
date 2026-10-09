@@ -2,6 +2,10 @@
 //! Trusted adapters certify determinism/frozen inputs, retain native source
 //! evidence, retire preparation custody, and settle actual terminal emissions.
 //! This module does not implement disk compression or a saved-world adapter.
+#[cfg(feature = "v8-runtime")]
+use crate::engine::{ServiceValue, TypedArrayKind};
+#[cfg(feature = "v8-runtime")]
+use crate::sources::NativeSourceImage;
 use crate::{
     clip_chunk_store::{ClipChunkReader, ClipChunkStore, ClipChunkWriter, ProceduralFrame},
     clock::{AnimationClock, ClockSample},
@@ -222,7 +226,7 @@ pub struct ReplayFlushedProof {
     _storage: StorageAdmission,
 }
 impl ReplayFlushedProof {
-    pub(crate) fn from_native(
+    pub fn from_native(
         broker: Arc<Mutex<PermissionBroker>>,
         authority: ReplayAuthority,
         frame_stamp: Option<Arc<TerminalFrameStamp>>,
@@ -269,6 +273,393 @@ pub enum InputFamily {
     Astronomy,
     Weather,
 }
+/// Exact immutable value accepted from one original native service handle.
+/// The value itself remains backed by its original-root quota admission.
+#[cfg(feature = "v8-runtime")]
+#[derive(Clone)]
+pub struct FrozenInputSnapshot {
+    family: InputFamily,
+    handle_id: String,
+    revision: u64,
+    value: ServiceValue,
+    native_images: Vec<NativeSourceImage>,
+}
+#[cfg(feature = "v8-runtime")]
+impl FrozenInputSnapshot {
+    /// Construct a source value admitted by a trusted native adapter. Guest
+    /// packages cannot call this API; runtime certificates bind these values
+    /// to the original broker lineage before they can enter a clip.
+    pub fn from_native(
+        family: InputFamily,
+        handle_id: &str,
+        revision: u64,
+        value: ServiceValue,
+    ) -> Result<Self> {
+        Self::from_native_with_images(family, handle_id, revision, value, Vec::new())
+    }
+    /// Construct a native-captured source value while retaining the exact
+    /// admitted image allocations referenced by its native image slots.
+    pub fn from_native_with_images(
+        family: InputFamily,
+        handle_id: &str,
+        revision: u64,
+        value: ServiceValue,
+        native_images: Vec<NativeSourceImage>,
+    ) -> Result<Self> {
+        name(handle_id)?;
+        if revision == 0 {
+            return Err(failure("frozen input revision is zero"));
+        }
+        if native_images.len() > 64 || (!native_images.is_empty() && family != InputFamily::Weather)
+        {
+            return Err(failure("frozen native image inventory"));
+        }
+        Ok(Self {
+            family,
+            handle_id: handle_id.to_owned(),
+            revision,
+            value,
+            native_images,
+        })
+    }
+    pub fn family(&self) -> InputFamily {
+        self.family
+    }
+    pub fn handle_id(&self) -> &str {
+        &self.handle_id
+    }
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+    pub fn value(&self) -> &ServiceValue {
+        &self.value
+    }
+    pub fn native_images(&self) -> &[NativeSourceImage] {
+        &self.native_images
+    }
+    fn wire_bytes(&self) -> Result<usize> {
+        self.native_images
+            .iter()
+            .try_fold(self.value.wire_bytes(), |total, image| {
+                total
+                    .checked_add(image.admitted_pixels().view().rgba.len())
+                    .and_then(|bytes| bytes.checked_add(size_of::<NativeSourceImage>()))
+                    .ok_or_else(|| failure("frozen native image byte count"))
+            })
+    }
+}
+/// One host-timestamped set of source revisions in a bounded replay recording.
+#[cfg(feature = "v8-runtime")]
+pub struct FrozenSourceFrame {
+    offset_ms: u64,
+    snapshots: Vec<FrozenInputSnapshot>,
+}
+#[cfg(feature = "v8-runtime")]
+impl FrozenSourceFrame {
+    /// Construct a frame from source values copied by their native owners.
+    pub fn from_native(offset_ms: u64, snapshots: Vec<FrozenInputSnapshot>) -> Self {
+        Self {
+            offset_ms,
+            snapshots,
+        }
+    }
+    pub fn offset_ms(&self) -> u64 {
+        self.offset_ms
+    }
+    pub fn snapshots(&self) -> &[FrozenInputSnapshot] {
+        &self.snapshots
+    }
+}
+/// Ordered native source timeline whose digest includes host offsets and all
+/// retained feed values. The timeline owns its metadata admission while each
+/// value and native image keeps its original quota-backed allocation.
+#[cfg(feature = "v8-runtime")]
+pub struct FrozenSourceSequence {
+    duration_ms: u64,
+    frames: Vec<FrozenSourceFrame>,
+    feed_ids: Vec<String>,
+    digest: [u8; 32],
+    _storage: StorageAdmission,
+}
+#[cfg(feature = "v8-runtime")]
+impl FrozenSourceSequence {
+    /// Admit a source timeline with stable feed identities and increasing
+    /// revisions. Frame values must already belong to `quota`.
+    pub fn from_native(
+        quota: QuotaGroup,
+        duration_ms: u64,
+        frames: Vec<FrozenSourceFrame>,
+        max_frames: usize,
+        max_bytes: usize,
+    ) -> Result<Self> {
+        const MAX_DURATION_MS: u64 = 120_000;
+        const MAX_FRAMES: usize = 512;
+        const MAX_BYTES: usize = 32_000_000;
+        if duration_ms == 0
+            || duration_ms > MAX_DURATION_MS
+            || max_frames == 0
+            || max_frames > MAX_FRAMES
+            || max_bytes == 0
+            || max_bytes > MAX_BYTES
+            || frames.is_empty()
+            || frames.len() > max_frames
+            || frames.len() > MAX_FRAMES
+            || frames[0].offset_ms != 0
+        {
+            return Err(failure("source sequence limits or initial frame"));
+        }
+
+        let mut previous_offset = None;
+        let mut inventory: Option<BTreeMap<String, InputFamily>> = None;
+        let mut revisions = BTreeMap::<String, u64>::new();
+        let mut wire_bytes = 0usize;
+        let mut metadata_bytes = size_of::<Self>()
+            .checked_add(
+                frames
+                    .capacity()
+                    .checked_mul(size_of::<FrozenSourceFrame>())
+                    .ok_or_else(|| failure("source sequence metadata size"))?,
+            )
+            .ok_or_else(|| failure("source sequence metadata size"))?;
+        let mut digest = Sha256::new();
+        digest.update(b"ilium.frozen-source-sequence.v1\0");
+        digest.update(duration_ms.to_be_bytes());
+        digest.update(
+            u64::try_from(frames.len())
+                .map_err(|_| failure("source sequence frame count"))?
+                .to_be_bytes(),
+        );
+
+        for frame in &frames {
+            if frame.offset_ms >= duration_ms
+                || previous_offset.is_some_and(|previous| frame.offset_ms <= previous)
+                || frame.snapshots.is_empty()
+                || frame.snapshots.len() > 64
+            {
+                return Err(failure("source sequence frame order or inventory"));
+            }
+            previous_offset = Some(frame.offset_ms);
+            let mut current_inventory = BTreeMap::new();
+            let mut frame_bytes = 0usize;
+            let mut frame_metadata_bytes = frame
+                .snapshots
+                .capacity()
+                .checked_mul(size_of::<FrozenInputSnapshot>())
+                .ok_or_else(|| failure("source sequence metadata size"))?;
+            let mut frame_digest = Sha256::new();
+            frame_digest.update(b"ilium.frozen-source-frame.v1\0");
+            frame_digest.update(frame.offset_ms.to_be_bytes());
+            frame_digest.update(
+                u64::try_from(frame.snapshots.len())
+                    .map_err(|_| failure("source sequence snapshot count"))?
+                    .to_be_bytes(),
+            );
+
+            for snapshot in &frame.snapshots {
+                if !snapshot.value.shares_root(&quota)
+                    || snapshot
+                        .native_images
+                        .iter()
+                        .any(|image| !image.shares_root(&quota))
+                    || current_inventory
+                        .insert(snapshot.handle_id.clone(), snapshot.family)
+                        .is_some()
+                {
+                    return Err(failure("source sequence owner or duplicate handle"));
+                }
+                let previous_revision = revisions.get(&snapshot.handle_id).copied();
+                if previous_revision.is_some_and(|revision| snapshot.revision <= revision) {
+                    return Err(failure("source sequence revision did not advance"));
+                }
+                revisions.insert(snapshot.handle_id.clone(), snapshot.revision);
+                frame_bytes = add(frame_bytes, snapshot.wire_bytes()?)?;
+                frame_metadata_bytes = add(frame_metadata_bytes, snapshot.handle_id.capacity())?;
+                frame_digest.update(capture_digest(std::slice::from_ref(snapshot))?);
+            }
+            if inventory.as_ref().is_some_and(|expected| {
+                current_inventory
+                    .iter()
+                    .any(|(handle, family)| expected.get(handle) != Some(family))
+            }) {
+                return Err(failure("source sequence feed inventory changed"));
+            }
+            inventory.get_or_insert(current_inventory);
+            wire_bytes = add(wire_bytes, frame_bytes)?;
+            if wire_bytes > max_bytes {
+                return Err(failure("source sequence byte limit"));
+            }
+            metadata_bytes = add(metadata_bytes, frame_metadata_bytes)?;
+            digest.update(frame_digest.finalize());
+        }
+
+        let digest = digest.finalize().into();
+        let feed_ids: Vec<String> = inventory
+            .ok_or_else(|| failure("source sequence feed inventory missing"))?
+            .into_keys()
+            .collect();
+        metadata_bytes = add(
+            metadata_bytes,
+            feed_ids
+                .capacity()
+                .checked_mul(size_of::<String>())
+                .ok_or_else(|| failure("source sequence feed index size"))?,
+        )?;
+        for handle_id in &feed_ids {
+            metadata_bytes = add(metadata_bytes, handle_id.capacity())?;
+        }
+        let storage = reserve(&quota, add(32768, metadata_bytes)?)?;
+        Ok(Self {
+            duration_ms,
+            frames,
+            feed_ids,
+            digest,
+            _storage: storage,
+        })
+    }
+    pub fn duration_ms(&self) -> u64 {
+        self.duration_ms
+    }
+    pub fn digest(&self) -> [u8; 32] {
+        self.digest
+    }
+    pub fn frames(&self) -> &[FrozenSourceFrame] {
+        &self.frames
+    }
+    /// Return the last captured source state at or before the replay offset.
+    pub fn frame_at(&self, offset_ms: u64) -> Option<&FrozenSourceFrame> {
+        if offset_ms >= self.duration_ms {
+            return None;
+        }
+        let index = self
+            .frames
+            .partition_point(|frame| frame.offset_ms <= offset_ms)
+            .checked_sub(1)?;
+        self.frames.get(index)
+    }
+    /// Select the newest captured revision for every feed at a playback time.
+    /// Sparse updates carry earlier feed revisions forward without duplicating
+    /// their payloads in every later frame.
+    pub fn snapshots_at(&self, offset_ms: u64) -> Option<FrozenSourceSnapshotsAt<'_>> {
+        if offset_ms >= self.duration_ms {
+            return None;
+        }
+        let frame_end = self
+            .frames
+            .partition_point(|frame| frame.offset_ms <= offset_ms);
+        (frame_end > 0).then_some(FrozenSourceSnapshotsAt {
+            sequence: self,
+            frame_end,
+            feed_index: 0,
+        })
+    }
+}
+#[cfg(feature = "v8-runtime")]
+pub struct FrozenSourceSnapshotsAt<'a> {
+    sequence: &'a FrozenSourceSequence,
+    frame_end: usize,
+    feed_index: usize,
+}
+#[cfg(feature = "v8-runtime")]
+impl<'a> Iterator for FrozenSourceSnapshotsAt<'a> {
+    type Item = &'a FrozenInputSnapshot;
+    fn next(&mut self) -> Option<Self::Item> {
+        let handle_id = self.sequence.feed_ids.get(self.feed_index)?;
+        self.feed_index += 1;
+        self.sequence.frames[..self.frame_end]
+            .iter()
+            .rev()
+            .find_map(|frame| {
+                frame
+                    .snapshots
+                    .iter()
+                    .find(|snapshot| snapshot.handle_id == *handle_id)
+            })
+    }
+}
+#[cfg(feature = "v8-runtime")]
+struct CaptureDigestWriter<'a>(&'a mut Sha256);
+#[cfg(feature = "v8-runtime")]
+impl std::io::Write for CaptureDigestWriter<'_> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.update(bytes);
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+#[cfg(feature = "v8-runtime")]
+fn family_name(family: InputFamily) -> &'static [u8] {
+    match family {
+        InputFamily::Pointer => b"pointer",
+        InputFamily::Location => b"location",
+        InputFamily::Audio => b"audio",
+        InputFamily::Series => b"series",
+        InputFamily::Earthquakes => b"earthquakes",
+        InputFamily::Aircraft => b"aircraft",
+        InputFamily::Boats => b"boats",
+        InputFamily::Chess => b"chess",
+        InputFamily::Astronomy => b"astronomy",
+        InputFamily::Weather => b"weather",
+    }
+}
+#[cfg(feature = "v8-runtime")]
+fn hash_capture_field(hash: &mut Sha256, bytes: &[u8]) -> Result<()> {
+    let length = u64::try_from(bytes.len()).map_err(|_| failure("capture field length"))?;
+    hash.update(length.to_be_bytes());
+    hash.update(bytes);
+    Ok(())
+}
+#[cfg(feature = "v8-runtime")]
+fn capture_digest(snapshots: &[FrozenInputSnapshot]) -> Result<[u8; 32]> {
+    let mut hash = Sha256::new();
+    hash.update(b"ilium.frozen-inputs.v1\0");
+    for snapshot in snapshots {
+        hash_capture_field(&mut hash, family_name(snapshot.family))?;
+        hash_capture_field(&mut hash, snapshot.handle_id.as_bytes())?;
+        hash.update(snapshot.revision.to_be_bytes());
+
+        hash.update(b"metadata\0");
+        serde_json::to_writer(CaptureDigestWriter(&mut hash), snapshot.value.metadata())?;
+        hash.update([0]);
+
+        hash.update(b"arrays\0");
+        for array in snapshot.value.arrays() {
+            hash_capture_field(&mut hash, array.name.as_bytes())?;
+            let kind = match array.kind {
+                TypedArrayKind::U8 => b"u8".as_slice(),
+                TypedArrayKind::F32 => b"f32".as_slice(),
+                TypedArrayKind::U16 => b"u16".as_slice(),
+                TypedArrayKind::U32 => b"u32".as_slice(),
+            };
+            hash_capture_field(&mut hash, kind)?;
+            hash.update(
+                u64::try_from(array.elements)
+                    .map_err(|_| failure("capture array length"))?
+                    .to_be_bytes(),
+            );
+        }
+        hash.update(b"planes\0");
+        for (name, plane) in snapshot.value.planes() {
+            hash_capture_field(&mut hash, name.as_bytes())?;
+            hash_capture_field(&mut hash, plane)?;
+        }
+        hash.update(b"native-images\0");
+        hash.update(
+            u64::try_from(snapshot.native_images.len())
+                .map_err(|_| failure("capture image count"))?
+                .to_be_bytes(),
+        );
+        for image in &snapshot.native_images {
+            let pixels = image.admitted_pixels().view();
+            hash.update(pixels.width.to_be_bytes());
+            hash.update(pixels.height.to_be_bytes());
+            hash_capture_field(&mut hash, &pixels.rgba)?;
+        }
+        hash.update(b"end-source\0");
+    }
+    Ok(hash.finalize().into())
+}
 /// Native verified frozen recording identity; construction never records a live
 /// device/feed. Its producing root and capture/grant metadata remain retained.
 pub struct FrozenInputs {
@@ -279,6 +670,8 @@ pub struct FrozenInputs {
     capture_label: String,
     lineage: Vec<GrantLineage>,
     quota: QuotaGroup,
+    #[cfg(feature = "v8-runtime")]
+    snapshots: Vec<FrozenInputSnapshot>,
     _storage: StorageAdmission,
 }
 impl FrozenInputs {
@@ -314,11 +707,96 @@ impl FrozenInputs {
             capture_label: capture_label.into(),
             lineage: lineage.to_vec(),
             quota,
+            #[cfg(feature = "v8-runtime")]
+            snapshots: Vec::new(),
             _storage: storage,
         }))
     }
+    #[cfg(feature = "v8-runtime")]
+    pub fn from_capture(
+        quota: QuotaGroup,
+        recording: &str,
+        snapshots: Vec<FrozenInputSnapshot>,
+        max_bytes: usize,
+        civil_anchor: Option<i64>,
+        capture_label: &str,
+        lineage: &[GrantLineage],
+    ) -> Result<Arc<Self>> {
+        if max_bytes == 0 || snapshots.len() > 64 {
+            return Err(failure("frozen input capture limit"));
+        }
+        name(recording)?;
+        if capture_label.len() > 1024 || capture_label.chars().any(char::is_control) {
+            return Err(failure("frozen input metadata limit"));
+        }
+        validate_lineage(lineage)?;
+
+        let mut families = BTreeSet::new();
+        let mut identities = BTreeSet::new();
+        let mut total_bytes = 0usize;
+        let mut retained_metadata = size_of::<FrozenInputSnapshot>()
+            .checked_mul(snapshots.len())
+            .ok_or_else(|| failure("frozen input metadata size"))?;
+        for snapshot in &snapshots {
+            if !snapshot.value.shares_root(&quota)
+                || snapshot
+                    .native_images
+                    .iter()
+                    .any(|image| !image.shares_root(&quota))
+                || !identities.insert((snapshot.family, snapshot.handle_id.as_str()))
+            {
+                return Err(failure("frozen input owner or duplicate handle"));
+            }
+            families.insert(snapshot.family);
+            total_bytes = add(total_bytes, snapshot.wire_bytes()?)?;
+            retained_metadata = add(retained_metadata, snapshot.handle_id.capacity())?;
+            retained_metadata = add(
+                retained_metadata,
+                snapshot
+                    .native_images
+                    .capacity()
+                    .checked_mul(size_of::<NativeSourceImage>())
+                    .ok_or_else(|| failure("frozen image owner metadata size"))?,
+            )?;
+            if total_bytes > max_bytes {
+                return Err(failure("frozen input byte limit"));
+            }
+        }
+        if families.len() > 10 {
+            return Err(failure("frozen input family limit"));
+        }
+        let digest = capture_digest(&snapshots)?;
+        let storage = reserve(&quota, add(32768, retained_metadata)?)?;
+        Ok(Arc::new(Self {
+            recording: Some(recording.to_owned()),
+            families,
+            digest,
+            civil_anchor,
+            capture_label: capture_label.to_owned(),
+            lineage: lineage.to_vec(),
+            quota,
+            snapshots,
+            _storage: storage,
+        }))
+    }
+    pub fn recording(&self) -> Option<&str> {
+        self.recording.as_deref()
+    }
+    pub fn digest(&self) -> [u8; 32] {
+        self.digest
+    }
+    #[cfg(feature = "v8-runtime")]
+    pub fn snapshots(&self) -> &[FrozenInputSnapshot] {
+        &self.snapshots
+    }
     pub fn capture_label(&self) -> &str {
         &self.capture_label
+    }
+    pub fn civil_anchor(&self) -> Option<i64> {
+        self.civil_anchor
+    }
+    pub fn lineage(&self) -> &[GrantLineage] {
+        &self.lineage
     }
 }
 /// Native execution-profile witness. It binds an actual sealed helper launch,
@@ -339,6 +817,8 @@ pub struct ReplayCertification {
     environment_digest: [u8; 32],
     helper_build_digest: [u8; 32],
     recorded_video_opens: u64,
+    source_capture_digest: Option<[u8; 32]>,
+    source_sequence_digest: Option<[u8; 32]>,
 }
 /// Immutable execution inputs used by the certificate's ordered digest binding.
 #[derive(Debug, Clone, Copy)]
@@ -367,6 +847,7 @@ impl ReplayCertification {
             execution_identity,
             preparation_yields,
             0,
+            None,
         )
     }
     pub(crate) fn sealed_recorded_video(
@@ -387,7 +868,127 @@ impl ReplayCertification {
             execution_identity,
             preparation_yields,
             recorded_video_opens,
+            None,
         )
+    }
+    pub(crate) fn sealed_source_capture(
+        package: &Package,
+        plan: &AnimationPlan,
+        settings: &Value,
+        execution_identity: ReplayExecutionIdentity,
+        preparation_yields: u64,
+        source_opens: u64,
+        frozen: &FrozenInputs,
+    ) -> Result<Self> {
+        if !(1..=64).contains(&source_opens)
+            || frozen.snapshots().is_empty()
+            || frozen.snapshots().len() != source_opens as usize
+            || frozen.recording().is_none()
+        {
+            return Err(failure("native source capture inventory absent"));
+        }
+        let replay = plan
+            .replay
+            .as_ref()
+            .ok_or_else(|| failure("replay declaration absent"))?;
+        if replay.seamless
+            || replay
+                .input_recording
+                .as_deref()
+                .is_some_and(|recording| Some(recording) != frozen.recording())
+            || replay.civil_anchor_ms.is_some()
+            || plan.preparation.is_some()
+            || plan.mode_unavailable_reason.is_some()
+            || plan
+                .permissions
+                .iter()
+                .any(|permission| permission.id != "network.http")
+            || plan.inputs.pointer.is_some()
+            || plan.inputs.location.is_some()
+            || plan.inputs.audio.is_some()
+            || plan.inputs.astronomy.is_some()
+        {
+            return Err(failure("source-backed replay plan is not host-bindable"));
+        }
+        let mut demanded = BTreeSet::new();
+        for (present, family) in [
+            (plan.inputs.series.is_some(), InputFamily::Series),
+            (plan.inputs.earthquakes.is_some(), InputFamily::Earthquakes),
+            (plan.inputs.aircraft.is_some(), InputFamily::Aircraft),
+            (plan.inputs.boats.is_some(), InputFamily::Boats),
+            (plan.inputs.chess.is_some(), InputFamily::Chess),
+            (plan.inputs.weather.is_some(), InputFamily::Weather),
+        ] {
+            if present {
+                demanded.insert(family);
+            }
+        }
+        if demanded.is_empty()
+            || !demanded.is_subset(&frozen.families)
+            || (plan.inputs.clock.as_ref().is_some_and(|clock| clock.civil)
+                && frozen.civil_anchor.is_none())
+        {
+            return Err(failure(
+                "source replay lacks demanded frozen input or civil anchor",
+            ));
+        }
+        Self::sealed(
+            package,
+            plan,
+            settings,
+            execution_identity,
+            preparation_yields,
+            0,
+            Some(frozen),
+        )
+    }
+    pub(crate) fn sealed_source_sequence(
+        package: &Package,
+        plan: &AnimationPlan,
+        settings: &Value,
+        execution_identity: ReplayExecutionIdentity,
+        preparation_yields: u64,
+        source_opens: u64,
+        frozen: &FrozenInputs,
+        sequence: &FrozenSourceSequence,
+    ) -> Result<Self> {
+        let mut certification = Self::sealed_source_capture(
+            package,
+            plan,
+            settings,
+            execution_identity,
+            preparation_yields,
+            source_opens,
+            frozen,
+        )?;
+        let mut binding = Sha256::new();
+        binding.update(b"ilium-native-source-sequence-replay-v1\0");
+        binding.update(certification.binding);
+        binding.update(sequence.digest());
+        certification.binding = binding.finalize().into();
+        certification.source_sequence_digest = Some(sequence.digest());
+        certification.reset_rules_digest = Sha256::digest(
+            [
+                b"finite-sequential-samples-v1".as_slice(),
+                &certification.binding,
+            ]
+            .concat(),
+        )
+        .into();
+        certification.clock_random_binding_digest =
+            Sha256::digest([b"sealed-ambient-v1".as_slice(), &certification.binding].concat())
+                .into();
+        certification.async_order_digest = Sha256::digest(
+            [
+                b"native-source-sequence-v1".as_slice(),
+                &preparation_yields.to_le_bytes(),
+                &source_opens.to_le_bytes(),
+                &certification.binding,
+            ]
+            .concat(),
+        )
+        .into();
+        Ok(certification)
     }
     fn sealed(
         package: &Package,
@@ -396,6 +997,7 @@ impl ReplayCertification {
         execution_identity: ReplayExecutionIdentity,
         preparation_yields: u64,
         recorded_video_opens: u64,
+        source_capture: Option<&FrozenInputs>,
     ) -> Result<Self> {
         let ReplayExecutionIdentity {
             ambient_seed,
@@ -407,16 +1009,18 @@ impl ReplayCertification {
             .replay
             .as_ref()
             .ok_or_else(|| failure("replay declaration absent"))?;
-        if !plan.inputs.is_empty()
-            || (recorded_video_opens == 0 && !plan.permissions.is_empty())
-            || (recorded_video_opens != 0
+        let source_backed = source_capture.is_some();
+        if (!source_backed && !plan.inputs.is_empty())
+            || (!source_backed && recorded_video_opens == 0 && !plan.permissions.is_empty())
+            || (!source_backed
+                && recorded_video_opens != 0
                 && plan.permissions.iter().any(|permission| {
                     !matches!(permission.id.as_str(), "disk.read" | "network.http")
                 }))
             || plan.preparation.is_some()
             || replay.seamless
-            || replay.input_recording.is_some()
-            || replay.civil_anchor_ms.is_some()
+            || (!source_backed && replay.input_recording.is_some())
+            || (!source_backed && replay.civil_anchor_ms.is_some())
             || plan.mode_unavailable_reason.is_some()
         {
             return Err(failure("finite recorded Video replay profile unavailable"));
@@ -424,13 +1028,21 @@ impl ReplayCertification {
         if helper_build_digest == [0; 32] {
             return Err(failure("running helper build identity absent"));
         }
-        let binding = replay_binding(
+        let mut binding = replay_binding(
             package,
             plan,
             settings,
             execution_identity,
             recorded_video_opens != 0,
         )?;
+        if let Some(frozen) = source_capture {
+            let mut source_binding = Sha256::new();
+            source_binding.update(b"ilium-native-source-replay-v1\0");
+            source_binding.update(binding);
+            source_binding.update(frozen.digest());
+            source_binding.update(frozen.recording().unwrap_or_default().as_bytes());
+            binding = source_binding.finalize().into();
+        }
         let mut assets = Sha256::new();
         assets.update(b"ilium-audited-assets-v1");
         for (path, bytes) in package.files() {
@@ -483,6 +1095,8 @@ impl ReplayCertification {
             environment_digest,
             helper_build_digest,
             recorded_video_opens,
+            source_capture_digest: source_capture.map(FrozenInputs::digest),
+            source_sequence_digest: None,
         })
     }
 }
@@ -725,6 +1339,7 @@ pub struct ClipSpecification<'a> {
     pub appearance_digest: [u8; 32],
     pub certification: ReplayCertification,
     pub frozen: Arc<FrozenInputs>,
+    pub source_sequence: Option<Arc<FrozenSourceSequence>>,
     pub evidence: Arc<FrozenEvidence>,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -743,6 +1358,7 @@ pub struct ClipSpec {
     frames: usize,
     seamless: bool,
     frozen: Arc<FrozenInputs>,
+    source_sequence: Option<Arc<FrozenSourceSequence>>,
     evidence: Arc<FrozenEvidence>,
     lineage: Vec<GrantLineage>,
     recorded_video: bool,
@@ -835,20 +1451,44 @@ impl ClipSpec {
             }
         }
         input.shape.layout().map_err(|e| failure(&e.to_string()))?;
-        if input.certification.binding
-            != replay_binding(
-                input.package,
-                &plan,
-                input.settings,
-                ReplayExecutionIdentity {
-                    ambient_seed: input.certification.ambient_seed,
-                    bootstrap_digest: input.certification.bootstrap_digest,
-                    environment_digest: input.certification.environment_digest,
-                    helper_build_digest: input.certification.helper_build_digest,
-                },
-                input.certification.recorded_video_opens != 0,
-            )?
-        {
+        let mut expected_binding = replay_binding(
+            input.package,
+            &plan,
+            input.settings,
+            ReplayExecutionIdentity {
+                ambient_seed: input.certification.ambient_seed,
+                bootstrap_digest: input.certification.bootstrap_digest,
+                environment_digest: input.certification.environment_digest,
+                helper_build_digest: input.certification.helper_build_digest,
+            },
+            input.certification.recorded_video_opens != 0,
+        )?;
+        if let Some(source_digest) = input.certification.source_capture_digest {
+            if source_digest != input.frozen.digest() || input.frozen.recording().is_none() {
+                return Err(failure("native source replay recording binding mismatch"));
+            }
+            let mut source_binding = Sha256::new();
+            source_binding.update(b"ilium-native-source-replay-v1\0");
+            source_binding.update(expected_binding);
+            source_binding.update(source_digest);
+            source_binding.update(input.frozen.recording().unwrap_or_default().as_bytes());
+            expected_binding = source_binding.finalize().into();
+        }
+        match (
+            &input.source_sequence,
+            input.certification.source_sequence_digest,
+        ) {
+            (Some(sequence), Some(sequence_digest)) if sequence.digest() == sequence_digest => {
+                let mut source_binding = Sha256::new();
+                source_binding.update(b"ilium-native-source-sequence-replay-v1\0");
+                source_binding.update(expected_binding);
+                source_binding.update(sequence_digest);
+                expected_binding = source_binding.finalize().into();
+            }
+            (None, None) => {}
+            _ => return Err(failure("native source sequence replay binding mismatch")),
+        }
+        if input.certification.binding != expected_binding {
             return Err(failure("native replay certificate binding mismatch"));
         }
         if !input.certification.full_unoccluded
@@ -883,8 +1523,15 @@ impl ClipSpec {
                 required.insert(family);
             }
         }
+        let source_backed = input.certification.source_capture_digest.is_some();
         if !required.is_subset(&input.frozen.families)
             || (!required.is_empty()
+                && replay
+                    .input_recording
+                    .as_deref()
+                    .is_some_and(|expected| Some(expected) != input.frozen.recording.as_deref()))
+            || (!source_backed
+                && !required.is_empty()
                 && replay.input_recording.as_deref() != input.frozen.recording.as_deref())
         {
             return Err(failure(
@@ -892,8 +1539,11 @@ impl ClipSpec {
             ));
         }
         if demands.clock.as_ref().is_some_and(|clock| clock.civil)
-            && (replay.civil_anchor_ms.is_none()
-                || replay.civil_anchor_ms != input.frozen.civil_anchor)
+            && ((!source_backed && replay.civil_anchor_ms.is_none())
+                || replay
+                    .civil_anchor_ms
+                    .is_some_and(|anchor| Some(anchor) != input.frozen.civil_anchor)
+                || input.frozen.civil_anchor.is_none())
         {
             return Err(failure("civil clock lacks matching frozen anchor"));
         }
@@ -915,6 +1565,8 @@ impl ClipSpec {
         let material = json!({"package":package.digest(),"verified_ilium":package.is_ilium(),"api":input.api_version,
             "backend":input.backend,"plan":plan_value,"settings":input.settings,"shape":input.shape,
             "appearance":input.appearance_digest,"frozen":input.frozen.digest,"recording":input.frozen.recording,
+            "source_capture":input.certification.source_capture_digest,
+            "source_sequence":input.certification.source_sequence_digest,
             "families":input.frozen.families,"civil_anchor":input.frozen.civil_anchor,"frozen_lineage":input.frozen.lineage,
             "evidence":input.evidence.digest,"reset":input.certification.reset_rules_digest,
             "clock_random":input.certification.clock_random_binding_digest,"assets":input.certification.prepared_assets_digest,
@@ -929,6 +1581,7 @@ impl ClipSpec {
             frames: count as usize,
             seamless: replay.seamless,
             frozen: input.frozen,
+            source_sequence: input.source_sequence,
             evidence: input.evidence,
             lineage,
             recorded_video: input.certification.recorded_video_opens != 0,
@@ -946,6 +1599,25 @@ impl ClipSpec {
     }
     pub fn is_recorded_video(&self) -> bool {
         self.recorded_video
+    }
+    /// Whether this clip has only procedural ownership and can be persisted
+    /// through the source-free streaming cache path.
+    pub fn can_stream_procedural(&self) -> bool {
+        !self.recorded_video
+            && self.source_sequence.is_none()
+            && self.evidence.entries.is_empty()
+            && self.lineage.is_empty()
+            && self.frozen.recording().is_none()
+            && self.frozen.snapshots().is_empty()
+            && self.frozen.families.is_empty()
+    }
+    #[cfg(feature = "v8-runtime")]
+    pub fn frozen_inputs(&self) -> &Arc<FrozenInputs> {
+        &self.frozen
+    }
+    #[cfg(feature = "v8-runtime")]
+    pub fn source_sequence(&self) -> Option<&Arc<FrozenSourceSequence>> {
+        self.source_sequence.as_ref()
     }
 }
 #[derive(Debug, Clone, Copy)]
@@ -1035,8 +1707,7 @@ impl ReplayClip {
     ) -> Result<Arc<ReplayClip>> {
         check_stop(stop)?;
         if !store.shares_root(&self.spec.frozen.quota)
-            || !self.spec.evidence.entries.is_empty()
-            || !self.spec.lineage.is_empty()
+            || !self.spec.can_stream_procedural()
             || self.frames.len() != self.spec.frames
             || self.disk.is_some()
         {
@@ -1159,12 +1830,9 @@ impl ReplayCache {
             return Err(failure("clip cache original root mismatch"));
         }
         if let Some(store) = &store {
-            if !store.shares_root(&self.quota)
-                || !spec.evidence.entries.is_empty()
-                || !spec.lineage.is_empty()
-            {
+            if !store.shares_root(&self.quota) || !spec.can_stream_procedural() {
                 return Err(AnimationError::PermissionDenied(
-                    "streaming clip lacks original procedural ownership".into(),
+                    "streaming clip is not source-free procedural output".into(),
                 ));
             }
         }
@@ -1376,11 +2044,10 @@ impl ReplayCache {
         authority.validate(&spec.package)?;
         if !self.quota.shares_root(&spec.frozen.quota)
             || !store.shares_root(&self.quota)
-            || !spec.evidence.entries.is_empty()
-            || !spec.lineage.is_empty()
+            || !spec.can_stream_procedural()
         {
             return Err(AnimationError::PermissionDenied(
-                "cold replay lacks original procedural ownership".into(),
+                "cold replay is not source-free procedural output".into(),
             ));
         }
         authorization.check(&authority, &spec.lineage, ReplayAccess::CachedDelivery)?;

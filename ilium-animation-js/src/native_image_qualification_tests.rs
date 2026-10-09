@@ -2,11 +2,15 @@
 //! V8 requests, native registries, helper copy/ACK and physical join are real.
 use super::*;
 use crate::{
-    engine::CreateState, helper::HelperLimits, manifest::AnimationMode, native_draw::DrawLimits,
-    native_media::MediaLimits, permissions::Ceiling, runtime::InstancePreparation,
-    trust::TrustVerifier, TRUSTED_BOOTSTRAP,
+    engine::CreateState, helper::HelperLimits, manifest::AnimationMode,
+    native_asset_host::NativeAssetHost, native_draw::DrawLimits, native_media::MediaLimits,
+    permissions::Ceiling, runtime::InstancePreparation, trust::TrustVerifier, TRUSTED_BOOTSTRAP,
 };
-use ilium_execution::{QuotaGroup, QuotaLimits};
+use ilium_execution::{
+    ClientLimits, Execution, ExecutionConfig, LaneConfig, QuotaGroup, QuotaLimits,
+};
+use ilium_platform::animation_files::PinnedDirectory;
+use ilium_platform::secure_fs::NoFollowDirectory;
 use image::{ImageBuffer, ImageFormat, Rgba};
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -14,15 +18,16 @@ use std::{
     collections::BTreeMap,
     io::{Cursor, Write},
     path::PathBuf,
+    sync::Arc,
 };
 
 fn quota() -> QuotaGroup {
     QuotaGroup::new(QuotaLimits {
-        clients: 0,
-        jobs: 0,
+        clients: 8,
+        jobs: 16,
         service_jobs: 0,
-        input_bytes: 0,
-        result_bytes: 0,
+        input_bytes: 32 * 1024 * 1024,
+        result_bytes: 32 * 1024 * 1024,
         worker_threads: 32,
         worker_bytes: 1024 * 1024 * 1024,
     })
@@ -46,6 +51,30 @@ fn archive(script: &str) -> Vec<u8> {
         zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
     zip.start_file("entry.mjs", options).unwrap();
     zip.write_all(script.as_bytes()).unwrap();
+    zip.start_file("manifest.json", options).unwrap();
+    zip.write_all(&serde_json::to_vec(&manifest).unwrap())
+        .unwrap();
+    zip.finish().unwrap().into_inner()
+}
+fn archive_with_png_asset(script: &str, png: &[u8]) -> Vec<u8> {
+    let entry = json!({"path":"entry.mjs","bytes":script.len(),
+        "sha256":format!("{:x}",Sha256::digest(script.as_bytes()))});
+    let asset = json!({"path":"assets/pixel.png","bytes":png.len(),
+        "sha256":format!("{:x}",Sha256::digest(png))});
+    let manifest = json!({
+        "api_version":1,"id":"native-image-asset-qualification",
+        "name":"Native image asset qualification","version":"1.0.0",
+        "entry":"entry.mjs","modes":["live"],
+        "settings":{"type":"object","properties":{}},
+        "assets":[asset],"files":[entry,asset]
+    });
+    let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    let options =
+        zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+    zip.start_file("entry.mjs", options).unwrap();
+    zip.write_all(script.as_bytes()).unwrap();
+    zip.start_file("assets/pixel.png", options).unwrap();
+    zip.write_all(png).unwrap();
     zip.start_file("manifest.json", options).unwrap();
     zip.write_all(&serde_json::to_vec(&manifest).unwrap())
         .unwrap();
@@ -92,6 +121,117 @@ fn script(body: &str) -> String {
         "export function plan(){{return {{output:{{mode:'pixels',format:'gray8',update:'replace'}},fps:30,inputs:{{}},permissions:[]}};}} export async function create(host){{const raw=new Uint8Array(__PNG__); {body} return {{render(context,frame){{frame.gray.fill(0);frame.present();}},dispose(){{}}}};}}"
     );
     template.replace("__PNG__", &serde_json::to_string(&tiny_png()).unwrap())
+}
+
+#[test]
+#[ignore = "run explicitly with matching ILIUM_ANIMATION_HELPER and delegated sandbox"]
+fn actual_helper_reads_packaged_png_decodes_samples_and_retires_native_handles() {
+    let quota = quota();
+    let png = tiny_png();
+    let script = "export function plan(){return {output:{mode:'pixels',format:'gray8',update:'replace'},fps:30,inputs:{},permissions:[]};} export async function create(host){const asset=await host.assets.read({grant:host.assets.bundle,relative_path:'assets/pixel.png',max_bytes:4096}); if(!asset.ok || !(asset.value.bytes instanceof Uint8Array))throw Error('asset_read'); const opened=await host.media.images.decode({bytes:asset.value.bytes,max_pixels:4}); if(!opened.ok)throw Error('image_decode'); const sampled=await host.media.images.sample({image:opened.value,rectangle:{x:0,y:0,width:1,height:1},format:'gray32'}); if(!sampled.ok || Math.abs(sampled.value[0]-0.2126)>0.01)throw Error('image_sample'); host.media.images.close(opened.value); return {render(context,frame){frame.gray.fill(0);frame.present();},dispose(){}};}";
+    let bytes = archive_with_png_asset(script, &png);
+    let _archive_admission = quota.reserve_external_storage(bytes.len() + 65536).unwrap();
+    let verifier = TrustVerifier::from_release_inventory(Vec::new()).unwrap();
+    let helper = PathBuf::from(
+        std::env::var_os("ILIUM_ANIMATION_HELPER")
+            .expect("explicit qualification requires the matching release helper"),
+    );
+    let mut instance = PackageInstance::verify(InstancePreparation {
+        archive: &bytes,
+        verifier: &verifier,
+        helper_executable: &helper,
+        trusted_bootstrap: TRUSTED_BOOTSTRAP,
+        settings: &json!({}),
+        mode: AnimationMode::Live,
+        environment: &json!({"cell_width":1,"cell_height":1,"dot_width":2,"dot_height":4}),
+        host_policy: Ceiling {
+            permissions: vec![],
+        },
+        instance_id: 94,
+        limits: HelperLimits::default(),
+        quota: quota.clone(),
+    })
+    .unwrap()
+    .prepare_without_rights()
+    .unwrap()
+    .0;
+    let disabled = LaneConfig {
+        threads: 0,
+        queue_slots: 0,
+        priority: None,
+        resident_bytes_per_thread: 0,
+    };
+    let execution = Execution::start(
+        quota.clone(),
+        ExecutionConfig {
+            cpu: disabled,
+            io: LaneConfig {
+                threads: 1,
+                queue_slots: 4,
+                priority: None,
+                resident_bytes_per_thread: 1024 * 1024,
+            },
+            service: disabled,
+        },
+    )
+    .unwrap();
+    let client = execution
+        .client(ClientLimits {
+            jobs: 8,
+            service_jobs: 0,
+            input_bytes: 16 * 1024 * 1024,
+            result_bytes: 16 * 1024 * 1024,
+        })
+        .unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let root = Arc::new(
+        PinnedDirectory::from_host(Arc::new(
+            NoFollowDirectory::open_root(directory.path()).unwrap(),
+        ))
+        .unwrap(),
+    );
+    let mut assets = NativeAssetHost::new(&instance, client, quota.clone(), root).unwrap();
+    let mut drawing =
+        NativeDrawHost::new(quota.clone(), MediaLimits::default(), DrawLimits::default()).unwrap();
+    let mut images = NativeImageHost::new(quota.clone()).unwrap();
+    let mut methods = Vec::new();
+    let mut creation = CreateState::Pending;
+    for _ in 0..12 {
+        for request in instance.requests().unwrap() {
+            methods.push(request.method.clone());
+            match request.method.as_str() {
+                "assets.read" => {
+                    assert!(assets.dispatch(&mut instance, request).unwrap().is_none())
+                }
+                _ => assert!(images
+                    .dispatch(&mut instance, &mut drawing, request)
+                    .unwrap()
+                    .is_none()),
+            }
+        }
+        creation = instance.pump().unwrap();
+        if creation == CreateState::Ready {
+            break;
+        }
+    }
+    assert_eq!(creation, CreateState::Ready);
+    assert_eq!(
+        methods.iter().map(String::as_str).collect::<Vec<_>>(),
+        [
+            "assets.read",
+            "media.images.decode",
+            "media.images.sample",
+            "media.images.close"
+        ]
+    );
+    assert!(images.pending.is_empty() && images.owned.is_empty());
+    assert!(instance.stop().cancellation.is_ok());
+    assert!(instance.is_physically_retired());
+    assets.revoke();
+    images.revoke();
+    assets.release_terminal_after_helper_retirement();
+    images.release_terminal_after_helper_retirement(&mut drawing);
+    assert!(assets.is_drained() && images.is_drained());
 }
 
 #[test]

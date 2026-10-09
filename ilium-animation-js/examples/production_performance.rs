@@ -15,6 +15,29 @@ fn main() {
         std::process::exit(1);
     }
 }
+
+#[cfg(all(test, feature = "v8-runtime", feature = "native-host"))]
+mod memory_metric_tests {
+    use super::benchmark::parse_proc_memory;
+
+    #[test]
+    fn parses_resident_and_high_water_memory_from_proc_status() {
+        assert_eq!(
+            parse_proc_memory("Name:\tbenchmark\nVmHWM:\t42 kB\nVmRSS:\t30 kB\n"),
+            Some((30 * 1024, 42 * 1024))
+        );
+    }
+
+    #[test]
+    fn rejects_incomplete_malformed_or_overflowing_memory_records() {
+        assert_eq!(parse_proc_memory("VmRSS:\t30 kB\n"), None);
+        assert_eq!(parse_proc_memory("VmRSS:\t30 MB\nVmHWM:\t42 kB\n"), None);
+        assert_eq!(
+            parse_proc_memory("VmRSS:\t30 kB\nVmHWM:\t18446744073709551615 kB\n"),
+            None
+        );
+    }
+}
 #[cfg(not(all(feature = "v8-runtime", feature = "native-host")))]
 fn main() {
     println!(
@@ -119,6 +142,52 @@ mod benchmark {
     }
     fn digest(bytes: &[u8]) -> String {
         format!("{:x}", Sha256::digest(bytes))
+    }
+    #[cfg(any(target_os = "linux", test))]
+    pub(super) fn parse_proc_memory(contents: &str) -> Option<(u64, u64)> {
+        let kibibytes = |name: &str| {
+            let line = contents.lines().find(|line| line.starts_with(name))?;
+            let mut fields = line[name.len()..].split_whitespace();
+            let value = fields.next()?.parse::<u64>().ok()?;
+            (fields.next()? == "kB")
+                .then(|| value.checked_mul(1024))
+                .flatten()
+        };
+        Some((kibibytes("VmRSS:")?, kibibytes("VmHWM:")?))
+    }
+    fn process_memory_snapshot() -> Value {
+        #[cfg(target_os = "linux")]
+        {
+            match std::fs::read_to_string("/proc/self/status")
+                .ok()
+                .and_then(|contents| parse_proc_memory(&contents))
+            {
+                Some((resident_bytes, high_water_bytes)) => json!({
+                    "available": true,
+                    "source": "/proc/self/status",
+                    "resident_bytes": resident_bytes,
+                    "high_water_bytes": high_water_bytes,
+                    "scope": "entire in-process benchmark; excludes any external helper process"
+                }),
+                None => {
+                    json!({"available": false, "source": "/proc/self/status", "reason": "VmRSS/VmHWM unavailable"})
+                }
+            }
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            json!({"available": false, "reason": "process RSS measurement is implemented for Linux only"})
+        }
+    }
+    fn memory_snapshot(quota: &QuotaGroup) -> Value {
+        let usage = quota.snapshot();
+        json!({
+            "process": process_memory_snapshot(),
+            "quota_ledger": {
+                "reserved_worker_bytes": usage.worker_bytes,
+                "worker_bytes_limit": usage.limits.worker_bytes
+            }
+        })
     }
     struct Options {
         beach: PathBuf,
@@ -248,7 +317,7 @@ mod benchmark {
             return Err(fail("package id does not match selected native baseline"));
         }
         emit(
-            json!({"type":"result","stage":"archive_loading","package_id":id,"elapsed_ns":started.elapsed().as_nanos(),"clock":"monotonic elapsed wall time","includes":["file open and read","quota admission","archive SHA256","RAM expansion and package validation"],"excludes":["V8 platform initialization","module evaluation","animation creation","helper IPC"],"filesystem_cache":"uncontrolled; not claimed as cold-cache IO"}),
+            json!({"type":"result","stage":"archive_loading","package_id":id,"elapsed_ns":started.elapsed().as_nanos(),"memory":memory_snapshot(quota),"clock":"monotonic elapsed wall time","includes":["file open and read","quota admission","archive SHA256","RAM expansion and package validation"],"excludes":["V8 platform initialization","module evaluation","animation creation","helper IPC"],"filesystem_cache":"uncontrolled; not claimed as cold-cache IO"}),
         );
         emit(
             json!({"type":"artifact","path":path,"archive_sha256":archive_sha,"package_digest":package.digest(),"canonical_manifest_sha256":digest(&serde_json::to_vec(package.manifest())?),"manifest":package.manifest()}),
@@ -315,17 +384,21 @@ mod benchmark {
             .map(|(path, source)| (*path, digest(source.as_bytes())))
             .collect();
         emit(
-            json!({"type":"manifest","benchmark":"production_performance","benchmark_source_sha256":digest(include_bytes!("production_performance.rs")),"bootstrap_sha256":digest(TRUSTED_BOOTSTRAP.as_bytes()),"native_baselines":baselines,"width_cells":options.width,"height_cells":options.height,"fps":options.fps,"warmup":options.warmup,"measured_frames":options.frames,"civil_epoch_ms":options.epoch_ms,"ordered_cases":options.cases,"root_limits":format!("{:?}",quota.snapshot().limits),"scope":"trusted in-process native scene and embedded V8 render, binary handoff and logical Surface acceptance","excludes":["protected helper IPC","permission broker acquisition","UI composition","terminal emission","process-global V8 platform initialization"],"cpu_time_ns":null,"cpu_time_limitation":"No portable platform CPU-time API is available; durations use monotonic elapsed wall time, never claimed as CPU time.","pack_policy":"identity tone, fixed 0.5 threshold; no protected source owner or terminal credit"}),
+            json!({"type":"manifest","benchmark":"production_performance","benchmark_source_sha256":digest(include_bytes!("production_performance.rs")),"bootstrap_sha256":digest(TRUSTED_BOOTSTRAP.as_bytes()),"native_baselines":baselines,"width_cells":options.width,"height_cells":options.height,"fps":options.fps,"warmup":options.warmup,"measured_frames":options.frames,"civil_epoch_ms":options.epoch_ms,"ordered_cases":options.cases,"root_limits":format!("{:?}",quota.snapshot().limits),"memory":memory_snapshot(&quota),"scope":"trusted in-process native scene and embedded V8 render, binary handoff and logical Surface acceptance","excludes":["protected helper IPC","permission broker acquisition","UI composition","terminal emission","process-global V8 platform initialization"],"cpu_time_ns":null,"cpu_time_limitation":"No portable platform CPU-time API is available; durations use monotonic elapsed wall time, never claimed as CPU time.","pack_policy":"identity tone, fixed 0.5 threshold; no protected source owner or terminal credit"}),
         );
         let mut blocked = 0;
         let mut measured = 0;
         let mut async_parity_blocked = 0;
         let mut failed_cases = Vec::new();
         for case in &options.cases {
-            let reason=match case.as_str() {
-                "beach-classic"|"beach-rich"=>Some("native client PreparedScene/shoreline renderers are private; this crate has neither a public native Beach factory nor a client dependency"),
-                "carpet-4"=>Some("native Carpet TV starts LiveTv directly; no public injected deterministic feed exists, and this benchmark never acquires real system/network data"),
-                _=>None,
+            let reason = match case.as_str() {
+                "beach-classic" | "beach-rich" => Some(
+                    "native client PreparedScene/shoreline renderers are private; this crate has neither a public native Beach factory nor a client dependency",
+                ),
+                "carpet-4" => Some(
+                    "native Carpet TV starts LiveTv directly; no public injected deterministic feed exists, and this benchmark never acquires real system/network data",
+                ),
+                _ => None,
             };
             if let Some(reason) = reason {
                 blocked += 1;
@@ -374,7 +447,7 @@ mod benchmark {
         }
         drop(execution);
         emit(
-            json!({"type":"summary","measured_cases":measured,"blocked_cases":blocked,"failed_cases":failed_cases.len(),"async_parity_blocked_measured_cases":async_parity_blocked,"status":if !failed_cases.is_empty(){"failed"}else if blocked==0 && async_parity_blocked==0{"measured"}else{"partial"},"retained_worker_threads":quota.snapshot().worker_threads,"retained_worker_bytes":quota.snapshot().worker_bytes,"retained_note":"process-global V8 platform remains initialized; this is not a zero-resource claim"}),
+            json!({"type":"summary","measured_cases":measured,"blocked_cases":blocked,"failed_cases":failed_cases.len(),"async_parity_blocked_measured_cases":async_parity_blocked,"status":if !failed_cases.is_empty(){"failed"}else if blocked==0 && async_parity_blocked==0{"measured"}else{"partial"},"memory":memory_snapshot(&quota),"retained_worker_threads":quota.snapshot().worker_threads,"retained_worker_bytes":quota.snapshot().worker_bytes,"retained_note":"process-global V8 platform remains initialized; this is not a zero-resource claim"}),
         );
         if !failed_cases.is_empty() {
             return Err(fail(&format!(
@@ -557,6 +630,13 @@ mod benchmark {
             ));
         }
         let js_preparation_ns = js_preparation.elapsed().as_nanos() as f64;
+        emit(json!({
+            "type": "result",
+            "stage": "case_setup",
+            "case": case,
+            "memory": memory_snapshot(quota),
+            "scope": "process RSS includes the in-process V8 platform and this case; no external helper"
+        }));
         let returned = [
             specification("work_data", TypedArrayKind::F32, layout.elements),
             specification("data", TypedArrayKind::F32, layout.elements),
@@ -845,13 +925,15 @@ mod benchmark {
                 compared += 1;
             }
         }
+        let memory_active_after_frames = memory_snapshot(quota);
         engine.dispose()?;
         drop(engine);
         drop(native);
+        let memory_after_instance_disposal = memory_snapshot(quota);
         // Timings remain diagnostic until differential output is qualified.
         // This emits no synthetic CPU measurement or unqualified speed ratio.
         emit(
-            json!({"type":"result","case":case,"status":if mode==3{"diagnostic_parity_blocked"}else if different_braille_cells==0{"measured"}else{"diagnostic_mask_mismatch"},"settings":settings,"native_preparation_elapsed_ns":native_preparation_ns,"v8_preparation_elapsed_ns":js_preparation_ns,"native_async_search":if mode==3{json!({"thinking_frames_including_warmup":thinking_frames,"status_transitions":native_status_transitions,"last_status":last_native_status,"search_worker_cpu_time_ns":null,"completion_wait_elapsed_ns":null,"native_completion_callbacks":native_completion_callbacks.get(),"v8_completion_callbacks":js_completion_callbacks.get(),"completion_policy":"original native Scene.status and V8 status records; same logical time and zero delta for continuation; monotonic Surface sequences","qualification":"completion-aligned component diagnostic; total native render elapsed includes original search scheduling/wait; V8 full elapsed includes cooperative continuation handoffs; worker CPU and live cadence unmeasured; output/decision qualification still required before ratios"})}else{Value::Null},"package_digest":package.digest(),"native_scene_render_elapsed":stats(&mut native_render),"native_plus_common_surface_elapsed":stats(&mut native_full),"v8_render_and_binary_handoff_elapsed":stats(&mut js_render),"v8_seed_render_and_accepted_surface_elapsed":stats(&mut js_full),"cpu_time_ns":null,"clock":"monotonic elapsed wall time","native_full_adapter":"native Raster copied into common gray32 Surface, validated and packed; this adapter is benchmark-only","v8_full_adapter":"binary seed, production facade render, detach/copy, sealed-plane validation, Surface validation/pack, acceptance microtasks","packed_differential":{"compared_cells":compared_cells,"different_cells":different_braille_cells,"different_dots":different_braille_dots,"native_masks_sha256":format!("{:x}",native_mask_hash.finalize()),"v8_masks_sha256":format!("{:x}",js_mask_hash.finalize()),"policy":"actual accepted Surface pack; identity tone; fixed0.5 threshold","scope":"pre-compositor Braille masks only; no terminal emission/source-authority proof","status":if mode==3{"blocked_async_decision_equality"}else if different_braille_cells==0{"exact_masks"}else{"different_masks"}},"differential":{"compared_scalars":compared,"max_abs_error":max_error,"rmse":(squared_error/compared as f64).sqrt(),"native_sha256":format!("{:x}",native_hash.finalize()),"v8_sha256":format!("{:x}",js_hash.finalize()),"status":if mode==3{"blocked_async_decision_equality"}else if max_error==0.0{"exact"}else{"requires_review"}},"input_sha256":format!("{:x}",input_hash.finalize()),"construction_preparation_included_in_frame_distribution":false,"first_frame_included_in_distribution":options.warmup==0}),
+            json!({"type":"result","case":case,"status":if mode==3{"diagnostic_parity_blocked"}else if different_braille_cells==0{"measured"}else{"diagnostic_mask_mismatch"},"settings":settings,"native_preparation_elapsed_ns":native_preparation_ns,"v8_preparation_elapsed_ns":js_preparation_ns,"memory_active_after_frames":memory_active_after_frames,"memory_after_instance_disposal":memory_after_instance_disposal,"native_async_search":if mode==3{json!({"thinking_frames_including_warmup":thinking_frames,"status_transitions":native_status_transitions,"last_status":last_native_status,"search_worker_cpu_time_ns":null,"completion_wait_elapsed_ns":null,"native_completion_callbacks":native_completion_callbacks.get(),"v8_completion_callbacks":js_completion_callbacks.get(),"completion_policy":"original native Scene.status and V8 status records; same logical time and zero delta for continuation; monotonic Surface sequences","qualification":"completion-aligned component diagnostic; total native render elapsed includes original search scheduling/wait; V8 full elapsed includes cooperative continuation handoffs; worker CPU and live cadence unmeasured; output/decision qualification still required before ratios"})}else{Value::Null},"package_digest":package.digest(),"native_scene_render_elapsed":stats(&mut native_render),"native_plus_common_surface_elapsed":stats(&mut native_full),"v8_render_and_binary_handoff_elapsed":stats(&mut js_render),"v8_seed_render_and_accepted_surface_elapsed":stats(&mut js_full),"cpu_time_ns":null,"clock":"monotonic elapsed wall time","native_full_adapter":"native Raster copied into common gray32 Surface, validated and packed; this adapter is benchmark-only","v8_full_adapter":"binary seed, production facade render, detach/copy, sealed-plane validation, Surface validation/pack, acceptance microtasks","packed_differential":{"compared_cells":compared_cells,"different_cells":different_braille_cells,"different_dots":different_braille_dots,"native_masks_sha256":format!("{:x}",native_mask_hash.finalize()),"v8_masks_sha256":format!("{:x}",js_mask_hash.finalize()),"policy":"actual accepted Surface pack; identity tone; fixed0.5 threshold","scope":"pre-compositor Braille masks only; no terminal emission/source-authority proof","status":if mode==3{"blocked_async_decision_equality"}else if different_braille_cells==0{"exact_masks"}else{"different_masks"}},"differential":{"compared_scalars":compared,"max_abs_error":max_error,"rmse":(squared_error/compared as f64).sqrt(),"native_sha256":format!("{:x}",native_hash.finalize()),"v8_sha256":format!("{:x}",js_hash.finalize()),"status":if mode==3{"blocked_async_decision_equality"}else if max_error==0.0{"exact"}else{"requires_review"}},"input_sha256":format!("{:x}",input_hash.finalize()),"construction_preparation_included_in_frame_distribution":false,"first_frame_included_in_distribution":options.warmup==0}),
         );
         Ok(different_braille_cells == 0)
     }

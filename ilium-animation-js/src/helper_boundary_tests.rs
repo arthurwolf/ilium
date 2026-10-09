@@ -238,13 +238,11 @@ fn boundary_completion_cancel_and_drain_commands_are_nonacquiring() {
         assert!(!command.permits_acquisition());
     } // Every listed command must reject fresh guest service acquisition.
     assert!(Command::Pump.permits_acquisition());
-    assert!(
-        Command::StartCreate {
-            settings: json!({}),
-            accepted_plan: json!({})
-        }
-        .permits_acquisition()
-    ); // Preserve the two explicit authorized continuation entrypoints.
+    assert!(Command::StartCreate {
+        settings: json!({}),
+        accepted_plan: json!({})
+    }
+    .permits_acquisition()); // Preserve the two explicit authorized continuation entrypoints.
     for state in [
         CompletionState::Delivered,
         CompletionState::Unknown,
@@ -254,25 +252,21 @@ fn boundary_completion_cancel_and_drain_commands_are_nonacquiring() {
         let record = completion_record(7, active(), Ok(state));
         assert_eq!(completed_state(record, 7, active()).unwrap(), state);
     } // Correlation preserves every distinct native terminal outcome.
-    assert!(
-        completed_state(
-            completion_record(7, active(), Ok(CompletionState::Delivered)),
-            8,
-            active()
-        )
-        .is_err()
-    ); // A different request cannot consume an otherwise successful ACK.
-    assert!(
-        completed_state(
-            completion_record(7, active(), Ok(CompletionState::Delivered)),
-            7,
-            ServiceAuthority {
-                authorization_epoch: 4,
-                ..active()
-            }
-        )
-        .is_err()
-    ); // A different active epoch cannot consume the ACK either.
+    assert!(completed_state(
+        completion_record(7, active(), Ok(CompletionState::Delivered)),
+        8,
+        active()
+    )
+    .is_err()); // A different request cannot consume an otherwise successful ACK.
+    assert!(completed_state(
+        completion_record(7, active(), Ok(CompletionState::Delivered)),
+        7,
+        ServiceAuthority {
+            authorization_epoch: 4,
+            ..active()
+        }
+    )
+    .is_err()); // A different active epoch cannot consume the ACK either.
 } // Actual no-checkpoint behavior is also forced through the real engine and actual helper qualification.
 #[test] // Two individually legal 48-plane requests must be paged rather than flattened into one illegal packet.
 fn boundary_actual_engine_requests_page_without_plane_collision_or_checkpoint() {
@@ -395,13 +389,11 @@ fn boundary_actual_helper_retirement_preserves_native_activation_until_actual_em
         .unwrap();
     instance.accept_frame(true).unwrap();
     let mut emitted = 0;
-    assert!(
-        instance
-            .with_playback_authority(&expected, || {
-                emitted += 1;
-            })
-            .is_err()
-    );
+    assert!(instance
+        .with_playback_authority(&expected, || {
+            emitted += 1;
+        })
+        .is_err());
     assert_eq!(emitted, 0);
     instance.retire_helper().unwrap();
     assert!(instance.is_physically_retired());
@@ -418,13 +410,11 @@ fn boundary_actual_helper_retirement_preserves_native_activation_until_actual_em
     assert_eq!(emitted, 1);
     let invalidation = instance.revoke_activation().unwrap().unwrap();
     assert!(invalidation.instance_ids.contains(&expected.instance_id));
-    assert!(
-        instance
-            .with_playback_authority(&expected, || {
-                emitted += 1;
-            })
-            .is_err()
-    );
+    assert!(instance
+        .with_playback_authority(&expected, || {
+            emitted += 1;
+        })
+        .is_err());
     assert_eq!(emitted, 1);
     drop(resolution);
     drop(instance);

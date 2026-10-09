@@ -8,7 +8,7 @@ use crate::{
     native_draw_host::NativeDrawHost,
     native_http_authority::NativeHttpAuthorityFactory,
     native_media::{MediaLimits, NativeMedia},
-    permissions::{Channel, PermissionBroker},
+    permissions::{Channel, PermissionBroker, SourceCaptureFence},
     runtime::{PackageInstance, ServiceOperation, SourceFeedOperation},
     sources::{
         self, AdmittedSourceSnapshot, AdmittedSourceValue, NativeSourceClient,
@@ -332,6 +332,18 @@ impl SourcePlanningAuthority {
             deadline,
         ))
     }
+    fn capture_context(
+        &self,
+    ) -> Result<(Arc<Mutex<PermissionBroker>>, SourceCaptureFence, QuotaGroup)> {
+        self.check()?;
+        let fence = self
+            .broker
+            .lock()
+            .map_err(|_| denied("source native owner poisoned"))?
+            .source_capture_fence(&self.channel)
+            .map_err(|error| AnimationError::PermissionDenied(error.to_string()))?;
+        Ok((Arc::clone(&self.broker), fence, self.quota.clone()))
+    }
 }
 /// Native supplied policy; never grow these limits on refusal. Media policy is
 /// the caller's original native policy, independently validated by NativeMedia.
@@ -565,15 +577,40 @@ struct Exchange {
 }
 /// Offline qualification replaces only the socket/body transport. The real
 /// package review, committed ticket, original IO job and native URL/hop
-/// authority still run. No test-only path is compiled into production.
-#[cfg(test)]
-struct OfflineSourceHttp {
+/// authority still run. This type exists only in unit tests or builds that
+/// explicitly enable `qualification-test-support`.
+#[cfg(any(test, feature = "qualification-test-support"))]
+#[doc(hidden)]
+pub struct OfflineSourceHttp {
     exact_url: String,
     public_address: std::net::SocketAddr,
     bodies: Mutex<std::collections::VecDeque<Vec<u8>>>,
 }
-#[cfg(test)]
+#[cfg(any(test, feature = "qualification-test-support"))]
 impl OfflineSourceHttp {
+    #[doc(hidden)]
+    pub fn new(
+        exact_url: String,
+        public_address: std::net::SocketAddr,
+        bodies: Vec<Vec<u8>>,
+    ) -> Result<Arc<Self>> {
+        let url = url::Url::parse(&exact_url)
+            .map_err(|error| AnimationError::Runtime(error.to_string()))?;
+        if url.scheme() != "https"
+            || public_address.port() != 443
+            || crate::network::classify_address(public_address.ip())
+                != crate::network::NetworkAddressClass::Public
+            || bodies.is_empty()
+        {
+            return Err(denied("offline source fixture authority is invalid"));
+        }
+        Ok(Arc::new(Self {
+            exact_url,
+            public_address,
+            bodies: Mutex::new(bodies.into()),
+        }))
+    }
+
     fn receive(
         &self,
         options: &HttpOptions,
@@ -636,7 +673,7 @@ struct ReplayState {
     refresh: Option<(String, u64, u64, bool)>,
     refresh_checked: bool,
     limits: SourceActorLimits,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "qualification-test-support"))]
     offline_http: Option<Arc<OfflineSourceHttp>>,
     _admission: StorageAdmission,
 }
@@ -1019,9 +1056,9 @@ impl Job for SourceIoJob {
                 ));
             }
         }
-        #[cfg(test)]
+        #[cfg(any(test, feature = "qualification-test-support"))]
         let offline_http = { run.dispatcher.actor_client().state()?.offline_http.clone() };
-        #[cfg(test)]
+        #[cfg(any(test, feature = "qualification-test-support"))]
         if let Some(fixture) = offline_http {
             let transport =
                 fixture.receive(&options, self.plan.kind, &mut authority, &self.quota, &stop);
@@ -1147,8 +1184,9 @@ pub struct SourceActorEnvironment {
     pub cadence: Arc<SourceCadence>,
     pub limits: SourceActorLimits,
     pub credentials: Option<Arc<Mutex<Box<dyn crate::native_http_host::HostCredentialAdapter>>>>,
-    #[cfg(test)]
-    offline_http: Option<Arc<OfflineSourceHttp>>,
+    #[cfg(any(test, feature = "qualification-test-support"))]
+    #[doc(hidden)]
+    pub offline_http: Option<Arc<OfflineSourceHttp>>,
 }
 struct SourceCredentialAdapter(Arc<Mutex<Box<dyn crate::native_http_host::HostCredentialAdapter>>>);
 impl crate::native_http_host::HostCredentialAdapter for SourceCredentialAdapter {
@@ -1196,6 +1234,7 @@ pub struct ProjectedFeedDescriptor {
 pub struct PreparedFeedRegistration {
     owner: Arc<Mutex<PermissionBroker>>,
     quota: QuotaGroup,
+    replay_lineage: Vec<crate::replay::GrantLineage>,
     worker_stop: Arc<AtomicBool>,
     stop: StopToken,
     registry: StorageAdmission,
@@ -1424,10 +1463,16 @@ impl SourceCompletion {
             return Err(denied("feed client original quota mismatch"));
         }
         let registry = charge(&quota, 64 * 1024)?;
+        let replay_lineage = self
+            .operation
+            .as_ref()
+            .ok_or_else(|| denied("feed replay requires its committed open operation"))
+            .and_then(|operation| instance.source_replay_lineage(operation))?;
         state.authority.promote_to_feed(stop.clone())?;
         Ok(PreparedFeedRegistration {
             owner: Arc::clone(&state.authority.broker),
             quota,
+            replay_lineage,
             worker_stop: Arc::clone(&self.step.view().run.stop),
             stop,
             registry,
@@ -1568,6 +1613,7 @@ pub struct NativeSourceFeedHost {
     client: Client,
     quota: QuotaGroup,
     owner: Arc<Mutex<PermissionBroker>>,
+    replay_lineage: Vec<crate::replay::GrantLineage>,
     dns: Arc<dyn DnsResolver + Send + Sync>,
     credentials: Option<Arc<Mutex<Box<dyn crate::native_http_host::HostCredentialAdapter>>>>,
     stop: StopToken,
@@ -1678,6 +1724,7 @@ impl NativeSourceFeedHost {
             client,
             quota: prepared.quota,
             owner: prepared.owner,
+            replay_lineage: prepared.replay_lineage,
             dns,
             credentials,
             stop: prepared.stop,
@@ -1687,6 +1734,63 @@ impl NativeSourceFeedHost {
             blocked_until_ms: 0,
             _registry: prepared.registry,
         }
+    }
+    /// Retain the exact latest admitted snapshot from a completed feed cycle.
+    /// Capture refuses while refresh state is unsettled; it never takes a
+    /// receipt, starts network work, or fabricates a source from metadata.
+    #[cfg(feature = "v8-runtime")]
+    pub fn capture_latest(
+        &self,
+        instance: &PackageInstance,
+        max_resident_bytes: usize,
+    ) -> Result<Arc<crate::native_source_capture::NativeCapturedFeed>> {
+        if self.stage.is_some() {
+            return Err(invalid(
+                "source feed capture refused during pending refresh",
+            ));
+        }
+        let Some(FeedOwnedState::Ready(retained)) = self.owned.as_ref() else {
+            return Err(invalid(
+                "source feed capture requires an acknowledged quiescent snapshot",
+            ));
+        };
+        let run = retained.view();
+        let handle = run
+            .handle
+            .ok_or_else(|| invalid("source feed capture handle absent"))?;
+        let snapshot = run
+            .dispatcher
+            .latest(handle)?
+            .ok_or_else(|| invalid("source feed has no completed snapshot to capture"))?;
+        let family = match &run.call {
+            SourceCall::Feed(SourceDemand::Series(_)) => crate::replay::InputFamily::Series,
+            SourceCall::Feed(SourceDemand::Earthquakes(_)) => {
+                crate::replay::InputFamily::Earthquakes
+            }
+            SourceCall::Feed(SourceDemand::Aircraft(_)) => crate::replay::InputFamily::Aircraft,
+            SourceCall::Feed(SourceDemand::Boats(_)) => crate::replay::InputFamily::Boats,
+            SourceCall::Feed(SourceDemand::Chess(_)) => crate::replay::InputFamily::Chess,
+            SourceCall::Feed(SourceDemand::Weather(_)) => crate::replay::InputFamily::Weather,
+            SourceCall::Operation(_) => {
+                return Err(invalid("operation cannot be captured as feed"))
+            }
+        };
+        let state = run.dispatcher.actor_client().state()?;
+        let (owner, fence, quota) = state.authority.capture_context()?;
+        drop(state);
+        if !Arc::ptr_eq(&owner, &self.owner) || !quota.shares_root(&self.quota) {
+            return Err(denied("source feed capture host owner/root mismatch"));
+        }
+        crate::native_source_capture::NativeCapturedFeed::from_native_source(
+            instance,
+            owner,
+            fence,
+            quota,
+            family,
+            snapshot,
+            self.replay_lineage.clone(),
+            max_resident_bytes,
+        )
     }
     pub fn next_due_ms(&self) -> Result<Option<u64>> {
         if self.stage.is_some() {
@@ -2455,7 +2559,7 @@ impl NativeSourceHost {
             cadence,
             limits,
             credentials,
-            #[cfg(test)]
+            #[cfg(any(test, feature = "qualification-test-support"))]
             offline_http,
         } = environment;
         let limits = limits.constrained(&request, instance.plan())?;
@@ -2484,7 +2588,7 @@ impl NativeSourceHost {
             refresh: None,
             refresh_checked: false,
             limits,
-            #[cfg(test)]
+            #[cfg(any(test, feature = "qualification-test-support"))]
             offline_http,
             _admission: metadata,
         })));
@@ -2882,6 +2986,42 @@ mod tests {
         io::Cursor,
         time::{Duration, Instant},
     };
+
+    #[test]
+    fn offline_source_fixture_requires_exact_https_authority_and_bounded_responses() {
+        let public_address = "93.184.216.34:443".parse().unwrap();
+        assert!(OfflineSourceHttp::new(
+            "http://earthquake.usgs.gov/feed".into(),
+            public_address,
+            vec![b"fixture".to_vec()],
+        )
+        .is_err());
+        assert!(OfflineSourceHttp::new(
+            "https://earthquake.usgs.gov/feed".into(),
+            "93.184.216.34:444".parse().unwrap(),
+            vec![b"fixture".to_vec()],
+        )
+        .is_err());
+        assert!(OfflineSourceHttp::new(
+            "https://earthquake.usgs.gov/feed".into(),
+            "127.0.0.1:443".parse().unwrap(),
+            vec![b"fixture".to_vec()],
+        )
+        .is_err());
+        assert!(OfflineSourceHttp::new(
+            "https://earthquake.usgs.gov/feed".into(),
+            "[::ffff:127.0.0.1]:443".parse().unwrap(),
+            vec![b"fixture".to_vec()],
+        )
+        .is_err());
+        assert!(OfflineSourceHttp::new(
+            "https://earthquake.usgs.gov/feed".into(),
+            public_address,
+            Vec::new(),
+        )
+        .is_err());
+    }
+
     fn quota() -> QuotaGroup {
         QuotaGroup::new(ilium_execution::QuotaLimits {
             clients: 2,
@@ -3689,6 +3829,7 @@ mod tests {
             client: client.clone(),
             quota: quota.clone(),
             owner,
+            replay_lineage: Vec::new(),
             dns: Arc::new(http::SystemDns),
             credentials: None,
             stop: StopToken::default(),

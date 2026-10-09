@@ -41,7 +41,7 @@ use ilium_platform::owned_worker::StopToken;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -68,6 +68,9 @@ pub struct PackageInstance {
     replay_pure_yield_count: u64,
     replay_completed_yield_count: u64,
     replay_video_open_count: u64,
+    replay_source_open_count: u64,
+    replay_source_freeze_count: u64,
+    replay_source_sequence_count: u64,
     plan: AnimationPlan,
     projection: AuthorizationProjection,
     selected_storage: BTreeMap<String, Arc<crate::native_storage::SelectedStorage>>,
@@ -712,6 +715,9 @@ impl VerifiedPreparation {
                 replay_pure_yield_count: 0,
                 replay_completed_yield_count: 0,
                 replay_video_open_count: 0,
+                replay_source_open_count: 0,
+                replay_source_freeze_count: 0,
+                replay_source_sequence_count: 0,
                 plan,
                 projection,
                 selected_storage: BTreeMap::new(),
@@ -2025,6 +2031,43 @@ impl PackageInstance {
                         .count() as u64,
                 )
                 .ok_or_else(|| AnimationError::Budget("replay Video open counter".into()))?;
+            #[cfg(all(feature = "native-host", feature = "native-network"))]
+            {
+                self.replay_source_open_count = self
+                    .replay_source_open_count
+                    .checked_add(
+                        requests
+                            .iter()
+                            .filter(|request| {
+                                crate::native_source_host::SourceCall::recognized(&request.method)
+                                    && request.method.ends_with(".open")
+                                    && matches!(
+                                        request.phase,
+                                        ServicePhase::Create | ServicePhase::Async
+                                    )
+                            })
+                            .count() as u64,
+                    )
+                    .ok_or_else(|| AnimationError::Budget("replay source open counter".into()))?;
+            }
+            self.replay_source_freeze_count = self
+                .replay_source_freeze_count
+                .checked_add(
+                    requests
+                        .iter()
+                        .filter(|request| request.method == "replay.freeze")
+                        .count() as u64,
+                )
+                .ok_or_else(|| AnimationError::Budget("replay source freeze counter".into()))?;
+            self.replay_source_sequence_count = self
+                .replay_source_sequence_count
+                .checked_add(
+                    requests
+                        .iter()
+                        .filter(|request| request.method == "replay.capture_sequence")
+                        .count() as u64,
+                )
+                .ok_or_else(|| AnimationError::Budget("replay source sequence counter".into()))?;
             self.replay_pure_yield_count = self
                 .replay_pure_yield_count
                 .checked_add(
@@ -2149,6 +2192,27 @@ impl PackageInstance {
         grants.iter().map(GrantLineage::from_grant).collect()
     }
     #[cfg(all(feature = "native-host", feature = "native-network"))]
+    pub(crate) fn source_replay_lineage(
+        &self,
+        operation: &ServiceOperation,
+    ) -> Result<Vec<GrantLineage>> {
+        if !crate::native_source_host::SourceCall::recognized(&operation.request.method)
+            || !operation.request.method.ends_with(".open")
+        {
+            return Err(AnimationError::PermissionDenied(
+                "recorded source requires its original committed feed-open operation".into(),
+            ));
+        }
+        let active = self.activation.as_ref().ok_or_else(|| {
+            AnimationError::PermissionDenied("recorded source activation missing".into())
+        })?;
+        let broker = lock_broker(&self.broker)?;
+        let grants = broker
+            .committed_operation_grants(&operation.ticket, &active.channel)
+            .map_err(permission_error)?;
+        grants.iter().map(GrantLineage::from_grant).collect()
+    }
+    #[cfg(all(feature = "native-host", feature = "native-network"))]
     pub(crate) fn source_planning_authority(
         &self,
         request: &HostRequest,
@@ -2260,6 +2324,40 @@ impl PackageInstance {
                 .map_err(permission_error)?;
             Ok(issue()) // Actual original CPU submit, no nested wait.
         })
+    }
+    #[cfg(all(feature = "native-host", feature = "native-network"))]
+    pub(crate) fn with_source_capture_authority<T>(
+        &self,
+        owner: &Arc<Mutex<PermissionBroker>>,
+        fence: &crate::permissions::SourceCaptureFence,
+        quota: &QuotaGroup,
+        read: impl FnOnce() -> T,
+    ) -> Result<T> {
+        if self.helper_retired
+            || !Arc::ptr_eq(owner, &self.broker)
+            || !self.quota.shares_root(quota)
+        {
+            return Err(AnimationError::PermissionDenied(
+                "source capture original owner retired or mismatched".into(),
+            ));
+        }
+        let broker = lock_broker(owner)?;
+        let fenced = broker
+            .check_source_capture_fence(fence)
+            .map_err(permission_error)?;
+        let current = self.current_service_authority_locked(&broker)?;
+        if fenced
+            != (
+                current.instance_id,
+                current.plan_generation,
+                current.authorization_epoch,
+            )
+        {
+            return Err(AnimationError::PermissionDenied(
+                "source capture activation changed".into(),
+            ));
+        }
+        Ok(read())
     }
     #[cfg(all(feature = "native-host", feature = "native-network"))]
     pub(crate) fn with_source_http_authority<T>(
@@ -2519,6 +2617,74 @@ impl PackageInstance {
             }
             helper.complete_service_request(request.id, authority, value)
         }) // Actual inert copy ACK; no helper JS/checkpoint under original native owner.
+    }
+    #[cfg(all(feature = "native-host", feature = "native-network"))]
+    pub fn complete_native_replay_freeze(
+        &mut self,
+        request: &HostRequest,
+        value: ServiceValue,
+    ) -> Result<CompletionState> {
+        self.live_helper_authority()?;
+        if request.method != "replay.freeze"
+            || request.is_cancelled()
+            || !request.payload.shares_root(&self.quota)
+            || !value.shares_root(&self.quota)
+        {
+            return Err(AnimationError::PermissionDenied(
+                "replay freeze publication owner/call mismatch".into(),
+            ));
+        }
+        let owner = Arc::clone(&self.broker);
+        let digest = self.package.digest();
+        let active = self.activation.as_ref().ok_or_else(|| {
+            AnimationError::PermissionDenied("replay freeze activation missing".into())
+        })?;
+        self.helper.with_native_publication(|helper| {
+            let broker = lock_broker(&owner)?;
+            let authority = authority_from(&broker, active)?;
+            validate_request(digest, request, authority)?;
+            if request.is_cancelled() {
+                return Err(AnimationError::PermissionDenied(
+                    "replay freeze publication cancelled".into(),
+                ));
+            }
+            helper.complete_service_request(request.id, authority, value)
+        })
+    }
+    #[cfg(all(feature = "native-host", feature = "native-network"))]
+    pub fn complete_native_replay_sequence(
+        &mut self,
+        request: &HostRequest,
+        value: ServiceValue,
+    ) -> Result<CompletionState> {
+        self.live_helper_authority()?;
+        if self.mode != AnimationMode::PreRendered
+            || !matches!(request.phase, ServicePhase::Create | ServicePhase::Async)
+            || request.method != "replay.capture_sequence"
+            || request.is_cancelled()
+            || !request.payload.shares_root(&self.quota)
+            || !value.shares_root(&self.quota)
+        {
+            return Err(AnimationError::PermissionDenied(
+                "replay sequence publication mode/owner/call mismatch".into(),
+            ));
+        }
+        let owner = Arc::clone(&self.broker);
+        let digest = self.package.digest();
+        let active = self.activation.as_ref().ok_or_else(|| {
+            AnimationError::PermissionDenied("replay sequence activation missing".into())
+        })?;
+        self.helper.with_native_publication(|helper| {
+            let broker = lock_broker(&owner)?;
+            let authority = authority_from(&broker, active)?;
+            validate_request(digest, request, authority)?;
+            if request.is_cancelled() {
+                return Err(AnimationError::PermissionDenied(
+                    "replay sequence publication cancelled".into(),
+                ));
+            }
+            helper.complete_service_request(request.id, authority, value)
+        })
     }
     #[cfg(all(feature = "native-host", feature = "native-network"))]
     pub fn copy_native_source_feed_snapshots(
@@ -3317,6 +3483,219 @@ impl PackageInstance {
             self.replay_video_open_count,
         )
     }
+    /// Certify a source-backed clip only when every create-time host request
+    /// is accounted for by the exact captured feeds, one native freeze, or a
+    /// settled pure yield. The capture digest and recording identity are then
+    /// bound again by ClipSpec against the retained FrozenInputs.
+    #[cfg(all(
+        feature = "native-host",
+        feature = "native-network",
+        feature = "v8-runtime"
+    ))]
+    pub fn certify_source_capture_replay(
+        &self,
+        frozen: &crate::replay::FrozenInputs,
+        captures: &[Arc<crate::native_source_capture::NativeCapturedFeed>],
+    ) -> Result<crate::replay::ReplayCertification> {
+        let source_count = self.replay_source_open_count;
+        if self.mode != AnimationMode::PreRendered
+            || self.creation != Some(CreateState::Ready)
+            || self.helper_retired
+            || self.current_service_authority().is_err()
+            || source_count == 0
+            || self.replay_video_open_count != 0
+            || self.replay_source_freeze_count != 1
+            || frozen.snapshots().len() as u64 != source_count
+            || captures.len() as u64 != source_count
+            || self
+                .replay_pure_yield_count
+                .checked_add(source_count)
+                .and_then(|count| count.checked_add(self.replay_source_freeze_count))
+                != Some(self.replay_request_count)
+            || self.replay_pure_yield_count != self.replay_completed_yield_count
+        {
+            return Err(AnimationError::PermissionDenied(
+                "source replay lacks an exact settled capture request inventory".into(),
+            ));
+        }
+        let mut lineage_by_id = BTreeMap::new();
+        for (capture, snapshot) in captures.iter().zip(frozen.snapshots()) {
+            capture.verify_frozen_snapshot(self, snapshot)?;
+            for lineage in capture.replay_lineage() {
+                match lineage_by_id.get(&lineage.request_id) {
+                    Some(existing) if existing != lineage => {
+                        return Err(AnimationError::PermissionDenied(
+                            "source replay grant lineage changed".into(),
+                        ));
+                    }
+                    Some(_) => {}
+                    None => {
+                        lineage_by_id.insert(lineage.request_id.clone(), lineage.clone());
+                    }
+                }
+            }
+        }
+        if lineage_by_id
+            .into_values()
+            .ne(frozen.lineage().iter().cloned())
+        {
+            return Err(AnimationError::PermissionDenied(
+                "source replay frozen grant lineage differs from native captures".into(),
+            ));
+        }
+        crate::replay::ReplayCertification::sealed_source_capture(
+            &self.package,
+            &self.plan,
+            &self.settings,
+            crate::replay::ReplayExecutionIdentity {
+                ambient_seed: self.ambient_seed,
+                bootstrap_digest: self.ambient_bootstrap_digest,
+                environment_digest: self.environment_digest,
+                helper_build_digest: self.helper_build_digest,
+            },
+            self.replay_completed_yield_count,
+            source_count,
+            frozen,
+        )
+    }
+    #[cfg(all(
+        feature = "native-host",
+        feature = "native-network",
+        feature = "v8-runtime"
+    ))]
+    pub fn certify_source_sequence_replay(
+        &self,
+        frozen: &crate::replay::FrozenInputs,
+        sequence: &crate::replay::FrozenSourceSequence,
+        captures: &[(
+            String,
+            Arc<crate::native_source_capture::NativeCapturedFeed>,
+        )],
+    ) -> Result<crate::replay::ReplayCertification> {
+        let source_count = self.replay_source_open_count;
+        if self.mode != AnimationMode::PreRendered
+            || self.creation != Some(CreateState::Ready)
+            || self.helper_retired
+            || self.current_service_authority().is_err()
+            || source_count == 0
+            || frozen.snapshots().len() as u64 != source_count
+            || sequence.frames().is_empty()
+            || captures.is_empty()
+            || self.replay_video_open_count != 0
+            || self.replay_source_freeze_count != 0
+            || self.replay_source_sequence_count != 1
+            || self
+                .replay_pure_yield_count
+                .checked_add(source_count)
+                .and_then(|count| count.checked_add(self.replay_source_sequence_count))
+                != Some(self.replay_request_count)
+            || self.replay_pure_yield_count != self.replay_completed_yield_count
+        {
+            return Err(AnimationError::PermissionDenied(
+                "source sequence lacks an exact settled capture request inventory".into(),
+            ));
+        }
+        let mut observed = BTreeSet::new();
+        let mut lineage_by_id = BTreeMap::new();
+        for (handle_id, capture) in captures {
+            let summary = capture.summary(self)?;
+            let identity = (handle_id.clone(), summary.source_revision);
+            if !observed.insert(identity.clone()) {
+                return Err(AnimationError::PermissionDenied(
+                    "source sequence repeated a native capture identity".into(),
+                ));
+            }
+            let snapshot = sequence
+                .frames()
+                .iter()
+                .flat_map(|frame| frame.snapshots())
+                .find(|snapshot| {
+                    snapshot.handle_id() == identity.0 && snapshot.revision() == identity.1
+                })
+                .ok_or_else(|| {
+                    AnimationError::PermissionDenied(
+                        "source sequence contains a revision without its original native capture"
+                            .into(),
+                    )
+                })?;
+            capture.verify_frozen_snapshot(self, snapshot)?;
+            for lineage in capture.replay_lineage() {
+                match lineage_by_id.get(&lineage.request_id) {
+                    Some(existing) if existing != lineage => {
+                        return Err(AnimationError::PermissionDenied(
+                            "source sequence grant lineage changed".into(),
+                        ));
+                    }
+                    Some(_) => {}
+                    None => {
+                        lineage_by_id.insert(lineage.request_id.clone(), lineage.clone());
+                    }
+                }
+            }
+        }
+        let expected: BTreeSet<_> = sequence
+            .frames()
+            .iter()
+            .flat_map(|frame| frame.snapshots())
+            .map(|snapshot| (snapshot.handle_id().to_owned(), snapshot.revision()))
+            .collect();
+        let initial_frame = sequence.frames().first().ok_or_else(|| {
+            AnimationError::PermissionDenied("source sequence initial frame is absent".into())
+        })?;
+        if initial_frame.snapshots().len() != frozen.snapshots().len() {
+            return Err(AnimationError::PermissionDenied(
+                "source sequence initial frame differs from frozen input inventory".into(),
+            ));
+        }
+        for snapshot in frozen.snapshots() {
+            let (handle_id, capture) = captures
+                .iter()
+                .find(|(handle_id, capture)| {
+                    handle_id == snapshot.handle_id()
+                        && capture
+                            .summary(self)
+                            .is_ok_and(|summary| summary.source_revision == snapshot.revision())
+                })
+                .ok_or_else(|| {
+                    AnimationError::PermissionDenied(
+                        "frozen initial source lacks its original native capture".into(),
+                    )
+                })?;
+            if !initial_frame.snapshots().iter().any(|initial| {
+                initial.handle_id() == handle_id && initial.revision() == snapshot.revision()
+            }) {
+                return Err(AnimationError::PermissionDenied(
+                    "frozen initial source is absent from sequence start".into(),
+                ));
+            }
+            capture.verify_frozen_snapshot(self, snapshot)?;
+        }
+        if observed != expected
+            || lineage_by_id
+                .into_values()
+                .ne(frozen.lineage().iter().cloned())
+        {
+            return Err(AnimationError::PermissionDenied(
+                "source sequence capture inventory or grant lineage differs from native owners"
+                    .into(),
+            ));
+        }
+        crate::replay::ReplayCertification::sealed_source_sequence(
+            &self.package,
+            &self.plan,
+            &self.settings,
+            crate::replay::ReplayExecutionIdentity {
+                ambient_seed: self.ambient_seed,
+                bootstrap_digest: self.ambient_bootstrap_digest,
+                environment_digest: self.environment_digest,
+                helper_build_digest: self.helper_build_digest,
+            },
+            self.replay_completed_yield_count,
+            source_count,
+            frozen,
+            sequence,
+        )
+    }
     pub fn check_recorded_video_replay_requests(&self, acquired_video_count: usize) -> Result<()> {
         if self.mode != AnimationMode::PreRendered
             || self.replay_video_open_count != acquired_video_count as u64
@@ -3328,6 +3707,55 @@ impl PackageInstance {
         {
             return Err(AnimationError::PermissionDenied(
                 "recorded replay issued a new external request".into(),
+            ));
+        }
+        Ok(())
+    }
+    #[cfg(all(
+        feature = "native-host",
+        feature = "native-network",
+        feature = "v8-runtime"
+    ))]
+    pub fn check_source_capture_replay_requests(&self, captured_source_count: usize) -> Result<()> {
+        if self.mode != AnimationMode::PreRendered
+            || captured_source_count == 0
+            || self.replay_video_open_count != 0
+            || self.replay_source_open_count != captured_source_count as u64
+            || self.replay_source_freeze_count != 1
+            || self
+                .replay_pure_yield_count
+                .checked_add(self.replay_source_open_count)
+                .and_then(|count| count.checked_add(self.replay_source_freeze_count))
+                != Some(self.replay_request_count)
+            || self.replay_pure_yield_count != self.replay_completed_yield_count
+        {
+            return Err(AnimationError::PermissionDenied(
+                "source replay observed an unrecorded native request".into(),
+            ));
+        }
+        Ok(())
+    }
+    #[cfg(all(
+        feature = "native-host",
+        feature = "native-network",
+        feature = "v8-runtime"
+    ))]
+    pub fn check_source_sequence_replay_requests(&self, opened_source_count: usize) -> Result<()> {
+        if self.mode != AnimationMode::PreRendered
+            || opened_source_count == 0
+            || self.replay_video_open_count != 0
+            || self.replay_source_open_count != opened_source_count as u64
+            || self.replay_source_freeze_count != 0
+            || self.replay_source_sequence_count != 1
+            || self
+                .replay_pure_yield_count
+                .checked_add(self.replay_source_open_count)
+                .and_then(|count| count.checked_add(self.replay_source_sequence_count))
+                != Some(self.replay_request_count)
+            || self.replay_pure_yield_count != self.replay_completed_yield_count
+        {
+            return Err(AnimationError::PermissionDenied(
+                "source sequence replay observed an unrecorded native request".into(),
             ));
         }
         Ok(())
@@ -3552,7 +3980,11 @@ mod shared_authority_tests {
             retained.begin_output(&copied),
             Err(AnimationError::PermissionDenied(_))
         ));
-        let committed_success = retained.begin_output(&expected).unwrap();
+        let stamp = TerminalFrameStamp::for_native_presentation();
+        let other_stamp = TerminalFrameStamp::for_native_presentation();
+        let committed_success = retained
+            .begin_output_for_presentation(&expected, Arc::clone(&stamp))
+            .unwrap();
         let committed_uncertain = retained.begin_output(&expected).unwrap();
         assert_eq!(lock_broker(&owner).unwrap().pending_frame_emissions(), 2);
         let invalidation = lock_broker(&owner).unwrap().retire(expected.instance_id);
@@ -3569,7 +4001,16 @@ mod shared_authority_tests {
         // Genuine effects committed before retirement settle afterward.
         drop(retained);
         assert_eq!(quota.snapshot().worker_bytes, 2048);
-        committed_success.backend_flushed().unwrap();
+        let proof = committed_success.backend_flushed().unwrap();
+        let replay_authority = ReplayAuthority {
+            package_digest: expected.package_digest.clone(),
+            instance_id: expected.instance_id,
+            revision: expected.plan_generation,
+            authorization_epoch: expected.authorization_epoch,
+        };
+        assert!(proof.belongs_to_frame(&owner, &replay_authority, &stamp));
+        assert!(!proof.belongs_to_frame(&owner, &replay_authority, &other_stamp));
+        drop(proof);
         assert_eq!(lock_broker(&owner).unwrap().pending_frame_emissions(), 0);
         assert_eq!(quota.snapshot().worker_bytes, 0);
     }

@@ -75,10 +75,25 @@ fn state_root() -> (tempfile::TempDir, Arc<PinnedDirectory>) {
     (directory, root)
 }
 fn archive(script: &str, asset: &[u8], state: bool, disk: bool, disk_write: bool) -> Vec<u8> {
+    archive_with_modules(script, asset, &[], state, disk, disk_write)
+}
+fn archive_with_modules(
+    script: &str,
+    asset: &[u8],
+    modules: &[(&str, &[u8])],
+    state: bool,
+    disk: bool,
+    disk_write: bool,
+) -> Vec<u8> {
     let entry = json!({"path":"entry.mjs","bytes":script.len(),
         "sha256":format!("{:x}",Sha256::digest(script.as_bytes()))});
     let bundled = json!({"path":"assets/default.bin","bytes":asset.len(),
         "sha256":format!("{:x}",Sha256::digest(asset))});
+    let mut files = vec![entry, bundled.clone()];
+    for (path, source) in modules {
+        files.push(json!({"path":path,"bytes":source.len(),
+            "sha256":format!("{:x}",Sha256::digest(source))}));
+    }
     let mut capabilities = if state {
         vec![json!({"id":"state.persist","scope":"session"})]
     } else {
@@ -94,7 +109,7 @@ fn archive(script: &str, asset: &[u8], state: bool, disk: bool, disk_write: bool
     let manifest = json!({"api_version":1,"id":"native-asset-qualification",
         "name":"Native asset qualification","version":"1.0.0","entry":"entry.mjs",
         "modes":["live"],"settings":{"type":"object","properties":{}},
-        "capabilities":capabilities,"assets":[bundled.clone()],"files":[entry,bundled]});
+        "capabilities":capabilities,"assets":[bundled.clone()],"files":files});
     let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
     let options =
         zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
@@ -102,6 +117,10 @@ fn archive(script: &str, asset: &[u8], state: bool, disk: bool, disk_write: bool
     zip.write_all(script.as_bytes()).unwrap();
     zip.start_file("assets/default.bin", options).unwrap();
     zip.write_all(asset).unwrap();
+    for (path, source) in modules {
+        zip.start_file(*path, options).unwrap();
+        zip.write_all(source).unwrap();
+    }
     zip.start_file("manifest.json", options).unwrap();
     zip.write_all(&serde_json::to_vec(&manifest).unwrap())
         .unwrap();
@@ -117,9 +136,30 @@ fn instance(
 ) -> PackageInstance {
     instance_with_disk_write(script, asset, quota, limits, state, disk, false)
 }
+fn instance_with_modules(
+    script: &str,
+    asset: &[u8],
+    modules: &[(&str, &[u8])],
+    quota: QuotaGroup,
+    limits: HelperLimits,
+) -> PackageInstance {
+    let bytes = archive_with_modules(script, asset, modules, false, false, false);
+    instance_from_archive(bytes, quota, limits, false, None, false)
+}
 fn instance_with_disk_write(
     script: &str,
     asset: &[u8],
+    quota: QuotaGroup,
+    limits: HelperLimits,
+    state: bool,
+    disk: Option<Arc<SelectedStorage>>,
+    disk_write: bool,
+) -> PackageInstance {
+    let bytes = archive(script, asset, state, disk.is_some(), disk_write);
+    instance_from_archive(bytes, quota, limits, state, disk, disk_write)
+}
+fn instance_from_archive(
+    bytes: Vec<u8>,
     quota: QuotaGroup,
     limits: HelperLimits,
     state: bool,
@@ -131,7 +171,6 @@ fn instance_with_disk_write(
             .expect("explicit qualification requires the matching release helper"),
     );
     assert!(helper.is_absolute());
-    let bytes = archive(script, asset, state, disk.is_some(), disk_write);
     let _archive_admission = quota.reserve_external_storage(bytes.len() + 65536).unwrap();
     let verifier = TrustVerifier::from_release_inventory(Vec::new()).unwrap();
     let verified = PackageInstance::verify(InstancePreparation {
@@ -263,6 +302,55 @@ fn actual_helper_bundle_memory_cache_typed_bytes_ack_and_retirement() {
             "cache.get",
             "cache.remove"
         ]
+    );
+    assert!(assets.pending.is_empty());
+    let stopped = instance.stop();
+    assert!(stopped.cancellation.is_ok());
+    assert!(instance.is_physically_retired());
+    assets.revoke();
+    assets.release_terminal_after_helper_retirement();
+    assert!(assets.is_drained());
+}
+
+#[test]
+#[ignore = "run explicitly with matching ILIUM_ANIMATION_HELPER and delegated sandbox"]
+fn actual_helper_imports_packaged_modules_and_reads_asset_from_same_archive() {
+    let quota = quota();
+    let (_execution, client, _receiver) = client(&quota);
+    let (_directory, root) = state_root();
+    let entry = "import {verify} from './modules/read.mjs'; export function plan(){return {output:{mode:'pixels',format:'gray8',update:'replace'},fps:30,inputs:{},permissions:[]};} export async function create(host){const asset=await host.assets.read({grant:host.assets.bundle,relative_path:'assets/default.bin',max_bytes:16}); if(!asset.ok || !(asset.value.bytes instanceof Uint8Array) || verify(asset.value.bytes)!==42)throw Error('archive module or asset mismatch'); return {render(context,frame){frame.gray.fill(0);frame.present();},dispose(){}};}";
+    let modules = [
+        (
+            "modules/read.mjs",
+            b"import {offset} from './constants.mjs'; export function verify(bytes){return bytes[0]+offset;}"
+                .as_slice(),
+        ),
+        ("modules/constants.mjs", b"export const offset=35;".as_slice()),
+    ];
+    let mut instance = instance_with_modules(
+        entry,
+        &[7, 8],
+        &modules,
+        quota.clone(),
+        HelperLimits::default(),
+    );
+    let mut assets = NativeAssetHost::new(&instance, client, quota, root).unwrap();
+    let mut methods = Vec::new();
+    let mut creation = CreateState::Pending;
+    for _ in 0..16 {
+        for request in instance.requests().unwrap() {
+            methods.push(request.method.clone());
+            assert!(assets.dispatch(&mut instance, request).unwrap().is_none());
+        }
+        creation = instance.pump().unwrap();
+        if creation == CreateState::Ready {
+            break;
+        }
+    }
+    assert_eq!(creation, CreateState::Ready);
+    assert_eq!(
+        methods.iter().map(String::as_str).collect::<Vec<_>>(),
+        ["assets.read"]
     );
     assert!(assets.pending.is_empty());
     let stopped = instance.stop();

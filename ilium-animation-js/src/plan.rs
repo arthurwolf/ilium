@@ -427,14 +427,10 @@ impl AnimationPlan {
                     "pre-rendered mode requires explicit replay metadata".into(),
                 )
             })?;
-            if plan.inputs.requires_recording() && replay.input_recording.is_none() {
-                return invalid("live inputs require authenticated frozen recording");
-            }
-            if plan.inputs.clock.as_ref().is_some_and(|clock| clock.civil)
-                && replay.civil_anchor_ms.is_none()
-            {
-                return invalid("civil replay requires an explicit frozen anchor");
-            }
+            // The host may bind an activation-local source recording and its
+            // civil anchor after async create. Clip certification remains the
+            // gate: demanded families and any guest expectations must match
+            // that exact retained native recording before frames are rendered.
         }
         Ok(plan)
     }

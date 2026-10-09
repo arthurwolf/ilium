@@ -3,6 +3,7 @@
 //! ClipSpec construction; protected-source integration remains unverified.
 use super::*;
 use crate::{
+    engine::{ArraySpec, EngineLimits, ServiceValue, TypedArrayKind},
     error::{AnimationError, Result},
     helper::HelperAuthority,
     manifest::AnimationMode,
@@ -71,6 +72,24 @@ fn shape() -> Shape {
 }
 fn plan(seamless: bool) -> AnimationPlan {
     AnimationPlan::parse(&json!({"fps":2,"output":{"mode":"cells","format":"mask8","update":"replace"},"inputs":{},"replay":{"seed":3,"duration_seconds":1,"seamless":seamless}}),AnimationMode::PreRendered,PlanBudget::default()).unwrap()
+}
+#[test]
+fn pre_render_plan_can_bind_recording_created_during_create() {
+    let parsed = AnimationPlan::parse(
+        &json!({
+            "fps": 2,
+            "output": {"mode":"cells","format":"mask8","update":"replace"},
+            "inputs": {"pointer":{"max_hz":1}},
+            "replay": {"seed":3,"duration_seconds":1,"seamless":false}
+        }),
+        AnimationMode::PreRendered,
+        PlanBudget::default(),
+    );
+
+    assert!(
+        parsed.is_ok(),
+        "the host recording is created during create(), after plan() returns"
+    );
 }
 #[derive(Default)]
 struct History(Mutex<Vec<(u64, Vec<usize>)>>);
@@ -227,6 +246,28 @@ impl Fixture {
             authorization_epoch: 1,
         }
     }
+}
+#[test]
+fn clips_declaring_frozen_source_families_cannot_use_procedural_storage() {
+    let fixture = Fixture::new(false, 32 << 20);
+    let frozen = FrozenInputs::from_host(
+        fixture.quota.clone(),
+        None,
+        &[InputFamily::Weather],
+        [6; 32],
+        None,
+        "frozen source family",
+        &[],
+    )
+    .unwrap();
+    let spec = fixture
+        .spec_with(&plan(false), &json!({}), shape(), frozen)
+        .unwrap();
+
+    assert!(
+        !spec.can_stream_procedural(),
+        "declared frozen source families are not source-free procedural output"
+    );
 }
 struct Authorization {
     epoch: AtomicU64,
@@ -1174,4 +1215,364 @@ fn cache_delivery_and_pending_emission_recheck_current_authority() {
         )
         .is_err());
     assert!(f.history.0.lock().unwrap().is_empty());
+}
+
+#[test]
+fn frozen_input_capture_retains_ordered_native_values_and_enforces_total_limit() {
+    let quota = root(8 << 20);
+    let mut first_planes = BTreeMap::new();
+    first_planes.insert("samples".into(), vec![1, 2, 3, 4]);
+    let first_value = ServiceValue::copy_from_host(
+        &json!({"provider":"fixture","revision":3}),
+        &[ArraySpec {
+            name: "samples".into(),
+            kind: TypedArrayKind::U8,
+            elements: 4,
+        }],
+        &first_planes,
+        &EngineLimits::default(),
+        quota.clone(),
+    )
+    .unwrap();
+    let first_snapshot = FrozenInputSnapshot::from_native(
+        InputFamily::Series,
+        "series:primary",
+        3,
+        first_value.clone(),
+    )
+    .unwrap();
+    let second_snapshot = FrozenInputSnapshot::from_native(
+        InputFamily::Weather,
+        "weather:local",
+        8,
+        ServiceValue::copy_from_host(
+            &json!({"provider":"fixture","revision":8}),
+            &[],
+            &BTreeMap::new(),
+            &EngineLimits::default(),
+            quota.clone(),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let snapshots = vec![first_snapshot, second_snapshot];
+    let measured_bytes = snapshots
+        .iter()
+        .map(FrozenInputSnapshot::wire_bytes)
+        .sum::<usize>();
+    let capture = FrozenInputs::from_capture(
+        quota.clone(),
+        "recording-native-1",
+        snapshots.clone(),
+        measured_bytes,
+        None,
+        "test capture",
+        &[],
+    )
+    .unwrap();
+
+    assert_eq!(capture.recording(), Some("recording-native-1"));
+    assert_eq!(capture.snapshots().len(), 2);
+    assert_eq!(capture.snapshots()[0].handle_id(), "series:primary");
+    assert_eq!(capture.snapshots()[0].revision(), 3);
+    assert_eq!(
+        capture.snapshots()[0].value().planes()["samples"],
+        [1, 2, 3, 4]
+    );
+    assert_eq!(capture.snapshots()[1].handle_id(), "weather:local");
+
+    let repeated = FrozenInputs::from_capture(
+        quota.clone(),
+        "recording-native-2",
+        snapshots.clone(),
+        measured_bytes,
+        None,
+        "test capture",
+        &[],
+    )
+    .unwrap();
+    assert_eq!(capture.digest(), repeated.digest());
+    assert!(FrozenInputs::from_capture(
+        quota,
+        "recording-too-large",
+        snapshots,
+        measured_bytes - 1,
+        None,
+        "test capture",
+        &[],
+    )
+    .is_err());
+}
+
+#[test]
+fn frozen_input_capture_retains_exact_native_image_allocations_and_hashes_pixels() {
+    use crate::{
+        native_media::{MediaLimits, NativeMedia},
+        sources::NativeSourceImage,
+    };
+
+    let quota = root(8 << 20);
+    let source_image = |rgba| {
+        let mut media = NativeMedia::new(quota.clone(), MediaLimits::default()).unwrap();
+        let handle = media.solid_image(rgba).unwrap();
+        NativeSourceImage::from_native(&media, handle).unwrap()
+    };
+    let first_image = source_image([12, 24, 36, 255]);
+    let equal_pixels_different_owner = source_image([12, 24, 36, 255]);
+    let second_image = source_image([12, 24, 37, 255]);
+    let make_capture = |image: NativeSourceImage| {
+        let value = ServiceValue::copy_from_host(
+            &json!({"layers":[{"tiles":[{"image":{"native_image_slot":0,"width":1,"height":1}}]}]}),
+            &[],
+            &BTreeMap::new(),
+            &EngineLimits::default(),
+            quota.clone(),
+        )
+        .unwrap();
+        let snapshot = FrozenInputSnapshot::from_native_with_images(
+            InputFamily::Weather,
+            "weather:tiles",
+            7,
+            value,
+            vec![image],
+        )
+        .unwrap();
+        FrozenInputs::from_capture(
+            quota.clone(),
+            "recording-weather",
+            vec![snapshot],
+            1 << 20,
+            None,
+            "native weather fixture",
+            &[],
+        )
+        .unwrap()
+    };
+
+    let first = make_capture(first_image.clone());
+    let repeated = make_capture(first_image.clone());
+    let equal_pixels = make_capture(equal_pixels_different_owner.clone());
+    let changed_pixels = make_capture(second_image);
+    assert!(first.snapshots()[0].native_images()[0].same_allocation(&first_image));
+    assert!(!first_image.same_allocation(&equal_pixels_different_owner));
+    assert!(equal_pixels.snapshots()[0].native_images()[0]
+        .same_allocation(&equal_pixels_different_owner));
+    assert_eq!(first.digest(), repeated.digest());
+    assert_eq!(first.digest(), equal_pixels.digest());
+    assert_ne!(first.digest(), changed_pixels.digest());
+}
+
+#[test]
+fn frozen_source_sequence_accounts_native_image_vector_capacity() {
+    let sequence_storage = |image_capacity| {
+        let quota = root(1 << 20);
+        let value = ServiceValue::copy_from_host(
+            &json!({"provider":"fixture"}),
+            &[],
+            &BTreeMap::new(),
+            &EngineLimits::default(),
+            quota.clone(),
+        )
+        .unwrap();
+        let native_images = Vec::with_capacity(image_capacity);
+        let image_slot_capacity = native_images.capacity();
+        let snapshot = FrozenInputSnapshot::from_native_with_images(
+            InputFamily::Weather,
+            "weather:tiles",
+            1,
+            value,
+            native_images,
+        )
+        .unwrap();
+        let baseline = quota.snapshot().worker_bytes;
+        let _sequence = FrozenSourceSequence::from_native(
+            quota.clone(),
+            1_000,
+            vec![FrozenSourceFrame::from_native(0, vec![snapshot])],
+            1,
+            1 << 20,
+        )
+        .unwrap();
+        (
+            quota.snapshot().worker_bytes - baseline,
+            image_slot_capacity,
+        )
+    };
+
+    let (one_slot_bytes, one_slot_capacity) = sequence_storage(1);
+    let (eight_slots_bytes, eight_slot_capacity) = sequence_storage(8);
+    assert_eq!(
+        eight_slots_bytes - one_slot_bytes,
+        (eight_slot_capacity - one_slot_capacity) * size_of::<NativeSourceImage>()
+    );
+}
+
+#[test]
+fn frozen_source_sequence_binds_timestamps_order_and_distinct_revisions() {
+    let quota = root(8 << 20);
+    let make_snapshot = |revision, label: &str| {
+        FrozenInputSnapshot::from_native(
+            InputFamily::Chess,
+            "chess:tv",
+            revision,
+            ServiceValue::copy_from_host(
+                &json!({"fen":label,"moves":[]}),
+                &[],
+                &BTreeMap::new(),
+                &EngineLimits::default(),
+                quota.clone(),
+            )
+            .unwrap(),
+        )
+        .unwrap()
+    };
+    let first = FrozenSourceFrame::from_native(0, vec![make_snapshot(3, "position-a")]);
+    let second = FrozenSourceFrame::from_native(1_000, vec![make_snapshot(4, "position-b")]);
+    let sequence =
+        FrozenSourceSequence::from_native(quota.clone(), 12_000, vec![first, second], 16, 1 << 20)
+            .unwrap();
+
+    assert_eq!(sequence.frame_at(0).unwrap().offset_ms(), 0);
+    assert_eq!(sequence.frame_at(999).unwrap().snapshots()[0].revision(), 3);
+    assert_eq!(
+        sequence.frame_at(1_000).unwrap().snapshots()[0].revision(),
+        4
+    );
+    assert_eq!(
+        sequence.frame_at(11_999).unwrap().snapshots()[0].revision(),
+        4
+    );
+    assert_eq!(sequence.duration_ms(), 12_000);
+    assert_eq!(
+        sequence.digest(),
+        FrozenSourceSequence::from_native(
+            quota.clone(),
+            12_000,
+            vec![
+                FrozenSourceFrame::from_native(0, vec![make_snapshot(3, "position-a")]),
+                FrozenSourceFrame::from_native(1_000, vec![make_snapshot(4, "position-b")]),
+            ],
+            16,
+            1 << 20,
+        )
+        .unwrap()
+        .digest()
+    );
+
+    let reordered = FrozenSourceSequence::from_native(
+        quota.clone(),
+        12_000,
+        vec![
+            FrozenSourceFrame::from_native(0, vec![make_snapshot(3, "position-a")]),
+            FrozenSourceFrame::from_native(1_001, vec![make_snapshot(4, "position-b")]),
+        ],
+        16,
+        1 << 20,
+    )
+    .unwrap();
+    assert_ne!(sequence.digest(), reordered.digest());
+}
+
+#[test]
+fn frozen_source_sequence_carries_forward_unchanged_feeds_between_sparse_updates() {
+    let quota = root(8 << 20);
+    let make_snapshot = |handle: &str, revision, fen: &str| {
+        FrozenInputSnapshot::from_native(
+            InputFamily::Chess,
+            handle,
+            revision,
+            ServiceValue::copy_from_host(
+                &json!({"fen":fen}),
+                &[],
+                &BTreeMap::new(),
+                &EngineLimits::default(),
+                quota.clone(),
+            )
+            .unwrap(),
+        )
+        .unwrap()
+    };
+    let sequence = FrozenSourceSequence::from_native(
+        quota,
+        3_000,
+        vec![
+            FrozenSourceFrame::from_native(
+                0,
+                vec![
+                    make_snapshot("chess:alpha", 4, "alpha-4"),
+                    make_snapshot("chess:beta", 8, "beta-8"),
+                ],
+            ),
+            FrozenSourceFrame::from_native(1_000, vec![make_snapshot("chess:alpha", 5, "alpha-5")]),
+            FrozenSourceFrame::from_native(2_000, vec![make_snapshot("chess:beta", 9, "beta-9")]),
+        ],
+        8,
+        1 << 20,
+    )
+    .unwrap();
+
+    let at_start: Vec<_> = sequence.snapshots_at(0).unwrap().collect();
+    assert_eq!(at_start.len(), 2);
+    assert_eq!(at_start[0].revision(), 4);
+    assert_eq!(at_start[1].revision(), 8);
+    let between_updates: Vec<_> = sequence.snapshots_at(1_500).unwrap().collect();
+    assert_eq!(between_updates.len(), 2);
+    assert_eq!(between_updates[0].revision(), 5);
+    assert_eq!(between_updates[1].revision(), 8);
+    let after_updates: Vec<_> = sequence.snapshots_at(2_500).unwrap().collect();
+    assert_eq!(after_updates.len(), 2);
+    assert_eq!(after_updates[0].revision(), 5);
+    assert_eq!(after_updates[1].revision(), 9);
+}
+
+#[test]
+fn frozen_source_sequence_refuses_missing_start_duplicate_revisions_and_limits() {
+    let quota = root(8 << 20);
+    let make_snapshot = |revision| {
+        FrozenInputSnapshot::from_native(
+            InputFamily::Chess,
+            "chess:tv",
+            revision,
+            ServiceValue::copy_from_host(
+                &json!({"fen":"position"}),
+                &[],
+                &BTreeMap::new(),
+                &EngineLimits::default(),
+                quota.clone(),
+            )
+            .unwrap(),
+        )
+        .unwrap()
+    };
+    let make_frame = |offset_ms, revision| {
+        FrozenSourceFrame::from_native(offset_ms, vec![make_snapshot(revision)])
+    };
+    assert!(FrozenSourceSequence::from_native(
+        quota.clone(),
+        1_000,
+        vec![make_frame(1, 1)],
+        16,
+        1 << 20,
+    )
+    .is_err());
+    assert!(FrozenSourceSequence::from_native(
+        quota.clone(),
+        1_000,
+        vec![make_frame(0, 1), make_frame(500, 1)],
+        16,
+        1 << 20,
+    )
+    .is_err());
+    assert!(FrozenSourceSequence::from_native(
+        quota.clone(),
+        1_000,
+        vec![make_frame(0, 1), make_frame(1_000, 2)],
+        16,
+        1 << 20,
+    )
+    .is_err());
+    assert!(
+        FrozenSourceSequence::from_native(quota, 1_000, vec![make_frame(0, 1)], 0, 1 << 20,)
+            .is_err()
+    );
 }

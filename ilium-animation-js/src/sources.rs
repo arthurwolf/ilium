@@ -189,6 +189,15 @@ impl NativeSourceImage {
     ) -> &Arc<crate::native_media::Admitted<crate::native_media::ImagePixels>> {
         &self.pixels
     }
+    /// Stable allocation identity while this admitted image remains retained.
+    /// Used only to deduplicate native aliases; never exposed to packages.
+    pub(crate) fn allocation_key(&self) -> usize {
+        Arc::as_ptr(&self.pixels) as usize
+    }
+    /// Whether two wrappers retain the exact same original admitted pixels.
+    pub(crate) fn same_allocation(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.pixels, &other.pixels)
+    }
     fn metadata(&self, slot: usize) -> Value {
         let pixels = self.pixels.view();
         serde_json::json!({"native_image_slot":slot,"width":pixels.width,"height":pixels.height})
@@ -834,7 +843,8 @@ impl<C: NativeSourceClient> SourceDispatcher<C> {
                     snapshot,
                     admission,
                     std::mem::take(&mut self.client.images),
-                )));
+                    stop,
+                )?));
                 slot.revision = revision;
                 slot.failures = 0;
                 Ok(slot.snapshot.clone())
@@ -868,7 +878,8 @@ impl<C: NativeSourceClient> SourceDispatcher<C> {
                             retained,
                             admission,
                             previous.native_images().to_vec(),
-                        )));
+                            stop,
+                        )?));
                     }
                 }
                 Err(error)

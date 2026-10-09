@@ -1408,6 +1408,106 @@ fn native_feed_seed_advances_latest_and_ignores_stale_revision_before_close() {
 }
 
 #[test]
+fn video_info_is_cached_revisioned_and_rejects_malformed_snapshots() {
+    let _serial = serial();
+    let script = r#"
+        export function plan(){return {};}
+        export async function create(host){
+            const opened=await host.media.video.open({url:'https://example.org/video',max_pixels:230400,max_fps:30});
+            if(!opened.ok)throw new Error(opened.error.code);
+            const video=opened.value;
+            const observe=()=>typeof video.info==='function' ? video.info() : {ok:false,error:{code:'missing_video_info'}};
+            globalThis.video_info_history=[observe()];
+            return {render(c,f){video_info_history.push(observe());f.present();},dispose(){}};
+        }
+    "#;
+    let mut engine = activated_engine(package(script), BOOTSTRAP);
+    assert_eq!(
+        engine.start_create(&json!({}), &json!({})).unwrap(),
+        CreateState::Pending
+    );
+    let requests = engine.take_requests().unwrap();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].method, "media.video.open");
+    let opened = ServiceValue::copy_from_host(
+        &json!({"ok":true,"value":{"id":"video-info-1","kind":"media.video",
+            "revision":1,"status":{"state":"preparing"},"latest":null,"info":null}}),
+        &[],
+        &BTreeMap::new(),
+        &EngineLimits::default(),
+        quota(),
+    )
+    .unwrap();
+    assert_eq!(
+        engine
+            .complete_service_request(requests[0].id, native_authority(), opened)
+            .unwrap(),
+        CompletionState::Delivered
+    );
+    assert_eq!(engine.pump().unwrap(), CreateState::Ready);
+    let mut owner = Owner::new(shape(Format::Gray8, Update::Retain, false));
+    let snapshot = |revision, info| {
+        json!({"id":"video-info-1","kind":"media.video","revision":revision,
+            "status":{"state":"ready"},"info":info})
+    };
+    for (sequence, descriptor) in [
+        (
+            1,
+            snapshot(
+                2,
+                json!({"width":640,"height":360,"duration_seconds":12.5,"seekable":true}),
+            ),
+        ),
+        (
+            2,
+            snapshot(
+                1,
+                json!({"width":16,"height":16,"duration_seconds":null,"seekable":false}),
+            ),
+        ),
+        (
+            3,
+            snapshot(
+                3,
+                json!({"width":0,"height":360,"duration_seconds":null,"seekable":false}),
+            ),
+        ),
+        (
+            4,
+            snapshot(
+                2,
+                json!({"width":640,"height":360,"duration_seconds":12.5,"seekable":true}),
+            ),
+        ),
+    ] {
+        let (context, arrays) = begin(
+            &mut engine,
+            &mut owner,
+            sequence,
+            &[],
+            json!({"__test_native_services":[descriptor]}),
+        );
+        let output = engine.render(&context, &arrays).unwrap();
+        assert!(
+            finish(&mut engine, &mut owner, &output, false)
+                .unwrap()
+                .accepted
+        );
+    }
+    assert_eq!(
+        engine.evaluate_json("video_info_history").unwrap(),
+        json!([
+            {"ok":true,"value":null},
+            {"ok":true,"value":{"width":640,"height":360,"duration_seconds":12.5,"seekable":true}},
+            {"ok":true,"value":{"width":640,"height":360,"duration_seconds":12.5,"seekable":true}},
+            {"ok":false,"error":{"code":"invalid_result","message":"Native video info snapshot was malformed."}},
+            {"ok":true,"value":{"width":640,"height":360,"duration_seconds":12.5,"seekable":true}}
+        ])
+    );
+    assert!(engine.take_requests().unwrap().is_empty());
+}
+
+#[test]
 fn cancelled_feed_open_cannot_brand_a_late_native_descriptor() {
     let _serial = serial();
     let script = r#"

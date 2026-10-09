@@ -182,6 +182,29 @@ mod option_tests {
     use super::*;
 
     #[test]
+    fn video_info_snapshot_is_a_bounded_sdk_record() {
+        let info = VideoInfo {
+            geometry: VideoGeometry {
+                width: 640,
+                height: 360,
+                format: VideoPixelFormat::Rgba8,
+            },
+            duration: Some(Duration::from_millis(12_500)),
+            seekable: true,
+        };
+        assert_eq!(
+            NativeVideoHost::snapshot_info(Some(info)),
+            json!({
+                "width":640,
+                "height":360,
+                "duration_seconds":12.5,
+                "seekable":true
+            })
+        );
+        assert_eq!(NativeVideoHost::snapshot_info(None), Value::Null);
+    }
+
+    #[test]
     fn video_open_requires_one_original_source_and_bounded_integer_limits() {
         let selected = json!({"asset":{"id":"selected-1","kind":"asset"},
             "relative_path":"clip.mp4","max_pixels":400,"max_fps":25});
@@ -777,7 +800,7 @@ impl NativeVideoHost {
             instance,
             json!({"ok":true,"value":{
                 "id":id,"kind":"media.video","revision":1,
-                "status":{"state":"preparing"},"latest":null
+                "status":{"state":"preparing"},"latest":null,"info":null
             }}),
         )
     }
@@ -1636,7 +1659,19 @@ impl NativeVideoHost {
     }
     fn snapshot_value(id: &str, active: &ActiveVideo, status: VideoStatus) -> Value {
         json!({"id":id,"kind":"media.video","revision":active.revision,
-            "status":Self::snapshot_status(status),"latest":active.latest.clone()})
+            "status":Self::snapshot_status(status),"latest":active.latest.clone(),
+            "info":Self::snapshot_info(status.info)})
+    }
+    fn snapshot_info(info: Option<VideoInfo>) -> Value {
+        match info {
+            Some(info) => json!({
+                "width":info.geometry.width,
+                "height":info.geometry.height,
+                "duration_seconds":info.duration.map(|duration| duration.as_secs_f64()),
+                "seekable":info.seekable
+            }),
+            None => Value::Null,
+        }
     }
     fn finish_closes(&mut self, instance: &mut PackageInstance) -> Result<()> {
         let ids: Vec<String> = self

@@ -781,6 +781,151 @@ pub struct Engine {
     next_seed_id: u64,
     _owner: PhantomData<Rc<()>>,
 }
+
+#[cfg(feature = "diagnostic-profiler")]
+const MAX_CPU_PROFILE_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
+
+#[cfg(feature = "diagnostic-profiler")]
+#[derive(Clone, Default)]
+struct CpuProfileChannel {
+    state: Arc<Mutex<CpuProfileChannelState>>,
+}
+
+#[cfg(feature = "diagnostic-profiler")]
+#[derive(Default)]
+struct CpuProfileChannelState {
+    responses: BTreeMap<i32, String>,
+    response_bytes: usize,
+    overflowed: bool,
+}
+
+#[cfg(feature = "diagnostic-profiler")]
+impl CpuProfileChannel {
+    fn record_response(
+        &self,
+        call_id: i32,
+        mut message: v8::UniquePtr<v8::inspector::StringBuffer>,
+    ) {
+        let Some(message) = message.as_mut() else {
+            return;
+        };
+        let view = message.string();
+        let Ok(mut state) = self.state.lock() else {
+            return;
+        };
+        let Some(remaining) = MAX_CPU_PROFILE_RESPONSE_BYTES.checked_sub(state.response_bytes)
+        else {
+            state.overflowed = true;
+            return;
+        };
+        let Some(response) = bounded_inspector_message(view, remaining) else {
+            state.overflowed = true;
+            return;
+        };
+        let total = state.response_bytes + response.len();
+        state.response_bytes = total;
+        state.responses.insert(call_id, response);
+    }
+
+    fn result(&self, call_id: i32) -> Result<Value> {
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| runtime("V8 profiler response lock poisoned"))?;
+        if state.overflowed {
+            return Err(runtime(
+                "V8 CPU profile exceeded the 8 MiB diagnostic limit",
+            ));
+        }
+        let response = state
+            .responses
+            .get(&call_id)
+            .ok_or_else(|| runtime("V8 Inspector did not return a profiler response"))?;
+        let response: Value = serde_json::from_str(response)
+            .map_err(|_| runtime("V8 Inspector returned invalid profiler JSON"))?;
+        if let Some(error) = response.get("error") {
+            return Err(AnimationError::Runtime(format!(
+                "V8 Inspector profiler error: {error}"
+            )));
+        }
+        response
+            .get("result")
+            .cloned()
+            .ok_or_else(|| runtime("V8 Inspector profiler response has no result"))
+    }
+}
+
+#[cfg(feature = "diagnostic-profiler")]
+impl v8::inspector::ChannelImpl for CpuProfileChannel {
+    fn send_response(&self, call_id: i32, message: v8::UniquePtr<v8::inspector::StringBuffer>) {
+        self.record_response(call_id, message);
+    }
+
+    fn send_notification(&self, _message: v8::UniquePtr<v8::inspector::StringBuffer>) {}
+
+    fn flush_protocol_notifications(&self) {}
+}
+
+#[cfg(feature = "diagnostic-profiler")]
+fn bounded_inspector_message(
+    view: v8::inspector::StringView<'_>,
+    remaining_bytes: usize,
+) -> Option<String> {
+    let byte_len = char::decode_utf16(view.into_iter()).try_fold(0usize, |total, character| {
+        total.checked_add(character.unwrap_or(char::REPLACEMENT_CHARACTER).len_utf8())
+    })?;
+    if byte_len > remaining_bytes {
+        return None;
+    }
+
+    let mut result = String::new();
+    result.try_reserve_exact(byte_len).ok()?;
+    for character in char::decode_utf16(view.into_iter()) {
+        result.push(character.unwrap_or(char::REPLACEMENT_CHARACTER));
+    }
+    Some(result)
+}
+
+#[cfg(feature = "diagnostic-profiler")]
+#[derive(Default)]
+struct CpuProfileInspectorClient;
+
+#[cfg(feature = "diagnostic-profiler")]
+impl v8::inspector::V8InspectorClientImpl for CpuProfileInspectorClient {}
+
+#[cfg(feature = "diagnostic-profiler")]
+fn dispatch_cpu_profile_command(
+    session: &v8::inspector::V8InspectorSession,
+    channel: &CpuProfileChannel,
+    call_id: i32,
+    method: &str,
+) -> Result<Value> {
+    let request = format!(r#"{{"id":{call_id},"method":"{method}"}}"#);
+    session.dispatch_protocol_message(v8::inspector::StringView::from(request.as_bytes()));
+    channel.result(call_id)
+}
+
+#[cfg(feature = "diagnostic-profiler")]
+fn destroy_cpu_profile_inspector(
+    engine: &mut Engine,
+    inspector: &v8::inspector::V8Inspector,
+) -> Result<()> {
+    let isolate = engine
+        .isolate
+        .as_mut()
+        .ok_or_else(|| runtime("isolate missing while closing V8 Inspector"))?;
+    v8::scope!(let scope, isolate);
+    let context = v8::Local::new(
+        scope,
+        engine
+            .context
+            .as_ref()
+            .ok_or_else(|| runtime("context missing while closing V8 Inspector"))?,
+    );
+    inspector.context_destroyed(context);
+    Ok(())
+}
+
 impl Engine {
     /// Constructs native machinery only: no package/bootstrap JavaScript executes.
     pub fn new(package: Arc<Package>, limits: EngineLimits, quota: QuotaGroup) -> Result<Self> {
@@ -2291,6 +2436,92 @@ impl Engine {
             Ok(output)
         })();
         self.finish(result)
+    }
+
+    /// Captures a bounded V8 Inspector CPU profile around one ordinary render.
+    /// This diagnostic-only entry point is feature-gated and never used by the
+    /// production render path.
+    #[cfg(feature = "diagnostic-profiler")]
+    pub fn render_with_cpu_profile(
+        &mut self,
+        context_value: &Value,
+        arrays: &[ArraySpec],
+    ) -> Result<(RenderOutput, Value)> {
+        use v8::inspector::{
+            Channel, StringView, V8Inspector, V8InspectorClient, V8InspectorClientTrustLevel,
+        };
+
+        if self.awaiting_accept {
+            return Err(runtime("previous render requires logical acknowledgement"));
+        }
+
+        let channel = CpuProfileChannel::default();
+        let inspector_client = V8InspectorClient::new(Box::new(CpuProfileInspectorClient));
+        let inspector = {
+            let isolate = self
+                .isolate
+                .as_mut()
+                .ok_or_else(|| runtime("isolate missing"))?;
+            let inspector = V8Inspector::create(isolate, inspector_client);
+            {
+                v8::scope!(let scope, isolate);
+                let context = v8::Local::new(
+                    scope,
+                    self.context
+                        .as_ref()
+                        .ok_or_else(|| runtime("context missing"))?,
+                );
+                inspector.context_created(
+                    context,
+                    1,
+                    StringView::from(&b"ilium-animation-diagnostic"[..]),
+                    StringView::from(&b"{}"[..]),
+                );
+            }
+            let session = inspector.connect(
+                1,
+                Channel::new(Box::new(channel.clone())),
+                StringView::from(&b"{}"[..]),
+                V8InspectorClientTrustLevel::Untrusted,
+            );
+            (inspector, session)
+        };
+        let (inspector, session) = inspector;
+
+        let setup_result = (|| {
+            dispatch_cpu_profile_command(&session, &channel, 1, "Profiler.enable")?;
+            dispatch_cpu_profile_command(&session, &channel, 2, "Profiler.start")?;
+            Ok(())
+        })();
+        if let Err(error) = setup_result {
+            let _ = dispatch_cpu_profile_command(&session, &channel, 3, "Profiler.disable");
+            drop(session);
+            destroy_cpu_profile_inspector(self, &inspector)?;
+            return Err(error);
+        }
+
+        // Profiling instrumentation can substantially slow a real frame. Keep
+        // that slowdown from aborting diagnostics at the production deadline;
+        // this opt-in feature remains unsuitable for production timing.
+        let render_limit_ms = self.limits.render_ms;
+        self.limits.render_ms = render_limit_ms.max(1_000);
+        let output = self.render(context_value, arrays);
+        self.limits.render_ms = render_limit_ms;
+        let profile_result = dispatch_cpu_profile_command(&session, &channel, 4, "Profiler.stop");
+        let disable_result =
+            dispatch_cpu_profile_command(&session, &channel, 5, "Profiler.disable");
+        drop(session);
+        destroy_cpu_profile_inspector(self, &inspector)?;
+
+        let output = output?;
+        disable_result?;
+        let profile_result = profile_result?;
+        let profile = profile_result
+            .get("profile")
+            .cloned()
+            .filter(Value::is_object)
+            .ok_or_else(|| runtime("V8 Inspector profiler response has no CPU profile"))?;
+        Ok((output, profile))
     }
     pub fn dispose(&mut self) -> Result<()> {
         if self.is_invalid() {
@@ -4269,15 +4500,36 @@ globalThis.__ilium_seed_frame=(metadata,planes)=>{input=planes.source;held=[work
     fn private_inventory_restores_phase_on_all_results_and_deduplicates_native_buffers() {
         let (_serial, _root) = fixture_lock();
         // Assert actual native custody.
-        let cases = [ // Count only discovered buffers.
-            ("Object.fromEntries(Array.from({length:48},(_,i)=>[String(i),working]))",true,1), // Deduplicate forty-eight aliases.
-            ("Object.defineProperty({a:working},'b',{get(){traps++;throw Error('inventory getter');}})",false,1), // Reject a later accessor.
-            ("Object.assign({a:working},{[Symbol('hidden')]:sealed})",false,1), // Reject hidden symbols.
-            ("Object.fromEntries(Array.from({length:49},(_,i)=>[String(i),working]))",false,0), // Enforce forty-eight own keys.
-            ("new Proxy({a:working},{ownKeys(){traps++;throw Error('proxy');}})",false,0), // Reject proxies before traps.
-            ("[working]",false,0), // Reject array inventories.
-            ("null",false,0), // Reject a present null inventory.
-            ("{a:1}",false,0), // Require native view leaves.
+        let cases = [
+            // Count only discovered buffers.
+            (
+                "Object.fromEntries(Array.from({length:48},(_,i)=>[String(i),working]))",
+                true,
+                1,
+            ), // Deduplicate forty-eight aliases.
+            (
+                "Object.defineProperty({a:working},'b',{get(){traps++;throw Error('inventory getter');}})",
+                false,
+                1,
+            ), // Reject a later accessor.
+            (
+                "Object.assign({a:working},{[Symbol('hidden')]:sealed})",
+                false,
+                1,
+            ), // Reject hidden symbols.
+            (
+                "Object.fromEntries(Array.from({length:49},(_,i)=>[String(i),working]))",
+                false,
+                0,
+            ), // Enforce forty-eight own keys.
+            (
+                "new Proxy({a:working},{ownKeys(){traps++;throw Error('proxy');}})",
+                false,
+                0,
+            ), // Reject proxies before traps.
+            ("[working]", false, 0), // Reject array inventories.
+            ("null", false, 0),      // Reject a present null inventory.
+            ("{a:1}", false, 0),     // Require native view leaves.
         ]; // Pin every native oracle.
         for (inventory, valid, count) in cases {
             // Isolate terminal cases.
@@ -4415,7 +4667,10 @@ globalThis.__ilium_seed_frame=(metadata,planes)=>{input=planes.source;held=[work
     fn thrown_render_detaches_working_sealed_and_native_seeded_input_buffers() {
         let (_serial, _root) = fixture_lock();
         // Clean inventory and seed custody.
-        let mut engine = engine("export async function create(){return {render(c,f){globalThis.render_called=true;f.gray.fill(0.5);throw Error('render failure');}};}","{working,sealed,input}"); // Throw after obtaining the alias.
+        let mut engine = engine(
+            "export async function create(){return {render(c,f){globalThis.render_called=true;f.gray.fill(0.5);throw Error('render failure');}};}",
+            "{working,sealed,input}",
+        ); // Throw after obtaining the alias.
         engine
             .seed_frame(
                 &json!({}),
@@ -4447,7 +4702,10 @@ globalThis.__ilium_seed_frame=(metadata,planes)=>{input=planes.source;held=[work
     fn malformed_inventory_detaches_known_buffer_and_native_seed_on_error() {
         let (_serial, _root) = fixture_lock();
         // Preserve discovered custody.
-        let mut engine = engine("export async function create(){return {render(){globalThis.render_called=true;}};}","Object.defineProperty({a:working},'b',{get(){traps++;throw Error('inventory getter');}})"); // Fail after one known view.
+        let mut engine = engine(
+            "export async function create(){return {render(){globalThis.render_called=true;}};}",
+            "Object.defineProperty({a:working},'b',{get(){traps++;throw Error('inventory getter');}})",
+        ); // Fail after one known view.
         engine
             .seed_frame(
                 &json!({}),
@@ -4746,7 +5004,7 @@ globalThis.__ilium_seed_frame=(metadata,planes)=>{input=planes.source;held=[work
     #[test]
     fn inspector_cpu_profile_contains_the_render_function() {
         let (_serial, _root) = fixture_lock();
-        let source = r#"export async function create(){return {render(_context,frame){let value=0;for(let i=0;i<250000;i++)value=Math.sin(value+i);frame.gray.fill(value);},dispose(){}};}"#;
+        let source = r#"export async function create(){return {render(_context,frame){let value=0;for(let i=0;i<25000;i++)value=Math.sin(value+i);frame.gray.fill(value);},dispose(){}};}"#;
         let mut engine = engine(source, "{working,sealed,input}");
         let (output, profile) = engine
             .render_with_cpu_profile(
@@ -4760,7 +5018,64 @@ globalThis.__ilium_seed_frame=(metadata,planes)=>{input=planes.source;held=[work
             .unwrap();
         assert_eq!(output.planes["gray"].len(), 16);
         let nodes = profile["nodes"].as_array().unwrap();
-        assert!(nodes.iter().any(|node| node["callFrame"]["functionName"] == "render"));
+        assert!(nodes
+            .iter()
+            .any(|node| node["callFrame"]["functionName"] == "render"));
+        assert!(!engine.is_invalid());
+        engine.accept_frame(true).unwrap();
+        engine
+            .evaluate_json(
+                "working=new Float32Array(4);sealed=new Float32Array(4);frame.gray=working",
+            )
+            .unwrap();
+        let next = engine
+            .render(
+                &json!({}),
+                &[ArraySpec {
+                    name: "gray".into(),
+                    kind: TypedArrayKind::F32,
+                    elements: 4,
+                }],
+            )
+            .unwrap();
+        assert_eq!(next.planes["gray"].len(), 16);
+    }
+
+    #[cfg(feature = "diagnostic-profiler")]
+    #[test]
+    fn inspector_profile_retires_engine_after_render_failure() {
+        let (_serial, _root) = fixture_lock();
+        let source = r#"export async function create(){return {render(){throw new Error("profiled render failure");},dispose(){}};}"#;
+        let mut engine = engine(source, "{working,sealed,input}");
+        let result = engine.render_with_cpu_profile(
+            &json!({}),
+            &[ArraySpec {
+                name: "gray".into(),
+                kind: TypedArrayKind::F32,
+                elements: 4,
+            }],
+        );
+        assert!(result.is_err());
+        assert!(engine.is_invalid());
+    }
+
+    #[cfg(feature = "diagnostic-profiler")]
+    #[test]
+    fn inspector_profile_response_limit_is_checked_before_copying() {
+        let oversized = vec![b'a'; MAX_CPU_PROFILE_RESPONSE_BYTES + 1];
+        assert!(bounded_inspector_message(
+            v8::inspector::StringView::from(oversized.as_slice()),
+            MAX_CPU_PROFILE_RESPONSE_BYTES,
+        )
+        .is_none());
+
+        let accepted = vec![b'a'; MAX_CPU_PROFILE_RESPONSE_BYTES];
+        let response = bounded_inspector_message(
+            v8::inspector::StringView::from(accepted.as_slice()),
+            MAX_CPU_PROFILE_RESPONSE_BYTES,
+        )
+        .expect("response exactly at the byte limit should be accepted");
+        assert_eq!(response.len(), MAX_CPU_PROFILE_RESPONSE_BYTES);
     }
 } // End native frame contracts.
 

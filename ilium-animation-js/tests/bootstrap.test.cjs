@@ -619,3 +619,61 @@ test('replay freeze validates the native recording identity without inventing on
     }
     assert.equal(calls, 5);
 });
+
+test('source-sequence capture refuses invalid bounds before native dispatch', async () => {
+    let calls = 0;
+    const env = environment((method, payload, references, realm) => {
+        if (method === 'sources.chess.open') return fixture_result(realm, "{id:'native_chess_feed',kind:'sources.chess',revision:1,status:{state:'ready'},latest:{revision:1,available:true,fen:'fixture'}}");
+        calls += 1;
+        assert.equal(method, 'replay.capture_sequence');
+        return { __proto__: null, ok: true, value: { __proto__: null, recording_id: 'fixture-sequence', sha256: 'b'.repeat(64), frame_count: 2 } };
+    });
+    const opened = await env.evaluate("__ilium_host.sources.chess.open({game_id:'tv',max_hz:1})");
+    assert.equal(opened.ok, true);
+    env.context.chess_feed = opened.value;
+    for (const [field, invalid] of [
+        ['duration_ms', '0'], ['duration_ms', '120001'], ['sample_hz', '0'], ['sample_hz', '61'],
+        ['max_frames', '0'], ['max_frames', '513'], ['max_bytes', '0'], ['max_bytes', '32000001'],
+    ]) {
+        const values = { duration_ms: '12000', sample_hz: '1', max_frames: '16', max_bytes: '8000000', [field]: invalid };
+        const result = await env.evaluate(`__ilium_host.replay.capture_sequence({sources:[chess_feed],duration_ms:${values.duration_ms},sample_hz:${values.sample_hz},max_frames:${values.max_frames},max_bytes:${values.max_bytes}})`);
+        assert.equal(result.ok, false, `invalid sequence bound ${field}=${invalid} must refuse`);
+    }
+    assert.equal((await env.evaluate("__ilium_host.replay.capture_sequence({sources:[],duration_ms:12000,sample_hz:1,max_frames:16,max_bytes:8000000})")).ok, false);
+    assert.equal((await env.evaluate("__ilium_host.replay.capture_sequence({sources:[chess_feed,chess_feed],duration_ms:12000,sample_hz:1,max_frames:16,max_bytes:8000000})")).ok, false);
+    assert.equal((await env.evaluate("__ilium_host.replay.capture_sequence({sources:[chess_feed],duration_ms:12000,sample_hz:1,max_frames:16,max_bytes:8000000,extra:true})")).ok, false);
+    assert.equal(calls, 0, 'invalid sequence options must not reach native dispatch');
+});
+
+test('source-sequence capture validates bounded native receipts', async () => {
+    let reply = { __proto__: null, recording_id: 'fixture-sequence', sha256: 'b'.repeat(64), frame_count: 2 };
+    let calls = 0;
+    const env = environment((method, payload, references, realm) => {
+        if (method === 'sources.chess.open') return fixture_result(realm, "{id:'native_chess_feed',kind:'sources.chess',revision:1,status:{state:'ready'},latest:{revision:1,available:true,fen:'fixture'}}");
+        assert.equal(method, 'replay.capture_sequence');
+        assert.equal(payload.duration_ms, 12_000);
+        calls += 1;
+        return { __proto__: null, ok: true, value: reply };
+    });
+    const opened = await env.evaluate("__ilium_host.sources.chess.open({game_id:'tv',max_hz:1})");
+    assert.equal(opened.ok, true);
+    env.context.chess_feed = opened.value;
+    const valid = await env.evaluate("__ilium_host.replay.capture_sequence({sources:[chess_feed],duration_ms:12000,sample_hz:1,max_frames:16,max_bytes:8000000})");
+    assert.equal(valid.ok, true);
+    assert.equal(valid.value.recording_id, 'fixture-sequence');
+    assert.equal(valid.value.sha256, 'b'.repeat(64));
+    assert.equal(valid.value.frame_count, 2);
+    assert(Object.isFrozen(valid.value));
+    for (const value of [
+        {}, { recording_id: '', sha256: 'b'.repeat(64), frame_count: 2 },
+        { recording_id: 'fixture-sequence', sha256: 'wrong', frame_count: 2 },
+        { recording_id: 'fixture-sequence', sha256: 'b'.repeat(64), frame_count: 0 },
+        { recording_id: 'fixture-sequence', sha256: 'b'.repeat(64), frame_count: 17 },
+        { recording_id: 'fixture-sequence', sha256: 'b'.repeat(64), frame_count: 2, extra: true },
+    ]) {
+        reply = { __proto__: null, ...value };
+        const result = await env.evaluate("__ilium_host.replay.capture_sequence({sources:[chess_feed],duration_ms:12000,sample_hz:1,max_frames:16,max_bytes:8000000})");
+        assert.equal(result.ok, false, 'malformed sequence receipt must refuse');
+    }
+    assert.equal(calls, 7);
+});

@@ -349,6 +349,9 @@ impl WorldDotBinding {
         let index = usize::try_from(index).ok()?;
         (index < self.length && self.frame.raster.dots[index] > 0.0).then_some(index)
     }
+    pub fn owner_id(&self, source_index: usize) -> Option<u32> {
+        self.frame.raster.owner_ids.get(source_index).copied()
+    }
     /// A retained binding can be credited only by an output authority charged
     /// to the same native quota root as the original world source.
     pub fn shares_root(&self, quota: &QuotaGroup) -> bool {

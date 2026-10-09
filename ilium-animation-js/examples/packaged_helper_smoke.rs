@@ -1,6 +1,6 @@
 //! Actual packaged-animation/helper check. JSONL stdout; no network acquisition.
-//! Synthetic pointer/clock inputs and a synthetic TV service descriptor verify
-//! transport/rendering only; no provider, permission-broker or live-feed proof.
+//! Synthetic pointer/clock inputs and a synthetic TV source/sequence verify
+//! helper transport/rendering only; no provider or permission-broker proof.
 #[cfg(feature = "v8-runtime")]
 fn main() {
     if let Err(error) = check::run() {
@@ -169,7 +169,7 @@ mod check {
                 let plan = helper.plan(&settings, mode.clone(), &environment)?;
                 let expected_refusal = !is_beach
                     && mode == AnimationMode::PreRendered
-                    && [0, 4, 7, 8].contains(
+                    && [0, 7, 8].contains(
                         &settings["mode"]
                             .as_i64()
                             .ok_or_else(|| fail("missing normalized mode"))?,
@@ -194,30 +194,49 @@ mod check {
                 }
                 let mut creation = helper.start_create(&settings, &plan)?;
                 let mut fixture_tv_opened = false;
+                let mut fixture_sequence_captured = false;
                 for _ in 0..8 {
                     let requests = helper.take_requests();
                     if !requests.is_empty() {
-                        if is_beach
-                            || mode != AnimationMode::Live
-                            || settings["mode"] != 4
-                            || fixture_tv_opened
-                            || requests.len() != 1
-                        {
+                        if is_beach || settings["mode"] != 4 || requests.len() != 1 {
                             return Err(fail("unexpected external acquisition"));
                         }
                         let request = requests.into_iter().next().unwrap();
-                        if request.method != "sources.chess.open"
-                            || request.payload.metadata() != &json!({"game_id":"tv","max_hz":1})
-                            || !request.payload.arrays().is_empty()
+                        if !request.payload.arrays().is_empty()
                             || !request.payload.planes().is_empty()
                         {
-                            return Err(fail("unexpected synthetic TV source request"));
+                            return Err(fail("synthetic TV request unexpectedly carries planes"));
                         }
-                        // Fixture-only native return: preserve the actual request ID,
-                        // activation and original-root admission through the helper ACK.
-                        // This deliberately does not grant a right or run a provider.
+                        // Keep the helper's real request ID, activation and original-root
+                        // admission through each synthetic native acknowledgement. This
+                        // fixture neither grants a right nor runs a provider.
+                        let result = match request.method.as_str() {
+                            "sources.chess.open"
+                                if !fixture_tv_opened
+                                    && request.payload.metadata()
+                                        == &json!({"game_id":"tv","max_hz":1}) =>
+                            {
+                                fixture_tv_opened = true;
+                                json!({"ok":true,"value":{"id":"synthetic-tv-transport-fixture","kind":"sources.chess","revision":1,"status":{"state":"ready"},"latest":{"available":true,"revision":1,"game_id":"synthetic-helper-fixture","fen":"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1","moves":[],"white":"synthetic fixture","black":"synthetic fixture","state":"playing"}}})
+                            }
+                            "replay.capture_sequence"
+                                if mode == AnimationMode::PreRendered
+                                    && fixture_tv_opened
+                                    && !fixture_sequence_captured
+                                    && request.payload.metadata()
+                                        == &json!({"sources":[{"id":"synthetic-tv-transport-fixture","kind":"sources.chess"}],"duration_ms":12000,"sample_hz":1,"max_frames":13,"max_bytes":8000000}) =>
+                            {
+                                fixture_sequence_captured = true;
+                                json!({"ok":true,"value":{"recording_id":"synthetic-tv-sequence-fixture","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","frame_count":13}})
+                            }
+                            _ => {
+                                return Err(fail(
+                                    "unexpected synthetic TV request or sequence bounds",
+                                ))
+                            }
+                        };
                         let result = ServiceValue::copy_from_host(
-                            &json!({"ok":true,"value":{"id":"synthetic-tv-transport-fixture","kind":"sources.chess","revision":1,"status":{"state":"ready"},"latest":{"available":true,"revision":1,"game_id":"synthetic-helper-fixture","fen":"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1","moves":[],"white":"synthetic fixture","black":"synthetic fixture","state":"playing"}}}),
+                            &result,
                             &[],
                             &BTreeMap::new(),
                             &EngineLimits::default(),
@@ -226,12 +245,11 @@ mod check {
                         if helper.complete_service_request(request.id, request.authority, result)?
                             != CompletionState::Delivered
                         {
-                            return Err(fail("synthetic TV descriptor was not acknowledged"));
+                            return Err(fail("synthetic TV request was not acknowledged"));
                         }
-                        fixture_tv_opened = true;
                         println!(
                             "{}",
-                            json!({"type":"fixture","choice":choice,"method":request.method,"synthetic_inputs":true,"scope":"source-handle transport only; no provider or broker acquisition"})
+                            json!({"type":"fixture","choice":choice,"method":request.method,"synthetic_inputs":true,"scope":"source/sequence transport only; no provider or broker acquisition"})
                         );
                     }
                     if creation == CreateState::Ready {
@@ -241,6 +259,15 @@ mod check {
                 }
                 if creation != CreateState::Ready {
                     return Err(fail("package creation did not finish"));
+                }
+                if !is_beach
+                    && settings["mode"] == 4
+                    && (!fixture_tv_opened
+                        || (mode == AnimationMode::PreRendered) != fixture_sequence_captured)
+                {
+                    return Err(fail(
+                        "TV creation did not open and capture the expected source",
+                    ));
                 }
                 let shape = json!({"cell_width":WIDTH,"cell_height":HEIGHT,"mode":"pixels","format":"gray32","update":"replace","cell_rgb":false,"colour_space":"srgb"});
                 let seeds = [ArraySpec {
@@ -264,9 +291,29 @@ mod check {
                 let planes = BTreeMap::from([("work_data".into(), vec![0; DOTS * 4])]);
                 let mut hash = Sha256::new();
                 let mut has_ink = false;
+                let mut frame_hashes = Vec::new();
                 for sequence in 1..=3_u64 {
                     let key = json!({"instance_id":instance_id.to_string(),"revision":"1","base_version":(sequence-1).to_string(),"sequence":sequence.to_string()});
-                    helper.seed_frame(&json!({"frame":{"key":key,"shape":shape,"reset":true,"invalid_rects":[],"input_specs":[]}}),&seeds,&planes)?;
+                    let host = if !is_beach && settings["mode"] == 4 {
+                        let (revision, fen) = match sequence {
+                            1 => (
+                                2,
+                                "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1",
+                            ),
+                            2 => (
+                                3,
+                                "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2",
+                            ),
+                            _ => (
+                                4,
+                                "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2",
+                            ),
+                        };
+                        json!({"services":[{"id":"synthetic-tv-transport-fixture","kind":"sources.chess","revision":revision,"status":{"state":"ready"},"latest":{"available":true,"revision":revision,"game_id":"synthetic-helper-fixture","fen":fen,"moves":[],"white":"synthetic fixture","black":"synthetic fixture","state":"playing"}}]})
+                    } else {
+                        json!({})
+                    };
+                    helper.seed_frame(&json!({"host":host,"frame":{"key":key,"shape":shape,"reset":true,"invalid_rects":[],"input_specs":[]}}),&seeds,&planes)?;
                     let seconds = (sequence - 1) as f64 / 20.0;
                     let inputs = if is_beach {
                         json!({})
@@ -310,6 +357,7 @@ mod check {
                         return Err(fail("replace frame did not touch every sample"));
                     }
                     hash.update(data);
+                    frame_hashes.push(format!("{:x}", Sha256::digest(data)));
                     if !helper.take_requests().is_empty() {
                         return Err(fail("render attempted external acquisition"));
                     }
@@ -319,19 +367,30 @@ mod check {
                 if !has_ink {
                     return Err(fail("animation rendered only blank frames"));
                 }
+                if !is_beach
+                    && settings["mode"] == 4
+                    && mode == AnimationMode::PreRendered
+                    && frame_hashes
+                        .iter()
+                        .collect::<std::collections::BTreeSet<_>>()
+                        .len()
+                        < 2
+                {
+                    return Err(fail("captured TV revisions did not change rendered pixels"));
+                }
                 passed += 1;
                 println!(
                     "{}",
-                    json!({"type":"result","choice":choice,"mode":mode,"status":"passed","frames":3,"data_sha256":format!("{:x}",hash.finalize()),"synthetic_inputs":true})
+                    json!({"type":"result","choice":choice,"mode":mode,"status":"passed","frames":3,"data_sha256":format!("{:x}",hash.finalize()),"frame_sha256":frame_hashes,"synthetic_inputs":true})
                 );
             }
         }
-        if passed != 18 || refused != 4 {
+        if passed != 19 || refused != 3 {
             return Err(fail("incomplete choice/mode inventory"));
         }
         println!(
             "{}",
-            json!({"type":"summary","rendered_choices":passed,"expected_refusals":refused,"frames":passed*3,"status":"passed","scope":"helper rendering only; no broker acquisition, fidelity, performance or terminal publication claim"})
+            json!({"type":"summary","rendered_choices":passed,"expected_refusals":refused,"frames":passed*3,"status":"passed","scope":"helper rendering with synthetic, revision-changing Carpet TV input; no broker acquisition, client replay custody, native parity, performance or terminal publication claim"})
         );
         Ok(())
     }
