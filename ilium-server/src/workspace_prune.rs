@@ -565,7 +565,7 @@ pub(crate) async fn inventory(
     project: NodeId,
 ) -> Result<WorkspaceInventory, String> {
     let client = execution_client(state)?;
-    let project_cwd = super::project_directory(state, project).await?;
+    let project_cwd = crate::workspace::project_directory(state, project).await?;
     let source = ilium_git::discover(&project_cwd)
         .await
         .map_err(|error| error.to_string())?;
@@ -574,7 +574,7 @@ pub(crate) async fn inventory(
     }
     let repository_lock = state.workspace_repository_lock(&source.common_dir).await;
     let _repository_guard = repository_lock.lock().await;
-    let current_project = super::project_directory(state, project).await?;
+    let current_project = crate::workspace::project_directory(state, project).await?;
     if current_project != project_cwd
         || ilium_git::discover(&current_project)
             .await
@@ -866,7 +866,7 @@ async fn stop_pane(
                             restore_resource = true;
                             Err(format!("PTY descendants cannot be proven stopped: {error}"))
                         }
-                        Ok(()) => match runtime.custody_ticket.take() {
+                        Ok(_termination_proof) => match runtime.custody_ticket.take() {
                             Some(ticket) => {
                                 let users = ilium_platform::process_control::
                                     processes_using_directory_bounded(
@@ -1011,7 +1011,7 @@ pub(crate) async fn remove_retained(
     branch_policy: WorkspacePruneBranchPolicy,
     reply: Option<&crate::ipc::EventReply<'_>>,
 ) -> WorkspacePruneResult {
-    let project_cwd = match super::project_directory(state, project).await {
+    let project_cwd = match crate::workspace::project_directory(state, project).await {
         Ok(cwd) => cwd,
         Err(error) => return blocked(error),
     };
@@ -1034,7 +1034,7 @@ pub(crate) async fn remove_retained(
         Err(error) => return blocked(error),
     };
     let _spawn_guard = state.workspace_spawn_lock.lock().await;
-    let current_project = match super::project_directory(state, project).await {
+    let current_project = match crate::workspace::project_directory(state, project).await {
         Ok(cwd) if cwd == project_cwd => cwd,
         _ => return blocked("project changed while waiting for removal admission"),
     };

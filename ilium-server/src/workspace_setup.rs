@@ -105,7 +105,7 @@ where
     F: Fn() -> bool + Send + Sync,
 {
     use ilium_platform::process_control::{
-        lower_background_child_priority, prepare_process_tree, ProcessTreeGuard,
+        ProcessTreeGuard, lower_background_child_priority, prepare_process_tree,
     };
     use std::process::Stdio;
 
@@ -180,7 +180,7 @@ where
     };
     let pipes = (child.stdout.take(), child.stderr.take());
     let (Some(stdout), Some(stderr)) = pipes else {
-        let cleanup = finalize(&mut child, &mut guard, process_id, limits.cleanup).await;
+        let cleanup = finalize(client, &mut child, &mut guard, process_id, limits.cleanup).await;
         return Err(with_cleanup(
             "setup output pipes are unavailable".into(),
             cleanup,
@@ -350,11 +350,8 @@ async fn wait_for_process_group_exit(
         })
         .await
         .map_err(|error| format!("setup exit-probe worker failed: {error}"))?;
-    result
-        .view()
-        .as_ref()
-        .map(|_| ())
-        .map_err(|error| format!("setup exit-probe worker failed: {error}"))
+    drop(result);
+    Ok(())
 }
 
 #[cfg(target_os = "linux")]
@@ -511,8 +508,8 @@ mod tests {
     #[tokio::test]
     async fn cancellation_stops_the_supervised_command_and_retains_its_files() {
         use std::sync::{
-            atomic::{AtomicBool, Ordering},
             Arc,
+            atomic::{AtomicBool, Ordering},
         };
         let temp = tempfile::tempdir().unwrap();
         let root = ilium_platform::paths::canonicalize(temp.path()).unwrap();

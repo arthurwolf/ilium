@@ -19,13 +19,11 @@ use ilium_platform::{paths, secure_fs};
 
 use crate::execution::ExecutionClient;
 use crate::ipc::handlers::{
-    broadcast_and_persist, spawn_and_register_pane_in_directory, RegisterPaneError,
+    RegisterPaneError, broadcast_and_persist, spawn_and_register_pane_in_directory,
 };
 use crate::pane::{PaneSnapshotKind, TerminalOrigin};
 use crate::state::{ServerState, WorkspaceClosePreference};
-
-#[path = "workspace_prune.rs"]
-pub(crate) mod prune;
+use crate::workspace_prune as prune;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum RestoreTarget {
@@ -117,6 +115,11 @@ pub(crate) async fn restore_target(
             ));
         }
     };
+    if let Err(error) = crate::workspace_owner::validate_registered_worktree_count(entries.len()) {
+        return RestoreTarget::Missing(format!(
+            "Git worktree registration cannot be verified: {error}"
+        ));
+    }
     let mut is_listed = false;
     for entry in entries.iter().filter(|entry| !entry.is_bare) {
         if crate::workspace_owner::canonical_path(client, &entry.path)
@@ -135,7 +138,10 @@ pub(crate) async fn restore_target(
     RestoreTarget::Ready
 }
 
-async fn project_directory(state: &ServerState, node_id: NodeId) -> Result<PathBuf, String> {
+pub(crate) async fn project_directory(
+    state: &ServerState,
+    node_id: NodeId,
+) -> Result<PathBuf, String> {
     let tree = state.tree.read().await;
     if node_id == ROOT_ID {
         return Ok(state.session_cwd.clone());
@@ -227,6 +233,8 @@ pub(crate) async fn repo_facts(state: &ServerState, project: NodeId) -> Result<R
     let listed = ilium_git::list_worktrees(&project_cwd)
         .await
         .map_err(|error| error.to_string())?;
+    crate::workspace_owner::validate_registered_worktree_count(listed.len())
+        .map_err(|error| error.to_string())?;
     let current_branch = ilium_git::head_probe(&project_cwd)
         .await
         .map_err(|error| error.to_string())?
@@ -255,6 +263,9 @@ pub(crate) async fn repo_facts(state: &ServerState, project: NodeId) -> Result<R
         .saturating_add(main_status.modified)
         .saturating_add(main_status.untracked)
         .saturating_add(main_status.conflicted);
+    let gitmodules_path = repository.worktree_root.join(".gitmodules");
+    let (worktree_directories, has_gitmodules) =
+        repo_facts_path_metadata(&execution.client, &listed, &gitmodules_path).await?;
     let occupied = {
         let tree = state.tree.read().await;
         tree.panes()
@@ -265,11 +276,11 @@ pub(crate) async fn repo_facts(state: &ServerState, project: NodeId) -> Result<R
             .collect::<Vec<_>>()
     };
     let mut worktrees = Vec::with_capacity(listed.len());
-    for entry in listed {
+    for (entry, is_directory) in listed.into_iter().zip(worktree_directories) {
         let existing = occupied
             .iter()
             .find(|(_, directory)| directory.starts_with(&entry.path));
-        let is_dirty = if entry.is_prunable || !entry.path.is_dir() {
+        let is_dirty = if entry.is_prunable || !is_directory {
             true
         } else {
             ilium_git::status(&entry.path)
@@ -277,24 +288,24 @@ pub(crate) async fn repo_facts(state: &ServerState, project: NodeId) -> Result<R
                 .map(|status| !status.is_clean())
                 .unwrap_or(true)
         };
-        let created_by_ilium =
-            if entry.path == main_directory || entry.is_prunable || !entry.path.is_dir() {
-                false
-            } else {
-                crate::workspace_owner::read_registered_marker(
-                    &execution.client,
-                    &repository.common_dir,
-                    &entry.path,
+        let created_by_ilium = if entry.path == main_directory || entry.is_prunable || !is_directory
+        {
+            false
+        } else {
+            crate::workspace_owner::read_registered_marker(
+                &execution.client,
+                &repository.common_dir,
+                &entry.path,
+            )
+            .await
+            .map_err(|error| {
+                format!(
+                    "cannot inspect worktree ownership at {}: {error}",
+                    entry.path.display()
                 )
-                .await
-                .map_err(|error| {
-                    format!(
-                        "cannot inspect worktree ownership at {}: {error}",
-                        entry.path.display()
-                    )
-                })?
-                .is_some()
-            };
+            })?
+            .is_some()
+        };
         worktrees.push(WorkspaceWorktreeFact {
             path: entry.path,
             branch: entry.branch,
@@ -303,7 +314,6 @@ pub(crate) async fn repo_facts(state: &ServerState, project: NodeId) -> Result<R
             occupied_pane_id: existing.map(|(pane_id, _)| *pane_id),
         });
     }
-    let has_gitmodules = repository.worktree_root.join(".gitmodules").is_file();
     Ok(RepoFacts {
         repo_common_dir: repository.common_dir,
         checkout_root: repository.worktree_root,
@@ -340,52 +350,297 @@ async fn progress(
     }
 }
 
-fn canonical_new_path(path: &Path) -> Result<(PathBuf, Option<PathBuf>), String> {
+const MAX_NEW_WORKTREE_PATH_BYTES: usize = 4096;
+const REPO_FACTS_METADATA_BATCH_SIZE: usize = 32;
+
+fn canonical_new_path_blocking(path: &Path) -> std::io::Result<(PathBuf, Option<PathBuf>)> {
     if !path.is_absolute()
         || path
             .components()
             .any(|component| matches!(component, Component::ParentDir | Component::CurDir))
     {
-        return Err("new worktree path must be absolute and normalized".into());
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "new worktree path must be absolute and normalized",
+        ));
     }
-    let parent = path.parent().ok_or("new worktree path has no parent")?;
-    let file_name = path
-        .file_name()
-        .ok_or("new worktree path has no final name")?;
+    let parent = path.parent().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "new worktree path has no parent",
+        )
+    })?;
+    let file_name = path.file_name().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "new worktree path has no final name",
+        )
+    })?;
     let (canonical_parent, created_parent) = match parent.symlink_metadata() {
         Ok(_) => (
-            paths::canonicalize(parent)
-                .map_err(|error| format!("worktree parent is unavailable: {error}"))?,
+            paths::canonicalize(parent).map_err(|error| {
+                std::io::Error::other(format!("worktree parent is unavailable: {error}"))
+            })?,
             None,
         ),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            let grandparent = parent.parent().ok_or("worktree parent has no parent")?;
-            let parent_name = parent.file_name().ok_or("worktree parent has no name")?;
-            let canonical_grandparent = paths::canonicalize(grandparent)
-                .map_err(|error| format!("worktree parent base is unavailable: {error}"))?;
+            let grandparent = parent.parent().ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "worktree parent has no parent",
+                )
+            })?;
+            let parent_name = parent.file_name().ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "worktree parent has no name",
+                )
+            })?;
+            let canonical_grandparent = paths::canonicalize(grandparent).map_err(|error| {
+                std::io::Error::other(format!("worktree parent base is unavailable: {error}"))
+            })?;
             if canonical_grandparent.join(parent_name) != parent {
-                return Err("worktree parent base is not canonical".into());
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "worktree parent base is not canonical",
+                ));
             }
-            std::fs::create_dir(parent)
-                .map_err(|error| format!("cannot create worktree parent: {error}"))?;
+            std::fs::create_dir(parent).map_err(|error| {
+                std::io::Error::other(format!("cannot create worktree parent: {error}"))
+            })?;
             (parent.to_path_buf(), Some(parent.to_path_buf()))
         }
-        Err(error) => return Err(format!("cannot inspect worktree parent: {error}")),
+        Err(error) => {
+            return Err(std::io::Error::other(format!(
+                "cannot inspect worktree parent: {error}"
+            )));
+        }
     };
     if !canonical_parent.is_dir() || canonical_parent.join(file_name) != path {
-        return Err("new worktree path has a noncanonical parent".into());
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "new worktree path has a noncanonical parent",
+        ));
     }
     match path.symlink_metadata() {
         Ok(_) => {
-            return Err(format!(
-                "new worktree path already exists: {}",
-                path.display()
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                format!("new worktree path already exists: {}", path.display()),
             ));
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(format!("cannot inspect worktree path: {error}")),
+        Err(error) => {
+            return Err(std::io::Error::other(format!(
+                "cannot inspect worktree path: {error}"
+            )));
+        }
     }
     Ok((path.to_path_buf(), created_parent))
+}
+
+async fn run_worktree_path_io<T: Send + 'static>(
+    client: &ExecutionClient,
+    paths: Vec<PathBuf>,
+    result_bytes: usize,
+    operation: impl FnOnce(Vec<PathBuf>, ilium_execution::JobContext) -> std::io::Result<T>
+    + Send
+    + 'static,
+) -> Result<Retained<T>, String> {
+    if paths.is_empty() {
+        return Err("worktree path I/O requires at least one path".into());
+    }
+    let path_bytes = paths.iter().try_fold(0usize, |total, path| {
+        let path_bytes = path.as_os_str().as_encoded_bytes().len();
+        if path_bytes > MAX_NEW_WORKTREE_PATH_BYTES {
+            return None;
+        }
+        total.checked_add(path_bytes.max(1))
+    });
+    let Some(path_bytes) = path_bytes else {
+        return Err("worktree path input exceeds the 4096-byte bounded I/O limit".into());
+    };
+    let declared_bytes = path_bytes
+        .checked_mul(4)
+        .and_then(|bytes| bytes.checked_add(4096usize.saturating_mul(paths.len().max(1))))
+        .ok_or("worktree path I/O admission size overflow")?;
+    let reservation = client
+        .reserve(
+            Lane::Io,
+            JobCost {
+                input_bytes: declared_bytes.max(1),
+                result_bytes: result_bytes.max(1),
+            },
+        )
+        .await
+        .map_err(|reason| format!("worktree path I/O admission failed: {reason:?}"))?;
+    client
+        .run_reserved(reservation, move |context| operation(paths, context))
+        .await
+        .map_err(|error| match error {
+            crate::execution::ExecutionError::Failed(error) => error.view().to_string(),
+            other => format!("worktree path I/O failed: {other:?}"),
+        })
+}
+
+async fn canonical_new_path(
+    client: &ExecutionClient,
+    path: PathBuf,
+) -> Result<Retained<(PathBuf, Option<PathBuf>)>, String> {
+    let path_bytes = path.as_os_str().as_encoded_bytes().len();
+    let result_bytes = path_bytes
+        .checked_mul(4)
+        .and_then(|bytes| bytes.checked_add(4096))
+        .ok_or("new worktree path result size overflow")?;
+    run_worktree_path_io(client, vec![path], result_bytes, |mut paths, _| {
+        canonical_new_path_blocking(&paths.remove(0))
+    })
+    .await
+}
+
+async fn worktree_paths_absent(
+    client: &ExecutionClient,
+    paths: Vec<PathBuf>,
+) -> Result<Retained<Vec<bool>>, String> {
+    let result_bytes = paths.len().max(1);
+    run_worktree_path_io(client, paths, result_bytes, |paths, _| {
+        paths
+            .iter()
+            .map(|path| match path.symlink_metadata() {
+                Ok(_) => Ok(false),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(true),
+                Err(error) => Err(error),
+            })
+            .collect()
+    })
+    .await
+}
+
+async fn remove_created_parent(client: &ExecutionClient, parent: PathBuf) -> Result<(), String> {
+    run_worktree_path_io(client, vec![parent], 1, |mut paths, _| {
+        std::fs::remove_dir(paths.remove(0))
+    })
+    .await?;
+    Ok(())
+}
+
+/// Probe checkout directories and `.gitmodules` in fixed-size batches. Paths
+/// remain borrowed until admission succeeds, so a large Git worktree list
+/// cannot create an uncharged duplicate path vector or one job per checkout.
+async fn repo_facts_path_metadata(
+    client: &ExecutionClient,
+    worktrees: &[ilium_git::Worktree],
+    gitmodules: &Path,
+) -> Result<(Vec<bool>, bool), String> {
+    let mut directories = Vec::new();
+    directories
+        .try_reserve_exact(worktrees.len())
+        .map_err(|error| format!("cannot allocate worktree metadata results: {error}"))?;
+    let mut has_gitmodules = false;
+
+    for (batch_index, batch) in worktrees.chunks(REPO_FACTS_METADATA_BATCH_SIZE).enumerate() {
+        let includes_gitmodules = batch_index == 0;
+        let path_count = batch.len() + usize::from(includes_gitmodules);
+        let encoded_path_bytes = batch
+            .iter()
+            .map(|worktree| worktree.path.as_os_str().as_encoded_bytes().len())
+            .chain(includes_gitmodules.then(|| gitmodules.as_os_str().as_encoded_bytes().len()))
+            .try_fold(0usize, |total, bytes| {
+                (bytes <= MAX_NEW_WORKTREE_PATH_BYTES)
+                    .then(|| total.checked_add(bytes.max(1)))
+                    .flatten()
+            })
+            .ok_or("repository metadata path batch exceeds the 4096-byte per-path limit")?;
+        let input_bytes = encoded_path_bytes
+            .checked_mul(4)
+            .and_then(|bytes| {
+                4096usize
+                    .checked_mul(path_count)
+                    .and_then(|overhead| bytes.checked_add(overhead))
+            })
+            .ok_or("repository metadata admission size overflow")?;
+        let result_bytes = path_count
+            .checked_mul(std::mem::size_of::<(bool, bool)>())
+            .ok_or("repository metadata result size overflow")?;
+        let reservation = client
+            .reserve(
+                Lane::Io,
+                JobCost {
+                    input_bytes: input_bytes.max(1),
+                    result_bytes: result_bytes.max(1),
+                },
+            )
+            .await
+            .map_err(|reason| format!("repository metadata admission failed: {reason:?}"))?;
+
+        // Clone only this admitted, fixed-size batch.
+        let mut paths = batch
+            .iter()
+            .map(|worktree| worktree.path.clone())
+            .collect::<Vec<_>>();
+        if includes_gitmodules {
+            paths.push(gitmodules.to_path_buf());
+        }
+        let worktree_count = batch.len();
+        let retained = client
+            .run_reserved(reservation, move |context: ilium_execution::JobContext| {
+                let mut results = Vec::with_capacity(paths.len());
+                for path in &paths {
+                    if context.stop_requested() {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::Interrupted,
+                            "repository metadata scan cancelled",
+                        ));
+                    }
+                    results.push(
+                        std::fs::metadata(path)
+                            .map(|metadata| (metadata.is_dir(), metadata.is_file()))
+                            .unwrap_or((false, false)),
+                    );
+                }
+                Ok(results)
+            })
+            .await
+            .map_err(|error| match error {
+                crate::execution::ExecutionError::Failed(error) => {
+                    format!("repository metadata I/O failed: {}", error.view())
+                }
+                other => format!("repository metadata I/O failed: {other:?}"),
+            })?;
+        let values = retained.view();
+        if values.len() != path_count {
+            return Err("repository metadata worker returned an incomplete batch".into());
+        }
+        directories.extend(
+            values
+                .iter()
+                .take(worktree_count)
+                .map(|(is_dir, _)| *is_dir),
+        );
+        if includes_gitmodules {
+            has_gitmodules = values[worktree_count].1;
+        }
+    }
+    if worktrees.is_empty() {
+        let retained = run_worktree_path_io(
+            client,
+            vec![gitmodules.to_path_buf()],
+            2,
+            |paths, context| {
+                if context.stop_requested() {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::Interrupted,
+                        "repository metadata scan cancelled",
+                    ));
+                }
+                let is_file = std::fs::metadata(&paths[0]).is_ok_and(|metadata| metadata.is_file());
+                Ok(vec![(false, is_file)])
+            },
+        )
+        .await?;
+        has_gitmodules = retained.view()[0].1;
+    }
+    Ok((directories, has_gitmodules))
 }
 
 /// Roll back only when include preparation wrote no path and Git finds no
@@ -442,14 +697,7 @@ async fn rollback_pre_pane_workspace(
         )
         .await
     {
-        Ok(result) if result.view().is_ok() => {}
-        Ok(result) => {
-            return format!(
-                "worktree retained at {}: copied-file rollback is unsafe: {}",
-                path.display(),
-                result.view().as_ref().expect_err("checked rollback result")
-            );
-        }
+        Ok(_result) => {}
         Err(problem) => {
             return format!(
                 "worktree retained at {}: copied-file rollback job failed: {problem}",
@@ -536,8 +784,15 @@ async fn rollback_pre_pane_workspace(
     // Git removes its per-worktree metadata with the checkout. Leaving the
     // marker in place avoids an ownerless checkout if removal fails.
     let command_result = ilium_git::remove_worktree(control_directory, &path, false).await;
-    let path_absent = matches!(path.symlink_metadata(), Err(error) if error.kind() == std::io::ErrorKind::NotFound);
-    let metadata_absent = matches!(metadata_directory.symlink_metadata(), Err(error) if error.kind() == std::io::ErrorKind::NotFound);
+    let absence = worktree_paths_absent(
+        &execution.client,
+        vec![path.clone(), metadata_directory.clone()],
+    )
+    .await;
+    let (path_absent, metadata_absent) = match &absence {
+        Ok(absence) => (absence.view()[0], absence.view()[1]),
+        Err(_) => (false, false),
+    };
     let registration_absent = ilium_git::list_worktrees(control_directory)
         .await
         .ok()
@@ -549,7 +804,10 @@ async fn rollback_pre_pane_workspace(
         );
     }
     if let Some(parent) = created_parent {
-        let _ = std::fs::remove_dir(parent);
+        let parent_cleanup = remove_created_parent(&execution.client, parent.to_path_buf()).await;
+        if let Err(error) = parent_cleanup {
+            return format!("new worktree removed; empty parent directory retained: {error}");
+        }
     }
     match ilium_git::delete_branch_if_tip(
         control_directory,
@@ -580,12 +838,16 @@ async fn rollback_uncommitted_creation(
         .workspace_repository_lock(&workspace.repo_common_dir)
         .await;
     let _guard = repo_lock.lock().await;
-    let _repository_lease = match prune::repository_lease(&workspace.repo_common_dir).await {
-        Ok(lease) => lease,
-        Err(error) => {
-            return format!("worktree retained: rollback repository admission failed: {error}");
-        }
+    let Some(execution) = state.execution.get() else {
+        return "worktree retained: execution service unavailable for rollback admission".into();
     };
+    let _repository_lease =
+        match prune::repository_lease(&execution.client, &workspace.repo_common_dir).await {
+            Ok(lease) => lease,
+            Err(error) => {
+                return format!("worktree retained: rollback repository admission failed: {error}");
+            }
+        };
     rollback_pre_pane_workspace(
         state,
         control_directory,
@@ -706,8 +968,16 @@ pub(crate) async fn create_agent_in_workspace(
     // Keep this reservation through the tree commit. Releasing it after Git
     // preparation would let another client attach before the pane appears.
     let mut repo_guard = Some(repo_lock.lock().await);
-    let mut repository_lease = Some(prune::repository_lease(&source.common_dir).await?);
+    let execution = state
+        .execution
+        .get()
+        .ok_or_else(|| "execution service unavailable for repository admission".to_string())?;
+    let mut repository_lease =
+        Some(prune::repository_lease(&execution.client, &source.common_dir).await?);
 
+    // Keep worker-result storage charged while the accepted worktree path is
+    // used by Git, include preparation, rollback and pane publication.
+    let mut _path_preparation_retention = None;
     let (workspace, launch_cwd, created_parent, included_files) = match spec {
         WorkspaceCreateSpec::New {
             branch,
@@ -733,7 +1003,9 @@ pub(crate) async fn create_agent_in_workspace(
             {
                 return Err("new worktree must be outside every existing checkout and Git metadata directory".into());
             }
-            let (path, created_parent) = canonical_new_path(&path)?;
+            let prepared_path = canonical_new_path(&execution.client, path).await?;
+            let (path, created_parent) = prepared_path.view().clone();
+            _path_preparation_retention = Some(prepared_path);
             progress(
                 direct_tx,
                 request_id,
@@ -744,7 +1016,7 @@ pub(crate) async fn create_agent_in_workspace(
                 || direct_tx.is_some_and(|reply| reply.is_closed())
             {
                 if let Some(parent) = created_parent {
-                    let _ = std::fs::remove_dir(parent);
+                    let _ = remove_created_parent(&execution.client, parent).await;
                 }
                 return Err("workspace creation cancelled before Git mutation".into());
             }
@@ -756,11 +1028,12 @@ pub(crate) async fn create_agent_in_workspace(
                     Ok(None) => "absent".into(),
                     Err(probe) => format!("unknown ({probe})"),
                 };
-                let path_state = match path.symlink_metadata() {
-                    Ok(_) => "present".to_string(),
-                    Err(probe) if probe.kind() == std::io::ErrorKind::NotFound => "absent".into(),
-                    Err(probe) => format!("unknown ({probe})"),
-                };
+                let path_state =
+                    match worktree_paths_absent(&execution.client, vec![path.clone()]).await {
+                        Ok(absence) if absence.view()[0] => "absent".to_string(),
+                        Ok(_) => "present".to_string(),
+                        Err(probe) => format!("unknown ({probe})"),
+                    };
                 let registration = match ilium_git::list_worktrees(&project_cwd).await {
                     Ok(entries) if entries.iter().any(|entry| entry.path == path) => {
                         "present".into()
@@ -771,7 +1044,7 @@ pub(crate) async fn create_agent_in_workspace(
                 if path_state == "absent" && registration == "absent" {
                     if let Some(parent) = created_parent {
                         // Remove only an empty exact directory made here.
-                        let _ = std::fs::remove_dir(parent);
+                        let _ = remove_created_parent(&execution.client, parent).await;
                     }
                 }
                 return Err(format!(
@@ -802,7 +1075,10 @@ pub(crate) async fn create_agent_in_workspace(
                         path.display()
                     )
                 })?;
-            if !launch_cwd.is_dir() {
+            if !crate::workspace_owner::is_directory(&execution.client, &launch_cwd)
+                .await
+                .map_err(|error| format!("cannot inspect project subdirectory: {error}"))?
+            {
                 let rollback = rollback_pre_pane_workspace(
                     state,
                     &project_cwd,
@@ -847,7 +1123,7 @@ pub(crate) async fn create_agent_in_workspace(
                         input_bytes: 16 * 1024 * 1024,
                         result_bytes: 16 * 1024 * 1024,
                     },
-                    move |context| {
+                    move |context: ilium_execution::JobContext| {
                         let result = crate::worktree_include::copy_worktree_includes_with_stop(
                             &source_project,
                             &target_project,
@@ -1004,7 +1280,10 @@ pub(crate) async fn create_agent_in_workspace(
                 }
             }
             let launch_cwd = path.join(&source.project_subpath);
-            if !launch_cwd.is_dir() {
+            if !crate::workspace_owner::is_directory(&execution.client, &launch_cwd)
+                .await
+                .map_err(|error| format!("cannot inspect project subdirectory: {error}"))?
+            {
                 return Err("project subdirectory is absent in the selected worktree".into());
             }
             let execution = state.execution.get().ok_or_else(|| {
@@ -1343,6 +1622,154 @@ mod tests {
     use super::*;
     use std::process::Command;
     use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn new_worktree_path_preparation_waits_for_bounded_io_admission() {
+        let execution = crate::execution::ServerExecution::start().expect("execution bank");
+        let client = execution.client.clone();
+        let started = std::sync::Arc::new(tokio::sync::Semaphore::new(0));
+        let mut blockers = Vec::new();
+        let mut releases = Vec::new();
+        for _ in 0..2 {
+            let reservation = client
+                .reserve(
+                    Lane::Io,
+                    JobCost {
+                        input_bytes: 1,
+                        result_bytes: 1,
+                    },
+                )
+                .await
+                .expect("I/O reservation");
+            let worker_started = std::sync::Arc::clone(&started);
+            let worker_client = client.clone();
+            let (release, wait) = std::sync::mpsc::sync_channel(1);
+            releases.push(release);
+            blockers.push(tokio::spawn(async move {
+                worker_client
+                    .run_reserved(reservation, move |_| {
+                        worker_started.add_permits(1);
+                        let _ = wait.recv();
+                        Ok::<_, std::convert::Infallible>(())
+                    })
+                    .await
+                    .expect("blocking I/O job");
+            }));
+        }
+        let _started = started
+            .acquire_many(2)
+            .await
+            .expect("both I/O workers started");
+
+        let temporary = TempDir::new().expect("temporary worktree parent");
+        let parent = temporary.path().join("new-parent");
+        let requested = parent.join("worktree");
+        let expected_path = requested.clone();
+        let preparation_client = client.clone();
+        let mut preparation =
+            tokio::spawn(async move { canonical_new_path(&preparation_client, requested).await });
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(50), &mut preparation)
+                .await
+                .is_err(),
+            "path preparation bypassed the saturated I/O bank"
+        );
+        assert!(!parent.exists(), "parent was created before I/O admission");
+
+        for release in releases {
+            let _ = release.send(());
+        }
+        for blocker in blockers {
+            blocker.await.expect("blocking job task");
+        }
+        let prepared = tokio::time::timeout(std::time::Duration::from_secs(3), preparation)
+            .await
+            .expect("path preparation completed after admission")
+            .expect("path preparation task")
+            .expect("valid new worktree path");
+        assert_eq!(prepared.view().0, expected_path);
+        assert_eq!(prepared.view().1.as_deref(), Some(parent.as_path()));
+        assert!(parent.is_dir());
+    }
+
+    #[tokio::test]
+    async fn repo_facts_metadata_waits_for_bounded_io_admission() {
+        let execution = crate::execution::ServerExecution::start().expect("execution bank");
+        let client = execution.client.clone();
+        let started = std::sync::Arc::new(tokio::sync::Semaphore::new(0));
+        let mut blockers = Vec::new();
+        let mut releases = Vec::new();
+        for _ in 0..2 {
+            let reservation = client
+                .reserve(
+                    Lane::Io,
+                    JobCost {
+                        input_bytes: 1,
+                        result_bytes: 1,
+                    },
+                )
+                .await
+                .expect("I/O reservation");
+            let worker_started = std::sync::Arc::clone(&started);
+            let worker_client = client.clone();
+            let (release, wait) = std::sync::mpsc::sync_channel(1);
+            releases.push(release);
+            blockers.push(tokio::spawn(async move {
+                worker_client
+                    .run_reserved(reservation, move |_| {
+                        worker_started.add_permits(1);
+                        let _ = wait.recv();
+                        Ok::<_, std::convert::Infallible>(())
+                    })
+                    .await
+                    .expect("blocking I/O job");
+            }));
+        }
+        let _started = started
+            .acquire_many(2)
+            .await
+            .expect("both I/O workers started");
+
+        let temporary = TempDir::new().expect("repository metadata fixture");
+        let worktree_path = temporary.path().join("checkout");
+        std::fs::create_dir(&worktree_path).expect("checkout directory");
+        let gitmodules = temporary.path().join(".gitmodules");
+        std::fs::write(&gitmodules, "[submodule \"example\"]\n").expect("Git metadata file");
+        let worktrees = vec![ilium_git::Worktree {
+            path: worktree_path,
+            head: None,
+            branch: None,
+            is_bare: false,
+            is_detached: false,
+            is_locked: false,
+            is_prunable: false,
+        }];
+        let metadata_client = client.clone();
+        let mut metadata = tokio::spawn(async move {
+            repo_facts_path_metadata(&metadata_client, &worktrees, &gitmodules).await
+        });
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(50), &mut metadata)
+                .await
+                .is_err(),
+            "repository metadata bypassed the saturated I/O bank"
+        );
+
+        for release in releases {
+            let _ = release.send(());
+        }
+        for blocker in blockers {
+            blocker.await.expect("blocking job task");
+        }
+        let (directories, has_gitmodules) =
+            tokio::time::timeout(std::time::Duration::from_secs(3), metadata)
+                .await
+                .expect("metadata completed after I/O admission")
+                .expect("metadata task")
+                .expect("metadata probe");
+        assert_eq!(directories, vec![true]);
+        assert!(has_gitmodules);
+    }
 
     async fn restore_target(saved_cwd: &Path, workspace: &PaneWorkspace) -> RestoreTarget {
         let client = crate::execution::test_general_client();

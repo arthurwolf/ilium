@@ -36,6 +36,15 @@ pub(crate) enum WorkspaceOwnerError {
     Serialize(#[from] serde_json::Error),
 }
 
+pub(crate) fn validate_registered_worktree_count(count: usize) -> Result<(), WorkspaceOwnerError> {
+    if count > MAX_REGISTERED_WORKTREES {
+        return Err(WorkspaceOwnerError::Invalid(
+            "repository has too many registered worktrees to verify safely",
+        ));
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct OwnershipMarker {
@@ -231,7 +240,7 @@ fn expected_marker(workspace: &PaneWorkspace) -> Result<OwnershipMarker, Workspa
 async fn validated_marker_path(
     client: &ExecutionClient,
     workspace: &PaneWorkspace,
-) -> Result<PathBuf, WorkspaceOwnerError> {
+) -> Result<Retained<PathBuf>, WorkspaceOwnerError> {
     if !workspace.created_by_ilium || workspace.branch.is_empty() || workspace.created_at_unix <= 0
     {
         return Err(WorkspaceOwnerError::Invalid(
@@ -351,11 +360,7 @@ pub(crate) async fn validated_marker_path_for(
         return Err(WorkspaceOwnerError::Invalid("repository identity changed"));
     }
     let listed = ilium_git::list_worktrees(root.view()).await?;
-    if listed.len() > MAX_REGISTERED_WORKTREES {
-        return Err(WorkspaceOwnerError::Invalid(
-            "repository has too many registered worktrees to verify safely",
-        ));
-    }
+    validate_registered_worktree_count(listed.len())?;
     let mut registered = false;
     for worktree in listed
         .iter()
@@ -470,6 +475,12 @@ mod tests {
         crate::execution::test_general_client()
     }
 
+    #[test]
+    fn registered_worktree_limit_is_explicit_and_inclusive() {
+        assert!(validate_registered_worktree_count(MAX_REGISTERED_WORKTREES).is_ok());
+        assert!(validate_registered_worktree_count(MAX_REGISTERED_WORKTREES + 1).is_err());
+    }
+
     async fn create_marker(
         workspace: &mut PaneWorkspace,
     ) -> Result<OwnershipMarker, WorkspaceOwnerError> {
@@ -491,7 +502,7 @@ mod tests {
 
     async fn validated_marker_path(
         workspace: &PaneWorkspace,
-    ) -> Result<PathBuf, WorkspaceOwnerError> {
+    ) -> Result<Retained<PathBuf>, WorkspaceOwnerError> {
         super::validated_marker_path(&client(), workspace).await
     }
 
@@ -541,7 +552,8 @@ mod tests {
     #[tokio::test]
     async fn marker_reads_wait_for_shared_io_capacity() {
         let execution = crate::execution::ServerExecution::start().expect("execution bank");
-        let client = execution.client.clone();
+        let execution_client = execution.client.clone();
+        let client = client();
         let barrier = std::sync::Arc::new(std::sync::Barrier::new(3));
         let started = std::sync::Arc::new(tokio::sync::Semaphore::new(0));
         let mut blockers = Vec::new();
@@ -575,9 +587,9 @@ mod tests {
         let temporary = TempDir::new().expect("temporary marker directory");
         let marker_path = temporary.path().join(MARKER_FILE);
         std_fs::write(&marker_path, b"{}").expect("write marker fixture");
-        let client = client();
-        let mut read =
-            tokio::spawn(async move { read_marker_bytes_if_present(&client, &marker_path).await });
+        let mut read = tokio::spawn(async move {
+            read_marker_bytes_if_present(&execution_client, &marker_path).await
+        });
         assert!(
             tokio::time::timeout(std::time::Duration::from_millis(50), &mut read)
                 .await
@@ -590,8 +602,8 @@ mod tests {
             blocker.await.expect("blocking job task");
         }
         assert_eq!(
-            read.await.expect("marker read task").unwrap(),
-            Some(b"{}".to_vec())
+            read.await.expect("marker read task").unwrap().view(),
+            &Some(b"{}".to_vec())
         );
     }
 
@@ -618,7 +630,7 @@ mod tests {
         let marker_path = validated_marker_path(&workspace)
             .await
             .expect("marker path");
-        assert!(marker_path.is_file());
+        assert!(marker_path.view().is_file());
         assert!(workspace.worktree_root.exists());
     }
 
@@ -643,7 +655,7 @@ mod tests {
 
         let mut wrong_root = marker.clone();
         wrong_root.worktree_root = workspace.repo_common_dir.clone();
-        std_fs::write(&marker_path, serde_json::to_vec(&wrong_root).unwrap())
+        std_fs::write(marker_path.view(), serde_json::to_vec(&wrong_root).unwrap())
             .expect("write wrong-root marker");
         assert!(matches!(
             read_registered_marker(&workspace.repo_common_dir, &workspace.worktree_root).await,
@@ -652,8 +664,11 @@ mod tests {
 
         let mut invalid_base = marker.clone();
         invalid_base.base_commit = "not-a-commit".into();
-        std_fs::write(&marker_path, serde_json::to_vec(&invalid_base).unwrap())
-            .expect("write invalid-base marker");
+        std_fs::write(
+            marker_path.view(),
+            serde_json::to_vec(&invalid_base).unwrap(),
+        )
+        .expect("write invalid-base marker");
         assert!(matches!(
             read_registered_marker(&workspace.repo_common_dir, &workspace.worktree_root).await,
             Err(WorkspaceOwnerError::Invalid(_))
@@ -664,8 +679,11 @@ mod tests {
             .as_object_mut()
             .unwrap()
             .remove("custody_revision");
-        std_fs::write(&marker_path, serde_json::to_vec(&pre_custody).unwrap())
-            .expect("write pre-custody marker");
+        std_fs::write(
+            marker_path.view(),
+            serde_json::to_vec(&pre_custody).unwrap(),
+        )
+        .expect("write pre-custody marker");
         assert!(matches!(
             read_registered_marker(&workspace.repo_common_dir, &workspace.worktree_root).await,
             Err(WorkspaceOwnerError::Invalid(_))
@@ -674,7 +692,7 @@ mod tests {
         let mut old_schema = serde_json::to_value(marker).unwrap();
         old_schema.as_object_mut().unwrap().remove("base_ref");
         old_schema.as_object_mut().unwrap().remove("base_commit");
-        std_fs::write(&marker_path, serde_json::to_vec(&old_schema).unwrap())
+        std_fs::write(marker_path.view(), serde_json::to_vec(&old_schema).unwrap())
             .expect("write pre-provenance marker");
         assert!(matches!(
             read_registered_marker(&workspace.repo_common_dir, &workspace.worktree_root).await,
@@ -693,7 +711,7 @@ mod tests {
             .expect("marker path");
         let target = workspace.worktree_root.join("foreign-marker.json");
         std_fs::write(&target, b"foreign content").expect("write foreign content");
-        symlink(&target, &marker_path).expect("link marker");
+        symlink(&target, marker_path.view()).expect("link marker");
         assert!(
             read_registered_marker(&workspace.repo_common_dir, &workspace.worktree_root)
                 .await
@@ -719,13 +737,13 @@ mod tests {
             Err(WorkspaceOwnerError::AlreadyExists)
         ));
         assert!(retry.workspace_id.is_none());
-        std_fs::write(&marker_path, b"foreign content").expect("tamper marker");
+        std_fs::write(marker_path.view(), b"foreign content").expect("tamper marker");
         assert!(matches!(
             verify_marker(&workspace).await,
             Err(WorkspaceOwnerError::Mismatch)
         ));
         assert_eq!(
-            std_fs::read(&marker_path).expect("marker remains"),
+            std_fs::read(marker_path.view()).expect("marker remains"),
             b"foreign content"
         );
     }
@@ -743,7 +761,7 @@ mod tests {
             Err(WorkspaceOwnerError::Invalid(_))
         ));
         assert!(workspace.workspace_id.is_none());
-        assert!(!marker_path.exists());
+        assert!(!marker_path.view().exists());
     }
 
     #[tokio::test]

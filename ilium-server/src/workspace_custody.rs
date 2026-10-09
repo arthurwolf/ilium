@@ -182,36 +182,39 @@ pub(crate) async fn begin(
     let worker_directory = ticket.metadata_directory.clone();
     let worker_file_name = ticket.file_name.clone();
     let result = client
-        .run_reserved(reservation, move |context: ilium_execution::JobContext| {
-            if context.stop_requested() {
-                return Err("custody ticket creation cancelled before file creation".into());
-            }
-            let before = ilium_platform::secure_fs::directory_generation(&worker_directory)
-                .map_err(|error| io_error("custody directory identity unavailable", error))?;
-            let directory = NoFollowDirectory::open_root(&worker_directory)
-                .map_err(|error| io_error("cannot pin worktree metadata directory", error))?;
-            if ilium_platform::secure_fs::directory_generation(&worker_directory)
-                .map_err(|error| io_error("custody directory identity changed", error))?
-                != before
-            {
-                return Err("custody metadata directory changed before ticket creation".into());
-            }
-            // After exclusive creation, finish the durability sequence even if
-            // the waiter cancels. A failed write or sync leaves a refusal token.
-            publish_ticket(
-                &directory,
-                &worker_file_name,
-                &bytes,
-                NoFollowDirectory::sync_all,
-            )?;
-            if ilium_platform::secure_fs::directory_generation(&worker_directory)
-                .map_err(|error| io_error("custody directory identity changed", error))?
-                != before
-            {
-                return Err("custody metadata directory changed after ticket creation".into());
-            }
-            Ok(())
-        })
+        .run_reserved(
+            reservation,
+            move |context: ilium_execution::JobContext| -> Result<(), String> {
+                if context.stop_requested() {
+                    return Err("custody ticket creation cancelled before file creation".into());
+                }
+                let before = ilium_platform::secure_fs::directory_generation(&worker_directory)
+                    .map_err(|error| io_error("custody directory identity unavailable", error))?;
+                let directory = NoFollowDirectory::open_root(&worker_directory)
+                    .map_err(|error| io_error("cannot pin worktree metadata directory", error))?;
+                if ilium_platform::secure_fs::directory_generation(&worker_directory)
+                    .map_err(|error| io_error("custody directory identity changed", error))?
+                    != before
+                {
+                    return Err("custody metadata directory changed before ticket creation".into());
+                }
+                // After exclusive creation, finish the durability sequence even if
+                // the waiter cancels. A failed write or sync leaves a refusal token.
+                publish_ticket(
+                    &directory,
+                    &worker_file_name,
+                    &bytes,
+                    NoFollowDirectory::sync_all,
+                )?;
+                if ilium_platform::secure_fs::directory_generation(&worker_directory)
+                    .map_err(|error| io_error("custody directory identity changed", error))?
+                    != before
+                {
+                    return Err("custody metadata directory changed after ticket creation".into());
+                }
+                Ok(())
+            },
+        )
         .await
         .map_err(|error| io_error("custody-ticket I/O job failed", error))?;
     drop(result);
@@ -305,37 +308,42 @@ pub(crate) async fn require_no_tickets(
     let reservation = reserve_io(client, io_cost(&[metadata_directory], 0)?).await?;
     let metadata_directory = metadata_directory.to_path_buf();
     let result = client
-        .run_reserved(reservation, move |context: ilium_execution::JobContext| {
-            let before = ilium_platform::secure_fs::directory_generation(&metadata_directory)
-                .map_err(|error| io_error("custody directory identity unavailable", error))?;
-            let _directory = NoFollowDirectory::open_root(&metadata_directory)
-                .map_err(|error| io_error("cannot pin custody directory", error))?;
-            let entries = std::fs::read_dir(&metadata_directory)
-                .map_err(|error| io_error("cannot list custody directory", error))?;
-            for (index, entry) in entries.enumerate() {
-                if context.stop_requested() {
-                    return Err("custody directory inspection cancelled".into());
+        .run_reserved(
+            reservation,
+            move |context: ilium_execution::JobContext| -> Result<(), String> {
+                let before = ilium_platform::secure_fs::directory_generation(&metadata_directory)
+                    .map_err(|error| {
+                    io_error("custody directory identity unavailable", error)
+                })?;
+                let _directory = NoFollowDirectory::open_root(&metadata_directory)
+                    .map_err(|error| io_error("cannot pin custody directory", error))?;
+                let entries = std::fs::read_dir(&metadata_directory)
+                    .map_err(|error| io_error("cannot list custody directory", error))?;
+                for (index, entry) in entries.enumerate() {
+                    if context.stop_requested() {
+                        return Err("custody directory inspection cancelled".into());
+                    }
+                    if index >= MAX_CUSTODY_ENTRIES {
+                        return Err("custody directory entry limit exceeded".into());
+                    }
+                    let entry =
+                        entry.map_err(|error| io_error("cannot inspect custody entry", error))?;
+                    let name = entry.file_name();
+                    if name.to_string_lossy().starts_with(PREFIX) {
+                        return Err(format!(
+                            "worktree process custody is unresolved ({})",
+                            name.to_string_lossy()
+                        ));
+                    }
                 }
-                if index >= MAX_CUSTODY_ENTRIES {
-                    return Err("custody directory entry limit exceeded".into());
+                let after = ilium_platform::secure_fs::directory_generation(&metadata_directory)
+                    .map_err(|error| io_error("custody directory identity changed", error))?;
+                if before != after {
+                    return Err("custody metadata directory changed during inspection".into());
                 }
-                let entry =
-                    entry.map_err(|error| io_error("cannot inspect custody entry", error))?;
-                let name = entry.file_name();
-                if name.to_string_lossy().starts_with(PREFIX) {
-                    return Err(format!(
-                        "worktree process custody is unresolved ({})",
-                        name.to_string_lossy()
-                    ));
-                }
-            }
-            let after = ilium_platform::secure_fs::directory_generation(&metadata_directory)
-                .map_err(|error| io_error("custody directory identity changed", error))?;
-            if before != after {
-                return Err("custody metadata directory changed during inspection".into());
-            }
-            Ok(())
-        })
+                Ok(())
+            },
+        )
         .await
         .map_err(|error| io_error("custody inspection I/O job failed", error))?;
     drop(result);
@@ -371,40 +379,45 @@ pub(crate) async fn require_only_ticket(
     let file_name = ticket.file_name.clone();
     let expected_bytes = exact_bytes(&ticket.workspace_id, &ticket.ticket_id)?;
     let result = client
-        .run_reserved(reservation, move |context: ilium_execution::JobContext| {
-            let before = ilium_platform::secure_fs::directory_generation(&metadata_directory)
-                .map_err(|error| io_error("custody directory identity unavailable", error))?;
-            let directory = NoFollowDirectory::open_root(&metadata_directory)
-                .map_err(|error| io_error("cannot pin custody directory", error))?;
-            let _opened = read_exact_ticket(&directory, &file_name, &expected_bytes)?;
-            let mut count = 0;
-            for (index, entry) in std::fs::read_dir(&metadata_directory)
-                .map_err(|error| io_error("cannot list custody directory", error))?
-                .enumerate()
-            {
-                if context.stop_requested() {
-                    return Err("custody directory inspection cancelled".into());
-                }
-                if index >= MAX_CUSTODY_ENTRIES {
-                    return Err("custody directory entry limit exceeded".into());
-                }
-                let entry =
-                    entry.map_err(|error| io_error("cannot inspect custody entry", error))?;
-                let name = entry.file_name();
-                if name.to_string_lossy().starts_with(PREFIX) {
-                    count += 1;
-                    if name != OsStr::new(&file_name) {
-                        return Err("another unresolved worktree custody ticket exists".into());
+        .run_reserved(
+            reservation,
+            move |context: ilium_execution::JobContext| -> Result<(), String> {
+                let before = ilium_platform::secure_fs::directory_generation(&metadata_directory)
+                    .map_err(|error| {
+                    io_error("custody directory identity unavailable", error)
+                })?;
+                let directory = NoFollowDirectory::open_root(&metadata_directory)
+                    .map_err(|error| io_error("cannot pin custody directory", error))?;
+                let _opened = read_exact_ticket(&directory, &file_name, &expected_bytes)?;
+                let mut count = 0;
+                for (index, entry) in std::fs::read_dir(&metadata_directory)
+                    .map_err(|error| io_error("cannot list custody directory", error))?
+                    .enumerate()
+                {
+                    if context.stop_requested() {
+                        return Err("custody directory inspection cancelled".into());
+                    }
+                    if index >= MAX_CUSTODY_ENTRIES {
+                        return Err("custody directory entry limit exceeded".into());
+                    }
+                    let entry =
+                        entry.map_err(|error| io_error("cannot inspect custody entry", error))?;
+                    let name = entry.file_name();
+                    if name.to_string_lossy().starts_with(PREFIX) {
+                        count += 1;
+                        if name != OsStr::new(&file_name) {
+                            return Err("another unresolved worktree custody ticket exists".into());
+                        }
                     }
                 }
-            }
-            let after = ilium_platform::secure_fs::directory_generation(&metadata_directory)
-                .map_err(|error| io_error("custody directory identity changed", error))?;
-            if before != after || count != 1 {
-                return Err("current pane custody ticket set changed".into());
-            }
-            Ok(())
-        })
+                let after = ilium_platform::secure_fs::directory_generation(&metadata_directory)
+                    .map_err(|error| io_error("custody directory identity changed", error))?;
+                if before != after || count != 1 {
+                    return Err("current pane custody ticket set changed".into());
+                }
+                Ok(())
+            },
+        )
         .await
         .map_err(|error| io_error("custody inspection I/O job failed", error))?;
     drop(result);

@@ -247,7 +247,7 @@ async fn run_probe(
 ) -> ProbeResult {
     let workspace = probe.workspace.clone();
     let (timeout, action) = match kind {
-        ProbeKind::Cheap => (CHEAP_TIMEOUT, cheap_probe(probe)),
+        ProbeKind::Cheap => (CHEAP_TIMEOUT, cheap_probe(state, probe)),
         ProbeKind::Full => {
             return ProbeResult {
                 pane_id,
@@ -282,14 +282,23 @@ async fn run_probe(
     }
 }
 
-async fn cheap_probe(probe: PaneProbe) -> Result<ProbeOutput, String> {
+async fn cheap_probe(state: Arc<ServerState>, probe: PaneProbe) -> Result<ProbeOutput, String> {
     let head_paths = match &probe.head_paths {
         Some(paths) => paths.clone(),
         None => match ilium_git::head_paths(&probe.cwd).await {
             Ok(paths) => paths,
             Err(error) => {
                 if matches!(
-                    crate::workspace::restore_target(&probe.cwd, &probe.workspace).await,
+                    crate::workspace::restore_target(
+                        &state
+                            .execution
+                            .get()
+                            .ok_or_else(|| "execution service is unavailable".to_string())?
+                            .client,
+                        &probe.cwd,
+                        &probe.workspace,
+                    )
+                    .await,
                     crate::workspace::RestoreTarget::Missing(_)
                 ) {
                     return Ok(ProbeOutput {
