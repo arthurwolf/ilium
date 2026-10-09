@@ -2701,7 +2701,7 @@ dependencies = [
 
 [[package]]
 name = "ilium"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2730,7 +2730,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-agent-debug"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ilium-core",
  "serde",
@@ -2739,7 +2739,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-agent-session"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ilium-core",
  "ilium-platform",
@@ -2750,7 +2750,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-ambient"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cap-std",
  "chrono",
@@ -2775,7 +2775,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-animation-js"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "chrono",
  "cosmic-text",
@@ -2799,7 +2799,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-client"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "arboard",
@@ -2864,7 +2864,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-compaction-analysis"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -2873,7 +2873,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
  "thiserror 2.0.18",
@@ -2881,7 +2881,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-detect"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ilium-core",
  "ilium-platform",
@@ -2893,7 +2893,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-execution"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "crossbeam-channel",
  "ilium-platform",
@@ -2901,7 +2901,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-git"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ilium-platform",
  "tempfile",
@@ -2911,7 +2911,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-gpu"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ilium-ambient",
  "ilium-execution",
@@ -2923,14 +2923,14 @@ dependencies = [
 
 [[package]]
 name = "ilium-http"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ureq",
 ]
 
 [[package]]
 name = "ilium-inference"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ilium-execution",
  "ilium-http",
@@ -2949,7 +2949,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-ipc"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bincode",
  "ilium-agent-debug",
@@ -2963,7 +2963,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-kilo-gateway"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ilium-http",
  "ilium-logging",
@@ -2977,20 +2977,22 @@ dependencies = [
 
 [[package]]
 name = "ilium-logging"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ilium-execution",
  "ilium-platform",
+ "ilium-transport",
  "serde_json",
  "tempfile",
  "thiserror 2.0.18",
+ "tokio",
  "tracing",
  "tracing-subscriber",
 ]
 
 [[package]]
 name = "ilium-platform"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "directories",
  "getrandom 0.3.4",
@@ -3005,7 +3007,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-prompts"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "handlebars",
  "serde",
@@ -3016,7 +3018,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-pty"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "crossterm",
@@ -3030,7 +3032,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-remote-compaction"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "chrono",
  "ilium-agent-session",
@@ -3044,7 +3046,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-server"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "axum",
  "chrono",
@@ -3084,7 +3086,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-session-convert"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "chrono",
  "ilium-agent-session",
@@ -3099,7 +3101,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-sound"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "ilium-core",
  "serde",
@@ -3110,7 +3112,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-test-fixtures"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "crossterm",
  "ilium-platform",
@@ -3123,7 +3125,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-transport"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "sha2 0.10.9",
  "tempfile",
@@ -3134,7 +3136,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-voice"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64 0.22.1",
  "cpal",
@@ -3154,7 +3156,7 @@ dependencies = [
 
 [[package]]
 name = "ilium-wikipedia"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "chrono",
  "ego-tree",
