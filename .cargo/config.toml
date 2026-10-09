@@ -1,3 +1,2 @@
 [build]
 jobs = 1
-rustc-wrapper = "./.cargo/limit-cpu.sh"

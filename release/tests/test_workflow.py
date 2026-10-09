@@ -8,6 +8,7 @@ import sys
 import tempfile
 import shutil
 import shlex
+import tomllib
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -242,6 +243,12 @@ def synthetic_package_animation_marker(target, source, native, archive,
 class WorkflowTests(unittest.TestCase):
     def setUp(self):
         self.workflow = yaml.load((ROOT / '.github/workflows/release.yml').read_text(), Loader=yaml.BaseLoader)
+
+    def test_workspace_cargo_config_does_not_install_host_specific_rustc_wrapper(self):
+        config = tomllib.loads((ROOT / '.cargo/config.toml').read_text(encoding='utf-8'))
+        self.assertNotIn(
+            'rustc-wrapper', config.get('build', {}),
+            'a workspace-wide POSIX compiler wrapper blocks Windows and non-ni-vm Actions runners')
 
     def test_cross_platform_ci_configures_isolated_pty_test_environment(self):
         ci = yaml.load((ROOT / '.github/workflows/ci.yml').read_text(), Loader=yaml.BaseLoader)
