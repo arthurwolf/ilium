@@ -22,6 +22,7 @@
 
 use ilium::session;
 
+mod progress_wait;
 mod voice;
 
 use std::ffi::OsString;
@@ -82,6 +83,12 @@ enum Command {
     /// Internal native clipboard owner; never opens a session or runtime.
     #[command(hide = true)]
     ClipboardHelper,
+    /// Internal Antigravity status-line capture; never opens a session or runtime.
+    #[command(name = "__antigravity-model-statusline", hide = true)]
+    AntigravityModelStatusline,
+    /// Internal Claude status-line model capture; never opens a session or runtime.
+    #[command(name = "__claude-model-statusline", hide = true)]
+    ClaudeModelStatusline,
     /// Internal offline release qualification; opens no terminal or session.
     #[command(hide = true)]
     ReleaseEmbeddingProbe {
@@ -118,6 +125,10 @@ enum Command {
         /// Starting ref for --worktree; defaults to the repository's default base.
         #[arg(long, requires = "worktree")]
         base: Option<String>,
+        /// Keep the pane open after the command exits. By default a
+        /// `new-pane` command pane closes itself when its command ends.
+        #[arg(long, conflicts_with = "worktree")]
+        keep_open: bool,
         #[arg(last = true, required = true, value_name = "CMD")]
         cmd: Vec<String>,
     },
@@ -136,6 +147,13 @@ enum Command {
     Progress {
         #[command(subcommand)]
         command: ProgressCommand,
+    },
+    /// Same as `ilium progress wait`: blocks until this pane's progress
+    /// monitor (or MONITOR_ID) settles, then prints one JSONL line.
+    Wait {
+        monitor_id: Option<u64>,
+        #[arg(long)]
+        timeout_seconds: Option<u64>,
     },
     /// Voice control from the command line: `voice say` types sentences into
     /// the running voice session as if they had been spoken. Output is JSONL.
@@ -221,6 +239,34 @@ enum ProgressCommand {
         /// performance notes above.
         #[arg(long, default_value_t = 1)]
         interval_seconds: u32,
+        /// After registering, block until the task settles, exactly like
+        /// `ilium progress wait` (prints a second JSONL line and exits with
+        /// the wait's status). The usual way to run a long task.
+        #[arg(long)]
+        wait: bool,
+        /// With --wait: give up after this many seconds (exit 6, task still
+        /// running). Omit to wait as long as the task takes.
+        #[arg(long, requires = "wait")]
+        timeout_seconds: Option<u64>,
+        /// Replace a monitor that is still running. Without this, `set`
+        /// refuses so a second `set` cannot silently discard a running job's
+        /// monitor and its notification.
+        #[arg(long)]
+        replace: bool,
+    },
+    /// Blocks until this pane's monitor (or MONITOR_ID) reports done or
+    /// error, or the monitor fails, is replaced, or is cleared. Prints one
+    /// JSONL line and exits 0 done, 3 task error, 4 monitor failed (outcome
+    /// unknown), 5 replaced/cleared/no monitor, 6 timeout. While this command
+    /// is waiting, the result is returned here instead of being typed into
+    /// the agent's prompt.
+    Wait {
+        /// Monitor to wait for; defaults to the pane's current monitor.
+        monitor_id: Option<u64>,
+        /// Give up after this many seconds (exit 6). Omit to wait as long as
+        /// the task takes.
+        #[arg(long)]
+        timeout_seconds: Option<u64>,
     },
     /// Returns the current registration, latest report, and monitor health.
     Status,
@@ -238,6 +284,7 @@ impl ProgressCommand {
         match self {
             Self::Check { .. } => "check",
             Self::Set { .. } => "set",
+            Self::Wait { .. } => "wait",
             Self::Status => "status",
             Self::Clear { .. } => "clear",
         }
@@ -267,6 +314,24 @@ fn main() -> ExitCode {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => {
                 eprintln!("ilium clipboard helper: {error}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+    if matches!(&cli.command, Some(Command::AntigravityModelStatusline)) {
+        return match ilium_client::antigravity_model_statusline::run_statusline_helper() {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("ilium Antigravity model capture: {error}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+    if matches!(&cli.command, Some(Command::ClaudeModelStatusline)) {
+        return match ilium_client::claude_model_statusline::run_statusline_helper() {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("ilium Claude model capture: {error}");
                 ExitCode::FAILURE
             }
         };
@@ -303,7 +368,11 @@ fn main() -> ExitCode {
 
 async fn run_main(cli: Cli) -> ExitCode {
     let outcome = dispatch(cli).await;
-    if let Err(error) = &outcome {
+    if let Some(error) = outcome
+        .as_ref()
+        .err()
+        .filter(|error| !matches!(error, CliError::ExitStatus(_)))
+    {
         tracing::error!(%error, error_debug = ?error, "ilium CLI action failed");
         eprintln!("ilium: {error}");
     }
@@ -312,6 +381,9 @@ async fn run_main(cli: Cli) -> ExitCode {
     let logging = process_logging_barrier(true).await;
     if let Err(error) = &logging {
         eprintln!("ilium: final logging drain failed: {error}");
+    }
+    if let Err(CliError::ExitStatus(code)) = &outcome {
+        return ExitCode::from(*code);
     }
     if outcome.is_ok() && logging.is_ok() {
         ExitCode::SUCCESS
@@ -348,6 +420,12 @@ async fn dispatch(cli: Cli) -> Result<(), CliError> {
     match cli.command {
         Some(Command::ClipboardHelper) => Err(CliError::ServerReportedError(
             "Clipboard helper must run before runtime startup".into(),
+        )),
+        Some(Command::AntigravityModelStatusline) => Err(CliError::ServerReportedError(
+            "Antigravity model capture must run before runtime startup".into(),
+        )),
+        Some(Command::ClaudeModelStatusline) => Err(CliError::ServerReportedError(
+            "Claude model capture must run before runtime startup".into(),
         )),
         Some(Command::ReleaseEmbeddingProbe {
             model_directory,
@@ -391,15 +469,26 @@ async fn dispatch(cli: Cli) -> Result<(), CliError> {
             worktree,
             branch,
             base,
+            keep_open,
             cmd,
         }) => match (worktree, branch) {
             (true, Some(branch)) => {
                 new_workspace_pane(&session_name, &cmd, &cli.cwd, &branch, base.as_deref()).await
             }
-            _ => new_pane(&session_name, &cmd, &cli.cwd).await,
+            _ => new_pane(&session_name, &cmd, &cli.cwd, keep_open).await,
         },
         Some(Command::Chat { command }) => chat(command, &cli.cwd),
         Some(Command::Progress { command }) => progress(command).await,
+        Some(Command::Wait {
+            monitor_id,
+            timeout_seconds,
+        }) => {
+            progress(ProgressCommand::Wait {
+                monitor_id,
+                timeout_seconds,
+            })
+            .await
+        }
         Some(Command::Voice { command }) => voice::voice(command, &cli.cwd).await,
     }
 }
@@ -568,7 +657,22 @@ async fn progress(command: ProgressCommand) -> Result<(), CliError> {
         }
     };
 
+    // Pending `--wait` after a successful `set`, as its timeout.
+    let mut wait_after_set: Option<Option<u64>> = None;
     let (request, expected_response) = match command {
+        ProgressCommand::Wait {
+            monitor_id,
+            timeout_seconds,
+        } => {
+            let result = progress_wait::wait_for_monitor(
+                &mut connection,
+                identity.pane_id,
+                monitor_id,
+                timeout_seconds.map(Duration::from_secs),
+            )
+            .await;
+            return finish_progress_wait(connection, identity.pane_id, request_id, result).await;
+        }
         ProgressCommand::Check { command } => (
             ilium_ipc::ClientRequest::CheckPaneProgressMonitor {
                 request_id,
@@ -580,15 +684,27 @@ async fn progress(command: ProgressCommand) -> Result<(), CliError> {
         ProgressCommand::Set {
             command,
             interval_seconds,
-        } => (
-            ilium_ipc::ClientRequest::SetPaneProgressMonitor {
-                request_id,
-                pane_id: identity.pane_id,
-                command,
-                interval_seconds,
-            },
-            ExpectedProgressResponse::Set,
-        ),
+            wait,
+            timeout_seconds,
+            replace,
+        } => {
+            if !replace {
+                refuse_replacing_running_monitor(&mut connection, identity.pane_id, request_id)
+                    .await?;
+            }
+            if wait {
+                wait_after_set = Some(timeout_seconds);
+            }
+            (
+                ilium_ipc::ClientRequest::SetPaneProgressMonitor {
+                    request_id,
+                    pane_id: identity.pane_id,
+                    command,
+                    interval_seconds,
+                },
+                ExpectedProgressResponse::Set,
+            )
+        }
         ProgressCommand::Status => (
             ilium_ipc::ClientRequest::GetPaneProgressMonitorStatus {
                 request_id,
@@ -621,6 +737,28 @@ async fn progress(command: ProgressCommand) -> Result<(), CliError> {
 
     let response = wait_for_progress_response(&mut connection, request_id, expected_response).await;
 
+    let accepted_monitor_id = match response.as_ref().map(|response| response.view()) {
+        Ok(ProgressResponse::Set {
+            result: Ok(accepted),
+            ..
+        }) => Some(accepted.monitor_id),
+        _ => None,
+    };
+    let response = match (wait_after_set, accepted_monitor_id, response) {
+        (Some(timeout_seconds), Some(monitor_id), Ok(response)) => {
+            print_progress_response(request_id, response)?;
+            let result = progress_wait::wait_for_monitor(
+                &mut connection,
+                identity.pane_id,
+                Some(monitor_id),
+                timeout_seconds.map(Duration::from_secs),
+            )
+            .await;
+            return finish_progress_wait(connection, identity.pane_id, request_id, result).await;
+        }
+        (_, _, response) => response,
+    };
+
     let _ = connection
         .requests
         .send(ilium_ipc::ClientRequest::Detach)
@@ -639,6 +777,83 @@ async fn progress(command: ProgressCommand) -> Result<(), CliError> {
             Err(error)
         }
     }
+}
+
+/// Prints a finished wait and turns its outcome into the process exit
+/// status; a transport failure prints the usual failure record instead.
+async fn finish_progress_wait(
+    connection: ilium_client::connection::Connection,
+    pane_id: ilium_core::NodeId,
+    request_id: u64,
+    result: Result<progress_wait::WaitReport, CliError>,
+) -> Result<(), CliError> {
+    let _ = connection
+        .requests
+        .send(ilium_ipc::ClientRequest::Detach)
+        .await;
+    match result {
+        Ok(report) => {
+            report.print();
+            match report.exit_code() {
+                0 => Ok(()),
+                code => Err(CliError::ExitStatus(code)),
+            }
+        }
+        Err(error) => {
+            print_progress_request_failure(
+                "wait",
+                request_id,
+                Some(pane_id),
+                "wait-failed",
+                &error,
+            );
+            Err(error)
+        }
+    }
+}
+
+/// `set` without `--replace` must not discard a monitor whose task is still
+/// running: that silently loses the earlier job's notification.
+async fn refuse_replacing_running_monitor(
+    connection: &mut ilium_client::connection::Connection,
+    pane_id: ilium_core::NodeId,
+    request_id: u64,
+) -> Result<(), CliError> {
+    let current = match progress_wait::current_monitor(connection, pane_id).await {
+        Ok(current) => current,
+        Err(error) => {
+            print_progress_request_failure(
+                "set",
+                request_id,
+                Some(pane_id),
+                "status-failed",
+                &error,
+            );
+            return Err(error);
+        }
+    };
+    let Some(current) = current else {
+        return Ok(());
+    };
+    if current.is_terminal() || current.monitor_health.is_failed() {
+        return Ok(());
+    }
+    let message = format!(
+        "pane already has running monitor {} (job {}, {:.0}%). Wait for it with `ilium progress \
+         wait {}`, use one probe that covers the whole pipeline, or pass --replace to discard it",
+        current.monitor_id, current.report.job_id, current.report.percent, current.monitor_id
+    );
+    println!(
+        "{{\"type\":\"progress_rejected\",\"operation\":\"set\",\"request_id\":{request_id},\"pane_id\":{},\"code\":\"monitor-active\",\"active_monitor_id\":{},\"message\":{}}}",
+        pane_id.0,
+        current.monitor_id,
+        json_string(&message)
+    );
+    let _ = connection
+        .requests
+        .send(ilium_ipc::ClientRequest::Detach)
+        .await;
+    Err(CliError::ServerReportedError(message))
 }
 
 fn print_progress_request_failure(
@@ -664,7 +879,11 @@ fn next_progress_request_id() -> u64 {
         .map_or(0, |duration| duration.as_nanos() as u64);
     let process_component = u64::from(std::process::id()).rotate_left(32);
     let request_id = unix_nanos ^ process_component ^ sequence.rotate_left(17);
-    if request_id == 0 { 1 } else { request_id }
+    if request_id == 0 {
+        1
+    } else {
+        request_id
+    }
 }
 
 async fn wait_for_progress_response(
@@ -757,7 +976,7 @@ fn print_progress_response(
         ProgressResponse::Set { pane_id, result } => match result {
             Ok(accepted) => {
                 println!(
-                    "{{\"type\":\"progress_set\",\"request_id\":{request_id},\"pane_id\":{},\"monitor_id\":{},\"progress\":{}}}",
+                    "{{\"type\":\"progress_set\",\"request_id\":{request_id},\"pane_id\":{},\"monitor_id\":{},\"progress\":{},\"recovery_command\":\"ilium progress status\"}}",
                     pane_id.0,
                     accepted.monitor_id,
                     pane_progress_json(&accepted.progress)
@@ -1364,7 +1583,12 @@ const fn workspace_stage_name(stage: WorkspaceCreateStage) -> &'static str {
     }
 }
 
-async fn new_pane(session_name: &str, cmd: &[String], cwd: &Path) -> Result<(), CliError> {
+async fn new_pane(
+    session_name: &str,
+    cmd: &[String],
+    cwd: &Path,
+    keep_open: bool,
+) -> Result<(), CliError> {
     let project_session = session::resolve_project_session(cwd, session_name)?;
     let log_path = session::ensure_server_running(&project_session).await?;
     initialize_cli_logging(&log_path)?;
@@ -1416,11 +1640,16 @@ async fn new_pane(session_name: &str, cmd: &[String], cwd: &Path) -> Result<(), 
     };
 
     let command_line = shell_join(cmd);
+    let kind = if keep_open {
+        ilium_ipc::NewPaneKind::Command(command_line)
+    } else {
+        ilium_ipc::NewPaneKind::CommandClosingOnExit(command_line)
+    };
     connection
         .requests
         .send(ilium_ipc::ClientRequest::NewPane {
             parent_group: ilium_core::ROOT_ID,
-            kind: ilium_ipc::NewPaneKind::Command(command_line),
+            kind,
             // The non-interactive CLI has no focused client-side terminal
             // or per-client settings, so preserve its established behavior
             // of starting new panes at the project session root.
@@ -1488,7 +1717,7 @@ fn initialize_cli_logging(log_path: &Path) -> Result<(), CliError> {
         })
         .unwrap_or(false);
     let quota = ilium_client::bootstrap_process_quota().map_err(ilium_logging::LoggingError::Io)?;
-    ilium_logging::initialize(log_path, enabled, "cli", &quota)?;
+    ilium_logging::initialize_forwarded(log_path, enabled, "cli", &quota)?;
     Ok(())
 }
 
@@ -1573,9 +1802,9 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        Cli, Command, ProgressCommand, chatroom_project_root, client_restart_args,
-        default_workspace_path, join_for_shell, json_string, pane_identity_from_values,
-        pane_progress_json, progress_report_json, session, shell_join, workspace_provider,
+        chatroom_project_root, client_restart_args, default_workspace_path, join_for_shell,
+        json_string, pane_identity_from_values, pane_progress_json, progress_report_json, session,
+        shell_join, workspace_provider, Cli, Command, ProgressCommand,
     };
     use clap::Parser;
 
@@ -1639,11 +1868,9 @@ mod tests {
                 OsString::from("review"),
             ]
         );
-        assert!(
-            !arguments.iter().any(|argument| {
-                argument == "--restart-server" || argument == "--reset-session"
-            })
-        );
+        assert!(!arguments
+            .iter()
+            .any(|argument| { argument == "--restart-server" || argument == "--reset-session" }));
     }
 
     #[test]
@@ -1826,25 +2053,99 @@ mod tests {
                 command: ProgressCommand::Set {
                     command,
                     interval_seconds: 1,
+                    wait: false,
+                    timeout_seconds: None,
+                    replace: false,
                 }
             }) if command == "/work/status --json"
         ));
     }
 
     #[test]
+    fn progress_set_can_wait_with_a_timeout_and_replace_on_purpose() {
+        let cli = Cli::try_parse_from([
+            "ilium",
+            "progress",
+            "set",
+            "--command",
+            "/work/status --json",
+            "--wait",
+            "--timeout-seconds",
+            "540",
+            "--replace",
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Some(Command::Progress {
+                command: ProgressCommand::Set {
+                    wait: true,
+                    timeout_seconds: Some(540),
+                    replace: true,
+                    ..
+                }
+            })
+        ));
+        // A timeout only makes sense for a waiting set.
+        assert!(Cli::try_parse_from([
+            "ilium",
+            "progress",
+            "set",
+            "--command",
+            "/work/status --json",
+            "--timeout-seconds",
+            "540",
+        ])
+        .is_err());
+    }
+
+    #[test]
+    fn progress_wait_and_top_level_wait_take_an_optional_monitor_id() {
+        let current = Cli::try_parse_from(["ilium", "progress", "wait"]).unwrap();
+        assert!(matches!(
+            current.command,
+            Some(Command::Progress {
+                command: ProgressCommand::Wait {
+                    monitor_id: None,
+                    timeout_seconds: None
+                }
+            })
+        ));
+        let exact =
+            Cli::try_parse_from(["ilium", "progress", "wait", "7", "--timeout-seconds", "60"])
+                .unwrap();
+        assert!(matches!(
+            exact.command,
+            Some(Command::Progress {
+                command: ProgressCommand::Wait {
+                    monitor_id: Some(7),
+                    timeout_seconds: Some(60)
+                }
+            })
+        ));
+        let top_level = Cli::try_parse_from(["ilium", "wait", "7"]).unwrap();
+        assert!(matches!(
+            top_level.command,
+            Some(Command::Wait {
+                monitor_id: Some(7),
+                timeout_seconds: None
+            })
+        ));
+        assert!(Cli::try_parse_from(["ilium", "wait", "not-a-number"]).is_err());
+    }
+
+    #[test]
     fn progress_no_longer_exposes_goal_pause_or_resume_controls() {
-        assert!(
-            Cli::try_parse_from([
-                "ilium",
-                "progress",
-                "set",
-                "--command",
-                "/work/status --json",
-                "--goal-policy",
-                "pause-and-resume",
-            ])
-            .is_err()
-        );
+        assert!(Cli::try_parse_from([
+            "ilium",
+            "progress",
+            "set",
+            "--command",
+            "/work/status --json",
+            "--goal-policy",
+            "pause-and-resume",
+        ])
+        .is_err());
         for operation in ["arm-goal-resume", "disarm-goal-resume"] {
             assert!(
                 Cli::try_parse_from(["ilium", "progress", operation, "--monitor-id", "42"])

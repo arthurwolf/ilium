@@ -76,6 +76,10 @@ pub enum CliError {
     Client(#[from] ilium_client::error::ClientError),
     #[error(transparent)]
     Logging(#[from] ilium_logging::LoggingError),
+    /// A command that already printed its JSONL result and only needs a
+    /// specific process exit status (for example `ilium progress wait`).
+    #[error("exit status {0}")]
+    ExitStatus(u8),
 }
 
 impl CliError {

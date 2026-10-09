@@ -25,11 +25,11 @@ use std::time::Duration;
 use clap::{Args, Subcommand};
 use ilium::session;
 use ilium_ipc::{
-    ClientRequest, ServerEvent, VoiceTextAccepted, VoiceTextPhase, VoiceTextRejection,
-    VoiceTextRejectionCode, normalize_voice_sentences,
+    normalize_voice_sentences, ClientRequest, ServerEvent, VoiceTextAccepted, VoiceTextPhase,
+    VoiceTextRejection, VoiceTextRejectionCode,
 };
 
-use crate::{CliError, json_string, next_progress_request_id, pane_identity_from_env};
+use crate::{json_string, next_progress_request_id, pane_identity_from_env, CliError};
 
 /// The token that reads sentences from standard input instead.
 const STDIN_TOKEN: &str = "-";

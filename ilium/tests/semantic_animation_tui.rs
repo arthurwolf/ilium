@@ -2,6 +2,7 @@
 //! All configuration, sessions and agent setup targets belong to this fixture.
 #![cfg(unix)]
 
+use ilium_ambient::voxel_landscape::pack_profiles::FULL_PACKS;
 use ilium_client::background_animation::{AnimationKind, AnimationPlaybackMode, AnimationSettings};
 use ilium_client::connection::Connection;
 use ilium_core::animation_recommendation::{
@@ -880,6 +881,11 @@ fn route_for_run(snapshot: &serde_json::Value, run: u64) -> Option<&serde_json::
 #[tokio::test]
 #[ignore = "requires real local Minecraft saves and the selected GoodVibes archive"]
 async fn actual_saved_world_route_emits_selected_pack_frames_and_preserves_inputs() {
+    let goodvibes_profile = FULL_PACKS
+        .iter()
+        .position(|profile| profile.id == "goodvibes")
+        .expect("GoodVibes must remain a selectable full-pack profile");
+    assert_eq!(FULL_PACKS[goodvibes_profile].name, "GoodVibes / Acaitart");
     let saves_root = required_native_path("ILIUM_SAVED_MAPS_NATIVE_SAVES");
     let goodvibes_archive = required_native_path("ILIUM_SAVED_MAPS_NATIVE_GOODVIBES_ARCHIVE");
     let goodvibes_root = std::env::var("ILIUM_SAVED_MAPS_NATIVE_GOODVIBES_ROOT")
@@ -929,7 +935,7 @@ async fn actual_saved_world_route_emits_selected_pack_frames_and_preserves_input
     settings.ambient.voxel_landscape.saved_maps.saves_folder =
         saves_root.to_string_lossy().into_owned();
     settings.ambient.voxel_landscape.pan_speed_percent = 200;
-    settings.ambient.voxel_landscape.pack_profile = 3;
+    settings.ambient.voxel_landscape.pack_profile = goodvibes_profile;
     settings.ambient.voxel_landscape.pack_path = goodvibes_archive.to_string_lossy().into_owned();
     settings.ambient.voxel_landscape.pack_root = goodvibes_root.clone();
     ilium_client::project_config::set_animation(&fixture.project, settings.clone()).unwrap();
@@ -945,7 +951,14 @@ async fn actual_saved_world_route_emits_selected_pack_frames_and_preserves_input
         authored.ambient.voxel_landscape.saved_maps.saves_folder,
         saves_root.to_string_lossy()
     );
-    assert_eq!(authored.ambient.voxel_landscape.pack_profile, 3);
+    assert_eq!(
+        authored.ambient.voxel_landscape.pack_profile,
+        goodvibes_profile
+    );
+    assert_eq!(
+        FULL_PACKS[authored.ambient.voxel_landscape.pack_profile].id, "goodvibes",
+        "the configured archive and selected full-pack profile must agree"
+    );
     assert_eq!(
         authored.ambient.voxel_landscape.pack_path,
         goodvibes_archive.to_string_lossy()
@@ -1155,7 +1168,8 @@ async fn actual_saved_world_route_emits_selected_pack_frames_and_preserves_input
         "schema": 1,
         "client_and_server": "actual isolated Ilium binaries over PTY",
         "world_source": "SavedMaps",
-        "pack_profile": "GoodVibes / Acaitart",
+        "pack_profile_id": FULL_PACKS[goodvibes_profile].id,
+        "pack_profile": FULL_PACKS[goodvibes_profile].name,
         "goodvibes_archive_sha256": pack_after,
         "visible_history_completed_runs": completed,
         "odd_biome_and_even_structure_novelty_verified": true,
@@ -1177,7 +1191,9 @@ async fn actual_saved_world_route_emits_selected_pack_frames_and_preserves_input
         "{}",
         serde_json::json!({
             "type":"artifact", "path":output, "manifest":"manifest.json",
-            "route_completed":completed >= 3, "selected_pack":"GoodVibes / Acaitart",
+            "route_completed":completed >= 3,
+            "selected_pack_id":FULL_PACKS[goodvibes_profile].id,
+            "selected_pack":FULL_PACKS[goodvibes_profile].name,
             "odd_biome_and_even_structure_novelty_verified":true,
             "inputs_unchanged":true, "captures":3
         })

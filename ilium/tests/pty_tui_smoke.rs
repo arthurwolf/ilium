@@ -59,6 +59,9 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+#[path = "support/terminal_pool_runtime.rs"]
+mod terminal_pool_runtime;
+
 use ilium_client::connection::Connection;
 
 fn settings_tab_keys(
@@ -2033,16 +2036,23 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     assert!(
         wait_until(
             || {
-                let screen = tui.screen_text();
-                screen.contains("Card preview lines")
-                    && screen.contains("‹ 3 ›")
-                    && screen.contains("Minimum column width")
-                    && screen.contains("‹ 20 ›")
+                tui.with_screen(|screen| {
+                    !rows_containing_in_order(
+                        screen,
+                        &["Card preview lines", "-", "3", "+", "*"],
+                    )
+                    .is_empty()
+                        && !rows_containing_in_order(
+                            screen,
+                            &["Minimum column width", "-", "20", "+", "*"],
+                        )
+                        .is_empty()
+                })
             },
             WAIT_TIMEOUT,
         )
         .await,
-        "expected the Kanban Board three-line default, got: {:?}",
+        "expected centered numeric values with decrement, increment, and direct-entry controls, got: {:?}",
         tui.screen_text()
     );
     tui.write(b"l")
@@ -2055,6 +2065,29 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         )
         .await,
         "expected Kanban Board setting to persist"
+    );
+    tui.write(b"*")
+        .expect("opening direct entry for the card preview line count");
+    assert!(
+        wait_until(
+            || tui.screen_text().contains("Value: 4")
+                && tui.screen_text().contains("Enter applies"),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected the direct numeric-entry dialog, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"\x7f5\r")
+        .expect("replacing the preview line count with an exact value");
+    assert!(
+        wait_until(
+            || std::fs::read_to_string(xdg.config_home.join("ilium").join("config.toml"))
+                .is_ok_and(|config| config.contains("card_preview_lines = 5")),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected the exact numeric entry to persist"
     );
     tui.write(b"jl")
         .expect("select and increase the minimum board column width");
