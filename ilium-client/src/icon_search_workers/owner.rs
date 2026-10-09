@@ -100,6 +100,12 @@ impl SearchBackend for NativeBackend {
     }
 }
 
+fn try_acquire_native_owner(directory: &std::path::Path) -> io::Result<Option<ExclusiveFileLock>> {
+    // One expensive embedding model may be live for this shared cache
+    // namespace, including across concurrent Ilium client processes.
+    ExclusiveFileLock::try_acquire(&directory.join("engine-0.lock"))
+}
+
 pub struct IconSearchWorkers {
     shared: Arc<Shared>,
     quota: QuotaGroup,
@@ -120,22 +126,11 @@ impl IconSearchWorkers {
             crate::execution::process_quota(),
             Arc::new(|stop| {
                 let directory = super::icon_model_cache_dir().join("worker-admission");
-                let mut slot = None;
-                // Clients sharing the same model-cache namespace may own at most
-                // two native engines. OS locks are released on process failure.
-                for index in 0..2 {
-                    let acquired = ExclusiveFileLock::try_acquire(
-                        &directory.join(format!("engine-{index}.lock")),
-                    )
-                    .map_err(|error| format!("icon engine admission: {error}"))?;
-                    if acquired.is_some() {
-                        slot = acquired;
-                        break;
-                    }
-                }
-                let slot = slot.ok_or_else(|| {
-                    "icon engine capacity is occupied by other clients".to_owned()
-                })?;
+                let slot = try_acquire_native_owner(&directory)
+                    .map_err(|error| format!("icon engine admission: {error}"))?
+                    .ok_or_else(|| {
+                        "icon engine capacity is occupied by another client".to_owned()
+                    })?;
                 Ok(Box::new(NativeBackend {
                     index: super::build_index(stop)?,
                     _host_slot: slot,
@@ -375,6 +370,21 @@ mod tests {
     use super::*;
     use std::sync::mpsc;
     const WAIT: Duration = Duration::from_secs(3);
+
+    #[test]
+    fn only_one_cross_client_native_icon_owner_is_admitted() {
+        let directory = tempfile::tempdir().unwrap();
+        let first = try_acquire_native_owner(directory.path())
+            .unwrap()
+            .expect("first native owner");
+        assert!(try_acquire_native_owner(directory.path())
+            .unwrap()
+            .is_none());
+        drop(first);
+        assert!(try_acquire_native_owner(directory.path())
+            .unwrap()
+            .is_some());
+    }
     struct Controlled {
         entered: mpsc::SyncSender<String>,
         release: Arc<Mutex<mpsc::Receiver<()>>>,

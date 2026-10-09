@@ -98,12 +98,16 @@ impl ValueControl {
         } else {
             spec.label_width
         };
-        let mut label_width = requested_label.min(row.width.saturating_sub(8));
+        // Size step targets for their rendered glyphs so wide numeric symbols
+        // keep a complete, independently clickable cell range.
+        let step_width = step_button_width(spec.kind, row.width);
+        let chrome = 2 * step_width + 4;
+        let value_cells = cell_width(spec.value).min(usize::from(row.width)) as u16;
+        let mut label_width = requested_label.min(row.width.saturating_sub(chrome + 2));
         let label_gap = u16::from(label_width > 0);
         let initial_control_width = row.width - label_width - label_gap;
-        if initial_control_width >= 7 {
-            let value_cells = cell_width(spec.value).min(usize::from(row.width)) as u16;
-            let current_value_slot = initial_control_width - 6;
+        if initial_control_width > chrome {
+            let current_value_slot = initial_control_width - chrome;
             if value_cells > current_value_slot {
                 // Release unused label budget before clipping a readable value.
                 // Very long labels may use half the row; the rest remains
@@ -115,7 +119,7 @@ impl ValueControl {
                     .width
                     .saturating_sub(label_floor)
                     .saturating_sub(label_gap)
-                    .saturating_sub(6);
+                    .saturating_sub(chrome);
                 let target_value_slot = value_cells.saturating_add(2).min(largest_value_slot);
                 label_width -= target_value_slot
                     .saturating_sub(current_value_slot)
@@ -128,15 +132,29 @@ impl ValueControl {
         let geometry = &mut prepared.geometry;
         geometry.label = Rect::new(row.x, row.y, label_width, 1);
         prepared.label_text = clip_cells(spec.label, label_width);
-        if control_width < 4 {
+        if control_width < 2 * step_width + 2 {
             geometry.open = Rect::new(control_x + control_width - 1, row.y, 1, 1);
             geometry.value_slot = Rect::new(control_x, row.y, control_width - 1, 1);
         } else {
-            let gap = u16::from(control_width >= 7);
-            geometry.previous = Rect::new(control_x, row.y, 1, 1);
-            geometry.value_slot =
-                Rect::new(control_x + 1 + gap, row.y, control_width - 3 - 3 * gap, 1);
-            let middle = Rect::new(control_x + control_width - 2 - gap, row.y, 1, 1);
+            let gap = match spec.kind {
+                ControlKind::Choice => u16::from(control_width > chrome),
+                ControlKind::Number => {
+                    u16::from(control_width > chrome.saturating_add(2).saturating_add(value_cells))
+                }
+            };
+            geometry.previous = Rect::new(control_x, row.y, step_width, 1);
+            geometry.value_slot = Rect::new(
+                control_x + step_width + gap,
+                row.y,
+                control_width - (2 * step_width + 1) - 3 * gap,
+                1,
+            );
+            let middle = Rect::new(
+                control_x + control_width - 1 - gap - step_width,
+                row.y,
+                step_width,
+                1,
+            );
             let last = Rect::new(control_x + control_width - 1, row.y, 1, 1);
             match spec.kind {
                 ControlKind::Choice => {
@@ -188,9 +206,10 @@ impl ValueControl {
         );
         paint(frame, geometry.label, &self.label_text, styles.label);
         paint(frame, geometry.value, &self.value_text, styles.value);
-        let glyphs = match self.kind {
-            ControlKind::Choice => ["←", "→", "+"],
-            ControlKind::Number => ["−", "+", "*"],
+        let glyphs = match (self.kind, geometry.previous.width) {
+            (ControlKind::Choice, _) => ["←", "→", "+"],
+            (ControlKind::Number, 1) => ["-", "+", "*"],
+            (ControlKind::Number, _) => [NUMBER_DECREMENT_GLYPH, NUMBER_INCREMENT_GLYPH, "*"],
         };
         let buttons = [
             (geometry.previous, self.previous_enabled),
@@ -282,6 +301,17 @@ impl ValueControl {
         enabled.then_some(action)
     }
 }
+/// Heavy Unicode decrement marker used by numeric controls.
+pub const NUMBER_DECREMENT_GLYPH: &str = "➖";
+/// Heavy Unicode increment marker used by numeric controls.
+pub const NUMBER_INCREMENT_GLYPH: &str = "➕";
+fn step_button_width(kind: ControlKind, row_width: u16) -> u16 {
+    match kind {
+        ControlKind::Choice => 1,
+        ControlKind::Number if row_width < 6 => 1,
+        ControlKind::Number => 2,
+    }
+}
 pub fn cell_width(text: &str) -> usize {
     UnicodeSegmentation::graphemes(text, true)
         .map(UnicodeWidthStr::width)
@@ -367,6 +397,78 @@ mod tests {
     }
 
     #[test]
+    fn five_cells_keep_compact_step_targets_and_direct_entry_visible() {
+        let control = ValueControl::new(Rect::new(0, 0, 5, 1), spec(ControlKind::Number, "7"));
+        let geometry = control.geometry();
+        assert_eq!(geometry.previous, Rect::new(0, 0, 1, 1));
+        assert_eq!(geometry.value_slot, Rect::new(1, 0, 2, 1));
+        assert_eq!(geometry.value, Rect::new(1, 0, 1, 1));
+        assert_eq!(geometry.next, Rect::new(3, 0, 1, 1));
+        assert_eq!(geometry.open, Rect::new(4, 0, 1, 1));
+
+        let mut terminal = Terminal::new(TestBackend::new(5, 1)).unwrap();
+        terminal
+            .draw(|frame| control.render(frame, ControlStyles::default()))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        assert_eq!(buffer[(0, 0)].symbol(), "-");
+        assert_eq!(buffer[(1, 0)].symbol(), "7");
+        assert_eq!(buffer[(3, 0)].symbol(), "+");
+        assert_eq!(buffer[(4, 0)].symbol(), "*");
+
+        assert_eq!(
+            control.hit(Position::new(0, 0), PointerButton::Left),
+            Some(ControlAction::Decrement)
+        );
+        assert_eq!(
+            control.hit(Position::new(1, 0), PointerButton::Left),
+            Some(ControlAction::EditNumber)
+        );
+        assert_eq!(
+            control.hit(Position::new(3, 0), PointerButton::Left),
+            Some(ControlAction::Increment)
+        );
+        assert_eq!(
+            control.hit(Position::new(4, 0), PointerButton::Left),
+            Some(ControlAction::EditNumber)
+        );
+    }
+
+    #[test]
+    fn six_cells_render_two_cell_numeric_step_targets_with_full_hit_ranges() {
+        let control = ValueControl::new(Rect::new(0, 0, 6, 1), spec(ControlKind::Number, "7"));
+        let geometry = control.geometry();
+        assert_eq!(geometry.previous, Rect::new(0, 0, 2, 1));
+        assert_eq!(geometry.value_slot, Rect::new(2, 0, 1, 1));
+        assert_eq!(geometry.value, Rect::new(2, 0, 1, 1));
+        assert_eq!(geometry.next, Rect::new(3, 0, 2, 1));
+        assert_eq!(geometry.open, Rect::new(5, 0, 1, 1));
+
+        let mut terminal = Terminal::new(TestBackend::new(6, 1)).unwrap();
+        terminal
+            .draw(|frame| control.render(frame, ControlStyles::default()))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        assert_eq!(buffer[(0, 0)].symbol(), "➖");
+        assert_eq!(buffer[(2, 0)].symbol(), "7");
+        assert_eq!(buffer[(3, 0)].symbol(), "➕");
+        assert_eq!(buffer[(5, 0)].symbol(), "*");
+
+        for x in 0..2 {
+            assert_eq!(
+                control.hit(Position::new(x, 0), PointerButton::Left),
+                Some(ControlAction::Decrement)
+            );
+        }
+        for x in 3..5 {
+            assert_eq!(
+                control.hit(Position::new(x, 0), PointerButton::Left),
+                Some(ControlAction::Increment)
+            );
+        }
+    }
+
+    #[test]
     fn narrow_layouts_paint_only_their_actual_targets() {
         let expected_rows = [
             "",
@@ -409,41 +511,112 @@ mod tests {
         }
     }
     #[test]
-    fn narrow_numbers_keep_entry_visible_without_hidden_step_targets() {
-        let cases = [
-            (1_u16, "*"),
-            (2, "…*"),
-            (3, "42*"),
-            (4, "−…+*"),
-            (5, "−42+*"),
-            (6, "−42 +*"),
-            (7, "− … + *"),
-        ];
-        for (width, expected_row) in cases {
+    fn narrow_numbers_keep_step_and_entry_targets_visible() {
+        for width in 1_u16..=10 {
             let control =
                 ValueControl::new(Rect::new(0, 0, width, 1), spec(ControlKind::Number, "42"));
-            let mut terminal = Terminal::new(TestBackend::new(9, 2)).unwrap();
+            let mut terminal = Terminal::new(TestBackend::new(12, 2)).unwrap();
             terminal
                 .draw(|frame| control.render(frame, ControlStyles::default()))
                 .unwrap();
             let buffer = terminal.backend().buffer();
-            let painted: String = (0..width)
-                .map(|x| buffer.cell((x, 0)).unwrap().symbol())
-                .collect();
-            assert_eq!(painted, expected_row, "width {width}");
-            for x in 0_u16..9 {
-                let expected = match buffer.cell((x, 0)).unwrap().symbol() {
-                    "−" => Some(ControlAction::Decrement),
-                    "+" => Some(ControlAction::Increment),
-                    "*" | "4" | "2" | "…" => Some(ControlAction::EditNumber),
-                    _ => None,
+            let geometry = control.geometry();
+            assert_eq!(geometry.open.width, 1, "width {width}");
+            if width == 5 || width >= 7 {
+                assert_eq!(control.value_text, "42", "width {width}");
+            }
+            let (decrement_glyph, increment_glyph) = if width < 6 {
+                ("-", "+")
+            } else {
+                (NUMBER_DECREMENT_GLYPH, NUMBER_INCREMENT_GLYPH)
+            };
+            let buttons = [
+                (geometry.previous, decrement_glyph, ControlAction::Decrement),
+                (geometry.next, increment_glyph, ControlAction::Increment),
+                (geometry.open, "*", ControlAction::EditNumber),
+            ];
+            for (rectangle, glyph, action) in buttons {
+                if rectangle.width == 0 {
+                    continue;
+                }
+                assert_eq!(rectangle.width, cell_width(glyph) as u16, "width {width}");
+                assert_eq!(
+                    buffer.cell((rectangle.x, 0)).unwrap().symbol(),
+                    glyph,
+                    "width {width}"
+                );
+                assert_eq!(
+                    control.hit(Position::new(rectangle.x, 0), PointerButton::Left),
+                    Some(action),
+                    "width {width}"
+                );
+            }
+            if width < 4 {
+                assert_eq!(geometry.previous.width, 0, "width {width}");
+                assert_eq!(geometry.next.width, 0, "width {width}");
+            } else if width < 6 {
+                assert_eq!(geometry.previous.width, 1, "width {width}");
+                assert_eq!(geometry.next.width, 1, "width {width}");
+            } else {
+                assert_eq!(geometry.previous.width, 2, "width {width}");
+                assert_eq!(geometry.next.width, 2, "width {width}");
+            }
+            assert_eq!(
+                control.hit(
+                    Position::new(geometry.open.x, geometry.open.y),
+                    PointerButton::Left
+                ),
+                Some(ControlAction::EditNumber),
+                "width {width}"
+            );
+            for x in 0..width {
+                let position = Position::new(x, 0);
+                let expected = if geometry.previous.contains(position) {
+                    Some(ControlAction::Decrement)
+                } else if geometry.next.contains(position) {
+                    Some(ControlAction::Increment)
+                } else if geometry.open.contains(position)
+                    || control.value_ink().iter().any(|ink| ink.contains(position))
+                {
+                    Some(ControlAction::EditNumber)
+                } else {
+                    None
                 };
                 assert_eq!(
-                    control.hit(Position::new(x, 0), PointerButton::Left),
+                    control.hit(position, PointerButton::Left),
                     expected,
                     "width {width}, x {x}"
                 );
             }
+        }
+    }
+    #[test]
+    fn number_buttons_use_heavy_unicode_glyphs_and_two_cell_targets() {
+        let control = ValueControl::new(Rect::new(0, 0, 18, 1), spec(ControlKind::Number, "42"));
+        let geometry = control.geometry();
+        assert_eq!(geometry.previous.width, 2);
+        assert_eq!(geometry.next.width, 2);
+        assert_eq!(geometry.open.width, 1);
+        let left_padding = geometry.value.x - geometry.value_slot.x;
+        let right_padding = geometry.value_slot.right() - geometry.value.right();
+        assert!(left_padding.abs_diff(right_padding) <= 1);
+
+        let mut terminal = Terminal::new(TestBackend::new(18, 2)).unwrap();
+        terminal
+            .draw(|frame| control.render(frame, ControlStyles::default()))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        for (rectangle, expected, action) in [
+            (geometry.previous, "➖", ControlAction::Decrement),
+            (geometry.next, "➕", ControlAction::Increment),
+            (geometry.open, "*", ControlAction::EditNumber),
+        ] {
+            assert_eq!(buffer[(rectangle.x, rectangle.y)].symbol(), expected);
+            assert_eq!(rectangle.width, cell_width(expected) as u16);
+            assert_eq!(
+                control.hit(Position::new(rectangle.x, rectangle.y), PointerButton::Left,),
+                Some(action),
+            );
         }
     }
     #[test]
@@ -507,22 +680,21 @@ mod tests {
     #[test]
     fn number_is_centered_and_padding_is_inert() {
         let control = ValueControl::new(Rect::new(2, 1, 13, 1), spec(ControlKind::Number, "42"));
-        assert_eq!(control.geometry().value_slot, Rect::new(4, 1, 7, 1));
+        assert_eq!(control.geometry().value_slot, Rect::new(5, 1, 5, 1));
         assert_eq!(control.geometry().value, Rect::new(6, 1, 2, 1));
         let mut terminal = Terminal::new(TestBackend::new(18, 3)).unwrap();
         terminal
             .draw(|frame| control.render(frame, ControlStyles::default()))
             .unwrap();
         let buffer = terminal.backend().buffer();
-        let painted: String = (2_u16..15)
-            .map(|x| buffer.cell((x, 1)).unwrap().symbol())
-            .collect();
-        assert_eq!(painted, "−   42    + *");
+        assert_eq!(buffer.cell((2, 1)).unwrap().symbol(), "➖");
+        assert_eq!(buffer.cell((11, 1)).unwrap().symbol(), "➕");
+        assert_eq!(buffer.cell((14, 1)).unwrap().symbol(), "*");
         for x in 1_u16..=15 {
             let expected = match x {
-                2 => Some(ControlAction::Decrement),
+                2 | 3 => Some(ControlAction::Decrement),
                 6 | 7 | 14 => Some(ControlAction::EditNumber),
-                12 => Some(ControlAction::Increment),
+                11 | 12 => Some(ControlAction::Increment),
                 _ => None,
             };
             assert_eq!(
@@ -577,8 +749,16 @@ mod tests {
             assert_eq!(painted_label, label);
             assert_eq!(painted_value, value);
             for (rectangle, glyph, action) in [
-                (geometry.previous, "−", ControlAction::Decrement),
-                (geometry.next, "+", ControlAction::Increment),
+                (
+                    geometry.previous,
+                    NUMBER_DECREMENT_GLYPH,
+                    ControlAction::Decrement,
+                ),
+                (
+                    geometry.next,
+                    NUMBER_INCREMENT_GLYPH,
+                    ControlAction::Increment,
+                ),
                 (geometry.open, "*", ControlAction::EditNumber),
             ] {
                 assert_eq!(buffer.cell((rectangle.x, 0)).unwrap().symbol(), glyph);

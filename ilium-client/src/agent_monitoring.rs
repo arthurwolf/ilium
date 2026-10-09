@@ -208,10 +208,25 @@ pub fn attention_status_signals(
     attention_signals_for_target(status, progress, attention_status_target(status, progress))
 }
 
+/// Progress reporting describes a monitored task, not whether its agent is
+/// currently working. Opt out of that evidence in Attention presentation only;
+/// the authoritative report, footer, unread state and notifications are retained.
+pub fn attention_progress_for_policy(
+    progress: Option<&PaneProgress>,
+    include_progress_reports: bool,
+) -> Option<&PaneProgress> {
+    if include_progress_reports {
+        progress
+    } else {
+        None
+    }
+}
+
 /// Selects the exact pair shown in the tree so rendering and hover provenance
 /// use one mode-specific decision, including the Attention priority rule.
 pub fn displayed_pane_signals(
     mode: AgentMonitoringMode,
+    include_progress_reports: bool,
     running_indicator: AttentionRunningIndicator,
     status: &PaneStatus,
     progress: Option<&PaneProgress>,
@@ -224,6 +239,7 @@ pub fn displayed_pane_signals(
         return project_pane_signals(status, progress, has_scheduled_input, shell_output);
     }
 
+    let progress = attention_progress_for_policy(progress, include_progress_reports);
     let target = attention_status_target(status, progress);
     let (objective, mut now) = attention_signals_for_target(status, progress, target);
     if running_indicator.uses_status_slot() && is_running_quietly(status, target) {
@@ -296,9 +312,7 @@ fn attention_selection_rule(target: Option<IconTarget>) -> &'static str {
             | IconTarget::GoalBlocked
             | IconTarget::GoalUsageLimited
             | IconTarget::GoalReached,
-        ) => {
-            "Attention priority 4: a non-active goal is checked after approval and task errors"
-        }
+        ) => "Attention priority 4: a non-active goal is checked after approval and task errors",
         Some(IconTarget::TaskDone) => {
             "Attention priority 5: an unread successful monitor report is checked after approval, failures, and non-active goals"
         }
@@ -491,6 +505,7 @@ mod tests {
         ] {
             let signals = displayed_pane_signals(
                 AgentMonitoringMode::Attention,
+                true,
                 indicator,
                 &working,
                 None,
@@ -503,6 +518,7 @@ mod tests {
         let approval = agent(AgentActivity::WaitingApproval, None);
         let signals = displayed_pane_signals(
             AgentMonitoringMode::Attention,
+            true,
             AttentionRunningIndicator::Spinner,
             &approval,
             None,
@@ -514,6 +530,7 @@ mod tests {
         let idle = agent(AgentActivity::Idle, None);
         let signals = displayed_pane_signals(
             AgentMonitoringMode::Attention,
+            true,
             AttentionRunningIndicator::Spinner,
             &idle,
             None,
@@ -521,5 +538,90 @@ mod tests {
             None,
         );
         assert_eq!(signals.now, NowSignal::None);
+    }
+    #[test]
+    fn attention_progress_opt_out_preserves_agent_activity_and_report_custody() {
+        use ilium_core::ObjectiveSignal;
+        let working = agent(AgentActivity::Working, None);
+        for outcome in [
+            ProgressTaskStatus::Error,
+            ProgressTaskStatus::Done,
+            ProgressTaskStatus::Running,
+        ] {
+            for unread in [false, true] {
+                let mut report = progress(outcome, unread);
+                if outcome == ProgressTaskStatus::Running {
+                    report.monitor_health = ProgressMonitorHealth::Failed {
+                        consecutive_failures: 3,
+                        last_error: "probe lost".to_string(),
+                    };
+                }
+                let before = report.clone();
+                let signals = displayed_pane_signals(
+                    AgentMonitoringMode::Attention,
+                    false,
+                    AttentionRunningIndicator::Icon,
+                    &working,
+                    Some(&report),
+                    false,
+                    None,
+                );
+                assert_eq!(signals.objective, ObjectiveSignal::None);
+                assert_eq!(signals.now, NowSignal::Working);
+                assert_eq!(report, before);
+                let legacy = displayed_pane_signals(
+                    AgentMonitoringMode::Attention,
+                    true,
+                    AttentionRunningIndicator::Icon,
+                    &working,
+                    Some(&report),
+                    false,
+                    None,
+                );
+                if outcome != ProgressTaskStatus::Done || unread {
+                    assert_ne!(legacy.objective, ObjectiveSignal::None);
+                }
+                let normal = displayed_pane_signals(
+                    AgentMonitoringMode::Normal,
+                    false,
+                    AttentionRunningIndicator::Icon,
+                    &working,
+                    Some(&report),
+                    false,
+                    None,
+                );
+                let normal_enabled = displayed_pane_signals(
+                    AgentMonitoringMode::Normal,
+                    true,
+                    AttentionRunningIndicator::Icon,
+                    &working,
+                    Some(&report),
+                    false,
+                    None,
+                );
+                assert_eq!(normal, normal_enabled);
+            }
+        }
+        let report = progress(ProgressTaskStatus::Error, true);
+        let approval = displayed_pane_signals(
+            AgentMonitoringMode::Attention,
+            false,
+            AttentionRunningIndicator::Icon,
+            &agent(AgentActivity::WaitingApproval, Some(GoalState::Blocked)),
+            Some(&report),
+            false,
+            None,
+        );
+        assert_eq!(approval.now, NowSignal::NeedsApproval);
+        let blocked = displayed_pane_signals(
+            AgentMonitoringMode::Attention,
+            false,
+            AttentionRunningIndicator::Icon,
+            &agent(AgentActivity::Working, Some(GoalState::Blocked)),
+            Some(&report),
+            false,
+            None,
+        );
+        assert_eq!(blocked.objective, ObjectiveSignal::Goal(GoalState::Blocked));
     }
 }

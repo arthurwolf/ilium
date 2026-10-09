@@ -11,7 +11,7 @@ use crate::background_animation::ComposedPresentation;
 use ilium_animation_js::replay::ReplayFlushedProof;
 use ilium_execution::{QuotaGroup, StorageAdmission};
 use ilium_platform::owned_worker::{
-    spawn_owned_with_completion, OwnedWorker, StopToken, WorkerExit, WorkerKind, WorkerTicket,
+    reserve_owned_worker, OwnedWorker, StopToken, WorkerExit, WorkerKind, WorkerTicket,
 };
 use ratatui::backend::Backend;
 use ratatui::buffer::{Buffer, Cell};
@@ -23,10 +23,12 @@ pub const MAX_FRAME_BYTES: usize = 32 * 1024 * 1024;
 // Two admitted frames (including ACKs), last emitted diff base, and1MiB
 // owner/channel/error metadata which may outlive actual output-thread join.
 const FRAME_STORAGE_BYTES: usize = (FRAME_SLOTS + 1) * MAX_FRAME_BYTES + 1024 * 1024;
-// Encoder retained capacity64MiB and one resize blank32MiB.
-// Diff streams directly; no whole-frame diff Vec is allocated.
+// Encoder retained capacity64MiB, one resize blank32MiB, and the emitted-cell
+// mask (one byte per cell). Diff streams directly; no whole-frame diff Vec.
 // These are cooperative declarations, not allocator/native RSS guarantees.
-const OUTPUT_WORKER_BYTES: usize = MAX_FRAME_BYTES * 3;
+const MAX_DIFF_MASK_BYTES: usize = MAX_FRAME_BYTES / std::mem::size_of::<Cell>();
+const OUTPUT_STACK_BYTES: usize = 2 * 1024 * 1024;
+const OUTPUT_WORKER_BYTES: usize = MAX_FRAME_BYTES * 3 + MAX_DIFF_MASK_BYTES + OUTPUT_STACK_BYTES;
 
 /// Whole-frame buffering with no implicit Drop flush. A failed explicit flush
 /// consumes the attempted buffer; an uncertain output prefix is never retried.
@@ -289,42 +291,43 @@ impl Presenter {
         let owned = shared.clone();
         let failure_allocation = slots.allocation.clone();
         let wake_allocation = slots.allocation.clone();
-        let worker = spawn_owned_with_completion(
-            "ilium-presentation",
-            WorkerKind::SynchronousIo,
-            StopToken::default(),
-            move || {
-                // Supervisor retains this closure through actual OS join/TLS.
-                let _admission = (&worker_admission, &wake_allocation);
-                wake.changed.notify_all();
-            },
-            move |stop| {
-                let closing = owned.clone();
-                let restoration = RestoreOnDrop(Some(move || {
-                    let mut queue = closing.queue.lock().unwrap_or_else(|e| e.into_inner());
-                    queue.closing = true;
-                    queue.frames.clear();
-                    drop(queue);
-                    cleanup();
-                }));
-                let result = match emit_frames(backend, &owned, &stop, &acks) {
-                    Ok(()) => Ok(()),
-                    Err(error) => {
-                        let kind = error.kind();
-                        let failure = Arc::new(GuardedFailure {
-                            error,
-                            _allocation: failure_allocation,
-                        });
-                        let _ = acks.try_send(Err(io::Error::new(kind, failure.clone())));
-                        Err(io::Error::new(kind, failure))
-                    }
-                };
-                drop(restoration);
-                let _ = done.send(result);
-            },
-            Arc::new(move || exit_wake.notify_one()),
-        )
-        .map_err(|error| guarded_failure(error, slots.allocation.clone()))?;
+        let worker = reserve_owned_worker(Some(OUTPUT_STACK_BYTES), worker_admission)?
+            .spawn_with_completion(
+                "ilium-presentation",
+                WorkerKind::SynchronousIo,
+                StopToken::default(),
+                move || {
+                    // Supervisor retains this closure through actual OS join/TLS.
+                    let _allocation = &wake_allocation;
+                    wake.changed.notify_all();
+                },
+                move |stop| {
+                    let closing = owned.clone();
+                    let restoration = RestoreOnDrop(Some(move || {
+                        let mut queue = closing.queue.lock().unwrap_or_else(|e| e.into_inner());
+                        queue.closing = true;
+                        queue.frames.clear();
+                        drop(queue);
+                        cleanup();
+                    }));
+                    let result = match emit_frames(backend, &owned, &stop, &acks) {
+                        Ok(()) => Ok(()),
+                        Err(error) => {
+                            let kind = error.kind();
+                            let failure = Arc::new(GuardedFailure {
+                                error,
+                                _allocation: failure_allocation,
+                            });
+                            let _ = acks.try_send(Err(io::Error::new(kind, failure.clone())));
+                            Err(io::Error::new(kind, failure))
+                        }
+                    };
+                    drop(restoration);
+                    let _ = done.send(result);
+                },
+                Arc::new(move || exit_wake.notify_one()),
+            )
+            .map_err(|error| guarded_failure(error, slots.allocation.clone()))?;
         Ok(Self {
             shared,
             slots,
@@ -743,6 +746,42 @@ mod tests {
     use std::io::Write;
 
     #[tokio::test]
+    async fn output_worker_admission_includes_the_worst_case_diff_mask_and_stack() {
+        let quota = QuotaGroup::new(ilium_execution::QuotaLimits {
+            clients: 0,
+            jobs: 0,
+            service_jobs: 0,
+            input_bytes: 0,
+            result_bytes: 0,
+            worker_threads: 1,
+            worker_bytes: OUTPUT_WORKER_BYTES - 1,
+        });
+        let result = Presenter::start(CrosstermBackend::new(Vec::new()), &quota);
+        let error = match result {
+            Err(error) => error,
+            Ok(mut presenter) => {
+                let _ = presenter.shutdown().await;
+                panic!("presentation worker started without its complete worker credit");
+            }
+        };
+        assert_eq!(error.kind(), io::ErrorKind::WouldBlock);
+        let usage = quota.snapshot();
+        assert_eq!(usage.worker_threads, 0);
+        assert_eq!(usage.worker_bytes, 0);
+    }
+
+    #[tokio::test]
+    async fn output_worker_requests_its_admitted_native_stack() {
+        let mut presenter =
+            Presenter::start(CrosstermBackend::new(Vec::<u8>::new()), &test_quota()).unwrap();
+        assert_eq!(
+            presenter._worker.ticket().metadata().requested_stack_bytes,
+            Some(OUTPUT_STACK_BYTES)
+        );
+        presenter.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
     async fn shutdown_waits_for_original_thread_local_cleanup_after_body_completion() {
         struct ExitGate {
             entered: std::sync::mpsc::SyncSender<()>,
@@ -802,7 +841,7 @@ mod tests {
                 .await
                 .is_err(),
             "body completion must not acknowledge physical presenter shutdown"
-        );
+        )?;
         // The timeout drops the shutdown future. Its real callback result and
         // sole observer must remain on the original presenter through retry.
         assert!(matches!(presenter.shutdown_emission, Some(Ok(()))));

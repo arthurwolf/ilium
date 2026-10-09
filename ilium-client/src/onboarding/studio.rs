@@ -1,6 +1,7 @@
 //! Sound-studio controls project onto the same persisted design used by the
 //! detached sound adapter. Preview is cached per edit, never per TUI frame.
 
+use ilium_execution::Retained;
 use ilium_sound::{SoundDesign, SoundSettings, Waveform, WaveformColumn};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -246,24 +247,76 @@ impl SoundControl {
 #[derive(Debug)]
 pub struct SoundStudio {
     pub(crate) identity: std::sync::Arc<()>,
+    preview_revision: u64,
     pub draft: SoundSettings,
-    pub preview: Vec<WaveformColumn>,
+    preview: Option<Retained<Vec<WaveformColumn>>>,
+}
+
+#[derive(Debug)]
+pub(crate) struct PreparedSoundPreview {
+    pub(crate) studio_identity: std::sync::Arc<()>,
+    pub(crate) revision: u64,
+    pub(crate) columns: Vec<WaveformColumn>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct SoundPreviewRequest {
+    pub(crate) studio_identity: std::sync::Arc<()>,
+    pub(crate) revision: u64,
+    pub(crate) design: SoundDesign,
 }
 
 impl SoundStudio {
     pub fn new(mut draft: SoundSettings) -> Self {
         draft.design = draft.design.normalized();
-        let preview = ilium_sound::waveform_preview(&draft.design, 120);
         Self {
             identity: std::sync::Arc::new(()),
+            preview_revision: 0,
             draft,
-            preview,
+            preview: None,
         }
     }
 
     pub fn changed(&mut self) {
         self.draft.design = self.draft.design.normalized();
-        self.preview = ilium_sound::waveform_preview(&self.draft.design, 120);
+        self.preview_revision = match self.preview_revision.checked_add(1) {
+            Some(revision) => revision,
+            None => {
+                // A wrapped revision must not make a pre-wrap result current again.
+                self.identity = std::sync::Arc::new(());
+                0
+            }
+        };
+        self.preview = None;
+    }
+
+    pub(crate) fn preview_request(&self) -> SoundPreviewRequest {
+        SoundPreviewRequest {
+            studio_identity: std::sync::Arc::clone(&self.identity),
+            revision: self.preview_revision,
+            design: self.draft.design.clone(),
+        }
+    }
+
+    pub(crate) fn preview_columns(&self) -> &[WaveformColumn] {
+        self.preview.as_ref().map_or(&[], |preview| preview.view())
+    }
+
+    pub(crate) fn accepts_preview(
+        &self,
+        studio_identity: &std::sync::Arc<()>,
+        revision: u64,
+    ) -> bool {
+        std::sync::Arc::ptr_eq(&self.identity, studio_identity) && self.preview_revision == revision
+    }
+
+    pub(crate) fn install_preview(&mut self, prepared: Retained<PreparedSoundPreview>) -> bool {
+        let result = prepared.view();
+        if !self.accepts_preview(&result.studio_identity, result.revision) {
+            return false;
+        }
+        self.preview = Some(prepared.map(|result| result.columns));
+        true
     }
 }
 
@@ -320,13 +373,47 @@ mod tests {
     }
 
     #[test]
-    fn editing_a_slider_updates_the_audio_and_cached_preview() {
+    fn sound_preview_is_not_synthesized_during_interactive_model_changes() {
         let mut studio = SoundStudio::new(SoundSettings::default());
-        let before = ilium_sound::render_pcm(&studio.draft.design);
-        let preview = studio.preview.clone();
+        assert!(studio.preview_columns().is_empty());
+        let initial = studio.preview_request();
         SoundControl::Pitch.adjust(&mut studio.draft.design, 1);
         studio.changed();
-        assert_ne!(ilium_sound::render_pcm(&studio.draft.design), before);
-        assert_ne!(studio.preview, preview);
+        let current = studio.preview_request();
+        assert_ne!(current.revision, initial.revision);
+        assert!(studio.preview_columns().is_empty());
+    }
+
+    #[test]
+    fn sound_preview_install_rejects_stale_revision_and_replaced_studio() {
+        let mut studio = SoundStudio::new(SoundSettings::default());
+        let old = studio.preview_request();
+        SoundControl::Pitch.adjust(&mut studio.draft.design, 1);
+        studio.changed();
+        assert!(!studio.accepts_preview(&old.studio_identity, old.revision));
+
+        let current = studio.preview_request();
+        assert!(studio.accepts_preview(&current.studio_identity, current.revision));
+
+        let replacement = SoundStudio::new(SoundSettings::default());
+        let replacement_request = replacement.preview_request();
+        assert!(!studio.accepts_preview(
+            &replacement_request.studio_identity,
+            replacement_request.revision,
+        ));
+    }
+
+    #[test]
+    fn sound_preview_revision_wrap_rotates_studio_identity() {
+        let mut studio = SoundStudio::new(SoundSettings::default());
+        let before = studio.preview_request();
+        studio.preview_revision = u64::MAX;
+        studio.changed();
+        let after = studio.preview_request();
+        assert_eq!(after.revision, 0);
+        assert!(!std::sync::Arc::ptr_eq(
+            &before.studio_identity,
+            &after.studio_identity,
+        ));
     }
 }

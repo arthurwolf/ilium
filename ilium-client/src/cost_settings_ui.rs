@@ -24,6 +24,7 @@ use crate::cost_settings::{
     QUOTA_FIXED_PRESETS,
 };
 use crate::theme;
+use crate::value_control::{NUMBER_DECREMENT_GLYPH, NUMBER_INCREMENT_GLYPH};
 
 /// Left margin shared with the other settings tabs.
 const INSET: u16 = 2;
@@ -88,6 +89,48 @@ fn wrap(text: &str, width: usize) -> Vec<String> {
         lines.push(line);
     }
     lines
+}
+
+fn section_bar(title: &str, compact_title: &str, width: u16) -> Line<'static> {
+    let width = usize::from(width);
+    let title = if width >= UnicodeWidthStr::width(title) + 5 {
+        title
+    } else {
+        compact_title
+    };
+    let title_width = UnicodeWidthStr::width(title);
+    let available_title_width = width.saturating_sub(5);
+    if width < 6 {
+        return Line::from(Span::styled(
+            title.chars().take(width).collect::<String>(),
+            Style::new()
+                .fg(theme::accent_bg())
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
+    let title = if title_width > available_title_width {
+        title
+            .chars()
+            .take(available_title_width)
+            .collect::<String>()
+    } else {
+        title.to_owned()
+    };
+    let title_width = UnicodeWidthStr::width(title.as_str());
+    let rule_width = width.saturating_sub(5 + title_width);
+    let border = theme::border_style(false);
+    Line::from(vec![
+        Span::styled("╭─ ", border),
+        Span::styled(
+            title,
+            Style::new()
+                .fg(theme::accent_bg())
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(" ", border),
+        Span::styled("─".repeat(rule_width), border),
+        Span::styled("╮", border),
+    ])
 }
 
 fn format_cuts(metric: CostMetric, cuts: &[f64; 4], per_hour: bool) -> String {
@@ -428,7 +471,7 @@ pub fn view(app: &App, selected_row: usize, width: u16) -> CostView {
     lines.push(Line::from(""));
 
     // ---- what is measured
-    lines.push(Line::from(Span::styled("  WHAT IS MEASURED?", accent)));
+    lines.push(section_bar("WHAT IS MEASURED?", "MEASURED", width));
     lines.push(Line::from(""));
     for metric in CostMetric::ALL {
         let row = CostRow::Metric(metric);
@@ -481,10 +524,11 @@ pub fn view(app: &App, selected_row: usize, width: u16) -> CostView {
     }
 
     // ---- how "expensive" is decided
-    lines.push(Line::from(Span::styled(
-        "  HOW IS \"EXPENSIVE\" DECIDED?",
-        accent,
-    )));
+    lines.push(section_bar(
+        "HOW IS \"EXPENSIVE\" DECIDED?",
+        "RATING",
+        width,
+    ));
     lines.push(Line::from(""));
     for calibration in Calibration::ALL {
         let row = CostRow::Calibration(calibration);
@@ -548,10 +592,11 @@ pub fn view(app: &App, selected_row: usize, width: u16) -> CostView {
     }
 
     // ---- what to show
-    lines.push(Line::from(Span::styled(
-        "  WHAT TO SHOW ON EACH AGENT",
-        accent,
-    )));
+    lines.push(section_bar(
+        "WHAT TO SHOW ON EACH AGENT",
+        "INDICATORS",
+        width,
+    ));
     for text in wrap(
         "Every indicator can be switched on independently, and each one is visible either always \
          or only while the pointer is over that entry. Indicators sit just left of the row's \
@@ -637,7 +682,7 @@ pub fn view(app: &App, selected_row: usize, width: u16) -> CostView {
     }
 
     // ---- sparkline and ordering parameters
-    lines.push(Line::from(Span::styled("  SPARKLINE AND ORDER", accent)));
+    lines.push(section_bar("SPARKLINE AND ORDER", "SPARKLINE", width));
     lines.push(Line::from(""));
     for row in [
         CostRow::SparklineWindow,
@@ -654,10 +699,15 @@ pub fn view(app: &App, selected_row: usize, width: u16) -> CostView {
             width,
         );
     }
-    lines.push(Line::from(Span::styled(
-        "  Up/Down select · Left/Right or Enter change · a ? next to a row explains it",
-        dim(),
-    )));
+    for text in wrap(
+        "Up/Down select · Left/Right step · + opens lists/increments · - decreases · * edits numbers · Enter opens/edits · ? help",
+        usize::from(width.saturating_sub(BODY_INDENT + 3)).max(20),
+    ) {
+        lines.push(Line::from(Span::styled(
+            format!("{}{text}", " ".repeat(usize::from(BODY_INDENT))),
+            dim(),
+        )));
+    }
     CostView {
         lines,
         rows: spans_out,
@@ -693,7 +743,10 @@ fn push_control(
         CostRow::HistoryDays | CostRow::Budget | CostRow::SparklineWindow | CostRow::SparklineCells
     );
     let shown = if is_number {
-        format!("− {} + *", param_value(row, app))
+        format!(
+            "{NUMBER_DECREMENT_GLYPH} {} {NUMBER_INCREMENT_GLYPH} *",
+            param_value(row, app)
+        )
     } else {
         format!("← {} + →", param_value(row, app))
     };
@@ -968,8 +1021,44 @@ mod tests {
     }
 
     #[test]
+    fn cost_settings_sections_use_rounded_title_bars_without_widening_the_page() {
+        let app = app();
+        for width in [110, 28] {
+            let view = view(&app, 0, width);
+            let bars = view
+                .lines
+                .iter()
+                .filter(|line| line.to_string().starts_with("╭─"))
+                .collect::<Vec<_>>();
+            assert_eq!(bars.len(), 4);
+            assert!(bars.iter().all(|line| {
+                line.width() <= usize::from(width) && line.to_string().ends_with('╮')
+            }));
+            if width >= 110 {
+                for title in [
+                    "WHAT IS MEASURED?",
+                    "HOW IS \"EXPENSIVE\" DECIDED?",
+                    "WHAT TO SHOW ON EACH AGENT",
+                    "SPARKLINE AND ORDER",
+                ] {
+                    assert!(bars.iter().any(|line| line.to_string().contains(title)));
+                }
+            }
+        }
+
+        use ratatui::{backend::TestBackend, Terminal};
+        let mut terminal = Terminal::new(TestBackend::new(110, 40)).unwrap();
+        terminal
+            .draw(|frame| render(frame, frame.area(), &app, 0, 0))
+            .unwrap();
+        crate::ui_capture::save("cost-settings-section-bars-110x40", &terminal);
+    }
+
+    #[test]
     fn shared_cost_chrome_renders_and_hits_every_numeric_and_choice_variant() {
-        use crate::value_control::{ControlAction, PointerButton};
+        use crate::value_control::{
+            ControlAction, PointerButton, NUMBER_DECREMENT_GLYPH, NUMBER_INCREMENT_GLYPH,
+        };
         use ratatui::{backend::TestBackend, Terminal};
         let mut app = app();
         for metric in CostMetric::ALL {
@@ -993,7 +1082,12 @@ mod tests {
                     let geometry = control.geometry();
                     let is_number = app.cost_settings.number_spec(span.row).is_some();
                     let (previous, next, open, action) = if is_number {
-                        ("−", "+", "*", ControlAction::EditNumber)
+                        (
+                            NUMBER_DECREMENT_GLYPH,
+                            NUMBER_INCREMENT_GLYPH,
+                            "*",
+                            ControlAction::EditNumber,
+                        )
                     } else {
                         ("←", "→", "+", ControlAction::OpenChoices)
                     };
@@ -1021,9 +1115,48 @@ mod tests {
                         Some((index, span.row, action))
                     );
                     if is_number {
+                        let current = app.cost_settings.number_text(span.row).unwrap();
+                        assert_eq!(
+                            value_hit(
+                                area,
+                                0,
+                                Position::new(geometry.previous.x, geometry.previous.y),
+                                PointerButton::Left,
+                                &app
+                            ),
+                            app.cost_settings
+                                .stepped_number_text(span.row, -1)
+                                .as_deref()
+                                .filter(|stepped| *stepped != current)
+                                .map(|_| (index, span.row, ControlAction::Decrement))
+                        );
+                        assert_eq!(
+                            value_hit(
+                                area,
+                                0,
+                                Position::new(geometry.next.x, geometry.next.y),
+                                PointerButton::Left,
+                                &app
+                            ),
+                            app.cost_settings
+                                .stepped_number_text(span.row, 1)
+                                .as_deref()
+                                .filter(|stepped| *stepped != current)
+                                .map(|_| (index, span.row, ControlAction::Increment))
+                        );
                         assert_eq!(
                             geometry.value.x - geometry.value_slot.x,
                             (geometry.value_slot.width - geometry.value.width) / 2
+                        );
+                    } else {
+                        let value = Position::new(geometry.value.x, geometry.value.y);
+                        assert_eq!(
+                            value_hit(area, 0, value, PointerButton::Left, &app),
+                            Some((index, span.row, ControlAction::NextChoice))
+                        );
+                        assert_eq!(
+                            value_hit(area, 0, value, PointerButton::Right, &app),
+                            Some((index, span.row, ControlAction::PreviousChoice))
                         );
                     }
                 }
@@ -1065,7 +1198,7 @@ mod tests {
         assert!(page.contains("← Only when hovering the entry + →"));
         assert!(page.contains("Sparkline window"));
         assert!(
-            page.contains("− 6 h + *"),
+            page.contains("➖ 6 h ➕ *"),
             "default window is six hours: {page}"
         );
     }
@@ -1150,7 +1283,7 @@ mod tests {
         app.cost_settings.calibration = Calibration::Budget;
         let page = text(&view(&app, 0, 110));
         assert!(page.contains("Budget per agent"));
-        assert!(page.contains("− $10 + *"));
+        assert!(page.contains("➖ $10 ➕ *"));
         assert!(!page.contains("History window"));
     }
 
@@ -1195,7 +1328,7 @@ mod tests {
         app.cost_settings.calibration = Calibration::Budget;
         let page = text(&super::view(&app, 0, 110));
         assert!(
-            page.contains("− 10% + *"),
+            page.contains("➖ 10% ➕ *"),
             "budget is a share of the window"
         );
         assert!(page.contains("quota_budget_percent"));

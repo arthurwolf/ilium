@@ -63,13 +63,21 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             app.apply_pane_process_terminated(pane_id, result);
             None
         }
+        ServerEvent::SoundPreviewCompleted { succeeded } => {
+            app.status_message = Some(if succeeded {
+                "Sound preview played".to_string()
+            } else {
+                "Sound preview failed".to_string()
+            });
+            None
+        }
         ServerEvent::PaneFrozen { pane_id, result } => {
             if result.is_ok() {
                 app.frozen_panes.insert(pane_id);
                 app.restore_frozen_screen(pane_id);
             } else {
                 app.frozen_panes.remove(&pane_id);
-                app.frozen_screens.remove(&pane_id);
+                app.discard_frozen_screen_restore(pane_id);
                 app.status_message = Some(format!("Agent freeze failed: {}", result.unwrap_err()));
             }
             None
@@ -259,6 +267,7 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             session_id,
             process_id,
             title_generation,
+            transcript_path,
         } => {
             app.agent_title_generations
                 .insert(pane_id, title_generation);
@@ -271,6 +280,14 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
                 }
             }
             let changed = app.agent_session_ids.get(&pane_id) != Some(&session_id);
+            match transcript_path {
+                Some(transcript_path) => {
+                    app.agent_transcript_paths.insert(pane_id, transcript_path);
+                }
+                None => {
+                    app.agent_transcript_paths.remove(&pane_id);
+                }
+            }
             let previous_session_id = app.agent_session_ids.insert(pane_id, session_id);
             if changed {
                 // A `/resume` can replace the agent session inside the same
@@ -318,6 +335,7 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             app.agent_title_generations
                 .insert(pane_id, title_generation);
             app.agent_process_ids.remove(&pane_id);
+            app.agent_transcript_paths.remove(&pane_id);
             if let Some(previous_session_id) = app.agent_session_ids.remove(&pane_id) {
                 app.title_inference_attempts
                     .remove(&(pane_id, previous_session_id));
@@ -518,6 +536,7 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
         | ServerEvent::ProgressMonitorSetCompleted { .. }
         | ServerEvent::ProgressMonitorStatusReported { .. }
         | ServerEvent::ProgressMonitorCleared { .. }
+        | ServerEvent::ProgressWaitCompleted { .. }
         | ServerEvent::VoiceTextResult { .. } => {
             // These replies have no attached-client presentation state yet.
             None
@@ -584,6 +603,7 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             app.receive_workspace_close_offer(request_id, pane_id, can_offer);
             None
         }
+        ServerEvent::AntigravityStatuslineCompleted { .. } => None,
         ServerEvent::VoiceTextOffered {
             request_id,
             sentences,
@@ -920,6 +940,24 @@ mod tests {
     }
 
     #[test]
+    fn sound_preview_status_changes_only_after_server_completion() {
+        let mut app = app();
+        app.status_message = Some("Sound preview requested".to_string());
+
+        apply(
+            &mut app,
+            ServerEvent::SoundPreviewCompleted { succeeded: false },
+        );
+        assert_eq!(app.status_message.as_deref(), Some("Sound preview failed"));
+
+        apply(
+            &mut app,
+            ServerEvent::SoundPreviewCompleted { succeeded: true },
+        );
+        assert_eq!(app.status_message.as_deref(), Some("Sound preview played"));
+    }
+
+    #[test]
     fn agent_detection_settings_events_apply_success_and_preserve_rejected_state() {
         let mut app = app();
         let accepted = ilium_ipc::AgentDetectionSettings {
@@ -1005,6 +1043,81 @@ mod tests {
             },
         );
         assert!(!app.pane_detection_evidence.contains_key(&pane_id));
+    }
+
+    #[test]
+    fn replayed_pane_frozen_event_restores_the_unfreeze_marker() {
+        let mut app = app();
+        let mut tree = ilium_core::Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = tree
+            .add_pane(group, "frozen Claude", PaneContentKind::Terminal)
+            .unwrap();
+        apply(&mut app, ServerEvent::TreeSnapshot(tree));
+
+        apply(
+            &mut app,
+            ServerEvent::PaneFrozen {
+                pane_id,
+                result: Ok(()),
+            },
+        );
+
+        assert!(app.frozen_panes.contains(&pane_id));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn pane_frozen_event_never_waits_for_snapshot_file_io() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = tempfile::tempdir().unwrap();
+        let frozen_directory = directory.path().join("frozen-screens");
+        std::fs::create_dir_all(&frozen_directory).unwrap();
+        let mut app = app();
+        app.config_dir = Some(directory.path().to_path_buf());
+        let mut tree = ilium_core::Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = tree
+            .add_pane(group, "frozen Claude", PaneContentKind::Terminal)
+            .unwrap();
+        apply(&mut app, ServerEvent::TreeSnapshot(tree));
+
+        let fifo = frozen_directory.join(format!("{}.bin", pane_id.0));
+        let status = std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        std::fs::set_permissions(&fifo, std::fs::Permissions::from_mode(0o600)).unwrap();
+
+        let mut event = tokio::task::spawn_blocking(move || {
+            apply(
+                &mut app,
+                ServerEvent::PaneFrozen {
+                    pane_id,
+                    result: Ok(()),
+                },
+            );
+        });
+        let returned = tokio::time::timeout(std::time::Duration::from_millis(250), &mut event)
+            .await
+            .is_ok();
+        if !returned {
+            let fifo_for_writer = fifo.clone();
+            let writer = tokio::task::spawn_blocking(move || {
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .open(fifo_for_writer)
+                    .unwrap()
+            });
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(2), writer).await;
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(2), &mut event).await;
+        }
+        assert!(
+            returned,
+            "PaneFrozen event handling must not wait for disk IO"
+        );
     }
 
     #[test]
@@ -1871,6 +1984,7 @@ mod tests {
                 session_id: "session-1".to_string(),
                 process_id: Some(12345),
                 title_generation: 0,
+                transcript_path: None,
             },
         );
         app.title_inference_attempts
@@ -1932,6 +2046,7 @@ mod tests {
                 session_id: "session-1".to_string(),
                 process_id: Some(12345),
                 title_generation: 0,
+                transcript_path: None,
             },
         );
         app.title_inference_attempts
@@ -1944,6 +2059,7 @@ mod tests {
                 session_id: "session-2".to_string(),
                 process_id: Some(23456),
                 title_generation: 1,
+                transcript_path: None,
             },
         );
 
@@ -1974,6 +2090,7 @@ mod tests {
                 session_id: "session-1".to_string(),
                 process_id: Some(12345),
                 title_generation: 0,
+                transcript_path: None,
             },
         );
         assert_eq!(
@@ -1993,6 +2110,7 @@ mod tests {
                 session_id: "session-1".to_string(),
                 process_id: Some(23456),
                 title_generation: 0,
+                transcript_path: None,
             },
         );
 
@@ -2021,6 +2139,7 @@ mod tests {
                 session_id: "session-1".to_string(),
                 process_id: Some(12345),
                 title_generation: 0,
+                transcript_path: None,
             },
         );
         app.title_inference_attempts
@@ -2028,6 +2147,7 @@ mod tests {
         app.inferred_title_session_ids
             .insert(pane_id, "session-1".to_string());
         app.titles_loading.insert(pane_id);
+        app.frozen_panes.insert(pane_id);
 
         apply(
             &mut app,
@@ -2044,6 +2164,7 @@ mod tests {
             .contains_key(&(pane_id, "session-1".to_string())));
         assert!(!app.inferred_title_session_ids.contains_key(&pane_id));
         assert!(!app.titles_loading.contains(&pane_id));
+        assert!(app.frozen_panes.contains(&pane_id));
     }
 
     #[test]
@@ -2062,6 +2183,7 @@ mod tests {
                 session_id: "session-1".to_string(),
                 process_id: Some(12345),
                 title_generation: 0,
+                transcript_path: None,
             },
         );
         app.title_inference_attempts

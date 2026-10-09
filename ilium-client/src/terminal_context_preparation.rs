@@ -18,6 +18,10 @@ pub(crate) struct ContextKey {
     pub row: u16,
     pub snapshot_ordinal: u64,
 }
+/// Agent class, session identity, pane launch directory and the optional
+/// server-verified transcript path (a hint re-verified before use).
+pub(crate) type HistoryContext = (ilium_core::AgentClass, String, PathBuf, Option<PathBuf>);
+
 pub(crate) struct ContextRequest {
     pub key: ContextKey,
     pub source_row: usize,
@@ -25,7 +29,7 @@ pub(crate) struct ContextRequest {
     pub selection: Option<TerminalSelection>,
     pub cwd: PathBuf,
     pub home: Option<PathBuf>,
-    pub history_context: Option<(ilium_core::AgentClass, String, PathBuf)>,
+    pub history_context: Option<HistoryContext>,
 }
 pub(crate) struct ContextText {
     pub source_line_text: String,
@@ -99,7 +103,7 @@ struct ResolveJob {
     column: usize,
     cwd: PathBuf,
     home: Option<PathBuf>,
-    history_context: Option<(ilium_core::AgentClass, String, PathBuf)>,
+    history_context: Option<HistoryContext>,
 }
 impl Job for ResolveJob {
     type Output = ContextText;
@@ -115,7 +119,9 @@ impl Job for ResolveJob {
             self.home.as_deref(),
         )
         .or(self.text.open_target);
-        if let (Some(home), Some((class, session, path))) = (&self.home, &self.history_context) {
+        if let (Some(home), Some((class, session, path, transcript_hint))) =
+            (&self.home, &self.history_context)
+        {
             if matches!(
                 class,
                 ilium_core::AgentClass::Claude | ilium_core::AgentClass::Codex
@@ -123,17 +129,14 @@ impl Job for ResolveJob {
                 let locator = ilium_agent_session::TranscriptLocator::new_bounded(
                     home,
                     path,
-                    ilium_agent_session::TranscriptReadLimits {
-                        line_bytes: 64 * 1024,
-                        total_read_bytes: 8 * 1024 * 1024,
-                        scanned_entries: 4096,
-                        retained_path_bytes: 1024 * 1024,
-                    },
+                    ilium_agent_session::INTERACTIVE_TRANSCRIPT_LOOKUP_LIMITS,
                 );
-                self.text.history_path = locator
-                    .transcript_for_session(class, session)
-                    .map(|transcript| transcript.path)
-                    .filter(|path| path.is_absolute());
+                self.text.history_path = crate::agent_history_path::resolve_history_path(
+                    &locator,
+                    class,
+                    session,
+                    transcript_hint.as_deref(),
+                );
                 if locator.read_limit_reached() {
                     // Optional path verification must not discard the already
                     // captured screen/selection or disable prompt recovery.
@@ -158,7 +161,7 @@ struct Slot {
     cwd: PathBuf,
     home: Option<PathBuf>,
     pending: Pending,
-    history_context: Option<(ilium_core::AgentClass, String, PathBuf)>,
+    history_context: Option<HistoryContext>,
 }
 pub(crate) struct ContextCompletion {
     pub key: ContextKey,
@@ -539,7 +542,7 @@ impl TerminalContextPreparation {
                     return Some(ContextCompletion {
                         key: slot.key,
                         text: Err("Context preparation completion was lost".into()),
-                    })
+                    });
                 }
             },
             Pending::Io(receipt) => match receipt.try_take() {
@@ -552,7 +555,7 @@ impl TerminalContextPreparation {
                     return Some(ContextCompletion {
                         key: slot.key,
                         text: Err("Context resolution completion was lost".into()),
-                    })
+                    });
                 }
             },
             Pending::Between(_) => {}
@@ -891,7 +894,7 @@ mod tests {
                 selection: None,
                 cwd: PathBuf::from("/"),
                 home: Some(home.path().to_owned()),
-                history_context: Some((class.clone(), session.into(), PathBuf::from("/"))),
+                history_context: Some((class.clone(), session.into(), PathBuf::from("/"), None)),
             });
             let completion = collect(&mut preparation);
             let text = completion.text.unwrap_or_else(|error| {

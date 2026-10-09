@@ -11,26 +11,47 @@ const MIB: usize = 1024 * 1024;
 const CPU_THREADS: usize = 2;
 const IO_THREADS: usize = 4;
 const SERVICE_THREADS: usize = 1;
-// The selected feature owners outside this bank contribute 21 roles:
-// clipboard3, media1, presenter1, animation1, icons1, voice4, video10.
+// The selected feature owners outside this bank contribute 27 roles:
+// clipboard3, media1, presenter1, animation1, GPU probe1, icons1, voice4, video10,
+// and up to five Spectrum capture roles (analysis plus helper/reader or the
+// platform's two/four declared CPAL stream roles).
 // Supervisor/logger/input add3, the opener reaper1, and the existing Tokio
 // runtime6. Derive the ceiling from the actual bank configuration; retiring
 // owners compete with these same roles and the unchanged4096 MiB allowance.
 // This declared scenario does not bound unadmitted libraries or allocator RSS.
-const PROCESS_WORKER_THREADS: usize = CPU_THREADS + IO_THREADS + SERVICE_THREADS + 21 + 3 + 1 + 6;
-// The terminal parser reserves twice `terminal.engine_memory_budget_mib` (engines
-// plus published snapshots) on top of the fixed allowance; the setting's maximum
-// bounds that extra declaration.
-const PROCESS_WORKER_BYTES: usize =
-    (4096 + 2 * crate::config::TerminalSettings::MAX_ENGINE_MEMORY_BUDGET_MIB as usize) * MIB;
+const PROCESS_WORKER_THREADS: usize = CPU_THREADS + IO_THREADS + SERVICE_THREADS + 27 + 3 + 1 + 6;
+// Parser allocations have independent custody; other finite owners keep their original limit.
+const PROCESS_WORKER_BYTES: usize = 4096 * MIB;
+// The optional parser-state/snapshot pool is controlled by terminal settings.
+// Keep the shared ledger for ownership accounting, but do not impose another
+// aggregate storage ceiling when that pool is Off.
+pub(crate) const TERMINAL_STORAGE_BYTES: usize = usize::MAX;
+pub(crate) const TERMINAL_REPLACEMENT_HEADROOM: usize = 8 * 128 * MIB;
+
+/// Creates the app-owned parser memory governor. Clone it into every parser
+/// service belonging to that app; never create one per pane or parser instance.
+pub(crate) fn terminal_storage_quota() -> Arc<crate::terminal_parsing::ParserMemoryGovernor> {
+    crate::terminal_parsing::ParserMemoryGovernor::new(
+        TERMINAL_STORAGE_BYTES,
+        TERMINAL_REPLACEMENT_HEADROOM,
+    )
+}
+
+#[cfg(test)]
+pub(crate) fn terminal_storage_quota_with_limit(
+    worker_bytes: usize,
+) -> Arc<crate::terminal_parsing::ParserMemoryGovernor> {
+    let headroom = TERMINAL_REPLACEMENT_HEADROOM.min(worker_bytes / 2);
+    crate::terminal_parsing::ParserMemoryGovernor::new(worker_bytes, headroom)
+}
 
 pub(crate) fn admission_notification() -> Arc<tokio::sync::Notify> {
     static WAKE: OnceLock<Arc<tokio::sync::Notify>> = OnceLock::new();
     Arc::clone(WAKE.get_or_init(|| Arc::new(tokio::sync::Notify::new())))
 }
 
-/// All explicit execution owners in this client process share this primitive
-/// budget. It owns no threads or engines and never substitutes for lifecycle.
+/// Finite execution owners share this budget; independently retained terminal
+/// allocations use `terminal_storage_quota`. Neither ledger replaces lifecycle.
 pub(crate) fn process_quota() -> QuotaGroup {
     static QUOTA: OnceLock<QuotaGroup> = OnceLock::new();
     QUOTA
@@ -158,6 +179,7 @@ pub struct ClientExecution {
     execution: Execution,
     general: Client,
     location_search: Client,
+    terminal_storage: Arc<crate::terminal_parsing::ParserMemoryGovernor>,
 }
 
 #[path = "execution_shutdown.rs"]
@@ -365,7 +387,10 @@ fn bank_config() -> ExecutionConfig {
         service: LaneConfig {
             threads: SERVICE_THREADS,
             queue_slots: 1,
-            priority: Some(WorkerPriority::BelowNormal),
+            // Terminal parsing is the sole service-lane owner and directly
+            // gates first content in a selected pane; keep it at inherited
+            // interactive priority while bulk CPU/I/O workers remain lowered.
+            priority: None,
             resident_bytes_per_thread: 128 * MIB,
         },
     }
@@ -450,6 +475,7 @@ impl ClientExecution {
             execution,
             general,
             location_search,
+            terminal_storage: terminal_storage_quota(),
         })
     }
     pub fn client(&self, limits: ClientLimits) -> Result<Client, RejectReason> {
@@ -459,6 +485,11 @@ impl ClientExecution {
     /// that retain admitted input after interactive processing completes.
     pub fn retirement(&self) -> ilium_execution::RetirementHandle {
         self.execution.retirement()
+    }
+    /// One finite parser allocation ledger shared by all terminal parsers in
+    /// this app. Cloned storage leases retain the ledger through retirement.
+    pub(crate) fn terminal_storage(&self) -> Arc<crate::terminal_parsing::ParserMemoryGovernor> {
+        Arc::clone(&self.terminal_storage)
     }
     /// Codec jobs share the existing CPU queue but retain their independent
     /// process-wide decoder/encoder envelopes. Do not nest either under the
@@ -496,7 +527,11 @@ impl ClientExecution {
         let finite = self.client(ClientLimits {
             jobs: 4,
             service_jobs: 0,
-            input_bytes: 128 * MIB,
+            // Generic image preparation conservatively charges up to 36 bytes
+            // per source pixel for decoder/orientation/resize overlap. This
+            // admits one ordinary 4K photo without weakening the shared
+            // execution bank's aggregate quota.
+            input_bytes: 384 * MIB,
             result_bytes: 128 * MIB,
         })?;
         Ok(ilium_ambient::resources::AmbientResources::new(finite))
@@ -603,6 +638,15 @@ pub(crate) fn test_document_client() -> Client {
 #[cfg(test)]
 mod composition_tests {
     use super::*;
+
+    #[test]
+    fn terminal_parser_lane_keeps_inherited_interactive_priority() {
+        let config = bank_config();
+        assert_eq!(config.service.threads, 1);
+        assert_eq!(config.service.priority, None);
+        assert_eq!(config.cpu.priority, Some(WorkerPriority::BelowNormal));
+        assert_eq!(config.io.priority, Some(WorkerPriority::BelowNormal));
+    }
 
     #[test]
     fn historical_selected_subset_preserves_storage_boundary() {
@@ -811,16 +855,18 @@ mod composition_tests {
         let before_decoder = decoder.usage().clients;
         let before_encoder = encoder.usage().clients;
         let outbound_limits = ClientLimits {
-            jobs: 1,
+            jobs: 60,
             service_jobs: 0,
-            input_bytes: 1024,
-            result_bytes: 1024,
+            input_bytes: 64 * 1024,
+            result_bytes: 64 * 1024,
         };
+        let first_outbound = execution.client(outbound_limits).expect("first outbound");
+        let second_outbound = execution.client(outbound_limits).expect("second outbound");
         let first = execution
-            .ipc_preparation(execution.client(outbound_limits).expect("first outbound"))
+            .ipc_preparation(first_outbound.clone())
             .expect("first interactive connection");
         let second = execution
-            .ipc_preparation(execution.client(outbound_limits).expect("second outbound"))
+            .ipc_preparation(second_outbound.clone())
             .expect("second interactive connection");
         assert_eq!(
             root.snapshot().worker_threads,
@@ -830,6 +876,40 @@ mod composition_tests {
         assert_eq!(general.usage().clients, before_general + 2);
         assert_eq!(decoder.usage().clients, before_decoder + 2);
         assert_eq!(encoder.usage().clients, before_encoder + 2);
+
+        let before_jobs = general.usage().jobs;
+        assert_eq!(before_jobs, 0, "isolated identity test starts without jobs");
+        let cost = ilium_execution::JobCost {
+            input_bytes: std::mem::size_of::<ilium_execution::ExternalReservation>(),
+            result_bytes: 0,
+        };
+        let mut reservations = Vec::with_capacity(60);
+        for _ in 0..30 {
+            reservations.push(
+                first_outbound
+                    .try_reserve_external(cost)
+                    .expect("first connection reserves within its child limit"),
+            );
+        }
+        for _ in 0..30 {
+            reservations.push(
+                second_outbound
+                    .try_reserve_external(cost)
+                    .expect("second connection shares the aggregate allowance"),
+            );
+        }
+        assert_eq!(general.usage().jobs, before_jobs + 60);
+        assert_eq!(first_outbound.usage().jobs, 30);
+        assert_eq!(second_outbound.usage().jobs, 30);
+        assert!(
+            matches!(
+                second_outbound.try_reserve_external(cost),
+                Err(ilium_execution::RejectReason::JobLimit)
+            ),
+            "the shared general-client job ceiling still applies across connections"
+        );
+        drop(reservations);
+        assert_eq!(general.usage().jobs, before_jobs);
         drop((first, second));
         assert_eq!(general.usage().clients, before_general);
         assert_eq!(decoder.usage().clients, before_decoder);

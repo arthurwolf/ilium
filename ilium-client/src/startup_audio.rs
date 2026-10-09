@@ -155,10 +155,10 @@ async fn discover_with(
                     JobOutcome::Panicked => {
                         Err(io::Error::other("startup audio discovery worker panicked"))
                     }
-                }
+                };
             }
             JobPoll::Lost | JobPoll::Taken => {
-                return Err(io::Error::other("startup audio discovery completion lost"))
+                return Err(io::Error::other("startup audio discovery completion lost"));
             }
         }
     }

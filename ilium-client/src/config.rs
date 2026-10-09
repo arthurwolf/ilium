@@ -426,8 +426,9 @@ impl SidebarDensity {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TerminalSettings {
     pub scrollback_budget_mib: u16,
-    /// Memory all live terminal parser engines may retain together. Hidden
-    /// panes keep their engine until a displayed pane needs the room.
+    /// Zero disables the parser pool. Positive MiB values bound engine state;
+    /// snapshots additionally allow 256 MiB of pin and replacement headroom.
+    /// Pooled pressure may reclaim an eligible hidden parser.
     pub engine_memory_budget_mib: u32,
     pub new_pane_directory: NewPaneDirectory,
     /// Holding `smart_copy_light_key` over a terminal pane starts Smart Copy
@@ -439,7 +440,7 @@ impl Default for TerminalSettings {
     fn default() -> Self {
         Self {
             scrollback_budget_mib: 8,
-            engine_memory_budget_mib: 4096,
+            engine_memory_budget_mib: 0,
             new_pane_directory: NewPaneDirectory::ProjectRoot,
             smart_copy_light: true,
             smart_copy_light_key: SmartCopyLightKey::Control,
@@ -510,12 +511,27 @@ impl TerminalSettings {
     pub const MAX_SCROLLBACK_BUDGET_MIB: u16 = 512;
     pub const MIN_ENGINE_MEMORY_BUDGET_MIB: u32 = 256;
     pub const MAX_ENGINE_MEMORY_BUDGET_MIB: u32 = 16384;
+
+    pub const fn is_valid_engine_memory_budget_mib(value: u32) -> bool {
+        value == 0
+            || (value >= Self::MIN_ENGINE_MEMORY_BUDGET_MIB
+                && value <= Self::MAX_ENGINE_MEMORY_BUDGET_MIB)
+    }
+
     pub fn stepped_engine_memory_budget_mib(self, direction: i32) -> u32 {
-        let value = i64::from(self.engine_memory_budget_mib) + i64::from(direction) * 256;
-        value.clamp(
-            i64::from(Self::MIN_ENGINE_MEMORY_BUDGET_MIB),
-            i64::from(Self::MAX_ENGINE_MEMORY_BUDGET_MIB),
-        ) as u32
+        if direction == 0 {
+            return self.engine_memory_budget_mib;
+        }
+        let current = i64::from(self.engine_memory_budget_mib);
+
+        let next = if direction > 0 {
+            (current / 256 + 1) * 256
+        } else {
+            (current.saturating_sub(1) / 256) * 256
+        };
+        let remaining_steps = i64::from(direction) - i64::from(direction.signum());
+        (next + remaining_steps * 256).clamp(0, i64::from(Self::MAX_ENGINE_MEMORY_BUDGET_MIB))
+            as u32
     }
     pub fn stepped_scrollback_budget_mib(self, direction: i32) -> u16 {
         let value = self.scrollback_budget_mib as i32 + direction * 4;
@@ -1030,6 +1046,9 @@ pub struct UiSettings {
     pub use_stable_glyphs: bool,
     /// Shows LLM-suggested per-title icons before node names in the left tree.
     pub show_inferred_title_icons: bool,
+    /// Uses each verified session's selected model for its tree icon when a
+    /// matching toolbar model glyph is known.
+    pub agent_tree_model_icons: bool,
     /// Shows the rename and one-step move controls in the hovered tree-row
     /// action strip. They are optional because keyboard shortcuts and context
     /// menus keep the operations available without persistent row clutter.
@@ -1061,6 +1080,9 @@ pub struct UiSettings {
     pub last_prompt_max_lines: u8,
     /// Client-side presentation policy for pane activity and goal signals.
     pub agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode,
+    /// Include progress outcomes and monitor failures in the Attention tree icon.
+    /// Disabled by default so historical task failures do not hide agent activity.
+    pub attention_progress_reports: bool,
     /// How Attention mode keeps showing that an agent is working.
     pub attention_running_indicator: crate::agent_monitoring::AttentionRunningIndicator,
     /// Live mirror of the server's `progress_monitor_enabled` setting (see
@@ -1117,6 +1139,7 @@ impl Default for UiSettings {
             sidebar_density: SidebarDensity::Standard,
             use_stable_glyphs: false,
             show_inferred_title_icons: false,
+            agent_tree_model_icons: false,
             show_tree_row_management_controls: false,
             agent_debug_menu_enabled: false,
             show_context_menu_icons: true,
@@ -1127,6 +1150,7 @@ impl Default for UiSettings {
             agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
             attention_running_indicator:
                 crate::agent_monitoring::AttentionRunningIndicator::default(),
+            attention_progress_reports: false,
             progress_monitor_enabled: true,
             progress_max_lines: DEFAULT_PROGRESS_MAX_LINES,
             completed_progress_hide_after_seconds: 60,
@@ -1245,7 +1269,9 @@ struct RawUiConfig {
     last_prompt_enabled: Option<bool>,
     last_prompt_max_lines: Option<u8>,
     agent_monitoring_mode: Option<String>,
+    agent_tree_model_icons: Option<bool>,
     attention_running_indicator: Option<String>,
+    attention_progress_reports: Option<bool>,
     progress_monitor_enabled: Option<bool>,
     progress_max_lines: Option<u8>,
     completed_progress_hide_after_seconds: Option<u32>,
@@ -1318,7 +1344,9 @@ pub enum ConfigLoadError {
     UnknownAction(String),
     /// A `[keybindings]` value isn't a printable key or one of the named
     /// arrow/page keys supported after the leader.
-    #[error("keybindings.{action:?} = {value:?} must be one printable key, up, down, page_up, or page_down")]
+    #[error(
+        "keybindings.{action:?} = {value:?} must be one printable key, up, down, page_up, or page_down"
+    )]
     InvalidBinding { action: String, value: String },
     /// A `[keyboard]` prefix (`shortcut_base` or `navigation_shortcut_base`)
     /// is not exactly one ASCII letter. Carrying the field name keeps the
@@ -1363,7 +1391,9 @@ pub enum ConfigLoadError {
     #[error("ui.agent_monitoring_mode = {0:?} must be \"normal\" or \"attention\"")]
     InvalidAgentMonitoringMode(String),
     /// `ui.attention_running_indicator` is outside the closed indicator set.
-    #[error("ui.attention_running_indicator = {0:?} must be \"off\", \"icon\", \"spinner\", \"pulsing_dot\", \"steady_dot\", or \"title_accent\"")]
+    #[error(
+        "ui.attention_running_indicator = {0:?} must be \"off\", \"icon\", \"spinner\", \"pulsing_dot\", \"steady_dot\", or \"title_accent\""
+    )]
     InvalidAttentionRunningIndicator(String),
     /// `ui.claude_agent_icon` is not one of the curated Claude choices.
     #[error("ui.claude_agent_icon = {0:?} is not a supported Claude icon")]
@@ -1383,11 +1413,15 @@ pub enum ConfigLoadError {
     InvalidMotionLevel(String),
     #[error("ui.sidebar_density = {0:?} must be compact, standard, or comfortable")]
     InvalidSidebarDensity(String),
-    #[error("ui.task_progress_frames must contain 2–13 printable frames, all one or all two display cells wide")]
+    #[error(
+        "ui.task_progress_frames must contain 2–13 printable frames, all one or all two display cells wide"
+    )]
     InvalidTaskProgressFrames,
     #[error("terminal.scrollback_budget_mib = {0} must be between 4 and 512")]
     InvalidScrollbackBudget(u16),
-    #[error("terminal.engine_memory_budget_mib = {0} must be between 256 and 16384")]
+    #[error(
+        "terminal.engine_memory_budget_mib = {0} must be 0 (parser pool Off) or between 256 and 16384 MiB"
+    )]
     InvalidEngineMemoryBudget(u32),
     #[error("terminal.new_pane_directory = {0:?} is not supported")]
     InvalidNewPaneDirectory(String),
@@ -1717,6 +1751,9 @@ fn merge_ui(raw: RawUiConfig) -> Result<UiSettings, ConfigLoadError> {
         show_inferred_title_icons: raw
             .show_inferred_title_icons
             .unwrap_or(defaults.show_inferred_title_icons),
+        agent_tree_model_icons: raw
+            .agent_tree_model_icons
+            .unwrap_or(defaults.agent_tree_model_icons),
         show_tree_row_management_controls: raw
             .show_tree_row_management_controls
             .unwrap_or(defaults.show_tree_row_management_controls),
@@ -1746,6 +1783,9 @@ fn merge_ui(raw: RawUiConfig) -> Result<UiSettings, ConfigLoadError> {
         },
         agent_monitoring_mode,
         attention_running_indicator,
+        attention_progress_reports: raw
+            .attention_progress_reports
+            .unwrap_or(defaults.attention_progress_reports),
         progress_monitor_enabled: raw
             .progress_monitor_enabled
             .unwrap_or(defaults.progress_monitor_enabled),
@@ -1802,10 +1842,7 @@ fn merge_terminal(raw: RawTerminalConfig) -> Result<TerminalSettings, ConfigLoad
     let engine_memory_budget_mib = raw
         .engine_memory_budget_mib
         .unwrap_or(defaults.engine_memory_budget_mib);
-    if !(TerminalSettings::MIN_ENGINE_MEMORY_BUDGET_MIB
-        ..=TerminalSettings::MAX_ENGINE_MEMORY_BUDGET_MIB)
-        .contains(&engine_memory_budget_mib)
-    {
+    if !TerminalSettings::is_valid_engine_memory_budget_mib(engine_memory_budget_mib) {
         return Err(ConfigLoadError::InvalidEngineMemoryBudget(
             engine_memory_budget_mib,
         ));
@@ -2924,6 +2961,10 @@ fn ui_settings_to_toml(ui: &UiSettings) -> toml::Value {
         toml::Value::Boolean(ui.show_inferred_title_icons),
     );
     table.insert(
+        "agent_tree_model_icons".to_string(),
+        toml::Value::Boolean(ui.agent_tree_model_icons),
+    );
+    table.insert(
         "show_tree_row_management_controls".to_string(),
         toml::Value::Boolean(ui.show_tree_row_management_controls),
     );
@@ -2954,6 +2995,10 @@ fn ui_settings_to_toml(ui: &UiSettings) -> toml::Value {
     table.insert(
         "agent_monitoring_mode".to_string(),
         toml::Value::String(ui.agent_monitoring_mode.key().to_string()),
+    );
+    table.insert(
+        "attention_progress_reports".to_string(),
+        toml::Value::Boolean(ui.attention_progress_reports),
     );
     table.insert(
         "attention_running_indicator".to_string(),
@@ -3147,6 +3192,137 @@ fn keyboard_settings_to_toml(keyboard: &KeyboardSettings) -> toml::Value {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn terminal_parser_pool_defaults_off_and_preserves_explicit_finite_limits() {
+        assert_eq!(TerminalSettings::default().engine_memory_budget_mib, 0);
+        let omitted: RawTerminalConfig = toml::from_str("").expect("empty terminal table");
+        assert_eq!(merge_terminal(omitted).unwrap().engine_memory_budget_mib, 0);
+        for budget in [0, 256, 4096, 16384] {
+            let authored: RawTerminalConfig =
+                toml::from_str(&format!("engine_memory_budget_mib = {budget}"))
+                    .expect("authored terminal table");
+            let settings = merge_terminal(authored).expect("explicit pool mode");
+            assert_eq!(settings.engine_memory_budget_mib, budget);
+            let saved = terminal_settings_to_toml(&settings);
+            let reloaded: RawTerminalConfig = saved.try_into().expect("saved terminal table");
+            assert_eq!(merge_terminal(reloaded).unwrap(), settings);
+        }
+    }
+
+    #[test]
+    fn parser_pool_default_and_disk_round_trip_preserve_explicit_limits() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.toml");
+        assert_eq!(
+            load(directory.path())
+                .unwrap()
+                .terminal
+                .engine_memory_budget_mib,
+            0
+        );
+        std::fs::write(&path, "[future_settings]\nkeep = 'untouched'\n").unwrap();
+        assert_eq!(
+            load(directory.path())
+                .unwrap()
+                .terminal
+                .engine_memory_budget_mib,
+            0
+        );
+        for budget_mib in [0, 256, 257, 4096, 16384] {
+            let settings = TerminalSettings {
+                engine_memory_budget_mib: budget_mib,
+                scrollback_budget_mib: 16,
+                new_pane_directory: NewPaneDirectory::FocusedTerminal,
+                smart_copy_light: false,
+                smart_copy_light_key: SmartCopyLightKey::Alt,
+            };
+            save_terminal_settings(directory.path(), &settings).unwrap();
+            assert_eq!(load(directory.path()).unwrap().terminal, settings);
+            let document: toml::Value =
+                toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            assert_eq!(
+                document["terminal"]["engine_memory_budget_mib"].as_integer(),
+                Some(i64::from(budget_mib))
+            );
+            assert_eq!(
+                document["future_settings"]["keep"].as_str(),
+                Some("untouched")
+            );
+        }
+        for budget_mib in [1, 255, 16385, u32::MAX] {
+            let raw = RawTerminalConfig {
+                engine_memory_budget_mib: Some(budget_mib),
+                ..RawTerminalConfig::default()
+            };
+            assert!(!TerminalSettings::is_valid_engine_memory_budget_mib(
+                budget_mib
+            ));
+            assert!(matches!(
+                merge_terminal(raw),
+                Err(ConfigLoadError::InvalidEngineMemoryBudget(value)) if value == budget_mib
+            ));
+        }
+    }
+
+    #[test]
+    fn parser_pool_numeric_edits_preserve_other_fields_and_reject_without_mutation() {
+        let current = TerminalSettings {
+            engine_memory_budget_mib: 4096,
+            scrollback_budget_mib: 16,
+            new_pane_directory: NewPaneDirectory::LastUsed,
+            smart_copy_light: false,
+            smart_copy_light_key: SmartCopyLightKey::Shift,
+        };
+        for (text, budget_mib) in [("0", 0), ("256", 256), ("257", 257), ("16384", 16384)] {
+            let mut settings = current;
+            crate::value_config::set_terminal_engine_memory(&mut settings, text).unwrap();
+            assert_eq!(
+                settings,
+                TerminalSettings {
+                    engine_memory_budget_mib: budget_mib,
+                    ..current
+                }
+            );
+            assert!(TerminalSettings::is_valid_engine_memory_budget_mib(
+                budget_mib
+            ));
+        }
+        for text in ["1", "255", "16385", "-1", "1.5", "NaN", "inf", "4294967296"] {
+            let mut settings = current;
+            assert!(
+                crate::value_config::set_terminal_engine_memory(&mut settings, text).is_err(),
+                "{text}"
+            );
+            assert_eq!(settings, current, "rejected edit mutated settings: {text}");
+        }
+    }
+
+    #[test]
+    fn parser_pool_arrow_steps_skip_gap_preserve_custom_noop_and_saturate() {
+        for (budget_mib, direction, expected) in [
+            (0, -1, 0),
+            (0, 1, 256),
+            (256, -1, 0),
+            (257, -1, 256),
+            (257, 1, 512),
+            (257, 0, 257),
+            (257, -2, 0),
+            (257, 2, 768),
+            (16384, 1, 16384),
+            (257, i32::MIN, 0),
+            (257, i32::MAX, 16384),
+        ] {
+            let settings = TerminalSettings {
+                engine_memory_budget_mib: budget_mib,
+                ..TerminalSettings::default()
+            };
+            assert_eq!(
+                settings.stepped_engine_memory_budget_mib(direction),
+                expected
+            );
+        }
+    }
+
+    #[test]
     fn smart_copy_light_settings_default_on_and_round_trip() {
         let defaults = TerminalSettings::default();
         assert!(defaults.smart_copy_light);
@@ -3271,6 +3447,7 @@ mod tests {
         let config = ClientConfig::default();
         let ui = &config.ui;
         assert_eq!(ui.agent_identifiers.mode, AgentIdentifierMode::Icon);
+        assert!(!ui.agent_tree_model_icons);
         for (target, glyph) in [
             (IconTarget::Claude, "🦀"),
             (IconTarget::Codex, "🐢"),
@@ -4272,6 +4449,30 @@ mod tests {
     }
 
     #[test]
+    fn attention_progress_reports_defaults_off_and_persists_both_choices() {
+        let dir = scratch_dir();
+        assert!(!load(&dir).unwrap().ui.attention_progress_reports);
+        // Existing configurations without the new key get the preferred default.
+        std::fs::write(
+            dir.join("config.toml"),
+            "[ui]\nagent_monitoring_mode = \"attention\"\n",
+        )
+        .unwrap();
+        assert!(!load(&dir).unwrap().ui.attention_progress_reports);
+        for enabled in [true, false] {
+            let mut ui = load(&dir).unwrap().ui;
+            ui.attention_progress_reports = enabled;
+            save_ui_settings(&dir, &ui).unwrap();
+            let reloaded = load(&dir).unwrap().ui;
+            assert_eq!(reloaded.attention_progress_reports, enabled);
+            assert_eq!(
+                reloaded.agent_monitoring_mode,
+                crate::agent_monitoring::AgentMonitoringMode::Attention
+            );
+        }
+    }
+
+    #[test]
     fn attention_running_indicator_defaults_round_trips_and_rejects_unknown() {
         use crate::agent_monitoring::AttentionRunningIndicator as Indicator;
         let dir = scratch_dir();
@@ -4352,6 +4553,7 @@ mod tests {
             last_prompt_enabled: false,
             last_prompt_max_lines: 7,
             agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Attention,
+            agent_tree_model_icons: true,
             attention_running_indicator:
                 crate::agent_monitoring::AttentionRunningIndicator::Spinner,
             progress_monitor_enabled: false,
@@ -4393,6 +4595,28 @@ mod tests {
                 .ui
                 .use_stable_glyphs
         );
+    }
+
+    #[test]
+    fn agent_tree_model_icons_default_off_and_round_trip() {
+        let dir = scratch_dir();
+        let defaults = load(&dir).expect("missing config should use defaults");
+        assert!(!defaults.ui.agent_tree_model_icons);
+        save_ui_settings(&dir, &defaults.ui).expect("save default model icon preference");
+        assert!(
+            !load(&dir).unwrap().ui.agent_tree_model_icons,
+            "saving the default settings should keep model icons off"
+        );
+
+        std::fs::write(
+            dir.join("config.toml"),
+            "[ui]\nagent_tree_model_icons = true\n",
+        )
+        .expect("write model icon preference");
+        let loaded = load(&dir).expect("model icon preference should load");
+        assert!(loaded.ui.agent_tree_model_icons);
+        save_ui_settings(&dir, &loaded.ui).expect("save model icon preference");
+        assert!(load(&dir).unwrap().ui.agent_tree_model_icons);
     }
 
     #[test]

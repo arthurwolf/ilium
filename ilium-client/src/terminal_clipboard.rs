@@ -317,13 +317,13 @@ impl ClipboardService {
                 return Err((
                     operation,
                     WriteAdmissionError::Busy("Clipboard queue busy; retry".into()),
-                ))
+                ));
             }
             Err(TryLockError::Poisoned(_)) => {
                 return Err((
                     operation,
                     WriteAdmissionError::Failed("Clipboard owner failed".into()),
-                ))
+                ));
             }
         };
         if queue.closing
@@ -569,7 +569,7 @@ fn exchange<W: Write, R: Read>(
 ) -> Result<String, String> {
     let (action, bytes): (u8, &[u8]) = match &operation {
         Operation::DeferredWrite(_) => {
-            return Err("Unprepared clipboard position reached native exchange".into())
+            return Err("Unprepared clipboard position reached native exchange".into());
         }
         Operation::Read => (READ, &[]),
         Operation::Write(text) => (WRITE, text.as_bytes()),

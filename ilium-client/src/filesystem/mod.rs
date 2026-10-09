@@ -1,6 +1,7 @@
 //! Client-owned filesystem preparation and acknowledged durability adapters.
 mod app;
 pub mod editor;
+pub(crate) mod editor_snapshot;
 pub mod editors;
 pub mod ordered;
 pub(crate) mod plugin_permissions;

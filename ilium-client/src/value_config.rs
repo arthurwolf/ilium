@@ -121,7 +121,7 @@ pub fn set_terminal_scrollback(settings: &mut TerminalSettings, text: &str) -> R
 }
 pub fn terminal_engine_memory_spec() -> NumberSpec {
     NumberSpec::Integer {
-        minimum: i128::from(TerminalSettings::MIN_ENGINE_MEMORY_BUDGET_MIB),
+        minimum: 0,
         maximum: i128::from(TerminalSettings::MAX_ENGINE_MEMORY_BUDGET_MIB),
     }
 }
@@ -129,9 +129,15 @@ pub fn set_terminal_engine_memory(
     settings: &mut TerminalSettings,
     text: &str,
 ) -> Result<(), String> {
-    settings.engine_memory_budget_mib =
-        u32::try_from(whole_number(terminal_engine_memory_spec(), text)?)
-            .map_err(|_| "Number exceeds this setting's storage range".to_owned())?;
+    let budget_mib = u32::try_from(whole_number(terminal_engine_memory_spec(), text)?)
+        .map_err(|_| "Number exceeds this setting's storage range".to_owned())?;
+
+    if !TerminalSettings::is_valid_engine_memory_budget_mib(budget_mib) {
+        return Err(
+            crate::config::ConfigLoadError::InvalidEngineMemoryBudget(budget_mib).to_string(),
+        );
+    }
+    settings.engine_memory_budget_mib = budget_mib;
     Ok(())
 }
 pub fn editor_autosave_spec() -> NumberSpec {

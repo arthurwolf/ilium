@@ -104,16 +104,20 @@ fn bar(width: usize, fraction: Option<f64>, tick: u64) -> String {
 /// The complete dialog, one string per row, each exactly `width` columns.
 pub(crate) fn dialog_lines(width: u16, text: &DialogText, tick: u64) -> Vec<String> {
     let inner = usize::from(width).saturating_sub(4);
-    let horizontal = "─".repeat(usize::from(width).saturating_sub(2));
+    let horizontal_width = usize::from(width).saturating_sub(2);
+    let title = crate::theme::chrome_title("Ilium").to_string();
+    let horizontal =
+        "─".repeat(horizontal_width.saturating_sub(UnicodeWidthStr::width(title.as_str()) + 1));
+    let bottom_horizontal = "─".repeat(horizontal_width);
     let row = |content: &str| format!("│ {} │", padded(content, inner));
     vec![
-        format!("╭{horizontal}╮"),
+        format!("╭{title} {horizontal}╮"),
         row(""),
         row(&text.category),
         row(&text.item),
         row(&bar(inner, text.fraction, tick)),
         row(""),
-        format!("╰{horizontal}╯"),
+        format!("╰{bottom_horizontal}╯"),
     ]
 }
 
@@ -214,6 +218,17 @@ mod tests {
     }
 
     #[test]
+    fn top_border_uses_shared_ilium_chrome_title() {
+        for width in [MIN_WIDTH, 40, MAX_WIDTH] {
+            let line = dialog_lines(width, &text(Some(0.5)), 0).remove(0);
+            let title = crate::theme::chrome_title("Ilium").to_string();
+            assert!(line.starts_with(&format!("╭{title} ─")), "{line:?}");
+            assert!(line.ends_with('╮'));
+            assert_eq!(line.width(), usize::from(width));
+        }
+    }
+
+    #[test]
     fn known_progress_fills_proportionally_and_labels_percent() {
         let line = dialog_lines(MAX_WIDTH, &text(Some(0.5)), 0)[4].clone();
         assert!(line.contains(" 50%"));
@@ -236,5 +251,42 @@ mod tests {
         let area = dialog_area(Rect::new(0, 0, 100, 30)).unwrap();
         assert_eq!((area.width, area.height), (MAX_WIDTH, HEIGHT));
         assert_eq!(area.x, (100 - MAX_WIDTH) / 2);
+    }
+
+    #[test]
+    fn composed_startup_progress_overlay_is_visible_at_terminal_sizes() {
+        use ratatui::{backend::TestBackend, Terminal};
+
+        let workspace = tempfile::tempdir().unwrap();
+        for (width, height) in [(24, 10), (40, 12), (80, 24), (120, 40)] {
+            let area = Rect::new(0, 0, width, height);
+            let mut app = crate::app::App::new(
+                "synthetic-startup-progress".into(),
+                workspace.path().to_path_buf(),
+            );
+            // A path makes the real startup overlay visible. No file means
+            // the renderer shows its honest indeterminate startup message.
+            app.startup_progress_path = Some(workspace.path().join("session.startup"));
+            app.set_screen_area(area);
+
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal
+                .draw(|frame| crate::ui::draw(frame, &mut app))
+                .unwrap();
+
+            let buffer = terminal.backend().buffer();
+            let rendered: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+            assert!(rendered.contains("Ilium"), "title at {width}x{height}");
+            assert!(
+                rendered.contains("Loading the session"),
+                "startup category at {width}x{height}"
+            );
+            assert!(
+                rendered.contains("Receiving panes"),
+                "startup detail at {width}x{height}"
+            );
+            assert!(rendered.contains('░'), "progress bar at {width}x{height}");
+            crate::ui_capture::save(&format!("startup-progress-{width}x{height}"), &terminal);
+        }
     }
 }

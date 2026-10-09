@@ -132,6 +132,7 @@ impl ProjectionRetention {
             | ProgressMonitorSetCompleted { .. }
             | ProgressMonitorStatusReported { .. }
             | ProgressMonitorCleared { .. }
+            | ProgressWaitCompleted { .. }
             | ProjectRestructureApplied { .. }
             | InitialStateSyncComplete
             | NodeActivityChanged { .. }
@@ -150,6 +151,7 @@ impl ProjectionRetention {
             | WorkspaceCreateFailed { .. }
             | WorkspaceInventoryReported { .. }
             | WorkspacePruneCompleted { .. }
+            | AntigravityStatuslineCompleted { .. }
             | Error { .. }
             | PaneResizeRejected { .. }
             | WorkspaceRemovalBlocked { .. } => return update,
@@ -160,9 +162,10 @@ impl ProjectionRetention {
                 }
                 Err(_) => (Slot::DetectionSettingsError, None),
             },
-            TextTriggersChanged { .. } | PaneProcessTerminated { .. } | PaneFrozen { .. } => {
-                (global, None)
-            }
+            TextTriggersChanged { .. }
+            | PaneProcessTerminated { .. }
+            | PaneFrozen { .. }
+            | SoundPreviewCompleted { .. } => (global, None),
         };
         update.keys.push(Key { slot, scope });
         update

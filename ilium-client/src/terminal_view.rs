@@ -31,6 +31,10 @@ use tui_term::widget::PseudoTerminal;
 
 use crate::terminal_activity::{VisibleRowEvidence, VisibleTextEvidence};
 
+#[cfg(test)]
+#[path = "terminal_view_parser_pressure_regressions.rs"]
+mod parser_pressure_regressions;
+
 /// Starting geometry for a freshly created pane, before the first real
 /// `ResizePane` request (sent once the client knows the pane's actual
 /// on-screen content box) corrects it.
@@ -181,7 +185,7 @@ fn osc_terminator(bytes: &[u8]) -> Option<(usize, usize)> {
 /// `10_000 * cols * 32` bytes) regardless of pane width or the configured
 /// budget.
 const RENDER_SCROLLBACK_ROWS: usize = 10_000;
-const RENDER_SCROLLBACK_MIN_ROWS: usize = 1_000;
+const RENDER_SCROLLBACK_MIN_ROWS: usize = 1;
 /// Bytes one pane's render scrollback may retain, in the same units as
 /// `retained_allocation_bytes` (64 bytes per column per row).
 const RENDER_SCROLLBACK_BUDGET_BYTES: usize = 64 * 1024 * 1024;
@@ -741,6 +745,50 @@ impl TerminalState {
         self.refresh_visible_text_fingerprint();
     }
 
+    /// Account for the old parser, a width-triggered replay, and resized cell storage together.
+    pub(crate) fn resize_peak_bytes(&self, rows: u16, cols: u16) -> usize {
+        let retained = self.retained_allocation_bytes();
+        let old_size = self.parser.screen().size();
+        if rows <= old_size.0 && cols <= old_size.1 {
+            // A shrinking resize does not grow either grid.
+            return retained;
+        }
+        let max_rows = rows.max(self.allocated_max_rows); // Shrinking does not prove capacity was freed.
+        let max_cols = cols.max(self.allocated_max_columns); // Older rows may retain wider allocations.
+        let wanted = render_scrollback_rows(max_cols);
+        let grid_bytes = |rows: u16, cols: u16, scrollback: usize| {
+            usize::from(rows)
+                .saturating_mul(2)
+                .saturating_add(scrollback)
+                .saturating_mul(usize::from(cols).saturating_mul(64).saturating_add(128))
+        };
+        if wanted >= self.render_scrollback_rows {
+            let replacement = grid_bytes(max_rows, max_cols, self.scrollback_total);
+            return retained
+                .saturating_add(replacement)
+                .saturating_add(128 * 1024);
+        }
+        let mut osc = OscAllocation::default();
+        for segment in &self.history_segments {
+            osc = osc.advance(&segment.bytes[segment.start..]);
+        }
+        let old_live = grid_bytes(
+            self.allocated_max_rows,
+            self.allocated_max_columns,
+            self.scrollback_total,
+        );
+        let other = retained
+            .saturating_sub(old_live)
+            .saturating_sub(self.osc_allocation.retained_bytes());
+        let replay =
+            grid_bytes(old_size.0, old_size.1, wanted).saturating_add(osc.retained_bytes());
+        let rebuilding = retained.saturating_add(replay);
+        let resizing = other
+            .saturating_add(replay)
+            .saturating_add(grid_bytes(max_rows, max_cols, wanted));
+        rebuilding.max(resizing).saturating_add(128 * 1024)
+    }
+
     /// Widening a pane lowers its scrollback row cap; the parser's cap is fixed
     /// at construction, so rebuild it from the retained raw history.
     fn shrink_render_scrollback_for_width(&mut self) {
@@ -751,10 +799,14 @@ impl TerminalState {
         let (rows, cols) = self.parser.screen().size();
         self.render_scrollback_rows = wanted;
         let mut rebuilt = vt100::Parser::new(rows, cols, wanted);
+        let mut rebuilt_osc = OscAllocation::default();
         for segment in &self.history_segments {
-            rebuilt.process(&segment.bytes[segment.start..]);
+            let bytes = &segment.bytes[segment.start..];
+            rebuilt_osc = rebuilt_osc.advance(bytes);
+            rebuilt.process(bytes); // Keep parser state and its allocation shadow in lockstep.
         }
         self.parser = rebuilt;
+        self.osc_allocation = rebuilt_osc;
     }
 
     /// Runs `f` with the screen currently visible to the user, for rendering
@@ -934,7 +986,7 @@ impl TerminalState {
     /// correct pane. The authoritative live parser keeps processing output;
     /// the ordinary live view returns on the next input or wheel journey to
     /// the bottom.
-    pub(crate) fn history_rebuild_peak_bytes(&self, end_byte: usize) -> usize {
+    fn history_rebuild_budget(&self, end_byte: usize) -> (usize, usize) {
         let mut remaining = end_byte.min(self.history_retained_len);
         let mut osc = OscAllocation::default();
         for segment in &self.history_segments {
@@ -947,21 +999,33 @@ impl TerminalState {
             }
         }
         let (rows, columns) = self.parser.screen().size();
-        let rows = usize::from(rows)
-            .saturating_mul(2)
-            .saturating_add(self.render_scrollback_rows);
-        self.retained_allocation_bytes()
-            .saturating_add(
-                rows.saturating_mul(usize::from(columns))
-                    .saturating_mul(128),
-            )
-            .saturating_add(rows.saturating_mul(256))
+        // Historical grids use the same widest-column charge as retained_allocation_bytes.
+        let columns = columns.max(self.allocated_max_columns);
+
+        let row_bytes = usize::from(columns).saturating_mul(128).saturating_add(256);
+        let fixed_bytes = self
+            .retained_allocation_bytes()
             .saturating_add(osc.retained_bytes())
+            .saturating_add(
+                usize::from(rows)
+                    .saturating_mul(2)
+                    .saturating_mul(row_bytes),
+            );
+        let scrollback_rows = self
+            .render_scrollback_rows
+            .min(crate::terminal_parsing::MAX_STATE_BYTES.saturating_sub(fixed_bytes) / row_bytes);
+        let peak_bytes = fixed_bytes.saturating_add(scrollback_rows.saturating_mul(row_bytes));
+        (peak_bytes, scrollback_rows)
+    }
+    pub(crate) fn history_rebuild_peak_bytes(&self, end_byte: usize) -> usize {
+        self.history_rebuild_budget(end_byte).0
     }
     pub fn jump_to_history_byte(&mut self, end_byte: usize) {
         let (rows, cols) = self.parser.screen().size();
         let mut remaining_bytes = end_byte.min(self.history_retained_len);
-        let mut historical_parser = vt100::Parser::new(rows, cols, self.render_scrollback_rows);
+
+        let (_, scrollback_rows) = self.history_rebuild_budget(end_byte);
+        let mut historical_parser = vt100::Parser::new(rows, cols, scrollback_rows);
         for segment in &self.history_segments {
             if remaining_bytes == 0 {
                 break;
@@ -1138,8 +1202,9 @@ impl PaintedTerminal {
         if bytes.len() < 4 {
             return Err("frozen terminal snapshot is truncated".to_string());
         }
-        let rows = u16::from_le_bytes([bytes[0], bytes[1]]).max(1);
-        let cols = u16::from_le_bytes([bytes[2], bytes[3]]).max(1);
+        let rows = u16::from_le_bytes([bytes[0], bytes[1]]);
+        let cols = u16::from_le_bytes([bytes[2], bytes[3]]);
+        crate::terminal_parsing::validate_geometry(rows, cols)?;
         let mut parser = vt100::Parser::new(rows, cols, 0);
         parser.process(&bytes[4..]);
         let snapshot = TerminalSnapshot {
@@ -1185,8 +1250,8 @@ impl PaintedTerminal {
     pub(crate) fn with_screen<R>(&self, read: impl FnOnce(&vt100::Screen) -> R) -> R {
         read(&self.snapshot.visible)
     }
-    /// Long-lived interactions leave the live/replacement category and obtain
-    /// a bounded history pin before retaining the original allocation.
+    /// Long-lived interactions obtain a bounded pin; the original allocation
+    /// remains charged until its final screen, history, frame, or pin owner drops.
     pub(crate) fn pinned(&self) -> Result<Self, String> {
         let prepared = self.preparation_snapshot()?;
         Ok(Self {
@@ -1234,7 +1299,9 @@ impl PaintedTerminal {
             )
             .saturating_add(128 * 1024);
         if bytes > 128 * 1024 * 1024 {
-            return Err(format!("Smart Copy capture exceeds its128MiB single-capture limit ({bytes} bytes required)"));
+            return Err(format!(
+                "Smart Copy capture exceeds its128MiB single-capture limit ({bytes} bytes required)"
+            ));
         }
         Ok(ilium_execution::JobCost {
             input_bytes: bytes,
@@ -1308,6 +1375,9 @@ impl TerminalState {
     }
     pub(crate) fn output_sequence(&self) -> u64 {
         self.last_output_sequence
+    }
+    pub(crate) fn live_size(&self) -> (u16, u16) {
+        self.parser.screen().size()
     }
     pub(crate) fn input_peak_bytes(&self, bytes: &[u8]) -> usize {
         let chunk = bytes.len();
@@ -1427,9 +1497,9 @@ impl TerminalState {
             self.parser.process(chunk);
             cursor.consumed = end;
             self.refresh_scrollback_total();
+            self.invalidate_live_render_if_visible(); // Progress previews need a fresh immutable screen revision before replay completes.
         }
         self.last_output_sequence = sequence;
-        self.invalidate_live_render_if_visible();
         self.refresh_visible_text_fingerprint();
         Ok(())
     }
@@ -2144,6 +2214,7 @@ pub struct TerminalView {
     pub(crate) desired_size: (u16, u16),
     pub(crate) budget_mib: u16,
     pub(crate) admission_error: Option<String>,
+    pub(crate) admission_pressure: Option<crate::terminal_parsing::ParserPressure>,
     pub(crate) applied_ordinal: u64,
     render_cache: RefCell<Option<TerminalRenderCache>>,
     #[cfg(test)]
@@ -2165,6 +2236,7 @@ impl TerminalView {
             desired_size: (rows, cols),
             budget_mib,
             admission_error: None,
+            admission_pressure: None,
             applied_ordinal: 0,
             render_cache: RefCell::new(None),
             #[cfg(test)]
@@ -2179,9 +2251,9 @@ impl TerminalView {
             .standalone
             .as_ref()
             .map(|state| Arc::new(state.publish()))
-            .unwrap_or_else(|| self.snapshot.clone());
+            .unwrap_or_else(|| self.display_snapshot());
         #[cfg(not(test))]
-        let snapshot = self.snapshot.clone();
+        let snapshot = self.display_snapshot();
         let live = snapshot
             .allocation_charge
             .as_ref()
@@ -2194,15 +2266,48 @@ impl TerminalView {
             _pin: None,
         }
     }
+    fn display_snapshot(&self) -> Arc<TerminalSnapshot> {
+        self.frontend
+            .as_ref()
+            .and_then(crate::terminal_parsing::PaneFrontend::progress_preview)
+            .unwrap_or_else(|| self.snapshot.clone())
+    }
+    pub(crate) fn has_initial_display(&self) -> bool {
+        self.snapshot.sequence > 0
+            || !self.snapshot.visible.contents().trim().is_empty()
+            || self.frontend.as_ref().is_some_and(|frontend| {
+                frontend.progress_preview().is_some_and(|snapshot| {
+                    snapshot.sequence > 0 || !snapshot.visible.contents().trim().is_empty()
+                })
+            })
+    }
+    pub(crate) fn parser_pressure(&self) -> Option<crate::terminal_parsing::ParserPressure> {
+        self.frontend
+            .as_ref()
+            .and_then(|frontend| frontend.parser_pressure())
+            .or(self.admission_pressure)
+    }
+    pub(crate) fn accepts_parser_target(
+        &self,
+        target: &crate::terminal_parsing::PaneTarget,
+    ) -> bool {
+        // Fence each attachment independently.
+        self.frontend
+            .as_ref()
+            .is_some_and(|frontend| frontend.accepts_target(target)) // Preserve domain identity across cache eviction.
+    }
+    pub(crate) fn can_evict_parser(&self) -> bool {
+        self.frontend
+            .as_ref()
+            .is_some_and(|frontend| frontend.can_evict(self.applied_ordinal))
+    }
     /// Releases this hidden pane's parser engine and published screen. The
     /// pane keeps its identity; the server journal rebuilds the screen when
     /// the pane is next displayed. Returns false when the parser still owes
     /// work that eviction would lose.
     pub(crate) fn evict_parser(&mut self) -> bool {
-        match &self.frontend {
-            Some(frontend)
-                if !frontend.is_confirmed_removed() && !frontend.has_suspended_output() => {}
-            _ => return false,
+        if !self.can_evict_parser() {
+            return false; // Never cancel admitted work to recover cache capacity.
         }
         if let Some(charge) = &self.snapshot.allocation_charge {
             charge.retire_live();
@@ -2214,6 +2319,7 @@ impl TerminalView {
         self.applied_ordinal = 0;
         *self.render_cache.get_mut() = None;
         self.admission_error = None;
+        self.admission_pressure = None;
         true
     }
     pub(crate) fn is_confirmed_removed(&self) -> bool {
@@ -2261,8 +2367,12 @@ impl TerminalView {
             }
         }
         self.snapshot = snapshot;
+        if let Some(frontend) = &self.frontend {
+            frontend.clear_progress_preview();
+        }
         *self.render_cache.get_mut() = None;
         self.admission_error = None;
+        self.admission_pressure = None;
     }
     fn command(&mut self, command: crate::terminal_parsing::PaneCommand) {
         if let Some(frontend) = &mut self.frontend {
@@ -2278,7 +2388,8 @@ impl TerminalView {
         if let Some(state) = &self.standalone {
             return state.with_screen(f);
         }
-        f(&self.snapshot.visible)
+        let snapshot = self.display_snapshot();
+        f(&snapshot.visible)
     }
     pub fn render_screen(&self, area: Rect, destination: &mut Buffer) {
         #[cfg(test)]
@@ -2289,15 +2400,16 @@ impl TerminalView {
         if area.is_empty() {
             return;
         }
+        let snapshot = self.display_snapshot();
         let mut cache = self.render_cache.borrow_mut();
         if cache
             .as_ref()
-            .is_none_or(|cache| cache.revision != self.snapshot.revision || cache.area != area)
+            .is_none_or(|cache| cache.revision != snapshot.revision || cache.area != area)
         {
             let mut buffer = Buffer::empty(area);
-            render_frozen_screen(&self.snapshot.visible, area, &mut buffer);
+            render_frozen_screen(&snapshot.visible, area, &mut buffer);
             *cache = Some(TerminalRenderCache {
-                revision: self.snapshot.revision,
+                revision: snapshot.revision,
                 area,
                 buffer,
             });
@@ -2611,6 +2723,62 @@ fn context_cost(snapshot: &TerminalSnapshot) -> Result<ilium_execution::JobCost,
 #[cfg(test)]
 mod search_origin_tests {
     use super::*;
+
+    #[test]
+    fn frozen_screen_rejects_zero_geometry_before_parser_construction() {
+        for (rows, cols) in [(0u16, 0u16), (0, 20), (3, 0)] {
+            let mut bytes = rows.to_le_bytes().to_vec();
+            bytes.extend_from_slice(&cols.to_le_bytes());
+            assert!(
+                PaintedTerminal::from_frozen_bytes(&bytes).is_err(),
+                "a corrupt frozen snapshot must not be normalized: {rows}x{cols}"
+            );
+        }
+    }
+
+    #[test]
+    fn frozen_screen_rejects_truncation_and_excessive_geometry() {
+        for length in 0..4 {
+            assert!(PaintedTerminal::from_frozen_bytes(&[1, 0, 1, 0][..length]).is_err());
+        }
+        for (rows, cols) in [(4097u16, 1u16), (1, 4097), (1024, 1024)] {
+            let mut bytes = rows.to_le_bytes().to_vec();
+            bytes.extend_from_slice(&cols.to_le_bytes());
+            assert!(
+                PaintedTerminal::from_frozen_bytes(&bytes).is_err(),
+                "{rows}x{cols}"
+            );
+        }
+    }
+
+    #[test]
+    fn frozen_screen_rejects_payloads_over_the_parser_state_budget() {
+        let mut bytes = vec![0; crate::terminal_parsing::MAX_STATE_BYTES + 1];
+        bytes[..2].copy_from_slice(&1u16.to_le_bytes());
+        bytes[2..4].copy_from_slice(&1u16.to_le_bytes());
+        assert!(PaintedTerminal::from_frozen_bytes(&bytes).is_err());
+    }
+
+    #[test]
+    fn frozen_screen_round_trip_preserves_exact_valid_geometry_and_contents() {
+        let mut bytes = 3u16.to_le_bytes().to_vec();
+        bytes.extend_from_slice(&17u16.to_le_bytes());
+        bytes.extend_from_slice(b"\x1b[31mexact\x1b[0m\r\nshape");
+        let original = PaintedTerminal::from_frozen_bytes(&bytes).unwrap();
+        let frozen = original.frozen_bytes();
+        assert_eq!(&frozen[..4], &bytes[..4]);
+        let restored = PaintedTerminal::from_frozen_bytes(&frozen).unwrap();
+        assert_eq!(restored.with_screen(|screen| screen.size()), (3, 17));
+        assert_eq!(
+            restored.with_screen(|screen| screen.contents()),
+            "exact\nshape"
+        );
+        assert_eq!(
+            restored.with_screen(|screen| screen.contents_formatted()),
+            original.with_screen(|screen| screen.contents_formatted())
+        );
+    }
+
     #[test]
     fn retained_search_journal_origin_survives_append_but_changes_on_trim_and_replay() {
         let mut view = TerminalView::with_scrollback_budget_mib(4, 40, 1);
@@ -2632,11 +2800,53 @@ mod search_origin_tests {
     fn scrollback_rows_shrink_with_width_and_wide_state_fits_engine_limit() {
         assert_eq!(render_scrollback_rows(80), RENDER_SCROLLBACK_ROWS);
         assert!(render_scrollback_rows(320) < render_scrollback_rows(200));
-        assert_eq!(render_scrollback_rows(4096), RENDER_SCROLLBACK_MIN_ROWS);
+        assert_eq!(render_scrollback_rows(4096), 255);
+        for columns in [80u16, 200, 320, 1024, 4096] {
+            let rows = render_scrollback_rows(columns);
+            let row_bytes = usize::from(columns) * 64 + 128;
+            assert!((RENDER_SCROLLBACK_MIN_ROWS..=RENDER_SCROLLBACK_ROWS).contains(&rows));
+            assert!(rows * row_bytes <= RENDER_SCROLLBACK_BUDGET_BYTES);
+        }
         let mut state = TerminalState::new(24, 80);
-        state.resize(24, 320);
-        let retained = state.retained_allocation_bytes();
-        assert!(retained < 128 * 1024 * 1024, "{retained}");
+        for columns in [320u16, 4096] {
+            assert!(crate::terminal_parsing::validate_geometry(24, columns).is_ok());
+            let peak = state.resize_peak_bytes(24, columns);
+            assert!(peak <= 128 * 1024 * 1024, "resize peak: {peak}");
+            state.resize(24, columns);
+            assert_eq!(state.with_screen(|screen| screen.size()), (24, columns));
+            let retained = state.retained_allocation_bytes();
+            assert!(retained < 128 * 1024 * 1024, "retained: {retained}");
+        }
+    }
+
+    #[test]
+    fn widening_rebuild_replaces_private_osc_accounting_with_retained_journal() {
+        let mut state = TerminalState::with_scrollback_budget_mib(3, 80, 1);
+        let mut old = b"\x1b]0;".to_vec();
+        old.extend(std::iter::repeat_n(b'x', 256 * 1024));
+        old.push(7);
+        state.feed(&old);
+        let old_scratch = state.osc_allocation.retained_bytes();
+        state.feed(&vec![0; 1024 * 1024]);
+        assert_eq!(state.history_retained_len, 1024 * 1024);
+        let retained = b"\x1b]0;fresh";
+        state.feed(retained);
+        let journal = state.collect_retained_history();
+        assert!(journal.ends_with(retained));
+        let expected = OscAllocation::default().advance(&journal);
+        assert!(expected.active);
+        assert_eq!(expected.highwater, 6);
+        assert_eq!(state.osc_allocation.retained_bytes(), old_scratch);
+        assert!(old_scratch > expected.retained_bytes());
+
+        state.resize(3, 320);
+        assert_eq!(state.osc_allocation.escaped, expected.escaped);
+        assert_eq!(state.osc_allocation.active, expected.active);
+        assert_eq!(state.osc_allocation.length, expected.length);
+        assert_eq!(state.osc_allocation.highwater, expected.highwater);
+        state.feed(b"\x07visible");
+        assert!(!state.osc_allocation.active);
+        assert_eq!(state.with_screen(|screen| screen.contents()), "visible");
     }
 
     #[test]

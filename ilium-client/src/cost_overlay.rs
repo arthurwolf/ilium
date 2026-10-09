@@ -10,7 +10,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear};
+use ratatui::widgets::Clear;
 use ratatui::Frame;
 use unicode_width::UnicodeWidthStr;
 
@@ -362,10 +362,7 @@ pub fn draw_detail_card(
         .max(bounds.y);
     let area = Rect::new(x, y, width, height);
     frame.render_widget(Clear, area);
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(theme::border_style(true))
-        .title(format!(" {title} "));
+    let block = theme::block(true).title(theme::chrome_title(title));
     let inner = block.inner(area);
     frame.render_widget(block, area);
     for (offset, line) in lines.iter().take(usize::from(inner.height)).enumerate() {

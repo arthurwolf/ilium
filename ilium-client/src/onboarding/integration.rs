@@ -32,6 +32,7 @@ pub fn open(app: &mut App, from_explicit_entry: bool) {
         app.onboarding_progress.wizard.step = Step::AiChoice;
     }
     app.onboarding = Some(step_ui(app));
+    app.request_sound_studio_preview();
     persist(app);
 }
 
@@ -544,6 +545,7 @@ fn activate(app: &mut App, hit: Hit) {
     }
     if step != app.onboarding_progress.wizard.step && app.onboarding.is_some() {
         app.onboarding = Some(step_ui(app));
+        app.request_sound_studio_preview();
     }
     persist(app);
 }
@@ -1069,13 +1071,22 @@ pub fn handle_mouse(app: &mut App, mouse: MouseEvent) -> bool {
                     );
                     None
                 }
-                MouseEventKind::Down(MouseButton::Left) => super::voice_ui::hit(
-                    geometry.content,
-                    &ui.voice_ui,
-                    &ui.voice_state,
-                    &app.voice_settings,
-                    position,
-                ),
+                MouseEventKind::Down(MouseButton::Left) => {
+                    if ui
+                        .voice_ui
+                        .scroll_to_track(geometry.content, &ui.voice_state, position)
+                    {
+                        None
+                    } else {
+                        super::voice_ui::hit(
+                            geometry.content,
+                            &ui.voice_ui,
+                            &ui.voice_state,
+                            &app.voice_settings,
+                            position,
+                        )
+                    }
+                }
                 MouseEventKind::ScrollUp => {
                     ui.voice_ui
                         .scroll_at(geometry.content, &ui.voice_state, -3, position);
@@ -1339,6 +1350,7 @@ impl App {
             studio.draft = settings.clone();
             studio.changed();
         }
+        self.request_sound_studio_preview();
         self.apply_sound_settings(settings.clone());
         self.queue_request(ilium_ipc::ClientRequest::UpdateSoundSettings { settings });
         host.begin_save(token);
@@ -1382,6 +1394,7 @@ fn apply_studio_action(app: &mut App, action: super::studio_ui::StudioAction) {
     }
     studio.changed();
     let settings = studio.draft.clone();
+    app.request_sound_studio_preview();
     app.status_message = Some("Sound design updated".into());
     app.apply_and_persist_sound_settings(settings);
 }
@@ -1833,16 +1846,15 @@ mod tests {
         number.draft.cursor = 4;
         app.finish_value_dialog(host, DialogOutcome::CommitNumber("0731".into()));
         assert_eq!(app.sound_settings.design.pitch_hz, 731);
-        assert_eq!(
-            app.onboarding
-                .as_ref()
-                .unwrap()
-                .studio
-                .as_ref()
-                .unwrap()
-                .preview,
-            ilium_sound::waveform_preview(&app.sound_settings.design, 120)
-        );
+        assert!(app
+            .onboarding
+            .as_ref()
+            .unwrap()
+            .studio
+            .as_ref()
+            .unwrap()
+            .preview_columns()
+            .is_empty());
         assert!(
             matches!(app.take_outbound_requests().as_slice(), [ClientRequest::UpdateSoundSettings { settings }] if settings.design.pitch_hz == 731)
         );
@@ -2057,7 +2069,11 @@ mod tests {
                     };
                     let g = value.control(rect, &app).geometry();
                     let symbols = if value == VoiceValue::Volume {
-                        [(g.previous, "−"), (g.next, "+"), (g.open, "*")]
+                        [
+                            (g.previous, crate::value_control::NUMBER_DECREMENT_GLYPH),
+                            (g.next, crate::value_control::NUMBER_INCREMENT_GLYPH),
+                            (g.open, "*"),
+                        ]
                     } else {
                         [(g.previous, "←"), (g.open, "+"), (g.next, "→")]
                     };

@@ -660,10 +660,19 @@ impl StatsAccumulator {
             + self.codex_spend.len()
             + self.codex_quota_spend.len();
         let retained = self.retained_bytes();
-        if records > 65_536 || self.extra_offsets.len() > 4096 || retained > 8 * 1024 * 1024 {
-            return Err(std::io::Error::other(
-                "Statistics retained record/byte bound reached; totals incomplete",
-            ));
+        const RECORD_LIMIT: usize = 65_536;
+        const RETAINED_BYTE_LIMIT: usize = 8 * 1024 * 1024;
+        if records > RECORD_LIMIT {
+            return Err(std::io::Error::other(format!(
+                "Statistics retained record limit reached: observed {records}, limit {RECORD_LIMIT}, {} over; totals incomplete",
+                records.saturating_sub(RECORD_LIMIT)
+            )));
+        }
+        if retained > RETAINED_BYTE_LIMIT {
+            return Err(std::io::Error::other(format!(
+                "Statistics retained byte limit reached: observed {retained}, limit {RETAINED_BYTE_LIMIT}, {} over; totals incomplete",
+                retained.saturating_sub(RETAINED_BYTE_LIMIT)
+            )));
         }
         Ok(())
     }
@@ -679,10 +688,13 @@ impl StatsAccumulator {
                 .iter()
                 .position(|byte| *byte == b'\n')
                 .map_or(buffer.len(), |index| index + 1);
-            if line.len().saturating_add(count) > MAX_LINE_BYTES {
-                return Err(std::io::Error::other(
-                    "Statistics transcript line exceeds 4 MiB; totals incomplete",
-                ));
+            let observed = line.len().saturating_add(count);
+            if observed > MAX_LINE_BYTES {
+                return Err(std::io::Error::other(format!(
+                    "Statistics transcript line size limit reached: used {} bytes, next chunk requires {count}, limit {MAX_LINE_BYTES}, observed at least {observed} (at least {} over); totals incomplete",
+                    line.len(),
+                    observed.saturating_sub(MAX_LINE_BYTES)
+                )));
             }
             line.extend_from_slice(&buffer[..count]);
             reader.consume(count);
@@ -1774,7 +1786,9 @@ mod tests {
     fn progress_outcomes_are_read_from_delivered_monitor_text() {
         use super::{parse_progress_outcome as parse, ProgressOutcome::*};
         assert_eq!(
-            parse("Ilium progress monitor 7 reports that job completed successfully.\nFinal progress: 100%."),
+            parse(
+                "Ilium progress monitor 7 reports that job completed successfully.\nFinal progress: 100%."
+            ),
             Some((7, Success))
         );
         assert_eq!(
@@ -2147,6 +2161,56 @@ mod tests {
         assert_eq!(accumulator.offset(), 0);
         accumulator.ingest_file(&path, |_, _, _| {}).unwrap();
         assert_eq!(accumulator.offset(), 3);
+    }
+
+    #[test]
+    fn main_transcript_reads_are_bounded_per_pass_and_resume_without_losing_lines() {
+        use super::StatsAccumulator;
+        use ilium_core::AgentClass;
+        use std::io::Write;
+
+        const PASS_BYTES: u64 = 16 * 1024 * 1024;
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("large-session.jsonl");
+        let chunk = b"{}\n".repeat(32 * 1024);
+        let mut file = std::fs::File::create(&path).unwrap();
+        for _ in 0..(2 * PASS_BYTES as usize / chunk.len()) {
+            file.write_all(&chunk).unwrap();
+        }
+        drop(file);
+
+        let mut accumulator = StatsAccumulator::new(AgentClass::Codex);
+        accumulator.ingest_file(&path, |_, _, _| {}).unwrap();
+        assert_eq!(accumulator.offset(), PASS_BYTES);
+
+        accumulator.ingest_file(&path, |_, _, _| {}).unwrap();
+        let expected_offset = 2 * PASS_BYTES;
+        assert_eq!(accumulator.offset(), expected_offset);
+    }
+
+    #[test]
+    fn sidecar_transcript_reads_are_bounded_per_pass_and_resume_without_losing_lines() {
+        use super::StatsAccumulator;
+        use ilium_core::AgentClass;
+        use std::io::Write;
+
+        const PASS_BYTES: u64 = 16 * 1024 * 1024;
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("large-sidecar.jsonl");
+        let chunk = b"{}\n".repeat(32 * 1024);
+        let mut file = std::fs::File::create(&path).unwrap();
+        for _ in 0..(2 * PASS_BYTES as usize / chunk.len()) {
+            file.write_all(&chunk).unwrap();
+        }
+        drop(file);
+
+        let mut accumulator = StatsAccumulator::new(AgentClass::Claude);
+        accumulator.ingest_extra_file(&path).unwrap();
+        assert_eq!(accumulator.extra_offsets.get(&path), Some(&PASS_BYTES));
+
+        accumulator.ingest_extra_file(&path).unwrap();
+        let expected_offset = 2 * PASS_BYTES;
+        assert_eq!(accumulator.extra_offsets.get(&path), Some(&expected_offset));
     }
 
     #[test]

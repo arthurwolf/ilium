@@ -9,7 +9,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Wrap},
+    widgets::{Paragraph, Wrap},
     Frame,
 };
 
@@ -787,9 +787,8 @@ fn render_demo(
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(35), Constraint::Percentage(65)])
         .split(area);
-    let tree_block = Block::default()
-        .borders(Borders::ALL)
-        .title("Demo tree")
+    let tree_block = crate::theme::block(state.tree_focus)
+        .title(crate::theme::chrome_title("Demo tree"))
         .border_style(Style::default().fg(if state.tree_focus { ACCENT } else { MUTED }));
     let tree_inner = tree_block.inner(columns[0]);
     let mut lines = Vec::new();
@@ -861,9 +860,8 @@ fn render_demo(
             .map(|node| node.name.as_str())
             .unwrap_or("Demo");
         frame.render_widget(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(name)
+            crate::theme::block(selected)
+                .title(crate::theme::chrome_title(name))
                 .border_style(Style::default().fg(color)),
             viewport.outer_area,
         );

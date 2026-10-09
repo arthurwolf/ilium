@@ -362,10 +362,15 @@ pub(crate) fn draw_save_error(frame: &mut ratatui::Frame<'_>, app: &crate::app::
     };
     let area = layout(frame.area()).preview;
     frame.render_widget(ratatui::widgets::Clear, area);
-    let text = format!("Draft retained. Retry after fixing storage; Esc/reopen to review a conflicting rule.\n{error}");
+    let text = format!(
+        "Draft retained. Retry after fixing storage; Esc/reopen to review a conflicting rule.\n{error}"
+    );
     frame.render_widget(
         ratatui::widgets::Paragraph::new(text)
-            .block(ratatui::widgets::Block::bordered().title("Text Trigger not saved"))
+            .block(
+                crate::theme::block(true)
+                    .title(crate::theme::chrome_title("Text Trigger not saved")),
+            )
             .wrap(ratatui::widgets::Wrap { trim: false }),
         area,
     );
@@ -439,6 +444,48 @@ impl TextTriggerDialogState {
 #[cfg(test)]
 mod delay_tests {
     use super::*;
+
+    #[test]
+    fn target_selector_paints_and_hits_both_directions_and_catalogue() {
+        use crate::value_control::{ControlAction, PointerButton};
+        use ratatui::{backend::TestBackend, Terminal};
+
+        let state = TextTriggerDialogState::new(None);
+        let area = Rect::new(0, 0, 100, 30);
+        let control = target_control(area, &state);
+        let geometry = control.geometry();
+        let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
+        terminal
+            .draw(|frame| control.render(frame, crate::value_control::ControlStyles::default()))
+            .unwrap();
+
+        for (rectangle, glyph) in [
+            (geometry.previous, "←"),
+            (geometry.open, "+"),
+            (geometry.next, "→"),
+        ] {
+            assert_eq!(
+                terminal.backend().buffer()[(rectangle.x, rectangle.y)].symbol(),
+                glyph
+            );
+        }
+        let value = ratatui::layout::Position::new(geometry.value.x, geometry.value.y);
+        assert_eq!(
+            control.hit(value, PointerButton::Left),
+            Some(ControlAction::NextChoice)
+        );
+        assert_eq!(
+            control.hit(value, PointerButton::Right),
+            Some(ControlAction::PreviousChoice)
+        );
+        assert_eq!(
+            control.hit(
+                ratatui::layout::Position::new(geometry.open.x, geometry.open.y),
+                PointerButton::Left
+            ),
+            Some(ControlAction::OpenChoices)
+        );
+    }
 
     #[test]
     fn a_new_trigger_starts_at_sixty_seconds() {

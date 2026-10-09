@@ -45,6 +45,7 @@ fn isolated_bank() -> (ClientExecution, QuotaGroup) {
             execution,
             general,
             location_search,
+            terminal_storage: terminal_storage_quota(),
         },
         quota,
     )
@@ -67,6 +68,9 @@ impl Drop for ReleaseGate {
 #[tokio::test]
 async fn blocked_shutdown_returns_inspectable_custody_instead_of_only_text() {
     let (execution, quota) = isolated_bank();
+    assert!(execution
+        .terminal_storage()
+        .shares_root(&execution.terminal_storage()));
     let client = execution.general.clone();
     let gate = ReleaseGate::new();
     let worker_gate = Arc::clone(&gate.0);

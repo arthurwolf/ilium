@@ -4,7 +4,7 @@
     "title": "Display mode",
     "explanation": "“Show objective and current-activity statuses separately in Normal mode, or emphasize the highest-priority signal in Attention mode while keeping agent identity separate.”",
     "specimen": "Use a paused-goal fixture that is also waiting for user approval:\n\nNORMAL\nObjective    Current activity   Identity   Title\n[P] paused   [?] approval       Codex      parser\n\nATTENTION\nSelected signal                Identity   Title\n[?] approval                   Codex      parser\n\nThe paused goal still exists; it is not cleared.\n\nThese are semantic enlargements of the actual tree row, not additional permanent columns. Add a compact priority caption:\n\napproval > failed monitor > task error\n> non-active goal > unread successful task\n> unread completed turn",
-    "states": "Normal and Attention, with identical underlying evidence. Attention changes which signal is presented, not the goal, approval state, identity, or title.",
+    "states": "Normal and Attention, with identical underlying evidence. Attention changes which signal is presented, not the goal, approval state, identity, or title. By default, Progress reports in Attention is Off: approval, stopped goals and unread agent turns take priority, followed by the selected running indicator. The failure-first caption applies only when Progress reports in Attention is On.",
     "motion": "None; paired stills make suppression versus deletion clear.",
     "caveat": "Use the actual selector for ties and cases without the listed priority signals; those fallback details are not supplied. On narrow terminals, stack the two mode specimens rather than merging the independent regions.",
     "frames": [
@@ -275,6 +275,19 @@
     "frames": [
       "Done 100%\nFooter visible before the configured deadline.",
       "Deadline reached\nFooter hidden; terminal rows reclaimed. Result retained."
+    ]
+  },
+  {
+    "id": "AM-24",
+    "title": "Use model icons in the tree",
+    "explanation": "When enabled, an agent row uses the toolbar glyph for the latest model recorded in that session. Unknown or unavailable model evidence keeps the configured provider icon.",
+    "specimen": "Two Codex sessions with recorded models:\n\n🌞  Sol session\n⭐  Astra session\n\nWith this setting off, both rows use the configured Codex icon.",
+    "states": "On uses a recognized recorded model glyph when agent identification is set to Selected icon. Off keeps provider icons. Full name, Single letter, and Nothing continue to control the agent identifier as before.",
+    "motion": "No animation is added. The glyph changes after a session records a model update.",
+    "caveat": "A transcript reports the latest model used in a recorded turn; an idle model-picker change may not appear until the next turn. Missing, unsupported, or unreadable evidence falls back to the provider icon. This feature does not enable cost collection.",
+    "frames": [
+      "Provider icons:\n🐢 Codex  first session\n🐢 Codex  second session",
+      "Recorded model icons:\n🌞 Sol  first session\n⭐ Astra  second session"
     ]
   },
   {
@@ -3484,6 +3497,20 @@
     ]
   },
   {
+    "id": "TERM-03",
+    "title": "Parser pool",
+    "explanation": "Choose Off (default, 0) to keep initialized hidden terminal parsers, or enable a finite pool that can reclaim eligible hidden engines.",
+    "specimen": "Two labeled stills: Parser pool Off (default), with retained hidden panes and higher RAM use; Parser pool On: 1024 MiB, with an eligible hidden pane evicted and replayed when revisited.",
+    "states": "Off imposes no aggregate parser memory cap, so initialized hidden panes and snapshots remain available at higher RAM use. On admits engine state against the chosen budget and snapshots against that budget plus 256 MiB of pin and replacement headroom. Changes apply live; explicit positive saved values are preserved.",
+    "motion": "static.",
+    "caveat": "Displayed panes and admitted unfinished work are protected from eviction. Held generations remain charged until their last owner releases them, so finite pooling can delay updates. Per-pane limits, bounded pins and captures, and command queues still apply. Off can use substantially more RAM as panes accumulate; this setting is not a total process RAM cap. No measured latency or RAM claim is implied.",
+    "frames": [
+      "Off (default, 0): initialized hidden panes retain their parsed state for faster revisits; RAM use grows with retained panes and snapshots.",
+      "On: 1024 MiB: engine-state budget 1024 MiB; snapshot allowance 1280 MiB. Only an eligible hidden parser may be evicted; displayed panes stay.",
+      "On with a retained old generation: preserve the last complete picture and show status in unused terminal rows. Actual release, a larger budget, or Off can restore pool admission; fixed per-pane limits remain."
+    ]
+  },
+  {
     "id": "TEXTTRIGGER-01",
     "title": "Text triggers",
     "explanation": "“An enabled regex can match a completed output line and send a configured literal message plus Enter to its selected target after the rule's delay (60 seconds by default, 0 sends immediately).”",
@@ -4456,6 +4483,19 @@
     "frames": [
       "Scene ‹ Hidden wheel ›\nEarly phase",
       "Scene ‹ Hidden wheel ›\nLater phase"
+    ]
+  },
+  {
+    "id": "AM-25",
+    "title": "Progress reports in Attention",
+    "explanation": "Choose whether monitored task reports can replace the agent activity icon in Attention mode. Off is the default: a failed progress report cannot hide a working agent.",
+    "specimen": "Synthetic working agent with a failed task report:\nOff: working indicator\nOn: task failed icon",
+    "states": "Off excludes progress success, task failures and monitor-health failures from the Attention tree icon. On restores approval, monitor failure, task error, goal and unread-result priority.",
+    "motion": "The chosen running indicator remains visible when no agent attention signal takes priority.",
+    "caveat": "Normal mode, progress footers, stored reports, acknowledgements and notifications are unchanged. Approval and stopped goals still take priority over running.",
+    "frames": [
+      "Off: Working agent with failed task → working indicator",
+      "On: Working agent with failed task → failed task icon"
     ]
   }
 ]

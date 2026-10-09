@@ -1863,7 +1863,10 @@ pub fn user_prompt(snapshot: &SmartCopySnapshot) -> Result<String, serde_json::E
         screen: &snapshot.lines,
         already_detected,
     };
-    Ok(ilium_prompts::render_value("naming/smart_copy/frozen-terminal-and-program-detected-selections-follow-as-json-data-cell-columns-in-a", &serde_json::json!({"v0": (serde_json::to_string(&input)?).to_string()})))
+    Ok(ilium_prompts::render_value(
+        "naming/smart_copy/frozen-terminal-and-program-detected-selections-follow-as-json-data-cell-columns-in-a",
+        &serde_json::json!({"v0": (serde_json::to_string(&input)?).to_string()}),
+    ))
 }
 
 #[cfg(test)]

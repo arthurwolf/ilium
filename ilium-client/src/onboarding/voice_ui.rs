@@ -8,7 +8,7 @@ use ratatui::{
     layout::{Position, Rect},
     style::{Color, Style},
     text::{Line, Span},
-    widgets::{Block, Paragraph, Wrap},
+    widgets::{Block, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap},
     Frame,
 };
 use std::borrow::Cow;
@@ -19,6 +19,8 @@ const INK: Color = Color::Rgb(224, 231, 244);
 const MUTED: Color = Color::Rgb(144, 157, 179);
 const ACCENT: Color = Color::Rgb(242, 188, 105);
 const SUCCESS: Color = Color::Rgb(116, 210, 194);
+const CONFIG_CARD_HEIGHT: u16 = 4;
+const CONFIG_CARD_STRIDE: u16 = CONFIG_CARD_HEIGHT + 1;
 
 pub const CONFIG_ROWS: [VoiceRow; 11] = [
     VoiceRow::Enabled,
@@ -65,8 +67,8 @@ impl VoiceUiState {
     pub fn reveal_focus(&mut self, area: Rect, state: &VoiceDemoState) {
         let geometry = Geometry::new(area, state);
         if self.focus < CONFIG_ROWS.len() {
-            let start = self.focus as u16 * 2;
-            let end = start + 2;
+            let start = self.focus as u16 * CONFIG_CARD_STRIDE;
+            let end = start + CONFIG_CARD_HEIGHT;
             if start < self.scroll {
                 self.scroll = start;
             } else if end > self.scroll.saturating_add(geometry.body.height) {
@@ -98,12 +100,58 @@ impl VoiceUiState {
         position: Position,
     ) {
         let geometry = Geometry::new(area, state);
-        if geometry.scene.is_some_and(|scene| scene.contains(position)) {
+        let over_scene = geometry.scene.is_some_and(|scene| {
+            scene.contains(position)
+                || (position.x == scene.right()
+                    && position.y >= scene.y
+                    && position.y < scene.bottom())
+        });
+        if over_scene {
             self.scene_scroll =
                 adjusted_scroll(self.scene_scroll, amount, geometry.max_scene_scroll());
         } else {
             self.scroll = adjusted_scroll(self.scroll, amount, geometry.max_scroll());
         }
+    }
+
+    /// Clicking either visible overflow track moves only that pane's viewport.
+    pub fn scroll_to_track(
+        &mut self,
+        area: Rect,
+        state: &VoiceDemoState,
+        position: Position,
+    ) -> bool {
+        let geometry = Geometry::new(area, state);
+        if let Some(scene) = geometry.scene {
+            if geometry.max_scene_scroll() > 0
+                && position.x == scene.right()
+                && position.y >= scene.y
+                && position.y < scene.bottom()
+            {
+                self.scene_scroll = scroll_position_for_track(
+                    position.y,
+                    scene.y,
+                    scene.height,
+                    geometry.max_scene_scroll(),
+                );
+                return true;
+            }
+        }
+        if area.width > 1
+            && geometry.max_scroll() > 0
+            && position.x == geometry.body.right()
+            && position.y >= geometry.body.y
+            && position.y < geometry.body.bottom()
+        {
+            self.scroll = scroll_position_for_track(
+                position.y,
+                geometry.body.y,
+                geometry.body.height,
+                geometry.max_scroll(),
+            );
+            return true;
+        }
+        false
     }
 
     pub fn focused_action(
@@ -159,8 +207,11 @@ impl Geometry {
         let scene_height = scene_paragraph(state)
             .line_count(scene_width)
             .min(usize::from(u16::MAX)) as u16;
-        let content_height =
-            (CONFIG_ROWS.len() as u16 * 2).saturating_add(if wide { 0 } else { scene_height });
+        let content_height = if wide {
+            ((CONFIG_ROWS.len() as u16 - 1) * CONFIG_CARD_STRIDE) + CONFIG_CARD_HEIGHT
+        } else {
+            CONFIG_ROWS.len() as u16 * CONFIG_CARD_STRIDE + scene_height
+        };
         Self {
             body,
             controls,
@@ -180,15 +231,15 @@ impl Geometry {
     }
 
     fn config_rect(&self, index: usize, scroll: u16) -> Option<Rect> {
-        let offset = (index as u16 * 2).checked_sub(scroll)?;
-        if offset + 2 > self.body.height {
+        let offset = (index as u16 * CONFIG_CARD_STRIDE).checked_sub(scroll)?;
+        if offset + CONFIG_CARD_HEIGHT > self.body.height {
             return None;
         }
         Some(Rect::new(
             self.body.x,
             self.body.y + offset,
             self.body.width,
-            2,
+            CONFIG_CARD_HEIGHT,
         ))
     }
 
@@ -196,7 +247,7 @@ impl Geometry {
         if let Some(scene) = self.scene {
             return Some((scene, scene_scroll.min(self.max_scene_scroll())));
         }
-        let start = CONFIG_ROWS.len() as u16 * 2;
+        let start = CONFIG_ROWS.len() as u16 * CONFIG_CARD_STRIDE;
         let offset = start.saturating_sub(scroll);
         let clipped = scroll.saturating_sub(start);
         if offset >= self.body.height {
@@ -391,27 +442,62 @@ pub fn render(
             continue;
         };
         let style = target_style(index, ui, true);
-        frame.render_widget(Block::default().style(style), rect);
-        frame.render_widget(
-            Paragraph::new(format!(" {label}")).style(style),
-            Rect::new(rect.x, rect.y, rect.width, 1),
-        );
+        let focused = index == ui.focus || ui.hovered == Some(index);
+        let block = crate::theme::block(focused)
+            .title(crate::theme::chrome_title(label))
+            .style(style);
+        let value_area = block.inner(rect);
+        frame.render_widget(block, rect);
         frame.render_widget(
             Paragraph::new(Line::from(vec![
-                Span::raw("   "),
+                Span::raw("‹ "),
                 Span::raw(value),
-                Span::raw("  ›"),
+                Span::raw(" ›"),
             ]))
-            .style(if index == ui.focus || ui.hovered == Some(index) {
-                style
-            } else {
-                style.fg(MUTED)
-            }),
-            Rect::new(rect.x, rect.y + 1, rect.width, 1),
+            .style(if focused { style } else { style.fg(MUTED) }),
+            value_area,
+        );
+    }
+    if area.width > 1 && geometry.max_scroll() > 0 && geometry.body.height > 0 {
+        let scrollbar_area = Rect::new(
+            geometry.body.right(),
+            geometry.body.y,
+            1,
+            geometry.body.height,
+        );
+        let mut scrollbar_state = ScrollbarState::new(geometry.content_height as usize)
+            .position(usize::from(scroll))
+            .viewport_content_length(usize::from(geometry.body.height));
+        frame.render_stateful_widget(
+            Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                .begin_symbol(None)
+                .end_symbol(None)
+                .track_symbol(Some("│"))
+                .style(crate::theme::border_style(false)),
+            scrollbar_area,
+            &mut scrollbar_state,
         );
     }
     if let Some((scene, clipped)) = geometry.scene_rect(scroll, ui.scene_scroll) {
         render_scene(frame, scene, state, clipped);
+    }
+    if let Some(scene) = geometry.scene {
+        let maximum = geometry.max_scene_scroll();
+        if area.width > 1 && maximum > 0 && scene.height > 0 {
+            let scrollbar_area = Rect::new(scene.right(), scene.y, 1, scene.height);
+            let mut scrollbar_state = ScrollbarState::new(geometry.scene_height as usize)
+                .position(usize::from(ui.scene_scroll.min(maximum)))
+                .viewport_content_length(usize::from(scene.height));
+            frame.render_stateful_widget(
+                Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                    .begin_symbol(None)
+                    .end_symbol(None)
+                    .track_symbol(Some("│"))
+                    .style(crate::theme::border_style(false)),
+                scrollbar_area,
+                &mut scrollbar_state,
+            );
+        }
     }
     for (index, rect) in geometry.controls.iter().enumerate() {
         let focus = CONFIG_ROWS.len() + index;
@@ -471,6 +557,15 @@ fn adjusted_scroll(current: u16, amount: i32, maximum: u16) -> u16 {
     i32::from(current)
         .saturating_add(amount)
         .clamp(0, i32::from(maximum)) as u16
+}
+
+fn scroll_position_for_track(position: u16, top: u16, height: u16, maximum: u16) -> u16 {
+    let travel = height.saturating_sub(1);
+    if travel == 0 {
+        return 0;
+    }
+    let offset = position.saturating_sub(top).min(travel);
+    (u32::from(offset) * u32::from(maximum) / u32::from(travel)) as u16
 }
 
 fn render_scene(frame: &mut Frame, rect: Rect, state: &VoiceDemoState, clipped: u16) {
@@ -611,6 +706,71 @@ mod tests {
             assert!(!text.contains(&settings.api_key));
             assert!(text.contains("Test voice"));
         }
+    }
+
+    #[test]
+    fn voice_configuration_cards_use_rounded_frames_at_compact_and_regular_sizes() {
+        let settings = VoiceSettings::default();
+        let state = VoiceDemoState::default();
+        for (width, height) in [(40, 16), (118, 33)] {
+            let area = Rect::new(0, 0, width, height);
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal
+                .draw(|frame| render(frame, area, &settings, &state, &VoiceUiState::default()))
+                .unwrap();
+
+            let geometry = Geometry::new(area, &state);
+            let first_card = geometry.config_rect(0, 0).unwrap();
+            let second_card = geometry.config_rect(1, 0).unwrap();
+            let buffer = terminal.backend().buffer();
+            assert!(
+                first_card.height >= 4,
+                "card too compressed at {width}x{height}"
+            );
+            assert_eq!(buffer[(first_card.x, first_card.y)].symbol(), "╭");
+            assert_eq!(buffer[(first_card.right() - 1, first_card.y)].symbol(), "╮");
+            assert_eq!(
+                buffer[(first_card.x, first_card.bottom() - 1)].symbol(),
+                "╰"
+            );
+            assert_eq!(
+                buffer[(first_card.right() - 1, first_card.bottom() - 1)].symbol(),
+                "╯"
+            );
+            assert!(
+                first_card.bottom() < second_card.y,
+                "configuration cards need a breathing row at {width}x{height}"
+            );
+            crate::ui_capture::save(&format!("voice-settings-cards-{width}x{height}"), &terminal);
+        }
+    }
+
+    #[test]
+    fn voice_studio_shows_independent_scrollbars_for_settings_and_transcript_overflow() {
+        let area = Rect::new(0, 0, 120, 16);
+        let settings = VoiceSettings::default();
+        let state = VoiceDemoState {
+            assistant_transcript: "A long transcript keeps the reading panel scrollable. "
+                .repeat(48),
+            ..VoiceDemoState::default()
+        };
+        let ui = VoiceUiState::default();
+        let geometry = Geometry::new(area, &state);
+        let scene = geometry.scene.expect("wide layout has a reading panel");
+        assert!(geometry.max_scroll() > 0);
+        assert!(geometry.max_scene_scroll() > 0);
+
+        let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
+        terminal
+            .draw(|frame| render(frame, area, &settings, &state, &ui))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let settings_bar_x = geometry.body.right();
+        let transcript_bar_x = scene.right();
+        assert!((geometry.body.y..geometry.body.bottom())
+            .any(|y| buffer[(settings_bar_x, y)].symbol() != " "));
+        assert!((scene.y..scene.bottom()).any(|y| buffer[(transcript_bar_x, y)].symbol() != " "));
+        crate::ui_capture::save("voice-studio-dual-scrollbars-120x16", &terminal);
     }
 
     #[test]
@@ -760,5 +920,38 @@ mod tests {
             ),
             Some(0)
         );
+    }
+
+    #[test]
+    fn wide_scrollbar_tracks_seek_only_their_own_pane() {
+        let area = Rect::new(0, 0, 120, 16);
+        let state = VoiceDemoState {
+            assistant_transcript: "long response ".repeat(160).into(),
+            ..VoiceDemoState::default()
+        };
+        let geometry = Geometry::new(area, &state);
+        let scene = geometry.scene.expect("wide layout has a reading panel");
+        let mut ui = VoiceUiState::default();
+
+        assert!(ui.scroll_to_track(
+            area,
+            &state,
+            Position::new(scene.right(), scene.bottom() - 1)
+        ));
+        assert_eq!(ui.scene_scroll, geometry.max_scene_scroll());
+        assert_eq!(ui.scroll, 0);
+
+        assert!(ui.scroll_to_track(
+            area,
+            &state,
+            Position::new(geometry.body.right(), geometry.body.bottom() - 1)
+        ));
+        assert_eq!(ui.scroll, geometry.max_scroll());
+        let settings_offset = ui.scroll;
+
+        ui.scroll_at(area, &state, -1, Position::new(scene.right(), scene.y));
+        assert!(ui.scene_scroll < geometry.max_scene_scroll());
+        assert_eq!(ui.scroll, settings_offset);
+        assert!(!ui.scroll_to_track(area, &state, Position::new(area.x, area.y)));
     }
 }

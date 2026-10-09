@@ -471,6 +471,7 @@ impl ValueDialogHost {
                         | crate::value_settings_choice::SettingsChoice::KiloModel
                         | crate::value_settings_choice::SettingsChoice::OllamaModel
                         | crate::value_settings_choice::SettingsChoice::OpenAiModel
+                        | crate::value_settings_choice::SettingsChoice::AnthropicModel
                 )
                 .then_some(app.onboarding_revision),
             },

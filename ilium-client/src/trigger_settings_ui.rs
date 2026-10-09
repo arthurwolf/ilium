@@ -7,10 +7,10 @@
 //! behavior cannot drift between presentation and interaction.
 
 use ratatui::buffer::CellDiffOption;
-use ratatui::layout::{Alignment, Position, Rect};
+use ratatui::layout::{Position, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Paragraph};
+use ratatui::widgets::{Block, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState};
 use ratatui::Frame;
 use unicode_width::UnicodeWidthStr;
 
@@ -21,6 +21,7 @@ use crate::trigger_settings::{TriggerAction, TriggerEvent};
 
 const DOCUMENT_INSET: u16 = 2;
 const EVENT_SPACING: u16 = 1;
+const EVENT_FRAME_WIDTH: u16 = 2;
 
 /// One action chip's exact document-space terminal-cell rectangle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,18 +64,18 @@ pub fn render(
     );
     let total_lines = document.lines.len();
     frame.render_widget(Paragraph::new(document.lines).scroll((scroll, 0)), area);
-    if total_lines > usize::from(area.height) {
-        let visible_start = usize::from(scroll).saturating_add(1);
-        let visible_end = usize::from(scroll)
-            .saturating_add(usize::from(area.height))
-            .min(total_lines);
-        frame.render_widget(
-            Paragraph::new(Span::styled(
-                format!("{visible_start}–{visible_end} / {total_lines}"),
-                Style::new().add_modifier(Modifier::DIM),
-            ))
-            .alignment(Alignment::Right),
-            Rect::new(area.x, area.y, area.width.saturating_sub(1), 1),
+    if total_lines > usize::from(area.height) && area.width >= 2 && area.height > 0 {
+        let mut state = ScrollbarState::new(total_lines)
+            .position(usize::from(scroll))
+            .viewport_content_length(usize::from(area.height));
+        frame.render_stateful_widget(
+            Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                .begin_symbol(None)
+                .end_symbol(None)
+                .track_symbol(Some("│"))
+                .style(theme::border_style(false)),
+            Rect::new(area.right(), area.y, 1, area.height),
+            &mut state,
         );
     }
     force_repaint_safe_diff(frame.buffer_mut(), area);
@@ -198,6 +199,14 @@ pub fn build_document(
 
     for (event_index, event) in TriggerEvent::ALL.into_iter().enumerate() {
         let start_row = lines.len() as u16;
+        let has_frame = usable_width >= EVENT_FRAME_WIDTH + 1;
+        let inner_width = if has_frame {
+            usable_width - EVENT_FRAME_WIDTH
+        } else {
+            usable_width
+        };
+        let mut event_lines = Vec::new();
+        let mut event_chips = Vec::new();
         let selected = event_index == selected_event;
         let heading_style = if selected {
             Style::new()
@@ -215,33 +224,33 @@ pub fn build_document(
                 Style::new().fg(theme::border_style(false).fg.unwrap_or_default()),
             ),
         ]);
-        if heading.width() <= usize::from(usable_width) {
-            lines.push(heading);
+        if heading.width() <= usize::from(inner_width) {
+            event_lines.push(heading);
         } else {
             push_wrapped_text(
-                &mut lines,
+                &mut event_lines,
                 &format!(
                     "{}  {}",
                     event_glyph(event, &app.ui_settings.icons),
                     event.label()
                 ),
-                usable_width,
+                inner_width,
                 0,
                 heading_style,
             );
             push_wrapped_text(
-                &mut lines,
+                &mut event_lines,
                 event.scope_label(),
-                usable_width,
-                3,
+                inner_width,
+                1,
                 Style::new().fg(theme::border_style(false).fg.unwrap_or_default()),
             );
         }
         push_wrapped_text(
-            &mut lines,
+            &mut event_lines,
             event.description(),
-            usable_width,
-            3,
+            inner_width,
+            1,
             Style::new().add_modifier(Modifier::DIM),
         );
 
@@ -265,10 +274,10 @@ pub fn build_document(
                 && (current_column
                     .saturating_add(gap)
                     .saturating_add(chip_width)
-                    > usable_width
+                    > inner_width
                     || (current_has_vs16_action && is_vs16_action))
             {
-                lines.push(Line::from(current_spans));
+                event_lines.push(Line::from(current_spans));
                 current_spans = vec![Span::raw(" ".repeat(usize::from(DOCUMENT_INSET)))];
                 current_column = DOCUMENT_INSET;
                 current_has_vs16_action = false;
@@ -290,8 +299,8 @@ pub fn build_document(
             } else {
                 Style::new().add_modifier(Modifier::DIM)
             };
-            let row = lines.len() as u16;
-            chips.push(TriggerChipHit {
+            let row = event_lines.len() as u16;
+            event_chips.push(TriggerChipHit {
                 event,
                 action,
                 row,
@@ -302,7 +311,49 @@ pub fn build_document(
             current_column = current_column.saturating_add(chip_width);
             current_has_vs16_action |= is_vs16_action;
         }
-        lines.push(Line::from(current_spans));
+        event_lines.push(Line::from(current_spans));
+
+        if has_frame {
+            let border = theme::border_style(selected);
+            let horizontal = "─".repeat(usize::from(usable_width - EVENT_FRAME_WIDTH));
+            lines.push(Line::from(vec![
+                Span::styled("╭", border),
+                Span::styled(horizontal.clone(), border),
+                Span::styled("╮", border),
+            ]));
+            for (row, content) in event_lines.into_iter().enumerate() {
+                let content_width = u16::try_from(content.width()).unwrap_or(u16::MAX);
+                let padding = inner_width.saturating_sub(content_width);
+                lines.push(Line::from(
+                    std::iter::once(Span::styled("│", border))
+                        .chain(content.spans)
+                        .chain(std::iter::once(Span::raw(" ".repeat(usize::from(padding)))))
+                        .chain(std::iter::once(Span::styled("│", border)))
+                        .collect::<Vec<_>>(),
+                ));
+                for mut chip in event_chips
+                    .iter()
+                    .filter(|chip| usize::from(chip.row) == row)
+                    .cloned()
+                {
+                    chip.row = start_row + 1 + chip.row;
+                    chip.start_column = chip.start_column.saturating_add(1);
+                    chip.end_column = chip.end_column.saturating_add(1);
+                    chips.push(chip);
+                }
+            }
+            lines.push(Line::from(vec![
+                Span::styled("╰", border),
+                Span::styled(horizontal, border),
+                Span::styled("╯", border),
+            ]));
+        } else {
+            for mut chip in event_chips {
+                chip.row = start_row + chip.row;
+                chips.push(chip);
+            }
+            lines.extend(event_lines);
+        }
         let end_row = lines.len().saturating_sub(1) as u16;
         event_rows.push((event, start_row, end_row));
         lines.extend((0..EVENT_SPACING).map(|_| Line::from("")));
@@ -401,6 +452,39 @@ mod tests {
     use super::*;
 
     #[test]
+    fn overflow_indicator_does_not_replace_trigger_document_text() {
+        use ratatui::{backend::TestBackend, Terminal};
+
+        let directory = tempfile::tempdir().unwrap();
+        let app = App::new(
+            "trigger-scrollbar".to_owned(),
+            directory.path().to_path_buf(),
+        );
+        let area = Rect::new(1, 1, 40, 4);
+        let document = build_document(&app, area.width - 1, 0, 0);
+        assert!(document.lines.len() > usize::from(area.height));
+        let mut reference = Terminal::new(TestBackend::new(42, 6)).unwrap();
+        reference
+            .draw(|frame| frame.render_widget(Paragraph::new(document.lines.clone()), area))
+            .unwrap();
+        let mut candidate = Terminal::new(TestBackend::new(42, 6)).unwrap();
+        candidate
+            .draw(|frame| render(frame, area, &app, 0, 0, 0))
+            .unwrap();
+        for y in area.y..area.bottom() {
+            for x in area.x..area.right() {
+                assert_eq!(
+                    candidate.backend().buffer()[(x, y)].symbol(),
+                    reference.backend().buffer()[(x, y)].symbol(),
+                    "document cell {x},{y}"
+                );
+            }
+        }
+        assert!((area.y..area.bottom())
+            .any(|y| candidate.backend().buffer()[(area.right(), y)].symbol() != " "));
+    }
+
+    #[test]
     fn narrow_document_wraps_chips_without_overlapping_hit_rectangles() {
         let app = App::new("test".to_owned(), std::env::temp_dir());
         let document = build_document(&app, 28, 6, 2);
@@ -413,6 +497,33 @@ mod tests {
                 .collect::<Vec<_>>();
             for pair in row_hits.windows(2) {
                 assert!(pair[0].end_column <= pair[1].start_column);
+            }
+        }
+    }
+
+    #[test]
+    fn trigger_events_use_rounded_sections_at_wide_and_compact_widths() {
+        let app = App::new("trigger-framing".to_owned(), std::env::temp_dir());
+        for width in [100, 28] {
+            let document = build_document(&app, width, 0, 0);
+            assert_eq!(document.event_rows.len(), TriggerEvent::ALL.len());
+            assert!(document
+                .lines
+                .iter()
+                .all(|line| line.width() <= usize::from(width)));
+            for (event, start, end) in &document.event_rows {
+                let top = document.lines[usize::from(*start)].to_string();
+                let bottom = document.lines[usize::from(*end)].to_string();
+                assert!(top.starts_with('╭'), "missing {event:?} top frame: {top:?}");
+                assert!(top.ends_with('╮'), "missing {event:?} top frame: {top:?}");
+                assert!(
+                    bottom.starts_with('╰'),
+                    "missing {event:?} bottom frame: {bottom:?}"
+                );
+                assert!(
+                    bottom.ends_with('╯'),
+                    "missing {event:?} bottom frame: {bottom:?}"
+                );
             }
         }
     }
@@ -473,32 +584,35 @@ mod tests {
     #[test]
     fn hit_test_returns_the_exact_wrapped_chip() {
         let app = App::new("test".to_owned(), std::env::temp_dir());
-        let area = Rect::new(10, 4, 32, 12);
-        let document = build_document(&app, area.width - 1, 0, 0);
-        let chip = document
-            .chips
-            .iter()
-            .find(|chip| {
-                chip.event == TriggerEvent::AgentFinishedWork
-                    && chip.action == Some(TriggerAction::RestructureProject)
-            })
-            .copied()
-            .unwrap();
-        let scroll = chip.row.saturating_sub(3);
-        let hit = hit_test(
-            &app,
-            area,
-            scroll,
-            Position::new(area.x + chip.start_column, area.y + chip.row - scroll),
-            0,
-            0,
-        );
-        assert_eq!(
-            hit,
-            Some((
-                TriggerEvent::AgentFinishedWork,
-                Some(Some(TriggerAction::RestructureProject))
-            ))
-        );
+        for width in [32, 29] {
+            let area = Rect::new(10, 4, width, 12);
+            let document = build_document(&app, area.width - 1, 0, 0);
+            let chip = document
+                .chips
+                .iter()
+                .find(|chip| {
+                    chip.event == TriggerEvent::AgentFinishedWork
+                        && chip.action == Some(TriggerAction::RestructureProject)
+                })
+                .copied()
+                .unwrap();
+            let scroll = chip.row.saturating_sub(3);
+            let hit = hit_test(
+                &app,
+                area,
+                scroll,
+                Position::new(area.x + chip.start_column, area.y + chip.row - scroll),
+                0,
+                0,
+            );
+            assert_eq!(
+                hit,
+                Some((
+                    TriggerEvent::AgentFinishedWork,
+                    Some(Some(TriggerAction::RestructureProject))
+                )),
+                "framed chip click at width {width}"
+            );
+        }
     }
 }

@@ -143,7 +143,7 @@ impl Job for ConfigurationWrite {
                         message: error.to_string(),
                         observed_session: None,
                         observed_agent_setup: None,
-                    })
+                    });
             }
             Separators(value) => {
                 return crate::project_config::set_show_project_separators(directory, value)
@@ -152,7 +152,7 @@ impl Job for ConfigurationWrite {
                         message: error.to_string(),
                         observed_session: None,
                         observed_agent_setup: None,
-                    })
+                    });
             }
         };
         result.map_err(|error| {
@@ -208,6 +208,7 @@ impl ConfigurationChange {
                     + value.icons.scheduled_input.capacity()
                     + value.icons.bookmark.capacity()
                     + value.icons.lock.capacity()
+                    + value.icons.frozen_agent.capacity()
                     + value.icons.toolbar_search.capacity()
                     + value.icons.toolbar_restructure.capacity()
                     + value.icons.toolbar_settings.capacity()

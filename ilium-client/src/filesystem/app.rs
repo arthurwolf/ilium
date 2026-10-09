@@ -1,12 +1,17 @@
 use super::editors::{EditorCompletion, LoadTarget, SavePurpose, SaveTarget};
 use super::ordered::WriteCompletion;
 use crate::app::{App, Mode, PaneRuntime};
+use crate::editor_pane::EditorPane;
 use ilium_core::{NodeId, NodeKind, PaneContentKind};
 use ilium_execution::JobOutcome;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 impl App {
+    pub(crate) fn has_editor_model_loan(&self) -> bool {
+        !self.editor_model_loans.is_empty()
+    }
+
     pub(crate) async fn drain_filesystem(&mut self) -> std::io::Result<()> {
         self.pending_editor_loads.clear();
         self.pending_board_loads.clear();
@@ -331,6 +336,18 @@ impl App {
     }
     pub(crate) fn collect_editor_files(&mut self) -> bool {
         self.retry_editor_path_admissions();
+        let frozen_panes = &self.frozen_panes;
+        let tree = &self.tree;
+        self.frozen_screens
+            .retain(|pane, _| frozen_panes.contains(pane) && tree.get(*pane).is_some());
+        let frozen_screens = &self.frozen_screens;
+        self.frozen_screen_holds.retain(|pane, _| {
+            frozen_panes.contains(pane)
+                && tree.get(*pane).is_some()
+                && frozen_screens.contains_key(pane)
+        });
+        self.frozen_screen_restore_identities
+            .retain(|pane, _| frozen_panes.contains(pane) && tree.get(*pane).is_some());
         let configuration_changed = self.collect_configuration_files()
             | self.collect_board_files()
             | self.collect_explorers()
@@ -354,6 +371,70 @@ impl App {
         while let Some(completion) = files.poll() {
             changed = true;
             match completion {
+                EditorCompletion::FrozenScreenSaved { target, completion } => {
+                    let current = self
+                        .frozen_screens
+                        .get(&target.pane_id)
+                        .is_some_and(|screen| Arc::ptr_eq(&screen.identity, &target.identity));
+                    if !current {
+                        continue;
+                    }
+                    let failure = match &completion {
+                        WriteCompletion::Outcome { outcome, .. } => match outcome.view() {
+                            JobOutcome::Finished(Ok(_)) => None,
+                            JobOutcome::Finished(Err(error)) => Some(error.clone()),
+                            JobOutcome::NotStarted { reason, .. } => {
+                                Some(format!("frozen screen write did not start: {reason:?}"))
+                            }
+                            JobOutcome::Panicked => Some("frozen screen writer panicked".into()),
+                        },
+                        WriteCompletion::Rejected { rejection, .. } => Some(format!(
+                            "frozen screen write was rejected: {:?}",
+                            rejection.reason
+                        )),
+                        WriteCompletion::Lost { .. } => {
+                            Some("frozen screen write result was lost".into())
+                        }
+                    };
+                    if let Some(error) = failure {
+                        self.status_message =
+                            Some(format!("Could not save frozen screen: {error}"));
+                    }
+                }
+                EditorCompletion::FrozenScreenLoaded { target, screen } => {
+                    let current = self
+                        .frozen_screen_restore_identities
+                        .get(&target.pane_id)
+                        .is_some_and(|identity| Arc::ptr_eq(identity, &target.identity))
+                        && self.frozen_panes.contains(&target.pane_id)
+                        && matches!(
+                            self.tree.get(target.pane_id).map(|node| &node.kind),
+                            Some(NodeKind::Pane {
+                                content: PaneContentKind::Terminal,
+                                ..
+                            })
+                        );
+                    if current {
+                        self.frozen_screen_restore_identities
+                            .remove(&target.pane_id);
+                        let (screen, retention) = screen.into_parts();
+                        self.frozen_screens.insert(target.pane_id, screen);
+                        self.frozen_screen_holds.insert(target.pane_id, retention);
+                    }
+                }
+                EditorCompletion::FrozenScreenLoadFailed { target, message } => {
+                    let current = self
+                        .frozen_screen_restore_identities
+                        .get(&target.pane_id)
+                        .is_some_and(|identity| Arc::ptr_eq(identity, &target.identity))
+                        && self.frozen_panes.contains(&target.pane_id);
+                    if current {
+                        self.frozen_screen_restore_identities
+                            .remove(&target.pane_id);
+                        self.status_message =
+                            Some(format!("Could not restore frozen screen: {message}"));
+                    }
+                }
                 EditorCompletion::Loaded {
                     target,
                     outcome,
@@ -412,6 +493,70 @@ impl App {
                             target.pane_id,
                             "Editor load result lost; retry opening the file".into(),
                         );
+                    }
+                }
+                EditorCompletion::SaveModelReturned {
+                    target,
+                    mut pane,
+                    result,
+                    cpu_thread: _,
+                } => {
+                    let current_loan = self
+                        .editor_model_loans
+                        .get(&target.pane_id)
+                        .is_some_and(|identity| Arc::ptr_eq(identity, &target.identity));
+                    let placeholder_matches = matches!(
+                        self.panes.get(&target.pane_id),
+                        Some(PaneRuntime::Editor(editor))
+                            if Arc::ptr_eq(&editor.instance_identity(), &target.identity)
+                    );
+                    let live_editor = matches!(
+                        self.tree.get(target.pane_id).map(|node| &node.kind),
+                        Some(NodeKind::Pane {
+                            content: PaneContentKind::Editor,
+                            ..
+                        })
+                    );
+                    if current_loan && placeholder_matches && live_editor {
+                        if let Err(error) = &result {
+                            pane.pending_saves = pane.pending_saves.saturating_sub(1);
+                            if pane
+                                .latest_save_operation
+                                .as_ref()
+                                .is_some_and(|operation| Arc::ptr_eq(operation, &target.operation))
+                            {
+                                pane.latest_save_operation = None;
+                            }
+                            self.status_message = Some(format!(
+                                "Save preparation failed; buffer remains unsaved: {error}"
+                            ));
+                        }
+                        self.panes.insert(target.pane_id, PaneRuntime::Editor(pane));
+                        self.editor_model_loans.remove(&target.pane_id);
+                    } else {
+                        self.editor_model_loans.remove(&target.pane_id);
+                        // The worker has already returned ownership. Avoid
+                        // publishing a stale model into a replaced pane; large
+                        // editor storage is retired on a CPU worker instead.
+                        if let Err(pane) = files.retire_editor_model(pane) {
+                            self.status_message = Some(
+                                "Stale editor model retained; CPU retirement admission is full"
+                                    .into(),
+                            );
+                            if !self.panes.contains_key(&target.pane_id) {
+                                self.panes.insert(target.pane_id, PaneRuntime::Editor(pane));
+                            }
+                        }
+                    }
+                }
+                EditorCompletion::SaveModelLost { target, message } => {
+                    if self
+                        .editor_model_loans
+                        .get(&target.pane_id)
+                        .is_some_and(|identity| Arc::ptr_eq(identity, &target.identity))
+                    {
+                        self.editor_model_loans.remove(&target.pane_id);
+                        self.status_message = Some(message);
                     }
                 }
                 EditorCompletion::Saved { target, completion } => {
@@ -543,6 +688,9 @@ impl App {
         path: PathBuf,
         purpose: SavePurpose,
     ) -> Result<(), String> {
+        if self.editor_model_loans.contains_key(&pane_id) {
+            return Err("Editor save preparation is already in progress".into());
+        }
         if path.capacity() > 64 * 1024 {
             return Err("Editor destination exceeds retained path limit".into());
         }
@@ -555,8 +703,15 @@ impl App {
             }
             _ => None,
         };
-        let Some(PaneRuntime::Editor(editor)) = self.panes.get_mut(&pane_id) else {
+        let Some(runtime) = self.panes.remove(&pane_id) else {
             return Err("Pane is not an editor".into());
+        };
+        let mut editor = match runtime {
+            PaneRuntime::Editor(editor) => editor,
+            other => {
+                self.panes.insert(pane_id, other);
+                return Err("Pane is not an editor".into());
+            }
         };
         let operation = Arc::new(());
         let target = SaveTarget {
@@ -568,15 +723,197 @@ impl App {
             operation: Arc::clone(&operation),
             prompt_input,
         };
-        let files = self.editor_files.as_mut().ok_or_else(|| {
-            "Filesystem workers are unavailable; buffer remains unsaved".to_string()
-        })?;
-        files.save(target, path, editor.textarea.lines())?;
+        let previous_operation = editor.latest_save_operation.clone();
+        let autosave_deadline = editor.autosave_deadline();
         editor.pending_saves += 1;
-        editor.latest_save_operation = Some(operation);
+        editor.latest_save_operation = Some(Arc::clone(&operation));
         editor.acknowledge_autosave_admission();
+        let identity = editor.instance_identity();
+        let Some(files) = self.editor_files.as_mut() else {
+            editor.pending_saves = editor.pending_saves.saturating_sub(1);
+            editor.latest_save_operation = previous_operation;
+            editor.restore_autosave_deadline(autosave_deadline);
+            self.panes.insert(pane_id, PaneRuntime::Editor(editor));
+            return Err("Filesystem workers are unavailable; buffer remains unsaved".into());
+        };
+        if let Err(failure) = files.save(target, path, editor) {
+            let mut editor = failure.pane;
+            editor.pending_saves = editor.pending_saves.saturating_sub(1);
+            editor.latest_save_operation = previous_operation;
+            editor.restore_autosave_deadline(autosave_deadline);
+            self.panes.insert(pane_id, PaneRuntime::Editor(editor));
+            return Err(failure.message);
+        }
+        self.editor_model_loans
+            .insert(pane_id, Arc::clone(&identity));
+        self.panes.insert(
+            pane_id,
+            PaneRuntime::Editor(Box::new(EditorPane::loan_placeholder(identity))),
+        );
         self.status_message = Some("Saving…".into());
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod shutdown_drain_tests {
+    use super::*;
+    use ilium_execution::{
+        ClientLimits, Execution, ExecutionConfig, Job, JobContext, JobCost, Lane, LaneConfig,
+        QuotaGroup, QuotaLimits, ShutdownMode,
+    };
+    use std::sync::{mpsc, Arc};
+    use std::time::{Duration, Instant};
+
+    struct BlockingIo {
+        entered: mpsc::SyncSender<()>,
+        release: mpsc::Receiver<()>,
+    }
+
+    impl Job for BlockingIo {
+        type Output = ();
+        type Error = ();
+
+        fn run(self, _context: JobContext) -> Result<(), ()> {
+            self.entered.send(()).unwrap();
+            self.release.recv().unwrap();
+            Ok(())
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn filesystem_shutdown_keeps_accepted_board_write_until_disk_readback() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("accepted-board.md");
+        let quota = QuotaGroup::new(QuotaLimits {
+            clients: 2,
+            jobs: 8,
+            service_jobs: 0,
+            input_bytes: 128 * 1024 * 1024,
+            result_bytes: 64 * 1024 * 1024,
+            worker_threads: 1,
+            worker_bytes: 32 * 1024 * 1024,
+        });
+        let disabled = LaneConfig {
+            threads: 0,
+            queue_slots: 0,
+            priority: None,
+            resident_bytes_per_thread: 0,
+        };
+        let mut execution = Execution::start(
+            quota.clone(),
+            ExecutionConfig {
+                cpu: disabled,
+                io: LaneConfig {
+                    threads: 1,
+                    queue_slots: 4,
+                    priority: None,
+                    resident_bytes_per_thread: 1024 * 1024,
+                },
+                service: disabled,
+            },
+        )
+        .unwrap();
+        let client = execution
+            .client(ClientLimits {
+                jobs: 4,
+                service_jobs: 0,
+                input_bytes: 64 * 1024 * 1024,
+                result_bytes: 16 * 1024 * 1024,
+            })
+            .unwrap();
+        let (entered_sender, entered_receiver) = mpsc::sync_channel(1);
+        let (release_sender, release_receiver) = mpsc::sync_channel(1);
+        let mut blocker = client
+            .try_submit(
+                Lane::Io,
+                JobCost {
+                    input_bytes: 1024,
+                    result_bytes: 1024,
+                },
+                BlockingIo {
+                    entered: entered_sender,
+                    release: release_receiver,
+                },
+            )
+            .unwrap();
+        entered_receiver
+            .recv_timeout(Duration::from_secs(3))
+            .expect("the single I/O worker is blocked");
+
+        let mut app = App::new(
+            "filesystem-shutdown-fixture".into(),
+            directory.path().into(),
+        );
+        app.editor_files = None;
+        app.board_files = None;
+        app.configuration_files = None;
+        app.integration_files = None;
+        let mut board_files = crate::filesystem::boards::BoardFiles::new(
+            client,
+            Arc::new(tokio::sync::Notify::new()),
+        );
+        board_files.set_storage_quota(quota);
+        let storage = ilium_core::BoardStorage::MarkdownFile { path: path.clone() };
+        let source = crate::board::read_source(storage, true).unwrap();
+        let mut board = board_files.attach(source).unwrap();
+        board.add_column("Accepted during shutdown".into()).unwrap();
+        app.board_files = Some(board_files);
+
+        // Release independently of the async test runtime so even the original
+        // deadline failure cannot strand the owned I/O thread.
+        let releaser = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(5100));
+            release_sender.send(()).unwrap();
+        });
+        let drain = app.drain_filesystem().await;
+        releaser.join().unwrap();
+        assert!(
+            drain.is_ok(),
+            "shutdown must retain the accepted writer past its warning deadline: {drain:?}"
+        );
+        assert_eq!(app.board_files.as_ref().unwrap().pending(), 0);
+        assert!(path.is_file(), "accepted board save must reach disk");
+        let saved = crate::board::read_source(
+            ilium_core::BoardStorage::MarkdownFile { path: path.clone() },
+            false,
+        )
+        .unwrap();
+        assert!(saved
+            .columns
+            .iter()
+            .any(|column| column.title == "Accepted during shutdown"));
+
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            match blocker.try_take() {
+                ilium_execution::JobPoll::Pending => {
+                    assert!(Instant::now() < deadline, "blocking I/O job did not settle");
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                ilium_execution::JobPoll::Ready(outcome) => {
+                    assert!(matches!(
+                        outcome.view(),
+                        ilium_execution::JobOutcome::Finished(Ok(()))
+                    ));
+                    break;
+                }
+                ilium_execution::JobPoll::Lost | ilium_execution::JobPoll::Taken => {
+                    panic!("blocking I/O receipt was lost")
+                }
+            }
+        }
+        drop(saved);
+        drop(blocker);
+        drop(board);
+        drop(app);
+        execution.request_shutdown(ShutdownMode::Cancel);
+        assert!(
+            execution
+                .join_until_background(Instant::now() + Duration::from_secs(5))
+                .unwrap()
+                .shutdown_complete
+        );
     }
 }
 

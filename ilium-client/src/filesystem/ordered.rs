@@ -101,6 +101,8 @@ pub struct OrderedWriter<J: Job> {
     bytes: usize,
     closing: bool,
     job_ready: fn(&J) -> bool,
+    max_writes: usize,
+    max_retained_bytes: usize,
 }
 
 impl<J: Job> OrderedWriter<J> {
@@ -116,6 +118,20 @@ impl<J: Job> OrderedWriter<J> {
     ) -> Self {
         let mut writer = Self::new(client, ready);
         writer.job_ready = job_ready;
+        writer
+    }
+    /// Configure a separate, explicitly bounded FIFO for payloads whose
+    /// retained domain limit differs from ordinary editor snapshots.
+    pub fn new_with_readiness_and_limits(
+        client: Client,
+        ready: Arc<tokio::sync::Notify>,
+        job_ready: fn(&J) -> bool,
+        max_writes: usize,
+        max_retained_bytes: usize,
+    ) -> Self {
+        let mut writer = Self::new_with_readiness(client, ready, job_ready);
+        writer.max_writes = max_writes.max(1);
+        writer.max_retained_bytes = max_retained_bytes.max(1);
         writer
     }
     /// Install before any admission. The actor callback must capture its original
@@ -149,6 +165,8 @@ impl<J: Job> OrderedWriter<J> {
             bytes: 0,
             closing: false,
             job_ready: |_| true,
+            max_writes: MAX_WRITES,
+            max_retained_bytes: MAX_RETAINED_BYTES,
         }
     }
     pub fn notification(&self) -> Arc<tokio::sync::Notify> {
@@ -199,7 +217,7 @@ impl<J: Job> OrderedWriter<J> {
                 return Err(WriterRejected {
                     failure,
                     value: job,
-                })
+                });
             }
         };
         Ok(self.commit(cost, job, admission))
@@ -223,18 +241,18 @@ impl<J: Job> OrderedWriter<J> {
             return Err(WriterAdmissionFailure::Closed);
         }
         let used = self.pending();
-        if used >= MAX_WRITES {
+        if used >= self.max_writes {
             return Err(WriterAdmissionFailure::Writes {
                 requested: 1,
                 used,
-                limit: MAX_WRITES,
+                limit: self.max_writes,
             });
         }
-        if bytes > MAX_RETAINED_BYTES {
+        if bytes > self.max_retained_bytes {
             return Err(WriterAdmissionFailure::RetainedBytes {
                 requested,
                 used: self.bytes,
-                limit: MAX_RETAINED_BYTES,
+                limit: self.max_retained_bytes,
             });
         }
         let next_id = self.next_id.checked_add(1);
@@ -366,6 +384,20 @@ mod tests {
         text: &'static str,
         entered: mpsc::SyncSender<&'static str>,
         gate: Option<mpsc::Receiver<()>>,
+    }
+
+    struct BlockIo {
+        entered: mpsc::SyncSender<()>,
+        release: mpsc::Receiver<()>,
+    }
+    impl Job for BlockIo {
+        type Output = ();
+        type Error = ();
+        fn run(self, _context: JobContext) -> Result<(), ()> {
+            self.entered.send(()).unwrap();
+            self.release.recv().unwrap();
+            Ok(())
+        }
     }
     impl Job for Write {
         type Output = &'static str;
@@ -515,6 +547,76 @@ mod tests {
                 .unwrap()
                 .remaining_workers,
             0
+        );
+    }
+
+    #[test]
+    fn dropping_owner_after_drain_deadline_does_not_discard_accepted_writes() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("authored.txt");
+        let (execution, general, filesystem, _) = evidence_execution();
+        let (entered_sender, entered_receiver) = mpsc::sync_channel(1);
+        let (release_sender, release_receiver) = mpsc::sync_channel(1);
+        let mut blocker = general
+            .try_submit(
+                Lane::Io,
+                small_cost(),
+                BlockIo {
+                    entered: entered_sender,
+                    release: release_receiver,
+                },
+            )
+            .unwrap();
+        entered_receiver
+            .recv_timeout(Duration::from_secs(3))
+            .expect("the single I/O worker is blocked");
+
+        let mut writer = OrderedWriter::new(filesystem, Arc::new(tokio::sync::Notify::new()));
+        let (write_started, _write_observed) = mpsc::sync_channel(2);
+        for text in ["FIRST", "SECOND"] {
+            writer
+                .enqueue(
+                    small_cost(),
+                    Write {
+                        path: path.clone(),
+                        text,
+                        entered: write_started.clone(),
+                        gate: None,
+                    },
+                )
+                .unwrap();
+        }
+        assert!(
+            writer.poll().is_none(),
+            "first write is accepted by the bank"
+        );
+        assert_eq!(writer.pending(), 2, "second write remains in owner custody");
+
+        // Client teardown can outlive its drain deadline. Accepted saves must
+        // remain owned somewhere that can publish them after the blocker exits.
+        drop(writer);
+        release_sender.send(()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            match blocker.try_take() {
+                JobPoll::Pending => {
+                    assert!(Instant::now() < deadline, "blocking I/O job did not settle");
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                JobPoll::Ready(outcome) => {
+                    assert!(matches!(outcome.view(), JobOutcome::Finished(Ok(()))));
+                    break;
+                }
+                JobPoll::Lost | JobPoll::Taken => panic!("blocking job receipt was lost"),
+            }
+        }
+        drop(blocker);
+        drop(general);
+        evidence_finish(execution);
+        let contents = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(
+            contents, "SECOND",
+            "the last accepted save must survive owner teardown"
         );
     }
     const MIB: usize = 1024 * 1024;

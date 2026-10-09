@@ -364,29 +364,52 @@ impl InputFailure {
 impl fmt::Display for InputFailure {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.kind {
-            InputFailureKind::Combined { first, .. } => write!(formatter, "{first}; another original input failure remains in custody"),
-            InputFailureKind::NativeRead { source, .. } => write!(formatter, "native terminal input failed: {source}; original source retained"),
-            InputFailureKind::Read { source, .. } => write!(formatter, "terminal input read failed: {source}"),
-            InputFailureKind::Refused { reason, original } => write!(formatter,
+            InputFailureKind::Combined { first, .. } => write!(
+                formatter,
+                "{first}; another original input failure remains in custody"
+            ),
+            InputFailureKind::NativeRead { source, .. } => write!(
+                formatter,
+                "native terminal input failed: {source}; original source retained"
+            ),
+            InputFailureKind::Read { source, .. } => {
+                write!(formatter, "terminal input read failed: {source}")
+            }
+            InputFailureKind::Refused { reason, original } => write!(
+                formatter,
                 "terminal input retained one whole original after {reason:?}; {} payload bytes are outside admission",
-                original.unadmitted_payload_bytes()),
+                original.unadmitted_payload_bytes()
+            ),
             InputFailureKind::Undispatched {
                 original,
                 consumed_paste_bytes: Some(consumed_paste_bytes),
                 previous,
-            } => write!(formatter,
+            } => write!(
+                formatter,
                 "terminal input shutdown retained an undispatched original ({} payload bytes, consumed paste prefix {consumed_paste_bytes} bytes); previous failure={}",
-                original.retained_payload_bytes(), previous.is_some()),
+                original.retained_payload_bytes(),
+                previous.is_some()
+            ),
             InputFailureKind::Undispatched {
                 original,
                 consumed_paste_bytes: None,
                 previous,
-            } => write!(formatter,
+            } => write!(
+                formatter,
                 "terminal input shutdown retained an undispatched original ({} payload bytes); previous failure={}",
-                original.retained_payload_bytes(), previous.is_some()),
-            InputFailureKind::Shutdown(report) => write!(formatter,
+                original.retained_payload_bytes(),
+                previous.is_some()
+            ),
+            InputFailureKind::Shutdown(report) => write!(
+                formatter,
                 "terminal input {:?}; {} undispatched originals, reader failure={}, retained native input={} remain in custody",
-                report.exit, report.pending.len(), report.failure.is_some(), report.native_custody().is_some_and(NativeInputCustody::has_retained_input)),
+                report.exit,
+                report.pending.len(),
+                report.failure.is_some(),
+                report
+                    .native_custody()
+                    .is_some_and(NativeInputCustody::has_retained_input)
+            ),
         }
     }
 }
@@ -916,7 +939,7 @@ impl InputDriver {
                 InputReader::Native(None) => {
                     return Err(io::Error::other(
                         "native source is retained in failure custody",
-                    ))
+                    ));
                 }
                 #[cfg(test)]
                 InputReader::Injected(read) => read(timeout)
@@ -1431,7 +1454,11 @@ impl InputRetirementDeadline {
 }
 impl fmt::Display for InputRetirementDeadline {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "terminal input worker {} retirement deadline elapsed; original FIFO and native owner retained", self.worker_id)
+        write!(
+            formatter,
+            "terminal input worker {} retirement deadline elapsed; original FIFO and native owner retained",
+            self.worker_id
+        )
     }
 }
 impl std::error::Error for InputRetirementDeadline {}

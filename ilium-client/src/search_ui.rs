@@ -566,9 +566,7 @@ fn last_command_from_text(text: &str) -> Option<String> {
     })
 }
 
-/// Draws the full-screen result browser. The intentionally border-light
-/// layout gives the query room to breathe while keeping object facts and
-/// evidence dense enough to scan without opening every hit.
+/// Draws the framed result browser, with shared render and pointer geometry.
 pub fn render(frame: &mut Frame, area: Rect, state: &SearchState, icons: &IconSettings) {
     render_cursor(frame, area, state, icons);
 }
@@ -580,6 +578,19 @@ pub fn render_cursor(
     icons: &IconSettings,
 ) -> Option<Position> {
     frame.render_widget(Clear, area);
+    frame.render_widget(
+        theme::block(true).title(theme::chrome_title("Workspace Search")),
+        area,
+    );
+    let vertical = search_sections(area);
+    let cursor = render_header(frame, vertical[0], state, icons);
+    render_summary(frame, vertical[1], state);
+    render_results(frame, vertical[2], state, icons);
+    render_footer(frame, vertical[3]);
+    cursor
+}
+
+fn search_sections(area: Rect) -> [Rect; 4] {
     let vertical = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -588,25 +599,13 @@ pub fn render_cursor(
             Constraint::Min(5),
             Constraint::Length(2),
         ])
-        .split(area);
-    let cursor = render_header(frame, vertical[0], state, icons);
-    render_summary(frame, vertical[1], state);
-    render_results(frame, vertical[2], state, icons);
-    render_footer(frame, vertical[3]);
-    cursor
+        .split(theme::block(true).inner(area));
+    [vertical[0], vertical[1], vertical[2], vertical[3]]
 }
 
 pub fn result_at(area: Rect, state: &SearchState, position: Position) -> Option<usize> {
-    let results_area = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(4),
-            Constraint::Length(1),
-            Constraint::Min(5),
-            Constraint::Length(2),
-        ])
-        .split(area)[2];
-    if !results_area.contains(position) {
+    let results_area = search_sections(area)[2];
+    if !result_content_area(results_area, state.results.len()).contains(position) {
         return None;
     }
     let relative_row = usize::from(position.y.saturating_sub(results_area.y));
@@ -623,12 +622,21 @@ pub fn result_at(area: Rect, state: &SearchState, position: Position) -> Option<
 }
 
 pub fn visible_result_rows(area: Rect) -> usize {
-    let result_height = area.height.saturating_sub(7);
+    let result_height = search_sections(area)[2].height;
     (usize::from(result_height) / RESULT_HEIGHT).max(1)
 }
 
 const RESULT_HEIGHT: usize = 5;
 const MAX_RESULTS: usize = 800;
+
+fn result_content_area(area: Rect, result_count: usize) -> Rect {
+    let visible_count = (usize::from(area.height) / RESULT_HEIGHT).max(1);
+    let gutter = u16::from(area.width >= 2 && result_count > visible_count);
+    Rect {
+        width: area.width.saturating_sub(gutter),
+        ..area
+    }
+}
 
 fn render_header(
     frame: &mut Frame,
@@ -636,19 +644,24 @@ fn render_header(
     state: &SearchState,
     icons: &IconSettings,
 ) -> Option<Position> {
-    let header = Line::from(vec![
-        Span::styled(
-            format!(
-                "{}  Workspace Search",
-                icons.glyph(IconTarget::ToolbarSearch)
-            ),
-            Style::new().add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            "   every agent, shell, retained terminal history, and open file",
+    let scope = if area.width >= 80 {
+        "across agents, shells, retained history, and open files"
+    } else if area.width >= 50 {
+        "agents · terminals · files"
+    } else {
+        ""
+    };
+    let mut header_spans = vec![Span::styled(
+        format!("{}  Live search", icons.glyph(IconTarget::ToolbarSearch)),
+        Style::new().add_modifier(Modifier::BOLD),
+    )];
+    if !scope.is_empty() {
+        header_spans.push(Span::styled(
+            format!("  {scope}"),
             Style::new().add_modifier(Modifier::DIM),
-        ),
-    ]);
+        ));
+    }
+    let header = Line::from(header_spans);
     frame.render_widget(Paragraph::new(header), area);
     let input_area = Rect::new(area.x, area.y.saturating_add(1), area.width, 3);
     let block = theme::block(true);
@@ -766,6 +779,7 @@ fn render_results(frame: &mut Frame, area: Rect, state: &SearchState, icons: &Ic
         return;
     }
     let visible_count = (usize::from(area.height) / RESULT_HEIGHT).max(1);
+    let content_area = result_content_area(area, state.results.len());
     for (visible_index, result) in state
         .results
         .iter()
@@ -776,7 +790,12 @@ fn render_results(frame: &mut Frame, area: Rect, state: &SearchState, icons: &Ic
         let y = area
             .y
             .saturating_add((visible_index * RESULT_HEIGHT) as u16);
-        let row_area = Rect::new(area.x, y, area.width, RESULT_HEIGHT as u16);
+        let row_area = Rect::new(
+            content_area.x,
+            y,
+            content_area.width,
+            (RESULT_HEIGHT as u16).min(area.bottom().saturating_sub(y)),
+        );
         let selected = state.scroll + visible_index == state.selected_index;
         let selection_style = if selected {
             theme::selected_style().add_modifier(Modifier::BOLD)
@@ -811,23 +830,37 @@ fn render_results(frame: &mut Frame, area: Rect, state: &SearchState, icons: &Ic
                 ),
                 Span::styled(&result.after, Style::new().fg(Color::Gray)),
             ]),
-            Line::from(""),
+            result_divider(row_area.width),
             Line::from(""),
         ];
         frame.render_widget(Paragraph::new(lines).style(selection_style), row_area);
     }
-    if state.results.len() > visible_count {
-        let mut scrollbar_state = ScrollbarState::new(state.results.len()).position(state.scroll);
+    if content_area.width < area.width {
+        let mut scrollbar_state = ScrollbarState::new(state.results.len())
+            .position(state.scroll)
+            .viewport_content_length(visible_count);
         frame.render_stateful_widget(
             Scrollbar::new(ScrollbarOrientation::VerticalRight)
                 .begin_symbol(None)
                 .end_symbol(None)
-                .track_symbol(Some(" "))
+                .track_symbol(Some("│"))
                 .style(theme::border_style(false)),
-            area,
+            Rect::new(content_area.right(), area.y, 1, area.height),
             &mut scrollbar_state,
         );
     }
+}
+
+fn result_divider(width: u16) -> Line<'static> {
+    let divider_width = usize::from(width.saturating_sub(4));
+    if divider_width == 0 {
+        return Line::default();
+    }
+    Line::from(vec![
+        Span::raw("  "),
+        Span::styled("─".repeat(divider_width), theme::border_style(false)),
+        Span::raw("  "),
+    ])
 }
 
 fn render_footer(frame: &mut Frame, area: Rect) {
@@ -1062,6 +1095,38 @@ mod tests {
     use super::*;
 
     #[test]
+    fn overflowing_results_reserve_a_separate_scrollbar_column() {
+        let area = Rect::new(2, 3, 40, 15);
+        assert_eq!(result_content_area(area, 3), area);
+        let content = result_content_area(area, 4);
+        assert_eq!(content.right() + 1, area.right());
+        assert!(!content.contains(Position::new(area.right() - 1, area.y)));
+        for width in [0, 1, 2] {
+            let tiny = Rect::new(0, 0, width, 1);
+            let content = result_content_area(tiny, 10);
+            assert!(content.right() <= tiny.right());
+            assert_eq!(content.height, tiny.height);
+        }
+    }
+
+    #[test]
+    fn search_frames_and_page_sizes_use_the_same_inner_geometry() {
+        for (width, height) in [(120, 40), (80, 24), (40, 12), (12, 6), (1, 1)] {
+            let screen = Rect::new(0, 0, width, height);
+            let inner = theme::block(true).inner(screen);
+            let sections = search_sections(screen);
+            for section in sections {
+                assert!(section.right() <= inner.right());
+                assert!(section.bottom() <= inner.bottom());
+            }
+            assert_eq!(
+                visible_result_rows(screen),
+                (usize::from(sections[2].height) / RESULT_HEIGHT).max(1)
+            );
+        }
+    }
+
+    #[test]
     fn terminal_search_ignores_ansi_and_preserves_a_raw_jump_offset() {
         let mut results = Vec::new();
         let history = b"before \x1b[31mneedle\x1b[0m after";
@@ -1163,6 +1228,7 @@ mod tests {
         terminal
             .draw(|frame| render(frame, frame.area(), &state, &IconSettings::default()))
             .expect("render workspace search");
+        crate::ui_capture::save("workspace-search-results-100x28", &terminal);
 
         let text = terminal
             .backend()
@@ -1172,9 +1238,16 @@ mod tests {
             .map(|cell| cell.symbol())
             .collect::<String>();
         assert!(text.contains("Workspace Search"));
+        assert_eq!(text.matches("Workspace Search").count(), 1);
         assert!(text.contains("Investigate checkout"));
         assert!(text.contains("last command: git status"));
         assert!(text.contains("needle"));
+        let result_area = search_sections(Rect::new(0, 0, 100, 28))[2];
+        assert_eq!(
+            terminal.backend().buffer()[(result_area.x + 10, result_area.y + 3)].symbol(),
+            "─",
+            "a quiet divider separates result details from the following item"
+        );
     }
 
     #[test]

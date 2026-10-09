@@ -623,7 +623,9 @@ fn the_card_explains_the_pick_rule_and_a_grid_limited_optimum() {
         let lines = body_lines(&ready, width);
         let text = squeezed(&lines);
         assert!(
-            text.contains("Pick rule: cheapest candidate with observed support; cost keeps falling below 120k"),
+            text.contains(
+                "Pick rule: cheapest candidate with observed support; cost keeps falling below 120k"
+            ),
             "{width}"
         );
         assert!(

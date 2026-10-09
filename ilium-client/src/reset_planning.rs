@@ -7,10 +7,14 @@
 //! may expose a possible-reset watch whose expiry is only the end of the
 //! forecast window.
 
+use std::convert::Infallible;
 use std::io::Read;
 use std::time::{Duration, SystemTime};
 
 use chrono::{DateTime, Local, Utc};
+use ilium_execution::{
+    Client, Job, JobContext, JobCost, JobOutcome, JobPoll, Lane, Receipt, SkipReason,
+};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
@@ -23,6 +27,9 @@ const POLL_INTERVAL: Duration = Duration::from_secs(60 * 60);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(12);
 const MAX_RESPONSE_BYTES: u64 = 1024 * 1024;
 const MAX_SOURCE_AGE: Duration = Duration::from_secs(6 * 60 * 60);
+// Includes the 1 MiB wire body and headroom for its parsed JSON value tree.
+const RESET_FETCH_WORKING_BYTES: usize = 16 * 1024 * 1024;
+const RESET_FETCH_RESULT_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -208,6 +215,34 @@ struct FetchFailure {
     retry_after: Option<Duration>,
 }
 
+struct ResetFetchJob<F> {
+    fetch: F,
+}
+
+impl<F> Job for ResetFetchJob<F>
+where
+    F: FnOnce(JobContext) -> FetchOutcome + Send + 'static,
+{
+    type Output = FetchOutcome;
+    type Error = Infallible;
+
+    fn run(self, context: JobContext) -> Result<Self::Output, Self::Error> {
+        Ok((self.fetch)(context))
+    }
+}
+
+/// Dropping an observation owner requests cancellation while the execution
+/// bank retains physical ownership until the blocking fetch actually returns.
+struct CancellableResetReceipt<J: Job>(Option<Receipt<J>>);
+
+impl<J: Job> Drop for CancellableResetReceipt<J> {
+    fn drop(&mut self) {
+        if let Some(receipt) = &self.0 {
+            receipt.cancel();
+        }
+    }
+}
+
 impl FetchFailure {
     fn malformed(message: impl Into<String>) -> Self {
         Self {
@@ -247,6 +282,8 @@ fn failed_outcome(failure: FetchFailure) -> FetchOutcome {
 pub fn spawn_monitor(
     settings_rx: watch::Receiver<ResetPlanningSettings>,
     events_tx: mpsc::Sender<MonitorEvent>,
+    client: Client,
+    completion: std::sync::Arc<tokio::sync::Notify>,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
         let mut settings_rx = settings_rx;
@@ -262,13 +299,14 @@ pub fn spawn_monitor(
                 {
                     continue;
                 }
-                let outcome =
-                    match tokio::task::spawn_blocking(move || fetch_provider(provider)).await {
-                        Ok(outcome) => outcome,
-                        Err(error) => failed_outcome(FetchFailure::transport(format!(
-                            "reset monitor worker failed: {error}"
-                        ))),
-                    };
+                let outcome = match fetch_with_execution(&client, &completion, move |_| {
+                    fetch_provider(provider)
+                })
+                .await
+                {
+                    Ok(outcome) => outcome,
+                    Err(error) => failed_outcome(FetchFailure::transport(error)),
+                };
                 next_checks[index] = next_poll_deadline(Instant::now(), outcome.retry_after);
                 if events_tx
                     .send(MonitorEvent {
@@ -305,6 +343,60 @@ pub fn spawn_monitor(
             }
         }
     })
+}
+
+async fn fetch_with_execution<F>(
+    client: &Client,
+    completion: &tokio::sync::Notify,
+    fetch: F,
+) -> Result<FetchOutcome, String>
+where
+    F: FnOnce(JobContext) -> FetchOutcome + Send + 'static,
+{
+    let mut receipt = CancellableResetReceipt(Some(
+        client
+            .try_submit(
+                Lane::Io,
+                JobCost {
+                    input_bytes: RESET_FETCH_WORKING_BYTES,
+                    result_bytes: RESET_FETCH_RESULT_BYTES,
+                },
+                ResetFetchJob { fetch },
+            )
+            .map_err(|rejected| format!("reset feed admission refused: {:?}", rejected.reason))?,
+    ));
+
+    loop {
+        let Some(active_receipt) = receipt.0.as_mut() else {
+            return Err("reset feed receipt was already consumed".to_string());
+        };
+        match active_receipt.try_take() {
+            JobPoll::Pending => completion.notified().await,
+            JobPoll::Lost => {
+                receipt.0.take();
+                return Err("reset feed worker lost its completion receipt".to_string());
+            }
+            JobPoll::Taken => {
+                receipt.0.take();
+                return Err("reset feed completion was already taken".to_string());
+            }
+            JobPoll::Ready(retained) => {
+                receipt.0.take();
+                let (outcome, storage) = retained.into_parts();
+                drop(storage);
+                return match outcome {
+                    JobOutcome::Finished(Ok(outcome)) => Ok(outcome),
+                    JobOutcome::Finished(Err(never)) => match never {},
+                    JobOutcome::NotStarted { reason, .. } => Err(match reason {
+                        SkipReason::Cancelled => "reset feed fetch was cancelled before starting",
+                        SkipReason::Shutdown => "reset feed fetch stopped during shutdown",
+                    }
+                    .to_string()),
+                    JobOutcome::Panicked => Err("reset feed worker panicked".to_string()),
+                };
+            }
+        }
+    }
 }
 
 fn next_poll_deadline(completed_at: Instant, retry_after: Option<Duration>) -> Option<Instant> {
@@ -803,6 +895,95 @@ pub fn compact_active_reset_watch_text(
 mod tests {
     use super::*;
     use serde_json::{json, Value};
+
+    #[tokio::test]
+    async fn reset_fetch_runs_on_bounded_io_worker_and_drop_requests_cancellation() {
+        use ilium_execution::{
+            Execution, ExecutionConfig, LaneConfig, QuotaGroup, QuotaLimits, ShutdownMode,
+        };
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let disabled = LaneConfig {
+            threads: 0,
+            queue_slots: 0,
+            priority: None,
+            resident_bytes_per_thread: 0,
+        };
+        let io = LaneConfig {
+            threads: 1,
+            queue_slots: 1,
+            priority: None,
+            resident_bytes_per_thread: 1024 * 1024,
+        };
+        let mut execution = Execution::start(
+            QuotaGroup::new(QuotaLimits {
+                clients: 2,
+                jobs: 2,
+                service_jobs: 0,
+                input_bytes: 32 * 1024 * 1024,
+                result_bytes: 128 * 1024,
+                worker_threads: 1,
+                worker_bytes: 1024 * 1024,
+            }),
+            ExecutionConfig {
+                cpu: disabled,
+                io,
+                service: disabled,
+            },
+        )
+        .expect("start bounded reset-fetch bank");
+        let completion = std::sync::Arc::new(tokio::sync::Notify::new());
+        let wake = std::sync::Arc::clone(&completion);
+        let client = execution
+            .client(ilium_execution::ClientLimits {
+                jobs: 1,
+                service_jobs: 0,
+                input_bytes: RESET_FETCH_WORKING_BYTES,
+                result_bytes: RESET_FETCH_RESULT_BYTES,
+            })
+            .expect("admit reset-fetch client")
+            .with_completion_wake(move || wake.notify_one());
+        let started = std::sync::Arc::new(AtomicBool::new(false));
+        let worker_thread = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let task_started = std::sync::Arc::clone(&started);
+        let task_thread = std::sync::Arc::clone(&worker_thread);
+        let task_client = client.clone();
+        let task_completion = std::sync::Arc::clone(&completion);
+        let event_loop_thread = std::thread::current().id();
+        let fetch = tokio::spawn(async move {
+            fetch_with_execution(&task_client, &task_completion, move |context| {
+                *task_thread.lock().expect("record worker thread") =
+                    Some(std::thread::current().id());
+                task_started.store(true, Ordering::Release);
+                while !context.stop_requested() {
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                failed_outcome(FetchFailure::transport("cancelled test fetch"))
+            })
+            .await
+        });
+
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !started.load(Ordering::Acquire) {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .expect("fetch job starts");
+        assert_ne!(
+            worker_thread.lock().expect("read worker thread").clone(),
+            Some(event_loop_thread),
+            "blocking fetch callback runs on a dedicated OS thread"
+        );
+
+        fetch.abort();
+        assert!(fetch.await.expect_err("future was aborted").is_cancelled());
+        execution.request_shutdown(ShutdownMode::Cancel);
+        let report = execution
+            .join_until_background(Instant::now() + Duration::from_secs(5))
+            .expect("cancelled fetch physically exits on its owner bank");
+        assert_eq!(report.remaining_workers, 0);
+    }
 
     fn now() -> DateTime<Utc> {
         DateTime::parse_from_rfc3339("2026-09-27T04:00:00Z")

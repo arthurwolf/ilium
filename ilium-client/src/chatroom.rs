@@ -230,7 +230,7 @@ fn read_existing_or_empty(path: &Path) -> anyhow::Result<String> {
             return Err(anyhow::anyhow!(
                 "failed to read {}: {error}",
                 path.display()
-            ))
+            ));
         }
     };
     let mut bytes = Vec::new();

@@ -468,7 +468,9 @@ impl WorktreeDialogState {
                 let branch = self.branch.buf.trim();
                 validate_branch_name(branch).map_err(|error| format!("Branch: {error}"))?;
                 if facts.local_branches.iter().any(|name| name == branch) {
-                    return Err(format!("Branch {branch} already exists; choose another name or an existing worktree"));
+                    return Err(format!(
+                        "Branch {branch} already exists; choose another name or an existing worktree"
+                    ));
                 }
                 let base_ref = self.base_ref.buf.trim();
                 if base_ref.is_empty() {

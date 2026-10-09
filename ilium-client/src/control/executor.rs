@@ -737,7 +737,7 @@ fn execute_editor(app: &mut App, command: EditorCommand) -> Result<ExecutionRece
         _ => {
             return Err(
                 ilium_prompts::voice::VOICE_EXECUTOR_TARGET_IS_NOT_AN_EDITOR_PANE.to_owned(),
-            )
+            );
         }
     };
     let message = match command.action {

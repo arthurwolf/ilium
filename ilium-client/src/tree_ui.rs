@@ -673,6 +673,8 @@ pub struct TreeRenderOptions<'a> {
     pub transitions: &'a TreeTransitions,
     /// Resolved user-global presentation settings for detected agent types.
     pub agent_identifiers: &'a AgentIdentifierSettings,
+    /// Session model evidence currently eligible for model-specific glyphs.
+    pub agent_models: &'a HashMap<NodeId, String>,
     pub icons: &'a IconSettings,
     /// Live status is ephemeral; static workspace provenance stays in core.
     pub workspace_git_statuses: &'a HashMap<NodeId, WorkspaceGitStatus>,
@@ -684,6 +686,7 @@ pub struct TreeRenderOptions<'a> {
     /// action icons. Custom configured glyphs are never replaced.
     pub use_stable_glyphs: bool,
     pub agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode,
+    pub attention_progress_reports: bool,
     pub attention_running_indicator: crate::agent_monitoring::AttentionRunningIndicator,
     /// Whether persisted LLM-suggested title icons should be rendered.
     pub show_inferred_title_icons: bool,
@@ -704,6 +707,7 @@ pub struct TreeRenderOptions<'a> {
     pub sidebar_files: &'a crate::filesystem::sidebar::SidebarSnapshot,
     pub chatroom_projects: &'a HashSet<NodeId>,
     pub panes: &'a HashMap<NodeId, crate::app::PaneRuntime>,
+    pub frozen_panes: &'a HashSet<NodeId>,
 }
 
 /// Shared immutable inputs for one recursive item-tree build. Keeping these
@@ -718,6 +722,7 @@ struct TreeItemBuildContext<'a> {
     terminal_activity: &'a TerminalActivityTracker,
     focused_pane_id: Option<NodeId>,
     agent_identifiers: &'a AgentIdentifierSettings,
+    agent_models: &'a HashMap<NodeId, String>,
     icons: &'a IconSettings,
     workspace_git_statuses: &'a HashMap<NodeId, WorkspaceGitStatus>,
     show_worktree_branch_line: bool,
@@ -727,6 +732,7 @@ struct TreeItemBuildContext<'a> {
     sidebar_density: SidebarDensity,
     use_stable_glyphs: bool,
     agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode,
+    attention_progress_reports: bool,
     attention_running_indicator: crate::agent_monitoring::AttentionRunningIndicator,
     show_inferred_title_icons: bool,
     panel_width: u16,
@@ -737,6 +743,7 @@ struct TreeItemBuildContext<'a> {
     sidebar_files: &'a crate::filesystem::sidebar::SidebarSnapshot,
     chatroom_projects: &'a HashSet<NodeId>,
     panes: &'a HashMap<NodeId, crate::app::PaneRuntime>,
+    frozen_panes: &'a HashSet<NodeId>,
 }
 
 /// Builds the full recursive `TreeItem` tree from the root group's
@@ -991,6 +998,11 @@ fn build_item(
                 node.is_bookmarked,
                 context.icons,
             );
+            let display_name = title_with_frozen_agent(
+                display_name,
+                context.frozen_panes.contains(&node.id),
+                context.icons,
+            );
             let label = pane_label_with_icons(
                 status,
                 &display_name,
@@ -1001,12 +1013,14 @@ fn build_item(
                         .terminal_activity
                         .phase(node.id, context.terminal_activity_elapsed_ms),
                     agent_identifiers: context.agent_identifiers,
+                    agent_model: context.agent_models.get(&node.id).map(String::as_str),
                     icons: context.icons,
                     editor_filename: editor_filename.as_deref(),
                     progress: progress.as_deref(),
                     has_scheduled_input: scheduled_input.is_some(),
                     use_stable_glyphs: context.use_stable_glyphs,
                     agent_monitoring_mode: context.agent_monitoring_mode,
+                    attention_progress_reports: context.attention_progress_reports,
                     attention_running_indicator: context.attention_running_indicator,
                 },
             );
@@ -1132,9 +1146,18 @@ fn title_with_lock(title: String, locked_closed: bool, icons: &IconSettings) -> 
     title
 }
 
+fn title_with_frozen_agent(title: String, is_frozen: bool, icons: &IconSettings) -> String {
+    if is_frozen {
+        return format!("{} {title}", icons.glyph(IconTarget::FrozenAgent));
+    }
+    title
+}
+
 #[cfg(test)]
 mod inferred_title_icon_tests {
-    use super::{title_with_bookmark, title_with_lock, title_with_optional_icon};
+    use super::{
+        title_with_bookmark, title_with_frozen_agent, title_with_lock, title_with_optional_icon,
+    };
     use crate::icon_settings::{IconSettings, IconTarget};
 
     #[test]
@@ -1176,6 +1199,21 @@ mod inferred_title_icon_tests {
         assert_eq!(
             title_with_lock("project".to_string(), false, &icons),
             "project"
+        );
+    }
+
+    #[test]
+    fn frozen_agent_titles_use_the_configured_frozen_marker() {
+        let mut icons = IconSettings::default();
+        icons.set(IconTarget::FrozenAgent, "❆".to_string());
+
+        assert_eq!(
+            title_with_frozen_agent("Codex task".to_string(), true, &icons),
+            "❆ Codex task"
+        );
+        assert_eq!(
+            title_with_frozen_agent("Codex task".to_string(), false, &icons),
+            "Codex task"
         );
     }
 }
@@ -1411,6 +1449,7 @@ struct PaneLabelContext<'a> {
     is_title_loading: bool,
     terminal_activity_phase: Option<TerminalActivityPhase>,
     agent_identifiers: &'a AgentIdentifierSettings,
+    agent_model: Option<&'a str>,
     icons: &'a IconSettings,
     editor_filename: Option<&'a str>,
     /// The pane's monitored task, if any; feeds both state slots.
@@ -1420,6 +1459,7 @@ struct PaneLabelContext<'a> {
     has_scheduled_input: bool,
     use_stable_glyphs: bool,
     agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode,
+    attention_progress_reports: bool,
     attention_running_indicator: crate::agent_monitoring::AttentionRunningIndicator,
 }
 
@@ -1445,12 +1485,14 @@ fn pane_label_with_icons(
         is_title_loading,
         terminal_activity_phase,
         agent_identifiers,
+        agent_model,
         icons,
         editor_filename,
         progress,
         has_scheduled_input,
         use_stable_glyphs,
         agent_monitoring_mode,
+        attention_progress_reports,
         attention_running_indicator,
     } = context;
 
@@ -1477,6 +1519,7 @@ fn pane_label_with_icons(
     };
     let signals = crate::agent_monitoring::displayed_pane_signals(
         agent_monitoring_mode,
+        attention_progress_reports,
         attention_running_indicator,
         status,
         progress,
@@ -1494,7 +1537,18 @@ fn pane_label_with_icons(
         PaneStatus::Agent(agent) => {
             let class = &agent.class;
             let activity = agent.activity();
-            let identity = Span::raw(agent_node_icon(class, agent_identifiers, icons).to_string());
+            let model_glyph = if agent_identifiers.mode == AgentIdentifierMode::Icon {
+                agent_model.and_then(|model| {
+                    crate::agent_toolbar::model_icon_glyph(class.clone(), model, icons)
+                })
+            } else {
+                None
+            };
+            let identity = Span::raw(
+                model_glyph
+                    .unwrap_or_else(|| agent_node_icon(class, agent_identifiers, icons))
+                    .to_string(),
+            );
             let text = agent_title(class, &title, agent_identifiers.mode);
             let text = match activity {
                 AgentActivity::Done => {
@@ -1515,19 +1569,36 @@ fn pane_label_with_icons(
             };
             (identity, text)
         }
-        PaneStatus::AgentUnavailable(recovery) => (
-            Span::styled(
-                agent_node_icon(&recovery.process.class, agent_identifiers, icons).to_string(),
-                Style::new().fg(Color::DarkGray),
-            ),
-            Span::styled(
-                format!(
-                    "{} [unavailable]",
-                    agent_title(&recovery.process.class, &title, agent_identifiers.mode)
+        PaneStatus::AgentUnavailable(recovery) => {
+            let model_glyph = if agent_identifiers.mode == AgentIdentifierMode::Icon {
+                agent_model.and_then(|model| {
+                    crate::agent_toolbar::model_icon_glyph(
+                        recovery.process.class.clone(),
+                        model,
+                        icons,
+                    )
+                })
+            } else {
+                None
+            };
+            (
+                Span::styled(
+                    model_glyph
+                        .unwrap_or_else(|| {
+                            agent_node_icon(&recovery.process.class, agent_identifiers, icons)
+                        })
+                        .to_string(),
+                    Style::new().fg(Color::DarkGray),
                 ),
-                Style::new().fg(Color::Gray),
-            ),
-        ),
+                Span::styled(
+                    format!(
+                        "{} [unavailable]",
+                        agent_title(&recovery.process.class, &title, agent_identifiers.mode)
+                    ),
+                    Style::new().fg(Color::Gray),
+                ),
+            )
+        }
         PaneStatus::Editor { dirty: true } => (
             Span::styled(
                 icons.glyph(IconTarget::Editor).to_string(),
@@ -1554,7 +1625,13 @@ fn pane_label_with_icons(
         == crate::agent_monitoring::AgentMonitoringMode::Attention
         && crate::agent_monitoring::is_running_quietly(
             status,
-            crate::agent_monitoring::attention_status_target(status, progress),
+            crate::agent_monitoring::attention_status_target(
+                status,
+                crate::agent_monitoring::attention_progress_for_policy(
+                    progress,
+                    attention_progress_reports,
+                ),
+            ),
         );
     let now = if is_quiet_running && signals.now == NowSignal::Working {
         attention_running_span(
@@ -1657,12 +1734,14 @@ pub(crate) fn agent_monitoring_demo_rows(
                 is_title_loading: false,
                 terminal_activity_phase: None,
                 agent_identifiers: &settings.agent_identifiers,
+                agent_model: None,
                 icons: &settings.icons,
                 editor_filename: None,
                 progress: None,
                 has_scheduled_input: false,
                 use_stable_glyphs: settings.use_stable_glyphs,
                 agent_monitoring_mode: mode,
+                attention_progress_reports: settings.attention_progress_reports,
                 attention_running_indicator: settings.attention_running_indicator,
             },
         );
@@ -1711,7 +1790,9 @@ fn pane_label(
             progress: None,
             has_scheduled_input: false,
             use_stable_glyphs: false,
+            agent_model: None,
             agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
+            attention_progress_reports: true,
             attention_running_indicator:
                 crate::agent_monitoring::AttentionRunningIndicator::default(),
         },
@@ -2275,6 +2356,7 @@ impl TreeItemCache {
                     terminal_activity: &TerminalActivityTracker::default(),
                     focused_pane_id: None,
                     agent_identifiers: &AgentIdentifierSettings::default(),
+                    agent_models: &HashMap::new(),
                     icons: &IconSettings::default(),
                     workspace_git_statuses: &HashMap::new(),
                     show_worktree_branch_line: true,
@@ -2283,9 +2365,11 @@ impl TreeItemCache {
                     sidebar_density: SidebarDensity::default(),
                     use_stable_glyphs: false,
                     agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
+                    attention_progress_reports: true,
                     attention_running_indicator:
                         crate::agent_monitoring::AttentionRunningIndicator::default(),
                     show_inferred_title_icons: false,
+                    frozen_panes: &HashSet::new(),
                     panel_width: 0,
                     opened_paths,
                     sidebar_files,
@@ -2340,6 +2424,7 @@ pub(crate) fn render(
             terminal_activity: options.terminal_activity,
             focused_pane_id: options.focused_pane_id,
             agent_identifiers: options.agent_identifiers,
+            agent_models: options.agent_models,
             icons: options.icons,
             workspace_git_statuses: options.workspace_git_statuses,
             show_worktree_branch_line: options.show_worktree_branch_line,
@@ -2348,6 +2433,7 @@ pub(crate) fn render(
             sidebar_density: options.sidebar_density,
             use_stable_glyphs: options.use_stable_glyphs,
             agent_monitoring_mode: options.agent_monitoring_mode,
+            attention_progress_reports: options.attention_progress_reports,
             attention_running_indicator: options.attention_running_indicator,
             show_inferred_title_icons: options.show_inferred_title_icons,
             panel_width: area.width,
@@ -2355,6 +2441,7 @@ pub(crate) fn render(
             sidebar_files: options.sidebar_files,
             chatroom_projects: options.chatroom_projects,
             panes: options.panes,
+            frozen_panes: options.frozen_panes,
         },
     );
     let mut title = sidebar_title(
@@ -2400,6 +2487,9 @@ pub(crate) fn render(
                 terminal_activity: options.terminal_activity,
                 focused_pane_id: options.focused_pane_id,
                 agent_identifiers: options.agent_identifiers,
+                // The presentation snapshot may contain an earlier session
+                // for this pane ID; never attach current-session evidence to it.
+                agent_models: &HashMap::new(),
                 icons: options.icons,
                 workspace_git_statuses: options.workspace_git_statuses,
                 show_worktree_branch_line: options.show_worktree_branch_line,
@@ -2408,8 +2498,10 @@ pub(crate) fn render(
                 sidebar_density: options.sidebar_density,
                 use_stable_glyphs: options.use_stable_glyphs,
                 agent_monitoring_mode: options.agent_monitoring_mode,
+                attention_progress_reports: options.attention_progress_reports,
                 attention_running_indicator: options.attention_running_indicator,
                 show_inferred_title_icons: options.show_inferred_title_icons,
+                frozen_panes: &HashSet::new(),
                 panel_width: area.width,
                 opened_paths: state.opened(),
                 sidebar_files: options.sidebar_files,
@@ -2798,7 +2890,7 @@ fn draw_scrollbar(frame: &mut Frame, area: Rect, total_rows: usize, state: &Tree
     let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
         .begin_symbol(None)
         .end_symbol(None)
-        .track_symbol(Some(" "))
+        .track_symbol(Some("│"))
         .style(theme::border_style(false));
     frame.render_stateful_widget(scrollbar, list, &mut scrollbar_state);
 }
@@ -2994,12 +3086,14 @@ mod tests {
                         is_title_loading: false,
                         terminal_activity_phase: None,
                         agent_identifiers: &identifiers,
+                        agent_model: None,
                         icons: &icons,
                         editor_filename: None,
                         progress: None,
                         has_scheduled_input: false,
                         use_stable_glyphs: stable,
                         agent_monitoring_mode: mode,
+                        attention_progress_reports: true,
                         attention_running_indicator: AttentionRunningIndicator::Off,
                     },
                 );
@@ -3153,12 +3247,14 @@ mod tests {
                     is_title_loading: false,
                     terminal_activity_phase: None,
                     agent_identifiers: &agent_identifiers,
+                    agent_model: None,
                     icons: &icons,
                     editor_filename: None,
                     progress: None,
                     has_scheduled_input: false,
                     use_stable_glyphs,
                     agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
+                    attention_progress_reports: true,
                     attention_running_indicator:
                         crate::agent_monitoring::AttentionRunningIndicator::default(),
                 },
@@ -3240,6 +3336,28 @@ mod tests {
         area: Rect,
         branch_rendering: (bool, &HashMap<NodeId, WorkspaceGitStatus>, bool),
     ) -> Buffer {
+        render_tree_buffer_with_models(
+            tree,
+            state,
+            transitions,
+            recently_created,
+            elapsed_ms,
+            area,
+            branch_rendering,
+            &HashMap::new(),
+        )
+    }
+
+    fn render_tree_buffer_with_models(
+        tree: &Tree,
+        state: &mut TreeState<NodeId>,
+        transitions: &TreeTransitions,
+        recently_created: &HashMap<NodeId, u128>,
+        elapsed_ms: u128,
+        area: Rect,
+        branch_rendering: (bool, &HashMap<NodeId, WorkspaceGitStatus>, bool),
+        agent_models: &HashMap<NodeId, String>,
+    ) -> Buffer {
         let (show_branch_line, workspace_git_statuses, show_project_separators) = branch_rendering;
         let titles_loading = HashSet::new();
         let agent_identifiers = AgentIdentifierSettings::default();
@@ -3265,6 +3383,7 @@ mod tests {
                         focused_pane_id: None,
                         transitions,
                         agent_identifiers: &agent_identifiers,
+                        agent_models,
                         icons: &IconSettings::default(),
                         workspace_git_statuses,
                         show_worktree_branch_line: show_branch_line,
@@ -3273,9 +3392,11 @@ mod tests {
                         sidebar_density: SidebarDensity::default(),
                         use_stable_glyphs: false,
                         agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
+                        attention_progress_reports: true,
                         attention_running_indicator:
                             crate::agent_monitoring::AttentionRunningIndicator::default(),
                         show_inferred_title_icons: false,
+                        frozen_panes: &HashSet::new(),
                         cost: None,
                         hover: TreeHoverState::default(),
                         sidebar_files: &Default::default(),
@@ -3542,6 +3663,261 @@ mod tests {
     }
 
     #[test]
+    fn rendered_tree_rows_show_mixed_provider_models_for_more_than_sixteen_sessions() {
+        let mut tree = Tree::new();
+        let group = tree.add_group(ROOT_ID, "mixed model rows").unwrap();
+        let cases = [
+            (AgentClass::Codex, "gpt-6.1-sol"),
+            (AgentClass::Claude, "claude-opus-4-1"),
+            (AgentClass::Antigravity, "Gemini 3.8 Flash (High)"),
+        ];
+        let mut models = HashMap::new();
+        let mut rows = Vec::new();
+        for index in 0..21 {
+            let (class, model) = &cases[index % cases.len()];
+            let title = format!("model-session-{index:02}");
+            let pane = tree
+                .add_pane(group, &title, ilium_core::PaneContentKind::Terminal)
+                .unwrap();
+            tree.set_pane_status(
+                pane,
+                PaneStatus::from_activity(class.clone(), AgentActivity::Idle, None),
+            )
+            .unwrap();
+            models.insert(pane, (*model).to_string());
+            let glyph = crate::agent_toolbar::model_icon_glyph(
+                class.clone(),
+                model,
+                &IconSettings::default(),
+            )
+            .expect("each representative provider model has a toolbar glyph")
+            .to_string();
+            rows.push((title, glyph));
+        }
+
+        let mut state = TreeState::default();
+        state.open(vec![group]);
+        let buffer = render_tree_buffer_with_models(
+            &tree,
+            &mut state,
+            &TreeTransitions::default(),
+            &HashMap::new(),
+            0,
+            Rect::new(0, 0, 64, 28),
+            (true, &HashMap::new(), false),
+            &models,
+        );
+
+        for (title, glyph) in rows {
+            let row = (buffer.area.y..buffer.area.bottom())
+                .find(|&row| buffer_row_text(&buffer, row).contains(&title))
+                .unwrap_or_else(|| panic!("rendered tree is missing pane {title}"));
+            assert!(
+                buffer_row_text(&buffer, row).contains(&glyph),
+                "rendered row for {title} must show its toolbar model glyph {glyph}"
+            );
+        }
+    }
+
+    #[test]
+    fn rendered_tree_rows_match_supported_model_glyphs_and_provider_fallbacks() {
+        let mut tree = Tree::new();
+        let group = tree.add_group(ROOT_ID, "toolbar model mappings").unwrap();
+        let icons = IconSettings::default();
+        let identifiers = AgentIdentifierSettings::default();
+        let cases = [
+            (AgentClass::Claude, "claude-haiku-4-5", true),
+            (AgentClass::Claude, "claude-sonnet-5", true),
+            (AgentClass::Claude, "claude-opus-4-1", true),
+            (AgentClass::Claude, "claude-fable-1", true),
+            (AgentClass::Codex, "gpt-6.1-sol", true),
+            (AgentClass::Codex, "gpt-6-astra", true),
+            (AgentClass::Codex, "gpt-6-luna", true),
+            (AgentClass::Antigravity, "gemini-3-pro", true),
+            (AgentClass::Antigravity, "Gemini 3.8 Flash (High)", true),
+            (AgentClass::Claude, "claude-unmapped-model", false),
+            (AgentClass::Codex, "gpt-5.6-terra", false),
+            (AgentClass::Antigravity, "Gemini 3.8 Ultra", false),
+        ];
+        let mut models = HashMap::new();
+        let mut expected_rows = Vec::new();
+        for (index, (class, model, has_model_glyph)) in cases.iter().enumerate() {
+            let pane_name = format!("mapped-model-{index:02}");
+            let pane = tree
+                .add_pane(group, &pane_name, ilium_core::PaneContentKind::Terminal)
+                .unwrap();
+            tree.set_pane_status(
+                pane,
+                PaneStatus::from_activity(class.clone(), AgentActivity::Idle, None),
+            )
+            .unwrap();
+            models.insert(pane, (*model).to_string());
+            let model_glyph = crate::agent_toolbar::model_icon_glyph(class.clone(), model, &icons);
+            let expected_glyph = if *has_model_glyph {
+                model_glyph.expect("supported model family has a toolbar glyph")
+            } else {
+                assert!(
+                    model_glyph.is_none(),
+                    "unknown model must use provider fallback"
+                );
+                agent_node_icon(class, &identifiers, &icons)
+            };
+            expected_rows.push((pane_name, expected_glyph.to_string()));
+        }
+
+        let mut state = TreeState::default();
+        state.open(vec![group]);
+        let buffer = render_tree_buffer_with_models(
+            &tree,
+            &mut state,
+            &TreeTransitions::default(),
+            &HashMap::new(),
+            0,
+            Rect::new(0, 0, 64, 24),
+            (true, &HashMap::new(), false),
+            &models,
+        );
+
+        for (title, expected_glyph) in expected_rows {
+            let row = (buffer.area.y..buffer.area.bottom())
+                .find(|&row| buffer_row_text(&buffer, row).contains(&title))
+                .unwrap_or_else(|| panic!("rendered tree is missing pane {title}"));
+            assert!(
+                buffer_row_text(&buffer, row).contains(&expected_glyph),
+                "rendered row for {title} must display {expected_glyph}"
+            );
+        }
+    }
+
+    #[test]
+    fn recorded_model_icon_overrides_provider_icon_only_for_icon_identifiers() {
+        let status = PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Idle, None);
+        let icons = IconSettings::default();
+        let label = |mode, model| {
+            let identifiers = AgentIdentifierSettings {
+                mode,
+                ..AgentIdentifierSettings::default()
+            };
+            pane_label_with_icons(
+                &status,
+                "Review",
+                PaneLabelContext {
+                    elapsed_ms: 0,
+                    is_title_loading: false,
+                    terminal_activity_phase: None,
+                    agent_identifiers: &identifiers,
+                    agent_model: model,
+                    icons: &icons,
+                    editor_filename: None,
+                    progress: None,
+                    has_scheduled_input: false,
+                    use_stable_glyphs: false,
+                    agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
+                    attention_progress_reports: true,
+                    attention_running_indicator:
+                        crate::agent_monitoring::AttentionRunningIndicator::default(),
+                },
+            )
+        };
+
+        let model_icon = label(AgentIdentifierMode::Icon, Some("gpt-6-astra"));
+        assert_eq!(model_icon.spans[0].content.trim_end(), "⭐");
+
+        let provider_fallback = label(AgentIdentifierMode::Icon, Some("gpt-5.6-terra"));
+        assert_eq!(
+            provider_fallback.spans[0].content.trim_end(),
+            AgentIdentifierSettings::default().codex_icon.glyph()
+        );
+
+        let letter = label(AgentIdentifierMode::Letter, Some("gpt-6-astra"));
+        assert!(line_text(&letter).ends_with("X: Review"));
+
+        let unavailable = PaneStatus::AgentUnavailable(Box::new(ilium_core::AgentRecovery {
+            last_known_state: ilium_core::AgentState::from_activity(
+                AgentClass::Codex,
+                AgentActivity::Idle,
+                None,
+            ),
+            process: ilium_core::AgentProcessKey {
+                class: AgentClass::Codex,
+                process_id: 42,
+                started_at_unix_seconds: 1,
+            },
+            availability: ilium_core::AgentAvailability::Exited(
+                ilium_core::AgentExitOutcome::ExitCode(0),
+            ),
+            signal_name: None,
+            session_id: Some("retained-session".into()),
+            last_prompt: None,
+            previous_exact_prompt: None,
+            latest_prompt_unavailable: false,
+        }));
+        let unavailable_label = pane_label_with_icons(
+            &unavailable,
+            "Review",
+            PaneLabelContext {
+                elapsed_ms: 0,
+                is_title_loading: false,
+                terminal_activity_phase: None,
+                agent_identifiers: &AgentIdentifierSettings {
+                    mode: AgentIdentifierMode::Icon,
+                    ..AgentIdentifierSettings::default()
+                },
+                agent_model: Some("gpt-6-astra"),
+                icons: &icons,
+                editor_filename: None,
+                progress: None,
+                has_scheduled_input: false,
+                use_stable_glyphs: false,
+                agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
+                attention_progress_reports: true,
+                attention_running_indicator:
+                    crate::agent_monitoring::AttentionRunningIndicator::default(),
+            },
+        );
+        assert_eq!(unavailable_label.spans[0].content.trim_end(), "⭐");
+        assert_eq!(
+            unavailable_label.spans[0].style.fg,
+            Some(Color::DarkGray),
+            "unavailable model icons keep the dim recovery styling"
+        );
+
+        let unavailable_fallback = pane_label_with_icons(
+            &unavailable,
+            "Review",
+            PaneLabelContext {
+                elapsed_ms: 0,
+                is_title_loading: false,
+                terminal_activity_phase: None,
+                agent_identifiers: &AgentIdentifierSettings {
+                    mode: AgentIdentifierMode::Icon,
+                    ..AgentIdentifierSettings::default()
+                },
+                agent_model: Some("gpt-5.6-terra"),
+                icons: &icons,
+                editor_filename: None,
+                progress: None,
+                has_scheduled_input: false,
+                use_stable_glyphs: false,
+                agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
+                attention_progress_reports: true,
+                attention_running_indicator:
+                    crate::agent_monitoring::AttentionRunningIndicator::default(),
+            },
+        );
+        assert_eq!(
+            unavailable_fallback.spans[0].content.trim_end(),
+            AgentIdentifierSettings::default().codex_icon.glyph(),
+            "unknown retained models keep the provider icon"
+        );
+        assert_eq!(
+            unavailable_fallback.spans[0].style.fg,
+            Some(Color::DarkGray),
+            "provider fallback keeps the unavailable recovery styling"
+        );
+    }
+
+    #[test]
     fn codex_letter_is_x_and_every_curated_icon_fits_the_fixed_column() {
         let status = PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Working, None);
         let mut settings = AgentIdentifierSettings {
@@ -3740,12 +4116,14 @@ mod tests {
                         is_title_loading: false,
                         terminal_activity_phase: Some(phase),
                         agent_identifiers: &settings,
+                        agent_model: None,
                         icons: &icons,
                         editor_filename: None,
                         progress: None,
                         has_scheduled_input: false,
                         use_stable_glyphs: false,
                         agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
+                        attention_progress_reports: true,
                         attention_running_indicator:
                             crate::agent_monitoring::AttentionRunningIndicator::default(),
                     },
@@ -3763,12 +4141,14 @@ mod tests {
                 is_title_loading: false,
                 terminal_activity_phase: None,
                 agent_identifiers: &settings,
+                agent_model: None,
                 icons: &icons,
                 editor_filename: None,
                 progress: None,
                 has_scheduled_input: false,
                 use_stable_glyphs: false,
                 agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
+                attention_progress_reports: true,
                 attention_running_indicator:
                     crate::agent_monitoring::AttentionRunningIndicator::default(),
             },
@@ -3947,12 +4327,14 @@ mod tests {
                 is_title_loading: false,
                 terminal_activity_phase: None,
                 agent_identifiers: &agent_identifiers,
+                agent_model: None,
                 icons: &icons,
                 editor_filename: None,
                 progress: None,
                 has_scheduled_input: false,
                 use_stable_glyphs: false,
                 agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
+                attention_progress_reports: true,
                 attention_running_indicator:
                     crate::agent_monitoring::AttentionRunningIndicator::default(),
             },
@@ -4050,6 +4432,7 @@ mod tests {
                         focused_pane_id: None,
                         transitions: &TreeTransitions::default(),
                         agent_identifiers: &agent_identifiers,
+                        agent_models: &HashMap::new(),
                         icons: &IconSettings::default(),
                         workspace_git_statuses: &HashMap::new(),
                         show_worktree_branch_line: true,
@@ -4058,9 +4441,11 @@ mod tests {
                         sidebar_density: SidebarDensity::default(),
                         use_stable_glyphs: false,
                         agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
+                        attention_progress_reports: true,
                         attention_running_indicator:
                             crate::agent_monitoring::AttentionRunningIndicator::default(),
                         show_inferred_title_icons: false,
+                        frozen_panes: &HashSet::new(),
                         cost: None,
                         hover: TreeHoverState::default(),
                         sidebar_files: &Default::default(),
@@ -4101,6 +4486,7 @@ mod tests {
                         focused_pane_id: None,
                         transitions: &TreeTransitions::default(),
                         agent_identifiers: &agent_identifiers,
+                        agent_models: &HashMap::new(),
                         icons: &IconSettings::default(),
                         workspace_git_statuses: &HashMap::new(),
                         show_worktree_branch_line: true,
@@ -4109,9 +4495,11 @@ mod tests {
                         sidebar_density: SidebarDensity::default(),
                         use_stable_glyphs: false,
                         agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
+                        attention_progress_reports: true,
                         attention_running_indicator:
                             crate::agent_monitoring::AttentionRunningIndicator::default(),
                         show_inferred_title_icons: false,
+                        frozen_panes: &HashSet::new(),
                         cost: None,
                         hover: TreeHoverState {
                             node: Some(TreeNodeHit {
@@ -4180,6 +4568,7 @@ mod tests {
                         focused_pane_id: None,
                         transitions: &TreeTransitions::default(),
                         agent_identifiers: &agent_identifiers,
+                        agent_models: &HashMap::new(),
                         icons: &IconSettings::default(),
                         workspace_git_statuses: &HashMap::new(),
                         show_worktree_branch_line: true,
@@ -4188,9 +4577,11 @@ mod tests {
                         sidebar_density: SidebarDensity::default(),
                         use_stable_glyphs: false,
                         agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
+                        attention_progress_reports: true,
                         attention_running_indicator:
                             crate::agent_monitoring::AttentionRunningIndicator::default(),
                         show_inferred_title_icons: false,
+                        frozen_panes: &HashSet::new(),
                         cost: None,
                         hover: TreeHoverState::default(),
                         sidebar_files: &Default::default(),
@@ -4934,6 +5325,7 @@ mod tests {
                 terminal_activity: &TerminalActivityTracker::default(),
                 focused_pane_id: None,
                 agent_identifiers: &AgentIdentifierSettings::default(),
+                agent_models: &HashMap::new(),
                 icons: &IconSettings::default(),
                 workspace_git_statuses: &HashMap::new(),
                 show_worktree_branch_line: true,
@@ -4942,9 +5334,11 @@ mod tests {
                 sidebar_density: SidebarDensity::Standard,
                 use_stable_glyphs: false,
                 agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
+                attention_progress_reports: true,
                 attention_running_indicator:
                     crate::agent_monitoring::AttentionRunningIndicator::default(),
                 show_inferred_title_icons: false,
+                frozen_panes: &HashSet::new(),
                 panel_width: area.width,
                 opened_paths: state.opened(),
                 sidebar_files: &Default::default(),
@@ -5089,6 +5483,7 @@ mod tests {
                 terminal_activity: &TerminalActivityTracker::default(),
                 focused_pane_id: None,
                 agent_identifiers: &AgentIdentifierSettings::default(),
+                agent_models: &HashMap::new(),
                 icons: &IconSettings::default(),
                 workspace_git_statuses: &HashMap::new(),
                 show_worktree_branch_line: true,
@@ -5097,9 +5492,11 @@ mod tests {
                 sidebar_density: SidebarDensity::default(),
                 use_stable_glyphs: false,
                 agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
+                attention_progress_reports: true,
                 attention_running_indicator:
                     crate::agent_monitoring::AttentionRunningIndicator::default(),
                 show_inferred_title_icons: false,
+                frozen_panes: &HashSet::new(),
                 panel_width: 0,
                 opened_paths: &opened_paths,
                 sidebar_files: crate::filesystem::sidebar::prepared_for_test(&tree, &opened_paths)
@@ -5122,6 +5519,7 @@ mod tests {
                 terminal_activity: &TerminalActivityTracker::default(),
                 focused_pane_id: None,
                 agent_identifiers: &AgentIdentifierSettings::default(),
+                agent_models: &HashMap::new(),
                 icons: &IconSettings::default(),
                 workspace_git_statuses: &HashMap::new(),
                 show_worktree_branch_line: true,
@@ -5130,9 +5528,11 @@ mod tests {
                 sidebar_density: SidebarDensity::default(),
                 use_stable_glyphs: false,
                 agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
+                attention_progress_reports: true,
                 attention_running_indicator:
                     crate::agent_monitoring::AttentionRunningIndicator::default(),
                 show_inferred_title_icons: false,
+                frozen_panes: &HashSet::new(),
                 panel_width: 0,
                 opened_paths: &opened_paths,
                 sidebar_files: crate::filesystem::sidebar::prepared_for_test(&tree, &opened_paths)
@@ -5158,6 +5558,7 @@ mod tests {
                 terminal_activity: &TerminalActivityTracker::default(),
                 focused_pane_id: None,
                 agent_identifiers: &AgentIdentifierSettings::default(),
+                agent_models: &HashMap::new(),
                 icons: &IconSettings::default(),
                 workspace_git_statuses: &HashMap::new(),
                 show_worktree_branch_line: true,
@@ -5166,9 +5567,11 @@ mod tests {
                 sidebar_density: SidebarDensity::default(),
                 use_stable_glyphs: false,
                 agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
+                attention_progress_reports: true,
                 attention_running_indicator:
                     crate::agent_monitoring::AttentionRunningIndicator::default(),
                 show_inferred_title_icons: false,
+                frozen_panes: &HashSet::new(),
                 panel_width: 0,
                 opened_paths: &opened_paths,
                 sidebar_files: crate::filesystem::sidebar::prepared_for_test(&tree, &opened_paths)
@@ -5217,6 +5620,7 @@ mod tests {
                 terminal_activity: &TerminalActivityTracker::default(),
                 focused_pane_id: None,
                 agent_identifiers: &AgentIdentifierSettings::default(),
+                agent_models: &HashMap::new(),
                 icons: &IconSettings::default(),
                 workspace_git_statuses: &HashMap::new(),
                 show_worktree_branch_line: true,
@@ -5225,9 +5629,11 @@ mod tests {
                 sidebar_density: SidebarDensity::default(),
                 use_stable_glyphs: false,
                 agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
+                attention_progress_reports: true,
                 attention_running_indicator:
                     crate::agent_monitoring::AttentionRunningIndicator::default(),
                 show_inferred_title_icons: false,
+                frozen_panes: &HashSet::new(),
                 panel_width: 0,
                 opened_paths: &opened_paths,
                 sidebar_files: &Default::default(),
@@ -5347,12 +5753,14 @@ mod tests {
                 is_title_loading: false,
                 terminal_activity_phase: None,
                 agent_identifiers: &settings,
+                agent_model: None,
                 icons: &icons,
                 editor_filename: None,
                 progress: None,
                 has_scheduled_input: true,
                 use_stable_glyphs: false,
                 agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
+                attention_progress_reports: true,
                 attention_running_indicator:
                     crate::agent_monitoring::AttentionRunningIndicator::default(),
             },
@@ -5467,6 +5875,7 @@ mod tests {
                 terminal_activity: &TerminalActivityTracker::default(),
                 focused_pane_id: None,
                 agent_identifiers: &AgentIdentifierSettings::default(),
+                agent_models: &HashMap::new(),
                 icons: &IconSettings::default(),
                 workspace_git_statuses: &HashMap::new(),
                 show_worktree_branch_line: true,
@@ -5475,9 +5884,11 @@ mod tests {
                 sidebar_density: SidebarDensity::default(),
                 use_stable_glyphs: false,
                 agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
+                attention_progress_reports: true,
                 attention_running_indicator:
                     crate::agent_monitoring::AttentionRunningIndicator::default(),
                 show_inferred_title_icons: false,
+                frozen_panes: &HashSet::new(),
                 panel_width: 0,
                 opened_paths: &opened_paths,
                 sidebar_files: &Default::default(),
@@ -5757,6 +6168,7 @@ mod tests {
                 terminal_activity: &TerminalActivityTracker::default(),
                 focused_pane_id: None,
                 agent_identifiers: &AgentIdentifierSettings::default(),
+                agent_models: &HashMap::new(),
                 icons: &IconSettings::default(),
                 workspace_git_statuses: &HashMap::new(),
                 show_worktree_branch_line: true,
@@ -5765,9 +6177,11 @@ mod tests {
                 sidebar_density: SidebarDensity::default(),
                 use_stable_glyphs: false,
                 agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
+                attention_progress_reports: true,
                 attention_running_indicator:
                     crate::agent_monitoring::AttentionRunningIndicator::default(),
                 show_inferred_title_icons: false,
+                frozen_panes: &HashSet::new(),
                 panel_width: 0,
                 opened_paths: &opened_paths,
                 sidebar_files: &Default::default(),
@@ -5987,6 +6401,7 @@ mod cost_indicator_tests {
                         focused_pane_id: None,
                         transitions: &TreeTransitions::default(),
                         agent_identifiers: &AgentIdentifierSettings::default(),
+                        agent_models: &HashMap::new(),
                         icons: &IconSettings::default(),
                         workspace_git_statuses: &HashMap::new(),
                         show_worktree_branch_line: true,
@@ -5995,9 +6410,11 @@ mod cost_indicator_tests {
                         sidebar_density: SidebarDensity::default(),
                         use_stable_glyphs: false,
                         agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
+                        attention_progress_reports: true,
                         attention_running_indicator:
                             crate::agent_monitoring::AttentionRunningIndicator::default(),
                         show_inferred_title_icons: false,
+                        frozen_panes: &HashSet::new(),
                         cost,
                         hover,
                         sidebar_files: &Default::default(),

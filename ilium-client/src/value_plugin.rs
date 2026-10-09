@@ -490,7 +490,9 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::value_control::{ControlAction, ControlStyles, PointerButton};
+    use crate::value_control::{
+        ControlAction, ControlStyles, PointerButton, NUMBER_DECREMENT_GLYPH, NUMBER_INCREMENT_GLYPH,
+    };
     use ratatui::{backend::TestBackend, layout::Position, Terminal};
     use serde_json::json;
     #[test]
@@ -515,7 +517,7 @@ mod tests {
                 let glyphs = if metadata.id == "palette" {
                     ["←", "→", "+"]
                 } else {
-                    ["−", "+", "*"]
+                    [NUMBER_DECREMENT_GLYPH, NUMBER_INCREMENT_GLYPH, "*"]
                 };
                 for (rect, glyph) in [
                     (geometry.previous, glyphs[0]),

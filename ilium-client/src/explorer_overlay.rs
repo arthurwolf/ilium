@@ -18,7 +18,9 @@ use crossterm::event::{
 use ratatui::layout::{Alignment, Constraint, Layout, Position, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Cell, Clear, Paragraph, Row, Table, TableState};
+use ratatui::widgets::{
+    Cell, Clear, Paragraph, Row, Scrollbar, ScrollbarOrientation, ScrollbarState, Table, TableState,
+};
 use ratatui::Frame;
 
 use crate::filesystem::explorer::{ExplorerEntry, ExplorerRead};
@@ -563,6 +565,7 @@ struct ExplorerLayout {
     /// Entry rows only, i.e. `table_area` minus the header row -- used for
     /// mouse hit-testing and for sizing a page-up/page-down jump.
     rows_area: Rect,
+    scrollbar_area: Rect,
     /// Explicit folder-confirmation control. It shares the popup's width so
     /// the large target remains easy to acquire with a mouse.
     action_area: Rect,
@@ -578,12 +581,16 @@ fn layout_for(screen_area: Rect) -> ExplorerLayout {
         Constraint::Length(1),
     ])
     .split(inner);
-    let table_area = sections[0];
+    let scrollbar_width = u16::from(sections[0].width >= 2);
+    let table_area = Rect {
+        width: sections[0].width.saturating_sub(scrollbar_width),
+        ..sections[0]
+    };
     let action_area = sections[1];
     let hint_area = sections[2];
     let rows_area = Rect::new(
         table_area.x,
-        table_area.y.saturating_add(1),
+        table_area.y.saturating_add(table_area.height.min(1)),
         table_area.width,
         table_area.height.saturating_sub(1),
     );
@@ -591,6 +598,12 @@ fn layout_for(screen_area: Rect) -> ExplorerLayout {
         popup_area,
         table_area,
         rows_area,
+        scrollbar_area: Rect::new(
+            table_area.right(),
+            rows_area.y,
+            scrollbar_width,
+            rows_area.height,
+        ),
         action_area,
         hint_area,
     }
@@ -702,6 +715,22 @@ pub fn render(frame: &mut Frame, screen_area: Rect, overlay: &ExplorerOverlay, n
         .with_offset(overlay.offset)
         .with_selected((!overlay.entries.is_empty()).then_some(overlay.selected));
     frame.render_stateful_widget(table, layout.table_area, &mut table_state);
+    if overlay.entries.len() > usize::from(layout.rows_area.height)
+        && !layout.scrollbar_area.is_empty()
+    {
+        let mut state = ScrollbarState::new(overlay.entries.len())
+            .position(table_state.offset())
+            .viewport_content_length(usize::from(layout.rows_area.height));
+        frame.render_stateful_widget(
+            Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                .begin_symbol(None)
+                .end_symbol(None)
+                .track_symbol(Some("│"))
+                .style(theme::border_style(false)),
+            layout.scrollbar_area,
+            &mut state,
+        );
+    }
 
     if let Some(folder_action_label) = &overlay.folder_action_label {
         let action_style = if overlay.folder_action_focused {
@@ -833,6 +862,29 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+
+    #[test]
+    fn explorer_scrollbar_is_outside_file_rows_and_confirmation_controls() {
+        for (width, height) in [(120, 40), (80, 24), (40, 12), (12, 6), (1, 1)] {
+            let screen = Rect::new(0, 0, width, height);
+            let layout = layout_for(screen);
+            assert_eq!(layout.table_area.right(), layout.scrollbar_area.x);
+            assert_eq!(layout.rows_area.width, layout.table_area.width);
+            assert!(layout.scrollbar_area.right() <= screen.right());
+            assert!(layout.scrollbar_area.bottom() <= layout.action_area.y);
+            if !layout.scrollbar_area.is_empty() {
+                assert_eq!(
+                    row_at(
+                        &layout,
+                        0,
+                        100,
+                        Position::new(layout.scrollbar_area.x, layout.scrollbar_area.y)
+                    ),
+                    None
+                );
+            }
+        }
+    }
 
     fn scratch_dir(label: &str) -> PathBuf {
         let dir = std::env::temp_dir()

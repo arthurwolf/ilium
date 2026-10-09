@@ -10,7 +10,7 @@
 //! a new agent provider extends those tables, matching the registry pattern
 //! `ilium-detect`'s `AgentSignature` already uses.
 
-use ilium_core::BuiltinAgentProvider;
+use ilium_core::{AgentClass, BuiltinAgentProvider};
 use ratatui::layout::{Position, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Span;
@@ -587,16 +587,8 @@ fn center_buttons(ctx: ToolbarContext) -> Vec<Button> {
         // the strength progression never bypasses the user-configurable icon
         // registry. Other providers retain the shared model role.
         for (index, model) in models_for(provider).iter().enumerate() {
-            let glyph = if provider == BuiltinAgentProvider::Claude {
-                match index {
-                    0 => icons.glyph(IconTarget::AgentToolbarClaudeHaiku),
-                    1 => icons.glyph(IconTarget::AgentToolbarClaudeSonnet),
-                    2 => icons.glyph(IconTarget::AgentToolbarClaudeOpus),
-                    _ => icons.glyph(IconTarget::AgentToolbarClaudeFable),
-                }
-            } else {
-                icons.glyph(IconTarget::AgentToolbarModel)
-            };
+            let glyph = toolbar_model_glyph(provider, index, icons)
+                .unwrap_or_else(|| icons.glyph(IconTarget::AgentToolbarModel));
             buttons.push(Button {
                 action: AgentToolbarAction::Model(index as u8),
                 text: format!("{glyph}{}", model.label),
@@ -634,6 +626,130 @@ fn center_buttons(ctx: ToolbarContext) -> Vec<Button> {
         show_labels,
     );
     buttons
+}
+
+fn claude_model_target(label: &str) -> Option<IconTarget> {
+    if label.eq_ignore_ascii_case("haiku") {
+        Some(IconTarget::AgentToolbarClaudeHaiku)
+    } else if label.eq_ignore_ascii_case("sonnet") {
+        Some(IconTarget::AgentToolbarClaudeSonnet)
+    } else if label.eq_ignore_ascii_case("opus") {
+        Some(IconTarget::AgentToolbarClaudeOpus)
+    } else if label.eq_ignore_ascii_case("fable") {
+        Some(IconTarget::AgentToolbarClaudeFable)
+    } else {
+        None
+    }
+}
+
+fn toolbar_model_glyph(
+    provider: BuiltinAgentProvider,
+    index: usize,
+    icons: &IconSettings,
+) -> Option<&str> {
+    match provider {
+        BuiltinAgentProvider::Codex => CODEX_MODEL_TIERS.get(index).map(|tier| tier.glyph),
+        BuiltinAgentProvider::Claude => {
+            let model = models_for(provider).get(index)?;
+            Some(icons.glyph(claude_model_target(model.label)?))
+        }
+        BuiltinAgentProvider::Antigravity => {
+            models_for(provider).get(index)?;
+            Some(icons.glyph(IconTarget::AgentToolbarModel))
+        }
+    }
+}
+
+/// Resolve the tree glyph from a verified session model identifier using the same
+/// mapping that supplies toolbar model buttons. Unknown model IDs fall back
+/// to the configured provider icon at the call site.
+pub(crate) fn model_icon_glyph<'a>(
+    class: AgentClass,
+    model: &str,
+    icons: &'a IconSettings,
+) -> Option<&'a str> {
+    let first = model.split_ascii_whitespace().next()?;
+    let id = first.split('[').next()?;
+    let family_present = |family: &str| {
+        id.split(|character: char| !character.is_ascii_alphanumeric())
+            .any(|token| token.eq_ignore_ascii_case(family))
+    };
+    match class {
+        AgentClass::Claude => {
+            let provider = BuiltinAgentProvider::Claude;
+            let is_alias = models_for(provider)
+                .iter()
+                .any(|candidate| id.eq_ignore_ascii_case(candidate.label));
+            if !is_alias
+                && !id
+                    .get(..7)
+                    .is_some_and(|prefix| prefix.eq_ignore_ascii_case("claude-"))
+            {
+                return None;
+            }
+            let mut matched = models_for(provider)
+                .iter()
+                .enumerate()
+                .filter(|(_, candidate)| family_present(candidate.label));
+            let (index, _) = matched.next()?;
+            if matched.next().is_some() {
+                return None;
+            }
+            toolbar_model_glyph(provider, index, icons)
+        }
+        AgentClass::Codex => {
+            let is_alias = CODEX_MODEL_TIERS
+                .iter()
+                .any(|tier| id.eq_ignore_ascii_case(tier.label));
+            if !is_alias
+                && !id
+                    .get(..4)
+                    .is_some_and(|prefix| prefix.eq_ignore_ascii_case("gpt-"))
+            {
+                return None;
+            }
+            let mut matched = CODEX_MODEL_TIERS
+                .iter()
+                .enumerate()
+                .filter(|(_, tier)| family_present(tier.label));
+            let (index, _) = matched.next()?;
+            if matched.next().is_some() {
+                return None;
+            }
+            toolbar_model_glyph(BuiltinAgentProvider::Codex, index, icons)
+        }
+        AgentClass::Antigravity => {
+            let provider = BuiltinAgentProvider::Antigravity;
+            let family_present = |family: &str| {
+                model
+                    .split(|character: char| !character.is_ascii_alphanumeric())
+                    .any(|token| token.eq_ignore_ascii_case(family))
+            };
+            if !family_present("gemini") {
+                return None;
+            }
+            let mut matched = models_for(provider)
+                .iter()
+                .enumerate()
+                .filter(|(_, candidate)| {
+                    candidate
+                        .command
+                        .strip_prefix("/model ")
+                        .and_then(|known| {
+                            known
+                                .rsplit(|character: char| !character.is_ascii_alphanumeric())
+                                .next()
+                        })
+                        .is_some_and(family_present)
+                });
+            let (index, _) = matched.next()?;
+            if matched.next().is_some() {
+                return None;
+            }
+            toolbar_model_glyph(provider, index, icons)
+        }
+        AgentClass::Other(_) => None,
+    }
 }
 
 /// At least two blank columns between adjacent buttons, per the toolbar's
@@ -972,6 +1088,52 @@ mod tests {
         assert_eq!(
             configured_texts,
             vec!["•Haiku", "◉Sonnet", "◆Opus", "✦Fable"]
+        );
+    }
+
+    #[test]
+    fn tree_model_icons_follow_the_same_model_button_glyphs() {
+        let mut icons = IconSettings::default();
+        icons.set(IconTarget::AgentToolbarClaudeSonnet, "◉".to_string());
+        icons.set(IconTarget::AgentToolbarClaudeHaiku, "•".to_string());
+
+        assert_eq!(
+            model_icon_glyph(AgentClass::Claude, "claude-sonnet-5", &icons),
+            Some("◉")
+        );
+        assert_eq!(
+            model_icon_glyph(AgentClass::Claude, "claude-haiku-4-5", &icons),
+            Some("•")
+        );
+        assert_eq!(
+            model_icon_glyph(AgentClass::Codex, "gpt-6-sol", &icons),
+            Some("☀️")
+        );
+        assert_eq!(
+            model_icon_glyph(AgentClass::Codex, "GPT-6-Astra high", &icons),
+            Some("⭐")
+        );
+        assert_eq!(
+            model_icon_glyph(AgentClass::Codex, "gpt-6-luna", &icons),
+            Some("🌙")
+        );
+        assert_eq!(
+            model_icon_glyph(AgentClass::Codex, "gpt-5.6-terra", &icons),
+            None
+        );
+
+        icons.set(IconTarget::AgentToolbarModel, "🚀".to_string());
+        assert_eq!(
+            model_icon_glyph(AgentClass::Antigravity, "gemini-3-pro", &icons),
+            Some("🚀")
+        );
+        assert_eq!(
+            model_icon_glyph(AgentClass::Antigravity, "Gemini 3.5 Flash (High)", &icons),
+            Some("🚀")
+        );
+        assert_eq!(
+            model_icon_glyph(AgentClass::Antigravity, "Gemini 3.5 Ultra", &icons),
+            None
         );
     }
 

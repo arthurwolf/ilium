@@ -272,4 +272,92 @@ mod tests {
         assert_ne!(drop_thread, ui_thread);
         assert_eq!(quota.snapshot().worker_bytes, 0);
     }
+
+    #[test]
+    fn retirement_refusal_preserves_the_untouched_original_paste() {
+        use ilium_execution::{
+            ClientLimits, Execution, ExecutionConfig, LaneConfig, QuotaGroup, QuotaLimits,
+            ShutdownMode,
+        };
+
+        let quota_group = QuotaGroup::new(QuotaLimits {
+            clients: 1,
+            jobs: 64,
+            service_jobs: 0,
+            input_bytes: 1024 * 1024,
+            result_bytes: 1024 * 1024,
+            worker_threads: 1,
+            worker_bytes: 1024 * 1024,
+        });
+        let cpu = LaneConfig {
+            threads: 1,
+            queue_slots: 1,
+            priority: None,
+            resident_bytes_per_thread: 4096,
+        };
+        let unused = LaneConfig {
+            threads: 0,
+            queue_slots: 0,
+            priority: None,
+            resident_bytes_per_thread: 0,
+        };
+        let mut execution = Execution::start(
+            quota_group,
+            ExecutionConfig {
+                cpu,
+                io: unused,
+                service: unused,
+            },
+        )
+        .unwrap();
+        let client = execution
+            .client(ClientLimits {
+                jobs: 64,
+                service_jobs: 0,
+                input_bytes: 1024 * 1024,
+                result_bytes: 1024 * 1024,
+            })
+            .unwrap();
+        let retirement = client.retirement();
+        let mut held_reservations = Vec::new();
+        loop {
+            match retirement.try_reserve::<u8>(std::mem::size_of::<u8>()) {
+                Ok(reservation) => held_reservations.push(reservation),
+                Err(RejectReason::QueueFull) => break,
+                Err(reason) => panic!("unexpected retirement admission refusal: {reason:?}"),
+            }
+        }
+
+        let (original, quota) =
+            crate::terminal_input_owner::paste_fixture("leave this paste intact\r\né".into());
+        let original_pointer = match original.view() {
+            crossterm::event::Event::Paste(text) => text.as_ptr(),
+            _ => unreachable!("paste fixture contains a paste"),
+        };
+        let mut replay = PasteReplay::new(original);
+
+        assert!(matches!(
+            replay.reserve_retirement(&retirement),
+            Err(RejectReason::QueueFull)
+        ));
+        assert_eq!(replay.consumed_bytes(), 0);
+        let (original, consumed_bytes) = replay.into_parts();
+        assert_eq!(consumed_bytes, 0);
+        assert!(
+            matches!(original.view(), crossterm::event::Event::Paste(text)
+            if text == "leave this paste intact\r\né" && text.as_ptr() == original_pointer)
+        );
+        assert!(quota.snapshot().worker_bytes > 0);
+
+        drop(original);
+        drop(held_reservations);
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+        drop(retirement);
+        drop(client);
+        execution.request_shutdown(ShutdownMode::Cancel);
+        let report = execution
+            .join_until_background(std::time::Instant::now() + std::time::Duration::from_secs(5))
+            .unwrap();
+        assert!(report.shutdown_complete);
+    }
 }

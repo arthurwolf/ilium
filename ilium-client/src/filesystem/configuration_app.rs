@@ -1,3 +1,6 @@
+#[cfg(test)]
+#[path = "terminal_pool_number_tests.rs"]
+mod terminal_pool_number_tests;
 #[derive(Default)]
 pub(crate) struct ConfigurationAdmission {
     pub attempts: u64,

@@ -509,7 +509,9 @@ fn task_explanation(task: TaskSignal) -> StatusExplanation {
             title: "Task registered, not started yet",
             body: "A long-running task has an Ilium progress monitor, and the task's own probe reports that it has not started. Ilium polls it; the pane's process does not.",
         },
-        TaskSignal::Running { degraded: false, .. } => StatusExplanation {
+        TaskSignal::Running {
+            degraded: false, ..
+        } => StatusExplanation {
             title: "Task running",
             body: "A long-running task is being watched by an Ilium progress monitor. The bar fills left to right in twelve steps; the exact percentage and status message are in the footer under the terminal.",
         },
@@ -722,7 +724,10 @@ pub fn workspace_explanation(
         reason: Some(format!(
             "Why: this pane's saved workspace record binds branch «{}» to worktree «{}»; live Git facts above are shown only when a current observation exists.",
             safe_tooltip_text(&workspace.branch),
-            safe_tooltip_text(&ilium_platform::paths::bounded_path_display(&workspace.worktree_root, 240)),
+            safe_tooltip_text(&ilium_platform::paths::bounded_path_display(
+                &workspace.worktree_root,
+                240
+            )),
         )),
     }
 }

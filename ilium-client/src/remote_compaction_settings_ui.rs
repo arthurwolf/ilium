@@ -19,6 +19,7 @@ use crate::remote_compaction_settings::{
     RemoteCompactionSettings, TechniqueTarget, THRESHOLD_PERCENT_RANGE,
 };
 use crate::theme;
+use crate::value_control::{NUMBER_DECREMENT_GLYPH, NUMBER_INCREMENT_GLYPH};
 
 /// Left margin shared with the other settings tabs.
 const INSET: u16 = 2;
@@ -59,6 +60,8 @@ pub enum HitAction {
     Adjust(i32),
     /// Open the full catalog for a named technique selector.
     OpenChoice(TechniqueTarget),
+    /// Open direct numeric entry for one bounded setting.
+    EditNumber(RemoteCompactionRow),
 }
 
 /// A click, resolved to the row it landed on.
@@ -215,6 +218,103 @@ fn format_tokens(tokens: u64) -> String {
     }
 }
 
+/// The agents' own compaction triggers, what they default to, and a warning
+/// when one fires before the remote threshold. Empty until the tab has read
+/// the configuration.
+fn native_trigger_lines(app: &App, width: u16) -> Vec<Line<'static>> {
+    use crate::remote_compaction_native::{
+        default_window_tokens, describe_limit, evaluate, NativeLimit,
+    };
+    let accent = Style::new()
+        .fg(theme::accent_bg())
+        .add_modifier(Modifier::BOLD);
+    let warning = Style::new()
+        .fg(ratatui::style::Color::Yellow)
+        .add_modifier(Modifier::BOLD);
+    let triggers = &app.remote_compaction_native.triggers;
+    if triggers.is_empty() {
+        return Vec::new();
+    }
+    let threshold = app.remote_compaction_settings.threshold_percent;
+    let wrap_width = usize::from(width.saturating_sub(BODY_INDENT + 3)).max(20);
+    let mut lines = vec![
+        Line::from(Span::styled("  NATIVE COMPACTION OF THE AGENTS", accent)),
+        Line::from(""),
+    ];
+    for trigger in triggers {
+        let window = default_window_tokens(trigger.target);
+        let result = evaluate(trigger, window, threshold);
+        let in_force = match result.effective_trigger_tokens {
+            Some(tokens) => format!(
+                "compacts at {} ({:.0}% of an assumed {} window)",
+                format_tokens(tokens),
+                result.effective_percent().unwrap_or_default(),
+                format_tokens(window),
+            ),
+            None => "automatic compaction is off".to_owned(),
+        };
+        lines.push(Line::from(vec![
+            Span::raw(format!(
+                "  {:<width$}",
+                trigger.target.label(),
+                width = usize::from(LABEL_WIDTH)
+            )),
+            Span::raw(in_force),
+        ]));
+        let configured = if trigger.limit == NativeLimit::Default {
+            "not configured".to_owned()
+        } else {
+            format!(
+                "{} from {}",
+                describe_limit(trigger.limit),
+                trigger.source.describe()
+            )
+        };
+        let detail = format!(
+            "Configured: {configured}. CLI default: {} ({:.0}%).",
+            format_tokens(result.default_trigger_tokens),
+            result.default_percent(),
+        );
+        for text in wrap(&detail, wrap_width) {
+            lines.push(Line::from(Span::styled(
+                format!("{}{text}", " ".repeat(usize::from(BODY_INDENT))),
+                dim(),
+            )));
+        }
+        for note in &trigger.notes {
+            for text in wrap(note, wrap_width) {
+                lines.push(Line::from(Span::styled(
+                    format!("{}{text}", " ".repeat(usize::from(BODY_INDENT))),
+                    dim(),
+                )));
+            }
+        }
+        if result.is_remote_shadowed {
+            let advice = match result.highest_working_percent() {
+                Some(percent) => format!(
+                    "Set the threshold to {percent}% or lower, or raise the agent's own limit."
+                ),
+                None => "Raise the agent's own limit.".to_owned(),
+            };
+            let text = format!(
+                "Warning: {} compacts itself at {} before the {}% remote threshold ({}) is reached, so remote compaction never starts for it. {advice}",
+                trigger.target.label(),
+                format_tokens(result.effective_trigger_tokens.unwrap_or_default()),
+                threshold,
+                format_tokens(result.remote_trigger_tokens),
+            );
+            for line in wrap(&text, wrap_width) {
+                lines.push(Line::from(Span::styled(
+                    format!("{}{line}", " ".repeat(usize::from(BODY_INDENT))),
+                    warning,
+                )));
+            }
+        }
+        lines.push(Line::from(""));
+    }
+    lines
+}
+
 fn format_seconds(seconds: u64) -> String {
     if seconds >= 60 && seconds.is_multiple_of(60) {
         format!("{} min", seconds / 60)
@@ -295,8 +395,9 @@ fn row_description(row: RemoteCompactionRow, app: &App) -> String {
             .to_owned(),
         RemoteCompactionRow::Threshold => format!(
             "Context fill, in percent of the model window, that starts an automatic compaction. \
-             Claude Code compacts on its own near 84% and Codex at 90%, so this stays lower \
-             ({}-{}%).",
+             Claude Code compacts on its own near 84% and Codex at 90% by default, but their \
+             settings or environment can lower that; the block above shows the values in force \
+             and warns when one fires first ({}-{}%).",
             THRESHOLD_PERCENT_RANGE.0, THRESHOLD_PERCENT_RANGE.1
         ),
         RemoteCompactionRow::PauseTimeout => "How long to wait for the agent to reach a clean pause before it is interrupted with Esc."
@@ -380,6 +481,7 @@ pub fn view(app: &App, selected_row: usize, width: u16) -> RemoteCompactionView 
         lines.push(Line::from(Span::styled(format!("  {text}"), dim())));
     }
     lines.push(Line::from(""));
+    lines.extend(native_trigger_lines(app, width));
 
     for &row in &all_rows {
         if let Some(heading) = section_heading(row) {
@@ -453,7 +555,7 @@ pub fn view(app: &App, selected_row: usize, width: u16) -> RemoteCompactionView 
                     if row.kind() == RemoteCompactionRowKind::Select {
                         format!("← {value} + →")
                     } else {
-                        format!("− {value} + *")
+                        format!("{NUMBER_DECREMENT_GLYPH} {value} {NUMBER_INCREMENT_GLYPH} *")
                     }
                 } else {
                     value
@@ -487,10 +589,15 @@ pub fn view(app: &App, selected_row: usize, width: u16) -> RemoteCompactionView 
             }
         }
     }
-    lines.push(Line::from(Span::styled(
-        "  Up/Down select · Left/Right, +/- or Enter change · x closes the privacy box · a ? next to a row explains it",
-        dim(),
-    )));
+    for text in wrap(
+        "Up/Down select · Left/Right step · + opens lists/increments · - decreases · * edits numbers · Enter opens/edits · x closes privacy · ? help",
+        body_width,
+    ) {
+        lines.push(Line::from(Span::styled(
+            format!("  {text}"),
+            dim(),
+        )));
+    }
     RemoteCompactionView {
         lines,
         rows: spans_out,
@@ -516,6 +623,32 @@ fn push_description(
 pub fn render(frame: &mut Frame, area: Rect, app: &App, selected_row: usize, scroll: u16) {
     let view = view(app, selected_row, area.width);
     crate::settings_ui::render_scrollable(frame, area, view.lines, scroll);
+    let rows = rows(app);
+    for span in &view.rows {
+        let Some(control) = value_control(area, scroll, span, app) else {
+            continue;
+        };
+        let selected = rows.get(selected_row) == Some(&span.row);
+        let style = if selected {
+            theme::selected_style().add_modifier(Modifier::BOLD)
+        } else {
+            Style::new().fg(theme::accent_bg())
+        };
+        frame.render_widget(
+            Paragraph::new(" ".repeat(usize::from(control.geometry().row.width))).style(style),
+            control.geometry().row,
+        );
+        control.render(
+            frame,
+            crate::value_control::ControlStyles {
+                background: style,
+                label: style,
+                value: style,
+                button: style,
+                disabled: style.add_modifier(Modifier::DIM),
+            },
+        );
+    }
 }
 
 pub fn max_scroll(app: &App, selected_row: usize, content_area: Rect) -> u16 {
@@ -597,35 +730,24 @@ pub fn hit_with_button(
         RemoteCompactionRowKind::Toggle | RemoteCompactionRowKind::Editor => HitAction::Adjust(0),
         RemoteCompactionRowKind::ReadOnly => HitAction::Select,
         RemoteCompactionRowKind::Stepper | RemoteCompactionRowKind::Select => {
-            // Only the painted control steps; the label and description lines
-            // are inert so a stray click never changes a value.  Clicking the
-            // value itself follows the shared control convention: left moves
-            // forward and right moves backward.
-            if virtual_line != span.control_line || virtual_x < span.control_x {
-                HitAction::Select
-            } else {
-                let value = row_value(span.row, app);
-                let value_start = span.control_x + 2;
-                let value_end = value_start + UnicodeWidthStr::width(value.as_str()) as u16;
-                let value_hit = (value_start..value_end).contains(&virtual_x);
-                if span.row.kind() == RemoteCompactionRowKind::Select && virtual_x == value_end + 1
-                {
-                    if let RemoteCompactionRow::Technique(target) = span.row {
-                        HitAction::OpenChoice(target)
-                    } else {
-                        HitAction::Select
-                    }
-                } else if span.row.kind() == RemoteCompactionRowKind::Select && value_hit {
-                    match button {
-                        crate::value_control::PointerButton::Left => HitAction::Adjust(1),
-                        crate::value_control::PointerButton::Right => HitAction::Adjust(-1),
-                        crate::value_control::PointerButton::Other => HitAction::Select,
-                    }
-                } else if virtual_x == span.control_x {
-                    HitAction::Adjust(-1)
-                } else {
-                    HitAction::Adjust(1)
+            let Some(control) = value_control(content_area, scroll, span, app) else {
+                return None;
+            };
+            match control.hit(position, button) {
+                Some(crate::value_control::ControlAction::PreviousChoice)
+                | Some(crate::value_control::ControlAction::Decrement) => HitAction::Adjust(-1),
+                Some(crate::value_control::ControlAction::NextChoice)
+                | Some(crate::value_control::ControlAction::Increment) => HitAction::Adjust(1),
+                Some(crate::value_control::ControlAction::OpenChoices) => {
+                    let RemoteCompactionRow::Technique(target) = span.row else {
+                        return None;
+                    };
+                    HitAction::OpenChoice(target)
                 }
+                Some(crate::value_control::ControlAction::EditNumber) => {
+                    HitAction::EditNumber(span.row)
+                }
+                None => HitAction::Select,
             }
         }
     };
@@ -634,6 +756,69 @@ pub fn hit_with_button(
         row: span.row,
         action,
     })
+}
+
+/// Prepares Remote Compaction selectors and numbers with the shared settings
+/// geometry, preserving this page's value formatting and row ownership.
+pub fn value_control(
+    content_area: Rect,
+    scroll: u16,
+    span: &RowSpan,
+    app: &App,
+) -> Option<crate::value_control::ValueControl> {
+    use crate::value_control::{ControlKind, ControlSpec, ValueControl};
+
+    let offset = span.control_line.checked_sub(scroll)?;
+    if offset >= content_area.height || span.control_x >= content_area.width {
+        return None;
+    }
+    let rect = Rect::new(
+        content_area.x + span.control_x,
+        content_area.y + offset,
+        content_area.width - span.control_x,
+        1,
+    );
+    let (kind, value, previous_enabled, next_enabled) = match span.row.kind() {
+        RemoteCompactionRowKind::Select => {
+            let RemoteCompactionRow::Technique(target) = span.row else {
+                return None;
+            };
+            (
+                ControlKind::Choice,
+                app.remote_compaction_settings
+                    .technique(target)
+                    .label()
+                    .to_owned(),
+                true,
+                true,
+            )
+        }
+        RemoteCompactionRowKind::Stepper => {
+            let field = crate::value_settings::SettingsNumber::Remote(span.row);
+            let (_, current) = field.snapshot(app);
+            let previous_enabled = field.stepped(app, -1).is_ok_and(|value| value != current);
+            let next_enabled = field.stepped(app, 1).is_ok_and(|value| value != current);
+            (
+                ControlKind::Number,
+                row_value(span.row, app),
+                previous_enabled,
+                next_enabled,
+            )
+        }
+        _ => return None,
+    };
+    Some(ValueControl::new(
+        rect,
+        ControlSpec {
+            kind,
+            label: "",
+            value: &value,
+            label_width: 0,
+            previous_enabled,
+            next_enabled,
+            open_enabled: true,
+        },
+    ))
 }
 
 /// The help topic anchors for every row, as (id, line, row).
@@ -737,12 +922,12 @@ mod tests {
         }
         assert!(page.contains("[ ] Remote compaction"));
         assert!(page.contains("[x] Redact secrets"));
-        assert!(page.contains("− 65% + *"));
+        assert!(page.contains("➖ 65% ➕ *"));
         assert!(page.contains("← Claude Code + →"));
         assert!(page.contains("← Codex + →"));
         assert!(page.contains("the real upstream prompt"));
-        assert!(page.contains("− 20k tokens + *"));
-        assert!(page.contains("− 2 min + *"));
+        assert!(page.contains("➖ 20k tokens ➕ *"));
+        assert!(page.contains("➖ 2 min ➕ *"));
         assert!(page.contains("Kilo Gateway / "));
         assert!(page.contains("Change it there"));
     }
@@ -857,14 +1042,20 @@ mod tests {
         assert_eq!(toggle.index, index_of(RemoteCompactionRow::Enabled));
 
         let threshold = span_of(RemoteCompactionRow::Threshold);
+        let threshold_control = value_control(content, 0, &threshold, &app).unwrap();
+        let threshold_geometry = threshold_control.geometry();
         let at = |x: u16, y: u16| hit(content, 0, Position::new(x, y), &app).unwrap().action;
         assert_eq!(
-            at(threshold.control_x, threshold.control_line),
+            at(threshold_geometry.previous.x, threshold_geometry.previous.y),
             HitAction::Adjust(-1)
         );
         assert_eq!(
-            at(threshold.control_x + 2, threshold.control_line),
+            at(threshold_geometry.next.x, threshold_geometry.next.y),
             HitAction::Adjust(1)
+        );
+        assert_eq!(
+            at(threshold_geometry.open.x, threshold_geometry.open.y),
+            HitAction::EditNumber(RemoteCompactionRow::Threshold)
         );
         assert_eq!(
             at(threshold.control_x - 1, threshold.control_line),
@@ -876,9 +1067,35 @@ mod tests {
         );
 
         let technique = span_of(RemoteCompactionRow::Technique(TechniqueTarget::Codex));
+        let technique_control = value_control(content, 0, &technique, &app).unwrap();
+        let technique_geometry = technique_control.geometry();
         assert_eq!(
-            at(technique.control_x + 5, technique.control_line),
+            hit_with_button(
+                content,
+                0,
+                Position::new(technique_geometry.value.x, technique_geometry.value.y),
+                crate::value_control::PointerButton::Left,
+                &app,
+            )
+            .unwrap()
+            .action,
             HitAction::Adjust(1)
+        );
+        assert_eq!(
+            hit_with_button(
+                content,
+                0,
+                Position::new(technique_geometry.value.x, technique_geometry.value.y),
+                crate::value_control::PointerButton::Right,
+                &app,
+            )
+            .unwrap()
+            .action,
+            HitAction::Adjust(-1)
+        );
+        assert_eq!(
+            at(technique_geometry.open.x, technique_geometry.open.y),
+            HitAction::OpenChoice(TechniqueTarget::Codex)
         );
         let prompt = span_of(RemoteCompactionRow::CustomPrompt);
         assert_eq!(at(10, prompt.first_line), HitAction::Adjust(0));
@@ -891,6 +1108,171 @@ mod tests {
         assert_eq!(scrolled.row, RemoteCompactionRow::Enabled);
         app.remote_compaction_settings.dismiss_privacy_banner();
         assert!(rows(&app).first() != Some(&RemoteCompactionRow::PrivacyBanner));
+    }
+
+    #[test]
+    fn rendered_remote_controls_use_shared_choice_and_centered_number_layouts() {
+        let app = app();
+        let content = Rect::new(0, 0, 110, 200);
+        let page = view(&app, 0, content.width);
+        let height = page.lines.len() as u16;
+        let mut terminal = Terminal::new(TestBackend::new(content.width, height)).unwrap();
+        terminal
+            .draw(|frame| render(frame, content, &app, 0, 0))
+            .unwrap();
+
+        for row in [
+            RemoteCompactionRow::Threshold,
+            RemoteCompactionRow::Technique(TechniqueTarget::Claude),
+        ] {
+            let span = page.rows.iter().find(|span| span.row == row).unwrap();
+            let control = value_control(content, 0, span, &app).unwrap();
+            let geometry = control.geometry();
+            let painted: String = (geometry.row.x..geometry.row.right())
+                .map(|x| {
+                    terminal
+                        .backend()
+                        .buffer()
+                        .cell((x, geometry.row.y))
+                        .unwrap()
+                        .symbol()
+                })
+                .collect();
+            match row.kind() {
+                RemoteCompactionRowKind::Stepper => {
+                    assert!(painted.contains('-'), "{painted:?}");
+                    assert!(painted.contains('+'), "{painted:?}");
+                    assert!(painted.contains('*'), "{painted:?}");
+                    assert!(geometry.value_slot.width > geometry.value.width);
+                    assert_eq!(
+                        geometry.value.x - geometry.value_slot.x,
+                        (geometry.value_slot.width - geometry.value.width) / 2
+                    );
+                }
+                RemoteCompactionRowKind::Select => {
+                    assert!(painted.contains('←'), "{painted:?}");
+                    assert!(painted.contains('+'), "{painted:?}");
+                    assert!(painted.contains('→'), "{painted:?}");
+                }
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    #[test]
+    fn settings_screen_paints_and_hits_remote_controls_in_the_same_geometry() {
+        use crate::value_control::{PointerButton, NUMBER_DECREMENT_GLYPH, NUMBER_INCREMENT_GLYPH};
+
+        let app = app();
+        let state = crate::app::SettingsState {
+            tab: crate::app::SettingsTab::RemoteCompaction,
+            ..Default::default()
+        };
+        let screen = Rect::new(0, 0, 140, 180);
+        let mut layout = crate::settings_ui::compute_layout_for_mode(screen, &app, &state);
+        let instructions =
+            crate::instruction_settings::panel_height(state.tab, layout.content_area);
+        layout.content_area.y += instructions;
+        layout.content_area.height = layout.content_area.height.saturating_sub(instructions);
+
+        let page = view(&app, state.selected_row, layout.content_area.width);
+        let mut terminal = Terminal::new(TestBackend::new(screen.width, screen.height)).unwrap();
+        terminal
+            .draw(|frame| crate::settings_ui::render(frame, screen, &app, &state))
+            .unwrap();
+
+        for row in [
+            RemoteCompactionRow::Threshold,
+            RemoteCompactionRow::Technique(TechniqueTarget::Claude),
+        ] {
+            let span = page.rows.iter().find(|span| span.row == row).unwrap();
+            let control = value_control(layout.content_area, state.scroll, span, &app).unwrap();
+            let geometry = control.geometry();
+            let expected = match row.kind() {
+                RemoteCompactionRowKind::Stepper => {
+                    [NUMBER_DECREMENT_GLYPH, NUMBER_INCREMENT_GLYPH, "*"]
+                }
+                RemoteCompactionRowKind::Select => ["←", "→", "+"],
+                _ => unreachable!(),
+            };
+            for (rectangle, symbol) in [
+                (geometry.previous, expected[0]),
+                (geometry.next, expected[1]),
+                (geometry.open, expected[2]),
+            ] {
+                assert_eq!(
+                    terminal.backend().buffer()[(rectangle.x, rectangle.y)].symbol(),
+                    symbol,
+                    "{row:?}"
+                );
+            }
+            match row.kind() {
+                RemoteCompactionRowKind::Stepper => {
+                    assert!(geometry.previous.x < geometry.value.x);
+                    assert!(geometry.value.right() <= geometry.next.x);
+                    assert!(geometry.next.x < geometry.open.x);
+                }
+                RemoteCompactionRowKind::Select => {
+                    assert!(geometry.previous.x < geometry.value.x);
+                    assert!(geometry.value.right() <= geometry.open.x);
+                    assert!(geometry.open.x < geometry.next.x);
+                }
+                _ => unreachable!(),
+            }
+
+            let open_position = Position::new(geometry.open.x, geometry.open.y);
+            let expected_open = match row {
+                RemoteCompactionRow::Threshold => HitAction::EditNumber(row),
+                RemoteCompactionRow::Technique(target) => HitAction::OpenChoice(target),
+                _ => unreachable!(),
+            };
+            assert_eq!(
+                hit_with_button(
+                    layout.content_area,
+                    state.scroll,
+                    open_position,
+                    PointerButton::Left,
+                    &app,
+                )
+                .unwrap()
+                .action,
+                expected_open
+            );
+        }
+
+        let span = page
+            .rows
+            .iter()
+            .find(|span| span.row == RemoteCompactionRow::Technique(TechniqueTarget::Claude))
+            .unwrap();
+        let geometry = value_control(layout.content_area, state.scroll, span, &app)
+            .unwrap()
+            .geometry();
+        let value = Position::new(geometry.value.x, geometry.value.y);
+        assert_eq!(
+            hit_with_button(
+                layout.content_area,
+                state.scroll,
+                value,
+                PointerButton::Left,
+                &app,
+            )
+            .unwrap()
+            .action,
+            HitAction::Adjust(1)
+        );
+        assert_eq!(
+            hit_with_button(
+                layout.content_area,
+                state.scroll,
+                value,
+                PointerButton::Right,
+                &app,
+            )
+            .unwrap()
+            .action,
+            HitAction::Adjust(-1)
+        );
     }
 
     #[test]

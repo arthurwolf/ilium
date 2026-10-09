@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
+use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::config::MotionLevel;
@@ -290,8 +290,7 @@ fn panel_block(title: &str, focused: bool) -> Block<'static> {
     } else {
         Span::raw(title.to_string())
     };
-    Block::default()
-        .borders(Borders::ALL)
+    theme::block(focused)
         .border_style(if focused {
             theme::selected_style()
         } else {

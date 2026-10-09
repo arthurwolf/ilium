@@ -60,6 +60,14 @@ const BASELINES: [(&str, &[u8]); 6] = [
         include_bytes!("../../ilium-ambient/src/style.rs"),
     ),
 ];
+fn resolve_package_path(value: &str) -> PathBuf {
+    let path = PathBuf::from(value);
+    if path.is_absolute() {
+        path
+    } else {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(path)
+    }
+}
 fn digest(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
@@ -83,7 +91,7 @@ fn options() -> Result<Option<Options>> {
     let arguments: Vec<_> = std::env::args().skip(1).collect();
     if arguments == ["--help"] {
         emit(
-            json!({"type":"result","usage":"v8_beach_performance --package ABS --sha256 HEX --width CELLS --height CELLS --fps INTEGER --warmup COUNT --frames COUNT [--diagnostic-render-ms INTEGER]","cases":["beach-classic","beach-rich"],"bounds":{"width":[1,320],"height":[1,120],"fps":[1,30],"warmup":[0,1000],"frames":[1,10000],"diagnostic_render_ms":[1,10000]},"diagnostic_warning":"An explicit diagnostic budget does not qualify production deadlines"}),
+            json!({"type":"result","usage":"v8_beach_performance --package PATH --sha256 HEX --width CELLS --height CELLS --fps INTEGER --warmup COUNT --frames COUNT [--diagnostic-render-ms INTEGER]","cases":["beach-classic","beach-rich"],"bounds":{"width":[1,320],"height":[1,120],"fps":[1,30],"warmup":[0,1000],"frames":[1,10000],"diagnostic_render_ms":[1,10000]},"diagnostic_warning":"An explicit diagnostic budget does not qualify production deadlines"}),
         );
         return Ok(None);
     }
@@ -120,17 +128,14 @@ fn options() -> Result<Option<Options>> {
         }
         Ok(value)
     };
-    let package = PathBuf::from(get("--package")?);
+    let package = resolve_package_path(get("--package")?);
     let digest = get("--sha256")?.to_owned();
-    if !package.is_absolute()
-        || digest.len() != 64
+    if digest.len() != 64
         || !digest
             .bytes()
             .all(|v| v.is_ascii_hexdigit() && !v.is_ascii_uppercase())
     {
-        return Err(invalid(
-            "absolute package path and lowercase SHA256 required",
-        ));
+        return Err(invalid("lowercase SHA256 required"));
     }
     Ok(Some(Options {
         package,
@@ -486,5 +491,30 @@ fn main() {
     if let Err(error) = run() {
         emit(json!({"type":"error","message":error.to_string()}));
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod package_path_tests {
+    use super::{digest, resolve_package_path};
+    use std::path::PathBuf;
+
+    #[test]
+    fn relative_package_path_loads_the_bundled_beach_archive_from_the_snapshot() {
+        let archive_path =
+            resolve_package_path("../ilium-animation-js/assets/packages/beach-1.0.0.iliumanim");
+        let archive = std::fs::read(archive_path).expect("bundled Beach archive exists");
+
+        assert_eq!(
+            digest(&archive),
+            "15c81ff5a9aa329aa4451c5e19405be4f6957a8f617ce4bff94b02be5b39612f"
+        );
+    }
+
+    #[test]
+    fn absolute_package_path_is_preserved() {
+        let path = PathBuf::from("/tmp/benchmark-package.iliumanim");
+
+        assert_eq!(resolve_package_path(path.to_str().unwrap()), path);
     }
 }

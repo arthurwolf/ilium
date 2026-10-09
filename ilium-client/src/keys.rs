@@ -22,6 +22,26 @@ use crate::icon_settings::IconTarget;
 use crate::keymap::{self, Action};
 use crate::prompt_queue::{PromptQueueDialogState, PromptQueueFocus};
 use crate::scheduled_input::{ScheduledInputDialogState, ScheduledInputFocus};
+
+/// Identifies key and paste events whose destination is unambiguous while an
+/// editor pane is temporarily owned by save preparation. `None` means the
+/// event is modal or otherwise cannot safely pass an earlier deferred event.
+pub(crate) fn editor_loan_event_target(app: &App, event: &Event) -> Option<Option<NodeId>> {
+    if !matches!(event, Event::Key(_) | Event::Paste(_)) {
+        return None;
+    }
+    match &app.mode {
+        Mode::Normal => match app.focus {
+            FocusTarget::Pane => app.focused_pane_id().map(Some),
+            // Tree shortcuts can close, replace or focus panes. Until the
+            // selected-node target is stamped explicitly, retain them as the
+            // ordered barrier rather than assuming tree focus is independent.
+            FocusTarget::Tree => None,
+        },
+        Mode::SaveAs(pane_id, _) => Some(Some(*pane_id)),
+        _ => None,
+    }
+}
 use crate::search_ui::SearchState;
 use crate::text_prompt::{self, PromptOutcome, TextPromptState};
 use crate::worktree_dialog::{
@@ -165,6 +185,10 @@ pub(crate) fn handle_event_after_intercept(app: &mut App, event: Event) {
         Mode::SchedulePaneInput(state) => handle_scheduled_input_event(app, state, &event),
         Mode::QueuePrompt(state) => handle_prompt_queue_event(app, state, &event),
         Mode::TextTriggerDialog(state) => handle_text_trigger_dialog_event(app, state, &event),
+        Mode::AgentMessageDialog(mut state) => {
+            let outcome = state.handle_event(&event);
+            app.finish_agent_message_dialog(state, outcome);
+        }
         Mode::EditorLineContextMenu(menu) => {
             handle_editor_line_context_menu_event(app, menu, &event)
         }
@@ -298,6 +322,7 @@ pub(crate) fn requires_key_paste_replay(app: &App) -> bool {
             | Mode::NavigationLeaderPending
             | Mode::SchedulePaneInput(_)
             | Mode::QueuePrompt(_)
+            | Mode::AgentMessageDialog(_)
             | Mode::CreateAgentWorkspace(_)
             | Mode::WorktreeManager(_)
             | Mode::AgentSetupPathPrompt(_, _)
@@ -1398,7 +1423,7 @@ fn handle_location_picker_event(
     use crate::location_picker::PickerOutcome;
     let outcome = match event {
         Event::Paste(pasted) => {
-            picker.paste(pasted);
+            picker.paste_with_screen(app.layout.screen_area, pasted);
             PickerOutcome::Continue
         }
         Event::Key(key) if is_press(key) => {
@@ -2415,6 +2440,7 @@ const SETTINGS_PAGE_SCROLL_LINES: u16 = 5;
 /// selected row's value; `PageUp`/`PageDown` scroll the content panel. See
 /// `crate::settings_ui`'s module doc comment for the design this mirrors.
 fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event) {
+    let selected_before = state.selected_row;
     let Event::Key(key) = event else {
         app.mode = Mode::Settings(state);
         return;
@@ -2811,6 +2837,8 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
             .find(|anchor| anchor.selected)
         {
             if let Some(topic) = crate::settings_help::catalog::by_id(&anchor.topic_id) {
+                #[cfg(test)]
+                crate::settings_ui::terminal_pool_help_regressions::opened_topic(&anchor.topic_id);
                 let help = crate::settings_help::dialog::SettingsHelpState::new(
                     anchor.topic_id,
                     topic.frames.len(),
@@ -2938,6 +2966,9 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                 }
                 crate::value_settings_choice::SettingsChoice::OpenAiModel => {
                     Some(crate::app::InferenceSettingField::OpenAiModel)
+                }
+                crate::value_settings_choice::SettingsChoice::AnthropicModel => {
+                    Some(crate::app::InferenceSettingField::AnthropicModel)
                 }
                 _ => None,
             };
@@ -3179,6 +3210,21 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                 }
             }
         }
+        KeyCode::Char('+')
+            if state.tab == SettingsTab::AgentMonitoring
+                && matches!(
+                    crate::settings_ui::agent_monitoring_rows(app).get(state.selected_row),
+                    Some(crate::app::AgentMonitoringRow::StatusIcon(_))
+                ) =>
+        {
+            if let Some(crate::app::AgentMonitoringRow::StatusIcon(target)) =
+                crate::settings_ui::agent_monitoring_rows(app)
+                    .get(state.selected_row)
+                    .copied()
+            {
+                state.icon_picker = Some(crate::app::IconPickerState::new(target));
+            }
+        }
         KeyCode::Enter | KeyCode::Char(' ') if state.tab == SettingsTab::AgentMonitoring => {
             use crate::app::AgentMonitoringRow as Row;
             if let Some(row) = crate::settings_ui::agent_monitoring_rows(app)
@@ -3251,6 +3297,9 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                 Some(crate::app::InferenceRow::Field(
                     crate::app::InferenceSettingField::OpenAiModel,
                 )) => app.settings_adjust_openai_model(-1),
+                Some(crate::app::InferenceRow::Field(
+                    crate::app::InferenceSettingField::AnthropicModel,
+                )) => app.settings_adjust_anthropic_model(-1),
                 Some(crate::app::InferenceRow::KiloGatewayModel) => {
                     app.settings_adjust_kilo_gateway_model(-1)
                 }
@@ -3280,6 +3329,11 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                     crate::app::InferenceSettingField::OpenAiModel,
                 )) if matches!(key.code, KeyCode::Right | KeyCode::Char('l')) => {
                     app.settings_adjust_openai_model(1)
+                }
+                Some(crate::app::InferenceRow::Field(
+                    crate::app::InferenceSettingField::AnthropicModel,
+                )) if matches!(key.code, KeyCode::Right | KeyCode::Char('l')) => {
+                    app.settings_adjust_anthropic_model(1)
                 }
                 Some(crate::app::InferenceRow::Field(field)) => {
                     app.mode = Mode::Settings(state);
@@ -3485,6 +3539,7 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
         | KeyCode::Char('l')
         | KeyCode::Char('-')
         | KeyCode::Char('+')
+        | KeyCode::Char('*')
         | KeyCode::Enter
         | KeyCode::Char(' ')
             if state.tab == SettingsTab::RemoteCompaction =>
@@ -3499,14 +3554,37 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                 .get(state.selected_row)
                 .copied()
             {
-                if matches!(key.code, KeyCode::Enter | KeyCode::Char('+')) {
-                    if let RemoteCompactionRow::Technique(target) = row {
-                        app.mode = Mode::Settings(state);
-                        app.begin_settings_choice_dialog(
-                            crate::value_settings_choice::SettingsChoice::RemoteTechnique(target),
-                        );
-                        return;
+                if key.code == KeyCode::Enter {
+                    match row {
+                        RemoteCompactionRow::Technique(target) => {
+                            app.mode = Mode::Settings(state);
+                            app.begin_settings_choice_dialog(
+                                crate::value_settings_choice::SettingsChoice::RemoteTechnique(
+                                    target,
+                                ),
+                            );
+                            return;
+                        }
+                        row if row.kind()
+                            == crate::remote_compaction_settings::RemoteCompactionRowKind::Stepper =>
+                        {
+                            app.mode = Mode::Settings(state);
+                            app.begin_settings_number_dialog(
+                                crate::value_settings::SettingsNumber::Remote(row),
+                            );
+                            return;
+                        }
+                        _ => {}
                     }
+                } else if key.code == KeyCode::Char('*')
+                    && row.kind()
+                        == crate::remote_compaction_settings::RemoteCompactionRowKind::Stepper
+                {
+                    app.mode = Mode::Settings(state);
+                    app.begin_settings_number_dialog(
+                        crate::value_settings::SettingsNumber::Remote(row),
+                    );
+                    return;
                 }
                 // A stray arrow never closes the privacy box for good; only
                 // Enter, Space, x and Delete do.
@@ -3796,6 +3874,37 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                 app.settings_adjust_sound_row(row, 1);
             }
         }
+        KeyCode::PageUp
+            if state.tab == SettingsTab::Animations
+                && crate::animation_settings_ui::has_saved_scene_activity(app) =>
+        {
+            if state.animation_detail_show_help {
+                state.animation_detail_scroll = state
+                    .animation_detail_scroll
+                    .saturating_sub(SETTINGS_PAGE_SCROLL_LINES);
+            } else {
+                crate::animation_settings_ui::page_saved_scene_activity(app, &mut state, true);
+            }
+        }
+        KeyCode::PageDown
+            if state.tab == SettingsTab::Animations
+                && crate::animation_settings_ui::has_saved_scene_activity(app) =>
+        {
+            if state.animation_detail_show_help {
+                state.animation_detail_scroll = state
+                    .animation_detail_scroll
+                    .saturating_add(SETTINGS_PAGE_SCROLL_LINES);
+            } else {
+                crate::animation_settings_ui::page_saved_scene_activity(app, &mut state, false);
+            }
+        }
+        KeyCode::Char('?')
+            if state.tab == SettingsTab::Animations
+                && crate::animation_settings_ui::has_saved_scene_activity(app) =>
+        {
+            state.animation_detail_show_help = !state.animation_detail_show_help;
+            state.animation_detail_scroll = 0;
+        }
         KeyCode::PageUp => state.scroll = state.scroll.saturating_sub(SETTINGS_PAGE_SCROLL_LINES),
         KeyCode::PageDown => state.scroll = state.scroll.saturating_add(SETTINGS_PAGE_SCROLL_LINES),
         _ => {}
@@ -3848,11 +3957,50 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
             state.scroll,
         );
     }
+    if state.selected_row != selected_before {
+        state.scroll =
+            crate::settings_ui::described_settings_scroll_for_selection(app, content_area, &state);
+    }
     let max_scroll =
         crate::settings_ui::max_scroll(state.tab, app, state.selected_row, content_area);
     state.scroll = state.scroll.min(max_scroll);
     app.optimization_sync_visibility(state.tab == SettingsTab::Optimization);
+    app.remote_compaction_sync_native(state.tab == SettingsTab::RemoteCompaction);
     app.mode = Mode::Settings(state);
+}
+
+#[cfg(test)]
+mod agent_monitoring_status_icon_key_tests {
+    use super::*;
+
+    #[test]
+    fn plus_opens_the_full_catalog_for_the_selected_status_icon() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::new("status-icon-plus-key".into(), directory.path().into());
+        let target = crate::agent_monitoring::STATUS_ICON_TARGETS[0];
+        let selected_row = crate::settings_ui::agent_monitoring_rows(&app)
+            .iter()
+            .position(|row| *row == crate::app::AgentMonitoringRow::StatusIcon(target))
+            .unwrap();
+        app.mode = Mode::Settings(SettingsState {
+            tab: SettingsTab::AgentMonitoring,
+            selected_row,
+            ..SettingsState::default()
+        });
+
+        handle_event(
+            &mut app,
+            Event::Key(KeyEvent::new(KeyCode::Char('+'), KeyModifiers::NONE)),
+        );
+
+        let Mode::Settings(state) = &app.mode else {
+            panic!("settings should remain open");
+        };
+        assert_eq!(
+            state.icon_picker.as_ref().map(|picker| picker.target),
+            Some(target)
+        );
+    }
 }
 
 #[cfg(test)]

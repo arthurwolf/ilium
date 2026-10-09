@@ -655,13 +655,24 @@ impl AnimationRow {
                 } else {
                     "Scene status"
                 }.to_owned(),
-                value: context.scene_status.clone().unwrap_or_else(|| {
-                    if settings.kind == AnimationKind::Semantic {
-                        "Awaiting tree recommendation"
-                    } else {
-                        "OK"
-                    }.to_owned()
-                }),
+                value: context
+                    .scene_status
+                    .as_deref()
+                    .map(|status| {
+                        if settings.kind == AnimationKind::VoxelLandscape {
+                            status.lines().next().unwrap_or_default().to_owned()
+                        } else {
+                            status.to_owned()
+                        }
+                    })
+                    .unwrap_or_else(|| {
+                        if settings.kind == AnimationKind::Semantic {
+                            "Awaiting tree recommendation"
+                        } else {
+                            "OK"
+                        }
+                        .to_owned()
+                    }),
                 kind: RowKind::Status,
                 help: if settings.kind == AnimationKind::Semantic {
                     "The selected project or entry's validated recommendation from tree reorganization; selecting an entry does not make another model request."
@@ -669,6 +680,17 @@ impl AnimationRow {
                 } else if settings.kind == AnimationKind::Wikipedia {
                     "Article title, source URL, revision, offline state, missing images and font coverage."
                         .to_owned()
+                } else if settings.kind == AnimationKind::VoxelLandscape {
+                    context
+                        .scene_status
+                        .as_deref()
+                        .filter(|status| status.lines().count() > 1)
+                        .map(|status| status.lines().skip(1).collect::<Vec<_>>().join("\n"))
+                        .filter(|details| !details.is_empty())
+                        .unwrap_or_else(|| {
+                            "What the saved-world scene is doing while it prepares and renders."
+                                .to_owned()
+                        })
                 } else {
                     "What the running scene reports: downloads, missing tools, missing devices."
                         .to_owned()

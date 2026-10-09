@@ -21,6 +21,9 @@ impl<T> InputBacklog<T> {
     pub(crate) fn is_empty(&self) -> bool {
         self.head.is_none()
     }
+    pub(crate) fn front(&self) -> Option<&T> {
+        self.head.as_ref()
+    }
     pub(crate) fn take_front(&mut self) -> Option<T> {
         let result = self.head.take();
         self.head = self.lookahead.take();

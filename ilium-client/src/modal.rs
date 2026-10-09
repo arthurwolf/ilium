@@ -14,6 +14,8 @@ use unicode_width::UnicodeWidthStr;
 use crate::text_prompt::TextPromptState;
 use crate::theme;
 
+const TEXT_PROMPT_DEFAULT_HINT: &str = "Click a button or use the shown keyboard shortcut";
+
 /// Fixed width of the "New group" destination picker (see
 /// `App::open_create_group_dialog`) -- wide enough for a few levels of
 /// indentation plus a realistic group name without wrapping.
@@ -495,7 +497,7 @@ pub fn render_text_prompt_cursor(
         title,
         state,
         confirm_label,
-        "Click a button or use the shown keyboard shortcut",
+        TEXT_PROMPT_DEFAULT_HINT,
         Style::new().add_modifier(Modifier::DIM),
     )
 }
@@ -546,7 +548,19 @@ pub fn render_text_prompt_with_hint_cursor(
         layout.actions,
         DialogActions::form("Cancel", confirm_label),
     );
-    frame.render_widget(Paragraph::new(hint).style(hint_style), layout.hint_row);
+    let hint_width = usize::from(layout.hint_row.width);
+    let compact_default_hint = (hint == TEXT_PROMPT_DEFAULT_HINT && hint.width() > hint_width)
+        .then(|| format!("Esc cancel · Enter {confirm_label}"));
+    let displayed_hint = match compact_default_hint.as_deref() {
+        Some(compact_hint) if compact_hint.width() <= hint_width => compact_hint,
+        Some(_) if hint_width >= "Esc / Enter".width() => "Esc / Enter",
+        Some(_) => "",
+        None => hint,
+    };
+    frame.render_widget(
+        Paragraph::new(displayed_hint).style(hint_style),
+        layout.hint_row,
+    );
 
     // `state.cursor` is a *char* index, but `Paragraph` gives wide (CJK/
     // emoji) characters two cells -- the cursor column must be the rendered
@@ -719,11 +733,23 @@ pub fn render_confirm(
     );
     render_dialog_actions(frame, layout.actions, actions);
     frame.render_widget(
-        Paragraph::new("Click either button, or use Y / N · Enter confirms · Esc cancels")
+        Paragraph::new(confirmation_hint(layout.hint_row.width))
             .style(Style::new().add_modifier(Modifier::DIM))
             .alignment(Alignment::Center),
         layout.hint_row,
     );
+}
+
+fn confirmation_hint(width: u16) -> &'static str {
+    const FULL: &str = "Click either button, or use Y / N · Enter confirms · Esc cancels";
+    const MEDIUM: &str = "Y/N answer · Enter confirm · Esc cancel";
+    const COMPACT: &str = "Y/N · Enter · Esc";
+    const MINIMAL: &str = "Y/N";
+
+    [FULL, MEDIUM, COMPACT, MINIMAL]
+        .into_iter()
+        .find(|hint| UnicodeWidthStr::width(*hint) <= usize::from(width))
+        .unwrap_or("")
 }
 
 /// Paints button-sized backgrounds so actions read as clickable controls
@@ -753,16 +779,20 @@ fn render_dialog_button(frame: &mut Frame, area: Rect, button: DialogButton<'_>)
             .bg(Color::Red)
             .add_modifier(Modifier::BOLD),
     };
+    // Preserve the action name before its redundant shortcut hint in narrow slots.
+    let mut spans = Vec::with_capacity(2);
+    let hinted_width = button.key_hint.width() + 2 + button.label.width();
+    if hinted_width <= usize::from(area.width) {
+        spans.push(Span::styled(
+            format!(" {} ", button.key_hint),
+            style.add_modifier(Modifier::UNDERLINED),
+        ));
+    }
+    spans.push(Span::styled(button.label, style));
     frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled(
-                format!(" {} ", button.key_hint),
-                style.add_modifier(Modifier::UNDERLINED),
-            ),
-            Span::styled(button.label, style),
-        ]))
-        .style(style)
-        .alignment(Alignment::Center),
+        Paragraph::new(Line::from(spans))
+            .style(style)
+            .alignment(Alignment::Center),
         area,
     );
 }
@@ -857,6 +887,53 @@ mod tests {
     }
 
     #[test]
+    fn confirmation_keyboard_hint_adapts_to_available_width() {
+        for width in [24, 30, 40, 60, 80] {
+            let screen = Rect::new(0, 0, width, 12);
+            let layout = confirm_dialog_layout(screen);
+            let mut terminal =
+                Terminal::new(TestBackend::new(screen.width, screen.height)).unwrap();
+            terminal
+                .draw(|frame| {
+                    render_confirm(
+                        frame,
+                        screen,
+                        "Close this item?",
+                        "Close the selected item?",
+                        DialogActions::confirmation(
+                            "Keep",
+                            DialogButtonTone::Neutral,
+                            "Close",
+                            DialogButtonTone::Danger,
+                        ),
+                    );
+                })
+                .unwrap();
+
+            let buffer = terminal.backend().buffer();
+            let row_start = usize::from(layout.hint_row.y) * usize::from(screen.width)
+                + usize::from(layout.hint_row.x);
+            let rendered_hint = buffer.content
+                [row_start..row_start + usize::from(layout.hint_row.width)]
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>();
+            assert!(rendered_hint.width() <= usize::from(layout.hint_row.width));
+            assert!(
+                rendered_hint.contains("Y/N"),
+                "width={width}: {rendered_hint:?}"
+            );
+            if width >= 60 {
+                assert!(rendered_hint.contains("Enter confirm"));
+                assert!(rendered_hint.contains("Esc cancel"));
+            }
+            if width >= 80 {
+                assert!(rendered_hint.contains("Click either button"));
+            }
+        }
+    }
+
+    #[test]
     fn text_prompt_renders_clickable_cancel_and_primary_actions() {
         let screen = Rect::new(0, 0, 100, 30);
         let layout = text_prompt_dialog_layout(screen);
@@ -881,5 +958,60 @@ mod tests {
                 .bg,
             Color::Cyan
         );
+    }
+}
+
+#[cfg(test)]
+mod compact_action_label_tests {
+    use super::*;
+    #[test]
+    fn compact_buttons_keep_complete_labels_before_shortcut_hints() {
+        use ratatui::{backend::TestBackend, Terminal};
+        for width in [16, 24] {
+            let mut terminal = Terminal::new(TestBackend::new(width, 1)).unwrap();
+            terminal
+                .draw(|frame| {
+                    render_dialog_button(
+                        frame,
+                        frame.area(),
+                        DialogActions::form("Cancel", "Create board").confirm,
+                    )
+                })
+                .unwrap();
+            let text: String = terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect();
+            assert!(text.contains("Create board"));
+            assert_eq!(text.contains("Enter"), width >= 18);
+            crate::ui_capture::save(&format!("compact-create-action-{width}x1"), &terminal);
+        }
+    }
+
+    #[test]
+    fn compact_text_prompt_uses_a_complete_hint_that_fits() {
+        use ratatui::{backend::TestBackend, Terminal};
+
+        let screen = Rect::new(0, 0, 40, 12);
+        let layout = text_prompt_dialog_layout(screen);
+        let state = TextPromptState::new("8872");
+        let mut terminal = Terminal::new(TestBackend::new(screen.width, screen.height)).unwrap();
+        terminal
+            .draw(|frame| render_text_prompt(frame, screen, "HTTP API port", &state, "Apply"))
+            .unwrap();
+
+        let row_start = usize::from(layout.hint_row.y) * usize::from(screen.width)
+            + usize::from(layout.hint_row.x);
+        let rendered_hint: String = terminal.backend().buffer().content
+            [row_start..row_start + usize::from(layout.hint_row.width)]
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(rendered_hint.contains("Esc cancel"));
+        assert!(rendered_hint.contains("Enter Apply"));
+        assert!(rendered_hint.width() <= usize::from(layout.hint_row.width));
     }
 }

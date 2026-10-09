@@ -162,7 +162,7 @@ impl SettingsNumber {
                 "Hide completed progress after (s; 0 = never)"
             }
             Self::TerminalScrollback => "Scrollback budget (MiB)",
-            Self::TerminalEngineMemory => "Terminal engine memory budget (MiB)",
+            Self::TerminalEngineMemory => "Parser pool budget (MiB; 0 = Off)",
             Self::EditorAutosaveDelay => "Autosave delay (ms)",
             Self::Board(BoardNumber::CardPreviewLines) => "Card preview lines",
             Self::Board(BoardNumber::MinimumColumnWidth) => "Minimum column width",
@@ -328,13 +328,19 @@ impl SettingsNumber {
                 .stepped_autosave_delay_ms(direction)
                 .to_string());
         }
+        if matches!(&self, Self::TerminalEngineMemory) {
+            let mut settings = crate::config::TerminalSettings::default();
+            value_config::set_terminal_engine_memory(&mut settings, &text)?;
+            return Ok(settings
+                .stepped_engine_memory_budget_mib(direction)
+                .to_string());
+        }
         let step = match self {
             Self::VoiceVolume => 5,
             Self::NotificationCoalesce => {
                 i128::from(ilium_sound::NotificationSettings::TASK_COALESCE_STEP_SECONDS)
             }
             Self::TerminalScrollback => 4,
-            Self::TerminalEngineMemory => 256,
             Self::Ui(UiNumber::CompletedProgressHideAfter) => 30,
             Self::Ui(UiNumber::AutoFreezeAfter) => 15 * 60,
             _ => 1,
@@ -790,6 +796,103 @@ mod tests {
     use super::*;
     use crate::app::SettingsState;
     use crate::value_dialog::{DialogOutcome, ValueDialogState};
+
+    #[test]
+    fn every_numeric_settings_binding_renders_centered_value_and_live_pointer_targets() {
+        use crate::value_control::{
+            cell_width, ControlAction, PointerButton, NUMBER_DECREMENT_GLYPH,
+            NUMBER_INCREMENT_GLYPH,
+        };
+        use ratatui::layout::Rect;
+        use ratatui::{backend::TestBackend, Terminal};
+
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::new(
+            "all-numeric-settings-controls".into(),
+            directory.path().into(),
+        );
+        app.agent_detection_settings = Some(ilium_ipc::AgentDetectionSettings {
+            working_poll_seconds: 15,
+            idle_poll_seconds: 45,
+            custom_signatures: Vec::new(),
+        });
+        let screen = Rect::new(0, 0, 140, 180);
+        app.set_screen_area(screen);
+
+        let mut binding_count = 0;
+        for tab in SettingsTab::ALL {
+            let state = SettingsState {
+                tab,
+                ..SettingsState::default()
+            };
+            let mut layout = crate::settings_ui::compute_layout_for_mode(screen, &app, &state);
+            let instructions = crate::instruction_settings::panel_height(tab, layout.content_area);
+            layout.content_area.y += instructions;
+            layout.content_area.height = layout.content_area.height.saturating_sub(instructions);
+            let mut terminal =
+                Terminal::new(TestBackend::new(screen.width, screen.height)).unwrap();
+            terminal
+                .draw(|frame| crate::settings_ui::render(frame, frame.area(), &app, &state))
+                .unwrap();
+
+            for row in 0..crate::settings_ui::settings_number_row_count(&app, tab) {
+                let Some(field) = SettingsNumber::at(&app, tab, row) else {
+                    continue;
+                };
+                binding_count += 1;
+
+                let (actual_field, control) = crate::settings_ui::settings_number_control(
+                    layout.content_area,
+                    &app,
+                    &state,
+                    row,
+                )
+                .unwrap_or_else(|| panic!("{tab:?}/{row} must render its numeric setting"));
+                assert_eq!(actual_field, field, "{tab:?}/{row}");
+
+                let geometry = control.geometry();
+                assert_eq!(
+                    geometry.value.x - geometry.value_slot.x,
+                    (geometry.value_slot.width - geometry.value.width) / 2,
+                    "{tab:?}/{row} value must be centered"
+                );
+                for (rectangle, glyph, action) in [
+                    (
+                        geometry.previous,
+                        NUMBER_DECREMENT_GLYPH,
+                        ControlAction::Decrement,
+                    ),
+                    (
+                        geometry.next,
+                        NUMBER_INCREMENT_GLYPH,
+                        ControlAction::Increment,
+                    ),
+                    (geometry.open, "*", ControlAction::EditNumber),
+                ] {
+                    assert_eq!(rectangle.width, cell_width(glyph) as u16, "{tab:?}/{row}");
+                    assert_eq!(
+                        terminal.backend().buffer()[(rectangle.x, rectangle.y)].symbol(),
+                        glyph,
+                        "{tab:?}/{row} visible button"
+                    );
+                    let hit = control.hit(
+                        ratatui::layout::Position::new(rectangle.x, rectangle.y),
+                        PointerButton::Left,
+                    );
+                    if action == ControlAction::EditNumber {
+                        assert_eq!(hit, Some(action), "{tab:?}/{row} direct-entry target");
+                    } else {
+                        assert!(
+                            hit.is_none() || hit == Some(action),
+                            "{tab:?}/{row} button maps to {action:?} or is disabled at its bound"
+                        );
+                    }
+                }
+            }
+        }
+
+        assert_eq!(binding_count, 28, "all numeric settings rows must be bound");
+    }
 
     #[test]
     fn auto_freeze_delay_supports_exact_seconds_and_original_arrow_steps() {

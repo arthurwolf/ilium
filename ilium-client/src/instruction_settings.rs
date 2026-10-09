@@ -192,6 +192,34 @@ impl App {
 mod tests {
     use super::*;
     #[test]
+    fn narrow_settings_panel_keeps_instruction_header_actions_visible() {
+        let app = App::new("instructions".into(), std::env::temp_dir());
+        let backend = ratatui::backend::TestBackend::new(40, 8);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                render(
+                    frame,
+                    Rect::new(0, 0, 40, 8),
+                    &app,
+                    SettingsTab::LlmInstructions,
+                    SELECTION_BASE,
+                )
+            })
+            .unwrap();
+        let header = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .take(80)
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(header.contains("Additional instructions"));
+        assert!(header.contains("Delete: clear"));
+    }
+
+    #[test]
     fn all_inputs_persist_through_the_same_values_and_clear() {
         let directory = tempfile::tempdir().unwrap();
         let mut app = App::new("instructions".into(), directory.path().to_path_buf());

@@ -21,6 +21,7 @@ use crate::app::{
     AgentToolbarModelSubmenuState, App, BoardDeleteTarget, BoardRenameTarget, ContextMenu,
     CreateBoardState, CreateGroupState, CreateSplitMembersState, CreateSplitOrientationState,
     FocusTarget, Mode, PaneRuntime, RightPanelTarget, SubmenuItemAction,
+    FROZEN_DIALOG_BUTTON_LABEL,
 };
 use crate::editor_pane::{EditorPane, EditorViewMode};
 use crate::icon_settings::IconTarget;
@@ -212,13 +213,18 @@ fn draw_smart_copy_preview(frame: &mut Frame, area: Rect, app: &App) {
     let lines = preview.display_lines();
     let content_width = lines
         .iter()
-        .map(|line| line.chars().count())
-        .chain(std::iter::once(preview.summary().chars().count()))
+        .map(|line| UnicodeWidthStr::width(line.as_str()))
+        .chain(std::iter::once(UnicodeWidthStr::width(
+            preview.summary().as_str(),
+        )))
         .max()
         .unwrap_or(0);
     // Borders (2) + text rows + summary + gauge.
     let height = (lines.len() as u16 + 4).min(area.height);
-    let width = (content_width as u16 + 4).clamp(28, area.width);
+    let width = u16::try_from(content_width.saturating_add(4))
+        .unwrap_or(u16::MAX)
+        .max(28)
+        .min(area.width);
     let dialog = Rect::new(
         area.x + (area.width - width) / 2,
         area.y + (area.height.saturating_sub(height)) / 2,
@@ -503,6 +509,7 @@ fn status_tooltip_content(
         .map(tree_ui::shell_output_phase);
     let signals = crate::agent_monitoring::displayed_pane_signals(
         app.ui_settings.agent_monitoring_mode,
+        app.ui_settings.attention_progress_reports,
         app.ui_settings.attention_running_indicator,
         status,
         progress.as_deref(),
@@ -715,6 +722,7 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) -> Option<Posit
     let tree_focused = matches!(app.focus, FocusTarget::Tree);
     let focused_pane_id = app.focused_pane_id();
     let tree_order = app.effective_tree_order();
+    let agent_models = app.current_tree_models();
     let mut painted_rows = tree_ui::render(
         frame,
         layout.tree_area,
@@ -741,6 +749,7 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) -> Option<Posit
             focused_pane_id,
             transitions: &app.tree_transitions,
             agent_identifiers: &app.ui_settings.agent_identifiers,
+            agent_models: &agent_models,
             icons: &app.ui_settings.icons,
             workspace_git_statuses: &app.workspace_git_statuses,
             show_worktree_branch_line: app.git_settings.branch_line
@@ -750,8 +759,10 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) -> Option<Posit
             sidebar_density: app.ui_settings.sidebar_density,
             use_stable_glyphs: app.ui_settings.use_stable_glyphs,
             agent_monitoring_mode: app.ui_settings.agent_monitoring_mode,
+            attention_progress_reports: app.ui_settings.attention_progress_reports,
             attention_running_indicator: app.ui_settings.attention_running_indicator,
             show_inferred_title_icons: app.ui_settings.show_inferred_title_icons,
+            frozen_panes: &app.frozen_panes,
             cost: Some(app.cost_tracker.overlay().as_ref()),
             hover: tree_ui::TreeHoverState {
                 node: app.hovered_tree_node,
@@ -846,10 +857,10 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) -> O
                         "Markdown file",
                         Style::new().add_modifier(Modifier::DIM),
                     )),
-            Line::from(format!(
-                "{} Create board from {label}",
-                context_menu_icon(&app.ui_settings, IconTarget::Board)
-            )),
+                    Line::from(format!(
+                        "{} Create board from {label}",
+                        context_menu_icon(&app.ui_settings, IconTarget::Board)
+                    )),
                 ])
                 .block(theme::block(true).title(theme::chrome_title("File actions"))),
                 menu.area,
@@ -879,14 +890,25 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) -> O
         Mode::ContextMenu(menu) => {
             draw_context_menu(frame, menu, app.ui_settings.tree_order, &app.ui_settings);
         }
-        Mode::TerminalPaneContextMenu(menu) => draw_terminal_pane_context_menu(frame, menu, &app.ui_settings),
+        Mode::TerminalPaneContextMenu(menu) => {
+            draw_terminal_pane_context_menu(frame, menu, &app.ui_settings)
+        }
         Mode::AgentToolbarModelSubmenu(state) => draw_agent_toolbar_model_submenu(frame, state),
         Mode::SmartCopy => {}
         Mode::AgentDebugLog(_) => {}
         Mode::AgentDebugSavePath(_, state) => {
-            cursor = modal::render_text_prompt_cursor(frame, area, "Save agent debug log", state, "Save").or(cursor);
+            cursor = modal::render_text_prompt_cursor(
+                frame,
+                area,
+                "Save agent debug log",
+                state,
+                "Save",
+            )
+            .or(cursor);
         }
-        Mode::SchedulePaneInput(state) => { cursor = draw_scheduled_input_dialog(frame, area, app, state).or(cursor); },
+        Mode::SchedulePaneInput(state) => {
+            cursor = draw_scheduled_input_dialog(frame, area, app, state).or(cursor);
+        }
         Mode::QueuePrompt(state) => draw_prompt_queue_dialog(frame, area, app, state),
         Mode::ValueDialog(host) => {
             let ink = match app.ui_settings.color_scheme {
@@ -906,30 +928,42 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) -> O
             );
         }
         Mode::TextTriggerDialog(state) => draw_text_trigger_dialog(frame, area, state),
-        Mode::EditorLineContextMenu(menu) => draw_editor_line_context_menu(frame, menu, &app.ui_settings),
+        Mode::AgentMessageDialog(state) => crate::agent_message_dialog::draw(frame, area, state),
+        Mode::EditorLineContextMenu(menu) => {
+            draw_editor_line_context_menu(frame, menu, &app.ui_settings)
+        }
         Mode::CreateAgentFromLine(state) => draw_create_agent_from_line(frame, area, state),
         Mode::CreateAgentWorkspace(state) => {
             crate::worktree_dialog::draw_dialog(frame, area, state);
         }
         Mode::WorktreeManager(state) => crate::worktree_manager::render(frame, area, state),
-        Mode::CreateGroup(state) => { cursor = draw_create_group(frame, app, state).or(cursor); },
+        Mode::CreateGroup(state) => {
+            cursor = draw_create_group(frame, app, state).or(cursor);
+        }
         Mode::CreateSplitOrientation(state) => {
             draw_create_split_orientation(frame, area, state, &app.ui_settings.icons);
         }
         Mode::CreateSplitMembers(state) => draw_create_split_members(frame, area, state),
-        Mode::CreateBoard(state) => { cursor = draw_create_board(frame, area, state).or(cursor); },
+        Mode::CreateBoard(state) => {
+            cursor = draw_create_board(frame, area, state).or(cursor);
+        }
         Mode::BoardCardPrompt(_, state) => {
-            cursor = modal::render_text_prompt_cursor(frame, area, "New card", state, "Create card").or(cursor);
+            cursor =
+                modal::render_text_prompt_cursor(frame, area, "New card", state, "Create card")
+                    .or(cursor);
         }
         Mode::BoardColumnPrompt(_, state) => {
-            cursor = modal::render_text_prompt_cursor(frame, area, "New column", state, "Create column").or(cursor);
+            cursor =
+                modal::render_text_prompt_cursor(frame, area, "New column", state, "Create column")
+                    .or(cursor);
         }
         Mode::BoardRenamePrompt(_, target, state) => {
             let title = match target {
                 BoardRenameTarget::Card => "Rename card",
                 BoardRenameTarget::Column => "Rename column",
             };
-            cursor = modal::render_text_prompt_cursor(frame, area, title, state, "Rename").or(cursor);
+            cursor =
+                modal::render_text_prompt_cursor(frame, area, title, state, "Rename").or(cursor);
         }
         Mode::BoardDeleteConfirm(_, target) => {
             let (title, message) = match target {
@@ -952,30 +986,68 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) -> O
             );
         }
         Mode::Rename(state) => {
-            cursor = modal::render_text_prompt_cursor(frame, area, "Rename", state, "Rename").or(cursor);
+            cursor =
+                modal::render_text_prompt_cursor(frame, area, "Rename", state, "Rename").or(cursor);
         }
         Mode::CommandPrompt(state) => {
-            cursor = modal::render_text_prompt_cursor(frame, area, "Run command", state, "Run").or(cursor);
+            cursor = modal::render_text_prompt_cursor(frame, area, "Run command", state, "Run")
+                .or(cursor);
         }
         Mode::InferenceSettingPrompt(field, state) => {
             if *field == crate::app::InferenceSettingField::RestructurePromptTokenLimit {
                 let (hint, is_error) = app.restructure_budget_input_hint(&state.buf);
-                let style = if is_error { Style::new().fg(Color::Red) } else { Style::new().add_modifier(Modifier::DIM) };
-                cursor = modal::render_text_prompt_with_hint_cursor(frame, area, field.label(), state, "Close", &hint, style).or(cursor);
-            } else if matches!(field, crate::app::InferenceSettingField::OpenAiApiKey | crate::app::InferenceSettingField::AnthropicApiKey | crate::app::InferenceSettingField::OpenRouterApiKey) {
-                cursor = modal::render_masked_text_prompt_cursor(frame, area, field.label(), state, "Apply").or(cursor);
+                let style = if is_error {
+                    Style::new().fg(Color::Red)
+                } else {
+                    Style::new().add_modifier(Modifier::DIM)
+                };
+                cursor = modal::render_text_prompt_with_hint_cursor(
+                    frame,
+                    area,
+                    field.label(),
+                    state,
+                    "Close",
+                    &hint,
+                    style,
+                )
+                .or(cursor);
+            } else if matches!(
+                field,
+                crate::app::InferenceSettingField::OpenAiApiKey
+                    | crate::app::InferenceSettingField::AnthropicApiKey
+                    | crate::app::InferenceSettingField::OpenRouterApiKey
+            ) {
+                cursor = modal::render_masked_text_prompt_cursor(
+                    frame,
+                    area,
+                    field.label(),
+                    state,
+                    "Apply",
+                )
+                .or(cursor);
             } else {
-                cursor = modal::render_text_prompt_cursor(frame, area, field.label(), state, "Apply").or(cursor);
+                cursor =
+                    modal::render_text_prompt_cursor(frame, area, field.label(), state, "Apply")
+                        .or(cursor);
             }
         }
         Mode::VoiceSettingPrompt(field, state) => {
-            cursor = modal::render_masked_text_prompt_cursor(frame, area, field.label(), state, "Replace").or(cursor);
+            cursor = modal::render_masked_text_prompt_cursor(
+                frame,
+                area,
+                field.label(),
+                state,
+                "Replace",
+            )
+            .or(cursor);
         }
         Mode::ApiSettingPrompt(state) => {
-            cursor = modal::render_text_prompt_cursor(frame, area, "HTTP API port", state, "Apply").or(cursor);
+            cursor = modal::render_text_prompt_cursor(frame, area, "HTTP API port", state, "Apply")
+                .or(cursor);
         }
         Mode::GitSettingPrompt(field, state) => {
-            cursor = modal::render_text_prompt_cursor(frame, area, field.label(), state, "Apply").or(cursor);
+            cursor = modal::render_text_prompt_cursor(frame, area, field.label(), state, "Apply")
+                .or(cursor);
         }
         Mode::AnimationTextPrompt(target, state) => {
             let (hint, style) = match &target.error {
@@ -996,9 +1068,12 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) -> O
                 "Apply",
                 &hint,
                 style,
-            ).or(cursor);
+            )
+            .or(cursor);
         }
-        Mode::LocationPicker(picker) => { cursor = crate::location_picker::render_cursor(frame, area, picker).or(cursor); },
+        Mode::LocationPicker(picker) => {
+            cursor = crate::location_picker::render_cursor(frame, area, picker).or(cursor);
+        }
         Mode::AgentSetupPathPrompt(feature, state) => {
             cursor = modal::render_text_prompt_cursor(
                 frame,
@@ -1006,12 +1081,16 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) -> O
                 &format!("{} global instruction file", feature.label()),
                 state,
                 "Use file",
-            ).or(cursor);
+            )
+            .or(cursor);
         }
         Mode::AgentSetupPrompt(state) => crate::setup_prompt::render(frame, area, state),
-        Mode::VoicePromptEditor(state) => crate::instruction_settings::render_editor(frame,area,state),
+        Mode::VoicePromptEditor(state) => {
+            crate::instruction_settings::render_editor(frame, area, state)
+        }
         Mode::SaveAs(_, state) => {
-            cursor = modal::render_text_prompt_cursor(frame, area, "Save As", state, "Save").or(cursor);
+            cursor =
+                modal::render_text_prompt_cursor(frame, area, "Save As", state, "Save").or(cursor);
         }
         Mode::ConfirmClose(target) => draw_confirm_close(frame, area, app, *target),
         Mode::ConvertSession => {
@@ -1039,7 +1118,8 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) -> O
                             &app.inference_settings,
                         )
                     });
-                let banner_rows = crate::remote_compaction_dialog::banner_rows(banner_text.as_deref());
+                let banner_rows =
+                    crate::remote_compaction_dialog::banner_rows(banner_text.as_deref());
                 crate::remote_compaction_dialog::render(
                     frame,
                     crate::remote_compaction_dialog::dialog_area(pane_area, area, banner_rows),
@@ -1049,10 +1129,12 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) -> O
             }
         }
         Mode::WaitingWorkspaceCloseOffer { .. } => {
-            let popup = modal::centered_fixed_rect(56, 5, area);
+            let popup_width = 64.min(area.width);
+            let popup = modal::centered_fixed_rect(popup_width, 5, area);
+            let status_lines = workspace_close_wait_lines(popup_width.saturating_sub(2));
             frame.render_widget(Clear, popup);
             frame.render_widget(
-                Paragraph::new("Checking whether this worktree can be removed…  Esc cancels")
+                Paragraph::new(status_lines.into_iter().map(Line::from).collect::<Vec<_>>())
                     .block(theme::block(true).title(theme::chrome_title("Worktree close"))),
                 popup,
             );
@@ -1060,24 +1142,51 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) -> O
         Mode::ConfirmWorkspaceCloseOffer(pane_id) => {
             let message = app.tree.pane_workspace(*pane_id).map_or_else(
                 || "Keep this worktree?".to_string(),
-                |workspace| format!("Remove the clean, merged worktree at {} too? Enter keeps it.", workspace.worktree_root.display()),
+                |workspace| {
+                    format!(
+                        "Remove the clean, merged worktree at {} too? Enter keeps it.",
+                        workspace.worktree_root.display()
+                    )
+                },
             );
-            modal::render_confirm(frame, area, "Remove worktree too?", &message,
-                modal::DialogActions::confirmation("Keep", modal::DialogButtonTone::Neutral, "Remove worktree", modal::DialogButtonTone::Danger));
+            modal::render_confirm(
+                frame,
+                area,
+                "Remove worktree too?",
+                &message,
+                modal::DialogActions::confirmation(
+                    "Keep",
+                    modal::DialogButtonTone::Neutral,
+                    "Remove worktree",
+                    modal::DialogButtonTone::Danger,
+                ),
+            );
         }
         Mode::ConfirmRemoveWorkspace(target) => {
             let message = app.tree.pane_workspace(*target).map_or_else(
                 || "This pane has no worktree".to_string(),
                 |workspace| format!("Remove the worktree at {}? The server checks for changes and running processes before removal. The branch is kept.", workspace.worktree_root.display()),
             );
-            modal::render_confirm(frame, area, "Remove worktree?", &message,
-                modal::DialogActions::confirmation("Keep", modal::DialogButtonTone::Neutral, "Remove", modal::DialogButtonTone::Danger));
+            modal::render_confirm(
+                frame,
+                area,
+                "Remove worktree?",
+                &message,
+                modal::DialogActions::confirmation(
+                    "Keep",
+                    modal::DialogButtonTone::Neutral,
+                    "Remove",
+                    modal::DialogButtonTone::Danger,
+                ),
+            );
         }
         Mode::ConfirmSessionRecovery { pane_count } => modal::render_confirm(
             frame,
             area,
             "Restore previous session?",
-            &format!("A stored snapshot contains {pane_count} pane(s). Restore it, or discard it and start fresh?"),
+            &format!(
+                "A stored snapshot contains {pane_count} pane(s). Restore it, or discard it and start fresh?"
+            ),
             modal::DialogActions::confirmation(
                 "Discard",
                 modal::DialogButtonTone::Danger,
@@ -1093,6 +1202,26 @@ fn draw_mode_overlay(frame: &mut Frame, area: Rect, app: &App, mode: &Mode) -> O
         | Mode::Search(_) => {}
     }
     cursor
+}
+
+fn workspace_close_wait_lines(inner_width: u16) -> Vec<&'static str> {
+    const FULL_STATUS: &str = "Checking whether this worktree can be removed…  Esc cancels";
+    if UnicodeWidthStr::width(FULL_STATUS) <= usize::from(inner_width) {
+        return vec![FULL_STATUS];
+    }
+    if inner_width >= 30 {
+        return vec!["Checking worktree… Esc cancels"];
+    }
+    if inner_width >= 19 {
+        return vec!["Checking worktree…", "Esc cancels"];
+    }
+    if inner_width >= 11 {
+        return vec!["Checking…", "Esc cancels"];
+    }
+    if inner_width >= 3 {
+        return vec!["Checking…", "Esc"];
+    }
+    vec!["…"]
 }
 
 fn draw_text_trigger_dialog(
@@ -1621,6 +1750,39 @@ fn draw_scheduled_input_dialog(
     cursor
 }
 
+/// Keep enough grapheme context for the viewport while retaining the original
+/// draft intact. Logical indices can be huge; local screen rows remain bounded.
+fn queued_prompt_view(text: &crate::text_prompt::TextPromptState, area: Rect) -> (&str, usize) {
+    let cursor_byte = text
+        .buf
+        .char_indices()
+        .nth(text.cursor)
+        .map_or(text.buf.len(), |(index, _)| index);
+    let context = usize::from(area.width.max(1))
+        .saturating_mul(usize::from(area.height.max(1)))
+        .saturating_mul(2)
+        .saturating_add(1);
+    let mut prior = std::collections::VecDeque::new();
+    let mut following = 0;
+    let mut end = text.buf.len();
+    for (index, _) in text.buf.grapheme_indices(true) {
+        if index <= cursor_byte {
+            prior.push_back(index);
+            if prior.len() > context {
+                prior.pop_front();
+            }
+        } else {
+            following += 1;
+            if following > context {
+                end = index;
+                break;
+            }
+        }
+    }
+    let start = prior.front().copied().unwrap_or(0);
+    (&text.buf[start..end], cursor_byte - start)
+}
+
 fn draw_prompt_queue_dialog(
     frame: &mut Frame,
     screen_area: Rect,
@@ -1656,16 +1818,28 @@ fn draw_prompt_queue_dialog(
     } else {
         Style::new().add_modifier(Modifier::DIM)
     };
-    frame.render_widget(
-        Paragraph::new(state.text.buf.clone())
-            .block(
-                theme::block(state.focus == PromptQueueFocus::Text)
-                    .title(theme::chrome_title("Multiline prompt")),
-            )
-            .style(text_style)
-            .wrap(ratatui::widgets::Wrap { trim: false }),
-        layout.text,
+    // The authoritative draft/cursor stay in TextPromptState. This temporary
+    // view follows that cursor, including drafts beyond the textarea's u16
+    // viewport range, without imposing a limit on queued input.
+    let (visible, cursor_byte) = queued_prompt_view(&state.text, layout.text);
+    let mut text_view =
+        ratatui_textarea::TextArea::from(visible[cursor_byte..].split('\n').map(str::to_owned));
+    // Constructor starts at (0, 0); insertion positions the view cursor using
+    // usize internally, avoiding CursorMove::Jump's narrowed row/column.
+    text_view.insert_str(&visible[..cursor_byte]);
+    text_view.set_wrap_mode(ratatui_textarea::WrapMode::WordOrGlyph);
+    text_view.set_style(text_style);
+    text_view.set_cursor_line_style(text_style);
+    text_view.set_cursor_style(if state.focus == PromptQueueFocus::Text {
+        text_style.add_modifier(Modifier::REVERSED)
+    } else {
+        text_style
+    });
+    text_view.set_block(
+        theme::block(state.focus == PromptQueueFocus::Text)
+            .title(theme::chrome_title("Multiline prompt")),
     );
+    frame.render_widget(&text_view, layout.text);
     frame.render_widget(
         Paragraph::new("DELIVERY").style(Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
         layout.delivery_label,
@@ -1722,9 +1896,29 @@ fn draw_prompt_queue_dialog(
         }
     }
     let warning = match state.delivery_choice {
-        PromptQueueDelivery::Forever => "DANGER: this will re-send forever whenever the agent finishes. Do not run it unmonitored.",
-        PromptQueueDelivery::Times { .. } => "The same prompt is sent once per future finish, until the selected count is exhausted.",
-        PromptQueueDelivery::Once => "The prompt remains queued until the agent next finishes, then is sent once.",
+        PromptQueueDelivery::Once if layout.warning.width < 35 => "Once after finish.",
+        PromptQueueDelivery::Times { .. } if layout.warning.width < 35 => {
+            "Counted sends after finish."
+        }
+        PromptQueueDelivery::Forever if layout.warning.width < 35 => "Forever; monitor closely.",
+        PromptQueueDelivery::Once if layout.warning.width < 84 => {
+            "Sends once after the agent finishes."
+        }
+        PromptQueueDelivery::Times { .. } if layout.warning.width < 84 => {
+            "One send per finish, up to count."
+        }
+        PromptQueueDelivery::Forever if layout.warning.width < 84 => {
+            "Repeats forever; monitor closely."
+        }
+        PromptQueueDelivery::Forever => {
+            "DANGER: this will re-send forever whenever the agent finishes. Do not run it unmonitored."
+        }
+        PromptQueueDelivery::Times { .. } => {
+            "The same prompt is sent once per future finish, until the selected count is exhausted."
+        }
+        PromptQueueDelivery::Once => {
+            "The prompt remains queued until the agent next finishes, then is sent once."
+        }
     };
     frame.render_widget(
         Paragraph::new(warning).style(Style::new().fg(
@@ -2287,8 +2481,12 @@ fn draw_pane_runtime(
         PaneRuntime::Terminal(term) => {
             let block = theme::block(pane_focused).title(theme::chrome_title(&pane_title));
             frame.render_widget(block, viewport.outer_area);
-            let terminal_area = completed_agent_close_action
+            let frozen_dialog = app.frozen_dialog_layout(viewport);
+            let completed_terminal_area = completed_agent_close_action
                 .map_or(viewport.content_area, |action| action.terminal_area);
+            let terminal_area = frozen_dialog
+                .as_ref()
+                .map_or(completed_terminal_area, |layout| layout.terminal_area);
             let smart_copy = app
                 .smart_copy_session
                 .as_ref()
@@ -2304,34 +2502,28 @@ fn draw_pane_runtime(
                 source.with_screen(|screen| {
                     terminal_view::render_frozen_screen(screen, terminal_area, frame.buffer_mut());
                 });
-                let dialog_width = terminal_area.width.min(52);
-                let dialog_height = terminal_area.height.min(7);
-                let dialog_area = Rect {
-                    x: terminal_area.x + terminal_area.width.saturating_sub(dialog_width) / 2,
-                    y: terminal_area.y + terminal_area.height.saturating_sub(dialog_height) / 2,
-                    width: dialog_width,
-                    height: dialog_height,
-                };
-                frame.render_widget(Clear, dialog_area);
-                frame.render_widget(
-                    Paragraph::new(vec![
-                        Line::from(Span::styled(
-                            "Agent frozen",
-                            Style::default().add_modifier(Modifier::BOLD),
-                        )),
-                        Line::from("Click the button or press Enter to resume it"),
-                        Line::from(Span::styled(
-                            "      [ Unfreeze agent ]      ",
-                            Style::default()
-                                .fg(Color::Black)
-                                .bg(Color::LightGreen)
-                                .add_modifier(Modifier::BOLD),
-                        )),
-                    ])
-                    .alignment(Alignment::Center)
-                    .block(theme::block(true).title(theme::chrome_title("Frozen agent"))),
-                    dialog_area,
-                );
+                if let Some(dialog) = frozen_dialog.as_ref() {
+                    frame.render_widget(Clear, dialog.dialog_area);
+                    frame.render_widget(
+                        Paragraph::new(vec![
+                            Line::from(Span::styled(
+                                "Agent frozen",
+                                Style::default().add_modifier(Modifier::BOLD),
+                            )),
+                            Line::from("Click the button or press Enter to resume it"),
+                            Line::from(Span::styled(
+                                FROZEN_DIALOG_BUTTON_LABEL,
+                                Style::default()
+                                    .fg(Color::Black)
+                                    .bg(Color::LightGreen)
+                                    .add_modifier(Modifier::BOLD),
+                            )),
+                        ])
+                        .alignment(Alignment::Center)
+                        .block(theme::block(true).title(theme::chrome_title("Frozen agent"))),
+                        dialog.dialog_area,
+                    );
+                }
             } else if let Some(source) = app.selection_terminal_source(viewport.pane_id) {
                 source.with_screen(|screen| {
                     terminal_view::render_frozen_screen(screen, terminal_area, frame.buffer_mut());
@@ -2339,27 +2531,84 @@ fn draw_pane_runtime(
                 });
             } else {
                 term.render_screen(terminal_area, frame.buffer_mut());
-                // A pane that has no parser engine must say why instead of
-                // staying black: it retries on its own, or cannot fit at all.
-                if let Some(error) = term
-                    .admission_error
-                    .as_deref()
-                    .filter(|_| term.frontend.is_none())
-                {
-                    let message = if error.contains("backpressure") {
-                        "Loading terminal... (terminal engine memory budget in use; raise it in Settings > Terminal)".to_owned()
-                    } else {
-                        format!("Terminal cannot be shown: {error}")
+                let display_error = term.admission_error.as_deref().or_else(|| {
+                    (term.frontend.is_some() && !term.has_initial_display())
+                        .then_some("waiting for initial terminal state")
+                });
+                if let Some(error) = display_error {
+                    use crate::terminal_parsing::ParserPressure;
+
+                    let message = match term.parser_pressure() {
+                        Some(ParserPressure::StatePool) => format!(
+                            "Loading terminal: {error} Turn pooling Off (0) or increase its budget in Settings > Terminal."
+                        ),
+                        Some(ParserPressure::SnapshotPool) => format!(
+                            "Loading terminal: {error} Retained snapshot memory returns only after its last holder releases it. Turn pooling Off (0) or increase its budget in Settings > Terminal."
+                        ),
+                        Some(ParserPressure::PaneLimit) => format!(
+                            "Terminal allocation limit: {error} The 128 MiB per-pane operation cap remains in effect with pooling Off."
+                        ),
+                        Some(ParserPressure::StorageBusy) => {
+                            format!("Loading terminal: {error} Retrying allocation bookkeeping.")
+                        }
+                        Some(ParserPressure::ProcessStorage) => format!(
+                            "Loading terminal: {error} The parser storage ledger refused this reservation; safe hidden engines may be reclaimed while active and retiring owners keep their credits."
+                        ),
+                        None if term.frontend.is_none() || term.applied_ordinal == 0 => {
+                            format!("Loading terminal: {error}")
+                        }
+                        None => format!("Terminal status: {error}"),
                     };
-                    frame.render_widget(
-                        ratatui::widgets::Paragraph::new(message)
-                            .wrap(ratatui::widgets::Wrap { trim: true })
-                            .style(
-                                ratatui::style::Style::default()
-                                    .add_modifier(ratatui::style::Modifier::DIM),
-                            ),
-                        terminal_area,
-                    );
+                    let status_area = {
+                        let buffer = frame.buffer_mut();
+                        let mut run_start = terminal_area.y;
+                        let mut run_height = 0_u16;
+                        let mut best_start = terminal_area.y;
+                        let mut best_height = 0_u16;
+
+                        // Inspect rendered cells so clipping and terminal dimensions remain unchanged.
+                        for row in terminal_area.y..terminal_area.bottom() {
+                            let row_is_blank =
+                                (terminal_area.x..terminal_area.right()).all(|column| {
+                                    buffer.content[buffer.index_of(column, row)]
+                                        .symbol()
+                                        .chars()
+                                        .all(char::is_whitespace)
+                                });
+                            if !row_is_blank {
+                                run_height = 0;
+                                continue;
+                            }
+                            if run_height == 0 {
+                                run_start = row;
+                            }
+                            run_height += 1;
+                            if run_height <= best_height {
+                                continue;
+                            }
+                            best_start = run_start;
+                            best_height = run_height;
+                        }
+
+                        (best_height != 0).then_some(ratatui::layout::Rect::new(
+                            terminal_area.x,
+                            best_start,
+                            terminal_area.width,
+                            best_height,
+                        ))
+                    };
+                    // Never cover retained terminal text when a full screen has no blank rows.
+                    if let Some(status_area) = status_area {
+                        frame.render_widget(
+                            ratatui::widgets::Paragraph::new(message)
+                                .wrap(ratatui::widgets::Wrap { trim: true })
+                                .style(
+                                    ratatui::style::Style::default()
+                                        .add_modifier(ratatui::style::Modifier::DIM),
+                                ),
+                            status_area,
+                        );
+                    }
                 }
                 crate::goal_resume_link::draw_goal_resume_link(
                     app,
@@ -2696,7 +2945,7 @@ fn draw_terminal_scrollbar_metrics(
     let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
         .begin_symbol(None)
         .end_symbol(None)
-        .track_symbol(Some(" "))
+        .track_symbol(Some("│"))
         .style(theme::border_style(false));
     frame.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
 }
@@ -2826,7 +3075,7 @@ fn draw_source_scrollbar(frame: &mut Frame, area: Rect, editor: &EditorPane) {
     let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
         .begin_symbol(None)
         .end_symbol(None)
-        .track_symbol(Some(" "));
+        .track_symbol(Some("│"));
     frame.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
 }
 
@@ -2849,7 +3098,7 @@ fn draw_rendered_scrollbar(
     let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
         .begin_symbol(None)
         .end_symbol(None)
-        .track_symbol(Some(" "));
+        .track_symbol(Some("│"));
     frame.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
 }
 
@@ -2961,6 +3210,7 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         Mode::QueuePrompt(..) => "QUEUE PROMPT",
         Mode::ValueDialog(..) => "VALUE OPTIONS",
         Mode::TextTriggerDialog(..) => "TEXT TRIGGER",
+        Mode::AgentMessageDialog(..) => "MESSAGE TO AGENTS",
         Mode::EditorLineContextMenu(..) => "LINE ACTIONS",
         Mode::CreateAgentFromLine(..) => "CREATE AGENT",
         Mode::CreateAgentWorkspace(..) => "CREATE AGENT WORKTREE",
@@ -3177,6 +3427,39 @@ fn draw_voice_control(frame: &mut Frame, area: Rect, app: &App) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn smart_copy_preview_fits_narrow_screens() {
+        let project = tempfile::tempdir().unwrap();
+        let mut app = App::new(
+            "synthetic-narrow-preview".into(),
+            project.path().to_path_buf(),
+        );
+        app.smart_copy_preview = Some(crate::smart_copy_light::SmartCopyPreview::new(
+            "界界界界界界界界界界界界".into(),
+            1,
+            true,
+            Instant::now(),
+        ));
+        for width in [12, 16, 20, 27, 28, 40] {
+            let area = Rect::new(0, 0, width, 9);
+            let mut terminal = Terminal::new(TestBackend::new(width, area.height)).unwrap();
+            terminal
+                .draw(|frame| super::draw_smart_copy_preview(frame, area, &app))
+                .unwrap();
+            let buffer = terminal.backend().buffer();
+            let top = (0..area.height)
+                .find(|y| (0..width).any(|x| buffer[(x, *y)].symbol() == "╭"))
+                .expect("the preview frame must remain visible");
+            let row: String = (0..width).map(|x| buffer[(x, top)].symbol()).collect();
+            assert!(row.contains("Preview"));
+            assert!(
+                row.contains('╮'),
+                "the right border must fit at width {width}"
+            );
+            crate::ui_capture::save(&format!("smart-copy-preview-{width}x9"), &terminal);
+        }
+    }
+
     #[test]
     fn smart_copy_preview_withholds_scene_attribution_and_recovers_after_close() {
         use crate::background_animation::test_support::{fake_host, FakeProbe};
@@ -3605,6 +3888,239 @@ mod tests {
             .collect::<String>();
         assert!(rendered.contains("Loading terminal"));
     }
+    #[test]
+    fn a_displayed_terminal_with_an_engine_reports_stalled_publication() {
+        use ilium_execution::{
+            ClientLimits, Execution, ExecutionConfig, LaneConfig, QuotaGroup, QuotaLimits,
+            ShutdownMode,
+        };
+        const MIB: usize = 1024 * 1024;
+        let disabled = LaneConfig {
+            threads: 0,
+            queue_slots: 0,
+            priority: None,
+            resident_bytes_per_thread: 0,
+        };
+        let mut execution = Execution::start(
+            QuotaGroup::new(QuotaLimits {
+                clients: 1,
+                jobs: 1,
+                service_jobs: 1,
+                input_bytes: 128 * MIB,
+                result_bytes: 2 * MIB,
+                worker_threads: 1,
+                // Reserve the service resident bytes plus retained bank metadata.
+                worker_bytes: 132 * MIB,
+            }),
+            ExecutionConfig {
+                cpu: disabled,
+                io: disabled,
+                service: LaneConfig {
+                    threads: 1,
+                    queue_slots: 1,
+                    priority: None,
+                    resident_bytes_per_thread: 128 * MIB,
+                },
+            },
+        )
+        .unwrap();
+        let client = execution
+            .client(ClientLimits {
+                jobs: 1,
+                service_jobs: 1,
+                input_bytes: 128 * MIB,
+                result_bytes: 2 * MIB,
+            })
+            .unwrap();
+        let parsing = crate::terminal_parsing::TerminalParsing::start(client, 256).unwrap();
+        let mut app = App::new("stalled-publication".into(), std::env::temp_dir());
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "Waiting", PaneContentKind::Terminal)
+            .unwrap();
+        let mut view = TerminalView::new(24, 80);
+        parsing.attach(pane_id, &mut view).unwrap();
+        assert!(
+            view.frontend.is_some(),
+            "exercise an allocated parser handle"
+        );
+        view.admission_error = Some("parser publication capacity is in use".into());
+        app.panes
+            .insert(pane_id, PaneRuntime::Terminal(Box::new(view)));
+        app.right_panel_target = RightPanelTarget::Pane { pane_id };
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+        terminal
+            .draw(|frame| draw_pane(frame, app.layout.pane_area, &app))
+            .unwrap();
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        // Shut down the isolated owner even when the rendering assertion fails.
+        drop(app);
+        drop(parsing);
+        execution.request_shutdown(ShutdownMode::Cancel);
+        assert_eq!(
+            execution
+                .join_until_background(Instant::now() + Duration::from_secs(5))
+                .unwrap()
+                .remaining_workers,
+            0
+        );
+        assert!(rendered.contains("parser publication capacity is in use"));
+    }
+
+    fn select_parser_regression_pane(app: &mut App, pane_id: ilium_core::NodeId) {
+        app.right_panel_target = RightPanelTarget::Pane { pane_id };
+    }
+
+    #[test]
+    fn initialized_off_panes_paint_all_128_retained_snapshots_on_the_next_draw() {
+        use crate::terminal_parsing::app_regressions::{initialized_app, view};
+        use std::time::{Duration, Instant};
+        let (_bank, mut app, ids) = initialized_app(128, 0, select_parser_regression_pane);
+        let retained: Vec<_> = ids
+            .iter()
+            .map(|id| {
+                let terminal = view(&app, *id);
+                (
+                    terminal.identity.clone(),
+                    terminal.applied_ordinal,
+                    terminal.with_screen(|screen| screen.contents()),
+                )
+            })
+            .collect();
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+        let mut longest = Duration::ZERO;
+        for pass in 0..3 {
+            for visit in 0..ids.len() {
+                let index = if pass % 2 == 0 {
+                    visit
+                } else {
+                    ids.len() - 1 - visit
+                };
+                let selected_at = Instant::now();
+                select_parser_regression_pane(&mut app, ids[index]);
+                // No parser collection or replay occurs between selection and this draw.
+                terminal
+                    .draw(|frame| draw_pane(frame, app.layout.pane_area, &app))
+                    .unwrap();
+                longest = longest.max(selected_at.elapsed());
+                let rendered = terminal
+                    .backend()
+                    .buffer()
+                    .content()
+                    .iter()
+                    .map(|cell| cell.symbol())
+                    .collect::<String>();
+                assert!(
+                    rendered.contains(&format!("pane-{index:03}")),
+                    "pass {pass}, pane {index}"
+                );
+                let current = view(&app, ids[index]);
+                assert!(std::sync::Arc::ptr_eq(
+                    &current.identity,
+                    &retained[index].0
+                ));
+                assert_eq!(current.applied_ordinal, retained[index].1);
+                assert_eq!(
+                    current.with_screen(|screen| screen.contents()),
+                    retained[index].2
+                );
+                assert!(current.frontend.is_some());
+            }
+        }
+        assert_eq!(
+            app.terminal_parsing.as_ref().unwrap().pending_work(),
+            Some((0, 0))
+        );
+        eprintln!(
+            "test_backend_off_revisits=384 max_selection_to_draw_us={}",
+            longest.as_micros()
+        );
+    }
+
+    #[test]
+    fn stalled_status_preserves_retained_terminal_cells_and_geometry() {
+        use crate::terminal_parsing::app_regressions::{initialized_app, view};
+        let (_bank, mut app, ids) = initialized_app(1, 0, select_parser_regression_pane);
+        let id = ids[0];
+        let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
+        terminal
+            .draw(|frame| draw_pane(frame, app.layout.pane_area, &app))
+            .unwrap();
+        let nonblank: Vec<_> = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .enumerate()
+            .filter(|(_, cell)| !cell.symbol().chars().all(char::is_whitespace))
+            .map(|(index, cell)| (index, cell.symbol().to_owned()))
+            .collect();
+        let before_size = view(&app, id).with_screen(|screen| screen.size());
+        let before_ordinal = view(&app, id).applied_ordinal;
+        let Some(PaneRuntime::Terminal(current)) = app.panes.get_mut(&id) else {
+            unreachable!()
+        };
+        current.admission_error = Some("parser publication capacity is in use".into());
+        terminal
+            .draw(|frame| draw_pane(frame, app.layout.pane_area, &app))
+            .unwrap();
+        for (index, symbol) in nonblank {
+            assert_eq!(
+                terminal.backend().buffer().content()[index].symbol(),
+                symbol
+            );
+        }
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(rendered.contains("pane-000"));
+        assert!(rendered.contains("parser publication capacity is in use"));
+        assert_eq!(
+            view(&app, id).with_screen(|screen| screen.size()),
+            before_size
+        );
+        assert_eq!(view(&app, id).applied_ordinal, before_ordinal);
+    }
+
+    #[test]
+    fn stale_parser_results_do_not_reach_any_app_consumer() {
+        crate::terminal_parsing::app_regressions::stale_domain_attachment_and_dead_target_never_reach_any_app_result_consumer(select_parser_regression_pane);
+    }
+
+    #[test]
+    fn parser_app_ordinals_are_applied_once_without_losing_retained_errors() {
+        crate::terminal_parsing::app_regressions::app_completes_each_ordinal_once_and_ack_preserves_picture_and_error(select_parser_regression_pane);
+    }
+
+    #[test]
+    fn parser_pool_app_eviction_protects_busy_displayed_and_retiring_owners() {
+        crate::terminal_parsing::app_regressions::pooled_app_protects_displayed_and_busy_panes_and_waits_for_retiring_claims(select_parser_regression_pane);
+    }
+
+    #[test]
+    fn parser_pool_exact_setter_rejects_before_runtime_mutation() {
+        crate::terminal_parsing::app_regressions::invalid_exact_pool_setter_rejects_before_mutating_any_live_setting(select_parser_regression_pane);
+    }
+
+    #[test]
+    fn parser_pool_custom_values_reach_existing_app_consumers() {
+        crate::terminal_parsing::app_regressions::custom_pool_values_reach_existing_app_consumers(
+            select_parser_regression_pane,
+        );
+    }
+
     #[test]
     fn completed_agent_renders_a_full_width_red_close_action_at_the_panel_bottom() {
         let mut app = App::new("test".to_owned(), std::env::temp_dir());
@@ -4308,8 +4824,8 @@ mod text_trigger_numeric_control_tests {
                     .find(|&column| buffer[(column, delay.y)].symbol() == symbol)
                     .unwrap_or_else(|| panic!("{width}x{height}: delay lacks {symbol}"))
             };
-            let decrement = position("−");
-            let increment = position("+");
+            let decrement = position(crate::value_control::NUMBER_DECREMENT_GLYPH);
+            let increment = position(crate::value_control::NUMBER_INCREMENT_GLYPH);
             let entry = position("*");
             let first_digit = position("6");
             let last_digit = position("0");
@@ -4336,6 +4852,65 @@ mod source_touch_provenance_tests {
         app.mode = Mode::Normal;
         app.modal_stack.push(Mode::Help);
         assert!(!late_layers_are_source_transparent(&app));
+    }
+}
+
+#[cfg(test)]
+mod worktree_close_dialog_tests {
+    use super::*;
+    use ratatui::{backend::TestBackend, Terminal};
+
+    #[test]
+    fn waiting_workspace_close_keeps_status_and_cancel_visible_on_small_terminals() {
+        for (width, height) in [(24, 10), (40, 12), (60, 20), (80, 24)] {
+            let app = App::new(
+                "worktree close visual regression".into(),
+                std::env::temp_dir(),
+            );
+            let mode = Mode::WaitingWorkspaceCloseOffer {
+                request_id: 1,
+                pane_id: ROOT_ID,
+            };
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal
+                .draw(|frame| {
+                    draw_mode_overlay(frame, frame.area(), &app, &mode);
+                })
+                .unwrap();
+
+            let rendered = terminal
+                .backend()
+                .buffer()
+                .content()
+                .chunks(usize::from(width))
+                .map(|row| row.iter().map(|cell| cell.symbol()).collect::<String>())
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(
+                rendered.contains("Worktree close"),
+                "{width}x{height}: {rendered}"
+            );
+            assert!(
+                rendered.contains("Checking"),
+                "{width}x{height}: {rendered}"
+            );
+            assert!(
+                rendered.contains("Esc cancels"),
+                "{width}x{height}: {rendered}"
+            );
+            if width <= 40 {
+                assert!(
+                    rendered.contains("Checking worktree…"),
+                    "narrow terminal should use the compact status: {rendered}"
+                );
+            }
+            if width == 80 {
+                assert!(
+                    rendered.contains("Checking whether this worktree can be removed"),
+                    "wide terminal should retain the full status: {rendered}"
+                );
+            }
+        }
     }
 }
 
@@ -4392,34 +4967,7 @@ mod context_menu_visual_tests {
     }
 
     fn save_frame(name: &str, terminal: &Terminal<TestBackend>) {
-        let Ok(directory) = std::env::var("ILIUM_MENU_RENDER_DIR") else {
-            return;
-        };
-        let directory = std::path::PathBuf::from(directory);
-        assert!(directory.is_absolute());
-        std::fs::create_dir_all(&directory).unwrap();
-        let buffer = terminal.backend().buffer();
-        let cells: Vec<_> = buffer
-            .content()
-            .iter()
-            .map(|cell| {
-                serde_json::json!({
-                    "text": cell.symbol(), "fg": format!("{:?}", cell.fg),
-                    "bg": format!("{:?}", cell.bg), "modifier": format!("{:?}", cell.modifier),
-                })
-            })
-            .collect();
-        let path = directory.join(format!("{name}.json"));
-        std::fs::write(
-            &path,
-            serde_json::to_vec_pretty(&serde_json::json!({
-                "type": "artifact", "fixture": name, "width": buffer.area.width,
-                "height": buffer.area.height, "cells": cells,
-            }))
-            .unwrap(),
-        )
-        .unwrap();
-        println!("{}", serde_json::json!({"type":"artifact", "path": path}));
+        crate::ui_capture::save_with_env(name, terminal, "ILIUM_MENU_RENDER_DIR");
     }
 
     #[test]
@@ -4674,5 +5222,170 @@ mod context_menu_visual_tests {
             })
             .unwrap();
         save_frame("terminal-short-last", &terminal);
+
+        let directory = tempfile::tempdir().unwrap();
+        for (width, height, menu_area, icon_preference) in [
+            (80, 24, Rect::new(2, 2, 44, 17), true),
+            (80, 24, Rect::new(2, 2, 44, 17), false),
+            (40, 10, Rect::new(0, 0, 40, 10), true),
+        ] {
+            let mut app = App::new("composed terminal menu".into(), directory.path().into());
+            app.set_screen_area(Rect::new(0, 0, width, height));
+            app.ui_settings.show_context_menu_icons = icon_preference;
+            app.mode = Mode::TerminalPaneContextMenu(TerminalPaneContextMenu {
+                pane_id: ROOT_ID,
+                source_line_text: menu.source_line_text.clone(),
+                visible_contents: menu.visible_contents.clone(),
+                full_history: menu.full_history.clone(),
+                selection_text: menu.selection_text.clone(),
+                area: menu_area,
+                actions: menu.actions.clone(),
+                selected_index: 0,
+                row_offset: 0,
+                preparation_generation: 0,
+                _preparation_hold: None,
+            });
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+            let buffer = terminal.backend().buffer();
+            assert_eq!(
+                buffer[(menu_area.x, menu_area.y)].symbol(),
+                "╭",
+                "the composed menu keeps its rounded frame at {width}x{height}"
+            );
+            let rendered = buffer
+                .content()
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>();
+            assert!(
+                rendered.contains("Terminal actions"),
+                "the composed menu title is visible at {width}x{height}"
+            );
+            assert!(
+                rendered.contains("Copy selection"),
+                "the composed menu action is visible at {width}x{height}"
+            );
+            save_frame(
+                &format!("composed-terminal-menu-{width}x{height}-icons-{icon_preference}"),
+                &terminal,
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod prompt_queue_visual_tests {
+    use super::*;
+    use ratatui::{backend::TestBackend, Terminal};
+
+    #[test]
+    fn queued_view_preserves_large_middle_cursor_and_grapheme_boundaries() {
+        let draft = "界e\u{301}\n".repeat(70_000) + "TAIL";
+        let mut text = crate::text_prompt::TextPromptState::new(draft.clone());
+        text.cursor = 140_001;
+        let cursor = text.cursor;
+        let (view, local_cursor) = queued_prompt_view(&text, Rect::new(0, 0, 70, 6));
+        let prefix: String = text.buf.chars().take(cursor).collect();
+        assert!(prefix.ends_with(&view[..local_cursor]));
+        let start = prefix.len() - local_cursor;
+        assert!(text
+            .buf
+            .grapheme_indices(true)
+            .any(|(index, _)| index == start));
+        assert!(view.len() < text.buf.len());
+        let mut textarea =
+            ratatui_textarea::TextArea::from(view[local_cursor..].split('\n').map(str::to_owned));
+        textarea.insert_str(&view[..local_cursor]);
+        assert_eq!(textarea.lines().join("\n"), view);
+        assert_eq!(text.buf, draft);
+        assert_eq!(text.cursor, cursor);
+    }
+
+    #[test]
+    fn queue_prompt_long_draft_keeps_edited_tail_visible() {
+        for (width, height) in [(120, 40), (80, 24), (60, 20), (40, 12)] {
+            let app = App::new(
+                "synthetic-queue-visibility".to_owned(),
+                std::path::PathBuf::from("/synthetic/ui-queue"),
+            );
+            let mut state = crate::prompt_queue::PromptQueueDialogState::new(ilium_core::ROOT_ID);
+            let mut draft = (0..60)
+                .map(|index| format!("Synthetic line {index:02}\n"))
+                .collect::<String>();
+            draft.push_str("EDITED-TAIL");
+            state.text = crate::text_prompt::TextPromptState::new(draft);
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal
+                .draw(|frame| draw_prompt_queue_dialog(frame, frame.area(), &app, &state))
+                .unwrap();
+            crate::ui_capture::save(&format!("queue-long-tail-{width}x{height}"), &terminal);
+            let layout = crate::prompt_queue::dialog_layout(Rect::new(0, 0, width, height));
+            let inner = theme::block(true).inner(layout.text);
+            assert!(
+                inner.width >= 11 && inner.height > 0,
+                "fixture must offer room for edited line at {width}x{height}"
+            );
+            let visible = (inner.y..inner.bottom())
+                .map(|y| {
+                    (inner.x..inner.right())
+                        .map(|x| terminal.backend().buffer()[(x, y)].symbol())
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(
+                visible.contains("EDITED-TAIL"),
+                "long draft hides current edit at {width}x{height}: {visible:?}"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod editor_polish_capture_tests {
+    use super::*;
+    #[test]
+    fn export_populated_editor_visual_matrix() {
+        use crate::app::{FocusTarget, PaneRuntime, RightPanelTarget};
+        use ilium_core::{PaneContentKind, ROOT_ID};
+        use ratatui::{backend::TestBackend, Terminal};
+        for (width, height) in [(120, 40), (80, 24), (60, 20), (40, 12)] {
+            for tail in [false, true] {
+                let mut app = App::new(
+                    "synthetic-editor-capture".to_owned(),
+                    std::path::PathBuf::from("/synthetic/project"),
+                );
+                let group = app.tree.add_group(ROOT_ID, "Synthetic workspace").unwrap();
+                let pane = app
+                    .tree
+                    .add_pane(group, "notes.rs", PaneContentKind::Editor)
+                    .unwrap();
+                let mut editor = EditorPane::empty();
+                let text = (0..80).map(|index| format!("let synthetic_value_{index} = \"Readable source with Unicode 界 and a long line for wrap inspection\";" )).collect::<Vec<_>>().join("\n");
+                editor.replace_contents(&text);
+                if tail {
+                    editor
+                        .textarea
+                        .move_cursor(ratatui_textarea::CursorMove::Bottom);
+                }
+                app.panes
+                    .insert(pane, PaneRuntime::Editor(Box::new(editor)));
+                app.right_panel_target = RightPanelTarget::Pane { pane_id: pane };
+                app.focus = FocusTarget::Pane;
+                app.set_screen_area(Rect::new(0, 0, width, height));
+                // Existing fixture installs the real source window and commits geometry after flush ACK.
+                app.prepare_test_editor_source_frame(pane);
+                let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+                terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+                crate::ui_capture::save(
+                    &format!(
+                        "editor-populated-{}-{width}x{height}",
+                        if tail { "tail" } else { "top" }
+                    ),
+                    &terminal,
+                );
+            }
+        }
     }
 }

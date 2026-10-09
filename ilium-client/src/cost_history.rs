@@ -239,30 +239,43 @@ fn candidate_files(
     let mut path_bytes = 0;
     let mut overflow = false;
     let mut scanned = 0;
-    let mut consider = |path: PathBuf, is_codex: bool| {
+    let mut consider = |path: PathBuf, is_codex: bool| -> Result<(), String> {
         if found.len() >= 16_384 || path_bytes + path.capacity() > 8 * 1024 * 1024 {
             overflow = true;
-            return;
+            return Ok(());
         }
-        let Ok(metadata) = std::fs::metadata(&path) else {
-            return;
+        let metadata = std::fs::metadata(&path).map_err(|error| {
+            format!(
+                "Cannot inspect cost history file {}: {error}",
+                path.display()
+            )
+        })?;
+        let modified = metadata.modified().map_err(|error| {
+            format!(
+                "Cannot read cost history modification time {}: {error}",
+                path.display()
+            )
+        })?;
+        let Ok(elapsed) = modified.duration_since(UNIX_EPOCH) else {
+            return Ok(());
         };
-        let Some(mtime_ms) = metadata
-            .modified()
-            .ok()
-            .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-            .map(|elapsed| elapsed.as_millis() as i64)
-        else {
-            return;
-        };
+        let mtime_ms = elapsed.as_millis() as i64;
         if mtime_ms >= oldest_ms && metadata.len() > 0 {
             path_bytes += path.capacity();
             found.push((path, metadata.len(), mtime_ms, is_codex));
         }
+        Ok(())
     };
 
-    if let Ok(projects) = std::fs::read_dir(home.join(".claude").join("projects")) {
-        for project in projects.flatten() {
+    let claude_projects = home.join(".claude").join("projects");
+    if let Some(projects) = read_optional_root(&claude_projects)? {
+        for project in projects {
+            let project = project.map_err(|error| {
+                format!(
+                    "Cannot enumerate Claude cost history under {}: {error}",
+                    claude_projects.display()
+                )
+            })?;
             scanned += 1;
             if should_stop() || scanned > 32_768 {
                 return Err(
@@ -270,10 +283,20 @@ fn candidate_files(
                         .into(),
                 );
             }
-            let Ok(files) = std::fs::read_dir(project.path()) else {
-                continue;
-            };
-            for file in files.flatten() {
+            let project_path = project.path();
+            let files = std::fs::read_dir(&project_path).map_err(|error| {
+                format!(
+                    "Cannot scan Claude cost history directory {}: {error}",
+                    project_path.display()
+                )
+            })?;
+            for file in files {
+                let file = file.map_err(|error| {
+                    format!(
+                        "Cannot enumerate Claude cost history directory {}: {error}",
+                        project_path.display()
+                    )
+                })?;
                 scanned += 1;
                 if should_stop() || scanned > 32_768 {
                     return Err("Cost history scan cancelled or entry limit exceeded; calibration incomplete".into());
@@ -283,25 +306,41 @@ fn candidate_files(
                     .extension()
                     .is_some_and(|extension| extension == "jsonl")
                 {
-                    consider(path, false);
+                    consider(path, false)?;
                 }
             }
         }
     }
-    let mut pending = vec![home.join(".codex").join("sessions")];
+    let codex_sessions = home.join(".codex").join("sessions");
+    let mut pending = match read_optional_root(&codex_sessions)? {
+        Some(_) => vec![codex_sessions.clone()],
+        None => Vec::new(),
+    };
     while let Some(directory) = pending.pop() {
-        let Ok(children) = std::fs::read_dir(&directory) else {
-            continue;
-        };
-        for child in children.flatten() {
+        let children = std::fs::read_dir(&directory).map_err(|error| {
+            format!(
+                "Cannot scan Codex cost history directory {}: {error}",
+                directory.display()
+            )
+        })?;
+        for child in children {
+            let child = child.map_err(|error| {
+                format!(
+                    "Cannot enumerate Codex cost history directory {}: {error}",
+                    directory.display()
+                )
+            })?;
             scanned += 1;
             if should_stop() || scanned > 32_768 || pending.len() >= 4096 {
                 return Err("Cost history scan cancelled or directory limit exceeded; calibration incomplete".into());
             }
             let path = child.path();
-            let Ok(kind) = child.file_type() else {
-                continue;
-            };
+            let kind = child.file_type().map_err(|error| {
+                format!(
+                    "Cannot inspect Codex cost history entry {}: {error}",
+                    path.display()
+                )
+            })?;
             if kind.is_dir() {
                 if pending.iter().map(PathBuf::capacity).sum::<usize>() + path.capacity()
                     > 4 * 1024 * 1024
@@ -313,7 +352,7 @@ fn candidate_files(
                 .extension()
                 .is_some_and(|extension| extension == "jsonl")
             {
-                consider(path, true);
+                consider(path, true)?;
             }
         }
     }
@@ -323,6 +362,19 @@ fn candidate_files(
         );
     }
     Ok(found)
+}
+
+/// An absent top-level store is normal for users who have not used that CLI.
+/// Every other read failure means calibration would be incomplete.
+fn read_optional_root(path: &Path) -> Result<Option<std::fs::ReadDir>, String> {
+    match std::fs::read_dir(path) {
+        Ok(entries) => Ok(Some(entries)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(format!(
+            "Cannot scan cost history root {}: {error}",
+            path.display()
+        )),
+    }
 }
 
 /// Scans the stores under `home`, reusing `cache_path` for unchanged files.
@@ -971,6 +1023,23 @@ mod tests {
         assert_eq!(entries.len(), 2);
         let totals = sorted_totals(&entries, &PriceTable::default());
         assert_eq!(totals, vec![12.5]);
+    }
+
+    #[test]
+    fn refuses_calibration_when_a_configured_history_root_cannot_be_scanned() {
+        let home = tempfile::tempdir().unwrap();
+        std::fs::create_dir(home.path().join(".claude")).unwrap();
+        std::fs::write(home.path().join(".claude/projects"), b"not a directory").unwrap();
+
+        let error = scan(
+            home.path(),
+            None,
+            30,
+            chrono::Utc::now().timestamp_millis(),
+            &|| false,
+        )
+        .expect_err("a failed configured-root scan must not look like empty history");
+        assert!(error.contains(".claude/projects"), "{error}");
     }
 
     fn quota_line(used: f64, resets_at: i64) -> String {

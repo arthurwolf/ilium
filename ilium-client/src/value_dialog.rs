@@ -8,7 +8,7 @@ use crate::value_control::{cell_width, clip_cells, PointerButton};
 use crossterm::event::KeyCode;
 use ratatui::layout::{Position, Rect};
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
+use ratatui::widgets::{Clear, Paragraph, Wrap};
 use ratatui::Frame;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
@@ -393,6 +393,7 @@ pub fn dialog_layout(screen: Rect) -> DialogLayout {
         popup.width.saturating_sub(2),
         popup.height.saturating_sub(2),
     );
+    let titled_border = popup.width >= 12;
     let row = |index: u16| {
         if index < inner.height {
             Rect::new(inner.x, inner.y.saturating_add(index), inner.width, 1)
@@ -409,13 +410,19 @@ pub fn dialog_layout(screen: Rect) -> DialogLayout {
     let cancel_width = footer.width.saturating_sub(submit_width).min(10);
     DialogLayout {
         popup,
-        title: row(0),
-        editor: row(1),
+        title: if titled_border {
+            Rect::new(popup.x, popup.y, popup.width, popup.height.min(1))
+        } else {
+            row(0)
+        },
+        editor: row(if titled_border { 0 } else { 1 }),
         document: Rect::new(
             inner.x,
-            inner.y.saturating_add(2),
+            inner.y.saturating_add(if titled_border { 1 } else { 2 }),
             inner.width,
-            inner.height.saturating_sub(4),
+            inner
+                .height
+                .saturating_sub(if titled_border { 3 } else { 4 }),
         ),
         status: if inner.height >= 4 {
             row(inner.height - 2)
@@ -645,23 +652,32 @@ impl<'a> PreparedValueDialog<'a> {
         if self.layout.popup.width == 0 || self.layout.popup.height == 0 {
             return;
         }
-        frame.render_widget(Clear, self.layout.popup);
-        frame.render_widget(
-            Block::default()
-                .borders(Borders::ALL)
-                .style(styles.background),
-            self.layout.popup,
-        );
-        let title = match self.state {
+        let title_source = match self.state {
             ValueDialogState::Choice(choice) => &choice.title,
             ValueDialogState::Number(number) => &number.title,
         };
-        paint(
-            frame,
-            self.layout.title,
-            &clip_cells(title, self.layout.title.width),
-            styles.current,
-        );
+        let titled_border = self.layout.popup.width >= 12;
+        let border_title = if titled_border {
+            clip_cells(title_source, self.layout.popup.width.saturating_sub(12))
+        } else {
+            String::new()
+        };
+        let block = crate::theme::block(true).style(styles.background);
+        let block = if titled_border {
+            block.title(crate::theme::chrome_title(&border_title).style(styles.current))
+        } else {
+            block
+        };
+        frame.render_widget(Clear, self.layout.popup);
+        frame.render_widget(block, self.layout.popup);
+        if !titled_border {
+            paint(
+                frame,
+                self.layout.title,
+                &clip_cells(title_source, self.layout.title.width),
+                styles.current,
+            );
+        }
         match self.state {
             ValueDialogState::Choice(choice) => self.render_choice(frame, choice, styles),
             ValueDialogState::Number(number) => self.render_number(frame, number, styles),
@@ -1055,6 +1071,7 @@ mod tests {
         terminal
             .draw(|frame| prepared.render(frame, DialogStyles::default()))
             .unwrap();
+        crate::ui_capture::save("value-dialog-shared-chrome-60x9", &terminal);
         let first_id = prepared.rows[prepared.first_line]
             .option_id
             .clone()
@@ -1065,6 +1082,15 @@ mod tests {
             DialogHit::Choice(first_id)
         );
         let buffer = terminal.backend().buffer();
+        assert_eq!(
+            buffer[(prepared.layout.popup.x, prepared.layout.popup.y)].symbol(),
+            "╭"
+        );
+        let title_row = (prepared.layout.popup.x..prepared.layout.popup.right())
+            .map(|x| buffer[(x, prepared.layout.popup.y)].symbol())
+            .collect::<String>();
+        assert!(title_row.contains("Choose palette"));
+        assert_eq!(prepared.layout.editor.y, prepared.layout.popup.y + 1);
         assert_eq!(
             buffer
                 .cell((prepared.layout.document.x + 2, first_y))
@@ -1093,6 +1119,23 @@ mod tests {
                 DialogHit::Outside
             );
         }
+    }
+
+    #[test]
+    fn compact_value_dialog_keeps_its_title_when_the_border_is_too_narrow() {
+        let state = ValueDialogState::Number(NumberDialogState::new("Count", "12"));
+        let mut terminal = Terminal::new(TestBackend::new(10, 8)).unwrap();
+        let prepared = PreparedValueDialog::new(Rect::new(0, 0, 10, 8), &state);
+        terminal
+            .draw(|frame| prepared.render(frame, DialogStyles::default()))
+            .unwrap();
+        crate::ui_capture::save("value-dialog-compact-10x8", &terminal);
+        let buffer = terminal.backend().buffer();
+        assert_eq!(
+            buffer[(prepared.layout.title.x, prepared.layout.title.y)].symbol(),
+            "C"
+        );
+        assert_eq!(prepared.layout.editor.y, prepared.layout.title.y + 1);
     }
 
     #[test]

@@ -46,6 +46,7 @@ pub enum IconTarget {
     ScheduledInput,
     Bookmark,
     Lock,
+    FrozenAgent,
     ToolbarSearch,
     ToolbarRestructure,
     ToolbarSettings,
@@ -84,7 +85,7 @@ pub enum IconTarget {
 }
 
 impl IconTarget {
-    pub const ALL: [Self; 66] = [
+    pub const ALL: [Self; 67] = [
         Self::Group,
         Self::TopLevel,
         Self::Project,
@@ -119,6 +120,7 @@ impl IconTarget {
         Self::ScheduledInput,
         Self::Bookmark,
         Self::Lock,
+        Self::FrozenAgent,
         Self::ToolbarSearch,
         Self::ToolbarRestructure,
         Self::ToolbarSettings,
@@ -189,6 +191,7 @@ impl IconTarget {
             Self::ScheduledInput => "Scheduled input pending",
             Self::Bookmark => "Bookmarked tree item",
             Self::Lock => "Locked closed folder",
+            Self::FrozenAgent => "Frozen agent pane",
             Self::ToolbarSearch => "Toolbar: search",
             Self::ToolbarRestructure => "Toolbar: restructure",
             Self::ToolbarSettings => "Toolbar: settings",
@@ -260,6 +263,7 @@ impl IconTarget {
             Self::ScheduledInput => "scheduled_input",
             Self::Bookmark => "bookmark",
             Self::Lock => "lock",
+            Self::FrozenAgent => "frozen_agent",
             Self::ToolbarSearch => "toolbar_search",
             Self::ToolbarRestructure => "toolbar_restructure",
             Self::ToolbarSettings => "toolbar_settings",
@@ -335,6 +339,7 @@ impl IconTarget {
             Self::ScheduledInput => "⏰",
             Self::Bookmark => "★",
             Self::Lock => "🔒",
+            Self::FrozenAgent => "❄",
             Self::ToolbarSearch => "🔎",
             Self::ToolbarRestructure => "♻️",
             Self::ToolbarSettings => "🎚️",
@@ -431,6 +436,7 @@ impl IconTarget {
             Self::ScheduledInput => &["⏰", "⏱", "⌚", "🕰️"],
             Self::Bookmark => &["★", "☆", "🔖", "📌"],
             Self::Lock => &["🔒", "🔐", "🔏", "⛓️"],
+            Self::FrozenAgent => &["❄", "❅", "❆", "⛄"],
             Self::ToolbarSearch => &["⌕", "🔎", "🔍", "◉"],
             Self::ToolbarRestructure | Self::RowRetitle | Self::RowProjectRestructure => {
                 &["♻️", "↻", "⟳", "✦"]
@@ -508,6 +514,7 @@ pub struct IconSettings {
     pub scheduled_input: String,
     pub bookmark: String,
     pub lock: String,
+    pub frozen_agent: String,
     pub toolbar_search: String,
     pub toolbar_restructure: String,
     pub toolbar_settings: String,
@@ -586,6 +593,7 @@ impl IconSettings {
             scheduled_input: value(IconTarget::ScheduledInput),
             bookmark: value(IconTarget::Bookmark),
             lock: value(IconTarget::Lock),
+            frozen_agent: value(IconTarget::FrozenAgent),
             toolbar_search: value(IconTarget::ToolbarSearch),
             toolbar_restructure: value(IconTarget::ToolbarRestructure),
             toolbar_settings: value(IconTarget::ToolbarSettings),
@@ -657,6 +665,7 @@ impl IconSettings {
             IconTarget::ScheduledInput => &self.scheduled_input,
             IconTarget::Bookmark => &self.bookmark,
             IconTarget::Lock => &self.lock,
+            IconTarget::FrozenAgent => &self.frozen_agent,
             IconTarget::ToolbarSearch => &self.toolbar_search,
             IconTarget::ToolbarRestructure => &self.toolbar_restructure,
             IconTarget::ToolbarSettings => &self.toolbar_settings,
@@ -737,6 +746,7 @@ impl IconSettings {
             IconTarget::ScheduledInput => &mut self.scheduled_input,
             IconTarget::Bookmark => &mut self.bookmark,
             IconTarget::Lock => &mut self.lock,
+            IconTarget::FrozenAgent => &mut self.frozen_agent,
             IconTarget::ToolbarSearch => &mut self.toolbar_search,
             IconTarget::ToolbarRestructure => &mut self.toolbar_restructure,
             IconTarget::ToolbarSettings => &mut self.toolbar_settings,
@@ -1249,6 +1259,23 @@ mod tests {
             assert_eq!(target.default_glyph(), glyph);
             assert_eq!(super::IconTarget::from_key(key), Some(target));
         }
+    }
+
+    #[test]
+    fn frozen_agent_marker_is_a_separately_configurable_snowflake() {
+        let mut icons = IconSettings::default();
+
+        assert!(IconTarget::ALL.contains(&IconTarget::FrozenAgent));
+        assert_eq!(IconTarget::FrozenAgent.key(), "frozen_agent");
+        assert_eq!(
+            IconTarget::from_key("frozen_agent"),
+            Some(IconTarget::FrozenAgent)
+        );
+        assert_eq!(icons.glyph(IconTarget::FrozenAgent), "❄");
+
+        icons.set(IconTarget::FrozenAgent, "❅".to_string());
+        assert_eq!(icons.glyph(IconTarget::FrozenAgent), "❅");
+        assert_eq!(icons.glyph(IconTarget::Lock), "🔒");
     }
 
     #[test]

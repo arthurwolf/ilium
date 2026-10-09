@@ -7,7 +7,7 @@
 use ratatui::layout::{Constraint, Direction, Layout, Position, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Clear, Paragraph};
+use ratatui::widgets::{Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState};
 use ratatui::Frame;
 
 use super::text::wrap_text;
@@ -29,6 +29,7 @@ const MODAL_HEIGHT: u16 = 30;
 pub(crate) struct ModalLayout {
     pub popup: Rect,
     pub text_area: Rect,
+    pub scrollbar_area: Rect,
     pub actions: DialogActionLayout,
     pub hint_row: Rect,
 }
@@ -49,9 +50,20 @@ pub(crate) fn modal_layout(screen: Rect) -> ModalLayout {
             Constraint::Length(1),
         ])
         .split(inner);
+    let scrollbar_width = u16::from(rows[0].width >= 2);
+    let text_area = Rect {
+        width: rows[0].width.saturating_sub(scrollbar_width),
+        ..rows[0]
+    };
     ModalLayout {
         popup,
-        text_area: rows[0],
+        text_area,
+        scrollbar_area: Rect::new(
+            text_area.right(),
+            text_area.y,
+            scrollbar_width,
+            text_area.height,
+        ),
         actions: dialog_action_layout(rows[2]),
         hint_row: rows[3],
     }
@@ -128,7 +140,9 @@ pub(crate) fn modal_lines(pending: &PendingApply, width: u16) -> Vec<Line<'stati
             warning().add_modifier(Modifier::BOLD),
         )));
         for row in wrap_text(
-            &format!("This value is EXTRAPOLATED ({support}). The simulation extends beyond your observed compactions, so the saving is a model result, not a measurement."),
+            &format!(
+                "This value is EXTRAPOLATED ({support}). The simulation extends beyond your observed compactions, so the saving is a model result, not a measurement."
+            ),
             width,
         ) {
             lines.push(Line::from(Span::styled(row, warning())));
@@ -211,10 +225,23 @@ pub(crate) fn render(frame: &mut Frame, screen: Rect, app: &crate::app::App) {
         .border_style(Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD));
     frame.render_widget(block, layout.popup);
     let lines = modal_lines(pending, layout.text_area.width);
-    frame.render_widget(
-        Paragraph::new(lines).scroll((pending.scroll.min(modal_max_scroll(pending, screen)), 0)),
-        layout.text_area,
-    );
+    let total_lines = lines.len();
+    let scroll = pending.scroll.min(modal_max_scroll(pending, screen));
+    frame.render_widget(Paragraph::new(lines).scroll((scroll, 0)), layout.text_area);
+    if total_lines > usize::from(layout.text_area.height) && !layout.scrollbar_area.is_empty() {
+        let mut state = ScrollbarState::new(total_lines)
+            .position(usize::from(scroll))
+            .viewport_content_length(usize::from(layout.text_area.height));
+        frame.render_stateful_widget(
+            Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                .begin_symbol(None)
+                .end_symbol(None)
+                .track_symbol(Some("│"))
+                .style(theme::border_style(false)),
+            layout.scrollbar_area,
+            &mut state,
+        );
+    }
     render_dialog_actions(
         frame,
         layout.actions,
@@ -226,4 +253,25 @@ pub(crate) fn render(frame: &mut Frame, screen: Rect, app: &crate::app::App) {
             .alignment(ratatui::layout::Alignment::Center),
         layout.hint_row,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn confirmation_scrollbar_has_its_own_column_without_covering_actions() {
+        for (width, height) in [(120, 40), (80, 24), (40, 12), (12, 6), (1, 1)] {
+            let screen = Rect::new(0, 0, width, height);
+            let layout = modal_layout(screen);
+            assert_eq!(layout.text_area.right(), layout.scrollbar_area.x);
+            assert_eq!(layout.text_area.y, layout.scrollbar_area.y);
+            assert_eq!(layout.text_area.height, layout.scrollbar_area.height);
+            assert!(layout.scrollbar_area.right() <= screen.right());
+            assert!(layout.scrollbar_area.bottom() <= screen.bottom());
+            if !layout.text_area.is_empty() {
+                assert!(layout.text_area.bottom() <= layout.hint_row.y);
+            }
+        }
+    }
 }

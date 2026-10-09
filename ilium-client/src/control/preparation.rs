@@ -132,7 +132,7 @@ impl Preparation {
                 return Err((
                     rejected.value,
                     format!("Voice control payload admission: {:?}", rejected.reason),
-                ))
+                ));
             }
         };
         self.pending.insert(invocation.view().call_id.clone());
@@ -168,7 +168,7 @@ impl Preparation {
                         return Some(Ok(self.failed(
                             &invocation.view().call_id,
                             format!("Voice state admission: {error:?}"),
-                        )))
+                        )));
                     }
                 };
                 let command = match super::decode_command(invocation.view()) {
@@ -177,7 +177,7 @@ impl Preparation {
                         return Some(Ok(self.failed(
                             &invocation.view().call_id,
                             "State tool decoded to a different command".into(),
-                        )))
+                        )));
                     }
                     Err(error) => return Some(Ok(self.failed(&invocation.view().call_id, error))),
                 };
@@ -195,7 +195,7 @@ impl Preparation {
                         return Some(Ok(self.failed(
                             &call_id,
                             format!("Voice state publication: {:?}", error.reason),
-                        )))
+                        )));
                     }
                 }
                 None
@@ -243,7 +243,7 @@ impl Preparation {
                     Err(error) => {
                         return Some(Ok(
                             self.failed(&call_id, format!("Voice state result storage: {error:?}"))
-                        ))
+                        ));
                     }
                 };
                 let (value, hold) = value.into_parts();

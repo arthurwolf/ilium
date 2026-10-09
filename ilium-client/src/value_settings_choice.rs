@@ -34,6 +34,7 @@ pub enum SettingsChoice {
     KiloModel,
     OllamaModel,
     OpenAiModel,
+    AnthropicModel,
     ProgressFillStyle,
     GitDefaultWhere,
     GitDefaultBase,
@@ -143,7 +144,7 @@ fn catalog<T: Copy + std::fmt::Debug + PartialEq>(
 }
 
 impl SettingsChoice {
-    pub const ALL: [Self; 33] = [
+    pub const ALL: [Self; 34] = [
         Self::TerminalDirectory,
         Self::EditorLineDisplay,
         Self::EditorMarkdown,
@@ -167,6 +168,7 @@ impl SettingsChoice {
         Self::KiloModel,
         Self::OllamaModel,
         Self::OpenAiModel,
+        Self::AnthropicModel,
         Self::ProgressFillStyle,
         Self::GitDefaultWhere,
         Self::GitDefaultBase,
@@ -221,6 +223,9 @@ impl SettingsChoice {
                     Some(crate::app::InferenceRow::Field(
                         crate::app::InferenceSettingField::OpenAiModel,
                     )) => Some(Self::OpenAiModel),
+                    Some(crate::app::InferenceRow::Field(
+                        crate::app::InferenceSettingField::AnthropicModel,
+                    )) => Some(Self::AnthropicModel),
                     _ => None,
                 }
             }
@@ -293,6 +298,7 @@ impl SettingsChoice {
             Self::KiloModel => "Kilo model",
             Self::OllamaModel => "Ollama model",
             Self::OpenAiModel => "OpenAI model",
+            Self::AnthropicModel => "Anthropic model",
             Self::ResetTimeDisplay => "Time display",
             Self::SoundSource => "Sound source",
             Self::SoundFile => "Sound file",
@@ -370,11 +376,14 @@ impl SettingsChoice {
                 };
                 (options, selected)
             }
-            Self::OllamaModel | Self::OpenAiModel => {
-                let (models, current) = if self == Self::OllamaModel {
-                    (&app.ollama_models, &app.inference_settings.ollama.model)
-                } else {
-                    (&app.openai_models, &app.inference_settings.openai.model)
+            Self::OllamaModel | Self::OpenAiModel | Self::AnthropicModel => {
+                let (models, current) = match self {
+                    Self::OllamaModel => (&app.ollama_models, &app.inference_settings.ollama.model),
+                    Self::AnthropicModel => (
+                        &app.anthropic_models,
+                        &app.inference_settings.anthropic.model,
+                    ),
+                    _ => (&app.openai_models, &app.inference_settings.openai.model),
                 };
                 let mut options = Vec::new();
                 let mut ids = std::collections::HashSet::new();
@@ -736,6 +745,7 @@ impl App {
                 | SettingsChoice::KiloModel
                 | SettingsChoice::OllamaModel
                 | SettingsChoice::OpenAiModel
+                | SettingsChoice::AnthropicModel
         ) {
             let mut desired = self.inference_settings.clone();
             match field {
@@ -748,6 +758,7 @@ impl App {
                 SettingsChoice::KiloModel => desired.kilo_gateway.model = id.into(),
                 SettingsChoice::OllamaModel => desired.ollama.model = id.into(),
                 SettingsChoice::OpenAiModel => desired.openai.model = id.into(),
+                SettingsChoice::AnthropicModel => desired.anthropic.model = id.into(),
                 _ => return Err("This is not an inference choice".into()),
             }
             self.enqueue_inference_value(directory, &desired, token)?;
@@ -785,7 +796,7 @@ impl App {
                 select!(crate::config::GitClosePolicy::ALL, git.default_close_policy)
             }
             SettingsChoice::SessionRecovery => {
-                return Err("Session choice was not dispatched".into())
+                return Err("Session choice was not dispatched".into());
             }
             SettingsChoice::SmartCopyModifier => select!(
                 crate::config::SmartCopyLightKey::ALL,
@@ -794,8 +805,9 @@ impl App {
             SettingsChoice::InferenceProvider
             | SettingsChoice::KiloModel
             | SettingsChoice::OllamaModel
-            | SettingsChoice::OpenAiModel => {
-                return Err("Inference choice was not dispatched".into())
+            | SettingsChoice::OpenAiModel
+            | SettingsChoice::AnthropicModel => {
+                return Err("Inference choice was not dispatched".into());
             }
             SettingsChoice::ResetTimeDisplay => {
                 select!(
@@ -1105,20 +1117,60 @@ mod tests {
     fn settings_choice_value_left_advances_right_reverses_and_plus_opens_catalog() {
         use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
         use ratatui::layout::Rect;
-        let directory = tempfile::tempdir().unwrap();
-        let mut app = App::new("choice-pointer".into(), directory.path().into());
-        app.config_dir = Some(directory.path().into());
-        app.set_screen_area(Rect::new(0, 0, 140, 60));
-        app.terminal_settings.new_pane_directory = NewPaneDirectory::LastUsed;
-        app.mode = Mode::Settings(SettingsState {
-            tab: SettingsTab::Terminal,
-            selected_row: 1,
-            ..SettingsState::default()
-        });
-        for (button, expected) in [
-            (MouseButton::Left, NewPaneDirectory::ProjectRoot),
-            (MouseButton::Right, NewPaneDirectory::LastUsed),
-        ] {
+        for width in [140, 80, 60, 40] {
+            let directory = tempfile::tempdir().unwrap();
+            let mut app = App::new(format!("choice-pointer-{width}"), directory.path().into());
+            app.config_dir = Some(directory.path().into());
+            app.set_screen_area(Rect::new(0, 0, width, 60));
+            app.terminal_settings.new_pane_directory = NewPaneDirectory::LastUsed;
+            app.mode = Mode::Settings(SettingsState {
+                tab: SettingsTab::Terminal,
+                selected_row: 1,
+                ..SettingsState::default()
+            });
+            for (button, expected) in [
+                (MouseButton::Left, NewPaneDirectory::ProjectRoot),
+                (MouseButton::Right, NewPaneDirectory::LastUsed),
+            ] {
+                let Mode::Settings(state) = &app.mode else {
+                    panic!("settings");
+                };
+                let layout = crate::settings_ui::compute_layout_for_mode(
+                    app.layout.screen_area,
+                    &app,
+                    state,
+                );
+                let (_, control) = crate::settings_ui::settings_choice_control(
+                    layout.content_area,
+                    &app,
+                    state,
+                    1,
+                )
+                .unwrap();
+                let value = control.geometry().value;
+                crate::mouse::handle_mouse_event(
+                    &mut app,
+                    MouseEvent {
+                        kind: MouseEventKind::Down(button),
+                        column: value.x,
+                        row: value.y,
+                        modifiers: KeyModifiers::NONE,
+                    },
+                );
+                assert_eq!(
+                    app.terminal_settings.new_pane_directory, expected,
+                    "{width}"
+                );
+            }
+            app.settle_filesystem_for_test();
+            assert_eq!(
+                crate::config::load(directory.path())
+                    .unwrap()
+                    .terminal
+                    .new_pane_directory,
+                NewPaneDirectory::LastUsed,
+                "{width}"
+            );
             let Mode::Settings(state) = &app.mode else {
                 panic!("settings");
             };
@@ -1127,58 +1179,68 @@ mod tests {
             let (_, control) =
                 crate::settings_ui::settings_choice_control(layout.content_area, &app, state, 1)
                     .unwrap();
-            let value = control.geometry().value;
+            let open = control.geometry().open;
             crate::mouse::handle_mouse_event(
                 &mut app,
                 MouseEvent {
-                    kind: MouseEventKind::Down(button),
-                    column: value.x,
-                    row: value.y,
+                    kind: MouseEventKind::Down(MouseButton::Left),
+                    column: open.x,
+                    row: open.y,
                     modifiers: KeyModifiers::NONE,
                 },
             );
-            assert_eq!(app.terminal_settings.new_pane_directory, expected);
+            let Mode::ValueDialog(host) = &app.mode else {
+                panic!("full catalog at {width}");
+            };
+            let ValueDialogState::Choice(choice) = &host.dialog else {
+                panic!("choice at {width}");
+            };
+            assert_eq!(
+                choice.options().len(),
+                NewPaneDirectory::ALL.len(),
+                "{width}"
+            );
+            assert_eq!(choice.selected_id.as_deref(), Some("LastUsed"), "{width}");
+            let project_root_index = choice
+                .options()
+                .iter()
+                .position(|option| option.id == "ProjectRoot")
+                .expect("the full catalog exposes the ProjectRoot option");
+            let layout = crate::value_dialog::dialog_layout(app.layout.screen_area);
+            let selection = ratatui::layout::Position::new(
+                layout.document.x + 1,
+                layout.document.y + project_root_index as u16,
+            );
+            crate::mouse::handle_mouse_event(
+                &mut app,
+                MouseEvent {
+                    kind: MouseEventKind::Down(MouseButton::Left),
+                    column: selection.x,
+                    row: selection.y,
+                    modifiers: KeyModifiers::NONE,
+                },
+            );
+            app.settle_filesystem_for_test();
+            assert!(matches!(app.mode, Mode::Settings(_)), "{width}");
+            assert_eq!(
+                crate::config::load(directory.path())
+                    .unwrap()
+                    .terminal
+                    .new_pane_directory,
+                NewPaneDirectory::ProjectRoot,
+                "{width}"
+            );
         }
-        app.settle_filesystem_for_test();
-        assert_eq!(
-            crate::config::load(directory.path())
-                .unwrap()
-                .terminal
-                .new_pane_directory,
-            NewPaneDirectory::LastUsed
-        );
-        let Mode::Settings(state) = &app.mode else {
-            panic!("settings");
-        };
-        let layout =
-            crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, &app, state);
-        let (_, control) =
-            crate::settings_ui::settings_choice_control(layout.content_area, &app, state, 1)
-                .unwrap();
-        let open = control.geometry().open;
-        crate::mouse::handle_mouse_event(
-            &mut app,
-            MouseEvent {
-                kind: MouseEventKind::Down(MouseButton::Left),
-                column: open.x,
-                row: open.y,
-                modifiers: KeyModifiers::NONE,
-            },
-        );
-        let Mode::ValueDialog(host) = &app.mode else {
-            panic!("full catalog");
-        };
-        let ValueDialogState::Choice(choice) = &host.dialog else {
-            panic!("choice");
-        };
-        assert_eq!(choice.options().len(), NewPaneDirectory::ALL.len());
-        assert_eq!(choice.selected_id.as_deref(), Some("LastUsed"));
     }
 
     #[test]
     fn discovered_model_catalogs_are_complete_deduplicated_and_keep_authored_current() {
         let mut app = App::new("synthetic-full-model-catalogs".into(), std::env::temp_dir());
-        for field in [SettingsChoice::OllamaModel, SettingsChoice::OpenAiModel] {
+        for field in [
+            SettingsChoice::OllamaModel,
+            SettingsChoice::OpenAiModel,
+            SettingsChoice::AnthropicModel,
+        ] {
             let models: Vec<String> = (0..400)
                 .map(|index| format!("synthetic/model-α-{index}"))
                 .collect();
@@ -1186,10 +1248,14 @@ mod tests {
                 app.ollama_models = models;
                 app.ollama_models.push("synthetic/model-α-399".into());
                 app.inference_settings.ollama.model = "authored/not-discovered".into();
-            } else {
+            } else if field == SettingsChoice::OpenAiModel {
                 app.openai_models = models;
                 app.openai_models.push("synthetic/model-α-399".into());
                 app.inference_settings.openai.model = "authored/not-discovered".into();
+            } else {
+                app.anthropic_models = models;
+                app.anthropic_models.push("synthetic/model-α-399".into());
+                app.inference_settings.anthropic.model = "authored/not-discovered".into();
             }
             let (options, selected) = field.options(&app);
             assert_eq!(options.len(), 401);

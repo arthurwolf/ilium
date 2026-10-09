@@ -12,7 +12,7 @@ use ilium_ipc::{
 use ratatui::layout::{Position, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Clear, Paragraph, Wrap};
+use ratatui::widgets::{Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap};
 use ratatui::Frame;
 
 use crate::{modal, theme};
@@ -65,6 +65,8 @@ pub enum ManagerHit {
 #[derive(Clone, Copy)]
 pub struct ManagerLayout {
     pub popup: Rect,
+    pub header: Rect,
+    pub branch: Rect,
     pub list: Rect,
     pub actions: Rect,
     pub detail: Rect,
@@ -72,23 +74,35 @@ pub struct ManagerLayout {
 
 pub fn layout(screen: Rect) -> ManagerLayout {
     let popup = modal::centered_fixed_rect(100, 24, screen);
-    let inner = Rect::new(
-        popup.x.saturating_add(1),
-        popup.y.saturating_add(1),
-        popup.width.saturating_sub(2),
-        popup.height.saturating_sub(2),
-    );
-    let list_height = inner.height.saturating_sub(8);
+    let inner = theme::block(true).inner(popup);
+    let action_height = inner.height.min(1);
+    let header_height = inner.height.saturating_sub(action_height).min(2);
+    let remaining = inner.height.saturating_sub(action_height + header_height);
+    let detail_height = remaining.min(5);
+    let list_height = remaining.saturating_sub(detail_height);
+    let list_y = inner.y.saturating_add(header_height);
     ManagerLayout {
         popup,
-        list: Rect::new(inner.x, inner.y.saturating_add(2), inner.width, list_height),
+        header: Rect::new(inner.x, inner.y, inner.width, header_height.min(1)),
+        branch: Rect::new(
+            inner.x,
+            inner.y + header_height.min(1),
+            inner.width,
+            header_height.saturating_sub(1),
+        ),
+        list: Rect::new(inner.x, list_y, inner.width, list_height),
         detail: Rect::new(
             inner.x,
-            inner.y.saturating_add(2).saturating_add(list_height),
+            list_y.saturating_add(list_height),
             inner.width,
-            5.min(inner.height),
+            detail_height,
         ),
-        actions: Rect::new(inner.x, inner.bottom().saturating_sub(1), inner.width, 1),
+        actions: Rect::new(
+            inner.x,
+            inner.bottom().saturating_sub(action_height),
+            inner.width,
+            action_height,
+        ),
     }
 }
 
@@ -98,6 +112,14 @@ fn visible_window(selected: usize, count: usize, height: usize) -> (usize, usize
     }
     let start = selected.saturating_sub(height / 2).min(count - height);
     (start, start + height)
+}
+
+fn inventory_content_area(area: Rect, count: usize) -> Rect {
+    if area.width >= 2 && count > usize::from(area.height) {
+        Rect::new(area.x, area.y, area.width - 1, area.height)
+    } else {
+        area
+    }
 }
 
 fn branch_toggle(policy: WorkspacePruneBranchPolicy) -> WorkspacePruneBranchPolicy {
@@ -357,16 +379,17 @@ impl WorktreeManagerState {
         if !layout.popup.contains(position) {
             return None;
         }
-        if matches!(self.view, ManagerView::Browsing) && layout.list.contains(position) {
-            let count = self
-                .inventory
-                .as_ref()
-                .map_or(0, |value| value.entries.len());
+        let count = self
+            .inventory
+            .as_ref()
+            .map_or(0, |value| value.entries.len());
+        let content = inventory_content_area(layout.list, count);
+        if matches!(self.view, ManagerView::Browsing) && content.contains(position) {
             let (start, end) = visible_window(self.selected, count, layout.list.height as usize);
             let index = start + usize::from(position.y.saturating_sub(layout.list.y));
             return (index < end).then_some(ManagerHit::Row(index));
         }
-        if position.y != layout.actions.y {
+        if !layout.actions.contains(position) {
             return None;
         }
         let offset = position.x.saturating_sub(layout.actions.x);
@@ -416,13 +439,8 @@ pub(crate) fn branch_control(
 ) -> Option<crate::value_control::ValueControl> {
     let (_, policy) = state.confirmation_branch()?;
     let areas = layout(screen);
-    let area = Rect::new(
-        areas.list.x,
-        areas.list.y.saturating_sub(1),
-        areas.list.width,
-        1,
-    );
-    if area.height == 0 {
+    let area = areas.branch;
+    if area.height == 0 || area.width == 0 {
         return None;
     }
     Some(crate::value_control::ValueControl::new(
@@ -469,12 +487,7 @@ pub fn render(frame: &mut Frame, screen: Rect, state: &WorktreeManagerState) {
     );
     frame.render_widget(
         Paragraph::new(header).style(Style::new().fg(Color::Cyan)),
-        Rect::new(
-            areas.list.x,
-            areas.list.y.saturating_sub(2),
-            areas.list.width,
-            1,
-        ),
+        areas.header,
     );
     if let Some(inventory) = &state.inventory {
         let (start, end) = visible_window(
@@ -495,7 +508,22 @@ pub fn render(frame: &mut Frame, screen: Rect, state: &WorktreeManagerState) {
                 Line::from(Span::styled(row_label(row), style))
             })
             .collect::<Vec<_>>();
-        frame.render_widget(Paragraph::new(rows), areas.list);
+        let content = inventory_content_area(areas.list, inventory.entries.len());
+        frame.render_widget(Paragraph::new(rows), content);
+        if content.width < areas.list.width && content.height > 0 {
+            let track = Rect::new(content.right(), content.y, 1, content.height);
+            let mut scrollbar = ScrollbarState::new(inventory.entries.len())
+                .position(start)
+                .viewport_content_length(usize::from(content.height));
+            frame.render_stateful_widget(
+                Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                    .begin_symbol(None)
+                    .end_symbol(None)
+                    .track_symbol(Some("│")),
+                track,
+                &mut scrollbar,
+            );
+        }
     }
     let detail = match &state.view {
         ManagerView::Loading => "Loading inventory…".to_owned(),
@@ -631,6 +659,76 @@ mod tests {
         assert!(!state.receive_inventory(11, NodeId(7), Ok(inventory.clone())));
         assert!(state.receive_inventory(10, NodeId(7), Ok(inventory)));
         state
+    }
+
+    #[test]
+    fn compact_layout_keeps_header_details_and_actions_inside_the_frame() {
+        let state = ready();
+        for (width, height) in [(120, 35), (80, 24), (40, 12), (12, 6), (2, 2), (1, 1)] {
+            let screen = Rect::new(0, 0, width, height);
+            let areas = layout(screen);
+            for area in [
+                areas.popup,
+                areas.header,
+                areas.branch,
+                areas.list,
+                areas.detail,
+                areas.actions,
+            ] {
+                assert!(area.right() <= screen.right(), "{area:?} at {screen:?}");
+                assert!(area.bottom() <= screen.bottom(), "{area:?} at {screen:?}");
+            }
+            assert!(areas.header.bottom() <= areas.branch.y);
+            assert!(areas.branch.bottom() <= areas.list.y);
+            assert!(areas.list.bottom() <= areas.detail.y);
+            assert!(areas.detail.bottom() <= areas.actions.y);
+            let mut terminal =
+                ratatui::Terminal::new(ratatui::backend::TestBackend::new(width, height)).unwrap();
+            terminal
+                .draw(|frame| render(frame, screen, &state))
+                .unwrap();
+            crate::ui_capture::save(&format!("worktrees-compact-{width}x{height}"), &terminal);
+            if areas.actions.height == 0 {
+                assert_eq!(state.hit_test(screen, Position::new(0, 0)), None);
+            }
+        }
+        let regular = layout(Rect::new(0, 0, 120, 35));
+        assert_eq!(regular.list.height, 14);
+        assert_eq!(regular.detail.height, 5);
+        assert_eq!(regular.branch.height, 1);
+    }
+
+    #[test]
+    fn inventory_overflow_track_is_visible_and_does_not_select_a_worktree() {
+        let mut state = ready();
+        let entry = state.inventory.as_ref().unwrap().entries[0].clone();
+        state.inventory.as_mut().unwrap().entries = vec![entry; 30];
+        state.selected = 29;
+        let screen = Rect::new(0, 0, 120, 35);
+        let areas = layout(screen);
+        let content = inventory_content_area(areas.list, 30);
+        assert_eq!(content.right() + 1, areas.list.right());
+        let (start, end) = visible_window(29, 30, usize::from(content.height));
+        assert_eq!(end, 30);
+        assert_eq!(
+            state.hit_test(screen, Position::new(content.x, content.y)),
+            Some(ManagerHit::Row(start)),
+        );
+        assert_eq!(
+            state.hit_test(screen, Position::new(content.right(), content.y)),
+            None
+        );
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 35)).unwrap();
+        terminal
+            .draw(|frame| render(frame, screen, &state))
+            .unwrap();
+        crate::ui_capture::save("worktrees-overflow", &terminal);
+        let buffer = terminal.backend().buffer();
+        assert!((content.y..content.bottom())
+            .any(|y| !buffer[(content.right(), y)].symbol().trim().is_empty()));
+        assert_eq!(inventory_content_area(areas.list, 1), areas.list);
+        assert_eq!(inventory_content_area(Rect::new(0, 0, 1, 1), 30).width, 1);
     }
 
     #[test]

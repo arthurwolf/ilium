@@ -12,8 +12,10 @@ use ilium_remote_compaction::{AgentKind, CompactionEvent, Technique, TokenBreakd
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Clear, Gauge, Paragraph};
+use ratatui::widgets::{Clear, Gauge, Paragraph, Wrap};
 use ratatui::Frame;
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 use crate::modal;
 use crate::remote_compaction_settings_ui::{privacy_banner_height, render_privacy_banner};
@@ -396,6 +398,222 @@ fn format_elapsed(elapsed: Duration) -> String {
     format!("{}:{:02}", seconds / 60, seconds % 60)
 }
 
+/// The settings page owns the full disclosure. The compact dialog keeps its
+/// recipient and every kind of material sent, but removes explanatory prose.
+fn compact_privacy_text(text: &str) -> String {
+    const PREFIX: &str = "Remote compaction sends this session's transcript (your prompts, code and tool output, possibly including secrets) to ";
+    const SUFFIX: &str =
+        " as currently configured in the Inference tab. That is a privacy decision.";
+    match text
+        .strip_prefix(PREFIX)
+        .and_then(|rest| rest.strip_suffix(SUFFIX))
+    {
+        Some(recipient) => format!(
+            "Transcript: prompts, code, and tool output; possibly secrets. Sent to {recipient} (Inference tab)."
+        ),
+        None => text.to_owned(),
+    }
+}
+
+/// The shared banner wraps at spaces, so introduce break opportunities in a
+/// long model ID before sizing and rendering it in a narrow dialog.
+fn break_long_words(text: &str, width: usize) -> String {
+    let mut result = String::new();
+    for word in text.split_whitespace() {
+        if !result.is_empty() {
+            result.push(' ');
+        }
+        let mut current_width = 0;
+        for grapheme in word.graphemes(true) {
+            let grapheme_width = UnicodeWidthStr::width(grapheme);
+            if current_width > 0 && current_width + grapheme_width > width {
+                result.push(' ');
+                current_width = 0;
+            }
+            result.push_str(grapheme);
+            current_width += grapheme_width;
+        }
+    }
+    result
+}
+
+fn take_rows(remaining: &mut Rect, rows: u16) -> Rect {
+    let height = rows.min(remaining.height);
+    let area = Rect::new(remaining.x, remaining.y, remaining.width, height);
+    remaining.y = remaining.y.saturating_add(height);
+    remaining.height -= height;
+    area
+}
+
+fn compact_hint(state: &RemoteCompactionDialogState, show_privacy: bool, width: u16) -> String {
+    let (detailed, short) = match &state.phase {
+        RemoteCompactionPhase::Failed(_) if state.is_agent_stopped => (
+            "Enter resume original | Esc close",
+            "Enter resume | Esc close",
+        ),
+        RemoteCompactionPhase::Failed(_) => ("Esc close", "Esc close"),
+        RemoteCompactionPhase::WaitingForPause | RemoteCompactionPhase::Compacting => {
+            ("Esc cancel", "Esc cancel")
+        }
+        RemoteCompactionPhase::StoppingAgent | RemoteCompactionPhase::Restarting => ("", ""),
+    };
+    let make_hint = |action: &str, privacy: &str| match (action.is_empty(), privacy.is_empty()) {
+        (false, false) => format!("{action} | {privacy}"),
+        (false, true) => action.to_owned(),
+        (true, false) => privacy.to_owned(),
+        (true, true) => String::new(),
+    };
+    let detailed = make_hint(detailed, if show_privacy { "x hide privacy" } else { "" });
+    if UnicodeWidthStr::width(detailed.as_str()) <= usize::from(width) {
+        return detailed;
+    }
+    make_hint(short, if show_privacy { "x hide" } else { "" })
+}
+
+/// In a short terminal, the footer and failure/phase message are fixed first.
+/// Stages, token detail and logs use only the space left after the disclosure.
+fn render_compact(
+    frame: &mut Frame,
+    inner: Rect,
+    state: &RemoteCompactionDialogState,
+    banner_text: Option<&str>,
+) {
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+    let mut remaining = inner;
+    remaining.height -= 1;
+    let footer = Rect::new(inner.x, inner.bottom() - 1, inner.width, 1);
+    let mut show_privacy = false;
+    if let Some(text) = banner_text {
+        let full = break_long_words(text, usize::from(inner.width.saturating_sub(4)).max(8));
+        let compact = break_long_words(
+            &compact_privacy_text(text),
+            usize::from(inner.width.saturating_sub(4)).max(8),
+        );
+        let disclosure =
+            if privacy_banner_height(&full, inner.width) <= remaining.height.saturating_sub(2) {
+                &full
+            } else {
+                &compact
+            };
+        let banner_height = privacy_banner_height(disclosure, inner.width);
+        if inner.width >= 30 && banner_height <= remaining.height.saturating_sub(2) {
+            let close =
+                render_privacy_banner(frame, take_rows(&mut remaining, banner_height), disclosure);
+            state.banner_close_rect.set(close);
+            show_privacy = close.width > 0;
+            if remaining.height >= 8 {
+                take_rows(&mut remaining, 1);
+            }
+        } else {
+            frame.render_widget(
+                Paragraph::new("Privacy notice too long. Widen terminal to read recipient.")
+                    .wrap(Wrap { trim: true })
+                    .style(Style::new().fg(Color::Yellow)),
+                take_rows(&mut remaining, 2),
+            );
+        }
+    }
+
+    let phase_height = if state.is_failed() { 2 } else { 1 };
+    frame.render_widget(
+        Paragraph::new(phase_line(state)).wrap(Wrap { trim: true }),
+        take_rows(&mut remaining, phase_height),
+    );
+    if remaining.height > 0 {
+        let ratio = f64::from(state.progress.clamp(0.0, 1.0));
+        frame.render_widget(
+            Gauge::default()
+                .gauge_style(Style::new().fg(if state.is_failed() {
+                    Color::Red
+                } else {
+                    Color::Cyan
+                }))
+                .ratio(ratio)
+                .label(format!("{:.0}%", ratio * 100.0)),
+            take_rows(&mut remaining, 1),
+        );
+    }
+    if remaining.height >= 11 {
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                format!("{} · {}", state.technique.label(), state.destination),
+                Style::new().add_modifier(Modifier::DIM),
+            ))),
+            take_rows(&mut remaining, 1),
+        );
+    }
+    if remaining.height > 0 {
+        let stages = if remaining.height >= 15 {
+            step_lines(state)
+        } else {
+            step_lines(state)
+                .into_iter()
+                .nth(state.active_stage())
+                .into_iter()
+                .collect()
+        };
+        let stage_height = stages.len() as u16;
+        frame.render_widget(
+            Paragraph::new(stages),
+            take_rows(&mut remaining, stage_height),
+        );
+    }
+    if remaining.height >= 3 {
+        if remaining.height >= 9 && inner.width >= 72 {
+            frame.render_widget(
+                Paragraph::new(Line::from(Span::styled(
+                    "Token usage",
+                    Style::new().add_modifier(Modifier::BOLD),
+                ))),
+                take_rows(&mut remaining, 1),
+            );
+            let bar_width = usize::from(inner.width).saturating_sub(48).clamp(8, 28);
+            frame.render_widget(
+                Paragraph::new(token_lines(&state.tokens, bar_width)),
+                take_rows(&mut remaining, 6),
+            );
+        } else {
+            frame.render_widget(
+                Paragraph::new(Line::from(Span::styled(
+                    format!(
+                        "Tokens · {} before → {} after",
+                        compact_count(state.tokens.before_context),
+                        compact_count(state.tokens.after_context)
+                    ),
+                    Style::new().add_modifier(Modifier::DIM),
+                ))),
+                take_rows(&mut remaining, 1),
+            );
+        }
+    }
+    if remaining.height > 0 {
+        // The failed phase already displays the final error; use the log area
+        // for preceding events instead of repeating that error verbatim.
+        let end = state.log.len().saturating_sub(usize::from(
+            state.is_failed()
+                && state
+                    .log
+                    .last()
+                    .is_some_and(|line| line.starts_with("Failed: ")),
+        ));
+        let start = end.saturating_sub(usize::from(remaining.height));
+        let lines: Vec<Line> = state.log[start..end]
+            .iter()
+            .map(|line| Line::from(Span::styled(line.clone(), Style::new().fg(Color::Gray))))
+            .collect();
+        frame.render_widget(Paragraph::new(lines), remaining);
+    }
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            compact_hint(state, show_privacy, inner.width),
+            Style::new().add_modifier(Modifier::DIM),
+        ))),
+        footer,
+    );
+}
+
 /// Draws the dialog over the frozen pane. `banner_text` is `Some` while the
 /// privacy banner has not been dismissed.
 pub fn render(
@@ -420,6 +638,10 @@ pub fn render(
     let banner_height = banner_text.map_or(0, |text| privacy_banner_height(text, inner.width));
     let banner_gap = u16::from(banner_height > 0);
     state.banner_close_rect.set(Rect::default());
+    if inner.width < 72 || inner.height < banner_height.saturating_add(23) {
+        render_compact(frame, inner, state, banner_text);
+        return;
+    }
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -525,8 +747,13 @@ mod tests {
         })
     }
 
-    fn screen_text(state: &RemoteCompactionDialogState, banner: Option<&str>) -> String {
-        let mut terminal = Terminal::new(TestBackend::new(100, 44)).unwrap();
+    fn screen_text_at(
+        state: &RemoteCompactionDialogState,
+        banner: Option<&str>,
+        width: u16,
+        height: u16,
+    ) -> String {
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
         terminal
             .draw(|frame| {
                 let area = dialog_area(None, frame.area(), banner_rows(banner));
@@ -543,6 +770,12 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n")
     }
+
+    fn screen_text(state: &RemoteCompactionDialogState, banner: Option<&str>) -> String {
+        screen_text_at(state, banner, 100, 44)
+    }
+
+    const PRIVACY_NOTICE: &str = "Remote compaction sends this session's transcript (your prompts, code and tool output, possibly including secrets) to Kilo Gateway / stepfun/step-3.7-flash:free as currently configured in the Inference tab. That is a privacy decision.";
 
     #[test]
     fn events_update_steps_progress_tokens_and_log() {
@@ -634,6 +867,80 @@ mod tests {
         assert_eq!(hint_text(&dialog), "Esc close");
         dialog.is_agent_stopped = true;
         assert!(hint_text(&dialog).contains("resume the original session"));
+    }
+
+    #[test]
+    fn failed_dialog_keeps_disclosure_error_and_actions_at_narrow_and_wide_sizes() {
+        let mut dialog = state();
+        dialog.is_agent_stopped = true;
+        dialog.fail("Synthetic provider failure: the session can be resumed safely".to_string());
+        for (width, height) in [(40, 12), (60, 20), (80, 24), (120, 40)] {
+            let text = screen_text_at(&dialog, Some(PRIVACY_NOTICE), width, height);
+            for expected in [
+                "Privacy decision",
+                "[x]",
+                "prompts",
+                "code",
+                "tool output",
+                "secrets",
+                "Kilo Gateway",
+                "stepfun/step-3.7-flash:free",
+                "Failed:",
+                "safely",
+                "Enter resume",
+                "Esc close",
+                "x hide",
+            ] {
+                assert!(
+                    text.contains(expected),
+                    "{width}x{height}: missing {expected:?} in\n{text}"
+                );
+            }
+            assert_eq!(dialog.banner_close_rect.get().width, 3);
+        }
+        let dismissed = screen_text_at(&dialog, None, 40, 12);
+        assert!(dismissed.contains("Enter resume"), "{dismissed}");
+        assert!(dismissed.contains("Esc close"), "{dismissed}");
+        assert!(!dismissed.contains("x hide"), "{dismissed}");
+        assert_eq!(dialog.banner_close_rect.get(), Rect::default());
+    }
+
+    #[test]
+    fn running_dialog_keeps_disclosure_phase_progress_and_cancel_at_narrow_sizes() {
+        let mut dialog = state();
+        dialog.progress = 0.6;
+        for (width, height) in [(40, 12), (60, 20)] {
+            let text = screen_text_at(&dialog, Some(PRIVACY_NOTICE), width, height);
+            for expected in [
+                "Privacy decision",
+                "[x]",
+                "Waiting for Claude",
+                "60%",
+                "Esc cancel",
+                "x hide",
+            ] {
+                assert!(
+                    text.contains(expected),
+                    "{width}x{height}: missing {expected:?} in\n{text}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn oversized_disclosure_requests_more_room_without_hiding_failure_actions() {
+        let mut dialog = state();
+        dialog.is_agent_stopped = true;
+        dialog.fail("network error".to_string());
+        let notice = format!(
+            "{PRIVACY_NOTICE} {}",
+            "very-long-model-identifier".repeat(20)
+        );
+        let text = screen_text_at(&dialog, Some(&notice), 40, 12);
+        assert!(text.contains("Privacy notice too long"), "{text}");
+        assert!(text.contains("Enter resume"), "{text}");
+        assert!(text.contains("Esc close"), "{text}");
+        assert_eq!(dialog.banner_close_rect.get(), Rect::default());
     }
 
     #[test]

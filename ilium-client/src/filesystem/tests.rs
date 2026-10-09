@@ -20,6 +20,27 @@ fn configuration_command_normalizes_spare_capacity_before_retention() {
 }
 
 #[test]
+fn frozen_agent_icon_capacity_is_included_in_ui_configuration_admission() {
+    let mut settings = crate::config::UiSettings::default();
+    let baseline_capacity = settings.icons.frozen_agent.capacity();
+    let baseline_bytes = ConfigurationChange::Ui(Box::new(settings.clone()))
+        .checked_bytes()
+        .unwrap();
+
+    settings.icons.frozen_agent.reserve(256);
+    let expanded_capacity = settings.icons.frozen_agent.capacity();
+    let expanded_bytes = ConfigurationChange::Ui(Box::new(settings))
+        .checked_bytes()
+        .unwrap();
+
+    assert!(expanded_capacity >= baseline_capacity + 256);
+    assert_eq!(
+        expanded_bytes - baseline_bytes,
+        expanded_capacity - baseline_capacity
+    );
+}
+
+#[test]
 fn text_trigger_modal_waits_for_real_durable_writer_and_server_request() {
     let directory = tempfile::tempdir().unwrap();
     let mut app = App::new("filesystem-fixture".into(), directory.path().to_path_buf());
@@ -398,6 +419,159 @@ fn isolated_load_execution() -> (
         .unwrap();
     (owner, client, quota)
 }
+
+fn isolated_editor_save_execution() -> (ilium_execution::Execution, ilium_execution::Client) {
+    use ilium_execution::{
+        ClientLimits, Execution, ExecutionConfig, LaneConfig, QuotaGroup, QuotaLimits,
+    };
+    let quota = QuotaGroup::new(QuotaLimits {
+        clients: 1,
+        jobs: 8,
+        service_jobs: 0,
+        input_bytes: 192 * 1024 * 1024,
+        result_bytes: 128 * 1024 * 1024,
+        worker_threads: 2,
+        worker_bytes: 32 * 1024 * 1024,
+    });
+    let bank = LaneConfig {
+        threads: 1,
+        queue_slots: 4,
+        priority: None,
+        resident_bytes_per_thread: 1024 * 1024,
+    };
+    let disabled = LaneConfig {
+        threads: 0,
+        queue_slots: 0,
+        priority: None,
+        resident_bytes_per_thread: 0,
+    };
+    let owner = Execution::start(
+        quota,
+        ExecutionConfig {
+            cpu: bank,
+            io: bank,
+            service: disabled,
+        },
+    )
+    .unwrap();
+    let client = owner
+        .client(ClientLimits {
+            jobs: 8,
+            service_jobs: 0,
+            input_bytes: 192 * 1024 * 1024,
+            result_bytes: 128 * 1024 * 1024,
+        })
+        .unwrap();
+    (owner, client)
+}
+
+#[test]
+fn editor_snapshot_is_captured_on_cpu_and_durably_read_back_before_ack() {
+    use super::editors::{EditorCompletion, EditorFiles, SavePurpose, SaveTarget};
+    use ilium_execution::{JobOutcome, ShutdownMode};
+
+    let (mut owner, client) = isolated_editor_save_execution();
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("owned-editor.md");
+    let pane_id = ilium_core::NodeId(90);
+    let mut pane = crate::editor_pane::EditorPane::empty();
+    pane.textarea = ratatui_textarea::TextArea::from(vec![
+        "first authored line".to_string(),
+        "second authored line".to_string(),
+    ]);
+    let identity = pane.instance_identity();
+    let operation = Arc::new(());
+    let target = SaveTarget {
+        pane_id,
+        identity,
+        revision: pane.content_revision(),
+        old_path: None,
+        purpose: SavePurpose::Explicit,
+        operation,
+        prompt_input: None,
+    };
+    let caller = std::thread::current().id();
+    let mut files = EditorFiles::new(client);
+    assert!(
+        files.save(target, path.clone(), Box::new(pane)).is_ok(),
+        "editor save should be admitted"
+    );
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut restored = false;
+    let mut acknowledged = false;
+    while files.pending() > 0 {
+        if let Some(completion) = files.poll() {
+            match completion {
+                EditorCompletion::SaveModelReturned {
+                    pane,
+                    result,
+                    cpu_thread,
+                    ..
+                } => {
+                    result.unwrap();
+                    assert_ne!(
+                        cpu_thread.unwrap(),
+                        caller,
+                        "capture must run on the CPU bank"
+                    );
+                    assert_eq!(pane.textarea.lines()[0], "first authored line");
+                    restored = true;
+                }
+                EditorCompletion::Saved { completion, .. } => {
+                    let super::ordered::WriteCompletion::Outcome { outcome, .. } = completion
+                    else {
+                        panic!("ordered editor writer did not produce an outcome")
+                    };
+                    let (outcome, _retention) = outcome.into_parts();
+                    let JobOutcome::Finished(Ok(saved)) = outcome else {
+                        panic!("ordered editor writer did not durably save")
+                    };
+                    assert_eq!(saved.source_revision, 0);
+                    acknowledged = true;
+                }
+                other => panic!(
+                    "unexpected editor completion: {:?}",
+                    completion_kind(&other)
+                ),
+            }
+        }
+        assert!(Instant::now() < deadline, "editor save did not settle");
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(
+        restored,
+        "the editable pane must return before the save settles"
+    );
+    assert!(
+        acknowledged,
+        "durable writer acknowledgement must be observed"
+    );
+    assert_eq!(
+        std::fs::read_to_string(path).unwrap(),
+        "first authored line\nsecond authored line\n"
+    );
+    drop(files);
+    owner.request_shutdown(ShutdownMode::Drain);
+    assert!(
+        owner
+            .join_until_background(Instant::now() + Duration::from_secs(5))
+            .unwrap()
+            .shutdown_complete
+    );
+}
+
+fn completion_kind(completion: &super::editors::EditorCompletion) -> &'static str {
+    match completion {
+        super::editors::EditorCompletion::FrozenScreenSaved { .. } => "frozen screen saved",
+        super::editors::EditorCompletion::Loaded { .. } => "loaded",
+        super::editors::EditorCompletion::LoadLost { .. } => "load lost",
+        super::editors::EditorCompletion::Saved { .. } => "saved",
+        super::editors::EditorCompletion::SaveModelReturned { .. } => "model returned",
+        super::editors::EditorCompletion::SaveModelLost { .. } => "model lost",
+        super::editors::EditorCompletion::UnmatchedWrite(_) => "unmatched write",
+    }
+}
 #[test]
 fn loaded_editor_source_credit_survives_receipt_and_real_worker_join_until_pane_drop() {
     use ilium_execution::{JobOutcome, JobPoll, Lane, ShutdownMode};
@@ -650,4 +824,210 @@ fn refused_editor_bank_admission_keeps_original_source_guard_for_retry() {
     assert!(quota.snapshot().worker_bytes > 0);
     drop(owner);
     assert_eq!(quota.snapshot().worker_bytes, 0);
+}
+
+#[tokio::test]
+async fn frozen_screen_restore_reads_and_parses_before_retained_publication() {
+    let directory = tempfile::tempdir().unwrap();
+    let frozen_directory = directory.path().join("frozen-screens");
+    std::fs::create_dir_all(&frozen_directory).unwrap();
+    let mut app = App::new(
+        "frozen-screen-restore".into(),
+        directory.path().to_path_buf(),
+    );
+    app.config_dir = Some(directory.path().to_path_buf());
+    let group = app.tree.add_group(ilium_core::ROOT_ID, "work").unwrap();
+    let pane_id = app
+        .tree
+        .add_pane(group, "frozen", ilium_core::PaneContentKind::Terminal)
+        .unwrap();
+    app.frozen_panes.insert(pane_id);
+    let mut snapshot = 2u16.to_le_bytes().to_vec();
+    snapshot.extend_from_slice(&24u16.to_le_bytes());
+    snapshot.extend_from_slice(b"\x1b[32mrestored\x1b[0m");
+    std::fs::write(
+        frozen_directory.join(format!("{}.bin", pane_id.0)),
+        snapshot,
+    )
+    .unwrap();
+
+    app.restore_frozen_screen(pane_id);
+    assert!(!app.frozen_screens.contains_key(&pane_id));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !app.frozen_screens.contains_key(&pane_id) {
+        app.collect_editor_files();
+        assert!(
+            Instant::now() < deadline,
+            "frozen screen worker did not publish"
+        );
+        tokio::time::sleep(Duration::from_millis(1)).await;
+    }
+    let restored = app.frozen_screens.get(&pane_id).unwrap();
+    assert_eq!(restored.with_screen(|screen| screen.size()), (2, 24));
+    assert_eq!(restored.with_screen(|screen| screen.contents()), "restored");
+    assert!(app.frozen_screen_holds.contains_key(&pane_id));
+}
+
+#[tokio::test]
+async fn stale_frozen_screen_restore_cannot_replace_the_new_pane_generation() {
+    let directory = tempfile::tempdir().unwrap();
+    let frozen_directory = directory.path().join("frozen-screens");
+    std::fs::create_dir_all(&frozen_directory).unwrap();
+    let mut app = App::new("stale-frozen-screen".into(), directory.path().to_path_buf());
+    app.config_dir = Some(directory.path().to_path_buf());
+    let group = app.tree.add_group(ilium_core::ROOT_ID, "work").unwrap();
+    let pane_id = app
+        .tree
+        .add_pane(group, "frozen", ilium_core::PaneContentKind::Terminal)
+        .unwrap();
+    app.frozen_panes.insert(pane_id);
+    let mut snapshot = 2u16.to_le_bytes().to_vec();
+    snapshot.extend_from_slice(&24u16.to_le_bytes());
+    snapshot.extend_from_slice(b"stale");
+    std::fs::write(
+        frozen_directory.join(format!("{}.bin", pane_id.0)),
+        snapshot,
+    )
+    .unwrap();
+
+    app.restore_frozen_screen(pane_id);
+    app.frozen_screen_restore_identities
+        .insert(pane_id, Arc::new(()));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        app.collect_editor_files();
+        if app
+            .editor_files
+            .as_ref()
+            .is_none_or(|files| files.pending() == 0)
+        {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "stale frozen screen worker did not retire"
+        );
+        tokio::time::sleep(Duration::from_millis(1)).await;
+    }
+    assert!(!app.frozen_screens.contains_key(&pane_id));
+    assert!(app.frozen_screen_restore_identities.contains_key(&pane_id));
+}
+
+#[test]
+fn frozen_screen_save_runs_on_workers_and_acknowledges_durable_readback() {
+    use super::editors::{EditorCompletion, EditorFiles, FrozenScreenTarget};
+    use ilium_execution::{JobOutcome, ShutdownMode};
+
+    let (mut owner, client) = isolated_editor_save_execution();
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("frozen-screens").join("91.bin");
+    let pane_id = ilium_core::NodeId(91);
+    let mut input = 2u16.to_le_bytes().to_vec();
+    input.extend_from_slice(&24u16.to_le_bytes());
+    input.extend_from_slice(b"\x1b[32mworker-owned snapshot\x1b[0m");
+    let screen = crate::terminal_view::PaintedTerminal::from_frozen_bytes(&input).unwrap();
+    let target = FrozenScreenTarget {
+        pane_id,
+        identity: Arc::new(()),
+    };
+    let caller = std::thread::current().id();
+    let mut files = EditorFiles::new(client);
+
+    files
+        .save_frozen_screen(target, path.clone(), screen)
+        .expect("bounded frozen-screen save should be admitted");
+    files.close_admission();
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut durable_acknowledgement = false;
+    while files.pending() > 0 {
+        if let Some(EditorCompletion::FrozenScreenSaved { completion, .. }) = files.poll() {
+            let super::ordered::WriteCompletion::Outcome { outcome, .. } = completion else {
+                panic!("ordered frozen-screen write did not produce a result")
+            };
+            let (outcome, _retention) = outcome.into_parts();
+            let JobOutcome::Finished(Ok(saved)) = outcome else {
+                panic!("frozen-screen save failed before durable acknowledgement")
+            };
+            assert_ne!(saved.serialization_thread, caller);
+            assert_ne!(saved.writer_thread, caller);
+            assert_ne!(
+                saved.serialization_thread, saved.writer_thread,
+                "CPU serialization and ordered I/O must have distinct owners"
+            );
+            let bytes = std::fs::read(&path).expect("acknowledged snapshot must exist");
+            let restored = crate::terminal_view::PaintedTerminal::from_frozen_bytes(&bytes)
+                .expect("acknowledged snapshot must parse");
+            assert_eq!(
+                restored.with_screen(|screen| screen.contents()),
+                "worker-owned snapshot"
+            );
+            durable_acknowledgement = true;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "frozen-screen save did not settle"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(durable_acknowledgement, "durable write receipt is required");
+
+    drop(files);
+    owner.request_shutdown(ShutdownMode::Drain);
+    assert!(
+        owner
+            .join_until_background(Instant::now() + Duration::from_secs(5))
+            .unwrap()
+            .shutdown_complete
+    );
+}
+
+#[test]
+fn frozen_screen_save_reports_durable_writer_failure() {
+    use super::editors::{EditorCompletion, EditorFiles, FrozenScreenTarget};
+    use ilium_execution::{JobOutcome, ShutdownMode};
+
+    let (mut owner, client) = isolated_editor_save_execution();
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("frozen-screens").join("blocked.bin");
+    std::fs::create_dir_all(&path).unwrap();
+    let screen = crate::terminal_view::PaintedTerminal::from_frozen_bytes(&[
+        24, 0, 80, 0, b'f', b'a', b'i', b'l',
+    ])
+    .unwrap();
+    let target = FrozenScreenTarget {
+        pane_id: ilium_core::NodeId(92),
+        identity: Arc::new(()),
+    };
+    let mut files = EditorFiles::new(client);
+    files
+        .save_frozen_screen(target, path, screen)
+        .expect("bounded frozen-screen save should be admitted");
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut reported_failure = false;
+    while files.pending() > 0 {
+        if let Some(EditorCompletion::FrozenScreenSaved { completion, .. }) = files.poll() {
+            let super::ordered::WriteCompletion::Outcome { outcome, .. } = completion else {
+                panic!("durable writer failure must retain its ordered result")
+            };
+            assert!(matches!(outcome.view(), JobOutcome::Finished(Err(_))));
+            reported_failure = true;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "frozen-screen writer failure did not settle"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(reported_failure, "writer failure must reach its owner");
+
+    drop(files);
+    owner.request_shutdown(ShutdownMode::Drain);
+    assert!(
+        owner
+            .join_until_background(Instant::now() + Duration::from_secs(5))
+            .unwrap()
+            .shutdown_complete
+    );
 }

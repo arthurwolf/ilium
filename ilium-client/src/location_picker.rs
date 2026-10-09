@@ -1,11 +1,10 @@
 //! Modal world-map picker for the shared observer or an independent OSM map.
 //!
-//! Three ways to choose a place, all ending in the same candidate that
-//! Enter (or the "Use location" button) confirms:
-//! * an address, geocoded on the client's owned finite I/O bank;
-//! * a direct "lat, lon" entry, parsed locally (no network);
-//! * a Braille world map with a crosshair (arrows, Shift for big steps, or a
-//!   mouse click).
+//! Address lookup and bounded latitude/longitude controls share a mode selector;
+//! either input form updates the same candidate as the Braille world map. Enter
+//! (or the "Use location" button) confirms it. Address search runs on the
+//! client's owned finite I/O bank, while coordinate entry is local and the map
+//! crosshair supports arrows, Shift for big steps, and mouse clicks.
 //!
 //! Render and input share [`layout`], so hit-testing can never drift from
 //! what is drawn.
@@ -33,6 +32,13 @@ use crate::modal::{
 };
 use crate::text_prompt::{self, PromptOutcome, TextPromptState};
 use crate::theme;
+use crate::value_control::{
+    ControlAction, ControlKind, ControlSpec, ControlStyles, PointerButton, ValueControl,
+};
+use crate::value_dialog::{
+    ChoiceDialogState, ChoiceOption, DialogOutcome, DialogStyles, NumberDialogState,
+    PreparedValueDialog, ValueDialogState,
+};
 
 /// Rows of the results list.
 const RESULT_ROWS: u16 = 4;
@@ -133,8 +139,23 @@ pub enum PickerTarget {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PickerFocus {
     Input,
+    EntryMode,
+    Latitude,
+    Longitude,
     Results,
     Map,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PickerEntryMode {
+    Address,
+    Coordinates,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CoordinateAxis {
+    Latitude,
+    Longitude,
 }
 
 /// What a key press asks the surrounding mode handler to do.
@@ -184,6 +205,9 @@ pub struct LocationPickerState {
     /// The place Enter would confirm; also where the crosshair is drawn.
     pub candidate: GeoLocation,
     pub focus: PickerFocus,
+    pub entry_mode: PickerEntryMode,
+    coordinate_dialog: Option<(CoordinateAxis, NumberDialogState)>,
+    entry_dialog: Option<ChoiceDialogState>,
     pub status: Option<String>,
     search: Option<SearchJob>,
     searcher: Searcher,
@@ -225,6 +249,9 @@ impl LocationPickerState {
             selected_result: 0,
             candidate: current.normalized(),
             focus: PickerFocus::Input,
+            entry_mode: PickerEntryMode::Address,
+            coordinate_dialog: None,
+            entry_dialog: None,
             status: None,
             search: None,
             searcher,
@@ -291,6 +318,188 @@ impl LocationPickerState {
 
     pub fn is_searching(&self) -> bool {
         self.search.is_some()
+    }
+
+    pub fn set_entry_mode(&mut self, mode: PickerEntryMode) {
+        if self.entry_mode == mode {
+            return;
+        }
+        self.coordinate_dialog = None;
+        self.entry_dialog = None;
+        self.entry_mode = mode;
+        if mode == PickerEntryMode::Coordinates {
+            // Dropping the receipt requests cancellation and makes any late
+            // completion unreachable from this picker.
+            self.search = None;
+            self.input_revision = self.input_revision.wrapping_add(1);
+            self.clear_results();
+            self.focus = PickerFocus::Latitude;
+        } else {
+            self.focus = PickerFocus::Input;
+        }
+        self.status = None;
+        self.status_storage = None;
+    }
+
+    fn step_entry_mode(&mut self, direction: i32) {
+        let mode = match (self.entry_mode, direction.signum()) {
+            (PickerEntryMode::Address, 1) | (PickerEntryMode::Coordinates, -1) => {
+                PickerEntryMode::Coordinates
+            }
+            (PickerEntryMode::Address, -1) | (PickerEntryMode::Coordinates, 1) => {
+                PickerEntryMode::Address
+            }
+            (_, 0) => return,
+            _ => unreachable!("signum is -1, 0, or 1"),
+        };
+        self.set_entry_mode(mode);
+    }
+
+    pub fn set_coordinate(&mut self, axis: CoordinateAxis, value: f64) -> Result<(), String> {
+        let latitude_limit = if matches!(&self.target, PickerTarget::OpenStreetMap { .. }) {
+            85.0
+        } else {
+            90.0
+        };
+        if !value.is_finite() {
+            return Err("Enter a finite coordinate".into());
+        }
+        let (bound, field) = match axis {
+            CoordinateAxis::Latitude => (latitude_limit, "latitude"),
+            CoordinateAxis::Longitude => (180.0, "longitude"),
+        };
+        if !(-bound..=bound).contains(&value) {
+            return Err(format!("Enter {field} between -{bound} and {bound}"));
+        }
+        match axis {
+            CoordinateAxis::Latitude => self.candidate.latitude = value,
+            CoordinateAxis::Longitude => self.candidate.longitude = value,
+        }
+        self.candidate.label = self.candidate.coordinate_text();
+        self.candidate_storage = None;
+        self.status = Some("Coordinates updated".into());
+        Ok(())
+    }
+
+    pub fn step_coordinate(&mut self, axis: CoordinateAxis, direction: i32) -> Result<(), String> {
+        let value = match axis {
+            CoordinateAxis::Latitude => self.candidate.latitude,
+            CoordinateAxis::Longitude => self.candidate.longitude,
+        };
+        let limit = match axis {
+            CoordinateAxis::Latitude
+                if matches!(&self.target, PickerTarget::OpenStreetMap { .. }) =>
+            {
+                85.0
+            }
+            CoordinateAxis::Latitude => 90.0,
+            CoordinateAxis::Longitude => 180.0,
+        };
+        let next = (value + f64::from(direction.signum())).clamp(-limit, limit);
+        self.set_coordinate(axis, next)
+    }
+
+    fn open_coordinate_dialog(&mut self, axis: CoordinateAxis) {
+        let value = match axis {
+            CoordinateAxis::Latitude => self.candidate.latitude,
+            CoordinateAxis::Longitude => self.candidate.longitude,
+        };
+        self.coordinate_dialog = Some((
+            axis,
+            NumberDialogState::new(
+                match axis {
+                    CoordinateAxis::Latitude => "Enter latitude",
+                    CoordinateAxis::Longitude => "Enter longitude",
+                },
+                format!("{value:.6}"),
+            ),
+        ));
+    }
+
+    fn open_entry_dialog(&mut self) {
+        let selected_id = match self.entry_mode {
+            PickerEntryMode::Address => "address",
+            PickerEntryMode::Coordinates => "coordinates",
+        };
+        let options = vec![
+            ChoiceOption {
+                id: "address".into(),
+                label: "Address search".into(),
+                disabled_reason: None,
+            },
+            ChoiceOption {
+                id: "coordinates".into(),
+                label: "Latitude and longitude".into(),
+                disabled_reason: None,
+            },
+        ];
+        if let Ok(dialog) =
+            ChoiceDialogState::new("Choose location input", options, Some(selected_id.into()))
+        {
+            self.entry_dialog = Some(dialog);
+        }
+    }
+
+    fn finish_coordinate_dialog(&mut self, axis: CoordinateAxis, text: String) {
+        let result = text
+            .trim()
+            .parse::<f64>()
+            .map_err(|_| "Enter a valid decimal coordinate".to_owned())
+            .and_then(|value| self.set_coordinate(axis, value));
+        match result {
+            Ok(()) => self.coordinate_dialog = None,
+            Err(error) => {
+                if let Some((_, dialog)) = &mut self.coordinate_dialog {
+                    dialog.reject(error);
+                }
+            }
+        }
+    }
+
+    fn handle_coordinate_dialog_key(&mut self, screen: Rect, code: KeyCode) -> bool {
+        let Some((axis, dialog)) = self.coordinate_dialog.take() else {
+            return false;
+        };
+        let mut state = ValueDialogState::Number(dialog);
+        match state.handle_key(screen, code) {
+            DialogOutcome::Cancel => {}
+            DialogOutcome::CommitNumber(text) => {
+                self.coordinate_dialog = match state {
+                    ValueDialogState::Number(dialog) => Some((axis, dialog)),
+                    ValueDialogState::Choice(_) => unreachable!(),
+                };
+                self.finish_coordinate_dialog(axis, text);
+            }
+            DialogOutcome::Continue | DialogOutcome::Choose(_) => {
+                if let ValueDialogState::Number(dialog) = state {
+                    self.coordinate_dialog = Some((axis, dialog));
+                }
+            }
+        }
+        true
+    }
+
+    fn handle_entry_dialog_key(&mut self, screen: Rect, code: KeyCode) -> bool {
+        let Some(dialog) = self.entry_dialog.take() else {
+            return false;
+        };
+        let mut state = ValueDialogState::Choice(dialog);
+        match state.handle_key(screen, code) {
+            DialogOutcome::Cancel => {}
+            DialogOutcome::Choose(id) => {
+                self.set_entry_mode(if id == "coordinates" {
+                    PickerEntryMode::Coordinates
+                } else {
+                    PickerEntryMode::Address
+                });
+            }
+            DialogOutcome::Continue | DialogOutcome::CommitNumber(_) => {
+                if let ValueDialogState::Choice(dialog) = state {
+                    self.entry_dialog = Some(dialog);
+                }
+            }
+        }
+        true
     }
 
     /// Test-only transport seam; forcing ownership tests use a real bank.
@@ -455,7 +664,30 @@ impl LocationPickerState {
     }
 
     pub fn paste(&mut self, text: &str) {
+        self.paste_with_screen(Rect::default(), text);
+    }
+
+    pub fn paste_with_screen(&mut self, screen: Rect, text: &str) {
         if self.is_saving() {
+            return;
+        }
+        if let Some(dialog) = self.entry_dialog.take() {
+            let mut state = ValueDialogState::Choice(dialog);
+            let _ = state.paste(screen, text);
+            if let ValueDialogState::Choice(dialog) = state {
+                self.entry_dialog = Some(dialog);
+            }
+            return;
+        }
+        if let Some((axis, dialog)) = self.coordinate_dialog.take() {
+            let mut state = ValueDialogState::Number(dialog);
+            let _ = state.paste(screen, text);
+            if let ValueDialogState::Number(dialog) = state {
+                self.coordinate_dialog = Some((axis, dialog));
+            }
+            return;
+        }
+        if self.entry_mode == PickerEntryMode::Coordinates {
             return;
         }
         let before = self.input.buf.clone();
@@ -478,10 +710,22 @@ impl LocationPickerState {
     }
 
     fn cycle_focus(&mut self, direction: i32) {
-        let order = if self.results.is_empty() {
-            vec![PickerFocus::Input, PickerFocus::Map]
+        let order = if self.entry_mode == PickerEntryMode::Coordinates {
+            vec![
+                PickerFocus::EntryMode,
+                PickerFocus::Latitude,
+                PickerFocus::Longitude,
+                PickerFocus::Map,
+            ]
+        } else if self.results.is_empty() {
+            vec![PickerFocus::Input, PickerFocus::EntryMode, PickerFocus::Map]
         } else {
-            vec![PickerFocus::Input, PickerFocus::Results, PickerFocus::Map]
+            vec![
+                PickerFocus::Input,
+                PickerFocus::EntryMode,
+                PickerFocus::Results,
+                PickerFocus::Map,
+            ]
         };
         let position = order
             .iter()
@@ -494,6 +738,9 @@ impl LocationPickerState {
     /// Enter in the input field: coordinates apply locally, anything else is
     /// geocoded.
     fn submit_input(&mut self) {
+        if self.entry_mode != PickerEntryMode::Address {
+            return;
+        }
         let text = self.input.buf.trim();
         if text.is_empty() {
             self.status = Some("Type an address or \"lat, lon\" first".to_owned());
@@ -545,7 +792,15 @@ impl LocationPickerState {
         if self.is_saving() && code != KeyCode::Esc {
             return PickerOutcome::Continue;
         }
-        let picker_layout = layout(screen);
+        if self.coordinate_dialog.is_some() {
+            self.handle_coordinate_dialog_key(screen, code);
+            return PickerOutcome::Continue;
+        }
+        if self.entry_dialog.is_some() {
+            self.handle_entry_dialog_key(screen, code);
+            return PickerOutcome::Continue;
+        }
+        let picker_layout = layout_for(screen, self.entry_mode);
         match code {
             KeyCode::Esc => return PickerOutcome::Cancel,
             KeyCode::Tab => {
@@ -559,6 +814,12 @@ impl LocationPickerState {
             _ => {}
         }
         match self.focus {
+            PickerFocus::EntryMode => match code {
+                KeyCode::Left => self.step_entry_mode(-1),
+                KeyCode::Right => self.step_entry_mode(1),
+                KeyCode::Enter => self.open_entry_dialog(),
+                _ => {}
+            },
             PickerFocus::Input => match code {
                 KeyCode::Down if !self.results.is_empty() => self.focus = PickerFocus::Results,
                 _ => {
@@ -583,6 +844,26 @@ impl LocationPickerState {
                         (self.selected_result + 1).min(self.results.len().saturating_sub(1));
                 }
                 KeyCode::Enter => self.choose_result(self.selected_result),
+                _ => {}
+            },
+            PickerFocus::Latitude => match code {
+                KeyCode::Left => {
+                    let _ = self.step_coordinate(CoordinateAxis::Latitude, -1);
+                }
+                KeyCode::Right => {
+                    let _ = self.step_coordinate(CoordinateAxis::Latitude, 1);
+                }
+                KeyCode::Enter => self.open_coordinate_dialog(CoordinateAxis::Latitude),
+                _ => {}
+            },
+            PickerFocus::Longitude => match code {
+                KeyCode::Left => {
+                    let _ = self.step_coordinate(CoordinateAxis::Longitude, -1);
+                }
+                KeyCode::Right => {
+                    let _ = self.step_coordinate(CoordinateAxis::Longitude, 1);
+                }
+                KeyCode::Enter => self.open_coordinate_dialog(CoordinateAxis::Longitude),
                 _ => {}
             },
             PickerFocus::Map => {
@@ -619,7 +900,52 @@ impl LocationPickerState {
 
     /// Left click at `position`.
     pub fn click(&mut self, position: Position, screen: Rect) -> PickerOutcome {
-        let picker_layout = layout(screen);
+        self.click_with_button(position, screen, PointerButton::Left)
+    }
+
+    pub fn click_with_button(
+        &mut self,
+        position: Position,
+        screen: Rect,
+        button: PointerButton,
+    ) -> PickerOutcome {
+        if let Some(dialog) = self.entry_dialog.take() {
+            let mut state = ValueDialogState::Choice(dialog);
+            match state.handle_pointer(screen, position, button) {
+                DialogOutcome::Cancel => {}
+                DialogOutcome::Choose(id) => self.set_entry_mode(if id == "coordinates" {
+                    PickerEntryMode::Coordinates
+                } else {
+                    PickerEntryMode::Address
+                }),
+                DialogOutcome::Continue | DialogOutcome::CommitNumber(_) => {
+                    if let ValueDialogState::Choice(dialog) = state {
+                        self.entry_dialog = Some(dialog);
+                    }
+                }
+            }
+            return PickerOutcome::Continue;
+        }
+        if let Some((axis, dialog)) = self.coordinate_dialog.take() {
+            let mut state = ValueDialogState::Number(dialog);
+            let outcome = state.handle_pointer(screen, position, button);
+            match outcome {
+                DialogOutcome::Cancel => {}
+                DialogOutcome::CommitNumber(text) => {
+                    if let ValueDialogState::Number(dialog) = state {
+                        self.coordinate_dialog = Some((axis, dialog));
+                    }
+                    self.finish_coordinate_dialog(axis, text);
+                }
+                DialogOutcome::Continue | DialogOutcome::Choose(_) => {
+                    if let ValueDialogState::Number(dialog) = state {
+                        self.coordinate_dialog = Some((axis, dialog));
+                    }
+                }
+            }
+            return PickerOutcome::Continue;
+        }
+        let picker_layout = layout_for(screen, self.entry_mode);
         if self.is_saving() {
             return if picker_layout.actions.action_at(position) == Some(DialogAction::Cancel) {
                 PickerOutcome::Cancel
@@ -628,10 +954,69 @@ impl LocationPickerState {
             };
         }
         if let Some(action) = picker_layout.actions.action_at(position) {
-            return match action {
-                DialogAction::Cancel => PickerOutcome::Cancel,
-                DialogAction::Confirm => PickerOutcome::Confirm,
-            };
+            if button == PointerButton::Left {
+                return match action {
+                    DialogAction::Cancel => PickerOutcome::Cancel,
+                    DialogAction::Confirm => PickerOutcome::Confirm,
+                };
+            }
+            return PickerOutcome::Continue;
+        }
+        let entry = entry_mode_control(picker_layout.entry_mode, self.entry_mode);
+        match entry.hit(position, button) {
+            Some(ControlAction::PreviousChoice) => {
+                self.step_entry_mode(-1);
+                return PickerOutcome::Continue;
+            }
+            Some(ControlAction::NextChoice) => {
+                self.step_entry_mode(1);
+                return PickerOutcome::Continue;
+            }
+            Some(ControlAction::OpenChoices) => {
+                self.open_entry_dialog();
+                return PickerOutcome::Continue;
+            }
+            _ => {}
+        }
+        if button != PointerButton::Left {
+            return PickerOutcome::Continue;
+        }
+        if self.entry_mode == PickerEntryMode::Coordinates {
+            for (axis, row, focus) in [
+                (
+                    CoordinateAxis::Latitude,
+                    picker_layout.latitude,
+                    PickerFocus::Latitude,
+                ),
+                (
+                    CoordinateAxis::Longitude,
+                    picker_layout.longitude,
+                    PickerFocus::Longitude,
+                ),
+            ] {
+                let control = coordinate_control(row, axis, &self.candidate);
+                if let Some(action) = control.hit(position, button) {
+                    self.focus = focus;
+                    match action {
+                        ControlAction::Decrement => {
+                            let _ = self.step_coordinate(axis, -1);
+                        }
+                        ControlAction::Increment => {
+                            let _ = self.step_coordinate(axis, 1);
+                        }
+                        ControlAction::EditNumber => self.open_coordinate_dialog(axis),
+                        _ => {}
+                    }
+                    return PickerOutcome::Continue;
+                }
+            }
+            if picker_layout.map.contains(position) {
+                self.focus = PickerFocus::Map;
+                let column = position.x - picker_layout.map.x;
+                let row = position.y - picker_layout.map.y;
+                self.set_candidate_from_cell(column, row, picker_layout.map);
+            }
+            return PickerOutcome::Continue;
         }
         if picker_layout.input_box.contains(position) {
             self.focus = PickerFocus::Input;
@@ -649,13 +1034,67 @@ impl LocationPickerState {
     }
 }
 
+fn entry_mode_control(row: Rect, mode: PickerEntryMode) -> ValueControl {
+    ValueControl::new(
+        row,
+        ControlSpec {
+            kind: ControlKind::Choice,
+            label: "Entry",
+            value: match mode {
+                PickerEntryMode::Address => "Address",
+                PickerEntryMode::Coordinates => "Coordinates",
+            },
+            label_width: 6,
+            previous_enabled: true,
+            next_enabled: true,
+            open_enabled: true,
+        },
+    )
+}
+
+fn coordinate_control(row: Rect, axis: CoordinateAxis, candidate: &GeoLocation) -> ValueControl {
+    let (label, value) = match axis {
+        CoordinateAxis::Latitude => ("Latitude", candidate.latitude),
+        CoordinateAxis::Longitude => ("Longitude", candidate.longitude),
+    };
+    let value = format!("{value:.4}");
+    ValueControl::new(
+        row,
+        ControlSpec {
+            kind: ControlKind::Number,
+            label,
+            value: &value,
+            label_width: 10,
+            previous_enabled: true,
+            next_enabled: true,
+            open_enabled: true,
+        },
+    )
+}
+
+fn picker_control_styles(focused: bool) -> ControlStyles {
+    let focus_style = if focused {
+        Style::new().add_modifier(Modifier::REVERSED | Modifier::BOLD)
+    } else {
+        Style::default()
+    };
+    ControlStyles {
+        value: focus_style,
+        button: focus_style,
+        ..ControlStyles::default()
+    }
+}
+
 /// Every rectangle of the picker, computed once from the screen size.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PickerLayout {
     pub popup: Rect,
     pub input_box: Rect,
     pub input_area: Rect,
+    pub entry_mode: Rect,
     pub results: Rect,
+    pub latitude: Rect,
+    pub longitude: Rect,
     pub map: Rect,
     pub candidate_row: Rect,
     pub credit_row: Rect,
@@ -664,6 +1103,15 @@ pub struct PickerLayout {
 }
 
 impl PickerLayout {
+    fn result_content_area(&self, count: usize) -> Rect {
+        let area = self.results;
+        if area.width >= 2 && count > usize::from(area.height) {
+            Rect::new(area.x, area.y, area.width - 1, area.height)
+        } else {
+            area
+        }
+    }
+
     pub fn visible_result_start(&self, selected_result: usize) -> usize {
         selected_result.saturating_sub(usize::from(self.results.height).saturating_sub(1))
     }
@@ -675,7 +1123,7 @@ impl PickerLayout {
         count: usize,
         selected_result: usize,
     ) -> Option<usize> {
-        if !self.results.contains(position) {
+        if !self.result_content_area(count).contains(position) {
             return None;
         }
         let index =
@@ -685,6 +1133,10 @@ impl PickerLayout {
 }
 
 pub fn layout(screen: Rect) -> PickerLayout {
+    layout_for(screen, PickerEntryMode::Address)
+}
+
+fn layout_for(screen: Rect, entry_mode: PickerEntryMode) -> PickerLayout {
     let width = screen.width.saturating_sub(4).clamp(40, 110);
     let height = screen.height.saturating_sub(2).clamp(18, 40);
     let popup = centered_fixed_rect(width, height, screen);
@@ -701,11 +1153,38 @@ pub fn layout(screen: Rect) -> PickerLayout {
             Constraint::Length(1),
         ])
         .split(inner);
+    let entry = Rect::new(
+        rows[0].x.saturating_add(1),
+        rows[0].y,
+        rows[0].width.saturating_sub(2),
+        u16::from(rows[0].height > 0),
+    );
+    let (latitude, longitude) = if entry_mode == PickerEntryMode::Coordinates {
+        let latitude = Rect::new(
+            rows[1].x,
+            rows[1].y,
+            rows[1].width,
+            u16::from(rows[1].height > 0),
+        );
+        let longitude_y = latitude.bottom();
+        let longitude = Rect::new(
+            rows[1].x,
+            longitude_y,
+            rows[1].width,
+            u16::from(longitude_y < rows[1].bottom()),
+        );
+        (latitude, longitude)
+    } else {
+        (Rect::default(), Rect::default())
+    };
     PickerLayout {
         popup,
         input_box: rows[0],
         input_area: inset_rect(rows[0], 1),
+        entry_mode: entry,
         results: rows[1],
+        latitude,
+        longitude,
         map: rows[2],
         candidate_row: rows[3],
         credit_row: rows[4],
@@ -775,14 +1254,26 @@ fn fit(text: &str, width: usize) -> String {
 fn credit_lines(target: &PickerTarget) -> &'static str {
     match target {
         PickerTarget::SharedObserver
-        | PickerTarget::OpenStreetMap { search_provider: AddressProvider::CityOnly, .. } =>
-            "Map: Natural Earth (public domain)\nSearch: Open-Meteo\nGeoNames (CC BY 4.0)",
-        PickerTarget::OpenStreetMap { search_provider: AddressProvider::Photon, .. } =>
-            "Map: Natural Earth (public domain)\nSearch: Photon (komoot)\n© OpenStreetMap contributors (ODbL)",
-        PickerTarget::OpenStreetMap { search_provider: AddressProvider::Nominatim, .. } =>
-            "Map: Natural Earth (public domain)\nSearch: configured Nominatim\n© OpenStreetMap contributors (ODbL)",
-        PickerTarget::OpenStreetMap { search_provider: AddressProvider::Disabled, .. } =>
-            "Map: Natural Earth (public domain)\nSearch: disabled\nNo provider lookup",
+        | PickerTarget::OpenStreetMap {
+            search_provider: AddressProvider::CityOnly,
+            ..
+        } => "Map: Natural Earth (public domain)\nSearch: Open-Meteo\nGeoNames (CC BY 4.0)",
+        PickerTarget::OpenStreetMap {
+            search_provider: AddressProvider::Photon,
+            ..
+        } => {
+            "Map: Natural Earth (public domain)\nSearch: Photon (komoot)\n© OpenStreetMap contributors (ODbL)"
+        }
+        PickerTarget::OpenStreetMap {
+            search_provider: AddressProvider::Nominatim,
+            ..
+        } => {
+            "Map: Natural Earth (public domain)\nSearch: configured Nominatim\n© OpenStreetMap contributors (ODbL)"
+        }
+        PickerTarget::OpenStreetMap {
+            search_provider: AddressProvider::Disabled,
+            ..
+        } => "Map: Natural Earth (public domain)\nSearch: disabled\nNo provider lookup",
     }
 }
 
@@ -796,7 +1287,7 @@ pub fn render_cursor(
     screen: Rect,
     picker: &LocationPickerState,
 ) -> Option<ratatui::layout::Position> {
-    let picker_layout = layout(screen);
+    let picker_layout = layout_for(screen, picker.entry_mode);
     frame.render_widget(Clear, picker_layout.popup);
     let title = match picker.target() {
         PickerTarget::SharedObserver => "Location",
@@ -806,22 +1297,42 @@ pub fn render_cursor(
         theme::block(true).title(theme::chrome_title(title)),
         picker_layout.popup,
     );
-    let input_title = match picker.focus {
-        PickerFocus::Input => "Address or lat, lon  (Enter)",
-        _ => "Address or lat, lon",
-    };
     frame.render_widget(
-        theme::block(picker.focus == PickerFocus::Input).title(theme::chrome_title(input_title)),
+        theme::block(picker.focus == PickerFocus::Input).title(theme::chrome_title("")),
         picker_layout.input_box,
     );
-    frame.render_widget(
-        Paragraph::new(picker.input.buf.as_str()),
-        picker_layout.input_area,
+    entry_mode_control(picker_layout.entry_mode, picker.entry_mode).render(
+        frame,
+        picker_control_styles(picker.focus == PickerFocus::EntryMode),
     );
+    if picker.entry_mode == PickerEntryMode::Address {
+        frame.render_widget(
+            Paragraph::new(picker.input.buf.as_str()),
+            picker_layout.input_area,
+        );
+    } else {
+        for (axis, area) in [
+            (CoordinateAxis::Latitude, picker_layout.latitude),
+            (CoordinateAxis::Longitude, picker_layout.longitude),
+        ] {
+            coordinate_control(area, axis, &picker.candidate).render(
+                frame,
+                picker_control_styles(
+                    picker.focus
+                        == match axis {
+                            CoordinateAxis::Latitude => PickerFocus::Latitude,
+                            CoordinateAxis::Longitude => PickerFocus::Longitude,
+                        },
+                ),
+            );
+        }
+    }
 
     // Results list.
-    let results = picker_layout.results;
-    if picker.results.is_empty() {
+    let results = picker_layout.result_content_area(picker.results.len());
+    if picker.entry_mode == PickerEntryMode::Coordinates {
+        frame.render_widget(Clear, picker_layout.results);
+    } else if picker.results.is_empty() {
         frame.render_widget(
             Paragraph::new(if picker.is_searching() {
                 "Searching\u{2026}"
@@ -860,6 +1371,21 @@ pub fn render_cursor(
                 ),
             );
         }
+    }
+
+    if results.width < picker_layout.results.width && results.height > 0 {
+        let track = Rect::new(results.right(), results.y, 1, results.height);
+        let mut scrollbar = ratatui::widgets::ScrollbarState::new(picker.results.len())
+            .position(picker_layout.visible_result_start(picker.selected_result))
+            .viewport_content_length(usize::from(results.height));
+        frame.render_stateful_widget(
+            ratatui::widgets::Scrollbar::new(ratatui::widgets::ScrollbarOrientation::VerticalRight)
+                .begin_symbol(None)
+                .end_symbol(None)
+                .track_symbol(Some("│")),
+            track,
+            &mut scrollbar,
+        );
     }
 
     // World map with crosshair.
@@ -934,7 +1460,21 @@ pub fn render_cursor(
             .style(Style::new().add_modifier(Modifier::DIM)),
         picker_layout.hint_row,
     );
-    if picker.focus == PickerFocus::Input {
+    let dialog_state = picker
+        .entry_dialog
+        .as_ref()
+        .map(|dialog| ValueDialogState::Choice(dialog.clone()))
+        .or_else(|| {
+            picker
+                .coordinate_dialog
+                .as_ref()
+                .map(|(_, dialog)| ValueDialogState::Number(dialog.clone()))
+        });
+    if let Some(state) = dialog_state {
+        PreparedValueDialog::new(screen, &state).render(frame, DialogStyles::default());
+        return None;
+    }
+    if picker.focus == PickerFocus::Input && picker.entry_mode == PickerEntryMode::Address {
         let prefix: String = picker.input.buf.chars().take(picker.input.cursor).collect();
         let cursor = crate::modal::single_line_cursor_position(
             picker_layout.input_area,
@@ -960,6 +1500,56 @@ mod tests {
     use std::time::{Duration, Instant};
 
     const SCREEN: Rect = Rect::new(0, 0, 120, 40);
+
+    #[test]
+    fn overflowing_address_results_render_the_selected_last_page_and_track() {
+        let mut picker = picker_with(offline());
+        picker.results = (0..12)
+            .map(|index| place(&format!("Synthetic address {index}"), 48.86, 2.35))
+            .collect();
+        picker.selected_result = 11;
+        picker.focus = PickerFocus::Results;
+        for (width, height) in [(120, 40), (80, 24), (40, 12)] {
+            let screen = Rect::new(0, 0, width, height);
+            let areas = layout(screen);
+            let content = areas.result_content_area(picker.results.len());
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal
+                .draw(|frame| render(frame, screen, &picker))
+                .unwrap();
+            crate::ui_capture::save(&format!("location-overflow-{width}x{height}"), &terminal);
+            if content.height > 0 && content.width >= 20 {
+                let buffer = terminal.backend().buffer();
+                let text: String = (content.y..content.bottom())
+                    .flat_map(|y| {
+                        (content.x..content.right()).map(move |x| buffer[(x, y)].symbol())
+                    })
+                    .collect();
+                assert!(text.contains("Synthetic address 11"));
+                assert!((content.y..content.bottom())
+                    .any(|y| !buffer[(content.right(), y)].symbol().trim().is_empty()));
+            }
+        }
+    }
+
+    #[test]
+    fn overflowing_address_results_reserve_an_inert_scrollbar_column() {
+        let areas = layout(SCREEN);
+        let count = usize::from(areas.results.height) + 8;
+        let content = areas.result_content_area(count);
+        assert_eq!(content.right() + 1, areas.results.right());
+        let selected = count - 1;
+        let start = areas.visible_result_start(selected);
+        assert_eq!(
+            areas.result_at(Position::new(content.x, content.y), count, selected),
+            Some(start)
+        );
+        assert_eq!(
+            areas.result_at(Position::new(content.right(), content.y), count, selected),
+            None
+        );
+        assert_eq!(areas.result_content_area(1), areas.results);
+    }
 
     fn place(label: &str, latitude: f64, longitude: f64) -> GeoLocation {
         GeoLocation::new(label, latitude, longitude)
@@ -1364,6 +1954,229 @@ mod tests {
         assert_eq!(picker.candidate.label, "48.857N 2.352E");
         assert!((picker.candidate.longitude - 2.352).abs() < 1e-9);
         assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn coordinate_fields_enforce_shared_and_openstreetmap_latitude_bounds() {
+        let mut shared = picker_with(offline());
+        shared
+            .set_coordinate(CoordinateAxis::Latitude, 89.5)
+            .unwrap();
+        shared.step_coordinate(CoordinateAxis::Latitude, 1).unwrap();
+        assert_eq!(shared.candidate.latitude, 90.0);
+
+        let search_settings = AddressSearchSettings::default();
+        let mut osm = LocationPickerState::for_openstreetmap(
+            place("Current map point", 84.5, 0.0),
+            PathBuf::from("/synthetic/osm-project"),
+            &search_settings,
+            None,
+        );
+        osm.set_entry_mode(PickerEntryMode::Coordinates);
+        osm.set_coordinate(CoordinateAxis::Latitude, 85.25)
+            .unwrap_err();
+        assert_eq!(osm.candidate.latitude, 84.5);
+        osm.set_coordinate(CoordinateAxis::Latitude, 84.9).unwrap();
+        osm.step_coordinate(CoordinateAxis::Latitude, 1).unwrap();
+        assert_eq!(osm.candidate.latitude, 85.0);
+        osm.step_coordinate(CoordinateAxis::Latitude, 1).unwrap();
+        assert_eq!(osm.candidate.latitude, 85.0);
+    }
+
+    #[test]
+    fn entry_mode_catalog_and_coordinate_dialog_use_shared_value_dialogs() {
+        let mut picker = picker_with(offline());
+        picker.open_entry_dialog();
+        assert!(picker.handle_entry_dialog_key(SCREEN, KeyCode::Down));
+        assert!(picker.handle_entry_dialog_key(SCREEN, KeyCode::Enter));
+        assert_eq!(picker.entry_mode, PickerEntryMode::Coordinates);
+        assert_eq!(picker.focus, PickerFocus::Latitude);
+
+        picker.open_coordinate_dialog(CoordinateAxis::Latitude);
+        let original_latitude = picker.candidate.latitude;
+        let (_, dialog) = picker.coordinate_dialog.as_mut().unwrap();
+        dialog.draft.buf = "91".into();
+        dialog.draft.cursor = 2;
+        assert!(picker.handle_coordinate_dialog_key(SCREEN, KeyCode::Enter));
+        assert_eq!(picker.candidate.latitude, original_latitude);
+        assert!(picker
+            .coordinate_dialog
+            .as_ref()
+            .unwrap()
+            .1
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("between -90 and 90"));
+
+        picker.coordinate_dialog.as_mut().unwrap().1.draft.buf = "48.5".into();
+        picker.coordinate_dialog.as_mut().unwrap().1.draft.cursor = 4;
+        assert!(picker.handle_coordinate_dialog_key(SCREEN, KeyCode::Enter));
+        assert_eq!(picker.candidate.latitude, 48.5);
+        assert!(picker.coordinate_dialog.is_none());
+    }
+
+    #[test]
+    fn coordinate_control_geometry_matches_render_and_pointer_targets_at_small_sizes() {
+        let mut picker = picker_with(offline());
+        picker.set_entry_mode(PickerEntryMode::Coordinates);
+        for (width, height) in [(80, 24), (40, 12)] {
+            let screen = Rect::new(0, 0, width, height);
+            let areas = layout_for(screen, PickerEntryMode::Coordinates);
+            assert!(areas.entry_mode.width > 0);
+            assert!(areas.latitude.width > 0);
+            assert!(areas.longitude.width > 0);
+            assert!(areas.map.width > 0);
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal
+                .draw(|frame| render(frame, screen, &picker))
+                .unwrap();
+            let buffer = terminal.backend().buffer();
+            let latitude =
+                coordinate_control(areas.latitude, CoordinateAxis::Latitude, &picker.candidate);
+            let geometry = latitude.geometry();
+            assert_eq!(
+                buffer[(geometry.previous.x, geometry.previous.y)].symbol(),
+                "➖"
+            );
+            assert_eq!(buffer[(geometry.next.x, geometry.next.y)].symbol(), "➕");
+            assert_eq!(buffer[(geometry.open.x, geometry.open.y)].symbol(), "*");
+            if geometry.previous.width > 0 {
+                assert_eq!(
+                    latitude.hit(
+                        Position::new(geometry.previous.x, geometry.previous.y),
+                        PointerButton::Left
+                    ),
+                    Some(ControlAction::Decrement)
+                );
+                let before = picker.candidate.latitude;
+                picker.click_with_button(
+                    Position::new(geometry.previous.x, geometry.previous.y),
+                    screen,
+                    PointerButton::Left,
+                );
+                assert_eq!(picker.candidate.latitude, (before - 1.0).max(-90.0));
+            }
+        }
+    }
+
+    #[test]
+    fn location_entry_plus_opens_catalog_and_star_opens_coordinate_entry() {
+        let mut picker = picker_with(offline());
+        let address_layout = layout_for(SCREEN, PickerEntryMode::Address);
+        let entry = entry_mode_control(address_layout.entry_mode, picker.entry_mode);
+        let value = entry.geometry().value;
+        picker.click_with_button(Position::new(value.x, value.y), SCREEN, PointerButton::Left);
+        assert_eq!(picker.entry_mode, PickerEntryMode::Coordinates);
+        let coordinate_entry = entry_mode_control(
+            layout_for(SCREEN, PickerEntryMode::Coordinates).entry_mode,
+            picker.entry_mode,
+        );
+        let value = coordinate_entry.geometry().value;
+        picker.click_with_button(
+            Position::new(value.x, value.y),
+            SCREEN,
+            PointerButton::Right,
+        );
+        assert_eq!(picker.entry_mode, PickerEntryMode::Address);
+
+        let entry = entry_mode_control(address_layout.entry_mode, picker.entry_mode);
+        let open = entry.geometry().open;
+        picker.click_with_button(Position::new(open.x, open.y), SCREEN, PointerButton::Left);
+        assert!(picker.entry_dialog.is_some());
+        picker.handle_entry_dialog_key(SCREEN, KeyCode::Down);
+        picker.handle_entry_dialog_key(SCREEN, KeyCode::Enter);
+        assert_eq!(picker.entry_mode, PickerEntryMode::Coordinates);
+
+        let coordinate_layout = layout_for(SCREEN, PickerEntryMode::Coordinates);
+        let number = coordinate_control(
+            coordinate_layout.latitude,
+            CoordinateAxis::Latitude,
+            &picker.candidate,
+        );
+        let open = number.geometry().open;
+        picker.click_with_button(Position::new(open.x, open.y), SCREEN, PointerButton::Left);
+        assert!(picker.coordinate_dialog.is_some());
+        picker.handle_coordinate_dialog_key(SCREEN, KeyCode::Esc);
+        assert!(picker.coordinate_dialog.is_none());
+        picker.open_coordinate_dialog(CoordinateAxis::Latitude);
+        picker.set_entry_mode(PickerEntryMode::Address);
+        assert!(picker.coordinate_dialog.is_none());
+    }
+
+    #[test]
+    fn location_entry_arrows_and_keys_cycle_from_either_mode() {
+        let mut picker = picker_with(offline());
+        picker.focus = PickerFocus::EntryMode;
+        let address = layout_for(SCREEN, PickerEntryMode::Address);
+        let previous = entry_mode_control(address.entry_mode, PickerEntryMode::Address)
+            .geometry()
+            .previous;
+        picker.click_with_button(
+            Position::new(previous.x, previous.y),
+            SCREEN,
+            PointerButton::Left,
+        );
+        assert_eq!(picker.entry_mode, PickerEntryMode::Coordinates);
+
+        let coordinates = layout_for(SCREEN, PickerEntryMode::Coordinates);
+        let next = entry_mode_control(coordinates.entry_mode, PickerEntryMode::Coordinates)
+            .geometry()
+            .next;
+        picker.click_with_button(Position::new(next.x, next.y), SCREEN, PointerButton::Left);
+        assert_eq!(picker.entry_mode, PickerEntryMode::Address);
+
+        assert_eq!(
+            picker.handle_key(KeyCode::Left, KeyModifiers::NONE, SCREEN),
+            PickerOutcome::Continue
+        );
+        assert_eq!(picker.entry_mode, PickerEntryMode::Coordinates);
+        assert_eq!(
+            picker.handle_key(KeyCode::Right, KeyModifiers::NONE, SCREEN),
+            PickerOutcome::Continue
+        );
+        assert_eq!(picker.entry_mode, PickerEntryMode::Address);
+    }
+
+    #[test]
+    fn right_clicks_outside_selector_values_leave_picker_actions_inert() {
+        let mut picker = picker_with(offline());
+        let before = picker.candidate.clone();
+        let areas = layout_for(SCREEN, PickerEntryMode::Address);
+        assert_eq!(
+            picker.click_with_button(
+                Position::new(areas.map.x, areas.map.y),
+                SCREEN,
+                PointerButton::Right,
+            ),
+            PickerOutcome::Continue
+        );
+        assert_eq!(picker.candidate, before);
+        assert_eq!(
+            picker.click_with_button(
+                areas.actions.confirm_button.as_position(),
+                SCREEN,
+                PointerButton::Right,
+            ),
+            PickerOutcome::Continue
+        );
+    }
+
+    #[test]
+    fn switching_to_coordinate_fields_cancels_pending_address_results() {
+        let mut picker = picker_with(offline());
+        type_text(&mut picker, "Paris");
+        let (sender, receiver) = mpsc::channel();
+        picker.adopt_search_channel(receiver);
+
+        picker.set_entry_mode(PickerEntryMode::Coordinates);
+
+        assert!(!picker.is_searching());
+        assert_eq!(picker.focus, PickerFocus::Latitude);
+        assert!(sender.send(Ok(vec![place("Paris", 48.85, 2.35)])).is_err());
+        assert!(!picker.poll_search());
+        assert!(picker.results.is_empty());
+        assert_eq!(picker.focus, PickerFocus::Latitude);
     }
 
     #[test]

@@ -478,7 +478,7 @@ impl BoardFiles {
                     return Some(BoardLoaded {
                         target,
                         result: Err(format!("Board read not admitted: {:?}", rejected.reason)),
-                    })
+                    });
                 }
             }
         }

@@ -14,6 +14,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Component, Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use ilium_core::{
@@ -74,6 +75,24 @@ use crate::worktree_dialog::{WorktreeDialogMode, WorktreeDialogState};
 use crate::worktree_manager::WorktreeManagerState;
 use ilium_inference::InferenceSettings;
 
+pub(crate) fn terminal_parser_retry_order(
+    pane_ids: impl IntoIterator<Item = NodeId>,
+    displayed_slots: &[NodeId],
+) -> Vec<NodeId> {
+    let mut order: Vec<NodeId> = pane_ids.into_iter().collect();
+    let mut displayed_count = 0;
+    for id in displayed_slots {
+        if let Some(offset) = order[displayed_count..]
+            .iter()
+            .position(|candidate| candidate == id)
+        {
+            order.swap(displayed_count, displayed_count + offset);
+            displayed_count += 1;
+        }
+    }
+    order
+}
+
 #[path = "app_semantic_animation.rs"]
 mod semantic_presentation;
 use ilium_ipc::TextTriggerSettings;
@@ -86,6 +105,14 @@ const TERMINAL_WHEEL_SCROLL_LINES: u16 = 3;
 /// File-backed chatrooms need eventual observation of external agent writes,
 /// but filesystem repair and parsing do not belong on animation cadences.
 const CHATROOM_RECONCILE_INTERVAL: Duration = Duration::from_secs(1);
+
+fn initial_statusline_generation() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos()
+        .min(u64::MAX as u128) as u64
+}
 
 /// Collapses lexical `.` and `..` components without requiring the target to
 /// exist. Board creation needs a stable absolute identity before it creates a
@@ -308,6 +335,7 @@ pub enum Mode {
     /// Multiline prompt collected for the server-owned completion queue.
     QueuePrompt(Box<PromptQueueDialogState>),
     TextTriggerDialog(Box<crate::text_trigger_dialog::TextTriggerDialogState>),
+    AgentMessageDialog(Box<crate::agent_message_dialog::AgentMessageDialog>),
     /// A mouse-anchored action menu for one physical editor source line.
     EditorLineContextMenu(EditorLineContextMenu),
     /// Agent selector and editable task prompt opened from an editor line.
@@ -787,6 +815,8 @@ impl AppearanceRow {
 pub enum AgentMonitoringRow {
     Mode,
     AttentionRunningIndicator,
+    AttentionProgressReports,
+    ModelIcons,
     ProgressMonitor,
     ProgressMonitorMaxLines,
     CompletedProgressHideAfter,
@@ -804,6 +834,8 @@ impl AgentMonitoringRow {
         let mut rows = vec![
             Self::Mode,
             Self::AttentionRunningIndicator,
+            Self::AttentionProgressReports,
+            Self::ModelIcons,
             Self::ProgressMonitor,
             Self::ProgressMonitorMaxLines,
             Self::CompletedProgressHideAfter,
@@ -1064,6 +1096,13 @@ pub struct SettingsState {
     /// The Animations tab hides its controls so the live field fills the
     /// screen; any key or click restores them.
     pub animation_fullscreen: bool,
+    /// Saved-scene activity log scroll offset; None follows the newest line.
+    pub animation_activity_scroll_from_top: Option<u16>,
+    /// The expanded animation-footer pane shows selected-control help instead
+    /// of the live preparation activity log.
+    pub animation_detail_show_help: bool,
+    /// Scroll offset for the expanded selected-control help pane.
+    pub animation_detail_scroll: u16,
     /// Browsing a subtab never changes the persisted/effective animation source.
     pub animation_source_tab: crate::animation_plugins::AnimationSourceTab,
     pub plugin_panel: crate::animation_plugins::PluginPanelState,
@@ -1194,6 +1233,9 @@ impl SettingsState {
             global_scroll: 0,
             animation_slider_drag: None,
             animation_fullscreen: false,
+            animation_activity_scroll_from_top: None,
+            animation_detail_show_help: false,
+            animation_detail_scroll: 0,
             animation_source_tab: crate::animation_plugins::AnimationSourceTab::Native,
             plugin_panel: crate::animation_plugins::PluginPanelState::default(),
             plugin_editor: None,
@@ -1244,6 +1286,7 @@ pub enum ContextMenuAction {
     /// pane, every such pane in a project, or every such pane in the whole
     /// tree from `ROOT_ID`.
     AskForUpdate,
+    SendMessageToAll,
     /// Converts the target agent pane's session to the other built-in
     /// provider (see `crate::session_conversion`).
     ConvertTo(BuiltinAgentProvider),
@@ -1300,6 +1343,7 @@ impl ContextMenuAction {
             Self::ToggleGroup => (0, 1),
             Self::CreateBoardFromMarkdown => (0, 2),
             Self::AskForUpdate => (1, 0),
+            Self::SendMessageToAll => (1, 0),
             Self::QueuePrompt => (1, 1),
             Self::SchedulePaneInput => (1, 2),
             Self::ClearPromptQueue => (1, 3),
@@ -1355,10 +1399,12 @@ impl ContextMenuAction {
             Self::QueuePrompt => IconTarget::GoalActive,
             Self::ClearPromptQueue | Self::Close => IconTarget::RowClose,
             Self::AskForUpdate => IconTarget::AskForUpdate,
+            Self::SendMessageToAll => IconTarget::AskForUpdate,
             Self::ConvertTo(BuiltinAgentProvider::Claude) => IconTarget::Claude,
             Self::ConvertTo(BuiltinAgentProvider::Codex) => IconTarget::Codex,
             Self::ConvertTo(BuiltinAgentProvider::Antigravity) => IconTarget::Antigravity,
-            Self::Freeze | Self::Unfreeze => IconTarget::Lock,
+            Self::Freeze => IconTarget::Lock,
+            Self::Unfreeze => IconTarget::FrozenAgent,
             Self::ShowSplitView | Self::NewSplitView => IconTarget::SplitVertical,
             Self::ToggleGroup | Self::NewGroup => IconTarget::Group,
             Self::NewAgent(BuiltinAgentProvider::Claude) => IconTarget::Claude,
@@ -1389,6 +1435,7 @@ impl ContextMenuAction {
             Self::QueuePrompt => "Queue prompt…".to_string(),
             Self::ClearPromptQueue => "Clear prompt queue".to_string(),
             Self::AskForUpdate => "Ask for status update".to_string(),
+            Self::SendMessageToAll => "Send message to all".to_string(),
             Self::ConvertTo(provider) => format!("Convert session to {}", provider.label()),
             Self::Freeze => "Freeze agent".to_string(),
             Self::Unfreeze => "Unfreeze agent".to_string(),
@@ -1972,6 +2019,17 @@ pub(crate) struct EmittedGeometry {
     _metadata: Option<std::sync::Arc<ilium_execution::StorageAdmission>>,
 }
 
+/// Shared geometry for the frozen-terminal dialog and its interactive button.
+/// The renderer and pointer handler consume the same rectangles so their
+/// layouts cannot drift apart.
+pub(crate) struct FrozenDialogLayout {
+    pub terminal_area: Rect,
+    pub dialog_area: Rect,
+    pub button_area: Option<Rect>,
+}
+
+pub(crate) const FROZEN_DIALOG_BUTTON_LABEL: &str = "      [ Unfreeze agent ]      ";
+
 pub struct App {
     /// The session this client is attached to (used to resolve the UDS
     /// socket path and to label the window/status bar).
@@ -2003,6 +2061,10 @@ pub struct App {
     /// a channel/socket handle directly is what keeps input dispatch
     /// synchronous and unit-testable without a real connection.
     outbox: Vec<crate::ipc_preparation::AdmittedRequest>,
+    /// Client-side fence for Antigravity status-line actions sent to the
+    /// server-owned pane input path.
+    antigravity_statusline_generation: u64,
+    antigravity_disable_pending_generation: Option<u64>,
     pub(crate) outbound_admission: Option<ilium_execution::Client>,
     pub(crate) location_search_client: Option<ilium_execution::Client>,
     pending_input_retention: Option<ilium_execution::Retention>,
@@ -2149,6 +2211,9 @@ pub struct App {
     /// When numeric Remote compaction rows were last changed plus the
     /// debounce; `None` while nothing is waiting to be saved.
     pub remote_compaction_save_deadline: Option<Instant>,
+    /// Native compaction triggers read from the agents' configuration while
+    /// the Remote compaction tab is open.
+    pub remote_compaction_native: crate::remote_compaction_native::NativeSnapshot,
     /// Derived per-agent spend and the overlay the tree draws.
     pub(crate) cost_tracker: crate::cost_tracker::CostTracker,
     pub reset_monitor_state: ResetMonitorState,
@@ -2185,8 +2250,12 @@ pub struct App {
     pub ollama_models: Vec<String>,
     /// Catalog owned by the current OpenAI endpoint and credential.
     pub openai_models: Vec<String>,
-    openai_catalog_revision: u64,
-    openai_discovery_revision: Option<u64>,
+    /// Catalog owned by the current Anthropic endpoint and credential.
+    pub anthropic_models: Vec<String>,
+    /// Advances whenever a keyed catalog (OpenAI or Anthropic) changes
+    /// endpoint, credential, or provider, rejecting in-flight older results.
+    keyed_catalog_revision: u64,
+    keyed_discovery_revision: Option<u64>,
     /// Free Kilo models begin with stable documented router fallbacks and are
     /// replaced by the latest compatible live catalog after a refresh.
     pub kilo_gateway_models: Vec<String>,
@@ -2199,7 +2268,7 @@ pub struct App {
     pub inference_test_result: Option<crate::inference_test::InferenceTestResult>,
     pub(crate) inference_test_hold: Option<std::sync::Arc<ilium_execution::StorageAdmission>>,
     pub(crate) model_discovery_hold: Option<std::sync::Arc<ilium_execution::StorageAdmission>>,
-    pub(crate) model_catalog_holds: [Option<std::sync::Arc<ilium_execution::StorageAdmission>>; 3],
+    pub(crate) model_catalog_holds: [Option<std::sync::Arc<ilium_execution::StorageAdmission>>; 4],
     pub(crate) model_catalog_preparation: crate::model_catalog_preparation::ModelCatalogPreparation,
     pub(crate) incoming_model_result_hold:
         Option<std::sync::Arc<ilium_execution::StorageAdmission>>,
@@ -2240,6 +2309,8 @@ pub struct App {
     pub stats_popover: Option<crate::session_stats_ui::StatsPopover>,
     /// Per-pane transcript statistics and the worker that reads them.
     pub session_stats: crate::session_stats_store::SessionStatsStore,
+    /// Latest model evidence for live tree rows; independent of cost settings.
+    pub(crate) session_models: crate::session_models::SessionModelCache,
     pub(crate) statistics_diagnostic: Option<String>,
     pub tree_toolbar_hovered: bool,
     pub hovered_tree_toolbar_action: Option<TreeToolbarAction>,
@@ -2365,6 +2436,7 @@ pub struct App {
     pub markdown_picker: ratatui_image::picker::Picker,
     pub document_preparation: Option<crate::document_preparation::DocumentPreparation>,
     pub(crate) text_trigger_preview: Option<crate::text_trigger_dialog::TextTriggerPreview>,
+    pub(crate) sound_studio_preview: Option<crate::onboarding::sound_preview::SoundStudioPreview>,
     pub(crate) paste_retirement: Option<ilium_execution::RetirementHandle>,
     pub(crate) source_window_preparation:
         Option<crate::source_window_preparation::SourceWindowPreparation>,
@@ -2414,6 +2486,10 @@ pub struct App {
     pub(crate) pending_board_dialogs: Vec<crate::filesystem::board_app::BoardDialogReceipt>,
     pub(crate) onboarding_dismiss_pending: bool,
     pub(crate) pending_editor_loads: Vec<crate::filesystem::editors::LoadTarget>,
+    /// Instance identities whose full editor model is temporarily owned by a
+    /// CPU save-preparation job. Input events remain in the ordered run-loop
+    /// custody queue until the matching model is restored.
+    pub(crate) editor_model_loans: HashMap<NodeId, Arc<()>>,
     pub(crate) editor_load_errors: HashMap<NodeId, String>,
     /// Creation-pulse bookkeeping: node id -> `started_at`-relative offset
     /// (ms) at which its insertion slide settles. Read by `tree_ui` to flash
@@ -2438,11 +2514,19 @@ pub struct App {
     /// retry (`crate::title_inference`'s `PaneBecameDone` trigger) doesn't
     /// need the server to resend it.
     pub agent_session_ids: HashMap<NodeId, String>,
+    /// Server-verified transcript path for each pane's `agent_session_ids`
+    /// entry. A hint only: lookups re-verify it before trusting it and fall
+    /// back to a bounded scan, so a stale or foreign path cannot be shown.
+    pub agent_transcript_paths: HashMap<NodeId, PathBuf>,
     /// Panes whose agent is being converted: their terminal output is ignored
     /// so the last screen stays on display behind the conversion dialog.
     pub frozen_panes: HashSet<NodeId>,
     /// Pinned terminal frames retained while an agent process is frozen.
     pub(crate) frozen_screens: HashMap<NodeId, crate::terminal_view::PaintedTerminal>,
+    /// Worker-result storage charges for screens restored from disk.
+    pub(crate) frozen_screen_holds: HashMap<NodeId, ilium_execution::Retention>,
+    /// Pane-instance fences for pending frozen-screen reads and parsing.
+    pub(crate) frozen_screen_restore_identities: HashMap<NodeId, Arc<()>>,
     /// Start time of the current auto-freeze eligibility window per pane.
     pub(crate) auto_freeze_since: HashMap<NodeId, Instant>,
     /// The active "Convert to" dialog, if any (see `Mode::ConvertSession`).
@@ -2660,6 +2744,8 @@ impl App {
             pane_detection_evidence: HashMap::new(),
             agent_debug_log_filter: AgentDebugLogFilter::default(),
             outbox: Vec::new(),
+            antigravity_statusline_generation: initial_statusline_generation(),
+            antigravity_disable_pending_generation: None,
             outbound_admission: {
                 #[cfg(test)]
                 {
@@ -2763,6 +2849,7 @@ impl App {
             remote_compaction_settings:
                 crate::remote_compaction_settings::RemoteCompactionSettings::default(),
             remote_compaction_save_deadline: None,
+            remote_compaction_native: crate::remote_compaction_native::NativeSnapshot::default(),
             cost_tracker: crate::cost_tracker::CostTracker::default(),
             reset_monitor_state: ResetMonitorState::default(),
             agent_detection_settings: None,
@@ -2793,8 +2880,9 @@ impl App {
             pending_icon_semantic_search: None,
             ollama_models: Vec::new(),
             openai_models: Vec::new(),
-            openai_catalog_revision: 0,
-            openai_discovery_revision: None,
+            anthropic_models: Vec::new(),
+            keyed_catalog_revision: 0,
+            keyed_discovery_revision: None,
             kilo_gateway_models: ilium_inference::kilo_gateway_fallback_models(),
             model_discovery: ModelDiscoveryState::Idle,
             inference_test_state: InferenceTestState::Idle,
@@ -2820,6 +2908,7 @@ impl App {
             workspace_git_statuses: HashMap::new(),
             stats_popover: None,
             session_stats: crate::session_stats_store::SessionStatsStore::default(),
+            session_models: crate::session_models::SessionModelCache::default(),
             statistics_diagnostic: None,
             tree_toolbar_hovered: false,
             hovered_tree_toolbar_action: None,
@@ -2872,6 +2961,7 @@ impl App {
             markdown_picker: ratatui_image::picker::Picker::halfblocks(),
             document_preparation: None,
             text_trigger_preview: None,
+            sound_studio_preview: None,
             paste_retirement: None,
             source_window_preparation: None,
             source_window_syntax: None,
@@ -3014,13 +3104,17 @@ impl App {
             pending_board_dialogs: Vec::new(),
             onboarding_dismiss_pending: false,
             pending_editor_loads: Vec::new(),
+            editor_model_loans: HashMap::new(),
             editor_load_errors: HashMap::new(),
             recently_created: HashMap::new(),
             terminal_activity: TerminalActivityTracker::default(),
             has_applied_first_snapshot: false,
             agent_session_ids: HashMap::new(),
+            agent_transcript_paths: HashMap::new(),
             frozen_panes: HashSet::new(),
             frozen_screens: HashMap::new(),
+            frozen_screen_holds: HashMap::new(),
+            frozen_screen_restore_identities: HashMap::new(),
             auto_freeze_since: HashMap::new(),
             conversion: None,
             pending_conversion_start: None,
@@ -3778,11 +3872,14 @@ impl App {
     #[cfg(test)]
     fn history_file_path_for_pane(&self, pane_id: NodeId, home_dir: &Path) -> Option<PathBuf> {
         let (agent_class, session_id, project_path) = self.known_agent_history_context(pane_id)?;
-        crate::agent_history_path::verified_jsonl_history_path(
+        crate::agent_history_path::verified_jsonl_history_path_with_hint(
             home_dir,
             &project_path,
             &agent_class,
             &session_id,
+            self.agent_transcript_paths
+                .get(&pane_id)
+                .map(PathBuf::as_path),
         )
     }
 
@@ -4431,7 +4528,9 @@ impl App {
         const MAX_METADATA_BYTES: usize = 32 * 1024 * 1024;
         let bytes = usize::from(self.layout.tree_area.height) * (64 * 1024) + 4096;
         if bytes > MAX_METADATA_BYTES {
-            return Err(format!("Terminal tree geometry requires {bytes} metadata bytes; maximum per frame is {MAX_METADATA_BYTES}"));
+            return Err(format!(
+                "Terminal tree geometry requires {bytes} metadata bytes; maximum per frame is {MAX_METADATA_BYTES}"
+            ));
         }
         match crate::execution::process_quota().reserve_external_storage(bytes) {
             Ok(hold) => {
@@ -4703,27 +4802,53 @@ impl App {
             .flatten()
     }
 
-    pub(crate) fn frozen_unfreeze_button(&self, viewport: PaneViewport) -> Option<Rect> {
+    pub(crate) fn frozen_dialog_layout(
+        &self,
+        viewport: PaneViewport,
+    ) -> Option<FrozenDialogLayout> {
         self.frozen_screens
             .contains_key(&viewport.pane_id)
             .then(|| {
-                let area = viewport.content_area;
-                let height = area.height.min(7);
-                let width = area.width.min(52);
-                let dialog = Rect {
-                    x: area.x + area.width.saturating_sub(width) / 2,
-                    y: area.y + area.height.saturating_sub(height) / 2,
-                    width,
-                    height,
+                let terminal_area = self
+                    .completed_agent_close_action(viewport)
+                    .map_or(viewport.content_area, |action| action.terminal_area);
+                let dialog_width = terminal_area.width.min(52);
+                let dialog_height = terminal_area.height.min(7);
+                let dialog_area = Rect {
+                    x: terminal_area.x + terminal_area.width.saturating_sub(dialog_width) / 2,
+                    y: terminal_area.y + terminal_area.height.saturating_sub(dialog_height) / 2,
+                    width: dialog_width,
+                    height: dialog_height,
                 };
-                let button_width = dialog.width.min(22);
-                Rect {
-                    x: dialog.x + dialog.width.saturating_sub(button_width) / 2,
-                    y: dialog.y + dialog.height.saturating_sub(2),
-                    width: button_width,
-                    height: 1,
+
+                // `theme::block` uses a one-cell border. The styled button is the
+                // third Paragraph line, centered inside that bordered content.
+                // Width is measured in terminal cells; the label is ASCII.
+                let inner_width = dialog_area.width.saturating_sub(2);
+                let inner_height = dialog_area.height.saturating_sub(2);
+                let button_area = (inner_width > 0 && inner_height >= 3).then(|| {
+                    let button_width = inner_width.min(FROZEN_DIALOG_BUTTON_LABEL.len() as u16);
+                    Rect {
+                        x: dialog_area.x
+                            + 1
+                            + inner_width.saturating_sub(FROZEN_DIALOG_BUTTON_LABEL.len() as u16)
+                                / 2,
+                        y: dialog_area.y + 3,
+                        width: button_width,
+                        height: 1,
+                    }
+                });
+
+                FrozenDialogLayout {
+                    terminal_area,
+                    dialog_area,
+                    button_area,
                 }
             })
+    }
+
+    pub(crate) fn frozen_unfreeze_button(&self, viewport: PaneViewport) -> Option<Rect> {
+        self.frozen_dialog_layout(viewport)?.button_area
     }
 
     /// Whether `pane_id` is a terminal agent that has finished its current
@@ -5239,6 +5364,12 @@ impl App {
     /// `crate::config::load`) and again by every settings-screen control
     /// that changes a value (see `apply_and_persist_ui_settings`).
     pub fn apply_ui_settings(&mut self, ui: UiSettings) {
+        let model_icons_enabled = ui.agent_tree_model_icons;
+        let model_icons_were_enabled = self.ui_settings.agent_tree_model_icons;
+        if model_icons_enabled != model_icons_were_enabled {
+            self.session_models.invalidate_model_icons();
+            crate::claude_model_statusline::reset_app_generation();
+        }
         if !ui.agent_debug_menu_enabled {
             if matches!(
                 self.mode,
@@ -5258,6 +5389,68 @@ impl App {
             self.remove_agent_debug_action_from_terminal_menu();
         }
         self.ui_settings = ui.clone();
+        if model_icons_enabled != model_icons_were_enabled {
+            if model_icons_enabled {
+                let executable = std::env::current_exe().ok();
+                match crate::antigravity_model_statusline::reconcile_setting(
+                    true,
+                    executable.as_deref(),
+                )
+                .and_then(|()| crate::antigravity_model_statusline::enabled_runtime_action())
+                {
+                    Ok(action) => {
+                        self.antigravity_disable_pending_generation = None;
+                        if self.queue_antigravity_statusline_action(action).is_some() {
+                            self.status_message = Some(
+                                "Antigravity model capture is configured and activation was queued"
+                                    .into(),
+                            );
+                        }
+                    }
+                    Err(error) => {
+                        self.status_message = Some(format!(
+                            "Antigravity model capture configuration could not be enabled: {error}"
+                        ));
+                    }
+                }
+            } else if model_icons_were_enabled {
+                match crate::antigravity_model_statusline::disabled_runtime_action() {
+                    Ok(action) => {
+                        if let Some(generation) = self.queue_antigravity_statusline_action(action) {
+                            self.antigravity_disable_pending_generation = Some(generation);
+                            self.status_message = Some(
+                                "Waiting for open Antigravity panes to process model-capture shutdown"
+                                    .into(),
+                            );
+                        }
+                    }
+                    Err(error) => {
+                        // Fence older activation work even when the saved
+                        // command cannot be read. Keep the persisted bridge
+                        // state intact until a safe restore is possible.
+                        let _ = self.queue_antigravity_statusline_action(
+                            ilium_ipc::AntigravityStatuslineAction::CancelPending,
+                        );
+                        self.antigravity_disable_pending_generation = None;
+                        self.status_message = Some(format!(
+                            "Antigravity model capture could not be disabled safely: {error}"
+                        ));
+                    }
+                }
+            } else {
+                let executable = None;
+                if let Err(error) =
+                    crate::antigravity_model_statusline::reconcile_setting(false, executable)
+                {
+                    self.status_message = Some(format!(
+                        "Antigravity model capture configuration could not be restored: {error}"
+                    ));
+                }
+                let _ = self.queue_antigravity_statusline_action(
+                    ilium_ipc::AntigravityStatuslineAction::CancelPending,
+                );
+            }
+        }
         let now = Instant::now();
         self.tree_width_animation.set_motion_enabled(
             matches!(ui.motion_level, crate::config::MotionLevel::Full),
@@ -5277,6 +5470,88 @@ impl App {
             self.tree_width_animation.current_width(),
         );
         self.set_layout(layout, PaneResizeCause::UserInterfaceSettings);
+    }
+
+    pub(crate) fn initialize_disabled_model_icon_setting(&mut self) {
+        if self.ui_settings.agent_tree_model_icons {
+            return;
+        }
+        match crate::antigravity_model_statusline::disabled_runtime_action() {
+            Ok(action) => {
+                if let Some(generation) = self.queue_antigravity_statusline_action(action) {
+                    self.antigravity_disable_pending_generation = Some(generation);
+                }
+            }
+            Err(error) => {
+                // Do not restore persisted settings until every live pane has
+                // acknowledged the matching shutdown generation.
+                let _ = self.queue_antigravity_statusline_action(
+                    ilium_ipc::AntigravityStatuslineAction::CancelPending,
+                );
+                self.antigravity_disable_pending_generation = None;
+                self.status_message = Some(format!(
+                    "Antigravity model capture could not be disabled safely: {error}"
+                ));
+            }
+        }
+    }
+
+    fn queue_antigravity_statusline_action(
+        &mut self,
+        action: ilium_ipc::AntigravityStatuslineAction,
+    ) -> Option<u64> {
+        let Some(generation) = self.antigravity_statusline_generation.checked_add(1) else {
+            self.status_message = Some(
+                "Antigravity status-line updates stopped because their generation limit was reached"
+                    .into(),
+            );
+            return None;
+        };
+        self.antigravity_statusline_generation = generation;
+        let request = ilium_ipc::ClientRequest::UpdateAntigravityStatusline { generation, action };
+        self.queue_request(request).then_some(generation)
+    }
+
+    pub(crate) fn antigravity_statusline_completed(
+        &mut self,
+        generation: u64,
+        result: Result<(), String>,
+    ) {
+        if generation != self.antigravity_statusline_generation {
+            return;
+        }
+        if self.ui_settings.agent_tree_model_icons {
+            if let Err(error) = result {
+                self.status_message = Some(format!(
+                    "Antigravity model capture could not be activated in every open pane: {error}"
+                ));
+            }
+            return;
+        }
+        if self.antigravity_disable_pending_generation != Some(generation) {
+            return;
+        }
+        if let Err(error) = result {
+            self.antigravity_disable_pending_generation = None;
+            self.status_message = Some(format!(
+                "Antigravity panes did not confirm status-line shutdown; saved settings remain intact: {error}"
+            ));
+            return;
+        }
+        match crate::antigravity_model_statusline::restore_after_live_deactivation() {
+            Ok(()) => {
+                self.antigravity_disable_pending_generation = None;
+                self.status_message = Some(
+                    "Antigravity model capture is off; live panes and saved settings are restored"
+                        .into(),
+                );
+            }
+            Err(error) => {
+                self.status_message = Some(format!(
+                    "Live Antigravity status-line shutdown completed, but saved settings were not restored: {error}"
+                ));
+            }
+        }
     }
 
     pub fn apply_terminal_settings(&mut self, settings: TerminalSettings) {
@@ -5959,6 +6234,16 @@ impl App {
             AgentMonitoringRow::Mode => self.settings_adjust_agent_monitoring_mode(direction),
             AgentMonitoringRow::AttentionRunningIndicator => {
                 self.settings_adjust_attention_running_indicator(direction)
+            }
+            AgentMonitoringRow::AttentionProgressReports => {
+                let mut ui = self.ui_settings.clone();
+                ui.attention_progress_reports = !ui.attention_progress_reports;
+                self.apply_and_persist_ui_settings(ui);
+            }
+            AgentMonitoringRow::ModelIcons => {
+                let mut ui = self.ui_settings.clone();
+                ui.agent_tree_model_icons = !ui.agent_tree_model_icons;
+                self.apply_and_persist_ui_settings(ui);
             }
             AgentMonitoringRow::ProgressMonitor => self.settings_toggle_progress_monitor(),
             AgentMonitoringRow::ProgressMonitorMaxLines => {
@@ -6792,6 +7077,79 @@ impl App {
         notification
     }
 
+    pub(crate) fn configure_sound_studio_preview(
+        &mut self,
+        client: ilium_execution::Client,
+    ) -> std::sync::Arc<tokio::sync::Notify> {
+        debug_assert!(
+            self.sound_studio_preview.is_none(),
+            "sound studio preview is configured once at client startup"
+        );
+        let preview = crate::onboarding::sound_preview::SoundStudioPreview::new(client);
+        let notification = preview.notification();
+        self.sound_studio_preview = Some(preview);
+        notification
+    }
+
+    pub(crate) fn request_sound_studio_preview(&mut self) {
+        let Some(request) = self
+            .onboarding
+            .as_ref()
+            .and_then(|onboarding| onboarding.studio.as_ref())
+            .map(crate::onboarding::studio::SoundStudio::preview_request)
+        else {
+            return;
+        };
+        if let Some(preview) = &mut self.sound_studio_preview {
+            preview.request(request, Instant::now());
+        }
+    }
+
+    pub(crate) fn reconcile_sound_studio_preview(&mut self) -> bool {
+        let Some(mut preview) = self.sound_studio_preview.take() else {
+            return false;
+        };
+        let mut changed = preview.collect(Instant::now());
+        if let Some(prepared) = preview.take_ready() {
+            if let Some(studio) = self
+                .onboarding
+                .as_mut()
+                .and_then(|onboarding| onboarding.studio.as_mut())
+            {
+                changed |= studio.install_preview(prepared);
+            }
+        }
+        if let Some(issue) = preview.take_failure() {
+            tracing::warn!(?issue, "sound studio preview worker failed");
+        }
+        self.sound_studio_preview = Some(preview);
+        changed
+    }
+
+    pub(crate) fn sound_studio_preview_retry_delay(&self, now: Instant) -> Option<Duration> {
+        self.sound_studio_preview
+            .as_ref()
+            .and_then(|preview| preview.retry_delay(now))
+    }
+
+    pub(crate) fn close_sound_studio_preview(&mut self) {
+        if let Some(preview) = &mut self.sound_studio_preview {
+            preview.close();
+        }
+    }
+
+    pub(crate) fn collect_closed_sound_studio_preview(&mut self) {
+        if let Some(preview) = &mut self.sound_studio_preview {
+            preview.collect(Instant::now());
+        }
+    }
+
+    pub(crate) fn sound_studio_preview_settled(&self) -> bool {
+        self.sound_studio_preview
+            .as_ref()
+            .is_none_or(crate::onboarding::sound_preview::SoundStudioPreview::is_settled)
+    }
+
     pub(crate) fn configure_paste_retirement(
         &mut self,
         retirement: ilium_execution::RetirementHandle,
@@ -7004,21 +7362,32 @@ impl App {
         let openai_catalog_changed = self.inference_settings.openai.base_url
             != inference.openai.base_url
             || self.inference_settings.openai.api_key != inference.openai.api_key;
-        let openai_provider_changed = self.inference_settings.selected_provider
+        let anthropic_catalog_changed = self.inference_settings.anthropic.base_url
+            != inference.anthropic.base_url
+            || self.inference_settings.anthropic.api_key != inference.anthropic.api_key;
+        let keyed_provider_changed = self.inference_settings.selected_provider
             != inference.selected_provider
-            && (self.inference_settings.selected_provider
-                == ilium_inference::InferenceProviderKind::OpenAi
-                || inference.selected_provider == ilium_inference::InferenceProviderKind::OpenAi);
-        if openai_catalog_changed || openai_provider_changed {
+            && (self
+                .inference_settings
+                .selected_provider
+                .has_keyed_model_catalog()
+                || inference.selected_provider.has_keyed_model_catalog());
+        if openai_catalog_changed || anthropic_catalog_changed || keyed_provider_changed {
             // A revision, rather than endpoint equality, also rejects edit-away/back results.
-            self.openai_catalog_revision = self.openai_catalog_revision.wrapping_add(1);
+            self.keyed_catalog_revision = self.keyed_catalog_revision.wrapping_add(1);
         }
         if openai_catalog_changed {
             self.openai_models.clear();
             self.model_catalog_holds[2] = None;
-            if !self.model_discovery.is_loading() {
-                self.model_discovery = ModelDiscoveryState::Idle;
-            }
+        }
+        if anthropic_catalog_changed {
+            self.anthropic_models.clear();
+            self.model_catalog_holds[3] = None;
+        }
+        if (openai_catalog_changed || anthropic_catalog_changed)
+            && !self.model_discovery.is_loading()
+        {
+            self.model_discovery = ModelDiscoveryState::Idle;
         }
         self.inference_settings = inference;
     }
@@ -7301,7 +7670,8 @@ impl App {
                     .base_url
                     .trim_end_matches('/')
             ),
-            ilium_inference::InferenceProviderKind::OpenAi => {
+            ilium_inference::InferenceProviderKind::OpenAi
+            | ilium_inference::InferenceProviderKind::Anthropic => {
                 ilium_inference::model_catalog_endpoint(&self.inference_settings)
                     .unwrap_or_default()
             }
@@ -7313,18 +7683,28 @@ impl App {
                 return;
             }
         };
-        if provider == ilium_inference::InferenceProviderKind::OpenAi {
-            if self.inference_settings.openai.api_key.trim().is_empty() {
+        if provider.has_keyed_model_catalog() {
+            let api_key = match provider {
+                ilium_inference::InferenceProviderKind::Anthropic => {
+                    &self.inference_settings.anthropic.api_key
+                }
+                _ => &self.inference_settings.openai.api_key,
+            };
+            if api_key.trim().is_empty() {
+                let error = format!(
+                    "Enter an API key before loading {} models",
+                    provider.label()
+                );
                 self.model_discovery = ModelDiscoveryState::Failed {
                     provider,
                     endpoint,
-                    error: "Enter an API key before loading OpenAI models".into(),
+                    error: error.clone(),
                     elapsed: Duration::ZERO,
                 };
-                self.status_message = Some("Enter an API key before loading OpenAI models".into());
+                self.status_message = Some(error);
                 return;
             }
-            self.openai_discovery_revision = Some(self.openai_catalog_revision);
+            self.keyed_discovery_revision = Some(self.keyed_catalog_revision);
         }
         self.pending_model_refresh = Some(provider);
         self.model_discovery = ModelDiscoveryState::Loading {
@@ -7368,7 +7748,7 @@ impl App {
             endpoint,
             elapsed,
             models,
-            self.openai_discovery_revision,
+            self.keyed_discovery_revision,
             selected,
             source,
         ) {
@@ -7422,12 +7802,13 @@ impl App {
             ilium_inference::InferenceProviderKind::KiloGateway => Some(0),
             ilium_inference::InferenceProviderKind::Ollama => Some(1),
             ilium_inference::InferenceProviderKind::OpenAi => Some(2),
+            ilium_inference::InferenceProviderKind::Anthropic => Some(3),
             _ => None,
         };
-        let old_revision = request.openai_revision;
+        let old_revision = request.keyed_revision;
         let result = prepared.result.map(|_| request.models);
-        if request.provider == ilium_inference::InferenceProviderKind::OpenAi
-            && old_revision != self.openai_discovery_revision
+        if request.provider.has_keyed_model_catalog()
+            && old_revision != self.keyed_discovery_revision
         {
             // A newer discovery owns the pending revision. Discard the older
             // CPU result without taking that revision or changing its spinner.
@@ -7474,20 +7855,24 @@ impl App {
         select_first: bool,
         selected_model: Option<&str>,
     ) {
-        if provider == ilium_inference::InferenceProviderKind::OpenAi
-            && (self.openai_discovery_revision.take() != Some(self.openai_catalog_revision)
+        if provider.has_keyed_model_catalog()
+            && (self.keyed_discovery_revision.take() != Some(self.keyed_catalog_revision)
                 || self.inference_settings.selected_provider != provider
                 || endpoint
                     != ilium_inference::model_catalog_endpoint(&self.inference_settings)
                         .unwrap_or_default())
         {
+            let error = format!(
+                "{} settings changed during discovery; refresh again",
+                provider.label()
+            );
             self.model_discovery = ModelDiscoveryState::Failed {
                 provider,
                 endpoint,
-                error: "OpenAI settings changed during discovery; refresh again".into(),
+                error: error.clone(),
                 elapsed,
             };
-            self.status_message = Some("OpenAI settings changed; refresh models again".into());
+            self.status_message = Some(error);
             return;
         }
         if provider == ilium_inference::InferenceProviderKind::Ollama
@@ -7536,6 +7921,10 @@ impl App {
                         self.openai_models = models;
                         self.openai_models.len()
                     }
+                    ilium_inference::InferenceProviderKind::Anthropic => {
+                        self.anthropic_models = models;
+                        self.anthropic_models.len()
+                    }
                     _ => 0,
                 };
                 self.model_discovery = ModelDiscoveryState::Loaded {
@@ -7568,23 +7957,49 @@ impl App {
     }
 
     pub fn settings_adjust_openai_model(&mut self, direction: i32) {
-        if self.openai_models.is_empty() {
+        self.settings_adjust_keyed_model(ilium_inference::InferenceProviderKind::OpenAi, direction);
+    }
+
+    pub fn settings_adjust_anthropic_model(&mut self, direction: i32) {
+        self.settings_adjust_keyed_model(
+            ilium_inference::InferenceProviderKind::Anthropic,
+            direction,
+        );
+    }
+
+    /// Steps through the live catalog of a keyed provider. Refresh must never
+    /// silently change a saved model; cycling only touches the saved choice.
+    fn settings_adjust_keyed_model(
+        &mut self,
+        provider: ilium_inference::InferenceProviderKind,
+        direction: i32,
+    ) {
+        let (models, selected) = match provider {
+            ilium_inference::InferenceProviderKind::Anthropic => (
+                &self.anthropic_models,
+                &self.inference_settings.anthropic.model,
+            ),
+            _ => (&self.openai_models, &self.inference_settings.openai.model),
+        };
+        if models.is_empty() {
             self.request_model_refresh();
             return;
         }
-        let selected = &self.inference_settings.openai.model;
-        let next = match self
-            .openai_models
-            .iter()
-            .position(|model| model == selected)
-        {
-            Some(index) => (index as i32 + direction.signum())
-                .rem_euclid(self.openai_models.len() as i32) as usize,
-            None if direction < 0 => self.openai_models.len() - 1,
+        let next = match models.iter().position(|model| model == selected) {
+            Some(index) => {
+                (index as i32 + direction.signum()).rem_euclid(models.len() as i32) as usize
+            }
+            None if direction < 0 => models.len() - 1,
             None => 0,
         };
+        let next_model = models[next].clone();
         let mut settings = self.inference_settings.clone();
-        settings.openai.model = self.openai_models[next].clone();
+        match provider {
+            ilium_inference::InferenceProviderKind::Anthropic => {
+                settings.anthropic.model = next_model
+            }
+            _ => settings.openai.model = next_model,
+        }
         self.apply_and_persist_inference_settings(settings);
     }
 
@@ -7714,17 +8129,6 @@ impl App {
     /// Asks the server-owned sound actor to play once. Preview uses the same
     /// backend and selected path as real transition alerts.
     pub fn settings_preview_sound(&mut self) -> bool {
-        if self.sound_settings.source == ilium_sound::SoundSourceKind::SoundFile
-            && !self
-                .sound_settings
-                .file
-                .as_ref()
-                .is_some_and(|path| path.is_file())
-        {
-            self.status_message =
-                Some("Cannot preview: select an available sound file first".to_string());
-            return false;
-        }
         if self.sound_settings.source == ilium_sound::SoundSourceKind::Muted {
             self.status_message = Some("Sound is muted".to_string());
             return false;
@@ -7732,7 +8136,8 @@ impl App {
         self.request_sound_preview(self.sound_settings.clone(), "Sound preview requested")
     }
 
-    /// Success means outbound admission, before server validation or playback.
+    /// Success means the request entered the outbound queue; the server later
+    /// reports the actual playback result through `SoundPreviewCompleted`.
     pub(crate) fn request_sound_preview(
         &mut self,
         settings: ilium_sound::SoundSettings,
@@ -8378,14 +8783,17 @@ impl App {
 
     pub(crate) fn plugin_panel_model(&self) -> crate::animation_plugins::PluginPanelModel {
         use crate::animation_plugins::{PluginPanelModel, PluginPanelRow};
+        let effective_settings = self
+            .committed_animation_settings
+            .as_ref()
+            .unwrap_or(&self.animation_settings);
+        let has_active_plugin = effective_settings.source
+            == crate::animation_plugins::AnimationSourceTab::Plugin
+            && effective_settings.plugin.selected.is_some();
         let mut model = if let Some(catalogue) = &self.plugin_catalogue {
-            let effective = self
-                .committed_animation_settings
-                .as_ref()
-                .unwrap_or(&self.animation_settings);
-            let active = (effective.source == crate::animation_plugins::AnimationSourceTab::Plugin)
+            let active = has_active_plugin
                 .then(|| {
-                    effective
+                    effective_settings
                         .plugin
                         .selected
                         .as_ref()
@@ -8432,23 +8840,25 @@ impl App {
                 }
             }
         }
-        if let Some(error) = self.animation_frame.status() {
-            let detail: String = error
-                .chars()
-                .filter(|character| !character.is_control())
-                .take(512)
-                .collect();
-            model.issue_details.push(format!("Runtime: {detail}"));
-            if let Some(index) = model
-                .rows
-                .iter()
-                .position(|row| *row == PluginPanelRow::Issues)
-            {
-                model.labels[index] =
-                    format!("{} package/runtime issue(s)", model.issue_details.len());
-            } else {
-                model.rows.push(PluginPanelRow::Issues);
-                model.labels.push("1 package/runtime issue(s)".into());
+        if has_active_plugin {
+            if let Some(error) = self.animation_frame.status() {
+                let detail: String = error
+                    .chars()
+                    .filter(|character| !character.is_control())
+                    .take(512)
+                    .collect();
+                model.issue_details.push(format!("Runtime: {detail}"));
+                if let Some(index) = model
+                    .rows
+                    .iter()
+                    .position(|row| *row == PluginPanelRow::Issues)
+                {
+                    model.labels[index] =
+                        format!("{} package/runtime issue(s)", model.issue_details.len());
+                } else {
+                    model.rows.push(PluginPanelRow::Issues);
+                    model.labels.push("1 package/runtime issue(s)".into());
+                }
             }
         }
         model
@@ -10356,6 +10766,23 @@ impl App {
         }
     }
 
+    pub(crate) fn set_terminal_engine_memory_budget_mib(
+        &mut self,
+        budget_mib: u32,
+    ) -> Result<(), String> {
+        if !TerminalSettings::is_valid_engine_memory_budget_mib(budget_mib) {
+            return Err(
+                crate::config::ConfigLoadError::InvalidEngineMemoryBudget(budget_mib).to_string(),
+            );
+        }
+        // Copy the current settings so an exact budget edit preserves other fields.
+        let mut settings = self.terminal_settings;
+        settings.engine_memory_budget_mib = budget_mib;
+        self.apply_terminal_settings(settings);
+        self.persist_terminal_settings();
+        Ok(())
+    }
+
     pub fn settings_adjust_terminal_row(&mut self, row: TerminalRow, direction: i32) {
         let mut settings = self.terminal_settings;
         match row {
@@ -11208,17 +11635,28 @@ impl App {
         }
     }
 
-    /// Whether a pane in the right panel still waits for a parser engine.
-    /// An engine can be unavailable only transiently (all claims held by
-    /// retiring panes, or the shared memory budget occupied), so the event
-    /// loop must keep retrying instead of sleeping until unrelated input
-    /// happens to arrive. Without this a pane selected in the tree stayed
-    /// black until the user focused it.
+    /// Keep the retry cadence active for registration and allocation pressure,
+    /// including an attached parser waiting to publish its first screen.
     pub(crate) fn is_displayed_terminal_awaiting_engine(&self) -> bool {
-        self.terminal_parsing.is_some()
-            && self.displayed_pane_slots().into_iter().flatten().any(|id| {
-                matches!(self.panes.get(&id), Some(PaneRuntime::Terminal(view)) if view.frontend.is_none())
-            })
+        if self.terminal_parsing.is_none() {
+            return false;
+        }
+        self.displayed_pane_slots().into_iter().flatten().any(|id| {
+            let Some(PaneRuntime::Terminal(view)) = self.panes.get(&id) else {
+                return false;
+            };
+            if view.frontend.is_none() {
+                return true;
+            }
+            match view.parser_pressure() {
+                // A retained history owner can release a copy-on-write peak.
+                Some(crate::terminal_parsing::ParserPressure::PaneLimit) => {
+                    view.has_suspended_output()
+                }
+                Some(_) => true,
+                None => false,
+            }
+        })
     }
     pub(crate) fn collect_terminal_parsing(&mut self) -> bool {
         if let Some(error) = self
@@ -11235,6 +11673,25 @@ impl App {
         let mut changed = false;
         for result in results {
             use crate::terminal_parsing::ParseResult;
+            let target = match &result {
+                ParseResult::Published { target, .. }
+                | ParseResult::Acknowledged { target, .. }
+                | ParseResult::Error { target, .. }
+                | ParseResult::InputBarrier { target, .. } => target,
+                #[cfg(test)]
+                ParseResult::Capture { target, .. } | ParseResult::CaptureFailed { target, .. } => {
+                    target
+                }
+            };
+            // Cache eviction preserves domain identity but replaces the frontend.
+            if !matches!(
+                self.panes.get(&target.pane_id),
+                Some(PaneRuntime::Terminal(view)) if view.accepts_parser_target(target)
+            ) {
+                continue;
+            }
+            #[cfg(test)]
+            crate::terminal_parsing::app_regressions::accepted_result(&result);
             match result {
                 ParseResult::Published {
                     target,
@@ -11243,8 +11700,10 @@ impl App {
                     evidence,
                 } => {
                     if let Some(PaneRuntime::Terminal(view)) = self.panes.get_mut(&target.pane_id) {
-                        if std::sync::Arc::ptr_eq(&view.identity, &target.identity) {
+                        if ordinal > view.applied_ordinal {
                             view.install(snapshot, ordinal);
+                            #[cfg(test)]
+                            crate::terminal_parsing::app_regressions::applied_ordinal(ordinal);
                             self.record_terminal_screen_change(target.pane_id, evidence);
                             changed |= self.is_pane_displayed(target.pane_id);
                         }
@@ -11256,19 +11715,20 @@ impl App {
                     evidence,
                 } => {
                     if let Some(PaneRuntime::Terminal(view)) = self.panes.get_mut(&target.pane_id) {
-                        if std::sync::Arc::ptr_eq(&view.identity, &target.identity) {
+                        if ordinal > view.applied_ordinal {
+                            // An error or barrier completion is not a new picture.
                             view.applied_ordinal = ordinal;
+                            #[cfg(test)]
+                            crate::terminal_parsing::app_regressions::applied_ordinal(ordinal);
                             self.record_terminal_screen_change(target.pane_id, evidence);
                         }
                     }
                 }
                 ParseResult::Error { target, message } => {
                     if let Some(PaneRuntime::Terminal(view)) = self.panes.get_mut(&target.pane_id) {
-                        if std::sync::Arc::ptr_eq(&view.identity, &target.identity) {
-                            view.admission_error = Some(message.clone());
-                            self.status_message = Some(message);
-                            changed = true;
-                        }
+                        view.admission_error = Some(message.clone());
+                        self.status_message = Some(message);
+                        changed = true;
                     }
                 }
                 ParseResult::InputBarrier {
@@ -11279,15 +11739,13 @@ impl App {
                     mouse,
                     paste,
                 } => {
-                    let valid = matches!(self.panes.get(&target.pane_id),Some(PaneRuntime::Terminal(view)) if std::sync::Arc::ptr_eq(&view.identity,&target.identity));
-                    if valid {
-                        self.terminal_input.record_ready_barrier(
-                            target.pane_id,
-                            &target.identity,
-                            generation,
-                            (mouse, paste, ordinal, sequence),
-                        );
-                    }
+                    self.terminal_input.record_ready_barrier(
+                        target.pane_id,
+                        &target.identity,
+                        generation,
+                        (mouse, paste, ordinal, sequence),
+                    );
+                    // The following ACK advances the ordinal after this payload is consumed.
                 }
                 #[cfg(test)]
                 ParseResult::CaptureFailed {
@@ -11343,20 +11801,29 @@ impl App {
                     }
                 }
                 if let Some(frontend) = &mut view.frontend {
+                    frontend.set_displayed(displayed.contains(id));
                     engines_held += 1;
+                }
+            }
+        }
+        // Commands that were refused before queue admission never reach the
+        // shared scheduler. Retry displayed panes first so a full queue cannot
+        // keep their pending work behind hidden panes' HashMap iteration order.
+        let retry_order = terminal_parser_retry_order(self.panes.keys().copied(), &displayed);
+        for id in retry_order {
+            if let Some(PaneRuntime::Terminal(view)) = self.panes.get_mut(&id) {
+                if let Some(frontend) = &mut view.frontend {
                     frontend.retry();
                 }
             }
         }
-        // Hidden panes keep their engine so revisiting them is instant. Only
-        // when a displayed pane is refused for memory do the least recently
-        // focused hidden engines give theirs back, one per retirement, because
-        // the displayed pane retries as soon as each retirement wakes the loop.
+        // Configured pool pressure and the hard app-wide storage ceiling both
+        // reclaim only hidden idle engines. Retiring targets keep their claims.
         let is_displayed_refused = self.panes.iter().any(|(id, pane)| {
-            displayed.contains(id)
-                && matches!(pane, PaneRuntime::Terminal(view)
-                    if view.admission_error.as_deref().is_some_and(|error| error.contains("backpressure")))
-        });
+                displayed.contains(id)
+                    && matches!(pane, PaneRuntime::Terminal(view)
+                        if view.parser_pressure().is_some_and(|pressure| pressure.can_reclaim_hidden_engine()))
+            });
         if is_displayed_refused && parsing.engine_claims() <= engines_held {
             let tree = &self.tree;
             let victim = self
@@ -11364,7 +11831,7 @@ impl App {
                 .iter()
                 .filter(|(id, pane)| {
                     !displayed.contains(id)
-                        && matches!(pane, PaneRuntime::Terminal(view) if view.frontend.is_some())
+                        && matches!(pane, PaneRuntime::Terminal(view) if view.can_evict_parser())
                 })
                 .min_by_key(|(id, _)| {
                     (
@@ -11392,7 +11859,9 @@ impl App {
         }
         let cancelled = self.terminal_input.retain(|id,identity| matches!(self.panes.get(&id),Some(PaneRuntime::Terminal(view)) if std::sync::Arc::ptr_eq(&view.identity,identity)));
         if cancelled != 0 {
-            self.status_message=Some(format!("Cancelled {cancelled} queued terminal inputs after confirmed pane removal/replacement"));
+            self.status_message = Some(format!(
+                "Cancelled {cancelled} queued terminal inputs after confirmed pane removal/replacement"
+            ));
         }
         for (id, identity) in self.terminal_input.needs_barriers() {
             let Some(generation) = self.terminal_input.next_generation() else {
@@ -13296,7 +13765,9 @@ impl App {
                         self.processing_event_retention.as_ref(),
                         self.processing_derivation_retention.as_ref(),
                     ) {
-                        self.status_message = Some(format!("Repository details remain pending: UI allocation admission refused ({reason:?})"));
+                        self.status_message = Some(format!(
+                            "Repository details remain pending: UI allocation admission refused ({reason:?})"
+                        ));
                     }
                 }
             }
@@ -13573,7 +14044,12 @@ impl App {
         };
         self.next_terminal_context_generation = next_generation;
         let home_dir = directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_path_buf());
-        let history_context = self.known_agent_history_context(pane_id);
+        let history_context =
+            self.known_agent_history_context(pane_id)
+                .map(|(agent_class, session_id, pane_cwd)| {
+                    let transcript_hint = self.agent_transcript_paths.get(&pane_id).cloned();
+                    (agent_class, session_id, pane_cwd, transcript_hint)
+                });
         let selection = self
             .terminal_selection
             .filter(|selection| selection.pane_id == pane_id && !selection.is_empty());
@@ -14644,7 +15120,9 @@ impl App {
                 Some(owner) => match owner.try_reserve_derived(reason.len()) {
                     Ok(retention) => Some(retention),
                     Err(error) => {
-                        self.status_message = Some(format!("Worktree action remains unavailable: UI allocation admission refused ({error:?}); see repository details"));
+                        self.status_message = Some(format!(
+                            "Worktree action remains unavailable: UI allocation admission refused ({error:?}); see repository details"
+                        ));
                         return;
                     }
                 },
@@ -15051,6 +15529,7 @@ impl App {
                 actions.insert(0, ContextMenuAction::ShowSplitView);
             }
             Some(node) if node.is_project() => {
+                actions.push(ContextMenuAction::SendMessageToAll);
                 actions.insert(0, ContextMenuAction::AddChatroom);
                 actions.insert(0, ContextMenuAction::ChangeProjectFolder);
                 self.insert_lock_actions(&mut actions, target, 0);
@@ -15058,7 +15537,13 @@ impl App {
                     actions.insert(0, ContextMenuAction::AskForUpdate);
                 }
             }
-            Some(node) if node.is_group() => self.insert_lock_actions(&mut actions, target, 0),
+            Some(node) if node.is_group() => {
+                self.insert_lock_actions(&mut actions, target, 0);
+                actions.extend([
+                    ContextMenuAction::AskForUpdate,
+                    ContextMenuAction::SendMessageToAll,
+                ]);
+            }
             Some(Node {
                 kind:
                     NodeKind::Pane {
@@ -15109,7 +15594,13 @@ impl App {
                 }
             }
             Some(node) if node.is_pane() => actions.insert(0, ContextMenuAction::FocusPane),
-            Some(node) if node.is_folder() => self.insert_lock_actions(&mut actions, target, 0),
+            Some(node) if node.is_folder() => {
+                self.insert_lock_actions(&mut actions, target, 0);
+                actions.extend([
+                    ContextMenuAction::AskForUpdate,
+                    ContextMenuAction::SendMessageToAll,
+                ]);
+            }
             Some(_) => {
                 return ContextMenuAction::ordered(ContextMenuAction::GLOBAL_ACTIONS.to_vec());
             }
@@ -15159,6 +15650,7 @@ impl App {
                 self.status_message = Some("Prompt queue cleared".to_string());
             }
             ContextMenuAction::AskForUpdate => self.action_ask_for_update(target),
+            ContextMenuAction::SendMessageToAll => self.open_agent_message_dialog(target),
             ContextMenuAction::ConvertTo(provider) => self.action_convert_session(target, provider),
             ContextMenuAction::Freeze => self.action_freeze_agent(target),
             ContextMenuAction::Unfreeze => self.action_unfreeze_agent(target),
@@ -15222,28 +15714,35 @@ impl App {
             self.status_message = Some("Only a live agent pane can be frozen".to_string());
             return;
         };
+        let Some((provider, session_id)) =
+            self.tree.get(pane_id).and_then(|node| match &node.kind {
+                NodeKind::Pane { status, .. } => status
+                    .agent_state()
+                    .and_then(|state| state.class.provider())
+                    .zip(self.agent_session_ids.get(&pane_id)),
+                _ => None,
+            })
+        else {
+            self.status_message =
+                Some("Cannot freeze: agent session identity is unavailable".into());
+            return;
+        };
+        let resume_command = provider.resume_command(session_id);
         let Ok(screen) = term.painted_source().pinned() else {
             self.status_message = Some("Could not retain the agent screen".to_string());
             return;
         };
-        self.frozen_screens.insert(pane_id, screen);
-        self.persist_frozen_screen(pane_id);
-        self.frozen_panes.insert(pane_id);
-        let resume_command = self
-            .tree
-            .get(pane_id)
-            .and_then(|node| match &node.kind {
-                NodeKind::Pane { status, .. } => status
-                    .agent_state()
-                    .and_then(|state| state.class.provider())
-                    .map(|provider| provider.command_line().to_string()),
-                _ => None,
-            })
-            .unwrap_or_default();
-        self.queue_request(ClientRequest::FreezePane {
+        if !self.queue_request(ClientRequest::FreezePane {
             pane_id,
             resume_command,
-        });
+        }) {
+            return;
+        }
+        self.frozen_screens.insert(pane_id, screen);
+        self.frozen_screen_holds.remove(&pane_id);
+        self.frozen_screen_restore_identities.remove(&pane_id);
+        self.persist_frozen_screen(pane_id);
+        self.frozen_panes.insert(pane_id);
         self.status_message = Some("Agent frozen; process is being stopped".to_string());
     }
 
@@ -15254,59 +15753,72 @@ impl App {
         })
     }
 
-    fn persist_frozen_screen(&self, pane_id: NodeId) {
-        let Some(screen) = self.frozen_screens.get(&pane_id) else {
+    fn persist_frozen_screen(&mut self, pane_id: NodeId) {
+        let Some(screen) = self.frozen_screens.get(&pane_id).cloned() else {
             return;
         };
         let Some(path) = self.frozen_screen_path(pane_id) else {
             return;
         };
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        let temporary = path.with_extension("bin.tmp");
-        if std::fs::write(&temporary, screen.frozen_bytes()).is_ok() {
-            let _ = std::fs::rename(temporary, path);
+        let target = crate::filesystem::editors::FrozenScreenTarget {
+            pane_id,
+            identity: Arc::clone(&screen.identity),
+        };
+        let Some(files) = self.editor_files.as_mut() else {
+            self.status_message = Some("Frozen screen worker is unavailable".into());
+            return;
+        };
+        if let Err(error) = files.save_frozen_screen(target, path, screen) {
+            self.status_message = Some(format!("Could not save frozen screen: {error}"));
         }
     }
 
     pub(crate) fn restore_frozen_screen(&mut self, pane_id: NodeId) {
+        if self.frozen_screens.contains_key(&pane_id)
+            || self.frozen_screen_restore_identities.contains_key(&pane_id)
+        {
+            return;
+        }
         let Some(path) = self.frozen_screen_path(pane_id) else {
             return;
         };
-        let Ok(bytes) = std::fs::read(path) else {
+        let Some(files) = self.editor_files.as_mut() else {
+            self.status_message = Some("Frozen screen worker is unavailable".into());
             return;
         };
-        if let Ok(screen) = crate::terminal_view::PaintedTerminal::from_frozen_bytes(&bytes) {
-            self.frozen_screens.insert(pane_id, screen);
+        let identity = Arc::new(());
+        let target = crate::filesystem::editors::FrozenScreenTarget {
+            pane_id,
+            identity: Arc::clone(&identity),
+        };
+        if let Err(error) = files.load_frozen_screen(target, path) {
+            self.status_message = Some(error);
+        } else {
+            self.frozen_screen_restore_identities
+                .insert(pane_id, identity);
         }
     }
 
+    pub(crate) fn discard_frozen_screen_restore(&mut self, pane_id: NodeId) {
+        self.frozen_screen_restore_identities.remove(&pane_id);
+        self.frozen_screen_holds.remove(&pane_id);
+        self.frozen_screens.remove(&pane_id);
+    }
+
     pub fn action_unfreeze_agent(&mut self, pane_id: NodeId) {
-        let Some(session_id) = self.agent_session_ids.get(&pane_id).cloned() else {
-            self.status_message =
-                Some("Cannot unfreeze: session identity is unavailable".to_string());
+        if !self.frozen_panes.contains(&pane_id) {
+            self.status_message = Some("This pane is not frozen".to_string());
             return;
-        };
-        let Some(provider) = self.tree.get(pane_id).and_then(|node| match &node.kind {
-            NodeKind::Pane { status, .. } => status
-                .agent_state()
-                .and_then(|state| state.class.provider()),
-            _ => None,
-        }) else {
-            self.status_message =
-                Some("Cannot unfreeze: agent provider is unavailable".to_string());
-            return;
-        };
-        self.frozen_panes.remove(&pane_id);
+        }
         self.auto_freeze_since.remove(&pane_id);
-        self.queue_request(ClientRequest::ReplacePaneWithCommand {
-            pane_id,
-            command_line: crate::session_conversion::ConversionDialogState::resume_command(
-                provider,
-                &session_id,
-            ),
-        });
+        // Focus must reach the server while the frozen pane still exists;
+        // UnfreezePane replaces it with a new pane ID.
+        self.focus_pane(pane_id);
+        if !self.queue_request(ClientRequest::UnfreezePane { pane_id }) {
+            return;
+        }
+        // Carry focus across the server's new pane ID at the same tree slot.
+        self.remember_replacement_focus(pane_id);
         self.status_message = Some("Unfreezing agent…".to_string());
     }
 
@@ -15374,9 +15886,30 @@ impl App {
     /// single pane, a project/group (every eligible pane inside it), or
     /// `ROOT_ID` (every eligible pane in the whole tree).
     pub fn action_ask_for_update(&mut self, target: NodeId) {
-        let pane_ids = self.tree.panes_eligible_for_update(target);
+        let is_folder = self
+            .tree
+            .get(target)
+            .is_some_and(|node| node.is_group() || node.is_folder());
+        let pane_ids = if is_folder {
+            match crate::agent_message_dialog::Scope::capture(&self.tree, target) {
+                Ok(scope) => scope.recipients(&self.tree),
+                Err(error) => {
+                    self.status_message = Some(error);
+                    return;
+                }
+            }
+        } else {
+            self.tree.panes_eligible_for_update(target)
+        };
         if pane_ids.is_empty() {
-            self.status_message = Some("No idle agent to ask for an update".to_string());
+            self.status_message = Some(
+                if is_folder {
+                    "No agent in this folder"
+                } else {
+                    "No idle agent to ask for an update"
+                }
+                .to_string(),
+            );
             return;
         }
         let mut pane_count = 0;
@@ -15394,6 +15927,154 @@ impl App {
         } else {
             format!("Asked {pane_count} agents for an update")
         });
+    }
+
+    pub fn open_agent_message_dialog(&mut self, target: NodeId) {
+        use crate::agent_message_dialog::{AgentMessageDialog, Recipient, RecipientState, Scope};
+        let scope = match Scope::capture(&self.tree, target) {
+            Ok(scope) => scope,
+            Err(error) => {
+                self.status_message = Some(error);
+                return;
+            }
+        };
+        let recipients = scope
+            .recipients(&self.tree)
+            .into_iter()
+            .filter_map(|pane_id| {
+                let node = self.tree.get(pane_id)?;
+                let NodeKind::Pane {
+                    status: PaneStatus::Agent(agent),
+                    ..
+                } = &node.kind
+                else {
+                    return None;
+                };
+                Some(Recipient {
+                    pane_id,
+                    label: format!("{} · {:?}", node.name, agent.turn),
+                    checked: true,
+                    state: RecipientState::Pending,
+                })
+            })
+            .collect();
+        let title = self
+            .tree
+            .get(target)
+            .map(|node| node.name.clone())
+            .unwrap_or_default();
+        let mut state = AgentMessageDialog::new(target, title, recipients);
+        state.scope = Some(scope);
+        self.mode = Mode::AgentMessageDialog(Box::new(state));
+    }
+
+    /// Queue admission is distinct from delivery. Keep successful admissions
+    /// recorded so ordinary retries cannot duplicate input in those panes.
+    pub fn finish_agent_message_dialog(
+        &mut self,
+        mut state: Box<crate::agent_message_dialog::AgentMessageDialog>,
+        outcome: crate::agent_message_dialog::Outcome,
+    ) {
+        use crate::agent_message_dialog::{Outcome, RecipientState, Scope};
+        if outcome == Outcome::Cancel {
+            self.mode = Mode::Normal;
+            return;
+        }
+        if outcome == Outcome::Continue {
+            self.mode = Mode::AgentMessageDialog(state);
+            return;
+        }
+        let text = state.text();
+        let selected = state.selected_ids();
+        let error = if text.trim().is_empty() {
+            Some("Enter a message")
+        } else if selected.is_empty() {
+            Some("Select at least one agent that has not already been queued")
+        } else {
+            None
+        };
+        if let Some(error) = error {
+            state.error = Some(error.into());
+            self.mode = Mode::AgentMessageDialog(state);
+            return;
+        }
+        let current_scope = Scope::capture(&self.tree, state.target);
+        if current_scope.as_ref().ok() != state.scope.as_ref() {
+            state.error =
+                Some("The project or folder scope changed. Cancel and reopen the dialog.".into());
+            self.mode = Mode::AgentMessageDialog(state);
+            return;
+        }
+        if (text.contains('\n') || text.contains('\r'))
+            && selected.iter().any(|pane_id| {
+                !matches!(self.panes.get(pane_id), Some(PaneRuntime::Terminal(view)) if view.wants_bracketed_paste())
+            })
+        {
+            state.error = Some("Multiline messages need bracketed paste enabled in every selected agent terminal".into());
+            self.mode = Mode::AgentMessageDialog(state);
+            return;
+        }
+        let scope = current_scope.expect("scope validated above");
+        let mut queued = 0;
+        let mut failed = 0;
+        let mut unavailable = 0;
+        for pane_id in selected {
+            let recipient = state
+                .recipients
+                .iter_mut()
+                .find(|recipient| recipient.pane_id == pane_id)
+                .expect("selected snapshot recipient");
+            if !scope.recipients(&self.tree).contains(&pane_id) {
+                recipient.checked = false;
+                recipient.state = RecipientState::Unavailable(
+                    "Agent removed, changed, or moved outside this folder".into(),
+                );
+                unavailable += 1;
+                continue;
+            }
+            let admitted = if state.press_enter {
+                self.send_terminal_submission(
+                    pane_id,
+                    text.clone(),
+                    PromptSubmissionSource::Keyboard,
+                )
+                .is_ok()
+            } else {
+                // Resolve paste mode for each live terminal, including retries.
+                // Embedded newlines retain their ordinary paste semantics.
+                let bytes = match self.panes.get_mut(&pane_id) {
+                    Some(PaneRuntime::Terminal(view)) => {
+                        view.scroll_to_bottom();
+                        if view.wants_bracketed_paste() {
+                            Some(encode_bracketed_paste(&text))
+                        } else {
+                            Some(text.as_bytes().to_vec())
+                        }
+                    }
+                    _ => None,
+                };
+                bytes.is_some_and(|bytes| {
+                    self.send_user_terminal_bytes(pane_id, bytes, None).is_ok()
+                })
+            };
+            if admitted {
+                recipient.checked = false;
+                recipient.state = RecipientState::Queued;
+                queued += 1;
+            } else {
+                failed += 1;
+            }
+        }
+        let report = format!(
+            "Queued for {queued} agents (delivery unconfirmed); {failed} not queued; {unavailable} unavailable"
+        );
+        self.status_message = Some(report.clone());
+        if failed > 0 || unavailable > 0 {
+            state.error = Some(report);
+            self.mode = Mode::AgentMessageDialog(state);
+        } else {
+            self.mode = Mode::Normal;
+        }
     }
 
     /// Validates the complete form before queueing one atomic request. An
@@ -16463,7 +17144,7 @@ impl App {
                     return Err(crate::terminal_input_owner::InputFailure::refused(
                         ilium_execution::RejectReason::InvalidCost,
                         pending.event,
-                    ))
+                    ));
                 }
             };
             let (_, retention) = placeholder.into_parts();
@@ -18490,6 +19171,200 @@ mod tests {
         App::new("test-session".to_string(), std::env::temp_dir())
     }
 
+    #[test]
+    fn icon_arrows_cycle_the_full_catalog_in_both_directions() {
+        use crate::icon_settings::{all_picker_search_results, IconTarget};
+
+        let directory = tempfile::tempdir().expect("temporary app directory");
+        let mut app = App::new("icon-catalog-cycle".into(), directory.path().into());
+        let target = IconTarget::Group;
+        let catalog = all_picker_search_results();
+        let current_index = (0..catalog.entry_count)
+            .find(|index| {
+                let entry = catalog.entry(*index).expect("catalog index is valid");
+                !target.suggestions().contains(&entry.glyph)
+            })
+            .expect("the full catalog extends beyond curated suggestions");
+        let current = catalog.entry(current_index).expect("current icon exists");
+        let next = catalog
+            .entry(current_index + 1)
+            .expect("a following full-catalog icon exists");
+
+        app.ui_settings.icons.set(target, current.glyph.to_string());
+        app.settings_cycle_icon(target, 1);
+        assert_eq!(app.ui_settings.icons.glyph(target), next.glyph);
+
+        app.settings_cycle_icon(target, -1);
+        assert_eq!(app.ui_settings.icons.glyph(target), current.glyph);
+
+        let first = catalog.entry(0).expect("catalog is not empty");
+        let last = catalog
+            .entry(catalog.entry_count - 1)
+            .expect("last catalog icon exists");
+        app.ui_settings.icons.set(target, last.glyph.to_string());
+        app.settings_cycle_icon(target, 1);
+        assert_eq!(app.ui_settings.icons.glyph(target), first.glyph);
+        app.settings_cycle_icon(target, -1);
+        assert_eq!(app.ui_settings.icons.glyph(target), last.glyph);
+    }
+
+    #[test]
+    fn plugin_panel_exposes_sanitized_bounded_runtime_error_details() {
+        use crate::background_animation::test_support::{fake_host, FakeProbe};
+
+        let mut app = app();
+        app.animation_settings.source = crate::animation_plugins::AnimationSourceTab::Plugin;
+        app.animation_settings.plugin.selected = Some(crate::animation_plugins::PluginSelection {
+            package_id: "test.runtime".into(),
+            mode: ilium_animation_js::manifest::AnimationMode::Live,
+            settings: serde_json::json!({}),
+        });
+        let probe = FakeProbe::new();
+        *probe.status.lock().unwrap() =
+            Some(format!("runtime failed\n{}\u{1b}[31m", "x".repeat(600)));
+        *app.animation_frame.host_mut() = fake_host(&probe);
+
+        let model = app.plugin_panel_model();
+        let issue_row = model
+            .rows
+            .iter()
+            .position(|row| *row == crate::animation_plugins::PluginPanelRow::Issues)
+            .expect("runtime failures appear in the Plugin issues row");
+
+        assert_eq!(model.labels[issue_row], "1 package/runtime issue(s)");
+        assert_eq!(model.issue_details.len(), 1);
+        assert_eq!(model.issue_details[0].len(), "Runtime: ".len() + 512);
+        assert!(model.issue_details[0].starts_with("Runtime: runtime failed"));
+        assert!(!model.issue_details[0].contains('\n'));
+        assert!(!model.issue_details[0].contains('\u{1b}'));
+
+        app.plugin_issue_hover = Some(crate::animation_hover::AnimationHover {
+            row: issue_row,
+            since: Instant::now(),
+            is_shown: true,
+        });
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 40)).expect("terminal");
+        terminal
+            .draw(|frame| {
+                crate::animation_plugins::draw_plugin_issue_popover(
+                    frame,
+                    frame.area(),
+                    &app,
+                    &model,
+                    &crate::animation_plugins::PluginPanelState::default(),
+                );
+            })
+            .expect("draw Plugin issue details");
+        let rendered: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(rendered.contains("Plugin issue details"));
+        assert!(rendered.contains("Runtime: runtime failed"));
+
+        app.animation_settings.source = crate::animation_plugins::AnimationSourceTab::Native;
+        assert!(app.plugin_panel_model().issue_details.is_empty());
+    }
+
+    #[test]
+    fn model_icon_setting_fences_live_statusline_actions_and_waits_for_disable_completion() {
+        let mut app = app();
+        let mut enabled = app.ui_settings.clone();
+        enabled.agent_tree_model_icons = true;
+        app.apply_ui_settings(enabled);
+        let enable_generation = app.antigravity_statusline_generation;
+        assert!(app.outbox.iter().any(|request| matches!(
+            request.view(),
+            ClientRequest::UpdateAntigravityStatusline {
+                generation,
+                action: ilium_ipc::AntigravityStatuslineAction::SetCommand { .. },
+            } if *generation == enable_generation
+        )));
+
+        let mut disabled = app.ui_settings.clone();
+        disabled.agent_tree_model_icons = false;
+        app.apply_ui_settings(disabled);
+        let disable_generation = app.antigravity_statusline_generation;
+        assert!(disable_generation > enable_generation);
+        assert_eq!(
+            app.antigravity_disable_pending_generation,
+            Some(disable_generation)
+        );
+        assert!(app.outbox.iter().any(|request| matches!(
+            request.view(),
+            ClientRequest::UpdateAntigravityStatusline {
+                generation,
+                action: ilium_ipc::AntigravityStatuslineAction::DeleteCommand,
+            } if *generation == disable_generation
+        )));
+
+        app.antigravity_statusline_completed(disable_generation, Ok(()));
+        assert_eq!(app.antigravity_disable_pending_generation, None);
+    }
+
+    #[test]
+    fn model_icon_settings_row_toggle_persists_the_new_value() {
+        let config_dir = tempfile::tempdir().unwrap();
+        let mut app = app();
+        app.config_dir = Some(config_dir.path().to_path_buf());
+
+        assert!(!app.ui_settings.agent_tree_model_icons);
+        app.settings_adjust_agent_monitoring_row(AgentMonitoringRow::ModelIcons, 1);
+        assert!(app.ui_settings.agent_tree_model_icons);
+
+        app.settle_filesystem_for_test();
+        assert!(
+            crate::config::load(config_dir.path())
+                .unwrap()
+                .ui
+                .agent_tree_model_icons
+        );
+    }
+
+    #[test]
+    fn disabled_model_icon_startup_waits_for_live_shutdown_completion() {
+        let mut app = app();
+
+        app.initialize_disabled_model_icon_setting();
+
+        let disable_generation = app.antigravity_statusline_generation;
+        assert_eq!(
+            app.antigravity_disable_pending_generation,
+            Some(disable_generation)
+        );
+        assert!(app.outbox.iter().any(|request| matches!(
+            request.view(),
+            ClientRequest::UpdateAntigravityStatusline {
+                generation,
+                action: ilium_ipc::AntigravityStatuslineAction::CancelPending,
+            } if *generation == disable_generation
+        )));
+
+        let stale_generation = disable_generation
+            .checked_sub(1)
+            .expect("startup status-line generation is nonzero");
+        app.antigravity_statusline_completed(stale_generation, Ok(()));
+        assert_eq!(
+            app.antigravity_disable_pending_generation,
+            Some(disable_generation)
+        );
+        assert!(app.status_message.is_none());
+
+        app.antigravity_statusline_completed(
+            disable_generation,
+            Err("pane did not confirm".into()),
+        );
+        assert_eq!(app.antigravity_disable_pending_generation, None);
+        assert!(app
+            .status_message
+            .as_deref()
+            .is_some_and(|message| message.contains("saved settings remain intact")));
+    }
+
     mod create_agent_line_admission_tests {
         use super::*;
 
@@ -18716,6 +19591,26 @@ mod tests {
         app.settings_preview_sound();
         assert!(app.outbox.is_empty());
         assert_eq!(app.status_message.as_deref(), Some("Sound is muted"));
+    }
+
+    #[test]
+    fn sound_preview_sends_missing_file_validation_to_server() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = app();
+        app.sound_settings.source = ilium_sound::SoundSourceKind::SoundFile;
+        app.sound_settings.file = Some(directory.path().join("missing-preview.ogg"));
+
+        assert!(app.settings_preview_sound());
+        assert_eq!(app.outbox.len(), 1);
+        assert!(matches!(
+            app.outbox[0].view(),
+            ClientRequest::PreviewSoundSettings { settings }
+                if settings.file.as_deref() == app.sound_settings.file.as_deref()
+        ));
+        assert_eq!(
+            app.status_message.as_deref(),
+            Some("Sound preview requested")
+        );
     }
 
     #[test]
@@ -19214,6 +20109,24 @@ mod tests {
         app.commit_emitted_geometry(next);
         assert_eq!(app.emitted_layout_revision(), Some(8));
         assert!(app.pointer_geometry_is_current());
+    }
+
+    #[test]
+    fn stale_presentation_ack_cannot_replace_newer_emitted_geometry() {
+        let mut app = app();
+        app.layout = UiLayout::from_screen_area(Rect::new(0, 0, 80, 24));
+        let stale = app.capture_emitted_geometry(7);
+        app.layout = UiLayout::from_screen_area(Rect::new(0, 0, 120, 40));
+        let current = app.capture_emitted_geometry(8);
+
+        app.commit_emitted_geometry(current);
+        app.commit_emitted_geometry(stale);
+
+        assert_eq!(app.emitted_layout_revision(), Some(8));
+        assert_eq!(
+            app.emitted_geometry.unwrap().layout,
+            UiLayout::from_screen_area(Rect::new(0, 0, 120, 40))
+        );
     }
 
     #[test]
@@ -21309,6 +22222,398 @@ mod tests {
     }
 
     #[test]
+    fn folder_agent_message_menu_offers_status_and_send_to_all() {
+        let mut app = app();
+        let project = app
+            .tree
+            .add_project(std::path::PathBuf::from("/tmp/message-menu"))
+            .unwrap();
+        let folder = app.tree.add_group(project, "folder").unwrap();
+        let pane = app
+            .tree
+            .add_pane(folder, "agent", PaneContentKind::Terminal)
+            .unwrap();
+        app.tree
+            .set_pane_status(
+                pane,
+                PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Idle, None),
+            )
+            .unwrap();
+        for target in [project, folder] {
+            let actions = app.context_actions_for(target);
+            assert!(
+                actions.contains(&ContextMenuAction::AskForUpdate),
+                "folder must offer status update"
+            );
+            assert!(
+                actions
+                    .iter()
+                    .any(|action| action.label() == "Send message to all"),
+                "container must offer message dialog"
+            );
+        }
+    }
+
+    #[test]
+    fn agent_message_dialog_sends_selected_snapshot_agents_and_preserves_message() {
+        use crate::agent_message_dialog::Outcome;
+        let mut app = app();
+        let project = app
+            .tree
+            .add_project(PathBuf::from("/tmp/message-send"))
+            .unwrap();
+        let group = app.tree.add_group(project, "folder").unwrap();
+        let first = app
+            .tree
+            .add_pane(group, "first", PaneContentKind::Terminal)
+            .unwrap();
+        let second = app
+            .tree
+            .add_pane(group, "second", PaneContentKind::Terminal)
+            .unwrap();
+        for pane in [first, second] {
+            app.tree
+                .set_pane_status(
+                    pane,
+                    PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Working, None),
+                )
+                .unwrap();
+        }
+        app.open_agent_message_dialog(group);
+        let Mode::AgentMessageDialog(mut state) = std::mem::replace(&mut app.mode, Mode::Normal)
+        else {
+            panic!("message dialog missing");
+        };
+        assert_eq!(state.selected_ids(), vec![first, second]);
+        state.recipients[1].checked = false;
+        state.message.insert_str("  first\n\nsecond  ");
+        let mut first_terminal = TerminalView::new(24, 80);
+        first_terminal.feed(b"\x1b[?2004h");
+        app.panes
+            .insert(first, PaneRuntime::Terminal(Box::new(first_terminal)));
+        let late = app
+            .tree
+            .add_pane(group, "late", PaneContentKind::Terminal)
+            .unwrap();
+        app.tree
+            .set_pane_status(
+                late,
+                PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Idle, None),
+            )
+            .unwrap();
+        app.finish_agent_message_dialog(state, Outcome::Send);
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ClientRequest::SubmitTerminalText {
+                pane_id: first,
+                text: "  first\n\nsecond  ".into(),
+                source: PromptSubmissionSource::Keyboard
+            }]
+        );
+        app.action_ask_for_update(group);
+        let requests = app.take_outbound_requests();
+        assert_eq!(
+            requests.len(),
+            3,
+            "folder status includes busy agents and uses fresh membership"
+        );
+        for request in requests {
+            assert!(matches!(
+                request,
+                ClientRequest::SubmitTerminalText {
+                    source: PromptSubmissionSource::AskForUpdate,
+                    ..
+                }
+            ));
+        }
+    }
+
+    #[test]
+    fn agent_message_dialog_marks_removed_snapshot_recipient_unavailable() {
+        use crate::agent_message_dialog::{Outcome, RecipientState};
+        let mut app = app();
+        let project = app
+            .tree
+            .add_project(PathBuf::from("/tmp/message-removed-recipient"))
+            .unwrap();
+        let group = app.tree.add_group(project, "agents").unwrap();
+        let retained = app
+            .tree
+            .add_pane(group, "retained", PaneContentKind::Terminal)
+            .unwrap();
+        let removed = app
+            .tree
+            .add_pane(group, "removed", PaneContentKind::Terminal)
+            .unwrap();
+        for pane in [retained, removed] {
+            app.tree
+                .set_pane_status(
+                    pane,
+                    PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Working, None),
+                )
+                .unwrap();
+        }
+
+        app.open_agent_message_dialog(group);
+        let Mode::AgentMessageDialog(mut state) = std::mem::replace(&mut app.mode, Mode::Normal)
+        else {
+            panic!("message dialog missing");
+        };
+        assert_eq!(state.selected_ids(), vec![retained, removed]);
+        state.message.insert_str("deliver to the retained agent");
+
+        app.panes.insert(
+            retained,
+            PaneRuntime::Terminal(Box::new(TerminalView::new(24, 80))),
+        );
+        app.tree.remove_node(removed).unwrap();
+        app.finish_agent_message_dialog(state, Outcome::Send);
+
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ClientRequest::SubmitTerminalText {
+                pane_id: retained,
+                text: "deliver to the retained agent".into(),
+                source: PromptSubmissionSource::Keyboard,
+            }]
+        );
+        let Mode::AgentMessageDialog(state) = app.mode else {
+            panic!("dialog must remain open to report the removed recipient");
+        };
+        let removed_row = state
+            .recipients
+            .iter()
+            .find(|row| row.pane_id == removed)
+            .unwrap();
+        assert!(!removed_row.checked);
+        assert!(matches!(removed_row.state, RecipientState::Unavailable(_)));
+        assert_eq!(state.selected_ids(), vec![retained]);
+    }
+
+    #[test]
+    fn agent_message_dialog_marks_moved_snapshot_recipient_unavailable() {
+        use crate::agent_message_dialog::{Outcome, RecipientState};
+        let mut app = app();
+        let project = app
+            .tree
+            .add_project(PathBuf::from("/tmp/message-moved-recipient"))
+            .unwrap();
+        let group = app.tree.add_group(project, "selected agents").unwrap();
+        let outside_group = app.tree.add_group(project, "other agents").unwrap();
+        let retained = app
+            .tree
+            .add_pane(group, "retained", PaneContentKind::Terminal)
+            .unwrap();
+        let moved = app
+            .tree
+            .add_pane(group, "moved", PaneContentKind::Terminal)
+            .unwrap();
+        for pane in [retained, moved] {
+            app.tree
+                .set_pane_status(
+                    pane,
+                    PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Working, None),
+                )
+                .unwrap();
+        }
+
+        app.open_agent_message_dialog(group);
+        let Mode::AgentMessageDialog(mut state) = std::mem::replace(&mut app.mode, Mode::Normal)
+        else {
+            panic!("message dialog missing");
+        };
+        assert_eq!(state.selected_ids(), vec![retained, moved]);
+        state
+            .message
+            .insert_str("deliver only to the retained agent");
+
+        app.panes.insert(
+            retained,
+            PaneRuntime::Terminal(Box::new(TerminalView::new(24, 80))),
+        );
+        app.tree.move_node(moved, outside_group, None).unwrap();
+        app.finish_agent_message_dialog(state, Outcome::Send);
+
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ClientRequest::SubmitTerminalText {
+                pane_id: retained,
+                text: "deliver only to the retained agent".into(),
+                source: PromptSubmissionSource::Keyboard,
+            }]
+        );
+        let Mode::AgentMessageDialog(state) = app.mode else {
+            panic!("dialog must remain open to report the moved recipient");
+        };
+        let moved_row = state
+            .recipients
+            .iter()
+            .find(|row| row.pane_id == moved)
+            .unwrap();
+        assert!(!moved_row.checked);
+        assert!(matches!(moved_row.state, RecipientState::Unavailable(_)));
+        assert_eq!(state.selected_ids(), vec![retained]);
+    }
+
+    #[test]
+    fn agent_message_dialog_without_enter_sends_message_bytes_without_newline() {
+        use crate::agent_message_dialog::Outcome;
+        let mut app = app();
+        let project = app
+            .tree
+            .add_project(PathBuf::from("/tmp/message-without-enter"))
+            .unwrap();
+        let pane = app
+            .tree
+            .add_pane(project, "agent", PaneContentKind::Terminal)
+            .unwrap();
+        app.tree
+            .set_pane_status(
+                pane,
+                PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Idle, None),
+            )
+            .unwrap();
+        let mut terminal = TerminalView::new(24, 80);
+        terminal.feed(b"\x1b[?2004l");
+        app.panes
+            .insert(pane, PaneRuntime::Terminal(Box::new(terminal)));
+
+        app.open_agent_message_dialog(project);
+        let Mode::AgentMessageDialog(mut state) = std::mem::replace(&mut app.mode, Mode::Normal)
+        else {
+            panic!("message dialog missing");
+        };
+        state.press_enter = false;
+        state.message.insert_str("hello agent");
+        app.finish_agent_message_dialog(state, Outcome::Send);
+
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ClientRequest::UserKeyInput {
+                pane_id: pane,
+                bytes: b"hello agent".to_vec(),
+                submission: None,
+                prompt_epoch: None,
+            }],
+            "disabling Enter sends only the message bytes"
+        );
+    }
+
+    #[test]
+    fn agent_message_dialog_keeps_multiline_text_until_every_recipient_supports_paste() {
+        use crate::agent_message_dialog::Outcome;
+        let mut app = app();
+        let project = app
+            .tree
+            .add_project(PathBuf::from("/tmp/message-paste-mode"))
+            .unwrap();
+        let first = app
+            .tree
+            .add_pane(project, "paste-ready", PaneContentKind::Terminal)
+            .unwrap();
+        let second = app
+            .tree
+            .add_pane(project, "plain-terminal", PaneContentKind::Terminal)
+            .unwrap();
+        for pane in [first, second] {
+            app.tree
+                .set_pane_status(
+                    pane,
+                    PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Idle, None),
+                )
+                .unwrap();
+        }
+        let mut paste_ready = TerminalView::new(24, 80);
+        paste_ready.feed(b"\x1b[?2004h");
+        app.panes
+            .insert(first, PaneRuntime::Terminal(Box::new(paste_ready)));
+        let mut plain_terminal = TerminalView::new(24, 80);
+        plain_terminal.feed(b"\x1b[?2004l");
+        app.panes
+            .insert(second, PaneRuntime::Terminal(Box::new(plain_terminal)));
+
+        app.open_agent_message_dialog(project);
+        let Mode::AgentMessageDialog(mut state) = std::mem::replace(&mut app.mode, Mode::Normal)
+        else {
+            panic!("message dialog missing");
+        };
+        state.message.insert_str("first line\nsecond line");
+        app.finish_agent_message_dialog(state, Outcome::Send);
+
+        assert!(
+            app.take_outbound_requests().is_empty(),
+            "preflight must reject the whole selection before queuing to the paste-ready terminal"
+        );
+        let Mode::AgentMessageDialog(mut state) = std::mem::replace(&mut app.mode, Mode::Normal)
+        else {
+            panic!("multiline message was discarded");
+        };
+        assert_eq!(state.text(), "first line\nsecond line");
+        assert_eq!(state.selected_ids(), vec![first, second]);
+        assert!(state
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("bracketed paste")));
+
+        let mut plain_terminal = TerminalView::new(24, 80);
+        plain_terminal.feed(b"\x1b[?2004h");
+        app.panes
+            .insert(second, PaneRuntime::Terminal(Box::new(plain_terminal)));
+        state.press_enter = false;
+        state.error = None;
+        app.finish_agent_message_dialog(state, Outcome::Send);
+
+        let requests = app.take_outbound_requests();
+        assert_eq!(
+            requests.len(),
+            2,
+            "both recipients queue after paste support is enabled"
+        );
+        for request in requests {
+            assert!(
+                matches!(request, ClientRequest::UserKeyInput { pane_id, bytes, .. }
+                if [first, second].contains(&pane_id) && bytes == b"\x1b[200~first line\nsecond line\x1b[201~")
+            );
+        }
+    }
+
+    #[test]
+    fn agent_message_dialog_rejects_blank_or_unselected_input_without_requests() {
+        use crate::agent_message_dialog::Outcome;
+        let mut app = app();
+        let project = app
+            .tree
+            .add_project(PathBuf::from("/tmp/message-empty"))
+            .unwrap();
+        let pane = app
+            .tree
+            .add_pane(project, "agent", PaneContentKind::Terminal)
+            .unwrap();
+        app.tree
+            .set_pane_status(
+                pane,
+                PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Idle, None),
+            )
+            .unwrap();
+        app.open_agent_message_dialog(project);
+        let Mode::AgentMessageDialog(mut state) = std::mem::replace(&mut app.mode, Mode::Normal)
+        else {
+            panic!("message dialog missing");
+        };
+        state.message.insert_str(" \n ");
+        app.finish_agent_message_dialog(state, Outcome::Send);
+        assert!(app.take_outbound_requests().is_empty());
+        let Mode::AgentMessageDialog(mut state) = std::mem::replace(&mut app.mode, Mode::Normal)
+        else {
+            panic!("invalid form was discarded");
+        };
+        state.message.insert_str("message");
+        state.recipients[0].checked = false;
+        app.finish_agent_message_dialog(state, Outcome::Send);
+        assert!(app.take_outbound_requests().is_empty());
+    }
+
+    #[test]
     fn ask_for_update_menu_entry_only_appears_where_an_eligible_pane_exists() {
         let mut app = app();
         let project = app
@@ -21334,7 +22639,8 @@ mod tests {
         }
 
         // Once idle, the entry appears for the pane itself, its project, and
-        // the whole-tree root -- but never for an unrelated empty group.
+        // the whole-tree root. Empty folders offer their own action and
+        // explain the empty recipient scope when invoked.
         app.tree
             .set_pane_status(
                 idle_pane,
@@ -21347,7 +22653,7 @@ mod tests {
                 .context_actions_for(target)
                 .contains(&ContextMenuAction::AskForUpdate));
         }
-        assert!(!app
+        assert!(app
             .context_actions_for(unrelated_group)
             .contains(&ContextMenuAction::AskForUpdate));
     }
@@ -21415,6 +22721,65 @@ mod tests {
                 }
             );
         }
+    }
+
+    #[test]
+    fn agent_message_filesystem_folder_status_update_reaches_agents_within_folder_path() {
+        let mut app = app();
+        let project_path = PathBuf::from("/tmp/ask-for-update-folder-scope");
+        let project = app.tree.add_project(project_path.clone()).unwrap();
+        let group = app.tree.add_group(project, "agents").unwrap();
+        let folder_path = project_path.join("src");
+        let folder = app.tree.add_folder(group, folder_path).unwrap();
+
+        let in_folder = app
+            .tree
+            .add_pane(group, "working-in-folder", PaneContentKind::Terminal)
+            .unwrap();
+        app.tree
+            .set_pane_status(
+                in_folder,
+                PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Working, None),
+            )
+            .unwrap();
+        app.tree
+            .set_pane_launch_cwd(in_folder, project_path.join("src/nested"))
+            .unwrap();
+
+        let outside_folder = app
+            .tree
+            .add_pane(group, "working-outside-folder", PaneContentKind::Terminal)
+            .unwrap();
+        app.tree
+            .set_pane_status(
+                outside_folder,
+                PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Working, None),
+            )
+            .unwrap();
+        app.tree
+            .set_pane_launch_cwd(outside_folder, project_path.join("tests"))
+            .unwrap();
+
+        let folder_actions = app.context_actions_for(folder);
+        assert!(folder_actions.contains(&ContextMenuAction::AskForUpdate));
+        assert!(folder_actions.contains(&ContextMenuAction::SendMessageToAll));
+        app.open_agent_message_dialog(folder);
+        let Mode::AgentMessageDialog(state) = &app.mode else {
+            panic!("filesystem folder did not open the message dialog");
+        };
+        assert_eq!(state.selected_ids(), vec![in_folder]);
+        app.execute_context_action(ContextMenuAction::AskForUpdate, folder);
+
+        assert_eq!(
+            app.take_outbound_requests(),
+            vec![ClientRequest::SubmitTerminalText {
+                pane_id: in_folder,
+                text: "please remind me, in a very compact way, what you were doing, what I asked you to do, how it went, etc, remind me what's going on"
+                    .into(),
+                source: PromptSubmissionSource::AskForUpdate,
+            }],
+            "folder updates include working agents inside the path and exclude agents outside it"
+        );
     }
 
     #[test]
@@ -22014,6 +23379,139 @@ mod tests {
         assert_eq!(app.status_message, None);
         assert!(app.titles_loading.contains(&pane_id));
         assert_eq!(app.take_pending_retitle_requests().len(), 1);
+    }
+
+    #[test]
+    fn freezing_stores_the_provider_session_resume_command() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "agent", PaneContentKind::Terminal)
+            .unwrap();
+        app.tree
+            .set_pane_status(
+                pane_id,
+                PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Working, None),
+            )
+            .unwrap();
+        app.agent_session_ids
+            .insert(pane_id, "00000000-0000-4000-8000-000000000123".to_string());
+        app.panes.insert(
+            pane_id,
+            PaneRuntime::Terminal(Box::new(TerminalView::new(24, 80))),
+        );
+
+        app.action_freeze_agent(pane_id);
+
+        assert!(app.take_outbound_requests().into_iter().any(|request| {
+            matches!(
+                request,
+                ClientRequest::FreezePane { pane_id: requested, resume_command }
+                    if requested == pane_id
+                        && resume_command == "claude --resume 00000000-0000-4000-8000-000000000123"
+            )
+        }));
+    }
+
+    #[test]
+    fn unfreezing_uses_the_server_frozen_origin_without_a_client_session_id() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "frozen agent", PaneContentKind::Terminal)
+            .unwrap();
+        app.frozen_panes.insert(pane_id);
+        // The server can clear this cache when the stopped process exits.
+        assert!(!app.agent_session_ids.contains_key(&pane_id));
+
+        app.action_unfreeze_agent(pane_id);
+
+        assert!(app.frozen_panes.contains(&pane_id));
+        assert!(app.take_outbound_requests().into_iter().any(|request| {
+            matches!(request, ClientRequest::UnfreezePane { pane_id: requested } if requested == pane_id)
+        }));
+    }
+
+    #[test]
+    fn context_menu_unfreeze_targets_the_clicked_frozen_pane_without_a_session_id() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let focused_pane = app
+            .tree
+            .add_pane(group, "focused", PaneContentKind::Terminal)
+            .unwrap();
+        let clicked_pane = app
+            .tree
+            .add_pane(group, "frozen", PaneContentKind::Terminal)
+            .unwrap();
+        app.frozen_panes.insert(clicked_pane);
+        app.right_panel_target = RightPanelTarget::Pane {
+            pane_id: focused_pane,
+        };
+        app.focus = FocusTarget::Pane;
+        assert!(app
+            .context_actions_for(clicked_pane)
+            .contains(&ContextMenuAction::Unfreeze));
+
+        app.execute_context_action(ContextMenuAction::Unfreeze, clicked_pane);
+
+        assert!(app.frozen_panes.contains(&clicked_pane));
+        assert!(!app.agent_session_ids.contains_key(&clicked_pane));
+        assert!(app.take_outbound_requests().into_iter().any(|request| {
+            matches!(request, ClientRequest::UnfreezePane { pane_id } if pane_id == clicked_pane)
+        }));
+    }
+
+    #[test]
+    fn frozen_screen_button_sends_unfreeze_without_a_client_session_id() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "frozen agent", PaneContentKind::Terminal)
+            .unwrap();
+        let terminal = TerminalView::new(24, 80);
+        let frozen_screen = terminal.painted_source().pinned().unwrap();
+        app.panes
+            .insert(pane_id, PaneRuntime::Terminal(Box::new(terminal)));
+        app.frozen_screens.insert(pane_id, frozen_screen);
+        app.frozen_panes.insert(pane_id);
+        app.right_panel_target = RightPanelTarget::Pane { pane_id };
+        app.focus = FocusTarget::Pane;
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+
+        let viewport = app.pane_viewport(pane_id).unwrap();
+        let button = app.frozen_unfreeze_button(viewport).unwrap();
+        let position = Position::new(button.x + button.width / 2, button.y);
+        crate::mouse::handle_mouse_event(
+            &mut app,
+            crossterm::event::MouseEvent {
+                kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+                column: position.x,
+                row: position.y,
+                modifiers: crossterm::event::KeyModifiers::NONE,
+            },
+        );
+
+        assert!(!app.agent_session_ids.contains_key(&pane_id));
+        assert_eq!(app.status_message.as_deref(), Some("Unfreezing agent…"));
+        assert!(app
+            .pending_replacement_focus
+            .is_some_and(|pending| { pending.old_pane_id == pane_id && pending.was_focused }));
+        assert!(app.take_outbound_requests().into_iter().any(|request| {
+            matches!(request, ClientRequest::UnfreezePane { pane_id: requested } if requested == pane_id)
+        }));
+
+        let replacement = app
+            .tree
+            .add_pane(group, "resumed agent", PaneContentKind::Terminal)
+            .unwrap();
+        app.tree.remove_node(pane_id).unwrap();
+        app.apply_pending_replacement_focus();
+        assert_eq!(app.active_pane_id(), Some(replacement));
+        assert!(app.pending_replacement_focus.is_none());
     }
 
     #[test]
@@ -23299,7 +24797,7 @@ mod tests {
             .expect("the detected Codex session should expose its verified JSONL path");
         let action = TerminalContextAction::CopyHistoryFilePathToClipboard { path: history_path };
 
-        assert_eq!(action.label(), "Copy path to history file");
+        assert_eq!(action.label(), "Copy history file path");
         assert_eq!(
             action,
             TerminalContextAction::CopyHistoryFilePathToClipboard {
@@ -23974,7 +25472,10 @@ mod tests {
                 app.collect_clipboard();
                 let requests = app.take_outbound_requests();
                 if disposition != "unchanged-crashed" {
-                    assert!(requests.is_empty(), "late clipboard bytes must not reach a removed or replaced destination: {disposition}");
+                    assert!(
+                        requests.is_empty(),
+                        "late clipboard bytes must not reach a removed or replaced destination: {disposition}"
+                    );
                     assert_eq!(
                         app.terminal_input.pending_count(),
                         0,
@@ -23982,7 +25483,10 @@ mod tests {
                     );
                     continue;
                 }
-                assert!(matches!(requests.as_slice(), [ClientRequest::UserKeyInput { pane_id: actual, bytes, .. }] if *actual == pane_id && *bytes == encode_bracketed_paste(&text)), "manual paste into the same crashed pane must preserve exact bytes and negotiated modes");
+                assert!(
+                    matches!(requests.as_slice(), [ClientRequest::UserKeyInput { pane_id: actual, bytes, .. }] if *actual == pane_id && *bytes == encode_bracketed_paste(&text)),
+                    "manual paste into the same crashed pane must preserve exact bytes and negotiated modes"
+                );
                 assert_eq!(
                     app.terminal_input.pending_count(),
                     1,
@@ -25306,12 +26810,16 @@ mod tests {
         // Asserts the failure names its target rather than quoting an errno
         // string: "No such file or directory" is the Unix wording, and Windows
         // says "The system cannot find the path specified" for the same cause.
-        assert!(app.status_message.as_deref().is_some_and(|message| message
-            .starts_with("Save agent debug log failed for")
-            && message.contains("codex.log")));
+        assert!(app.status_message.as_deref().is_some_and(|message| {
+            message.starts_with("Save agent debug log failed for") && message.contains("codex.log")
+        }));
 
         std::fs::create_dir(directory.path().join("exports")).unwrap();
         assert!(app.save_agent_debug_log(pane_id, "exports/codex.log"));
+        assert!(app
+            .status_message
+            .as_deref()
+            .is_some_and(|message| { message.starts_with("Saving agent debug log to") }));
         let saved = std::fs::read_to_string(directory.path().join("exports/codex.log")).unwrap();
         assert!(saved.contains("ILIUM AGENT DEBUG LOG"));
         assert!(saved.contains("Pane: Codex audit"));

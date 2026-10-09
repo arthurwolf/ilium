@@ -193,13 +193,13 @@ fn resolve_path(app: &App, requested_path: &str) -> Result<NodeId, String> {
                 return Err(ilium_prompts::render_value(
                     "voice/resolver/no-child-named-v0-exists-under",
                     &serde_json::json!({"v0": format!("{:?}", component), "v1": (node_path(app, current)).to_string()}),
-                ))
+                ));
             }
             _ => {
                 return Err(ilium_prompts::render_value(
                     "voice/resolver/path-component-v0-is-ambiguous-under",
                     &serde_json::json!({"v0": format!("{:?}", component), "v1": (node_path(app, current)).to_string()}),
-                ))
+                ));
             }
         }
     }

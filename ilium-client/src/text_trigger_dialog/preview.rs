@@ -18,6 +18,9 @@ use super::{TextTriggerDialogState, TextTriggerPreviewIssue};
 
 const MIB: usize = 1024 * 1024;
 
+const REGEX_NFA_SIZE_LIMIT_BYTES: usize = 10 * MIB;
+const REGEX_DFA_CACHE_SIZE_LIMIT_BYTES: usize = 2 * MIB;
+
 const MAX_REGEXP_BYTES: usize = 256 * 1024;
 const MAX_MESSAGE_BYTES: usize = 256 * 1024;
 const MAX_SAMPLE_BYTES: usize = MIB;
@@ -36,11 +39,11 @@ const CAPTURE_RETRY_INTERVAL: Duration = Duration::from_millis(1);
 const ADMISSION_RETRY_INTERVAL: Duration = Duration::from_millis(25);
 
 const JOB_COST: JobCost = JobCost {
-    // Cooperative declared working cost, not an allocator/RSS bound. Pinned
-    // regex defaults retain up to 10 MiB NFA and 2 MiB hybrid cache. Source
-    // copies have separate 4 MiB retirement admission; output has separate
-    // 4 MiB admission and this result debit. Regex compiler AST/temporary
-    // scratch is opaque: these defaults do not strictly cap its peak.
+    // Cooperative declared working cost, not an allocator/RSS bound. Explicit
+    // regex NFA and hybrid-cache limits are 10 MiB and 2 MiB; they do not bound
+    // regex parser/compiler AST and temporary scratch. Source copies have
+    // separate 4 MiB retirement admission; output has separate 4 MiB admission
+    // and this result debit.
     input_bytes: 16 * MIB,
     result_bytes: 4 * MIB,
 };
@@ -954,7 +957,11 @@ fn build_preview(
         return Ok("Enter a regexp to preview matching sample lines.".to_owned());
     }
 
-    let regex = match regex::Regex::new(&captured.regexp) {
+    let regex = match regex::RegexBuilder::new(&captured.regexp)
+        .size_limit(REGEX_NFA_SIZE_LIMIT_BYTES)
+        .dfa_size_limit(REGEX_DFA_CACHE_SIZE_LIMIT_BYTES)
+        .build()
+    {
         Ok(regex) => regex,
 
         Err(error) => {

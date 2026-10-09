@@ -271,7 +271,7 @@ impl IntegrationFiles {
             IntegrationIntent::Append { room, .. } | IntegrationIntent::AddRoom(room)
                 if room.path.capacity() > 64 * 1024 =>
             {
-                return Err("Chatroom target exceeds retained path limit".into())
+                return Err("Chatroom target exceeds retained path limit".into());
             }
             _ => {}
         }

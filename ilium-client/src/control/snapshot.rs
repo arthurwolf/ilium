@@ -612,6 +612,7 @@ fn settings_snapshot(app: &App) -> Value {
         "terminal": {
             "scrollback_budget_mib": app.terminal_settings.scrollback_budget_mib,
             "engine_memory_budget_mib": app.terminal_settings.engine_memory_budget_mib,
+            "parser_pool_enabled": app.terminal_settings.engine_memory_budget_mib != 0,
             "new_pane_directory": format!("{:?}", app.terminal_settings.new_pane_directory).to_ascii_lowercase(),
             "smart_copy_light": app.terminal_settings.smart_copy_light,
             "smart_copy_light_key": app.terminal_settings.smart_copy_light_key.config_name(),
@@ -796,6 +797,7 @@ pub(crate) fn mode_label(mode: &Mode) -> &'static str {
         Mode::QueuePrompt(_) => "queue_prompt",
         Mode::ValueDialog(_) => "value_options",
         Mode::TextTriggerDialog(_) => "text_trigger_dialog",
+        Mode::AgentMessageDialog(_) => "agent_message_dialog",
         Mode::EditorLineContextMenu(_) => "editor_line_menu",
         Mode::CreateAgentFromLine(_) => "create_agent",
         Mode::CreateAgentWorkspace(_) => "create_agent_workspace",

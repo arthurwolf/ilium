@@ -31,8 +31,14 @@ use unicode_width::UnicodeWidthStr;
 pub const PANEL_WIDTH: u16 = 112;
 /// Rows above each list: the column heading.
 const HEADER_ROWS: u16 = 1;
-/// Rows below the lists: two help lines, the status line and the key hint.
+/// Default rows below the lists: two help lines, the status line and key hint.
 const FOOTER_ROWS: u16 = 4;
+/// Maximum live preparation-log rows that may displace the settings list.
+const MAX_ACTIVITY_VIEW_ROWS: u16 = 8;
+/// Selected-control context remains visible above the saved-scene status and log.
+const PINNED_CONTROL_HELP_ROWS: u16 = 2;
+/// Activity and expanded-help panels move by this many rows per page key.
+const SETTINGS_ACTIVITY_PAGE_ROWS: u16 = 8;
 /// Rows of the Prev/Next button line under the scene list.
 const NAV_ROWS: u16 = 1;
 /// Widest button of the Prev/Next line, in cells.
@@ -197,12 +203,133 @@ pub fn layout(area: Rect) -> AnimationLayout {
     layout_with_footer(area, FOOTER_ROWS)
 }
 
-fn footer_rows(area: Rect, model: &RowModel) -> u16 {
+fn saved_scene_activity_report(model: &RowModel) -> Option<String> {
+    if model.effective_kind() != Some(AnimationKind::VoxelLandscape) {
+        return None;
+    }
+    let row = model
+        .rows()
+        .iter()
+        .position(|row| *row == AnimationRow::SceneStatus)?;
+    let view = model.view(row)?;
+    (view.help.lines().count() > 1)
+        .then(|| format!("{}: {}\n{}", view.label, view.value, view.help))
+}
+
+fn saved_scene_activity_sections(report: &str) -> (String, String) {
+    let mut progress = None;
+    let mut elapsed = None;
+    let mut stage_eta = None;
+    let mut total_eta = None;
+    let mut route_eta = None;
+    let mut current_work = None;
+    let mut activity = Vec::new();
+    let mut in_activity = false;
+
+    for line in report.lines() {
+        if let Some(first_event) = line.strip_prefix("Recent activity:") {
+            in_activity = true;
+            let first_event = first_event.trim();
+            if !first_event.is_empty() {
+                activity.push(first_event);
+            }
+            continue;
+        }
+        if in_activity {
+            activity.push(line);
+        } else if line.starts_with("Scene Status:") {
+            progress = Some(line);
+        } else if line.starts_with("Elapsed:") {
+            elapsed = Some(line);
+        } else if line.starts_with("ETA:") {
+            stage_eta = Some(line);
+        } else if line.starts_with("Route ETA:") {
+            route_eta = Some(line.split(';').next().unwrap_or(line));
+        } else if line.starts_with("Now:") {
+            current_work = Some(line);
+        } else if line.starts_with("Total ETA:") {
+            total_eta = Some(line);
+        }
+    }
+
+    (
+        [
+            progress,
+            elapsed,
+            stage_eta,
+            route_eta,
+            total_eta,
+            current_work,
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join("\n"),
+        activity.join("\n"),
+    )
+}
+
+fn wrapped_rows(text: &str, width: u16) -> u16 {
+    Paragraph::new(text)
+        .wrap(Wrap { trim: true })
+        .line_count(width.max(1)) as u16
+}
+
+pub(crate) fn has_saved_scene_activity(app: &App) -> bool {
+    saved_scene_activity_report(&app.animation_row_model()).is_some()
+}
+
+pub(crate) fn page_saved_scene_activity(app: &App, state: &mut SettingsState, older: bool) -> bool {
+    let model = app.animation_row_model();
+    let Some(report) = saved_scene_activity_report(&model) else {
+        return false;
+    };
+    let (summary, activity) = saved_scene_activity_sections(&report);
+    let mut area = crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, app, state)
+        .content_area;
+    let instruction_height = crate::instruction_settings::panel_height(state.tab, area);
+    area.y += instruction_height;
+    area.height = area.height.saturating_sub(instruction_height);
+    let credits = credit_footer_rows(area, &model);
+    let footer_height = footer_rows(area, &model);
+    let panel = layout_with_footer(area, footer_height).panel;
+    let detail_rows = footer_height.saturating_sub(2 + credits);
+    let summary_rows = wrapped_rows(&summary, panel.width);
+    let activity_rows = detail_rows
+        .saturating_sub(PINNED_CONTROL_HELP_ROWS)
+        .saturating_sub(summary_rows);
+    let total_rows = wrapped_rows(&activity, panel.width);
+    let maximum_scroll = total_rows.saturating_sub(activity_rows);
+
+    if older {
+        let current = state
+            .animation_activity_scroll_from_top
+            .unwrap_or(maximum_scroll);
+        state.animation_activity_scroll_from_top =
+            Some(current.saturating_sub(SETTINGS_ACTIVITY_PAGE_ROWS));
+    } else if let Some(current) = state.animation_activity_scroll_from_top {
+        let next = current.saturating_add(SETTINGS_ACTIVITY_PAGE_ROWS);
+        state.animation_activity_scroll_from_top = (next < maximum_scroll).then_some(next);
+    }
+    true
+}
+
+fn selected_control_help(model: &RowModel, selected_row: usize) -> String {
+    model
+        .view(selected_row)
+        .map_or_else(String::new, |view| match view.number() {
+            Some((minimum, maximum, _, _)) => format!(
+                "{}: {} ({}..{}). {}",
+                view.label, view.value, minimum, maximum, view.help
+            ),
+            None => format!("{}: {}. {}", view.label, view.value, view.help),
+        })
+}
+
+fn credit_footer_rows(area: Rect, model: &RowModel) -> u16 {
     let urls = model
         .effective_kind()
         .map_or(&[] as &'static [&'static str], |kind| kind.inspired_by());
-    // The credit sits beside the panel only when its longest line fits whole
-    // there; otherwise it gets footer rows of its own under the controls.
     let longest = urls
         .iter()
         .map(|url| UnicodeWidthStr::width(*url) + 14)
@@ -211,10 +338,27 @@ fn footer_rows(area: Rect, model: &RowModel) -> u16 {
     if area.height < 12
         || area.width.saturating_sub(layout(area).panel.width) as usize >= longest.max(16)
     {
-        return FOOTER_ROWS;
+        0
+    } else if urls.is_empty() {
+        0
+    } else {
+        urls.len() as u16 + 1
     }
-    let credits = urls.len();
-    FOOTER_ROWS + if credits > 0 { credits as u16 + 1 } else { 0 }
+}
+
+fn footer_rows(area: Rect, model: &RowModel) -> u16 {
+    let credits = credit_footer_rows(area, model);
+    let Some(report) = saved_scene_activity_report(model) else {
+        return FOOTER_ROWS + credits;
+    };
+    let (summary, activity) = saved_scene_activity_sections(&report);
+    let summary_rows = wrapped_rows(&summary, layout(area).panel.width);
+    let activity_rows =
+        wrapped_rows(&activity, layout(area).panel.width).min(MAX_ACTIVITY_VIEW_ROWS);
+    let requested = summary_rows + activity_rows + PINNED_CONTROL_HELP_ROWS + 2 + credits;
+    // Keep at least six rows of the settings panel usable on short terminals;
+    // PageUp/PageDown makes the bounded live-log viewport fully navigable.
+    requested.min(area.height.saturating_sub(6).max(FOOTER_ROWS))
 }
 
 fn geometry(area: Rect, model: &RowModel) -> AnimationLayout {
@@ -921,12 +1065,7 @@ pub fn plugin_editor_option_at(
         return None;
     };
     let panel = layout(area).panel;
-    let body = Rect::new(
-        panel.x,
-        panel.y.saturating_add(2),
-        panel.width,
-        panel.height.saturating_sub(4),
-    );
+    let body = plugin_editor_body(panel);
     let scroll = cursor.saturating_sub(usize::from(body.height).saturating_sub(1));
     crate::animation_plugins::plugin_row_at(body, scroll, options.len(), position)
 }
@@ -937,16 +1076,37 @@ pub enum PluginEditorAction {
     Cancel,
 }
 
+fn plugin_editor_body(panel: Rect) -> Rect {
+    let inner = crate::theme::block(true).inner(panel);
+    Rect::new(
+        inner.x,
+        inner.y,
+        inner.width,
+        inner.height.saturating_sub(2),
+    )
+}
+
+fn plugin_editor_action_row(panel: Rect) -> Rect {
+    let inner = crate::theme::block(true).inner(panel);
+    Rect::new(
+        inner.x,
+        inner.bottom().saturating_sub(1),
+        inner.width,
+        u16::from(inner.height > 0),
+    )
+}
+
 pub fn plugin_editor_action_at(area: Rect, position: Position) -> Option<PluginEditorAction> {
     let panel = layout(area).panel;
-    if panel.height == 0 {
+    let row = plugin_editor_action_row(panel);
+    if row.height == 0 {
         return None;
     }
-    let apply = Rect::new(panel.x, panel.bottom() - 1, panel.width.min(9), 1);
+    let apply = Rect::new(row.x, row.y, row.width.min(7), 1);
     let cancel = Rect::new(
-        panel.x.saturating_add(9),
-        panel.bottom() - 1,
-        panel.width.saturating_sub(9).min(9),
+        row.x.saturating_add(9),
+        row.y,
+        row.width.saturating_sub(9).min(8),
         1,
     );
     if apply.contains(position) {
@@ -964,18 +1124,12 @@ fn render_plugin_editor(
     editor: &crate::animation_plugins::PluginEditor,
     ink: Style,
 ) {
+    let block = crate::theme::block(true).title(crate::theme::chrome_title(&editor.label));
+    let inner = block.inner(panel);
+    let body = plugin_editor_body(panel);
+    let action_row = plugin_editor_action_row(panel);
     frame.render_widget(Clear, panel);
-    frame.render_widget(Block::default().style(ink), panel);
-    frame.render_widget(
-        Paragraph::new(editor.label.as_str()).style(ink.add_modifier(Modifier::BOLD)),
-        Rect::new(panel.x, panel.y, panel.width, panel.height.min(1)),
-    );
-    let body = Rect::new(
-        panel.x,
-        panel.y.saturating_add(2),
-        panel.width,
-        panel.height.saturating_sub(4),
-    );
+    frame.render_widget(block, panel);
     match &editor.kind {
         crate::animation_plugins::PluginEditorKind::Choice { options, cursor } => {
             let scroll = cursor.saturating_sub(usize::from(body.height).saturating_sub(1));
@@ -1004,7 +1158,7 @@ fn render_plugin_editor(
             frame.render_widget(Paragraph::new(editor.input.as_str()).style(ink), body);
         }
     }
-    if panel.height >= 2 {
+    if inner.height >= 2 {
         frame.render_widget(
             Paragraph::new(
                 editor
@@ -1013,12 +1167,9 @@ fn render_plugin_editor(
                     .unwrap_or("Enter applies · Esc cancels"),
             )
             .style(ink),
-            Rect::new(panel.x, panel.bottom() - 2, panel.width, 1),
+            Rect::new(inner.x, action_row.y.saturating_sub(1), inner.width, 1),
         );
-        frame.render_widget(
-            Paragraph::new("[Apply]  [Cancel]").style(ink),
-            Rect::new(panel.x, panel.bottom() - 1, panel.width, 1),
-        );
+        frame.render_widget(Paragraph::new("[Apply]  [Cancel]").style(ink), action_row);
     }
 }
 
@@ -1078,6 +1229,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
         }
         return;
     }
+
+    draw_column_divider(frame, area, layout);
 
     let bold = ink.add_modifier(Modifier::BOLD);
     if layout.scene_heading.height > 0 {
@@ -1181,19 +1334,73 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
         return;
     }
     let footer_top = panel.bottom() - footer_height;
-    let help = model
-        .view(state.selected_row)
-        .map_or_else(String::new, |view| match view.number() {
-            Some((minimum, maximum, _, _)) => format!(
-                "{}: {} ({}..{}). {}",
-                view.label, view.value, minimum, maximum, view.help
-            ),
-            None => format!("{}: {}. {}", view.label, view.value, view.help),
-        });
-    frame.render_widget(
-        Paragraph::new(help).style(ink).wrap(Wrap { trim: true }),
-        Rect::new(panel.x, footer_top, panel.width, 2),
-    );
+    let live_activity = saved_scene_activity_report(&model);
+    let activity_sections = live_activity.as_deref().map(saved_scene_activity_sections);
+    let control_help = selected_control_help(&model, state.selected_row);
+    let credits = credit_footer_rows(area, &model);
+    let detail_rows = footer_height.saturating_sub(2 + credits);
+    let status_y = footer_top + detail_rows;
+    let activity_visible = live_activity.is_some();
+    if live_activity.is_some() {
+        if state.animation_detail_show_help {
+            let help = Paragraph::new(control_help.as_str())
+                .wrap(Wrap { trim: true })
+                .style(ink);
+            let maximum_scroll = (help.line_count(panel.width) as u16).saturating_sub(detail_rows);
+            frame.render_widget(
+                help.scroll((state.animation_detail_scroll.min(maximum_scroll), 0)),
+                Rect::new(panel.x, footer_top, panel.width, detail_rows),
+            );
+        } else {
+            let pinned_rows = detail_rows.min(PINNED_CONTROL_HELP_ROWS);
+            frame.render_widget(
+                Paragraph::new(control_help.as_str())
+                    .style(ink)
+                    .wrap(Wrap { trim: true }),
+                Rect::new(panel.x, footer_top, panel.width, pinned_rows),
+            );
+            let summary = activity_sections
+                .as_ref()
+                .map_or("", |(summary, _)| summary.as_str());
+            let summary_rows =
+                wrapped_rows(summary, panel.width).min(detail_rows.saturating_sub(pinned_rows));
+            if summary_rows > 0 {
+                frame.render_widget(
+                    Paragraph::new(summary).style(ink).wrap(Wrap { trim: true }),
+                    Rect::new(panel.x, footer_top + pinned_rows, panel.width, summary_rows),
+                );
+            }
+            let activity_area = Rect::new(
+                panel.x,
+                footer_top + pinned_rows + summary_rows,
+                panel.width,
+                detail_rows
+                    .saturating_sub(pinned_rows)
+                    .saturating_sub(summary_rows),
+            );
+            if activity_area.height > 0 {
+                let activity_text = activity_sections
+                    .as_ref()
+                    .map_or("", |(_, activity)| activity.as_str());
+                let activity = Paragraph::new(activity_text)
+                    .style(ink)
+                    .wrap(Wrap { trim: true });
+                let total_rows = activity.line_count(panel.width) as u16;
+                let maximum_scroll = total_rows.saturating_sub(activity_area.height);
+                let from_top = state
+                    .animation_activity_scroll_from_top
+                    .map_or(maximum_scroll, |scroll| scroll.min(maximum_scroll));
+                frame.render_widget(activity.scroll((from_top, 0)), activity_area);
+            }
+        }
+    } else {
+        frame.render_widget(
+            Paragraph::new(control_help.as_str())
+                .style(ink)
+                .wrap(Wrap { trim: true }),
+            Rect::new(panel.x, footer_top, panel.width, detail_rows),
+        );
+    }
     let semantic_error = app.semantic_animation_error();
     frame.render_widget(
         Paragraph::new(fit(
@@ -1204,25 +1411,37 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
             usize::from(panel.width),
         ))
         .style(ink),
-        Rect::new(panel.x, footer_top + 2, panel.width, 1),
+        Rect::new(panel.x, status_y, panel.width, 1),
     );
-    frame.render_widget(
-        Paragraph::new(fit(
-            "\u{2191}\u{2193} row \u{b7} \u{2190}\u{2192} adjust \u{b7} Enter set \u{b7} [ ] prev/next scene \u{b7} f full screen",
-            usize::from(panel.width),
-        ))
-        .style(ink.add_modifier(Modifier::DIM)),
-        Rect::new(panel.x, footer_top + 3, panel.width, 1),
-    );
-    render_inspired_by(
-        frame,
-        area,
-        app,
-        if footer_height > FOOTER_ROWS {
-            0
+    let instructions = if activity_visible {
+        if state.animation_detail_show_help {
+            "PgUp/PgDn selected help \u{b7} ? live activity \u{b7} Esc closes settings"
         } else {
-            panel.width
-        },
+            "PgUp/PgDn activity log \u{b7} ? selected help \u{b7} \u{2191}\u{2193} row \u{b7} f full screen"
+        }
+    } else {
+        "\u{2191}\u{2193} row \u{b7} \u{2190}\u{2192} adjust \u{b7} Enter set \u{b7} [ ] prev/next scene \u{b7} f full screen"
+    };
+    frame.render_widget(
+        Paragraph::new(fit(instructions, usize::from(panel.width)))
+            .style(ink.add_modifier(Modifier::DIM)),
+        Rect::new(panel.x, status_y + 1, panel.width, 1),
+    );
+    render_inspired_by(frame, area, app, if credits > 0 { 0 } else { panel.width });
+}
+
+/// Use the existing one-cell gutter to distinguish shared animation controls
+/// from the selected scene's controls without reducing either column width.
+fn draw_column_divider(frame: &mut Frame, area: Rect, layout: AnimationLayout) {
+    let x = layout.scenes.right();
+    let width = layout.controls.x.saturating_sub(x);
+    if width == 0 || area.height == 0 || layout.controls.width == 0 {
+        return;
+    }
+    let rows = (0..area.height).map(|_| "│").collect::<Vec<_>>().join("\n");
+    frame.render_widget(
+        Paragraph::new(rows).style(crate::theme::border_style(false)),
+        Rect::new(x, area.y, width, area.height),
     );
 }
 
@@ -1551,7 +1770,7 @@ mod tests {
 
     #[test]
     fn every_native_choice_and_number_paints_and_hits_at_supported_sizes() {
-        use crate::value_control::{ControlAction, ControlStyles, PointerButton};
+        use crate::value_control::{cell_width, ControlAction, ControlStyles, PointerButton};
 
         let mut checked_choices = 0;
         let mut checked_numbers = 0;
@@ -1594,7 +1813,12 @@ mod tests {
                                             }
                                             RowKind::Slider(_) | RowKind::Number { .. } => {
                                                 checked_numbers += 1;
-                                                ("−", "+", "*", ControlAction::EditNumber)
+                                                (
+                                                    crate::value_control::NUMBER_DECREMENT_GLYPH,
+                                                    crate::value_control::NUMBER_INCREMENT_GLYPH,
+                                                    "*",
+                                                    ControlAction::EditNumber,
+                                                )
                                             }
                                             _ => continue,
                                         };
@@ -1619,7 +1843,8 @@ mod tests {
                                             (geometry.open, open),
                                         ] {
                                             assert_eq!(
-                                                rect.width, 1,
+                                                rect.width,
+                                                cell_width(glyph) as u16,
                                                 "{kind:?} {width}x{height}: {} missing {glyph}",
                                                 view.label
                                             );
@@ -1630,10 +1855,17 @@ mod tests {
                                             );
                                         }
                                         assert_eq!(
-                                value_hit(area, &model, scrolls, Position::new(geometry.open.x, geometry.open.y), PointerButton::Left),
-                                Some((row, action)),
-                                "{kind:?} {width}x{height}: {} open button belongs to a different row", view.label
-                            );
+                                            value_hit(
+                                                area,
+                                                &model,
+                                                scrolls,
+                                                Position::new(geometry.open.x, geometry.open.y),
+                                                PointerButton::Left
+                                            ),
+                                            Some((row, action)),
+                                            "{kind:?} {width}x{height}: {} open button belongs to a different row",
+                                            view.label
+                                        );
                                         assert_eq!(
                                             value_hit(
                                                 area,
@@ -1741,7 +1973,12 @@ mod tests {
                 }
                 RowKind::Slider(_) | RowKind::Number { .. } => {
                     numbers += 1;
-                    ("−", "+", "*", ControlAction::EditNumber)
+                    (
+                        crate::value_control::NUMBER_DECREMENT_GLYPH,
+                        crate::value_control::NUMBER_INCREMENT_GLYPH,
+                        "*",
+                        ControlAction::EditNumber,
+                    )
                 }
                 _ => unreachable!(),
             };
@@ -1823,39 +2060,437 @@ mod tests {
 
     #[test]
     fn animation_choice_value_left_steps_forward_and_right_steps_backward() {
-        let (mut app, _probe, _project) = settings_app(140, 120);
-        let row = row_index(&app, &AnimationRow::Common("dither"));
-        let model = app.animation_row_model();
-        let control = value_control(content_area(&app), &model, row, Scrolls::default()).unwrap();
-        let value = control.geometry().value;
-        let before = model.control(row).unwrap().value.clone();
-        let forward = model.control(row).unwrap().stepped(1).unwrap();
+        for width in [140, 80, 60, 40] {
+            let (mut app, _probe, _project) = settings_app(width, 120);
+            let row = row_index(&app, &AnimationRow::Common("dither"));
+            let model = app.animation_row_model();
+            let control =
+                value_control(content_area(&app), &model, row, Scrolls::default()).unwrap();
+            let value = control.geometry().value;
+            let before = model.control(row).unwrap().value.clone();
+            let forward = model.control(row).unwrap().stepped(1).unwrap();
+            pointer(
+                &mut app,
+                MouseEventKind::Down(MouseButton::Left),
+                value.x,
+                value.y,
+            );
+            assert_eq!(
+                app.animation_settings
+                    .common_control("dither")
+                    .unwrap()
+                    .value,
+                forward,
+                "left-click advances the animation selector at width {width}"
+            );
+            pointer(
+                &mut app,
+                MouseEventKind::Down(MouseButton::Right),
+                value.x,
+                value.y,
+            );
+            assert_eq!(
+                app.animation_settings
+                    .common_control("dither")
+                    .unwrap()
+                    .value,
+                before,
+                "right-click reverses the animation selector at width {width}"
+            );
+        }
+    }
+
+    #[test]
+    fn osm_place_plus_selects_and_persists_from_the_complete_city_catalogue() {
+        for width in [140, 80, 60, 40] {
+            let (mut app, _probe, project) = settings_app(width, 120);
+            app.animation_settings.kind = AnimationKind::OpenStreetMap;
+            let (value, open, expected_labels) = {
+                let model = app.animation_row_model();
+                let row = row_index(&app, &AnimationRow::SceneControl("place"));
+                let metadata = model.control(row).expect("OSM place choice metadata");
+                let ilium_ambient::ControlKind::Choice { options } = &metadata.kind else {
+                    panic!("OSM place must remain a finite city choice")
+                };
+                let control = value_control(content_area(&app), &model, row, Scrolls::default())
+                    .expect("OSM place must render the shared selector");
+                (
+                    control.geometry().value,
+                    control.geometry().open,
+                    options
+                        .iter()
+                        .map(|label| (*label).to_owned())
+                        .collect::<Vec<_>>(),
+                )
+            };
+            assert_eq!(expected_labels.len(), 10, "width {width}");
+            assert!(expected_labels.iter().any(|label| label == "Paris"));
+            assert!(expected_labels.iter().any(|label| label == "Tokyo"));
+
+            let current_place = app.animation_settings.ambient.openstreetmap.place;
+            let next_place = (current_place + 1) % expected_labels.len();
+            pointer(
+                &mut app,
+                MouseEventKind::Down(MouseButton::Left),
+                value.x,
+                value.y,
+            );
+            assert_eq!(
+                app.animation_settings.ambient.openstreetmap.place, next_place,
+                "left-click advances the OSM city selector at width {width}"
+            );
+            pointer(
+                &mut app,
+                MouseEventKind::Down(MouseButton::Right),
+                value.x,
+                value.y,
+            );
+            assert_eq!(
+                app.animation_settings.ambient.openstreetmap.place, current_place,
+                "right-click reverses the OSM city selector at width {width}"
+            );
+
+            let _ = draw(&mut app, width, 120);
+            pointer(
+                &mut app,
+                MouseEventKind::Down(MouseButton::Left),
+                open.x,
+                open.y,
+            );
+            let screen = app.layout.screen_area;
+            let Mode::ValueDialog(host) = &app.mode else {
+                panic!("the OSM plus control should open its catalogue at width {width}")
+            };
+            let crate::value_dialog::ValueDialogState::Choice(dialog) = &host.dialog else {
+                panic!("the OSM place catalogue should be a choice dialog")
+            };
+            let dialog_labels = dialog
+                .options()
+                .iter()
+                .map(|option| option.label.clone())
+                .collect::<Vec<_>>();
+            assert_eq!(dialog_labels, expected_labels, "width {width}");
+            let tokyo_index = dialog_labels
+                .iter()
+                .position(|label| label == "Tokyo")
+                .expect("Tokyo remains individually listed");
+            let layout = crate::value_dialog::dialog_layout(screen);
+            let selection = Position::new(
+                layout.document.x + 1,
+                layout.document.y + tokyo_index as u16,
+            );
+            pointer(
+                &mut app,
+                MouseEventKind::Down(MouseButton::Left),
+                selection.x,
+                selection.y,
+            );
+            app.settle_filesystem_for_test();
+            assert!(matches!(app.mode, Mode::Settings(_)), "width {width}");
+            let reloaded = crate::project_config::load(project.path())
+                .unwrap()
+                .animation;
+            assert_eq!(
+                reloaded.ambient.openstreetmap.place, tokyo_index,
+                "width {width}"
+            );
+        }
+    }
+
+    #[test]
+    fn osm_world_sampler_plus_opens_every_named_destination() {
+        let (mut app, _probe, project) = settings_app(140, 120);
+        app.animation_settings.kind = AnimationKind::OpenStreetMap;
+        let osm = &mut app.animation_settings.ambient.openstreetmap;
+        ilium_ambient::SceneSettings::set_control(
+            osm,
+            "source",
+            ilium_ambient::ControlValue::Index(2),
+        )
+        .unwrap();
+        ilium_ambient::SceneSettings::set_control(
+            osm,
+            "selection",
+            ilium_ambient::ControlValue::Index(1),
+        )
+        .unwrap();
+        osm.place_list = "world-sampler".into();
+        osm.destination_id = "paris".into();
+
+        let (open, expected_labels) = {
+            let model = app.animation_row_model();
+            let row = row_index(&app, &AnimationRow::SceneControl("destination"));
+            let metadata = model.control(row).expect("OSM destination choice metadata");
+            let ilium_ambient::ControlKind::Choice { options } = &metadata.kind else {
+                panic!("OSM named destinations must remain a finite choice")
+            };
+            let control = value_control(content_area(&app), &model, row, Scrolls::default())
+                .expect("OSM destinations must render the shared selector");
+            (
+                control.geometry().open,
+                options
+                    .iter()
+                    .map(|label| (*label).to_owned())
+                    .collect::<Vec<_>>(),
+            )
+        };
+        assert!(expected_labels.len() > 10);
+        assert!(expected_labels.iter().any(|label| label == "Chicago"));
+
+        let _ = draw(&mut app, 140, 120);
         pointer(
             &mut app,
             MouseEventKind::Down(MouseButton::Left),
-            value.x,
-            value.y,
+            open.x,
+            open.y,
         );
-        assert_eq!(
-            app.animation_settings
-                .common_control("dither")
-                .unwrap()
-                .value,
-            forward
+        let screen = app.layout.screen_area;
+        let Mode::ValueDialog(host) = &app.mode else {
+            panic!("the OSM destination + control should open its catalogue")
+        };
+        let crate::value_dialog::ValueDialogState::Choice(dialog) = &host.dialog else {
+            panic!("the OSM destination catalogue should be a choice dialog")
+        };
+        let dialog_labels = dialog
+            .options()
+            .iter()
+            .map(|option| option.label.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(dialog_labels, expected_labels);
+        let chicago_index = dialog_labels
+            .iter()
+            .position(|label| label == "Chicago")
+            .expect("Chicago remains individually listed");
+        let layout = crate::value_dialog::dialog_layout(screen);
+        let selection = Position::new(
+            layout.document.x + 1,
+            layout.document.y + chicago_index as u16,
         );
         pointer(
             &mut app,
-            MouseEventKind::Down(MouseButton::Right),
-            value.x,
-            value.y,
+            MouseEventKind::Down(MouseButton::Left),
+            selection.x,
+            selection.y,
         );
+        app.settle_filesystem_for_test();
+        assert!(matches!(app.mode, Mode::Settings(_)));
+        let reloaded = crate::project_config::load(project.path())
+            .unwrap()
+            .animation;
+        assert_eq!(reloaded.ambient.openstreetmap.destination_id, "chicago");
+    }
+
+    #[test]
+    fn osm_tour_list_plus_selects_and_persists_a_full_catalogue_option() {
+        let (mut app, _probe, project) = settings_app(140, 120);
+        app.animation_settings.kind = AnimationKind::OpenStreetMap;
+        let (open, expected_labels) = {
+            let model = app.animation_row_model();
+            let row = row_index(&app, &AnimationRow::SceneControl("place_list"));
+            let metadata = model.control(row).expect("OSM tour-list choice metadata");
+            let ilium_ambient::ControlKind::Choice { options } = &metadata.kind else {
+                panic!("OSM tour lists must remain finite choices")
+            };
+            let control = value_control(content_area(&app), &model, row, Scrolls::default())
+                .expect("OSM tour lists must render the shared selector");
+            (
+                control.geometry().open,
+                options
+                    .iter()
+                    .map(|label| (*label).to_owned())
+                    .collect::<Vec<_>>(),
+            )
+        };
+        assert!(expected_labels.len() >= 4);
+        assert!(expected_labels
+            .iter()
+            .any(|label| label == "Offline Europe"));
+
+        let _ = draw(&mut app, 140, 120);
+        pointer(
+            &mut app,
+            MouseEventKind::Down(MouseButton::Left),
+            open.x,
+            open.y,
+        );
+        let screen = app.layout.screen_area;
+        let Mode::ValueDialog(host) = &app.mode else {
+            panic!("the OSM tour-list + control should open its catalogue")
+        };
+        let crate::value_dialog::ValueDialogState::Choice(dialog) = &host.dialog else {
+            panic!("the OSM tour-list catalogue should be a choice dialog")
+        };
+        let dialog_labels = dialog
+            .options()
+            .iter()
+            .map(|option| option.label.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(dialog_labels, expected_labels);
+        let europe_index = dialog_labels
+            .iter()
+            .position(|label| label == "Offline Europe")
+            .expect("Offline Europe remains individually listed");
+        let layout = crate::value_dialog::dialog_layout(screen);
+        let selection = Position::new(
+            layout.document.x + 1,
+            layout.document.y + europe_index as u16,
+        );
+        pointer(
+            &mut app,
+            MouseEventKind::Down(MouseButton::Left),
+            selection.x,
+            selection.y,
+        );
+        app.settle_filesystem_for_test();
+        assert!(matches!(app.mode, Mode::Settings(_)));
+        let reloaded = crate::project_config::load(project.path())
+            .unwrap()
+            .animation;
+        assert_eq!(reloaded.ambient.openstreetmap.place_list, "offline-europe");
+    }
+
+    #[test]
+    fn osm_place_tour_plus_selects_and_persists_the_catalogue_mode() {
+        let (mut app, _probe, project) = settings_app(140, 120);
+        app.animation_settings.kind = AnimationKind::OpenStreetMap;
+        let (open, expected_labels) = {
+            let model = app.animation_row_model();
+            let row = row_index(&app, &AnimationRow::SceneControl("tour"));
+            let metadata = model.control(row).expect("OSM tour choice metadata");
+            let ilium_ambient::ControlKind::Choice { options } = &metadata.kind else {
+                panic!("OSM place-tour mode must remain a finite choice")
+            };
+            let control = value_control(content_area(&app), &model, row, Scrolls::default())
+                .expect("OSM place-tour mode must render the shared selector");
+            (
+                control.geometry().open,
+                options
+                    .iter()
+                    .map(|label| (*label).to_owned())
+                    .collect::<Vec<_>>(),
+            )
+        };
         assert_eq!(
-            app.animation_settings
-                .common_control("dither")
-                .unwrap()
-                .value,
-            before
+            expected_labels,
+            vec![
+                "Selected place".to_owned(),
+                "Ordered tour".to_owned(),
+                "Shuffled tour".to_owned(),
+            ]
         );
+
+        let _ = draw(&mut app, 140, 120);
+        pointer(
+            &mut app,
+            MouseEventKind::Down(MouseButton::Left),
+            open.x,
+            open.y,
+        );
+        let screen = app.layout.screen_area;
+        let Mode::ValueDialog(host) = &app.mode else {
+            panic!("the OSM place-tour + control should open its catalogue")
+        };
+        let crate::value_dialog::ValueDialogState::Choice(dialog) = &host.dialog else {
+            panic!("the OSM place-tour catalogue should be a choice dialog")
+        };
+        let dialog_labels = dialog
+            .options()
+            .iter()
+            .map(|option| option.label.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(dialog_labels, expected_labels);
+        let shuffled_index = dialog_labels
+            .iter()
+            .position(|label| label == "Shuffled tour")
+            .expect("Shuffled tour remains individually listed");
+        let layout = crate::value_dialog::dialog_layout(screen);
+        let selection = Position::new(
+            layout.document.x + 1,
+            layout.document.y + shuffled_index as u16,
+        );
+        pointer(
+            &mut app,
+            MouseEventKind::Down(MouseButton::Left),
+            selection.x,
+            selection.y,
+        );
+        app.settle_filesystem_for_test();
+        assert!(matches!(app.mode, Mode::Settings(_)));
+        let reloaded = crate::project_config::load(project.path())
+            .unwrap()
+            .animation;
+        assert_eq!(reloaded.ambient.openstreetmap.tour, 2);
+    }
+
+    #[test]
+    fn osm_catalogue_mode_plus_enables_and_persists_the_offline_tour_lists() {
+        let (mut app, _probe, project) = settings_app(140, 120);
+        app.animation_settings.kind = AnimationKind::OpenStreetMap;
+        let (open, expected_labels) = {
+            let model = app.animation_row_model();
+            let row = row_index(&app, &AnimationRow::SceneControl("selection"));
+            let metadata = model
+                .control(row)
+                .expect("OSM catalogue-mode choice metadata");
+            let ilium_ambient::ControlKind::Choice { options } = &metadata.kind else {
+                panic!("OSM catalogue mode must remain a finite choice")
+            };
+            let control = value_control(content_area(&app), &model, row, Scrolls::default())
+                .expect("OSM catalogue mode must render the shared selector");
+            (
+                control.geometry().open,
+                options
+                    .iter()
+                    .map(|label| (*label).to_owned())
+                    .collect::<Vec<_>>(),
+            )
+        };
+        assert_eq!(
+            expected_labels,
+            vec!["Classic place".to_owned(), "Offline tour list".to_owned()]
+        );
+
+        let _ = draw(&mut app, 140, 120);
+        pointer(
+            &mut app,
+            MouseEventKind::Down(MouseButton::Left),
+            open.x,
+            open.y,
+        );
+        let screen = app.layout.screen_area;
+        let Mode::ValueDialog(host) = &app.mode else {
+            panic!("the OSM catalogue-mode + control should open its catalogue")
+        };
+        let crate::value_dialog::ValueDialogState::Choice(dialog) = &host.dialog else {
+            panic!("the OSM catalogue-mode selector should open a choice dialog")
+        };
+        let dialog_labels = dialog
+            .options()
+            .iter()
+            .map(|option| option.label.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(dialog_labels, expected_labels);
+        let list_mode_index = dialog_labels
+            .iter()
+            .position(|label| label == "Offline tour list")
+            .expect("Offline tour list remains individually listed");
+        let layout = crate::value_dialog::dialog_layout(screen);
+        let selection = Position::new(
+            layout.document.x + 1,
+            layout.document.y + list_mode_index as u16,
+        );
+        pointer(
+            &mut app,
+            MouseEventKind::Down(MouseButton::Left),
+            selection.x,
+            selection.y,
+        );
+        app.settle_filesystem_for_test();
+        assert!(matches!(app.mode, Mode::Settings(_)));
+        let reloaded = crate::project_config::load(project.path())
+            .unwrap()
+            .animation;
+        assert!(reloaded.ambient.openstreetmap.is_list_tour());
     }
 
     #[test]
@@ -1932,6 +2567,253 @@ mod tests {
         assert!(narrow.track.width >= 8 && narrow.value.right() <= columns.scenes.right());
     }
 
+    #[test]
+    fn saved_scene_activity_report_expands_the_live_footer() {
+        let settings = AnimationSettings {
+            kind: AnimationKind::VoxelLandscape,
+            ..Default::default()
+        };
+        let status = "Saved worlds [====......] phase 3/6\nNow: Projecting covered chunks\nElapsed: 00:42\nETA: about 00:18 for this measured scan\nTotal ETA: incomplete; about 00:18 for the measured stage; up to 13 route candidates remain without a measured duration\nRecent activity:\n+00:08 Scanned region files\n+00:19 Loaded 64 chunks";
+        let model = RowModel::new(
+            &settings,
+            &RowContext {
+                scene_status: Some(status.to_owned()),
+                ..Default::default()
+            },
+        );
+        let area = Rect::new(0, 0, 80, 24);
+
+        let report = saved_scene_activity_report(&model).unwrap();
+        let (summary, activity) = saved_scene_activity_sections(&report);
+        assert!(report.contains("Now: Projecting covered chunks"));
+        assert!(summary.contains("Elapsed: 00:42"));
+        assert!(summary.contains("ETA: about 00:18 for this measured scan"));
+        assert!(report.contains("Total ETA: incomplete; about 00:18 for the measured stage"));
+        assert!(report.contains("+00:19 Loaded 64 chunks"));
+        let required_rows = wrapped_rows(&summary, layout(area).panel.width)
+            + wrapped_rows(&activity, layout(area).panel.width)
+            + PINNED_CONTROL_HELP_ROWS
+            + 2;
+        assert!(footer_rows(area, &model) >= required_rows);
+
+        let short_area = Rect::new(0, 0, 80, 16);
+        assert!(footer_rows(short_area, &model) <= short_area.height - 6);
+    }
+
+    #[test]
+    fn saved_scene_activity_sections_keep_inline_wait_message() {
+        let report = "Scene Status: Saved worlds [..] phase ?/6\nNow: Updating preparation details\nElapsed: refreshing with preparation state\nETA: unavailable (no measured work rate)\nRecent activity: waiting for a nonblocking status snapshot";
+
+        let (summary, activity) = saved_scene_activity_sections(report);
+
+        assert!(summary.contains("Saved worlds [..] phase ?/6"));
+        assert_eq!(activity, "waiting for a nonblocking status snapshot");
+    }
+
+    #[test]
+    fn saved_scene_activity_footer_accounts_for_wrapped_event_lines() {
+        let settings = AnimationSettings {
+            kind: AnimationKind::VoxelLandscape,
+            ..Default::default()
+        };
+        let long_event = format!("+00:19 {}", "detail ".repeat(60));
+        let status = format!(
+            "Saved worlds [====..] phase 4/6\nNow: Reading region files\nElapsed: 00:42\nETA: 00:18 for this scan\nRecent activity:\n{long_event}"
+        );
+        let model = RowModel::new(
+            &settings,
+            &RowContext {
+                scene_status: Some(status),
+                ..Default::default()
+            },
+        );
+        let area = Rect::new(0, 0, 80, 32);
+        let panel_width = layout(area).panel.width;
+        let report = saved_scene_activity_report(&model).unwrap();
+        let credit_rows = credit_footer_rows(area, &model);
+        let (summary, activity) = saved_scene_activity_sections(&report);
+        let summary_rows = wrapped_rows(&summary, panel_width);
+        let wrapped_activity_rows = wrapped_rows(&activity, panel_width);
+        let reserved_rows = footer_rows(area, &model);
+        let viewport_rows =
+            reserved_rows.saturating_sub(summary_rows + PINNED_CONTROL_HELP_ROWS + 2 + credit_rows);
+
+        assert!(
+            wrapped_activity_rows > viewport_rows,
+            "fixture must require log scrolling: viewport={viewport_rows}, wrapped={wrapped_activity_rows}"
+        );
+        assert!(
+            viewport_rows > 0,
+            "the bounded footer must retain a visible activity row: reserved={reserved_rows}"
+        );
+    }
+
+    #[test]
+    fn saved_scene_activity_pages_keep_control_help_reachable() {
+        let (mut app, probe, _project) = settings_app(100, 20);
+        app.animation_settings.kind = AnimationKind::VoxelLandscape;
+        let selected = row_index(&app, &AnimationRow::Common("lightness"));
+        set_selected_row(&mut app, selected);
+        let events = (0..24)
+            .map(|index| format!("+00:{index:02} Activity item {index}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        *probe.status.lock().unwrap() = Some(format!(
+            "Saved worlds [====......] phase 3/6\nNow: Reading map chunks\nElapsed: 00:42\nETA: about 00:24 for this measured scan\nTotal ETA: incomplete; route checks remain\nRoute ETA: about 00:12; based on 1 completed candidate\nRecent activity:\n{events}"
+        ));
+
+        let initial = screen_text(&draw(&mut app, 100, 20)).join("\n");
+        let control_help = selected_control_help(&app.animation_row_model(), selected);
+        assert!(
+            initial.contains(control_help.lines().next().unwrap()),
+            "selected-control help should stay pinned above the activity log: {initial}"
+        );
+        assert!(
+            initial.contains("Activity item 23"),
+            "the live log should follow its newest event by default: {initial}"
+        );
+        assert!(
+            initial.contains("Saved worlds [====......] phase 3/6"),
+            "the preparation progress bar should remain pinned above live activity: {initial}"
+        );
+        assert!(
+            initial.contains("Now: Reading map chunks"),
+            "the current preparation step should remain pinned above live activity: {initial}"
+        );
+        assert!(
+            initial.contains("Total ETA: incomplete; route checks remain"),
+            "the remaining preparation estimate should remain pinned above live activity: {initial}"
+        );
+        assert!(
+            initial.contains("Route ETA: about 00:12"),
+            "the measured route estimate should remain visible while new activity arrives: {initial}"
+        );
+
+        key(&mut app, KeyCode::PageUp);
+        let older = screen_text(&draw(&mut app, 100, 20)).join("\n");
+        assert_eq!(selected_row(&app), selected, "log paging changed selection");
+        assert!(
+            !older.contains("Activity item 23"),
+            "PageUp should reveal older activity rather than changing the row: {older}"
+        );
+
+        key(&mut app, KeyCode::PageDown);
+        let newest = screen_text(&draw(&mut app, 100, 20)).join("\n");
+        assert!(
+            newest.contains("Activity item 23"),
+            "PageDown should return to the live log tail: {newest}"
+        );
+
+        key(&mut app, KeyCode::Char('?'));
+        let help = screen_text(&draw(&mut app, 100, 20)).join("\n");
+        let Mode::Settings(state) = &app.mode else {
+            panic!("settings view should stay open");
+        };
+        assert!(state.animation_detail_show_help);
+        assert!(
+            help.contains("PgUp/PgDn selected help"),
+            "the expanded help view should keep the selected setting's help reachable: {help}"
+        );
+        assert_eq!(selected_row(&app), selected);
+    }
+
+    #[test]
+    fn saved_scene_route_eta_stays_visible_on_a_short_terminal() {
+        let (mut app, probe, _project) = settings_app(80, 12);
+        app.animation_settings.kind = AnimationKind::VoxelLandscape;
+        let selected = row_index(&app, &AnimationRow::Common("lightness"));
+        set_selected_row(&mut app, selected);
+        *probe.status.lock().unwrap() = Some(
+            "Saved worlds [====......] phase 3/6\nNow: Reading map chunks\nElapsed: 00:42\nETA: about 00:24 for this measured scan\nTotal ETA: incomplete; route checks remain\nRoute ETA: about 00:12; based on 1 completed candidate\nRecent activity:\n+00:19 Loaded 64 chunks".to_owned(),
+        );
+
+        let rendered = screen_text(&draw(&mut app, 80, 12)).join("\n");
+        assert!(
+            rendered.contains("Saved worlds [====......] phase 3/6"),
+            "the preparation progress bar should remain visible on a short terminal: {rendered}"
+        );
+        assert!(
+            rendered.contains("Route ETA: about 00:12"),
+            "the route estimate should take priority over less urgent details on a short terminal: {rendered}"
+        );
+    }
+
+    #[test]
+    fn saved_scene_selected_status_help_can_be_scrolled_to_its_last_event() {
+        let (mut app, probe, _project) = settings_app(100, 20);
+        app.animation_settings.kind = AnimationKind::VoxelLandscape;
+        let selected = row_index(&app, &AnimationRow::SceneStatus);
+        set_selected_row(&mut app, selected);
+        let events = (0..24)
+            .map(|index| format!("+00:{index:02} Activity item {index}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        *probe.status.lock().unwrap() = Some(format!(
+            "Saved worlds [====......] phase 3/6\nNow: Reading map chunks\nElapsed: 00:42\nETA: 00:18 for this scan\nRecent activity:\n{events}"
+        ));
+
+        key(&mut app, KeyCode::Char('?'));
+        for _ in 0..8 {
+            key(&mut app, KeyCode::PageDown);
+        }
+        let rendered = screen_text(&draw(&mut app, 100, 20)).join("\n");
+        assert_eq!(selected_row(&app), selected);
+        assert!(
+            rendered.contains("Activity item 23"),
+            "expanded Scene status help should remain fully scrollable: {rendered}"
+        );
+    }
+
+    #[test]
+    fn saved_scene_help_view_scrolls_through_the_full_selected_status() {
+        let (mut app, probe, _project) = settings_app(100, 20);
+        app.animation_settings.kind = AnimationKind::VoxelLandscape;
+        let selected = row_index(&app, &AnimationRow::SceneStatus);
+        set_selected_row(&mut app, selected);
+        let events = (0..24)
+            .map(|index| format!("+00:{index:02} Activity item {index}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        *probe.status.lock().unwrap() = Some(format!(
+            "Saved worlds [====......] phase 3/6\nNow: Reading map chunks\nElapsed: 00:42\nETA: 00:18 for this scan\nRecent activity:\n{events}"
+        ));
+
+        key(&mut app, KeyCode::Char('?'));
+        for _ in 0..8 {
+            key(&mut app, KeyCode::PageDown);
+        }
+        let rendered = screen_text(&draw(&mut app, 100, 20)).join("\n");
+        assert_eq!(selected_row(&app), selected);
+        assert!(
+            rendered.contains("Activity item 23"),
+            "PageDown should reach the end of long selected-control help: {rendered}"
+        );
+    }
+
+    #[test]
+    fn saved_scene_progress_and_activity_are_visible_in_the_rendered_panel() {
+        let (mut app, probe, _project) = settings_app(100, 30);
+        app.animation_settings.kind = AnimationKind::VoxelLandscape;
+        *probe.status.lock().unwrap() = Some(
+            "Saved worlds [====..] phase 4/6\nNow: Reading region 12 of 30\nElapsed: 00:42\nETA: 00:18 for this scan\nRecent activity:\n+00:08 Found 420 allocated chunks\n+00:19 Loaded 64 covered chunks"
+                .to_owned(),
+        );
+
+        let terminal = draw(&mut app, 100, 30);
+        let rendered = screen_text(&terminal).join("\n");
+
+        for line in [
+            "Saved worlds [====..] phase 4/6",
+            "Now: Reading region 12 of 30",
+            "Elapsed: 00:42",
+            "ETA: 00:18 for this scan",
+            "+00:08 Found 420 allocated chunks",
+            "+00:19 Loaded 64 covered chunks",
+        ] {
+            assert!(rendered.contains(line), "missing {line:?} in:\n{rendered}");
+        }
+    }
+
     fn key(app: &mut App, code: KeyCode) {
         crate::keys::handle_event(app, Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
         app.settle_filesystem_for_test();
@@ -1978,6 +2860,68 @@ mod tests {
             ..Default::default()
         });
         (app, probe, project)
+    }
+
+    #[test]
+    fn plugin_editor_uses_shared_frame_and_keeps_actions_inside_it() {
+        for area in [Rect::new(0, 0, 80, 24), Rect::new(0, 0, 40, 12)] {
+            let panel = layout(area).panel;
+            let inner = crate::theme::block(true).inner(panel);
+            let action_y = inner.bottom().saturating_sub(1);
+            let editor = crate::animation_plugins::PluginEditor {
+                fence: crate::animation_plugins::PluginControlFence {
+                    package_digest: "0".repeat(64),
+                    selection: crate::animation_plugins::PluginSelection {
+                        package_id: "synthetic-plugin".into(),
+                        mode: ilium_animation_js::manifest::AnimationMode::Live,
+                        settings: serde_json::json!({}),
+                    },
+                    schema: serde_json::json!({}),
+                },
+                control_id: "synthetic-control".into(),
+                label: "Dither strength".into(),
+                kind: crate::animation_plugins::PluginEditorKind::Text { max_length: 16 },
+                input: "0.5".into(),
+                error: None,
+            };
+            let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
+            terminal
+                .draw(|frame| render_plugin_editor(frame, panel, &editor, Style::new()))
+                .unwrap();
+            let buffer = terminal.backend().buffer();
+            assert_eq!(
+                buffer[(panel.x, panel.y)].symbol(),
+                "╭",
+                "the editor needs the shared rounded frame at {area:?}",
+            );
+            let rendered: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+            assert!(
+                rendered.contains("Dither strength"),
+                "the editor title must remain visible at {area:?}",
+            );
+            assert_eq!(
+                plugin_editor_action_at(area, Position::new(panel.x, action_y)),
+                None,
+                "the left border must not activate Apply at {area:?}",
+            );
+            assert_eq!(
+                plugin_editor_action_at(area, Position::new(inner.x, action_y)),
+                Some(PluginEditorAction::Apply),
+            );
+            assert_eq!(
+                plugin_editor_action_at(area, Position::new(inner.x + 9, action_y)),
+                Some(PluginEditorAction::Cancel),
+            );
+            assert_eq!(
+                plugin_editor_action_at(area, Position::new(panel.right() - 1, action_y)),
+                None,
+                "the right border must remain inert at {area:?}",
+            );
+            crate::ui_capture::save(
+                &format!("plugin-editor-framed-{}x{}", area.width, area.height),
+                &terminal,
+            );
+        }
     }
 
     #[test]
@@ -2988,13 +3932,9 @@ mod tests {
             "compact credits get reserved footer rows below the controls"
         );
         let credit_y = content_area(&app).bottom() - 2;
-        assert!(model.rows().iter().enumerate().all(|(row, _)| row_y(
-            content_area(&app),
-            &model,
-            row,
-            Scrolls::default()
-        )
-        .is_none_or(|y| y < credit_y)));
+        assert!(model.rows().iter().enumerate().all(|(row, _)| {
+            row_y(content_area(&app), &model, row, Scrolls::default()).is_none_or(|y| y < credit_y)
+        }));
         assert!(panel.contains(Position::new(panel.x, credit_y)));
         key(&mut app, KeyCode::Char('f'));
         let full = draw(&mut app, 120, 36);
@@ -3531,6 +4471,17 @@ mod tests {
         for (width, height) in [(80, 24), (120, 40), (160, 50)] {
             let (mut app, _probe, _project) = settings_app(width, height);
             let terminal = draw(&mut app, width, height);
+            let area = Rect::new(0, 0, width, height);
+            let columns = layout(area);
+            let model = app.animation_row_model();
+            let footer_start = height.saturating_sub(footer_rows(area, &model));
+            for y in 0..footer_start {
+                assert_eq!(
+                    terminal.backend().buffer()[(columns.scenes.right(), y)].symbol(),
+                    "│",
+                    "{width}x{height} should separate shared and scene controls at row {y}"
+                );
+            }
             let text = screen_text(&terminal);
             let joined = text.join("\n");
             let wide = width >= 120;

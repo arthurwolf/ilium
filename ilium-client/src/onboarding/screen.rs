@@ -4,7 +4,7 @@ use ratatui::{
     layout::{Position, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph, Wrap},
+    widgets::{Block, Clear, Paragraph, Wrap},
     Frame,
 };
 
@@ -47,6 +47,7 @@ pub enum Hit {
 pub struct Geometry {
     pub header: Rect,
     pub steps: Rect,
+    pub content_frame: Rect,
     pub content: Rect,
     pub back: Rect,
     pub next: Rect,
@@ -61,6 +62,7 @@ impl Geometry {
         let footer_y = area.bottom().saturating_sub(2).max(area.y);
         let content_y = (area.y + 5).min(footer_y);
         let button_width = (width / 3).min(22);
+        let content_frame = Rect::new(x, content_y, width, footer_y.saturating_sub(content_y));
         Self {
             header: Rect::new(x, area.y, width, area.height.min(2)),
             steps: Rect::new(
@@ -69,7 +71,10 @@ impl Geometry {
                 width,
                 area.height.saturating_sub(2).min(2),
             ),
-            content: Rect::new(x, content_y, width, footer_y.saturating_sub(content_y)),
+            content_frame,
+            // Drawing, pointer routing and scroll limits all receive this
+            // same inset; the frame never doubles as an interactive control.
+            content: crate::theme::block(true).inner(content_frame),
             back: Rect::new(
                 x,
                 footer_y,
@@ -210,6 +215,10 @@ pub fn render_shell(frame: &mut Frame, area: Rect, step: Step) -> Geometry {
     frame.render_widget(Clear, area);
     frame.render_widget(Block::default().style(Style::new().bg(CANVAS)), area);
     frame.render_widget(
+        crate::theme::block(true).title(crate::theme::chrome_title(step.title())),
+        geometry.content_frame,
+    );
+    frame.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled(
                 " ILIUM ",
@@ -316,9 +325,11 @@ pub fn render_choices(frame: &mut Frame, geometry: &Geometry, step: Step, ui: &W
                 .scroll((clipped, 0))
                 .style(Style::new().fg(foreground).bg(background))
                 .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .border_style(Style::new().fg(if active { ACCENT } else { MUTED })),
+                    crate::theme::block(active).border_style(Style::new().fg(if active {
+                        ACCENT
+                    } else {
+                        MUTED
+                    })),
                 ),
             rectangle,
         );
@@ -345,19 +356,55 @@ pub fn render_choices(frame: &mut Frame, geometry: &Geometry, step: Step, ui: &W
 fn choice_text(step: Step) -> [(&'static str, &'static str, &'static str); 3] {
     match step {
         Step::AiChoice => [
-            ("Kilo Gateway", "Cloud · no-cost models", "Free AI naming and organization. It sometimes just fails.\n\nData is sent to a hosted provider and may be used for training.\n\nChoose this if convenience matters most."),
-            ("Paid APIs", "Cloud · your account", "Choose your provider and model.\n\nFast, capable models; usage costs money. Your provider's data policy applies.\n\nBring an API key."),
-            ("Local Ollama", "Your machine · your data", "Run naming and organization locally.\n\nNo API usage charge; speed and model quality depend on your hardware.\n\nRequires a running Ollama instance."),
+            (
+                "Kilo Gateway",
+                "Cloud · no-cost models",
+                "Free AI naming and organization. It sometimes just fails.\n\nData is sent to a hosted provider and may be used for training.\n\nChoose this if convenience matters most.",
+            ),
+            (
+                "Paid APIs",
+                "Cloud · your account",
+                "Choose your provider and model.\n\nFast, capable models; usage costs money. Your provider's data policy applies.\n\nBring an API key.",
+            ),
+            (
+                "Local Ollama",
+                "Your machine · your data",
+                "Run naming and organization locally.\n\nNo API usage charge; speed and model quality depend on your hardware.\n\nRequires a running Ollama instance.",
+            ),
         ],
         Step::SoundChoice => [
-            ("Ilium signature", "A little chirp", "The bundled notification sound.\n\nA short, gentle chirp, available even without system sound files.\n\nPreview it before choosing."),
-            ("System sounds", "Familiar by design", "Choose a sound installed on this computer.\n\nBrowse your Ubuntu, Windows or macOS sound catalog.\n\nKeep the desktop's familiar character."),
-            ("Sound studio", "Make something yours", "Shape your own notification.\n\nPlay with tone, rhythm, harmony, texture and envelopes.\n\nDesign it, hear it, keep it."),
+            (
+                "Ilium signature",
+                "A little chirp",
+                "The bundled notification sound.\n\nA short, gentle chirp, available even without system sound files.\n\nPreview it before choosing.",
+            ),
+            (
+                "System sounds",
+                "Familiar by design",
+                "Choose a sound installed on this computer.\n\nBrowse your Ubuntu, Windows or macOS sound catalog.\n\nKeep the desktop's familiar character.",
+            ),
+            (
+                "Sound studio",
+                "Make something yours",
+                "Shape your own notification.\n\nPlay with tone, rhythm, harmony, texture and envelopes.\n\nDesign it, hear it, keep it.",
+            ),
         ],
         Step::KeyboardChoice => [
-            ("tmux", "Ctrl+B · familiar muscle memory", "Start with Ilium's tmux-style preset.\n\nCommon pane actions follow familiar bindings. Ilium's tree adds a few new moves.\n\nTry them next."),
-            ("GNU Screen", "Ctrl+A · familiar muscle memory", "Start with Ilium's Screen-style preset.\n\nUse the prefix you already know. Ctrl+A shadows the shell's beginning-of-line shortcut.\n\nPractice without risk."),
-            ("Custom", "Your hands, your rules", "Choose your own prefixes and bindings.\n\nKeep your current mapping, or build a new one with conflict checks.\n\nTest everything in the playground."),
+            (
+                "tmux",
+                "Ctrl+B · familiar muscle memory",
+                "Start with Ilium's tmux-style preset.\n\nCommon pane actions follow familiar bindings. Ilium's tree adds a few new moves.\n\nTry them next.",
+            ),
+            (
+                "GNU Screen",
+                "Ctrl+A · familiar muscle memory",
+                "Start with Ilium's Screen-style preset.\n\nUse the prefix you already know. Ctrl+A shadows the shell's beginning-of-line shortcut.\n\nPractice without risk.",
+            ),
+            (
+                "Custom",
+                "Your hands, your rules",
+                "Choose your own prefixes and bindings.\n\nKeep your current mapping, or build a new one with conflict checks.\n\nTest everything in the playground.",
+            ),
         ],
         _ => [("", "", ""); 3],
     }
@@ -389,6 +436,36 @@ fn short_title(step: Step) -> &'static str {
 mod tests {
     use super::*;
     use ratatui::{backend::TestBackend, Terminal};
+
+    #[test]
+    fn onboarding_content_frame_preserves_shared_draw_and_hit_geometry() {
+        for (width, height) in [(120, 40), (80, 24), (60, 20), (40, 12)] {
+            for step in Step::ALL {
+                let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+                terminal
+                    .draw(|frame| {
+                        render_shell(frame, frame.area(), step);
+                    })
+                    .unwrap();
+                let geometry = Geometry::new(Rect::new(0, 0, width, height));
+                let buffer = terminal.backend().buffer();
+                let outer = geometry.content_frame;
+                assert_eq!(buffer[(outer.x, outer.y)].symbol(), "╭");
+                assert_eq!(
+                    buffer[(outer.right() - 1, outer.bottom() - 1)].symbol(),
+                    "╯"
+                );
+                assert_eq!(geometry.content, crate::theme::block(true).inner(outer));
+                assert!(geometry.content.height > 0);
+                assert!(geometry.content.bottom() < geometry.back.y);
+                assert_eq!(geometry.hit(Position::new(outer.x, outer.y), 0), None);
+                crate::ui_capture::save(
+                    &format!("onboarding-shell-{}-{width}x{height}", step.number()),
+                    &terminal,
+                );
+            }
+        }
+    }
 
     #[test]
     fn all_seven_chevrons_fit_between_label_breakpoints() {

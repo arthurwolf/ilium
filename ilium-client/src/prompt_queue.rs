@@ -129,15 +129,29 @@ pub struct PromptQueueDialogLayout {
 
 pub fn dialog_layout(screen_area: Rect) -> PromptQueueDialogLayout {
     let popup = modal::centered_fixed_rect(76, 21, screen_area);
-    let inner = Rect::new(
-        popup.x + 3,
-        popup.y + 2,
-        popup.width.saturating_sub(6),
-        popup.height.saturating_sub(4),
-    );
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
+    let compact = popup.height < 18;
+    let inner = if compact {
+        popup.inner(ratatui::layout::Margin::new(2, 1))
+    } else {
+        popup.inner(ratatui::layout::Margin::new(3, 2))
+    };
+    // Keep real draft and repeat-count interiors on short terminals. Their
+    // own titles identify them; separate labels/spacers can yield the space.
+    let constraints = if compact {
+        [
+            Constraint::Length(0),
+            Constraint::Length(0),
+            Constraint::Length(0),
+            Constraint::Min(3),
+            Constraint::Length(0),
+            Constraint::Length(1),
+            Constraint::Length(3),
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(0),
+        ]
+    } else {
+        [
             Constraint::Length(1),
             Constraint::Length(1),
             Constraint::Length(1),
@@ -148,7 +162,11 @@ pub fn dialog_layout(screen_area: Rect) -> PromptQueueDialogLayout {
             Constraint::Length(1),
             Constraint::Length(1),
             Constraint::Length(1),
-        ])
+        ]
+    };
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(constraints)
         .split(inner);
     let enqueue_button = Layout::default()
         .direction(Direction::Horizontal)
@@ -383,5 +401,35 @@ mod delivery_control_tests {
             control.key_action(KeyCode::Enter, true),
             Some(ControlAction::OpenChoices)
         );
+    }
+}
+
+#[cfg(test)]
+mod compact_layout_tests {
+    use super::*;
+
+    #[test]
+    fn compact_queue_keeps_draft_controls_and_warning_inside_popup() {
+        let layout = dialog_layout(Rect::new(0, 0, 40, 12));
+        assert!(layout.text.width >= 13 && layout.text.height >= 3);
+        assert_eq!(layout.delivery.height, 1);
+        assert_eq!(layout.times.height, 3);
+        assert_eq!(layout.warning.height, 1);
+        assert_eq!(layout.enqueue_button.height, 1);
+        let controls = [
+            layout.text,
+            layout.delivery,
+            layout.times,
+            layout.warning,
+            layout.enqueue_button,
+        ];
+        for area in controls {
+            assert!(area.x > layout.popup.x && area.y > layout.popup.y);
+            assert!(area.right() < layout.popup.right());
+            assert!(area.bottom() < layout.popup.bottom());
+        }
+        for pair in controls.windows(2) {
+            assert!(pair[0].bottom() <= pair[1].y);
+        }
     }
 }

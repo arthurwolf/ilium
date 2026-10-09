@@ -44,6 +44,7 @@ mod animation_plugins;
 mod animation_rows;
 mod animation_settings_ui;
 mod animation_visibility;
+pub mod antigravity_model_statusline;
 pub mod app;
 pub mod ascii_chart;
 #[cfg(test)]
@@ -54,6 +55,7 @@ pub mod board;
 pub mod board_ui;
 pub mod chatroom;
 pub mod chatroom_ui;
+pub mod claude_model_statusline;
 pub mod compaction_app;
 pub mod compaction_report;
 pub mod compaction_scan;
@@ -75,6 +77,7 @@ pub mod document_preparation;
 mod editor_capture_budget;
 pub mod editor_chrome;
 pub mod editor_highlight;
+mod editor_input_backlog;
 pub mod editor_line_path;
 pub mod editor_pane;
 pub mod editor_toolbar;
@@ -123,6 +126,7 @@ pub mod release_embedding;
 pub mod remote_compaction_app;
 pub mod remote_compaction_dialog;
 pub mod remote_compaction_flow;
+pub mod remote_compaction_native;
 pub mod remote_compaction_settings;
 pub mod remote_compaction_settings_ui;
 pub mod remote_compaction_worker;
@@ -135,6 +139,7 @@ pub mod search_ui;
 pub mod search_workers;
 mod semantic_animation;
 pub mod session_conversion;
+mod session_models;
 pub mod session_naming;
 pub mod session_stats;
 pub mod session_stats_popover;
@@ -152,6 +157,7 @@ mod startup_dialog;
 pub use smart_copy_selection::{
     RestoredSelection, SelectionCompletion, SelectionShutdownCustody, SelectionShutdownErrors,
 };
+pub mod agent_message_dialog;
 pub mod goal_resume_link;
 mod input_backlog;
 mod paste_cursor;
@@ -221,6 +227,9 @@ pub mod voice_settings;
 pub mod workspace_file;
 pub mod worktree_dialog;
 pub mod worktree_manager;
+
+#[cfg(test)]
+mod ui_capture;
 
 #[cfg(test)]
 mod performance_tests;
@@ -456,10 +465,6 @@ pub async fn run(options: RunOptions) -> Result<ClientExitReason, ClientError> {
         return Err(ClientError::InvalidSessionCwd(options.session_cwd));
     }
 
-    // One background probe per process decides whether the GPU option of the
-    // animation scenes is usable; it never blocks start-up.
-    ilium_gpu::start_probe();
-
     // Resolved and installed once, before the terminal enters raw/
     // alternate-screen mode and before any render call -- see
     // `theme::THEME`'s doc comment on why a one-time `OnceLock` init is only
@@ -480,7 +485,7 @@ pub async fn run(options: RunOptions) -> Result<ClientExitReason, ClientError> {
                 .flatten()
         })
         .unwrap_or(false);
-    ilium_logging::initialize(
+    ilium_logging::initialize_forwarded(
         &options.log_path,
         file_logging_enabled_hint,
         "client",
@@ -631,6 +636,13 @@ async fn run_inner(
     let execution = crate::execution::ClientExecution::start_async()
         .await
         .map_err(|error| ClientError::TerminalSetup(std::io::Error::other(error)))?;
+    let ambient_resources = execution.ambient_resources().map_err(|error| {
+        ClientError::TerminalSetup(std::io::Error::other(format!(
+            "ambient resources startup: {error:?}"
+        )))
+    })?;
+    // Probe asynchronously under the same bounded quota as animation work.
+    let mut gpu_probe = ilium_gpu::start_probe(ambient_resources.clone());
     startup_dialog.show(
         "Starting ilium",
         "Finding sounds and audio devices",
@@ -663,6 +675,14 @@ async fn run_inner(
         })?;
     let text_trigger_preview_notification =
         app.configure_text_trigger_preview(text_trigger_preview_client);
+    let sound_preview_client = execution
+        .client(crate::onboarding::sound_preview::limits())
+        .map_err(|error| {
+            ClientError::TerminalSetup(std::io::Error::other(format!(
+                "sound studio preview startup: {error:?}"
+            )))
+        })?;
+    let sound_preview_notification = app.configure_sound_studio_preview(sound_preview_client);
 
     let outbound_admission = execution
         .client(crate::ipc_preparation::request_limits())
@@ -749,12 +769,13 @@ async fn run_inner(
     let selection = crate::smart_copy_selection::SelectionOwner::new(selection_client);
     let selection_notification = selection.notification();
     app.light_copy_selection = Some(selection);
-    let parsing = crate::terminal_parsing::TerminalParsing::start(
+    let parsing = crate::terminal_parsing::TerminalParsing::start_with_storage(
         execution.terminal_parser().map_err(|error| {
             ClientError::TerminalSetup(std::io::Error::other(format!(
                 "terminal parser client: {error:?}"
             )))
         })?,
+        execution.terminal_storage(),
         app.terminal_settings.engine_memory_budget_mib,
     )
     .map_err(|error| ClientError::TerminalSetup(std::io::Error::other(error)))?;
@@ -789,6 +810,8 @@ async fn run_inner(
     let statistics_client =
         statistics_client.with_completion_wake(move || statistics_wake.notify_one());
     app.session_stats
+        .configure_execution(statistics_client.clone());
+    app.session_models
         .configure_execution(statistics_client.clone());
     app.compaction_optimizer
         .configure_execution(statistics_client.clone());
@@ -872,11 +895,6 @@ async fn run_inner(
     let media_owner =
         crate::media_control::MediaOwner::start().map_err(ClientError::TerminalSetup)?;
     let mut icon_search_workers = IconSearchWorkers::new();
-    let ambient_resources = execution.ambient_resources().map_err(|error| {
-        ClientError::TerminalSetup(std::io::Error::other(format!(
-            "ambient resources startup: {error:?}"
-        )))
-    })?;
     app.animation_frame.configure_resources(ambient_resources);
     let keyboard_enhancement_pushed = guard._guard.keyboard_enhancement_state();
     // The presenter does not emit a frame until the owned query resolves.
@@ -910,11 +928,19 @@ async fn run_inner(
     let mut shutdown_requests = shutdown_requests::ShutdownRequests::default();
     let mut request_drain_cause = None;
     let mut deferred_input = input_backlog::InputBacklog::default();
+    let mut editor_deferred_input =
+        crate::editor_input_backlog::EditorInputBacklog::begin(crate::execution::process_quota())
+            .map_err(|reason| {
+            ClientError::TerminalSetup(std::io::Error::other(format!(
+                "editor input custody admission: {reason:?}"
+            )))
+        })?;
     let result = async {
     let mut presentation_frame_id = 0_u64;
     let mut presentation_layout_revision = 0_u64;
 
     app.apply_ui_settings(config.ui);
+    app.initialize_disabled_model_icon_setting();
     match crate::project_config::load(&app.session_cwd) {
         Ok(project_config) => {
             app.ui_settings.show_project_separators = project_config.show_project_separators;
@@ -1010,12 +1036,63 @@ async fn run_inner(
         app.onboarding_revision,
         app.onboarding.is_none() && app.onboarding_progress.automatic_ai_allowed(),
     );
-    let (conversion_events_tx, mut conversion_events_rx) = mpsc::channel(256);
-    let mut conversion_workers =
-        crate::session_conversion::ConversionWorkers::new(conversion_events_tx);
-    let (remote_compaction_events_tx, mut remote_compaction_events_rx) = mpsc::channel(256);
-    let mut remote_compaction_workers =
-        crate::remote_compaction_worker::RemoteCompactionWorkers::new(remote_compaction_events_tx);
+    let conversion_notification = std::sync::Arc::new(tokio::sync::Notify::new());
+    let conversion_wake = std::sync::Arc::clone(&conversion_notification);
+    let conversion_client = execution
+        .client(ilium_execution::ClientLimits {
+            jobs: 1,
+            service_jobs: 0,
+            input_bytes: crate::session_conversion::CONVERSION_WORKING_BYTES,
+            result_bytes: crate::session_conversion::CONVERSION_RESULT_BYTES,
+        })
+        .map_err(|error| {
+            ClientError::TerminalSetup(std::io::Error::other(format!(
+                "session conversion worker startup: {error:?}"
+            )))
+        })?
+        .with_completion_wake(move || conversion_wake.notify_one());
+    let mut conversion_workers = crate::session_conversion::ConversionWorkers::new(
+        conversion_client,
+        conversion_notification.clone(),
+    );
+    let remote_compaction_notification = std::sync::Arc::new(tokio::sync::Notify::new());
+    let remote_compaction_wake = std::sync::Arc::clone(&remote_compaction_notification);
+    let remote_compaction_client = execution
+        .client(ilium_execution::ClientLimits {
+            jobs: 1,
+            service_jobs: 0,
+            input_bytes: 512 * 1024 * 1024,
+            result_bytes: 2 * 1024 * 1024,
+        })
+        .map_err(|error| {
+            ClientError::TerminalSetup(std::io::Error::other(format!(
+                "remote compaction worker startup: {error:?}"
+            )))
+        })?
+        .with_completion_wake(move || {
+            remote_compaction_wake.notify_one();
+        });
+    let mut remote_compaction_workers = crate::remote_compaction_worker::RemoteCompactionWorkers::new(
+        remote_compaction_client,
+        remote_compaction_notification.clone(),
+    );
+    let reset_notification = std::sync::Arc::new(tokio::sync::Notify::new());
+    let reset_wake = std::sync::Arc::clone(&reset_notification);
+    let reset_client = execution
+        .client(ilium_execution::ClientLimits {
+            jobs: 1,
+            service_jobs: 0,
+            input_bytes: 16 * 1024 * 1024,
+            result_bytes: 64 * 1024,
+        })
+        .map_err(|error| {
+            ClientError::TerminalSetup(std::io::Error::other(format!(
+                "reset planning worker startup: {error:?}"
+            )))
+        })?
+        .with_completion_wake(move || {
+            reset_wake.notify_one();
+        });
     let search_client = execution.client(ilium_execution::ClientLimits { jobs: 2, service_jobs: 0, input_bytes: 384 * 1024 * 1024, result_bytes: 64 * 1024 * 1024 })
         .map_err(|error| ClientError::TerminalSetup(std::io::Error::other(format!("workspace search startup: {error:?}"))))?;
     let mut search_workers = SearchWorkers::new(search_client);
@@ -1024,7 +1101,12 @@ async fn run_inner(
     let (reset_events_tx, mut reset_events_rx) = mpsc::channel(4);
     let (reset_settings_tx, reset_settings_rx) =
         tokio::sync::watch::channel(app.reset_planning_settings.clone());
-    let reset_monitor = crate::reset_planning::spawn_monitor(reset_settings_rx, reset_events_tx);
+    let reset_monitor = crate::reset_planning::spawn_monitor(
+        reset_settings_rx,
+        reset_events_tx,
+        reset_client,
+        reset_notification,
+    );
     let control_client = execution.client(ilium_execution::ClientLimits {
         jobs: 20, service_jobs: 0, input_bytes: 384 * 1024 * 1024, result_bytes: 256 * 1024 * 1024,
     }).map_err(|error| ClientError::TerminalSetup(std::io::Error::other(format!("control preparation startup: {error:?}"))))?;
@@ -1110,6 +1192,12 @@ async fn run_inner(
     let mut last_streamed_pane_slots: Option<[Option<ilium_core::NodeId>; 4]> = None;
 
     'event_loop: while app.exit_reason.is_none() {
+        if remote_compaction_workers
+            .collect(|event| app.apply_remote_compaction_worker_event(event))
+        {
+            needs_redraw = true;
+            needs_immediate_redraw = true;
+        }
         app.begin_editor_capture_turn();
         if let Err(failure) = app.retry_native_terminal_paste() {
             input_failure = Some(failure);
@@ -1124,11 +1212,77 @@ async fn run_inner(
             needs_redraw = true;
             needs_immediate_redraw = true;
         }
-        if app.pending_native_paste.is_none() && app.pending_key_paste.is_none() {
+        if app.pending_native_paste.is_none()
+            && app.pending_key_paste.is_none()
+            && !app.has_editor_model_loan()
+        {
+            if let Some(queued) = editor_deferred_input.pop() {
+                let geometry_is_current = match queued.original.as_ref() {
+                    Ok(input) if matches!(input.view(), Event::Mouse(_)) => {
+                        app.pointer_geometry_is_current()
+                            && (queued.layout_revision_matches(app.emitted_layout_revision())
+                                || crate::mouse::editor_input_hit_pane(&app, input.view())
+                                    .is_some_and(|pane_id| queued.target_pane == Some(pane_id)))
+                    }
+                    _ => true,
+                };
+                let loan_identity_is_current = queued
+                    .target_pane
+                    .zip(queued.loan_identity.as_ref())
+                    .is_none_or(|(pane_id, _identity)| {
+                        app.editor_model_loans
+                            .get(&pane_id)
+                            .is_some_and(|current| queued.loan_identity_matches(current))
+                            || matches!(
+                                app.panes.get(&pane_id),
+                                Some(crate::app::PaneRuntime::Editor(editor))
+                                    if queued.loan_identity_matches(&editor.instance_identity())
+                            )
+                    });
+                if !geometry_is_current || !loan_identity_is_current {
+                    input_failure = Some(match queued.original {
+                        Ok(event) => terminal_input_owner::InputFailure::undispatched(
+                            event,
+                            input_failure.take(),
+                        ),
+                        Err(error) => terminal_input_owner::InputFailure::combine(
+                            input_failure.take(),
+                            error,
+                        ),
+                    });
+                    break;
+                }
+                let mut empty_input = EmptyReadyInput;
+                let mut no_deferred = input_backlog::InputBacklog::default();
+                if let Some(failure) = dispatch_ready_input_events(
+                    &mut app,
+                    &mut empty_input,
+                    &mut naming_workers,
+                    &mut icon_search_workers,
+                    home_dir.as_deref(),
+                    queued.original,
+                    &mut no_deferred,
+                    &mut editor_deferred_input,
+                ) {
+                    input_failure = Some(failure);
+                    break;
+                }
+                needs_redraw = true;
+                needs_immediate_redraw = true;
+            }
+        }
+        let deferred_event_fits_editor_custody = !app.has_editor_model_loan()
+            || deferred_input
+                .front()
+                .is_some_and(|event| editor_deferred_input.can_accept(event));
+        if app.pending_native_paste.is_none()
+            && app.pending_key_paste.is_none()
+            && deferred_event_fits_editor_custody
+        {
             if let Some(event) = deferred_input.take_front() {
                 if let Some(failure) = dispatch_ready_input_events(
                     &mut app, &mut input_rx, &mut naming_workers, &mut icon_search_workers,
-                    home_dir.as_deref(), event, &mut deferred_input,
+                    home_dir.as_deref(), event, &mut deferred_input, &mut editor_deferred_input,
                 ) {
                     input_failure = Some(failure);
                     break;
@@ -1173,6 +1327,7 @@ async fn run_inner(
         }
         if let Some(delay) = app.source_window_retry_delay(now) { tick_delay = tick_delay.min(delay); }
         if let Some(delay) = app.text_trigger_preview_retry_delay(now) { tick_delay = tick_delay.min(delay); }
+        if let Some(delay) = app.sound_studio_preview_retry_delay(now) { tick_delay = tick_delay.min(delay); }
         if let Some(delay) = app.light_copy_selection.as_ref().and_then(|owner| owner.retry_delay()) { tick_delay = tick_delay.min(delay); }
         if !app.light_copy_recovery.is_empty() || !app.light_copy_restored.is_empty() { tick_delay = tick_delay.min(Duration::from_millis(100)); }
         if crate::onboarding::integration::is_animating(&app) || last_onboarding_animation_active {
@@ -1213,9 +1368,11 @@ async fn run_inner(
             _ = external_open_notification.notified() => { needs_redraw |= app.collect_external_open(); }
             _ = document_notification.notified() => { needs_redraw = true; }
             _ = text_trigger_preview_notification.notified() => { needs_redraw |= app.reconcile_text_trigger_preview(); }
+            _ = sound_preview_notification.notified() => { needs_redraw |= app.reconcile_sound_studio_preview(); }
             _ = catalogue_notification.notified() => { needs_redraw |= app.collect_plugin_catalogue(); }
             _ = statistics_notification.notified() => {
                 needs_redraw |= app.session_stats.drain_events();
+                needs_redraw |= app.tick_session_models(Instant::now());
                 needs_redraw |= app.tick_cost(Instant::now());
                 needs_redraw |= app.tick_compaction(Instant::now());
             }
@@ -1229,7 +1386,7 @@ async fn run_inner(
                 app.projection_admission_wake = None;
                 app.projection_busy_retry_at = None;
             }
-            _ = filesystem_admission_notification.notified() => {needs_redraw |= app.collect_editor_files(); naming_workers.collect(); smart_copy_workers.collect(); needs_redraw |= app.collect_model_catalog_preparation(); needs_redraw |= app.reconcile_text_trigger_preview();}
+            _ = filesystem_admission_notification.notified() => {needs_redraw |= app.collect_editor_files(); naming_workers.collect(); smart_copy_workers.collect(); needs_redraw |= app.collect_model_catalog_preparation(); needs_redraw |= app.reconcile_text_trigger_preview(); needs_redraw |= app.reconcile_sound_studio_preview();}
             completion = app.debug_logging.next_completion() => {
                 apply_debug_logging_completion(&mut app, completion);
                 needs_redraw = true;
@@ -1284,7 +1441,7 @@ async fn run_inner(
                 needs_redraw |= app.animation_frame.collect();
             }
             _ = tokio::task::yield_now(), if app.pending_key_paste.is_some() => {}
-            input_event = input_rx.recv(), if app.pending_native_paste.is_none() && app.pending_key_paste.is_none() && deferred_input.is_empty() => {
+            input_event = input_rx.recv(), if app.pending_native_paste.is_none() && app.pending_key_paste.is_none() && deferred_input.is_empty() && (!app.has_editor_model_loan() || !editor_deferred_input.is_full()) => {
                 match input_event {
                     Some(event) => {
                         if let Some(failure) = dispatch_ready_input_events(
@@ -1295,6 +1452,7 @@ async fn run_inner(
                             home_dir.as_deref(),
                             event,
                             &mut deferred_input,
+                            &mut editor_deferred_input,
                         ) {
                             input_failure = Some(failure);
                             break;
@@ -1343,15 +1501,17 @@ async fn run_inner(
                 needs_redraw = true;
                 needs_immediate_redraw = true;
             }
-            Some(conversion_event) = conversion_events_rx.recv() => {
-                app.apply_conversion_worker_event(conversion_event);
-                needs_redraw = true;
-                needs_immediate_redraw = true;
+            _ = conversion_notification.notified() => {
+                let collected = conversion_workers
+                    .collect(|event| app.apply_conversion_worker_event(event));
+                needs_redraw |= collected;
+                needs_immediate_redraw |= collected;
             }
-            Some(remote_compaction_event) = remote_compaction_events_rx.recv() => {
-                app.apply_remote_compaction_worker_event(remote_compaction_event);
-                needs_redraw = true;
-                needs_immediate_redraw = true;
+            _ = remote_compaction_notification.notified() => {
+                let collected = remote_compaction_workers
+                    .collect(|event| app.apply_remote_compaction_worker_event(event));
+                needs_redraw |= collected;
+                needs_immediate_redraw |= collected;
             }
             _ = search_notification.notified() => {
                 if let Some(search_event) = search_workers.collect() { app.apply_workspace_search_result(search_event); }
@@ -1476,6 +1636,7 @@ async fn run_inner(
         }
 
         needs_redraw |= app.reconcile_text_trigger_preview();
+        needs_redraw |= app.reconcile_sound_studio_preview();
         dispatch_pending_app_work(
             &mut app,
             &mut naming_workers,
@@ -1561,7 +1722,11 @@ async fn run_inner(
         }
 
         if let Some(job) = app.take_pending_conversion_start() {
-            conversion_workers.spawn(job);
+            if let Err(event) = conversion_workers.spawn(job) {
+                app.apply_conversion_worker_event(event);
+                needs_redraw = true;
+                needs_immediate_redraw = true;
+            }
         }
         if app.take_pending_conversion_cancel() {
             conversion_workers.cancel();
@@ -1570,7 +1735,11 @@ async fn run_inner(
             remote_compaction_workers.cancel();
         }
         if let Some(job) = app.take_pending_remote_compaction_job() {
-            remote_compaction_workers.spawn(job);
+            if let Err(event) = remote_compaction_workers.spawn(job) {
+                app.apply_remote_compaction_worker_event(event);
+                needs_redraw = true;
+                needs_immediate_redraw = true;
+            }
         }
 
         if app.publish_outbound_requests(&connection.requests).is_err() {
@@ -1953,6 +2122,22 @@ async fn run_inner(
             }
         }
     }
+    while let Some(queued) = editor_deferred_input.pop() {
+        match queued.original {
+            Ok(event) => {
+                input_failure = Some(terminal_input_owner::InputFailure::undispatched(
+                    event,
+                    input_failure.take(),
+                ));
+            }
+            Err(error) => {
+                input_failure = Some(terminal_input_owner::InputFailure::combine(
+                    input_failure.take(),
+                    error,
+                ));
+            }
+        }
+    }
     if let Some(failure) = app.take_native_paste_failure() {
         input_failure = Some(terminal_input_owner::InputFailure::combine(
             input_failure.take(),
@@ -1989,9 +2174,11 @@ async fn run_inner(
         && (app.unconfirmed_exact_prompt_reports() != 0
             || naming_workers.has_pending_exact_delivery())
     {
-        tracing::error!(unconfirmed_exact_transcript_reports=app.unconfirmed_exact_prompt_reports(),
-            pending_exact_delivery=naming_workers.has_pending_exact_delivery(),
-            "Published exact transcript evidence has no final outbound flush acknowledgement; delivery is uncertain");
+        tracing::error!(
+            unconfirmed_exact_transcript_reports = app.unconfirmed_exact_prompt_reports(),
+            pending_exact_delivery = naming_workers.has_pending_exact_delivery(),
+            "Published exact transcript evidence has no final outbound flush acknowledgement; delivery is uncertain"
+        );
     }
     smart_copy_workers.cancel();
     // This runs on every Result exit, including connection and output errors.
@@ -2109,7 +2296,8 @@ async fn run_inner(
             Ok(())
         } else {
             Err(ClientError::TerminalSetup(std::io::Error::other(
-                "Selection preparation failed; originals retired during shutdown, no copy success claimed")))
+                "Selection preparation failed; originals retired during shutdown, no copy success claimed",
+            )))
         };
         app.light_copy_recovery.clear(); // Queues entire original disposal on still-live CPU.
         app.light_copy_restored.clear(); // Returned Sessions have their original self-retirement permits.
@@ -2204,22 +2392,60 @@ async fn run_inner(
         .await
         .map_err(ClientError::TerminalSetup);
     app.session_stats.cancel_pending();
+    app.session_models.cancel_pending();
     app.cost_tracker.cancel_pending();
     app.model_catalog_preparation.close();
     app.close_text_trigger_preview();
+    app.close_sound_studio_preview();
+    remote_compaction_workers.cancel();
     // Completed/cancelled receipts retain retirement storage until collected.
     // Reconcile them while the shared owner enforces its physical-exit deadline.
+    let gpu_probe_result = match gpu_probe
+        .take()
+        .and_then(ilium_gpu::GpuProbeOwner::request_stop)
+    {
+        Some(retirement) => tokio::task::spawn_blocking(move || {
+            retirement.join_until(std::time::Instant::now() + std::time::Duration::from_secs(5))
+        })
+        .await
+        .map_err(|error| ClientError::TerminalSetup(std::io::Error::other(error)))
+        .and_then(|result| {
+            result.map_err(|error| ClientError::TerminalSetup(std::io::Error::other(error)))
+        }),
+        None => Ok(()),
+    };
     let execution_shutdown = execution.shutdown();
     tokio::pin!(execution_shutdown);
     let execution_result = loop {
         app.collect_closed_text_trigger_preview();
+        app.collect_closed_sound_studio_preview();
         tokio::select! {
             result = &mut execution_shutdown => break result,
             _ = text_trigger_preview_notification.notified() => {},
+            _ = sound_preview_notification.notified() => {},
             _ = filesystem_admission_notification.notified() => {},
+            _ = remote_compaction_notification.notified() => {
+                remote_compaction_workers.collect(|event| app.apply_remote_compaction_worker_event(event));
+            },
         }
     };
+    remote_compaction_workers.collect(|event| app.apply_remote_compaction_worker_event(event));
+    let remote_compaction_result = if remote_compaction_workers.is_running() {
+        Err(ClientError::TerminalSetup(std::io::Error::other(
+            "remote compaction receipt remained unsettled after execution shutdown",
+        )))
+    } else {
+        Ok(())
+    };
     app.collect_closed_text_trigger_preview();
+    app.collect_closed_sound_studio_preview();
+    let sound_preview_result = if app.sound_studio_preview_settled() {
+        Ok(())
+    } else {
+        Err(ClientError::TerminalSetup(std::io::Error::other(
+            "sound studio preview receipt remained unsettled after execution shutdown",
+        )))
+    };
     let text_trigger_preview_result = match app.text_trigger_preview.as_ref() {
         Some(preview) if preview.settlement_issue().is_some() => Err(ClientError::TerminalSetup(
             std::io::Error::other(preview.settlement_issue().unwrap().message()),
@@ -2237,10 +2463,13 @@ async fn run_inner(
         .and(clipboard_shutdown_result)
         .and(external_open_shutdown_result)
         .and(media_shutdown_result)
+        .and(gpu_probe_result)
         .and(icon_shutdown_result)
         .and(animation_receipt_result)
         .and(animation_shutdown_result)
+        .and(remote_compaction_result)
         .and(text_trigger_preview_result)
+        .and(sound_preview_result)
         .and(logging_result)
         .and(filesystem_result)
         .and(result);
@@ -2942,7 +3171,7 @@ fn project_final_voice_event(
             return Err((
                 receipt,
                 format!("Voice event waiting for storage admission: {reason:?}"),
-            ))
+            ));
         }
     };
     if let ilium_voice::VoiceEvent::AssistantTranscript(delta) = receipt.event() {
@@ -3021,14 +3250,20 @@ async fn deliver_voice_tool_outputs(
                 Some("Earlier voice outputs await original actor cancellation receipt".into());
             if !outputs.is_empty() {
                 app.normal_voice_retirement_failed = true;
-                tracing::error!(cancelled_outputs=outputs.len(), "Voice output producer crossed actor fence; incoming originals explicitly cancelled");
+                tracing::error!(
+                    cancelled_outputs = outputs.len(),
+                    "Voice output producer crossed actor fence; incoming originals explicitly cancelled"
+                );
             }
             return;
         }
         // A single retained head fences both incoming event and CPU collectors.
         if !outputs.is_empty() {
             app.normal_voice_retirement_failed = true;
-            tracing::error!(cancelled_outputs=outputs.len(), "Voice output producer crossed retained-head fence; incoming originals explicitly cancelled");
+            tracing::error!(
+                cancelled_outputs = outputs.len(),
+                "Voice output producer crossed retained-head fence; incoming originals explicitly cancelled"
+            );
             app.status_message =
                 Some("Voice output producer ordering failed; earlier originals retained".into());
             outputs = pending;
@@ -3252,7 +3487,9 @@ async fn collect_normal_voice_retirement(
                         undelivered_stop_outputs = final_outputs,
                         "Original voice actor stopped; consumed provider delivery may be uncertain"
                     );
-                    app.status_message = Some(format!("Voice actor stopped; {cancelled} commands and {final_outputs} final outputs undelivered"));
+                    app.status_message = Some(format!(
+                        "Voice actor stopped; {cancelled} commands and {final_outputs} final outputs undelivered"
+                    ));
                 }
                 _ => {}
             }
@@ -3265,7 +3502,9 @@ async fn collect_normal_voice_retirement(
                     undelivered_stop_outputs = final_outputs,
                     "Voice originals explicitly cancelled; never replayed into replacement actor"
                 );
-                app.status_message = Some(format!("Original voice session cancelled {cancelled} queued commands and {final_outputs} final outputs"));
+                app.status_message = Some(format!(
+                    "Original voice session cancelled {cancelled} queued commands and {final_outputs} final outputs"
+                ));
             }
             app.voice_shutdown_requested = false;
             app.voice_shutdown_after_delivery = false;
@@ -3615,7 +3854,7 @@ fn voice_text_offer_result_with_fifo(
                 return Some(Err(VoiceTextRejection::new(
                     VoiceTextRejectionCode::VoiceUnavailable,
                     "the voice session ended before the text could be delivered",
-                )))
+                )));
             }
         }
     } else {
@@ -3793,7 +4032,10 @@ fn apply_server_events(
             };
         app.processing_derivation_retention = projection_update.derived_retention.take();
         app.processing_event_retention = retention;
-        if let ilium_ipc::ServerEvent::DebugLoggingChanged { enabled } = event {
+        if let ilium_ipc::ServerEvent::AntigravityStatuslineCompleted { generation, result } = event
+        {
+            app.antigravity_statusline_completed(generation, result);
+        } else if let ilium_ipc::ServerEvent::DebugLoggingChanged { enabled } = event {
             synchronize_debug_logging_from_server(app, enabled);
         } else if let Some(occurrence) = crate::render_cache::apply(app, event) {
             damage.needs_redraw = true;
@@ -3893,9 +4135,9 @@ fn synchronize_debug_logging_from_server(app: &mut App, enabled: bool) {
 /// Consecutive mouse-motion reports are coalesced to their newest position:
 /// only that position can determine the current hover state, while keeping
 /// every non-motion event in order preserves click, drag, and scroll input.
-fn dispatch_ready_input_events(
+fn dispatch_ready_input_events<S>(
     app: &mut App,
-    input_rx: &mut terminal_input_owner::InputReceiver,
+    input_rx: &mut S,
     naming_workers: &mut NamingWorkers,
     icon_search_workers: &mut IconSearchWorkers,
     home_dir: Option<&std::path::Path>,
@@ -3903,14 +4145,57 @@ fn dispatch_ready_input_events(
     deferred: &mut input_backlog::InputBacklog<
         Result<terminal_input_owner::InputEvent, terminal_input_owner::InputFailure>,
     >,
-) -> Option<terminal_input_owner::InputFailure> {
+    editor_deferred: &mut crate::editor_input_backlog::EditorInputBacklog,
+) -> Option<terminal_input_owner::InputFailure>
+where
+    S: ReadyInput<
+        Item = Result<terminal_input_owner::InputEvent, terminal_input_owner::InputFailure>,
+    >,
+{
     let mut failure = None;
+    let mut overflow = None;
     let lookahead = {
         let mut ready = input_backlog::BacklogReady {
             backlog: deferred,
             upstream: input_rx,
         };
         for_each_ready_input_event_until(&mut ready, first, |event| {
+            if app.has_editor_model_loan() {
+                let classification = event.as_ref().ok().and_then(|input| {
+                    let event = input.view();
+                    if matches!(event, Event::Mouse(_)) {
+                        crate::mouse::editor_loan_event_target(app, event)
+                    } else {
+                        crate::keys::editor_loan_event_target(app, event)
+                    }
+                });
+                let target_pane = classification.flatten().or_else(|| {
+                    event
+                        .as_ref()
+                        .ok()
+                        .and_then(|input| crate::mouse::editor_input_hit_pane(app, input.view()))
+                });
+                let blocks_order = !editor_deferred.is_empty()
+                    || classification.is_none()
+                    || target_pane
+                        .is_some_and(|pane_id| app.editor_model_loans.contains_key(&pane_id));
+                if blocks_order {
+                    let loan_identity = target_pane
+                        .and_then(|pane_id| app.editor_model_loans.get(&pane_id).cloned());
+                    return match editor_deferred.push(
+                        event,
+                        target_pane,
+                        app.emitted_layout_revision(),
+                        loan_identity,
+                    ) {
+                        Ok(()) => true,
+                        Err(original) => {
+                            overflow = Some(original);
+                            false
+                        }
+                    };
+                }
+            }
             match event {
                 Ok(event) => {
                     let is_paste = matches!(event.view(), Event::Paste(_));
@@ -3997,7 +4282,7 @@ fn dispatch_ready_input_events(
                 && app.pending_key_paste.is_none()
         })
     };
-    if let Err(refused) = deferred.restore(None, lookahead) {
+    if let Err(refused) = deferred.restore(overflow, lookahead) {
         // Preserve every incoming original on a violated two-slot invariant.
         // Existing backlog ownership is unchanged and drains during shutdown.
         for event in [refused.original, refused.lookahead].into_iter().flatten() {
@@ -4046,11 +4331,13 @@ fn retain_interrupted_key_paste(
         return previous;
     };
     let (original, consumed_bytes) = replay.into_parts();
-    Some(terminal_input_owner::InputFailure::undispatched_after_paste(
-        original,
-        consumed_bytes,
-        previous,
-    ))
+    Some(
+        terminal_input_owner::InputFailure::undispatched_after_paste(
+            original,
+            consumed_bytes,
+            previous,
+        ),
+    )
 }
 
 trait InputBatchItem: Sized {
@@ -4085,6 +4372,16 @@ impl ReadyInput for terminal_input_owner::InputReceiver {
 
     fn try_next(&mut self) -> Result<Self::Item, mpsc::error::TryRecvError> {
         self.try_recv()
+    }
+}
+
+struct EmptyReadyInput;
+
+impl ReadyInput for EmptyReadyInput {
+    type Item = Result<terminal_input_owner::InputEvent, terminal_input_owner::InputFailure>;
+
+    fn try_next(&mut self) -> Result<Self::Item, mpsc::error::TryRecvError> {
+        Err(mpsc::error::TryRecvError::Empty)
     }
 }
 
@@ -4598,8 +4895,7 @@ mod responsiveness_tests {
             "paste-shutdown-test".to_owned(),
             project_directory.path().to_path_buf(),
         );
-        let (original, quota) =
-            terminal_input_owner::paste_fixture("a\r\né".to_owned());
+        let (original, quota) = terminal_input_owner::paste_fixture("a\r\né".to_owned());
         let original_pointer = match original.view() {
             Event::Paste(text) => text.as_ptr(),
             _ => unreachable!("paste fixture contains a paste"),
@@ -4611,8 +4907,10 @@ mod responsiveness_tests {
         let failure = retain_interrupted_key_paste(&mut app, None).unwrap();
 
         assert_eq!(failure.consumed_paste_bytes(), Some(3));
-        assert!(matches!(failure.original().unwrap().view(), Event::Paste(text)
-            if text.as_ptr() == original_pointer && text == "a\r\né"));
+        assert!(
+            matches!(failure.original().unwrap().view(), Event::Paste(text)
+            if text.as_ptr() == original_pointer && text == "a\r\né")
+        );
         assert!(quota.snapshot().worker_bytes > 0);
         drop(failure);
         assert_eq!(quota.snapshot().worker_bytes, 0);

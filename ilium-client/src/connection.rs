@@ -182,7 +182,7 @@ impl RequestSender {
                             reason: RequestSendFailure::WriterClosed,
                             _retention: Some(retention),
                         })
-                    })
+                    });
                 }
                 Err(error) => {
                     let error = *error;

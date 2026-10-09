@@ -362,7 +362,9 @@ impl ApplyWarning {
                 } else {
                     "that profile when it is selected"
                 };
-                format!("profile \"{profile}\" sets this key to {value}; it overrides the top-level value for {selection}")
+                format!(
+                    "profile \"{profile}\" sets this key to {value}; it overrides the top-level value for {selection}"
+                )
             }
             Self::ValueUnchanged => "the file already holds this value; nothing will change".into(),
         }
@@ -443,6 +445,15 @@ pub fn read_current(
         value,
         fingerprint: loaded.fingerprint,
     })
+}
+
+/// Project-level and profile settings that shadow the user-level value, for
+/// display only. A missing or unreadable user file contributes no profiles.
+pub fn read_overrides(target: AgentConfigTarget, paths: &ConfigPaths) -> Vec<ApplyWarning> {
+    let user_text = load_config_file(&target.config_path(paths))
+        .map(|loaded| loaded.text)
+        .unwrap_or_default();
+    collect_warnings(target, paths, &user_text)
 }
 
 /// Prepares one change without writing anything: validates the file and the
@@ -1464,10 +1475,113 @@ fn edit_json_text(text: &str, key: &str, change: KeyChange) -> Result<String, St
             member.value_start..member.value_end,
             &value.to_string(),
         ),
-        (None, KeyChange::Set(value)) => insert_json_member(text, &root, key, value),
+        (None, KeyChange::Set(value)) => {
+            insert_json_member(text, &root, key, &serde_json::Value::from(value))
+        }
         (Some(member), KeyChange::Remove) => remove_json_member(text, &root, member),
         (None, KeyChange::Remove) => Ok(text.to_string()),
     }
+}
+
+/// Edits one top-level JSON value while preserving every other byte. Used by
+/// managed integrations that need to own a structured setting temporarily.
+pub(crate) fn edit_top_level_json_value(
+    text: &str,
+    key: &str,
+    replacement: Option<serde_json::Value>,
+) -> Result<String, String> {
+    let mut expected: serde_json::Value =
+        serde_json::from_str(text).map_err(|error| format!("invalid JSON: {error}"))?;
+    let object = expected
+        .as_object_mut()
+        .ok_or_else(|| "the top level of the file is not a JSON object".to_owned())?;
+    let root = scan_json_root(text)?;
+    let member = json_find_member(&root, key)?;
+    let edited = match (member, replacement.as_ref()) {
+        (Some(member), Some(value)) => replace_range(
+            text,
+            member.value_start..member.value_end,
+            &serde_json::to_string(value).map_err(|error| error.to_string())?,
+        )?,
+        (None, Some(value)) => insert_json_member(text, &root, key, value)?,
+        (Some(member), None) => remove_json_member(text, &root, member)?,
+        (None, None) => text.to_owned(),
+    };
+    match replacement {
+        Some(value) => {
+            object.insert(key.to_owned(), value);
+        }
+        None => {
+            object.remove(key);
+        }
+    }
+    let actual: serde_json::Value = serde_json::from_str(&edited)
+        .map_err(|error| format!("edited JSON is invalid: {error}"))?;
+    if expected != actual {
+        return Err("edit check: the edit changed something besides the target key".into());
+    }
+    Ok(edited)
+}
+
+/// Restores one top-level JSON value from its original source slice so a
+/// managed setting can put the user's exact formatting back when disabling.
+pub(crate) fn restore_top_level_json_value_text(
+    text: &str,
+    key: &str,
+    replacement: Option<&str>,
+) -> Result<String, String> {
+    let mut expected: serde_json::Value =
+        serde_json::from_str(text).map_err(|error| format!("invalid JSON: {error}"))?;
+    let object = expected
+        .as_object_mut()
+        .ok_or_else(|| "the top level of the file is not a JSON object".to_owned())?;
+    let replacement_value: Option<serde_json::Value> = replacement
+        .map(serde_json::from_str)
+        .transpose()
+        .map_err(|error| format!("invalid replacement JSON: {error}"))?;
+    let root = scan_json_root(text)?;
+    let member = json_find_member(&root, key)?;
+    let edited = match (member, replacement) {
+        (Some(member), Some(raw)) => {
+            replace_range(text, member.value_start..member.value_end, raw)?
+        }
+        (None, Some(raw)) => {
+            let value = replacement_value
+                .as_ref()
+                .expect("parsed replacement exists");
+            insert_json_member(text, &root, key, value)?
+        }
+        (Some(member), None) => remove_json_member(text, &root, member)?,
+        (None, None) => text.to_owned(),
+    };
+    match replacement_value {
+        Some(value) => {
+            object.insert(key.to_owned(), value);
+        }
+        None => {
+            object.remove(key);
+        }
+    }
+    let actual: serde_json::Value = serde_json::from_str(&edited)
+        .map_err(|error| format!("edited JSON is invalid: {error}"))?;
+    if expected != actual {
+        return Err("edit check: the edit changed something besides the target key".into());
+    }
+    Ok(edited)
+}
+
+pub(crate) fn top_level_json_value_text(text: &str, key: &str) -> Result<Option<String>, String> {
+    let _: serde_json::Value =
+        serde_json::from_str(text).map_err(|error| format!("invalid JSON: {error}"))?;
+    let root = scan_json_root(text)?;
+    let Some(member) = json_find_member(&root, key)? else {
+        return Ok(None);
+    };
+    Ok(Some(
+        text.get(member.value_start..member.value_end)
+            .ok_or("internal JSON span error")?
+            .to_owned(),
+    ))
 }
 
 /// Inserts `"key": value` as the first member, reusing the whitespace that
@@ -1476,8 +1590,9 @@ fn insert_json_member(
     text: &str,
     root: &JsonRoot,
     key: &str,
-    value: u64,
+    value: &serde_json::Value,
 ) -> Result<String, String> {
+    let value = serde_json::to_string(value).map_err(|error| error.to_string())?;
     if let Some(first) = root.members.first() {
         let leading = text
             .get(root.open + 1..first.key_start)

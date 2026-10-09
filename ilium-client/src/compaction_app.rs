@@ -232,7 +232,7 @@ impl App {
         }
     }
 
-    fn optimization_config_paths(&self) -> Result<ConfigPaths, WriteError> {
+    pub(crate) fn optimization_config_paths(&self) -> Result<ConfigPaths, WriteError> {
         self.optimization
             .paths
             .config(&self.agent_setup_project_roots())

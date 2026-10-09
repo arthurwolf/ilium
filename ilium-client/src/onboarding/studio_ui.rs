@@ -365,8 +365,14 @@ fn geometry(area: Rect, _ui: &StudioUiState) -> StudioGeometry {
             false,
         );
     }
-    let plot_height = if wide { 5 } else { 3 };
-    let envelope_height = if wide { 5 } else { 3 };
+    let preview_height = if wide {
+        7
+    } else if viewport.height >= 11 {
+        4
+    } else {
+        3
+    };
+    let preview_gap = u16::from(!wide && viewport.height >= 11);
     if wide {
         let first = width * 2 / 3;
         push(
@@ -374,7 +380,7 @@ fn geometry(area: Rect, _ui: &StudioUiState) -> StudioGeometry {
             x,
             first.saturating_sub(1),
             3,
-            plot_height,
+            preview_height,
             false,
         );
         push(
@@ -382,24 +388,24 @@ fn geometry(area: Rect, _ui: &StudioUiState) -> StudioGeometry {
             x + first + 1,
             width.saturating_sub(first + 1),
             3,
-            envelope_height,
+            preview_height,
             false,
         );
     } else {
-        push(ElementKind::WavePlot, x, width, 3, plot_height, false);
+        push(ElementKind::WavePlot, x, width, 3, preview_height, false);
         push(
             ElementKind::Envelope,
             x,
             width,
-            3 + plot_height,
-            envelope_height,
+            3 + preview_height + preview_gap,
+            preview_height,
             false,
         );
     }
     let presets_y = if wide {
-        3 + plot_height
+        3 + preview_height
     } else {
-        3 + plot_height + envelope_height
+        3 + preview_height * 2 + preview_gap
     };
     push(
         ElementKind::Heading("STARTING POINTS  /  then make it yours"),
@@ -777,41 +783,44 @@ fn event_label(event: SoundEvent) -> &'static str {
 }
 
 fn render_wave(frame: &mut Frame, rect: Rect, studio: &SoundStudio) {
-    frame.render_widget(Block::default().style(Style::new().bg(PANEL)), rect);
-    if studio.preview.is_empty() {
+    let block = crate::theme::block(false)
+        .title(crate::theme::chrome_title("Waveform"))
+        .style(Style::new().bg(PANEL));
+    let content = block.inner(rect);
+    frame.render_widget(block, rect);
+    let preview = studio.preview_columns();
+    if preview.is_empty() || content.is_empty() {
         return;
     }
-    let plot = Rect::new(
-        rect.x,
-        rect.y + 1,
-        rect.width,
-        rect.height.saturating_sub(1),
-    );
-    let peak = studio
-        .preview
+    let peak = preview
         .iter()
         .map(|column| i32::from(column.min).abs().max(i32::from(column.max).abs()))
         .max()
         .unwrap_or(0);
-    frame.render_widget(
-        Paragraph::new(format!(
-            " PCM  ·  {} ms  ·  peak {:.0}%",
-            studio.draft.design.duration_ms,
-            f64::from(peak) * 100.0 / 32767.0
-        ))
-        .style(Style::new().fg(MUTED)),
-        Rect::new(rect.x, rect.y, rect.width, 1),
-    );
+    let plot = if content.height >= 4 {
+        frame.render_widget(
+            Paragraph::new(format!(
+                " PCM  ·  {} ms  ·  peak {:.0}%",
+                studio.draft.design.duration_ms,
+                f64::from(peak) * 100.0 / 32767.0
+            ))
+            .style(Style::new().fg(MUTED)),
+            Rect::new(content.x, content.y, content.width, 1),
+        );
+        Rect::new(content.x, content.y + 1, content.width, content.height - 1)
+    } else {
+        content
+    };
     if plot.is_empty() {
         return;
     }
     for column in 0..plot.width {
         // Aggregate cached extrema; never discard a peak during a narrow resize.
-        let start = usize::from(column) * studio.preview.len() / usize::from(plot.width);
-        let end = ((usize::from(column) + 1) * studio.preview.len() / usize::from(plot.width))
+        let start = usize::from(column) * preview.len() / usize::from(plot.width);
+        let end = ((usize::from(column) + 1) * preview.len() / usize::from(plot.width))
             .max(start + 1)
-            .min(studio.preview.len());
-        let samples = &studio.preview[start.min(studio.preview.len() - 1)..end];
+            .min(preview.len());
+        let samples = &preview[start.min(preview.len() - 1)..end];
         let low = samples.iter().map(|value| value.min).min().unwrap_or(0);
         let high = samples.iter().map(|value| value.max).max().unwrap_or(0);
         let to_row = |sample: i16| {
@@ -837,13 +846,13 @@ fn render_wave(frame: &mut Frame, rect: Rect, studio: &SoundStudio) {
 }
 
 fn render_envelope(frame: &mut Frame, rect: Rect, design: &SoundDesign) {
-    frame.render_widget(Block::default().style(Style::new().bg(PANEL)), rect);
-    frame.render_widget(
-        Paragraph::new(" A · D · S · R  /  envelope").style(Style::new().fg(MUTED)),
-        Rect::new(rect.x, rect.y, rect.width, 1),
-    );
-    let height = rect.height.saturating_sub(1);
-    if height == 0 || rect.width == 0 {
+    let block = crate::theme::block(false)
+        .title(crate::theme::chrome_title("Envelope"))
+        .style(Style::new().bg(PANEL));
+    let content = block.inner(rect);
+    frame.render_widget(block, rect);
+    let height = content.height;
+    if height == 0 || content.width == 0 {
         return;
     }
     let duration = f64::from(design.duration_ms);
@@ -853,8 +862,8 @@ fn render_envelope(frame: &mut Frame, rect: Rect, design: &SoundDesign) {
     let decay = f64::from(design.decay_ms) * scale;
     let release = f64::from(design.release_ms) * scale;
     let sustain = f64::from(design.sustain_percent) / 100.0;
-    for column in 0..rect.width {
-        let time = f64::from(column) / f64::from(rect.width.saturating_sub(1).max(1)) * duration;
+    for column in 0..content.width {
+        let time = f64::from(column) / f64::from(content.width.saturating_sub(1).max(1)) * duration;
         let level = if time < attack {
             time / attack
         } else if time < attack + decay {
@@ -867,7 +876,7 @@ fn render_envelope(frame: &mut Frame, rect: Rect, design: &SoundDesign) {
         let row = ((1.0 - level.clamp(0.0, 1.0)) * f64::from(height - 1)).round() as u16;
         frame.render_widget(
             Paragraph::new("•").style(Style::new().fg(ACCENT)),
-            Rect::new(rect.x + column, rect.y + 1 + row, 1, 1),
+            Rect::new(content.x + column, content.y + row, 1, 1),
         );
     }
 }
@@ -1073,5 +1082,82 @@ mod tests {
                 .draw(|frame| render(frame, frame.area(), &studio, &StudioUiState::default()))
                 .unwrap();
         }
+    }
+
+    fn preview_rects(area: Rect) -> [Rect; 2] {
+        let geometry = geometry(area, &StudioUiState::default());
+        [ElementKind::WavePlot, ElementKind::Envelope].map(|kind| {
+            let element = geometry
+                .elements
+                .iter()
+                .find(|element| {
+                    matches!(
+                        (element.kind, kind),
+                        (ElementKind::WavePlot, ElementKind::WavePlot)
+                            | (ElementKind::Envelope, ElementKind::Envelope)
+                    )
+                })
+                .expect("preview element");
+            geometry.rect(element, 0).expect("visible preview")
+        })
+    }
+
+    #[test]
+    fn sound_studio_previews_use_titled_rounded_frames_at_regular_and_compact_sizes() {
+        let studio = SoundStudio::new(ilium_sound::SoundSettings::default());
+        for area in [Rect::new(0, 0, 118, 33), Rect::new(0, 0, 40, 16)] {
+            let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
+            terminal
+                .draw(|frame| render(frame, area, &studio, &StudioUiState::default()))
+                .unwrap();
+
+            let buffer = terminal.backend().buffer();
+            let [waveform, envelope] = preview_rects(area);
+            for (kind, title) in [
+                (ElementKind::WavePlot, "Waveform"),
+                (ElementKind::Envelope, "Envelope"),
+            ] {
+                let rect = if matches!(kind, ElementKind::WavePlot) {
+                    waveform
+                } else {
+                    envelope
+                };
+                assert_eq!(
+                    buffer[(rect.x, rect.y)].symbol(),
+                    "╭",
+                    "{title} at {area:?}"
+                );
+                assert_eq!(
+                    buffer[(rect.x, rect.bottom() - 1)].symbol(),
+                    "╰",
+                    "{title} at {area:?}"
+                );
+                assert_eq!(
+                    buffer[(rect.right() - 1, rect.y)].symbol(),
+                    "╮",
+                    "{title} at {area:?}",
+                );
+                assert_eq!(
+                    buffer[(rect.right() - 1, rect.bottom() - 1)].symbol(),
+                    "╯",
+                    "{title} at {area:?}"
+                );
+                let rendered: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+                assert!(rendered.contains(title), "missing {title} at {area:?}");
+            }
+            crate::ui_capture::save(
+                &format!(
+                    "sound-studio-previews-framed-{}x{}",
+                    area.width, area.height
+                ),
+                &terminal,
+            );
+        }
+    }
+
+    #[test]
+    fn compact_sound_studio_previews_keep_a_row_between_their_frames() {
+        let [waveform, envelope] = preview_rects(Rect::new(0, 0, 40, 16));
+        assert!(waveform.bottom() < envelope.y);
     }
 }

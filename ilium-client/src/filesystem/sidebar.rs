@@ -69,6 +69,18 @@ impl SidebarRead {
         Ok(())
     }
 }
+
+fn visit_directory_entries(
+    entries: impl IntoIterator<Item = std::io::Result<std::fs::DirEntry>>,
+    directory: &std::path::Path,
+    mut visit: impl FnMut(std::fs::DirEntry) -> Result<(), String>,
+) -> Result<(), String> {
+    for entry in entries.into_iter().filter_map(Result::ok) {
+        visit(entry)?;
+    }
+    Ok(())
+}
+
 impl Job for SidebarRead {
     type Output = SidebarSnapshot;
     type Error = String;
@@ -93,13 +105,13 @@ impl Job for SidebarRead {
                 let entries = std::fs::read_dir(&directory)
                     .map_err(|error| format!("{}: {error}", directory.display()))?;
                 let mut children = Vec::new();
-                for entry in entries.flatten() {
+                visit_directory_entries(entries, &directory, |entry| {
                     if context.stop_requested() {
                         return Err("Sidebar preparation cancelled".into());
                     }
                     let name = entry.file_name();
                     if name.to_string_lossy().starts_with('.') {
-                        continue;
+                        return Ok(());
                     }
                     let path = entry.path();
                     let is_directory = entry.file_type().is_ok_and(|kind| kind.is_dir());
@@ -136,7 +148,8 @@ impl Job for SidebarRead {
                         path,
                         is_directory,
                     });
-                }
+                    Ok(())
+                })?;
                 // Match existing native filename ordering, with directories first.
                 children.sort_by(|a, b| {
                     b.is_directory
@@ -291,6 +304,33 @@ mod capacity_tests {
         };
         assert!(request.checked().is_err());
     }
+
+    #[test]
+    fn a_directory_entry_error_rejects_the_listing_instead_of_publishing_partial_rows() {
+        let directory = tempfile::tempdir().expect("sidebar directory");
+        std::fs::write(directory.path().join("visible.txt"), b"visible")
+            .expect("directory entry fixture");
+        let valid_entry = std::fs::read_dir(directory.path())
+            .expect("read fixture directory")
+            .next()
+            .expect("fixture entry")
+            .expect("valid fixture entry");
+        let error = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "injected");
+        let mut visited = Vec::new();
+        let result =
+            visit_directory_entries([Ok(valid_entry), Err(error)], directory.path(), |entry| {
+                visited.push(entry.file_name());
+                Ok(())
+            });
+
+        let expected_error = format!("{}: injected", directory.path().display());
+        assert!(result.unwrap_err().contains(expected_error.as_str()));
+        assert_eq!(
+            visited.len(),
+            1,
+            "fixture proves iteration reached a later error"
+        );
+    }
 }
 
 impl crate::app::App {
@@ -387,7 +427,7 @@ pub(crate) fn prepared_for_test(
                 return outcome.map(|outcome| match outcome {
                     JobOutcome::Finished(Ok(snapshot)) => snapshot,
                     _ => panic!("sidebar fixture preparation failed"),
-                })
+                });
             }
             JobPoll::Pending => {
                 assert!(Instant::now() < deadline, "sidebar fixture never completed");

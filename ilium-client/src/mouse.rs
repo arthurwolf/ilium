@@ -25,6 +25,28 @@ use crate::prompt_queue::{PromptQueueDialogState, PromptQueueFocus};
 use crate::scheduled_input::{ScheduledInputDialogState, ScheduledInputFocus};
 use crate::tree_ui::{self, TreeRowAction, TreeToolbarAction};
 
+/// The pointer route can depend on overlays, gestures and the last emitted
+/// geometry. Until those conditions are fully represented in the input
+/// snapshot contract, mouse events are deliberately ambiguous to an editor
+/// loan and must form the ordered custody barrier.
+pub(crate) fn editor_loan_event_target(_app: &App, _event: &Event) -> Option<Option<NodeId>> {
+    None
+}
+
+/// Captures the pane under a mouse coordinate only when the terminal geometry
+/// that was actually emitted is still current. This stamp is used solely to
+/// fence replay; it does not claim that overlays will dispatch to that pane.
+pub(crate) fn editor_input_hit_pane(app: &App, event: &Event) -> Option<NodeId> {
+    let Event::Mouse(mouse) = event else {
+        return None;
+    };
+    if !app.pointer_geometry_is_current() {
+        return None;
+    }
+    app.pane_viewport_at(Position::new(mouse.column, mouse.row))
+        .map(|viewport| viewport.pane_id)
+}
+
 /// Converts a crossterm mouse event's kind/modifiers into the wire shapes
 /// `ilium_ipc::ClientRequest::MouseInput` carries. The two enums are a
 /// deliberate 1:1 mirror of each other (see `ilium_server::mouse`'s
@@ -129,6 +151,15 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
     let position = Position::new(mouse.column, mouse.row);
     app.set_terminal_focused(true);
     app.set_pointer_position(Some(position));
+    if matches!(app.mode, Mode::AgentMessageDialog(_)) {
+        let Mode::AgentMessageDialog(mut state) = std::mem::replace(&mut app.mode, Mode::Normal)
+        else {
+            unreachable!("matched message dialog");
+        };
+        let outcome = state.handle_mouse(app.layout.screen_area, mouse);
+        app.finish_agent_message_dialog(state, outcome);
+        return;
+    }
     if !app.layout.tree_area.contains(position) {
         app.update_agent_popover_pointer(position, Instant::now());
     }
@@ -842,13 +873,15 @@ fn handle_terminal_pane_context_menu_mouse(
     app.execute_terminal_context_action(action, menu);
 }
 
-/// Left clicks inside the location picker: fields, results, map and buttons
+/// Clicks inside the location picker: fields, results, map and buttons
 /// are resolved through the same `location_picker::layout` the renderer uses.
 fn handle_location_picker_mouse(app: &mut App, mouse: MouseEvent) {
     use crate::location_picker::PickerOutcome;
-    if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
-        return;
-    }
+    let button = match mouse.kind {
+        MouseEventKind::Down(MouseButton::Left) => crate::value_control::PointerButton::Left,
+        MouseEventKind::Down(MouseButton::Right) => crate::value_control::PointerButton::Right,
+        _ => return,
+    };
     let position = Position::new(mouse.column, mouse.row);
     let screen = app.layout.screen_area;
     let mut picker = match std::mem::replace(&mut app.mode, Mode::Normal) {
@@ -858,7 +891,7 @@ fn handle_location_picker_mouse(app: &mut App, mouse: MouseEvent) {
             return;
         }
     };
-    match picker.click(position, screen) {
+    match picker.click_with_button(position, screen, button) {
         PickerOutcome::Continue => app.mode = Mode::LocationPicker(picker),
         PickerOutcome::Cancel => app.pop_modal(),
         PickerOutcome::Confirm => match app.confirm_location_picker(&mut picker) {
@@ -2192,6 +2225,36 @@ fn update_animation_hover(
     app.set_animation_hover(row, Instant::now());
 }
 
+/// Pointer tab changes share the same row and scroll reset semantics.
+fn select_settings_pointer_tab(
+    app: &App,
+    state: &mut crate::app::SettingsState,
+    tab: crate::app::SettingsTab,
+    content_area: Rect,
+) {
+    if tab == state.tab {
+        return;
+    }
+    state.tab = tab;
+    state.selected_row = usize::from(
+        tab == crate::app::SettingsTab::Titles
+            && app.inference_settings.title_style == ilium_inference::TitleStyle::Summarization,
+    );
+    if tab == crate::app::SettingsTab::Animations {
+        state.selected_row = crate::background_animation::AnimationKind::ALL
+            .iter()
+            .position(|kind| *kind == app.animation_settings.kind)
+            .unwrap_or(0);
+        state.scene_scroll = 0;
+        state.global_scroll = 0;
+        state.scroll = 0;
+        crate::animation_settings_ui::sync_scrolls(content_area, &app.animation_row_model(), state);
+    } else {
+        state.scroll = 0;
+    }
+    state.trigger_action_cursor = 0;
+}
+
 /// Mouse handling for the full-screen settings view (`Mode::Settings`):
 /// clicking the header's close button closes the screen, clicking a tab
 /// switches to it, clicking a row's `‹`/value control decrements/increments
@@ -2280,6 +2343,17 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                 .saturating_sub(instruction_height);
         }
     }
+
+    let scrollable_area = if state.tab == crate::app::SettingsTab::Optimization {
+        crate::compaction_ui::body_area(layout.content_area)
+    } else {
+        layout.content_area
+    };
+    let content_scrollbar_area = Rect {
+        y: scrollable_area.y,
+        height: scrollable_area.height,
+        ..layout.content_scrollbar_area
+    };
 
     if state.tab == crate::app::SettingsTab::Icons && state.icon_picker.is_none() {
         if let MouseEventKind::Down(button @ (MouseButton::Left | MouseButton::Right)) = mouse.kind
@@ -2675,49 +2749,97 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                 return;
             }
         }
-        // A bounded inventory: unrecognized rows retain their own handlers.
-        let rows = crate::settings_ui::settings_number_row_count(app, state.tab);
-        for row in 0..rows {
-            if let Some((field, control)) =
-                crate::settings_ui::settings_choice_control(layout.content_area, app, &state, row)
-            {
-                if control.geometry().row.contains(position) {
-                    state.selected_row = row;
-                    match control.hit(position, button) {
-                        Some(ControlAction::PreviousChoice) => app.step_settings_choice(field, -1),
-                        Some(ControlAction::NextChoice) => app.step_settings_choice(field, 1),
-                        Some(ControlAction::OpenChoices) => {
-                            app.mode = Mode::Settings(state);
-                            app.begin_settings_choice_dialog(field);
-                            return;
+        // Remote Compaction has multi-line rows and owns both their painted
+        // controls and pointer geometry in remote_compaction_settings_ui.
+        // Keep the generic flat-row dispatcher out of that page.
+        if state.tab != crate::app::SettingsTab::RemoteCompaction {
+            // A bounded inventory: unrecognized rows retain their own handlers.
+            let rows = crate::settings_ui::settings_number_row_count(app, state.tab);
+            for row in 0..rows {
+                if let Some(control) = crate::settings_ui::settings_status_icon_control(
+                    layout.content_area,
+                    app,
+                    &state,
+                    row,
+                ) {
+                    let geometry = control.geometry();
+                    if geometry.row.contains(position) {
+                        let crate::app::AgentMonitoringRow::StatusIcon(target) =
+                            crate::settings_ui::agent_monitoring_rows(app)[row]
+                        else {
+                            unreachable!("status icon control must belong to a status icon row")
+                        };
+                        state.selected_row = row;
+                        match control.hit(position, button) {
+                            Some(ControlAction::PreviousChoice) => {
+                                app.settings_cycle_icon(target, -1);
+                            }
+                            Some(ControlAction::NextChoice) => {
+                                app.settings_cycle_icon(target, 1);
+                            }
+                            Some(ControlAction::OpenChoices) => {
+                                state.icon_picker = Some(crate::app::IconPickerState::new(target));
+                            }
+                            None if geometry.label.contains(position) => {
+                                // Preserve the existing shortcut: clicking the
+                                // descriptive label opens the complete picker.
+                                state.icon_picker = Some(crate::app::IconPickerState::new(target));
+                            }
+                            _ => {}
                         }
-                        _ => {}
+                        app.mode = Mode::Settings(state);
+                        return;
                     }
-                    app.mode = Mode::Settings(state);
-                    return;
                 }
-            }
-            let Some((field, control)) =
-                crate::settings_ui::settings_number_control(layout.content_area, app, &state, row)
-            else {
-                continue;
-            };
-            if !control.geometry().row.contains(position) {
-                continue;
-            }
-            state.selected_row = row;
-            match control.hit(position, button) {
-                Some(ControlAction::Decrement) => app.step_settings_number(field, -1),
-                Some(ControlAction::Increment) => app.step_settings_number(field, 1),
-                Some(ControlAction::EditNumber) => {
-                    app.mode = Mode::Settings(state);
-                    app.begin_settings_number_dialog(field);
-                    return;
+                if let Some((field, control)) = crate::settings_ui::settings_choice_control(
+                    layout.content_area,
+                    app,
+                    &state,
+                    row,
+                ) {
+                    if control.geometry().row.contains(position) {
+                        state.selected_row = row;
+                        match control.hit(position, button) {
+                            Some(ControlAction::PreviousChoice) => {
+                                app.step_settings_choice(field, -1)
+                            }
+                            Some(ControlAction::NextChoice) => app.step_settings_choice(field, 1),
+                            Some(ControlAction::OpenChoices) => {
+                                app.mode = Mode::Settings(state);
+                                app.begin_settings_choice_dialog(field);
+                                return;
+                            }
+                            _ => {}
+                        }
+                        app.mode = Mode::Settings(state);
+                        return;
+                    }
                 }
-                _ => {}
+                let Some((field, control)) = crate::settings_ui::settings_number_control(
+                    layout.content_area,
+                    app,
+                    &state,
+                    row,
+                ) else {
+                    continue;
+                };
+                if !control.geometry().row.contains(position) {
+                    continue;
+                }
+                state.selected_row = row;
+                match control.hit(position, button) {
+                    Some(ControlAction::Decrement) => app.step_settings_number(field, -1),
+                    Some(ControlAction::Increment) => app.step_settings_number(field, 1),
+                    Some(ControlAction::EditNumber) => {
+                        app.mode = Mode::Settings(state);
+                        app.begin_settings_number_dialog(field);
+                        return;
+                    }
+                    _ => {}
+                }
+                app.mode = Mode::Settings(state);
+                return;
             }
-            app.mode = Mode::Settings(state);
-            return;
         }
     }
 
@@ -2836,6 +2958,8 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                 crate::settings_ui::settings_help_at(&layout, app, &state, position)
             {
                 if let Some(topic) = crate::settings_help::catalog::by_id(&topic_id) {
+                    #[cfg(test)]
+                    crate::settings_ui::terminal_pool_help_regressions::opened_topic(&topic_id);
                     let help = crate::settings_help::dialog::SettingsHelpState::new(
                         topic_id,
                         topic.frames.len(),
@@ -2847,31 +2971,26 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
             }
             if let Some(tab) =
                 crate::settings_ui::tab_at_for_active(layout.tab_list_area, position, state.tab)
+                    .or_else(|| {
+                        crate::settings_ui::tab_scrollbar_target(layout.tab_list_area, position)
+                    })
             {
-                if tab != state.tab {
-                    state.tab = tab;
-                    state.selected_row = usize::from(
-                        tab == crate::app::SettingsTab::Titles
-                            && app.inference_settings.title_style
-                                == ilium_inference::TitleStyle::Summarization,
-                    );
-                    if tab == crate::app::SettingsTab::Animations {
-                        state.selected_row = crate::background_animation::AnimationKind::ALL
-                            .iter()
-                            .position(|kind| *kind == app.animation_settings.kind)
-                            .unwrap_or(0);
-                        state.scene_scroll = 0;
-                        state.global_scroll = 0;
-                        state.scroll = 0;
-                        crate::animation_settings_ui::sync_scrolls(
-                            layout.content_area,
-                            &app.animation_row_model(),
-                            &mut state,
-                        );
-                    } else {
-                        state.scroll = 0;
-                    }
-                    state.trigger_action_cursor = 0;
+                select_settings_pointer_tab(app, &mut state, tab, layout.content_area);
+            } else if crate::settings_ui::has_shared_content_scrollbar(state.tab)
+                && content_scrollbar_area.contains(position)
+            {
+                let max_scroll = crate::settings_ui::max_scroll(
+                    state.tab,
+                    app,
+                    state.selected_row,
+                    layout.content_area,
+                );
+                if let Some(scroll) = crate::settings_ui::content_scrollbar_target(
+                    content_scrollbar_area,
+                    position,
+                    max_scroll,
+                ) {
+                    state.scroll = scroll;
                 }
             } else if state.tab == crate::app::SettingsTab::Animations {
                 use crate::animation_rows::AnimationRowOutcome;
@@ -3007,6 +3126,9 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                         crate::app::InferenceRow::Field(
                             crate::app::InferenceSettingField::OpenAiModel,
                         ) => app.settings_adjust_openai_model(direction),
+                        crate::app::InferenceRow::Field(
+                            crate::app::InferenceSettingField::AnthropicModel,
+                        ) => app.settings_adjust_anthropic_model(direction),
                         crate::app::InferenceRow::Field(field) => {
                             app.mode = Mode::Settings(state);
                             app.settings_open_inference_field(field);
@@ -3020,7 +3142,8 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                     layout.content_area,
                     state.scroll,
                     position,
-                    app.text_trigger_settings.triggers.len(),
+                    app,
+                    state.selected_row,
                 ) {
                     state.selected_row = index;
                     let editing_index =
@@ -3110,6 +3233,9 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                                     crate::app::AgentMonitoringRow::AddCustomSignature => {
                                         app.settings_begin_custom_agent_signature();
                                     }
+                                    crate::app::AgentMonitoringRow::ModelIcons => {
+                                        app.settings_adjust_agent_monitoring_row(row, 1);
+                                    }
                                     crate::app::AgentMonitoringRow::StatusIcon(target) => {
                                         state.icon_picker =
                                             Some(crate::app::IconPickerState::new(target));
@@ -3123,11 +3249,11 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                     return;
                 }
             } else if state.tab == crate::app::SettingsTab::VoiceControl {
-                if let Some((index, direction)) = crate::settings_ui::simple_content_hit(
+                if let Some((index, direction)) = crate::settings_ui::voice_content_hit(
                     layout.content_area,
                     state.scroll,
                     position,
-                    crate::voice_settings::VoiceRow::ALL.len(),
+                    app,
                 ) {
                     state.selected_row = index;
                     if let Some(row) = crate::voice_settings::VoiceRow::ALL.get(index).copied() {
@@ -3196,6 +3322,12 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                         app.begin_settings_choice_dialog(
                             crate::value_settings_choice::SettingsChoice::RemoteTechnique(target),
                         );
+                    } else if let crate::remote_compaction_settings_ui::HitAction::EditNumber(row) =
+                        hit.action
+                    {
+                        app.begin_settings_number_dialog(
+                            crate::value_settings::SettingsNumber::Remote(row),
+                        );
                     }
                     return;
                 }
@@ -3212,11 +3344,10 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                     return;
                 }
             } else if state.tab == crate::app::SettingsTab::Debug {
-                if let Some((index, _direction)) = crate::settings_ui::simple_content_hit(
+                if let Some(index) = crate::settings_ui::debug_content_hit(
                     layout.content_area,
                     state.scroll,
                     position,
-                    crate::app::DebugRow::ALL.len(),
                 ) {
                     state.selected_row = index;
                     if matches!(
@@ -3420,33 +3551,54 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
         MouseEventKind::Up(MouseButton::Left) => state.animation_slider_drag = None,
         MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
             state.animation_slider_drag = None;
-            let delta = i32::from(SETTINGS_WHEEL_SCROLL_LINES);
-            let delta = if mouse.kind == MouseEventKind::ScrollUp {
-                -delta
-            } else {
-                delta
-            };
-            // On the Animations tab the wheel scrolls the region under the
-            // pointer (scene list, global settings or the right column); the
-            // scene list scrolls its window without selecting a scene.
-            let mut scrolls = crate::animation_settings_ui::Scrolls::of(&state);
-            let handled = state.tab == crate::app::SettingsTab::Animations
-                && !state.animation_fullscreen
-                && crate::animation_settings_ui::wheel_scroll(
-                    layout.content_area,
-                    &app.animation_row_model(),
-                    &mut scrolls,
-                    position,
-                    delta,
-                );
-            if handled {
-                scrolls.store(&mut state);
-            } else {
-                state.scroll = if delta < 0 {
-                    state.scroll.saturating_sub(delta.unsigned_abs() as u16)
+            if layout.tab_list_area.contains(position) {
+                let index = crate::app::SettingsTab::ALL
+                    .iter()
+                    .position(|tab| *tab == state.tab)
+                    .unwrap_or(0);
+                let next = if mouse.kind == MouseEventKind::ScrollUp {
+                    index.saturating_sub(1)
                 } else {
-                    state.scroll.saturating_add(delta as u16)
+                    (index + 1).min(crate::app::SettingsTab::ALL.len() - 1)
                 };
+                select_settings_pointer_tab(
+                    app,
+                    &mut state,
+                    crate::app::SettingsTab::ALL[next],
+                    layout.content_area,
+                );
+            } else if layout.content_area.contains(position)
+                || (crate::settings_ui::has_shared_content_scrollbar(state.tab)
+                    && content_scrollbar_area.contains(position))
+            {
+                let delta = i32::from(SETTINGS_WHEEL_SCROLL_LINES);
+                let delta = if mouse.kind == MouseEventKind::ScrollUp {
+                    -delta
+                } else {
+                    delta
+                };
+                // On the Animations tab the wheel scrolls the region under the
+                // pointer (scene list, global settings or the right column); the
+                // scene list scrolls its window without selecting a scene.
+                let mut scrolls = crate::animation_settings_ui::Scrolls::of(&state);
+                let handled = state.tab == crate::app::SettingsTab::Animations
+                    && !state.animation_fullscreen
+                    && crate::animation_settings_ui::wheel_scroll(
+                        layout.content_area,
+                        &app.animation_row_model(),
+                        &mut scrolls,
+                        position,
+                        delta,
+                    );
+                if handled {
+                    scrolls.store(&mut state);
+                } else {
+                    state.scroll = if delta < 0 {
+                        state.scroll.saturating_sub(delta.unsigned_abs() as u16)
+                    } else {
+                        state.scroll.saturating_add(delta as u16)
+                    };
+                }
             }
         }
         _ => {}
@@ -3469,6 +3621,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
         crate::settings_ui::max_scroll(state.tab, app, state.selected_row, layout.content_area);
     state.scroll = state.scroll.min(max_scroll);
     app.optimization_sync_visibility(state.tab == crate::app::SettingsTab::Optimization);
+    app.remote_compaction_sync_native(state.tab == crate::app::SettingsTab::RemoteCompaction);
     app.mode = Mode::Settings(state);
 }
 
@@ -5493,6 +5646,265 @@ mod text_trigger_mouse_tests {
     }
 
     #[test]
+    fn settings_navigation_wheel_targets_tabs_instead_of_right_content() {
+        // Synthetic navigation only: no setting or persisted value is changed.
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::new(
+            "settings-navigation-wheel".to_owned(),
+            directory.path().into(),
+        );
+        for (width, height) in [(120, 40), (80, 24), (60, 20), (40, 12)] {
+            app.set_screen_area(Rect::new(0, 0, width, height));
+            for (index, tab) in SettingsTab::ALL.into_iter().enumerate() {
+                for (kind, expected_index) in [
+                    (MouseEventKind::ScrollUp, index.saturating_sub(1)),
+                    (
+                        MouseEventKind::ScrollDown,
+                        (index + 1).min(SettingsTab::ALL.len() - 1),
+                    ),
+                ] {
+                    let state = SettingsState {
+                        tab,
+                        ..SettingsState::default()
+                    };
+                    let layout = crate::settings_ui::compute_layout_for_mode(
+                        app.layout.screen_area,
+                        &app,
+                        &state,
+                    );
+                    let position =
+                        Position::new(layout.tab_list_area.x + 1, layout.tab_list_area.y + 1);
+                    assert!(layout.tab_list_area.contains(position));
+                    app.mode = Mode::Settings(state);
+                    handle_mouse_event(
+                        &mut app,
+                        MouseEvent {
+                            kind,
+                            column: position.x,
+                            row: position.y,
+                            modifiers: crossterm::event::KeyModifiers::empty(),
+                        },
+                    );
+                    let Mode::Settings(state) = &app.mode else {
+                        panic!("navigation wheel must keep Settings open");
+                    };
+                    assert_eq!(
+                        state.tab,
+                        SettingsTab::ALL[expected_index],
+                        "{tab:?} {kind:?} on {width}x{height}"
+                    );
+                    assert_eq!(
+                        state.scroll, 0,
+                        "navigation wheel must not scroll the right content"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn settings_navigation_scrollbar_click_selects_the_tab_at_the_track_position() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::new(
+            "settings-navigation-scrollbar".to_owned(),
+            directory.path().into(),
+        );
+        let mut overflowing_sizes = 0;
+        for (width, height) in [(120, 40), (80, 24), (60, 20), (40, 12)] {
+            app.set_screen_area(Rect::new(0, 0, width, height));
+            let state = SettingsState {
+                tab: SettingsTab::Appearance,
+                ..SettingsState::default()
+            };
+            let layout =
+                crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, &app, &state);
+            let position = Position::new(
+                layout.tab_list_area.right() - 1,
+                layout.tab_list_area.bottom() - 1,
+            );
+            let Some(target) =
+                crate::settings_ui::tab_scrollbar_target(layout.tab_list_area, position)
+            else {
+                // A fitting tab list has no scrollbar; do not treat its last
+                // row as a track click.
+                continue;
+            };
+            overflowing_sizes += 1;
+            assert_eq!(
+                target,
+                SettingsTab::ALL.last().copied(),
+                "the bottom navigation track targets the final tab at {width}x{height}"
+            );
+            app.mode = Mode::Settings(state);
+            handle_mouse_event(
+                &mut app,
+                MouseEvent {
+                    kind: MouseEventKind::Down(MouseButton::Left),
+                    column: position.x,
+                    row: position.y,
+                    modifiers: crossterm::event::KeyModifiers::empty(),
+                },
+            );
+            let Mode::Settings(state) = &app.mode else {
+                panic!("navigation scrollbar click must keep Settings open");
+            };
+            assert_eq!(
+                state.tab,
+                SettingsTab::Setup,
+                "tab selection at {width}x{height}"
+            );
+            assert_eq!(state.scroll, 0, "right content stays at its top");
+        }
+        assert!(
+            overflowing_sizes > 0,
+            "at least one size must exercise the track"
+        );
+    }
+
+    #[test]
+    fn settings_content_scrollbar_click_and_wheel_move_the_visible_document() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::new(
+            "settings-content-scrollbar".to_owned(),
+            directory.path().into(),
+        );
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        app.text_trigger_settings.triggers = (0..32)
+            .map(|index| ilium_ipc::TextTrigger {
+                id: format!("synthetic-{index}"),
+                regexp: format!("pattern-{index}"),
+                message: "synthetic response".to_owned(),
+                ..ilium_ipc::TextTrigger::default()
+            })
+            .collect();
+
+        let initial = SettingsState {
+            tab: SettingsTab::TextTriggers,
+            ..SettingsState::default()
+        };
+        let layout =
+            crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, &app, &initial);
+        let maximum = crate::settings_ui::max_scroll(
+            initial.tab,
+            &app,
+            initial.selected_row,
+            layout.content_area,
+        );
+        assert!(maximum > 3, "fixture must expose a useful scroll range");
+        assert_eq!(layout.content_scrollbar_area.width, 1);
+
+        let wheel_position = Position::new(
+            layout.content_scrollbar_area.x,
+            layout.content_scrollbar_area.y + 1,
+        );
+        app.mode = Mode::Settings(initial.clone());
+        handle_mouse_event(
+            &mut app,
+            MouseEvent {
+                kind: MouseEventKind::ScrollDown,
+                column: wheel_position.x,
+                row: wheel_position.y,
+                modifiers: crossterm::event::KeyModifiers::empty(),
+            },
+        );
+        let Mode::Settings(after_wheel) = &app.mode else {
+            panic!("scrollbar wheel must keep Settings open");
+        };
+        assert_eq!(after_wheel.scroll, 3);
+
+        let bottom = layout.content_scrollbar_area.bottom() - 1;
+        app.mode = Mode::Settings(initial);
+        handle_mouse_event(
+            &mut app,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: layout.content_scrollbar_area.x,
+                row: bottom,
+                modifiers: crossterm::event::KeyModifiers::empty(),
+            },
+        );
+        let Mode::Settings(after_click) = &app.mode else {
+            panic!("scrollbar click must keep Settings open");
+        };
+        assert_eq!(after_click.scroll, maximum);
+    }
+
+    #[test]
+    fn settings_wheel_on_header_and_frames_preserves_content_scroll() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::new(
+            "settings-wheel-boundaries".to_owned(),
+            directory.path().into(),
+        );
+        app.text_trigger_settings.triggers = (0..32)
+            .map(|index| ilium_ipc::TextTrigger {
+                id: format!("synthetic-{index}"),
+                regexp: format!("pattern-{index}"),
+                message: "synthetic response".to_owned(),
+                ..ilium_ipc::TextTrigger::default()
+            })
+            .collect();
+        for (width, height) in [(120, 40), (80, 24), (60, 20), (40, 12)] {
+            app.set_screen_area(Rect::new(0, 0, width, height));
+            let initial = SettingsState {
+                tab: SettingsTab::TextTriggers,
+                scroll: 1,
+                ..SettingsState::default()
+            };
+            let layout =
+                crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, &app, &initial);
+            assert!(
+                crate::settings_ui::max_scroll(
+                    initial.tab,
+                    &app,
+                    initial.selected_row,
+                    layout.content_area,
+                ) > initial.scroll,
+                "fixture must have scrollable content"
+            );
+            for position in [
+                Position::new(layout.header_area.x, layout.header_area.y),
+                Position::new(
+                    layout.navigation_frame_area.x + 1,
+                    layout.navigation_frame_area.y,
+                ),
+                Position::new(layout.content_frame_area.x + 1, layout.content_frame_area.y),
+                Position::new(
+                    layout.content_frame_area.x + 1,
+                    layout.content_frame_area.bottom() - 1,
+                ),
+            ] {
+                assert!(!layout.content_area.contains(position));
+                assert!(!layout.tab_list_area.contains(position));
+                for kind in [MouseEventKind::ScrollUp, MouseEventKind::ScrollDown] {
+                    app.mode = Mode::Settings(SettingsState {
+                        tab: initial.tab,
+                        scroll: initial.scroll,
+                        ..SettingsState::default()
+                    });
+                    handle_mouse_event(
+                        &mut app,
+                        MouseEvent {
+                            kind,
+                            column: position.x,
+                            row: position.y,
+                            modifiers: crossterm::event::KeyModifiers::empty(),
+                        },
+                    );
+                    let Mode::Settings(state) = &app.mode else {
+                        panic!("frame wheel must keep Settings open");
+                    };
+                    assert_eq!(state.tab, initial.tab);
+                    assert_eq!(
+                        state.scroll, initial.scroll,
+                        "{kind:?} at {position:?} on {width}x{height} must stay outside content"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn clicking_add_opens_editor_and_escape_returns_to_settings() {
         let mut app = settings_app(0);
         click_trigger_line(&mut app, 4);
@@ -5671,6 +6083,70 @@ mod icon_assignment_control_tests {
     use super::*;
 
     #[test]
+    fn compact_assignment_pointer_steps_both_directions_and_opens_catalog() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::new(
+            "compact-icon-assignment-pointer".into(),
+            directory.path().into(),
+        );
+        app.config_dir = Some(directory.path().into());
+        let screen = Rect::new(0, 0, 40, 24);
+        app.set_screen_area(screen);
+        let target = crate::agent_monitoring::general_icon_targets()[0];
+        let suggestions = target.suggestions();
+        app.ui_settings.icons.set(target, suggestions[0].into());
+        let mut state = crate::app::SettingsState {
+            tab: crate::app::SettingsTab::Icons,
+            ..Default::default()
+        };
+        let mut area =
+            crate::settings_ui::compute_layout_for_mode(screen, &app, &state).content_area;
+        let instructions = crate::instruction_settings::panel_height(state.tab, area);
+        area.y += instructions;
+        area.height = area.height.saturating_sub(instructions);
+        for (part, button, expected, opens) in [
+            ("previous", MouseButton::Left, suggestions.len() - 1, false),
+            ("next", MouseButton::Left, 0, false),
+            ("value", MouseButton::Left, 1, false),
+            ("value", MouseButton::Right, 0, false),
+            ("open", MouseButton::Left, 0, true),
+        ] {
+            let geometry = crate::settings_ui::icon_assignment_control(
+                area,
+                state.scroll,
+                0,
+                app.ui_settings.icons.glyph(target),
+            )
+            .expect("compact icon row exposes the shared selector")
+            .geometry();
+            let rectangle = match part {
+                "previous" => geometry.previous,
+                "next" => geometry.next,
+                "value" => geometry.value,
+                _ => geometry.open,
+            };
+            handle_settings_mouse(
+                &mut app,
+                state,
+                MouseEvent {
+                    kind: MouseEventKind::Down(button),
+                    column: rectangle.x,
+                    row: rectangle.y,
+                    modifiers: crossterm::event::KeyModifiers::NONE,
+                },
+            );
+            app.settle_filesystem_for_test();
+            assert_eq!(app.ui_settings.icons.glyph(target), suggestions[expected]);
+            let Mode::Settings(next) = std::mem::replace(&mut app.mode, Mode::Normal) else {
+                panic!("Settings remains open after compact selector interaction")
+            };
+            state = next;
+            assert_eq!(state.icon_picker.is_some(), opens);
+        }
+        assert_eq!(state.icon_picker.unwrap().target, target);
+    }
+
+    #[test]
     fn assignment_pointer_preserves_label_and_reverses_value_then_opens_full_catalog() {
         let directory = tempfile::tempdir().unwrap();
         let mut app = App::new("icon-assignment-pointer".into(), directory.path().into());
@@ -5726,5 +6202,349 @@ mod icon_assignment_control_tests {
             assert_eq!(state.icon_picker.is_some(), opens);
         }
         assert_eq!(state.icon_picker.unwrap().target, target);
+    }
+
+    #[test]
+    fn frozen_agent_icon_can_be_changed_from_the_icons_settings_screen() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::new("frozen-agent-icon-pointer".into(), directory.path().into());
+        app.config_dir = Some(directory.path().into());
+        let screen = Rect::new(0, 0, 140, 45);
+        app.set_screen_area(screen);
+        let target = crate::icon_settings::IconTarget::FrozenAgent;
+        let suggestions = target.suggestions();
+        let row = crate::agent_monitoring::general_icon_targets()
+            .iter()
+            .position(|candidate| *candidate == target)
+            .expect("frozen-agent icon belongs to the Icons settings catalog");
+        let mut state = crate::app::SettingsState {
+            tab: crate::app::SettingsTab::Icons,
+            ..Default::default()
+        };
+        let mut area =
+            crate::settings_ui::compute_layout_for_mode(screen, &app, &state).content_area;
+        let height = crate::instruction_settings::panel_height(state.tab, area);
+        area.y += height;
+        area.height = area.height.saturating_sub(height);
+
+        let control = crate::settings_ui::icon_assignment_control(
+            area,
+            state.scroll,
+            row,
+            app.ui_settings.icons.glyph(target),
+        )
+        .expect("frozen-agent icon row is visible")
+        .geometry();
+        handle_settings_mouse(
+            &mut app,
+            state,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: control.value.x,
+                row: control.value.y,
+                modifiers: crossterm::event::KeyModifiers::NONE,
+            },
+        );
+        assert_eq!(app.ui_settings.icons.glyph(target), suggestions[1]);
+        app.settle_filesystem_for_test();
+        assert_eq!(
+            crate::config::load(directory.path())
+                .expect("load persisted frozen-agent icon choice")
+                .ui
+                .icons
+                .frozen_agent,
+            suggestions[1]
+        );
+
+        let Mode::Settings(next) = std::mem::replace(&mut app.mode, Mode::Normal) else {
+            panic!("Icons settings remain open after cycling the frozen marker");
+        };
+        state = next;
+        assert_eq!(state.selected_row, row);
+
+        let control = crate::settings_ui::icon_assignment_control(
+            area,
+            state.scroll,
+            row,
+            app.ui_settings.icons.glyph(target),
+        )
+        .expect("frozen-agent icon row remains visible")
+        .geometry();
+        handle_settings_mouse(
+            &mut app,
+            state,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: control.open.x,
+                row: control.open.y,
+                modifiers: crossterm::event::KeyModifiers::NONE,
+            },
+        );
+        let Mode::Settings(state) = app.mode else {
+            panic!("Icons settings remain open with the icon picker");
+        };
+        assert_eq!(state.icon_picker.unwrap().target, target);
+    }
+}
+
+#[cfg(test)]
+mod agent_monitoring_icon_control_tests {
+    use super::*;
+    use crate::app::{App, Mode, SettingsState, SettingsTab};
+
+    #[test]
+    fn status_icon_controls_step_in_both_directions_and_open_the_catalog() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::new(
+            "agent-monitoring-icon-pointer".into(),
+            directory.path().into(),
+        );
+        app.config_dir = Some(directory.path().into());
+        let screen = Rect::new(0, 0, 160, 80);
+        app.set_screen_area(screen);
+        let target = crate::agent_monitoring::STATUS_ICON_TARGETS[0];
+        let suggestions = target.suggestions();
+        app.ui_settings.icons.set(target, suggestions[0].into());
+        let mut state = SettingsState {
+            tab: SettingsTab::AgentMonitoring,
+            ..SettingsState::default()
+        };
+        let mut layout = crate::settings_ui::compute_layout_for_mode(screen, &app, &state);
+        let instructions =
+            crate::instruction_settings::panel_height(state.tab, layout.content_area);
+        layout.content_area.y += instructions;
+        layout.content_area.height = layout.content_area.height.saturating_sub(instructions);
+        let row = crate::settings_ui::agent_monitoring_rows(&app)
+            .iter()
+            .position(|row| *row == crate::app::AgentMonitoringRow::StatusIcon(target))
+            .unwrap();
+
+        for (part, button, expected, opens) in [
+            ("value", MouseButton::Left, 1, false),
+            ("value", MouseButton::Right, 0, false),
+            ("previous", MouseButton::Left, suggestions.len() - 1, false),
+            ("next", MouseButton::Left, 0, false),
+            ("open", MouseButton::Left, 0, true),
+        ] {
+            let control = crate::settings_ui::settings_status_icon_control(
+                layout.content_area,
+                &app,
+                &state,
+                row,
+            )
+            .unwrap();
+            let geometry = control.geometry();
+            let rectangle = match part {
+                "value" => geometry.value,
+                "previous" => geometry.previous,
+                "next" => geometry.next,
+                _ => geometry.open,
+            };
+            handle_settings_mouse(
+                &mut app,
+                state,
+                MouseEvent {
+                    kind: MouseEventKind::Down(button),
+                    column: rectangle.x,
+                    row: rectangle.y,
+                    modifiers: KeyModifiers::NONE,
+                },
+            );
+            assert_eq!(app.ui_settings.icons.glyph(target), suggestions[expected]);
+            let Mode::Settings(next) = std::mem::replace(&mut app.mode, Mode::Normal) else {
+                panic!("settings retained");
+            };
+            state = next;
+            assert_eq!(state.icon_picker.is_some(), opens);
+        }
+        assert_eq!(state.icon_picker.unwrap().target, target);
+    }
+
+    #[test]
+    fn model_icon_setting_toggles_when_its_label_is_clicked() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::new(
+            "agent-monitoring-model-icon-pointer".into(),
+            directory.path().into(),
+        );
+        app.config_dir = Some(directory.path().into());
+        app.ui_settings.agent_tree_model_icons = false;
+        let screen = Rect::new(0, 0, 160, 80);
+        app.set_screen_area(screen);
+        let mut state = SettingsState {
+            tab: SettingsTab::AgentMonitoring,
+            ..SettingsState::default()
+        };
+        let mut layout = crate::settings_ui::compute_layout_for_mode(screen, &app, &state);
+        let instructions =
+            crate::instruction_settings::panel_height(state.tab, layout.content_area);
+        layout.content_area.y += instructions;
+        layout.content_area.height = layout.content_area.height.saturating_sub(instructions);
+        let content_area = layout.content_area;
+        let label_position = (content_area.y..content_area.y.saturating_add(content_area.height))
+            .find_map(|row| {
+                let position = Position::new(content_area.x, row);
+                matches!(
+                    crate::settings_ui::agent_monitoring_content_hit(
+                        content_area,
+                        state.scroll,
+                        position,
+                        &app,
+                    ),
+                    Some(crate::settings_ui::AgentMonitoringContentHit::Row {
+                        row: crate::app::AgentMonitoringRow::ModelIcons,
+                        direction: 0,
+                    })
+                )
+                .then_some(position)
+            })
+            .expect("model-icon label is visible in the Agent Monitoring pane");
+
+        handle_settings_mouse(
+            &mut app,
+            state,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: label_position.x,
+                row: label_position.y,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+
+        assert!(
+            app.ui_settings.agent_tree_model_icons,
+            "clicking the ModelIcons label should toggle the setting on"
+        );
+        app.settle_filesystem_for_test();
+        assert!(
+            crate::config::load(directory.path())
+                .expect("enabled model icon setting should reload")
+                .ui
+                .agent_tree_model_icons,
+            "clicking the ModelIcons label should persist the setting on"
+        );
+
+        let Mode::Settings(state) = std::mem::replace(&mut app.mode, Mode::Normal) else {
+            panic!("settings retained");
+        };
+        handle_settings_mouse(
+            &mut app,
+            state,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: label_position.x,
+                row: label_position.y,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+        assert!(
+            !app.ui_settings.agent_tree_model_icons,
+            "clicking the ModelIcons label again should toggle the setting off"
+        );
+        app.settle_filesystem_for_test();
+        assert!(
+            !crate::config::load(directory.path())
+                .expect("disabled model icon setting should reload")
+                .ui
+                .agent_tree_model_icons,
+            "clicking the ModelIcons label again should persist the setting off"
+        );
+    }
+}
+
+#[cfg(test)]
+mod frozen_agent_context_mouse_tests {
+    use super::*;
+    use crate::app::{ContextMenuAction, FocusTarget, Mode, RightPanelTarget};
+    use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+    use ilium_ipc::ClientRequest;
+
+    #[test]
+    fn right_click_unfreezes_the_clicked_pane_without_a_cached_session_id() {
+        let mut app = App::new("test-session".to_string(), std::env::temp_dir());
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let focused_pane = app
+            .tree
+            .add_pane(group, "focused", ilium_core::PaneContentKind::Terminal)
+            .unwrap();
+        let clicked_pane = app
+            .tree
+            .add_pane(group, "frozen", ilium_core::PaneContentKind::Terminal)
+            .unwrap();
+        app.tree_state.open(vec![group]);
+        app.frozen_panes.insert(clicked_pane);
+        app.right_panel_target = RightPanelTarget::Pane {
+            pane_id: focused_pane,
+        };
+        app.focus = FocusTarget::Pane;
+
+        let tree_area = app.layout.tree_area;
+        let clicked_row = (tree_area.y..tree_area.bottom())
+            .find(|row| {
+                app.tree_node_at(Position::new(tree_area.x + 1, *row))
+                    .is_some_and(|hit| hit.id == clicked_pane)
+            })
+            .expect("frozen pane should be visible in the tree");
+        handle_mouse_event(
+            &mut app,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Right),
+                column: tree_area.x + 1,
+                row: clicked_row,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+
+        let (action_column, action_row) = match &app.mode {
+            Mode::ContextMenu(menu) => {
+                assert_eq!(menu.target, clicked_pane);
+                let index = menu
+                    .actions
+                    .iter()
+                    .position(|action| *action == ContextMenuAction::Unfreeze)
+                    .expect("frozen pane menu should offer unfreeze");
+                (
+                    menu.area.x + 1,
+                    menu.area.y + 1 + menu.layout().row_for_action(index).unwrap(),
+                )
+            }
+            _ => panic!("right click should open the frozen pane menu"),
+        };
+        handle_mouse_event(
+            &mut app,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: action_column,
+                row: action_row,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+
+        assert!(!app.agent_session_ids.contains_key(&clicked_pane));
+        assert!(app.frozen_panes.contains(&clicked_pane));
+        assert!(app
+            .pending_replacement_focus
+            .is_some_and(|pending| { pending.old_pane_id == clicked_pane && pending.was_focused }));
+        let requests = app.take_outbound_requests();
+        let unfreeze_index = requests
+            .iter()
+            .position(|request| {
+                matches!(request, ClientRequest::UnfreezePane { pane_id } if *pane_id == clicked_pane)
+            })
+            .expect("right-click action queues UnfreezePane");
+        assert!(requests[..unfreeze_index].iter().any(|request| {
+            matches!(request, ClientRequest::SetPaneFocus { pane_id, focused: true } if *pane_id == clicked_pane)
+        }));
+
+        let parent = app.tree.parent_of(clicked_pane).unwrap();
+        let replacement = app
+            .tree
+            .add_pane(parent, "resumed", ilium_core::PaneContentKind::Terminal)
+            .unwrap();
+        app.tree.remove_node(clicked_pane).unwrap();
+        app.apply_pending_replacement_focus();
+        assert_eq!(app.active_pane_id(), Some(replacement));
+        assert!(app.pending_replacement_focus.is_none());
     }
 }

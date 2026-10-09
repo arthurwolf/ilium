@@ -43,7 +43,9 @@ pub fn exact_user_prompt_after(
             if line.len().saturating_add(count) > 1024 * 1024
                 || read_bytes.saturating_add(count) > 16 * 1024 * 1024
             {
-                anyhow::bail!("Exact prompt transcript exceeded bounded evidence limits; no exact recovery claimed");
+                anyhow::bail!(
+                    "Exact prompt transcript exceeded bounded evidence limits; no exact recovery claimed"
+                );
             }
             line.extend_from_slice(&buffer[..count]);
             read_bytes += count;

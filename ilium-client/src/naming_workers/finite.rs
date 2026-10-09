@@ -261,7 +261,8 @@ fn run_request(
                     "{}/api/tags",
                     settings.ollama.base_url.trim_end_matches('/')
                 ),
-                ilium_inference::InferenceProviderKind::OpenAi => {
+                ilium_inference::InferenceProviderKind::OpenAi
+                | ilium_inference::InferenceProviderKind::Anthropic => {
                     ilium_inference::model_catalog_endpoint(settings).unwrap_or_default()
                 }
                 _ => provider.label().to_owned(),

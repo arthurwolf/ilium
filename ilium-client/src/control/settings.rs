@@ -1,5 +1,8 @@
 //! Dotted-path adapter over ilium's existing validated settings methods.
 
+#[cfg(test)]
+#[path = "parser_pool_settings_regressions.rs"]
+mod parser_pool_settings_regressions;
 use ilium_inference::{InferenceProviderKind, TitleStyle};
 use ilium_sound::{NotificationEvent, SoundEvent, SoundSourceKind};
 use ilium_voice::{ReasoningEffort, VadEagerness, VoiceInputMode, VoiceModel, VoiceName};
@@ -113,7 +116,9 @@ fn configuration_receipt(
         return Ok(None);
     }
     if let Some(error) = &app.configuration_admission.rejection {
-        return Err(format!("Settings change has unaccepted writes: {error}; any earlier admitted writes remain pending"));
+        return Err(format!(
+            "Settings change has unaccepted writes: {error}; any earlier admitted writes remain pending"
+        ));
     }
     Ok(Some(ExecutionReceipt::local_write_pending(
         "Settings",
@@ -185,7 +190,7 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
                     return Err(
                         ilium_prompts::voice::VOICE_SETTINGS_COLOR_SCHEME_MUST_BE_DARK_OR_LIGHT
                             .to_owned(),
-                    )
+                    );
                 }
             };
             if app.ui_settings.color_scheme != target {
@@ -301,31 +306,7 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
         "terminal.engine_memory_budget_mib" => {
             let target = u32::try_from(unsigned(&value)?)
                 .map_err(|_| "Engine memory budget is too large".to_owned())?;
-            if !(crate::config::TerminalSettings::MIN_ENGINE_MEMORY_BUDGET_MIB
-                ..=crate::config::TerminalSettings::MAX_ENGINE_MEMORY_BUDGET_MIB)
-                .contains(&target)
-                || target % 256 != 0
-            {
-                return Err("Engine memory budget must be 256-16384 MiB in steps of 256".to_owned());
-            }
-            // Bounded like the scrollback loop: a hand-edited unaligned value
-            // never lands on `target` by fixed steps.
-            let max_steps = ((crate::config::TerminalSettings::MAX_ENGINE_MEMORY_BUDGET_MIB
-                - crate::config::TerminalSettings::MIN_ENGINE_MEMORY_BUDGET_MIB)
-                / 256
-                + 1) as usize;
-            for _ in 0..max_steps {
-                if app.terminal_settings.engine_memory_budget_mib == target {
-                    break;
-                }
-                let direction = if app.terminal_settings.engine_memory_budget_mib < target {
-                    1
-                } else {
-                    -1
-                };
-                app.settings_adjust_terminal_row(TerminalRow::EngineMemoryBudget, direction);
-            }
-            ensure_reached(app.terminal_settings.engine_memory_budget_mib == target)?;
+            app.set_terminal_engine_memory_budget_mib(target)?;
         }
         "terminal.new_pane_directory" => {
             let target = parse_new_pane_directory(string(&value)?)?;
@@ -352,7 +333,7 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
                 other => {
                     return Err(format!(
                         "terminal.smart_copy_light_key {other:?} must be ctrl, alt or shift"
-                    ))
+                    ));
                 }
             };
             for _ in 0..crate::config::SmartCopyLightKey::ALL.len() {
@@ -829,7 +810,7 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
                     return Err(ilium_prompts::render_value(
                         "voice/settings/unknown-or-read-only-setting-path",
                         &serde_json::json!({"v0": format!("{:?}", path)}),
-                    ))
+                    ));
                 }
             }
             app.apply_and_persist_git_settings(settings)?;
@@ -838,7 +819,7 @@ fn set_setting(app: &mut App, path: &str, value: Value) -> Result<(), String> {
             return Err(ilium_prompts::render_value(
                 "voice/settings/unknown-or-read-only-setting-path",
                 &serde_json::json!({"v0": format!("{:?}", path)}),
-            ))
+            ));
         }
     }
     Ok(())
@@ -891,6 +872,7 @@ fn adjust_setting(app: &mut App, path: &str, direction: i32) -> Result<(), Strin
         "sound.file" => app.settings_adjust_sound_row(SoundRow::File, direction),
         "inference.kilo_gateway.model" => app.settings_adjust_kilo_gateway_model(direction),
         "inference.openai.model" => app.settings_adjust_openai_model(direction),
+        "inference.anthropic.model" => app.settings_adjust_anthropic_model(direction),
         "voice.model" => {
             app.settings_adjust_voice_row(crate::voice_settings::VoiceRow::Model, direction)
         }
@@ -929,7 +911,7 @@ fn adjust_setting(app: &mut App, path: &str, direction: i32) -> Result<(), Strin
             return Err(ilium_prompts::render_value(
                 "voice/settings/setting-v0-is-not-adjustable-use-set",
                 &serde_json::json!({"v0": format!("{:?}", path)}),
-            ))
+            ));
         }
     }
     Ok(())

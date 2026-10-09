@@ -13,9 +13,12 @@ use std::sync::Arc;
 
 use crossterm::event::KeyCode;
 use ilium_core::{AgentProvider, BuiltinAgentProvider, NodeId};
+use ilium_execution::{
+    Client, Job, JobContext, JobCost, JobOutcome, JobPoll, Lane, Receipt, SkipReason,
+};
 use ilium_ipc::ClientRequest;
 use ilium_session_convert::{
-    convert_session, ConversionEvent, ConversionOutcome, ConversionRequest,
+    convert_session_with_cancel, ConversionEvent, ConversionOutcome, ConversionRequest,
 };
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -23,7 +26,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Gauge, Paragraph};
 use ratatui::Frame;
 use tokio::sync::mpsc;
-use tokio::task::JoinHandle;
+use tokio::sync::Notify;
 
 use crate::app::{App, Mode};
 use crate::modal;
@@ -32,6 +35,10 @@ use crate::theme;
 /// Upper bound on retained log lines; a conversion emits tens of lines, this
 /// only guards against a runaway producer.
 const MAX_LOG_LINES: usize = 500;
+pub(crate) const CONVERSION_WORKING_BYTES: usize = 512 * 1024 * 1024;
+pub(crate) const CONVERSION_RESULT_BYTES: usize = 2 * 1024 * 1024;
+const MAX_PROGRESS_TEXT_BYTES: usize = 4 * 1024;
+const UI_EVENT_CAPACITY: usize = 64;
 
 /// Where the conversion currently is. `Failed` keeps the agent-stopped fact so
 /// the dialog knows whether "resume the original session" is offered.
@@ -167,68 +174,216 @@ pub enum ConversionWorkerEvent {
 
 struct ActiveWorker {
     cancel: Arc<AtomicBool>,
-    handle: JoinHandle<()>,
+    pane_id: NodeId,
+    receipt: Receipt<ConversionTask>,
+}
+
+struct ConversionTask {
+    job: ConversionJob,
+    events: mpsc::Sender<ConversionWorkerEvent>,
+    cancel: Arc<AtomicBool>,
+    notification: Arc<Notify>,
+}
+
+impl Job for ConversionTask {
+    type Output = ConversionWorkerEvent;
+    type Error = std::convert::Infallible;
+
+    fn run(self, context: JobContext) -> Result<Self::Output, Self::Error> {
+        let pane_id = self.job.pane_id;
+        let request = self.job.request;
+        let worker_cancel = Arc::clone(&self.cancel);
+        let stop = context.stop_token();
+        let notification = Arc::clone(&self.notification);
+        let events = self.events;
+        let mut sink = |mut event: ConversionEvent| {
+            if stop.is_stopped() {
+                worker_cancel.store(true, Ordering::Release);
+            }
+            let replaceable = matches!(event, ConversionEvent::Progress(_));
+            bound_conversion_event(&mut event);
+            match events.try_send(ConversionWorkerEvent::Progress { pane_id, event }) {
+                Ok(()) => notification.notify_one(),
+                Err(mpsc::error::TrySendError::Full(_)) if replaceable => {}
+                Err(mpsc::error::TrySendError::Full(_)) => {
+                    worker_cancel.store(true, Ordering::Release);
+                    notification.notify_one();
+                }
+                Err(mpsc::error::TrySendError::Closed(_)) => {
+                    worker_cancel.store(true, Ordering::Release);
+                    notification.notify_one();
+                }
+            }
+        };
+        let is_cancelled = || self.cancel.load(Ordering::Acquire) || stop.is_stopped();
+        let result = convert_session_with_cancel(&request, &is_cancelled, &mut sink)
+            .map_err(|error| bounded_conversion_error(error.to_string()));
+        Ok(ConversionWorkerEvent::Finished { pane_id, result })
+    }
 }
 
 /// Owns the single in-flight conversion worker so it can be cancelled and is
 /// never left running past the client.
 pub struct ConversionWorkers {
+    client: Client,
     events: mpsc::Sender<ConversionWorkerEvent>,
+    received_events: mpsc::Receiver<ConversionWorkerEvent>,
+    notification: Arc<Notify>,
     active: Option<ActiveWorker>,
 }
 
 impl ConversionWorkers {
-    pub fn new(events: mpsc::Sender<ConversionWorkerEvent>) -> Self {
+    pub fn new(client: Client, notification: Arc<Notify>) -> Self {
+        let (events, received_events) = mpsc::channel(UI_EVENT_CAPACITY);
         Self {
+            client,
             events,
+            received_events,
+            notification,
             active: None,
         }
     }
 
-    pub fn spawn(&mut self, job: ConversionJob) {
-        self.reap_finished();
-        if let Some(previous) = self.active.take() {
-            previous.cancel.store(true, Ordering::SeqCst);
+    pub fn spawn(&mut self, job: ConversionJob) -> Result<(), ConversionWorkerEvent> {
+        if self.active.is_some() {
+            return Err(conversion_failure(
+                &job,
+                "A previous session conversion is still stopping",
+            ));
         }
+        let pane_id = job.pane_id;
         let cancel = Arc::new(AtomicBool::new(false));
-        let worker_cancel = Arc::clone(&cancel);
-        let events = self.events.clone();
-        let handle = tokio::task::spawn_blocking(move || {
-            let pane_id = job.pane_id;
-            let progress_events = events.clone();
-            let mut sink = |event: ConversionEvent| {
-                // The receiver only disappears while the client shuts down.
-                let _ = progress_events
-                    .blocking_send(ConversionWorkerEvent::Progress { pane_id, event });
-            };
-            let result = convert_session(&job.request, &worker_cancel, &mut sink)
-                .map_err(|error| error.to_string());
-            let _ = events.blocking_send(ConversionWorkerEvent::Finished { pane_id, result });
+        let task = ConversionTask {
+            job,
+            events: self.events.clone(),
+            cancel: Arc::clone(&cancel),
+            notification: Arc::clone(&self.notification),
+        };
+        let receipt = self
+            .client
+            .try_submit(
+                Lane::Io,
+                JobCost {
+                    input_bytes: CONVERSION_WORKING_BYTES,
+                    result_bytes: CONVERSION_RESULT_BYTES,
+                },
+                task,
+            )
+            .map_err(|rejected| {
+                conversion_failure(
+                    &rejected.value.job,
+                    &format!(
+                        "Session conversion admission refused: {:?}",
+                        rejected.reason
+                    ),
+                )
+            })?;
+        self.active = Some(ActiveWorker {
+            cancel,
+            pane_id,
+            receipt,
         });
-        self.active = Some(ActiveWorker { cancel, handle });
+        Ok(())
     }
 
     /// Asks the running conversion (if any) to stop at its next checkpoint.
     pub fn cancel(&self) {
         if let Some(active) = &self.active {
-            active.cancel.store(true, Ordering::SeqCst);
+            active.cancel.store(true, Ordering::Release);
+            active.receipt.cancel();
         }
     }
 
-    fn reap_finished(&mut self) {
-        if self
-            .active
-            .as_ref()
-            .is_some_and(|active| active.handle.is_finished())
-        {
-            self.active = None;
+    /// Applies bounded progress and the receipt-backed semantic result.
+    /// The admission charge remains live through application of the result.
+    pub fn collect(&mut self, mut apply: impl FnMut(ConversionWorkerEvent)) -> bool {
+        let mut did_apply = false;
+        while let Ok(event) = self.received_events.try_recv() {
+            apply(event);
+            did_apply = true;
         }
+        let Some(active) = self.active.as_mut() else {
+            return did_apply;
+        };
+        let pane_id = active.pane_id;
+        let result = match active.receipt.try_take() {
+            JobPoll::Pending | JobPoll::Taken => None,
+            JobPoll::Ready(outcome) => Some(outcome.map(|outcome| match outcome {
+                JobOutcome::Finished(Ok(event)) => event,
+                JobOutcome::Finished(Err(never)) => match never {},
+                JobOutcome::NotStarted { job, reason } => conversion_failure(
+                    &job.job,
+                    match reason {
+                        SkipReason::Cancelled => {
+                            "Session conversion was cancelled before it started"
+                        }
+                        SkipReason::Shutdown => "Session conversion stopped during shutdown",
+                    },
+                ),
+                JobOutcome::Panicked => {
+                    conversion_worker_failure(pane_id, "Session conversion worker panicked")
+                }
+            })),
+            JobPoll::Lost => Some(active.receipt.retention().retain(conversion_worker_failure(
+                pane_id,
+                "Session conversion worker lost its completion receipt",
+            ))),
+        };
+        if let Some(outcome) = result {
+            if let Some(active) = self.active.take() {
+                let (event, retention) = outcome.into_parts();
+                apply(event);
+                drop(retention);
+                drop(active);
+                did_apply = true;
+            }
+        }
+        did_apply
     }
 }
 
 impl Drop for ConversionWorkers {
     fn drop(&mut self) {
         self.cancel();
+    }
+}
+
+fn conversion_failure(job: &ConversionJob, reason: &str) -> ConversionWorkerEvent {
+    ConversionWorkerEvent::Finished {
+        pane_id: job.pane_id,
+        result: Err(bounded_conversion_error(reason.to_string())),
+    }
+}
+
+fn conversion_worker_failure(pane_id: NodeId, reason: &str) -> ConversionWorkerEvent {
+    ConversionWorkerEvent::Finished {
+        pane_id,
+        result: Err(bounded_conversion_error(reason.to_string())),
+    }
+}
+
+fn bound_conversion_event(event: &mut ConversionEvent) {
+    let text = match event {
+        ConversionEvent::Step { title, .. } | ConversionEvent::Log(title) => title,
+        ConversionEvent::Progress(_) => return,
+    };
+    truncate_conversion_text(text);
+}
+
+fn bounded_conversion_error(error: String) -> String {
+    let mut error = error;
+    truncate_conversion_text(&mut error);
+    error
+}
+
+fn truncate_conversion_text(text: &mut String) {
+    if text.len() > MAX_PROGRESS_TEXT_BYTES {
+        let mut boundary = MAX_PROGRESS_TEXT_BYTES;
+        while !text.is_char_boundary(boundary) {
+            boundary -= 1;
+        }
+        text.truncate(boundary);
+        text.push('…');
     }
 }
 
@@ -611,6 +766,94 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn conversion_worker_completes_through_the_bounded_io_receipt() {
+        use ilium_execution::{
+            Execution, ExecutionConfig, LaneConfig, QuotaGroup, QuotaLimits, ShutdownMode,
+        };
+        use std::time::{Duration, Instant};
+
+        let quota = QuotaGroup::new(QuotaLimits {
+            clients: 1,
+            jobs: 1,
+            service_jobs: 0,
+            input_bytes: CONVERSION_WORKING_BYTES,
+            result_bytes: CONVERSION_RESULT_BYTES,
+            worker_threads: 1,
+            worker_bytes: 4 * 1024 * 1024,
+        });
+        let disabled = LaneConfig {
+            threads: 0,
+            queue_slots: 0,
+            priority: None,
+            resident_bytes_per_thread: 0,
+        };
+        let mut execution = Execution::start(
+            quota,
+            ExecutionConfig {
+                cpu: disabled,
+                io: LaneConfig {
+                    threads: 1,
+                    queue_slots: 1,
+                    priority: None,
+                    resident_bytes_per_thread: 4 * 1024 * 1024,
+                },
+                service: disabled,
+            },
+        )
+        .unwrap();
+        let notification = Arc::new(Notify::new());
+        let wake = Arc::clone(&notification);
+        let client = execution
+            .client(ilium_execution::ClientLimits {
+                jobs: 1,
+                service_jobs: 0,
+                input_bytes: CONVERSION_WORKING_BYTES,
+                result_bytes: CONVERSION_RESULT_BYTES,
+            })
+            .unwrap()
+            .with_completion_wake(move || wake.notify_one());
+        let mut workers = ConversionWorkers::new(client, Arc::clone(&notification));
+        let temporary = tempfile::tempdir().unwrap();
+        let job = ConversionJob {
+            pane_id: NodeId(7),
+            request: ConversionRequest {
+                home_dir: temporary.path().to_path_buf(),
+                project_cwd: temporary.path().to_path_buf(),
+                source: BuiltinAgentProvider::Claude,
+                target: BuiltinAgentProvider::Codex,
+                source_session_id: "11111111-1111-4111-8111-111111111111".to_string(),
+                codex_home: None,
+                codex_executable: None,
+            },
+        };
+        workers.spawn(job).unwrap();
+        let mut events = Vec::new();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                notification.notified().await;
+                workers.collect(|event| events.push(event));
+                if matches!(events.last(), Some(ConversionWorkerEvent::Finished { .. })) {
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("worker completion notification");
+        assert!(matches!(
+            events.last(),
+            Some(ConversionWorkerEvent::Finished {
+                result: Err(message), ..
+            }) if message.contains("no Claude Code transcript")
+        ));
+        drop(workers);
+        execution.request_shutdown(ShutdownMode::Cancel);
+        let report = execution
+            .join_until_background(Instant::now() + Duration::from_secs(5))
+            .unwrap();
+        assert!(report.shutdown_complete);
+    }
 
     fn state() -> ConversionDialogState {
         ConversionDialogState::new(

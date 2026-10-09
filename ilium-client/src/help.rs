@@ -7,6 +7,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph};
 use ratatui::Frame;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::keymap;
 use crate::layout::centered_rect;
@@ -39,31 +40,49 @@ pub fn render(
     // underneath it this frame.
     frame.render_widget(Clear, popup_area);
 
+    let inner_width = usize::from(popup_area.width.saturating_sub(2));
+    let column_count = if inner_width >= 70 { 2 } else { 1 };
+    let divider_width = if column_count == 2 {
+        UnicodeWidthStr::width(" │ ")
+    } else {
+        0
+    };
+    let action_column_width = inner_width
+        .saturating_sub(divider_width)
+        .checked_div(column_count)
+        .unwrap_or_default();
     let table_rows: Vec<Line> = bindings
-        .chunks(2)
+        .chunks(column_count)
         .map(|pair| {
             let mut spans = Vec::new();
             for (index, binding) in pair.iter().enumerate() {
                 if index > 0 {
-                    spans.push(Span::raw("   "));
+                    spans.push(Span::styled(" │ ", theme::border_style(false)));
                 }
-                spans.push(Span::styled(
-                    format!(
-                        "{} {}",
-                        keymap::action_prefix_label(
-                            binding.action,
-                            shortcut_base,
-                            navigation_shortcut_base,
-                        ),
-                        keymap::key_label(binding.key)
+                let action = format!(
+                    "{} {}",
+                    keymap::action_prefix_label(
+                        binding.action,
+                        shortcut_base,
+                        navigation_shortcut_base,
                     ),
+                    keymap::key_label(binding.key)
+                );
+                let action_width = UnicodeWidthStr::width(action.as_str());
+                let summary_width = action_column_width.saturating_sub(action_width + 3);
+                let summary = truncate_to_width(binding.description, summary_width);
+                spans.push(Span::styled(
+                    action,
                     Style::new().add_modifier(Modifier::BOLD),
                 ));
-                // A 22-cell description keeps two complete action columns inside
-                // the 80-column terminal baseline, while the Keyboard settings
-                // table exposes the full action name for remapping.
-                let summary = binding.description.chars().take(22).collect::<String>();
-                spans.push(Span::raw(format!(" — {summary:<22}")));
+                spans.push(Span::raw(format!(" — {summary}")));
+
+                if column_count == 2 && index == 0 {
+                    let item_width = action_width + 3 + UnicodeWidthStr::width(summary.as_str());
+                    spans.push(Span::raw(
+                        " ".repeat(action_column_width.saturating_sub(item_width)),
+                    ));
+                }
             }
             Line::from(spans)
         })
@@ -87,7 +106,7 @@ pub fn render(
     }
     .min(table_rows.len());
     let visible_action_count: usize = bindings
-        .chunks(2)
+        .chunks(column_count)
         .take(visible_row_count)
         .map(|pair| pair.len())
         .sum();
@@ -101,18 +120,27 @@ pub fn render(
     lines.push(Line::from(""));
     lines.extend(table_rows.into_iter().take(visible_row_count));
     if show_truncation_notice {
-        lines.push(Line::from(format!(
-            "… {hidden_action_count} more actions — see Settings → Keyboard for the full list",
-        )));
+        lines.push(Line::from(if inner_width < 60 {
+            format!("… {hidden_action_count} more: Settings → Keyboard")
+        } else {
+            format!(
+                "… {hidden_action_count} more actions — see Settings → Keyboard for the full list"
+            )
+        }));
     }
     lines.push(Line::from(""));
-    lines.push(Line::from(format!(
-        "Mouse: pane focus · tree expand/reorder · context menus · tree footer Settings · {} rename",
-        theme::PEN_ICON,
-    )));
-    lines.push(Line::from(
-        "Terminal history: wheel / Shift+PgUp/PgDn · Shift+End live · Ctrl+End app",
-    ));
+    if inner_width < 60 {
+        lines.push(Line::from("Mouse: focus · menus · tree reorder"));
+        lines.push(Line::from("History: wheel / Shift+PgUp/PgDn"));
+    } else {
+        lines.push(Line::from(format!(
+            "Mouse: pane focus · tree expand/reorder · context menus · tree footer Settings · {} rename",
+            theme::PEN_ICON,
+        )));
+        lines.push(Line::from(
+            "Terminal history: wheel / Shift+PgUp/PgDn · Shift+End live · Ctrl+End app",
+        ));
+    }
     lines.push(Line::from(Span::styled(
         format!(
             "press {} {} again, or Esc, to close",
@@ -127,8 +155,48 @@ pub fn render(
     )));
 
     let block = theme::block(true).title(theme::chrome_title("Help"));
+    let inner = block.inner(popup_area);
+    if let Some(close_hint) = lines.last_mut() {
+        if close_hint.width() > usize::from(inner.width) {
+            *close_hint = Line::from(if inner.width >= 10 {
+                "Esc closes"
+            } else {
+                "Esc"
+            });
+        }
+    }
+    // On very short screens the fixed footer itself exceeds the panel.
+    // Keep its final rows so the dismissal hint remains the last visible row.
+    let hidden_prefix = lines.len().saturating_sub(usize::from(inner.height));
+    if hidden_prefix > 0 {
+        lines.drain(..hidden_prefix);
+    }
     let paragraph = Paragraph::new(lines).block(block);
     frame.render_widget(paragraph, popup_area);
+}
+
+fn truncate_to_width(text: &str, max_width: usize) -> String {
+    if UnicodeWidthStr::width(text) <= max_width {
+        return text.to_owned();
+    }
+    if max_width == 0 {
+        return String::new();
+    }
+
+    let ellipsis = "…";
+    let content_width = max_width.saturating_sub(UnicodeWidthStr::width(ellipsis));
+    let mut result = String::new();
+    let mut width = 0;
+    for character in text.chars() {
+        let character_width = UnicodeWidthChar::width(character).unwrap_or(0);
+        if width + character_width > content_width {
+            break;
+        }
+        result.push(character);
+        width += character_width;
+    }
+    result.push_str(ellipsis);
+    result
 }
 
 #[cfg(test)]
@@ -136,6 +204,44 @@ mod tests {
     use super::*;
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
+
+    #[test]
+    fn help_summary_truncation_respects_terminal_cells_and_marks_omissions() {
+        assert_eq!(truncate_to_width("move workspace pane", 6), "move …");
+        assert_eq!(truncate_to_width("界面設定", 5), "界面…");
+        assert_eq!(truncate_to_width("ok", 2), "ok");
+        assert_eq!(truncate_to_width("long", 0), "");
+    }
+
+    #[test]
+    fn help_retains_an_escape_hint_when_the_fixed_footer_cannot_fit() {
+        for (width, height) in [(80, 4), (80, 5), (80, 6), (80, 8), (40, 6), (12, 6)] {
+            let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+            terminal
+                .draw(|frame| {
+                    render(
+                        frame,
+                        frame.area(),
+                        keymap::ShortcutBase::A,
+                        keymap::DEFAULT_NAVIGATION_SHORTCUT_BASE,
+                        keymap::LEADER_BINDINGS,
+                    )
+                })
+                .unwrap();
+            crate::ui_capture::save(&format!("help-compact-{width}x{height}"), &terminal);
+            let rendered: String = terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect();
+            assert!(
+                rendered.contains("Esc"),
+                "missing dismissal hint at {width}x{height}"
+            );
+        }
+    }
 
     #[test]
     fn help_renders_the_current_shortcut_base_in_rows_and_close_hint() {
@@ -152,6 +258,7 @@ mod tests {
                 )
             })
             .unwrap();
+        crate::ui_capture::save("help-shortcut-columns-140x60", &terminal);
         let buffer = terminal.backend().buffer();
         let rendered = buffer
             .content
@@ -159,8 +266,13 @@ mod tests {
             .map(|cell| cell.symbol())
             .collect::<String>();
         assert!(rendered.contains("Ctrl+B ?"));
+        assert!(rendered.contains("New terminal pane in the selected group"));
         assert!(rendered.contains("press Ctrl+B ? again"));
         assert!(rendered.contains(theme::PEN_ICON));
+        assert!(
+            rendered.contains(" │ "),
+            "the shortcut columns have a quiet divider"
+        );
         assert!(rendered.contains("Shift+End live · Ctrl+End app"));
         // Regressing to the pre-"live remap" wording would still contain
         // "Ctrl+B", so this must check the actual old phrase, not a base

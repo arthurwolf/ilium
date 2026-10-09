@@ -17,7 +17,7 @@ use crate::{
 use ratatui::{
     layout::Rect,
     style::Modifier,
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::{Clear, Paragraph},
     Frame,
 };
 use std::time::{Duration, Instant};
@@ -155,8 +155,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, model: &RowModel, scroll
     };
     let ink = control_ink(app);
     frame.render_widget(Clear, geometry.rectangle);
-    let block = Block::default()
-        .borders(Borders::ALL)
+    let block = crate::theme::block(false)
         .title(title)
         .style(ink)
         .border_style(ink.add_modifier(Modifier::DIM));

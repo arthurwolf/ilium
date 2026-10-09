@@ -604,60 +604,80 @@ impl SessionStatsStore {
     }
 }
 
-/// Sub-agent transcripts of a Claude Code session: every `.jsonl` below
-/// `<project dir>/<session id>/subagents/`, including per-workflow folders.
-fn claude_subagent_files(main_transcript: &std::path::Path) -> Result<Vec<PathBuf>, String> {
-    const MAX_DEPTH: usize = 6;
-    let mut files = Vec::new();
-    let mut path_bytes = 0;
-    let mut scanned = 0;
-    let mut pending = vec![(
-        main_transcript.with_extension("").join("subagents"),
-        0_usize,
-    )];
-    while let Some((directory, depth)) = pending.pop() {
-        let children = match std::fs::read_dir(&directory) {
-            Ok(children) => children,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+/// Streams Claude sub-agent transcripts without retaining the whole directory
+/// tree or every transcript path at once.
+struct ClaudeSubagentFiles {
+    pending: Vec<(PathBuf, std::fs::ReadDir)>,
+}
+
+impl ClaudeSubagentFiles {
+    fn new(main_transcript: &std::path::Path) -> Result<Self, String> {
+        let directory = main_transcript.with_extension("").join("subagents");
+        let pending = match std::fs::read_dir(&directory) {
+            Ok(children) => vec![(directory.clone(), children)],
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
             Err(error) => {
                 return Err(format!(
-                    "Subagent transcript inventory: {error}; statistics incomplete"
-                ))
+                    "Could not open sub-agent transcript directory {}: {error}; statistics incomplete",
+                    directory.display()
+                ));
             }
         };
-        for child in children.flatten() {
-            scanned += 1;
-            if scanned > 4096 || files.len() + pending.len() >= 4096 {
-                return Err(
-                    "Subagent transcript inventory exceeds 4096 entries; statistics incomplete"
-                        .into(),
-                );
-            }
-            let path = child.path();
-            path_bytes += path.capacity();
-            if path.capacity() > 64 * 1024 || path_bytes > 1024 * 1024 {
-                return Err(
-                    "Subagent transcript path exceeds bounds; statistics incomplete".into(),
-                );
-            }
-            let Ok(kind) = child.file_type() else {
-                continue;
+        Ok(Self { pending })
+    }
+}
+
+impl Iterator for ClaudeSubagentFiles {
+    type Item = Result<PathBuf, String>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let entry = match self.pending.last_mut() {
+                Some((directory, children)) => match children.next() {
+                    Some(Ok(entry)) => entry,
+                    Some(Err(error)) => {
+                        return Some(Err(format!(
+                            "Could not read sub-agent transcript directory {}: {error}; statistics incomplete",
+                            directory.display()
+                        )));
+                    }
+                    None => {
+                        self.pending.pop();
+                        continue;
+                    }
+                },
+                None => return None,
+            };
+            let path = entry.path();
+            let kind = match entry.file_type() {
+                Ok(kind) => kind,
+                Err(error) => {
+                    return Some(Err(format!(
+                        "Could not inspect sub-agent transcript path {}: {error}; statistics incomplete",
+                        path.display()
+                    )));
+                }
             };
             if kind.is_dir() {
-                if depth >= MAX_DEPTH {
-                    return Err("Subagent transcript depth exceeds6; statistics incomplete".into());
+                match std::fs::read_dir(&path) {
+                    Ok(children) => self.pending.push((path.clone(), children)),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => {
+                        return Some(Err(format!(
+                            "Could not open sub-agent transcript directory {}: {error}; statistics incomplete",
+                            path.display()
+                        )));
+                    }
                 }
-                pending.push((path, depth + 1));
-            } else if path
-                .extension()
-                .is_some_and(|extension| extension == "jsonl")
+            } else if kind.is_file()
+                && path
+                    .extension()
+                    .is_some_and(|extension| extension == "jsonl")
             {
-                files.push(path);
+                return Some(Ok(path));
             }
         }
     }
-    files.sort();
-    Ok(files)
 }
 
 fn run_pass(pass: StatsPass, context: JobContext) -> Result<StatsEvent, String> {
@@ -677,7 +697,11 @@ fn run_pass(pass: StatsPass, context: JobContext) -> Result<StatsEvent, String> 
         ilium_agent_session::TranscriptReadLimits {
             line_bytes: 1024 * 1024,
             total_read_bytes: 16 * 1024 * 1024,
-            scanned_entries: 4096,
+            // Codex stores can contain many thousands of dated transcript
+            // files. Discovery filters by the requested session ID while
+            // walking, so the entry cap guards pathological trees without
+            // imposing a small limit on ordinary history.
+            scanned_entries: 1_000_000,
             retained_path_bytes: 1024 * 1024,
         },
     );
@@ -687,13 +711,26 @@ fn run_pass(pass: StatsPass, context: JobContext) -> Result<StatsEvent, String> 
             .map(|transcript| transcript.path)
     });
     if locator.read_limit_reached() {
-        return Err("Statistics transcript discovery exceeded bounded evidence limits".into());
+        if let Some(failure) = locator.read_limit_failure() {
+            return Err(format!(
+                "Statistics transcript discovery stopped: {failure}; this session remains unverified."
+            ));
+        }
+        return Err(
+            "Statistics transcript discovery could not finish because metadata processing was cancelled or failed; this session remains unverified."
+                .into(),
+        );
     }
     let Some(path) = path else {
         return Err("No verified transcript file for this session yet.".into());
     };
     if path.capacity() > 64 * 1024 {
-        return Err("Statistics transcript path exceeds bounded storage".into());
+        let limit = 64 * 1024;
+        let observed = path.capacity();
+        return Err(format!(
+            "Statistics transcript path capacity limit reached: path uses {observed} bytes, limit {limit}, {} over; statistics incomplete.",
+            observed.saturating_sub(limit)
+        ));
     }
     let mut accumulator =
         accumulator.unwrap_or_else(|| Box::new(StatsAccumulator::new(request.class.clone())));
@@ -737,7 +774,8 @@ fn run_pass(pass: StatsPass, context: JobContext) -> Result<StatsEvent, String> 
             )
         })?;
     if request.class == AgentClass::Claude {
-        for extra in claude_subagent_files(&path)? {
+        for extra in ClaudeSubagentFiles::new(&path)? {
+            let extra = extra?;
             if context.stop_requested() {
                 return Err("Statistics cancelled; totals incomplete".into());
             }
@@ -856,6 +894,20 @@ mod tests {
         ];
         let body: String = lines.iter().map(|line| format!("{line}\n")).collect();
         std::fs::write(directory.join(format!("{id}.jsonl")), body).unwrap();
+    }
+
+    fn write_codex_transcript(home: &std::path::Path, project: &std::path::Path, id: &str) {
+        let directory = home.join(".codex").join("sessions").join("2026/10/07");
+        std::fs::create_dir_all(&directory).unwrap();
+        let metadata = serde_json::json!({
+            "type": "session_meta",
+            "payload": {"id": id, "cwd": project}
+        });
+        std::fs::write(
+            directory.join(format!("rollout-2026-10-07T10-00-00-{id}.jsonl")),
+            format!("{metadata}\n"),
+        )
+        .unwrap();
     }
 
     fn wait_for(store: &mut SessionStatsStore, pane_id: NodeId) {
@@ -1136,6 +1188,47 @@ mod tests {
     }
 
     #[test]
+    fn codex_session_lookup_succeeds_after_more_than_4096_unrelated_files() {
+        let home = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let session = "123e4567-e89b-12d3-a456-426614174000";
+        write_codex_transcript(home.path(), project.path(), session);
+        let directory = home
+            .path()
+            .join(".codex")
+            .join("sessions")
+            .join("2026/10/07");
+        for index in 0..4_200 {
+            std::fs::write(directory.join(format!("unrelated-{index}.jsonl")), "").unwrap();
+        }
+
+        let (mut owner, mut store) = isolated_stats_store();
+        let pane_id = NodeId(9);
+        assert!(store.request_refresh(
+            pane_id,
+            StatsRequest {
+                class: AgentClass::Codex,
+                session_id: session.into(),
+                project_path: project.path().to_path_buf(),
+                home: home.path().to_path_buf(),
+            },
+            Instant::now(),
+        ));
+        wait_for(&mut store, pane_id);
+        assert_eq!(store.entry(pane_id).unwrap().state, LoadState::Ready);
+        drop(store);
+        owner.request_shutdown(ilium_execution::ShutdownMode::Drain);
+        assert_eq!(
+            owner
+                .join_until_background(Instant::now() + Duration::from_secs(5))
+                .unwrap()
+                .remaining_workers,
+            0,
+            "isolated statistics IO worker joined"
+        );
+    }
+
+    #[test]
     fn claude_subagent_files_count_toward_the_session_and_are_read_incrementally() {
         let home = tempfile::tempdir().unwrap();
         let project = tempfile::tempdir().unwrap();
@@ -1168,7 +1261,10 @@ mod tests {
         let agent_file = nested.join("agent-a1.jsonl");
         std::fs::write(&agent_file, side_call("msg_side_1", 1000)).unwrap();
 
-        let files = claude_subagent_files(&main_transcript).unwrap();
+        let files = ClaudeSubagentFiles::new(&main_transcript)
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
         assert_eq!(files, vec![agent_file.clone()]);
 
         let request = StatsRequest {
@@ -1225,6 +1321,37 @@ mod tests {
             0,
             "isolated statistics IO worker joined"
         );
+    }
+
+    #[test]
+    fn claude_subagent_inventory_streams_more_than_4096_transcripts() {
+        let home = tempfile::tempdir().unwrap();
+        let main_transcript = home.path().join("session.jsonl");
+        let directory = main_transcript.with_extension("").join("subagents");
+        std::fs::create_dir_all(&directory).unwrap();
+        for index in 0..4_200 {
+            std::fs::write(directory.join(format!("agent-{index}.jsonl")), "").unwrap();
+        }
+
+        let mut seen = 0;
+        for path in ClaudeSubagentFiles::new(&main_transcript).unwrap() {
+            assert!(path.is_ok());
+            seen += 1;
+        }
+        assert_eq!(seen, 4_200);
+    }
+
+    #[test]
+    fn claude_subagent_offsets_use_the_memory_budget_not_a_4096_file_cutoff() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut accumulator = StatsAccumulator::new(AgentClass::Claude);
+        for index in 0..4_200 {
+            let path = directory.path().join(format!("agent-{index}.jsonl"));
+            std::fs::write(&path, "{}\n").unwrap();
+            accumulator.ingest_extra_file(&path).unwrap();
+        }
+
+        assert!(accumulator.retained_bytes() < 8 * 1024 * 1024);
     }
 
     #[test]

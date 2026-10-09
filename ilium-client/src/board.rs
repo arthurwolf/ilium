@@ -1784,6 +1784,29 @@ mod tests {
         )))
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn create_missing_board_does_not_replace_a_dangling_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempfile::tempdir().unwrap();
+        let target = directory.path().join("missing-target.md");
+        let link = directory.path().join("board.md");
+        symlink(&target, &link).unwrap();
+
+        let result = read_source(BoardStorage::MarkdownFile { path: link.clone() }, true);
+
+        assert!(
+            result.is_err(),
+            "an existing dangling link is not a new board"
+        );
+        assert!(fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert!(!target.exists());
+    }
+
     #[test]
     fn board_text_extract_renders_columns_and_cards_with_nonempty_bodies_inline() {
         let columns = vec![BoardColumn {

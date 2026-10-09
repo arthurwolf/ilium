@@ -105,7 +105,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &AgentDebugLogVie
             Scrollbar::new(ScrollbarOrientation::VerticalRight)
                 .begin_symbol(None)
                 .end_symbol(None)
-                .track_symbol(Some(" "))
+                .track_symbol(Some("│"))
                 .style(theme::border_style(true)),
             regions[1],
             &mut scrollbar_state,

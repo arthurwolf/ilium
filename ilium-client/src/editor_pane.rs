@@ -198,6 +198,13 @@ impl EditorPane {
         }
     }
 
+    pub(crate) fn loan_placeholder(identity: std::sync::Arc<()>) -> Self {
+        let mut editor = Self::empty();
+        editor.preparation_identity = identity;
+        editor.preparation_error = Some("Save snapshot preparation in progress".into());
+        editor
+    }
+
     /// Installs lines already read and bounded by the filesystem worker.
     /// This constructor performs no filesystem access.
     pub(crate) fn from_source(source: crate::filesystem::editor::EditorSource) -> Self {
@@ -226,6 +233,10 @@ impl EditorPane {
     }
     pub(crate) fn acknowledge_autosave_admission(&mut self) {
         self.autosave_pending_since = None;
+    }
+
+    pub(crate) fn restore_autosave_deadline(&mut self, deadline: Option<Instant>) {
+        self.autosave_pending_since = deadline;
     }
 
     /// Loads a file's contents into a new buffer. If the file doesn't exist

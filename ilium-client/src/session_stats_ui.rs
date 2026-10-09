@@ -448,7 +448,17 @@ impl Canvas {
                 Style::new().fg(self.palette.dim),
             ));
         }
-        self.line(Line::from(spans));
+        let mut heading = Line::from(spans);
+        let heading_width = u16::try_from(heading.width()).unwrap_or(u16::MAX);
+        let rule_width = self.width.saturating_sub(heading_width.saturating_add(1));
+        if rule_width > 0 {
+            heading.spans.push(Span::raw(" "));
+            heading.spans.push(Span::styled(
+                "─".repeat(usize::from(rule_width)),
+                theme::border_style(false),
+            ));
+        }
+        self.line(heading);
     }
 
     /// The row of timescale buttons that sits under a time chart's heading.
@@ -949,10 +959,7 @@ pub fn render(
     let pin_glyph = if popover.pinned { "◆" } else { "◇" };
     let block = theme::block(true)
         .style(background)
-        .title(Line::from(vec![Span::styled(
-            format!(" {pin_glyph} Costs & stats "),
-            title_style,
-        )]));
+        .title(theme::chrome_title(&format!("{pin_glyph} Costs & stats")).style(title_style));
     frame.render_widget(block, layout.area);
 
     let buffer = frame.buffer_mut();
@@ -2289,6 +2296,10 @@ mod tests {
             .iter()
             .position(|row| row.contains("OUTPUT OVER TIME"))
             .expect("output heading");
+        assert!(
+            rows[heading].contains('─'),
+            "section heading has a quiet rule"
+        );
         assert!(rows[heading + 1].contains("timescale"));
         for label in ["all", "24h", "6h", "1h", "15m", "5m"] {
             assert!(rows[heading + 1].contains(label), "{label}");
@@ -2304,6 +2315,47 @@ mod tests {
         // Time labels come after the ribbon, under the axis.
         assert!(rows[ribbon + 3].contains(':'));
         assert!(popover.scale_buttons.len() >= StatsScale::ALL.len());
+    }
+
+    #[test]
+    fn overview_capture_shows_section_rules_at_a_wide_terminal_size() {
+        let stats = sample_stats();
+        let load = LoadState::Ready;
+        let view = StatsView {
+            stats: Some(&stats),
+            load: &load,
+            supported: true,
+            has_session: true,
+            now_ms: 1_790_000_000_000 + 45 * 60_000,
+            animation_ms: 0,
+            scheme: ColorScheme::Dark,
+        };
+        let mut popover = StatsPopover::new(NodeId(1), true, Instant::now());
+        let mut terminal = Terminal::new(TestBackend::new(120, 120)).unwrap();
+        terminal
+            .draw(|frame| {
+                render(
+                    frame,
+                    frame.area(),
+                    Position::new(5, 0),
+                    &mut popover,
+                    &view,
+                )
+            })
+            .unwrap();
+        crate::ui_capture::save("costs-stats-sections-120x120", &terminal);
+        let rows = (0..120)
+            .map(|y| {
+                (0..120)
+                    .map(|x| terminal.backend().buffer()[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            rows.iter()
+                .any(|row| row.contains("OUTPUT OVER TIME") && row.contains('─')),
+            "the rendered stats headings should carry their quiet rule"
+        );
     }
 
     #[test]
@@ -2501,7 +2553,10 @@ mod tests {
         // Synthetic retained transcript statistics, rendered by the real popover.
         // A failed refresh must not make these totals look current or erase them.
         let stats = sample_stats();
-        let load = LoadState::Unavailable("Transcript scan safety limit reached".into());
+        let load = LoadState::Unavailable(
+            "Statistics transcript discovery stopped: filesystem entries limit reached: used 4096, next item requires 1, limit 4096, observed at least 4097 (at least 1 over); remaining discovery work was not measured; this session remains unverified."
+                .into(),
+        );
         for tab in StatsTab::ALL {
             let view = StatsView {
                 stats: Some(&stats),
@@ -2539,10 +2594,9 @@ mod tests {
                 text.contains("Statistics may be incomplete"),
                 "{tab:?} must disclose the failed refresh alongside retained totals: {text}"
             );
-            assert!(
-                text.contains("Transcript scan safety limit reached"),
-                "{text}"
-            );
+            assert!(text.contains("filesystem entries limit reached"), "{text}");
+            assert!(text.contains("used 4096"), "{text}");
+            assert!(text.contains("at least 1 over"), "{text}");
             assert!(!text.contains("No statistics available"), "{text}");
             if tab == StatsTab::Overview {
                 assert!(

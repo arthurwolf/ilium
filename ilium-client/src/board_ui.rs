@@ -1,6 +1,6 @@
 //! Shared Kanban board rendering and pointer geometry.
 //!
-//! Card height, contiguous placement, detail-panel allocation, and mouse
+//! Card height, spaced placement, detail-panel allocation, and mouse
 //! hit-testing all originate here so changing the preview-line setting cannot
 //! make clicks drift away from what the terminal actually shows.
 
@@ -14,13 +14,15 @@ use ratatui::widgets::{
     Block, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Widget, Wrap,
 };
 use ratatui::Frame;
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 use crate::board::{checkbox_occurrences, BoardCard, BoardPane, CardDetailEditor, CardEditorField};
 use crate::theme;
 
 const DETAIL_PANEL_WIDTH_DIVISOR: u16 = 3;
 const CARD_BORDER_ROWS: u16 = 2;
-const HINT_HEIGHT: u16 = 1;
+const CARD_GAP_ROWS: u16 = 1;
 const HORIZONTAL_SCROLLBAR_HEIGHT: u16 = 1;
 const DETAIL_CLOSE_LABEL: &str = "×";
 
@@ -76,13 +78,14 @@ pub fn compute_layout(
     column_count: usize,
     minimum_column_width: u16,
 ) -> BoardLayout {
-    let content_height = area.height.saturating_sub(HINT_HEIGHT);
+    let hint_height = board_hint_lines(is_detail_panel_open, area.width).len() as u16;
+    let content_height = area.height.saturating_sub(hint_height);
     let content_area = Rect::new(area.x, area.y, area.width, content_height);
     let hint_area = Rect::new(
         area.x,
         area.y.saturating_add(content_height),
         area.width,
-        area.height.min(HINT_HEIGHT),
+        area.height.min(hint_height),
     );
     let (columns_content_area, detail_area) = if is_detail_panel_open && content_area.width >= 3 {
         let detail_width = content_area.width / DETAIL_PANEL_WIDTH_DIVISOR;
@@ -182,11 +185,85 @@ pub fn column_viewport(board: &BoardPane, area: Rect, minimum_column_width: u16)
     }
 }
 
-/// Returns one visible card rectangle. Cards are contiguous: there is no
-/// spacer row between one card's bottom border and the next card's top border.
+fn card_stride(preview_lines: u16) -> u16 {
+    preview_lines
+        .saturating_add(CARD_BORDER_ROWS)
+        .saturating_add(CARD_GAP_ROWS)
+}
+
+/// Keep the keyboard selection visible without persisting presentation state.
+/// Rendering and all pointer geometry derive the same first visible card.
+fn first_visible_card(
+    board: &BoardPane,
+    column_index: usize,
+    inner: Rect,
+    preview_lines: u16,
+) -> usize {
+    if column_index != board.selected_column || inner.height == 0 {
+        return 0;
+    }
+    let card_height = preview_lines.saturating_add(CARD_BORDER_ROWS);
+    let visible_count =
+        usize::from(inner.height.saturating_sub(card_height) / card_stride(preview_lines) + 1);
+    board
+        .selected_card
+        .unwrap_or(0)
+        .min(board.columns[column_index].cards.len().saturating_sub(1))
+        .saturating_sub(visible_count.saturating_sub(1))
+}
+
+fn cards_overflow(inner: Rect, card_count: usize, preview_lines: u16) -> bool {
+    card_count
+        .saturating_mul(usize::from(card_stride(preview_lines)))
+        .saturating_sub(usize::from(CARD_GAP_ROWS))
+        > usize::from(inner.height)
+}
+
+fn card_content_area(inner: Rect, card_count: usize, preview_lines: u16) -> Rect {
+    let gutter = u16::from(inner.width >= 2 && cards_overflow(inner, card_count, preview_lines));
+    Rect {
+        width: inner.width.saturating_sub(gutter),
+        ..inner
+    }
+}
+
+fn column_title(title: &str, count: usize, width: u16, style: Style) -> Line<'static> {
+    let count = count.to_string();
+    let available = usize::from(width.saturating_sub(2));
+    if available < count.len() + 3 {
+        return Line::default();
+    }
+    let title_width = available - count.len() - 3;
+    let mut label = String::new();
+    if title.width() <= title_width {
+        label.push_str(title);
+    } else if title_width > 0 {
+        let mut used = 0;
+        for grapheme in title.graphemes(true) {
+            let cells = grapheme.width();
+            if used + cells > title_width - 1 {
+                break;
+            }
+            label.push_str(grapheme);
+            used += cells;
+        }
+        label.push('…');
+    }
+    Line::from(vec![
+        Span::styled(format!(" {label} "), style),
+        Span::styled(
+            format!("{count} "),
+            Style::new().add_modifier(Modifier::DIM),
+        ),
+    ])
+}
+
+/// Returns one visible card rectangle, leaving a quiet row between borders.
 pub fn card_area(column_inner: Rect, card_index: usize, preview_lines: u16) -> Option<Rect> {
     let card_height = preview_lines.saturating_add(CARD_BORDER_ROWS);
-    let offset = u16::try_from(card_index).ok()?.saturating_mul(card_height);
+    let offset = u16::try_from(card_index)
+        .ok()?
+        .saturating_mul(card_stride(preview_lines));
     if offset >= column_inner.height {
         return None;
     }
@@ -259,9 +336,17 @@ pub fn hit_test(
         if !column_area.contains(position) {
             continue;
         }
-        let inner = Block::bordered().inner(column_area);
-        for card_index in 0..board.columns[column_index].cards.len() {
-            let Some(card_area) = card_area(inner, card_index, preview_lines) else {
+        let inner = card_content_area(
+            Block::bordered().inner(column_area),
+            board.columns[column_index].cards.len(),
+            preview_lines,
+        );
+        if position.x == inner.right() && inner.width < column_area.width.saturating_sub(2) {
+            return None;
+        }
+        let first_card = first_visible_card(board, column_index, inner, preview_lines);
+        for card_index in first_card..board.columns[column_index].cards.len() {
+            let Some(card_area) = card_area(inner, card_index - first_card, preview_lines) else {
                 break;
             };
             if !card_area.contains(position) {
@@ -310,13 +395,21 @@ pub fn card_drop_target(
         if !column_area.contains(position) {
             continue;
         }
-        let inner = Block::bordered().inner(column_area);
+        let inner = card_content_area(
+            Block::bordered().inner(column_area),
+            board.columns[column_index].cards.len(),
+            preview_lines,
+        );
+        let first_card = first_visible_card(board, column_index, inner, preview_lines);
         if position.y <= inner.y {
-            return Some((column_index, 0));
+            return Some((column_index, first_card));
         }
-        let card_height = preview_lines.saturating_add(CARD_BORDER_ROWS).max(1);
-        let card_index = usize::from(position.y.saturating_sub(inner.y) / card_height)
-            .min(board.columns[column_index].cards.len());
+        let stride = card_stride(preview_lines);
+        let offset = position.y.saturating_sub(inner.y);
+        let card_index = (first_card
+            + usize::from(offset / stride)
+            + usize::from(offset % stride >= stride.saturating_sub(CARD_GAP_ROWS)))
+        .min(board.columns[column_index].cards.len());
         return Some((column_index, card_index));
     }
     None
@@ -340,7 +433,7 @@ fn horizontal_scroll_target(
         / usize::from(scrollbar_area.width.saturating_sub(1))
 }
 
-/// Draws columns, contiguous card previews, the optional editor panel, and
+/// Draws columns, spaced card previews, the optional editor panel, and
 /// the horizontal viewport affordance.
 pub fn render(
     frame: &mut Frame,
@@ -371,15 +464,40 @@ pub fn render(
             .style(theme::border_style(false));
         frame.render_stateful_widget(scrollbar, scrollbar_area, &mut state);
     }
-    let hint = if board.is_detail_panel_open {
-        "Tab field · type to edit · every change saves immediately · Esc close"
-    } else {
-        "←/→ column · ↑/↓ header/card · Enter details · n card · c column · e rename · d delete · Shift+arrows move · drag cards"
-    };
     frame.render_widget(
-        Paragraph::new(Span::styled(hint, Style::new().add_modifier(Modifier::DIM))),
+        Paragraph::new(
+            board_hint_lines(board.is_detail_panel_open, layout.hint_area.width)
+                .into_iter()
+                .map(|line| {
+                    Line::from(Span::styled(line, Style::new().add_modifier(Modifier::DIM)))
+                }),
+        ),
         layout.hint_area,
     );
+}
+
+fn board_hint_lines(is_detail_open: bool, width: u16) -> Vec<&'static str> {
+    if is_detail_open {
+        return match width {
+            0..=19 => vec!["Esc"],
+            20..=21 => vec!["Tab edits", "Autosave", "Esc closes"],
+            22..=25 => vec!["Tab edits", "Autosaves · Esc closes"],
+            26..=37 => vec!["Tab field", "Autosaves", "Esc closes"],
+            38..=68 => vec![
+                "Tab field · type to edit",
+                "Changes save immediately · Esc closes",
+            ],
+            _ => vec!["Tab field · type to edit · every change saves immediately · Esc close"],
+        };
+    }
+    match width {
+        0..=10 => vec![],
+        11..=18 => vec!["Enter opens"],
+        19..=28 => vec!["Enter opens", "n new card", "c/e edit · d delete"],
+        29..=38 => vec!["Arrows move · Enter details", "n card · c col · e name", "d delete · Shift/drag move"],
+        39..=118 => vec!["←→ cols · ↑↓ cards · Enter details", "n card · c column · e rename · d delete", "Shift+←/→ move · drag cards"],
+        _ => vec!["←/→ column · ↑/↓ header/card · Enter details · n card · c column · e rename · d delete · Shift+arrows move · drag cards"],
+    }
 }
 
 fn render_columns(
@@ -404,16 +522,14 @@ fn render_columns(
         } else {
             Style::new().add_modifier(Modifier::BOLD)
         };
-        let block = Block::bordered()
-            .border_style(theme::border_style(is_selected_column))
-            .title(Line::from(vec![
-                Span::styled(format!(" {} ", column.title), title_style),
-                Span::styled(
-                    column.cards.len().to_string(),
-                    Style::new().add_modifier(Modifier::DIM),
-                ),
-            ]));
-        let inner = block.inner(column_area);
+        let block = theme::block(is_selected_column).title(column_title(
+            &column.title,
+            column.cards.len(),
+            column_area.width,
+            title_style,
+        ));
+        let column_inner = block.inner(column_area);
+        let inner = card_content_area(column_inner, column.cards.len(), preview_lines);
         frame.render_widget(block, column_area);
         if column.cards.is_empty() {
             frame.render_widget(
@@ -424,8 +540,9 @@ fn render_columns(
                 inner,
             );
         } else {
-            for (card_index, card) in column.cards.iter().enumerate() {
-                let Some(area) = card_area(inner, card_index, preview_lines) else {
+            let first_card = first_visible_card(board, column_index, inner, preview_lines);
+            for (card_index, card) in column.cards.iter().enumerate().skip(first_card) {
+                let Some(area) = card_area(inner, card_index - first_card, preview_lines) else {
                     break;
                 };
                 let is_selected = is_selected_column && board.selected_card == Some(card_index);
@@ -444,11 +561,33 @@ fn render_columns(
                 };
                 frame.render_widget(
                     Paragraph::new(Span::styled(atomic_checkbox_title(&card.title), text_style))
-                        .block(Block::bordered().border_style(border_style))
+                        .block(theme::block(is_selected).border_style(border_style))
                         .wrap(Wrap { trim: true }),
                     area,
                 );
             }
+        }
+        if inner.width < column_inner.width && inner.height > 0 {
+            let first = first_visible_card(board, column_index, inner, preview_lines);
+            let complete_cards = usize::from(
+                inner
+                    .height
+                    .saturating_sub(preview_lines.saturating_add(CARD_BORDER_ROWS))
+                    / card_stride(preview_lines)
+                    + 1,
+            );
+            let mut state = ScrollbarState::new(column.cards.len())
+                .position(first)
+                .viewport_content_length(complete_cards);
+            frame.render_stateful_widget(
+                Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                    .begin_symbol(None)
+                    .end_symbol(None)
+                    .track_symbol(Some("│"))
+                    .style(theme::border_style(false)),
+                Rect::new(inner.right(), inner.y, 1, inner.height),
+                &mut state,
+            );
         }
         render_drop_indicator(frame, board, column_index, inner, preview_lines);
     }
@@ -467,11 +606,14 @@ fn render_drop_indicator(
     if target_column != column_index || column_inner.height == 0 {
         return;
     }
-    let card_height = preview_lines.saturating_add(CARD_BORDER_ROWS).max(1);
+    let first_card = first_visible_card(board, column_index, column_inner, preview_lines);
+    let visible_insertion_index = insertion_index.saturating_sub(first_card);
+    let stride = card_stride(preview_lines);
     let requested_y = column_inner.y.saturating_add(
-        u16::try_from(insertion_index)
+        u16::try_from(visible_insertion_index)
             .unwrap_or(u16::MAX)
-            .saturating_mul(card_height),
+            .saturating_mul(stride)
+            .saturating_sub(u16::from(visible_insertion_index > 0)),
     );
     let y = requested_y.min(column_inner.bottom().saturating_sub(1));
     frame.render_widget(
@@ -482,12 +624,7 @@ fn render_drop_indicator(
 }
 
 fn render_detail_panel(frame: &mut Frame, area: Rect, editor: &CardDetailEditor) {
-    let block = Block::bordered()
-        .border_style(theme::border_style(true))
-        .title(Span::styled(
-            " Card details ",
-            Style::new().add_modifier(Modifier::BOLD),
-        ));
+    let block = theme::block(true).title(theme::chrome_title("Card details"));
     frame.render_widget(block, area);
     frame.render_widget(
         Paragraph::new(DETAIL_CLOSE_LABEL).style(theme::selected_style()),
@@ -496,9 +633,7 @@ fn render_detail_panel(frame: &mut Frame, area: Rect, editor: &CardDetailEditor)
     let layout = detail_editor_layout(area);
     let mut title = editor.title.clone();
     title.set_block(
-        Block::bordered()
-            .title(" Title ")
-            .border_style(theme::border_style(editor.focus == CardEditorField::Title)),
+        theme::block(editor.focus == CardEditorField::Title).title(theme::chrome_title("Title")),
     );
     title.set_cursor_style(if editor.focus == CardEditorField::Title {
         theme::selected_style()
@@ -509,9 +644,7 @@ fn render_detail_panel(frame: &mut Frame, area: Rect, editor: &CardDetailEditor)
 
     let mut body = editor.body.clone();
     body.set_block(
-        Block::bordered()
-            .title(" Notes ")
-            .border_style(theme::border_style(editor.focus == CardEditorField::Body)),
+        theme::block(editor.focus == CardEditorField::Body).title(theme::chrome_title("Notes")),
     );
     body.set_cursor_style(if editor.focus == CardEditorField::Body {
         theme::selected_style()
@@ -681,6 +814,39 @@ mod tests {
     use super::*;
     use crate::board::{BoardColumn, BoardPane};
 
+    #[test]
+    fn board_footer_hints_fit_and_keep_their_viewport_rows() {
+        for width in 1..=180 {
+            for detail in [false, true] {
+                let lines = board_hint_lines(detail, width);
+                assert!(
+                    lines
+                        .iter()
+                        .all(|line| UnicodeWidthStr::width(*line) <= usize::from(width)),
+                    "hint clips at width {width}: {lines:?}"
+                );
+                let layout = compute_layout(Rect::new(0, 0, width, 24), detail, 3, 18);
+                assert_eq!(layout.hint_area.height, lines.len() as u16);
+                let viewport_bottom = layout
+                    .horizontal_scrollbar_area
+                    .map_or(layout.columns_area.bottom(), Rect::bottom);
+                assert_eq!(
+                    viewport_bottom.max(layout.detail_area.map_or(0, Rect::bottom)),
+                    layout.hint_area.y
+                );
+            }
+        }
+        let wide = board_hint_lines(false, 120).join(" ");
+        for expected in [
+            "column", "card", "details", "new", "rename", "delete", "move", "drag",
+        ] {
+            assert!(
+                wide.contains(expected),
+                "missing board action {expected}: {wide}"
+            );
+        }
+    }
+
     // Returns the backing `TempDir` alongside the board: dropping it deletes
     // the directory `board.storage`'s path points at, so it must outlive
     // every use of the returned `BoardPane` in the calling test.
@@ -750,14 +916,75 @@ mod tests {
     }
 
     #[test]
-    fn cards_are_contiguous_and_follow_the_preview_line_setting() {
+    fn cards_leave_a_spacer_row_and_follow_the_preview_line_setting() {
         let inner = Rect::new(1, 1, 30, 20);
 
         let first = card_area(inner, 0, 3).unwrap();
         let second = card_area(inner, 1, 3).unwrap();
 
         assert_eq!(first.height, 5);
-        assert_eq!(second.y, first.bottom());
+        assert_eq!(second.y, first.bottom() + CARD_GAP_ROWS);
+    }
+
+    #[test]
+    fn long_unicode_column_titles_leave_room_for_the_card_count() {
+        for width in 1..=40 {
+            let title = column_title("制作中 👩‍💻 Very long column name", 123, width, Style::new());
+            assert!(title.width() <= usize::from(width.saturating_sub(2)));
+            if width >= 8 {
+                let text: String = title
+                    .spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect();
+                assert!(text.ends_with("123 "));
+            }
+        }
+    }
+
+    #[test]
+    fn selected_cards_beyond_the_first_page_remain_visible_and_clickable() {
+        let (_directory, mut board) = board();
+        board.columns[0].cards = (0..8)
+            .map(|index| BoardCard {
+                title: format!("Card {index}"),
+                body: String::new(),
+            })
+            .collect();
+        board.selected_card = Some(7);
+        let area = Rect::new(0, 0, 60, 14);
+        let layout = compute_layout(area, false, 1, 20);
+        let column_inner = Block::bordered().inner(layout.columns_area);
+        let inner = card_content_area(column_inner, 8, 3);
+        assert_eq!(inner.right() + 1, column_inner.right());
+        let first = first_visible_card(&board, 0, inner, 3);
+        assert_eq!(first, 6);
+        let selected = card_area(inner, 7 - first, 3).unwrap();
+        assert_eq!(selected.height, 5);
+        let position = Position::new(selected.x + 1, selected.y + 1);
+        assert_eq!(
+            hit_test(&board, area, 3, 20, position),
+            Some(BoardHit::Card {
+                column_index: 0,
+                card_index: 7
+            })
+        );
+        assert_eq!(
+            card_drop_target(&board, area, 3, 20, position),
+            Some((0, 7))
+        );
+        assert_eq!(
+            hit_test(&board, area, 3, 20, Position::new(inner.right(), inner.y)),
+            None
+        );
+        let mut terminal = Terminal::new(TestBackend::new(60, 14)).unwrap();
+        terminal
+            .draw(|frame| render(frame, frame.area(), &board, 3, 20))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let text: String = buffer.content().iter().map(|cell| cell.symbol()).collect();
+        assert!(text.contains("Card 7"));
+        assert!(!text.contains("Card 0"));
     }
 
     #[test]
@@ -767,6 +994,15 @@ mod tests {
 
         assert_eq!(
             hit_test(&board, area, 3, 20, Position::new(3, 6)),
+            Some(BoardHit::Column { column_index: 0 }),
+        );
+        assert_eq!(
+            card_drop_target(&board, area, 3, 20, Position::new(3, 6)),
+            Some((0, 1)),
+        );
+
+        assert_eq!(
+            hit_test(&board, area, 3, 20, Position::new(3, 7)),
             Some(BoardHit::Card {
                 column_index: 0,
                 card_index: 1,
@@ -795,7 +1031,7 @@ mod tests {
         assert!(rows[2].contains("one two three"));
         assert!(rows[3].contains("four five six"));
         assert!(rows[4].contains("seven"));
-        assert!(rows[7].contains("second item"));
+        assert!(rows[8].contains("second item"));
         assert!(!rows[1].contains(" card "));
     }
 

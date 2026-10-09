@@ -135,7 +135,7 @@ impl IpcPreparation {
                         return Ok(outcome.map(|outcome| match outcome {
                             JobOutcome::Finished(Ok(output)) => output,
                             _ => unreachable!("exclusive validated codec outcome"),
-                        }))
+                        }));
                     }
                     JobOutcome::Finished(Err(_)) => {
                         let error = outcome.map(|outcome| match outcome {
@@ -148,14 +148,14 @@ impl IpcPreparation {
                         return Err(IpcError::Io(io::Error::new(
                             io::ErrorKind::Interrupted,
                             "codec cancelled before execution",
-                        )))
+                        )));
                     }
                     JobOutcome::Panicked => {
-                        return Err(IpcError::Io(io::Error::other("codec worker panicked")))
+                        return Err(IpcError::Io(io::Error::other("codec worker panicked")));
                     }
                 },
                 JobPoll::Lost | JobPoll::Taken => {
-                    return Err(IpcError::Io(io::Error::other("codec completion lost")))
+                    return Err(IpcError::Io(io::Error::other("codec completion lost")));
                 }
             }
         }
@@ -253,7 +253,8 @@ pub(crate) fn request_retained_bytes(request: &ilium_ipc::ClientRequest) -> usiz
         | R::ChangeProjectFolder { path, .. } => count.path(path),
         R::NewPane { kind, .. } => match kind {
             ilium_ipc::NewPaneKind::PlainShell => {}
-            ilium_ipc::NewPaneKind::Command(command) => count.string(command),
+            ilium_ipc::NewPaneKind::Command(command)
+            | ilium_ipc::NewPaneKind::CommandClosingOnExit(command) => count.string(command),
             ilium_ipc::NewPaneKind::Editor(path) => count.path(path),
             ilium_ipc::NewPaneKind::CommandWithInitialInput {
                 command_line,
@@ -276,6 +277,12 @@ pub(crate) fn request_retained_bytes(request: &ilium_ipc::ClientRequest) -> usiz
         }
         R::SetVisiblePanes { pane_ids } => count.vector(pane_ids),
         R::DiscardTerminalDelivery { pane_ids } => count.vector(pane_ids),
+        R::UnfreezePane { .. } => {}
+        R::UpdateAntigravityStatusline { action, .. } => {
+            if let ilium_ipc::AntigravityStatuslineAction::SetCommand { command } = action {
+                count.string(command);
+            }
+        }
         R::UpdateSoundSettings { settings } | R::PreviewSoundSettings { settings } => {
             if let Some(path) = &settings.file {
                 count.path(path);
@@ -488,6 +495,7 @@ pub(crate) fn request_retained_bytes(request: &ilium_ipc::ClientRequest) -> usiz
         | R::SetNodeLockedClosed { .. }
         | R::GetPaneProgressMonitorStatus { .. }
         | R::ClearPaneProgressMonitor { .. }
+        | R::WaitPaneProgressMonitor { .. }
         | R::UpdateProgressMonitorEnabled { .. }
         | R::RegisterVoiceTextReceiver
         | R::QueryRepoFacts { .. }
@@ -1222,5 +1230,39 @@ mod decoded_pressure_tests {
         assert_eq!(storage.nonterminal_bytes.load(Ordering::Acquire), 0);
         assert_eq!(storage.blocked_projections.load(Ordering::Acquire), 0);
         assert_eq!(storage.quota.snapshot().worker_bytes, 0);
+    }
+}
+
+#[cfg(test)]
+mod antigravity_statusline_request_tests {
+    use super::request_retained_bytes;
+    use ilium_ipc::{AntigravityStatuslineAction, ClientRequest};
+
+    #[test]
+    fn statusline_request_retention_includes_the_owned_command_capacity() {
+        let without_command = ClientRequest::UpdateAntigravityStatusline {
+            generation: 1,
+            action: AntigravityStatuslineAction::CancelPending,
+        };
+        let delete_command = ClientRequest::UpdateAntigravityStatusline {
+            generation: 2,
+            action: AntigravityStatuslineAction::DeleteCommand,
+        };
+        let mut command = String::with_capacity(4096);
+        command.push_str("/usr/bin/ilium __antigravity-model-statusline");
+        let command_capacity = command.capacity();
+        let with_command = ClientRequest::UpdateAntigravityStatusline {
+            generation: 3,
+            action: AntigravityStatuslineAction::SetCommand { command },
+        };
+
+        assert_eq!(
+            request_retained_bytes(&delete_command),
+            request_retained_bytes(&without_command),
+        );
+        assert_eq!(
+            request_retained_bytes(&with_command) - request_retained_bytes(&without_command),
+            command_capacity,
+        );
     }
 }

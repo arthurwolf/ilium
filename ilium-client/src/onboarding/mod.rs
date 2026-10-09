@@ -5,6 +5,7 @@ pub mod keyboard_ui;
 pub mod practice;
 pub mod progress;
 pub mod screen;
+pub(crate) mod sound_preview;
 pub mod state;
 pub mod studio;
 pub mod studio_ui;

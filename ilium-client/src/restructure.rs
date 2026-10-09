@@ -848,7 +848,10 @@ fn render_restructure_prompt_with_instructions(
         structure_evidence_budget = structure_evidence_budget.saturating_mul(3) / 4;
     }
 
-    anyhow::bail!(ilium_prompts::render_value("naming/restructure/restructure-prompt-exceeded-the-maximum-restructure-prompt-characters-character-safet", &serde_json::json!({"v0": prompt_token_limit.to_string(), "v1": prompt_tokens.to_string()})))
+    anyhow::bail!(ilium_prompts::render_value(
+        "naming/restructure/restructure-prompt-exceeded-the-maximum-restructure-prompt-characters-character-safet",
+        &serde_json::json!({"v0": prompt_token_limit.to_string(), "v1": prompt_tokens.to_string()})
+    ))
 }
 
 /// LLM-facing mirror of `ilium_core::RestructureNode`, tagged for a clean
@@ -1091,7 +1094,10 @@ fn parse_restructure_response(
         let mut unexpected: Vec<_> = referenced_set.difference(&expected_set).copied().collect();
         missing.sort_by_key(|id| id.0);
         unexpected.sort_by_key(|id| id.0);
-        anyhow::bail!(ilium_prompts::render_value("naming/restructure/restructure-response-referenced-the-wrong-leaf-set-missing-missing-unexpected-unexpec", &serde_json::json!({"v0": format!("{:?}", missing), "v1": format!("{:?}", unexpected)})));
+        anyhow::bail!(ilium_prompts::render_value(
+            "naming/restructure/restructure-response-referenced-the-wrong-leaf-set-missing-missing-unexpected-unexpec",
+            &serde_json::json!({"v0": format!("{:?}", missing), "v1": format!("{:?}", unexpected)})
+        ));
     }
     let expected_kinds: HashMap<NodeId, ExpectedLeafKind> = contexts
         .iter()
@@ -1137,7 +1143,10 @@ fn parse_restructure_response(
             .collect();
         missing.sort_unstable();
         unexpected.sort_unstable();
-        anyhow::bail!(ilium_prompts::render_value("naming/restructure/restructure-response-changed-the-protected-split-view-set-missing-missing-unexpected", &serde_json::json!({"v0": format!("{:?}", missing), "v1": format!("{:?}", unexpected)})));
+        anyhow::bail!(ilium_prompts::render_value(
+            "naming/restructure/restructure-response-changed-the-protected-split-view-set-missing-missing-unexpected",
+            &serde_json::json!({"v0": format!("{:?}", missing), "v1": format!("{:?}", unexpected)})
+        ));
     }
     // A restructure may reorganize existing leaves, but it must never
     // arbitrarily rebrand them. Keep each already-persisted icon authoritative
@@ -1238,20 +1247,32 @@ fn validate_model_contract(
         match node {
             LlmRestructureNode::Pane { id, .. } => {
                 if expected_kinds.get(id) != Some(&ExpectedLeafKind::Pane) {
-                    anyhow::bail!(ilium_prompts::render_value("naming/restructure/restructure-response-node-path-claimed-id-was-a-pane-but-the-existing-item-is-a-folde", &serde_json::json!({"v0": (node_path).to_string(), "v1": format!("{:?}", id)})));
+                    anyhow::bail!(ilium_prompts::render_value(
+                        "naming/restructure/restructure-response-node-path-claimed-id-was-a-pane-but-the-existing-item-is-a-folde",
+                        &serde_json::json!({"v0": (node_path).to_string(), "v1": format!("{:?}", id)})
+                    ));
                 }
             }
             LlmRestructureNode::Folder { id, .. } => {
                 if in_split_view {
-                    anyhow::bail!(ilium_prompts::render_value("naming/restructure/restructure-response-node-path-placed-folder-id-inside-a-split-view", &serde_json::json!({"v0": (node_path).to_string(), "v1": format!("{:?}", id)})));
+                    anyhow::bail!(ilium_prompts::render_value(
+                        "naming/restructure/restructure-response-node-path-placed-folder-id-inside-a-split-view",
+                        &serde_json::json!({"v0": (node_path).to_string(), "v1": format!("{:?}", id)})
+                    ));
                 }
                 if expected_kinds.get(id) != Some(&ExpectedLeafKind::Folder) {
-                    anyhow::bail!(ilium_prompts::render_value("naming/restructure/restructure-response-node-path-claimed-id-was-a-folder-but-the-existing-item-is-a-pan", &serde_json::json!({"v0": (node_path).to_string(), "v1": format!("{:?}", id)})));
+                    anyhow::bail!(ilium_prompts::render_value(
+                        "naming/restructure/restructure-response-node-path-claimed-id-was-a-folder-but-the-existing-item-is-a-pan",
+                        &serde_json::json!({"v0": (node_path).to_string(), "v1": format!("{:?}", id)})
+                    ));
                 }
             }
             LlmRestructureNode::Group { children, .. } => {
                 if in_split_view {
-                    anyhow::bail!(ilium_prompts::render_value("naming/restructure/restructure-response-node-path-placed-a-group-inside-a-split-view", &serde_json::json!({"v0": (node_path).to_string()})));
+                    anyhow::bail!(ilium_prompts::render_value(
+                        "naming/restructure/restructure-response-node-path-placed-a-group-inside-a-split-view",
+                        &serde_json::json!({"v0": (node_path).to_string()})
+                    ));
                 }
                 validate_model_contract(
                     children,
@@ -1264,7 +1285,10 @@ fn validate_model_contract(
             }
             LlmRestructureNode::ExistingGroup { children, .. } => {
                 if in_split_view {
-                    anyhow::bail!(ilium_prompts::render_value("naming/restructure/restructure-response-node-path-placed-an-existing-group-inside-a-split-view", &serde_json::json!({"v0": (node_path).to_string()})));
+                    anyhow::bail!(ilium_prompts::render_value(
+                        "naming/restructure/restructure-response-node-path-placed-an-existing-group-inside-a-split-view",
+                        &serde_json::json!({"v0": (node_path).to_string()})
+                    ));
                 }
                 validate_model_contract(
                     children,
@@ -1277,13 +1301,22 @@ fn validate_model_contract(
             }
             LlmRestructureNode::SplitView { id, children } => {
                 if in_split_view {
-                    anyhow::bail!(ilium_prompts::render_value("naming/restructure/restructure-response-node-path-nested-a-split-view-inside-another-split-view", &serde_json::json!({"v0": (node_path).to_string()})));
+                    anyhow::bail!(ilium_prompts::render_value(
+                        "naming/restructure/restructure-response-node-path-nested-a-split-view-inside-another-split-view",
+                        &serde_json::json!({"v0": (node_path).to_string()})
+                    ));
                 }
                 let Some(expected_split_view) = expected_split_views.get(id) else {
-                    anyhow::bail!(ilium_prompts::render_value("naming/restructure/restructure-response-node-path-invented-unknown-split-view-id", &serde_json::json!({"v0": (node_path).to_string(), "v1": format!("{:?}", id)})));
+                    anyhow::bail!(ilium_prompts::render_value(
+                        "naming/restructure/restructure-response-node-path-invented-unknown-split-view-id",
+                        &serde_json::json!({"v0": (node_path).to_string(), "v1": format!("{:?}", id)})
+                    ));
                 };
                 if !referenced_split_views.insert(*id) {
-                    anyhow::bail!(ilium_prompts::render_value("naming/restructure/restructure-response-referenced-protected-split-view-id-more-than-once", &serde_json::json!({"v0": format!("{:?}", id)})));
+                    anyhow::bail!(ilium_prompts::render_value(
+                        "naming/restructure/restructure-response-referenced-protected-split-view-id-more-than-once",
+                        &serde_json::json!({"v0": format!("{:?}", id)})
+                    ));
                 }
                 let actual_pane_ids = children
                     .iter()
@@ -1296,7 +1329,10 @@ fn validate_model_contract(
                     })
                     .collect::<anyhow::Result<Vec<_>>>()?;
                 if actual_pane_ids != expected_split_view.ordered_pane_ids {
-                    anyhow::bail!(ilium_prompts::render_value("naming/restructure/restructure-response-changed-protected-split-view-id-pane-order-or-membership-expecte", &serde_json::json!({"v0": format!("{:?}", id), "v1": format!("{:?}", expected_split_view.ordered_pane_ids), "v2": format!("{:?}", actual_pane_ids)})));
+                    anyhow::bail!(ilium_prompts::render_value(
+                        "naming/restructure/restructure-response-changed-protected-split-view-id-pane-order-or-membership-expecte",
+                        &serde_json::json!({"v0": format!("{:?}", id), "v1": format!("{:?}", expected_split_view.ordered_pane_ids), "v2": format!("{:?}", actual_pane_ids)})
+                    ));
                 }
                 validate_model_contract(
                     children,

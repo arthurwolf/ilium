@@ -117,7 +117,7 @@ fn startup_failure_is_send_sync_for_typed_root_io_error_custody() {
 fn selected_v8_helper_fits_declared_client_roles_and_retiring_helpers_still_compete() {
     // Isolated ledger, real admission API: no process-global fixture pressure.
     let quota = QuotaGroup::new(process_quota().snapshot().limits);
-    let native_roles = CPU_THREADS + IO_THREADS + SERVICE_THREADS + 21 + 3 + 1 + 6;
+    let native_roles = CPU_THREADS + IO_THREADS + SERVICE_THREADS + 27 + 3 + 1 + 6;
     let helper_limits = ilium_animation_js::helper::HelperLimits::default();
     let helper_roles = helper_limits.sandbox.maximum_tasks as usize + 2;
     let native = quota.reserve_external_worker(native_roles, 0).unwrap();

@@ -1183,9 +1183,8 @@ pub fn draw_plugin_issue_popover(
         ratatui::widgets::Paragraph::new(geometry.lines.join("\n"))
             .style(ink)
             .block(
-                ratatui::widgets::Block::default()
-                    .borders(ratatui::widgets::Borders::ALL)
-                    .title(" Package inspection details ")
+                crate::theme::block(false)
+                    .title(crate::theme::chrome_title("Plugin issue details"))
                     .style(ink),
             ),
         geometry.rectangle,
@@ -1260,6 +1259,40 @@ mod tests {
     }
 
     #[test]
+    fn plugin_issue_report_sanitizes_control_characters_in_package_paths() {
+        let catalogue = PluginCatalogue {
+            entries: Vec::new(),
+            issues: vec![CatalogueIssue {
+                path: PathBuf::from("bad\nfake\u{1b}[31m.iliumanim"),
+                message: "entry.mjs is missing".into(),
+            }],
+        };
+        let model = PluginPanelModel::new(&catalogue, &PluginPreferences::default());
+
+        assert_eq!(
+            model.issue_details,
+            vec!["badfake[31m.iliumanim: entry.mjs is missing"]
+        );
+    }
+
+    #[test]
+    fn plugin_issue_report_bounds_package_paths() {
+        let catalogue = PluginCatalogue {
+            entries: Vec::new(),
+            issues: vec![CatalogueIssue {
+                path: PathBuf::from(format!("{}.iliumanim", "x".repeat(600))),
+                message: "unreadable archive".into(),
+            }],
+        };
+        let model = PluginPanelModel::new(&catalogue, &PluginPreferences::default());
+
+        assert_eq!(
+            model.issue_details[0],
+            format!("{}: unreadable archive", "x".repeat(512))
+        );
+    }
+
+    #[test]
     fn plugin_issue_popover_renders_both_package_paths_and_failure_reasons() {
         let project = tempfile::tempdir().expect("project");
         let mut app = crate::app::App::new("plugin-issues-test".into(), project.path().into());
@@ -1307,7 +1340,7 @@ mod tests {
             .map(|cell| cell.symbol())
             .collect();
         for detail in [
-            "Package inspection details",
+            "Plugin issue details",
             "beach.iliumanim",
             "release digest mismatch",
             "carpet.iliumanim",
