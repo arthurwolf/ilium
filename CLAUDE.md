@@ -8,11 +8,17 @@ Documentation lives at the repository root: `README.md` (short user overview), `
 
 All compilation goes through the ni-build service on ni-vm, as defined in `~/.claude/CLAUDE.md` ("Distributed compilation through ni-build"); that global section is the only copy. The chatroom, progress-monitor and goal/waiting rules also live only in the global file.
 
+**Where compile and test runs happen.** Any compile, test, Clippy or fmt run made to check that work functions goes in a separate build folder, never in the main checkout or on the current branch:
+
+- Create `/media/arthur/build/ilium-<task>/` (touch `.scratch-reaper` and `findmnt` the disk first, per the global Scratch Disks rule), copy the current source into it (for example `git archive` of the working tree, or an rsync that excludes `target/`), and run `cargo` there with `CARGO_TARGET_DIR` inside that folder. Dispatch still goes through ni-build.
+- Do not run Cargo in `/home/arthur/dev/ai/ilium`, do not create a `target/` there, and do not switch or create branches to compile. Do not use `git worktree` (global rule).
+- Remove the build folder when the verification is done and the results are recorded, unless it holds the only copy of a retained result.
+
 ## Ilium process custody
 
 Never run commands, jobs, builds, tests, probes or launchers through `ilium new-pane`. Run them from your own pane (background process in your own shell) and register `ilium progress` from that same pane. Use `new-pane` only when the user explicitly asks for a new pane. Spawned panes accumulate in the user's tree.
 
-Never restart Ilium or its running server, session, or panes. Do not use `--restart-server`, stop or replace the live server, or restart it indirectly through a service. The user alone restarts Ilium. After a code change, build and deploy the binaries, verify the installed artifact, and report clearly when an already-running server still has the old executable loaded.
+Never restart Ilium or its running server, session, or panes. Do not use `--restart-server`, stop or replace the live server, or restart it indirectly through a service. The user alone restarts Ilium. Code changes do not install binaries: see "Deploy policy" below. When the user asks for a deploy and the running server still has the old executable loaded, report that clearly.
 
 ## Workspace layout
 
@@ -79,10 +85,18 @@ generic over any async byte stream and must not learn about sockets or pipes.
 - Run `cargo clippy --workspace --all-targets` and `cargo fmt --check` before considering any change done. Treat new clippy warnings as things to fix, not suppress with `#[allow]`, unless there's a specific documented reason.
 - **Remote build output is cleaned immediately.** The ni-build service retrieves hash-verified artifacts and receipts, then removes only its exact `/data/ni-build-service/jobs/<uuid>/` directory. Preserve failed recovery evidence and other owners' jobs. Local returned artifacts are verified build outputs, not locally compiled outputs.
 
-## Capacity gates and deploys
+## Capacity gates
 
 - Never lower a capacity gate (pane counts in scale tests such as `terminal_pool_runtime.rs`, quota limits, worker caps) to make a test or restore pass. A failing capacity gate is a real regression: fix the budget or the consumer.
-- Install binaries only with `make install RECEIPT=<ni-build job id>` (`tools/install-from-receipt.py`). It verifies the receipt and artifact hashes and writes `<bin>.build.json`. Never copy a `target/release` binary into place by hand.
+
+## Deploy policy
+
+"Deploy" means replacing the mainstream `ilium` binaries the user runs, that is `make install RECEIPT=<ni-build job id>` (`tools/install-from-receipt.py`) with the server and client it installs. It verifies the receipt and artifact hashes and writes `<bin>.build.json`. Never copy a `target/release` binary into place by hand.
+
+- **Deploy is opt-in, per request.** Compile and install only when the user explicitly asks in that request (for example "deploy", "install", "compile and deploy", "replace the mainstream ilium"). Approval in an earlier request, a plan, or a `/goal` does not carry over.
+- **Finishing work does not deploy.** When a feature, a `/goal`, or any other task is done, a compile+deploy cycle does not follow automatically. Verify in the separate build folder, report the source state, commit if asked, and state that the installed binaries are unchanged.
+- **Verification builds are never installed.** A binary compiled to test behaviour is not copied, linked or installed over the mainstream one, even when it passes.
+- **Restart stays with the user.** Installing binaries does not restart the running server (see "Ilium process custody").
 
 ## No code freezes
 
