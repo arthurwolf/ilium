@@ -89,7 +89,20 @@ jobs:
             # `--no-fail-fast` for the same reason the Windows job uses it: one
             # run should report every crate, not stop at the first failure.
             - name: cargo test
-              run: cargo test --workspace --no-fail-fast
+              run: |
+                  systemd-run --user --wait --pipe --collect \
+                    --unit=ilium-ci-tests-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT} \
+                    --property=Delegate=yes \
+                    --working-directory="$GITHUB_WORKSPACE" \
+                    --setenv="PATH=$PATH" \
+                    --setenv="CARGO_TERM_COLOR=$CARGO_TERM_COLOR" \
+                    --setenv="CARGO_INCREMENTAL=$CARGO_INCREMENTAL" \
+                    --setenv="RUST_BACKTRACE=$RUST_BACKTRACE" \
+                    --setenv="RUST_TEST_THREADS=$RUST_TEST_THREADS" \
+                    --setenv="ILIUM_PTY_SMOKE_BINARY=$ILIUM_PTY_SMOKE_BINARY" \
+                    --setenv="ILIUM_ANIMATION_HELPER=$ILIUM_ANIMATION_HELPER" \
+                    --setenv="ILIUM_NAMING_EVIDENCE_DIR=$ILIUM_NAMING_EVIDENCE_DIR" \
+                    /usr/bin/env cargo test --workspace --no-fail-fast
               env:
                 # Process-heavy PTY tests contend with one another when Cargo
                 # test binaries use the runner's full parallelism.

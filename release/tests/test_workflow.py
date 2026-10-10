@@ -276,6 +276,30 @@ class WorkflowTests(unittest.TestCase):
                         '${{ runner.temp }}/ilium-naming-evidence',
                     )
 
+    def test_linux_workspace_tests_run_in_an_owned_delegated_cgroup_unit(self):
+        ci = yaml.load((ROOT / '.github/workflows/ci.yml').read_text(), Loader=yaml.BaseLoader)
+        steps = ci['jobs']['test-linux']['steps']
+        test_step = next(step for step in steps if step.get('name') == 'cargo test')
+        command = test_step['run']
+
+        self.assertIn('systemd-run --user --wait --pipe --collect', command)
+        self.assertIn('--property=Delegate=yes', command)
+        self.assertIn('--working-directory="$GITHUB_WORKSPACE"', command)
+        self.assertIn('--unit=ilium-ci-tests-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}', command)
+        for variable in (
+            'PATH',
+            'CARGO_TERM_COLOR',
+            'CARGO_INCREMENTAL',
+            'RUST_BACKTRACE',
+            'RUST_TEST_THREADS',
+            'ILIUM_PTY_SMOKE_BINARY',
+            'ILIUM_ANIMATION_HELPER',
+            'ILIUM_NAMING_EVIDENCE_DIR',
+        ):
+            with self.subTest(variable=variable):
+                self.assertIn(f'--setenv="{variable}=', command)
+        self.assertIn('cargo test --workspace --no-fail-fast', command)
+
     def test_native_workspace_tests_use_run_owned_candidate_binaries(self):
         targets = {
             'linux': {'os': 'linux', 'rust_target': 'x86_64-unknown-linux-gnu'},

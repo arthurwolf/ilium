@@ -1,0 +1,10 @@
+[target.x86_64-unknown-linux-gnu]
+# `cargo test --target x86_64-unknown-linux-gnu` runs helper tests in an
+# explicitly delegated user scope so the helper can create its bounded cgroup.
+runner = [
+    "systemd-run",
+    "--user",
+    "--scope",
+    "--property=Delegate=yes",
+    "--expand-environment=no",
+]
