@@ -1,6 +1,6 @@
 # CLI reference
 
-The `ilium` command attaches the terminal interface to a project session and offers short one-shot subcommands for scripts and agents: listing and ending sessions, adding panes, starting agents in Git worktrees, the file-backed agent Chatroom, long-task progress reporting, and typed voice input. This page documents every subcommand, flag, output format, environment variable and exit behaviour, with examples.
+The `ilium` command attaches the terminal interface to a project session and offers short one-shot subcommands for scripts and agents: listing and ending sessions, adding panes, starting agents in Git worktrees, the file-backed agent Chatroom, long-task progress reporting, typed voice input, and listing or messaging agents across every running session. This page documents every subcommand, flag, output format, environment variable and exit behaviour, with examples.
 
 Contents:
 
@@ -15,6 +15,9 @@ Contents:
 - [ilium chat](#ilium-chat)
 - [ilium progress](#ilium-progress)
 - [ilium voice say](#ilium-voice-say)
+- [Pane selection](#pane-selection)
+- [ilium panes](#ilium-panes)
+- [ilium broadcast](#ilium-broadcast)
 - [Environment variables](#environment-variables)
 - [Output formats and exit status](#output-formats-and-exit-status)
 - [Other binaries and hidden commands](#other-binaries-and-hidden-commands)
@@ -34,6 +37,8 @@ Commands:
   chat          Read, initialize, or post to this project's file-backed agent room
   progress      Report or clear a long-running task's progress from inside a pane
   voice         Voice control from the command line (`voice say`)
+  panes         List the panes of every running session that pass the pane selection
+  broadcast     Send a message to every running agent that passes the pane selection
   help          Print help for the program or a subcommand
 ```
 
@@ -54,7 +59,7 @@ These options are defined once and accepted by every subcommand.
 
 Which commands use which option:
 
-- `--cwd` is used by every command that addresses a session or a project: bare `ilium`, `new-session`, `ls`, `kill-session`, `new-pane`, `chat` and `voice say`. `progress` ignores it; it addresses the pane it is running in through its environment (see [ilium progress](#ilium-progress)).
+- `--cwd` is used by every command that addresses a session or a project: bare `ilium`, `new-session`, `ls`, `kill-session`, `new-pane`, `chat` and `voice say`. `panes` and `broadcast` scan every session on the machine and use it only for `--here` and relative `--project` values. `progress` ignores it; it addresses the pane it is running in through its environment (see [ilium progress](#ilium-progress)).
 - `--restart-server`, `--reset-session` and `--onboarding` only act when attaching (bare `ilium` and `ilium new-session`). The other subcommands accept them but ignore them.
 
 ### --restart-server
@@ -85,6 +90,8 @@ ilium --reset-session new-session review
 | `ilium chat context` / `ilium chat tail` | Print recent room records. | Plain text |
 | `ilium progress check\|set\|status\|clear` | Manage this pane's long-task monitor. | JSONL |
 | `ilium voice say <sentence>...` | Type sentences into the live voice session. | JSONL |
+| `ilium panes [selection]` | List panes across every running session. | JSONL |
+| `ilium broadcast [selection] <message>...` | Send a message to every selected agent. | JSONL |
 
 ## ilium (attach)
 
@@ -267,16 +274,18 @@ ilium chat context --limit 40
 
 ```sh
 ilium progress check  --command '<probe>'
-ilium progress set    --command '<probe>' [--interval-seconds <n>]
+ilium progress set    --command '<probe>' [--interval-seconds <n>] [--wait [--timeout-seconds <n>]] [--replace]
+ilium progress wait   [<monitor_id>] [--timeout-seconds <n>]
+ilium wait            [<monitor_id>] [--timeout-seconds <n>]
 ilium progress status
-ilium progress clear  [--monitor-id <id>]
+ilium progress clear  [--monitor-id <id> | --all]
 ```
 
 Requirements:
 
 - It must run **inside an Ilium terminal pane**. The server injects the environment that identifies the pane. Outside a pane the command prints a `progress_request_failed` record with code `pane-identity-unavailable` and exits non-zero with `not running inside an ilium-managed pane: ILIUM_PANE_ID is not set`.
 - The progress monitor feature must be enabled (**Settings → Appearance → Progress monitor**, `progress_monitor_enabled` in `[ui]`; on by default). When it is off, requests are rejected with code `disabled`.
-- The pane keeps its monitor in server memory and state; a replaced or cleared monitor cannot be resurrected by a stale agent (see `--monitor-id`).
+- A pane holds up to 8 monitors at once, one per task, in registration order. The server keeps them in memory and in the session snapshot; a cleared monitor cannot be resurrected by a stale agent (see `--monitor-id`).
 
 ### The probe contract
 
@@ -313,12 +322,15 @@ On success prints:
 
 ### progress set
 
-Validates the probe, then atomically starts, or replaces, this pane's monitor, and waits for a correlated acknowledgement carrying the monitor ID and the accepted first report. Silence is never treated as acceptance.
+Validates the probe, then atomically adds a monitor to this pane, and waits for a correlated acknowledgement carrying the monitor ID and the accepted first report. Silence is never treated as acceptance. Other monitors of the pane are not touched. Registering the exact command of a monitor that is still running returns that monitor instead of adding a second one. Settled monitors whose outcome was already delivered make room for new ones; a ninth monitor that is still needed is refused with `too-many-monitors`.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `--command <probe>` | required | The probe command line. |
 | `--interval-seconds <n>` | 1 | How often the probe re-runs, from 1 to 86400 (24 hours). |
+| `--wait` | off | After the acknowledgement line, block like `ilium progress wait <monitor_id>` and print its `progress_wait` line. |
+| `--timeout-seconds <n>` | none | With `--wait`: stop waiting after this many seconds (exit 6). Use a value below your shell tool's command time limit. |
+| `--replace` | off | Clear every monitor of this pane first. Use only on purpose. |
 
 ```sh
 ilium progress set --command 'cat /tmp/build.status' --interval-seconds 5
@@ -330,26 +342,52 @@ ilium progress set --command 'cat /tmp/build.status' --interval-seconds 5
 
 Keep the `monitor_id`. After this, do not poll: the server watches the task and tells the agent when it reaches `done` or `error`. A live progress monitor can also suppress "agent finished" alerts while work continues. See [Agent monitoring](agent-monitoring.md) and [Notifications](notifications.md).
 
-### progress status
+### progress wait
 
-Prints the current registration, latest report and monitor health.
+Blocks until one monitor settles, then prints one `progress_wait` record and exits with a status an agent can act on. `ilium wait` is the same command. This is the normal way for an agent to wait: one blocking command instead of ending its turn or polling.
+
+| Argument | Meaning |
+| --- | --- |
+| `<monitor_id>` | The monitor to wait for. Optional when the pane has exactly one monitor; with several, the command refuses with `monitor-ambiguous` (exit 2) and lists their IDs in `monitor_ids`. |
+| `--timeout-seconds <n>` | Stop waiting after this many seconds. The monitor keeps running; run the same command again to keep waiting. |
 
 ```text
-{"type":"progress_status","request_id":...,"pane_id":12,"active":true,"progress":{...}}
+{"type":"progress_wait","pane_id":12,"monitor_id":3,"outcome":"done","exit_code":0,"waited_seconds":412,"composer_notice":"suppressed","next":"...","progress":{...}}
 ```
 
-`active` is `false` and `progress` is `null` when no monitor exists. `monitor_health.state` is `healthy`, `degraded` or `failed`; the last two carry `consecutive_failures` and `last_error`.
+| Exit | `outcome` | Meaning |
+| --- | --- | --- |
+| 0 | `done` | The task reported `done`. |
+| 2 | (`progress_rejected`, code `monitor-ambiguous`) | No ID given and the pane has several monitors. |
+| 3 | `error` | The task reported `error`. |
+| 4 | `monitor-failed` | The probe stopped working; the task outcome is unknown, so check the task directly. |
+| 5 | `cleared`, `no-monitor` | The monitor was cleared while waiting, or does not exist. |
+| 6 | `still-running` | `--timeout-seconds` elapsed. |
+
+While a wait is held, the server hands the outcome to it instead of typing a notification into the agent's prompt (`composer_notice` is `suppressed`). If the wait is killed first, the typed notification still arrives; `may-also-arrive` means a typed message about the same monitor is a duplicate.
+
+### progress status
+
+Prints every monitor of the pane, in registration order, with its latest report and health.
+
+```text
+{"type":"progress_status","request_id":...,"pane_id":12,"monitor_count":2,"running":true,"monitors":[{"monitor_id":3,...},{"monitor_id":4,...}]}
+```
+
+`monitors` is empty when the pane has no monitor. `running` is `true` while any monitor's task is still live. `monitor_health.state` is `healthy`, `degraded` or `failed`; the last two carry `consecutive_failures` and `last_error`.
 
 ### progress clear
 
-Stops the active monitor and clears its retained result.
+Stops monitors and clears their retained results.
 
 | Option | Meaning |
 | --- | --- |
-| `--monitor-id <id>` | Fence the operation: only clear the monitor with this ID. If a newer monitor has replaced it, the request is rejected with `stale-monitor` and the newer monitor is untouched. |
+| `--monitor-id <id>` | Clear only this monitor. If it no longer exists, the request is rejected with `stale-monitor` and the other monitors are untouched. |
+| `--all` | Clear every monitor of the pane. |
+| (neither) | Clears the only monitor; refused with `monitor-ambiguous` when the pane has several. |
 
 ```text
-{"type":"progress_clear","request_id":...,"pane_id":12,"cleared":true,"cleared_monitor_id":3}
+{"type":"progress_clear","request_id":...,"pane_id":12,"cleared":true,"cleared_monitor_ids":[3]}
 ```
 
 ### Failures
@@ -361,7 +399,7 @@ Every failure is reported on stdout as one JSON record and the process exits non
 | `progress_rejected` | The server refused the request. Fields: `operation`, `request_id`, `pane_id`, `code`, `message`. |
 | `progress_request_failed` | The request never completed. Fields: `operation`, `request_id`, `pane_id` (or `null`), `code`, `message`. Codes: `pane-identity-unavailable`, `connection-failed`, `request-send-failed`, `transport-error`. |
 
-Rejection codes: `disabled`, `invalid-request`, `invalid-probe-report`, `probe-spawn-failed`, `probe-timed-out`, `probe-exited-non-zero`, `probe-output-too-large`, `probe-io-failed`, `pane-not-found`, `stale-monitor`. The CLI waits up to 45 seconds for the server's correlated reply.
+Rejection codes: `disabled`, `invalid-request`, `invalid-probe-report`, `probe-spawn-failed`, `probe-timed-out`, `probe-exited-non-zero`, `probe-output-too-large`, `probe-io-failed`, `pane-not-found`, `stale-monitor`, `too-many-monitors`, `monitor-ambiguous`. The CLI waits up to 45 seconds for the server's correlated reply.
 
 ### A complete example
 
@@ -372,11 +410,14 @@ Rejection codes: `disabled`, `invalid-request`, `invalid-probe-report`, `probe-s
 # 2. A cheap probe that prints one JSON object. Absolute paths only.
 probe='cat /tmp/tests.status.json'
 
-# 3. Validate, then register.
+# 3. Validate, then register and block until the task settles.
 ilium progress check --command "$probe"
-ilium progress set   --command "$probe" --interval-seconds 5
+ilium progress set   --command "$probe" --interval-seconds 5 --wait --timeout-seconds 590
 
-# 4. Later, when finished or abandoned:
+# 4. If it printed exit 6 (still running), keep waiting on the monitor ID it printed:
+ilium progress wait 3 --timeout-seconds 590
+
+# 5. After handling the result:
 ilium progress clear --monitor-id 3
 ```
 
@@ -428,6 +469,84 @@ Output is JSONL: first a `progress` record, then exactly one `result` or `error`
 
 The process exits non-zero after an `error` record. Human-readable diagnostics go to stderr.
 
+## Pane selection
+
+`ilium panes` and `ilium broadcast` share one set of selection options, so a selection means the same thing in both. Use `ilium panes` with a selection first to see exactly which panes `ilium broadcast` would reach.
+
+Both commands look at **every running session on this machine**, in every project: they list the live sockets in the session socket directory and read each session's pane tree in turn. A session started under a different `ILIUM_SOCKET_DIR` or `XDG_RUNTIME_DIR` is not visible.
+
+| Option | Meaning |
+| --- | --- |
+| `-m`, `--match <TEXT>` | Keep panes whose searched fields contain TEXT, ignoring case. |
+| `-e`, `--regex <PATTERN>` | Keep panes whose searched fields match the regular expression (Rust `regex` syntax, unanchored, case-insensitive). |
+| `--field <FIELD>` | Fields searched by `--match` and `--regex`: `name` (title and short title), `project`, `cwd`, `agent`, `session`. Default: all. |
+| `-v`, `--invert` | Keep panes that no `--match` or `--regex` matches. Needs at least one of them. |
+| `-p`, `--project <PROJECT>` | Keep panes in these projects. A value with a path separator, or `.`, `..`, `~`, is a directory and selects every project at or below it (relative values are resolved against `--cwd`). A bare value is a project folder name, compared ignoring case. |
+| `--exclude-project <PROJECT>` | Drop panes in these projects (same syntax). Exclusion wins over `--project`. |
+| `--here` | Keep only panes of the project that contains `--cwd` (the current directory by default). |
+| `-s`, `--session <NAME>` | Keep panes in these session names. |
+| `-a`, `--agent <AGENT>` | Keep panes running these agents: `claude`, `codex`, `antigravity`, or a custom agent's name. |
+| `--state <STATE>` | Keep agents in these states: `working`, `waiting-approval`, `waiting-subagents`, `settling`, `idle` (includes `done`), `done` (finished a turn nobody has looked at yet). |
+| `--kind <KIND>` | Keep panes of these kinds: `agent`, `shell`, `editor`, `board`, `unavailable-agent` (an agent pane whose program is not running). |
+| `--pane <ID>` | Keep these pane ids. Ids are unique only within one session, so combine with `--session` or `--project` when several sessions run. |
+
+How options combine:
+
+- Different options narrow the selection (AND). Repeating an option, or giving it comma-separated values, widens that option (OR): `--project ilium,lumen` and `--project ilium --project lumen` are the same.
+- `--match` and `--regex` together form the text filter: a pane passes when **any** of them matches **any** searched field. `--invert` flips only the text filter, never the other options.
+- An invalid regular expression, `--invert` without a pattern, or `--here` outside a readable directory prints an `error` record with code `invalid-selection` (or `invalid-request` for `broadcast`) and exits 2.
+
+## ilium panes
+
+```sh
+ilium panes [selection options]
+ilium panes --agent codex --state idle
+```
+
+Lists the selected panes, one `pane` record each, then a `summary`:
+
+```text
+{"type":"pane","session":"default","pane_id":12,"name":"refactor parser","kind":"agent","agent":"Codex","state":"working","project":"/home/me/dev/ilium","cwd":"/home/me/dev/ilium","is_self":false}
+{"type":"summary","command":"panes","ok":true,"sessions":3,"unreachable_sessions":0,"panes":1}
+```
+
+`kind`, `agent` and `state` use the values of the selection options; `agent` and `state` are `null` for panes that are not agents. `is_self` marks the pane running the command. A session that is running but cannot be read produces a `warning` record with code `session-unreachable`, and `ok` is then `false`; the command still exits 0.
+
+## ilium broadcast
+
+```sh
+ilium broadcast [selection options] [--when-idle] [--dry-run] [--include-self] <MESSAGE>...
+ilium broadcast --project ilium,lumen "Re-read CLAUDE.md before your next step."
+ilium broadcast --regex 'review|audit' --field name --invert --dry-run "Stop and report."
+cat notice.md | ilium broadcast --agent claude -
+```
+
+Sends one message to every selected **agent**: it is typed into the agent's prompt and submitted with Enter, exactly as the interface's "Send message to all" does. Shells, editors, boards, and agent panes whose program is not running are never typed into, whatever the selection. Sessions are visited one at a time, and each agent's delivery is confirmed by its server before the next.
+
+| Argument or option | Default | Meaning |
+| --- | --- | --- |
+| `<MESSAGE>...` | required | The message; several words are joined with spaces. A lone `-` reads the whole message from standard input. Put `--` first when the message starts with a hyphen. |
+| `--file <PATH>` | | Read the message from a file instead (relative to the current directory). |
+| `--when-idle` | off | Send now only to idle agents. Busy agents get the message in their prompt queue and receive it when their current turn finishes. |
+| `--dry-run` | off | Print what would happen to each recipient without sending anything. |
+| `--include-self` | off | Also send to the pane running this command. By default it is skipped. |
+| `--timeout-seconds <n>` | 15 | How long to wait for each delivery's confirmation, 1 to 600. |
+| selection options | all agents | See [Pane selection](#pane-selection). |
+
+A trailing newline is removed. A multi-line message is sent as one bracketed paste, so the receiving program must have bracketed paste switched on (Claude Code and Codex do); otherwise that recipient reports a `failed` result.
+
+Output is JSONL: a `progress` record, a `warning` per session that could not be read, one `result` per selected agent, then a `summary`:
+
+```text
+{"type":"progress","command":"broadcast","stage":"sending","sessions":3,"message_bytes":41}
+{"type":"result","command":"broadcast","outcome":"delivered","session":"default","pane_id":12,"name":"refactor parser","kind":"agent","agent":"Codex","state":"working","project":"/home/me/dev/ilium","cwd":"/home/me/dev/ilium","is_self":false}
+{"type":"summary","command":"broadcast","ok":true,"dry_run":false,"sessions":3,"unreachable_sessions":0,"recipients":1,"delivered":1,"queued":0,"planned":0,"skipped":0,"failed":0}
+```
+
+`outcome` is `delivered`, `queued` (`--when-idle`), `would-send` or `would-queue` (`--dry-run`), `skipped` (the calling pane) or `failed`; `skipped` and `failed` carry a `reason`. A `failed` delivery that timed out may still arrive.
+
+Exit status: 0 when at least one agent was reached (or planned) and nothing failed; 1 when nothing was selected, any delivery failed, or any running session could not be read; 2 for an invalid selection or an empty message.
+
 ## Environment variables
 
 Variables set by Ilium inside every terminal pane:
@@ -465,6 +584,7 @@ Logging is off by default. When enabled in Settings, logs are written under the 
 | `new-pane --worktree` | JSONL (`progress`, `result`, `error`) | an `error` record, plus `ilium: <error>` on stderr |
 | `progress` | JSONL, one record per call | a `progress_rejected` or `progress_request_failed` record, plus the error on stderr |
 | `voice say` | JSONL (`progress`, then `result` or `error`) | an `error` record, plus the error on stderr |
+| `panes`, `broadcast` | JSONL (see each command) | an `error` record for an invalid selection or message (exit 2); `broadcast` exits 1 when nothing was selected or any delivery failed |
 
 Every JSONL line is a single JSON object with a `type` field. Parse stdout line by line and branch on `type`; paths and IDs are explicit fields.
 

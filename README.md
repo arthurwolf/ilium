@@ -139,6 +139,7 @@ After a restart, Ilium restores the layout and relaunches pane programs, resumin
 | `ilium new-pane [--keep-open] -- <cmd>` | Add a terminal pane without attaching the TUI. The pane closes when the command exits unless `--keep-open` is given. |
 | `ilium chat --help` / `ilium progress --help` | Chatroom and progress commands. |
 | `ilium voice say --help` | Typed voice input. |
+| `ilium panes` / `ilium broadcast <message>` | List panes, or message agents, across every running session; filter by project, agent, state, text or regex. |
 
 Every command and flag: [Command-line reference](src/docs/cli-reference.md).
 

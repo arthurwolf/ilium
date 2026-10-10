@@ -14,19 +14,59 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 ## [Unreleased]
 
 ### Changed
-- Wide settings and form rows now connect each label to its controls with grey `…` leaders, so the label, `-`/`+` steppers and value stay easy to match on wide terminals.
+- Codex session conversion now bounds app-server output records and queued reader events, clipping oversized diagnostics and failing closed on oversized protocol lines.
+- Live ambient data pollers and fleet-marker preparers now reserve persistent worker capacity from the host's shared quota before starting.
+- Lichess TV stream workers now reserve host-shared thread and stack capacity before connecting.
+- NASA/EUMETSAT map image decoding now applies encoded-byte, dimension, and pixel limits before allocating decoded frames; cached mosaics reject oversized and non-regular files before reading.
+- Night Lights and Clouds reserve shared worker capacity, publish through one-slot update channels, cap Clouds grids, and report unexpected worker exit before retrying with backoff.
+- Voxel Landscape now reserves shared worker capacity and its full one-GiB scene budget before preparation; admission refusal is reported in scene status.
+- Wind gust-field direction sampling now uses a bounded interpolated lookup for ordinary angles and exact `sin_cos` range reduction outside that range.
+- Java-default generated landscapes explicitly reuse the Java 1.19.3 dandelion and tall-grass textures for newer wildflower materials, preserving complete material coverage.
+- Generated landscape probe failures now include missing required-material names and the state, model, alias, and fallback counts reported by the renderer.
+- Queued-prompt acknowledgement and scheduled-input countdown clearing now update only the affected pane, not the full tree snapshot. Server read syscalls and CPU fall sharply with many panes (see `PERFORMANCE.md`, Many-agent scale pass).
+- Chatroom reconciliation runs full repairs at most every 15 seconds unless the chatroom file changes or a structural request arrives.
+- Wide settings and form rows now connect each label to its controls with darker grey `…` leaders that blend into the background while staying visible, so the label, `-`/`+` steppers and value stay easy to match on wide terminals.
 - Number controls use literal single-cell `-` and `+` steppers around the centered value, with `*` for direct entry.
 - Animation selectors, including OSM city choices, use left/right stepping and a `+` dialog with the full option list.
+- OpenStreetMap address and Overpass requests share persisted per-host `Retry-After` cooldowns across Ilium clients.
 - Agent Monitoring can show each session's selected model icon in the tree; this setting is off by default and falls back to provider icons for unsupported models.
+- Text Trigger updates reserve ordered event capacity before accepting new
+  rules; admission refusal keeps the previous rules active, and unchanged rules
+  do not create a new revision or event.
+- Workspace creation, pruning, removal and automatic close requests share a
+  bounded server-owned task registry; overload is refused before mutation work
+  starts, and shutdown drains every admitted mutation.
+- IPC direct replies reserve shared process storage before queueing and retain
+  that admission through encoding and socket flush.
+- With parser pooling Off, terminal pane storage has no aggregate 4-GiB
+  admission cap; enabling the pool bounds aggregate engine and snapshot memory,
+  while per-pane operation limits remain in both modes.
+
+### Added
+- Every animation's settings open with a two-sentence introduction of what the animation is and what it shows.
+- `ilium broadcast` sends a message to every running agent across all projects and sessions on this machine, or only to the agents a selection keeps; `--when-idle` queues it for busy agents, `--dry-run` shows the recipients first, and the calling pane is skipped unless `--include-self` is given.
+- `ilium panes` lists the panes of every running session as JSONL. It shares one set of selection options with `ilium broadcast`: substring and regular-expression text filters over chosen fields with `--invert`, project lists by directory or folder name, `--exclude-project`, `--here`, session, agent, agent state, pane kind and pane id.
+- `ilium progress guard` is a Claude Code `PreToolUse` hook that Ilium installs into each chatroom project's `.claude/settings.local.json`. Inside an Ilium pane it refuses a foreground Bash call with a timeout over three minutes unless the call is an `ilium progress` or `ilium wait` command or runs in the background. Outside a pane, and for malformed hook input, it allows the call.
 
 ### Fixed
-- The LLM Instructions list now shows a scrollbar when compact panels hide fields, while keeping text clear of the track.
+- `ilium new-pane --worktree` now places new worktrees at the Settings -> Git "Worktree location" template, as the TUI dialog already did, instead of always using a sibling `<repo>.worktrees` directory.
+- Pane progress monitors survive a server restart: the restored server keeps the same monitor ID and keeps observing the task instead of reporting it as lost.
+- Anthropic requests send each model's documented output-token maximum instead of the 1,000,000-token fallback, so `claude-haiku-5-5` and other Claude models no longer reject requests with "max_tokens ... exceeds the maximum allowed number of output tokens".
+- Compact numeric controls now keep a centered value and direct-entry target visible before hiding step buttons that do not fit.
+- `ilium new-pane` no longer waits 5 s before every request. It accepts the attach `PaneStateSnapshot` as its baseline and gives the create confirmation 30 s under load, so 200-pane scripted creation no longer fails with `no confirmation received from the server`.
+- Saved-world route failures now identify the exact supporting chunk and generation-status error instead of ending with an empty reason.
+- "Send message to all" now submits to Codex agents: messages are sent as one bracketed paste and then Enter, so Codex no longer turns the Enter after a long message into a new line. The same applies to scheduled input, prompt queues, text triggers and `ilium broadcast`.
+- "Send message to all" no longer refuses multi-line messages because of a stale "bracketed paste" check in the interface. The server now checks each agent's live terminal, and an agent that really cannot take a multi-line message gets a plain-language explanation naming it.
+- When two live agent processes claim the same session, both claims are now invalidated instead of one arbitrary winner being kept during evidence checks.
+- A progress monitor whose observation task has stopped is now marked as failed instead of leaving the agent waiting forever. A settled outcome that never reached the agent is delivered again, and a delivery that may already have reached it is marked as a possible duplicate.
+- The LLM Instructions list shows a scrollbar when compact panels hide fields; clicking its track jumps through fields while keeping text clear of the rail.
+- The LLM Instructions panel keeps its title and action hints on separate visible rows, with field clicks and scrollbar input aligned below them.
 - Compact Inference Settings keep the full Kilo Gateway privacy warning and its panel border visible by reclaiming unused top spacing.
 - Focused visible terminals now take parser priority over visible sibling backlogs, so newly selected agent output is applied first under queue pressure.
 - Migrated Kilo StepFun defaults and test fixtures to `stepfun/step-5-preview-free`. Running processes and installed binaries require a separate release update.
 - Inland lake shaping now fades at wetland climate boundaries, preventing abrupt height and water changes at neighboring columns.
 - Saved-world preparation progress now rounds partial phases consistently.
-- Compact saved-world preparation footers keep the progress bar and measured route ETA visible together, while retaining recent activity when space permits.
+- Compact saved-world preparation footers keep the progress bar and measured route ETA visible together, with a one-line fallback on short terminals and recent activity when space permits.
 
 - Unfreezing reserves request capacity before focus updates, including frozen-screen button clicks, so focus traffic cannot consume the slot needed to resume the saved agent session.
 - Agent Cost metric and calibration settings now use shared left/right selectors and full choice dialogs.
@@ -42,6 +82,7 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
   - A plain `claude` pane whose generated conversation id was not verified yet is saved with that id, and restored with `claude --resume <id>` when the transcript exists. Previously it restarted as a blank `claude`.
 - Terminal capacity: each PTY now has its own quota that scales with the pane count (up to about 1,600 panes on Unix), instead of sharing the server's 512 MiB pool, which stopped a 128-pane restore after about 25 panes. PTY worker stacks went from 2 MiB to 4 MiB. The shared server pool is now 4 GiB.
 - Background jobs that declared a resource cost smaller than their own closure or result type are admitted at the size they need, instead of failing with `InvalidCost`. This broke worktree creation, setup probes and notifications when the declared cost was too small.
+- Work submitted to a disabled I/O or CPU lane is refused at once as a permanent capacity error, instead of being reported as queue pressure that callers retry forever.
 - New always-on lifecycle log `.ilium/logs/<session>.lifecycle.jsonl`: server start with the executable and its install record, restore result, failed and retried starts, who requested each close, closed panes, shutdown.
 - `make install` now installs only from a verified build receipt (`make install RECEIPT=<job id>`) and writes `<binary>.build.json` beside each executable.
 - Sessions with hundreds of agents stay responsive (many-agent scale pass, see `PERFORMANCE.md`):
@@ -163,7 +204,8 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 - `ilium progress wait [MONITOR_ID]` (also `ilium wait`) blocks until a progress monitor reports done or error, fails, is replaced or is cleared, prints one JSONL record, and exits 0 done, 3 task error, 4 monitor failed, 5 replaced/cleared, 6 timeout. While it waits, the server returns the result to it instead of typing a notification into the agent's prompt; if the wait is killed, the typed notification still arrives.
 - `ilium progress set --wait` registers a monitor and waits for it in one command.
 - The progress instructions Ilium installs for agents now tell them to register and wait with `ilium progress set --wait` (with `--timeout-seconds` below their shell tool's limit, or in the background when their tool reports the exit), to keep waiting on a returned still-running command with the longest wait the tool allows, and to fall back to the typed result message on an older Ilium build. They also state that this wait overrides general rules against sleep loops and long waits.
-- `ilium progress set` now refuses (code `monitor-active`) to replace a monitor that is still running unless `--replace` is given, so a second job can no longer silently discard the first job's monitor and result.
+- A pane can now run up to 8 progress monitors at once, for example a build and a test suite started by two subagents of one agent. `ilium progress set` adds a monitor without touching the others (registering the same probe command again returns the live monitor), a ninth live monitor is refused with `too-many-monitors`, and `set --replace` clears every monitor of the pane first. `ilium progress wait` and `ilium progress clear` without a monitor id refuse with `monitor-ambiguous` (exit 2, listing `monitor_ids`) when the pane has several; `clear --all` clears them all. `ilium progress status` reports `monitor_count`, `running` and a `monitors` array. The pane footer shows one gauge row per monitor in registration order with a `+N more` row when they do not fit, hovering a row explains that monitor, and the sidebar glyph represents the most urgent monitor. The Progress teaching for agents (version 10) explains this. Monitor lists keep the former single-monitor wire layout when they hold zero or one monitor, so a new `ilium` command still works against a server started before this change until Ilium is restarted.
+- A `progress wait` that reaches `--timeout-seconds` now includes the monitor's latest report in its `progress_wait` record instead of `null`, so an agent sees how far the task got without a separate status call.
 
 - Anthropic inference settings can load the live model catalog from `GET /v1/models` and select a model from that list, matching the OpenAI-compatible provider.
 - Project and folder context menus can open a recipient-selectable message dialog for agent terminals; filesystem folders include agents whose launch directories are within the folder path. Sending can optionally press Enter.
@@ -327,6 +369,7 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 - Installation guidance keeps the source-build fallback without retaining publication-status text that becomes stale when the first release is published.
 - Cost-history calibration now reports unreadable or malformed transcript roots and entries as incomplete scans instead of silently treating them as absent history.
 - Topographic and OpenStreetMap loaders now reserve shared worker capacity before decoding and charge retained heightfields/maps until the scene releases them; temporary capacity refusal retries without blocking rendering.
+- Topographic world-load worker failures now retry after a bounded backoff while the last loaded world remains available.
 - Native release jobs install the pinned Rust toolchain in a private Rustup directory, preventing preinstalled runner components from conflicting with the macOS release build.
 - Remote compaction now uses bounded shared I/O admission, keeps semantic completion in typed receipts, and cannot stall cancellation on a full UI event queue. A dropped progress event after transcript commit no longer turns a successful rewrite into a reported failure or masks other domain errors. Transcript capture refuses files larger than 128 MiB before whole-file allocation. Rewrite verification checks only persisted appended records and refuses appended output above 16 MiB, avoiding a second full-transcript parse.
 - Session conversion now runs through the shared bounded I/O bank with receipt-backed completion and nonblocking progress delivery. Claude and Codex transcript reads and generated output are capped at 128 MiB, and the Codex import ledger at 16 MiB, before unbounded allocation or persistence. Provider error normalization no longer duplicates complete unbounded messages.

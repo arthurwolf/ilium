@@ -227,10 +227,10 @@ Every command prints **one JSONL record** to stdout on success (one JSON object 
 | Command | Purpose | Output `type` |
 | --- | --- | --- |
 | `ilium progress check --command '<probe>'` | Run the probe once through the server and validate it. Installs nothing. | `progress_check` |
-| `ilium progress set --command '<probe>' [--interval-seconds N] [--wait [--timeout-seconds S]] [--replace]` | Validate, then atomically start this pane's monitor. Waits for a server acknowledgement that contains the monitor id and the accepted first report. With `--wait`, then blocks exactly like `ilium progress wait` and prints a second line. Refuses (code `monitor-active`) while the pane's current monitor is still running, unless `--replace` is given. | `progress_set` (then `progress_wait`) |
-| `ilium progress wait [MONITOR_ID] [--timeout-seconds S]` | Block until the monitor (default: the pane's current one) reports `done` or `error`, fails, is replaced or is cleared. `ilium wait` is the same command. | `progress_wait` |
-| `ilium progress status` | Current registration, latest report and monitor health for this pane. | `progress_status` |
-| `ilium progress clear [--monitor-id ID]` | Stop the monitor and clear its retained progress. With `--monitor-id`, only clears that exact monitor, so a stale agent cannot clear a newer replacement. | (clear result) |
+| `ilium progress set --command '<probe>' [--interval-seconds N] [--wait [--timeout-seconds S]] [--replace]` | Validate, then atomically add a monitor to this pane. Waits for a server acknowledgement that contains the monitor id and the accepted first report. With `--wait`, then blocks exactly like `ilium progress wait` and prints a second line. Other monitors of the pane keep running; `--replace` clears all of them first. | `progress_set` (then `progress_wait`) |
+| `ilium progress wait [MONITOR_ID] [--timeout-seconds S]` | Block until the monitor reports `done` or `error`, fails or is cleared. Without an id it picks the pane's only unsettled monitor (else its only monitor) and refuses with `monitor-ambiguous` (exit 2) when there are several. `ilium wait` is the same command. | `progress_wait` |
+| `ilium progress status` | Every monitor of this pane: registration, latest report and monitor health (`monitor_count`, `running`, `monitors`). | `progress_status` |
+| `ilium progress clear [--monitor-id ID \| --all]` | Stop a monitor and clear its retained progress. With `--monitor-id`, only that exact monitor. Without it, the pane's only monitor; with several, it refuses with `monitor-ambiguous` unless `--all` is given. | (clear result) |
 
 
 ### Waiting for a monitor
@@ -242,8 +242,9 @@ Every command prints **one JSONL record** to stdout on success (one JSON object 
 | 0 | `done` | The task reported `done`. |
 | 3 | `error` | The task reported `error`; the record carries the error text. |
 | 4 | `monitor-failed` | The probe stopped working, so the task outcome is unknown. |
-| 5 | `replaced`, `cleared`, `no-monitor` | A newer `set` replaced the monitor, it was cleared, monitoring was switched off, or the pane has no monitor. |
+| 5 | `cleared`, `no-monitor` | The monitor was cleared (also by `set --replace`), monitoring was switched off, or the pane has no monitor. |
 | 6 | `still-running` | `--timeout-seconds` elapsed. Run the same command again to keep waiting. |
+| 2 | (`progress_rejected`, code `monitor-ambiguous`) | No id was given and the pane has several monitors; the record lists their ids in `monitor_ids`. |
 | 1 | (failure record) | The command could not reach the server or the connection broke. |
 
 The record also carries `composer_notice`: `suppressed` means the server did not, and will not, type a result message for this monitor, because this command delivered it. `may-also-arrive` means a message was already typed (or may be) and is a duplicate of this record. If the wait command is killed or the agent stops it, the server falls back to typing the message, so nothing is lost.
@@ -277,7 +278,7 @@ ilium progress status
 ilium progress clear --monitor-id 7
 ```
 
-`set` never silently succeeds: if the server does not acknowledge within the request timeout, it reports a failure. A pane has one monitor. Calling `set` again after the current monitor settled replaces it; while it is still running, `set` refuses with code `monitor-active` so a second job cannot silently discard the first job's monitor and its result. Prefer one probe that covers a whole multi-step pipeline; pass `--replace` only to deliberately discard the running monitor.
+`set` never silently succeeds: if the server does not acknowledge within the request timeout, it reports a failure. A pane can run up to 8 monitors at once, for example a build and a test suite started by two subagents of the same agent. `set` adds a monitor and never disturbs the others. Registering the same probe command while its monitor is still running returns that monitor instead of a duplicate. Settled monitors whose outcome was already delivered make room for new ones; a ninth live monitor is refused with code `too-many-monitors`. The footer shows one gauge row per monitor in registration order, with a `+N more` row when they do not fit, and the sidebar glyph represents the most urgent one (an unread failure, then a running task). Still prefer one probe that covers a whole multi-step pipeline, and pass the monitor id to `wait` and `clear` when a pane may have several. `--replace` clears every monitor of the pane before adding the new one.
 
 ### The probe contract
 
@@ -381,8 +382,9 @@ Under Settings, **Agent Monitoring** (the same rows are also reachable from **Us
 | `probe-timed-out` / `probe-exited-non-zero` / `probe-output-too-large` | The probe is slow, failing or chatty. Run it by hand, keep stdout to one short object, keep stderr small. |
 | `invalid-probe-report` | Not exactly one JSON object, an unknown field, percent out of range, an `error` without `status:"error"` (or the reverse), or `job_id` changed. |
 | Stuck at 0 percent while the job runs | A relative path in the probe. Use absolute paths. |
-| `stale-monitor` on `clear --monitor-id` | A newer monitor replaced yours; the clear was refused on purpose. |
-| `monitor-active` on `set` | The pane's current monitor is still running. Wait for it (`ilium progress wait`), use one probe for the whole pipeline, or pass `--replace`. |
+| `stale-monitor` on `clear --monitor-id` | That monitor no longer exists (it was already cleared or replaced); the clear was refused on purpose. |
+| `monitor-ambiguous` on `wait` or `clear` | The pane has several monitors. Pass the monitor id the `set` line printed (`ilium progress status` lists them), or `clear --all`. |
+| `too-many-monitors` on `set` | The pane already has 8 live monitors. Wait for one or clear it. |
 | `ilium progress wait` fails with "closed the connection" | The server restarted, or the running server is older than the `wait` command. The normal typed result message still arrives. |
 | Footer shows "monitor failed" | Three probe failures in a row. Fix the probe and register again with `ilium progress set`. |
 

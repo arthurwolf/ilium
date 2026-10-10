@@ -28,7 +28,8 @@ import sys
 from pathlib import Path
 
 DEFAULT_BINARIES = ["ilium", "ilium-server", "ilium-animation-helper"]
-RECEIPTS_ROOT = Path.home() / ".local/share/ni-build/receipts"
+# ni-build keeps receipts on the build scratch disk (pruned after 72 h idle).
+RECEIPTS_ROOT = Path("/media/arthur/build/ni-build-receipts")
 
 
 def emit(kind, **fields):
