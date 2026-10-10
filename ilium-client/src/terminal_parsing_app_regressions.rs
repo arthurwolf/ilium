@@ -41,6 +41,56 @@ fn pending_parser_retries_prioritize_displayed_panes_and_keep_hidden_work() {
     assert_eq!(hidden, [NodeId(4), NodeId(5)]);
 }
 
+pub(crate) fn focused_split_member_updates_parser_priority(select: fn(&mut App, NodeId)) {
+    use std::sync::atomic::Ordering;
+
+    let (_bank, mut app, ids) = initialized_app(2, 0, select);
+    let group = app.tree.parent_of(ids[0]).expect("panes share a group");
+    app.tree
+        .create_split_view(
+            group,
+            "Vertical split",
+            ilium_core::SplitOrientation::Vertical,
+            &ids,
+        )
+        .unwrap();
+    app.focus_pane(ids[1]);
+    app.collect_terminal_parsing();
+
+    assert_eq!(
+        app.visible_pane_stream_order(),
+        [Some(ids[1]), Some(ids[0]), None, None]
+    );
+    assert!(view(&app, ids[0])
+        .frontend
+        .as_ref()
+        .unwrap()
+        .target
+        .displayed
+        .load(Ordering::Acquire));
+    assert!(view(&app, ids[1])
+        .frontend
+        .as_ref()
+        .unwrap()
+        .target
+        .displayed
+        .load(Ordering::Acquire));
+    assert!(!view(&app, ids[0])
+        .frontend
+        .as_ref()
+        .unwrap()
+        .target
+        .focused
+        .load(Ordering::Acquire));
+    assert!(view(&app, ids[1])
+        .frontend
+        .as_ref()
+        .unwrap()
+        .target
+        .focused
+        .load(Ordering::Acquire));
+}
+
 fn view_mut(app: &mut App, id: NodeId) -> &mut TerminalView {
     let Some(PaneRuntime::Terminal(view)) = app.panes.get_mut(&id) else {
         panic!("missing terminal {id:?}");

@@ -5,7 +5,7 @@ use ilium_ambient::resources::WorkerCost;
 use ilium_ambient::source::Worker;
 use ilium_execution::StorageAdmission;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, mpsc};
+use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
 pub(crate) const CACHE_FPS: u32 = 30;

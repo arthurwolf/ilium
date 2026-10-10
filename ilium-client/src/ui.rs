@@ -4105,6 +4105,13 @@ mod tests {
     }
 
     #[test]
+    fn focused_split_member_updates_its_parser_priority() {
+        crate::terminal_parsing::app_regressions::focused_split_member_updates_parser_priority(
+            select_parser_regression_pane,
+        );
+    }
+
+    #[test]
     fn parser_pool_app_eviction_protects_busy_displayed_and_retiring_owners() {
         crate::terminal_parsing::app_regressions::pooled_app_protects_displayed_and_busy_panes_and_waits_for_retiring_claims(select_parser_regression_pane);
     }

@@ -106,6 +106,10 @@ const TERMINAL_WHEEL_SCROLL_LINES: u16 = 3;
 /// but filesystem repair and parsing do not belong on animation cadences.
 const CHATROOM_RECONCILE_INTERVAL: Duration = Duration::from_secs(1);
 
+/// Full provider-integration repair cadence. Hooks and guidance change rarely,
+/// so the every-second deadline only stats the visible room between repairs.
+const CHATROOM_REPAIR_INTERVAL: Duration = Duration::from_secs(15);
+
 fn initial_statusline_generation() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -2045,6 +2049,11 @@ pub struct App {
     /// Explicit filesystem-poll deadline shared by visible message refresh and
     /// provider integration repair.
     next_chatroom_reconcile_at: Option<Instant>,
+    /// Next full provider-integration repair; between repairs only the
+    /// visible room is re-read, and only when its file stamp changed.
+    next_chatroom_repair_at: Option<Instant>,
+    /// Stamp of the visible room file at the last queued reconcile.
+    chatroom_file_stamp: Option<(NodeId, Option<(std::time::SystemTime, u64)>)>,
     /// On-demand history caches are separate from the render tree so normal
     /// structural snapshots never carry or clone the retained journal.
     pub agent_debug_logs: HashMap<NodeId, AgentDebugLogCache>,
@@ -2740,6 +2749,8 @@ impl App {
             // The first authoritative tree snapshot installs this deadline.
             // Until then an empty client has no project to inspect.
             next_chatroom_reconcile_at: None,
+            next_chatroom_repair_at: None,
+            chatroom_file_stamp: None,
             agent_debug_logs: HashMap::new(),
             pane_detection_evidence: HashMap::new(),
             agent_debug_log_filter: AgentDebugLogFilter::default(),
@@ -5044,11 +5055,27 @@ impl App {
     /// discovery without coupling status-only tree version bumps to file I/O.
     pub(crate) fn request_chatroom_reconcile(&mut self) {
         self.next_chatroom_reconcile_at = Some(Instant::now());
+        self.next_chatroom_repair_at = None;
+    }
+
+    /// Stat fingerprint of the visible room's file, or `None` when no room is
+    /// visible. One stat per deadline replaces re-reading every project's
+    /// instruction files and the room on each second.
+    fn visible_chatroom_stamp(&self) -> Option<(NodeId, Option<(std::time::SystemTime, u64)>)> {
+        let RightPanelTarget::Chatroom { project_id } = self.right_panel_target else {
+            return None;
+        };
+        let project_root = self.tree.get(project_id).and_then(Node::project_path)?;
+        let stamp = std::fs::metadata(crate::chatroom::path_for_project(project_root))
+            .ok()
+            .and_then(|metadata| Some((metadata.modified().ok()?, metadata.len())));
+        Some((project_id, stamp))
     }
 
     /// Reconciles chatroom files only when their independent deadline is due.
-    /// External writers remain visible within one second while high-frequency
-    /// spinner ticks stay entirely in memory.
+    /// A full repair (provider hooks, guidance, every room) runs on structural
+    /// changes and at most every `CHATROOM_REPAIR_INTERVAL`; in between, the
+    /// room only re-reads when its file's stamp changed.
     pub fn tick_chatroom_projects(&mut self, now: Instant) -> bool {
         let Some(next_reconcile_at) = self.next_chatroom_reconcile_at else {
             return false;
@@ -5056,9 +5083,17 @@ impl App {
         if now < next_reconcile_at {
             return false;
         }
-        let has_changed = self.reconcile_chatroom_projects();
         self.next_chatroom_reconcile_at = Some(now + CHATROOM_RECONCILE_INTERVAL);
-        has_changed
+        let repair_due = self.next_chatroom_repair_at.is_none_or(|at| now >= at);
+        let stamp = self.visible_chatroom_stamp();
+        if !repair_due && stamp == self.chatroom_file_stamp {
+            return false;
+        }
+        if repair_due {
+            self.next_chatroom_repair_at = Some(now + CHATROOM_REPAIR_INTERVAL);
+        }
+        self.chatroom_file_stamp = stamp;
+        self.reconcile_chatroom_projects()
     }
 
     /// Handles text entry directly in the room's composer. The user is the
@@ -11717,6 +11752,32 @@ impl App {
         let Some(parsing) = &self.terminal_parsing else {
             return false;
         };
+        // Publish a focus change to the parser before draining its result
+        // queue. Applying a large batch of old pane results must not postpone
+        // the newly selected pane's priority update.
+        let focused = self
+            .focused_pane_id()
+            .filter(|pane_id| self.displayed_pane_slots().contains(&Some(*pane_id)));
+        if let Some(pane_id) = focused {
+            if let Some(PaneRuntime::Terminal(view)) = self.panes.get_mut(&pane_id) {
+                if view.frontend.is_none() {
+                    if let Err(error) = parsing.attach(pane_id, view) {
+                        view.admission_error = Some(error);
+                    }
+                }
+                if let Some(frontend) = &mut view.frontend {
+                    frontend.set_displayed(true);
+                    frontend.set_focused(true);
+                }
+            }
+        }
+        for (pane_id, pane) in &mut self.panes {
+            if let PaneRuntime::Terminal(view) = pane {
+                if let Some(frontend) = &mut view.frontend {
+                    frontend.set_focused(focused == Some(*pane_id));
+                }
+            }
+        }
         let results = parsing.collect();
         let mut changed = false;
         for result in results {
@@ -11839,6 +11900,14 @@ impl App {
             return changed;
         };
         let displayed: Vec<NodeId> = self.displayed_pane_slots().into_iter().flatten().collect();
+        let focused = self
+            .focused_pane_id()
+            .filter(|pane_id| displayed.contains(pane_id));
+        let parser_retry_priority: Vec<NodeId> = self
+            .visible_pane_stream_order()
+            .into_iter()
+            .flatten()
+            .collect();
         let mut engines_held = 0_usize;
         for (id, pane) in &mut self.panes {
             if let PaneRuntime::Terminal(view) = pane {
@@ -11850,14 +11919,17 @@ impl App {
                 }
                 if let Some(frontend) = &mut view.frontend {
                     frontend.set_displayed(displayed.contains(id));
+                    frontend.set_focused(focused == Some(*id));
                     engines_held += 1;
                 }
             }
         }
         // Commands that were refused before queue admission never reach the
-        // shared scheduler. Retry displayed panes first so a full queue cannot
-        // keep their pending work behind hidden panes' HashMap iteration order.
-        let retry_order = terminal_parser_retry_order(self.panes.keys().copied(), &displayed);
+        // shared scheduler. Retry the focused pane, then its visible siblings,
+        // before hidden panes so a full queue cannot leave selected content
+        // behind a visible sibling's pending output.
+        let retry_order =
+            terminal_parser_retry_order(self.panes.keys().copied(), &parser_retry_priority);
         for id in retry_order {
             if let Some(PaneRuntime::Terminal(view)) = self.panes.get_mut(&id) {
                 if let Some(frontend) = &mut view.frontend {
@@ -18156,7 +18228,6 @@ impl App {
             .frozen_unfreeze_button(viewport)
             .is_some_and(|button| button.contains(position))
         {
-            self.focus_pane(id);
             self.action_unfreeze_agent(id);
             return;
         }
@@ -19335,7 +19406,9 @@ mod tests {
 
     #[test]
     fn model_icon_setting_fences_live_statusline_actions_and_waits_for_disable_completion() {
+        let (mut execution, client) = native_paste_bank();
         let mut app = app();
+        app.outbound_admission = Some(client.clone());
         let mut enabled = app.ui_settings.clone();
         enabled.agent_tree_model_icons = true;
         app.apply_ui_settings(enabled);
@@ -19361,12 +19434,23 @@ mod tests {
             request.view(),
             ClientRequest::UpdateAntigravityStatusline {
                 generation,
-                action: ilium_ipc::AntigravityStatuslineAction::DeleteCommand,
+                action: ilium_ipc::AntigravityStatuslineAction::CancelPending,
             } if *generation == disable_generation
         )));
 
         app.antigravity_statusline_completed(disable_generation, Ok(()));
         assert_eq!(app.antigravity_disable_pending_generation, None);
+
+        app.outbox.clear();
+        app.outbound_admission = None;
+        drop(client);
+        execution.request_shutdown(ilium_execution::ShutdownMode::Cancel);
+        assert!(
+            execution
+                .join_until_background(Instant::now() + Duration::from_secs(5))
+                .unwrap()
+                .shutdown_complete
+        );
     }
 
     #[test]
@@ -23635,6 +23719,62 @@ mod tests {
         app.apply_pending_replacement_focus();
         assert_eq!(app.active_pane_id(), Some(replacement));
         assert!(app.pending_replacement_focus.is_none());
+    }
+
+    #[test]
+    fn frozen_screen_button_reserves_unfreeze_before_focus_when_only_one_slot_remains() {
+        use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+
+        let (mut execution, client) = native_paste_bank();
+        let mut app = app();
+        app.outbound_admission = Some(client.clone());
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "frozen agent", PaneContentKind::Terminal)
+            .unwrap();
+        let terminal = TerminalView::new(24, 80);
+        let frozen_screen = terminal.painted_source().pinned().unwrap();
+        app.panes
+            .insert(pane_id, PaneRuntime::Terminal(Box::new(terminal)));
+        app.frozen_screens.insert(pane_id, frozen_screen);
+        app.frozen_panes.insert(pane_id);
+        app.right_panel_target = RightPanelTarget::Pane { pane_id };
+        app.focus = FocusTarget::Tree;
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        let holds: Vec<_> = (0..31)
+            .map(|_| crate::ipc_preparation::reserve_request(&client, 4096).unwrap())
+            .collect();
+
+        let viewport = app.pane_viewport(pane_id).unwrap();
+        let button = app.frozen_unfreeze_button(viewport).unwrap();
+        let position = Position::new(button.x + button.width / 2, button.y);
+        crate::mouse::handle_mouse_event(
+            &mut app,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: position.x,
+                row: position.y,
+                modifiers: crossterm::event::KeyModifiers::NONE,
+            },
+        );
+
+        let unfreeze_was_queued = app.take_outbound_requests().into_iter().any(|request| {
+            matches!(request, ClientRequest::UnfreezePane { pane_id: requested } if requested == pane_id)
+        });
+        drop(holds);
+        app.outbound_admission = None;
+        drop(app);
+        execution.request_shutdown(ilium_execution::ShutdownMode::Cancel);
+        let report = execution
+            .join_until_background(Instant::now() + Duration::from_secs(5))
+            .unwrap();
+
+        assert!(report.shutdown_complete);
+        assert!(
+            unfreeze_was_queued,
+            "the frozen-screen click spent the last admission credit on focus"
+        );
     }
 
     #[test]
@@ -28174,6 +28314,29 @@ mod tests {
     }
 
     #[test]
+    fn chatroom_full_repairs_are_throttled_between_structural_requests() {
+        let mut app = app();
+        let now = Instant::now();
+        app.next_chatroom_reconcile_at = Some(now);
+        assert!(!app.tick_chatroom_projects(now), "first deadline repairs");
+        let repair_at = app.next_chatroom_repair_at.expect("repair scheduled");
+        assert_eq!(repair_at, now + CHATROOM_REPAIR_INTERVAL);
+
+        // No room is visible, so between repairs the stamp is unchanged and the
+        // next second's deadline queues nothing and keeps the repair deadline.
+        app.next_chatroom_reconcile_at = Some(now + CHATROOM_RECONCILE_INTERVAL);
+        assert!(!app.tick_chatroom_projects(now + CHATROOM_RECONCILE_INTERVAL));
+        assert_eq!(app.next_chatroom_repair_at, Some(repair_at));
+        assert!(app.visible_chatroom_stamp().is_none());
+
+        app.request_chatroom_reconcile();
+        assert_eq!(
+            app.next_chatroom_repair_at, None,
+            "structural change forces repair"
+        );
+    }
+
+    #[test]
     fn setup_rows_include_both_features_for_global_and_launch_project_targets() {
         let project = tempfile::tempdir().unwrap();
         let mut app = App::new("test".to_string(), project.path().to_path_buf());
@@ -28218,7 +28381,10 @@ mod tests {
 
         assert!(!project.join("CLAUDE.md").exists());
         assert!(!project.join("AGENTS.md").exists());
-        for target in [home.join(".claude/CLAUDE.md"), home.join(".codex/AGENTS.md")] {
+        for target in [
+            home.join(".claude/CLAUDE.md"),
+            home.join(".codex/AGENTS.md"),
+        ] {
             for feature in AgentFeature::ALL {
                 assert_eq!(
                     crate::agent_feature_setup::status(&target, feature).unwrap(),

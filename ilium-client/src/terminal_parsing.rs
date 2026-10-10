@@ -202,6 +202,7 @@ pub(crate) struct PaneTarget {
     pub pane_id: NodeId,
     pub identity: Arc<()>,
     alive: Arc<AtomicBool>,
+    focused: Arc<AtomicBool>,
     displayed: Arc<AtomicBool>,
     suspended_output: Arc<AtomicBool>,
     confirmed_removed: Arc<AtomicBool>,
@@ -613,6 +614,12 @@ pub(crate) struct PaneFrontend {
     older_intents: usize,
 }
 impl PaneFrontend {
+    pub(crate) fn set_focused(&self, focused: bool) {
+        if self.target.focused.swap(focused, Ordering::AcqRel) != focused {
+            self.shared.changed.notify_one();
+        }
+    }
+
     pub(crate) fn set_displayed(&self, displayed: bool) {
         if self.target.displayed.swap(displayed, Ordering::AcqRel) != displayed {
             self.shared.changed.notify_one();
@@ -894,6 +901,7 @@ impl TerminalParsing {
             pane_id,
             identity: view.identity.clone(),
             alive: Arc::new(AtomicBool::new(true)),
+            focused: Arc::new(AtomicBool::new(false)),
             displayed: Arc::new(AtomicBool::new(false)),
             suspended_output: Arc::new(AtomicBool::new(false)),
             confirmed_removed: Arc::new(AtomicBool::new(false)),
@@ -985,7 +993,19 @@ fn retire_dropped_engines(engines: &mut HashMap<NodeId, Engine>, shared: &Shared
     }
 }
 fn command_display_priority(command: &Command) -> usize {
-    usize::from(!command.target.displayed.load(Ordering::Acquire))
+    command_priority(
+        command.target.focused.load(Ordering::Acquire),
+        command.target.displayed.load(Ordering::Acquire),
+    )
+}
+fn command_priority(focused: bool, displayed: bool) -> usize {
+    if focused && displayed {
+        0
+    } else if displayed {
+        1
+    } else {
+        2
+    }
 }
 fn best_priority_index(priorities: impl Iterator<Item = (usize, usize)>) -> Option<usize> {
     priorities
@@ -1726,6 +1746,29 @@ mod tests {
         assert!(should_run_deferred(Some(0), Some(1), false));
         assert!(!should_run_deferred(Some(1), Some(0), true));
         assert!(should_run_deferred(Some(0), Some(0), true));
+    }
+
+    #[test]
+    fn newly_focused_pane_preempts_older_visible_sibling_backlog() {
+        let queued = [
+            (0, command_priority(false, true)),
+            (1, command_priority(true, true)),
+            (2, command_priority(false, false)),
+        ];
+        assert_eq!(best_priority_index(queued.into_iter()), Some(1));
+        assert_eq!(command_priority(true, false), 2);
+        let focused_priority = command_priority(true, true);
+        let sibling_priority = command_priority(false, true);
+        assert!(should_run_deferred(
+            Some(focused_priority),
+            Some(sibling_priority),
+            false
+        ));
+        assert!(!should_run_deferred(
+            Some(sibling_priority),
+            Some(focused_priority),
+            true
+        ));
     }
 
     struct Bank(Execution);
