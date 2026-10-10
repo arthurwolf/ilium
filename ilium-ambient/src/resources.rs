@@ -94,6 +94,21 @@ impl<T> Stored<T> {
 /// environments share it rather than starting an execution per constructor.
 #[cfg(test)]
 fn create_test_resources() -> (ilium_execution::Execution, AmbientResources) {
+    create_test_resources_with_limits(256, 16 * 1024 * 1024 * 1024)
+}
+
+#[cfg(test)]
+fn create_isolated_test_resources() -> (ilium_execution::Execution, AmbientResources) {
+    // Leave room for the four admitted bank threads (and their bank metadata)
+    // before a test deliberately fills the worker budget.
+    create_test_resources_with_limits(20, 2308 * 1024 * 1024)
+}
+
+#[cfg(test)]
+fn create_test_resources_with_limits(
+    worker_threads: usize,
+    worker_bytes: usize,
+) -> (ilium_execution::Execution, AmbientResources) {
     use ilium_execution::{ClientLimits, Execution, ExecutionConfig, LaneConfig, QuotaLimits};
     let quota = QuotaGroup::new(QuotaLimits {
         clients: 8,
@@ -101,8 +116,8 @@ fn create_test_resources() -> (ilium_execution::Execution, AmbientResources) {
         service_jobs: 0,
         input_bytes: 512 * 1024 * 1024,
         result_bytes: 512 * 1024 * 1024,
-        worker_threads: 16,
-        worker_bytes: 2304 * 1024 * 1024,
+        worker_threads,
+        worker_bytes,
     });
     let lane = LaneConfig {
         threads: 2,
@@ -139,7 +154,7 @@ fn create_test_resources() -> (ilium_execution::Execution, AmbientResources) {
 /// cannot prevent the decoder worker from reaching the timeout under test.
 #[cfg(test)]
 pub(crate) fn isolated_test_resources() -> (ilium_execution::Execution, AmbientResources) {
-    create_test_resources()
+    create_isolated_test_resources()
 }
 
 #[cfg(test)]

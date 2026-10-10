@@ -66,6 +66,46 @@ const WIND_FIELD_MAX_DIMENSION: usize = 512;
 const CELL_WIND_MIN_DOTS: u32 = 20_000;
 const CELL_WIND_MAX_STRENGTH: u32 = 35;
 const CELL_WIND_MAX_GUSTS: u32 = 30;
+const WIND_DIRECTION_LUT_SIZE: usize = 8192;
+static WIND_DIRECTION_LUT: std::sync::OnceLock<[[f32; 2]; WIND_DIRECTION_LUT_SIZE]> =
+    std::sync::OnceLock::new();
+
+/// Small-angle direction lookup for the per-sample gust field. Outside this
+/// bounded range, keep the standard library's full range reduction.
+fn wind_direction_table() -> &'static [[f32; 2]; WIND_DIRECTION_LUT_SIZE] {
+    const TAU: f32 = std::f32::consts::TAU;
+    WIND_DIRECTION_LUT.get_or_init(|| {
+        std::array::from_fn(|index| {
+            let sample_angle = index as f32 * TAU / WIND_DIRECTION_LUT_SIZE as f32;
+            let (sine, cosine) = sample_angle.sin_cos();
+            [sine, cosine]
+        })
+    })
+}
+
+fn wind_direction_sin_cos(angle: f32, table: &[[f32; 2]; WIND_DIRECTION_LUT_SIZE]) -> (f32, f32) {
+    const TAU: f32 = std::f32::consts::TAU;
+    if !angle.is_finite() || !(-TAU..2.0 * TAU).contains(&angle) {
+        return angle.sin_cos();
+    }
+
+    let angle = if angle < 0.0 {
+        angle + TAU
+    } else if angle >= TAU {
+        angle - TAU
+    } else {
+        angle
+    };
+    let position = angle * (WIND_DIRECTION_LUT_SIZE as f32 / TAU);
+    let index = (position as usize).min(WIND_DIRECTION_LUT_SIZE - 1);
+    let fraction = (position - index as f32).clamp(0.0, 1.0);
+    let first = table[index];
+    let second = table[(index + 1) % WIND_DIRECTION_LUT_SIZE];
+    (
+        first[0] + fraction * (second[0] - first[0]),
+        first[1] + fraction * (second[1] - first[1]),
+    )
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Dot {
@@ -290,6 +330,7 @@ impl Sim {
         sim
     }
 
+    #[cfg(test)]
     pub fn dots(&self) -> &[Dot] {
         &self.dots
     }
@@ -491,9 +532,11 @@ impl Sim {
 
     pub(super) fn update_wind_field(&mut self, angle: f32, time: f32) -> bool {
         self.rebuild_wind_field_samples(angle, time);
-        self.uses_cell_wind_field()
-            .then(|| self.update_wind_cell_field())
-            .unwrap_or(false)
+        if self.uses_cell_wind_field() {
+            self.update_wind_cell_field()
+        } else {
+            false
+        }
     }
 
     fn rebuild_wind_field_samples(&mut self, angle: f32, time: f32) {
@@ -515,6 +558,7 @@ impl Sim {
             }
             self.wind_x_angle_cache_key = Some(cache_key);
         }
+        let direction_table = wind_direction_table();
         for row in 0..self.wind_field_rows {
             let y = row as f32 * height / (self.wind_field_rows - 1) as f32;
             let (inner_y_sin, _) = (0.13 * y + 0.5 * time).sin_cos();
@@ -529,7 +573,8 @@ impl Sim {
                     * 0.5;
                 let strength = base_strength * (1.0 + gust * 0.8 * swell);
                 let veer = gust * 0.5 * add_sines(veer_x_sin, veer_x_cos, veer_y_sin, veer_y_cos);
-                let (direction_sin, direction_cos) = (angle + veer).sin_cos();
+                let (direction_sin, direction_cos) =
+                    wind_direction_sin_cos(angle + veer, direction_table);
                 self.wind_field[row * self.wind_field_columns + column] =
                     (direction_cos * strength, direction_sin * strength);
             }
@@ -994,6 +1039,7 @@ impl Sim {
     }
 
     /// Advances the physics to animation time `time` (seconds).
+    #[cfg(test)]
     pub fn advance(&mut self, time: f32) {
         self.advance_inner(time, true);
     }
@@ -1109,10 +1155,10 @@ impl Sim {
             fill[bucket] += 1;
         }
         let radius_squared = DIFFUSION_RADIUS * DIFFUSION_RADIUS;
-        for index in 0..count {
+        for (index, &bucket_value) in dot_buckets.iter().enumerate().take(count) {
             let dot = self.dots[index];
             let dot_y = dot.y * ASPECT;
-            let bucket = dot_buckets[index] as usize;
+            let bucket = bucket_value as usize;
             let (column, row) = (bucket % columns, bucket / columns);
             let (mut push_x, mut push_y) = (0.0_f32, 0.0_f32);
             let mut seen = 0;
@@ -1642,7 +1688,7 @@ mod gust_field_accuracy_tests {
 #[cfg(test)]
 mod wind_trig_experiment_tests {
     use super::super::settings::WindSettings;
-    use super::{Sim, WIND_FORCE};
+    use super::{wind_direction_sin_cos, wind_direction_table, Sim, WIND_FORCE};
     use crate::scene::OccupancyMask;
     use std::time::Instant;
 
@@ -1783,6 +1829,36 @@ mod wind_trig_experiment_tests {
                     .fold(0.0_f32, f32::max);
                 assert!(maximum_error < 0.0001, "force error {maximum_error}");
             }
+        }
+    }
+
+    #[test]
+    fn interpolated_wind_direction_stays_within_visual_force_tolerance() {
+        let table = wind_direction_table();
+        for sample in 0..=16_384 {
+            let angle = -std::f32::consts::PI + std::f32::consts::TAU * sample as f32 / 16_384.0;
+            let actual = wind_direction_sin_cos(angle, table);
+            let expected = angle.sin_cos();
+            let error = (actual.0 - expected.0).hypot(actual.1 - expected.1);
+            assert!(error < 0.000002, "angle {angle}: vector error {error}");
+        }
+    }
+
+    #[test]
+    fn wind_direction_uses_exact_range_reduction_outside_lut_range() {
+        let table = wind_direction_table();
+        for angle in [
+            std::f32::consts::TAU * 2.0,
+            -std::f32::consts::TAU - 0.25,
+            1_000_000.0,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+            f32::NAN,
+        ] {
+            let actual = wind_direction_sin_cos(angle, table);
+            let expected = angle.sin_cos();
+            assert_eq!(actual.0.to_bits(), expected.0.to_bits());
+            assert_eq!(actual.1.to_bits(), expected.1.to_bits());
         }
     }
 

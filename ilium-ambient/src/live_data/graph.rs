@@ -364,11 +364,19 @@ impl GraphScene {
             }
             return;
         }
-        match fetch::graph(
-            self.settings.source(),
-            self.settings.effective_poll_seconds(),
-            self.settings.window_minutes,
-        ) {
+        let result = self
+            .resources
+            .as_ref()
+            .ok_or_else(|| "Live graph admission is unavailable".to_owned())
+            .and_then(|resources| {
+                fetch::graph(
+                    resources,
+                    self.settings.source(),
+                    self.settings.effective_poll_seconds(),
+                    self.settings.window_minutes,
+                )
+            });
+        match result {
             Ok(poller) => self.poller = Some(poller),
             Err(error) => self.startup_error = Some(error),
         }

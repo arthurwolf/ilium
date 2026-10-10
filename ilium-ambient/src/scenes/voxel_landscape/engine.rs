@@ -21,6 +21,7 @@ use super::{
 };
 use crate::{
     control::SceneSettings,
+    resources::WorkerCost,
     scene::{Frame, Scene, SceneEnv},
     source::Worker,
     style::ScenePalette,
@@ -132,103 +133,157 @@ impl VoxelLandscapeScene {
         let requests = Arc::new(Mutex::new(None::<Request>));
         let revision = Arc::new(AtomicU64::new(0));
         let results = Arc::new(Mutex::new(None::<Response>));
+        let retired = Arc::new(Retirement::new());
+        let worker_reservation = match env.resources.reserve_worker(WorkerCost {
+            threads: 1,
+            resident_bytes: 64 * 1024 * 1024,
+        }) {
+            Ok(reservation) => reservation,
+            Err(error) => {
+                return Self {
+                    settings,
+                    requests,
+                    revision,
+                    results,
+                    worker: None,
+                    requested: None,
+                    prepared: None,
+                    prepared_request: None,
+                    streamed: None,
+                    streamed_request: None,
+                    stream_pending: false,
+                    retired,
+                    error: Some(format!("Surface worker admission rejected: {error:?}")),
+                    palette: env.palette.clone(),
+                };
+            }
+        };
+        let surface_budget = surface_binding::scene_budget()
+            .expect("fixed generated-scene account must satisfy ByteBudget ceiling");
+        let surface_storage = match env
+            .resources
+            .reserve_storage(surface_budget.limit() as usize)
+        {
+            Ok(storage) => storage,
+            Err(error) => {
+                return Self {
+                    settings,
+                    requests,
+                    revision,
+                    results,
+                    worker: None,
+                    requested: None,
+                    prepared: None,
+                    prepared_request: None,
+                    streamed: None,
+                    streamed_request: None,
+                    stream_pending: false,
+                    retired,
+                    error: Some(format!("Surface storage admission rejected: {error:?}")),
+                    palette: env.palette.clone(),
+                };
+            }
+        };
         let worker_requests = Arc::clone(&requests);
         let worker_revision = Arc::clone(&revision);
         let worker_results = Arc::clone(&results);
         let worker_settings = settings.clone();
         let cache_dir = env.cache_dir.clone();
-        let retired = Arc::new(Retirement::new());
         let worker_retired = Arc::clone(&retired);
-        let worker = Worker::try_spawn("voxel-surface-pack", move |stop| {
-            ilium_platform::thread_priority::lower_current_thread(
-                ilium_platform::thread_priority::WorkerPriority::BelowNormal,
-            );
-            // The fixed one-GiB value is exactly ByteBudget's validated maximum.
-            let budget = surface_binding::scene_budget()
-                .expect("fixed generated-scene account must satisfy ByteBudget ceiling");
-            let mut stream_session: Option<GeneratedViewportSession> = None;
-            while !stop.load(Ordering::Relaxed) {
-                drop(worker_retired.drain());
-                let request = match worker_requests.lock() {
-                    Ok(mut slot) => slot.take(),
-                    Err(poisoned) => poisoned.into_inner().take(),
-                };
-                let Some(request) = request else {
-                    std::thread::sleep(Duration::from_millis(25));
-                    continue;
-                };
-                let cancel = Cancel::for_revision(&stop, &worker_revision, request.revision);
-                let result = resolve_generated_sources(&worker_settings, &cache_dir, cancel)
-                    .and_then(|(resolved, fallback)| {
-                        if request.stream {
-                            let scale = Self::scale(&worker_settings);
-                            if !stream_session.as_ref().is_some_and(|session| {
-                                session.matches(
-                                    request.region,
-                                    scale,
-                                    request.size,
-                                    &resolved,
-                                    fallback.as_ref(),
-                                )
-                            }) {
+        let budget_limit = surface_budget.limit();
+        let worker =
+            Worker::start_admitted("voxel-surface-pack", worker_reservation, move |stop| {
+                ilium_platform::thread_priority::lower_current_thread(
+                    ilium_platform::thread_priority::WorkerPriority::BelowNormal,
+                );
+                // The shared host lease covers the full per-scene hard ceiling and
+                // follows retained reservations after worker retirement.
+                let budget =
+                    super::assets::budget::ByteBudget::with_storage(budget_limit, surface_storage)
+                        .expect("admitted surface budget uses its validated limit");
+                let mut stream_session: Option<GeneratedViewportSession> = None;
+                while !stop.load(Ordering::Relaxed) {
+                    drop(worker_retired.drain());
+                    let request = match worker_requests.lock() {
+                        Ok(mut slot) => slot.take(),
+                        Err(poisoned) => poisoned.into_inner().take(),
+                    };
+                    let Some(request) = request else {
+                        std::thread::sleep(Duration::from_millis(25));
+                        continue;
+                    };
+                    let cancel = Cancel::for_revision(&stop, &worker_revision, request.revision);
+                    let result = resolve_generated_sources(&worker_settings, &cache_dir, cancel)
+                        .and_then(|(resolved, fallback)| {
+                            if request.stream {
+                                let scale = Self::scale(&worker_settings);
+                                if !stream_session.as_ref().is_some_and(|session| {
+                                    session.matches(
+                                        request.region,
+                                        scale,
+                                        request.size,
+                                        &resolved,
+                                        fallback.as_ref(),
+                                    )
+                                }) {
+                                    stream_session = None;
+                                    stream_session = Some(GeneratedViewportSession::open(
+                                        request.region,
+                                        scale,
+                                        request.size,
+                                        &resolved,
+                                        fallback.as_ref(),
+                                        budget.clone(),
+                                        cancel,
+                                    )?);
+                                }
+                                stream_session
+                                    .as_mut()
+                                    .ok_or_else(|| {
+                                        AssetError::InvalidMetadata(
+                                            "generated viewport session absent".into(),
+                                        )
+                                    })?
+                                    .render(request.camera, request.time, cancel)
+                                    .map(|streamed| PreparedResult::Streamed(Box::new(streamed)))
+                            } else {
                                 stream_session = None;
-                                stream_session = Some(GeneratedViewportSession::open(
+                                surface_binding::prepare_viewport_with_fallback_in_budget(
                                     request.region,
-                                    scale,
+                                    Self::scale(&worker_settings),
                                     request.size,
                                     &resolved,
                                     fallback.as_ref(),
                                     budget.clone(),
                                     cancel,
-                                )?);
+                                )
+                                .map(|prepared| PreparedResult::Retained(Box::new(prepared)))
                             }
-                            stream_session
-                                .as_mut()
-                                .ok_or_else(|| {
-                                    AssetError::InvalidMetadata(
-                                        "generated viewport session absent".into(),
-                                    )
-                                })?
-                                .render(request.camera, request.time, cancel)
-                                .map(|streamed| PreparedResult::Streamed(Box::new(streamed)))
-                        } else {
-                            stream_session = None;
-                            surface_binding::prepare_viewport_with_fallback_in_budget(
-                                request.region,
-                                Self::scale(&worker_settings),
-                                request.size,
-                                &resolved,
-                                fallback.as_ref(),
-                                budget.clone(),
-                                cancel,
-                            )
-                            .map(|prepared| PreparedResult::Retained(Box::new(prepared)))
-                        }
-                    });
-                if cancel.is_cancelled() {
-                    continue;
+                        });
+                    if cancel.is_cancelled() {
+                        continue;
+                    }
+                    let response = Response {
+                        revision: request.revision,
+                        region: request.region,
+                        size: request.size,
+                        result,
+                    };
+                    let replaced = match worker_results.lock() {
+                        Ok(mut slot) => slot.replace(response),
+                        Err(poisoned) => poisoned.into_inner().replace(response),
+                    };
+                    drop(replaced);
                 }
-                let response = Response {
-                    revision: request.revision,
-                    region: request.region,
-                    size: request.size,
-                    result,
-                };
-                let replaced = match worker_results.lock() {
-                    Ok(mut slot) => slot.replace(response),
-                    Err(poisoned) => poisoned.into_inner().replace(response),
-                };
-                drop(replaced);
-            }
-            // Scene teardown transfers its last snapshot before signalling stop.
-            // The worker retains these mailbox Arcs until all heavy data are gone.
-            drop(worker_retired.drain());
-            let pending = worker_results
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .take();
-            drop(pending);
-        });
+                // Scene teardown transfers its last snapshot before signalling stop.
+                // The worker retains these mailbox Arcs until all heavy data are gone.
+                drop(worker_retired.drain());
+                let pending = worker_results
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .take();
+                drop(pending);
+            });
         let (worker, error) = match worker {
             Ok(worker) => (Some(worker), None),
             Err(error) => (
@@ -261,7 +316,7 @@ impl VoxelLandscapeScene {
             if let Some(streamed) = self.streamed.as_ref() {
                 return Some(TextureSourceReceipt {
                     texture_source: self.texture_source_name(),
-                    source_sha256: streamed.source_sha256.clone(),
+                    source_sha256: streamed.source_sha256,
                     material_coverage: streamed.material_coverage,
                     state_gaps: streamed.state_gaps,
                     model_substitutions: streamed.model_substitutions,
@@ -275,7 +330,7 @@ impl VoxelLandscapeScene {
             if let Some(prepared) = self.prepared.as_ref() {
                 return Some(TextureSourceReceipt {
                     texture_source: self.texture_source_name(),
-                    source_sha256: prepared.source_sha256.clone(),
+                    source_sha256: prepared.source_sha256,
                     material_coverage: prepared.material_coverage(),
                     state_gaps: prepared.skipped_states.len(),
                     model_substitutions: prepared.model_substitutions.len(),
@@ -528,10 +583,16 @@ impl Scene for VoxelLandscapeScene {
             || fallback_atlases > 0
             || !prepared.material_fallbacks.is_empty()
         {
-            Some(format!("Surface art {found}/{required}; {} texture aliases; {} model substitutions; {} state gaps; {} textured fauna candidates; {} fauna gaps; {} fauna and {} material images from reviewed full-pack fallback (not selected-native)",
-                    prepared.compatibility_aliases.len(),prepared.model_substitutions.len(),
-                    prepared.skipped_states.len(),prepared.entities.rendered_entities,
-                    fauna_gaps,fallback_atlases,prepared.material_fallbacks.len()))
+            Some(format!(
+                "Surface art {found}/{required}; {} texture aliases; {} model substitutions; {} state gaps; {} textured fauna candidates; {} fauna gaps; {} fauna and {} material images from reviewed full-pack fallback (not selected-native)",
+                prepared.compatibility_aliases.len(),
+                prepared.model_substitutions.len(),
+                prepared.skipped_states.len(),
+                prepared.entities.rendered_entities,
+                fauna_gaps,
+                fallback_atlases,
+                prepared.material_fallbacks.len()
+            ))
         } else {
             None
         }
@@ -669,6 +730,16 @@ pub fn render_prepared(
 mod tests {
     use super::*;
 
+    fn finish_scene(scene: VoxelLandscapeScene, execution: &mut ilium_execution::Execution) {
+        drop(scene);
+        execution.request_shutdown(ilium_execution::ShutdownMode::Cancel);
+        let report = execution
+            .join_until_background(std::time::Instant::now() + Duration::from_secs(5))
+            .unwrap();
+        assert!(report.shutdown_complete);
+        assert_eq!(report.remaining_workers, 0);
+    }
+
     #[test]
     fn java_default_generation_skips_selected_pack_registry_resolution() {
         static CANCEL: AtomicBool = AtomicBool::new(false);
@@ -709,20 +780,21 @@ mod tests {
 
     #[test]
     fn generated_texture_receipt_is_unavailable_before_current_surface_preparation() {
+        let (mut execution, resources) = crate::resources::isolated_test_resources();
         let env = SceneEnv::for_test(
             std::env::temp_dir().join("voxel-texture-receipt-test"),
-            crate::resources::test_resources(),
+            resources,
         );
         let scene = VoxelLandscapeScene::new(&VoxelLandscapeSettings::default(), &env);
         assert!(scene.texture_source_receipt().is_none());
+        finish_scene(scene, &mut execution);
     }
 
     #[test]
     fn follows_palette_natively_and_stores_updates() {
-        let mut env = SceneEnv::for_test(
-            std::env::temp_dir().join("voxel-palette-test"),
-            crate::resources::test_resources(),
-        );
+        let (mut execution, resources) = crate::resources::isolated_test_resources();
+        let mut env =
+            SceneEnv::for_test(std::env::temp_dir().join("voxel-palette-test"), resources);
         let none = VoxelLandscapeScene::new(&VoxelLandscapeSettings::default(), &env);
         assert!(none.follows_palette() && !none.palette.is_provided());
         env.palette = ScenePalette {
@@ -734,6 +806,8 @@ mod tests {
         assert!(scene.palette.is_provided());
         scene.set_palette(&ScenePalette::default());
         assert!(!scene.palette.is_provided());
+        drop(none);
+        finish_scene(scene, &mut execution);
     }
     #[test]
     fn all_supported_zoom_witnesses_use_finite_tile_streaming() {
@@ -762,13 +836,14 @@ mod tests {
     }
     #[test]
     fn streamed_frame_request_waits_for_its_owned_revision() {
+        let (mut execution, resources) = crate::resources::isolated_test_resources();
         let settings = VoxelLandscapeSettings {
             zoom_percent: 25,
             ..Default::default()
         };
         let env = SceneEnv::for_test(
             std::env::temp_dir().join("ilium-viewport-request-test"),
-            crate::resources::test_resources(),
+            resources,
         );
         let mut scene = VoxelLandscapeScene::new(&settings, &env);
         let region = Region {
@@ -792,6 +867,27 @@ mod tests {
             Duration::from_millis(83),
         );
         assert_eq!(scene.revision.load(Ordering::Acquire), first + 1);
+        finish_scene(scene, &mut execution);
+    }
+
+    #[test]
+    fn surface_worker_refusal_is_visible_and_releases_admission_for_retry() {
+        let (mut execution, resources) = crate::resources::isolated_test_resources();
+        let pressure = resources.reserve_storage(1300 * 1024 * 1024).unwrap();
+        let env = SceneEnv::for_test(std::path::PathBuf::new(), resources.clone());
+        let refused = VoxelLandscapeScene::new(&VoxelLandscapeSettings::default(), &env);
+        assert!(refused.worker.is_none());
+        assert!(refused
+            .status()
+            .as_deref()
+            .unwrap()
+            .contains("storage admission rejected"));
+        drop(refused);
+        drop(pressure);
+
+        let admitted = VoxelLandscapeScene::new(&VoxelLandscapeSettings::default(), &env);
+        assert!(admitted.worker.is_some());
+        finish_scene(admitted, &mut execution);
     }
     #[test]
     fn freeze_stops_pan_but_surface_frame_time_remains_external() {

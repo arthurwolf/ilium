@@ -6,7 +6,6 @@ use crate::minecraft::settings::{SavedMapsSettings, WorldSource};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-pub const GENERATED_TEXTURE_SOURCE_SELECTED_PACK: usize = 0;
 pub const GENERATED_TEXTURE_SOURCE_JAVA_DEFAULT: usize = 1;
 
 /// User overrides are retained separately for each named pack.
@@ -487,57 +486,228 @@ impl SceneSettings for VoxelLandscapeSettings {
         let mut rows = value.saved_maps.controls();
         let is_saved_source = value.saved_maps.source == WorldSource::SavedMaps;
         let renderer_rows = vec![
-            Control::choice("generated_texture_source", "Generated texture source", value.generated_texture_source,
-                &["Selected full texture pack", "Minecraft Java 1.19.3 default"],
-                "Generated landscapes use either the selected texture pack or installed, digest-pinned Java 1.19.3 assets."),
-            Control::choice("pack_profile", if is_saved_source { "Custom pack profile" } else if value.generated_texture_source == 1 { "Saved pack profile (inactive)" } else { "Full texture pack" }, value.pack_profile,
-                &["GoodVibes / Acaitart",
-                  "deathcap ProgrammerArt", "Textureless", "Plasticator",
-                  "PixelPerfectionCE", "Faithful32", "Faithful64", "Antumbra"],
+            Control::choice(
+                "generated_texture_source",
+                "Generated texture source",
+                value.generated_texture_source,
+                &[
+                    "Selected full texture pack",
+                    "Minecraft Java 1.19.3 default",
+                ],
+                "Generated landscapes use either the selected texture pack or installed, digest-pinned Java 1.19.3 assets.",
+            ),
+            Control::choice(
+                "pack_profile",
+                if is_saved_source {
+                    "Custom pack profile"
+                } else if value.generated_texture_source == 1 {
+                    "Saved pack profile (inactive)"
+                } else {
+                    "Full texture pack"
+                },
+                value.pack_profile,
+                &[
+                    "GoodVibes / Acaitart",
+                    "deathcap ProgrammerArt",
+                    "Textureless",
+                    "Plasticator",
+                    "PixelPerfectionCE",
+                    "Faithful32",
+                    "Faithful64",
+                    "Antumbra",
+                ],
                 if is_saved_source {
                     "Choose the profile whose custom override you want to configure. A blank custom path uses installed Java 1.19.3 assets."
                 } else {
                     "Selected full-world source; missing texture/model coverage is reported explicitly."
-                }),
-            Control::text("pack_path", "Custom pack file or folder", &value.pack_path,
-                if is_saved_source { "Blank uses installed Java 1.19.3 assets" } else if value.generated_texture_source == 1 { "Ignored while Java default is active" } else { "Blank uses the selected installed pack" },
+                },
+            ),
+            Control::text(
+                "pack_path",
+                "Custom pack file or folder",
+                &value.pack_path,
+                if is_saved_source {
+                    "Blank uses installed Java 1.19.3 assets"
+                } else if value.generated_texture_source == 1 {
+                    "Ignored while Java default is active"
+                } else {
+                    "Blank uses the selected installed pack"
+                },
                 if is_saved_source {
                     "Optional absolute local Java ZIP archive or extracted directory. Its models and textures override installed Java 1.19.3 assets. Each profile retains its own custom override."
                 } else {
                     "Optional absolute local ZIP archive or extracted directory for this pack. Each pack retains its own override."
-                }),
-            Control::text("pack_root", "Root inside pack", &value.pack_root,
-                "Optional relative folder", "Use only when the archive nests its pack files under a folder."),
-            Control::choice("pack_mount", "Pack source type", value.pack_mount,
-                &["ZIP archive", "Directory"], "Choose how to read the selected local source."),
-            Control::choice("pack_edition", "Pack edition", value.pack_edition,
+                },
+            ),
+            Control::text(
+                "pack_root",
+                "Root inside pack",
+                &value.pack_root,
+                "Optional relative folder",
+                "Use only when the archive nests its pack files under a folder.",
+            ),
+            Control::choice(
+                "pack_mount",
+                "Pack source type",
+                value.pack_mount,
+                &["ZIP archive", "Directory"],
+                "Choose how to read the selected local source.",
+            ),
+            Control::choice(
+                "pack_edition",
+                "Pack edition",
+                value.pack_edition,
                 &["Reviewed primary edition", "Plasticator Bedrock 2.4"],
-                "Bedrock is available only for the reviewed Plasticator variant."),
-            Control::text("pack_addon_path", "Official models add-on", &value.pack_addon_path,
-                "Optional absolute path", "Only Textureless has a reviewed internal model add-on."),
-            Control::choice("pack_addon_mount", "Add-on source type", value.pack_addon_mount,
-                &["ZIP archive", "Directory"], "Applies only to the Textureless add-on."),
-            Control::toggle("pack_duplicate_last_wins", "Use last duplicate ZIP member",
+                "Bedrock is available only for the reviewed Plasticator variant.",
+            ),
+            Control::text(
+                "pack_addon_path",
+                "Official models add-on",
+                &value.pack_addon_path,
+                "Optional absolute path",
+                "Only Textureless has a reviewed internal model add-on.",
+            ),
+            Control::choice(
+                "pack_addon_mount",
+                "Add-on source type",
+                value.pack_addon_mount,
+                &["ZIP archive", "Directory"],
+                "Applies only to the Textureless add-on.",
+            ),
+            Control::toggle(
+                "pack_duplicate_last_wins",
+                "Use last duplicate ZIP member",
                 value.pack_duplicate_last_wins,
-                "Textureless only: retain a duplicate-member report and choose the final central-directory entry."),
-            Control::text("pack_format", "Target pack format", &format!("{}.{}", value.pack_format_major, value.pack_format_minor),
-                "major.minor", "Target for authored overlays; outside declared range requires explicit compatibility evidence."),
-            Control::text("seed", "World seed", &value.seed.to_string(), "0–4294967295", "The same seed recreates the same world, including structures. Camera and color changes preserve terrain."),
-            Control::choice("atmosphere", "Scene atmosphere", value.atmosphere, &["Day", "Night", "Thunderstorm"], "Choose a fixed atmosphere with matching light and surface creature scenes. Terrain and structures keep their positions."),
-            Control::slider("zoom", "Tile zoom", value.zoom_percent, (25,400,5), "%", "Enlarge isometric tiles to inspect blocks, or zoom out to see more landscape."),
-            Control::choice("detail", "Detail", value.detail, &["Terrain", "Landmarks", "Landscape", "All features"], "Choose the visible decoration density. Terrain and structure positions remain stable across detail levels."),
-            Control::slider("pan_speed", "Camera speed", value.pan_speed_percent, (0,200,5), "%", "Slow continuous movement across the world. Zero freezes the camera; global animation speed also applies."),
-            Control::choice("pan_direction", "Camera direction", value.pan_direction, &["East", "South", "North-east", "South-east"], "Choose the direction in world space; the isometric projection keeps both ground axes visible."),
-            Control::choice("color_mode", "Dither color", value.color_mode, &["Black and white", "Texture colors"], "Use the selected artwork's colors or monochrome shading. Global density controls dot coverage."),
-            Control::choice("palette", "Landscape palette", value.palette, &["Original colors", "Rose garden", "Cool mist", "Amber evening"], "Keep original texture colors or choose a color tint."),
-            Control::slider("hue", "Hue tint", value.hue_degrees, (0,360,5), "°", "180° is neutral; lower values favor warm tones and higher values favor cool tones."),
-            Control::slider("saturation", "Color saturation", value.saturation_percent, (0,100,5), "%", "Pastel color intensity. Zero makes all material colors gray while retaining their shading."),
-            Control::slider("lightness", "Color lightness", value.lightness_percent, (5,100,5), "%", "Brightness of lit dots in both modes, not the number of dots. Does not replace the global background lightness setting."),
-            Control::slider("vegetation", "Vegetation density", value.vegetation_percent, (0,200,5), "%", "Density of biome-appropriate trees, flowers, crops and other plants. Existing anchor positions remain deterministic."),
-            Control::slider("structures", "Structure density", value.structures_percent, (0,200,5), "%", "Density of villages, ruins and landscape landmarks. Zero retains natural terrain only."),
-            Control::toggle("rivers", "Rivers", value.rivers, "Carve coherent river channels and fill them to their water level."),
-            Control::toggle("ravines", "Ravines", value.ravines, "Open narrow deep fissures exposing stratified rock faces."),
-            Control::toggle("caves", "Cave mouths", value.caves, "Show surface cave openings with dark entrances, not a subterranean camera."),
+                "Textureless only: retain a duplicate-member report and choose the final central-directory entry.",
+            ),
+            Control::text(
+                "pack_format",
+                "Target pack format",
+                &format!("{}.{}", value.pack_format_major, value.pack_format_minor),
+                "major.minor",
+                "Target for authored overlays; outside declared range requires explicit compatibility evidence.",
+            ),
+            Control::text(
+                "seed",
+                "World seed",
+                &value.seed.to_string(),
+                "0–4294967295",
+                "The same seed recreates the same world, including structures. Camera and color changes preserve terrain.",
+            ),
+            Control::choice(
+                "atmosphere",
+                "Scene atmosphere",
+                value.atmosphere,
+                &["Day", "Night", "Thunderstorm"],
+                "Choose a fixed atmosphere with matching light and surface creature scenes. Terrain and structures keep their positions.",
+            ),
+            Control::slider(
+                "zoom",
+                "Tile zoom",
+                value.zoom_percent,
+                (25, 400, 5),
+                "%",
+                "Enlarge isometric tiles to inspect blocks, or zoom out to see more landscape.",
+            ),
+            Control::choice(
+                "detail",
+                "Detail",
+                value.detail,
+                &["Terrain", "Landmarks", "Landscape", "All features"],
+                "Choose the visible decoration density. Terrain and structure positions remain stable across detail levels.",
+            ),
+            Control::slider(
+                "pan_speed",
+                "Camera speed",
+                value.pan_speed_percent,
+                (0, 200, 5),
+                "%",
+                "Slow continuous movement across the world. Zero freezes the camera; global animation speed also applies.",
+            ),
+            Control::choice(
+                "pan_direction",
+                "Camera direction",
+                value.pan_direction,
+                &["East", "South", "North-east", "South-east"],
+                "Choose the direction in world space; the isometric projection keeps both ground axes visible.",
+            ),
+            Control::choice(
+                "color_mode",
+                "Dither color",
+                value.color_mode,
+                &["Black and white", "Texture colors"],
+                "Use the selected artwork's colors or monochrome shading. Global density controls dot coverage.",
+            ),
+            Control::choice(
+                "palette",
+                "Landscape palette",
+                value.palette,
+                &[
+                    "Original colors",
+                    "Rose garden",
+                    "Cool mist",
+                    "Amber evening",
+                ],
+                "Keep original texture colors or choose a color tint.",
+            ),
+            Control::slider(
+                "hue",
+                "Hue tint",
+                value.hue_degrees,
+                (0, 360, 5),
+                "°",
+                "180° is neutral; lower values favor warm tones and higher values favor cool tones.",
+            ),
+            Control::slider(
+                "saturation",
+                "Color saturation",
+                value.saturation_percent,
+                (0, 100, 5),
+                "%",
+                "Pastel color intensity. Zero makes all material colors gray while retaining their shading.",
+            ),
+            Control::slider(
+                "lightness",
+                "Color lightness",
+                value.lightness_percent,
+                (5, 100, 5),
+                "%",
+                "Brightness of lit dots in both modes, not the number of dots. Does not replace the global background lightness setting.",
+            ),
+            Control::slider(
+                "vegetation",
+                "Vegetation density",
+                value.vegetation_percent,
+                (0, 200, 5),
+                "%",
+                "Density of biome-appropriate trees, flowers, crops and other plants. Existing anchor positions remain deterministic.",
+            ),
+            Control::slider(
+                "structures",
+                "Structure density",
+                value.structures_percent,
+                (0, 200, 5),
+                "%",
+                "Density of villages, ruins and landscape landmarks. Zero retains natural terrain only.",
+            ),
+            Control::toggle(
+                "rivers",
+                "Rivers",
+                value.rivers,
+                "Carve coherent river channels and fill them to their water level.",
+            ),
+            Control::toggle(
+                "ravines",
+                "Ravines",
+                value.ravines,
+                "Open narrow deep fissures exposing stratified rock faces.",
+            ),
+            Control::toggle(
+                "caves",
+                "Cave mouths",
+                value.caves,
+                "Show surface cave openings with dark entrances, not a subterranean camera.",
+            ),
         ];
         rows.extend(renderer_rows.into_iter().filter(|row| {
             value.saved_maps.source == WorldSource::Generated

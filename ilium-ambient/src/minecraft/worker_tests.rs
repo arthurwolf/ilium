@@ -1,6 +1,20 @@
 use super::*;
 use std::sync::mpsc;
 
+fn start_worker<T: Send + Sync + 'static>(
+    prepare: impl FnMut(&Request, &dyn Fn() -> bool) -> Result<T, String> + Send + 'static,
+) -> PreparationWorker<T> {
+    PreparationWorker::start_with(
+        &crate::resources::test_resources(),
+        WorkerCost {
+            threads: 1,
+            resident_bytes: 8 * 1024 * 1024,
+        },
+        prepare,
+    )
+    .unwrap()
+}
+
 fn request(generation: u64) -> Request {
     Request {
         generation,
@@ -25,15 +39,14 @@ fn admit<T: Send + Sync + 'static>(worker: &PreparationWorker<T>, request: &Requ
 fn newer_generation_cancels_inflight_and_stale_completion_is_not_published() {
     let (started, start_events) = mpsc::channel();
     let (release, releases) = mpsc::channel();
-    let worker = PreparationWorker::start_with(move |request, cancelled| {
+    let worker = start_worker(move |request, cancelled| {
         started.send(request.generation).unwrap();
         if request.generation == 1 {
             releases.recv_timeout(Duration::from_secs(3)).unwrap();
             assert!(cancelled());
         }
         Ok(request.generation)
-    })
-    .unwrap();
+    });
     admit(&worker, &request(1));
     assert_eq!(
         start_events.recv_timeout(Duration::from_secs(3)).unwrap(),
@@ -61,14 +74,13 @@ fn newer_generation_cancels_inflight_and_stale_completion_is_not_published() {
 fn pending_slot_coalesces_to_the_latest_request() {
     let (started, starts) = mpsc::channel();
     let (release, releases) = mpsc::channel();
-    let worker = PreparationWorker::start_with(move |request, _| {
+    let worker = start_worker(move |request, _| {
         started.send(request.generation).unwrap();
         if request.generation == 1 {
             releases.recv_timeout(Duration::from_secs(3)).unwrap();
         }
         Ok(request.generation)
-    })
-    .unwrap();
+    });
     admit(&worker, &request(1));
     assert_eq!(starts.recv_timeout(Duration::from_secs(3)).unwrap(), 1);
     admit(&worker, &request(2));
@@ -79,7 +91,7 @@ fn pending_slot_coalesces_to_the_latest_request() {
 
 #[test]
 fn invalid_requests_do_not_supersede_valid_generation() {
-    let worker = PreparationWorker::start_with(|request, _| Ok(request.generation)).unwrap();
+    let worker = start_worker(|request, _| Ok(request.generation));
     let mut invalid = request(2);
     invalid.chunks = (0..129).map(|x| [x, 0]).collect();
     assert!(matches!(
@@ -105,7 +117,7 @@ fn swap_retires_old_output_on_the_worker_thread() {
         }
     }
     let (dropped, drops) = mpsc::channel();
-    let worker = PreparationWorker::start_with(move |_, _| Ok(Dropped(dropped.clone()))).unwrap();
+    let worker = start_worker(move |_, _| Ok(Dropped(dropped.clone())));
     let mut prepared = None;
     for generation in [1, 2] {
         admit(&worker, &request(generation));
@@ -138,7 +150,7 @@ fn swap_retires_old_output_on_the_worker_thread() {
 
 #[test]
 fn busy_admission_cancels_old_generation_without_blocking_the_caller() {
-    let worker = PreparationWorker::start_with(|request, _| Ok(request.generation)).unwrap();
+    let worker = start_worker(|request, _| Ok(request.generation));
     let pending = worker.shared.pending.lock().unwrap();
     assert_eq!(worker.submit(&request(2)).unwrap(), Admission::Busy);
     assert_eq!(worker.shared.desired.load(Ordering::Acquire), 2);
@@ -149,7 +161,7 @@ fn busy_admission_cancels_old_generation_without_blocking_the_caller() {
 
 #[test]
 fn preparation_error_is_bounded_and_published_with_its_generation() {
-    let worker = PreparationWorker::<()>::start_with(|_, _| Err("é".repeat(10_000))).unwrap();
+    let worker = start_worker::<()>(|_, _| Err("é".repeat(10_000)));
     admit(&worker, &request(1));
     let deadline = std::time::Instant::now() + Duration::from_secs(3);
     let mut prepared = None;
@@ -164,8 +176,7 @@ fn preparation_error_is_bounded_and_published_with_its_generation() {
 
 #[test]
 fn callback_panic_becomes_explicit_fault_without_publishing_partial_output() {
-    let worker =
-        PreparationWorker::<()>::start_with(|_, _| panic!("test preparation panic")).unwrap();
+    let worker = start_worker::<()>(|_, _| panic!("test preparation panic"));
     admit(&worker, &request(1));
     let deadline = std::time::Instant::now() + Duration::from_secs(3);
     while worker.shared.fault.load(Ordering::Acquire) == 0 && std::time::Instant::now() < deadline {
@@ -180,7 +191,7 @@ fn callback_panic_becomes_explicit_fault_without_publishing_partial_output() {
 fn dropping_worker_signals_inflight_cancellation_and_owned_cleanup() {
     let (started, starts) = mpsc::channel();
     let (ended, ends) = mpsc::channel();
-    let worker = PreparationWorker::start_with(move |_, cancelled| {
+    let worker = start_worker(move |_, cancelled| {
         started.send(()).unwrap();
         let deadline = std::time::Instant::now() + Duration::from_secs(3);
         while !cancelled() && std::time::Instant::now() < deadline {
@@ -189,8 +200,7 @@ fn dropping_worker_signals_inflight_cancellation_and_owned_cleanup() {
         assert!(cancelled());
         ended.send(()).unwrap();
         Ok(())
-    })
-    .unwrap();
+    });
     admit(&worker, &request(1));
     starts.recv_timeout(Duration::from_secs(3)).unwrap();
     drop(worker);
@@ -211,11 +221,10 @@ fn faulted_worker_still_retires_published_output_off_the_caller_thread() {
         }
     }
     let (dropped, drops) = mpsc::channel();
-    let worker = PreparationWorker::start_with(move |request, _| {
+    let worker = start_worker(move |request, _| {
         assert_ne!(request.generation, 2, "test second preparation panic");
         Ok(Dropped(dropped.clone()))
-    })
-    .unwrap();
+    });
     admit(&worker, &request(1));
     let deadline = std::time::Instant::now() + Duration::from_secs(3);
     let mut prepared = None;
@@ -241,4 +250,49 @@ fn faulted_worker_still_retires_published_output_off_the_caller_thread() {
         .recv_timeout(Duration::from_secs(3))
         .unwrap()
         .starts_with("ilium-ambient-minecraft-saved"));
+}
+
+#[test]
+fn shared_worker_admission_refusal_releases_cleanly_for_retry() {
+    use ilium_execution::ShutdownMode;
+    use std::time::Instant;
+
+    let (mut execution, resources) = crate::resources::isolated_test_resources();
+    let pressure = resources
+        .reserve_worker(WorkerCost {
+            threads: 1,
+            resident_bytes: 2300 * 1024 * 1024,
+        })
+        .unwrap();
+    let result = PreparationWorker::<()>::start_with(
+        &resources,
+        WorkerCost {
+            threads: 1,
+            resident_bytes: 8 * 1024 * 1024,
+        },
+        |_, _| Ok(()),
+    );
+    let error = match result {
+        Ok(_) => panic!("worker admission unexpectedly succeeded"),
+        Err(error) => error,
+    };
+    assert!(error.contains("saved preparation admission rejected"));
+    drop(pressure);
+
+    let worker = PreparationWorker::<()>::start_with(
+        &resources,
+        WorkerCost {
+            threads: 1,
+            resident_bytes: 8 * 1024 * 1024,
+        },
+        |_, _| Ok(()),
+    )
+    .unwrap();
+    drop(worker);
+    execution.request_shutdown(ShutdownMode::Cancel);
+    let report = execution
+        .join_until_background(Instant::now() + Duration::from_secs(5))
+        .unwrap();
+    assert!(report.shutdown_complete);
+    assert_eq!(report.remaining_workers, 0);
 }

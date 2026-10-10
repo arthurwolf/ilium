@@ -1545,7 +1545,7 @@ fn native_visible_overflow_and_generic_hidden_overflow_still_invalidate() {
                 cancel,
             )
             .unwrap();
-        for layer in 1..=8 {
+        for layer in 1..=12 {
             raster
                 .quad(
                     quad(f64::from(layer)),
@@ -1558,20 +1558,51 @@ fn native_visible_overflow_and_generic_hidden_overflow_still_invalidate() {
         }
         assert!(matches!(
             raster.quad(
-                quad(9.0),
-                owner(9),
+                quad(13.0),
+                owner(13),
                 mode,
                 &FlatShader(rgba([0.1; 3], 0.5)),
                 cancel
             ),
             Err(super::assets::error::AssetError::Limit {
                 resource: "translucent layers per pixel",
-                requested: 9,
-                limit: 8
+                requested: 13,
+                limit: 12
             })
         ));
         assert!(raster.pixel(2, 2).is_err());
     }
+}
+#[test]
+fn saved_world_pixel_composites_nine_translucent_layers_over_opaque_terrain() {
+    let budget = ByteBudget::new(1 << 20).unwrap();
+    let stop = AtomicBool::new(false);
+    let cancel = Cancel::new(&stop);
+    let mut raster = RasterFrame::new([4, 4], RasterLimits::default(), &budget, cancel).unwrap();
+    raster
+        .quad(
+            quad(-1.0),
+            owner(0),
+            AlphaMode::Opaque,
+            &FlatShader(rgba([0.2; 3], 1.0)),
+            cancel,
+        )
+        .unwrap();
+    for layer in 1..=9 {
+        raster
+            .quad(
+                quad(f64::from(layer)),
+                owner(layer),
+                AlphaMode::Blend,
+                &FlatShader(rgba([0.1; 3], 0.5)),
+                cancel,
+            )
+            .unwrap();
+    }
+
+    let pixel = raster.pixel(2, 2).unwrap();
+    assert_eq!(pixel.contributors.iter().flatten().count(), 10);
+    assert_eq!(pixel.front_owner, Some(owner(9)));
 }
 #[test]
 fn native_occluded_layers_preserve_visible_colours_and_owners() {

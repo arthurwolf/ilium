@@ -6,6 +6,7 @@ use super::{
     },
     model::Position,
 }; // Actual released API.
+use crate::resources::AmbientResources;
 use std::{sync::Arc, time::Duration}; // Raw inputs are additionally protected by fleet-cache custody.
 #[derive(Default)] // Construction performs no thread creation or fleet traversal.
 pub(super) struct FleetLayer {
@@ -74,7 +75,12 @@ impl FleetLayer {
         self.owner = Some(owner);
         self.received_ms = received_ms; // The previous compatible prepared layer stays visible until replacement.
     } // End block.
-    pub fn update(&mut self, mut key: MarkerKey, wall: Duration) {
+    pub fn update(
+        &mut self,
+        mut key: MarkerKey,
+        wall: Duration,
+        resources: Option<&AmbientResources>,
+    ) {
         // Caller supplies dimensions, kind and marker brightness only.
         if self.positions.is_none() {
             return;
@@ -111,7 +117,12 @@ impl FleetLayer {
             if wall < self.retry_at {
                 return;
             } // Bound attempts after a spawn/admission failure.
-            match MarkerWorker::try_start() {
+            let Some(resources) = resources else {
+                self.error = Some("marker worker admission unavailable".into());
+                self.retry_at = wall.saturating_add(Duration::from_secs(1));
+                return;
+            };
+            match MarkerWorker::try_start(resources) {
                 // The released implementation, with bounded admission.
                 Ok(worker) => {
                     self.worker = Some(worker);
@@ -326,6 +337,7 @@ mod tests {
                 ..original
             },
             Duration::ZERO,
+            None,
         ); // Immediate suppression.
         assert!(layer.prepared().is_none());
         assert!(layer.worker.is_none());

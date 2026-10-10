@@ -58,13 +58,18 @@ fn route_support_is_eligible(
     support: &BTreeSet<[i32; 2]>,
     allocated: &BTreeSet<[i32; 2]>,
     mut has_full_status: impl FnMut([i32; 2]) -> Result<bool, String>,
-) -> Result<bool, String> {
+) -> Result<(), String> {
     for position in support {
-        if !allocated.contains(position) || !has_full_status(*position)? {
-            return Ok(false);
+        if !allocated.contains(position) {
+            return Err(format!("source chunk {position:?} is not allocated"));
+        }
+        if !has_full_status(*position)? {
+            return Err(format!(
+                "source chunk {position:?} is unfinished or has no readable generation status"
+            ));
         }
     }
-    Ok(true)
+    Ok(())
 }
 
 fn saved_chunk_has_full_generation_status(
@@ -119,9 +124,10 @@ fn saved_chunk_has_full_generation_status(
         result
     };
     match chunk {
-        Ok(Some(chunk)) => Ok(
-            super::chunk::has_full_generation_status(&chunk.document, position).unwrap_or(false),
-        ),
+        Ok(Some(chunk)) => super::chunk::has_full_generation_status(&chunk.document, position)
+            .map_err(|error| {
+                format!("chunk {position:?} generation status could not be decoded: {error}")
+            }),
         Ok(None) => Ok(false),
         Err(super::region::Error::Cancelled) => Err("Saved route preparation cancelled".into()),
         Err(error) => {
@@ -443,9 +449,9 @@ impl PreparationProgress {
             (scan_stage_index(update.stage) * 100 + local_percent) / PREPARATION_SCAN_STAGES;
         advance_overall_progress(&self.overall_percent, completed_phases, phase_fraction);
         let stage_rate = &mut scan.stage_rates[scan_stage_index(update.stage)];
-        if stage_rate.map_or(true, |rate| {
-            rate.total != update.total || update.completed < rate.last_completed
-        }) {
+        if stage_rate
+            .is_none_or(|rate| rate.total != update.total || update.completed < rate.last_completed)
+        {
             *stage_rate = Some(ScanRate {
                 total: update.total,
                 started_at: now,
@@ -518,12 +524,8 @@ impl PreparationProgress {
             maximum,
             rate,
         });
-        if maximum > 0 {
-            advance_overall_progress(
-                &self.overall_percent,
-                state.completed_phases,
-                attempted.saturating_mul(100) / maximum,
-            );
+        if let Some(percent) = attempted.saturating_mul(100).checked_div(maximum) {
+            advance_overall_progress(&self.overall_percent, state.completed_phases, percent);
         }
     }
 
@@ -1974,6 +1976,7 @@ fn finish_worker_handoff(runtime: &SavedRuntime, pending: Option<History>) {
 /// Catalog preparation is independent of raster size. It retains exact
 /// initial evidence/route windows and their bound directories; no model bank
 /// or clipped map is prepared until an emitted viewport requests a route.
+#[allow(clippy::too_many_arguments)] // Keep worker custody, cancellation and progress capabilities explicit.
 fn prepare_bundle(
     source: SourceRoot,
     storage: PathBuf,
@@ -2664,13 +2667,9 @@ fn prepare_selection(
                     ),
                 );
                 let mut status_reads = 0;
-                let mut rejected_chunk = None;
-                let support_has_full_status = route_support_is_eligible(
-                    support,
-                    allocated,
-                    |position| {
-                        status_reads += 1;
-                        progress.work(
+                let support_status = route_support_is_eligible(support, allocated, |position| {
+                    status_reads += 1;
+                    progress.work(
                             &bound.directory,
                             "Checking saved chunk generation status",
                             status_reads,
@@ -2679,19 +2678,26 @@ fn prepare_selection(
                                 "Candidate {attempted} of {MAX_ROUTE_QUALIFICATIONS}: checking chunk {position:?}"
                             ),
                         );
-                        let full = saved_chunk_has_full_generation_status(
-                            bundle, bound, position, &cancelled, progress,
-                        )?;
-                        if !full {
-                            rejected_chunk = Some(position);
-                        }
-                        Ok(full)
-                    },
-                )?;
-                if !support_has_full_status {
+                    saved_chunk_has_full_generation_status(
+                        bundle, bound, position, &cancelled, progress,
+                    )
+                });
+                if let Err(reason) = support_status {
+                    if cancelled() {
+                        return Err("Saved route preparation cancelled".into());
+                    }
+                    let failure = format!(
+                        "map {:?}, choice {:?}, cap {maximum_length}, length {:.1}, {:?}: {reason}",
+                        plan.source().map,
+                        plan.choice(),
+                        plan.line().length(),
+                        plan.route()
+                    );
+                    if failures.len() < 8 {
+                        failures.push(failure);
+                    }
                     progress.record(&format!(
-                        "Candidate {attempted} rejected before full viewport decode at chunk {:?}: status is unfinished or unreadable",
-                        rejected_chunk
+                        "Candidate {attempted} rejected before full viewport decode: {reason}"
                     ));
                     return Ok(None);
                 }

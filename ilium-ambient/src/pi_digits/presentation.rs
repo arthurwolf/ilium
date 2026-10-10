@@ -1,15 +1,18 @@
 //! Exact Pi in native text or coverage rasterized from the bundled real font.
 use super::digits;
 use crate::control::{Control, ControlValue, SceneSettings};
+use crate::resources::{AmbientResources, WorkerCost};
 use crate::scene::{Frame, Scene, SceneEnv};
 use crate::source::Worker;
 use cosmic_text::{Attrs, Buffer, Color, Family, FontSystem, Metrics, Shaping, SwashCache, Wrap};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc, Mutex, OnceLock};
-use std::time::Duration;
+use std::sync::{mpsc, Arc};
+use std::time::{Duration, Instant};
 const FONT: &[u8] = include_bytes!("../../assets/fonts/CascadiaCode-Regular.otf");
 const MAX_CELLS: usize = 131_072;
+const PI_PREPARATION_WORKER_BYTES: usize = 16 * 1024 * 1024;
+const PI_PREPARATION_RETRY_BACKOFF: Duration = Duration::from_secs(5);
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PiSettings {
@@ -54,13 +57,53 @@ impl SceneSettings for PiSettings {
         next
     }
     fn controls(&self) -> Vec<Control> {
-        let mut rows=vec![
-            Control::choice("mode","Pi rendering",self.mode,&["Native text","Font Braille"],"Native text uses the terminal font. Font Braille rasterizes the bundled Cascadia Code on an owned worker."),
-            Control::slider("digits_limit","Exact digits",self.digits_limit,(1,20000,100),"","Number of exact decimal digits, including the initial 3. The decimal separator is added for display; the sequence repeats after this prefix."),
-            Control::slider("scroll_speed","Scroll speed",self.scroll_speed,(0,2000,10)," ×0.1 chars/s","Move through the exact digit sequence. Zero holds the prefix; global Speed also applies."),
-            Control::slider("hue_degrees","Pi hue",self.hue_degrees,(0,360,5),"°","Common color of decimal digits when digit colors are disabled."),
-            Control::slider("brightness_percent","Pi brightness",self.brightness_percent,(0,100,5),"%","Zero hides both native and Braille text. Color brightness and dot coverage are independent."),
-            Control::toggle("digit_colors","Colors by digit",self.digit_colors,"Assign a separate hue to each decimal digit. The decimal separator keeps the common hue.")];
+        let mut rows = vec![
+            Control::choice(
+                "mode",
+                "Pi rendering",
+                self.mode,
+                &["Native text", "Font Braille"],
+                "Native text uses the terminal font. Font Braille rasterizes the bundled Cascadia Code on an owned worker.",
+            ),
+            Control::slider(
+                "digits_limit",
+                "Exact digits",
+                self.digits_limit,
+                (1, 20000, 100),
+                "",
+                "Number of exact decimal digits, including the initial 3. The decimal separator is added for display; the sequence repeats after this prefix.",
+            ),
+            Control::slider(
+                "scroll_speed",
+                "Scroll speed",
+                self.scroll_speed,
+                (0, 2000, 10),
+                " ×0.1 chars/s",
+                "Move through the exact digit sequence. Zero holds the prefix; global Speed also applies.",
+            ),
+            Control::slider(
+                "hue_degrees",
+                "Pi hue",
+                self.hue_degrees,
+                (0, 360, 5),
+                "°",
+                "Common color of decimal digits when digit colors are disabled.",
+            ),
+            Control::slider(
+                "brightness_percent",
+                "Pi brightness",
+                self.brightness_percent,
+                (0, 100, 5),
+                "%",
+                "Zero hides both native and Braille text. Color brightness and dot coverage are independent.",
+            ),
+            Control::toggle(
+                "digit_colors",
+                "Colors by digit",
+                self.digit_colors,
+                "Assign a separate hue to each decimal digit. The decimal separator keeps the common hue.",
+            ),
+        ];
         if self.mode == 1 {
             rows.insert(1,Control::slider("font_size","Font size",self.font_size,(8,48,2)," dots","Real-font height in Braille raster dots. Native text uses the terminal emulator's configured size."));
         }
@@ -149,8 +192,13 @@ struct Atlas {
     glyphs: Vec<Vec<f32>>,
 }
 struct Prepared {
-    digits: Arc<String>,
+    digits: Arc<DigitPrefix>,
     atlas: Atlas,
+    _atlas_storage: Arc<ilium_execution::StorageAdmission>,
+}
+struct DigitPrefix {
+    text: String,
+    _storage: Arc<ilium_execution::StorageAdmission>,
 }
 fn build_atlas(size: i32) -> Result<Atlas, String> {
     let size = size.clamp(8, 48) as f32;
@@ -201,40 +249,53 @@ fn build_atlas(size: i32) -> Result<Atlas, String> {
         glyphs,
     })
 }
-/// One process-wide exact prefix cache. Admission is worker-only and cancellable
-/// while queued; at most one bounded spigot computation can run concurrently.
-fn exact_digits(count: usize, stop: &AtomicBool) -> Result<Arc<String>, String> {
-    static CACHE: OnceLock<Mutex<Arc<String>>> = OnceLock::new();
-    let cache = CACHE.get_or_init(|| Mutex::new(Arc::new(String::new())));
-    loop {
-        if stop.load(Ordering::Relaxed) {
-            return Err("Pi preparation cancelled".into());
-        }
-        match cache.try_lock() {
-            Ok(mut cached) => {
-                if cached.len() < count {
-                    *cached = Arc::new(digits::generate(count)?);
-                }
-                return Ok(Arc::clone(&cached));
-            }
-            Err(std::sync::TryLockError::Poisoned(_)) => {
-                return Err("Pi preparation cache failed".into())
-            }
-            Err(std::sync::TryLockError::WouldBlock) => {
-                std::thread::sleep(Duration::from_millis(25))
-            }
-        }
+/// The scene retains its own exact prefix across font-only rebuilds; the
+/// bounded spigot computation runs only on its admitted worker.
+fn atlas_storage_bytes(size: i32) -> Result<usize, String> {
+    let size = size.clamp(8, 48) as f32;
+    let width = ((size * 0.75).ceil() as usize + 2).div_ceil(2) * 2;
+    let height = ((size * 1.4).ceil() as usize).div_ceil(4) * 4;
+    width
+        .checked_mul(height)
+        .and_then(|pixels| pixels.checked_mul(11))
+        .and_then(|samples| samples.checked_mul(std::mem::size_of::<f32>()))
+        .and_then(|bytes| bytes.checked_add(16 * std::mem::size_of::<Vec<f32>>()))
+        .ok_or_else(|| "Pi atlas storage size overflow".to_owned())
+}
+
+fn exact_digits(
+    count: usize,
+    stop: &AtomicBool,
+    resources: &AmbientResources,
+    cached: Option<Arc<DigitPrefix>>,
+) -> Result<Arc<DigitPrefix>, String> {
+    if stop.load(Ordering::Relaxed) {
+        return Err("Pi preparation cancelled".into());
     }
+    if let Some(cached) = cached.filter(|digits| digits.text.len() >= count) {
+        return Ok(cached);
+    }
+    let storage = resources
+        .reserve_storage(count.saturating_add(std::mem::size_of::<DigitPrefix>()))
+        .map_err(|reason| format!("Pi digit storage admission refused: {reason:?}"))?;
+    let text = digits::generate(count)?;
+    Ok(Arc::new(DigitPrefix {
+        text,
+        _storage: storage,
+    }))
 }
 
 pub struct PiScene {
     settings: PiSettings,
+    resources: AmbientResources,
     worker: Option<Worker>,
     receiver: Option<mpsc::Receiver<Result<Prepared, String>>>,
     prepared: Option<Prepared>,
+    digit_cache: Option<Arc<DigitPrefix>>,
     native: Vec<Option<char>>,
     native_width: usize,
     status: Option<String>,
+    retry_after: Option<Instant>,
 }
 impl PiScene {
     // PALETTE (native Scene contract): `env.palette` is the shared look's current
@@ -244,15 +305,18 @@ impl PiScene {
     // changes. Monochrome scenes may ignore it. Today `PaletteScene` (scene.rs),
     // which `create_scene` wraps around every scene, shifts this scene's cell
     // colours onto the palette by brightness.
-    pub fn new(settings: PiSettings, _environment: &SceneEnv) -> Self {
+    pub fn new(settings: PiSettings, environment: &SceneEnv) -> Self {
         let mut scene = Self {
             settings: settings.normalized(),
+            resources: environment.resources.clone(),
             worker: None,
             receiver: None,
             prepared: None,
+            digit_cache: None,
             native: vec![],
             native_width: 0,
             status: None,
+            retry_after: None,
         };
         scene.start();
         scene
@@ -261,30 +325,66 @@ impl PiScene {
         if let Some(worker) = self.worker.take() {
             worker.stop_in_background();
         }
+        let reservation = match self.resources.reserve_worker(WorkerCost {
+            threads: 1,
+            resident_bytes: PI_PREPARATION_WORKER_BYTES,
+        }) {
+            Ok(reservation) => reservation,
+            Err(error) => {
+                self.status = Some(format!("Pi worker admission refused: {error:?}"));
+                self.receiver = None;
+                self.retry_after = Some(Instant::now() + PI_PREPARATION_RETRY_BACKOFF);
+                return;
+            }
+        };
         let settings = self.settings.clone();
+        let resources = self.resources.clone();
+        let cached_digits = self.digit_cache.clone();
         let (sender, receiver) = mpsc::sync_channel(1);
         self.receiver = Some(receiver);
         self.status = Some("Preparing exact Pi digits and bundled font".into());
-        match Worker::try_spawn("pi-font", move |stop| {
+        match Worker::start_admitted("pi-font", reservation, move |stop| {
             let result = (|| {
-                let digits = exact_digits(settings.digits_limit as usize, &stop)?;
+                let digits = exact_digits(
+                    settings.digits_limit as usize,
+                    &stop,
+                    &resources,
+                    cached_digits,
+                )?;
                 if stop.load(Ordering::Relaxed) {
                     return Err("Pi preparation cancelled".into());
                 }
+                let atlas_storage = resources
+                    .reserve_storage(atlas_storage_bytes(settings.font_size)?)
+                    .map_err(|reason| format!("Pi atlas storage admission refused: {reason:?}"))?;
+                let atlas = build_atlas(settings.font_size)?;
                 Ok(Prepared {
                     digits,
-                    atlas: build_atlas(settings.font_size)?,
+                    atlas,
+                    _atlas_storage: atlas_storage,
                 })
             })();
             if !stop.load(Ordering::Relaxed) {
                 let _ = sender.try_send(result);
             }
         }) {
-            Ok(worker) => self.worker = Some(worker),
+            Ok(worker) => {
+                self.worker = Some(worker);
+                self.retry_after = None;
+            }
             Err(error) => {
                 self.status = Some(format!("Pi worker failed: {error}"));
                 self.receiver = None;
+                self.retry_after = Some(Instant::now() + PI_PREPARATION_RETRY_BACKOFF);
             }
+        }
+    }
+    fn retry_preparation_if_due(&mut self) {
+        if self
+            .retry_after
+            .is_some_and(|retry_after| Instant::now() >= retry_after)
+        {
+            self.start();
         }
     }
     pub fn apply_settings(&mut self, settings: PiSettings) {
@@ -303,17 +403,21 @@ impl PiScene {
         };
         match receiver.try_recv() {
             Ok(Ok(prepared)) => {
+                self.digit_cache = Some(Arc::clone(&prepared.digits));
                 self.prepared = Some(prepared);
                 self.status = None;
                 self.receiver = None;
+                self.retry_after = None;
             }
             Ok(Err(error)) => {
                 self.status = Some(error);
                 self.receiver = None;
+                self.retry_after = Some(Instant::now() + PI_PREPARATION_RETRY_BACKOFF);
             }
             Err(mpsc::TryRecvError::Disconnected) => {
                 self.status = Some("Pi preparation ended without a result".into());
                 self.receiver = None;
+                self.retry_after = Some(Instant::now() + PI_PREPARATION_RETRY_BACKOFF);
             }
             Err(mpsc::TryRecvError::Empty) => {}
         }
@@ -329,14 +433,18 @@ impl PiScene {
     }
     #[cfg(test)]
     fn prepared(settings: PiSettings, prepared: Prepared) -> Self {
+        let digit_cache = Some(Arc::clone(&prepared.digits));
         Self {
             settings: settings.normalized(),
+            resources: crate::resources::test_resources(),
             worker: None,
             receiver: None,
             prepared: Some(prepared),
+            digit_cache,
             native: vec![],
             native_width: 0,
             status: None,
+            retry_after: None,
         }
     }
 }
@@ -391,6 +499,7 @@ impl Scene for PiScene {
     }
     fn render(&mut self, frame: &mut Frame<'_>) {
         self.receive();
+        self.retry_preparation_if_due();
         let width = usize::from(frame.width);
         let height = usize::from(frame.height);
         let count = width * height;
@@ -415,7 +524,7 @@ impl Scene for PiScene {
             % (limit + 1) as f64) as usize;
         if self.settings.mode == 0 {
             for (index, cell) in self.native.iter_mut().enumerate() {
-                let character = character_at(&prepared.digits, limit, index + offset);
+                let character = character_at(&prepared.digits.text, limit, index + offset);
                 *cell = Some(character);
                 frame.cell_colors[index] = digit_color(&self.settings, character);
             }
@@ -429,8 +538,11 @@ impl Scene for PiScene {
         }
         for row in 0..rows {
             for column in 0..columns {
-                let character =
-                    character_at(&prepared.digits, limit, row * columns + column + offset);
+                let character = character_at(
+                    &prepared.digits.text,
+                    limit,
+                    row * columns + column + offset,
+                );
                 let glyph_index = character.to_digit(10).map_or(10, |digit| digit as usize);
                 let ink = &atlas.glyphs[glyph_index];
                 let color = digit_color(&self.settings, character);
@@ -469,6 +581,26 @@ impl Scene for PiScene {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn prepared(digit_count: usize, font_size: i32) -> Prepared {
+        let resources = crate::resources::test_resources();
+        let digit_storage = resources
+            .reserve_storage(digit_count.saturating_add(std::mem::size_of::<DigitPrefix>()))
+            .unwrap();
+        let digits = Arc::new(DigitPrefix {
+            text: digits::generate(digit_count).unwrap(),
+            _storage: digit_storage,
+        });
+        let atlas_storage = resources
+            .reserve_storage(atlas_storage_bytes(font_size).unwrap())
+            .unwrap();
+        let atlas = build_atlas(font_size).unwrap();
+        Prepared {
+            digits,
+            atlas,
+            _atlas_storage: atlas_storage,
+        }
+    }
     use crate::raster::Raster;
     #[test]
     fn controls_round_trip_with_independent_digit_hues_and_clamped_bounds() {
@@ -511,10 +643,7 @@ mod tests {
     }
     #[test]
     fn font_braille_scroll_and_zero_brightness_preserve_real_digit_content() {
-        let prepared = Prepared {
-            digits: Arc::new(digits::generate(100).unwrap()),
-            atlas: build_atlas(16).unwrap(),
-        };
+        let prepared = prepared(100, 16);
         let mut scene = PiScene::prepared(
             PiSettings {
                 mode: 1,
@@ -602,16 +731,90 @@ mod tests {
             .unwrap();
         assert!(prepared
             .digits
+            .text
             .starts_with("314159265358979323846264338327950"));
-        assert!(prepared.digits.len() >= 64);
+        assert!(prepared.digits.text.len() >= 64);
         assert_eq!(prepared.atlas.glyphs.len(), 11);
     }
     #[test]
-    fn empty_tiny_targets_and_native_out_of_bounds_are_safe() {
-        let prepared = Prepared {
-            digits: Arc::new(digits::generate(10).unwrap()),
-            atlas: build_atlas(48).unwrap(),
+    fn exact_digit_prefix_is_reused_without_allocating_another_charge() {
+        let resources = crate::resources::test_resources();
+        let stop = AtomicBool::new(false);
+        let prefix = exact_digits(64, &stop, &resources, None).unwrap();
+        let reused = exact_digits(32, &stop, &resources, Some(Arc::clone(&prefix))).unwrap();
+        assert!(Arc::ptr_eq(&prefix, &reused));
+        assert_eq!(reused.text.len(), 64);
+    }
+    #[test]
+    fn worker_admission_refusal_can_retry_after_capacity_is_released() {
+        use ilium_execution::{ShutdownMode, WorkerExit};
+        use std::time::Instant;
+
+        let (mut execution, resources) = crate::resources::isolated_test_resources();
+        let pressure = resources
+            .reserve_worker(WorkerCost {
+                threads: 1,
+                resident_bytes: 2300 * 1024 * 1024,
+            })
+            .unwrap();
+        let environment = SceneEnv::for_test(std::path::PathBuf::new(), resources.clone());
+        let mut scene = PiScene::new(
+            PiSettings {
+                digits_limit: 64,
+                font_size: 8,
+                ..Default::default()
+            },
+            &environment,
+        );
+        assert!(scene.worker.is_none());
+        assert!(scene
+            .status
+            .as_deref()
+            .unwrap()
+            .contains("admission refused"));
+
+        drop(pressure);
+        scene.retry_after = Some(Instant::now());
+        let mut raster = Raster::default();
+        raster.resize(2, 4);
+        let mut colors = vec![];
+        let mut frame = Frame {
+            raster: &mut raster,
+            cell_colors: &mut colors,
+            width: 1,
+            height: 1,
+            time: Duration::ZERO,
+            wall: Duration::ZERO,
+            now: std::time::SystemTime::UNIX_EPOCH,
         };
+        scene.render(&mut frame);
+        assert!(scene.worker.is_some());
+        let result = scene
+            .receiver
+            .as_ref()
+            .unwrap()
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap();
+        assert!(result.is_ok());
+        drop(scene);
+
+        execution.request_shutdown(ShutdownMode::Cancel);
+        let report = execution
+            .join_until_background(Instant::now() + Duration::from_secs(5))
+            .unwrap();
+        assert!(report.shutdown_complete);
+        assert_eq!(report.remaining_workers, 0);
+        assert!(report.observations.iter().all(|observation| matches!(
+            observation,
+            ilium_execution::JoinObservation::Exited {
+                exit: WorkerExit::Joined,
+                ..
+            }
+        )));
+    }
+    #[test]
+    fn empty_tiny_targets_and_native_out_of_bounds_are_safe() {
+        let prepared = prepared(10, 48);
         let mut scene = PiScene::prepared(
             PiSettings {
                 mode: 1,
@@ -640,14 +843,7 @@ mod tests {
     }
     #[test]
     fn exact_prefix_composes_native_cells_with_decimal() {
-        let digits = Arc::new(super::super::digits::generate(100).unwrap());
-        let mut scene = PiScene::prepared(
-            PiSettings::default(),
-            Prepared {
-                digits,
-                atlas: build_atlas(16).unwrap(),
-            },
-        );
+        let mut scene = PiScene::prepared(PiSettings::default(), prepared(100, 16));
         let mut raster = Raster::default();
         raster.resize(40, 16);
         let mut colors = vec![];

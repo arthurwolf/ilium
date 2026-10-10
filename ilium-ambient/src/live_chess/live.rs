@@ -1,10 +1,16 @@
 //! Owned streaming TV connection with bounded lines and coalesced snapshots.
 use super::feed::{self, Game};
 use crate::live_data::model::FeedState;
-use crate::source::{http_stream_lines, sleep_unless_stopped, FetchError, Worker};
+use crate::{
+    resources::{AmbientResources, WorkerCost},
+    source::{http_stream_lines, sleep_unless_stopped, FetchError, Worker},
+};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+const LIVE_TV_WORKER_STACK_BYTES: usize = 2 * 1024 * 1024;
+const LIVE_TV_WORKER_RESIDENT_BYTES: usize = 4 * 1024 * 1024;
 
 #[derive(Debug, Clone, Default)]
 pub struct TvSnapshot {
@@ -18,13 +24,8 @@ pub struct LiveTv {
 }
 
 impl LiveTv {
-    pub fn start() -> Result<Self, String> {
-        let snapshot = Arc::new(Mutex::new(Arc::new(TvSnapshot::default())));
-        let shared = Arc::clone(&snapshot);
-        let worker = Worker::try_spawn("live-chess", move |stop| {
-            ilium_platform::thread_priority::lower_current_thread(
-                ilium_platform::thread_priority::WorkerPriority::Lowest,
-            );
+    pub fn start(resources: &AmbientResources) -> Result<Self, String> {
+        Self::start_with(resources, move |shared, stop| {
             run_connections(
                 &shared,
                 &stop,
@@ -40,6 +41,31 @@ impl LiveTv {
                 |delay| sleep_unless_stopped(&stop, delay),
             );
         })
+    }
+
+    fn start_with(
+        resources: &AmbientResources,
+        run: impl FnOnce(Arc<Mutex<Arc<TvSnapshot>>>, Arc<AtomicBool>) + Send + 'static,
+    ) -> Result<Self, String> {
+        let admission = resources
+            .reserve_worker(WorkerCost {
+                threads: 1,
+                resident_bytes: LIVE_TV_WORKER_RESIDENT_BYTES,
+            })
+            .map_err(|error| format!("could not admit live chess worker: {error:?}"))?;
+        let snapshot = Arc::new(Mutex::new(Arc::new(TvSnapshot::default())));
+        let shared = Arc::clone(&snapshot);
+        let worker = Worker::start_admitted_with_stack(
+            "live-chess",
+            admission,
+            Some(LIVE_TV_WORKER_STACK_BYTES),
+            move |stop| {
+                ilium_platform::thread_priority::lower_current_thread(
+                    ilium_platform::thread_priority::WorkerPriority::Lowest,
+                );
+                run(shared, stop);
+            },
+        )
         .map_err(|error| format!("could not start live chess worker: {error}"))?;
         Ok(Self {
             snapshot,
@@ -146,6 +172,74 @@ impl Drop for LiveTv {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn live_chess_admission_refuses_before_starting_a_connection() {
+        let (_execution, resources) = crate::resources::isolated_test_resources();
+        let quota = resources.finite().quota_group();
+        let before = quota.snapshot();
+        let remaining_threads = before
+            .limits
+            .worker_threads
+            .saturating_sub(before.worker_threads);
+        assert!(
+            remaining_threads > 0,
+            "test quota must have worker capacity"
+        );
+        let blocker = resources
+            .reserve_worker(WorkerCost {
+                threads: remaining_threads,
+                resident_bytes: 1,
+            })
+            .expect("fill the shared worker allowance");
+        let error = match LiveTv::start(&resources) {
+            Ok(_) => panic!("live chess worker bypassed shared quota"),
+            Err(error) => error,
+        };
+        assert!(error.contains("could not admit live chess worker"));
+        assert_eq!(
+            quota.snapshot().worker_threads,
+            before.worker_threads + remaining_threads
+        );
+        drop(blocker);
+        assert_eq!(quota.snapshot().worker_threads, before.worker_threads);
+    }
+
+    #[test]
+    fn live_chess_worker_charge_follows_physical_thread_retirement() {
+        let (_execution, resources) = crate::resources::isolated_test_resources();
+        let quota = resources.finite().quota_group();
+        let before = quota.snapshot();
+        let (started, entered) = std::sync::mpsc::sync_channel(1);
+        let live = LiveTv::start_with(&resources, move |_, stop| {
+            started.send(()).unwrap();
+            while !stop.load(Ordering::Acquire) {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        })
+        .unwrap();
+        entered.recv_timeout(Duration::from_secs(2)).unwrap();
+        let ticket = live.worker.as_ref().unwrap().join_observer().unwrap();
+        let charged = quota.snapshot();
+        assert_eq!(charged.worker_threads, before.worker_threads + 1);
+        assert_eq!(
+            charged.worker_bytes,
+            before.worker_bytes + LIVE_TV_WORKER_RESIDENT_BYTES
+        );
+        assert_eq!(
+            ticket.metadata().requested_stack_bytes,
+            Some(LIVE_TV_WORKER_STACK_BYTES)
+        );
+
+        drop(live);
+        assert_eq!(
+            ticket.join_until(std::time::Instant::now() + Duration::from_secs(2)),
+            Ok(ilium_platform::owned_worker::WorkerExit::Joined)
+        );
+        let retired = quota.snapshot();
+        assert_eq!(retired.worker_threads, before.worker_threads);
+        assert_eq!(retired.worker_bytes, before.worker_bytes);
+    }
 
     const FEATURED: &[u8] =
         br#"{"t":"featured","d":{"id":"oldgame","fen":"4k3/8/8/8/8/8/8/4K3 w - - 0 1"}}"#;

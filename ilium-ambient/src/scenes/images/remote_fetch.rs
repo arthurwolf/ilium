@@ -76,6 +76,7 @@ fn retryable(reason: RejectReason) -> bool {
 
 /// Retain the image loader's FIFO head while waiting for bounded I/O admission.
 /// The response remains storage-charged after its finite receipt is collected.
+#[allow(clippy::too_many_arguments)] // Explicit audited fetch limits and resource authorities vary independently.
 pub(super) fn fetch(
     cache_dir: &Path,
     url: &str,

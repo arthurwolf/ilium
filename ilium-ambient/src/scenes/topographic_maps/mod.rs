@@ -32,6 +32,7 @@ use projection::Camera;
 use settings::{BelowStyle, PaletteChoice, PanStyle, Projection, WorldId};
 use std::sync::mpsc::{Receiver, TryRecvError};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 /// Seconds the dissolve to the next world takes.
 const DISSOLVE_SECONDS: f64 = 4.0;
@@ -43,6 +44,7 @@ const MAX_HEIGHTFIELD_BYTES: usize = 2048 * 1024 * std::mem::size_of::<f32>();
 // PNG decoding holds a temporary raster alongside the f32 result. This covers
 // the measured image peak and is conservative for fictional-world generation.
 const HEIGHTFIELD_WORKER_BYTES: usize = 64 * 1024 * 1024;
+const WORLD_LOAD_RETRY_BACKOFF: Duration = Duration::from_secs(5);
 const NO_LEVEL: i32 = i32::MIN;
 
 struct Loaded {
@@ -65,6 +67,7 @@ pub struct TopographicMapsScene {
     previous: Option<(Loaded, f64)>,
     loading: Option<Loading>,
     failed: Option<(WorldId, String)>,
+    retry_after: Option<Instant>,
     waiting_for_capacity: bool,
     resources: AmbientResources,
     heights: Vec<f32>,
@@ -121,6 +124,7 @@ impl TopographicMapsScene {
             previous: None,
             loading: None,
             failed: None,
+            retry_after: None,
             waiting_for_capacity: false,
             resources: env.resources.clone(),
             heights: Vec::new(),
@@ -169,10 +173,12 @@ impl TopographicMapsScene {
                 }
                 Ok(Err(message)) => {
                     self.failed = Some((loading.id, message));
+                    self.retry_after = Some(Instant::now() + WORLD_LOAD_RETRY_BACKOFF);
                     self.loading = None;
                 }
                 Err(TryRecvError::Disconnected) => {
                     self.failed = Some((loading.id, "world loader stopped".to_owned()));
+                    self.retry_after = Some(Instant::now() + WORLD_LOAD_RETRY_BACKOFF);
                     self.loading = None;
                 }
                 Err(TryRecvError::Empty) => {}
@@ -191,10 +197,20 @@ impl TopographicMapsScene {
             .as_ref()
             .is_some_and(|loaded| loaded.id == desired)
             || self.loading.is_some()
-            || self.failed.as_ref().is_some_and(|(id, _)| *id == desired)
         {
             self.waiting_for_capacity = false;
             return;
+        }
+        if self.failed.as_ref().is_some_and(|(id, _)| *id == desired) {
+            if self
+                .retry_after
+                .is_some_and(|retry_after| Instant::now() < retry_after)
+            {
+                self.waiting_for_capacity = false;
+                return;
+            }
+            self.failed = None;
+            self.retry_after = None;
         }
         let storage = match self.resources.reserve_storage(MAX_HEIGHTFIELD_BYTES) {
             Ok(storage) => storage,
@@ -226,6 +242,7 @@ impl TopographicMapsScene {
             Ok(worker) => {
                 self.waiting_for_capacity = false;
                 self.failed = None;
+                self.retry_after = None;
                 self.loading = Some(Loading {
                     id: desired,
                     receiver,
@@ -234,6 +251,7 @@ impl TopographicMapsScene {
             }
             Err(error) => {
                 self.failed = Some((desired, format!("world worker start: {error}")));
+                self.retry_after = Some(Instant::now() + WORLD_LOAD_RETRY_BACKOFF);
             }
         }
     }
@@ -517,7 +535,7 @@ impl Scene for TopographicMapsScene {
     fn status(&self) -> Option<String> {
         if let Some((_, message)) = &self.failed {
             if self.current.is_none() {
-                return Some(format!("No elevation data: {message}"));
+                return Some(format!("No elevation data: {message} (retrying)"));
             }
         }
         let Some(loaded) = self.current.as_ref() else {
@@ -540,8 +558,11 @@ impl Scene for TopographicMapsScene {
         } else {
             ""
         };
+        let failure = self.failed.as_ref().map_or(String::new(), |(_, message)| {
+            format!(" — world load failed: {message} (retrying)")
+        });
         Some(format!(
-            "{} — {} m contours, relief {:.1} to {:.1} km{loading}{waiting}",
+            "{} — {} m contours, relief {:.1} to {:.1} km{loading}{waiting}{failure}",
             loaded.field.view().name,
             loaded.interval_m,
             loaded.field.view().min_m / 1000.0,

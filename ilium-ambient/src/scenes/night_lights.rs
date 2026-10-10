@@ -24,14 +24,16 @@ use self::tiles::{
 };
 use crate::control::{self, Control, ControlValue, SceneSettings};
 use crate::location::GeoLocation;
+use crate::resources::{AmbientResources, WorkerCost};
 use crate::scene::{Frame, Scene, SceneEnv};
 use crate::source::{sleep_unless_stopped, Worker};
 use serde::{Deserialize, Serialize};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const DAILY_LAYER: &str = "VIIRS_NOAA20_GapFilled_BRDF_Corrected_DayNightBand_Radiance";
 const BLACK_MARBLE_LAYER: &str = "VIIRS_Black_Marble";
@@ -41,6 +43,11 @@ const MATRIX_SET: &str = "500m";
 const DAILY_LOOKBACK_DAYS: i64 = 4;
 const RETRY_AFTER: Duration = Duration::from_secs(5 * 60);
 const TILE_CACHE_BUDGET: u64 = 120 * 1024 * 1024;
+// Covers bounded encoded input, decoded tiles, mosaic/mip construction and the
+// last published mosaic while the next one is prepared.
+const NIGHT_LIGHTS_WORKER_BYTES: usize = 160 * 1024 * 1024;
+const UPDATE_QUEUE_CAPACITY: usize = 1;
+const WORKER_FAILURE_BACKOFF: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -427,6 +434,20 @@ fn mosaic_key(source: NightSource, date: &str, level: u8) -> String {
     format!("{}_{date}_L{level}", source.id())
 }
 
+fn read_cached_mosaic(path: &Path) -> Option<Vec<u8>> {
+    let metadata = std::fs::symlink_metadata(path).ok()?;
+    if !metadata.file_type().is_file() || metadata.len() > tiles::MAX_MAP_IMAGE_BYTES as u64 {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)
+        .ok()?
+        .take(tiles::MAX_MAP_IMAGE_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    (bytes.len() <= tiles::MAX_MAP_IMAGE_BYTES).then_some(bytes)
+}
+
 /// The newest cached mosaic of `source` at `level`, as (grid, date).
 fn load_cached_mosaic(
     directory: &Path,
@@ -452,9 +473,16 @@ fn load_cached_mosaic(
         }
     }
     let (date, path) = best?;
-    let image = tiles::decode_image(&std::fs::read(path).ok()?, false).ok()?;
     let expected_width = TILE_PIXELS * 5 * (1usize << level) / 4;
-    if image.width != expected_width {
+    let expected_height = TILE_PIXELS * 5 * (1usize << level) / 8;
+    let image = tiles::decode_image_bounded(
+        &read_cached_mosaic(&path)?,
+        false,
+        expected_width,
+        expected_height,
+    )
+    .ok()?;
+    if image.width != expected_width || image.height != expected_height {
         return None;
     }
     Some((GeoGrid::from_image(GeoBox::WORLD, image), date))
@@ -481,7 +509,7 @@ fn refresh_once(
     job: &Job,
     directory: &Path,
     held_key: Option<&str>,
-    updates: &Sender<Update>,
+    updates: &SyncSender<Update>,
     stop: &AtomicBool,
 ) -> Result<Refreshed, RefreshError> {
     let tile_directory = directory.join("tiles");
@@ -613,7 +641,7 @@ fn remove_older_mosaics(directory: &Path, source: NightSource, level: u8, keep_d
     }
 }
 
-fn run_worker(job: Job, updates: Sender<Update>, stop: Arc<AtomicBool>) {
+fn run_worker(job: Job, updates: SyncSender<Update>, stop: Arc<AtomicBool>) {
     let directory = job.cache_dir.join("night_lights");
     let mut held_key = None;
     // Show whatever is on disk immediately (also works fully offline).
@@ -658,6 +686,7 @@ type LandFn = Box<dyn Fn(f64, f64) -> bool + Send>;
 pub struct NightLightsScene {
     // Declared first so the worker is stopped before anything else is dropped.
     worker: Option<Worker>,
+    resources: AmbientResources,
     settings: NightLightsSettings,
     location: GeoLocation,
     cache_dir: PathBuf,
@@ -669,6 +698,7 @@ pub struct NightLightsScene {
     label: Option<String>,
     progress: Option<String>,
     problem: Option<String>,
+    worker_retry_after: Option<Instant>,
     located: Option<(View, DotTable)>,
 }
 
@@ -700,6 +730,7 @@ impl NightLightsScene {
     ) -> Self {
         Self {
             worker: None,
+            resources: env.resources.clone(),
             settings: settings.normalized(),
             location: env.location.normalized(),
             cache_dir: env.cache_dir.clone(),
@@ -711,6 +742,7 @@ impl NightLightsScene {
             label: None,
             progress: None,
             problem: None,
+            worker_retry_after: None,
             located: None,
         }
     }
@@ -730,10 +762,28 @@ impl NightLightsScene {
     }
 
     fn ensure_worker(&mut self, dots_w: usize, dots_h: usize) {
+        self.observe_worker_exit();
         if self.worker.is_some() || dots_w == 0 || dots_h == 0 {
             return;
         }
-        let (sender, receiver) = mpsc::channel();
+        if self
+            .worker_retry_after
+            .is_some_and(|retry_after| Instant::now() < retry_after)
+        {
+            return;
+        }
+        self.worker_retry_after = None;
+        let reservation = match self.resources.reserve_worker(WorkerCost {
+            threads: 1,
+            resident_bytes: NIGHT_LIGHTS_WORKER_BYTES,
+        }) {
+            Ok(reservation) => reservation,
+            Err(error) => {
+                self.problem = Some(format!("Night Lights worker admission refused: {error:?}"));
+                return;
+            }
+        };
+        let (sender, receiver) = mpsc::sync_channel(UPDATE_QUEUE_CAPACITY);
         let job = Job {
             cache_dir: self.cache_dir.clone(),
             source: self.settings.source,
@@ -742,10 +792,34 @@ impl NightLightsScene {
             fetcher: Arc::clone(&self.fetcher),
             now: Arc::clone(&self.now),
         };
-        self.receiver = Some(receiver);
-        self.worker = Some(Worker::spawn("night-lights", move |stop| {
+        match Worker::start_admitted("night-lights", reservation, move |stop| {
             run_worker(job, sender, stop);
-        }));
+        }) {
+            Ok(worker) => {
+                self.receiver = Some(receiver);
+                self.worker = Some(worker);
+                self.problem = None;
+            }
+            Err(error) => {
+                self.problem = Some(format!("Night Lights worker could not start: {error}"));
+            }
+        }
+    }
+
+    fn observe_worker_exit(&mut self) {
+        let exit = self
+            .worker
+            .as_ref()
+            .and_then(Worker::join_observer)
+            .and_then(|ticket| ticket.exit());
+        let Some(exit) = exit else { return };
+        self.worker.take();
+        self.receiver = None;
+        self.progress = None;
+        self.worker_retry_after = Some(Instant::now() + WORKER_FAILURE_BACKOFF);
+        self.problem = Some(format!(
+            "Night Lights worker exited unexpectedly ({exit:?}); retrying shortly"
+        ));
     }
 
     fn apply(&mut self, update: Update) {

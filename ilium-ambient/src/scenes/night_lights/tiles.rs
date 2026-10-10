@@ -16,6 +16,7 @@
 
 use crate::source::{self, FetchError};
 use std::collections::HashMap;
+use std::io::Cursor;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -29,6 +30,8 @@ const LEVEL0_SPAN_DEGREES: f64 = 288.0;
 pub const IMMUTABLE_AGE: Duration = Duration::from_secs(10 * 365 * 24 * 3600);
 const TILE_TIMEOUT: Duration = Duration::from_secs(8);
 const MAX_TILE_BYTES: usize = 12 * 1024 * 1024;
+pub(crate) const MAX_MAP_IMAGE_BYTES: usize = 64 * 1024 * 1024;
+const MAX_IMAGE_PIXELS: usize = 13_107_200;
 
 // ---------------------------------------------------------------------------
 // UTC time (no calendar dependency)
@@ -590,10 +593,47 @@ pub struct DecodedImage {
 }
 
 pub fn decode_image(bytes: &[u8], keep_rgb: bool) -> Result<DecodedImage, String> {
-    let rgba = image::load_from_memory(bytes)
+    decode_image_bounded(bytes, keep_rgb, TILE_PIXELS, TILE_PIXELS)
+}
+
+pub(crate) fn decode_image_bounded(
+    bytes: &[u8],
+    keep_rgb: bool,
+    max_width: usize,
+    max_height: usize,
+) -> Result<DecodedImage, String> {
+    if bytes.len() > MAX_MAP_IMAGE_BYTES {
+        return Err("encoded image exceeds the map decode limit".to_owned());
+    }
+    let max_pixels = max_width
+        .checked_mul(max_height)
+        .filter(|pixels| *pixels > 0 && *pixels <= MAX_IMAGE_PIXELS)
+        .ok_or_else(|| "image dimensions exceed the map decode limit".to_owned())?;
+    let mut reader = image::ImageReader::new(Cursor::new(bytes))
+        .with_guessed_format()
+        .map_err(|error| format!("image decode failed: {error}"))?;
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(
+        u32::try_from(max_width).map_err(|_| "image width exceeds decoder limits".to_owned())?,
+    );
+    limits.max_image_height = Some(
+        u32::try_from(max_height).map_err(|_| "image height exceeds decoder limits".to_owned())?,
+    );
+    limits.max_alloc = Some(
+        u64::try_from(max_pixels)
+            .ok()
+            .and_then(|pixels| pixels.checked_mul(8))
+            .ok_or_else(|| "image allocation limit overflow".to_owned())?,
+    );
+    reader.limits(limits);
+    let rgba = reader
+        .decode()
         .map_err(|error| format!("image decode failed: {error}"))?
         .to_rgba8();
     let (width, height) = (rgba.width() as usize, rgba.height() as usize);
+    if width == 0 || height == 0 || width.checked_mul(height).is_none_or(|n| n > max_pixels) {
+        return Err("decoded image dimensions exceed the map decode limit".to_owned());
+    }
     let mut luma = Vec::with_capacity(width * height);
     let mut rgb = keep_rgb.then(|| Vec::with_capacity(width * height));
     for pixel in rgba.pixels() {
@@ -1308,6 +1348,8 @@ mod tests {
         assert!(clear.luma.iter().all(|value| *value == 0));
         assert!(clear.rgb.is_none());
         assert!(decode_image(b"not an image", false).is_err());
+        assert!(decode_image(&solid_png(513, 1, [1, 2, 3, 255]), false).is_err());
+        assert!(decode_image_bounded(&solid_png(2, 2, [1, 2, 3, 255]), false, 1, 2).is_err());
     }
 
     fn synthetic_level1_tiles(value_of: impl Fn(u32, u32) -> u8) -> HashMap<TileId, DecodedImage> {

@@ -182,8 +182,8 @@ impl WindScene {
         // In-bounds coordinates are nonnegative, and the raster scales are
         // powers of two, so direct scaling preserves the legacy subpixel bins
         // while avoiding per-dot floor/subtraction work.
-        let sub_x = ((x * 2.0) as usize).min(usize::from(frame.raster.width) - 1);
-        let sub_y = ((y * 4.0) as usize).min(usize::from(frame.raster.height) - 1);
+        let sub_x = ((x * 2.0) as usize).min(frame.raster.width - 1);
+        let sub_y = ((y * 4.0) as usize).min(frame.raster.height - 1);
         frame.raster.opaque_dot_in_bounds(sub_x, sub_y);
     }
 
@@ -192,7 +192,30 @@ impl WindScene {
         Self::draw_positions_deduplicated(frame, dots.iter().map(|dot| (dot.x, dot.y)), coverage);
     }
 
+    #[cfg(test)]
     fn draw_positions_deduplicated(
+        frame: &mut Frame<'_>,
+        positions: impl IntoIterator<Item = (f32, f32)>,
+        coverage: &mut Vec<u64>,
+    ) {
+        Self::draw_positions_deduplicated_impl::<true>(frame, positions, coverage);
+    }
+
+    /// Simulation initialization, scalar wrapping, and SIMD state validation
+    /// keep render positions finite and in bounds, so the dense production path
+    /// can skip repeating those checks for every dot.
+    fn draw_positions_deduplicated_from_sim(
+        frame: &mut Frame<'_>,
+        positions: impl IntoIterator<Item = (f32, f32)>,
+        coverage: &mut Vec<u64>,
+    ) {
+        if frame.width == 0 || frame.height == 0 {
+            return;
+        }
+        Self::draw_positions_deduplicated_impl::<false>(frame, positions, coverage);
+    }
+
+    fn draw_positions_deduplicated_impl<const VALIDATE_POSITIONS: bool>(
         frame: &mut Frame<'_>,
         positions: impl IntoIterator<Item = (f32, f32)>,
         coverage: &mut Vec<u64>,
@@ -203,14 +226,24 @@ impl WindScene {
         let raster_width = frame.raster.width;
 
         for (x, y) in positions {
-            if !x.is_finite()
-                || !y.is_finite()
-                || x < 0.0
-                || y < 0.0
-                || x >= f32::from(frame.width)
-                || y >= f32::from(frame.height)
-            {
-                continue;
+            if VALIDATE_POSITIONS {
+                if !x.is_finite()
+                    || !y.is_finite()
+                    || x < 0.0
+                    || y < 0.0
+                    || x >= f32::from(frame.width)
+                    || y >= f32::from(frame.height)
+                {
+                    continue;
+                }
+            } else {
+                debug_assert!(
+                    x.is_finite()
+                        && y.is_finite()
+                        && (0.0..f32::from(frame.width)).contains(&x)
+                        && (0.0..f32::from(frame.height)).contains(&y),
+                    "simulation render positions must be finite and inside the wrapped screen"
+                );
             }
             // Finite in-range checks replace cell flooring here; power-of-two
             // scaling then selects the same subpixel bins directly.
@@ -273,7 +306,7 @@ impl Scene for WindScene {
                 self.sim.render_positions().size_hint().0,
                 frame.raster.dots.len(),
             ) {
-                Self::draw_positions_deduplicated(
+                Self::draw_positions_deduplicated_from_sim(
                     frame,
                     self.sim.render_positions(),
                     &mut self.raster_coverage,

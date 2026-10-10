@@ -1,6 +1,11 @@
 //! Demand-driven fleet geometry. Presentation never waits for preparation.
 use super::{fleet_cache::FleetBatch, map, maps::MapKind, model::Position};
-use crate::{raster::Raster, source::Worker};
+use crate::{
+    raster::Raster,
+    resources::{AmbientResources, WorkerCost, WorkerReservation},
+    source::Worker,
+};
+use ilium_execution::StorageAdmission;
 use std::{
     io,
     sync::{
@@ -40,6 +45,8 @@ pub(super) struct PreparedMarkers {
     pub occupied_centers: Vec<bool>,
     pub accepted_positions: usize,
     pub unique_center_cells: usize,
+    // Follows the immutable raster through publication and every scene clone.
+    pub _storage: Option<Arc<StorageAdmission>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -86,6 +93,8 @@ struct Shared {
 }
 
 const MAX_MARKER_WORKERS: usize = 4; // Bound live and stopping preparers across scene churn.
+const MARKER_WORKER_STACK_BYTES: usize = 2 * 1024 * 1024;
+const MARKER_WORKER_RESIDENT_BYTES: usize = 4 * 1024 * 1024;
 static MARKER_WORKERS: AtomicUsize = AtomicUsize::new(0); // Includes workers awaiting cancellation cleanup.
 struct MarkerPermit; // One slot, owned by one actual worker closure.
 impl MarkerPermit {
@@ -115,9 +124,21 @@ pub(super) struct MarkerWorker {
 }
 
 impl MarkerWorker {
-    pub fn try_start() -> io::Result<Self> {
-        // Production admission never waits.
-        Self::start_admitted(prepare_positions, MarkerPermit::acquire()?) // Hold the permit through actual worker exit.
+    pub fn try_start(resources: &AmbientResources) -> io::Result<Self> {
+        // Charge the shared host quota and process-local scene churn cap; both
+        // leases remain held until physical thread retirement.
+        let admission = resources
+            .reserve_worker(WorkerCost {
+                threads: 1,
+                resident_bytes: MARKER_WORKER_RESIDENT_BYTES,
+            })
+            .map_err(|error| io::Error::new(io::ErrorKind::WouldBlock, format!("{error:?}")))?;
+        Self::start_admitted(
+            prepare_positions,
+            MarkerPermit::acquire()?,
+            admission,
+            resources.clone(),
+        )
     }
     fn start_admitted(
         // Preserve the typed operation.
@@ -125,90 +146,112 @@ impl MarkerWorker {
             + Send
             + 'static, // Existing test injection.
         permit: MarkerPermit, // Admission belongs to the closure, not the presentation owner.
+        admission: WorkerReservation,
+        resources: AmbientResources,
     ) -> io::Result<Self> {
         // Spawn failure drops the captured permit.
         let shared = Arc::new(Shared::default());
         let state = Arc::clone(&shared);
         let (wake, receiver) = mpsc::sync_channel(1);
-        let worker = Worker::try_spawn("map-markers", move |stop| {
-            let _permit = permit; // Release admission only after all worker-side cleanup finishes.
-                                  // Local drop order keeps admission through captured-state cleanup, including unwinding.
-            let mut prepare = prepare;
-            let state = state;
-            let receiver = receiver;
-            ilium_platform::thread_priority::lower_current_thread(
-                ilium_platform::thread_priority::WorkerPriority::Lowest,
-            );
-            while !stop.load(Ordering::Relaxed) {
-                match receiver.recv_timeout(Duration::from_millis(25)) {
-                    Ok(()) | Err(RecvTimeoutError::Timeout) => {}
-                    Err(RecvTimeoutError::Disconnected) => break,
-                }
-                while receiver.try_recv().is_ok() {}
-                let (request, retired) = match state.pending.lock() {
-                    Ok(mut pending) => (pending.request.take(), pending.retired.take()),
-                    Err(_) => {
-                        state.fault.store(1, Ordering::Release);
-                        break;
+        let worker = Worker::start_admitted_with_stack(
+            "map-markers",
+            admission,
+            Some(MARKER_WORKER_STACK_BYTES),
+            move |stop| {
+                let _permit = permit; // Release admission only after all worker-side cleanup finishes.
+                                      // Local drop order keeps admission through captured-state cleanup, including unwinding.
+                let mut prepare = prepare;
+                let state = state;
+                let receiver = receiver;
+                let resources = resources;
+                ilium_platform::thread_priority::lower_current_thread(
+                    ilium_platform::thread_priority::WorkerPriority::Lowest,
+                );
+                while !stop.load(Ordering::Relaxed) {
+                    match receiver.recv_timeout(Duration::from_millis(25)) {
+                        Ok(()) | Err(RecvTimeoutError::Timeout) => {}
+                        Err(RecvTimeoutError::Disconnected) => break,
                     }
-                };
-                drop(retired);
-                let Some(request) = request else { continue };
-                let cancelled = || {
-                    stop.load(Ordering::Relaxed)
-                        || state.desired.load(Ordering::Acquire) != request.key.request_generation
-                };
-                if cancelled() {
-                    continue;
-                }
-                let prepared = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    prepare(&request, &cancelled)
-                }));
-                let Ok(prepared) = prepared else {
-                    state.fault.store(3, Ordering::Release);
-                    break;
-                };
-                let Some(prepared) = prepared else {
-                    if !cancelled() {
-                        state.fault.store(3, Ordering::Release);
-                    }
-                    continue;
-                };
-                if cancelled() {
-                    continue;
-                }
-                let prepared = Arc::new(prepared);
-                let replaced = match state.latest.lock() {
-                    Ok(mut latest) => {
-                        if cancelled() {
-                            None
-                        } else {
-                            latest.replace(Arc::clone(&prepared))
+                    while receiver.try_recv().is_ok() {}
+                    let (request, retired) = match state.pending.lock() {
+                        Ok(mut pending) => (pending.request.take(), pending.retired.take()),
+                        Err(_) => {
+                            state.fault.store(1, Ordering::Release);
+                            break;
                         }
+                    };
+                    drop(retired);
+                    let Some(request) = request else { continue };
+                    let cancelled = || {
+                        stop.load(Ordering::Relaxed)
+                            || state.desired.load(Ordering::Acquire)
+                                != request.key.request_generation
+                    };
+                    if cancelled() {
+                        continue;
                     }
-                    Err(_) => {
-                        state.fault.store(1, Ordering::Release);
+                    let storage = loop {
+                        if cancelled() {
+                            break None;
+                        }
+                        match prepared_storage_bytes(request.key)
+                            .and_then(|bytes| resources.reserve_storage(bytes).ok())
+                        {
+                            Some(storage) => break Some(storage),
+                            None => std::thread::sleep(Duration::from_millis(25)),
+                        }
+                    };
+                    let Some(storage) = storage else { continue };
+                    let prepared = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        prepare(&request, &cancelled)
+                    }));
+                    let Ok(prepared) = prepared else {
+                        state.fault.store(3, Ordering::Release);
                         break;
+                    };
+                    let Some(mut prepared) = prepared else {
+                        if !cancelled() {
+                            state.fault.store(3, Ordering::Release);
+                        }
+                        continue;
+                    };
+                    if cancelled() {
+                        continue;
+                    }
+                    prepared._storage = Some(storage);
+                    let prepared = Arc::new(prepared);
+                    let replaced = match state.latest.lock() {
+                        Ok(mut latest) => {
+                            if cancelled() {
+                                None
+                            } else {
+                                latest.replace(Arc::clone(&prepared))
+                            }
+                        }
+                        Err(_) => {
+                            state.fault.store(1, Ordering::Release);
+                            break;
+                        }
+                    };
+                    drop(replaced);
+                }
+                // Close admission before final cleanup; submission rechecks under
+                // the pending lock so no request can arrive after this drain.
+                state
+                    .fault
+                    .compare_exchange(0, 2, Ordering::AcqRel, Ordering::Acquire)
+                    .ok();
+                // Cleanup remains worker-owned even if the presentation owner drops.
+                let cleanup = match state.pending.lock() {
+                    Ok(mut pending) => (pending.request.take(), pending.retired.take()),
+                    Err(poisoned) => {
+                        let mut pending = poisoned.into_inner();
+                        (pending.request.take(), pending.retired.take())
                     }
                 };
-                drop(replaced);
-            }
-            // Close admission before final cleanup; submission rechecks under
-            // the pending lock so no request can arrive after this drain.
-            state
-                .fault
-                .compare_exchange(0, 2, Ordering::AcqRel, Ordering::Acquire)
-                .ok();
-            // Cleanup remains worker-owned even if the presentation owner drops.
-            let cleanup = match state.pending.lock() {
-                Ok(mut pending) => (pending.request.take(), pending.retired.take()),
-                Err(poisoned) => {
-                    let mut pending = poisoned.into_inner();
-                    (pending.request.take(), pending.retired.take())
-                }
-            };
-            drop(cleanup);
-        })?;
+                drop(cleanup);
+            },
+        )?;
         Ok(Self {
             worker: Some(worker),
             shared,
@@ -303,6 +346,21 @@ fn valid_key(key: MarkerKey) -> bool {
             .is_some_and(|n| n <= 16_777_216)
 }
 
+fn prepared_storage_bytes(key: MarkerKey) -> Option<usize> {
+    if !valid_key(key) {
+        return None;
+    }
+    let dot_bytes = key
+        .dot_width
+        .checked_mul(key.dot_height)?
+        .checked_mul(std::mem::size_of::<f32>() + std::mem::size_of::<u32>())?;
+    let cell_bytes = key
+        .cell_width
+        .checked_mul(key.cell_height)?
+        .checked_mul(std::mem::size_of::<bool>())?;
+    dot_bytes.checked_add(cell_bytes).map(|bytes| bytes.max(1))
+}
+
 pub(super) fn prepare_positions(
     request: &MarkerRequest,
     cancelled: &dyn Fn() -> bool,
@@ -328,6 +386,7 @@ pub(super) fn prepare_positions(
         occupied_centers,
         accepted_positions: 0,
         unique_center_cells: 0,
+        _storage: None,
     };
     if key.cell_width == 0 || key.cell_height == 0 || key.dot_width == 0 || key.dot_height == 0 {
         return (!cancelled()).then_some(prepared);
@@ -418,6 +477,44 @@ mod tests {
     use super::*;
     use std::time::Instant;
 
+    #[test]
+    fn production_marker_owner_charges_shared_quota_until_native_exit() {
+        let (_execution, resources) = crate::resources::isolated_test_resources();
+        let quota = resources.finite().quota_group();
+        let before = quota.snapshot();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let worker = loop {
+            match MarkerWorker::try_start(&resources) {
+                Ok(worker) => break worker,
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                    assert!(Instant::now() < deadline, "marker admission stayed busy");
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                Err(error) => panic!("marker worker spawn failed: {error}"),
+            }
+        };
+        let ticket = worker.worker.as_ref().unwrap().join_observer().unwrap();
+        let charged = quota.snapshot();
+        assert_eq!(charged.worker_threads, before.worker_threads + 1);
+        assert_eq!(
+            charged.worker_bytes,
+            before.worker_bytes + MARKER_WORKER_RESIDENT_BYTES
+        );
+        assert_eq!(
+            ticket.metadata().requested_stack_bytes,
+            Some(MARKER_WORKER_STACK_BYTES)
+        );
+
+        drop(worker);
+        assert_eq!(
+            ticket.join_until(Instant::now() + Duration::from_secs(2)),
+            Ok(ilium_platform::owned_worker::WorkerExit::Joined)
+        );
+        let retired = quota.snapshot();
+        assert_eq!(retired.worker_threads, before.worker_threads);
+        assert_eq!(retired.worker_bytes, before.worker_bytes);
+    }
+
     fn fixture_worker(
         prepare: impl FnMut(&MarkerRequest, &dyn Fn() -> bool) -> Option<PreparedMarkers>
             + Send
@@ -425,18 +522,31 @@ mod tests {
     ) -> MarkerWorker {
         // Tests may wait for shared admission; UI code cannot.
         let deadline = Instant::now() + Duration::from_secs(10); // Bound parallel-test contention.
-        let permit = loop {
-            // Do not consume the closure before admission succeeds.
-            match MarkerPermit::acquire() {
-                Ok(permit) => break permit,
+        let resources = crate::resources::test_resources();
+        let (permit, admission) = loop {
+            let permit = match MarkerPermit::acquire() {
+                Ok(permit) => permit,
                 Err(error) => {
                     assert_eq!(error.kind(), io::ErrorKind::WouldBlock);
                     assert!(Instant::now() < deadline);
                     std::thread::sleep(Duration::from_millis(1));
+                    continue;
                 }
-            } // No unbounded fixture wait.
-        }; // End block.
-        MarkerWorker::start_admitted(prepare, permit).unwrap() // Exercise the same admitted worker constructor.
+            };
+            match resources.reserve_worker(WorkerCost {
+                threads: 1,
+                resident_bytes: MARKER_WORKER_RESIDENT_BYTES,
+            }) {
+                Ok(admission) => break (permit, admission),
+                Err(_) => {
+                    drop(permit);
+                    assert!(Instant::now() < deadline);
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+            }
+        };
+        MarkerWorker::start_admitted(prepare, permit, admission, resources).unwrap()
+        // Exercise the same admitted worker constructor.
     } // End block.
 
     fn request(generation: u64) -> MarkerRequest {
@@ -457,6 +567,84 @@ mod tests {
             ]), // Preserve the typed operation.
             _owner: None,
         }
+    }
+
+    #[test]
+    fn prepared_marker_storage_covers_all_retained_raster_buffers() {
+        let key = request(1).key;
+        assert_eq!(
+            prepared_storage_bytes(key),
+            Some(
+                key.dot_width
+                    * key.dot_height
+                    * (std::mem::size_of::<f32>() + std::mem::size_of::<u32>())
+                    + key.cell_width * key.cell_height * std::mem::size_of::<bool>()
+            )
+        );
+        let largest = MarkerKey {
+            dot_width: 16_777_216,
+            dot_height: 1,
+            cell_width: 0,
+            cell_height: 0,
+            ..key
+        };
+        assert_eq!(prepared_storage_bytes(largest), Some(16_777_216 * 8));
+        assert_eq!(
+            prepared_storage_bytes(MarkerKey {
+                dot_width: usize::MAX,
+                dot_height: 2,
+                ..key
+            }),
+            None
+        );
+    }
+
+    #[test]
+    fn prepared_marker_storage_charge_follows_published_frame_lifetime() {
+        let (_execution, resources) = crate::resources::isolated_test_resources();
+        let quota = resources.finite().quota_group();
+        let before = quota.snapshot();
+        let admission = resources
+            .reserve_worker(WorkerCost {
+                threads: 1,
+                resident_bytes: MARKER_WORKER_RESIDENT_BYTES,
+            })
+            .unwrap();
+        let worker = MarkerWorker::start_admitted(
+            prepare_positions,
+            MarkerPermit::acquire().unwrap(),
+            admission,
+            resources.clone(),
+        )
+        .unwrap();
+        let input = request(1);
+        let storage_bytes = prepared_storage_bytes(input.key).unwrap();
+        worker.try_submit_latest(&input).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let prepared = loop {
+            if let Some(prepared) = worker.try_latest(input.key).unwrap() {
+                break prepared;
+            }
+            assert!(Instant::now() < deadline, "marker preparation timed out");
+            std::thread::yield_now();
+        };
+        assert_eq!(
+            quota.snapshot().worker_bytes,
+            before.worker_bytes + MARKER_WORKER_RESIDENT_BYTES + storage_bytes
+        );
+
+        let ticket = worker.worker.as_ref().unwrap().join_observer().unwrap();
+        drop(worker);
+        assert_eq!(
+            ticket.join_until(Instant::now() + Duration::from_secs(2)),
+            Ok(ilium_platform::owned_worker::WorkerExit::Joined)
+        );
+        assert_eq!(
+            quota.snapshot().worker_bytes,
+            before.worker_bytes + storage_bytes
+        );
+        drop(prepared);
+        assert_eq!(quota.snapshot().worker_bytes, before.worker_bytes);
     }
 
     #[test]

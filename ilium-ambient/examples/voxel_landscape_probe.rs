@@ -26,6 +26,9 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
+type SelectedPack = (usize, PathBuf, usize);
+type OptionalSelectedPack = Option<SelectedPack>;
+
 fn emit(value: serde_json::Value) {
     println!("{value}");
 }
@@ -38,9 +41,7 @@ fn number<T: std::str::FromStr>(
         text.parse().map_err(|_| format!("Invalid {name}: {text}"))
     })
 }
-fn selected_pack(
-    arguments: &mut BTreeMap<String, String>,
-) -> Result<Option<(usize, PathBuf, usize)>, String> {
+fn selected_pack(arguments: &mut BTreeMap<String, String>) -> Result<OptionalSelectedPack, String> {
     let profile = arguments.remove("--pack-profile");
     let path = arguments.remove("--pack-path");
     let mount = arguments.remove("--pack-mount");
@@ -105,8 +106,16 @@ fn qualified_texture_frame(
 ) -> Result<(usize, String), String> {
     let (satisfied, required) = frame.material_coverage;
     if required == 0 || satisfied != required {
+        let status = frame
+            .status
+            .as_deref()
+            .unwrap_or("no renderer status details");
         return Err(format!(
-            "Texture frame has incomplete required material coverage: {satisfied}/{required}"
+            "Texture frame has incomplete required material coverage: {satisfied}/{required}; {status}; state gaps {}; model substitutions {}; material fallbacks {}; compatibility aliases {}",
+            frame.state_gaps,
+            frame.model_substitutions,
+            frame.material_fallbacks,
+            frame.compatibility_aliases,
         ));
     }
     let covered_pixels = frame.covered.iter().filter(|covered| **covered).count();
@@ -142,7 +151,7 @@ fn covered_texture_pixels(colors: &[[u8; 3]], covered: &[bool]) -> Result<Vec<u8
 
 fn parse_capture_texture_source(
     arguments: &mut BTreeMap<String, String>,
-) -> Result<(GeneratedTextureSource, Option<(usize, PathBuf, usize)>), String> {
+) -> Result<(GeneratedTextureSource, OptionalSelectedPack), String> {
     let requested_source = arguments.remove("--texture-source");
     let source = GeneratedTextureSource::parse(requested_source.as_deref())?;
     let selected_pack = selected_pack(arguments)?;

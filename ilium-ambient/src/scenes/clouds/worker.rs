@@ -13,7 +13,7 @@ use crate::source::sleep_unless_stopped;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::SyncSender;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -227,8 +227,16 @@ fn fetch_frame(
             );
             let bytes = job.fetcher.fetch(directory, &url, IMMUTABLE_AGE, stop)?;
             // A WMS service exception arrives as XML with a success status.
-            let image = crate::scenes::night_lights::tiles::decode_image(&bytes, job.want_rgb)
-                .map_err(|_| FrameError::Missing)?;
+            let image = crate::scenes::night_lights::tiles::decode_image_bounded(
+                &bytes,
+                job.want_rgb,
+                job.grid_width,
+                job.grid_height,
+            )
+            .map_err(|_| FrameError::Missing)?;
+            if image.width != job.grid_width || image.height != job.grid_height {
+                return Err(FrameError::Missing);
+            }
             return Ok(CloudFrame::new(time, GeoGrid::from_image(job.bbox, image)));
         }
         Endpoint::GibsTimed {
@@ -285,7 +293,7 @@ fn refresh(
     source: CloudSource,
     directory: &Path,
     have: &mut BTreeMap<UtcTime, Arc<CloudFrame>>,
-    updates: &Sender<Update>,
+    updates: &SyncSender<Update>,
     stop: &AtomicBool,
 ) -> Result<(), WorkerError> {
     let provider = provider(source);
@@ -362,13 +370,13 @@ fn publish(
     job: &Job,
     provider: &Provider,
     have: &BTreeMap<UtcTime, Arc<CloudFrame>>,
-    updates: &Sender<Update>,
+    updates: &SyncSender<Update>,
 ) {
     let set = FrameSet::new(provider.name, job.bbox, have.values().cloned().collect());
     let _ = updates.send(Update::Frames(Arc::new(set)));
 }
 
-pub fn run_worker(job: Job, updates: Sender<Update>, stop: Arc<AtomicBool>) {
+pub fn run_worker(job: Job, updates: SyncSender<Update>, stop: Arc<AtomicBool>) {
     let directory = job.cache_dir.join("clouds");
     let mut have: BTreeMap<UtcTime, Arc<CloudFrame>> = BTreeMap::new();
     let mut have_source: Option<CloudSource> = None;

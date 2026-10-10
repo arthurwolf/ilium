@@ -163,7 +163,7 @@ impl TerrainFields {
         for cell_x in grid_x - 1..=grid_x + 1 {
             for cell_z in grid_z - 1..=grid_z + 1 {
                 let site = hash2(self.seed ^ 0x696e_6c61_6e64_6c6b, cell_x, cell_z);
-                if site % 6 != 0 {
+                if !site.is_multiple_of(6) {
                     continue;
                 }
                 let center_x = cell_x * CELL_SIZE + 48 + ((site >> 8) % 96) as i64;

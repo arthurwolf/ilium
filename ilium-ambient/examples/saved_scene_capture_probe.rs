@@ -208,6 +208,16 @@ fn frame_evidence_matches(
         && evidence.selected_archive_sha256 == selected_digest
 }
 
+fn terminal_saved_scene_failure(status: Option<&str>) -> Option<String> {
+    status?.lines().find_map(|line| {
+        let detail = line.strip_prefix("Latest status: ").unwrap_or(line);
+        (detail.starts_with("Saved tour planner:")
+            || detail == "No eligible saved tour in finite survey"
+            || detail.starts_with("Saved-world preparation failed:"))
+        .then(|| detail.to_owned())
+    })
+}
+
 fn paint_png(
     raster: &Raster,
     cell_colors: &[[u8; 3]],
@@ -403,6 +413,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         if last_progress.elapsed() >= Duration::from_secs(3) {
+            let scene_status = scene.status();
+            if let Some(failure) = terminal_saved_scene_failure(scene_status.as_deref()) {
+                return Err(format!(
+                    "saved scene reported a terminal preparation failure before frame capture: {failure}"
+                )
+                .into());
+            }
             emit(json!({
                 "type": "progress",
                 "stage": "waiting for or rendering saved-world frames",
@@ -412,7 +429,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 "frames": captured.len(),
                 "frames_requested": arguments.frame_count,
                 "elapsed_seconds": elapsed.as_secs(),
-                "scene_status": scene.status(),
+                "scene_status": scene_status,
             }));
             last_progress = Instant::now();
         }
@@ -482,6 +499,23 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn planner_failure_stops_capture_with_the_specific_saved_scene_reason() {
+        let reason = "Saved tour planner: 2/16 routes failed: chunk [-18, -7] is unfinished";
+        let status = format!(
+            "Saved worlds [####......]\nNow: Checking camera routes\nLatest status: {reason}\nRecent activity:\n+00:00 · route rejected"
+        );
+
+        assert_eq!(
+            terminal_saved_scene_failure(Some(&status)),
+            Some(reason.to_owned())
+        );
+        assert_eq!(
+            terminal_saved_scene_failure(Some("Saved worlds [###.......]\nNow: Reading chunks")),
+            None
+        );
+    }
 
     #[test]
     fn capture_render_metadata_records_cell_pixel_dimensions_and_zoom() {

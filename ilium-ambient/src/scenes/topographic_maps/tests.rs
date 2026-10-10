@@ -147,6 +147,95 @@ fn world_loading_retries_after_shared_worker_capacity_returns() {
 }
 
 #[test]
+fn failed_world_loader_retries_after_backoff() {
+    use crate::resources::WorkerCost;
+    use crate::source::Worker;
+    use std::sync::mpsc;
+    use std::time::Instant;
+
+    let (mut execution, resources) = crate::resources::isolated_test_resources();
+    let env = SceneEnv::for_test(std::env::temp_dir(), resources.clone());
+    let mut scene = TopographicMapsScene::new(
+        &TopographicMapsSettings {
+            body: BodyChoice::CycleReal,
+            ..Default::default()
+        },
+        &env,
+    );
+    scene.advance_loading(0.0);
+    let initial_ticket = scene
+        .loading
+        .as_ref()
+        .unwrap()
+        ._worker
+        .join_observer()
+        .unwrap();
+    render_loaded(&mut scene, 0.0, 80, 24);
+    initial_ticket
+        .join_until(Instant::now() + Duration::from_secs(5))
+        .unwrap();
+    let retained_world = scene.current.as_ref().unwrap().id;
+    let next_time = f64::from(scene.settings.body_seconds);
+    let desired = scene.desired_world(next_time);
+    assert_ne!(desired, retained_world);
+    let (sender, receiver) = mpsc::channel();
+    assert!(sender
+        .send(Err("injected world-load failure".to_owned()))
+        .is_ok());
+    let failed_worker = Worker::start_admitted(
+        "topography-failure-fixture",
+        resources
+            .reserve_worker(WorkerCost {
+                threads: 1,
+                resident_bytes: HEIGHTFIELD_WORKER_BYTES,
+            })
+            .unwrap(),
+        |_| {},
+    )
+    .unwrap();
+    scene.loading = Some(Loading {
+        id: desired,
+        receiver,
+        _worker: failed_worker,
+    });
+
+    scene.advance_loading(next_time);
+    assert!(scene.loading.is_none());
+    assert!(scene.failed.is_some());
+    assert_eq!(scene.current.as_ref().unwrap().id, retained_world);
+    assert!(scene
+        .status()
+        .unwrap()
+        .contains("injected world-load failure"));
+    scene.advance_loading(next_time);
+    assert!(
+        scene.loading.is_none(),
+        "failure retries must honor backoff"
+    );
+
+    scene.retry_after = Some(Instant::now() - WORLD_LOAD_RETRY_BACKOFF);
+    scene.advance_loading(next_time);
+    let retry_ticket = scene
+        .loading
+        .as_ref()
+        .expect("a terminal loader failure should be retried")
+        ._worker
+        .join_observer()
+        .unwrap();
+    render_loaded(&mut scene, next_time, 80, 24);
+    assert_eq!(scene.current.as_ref().unwrap().id, desired);
+    retry_ticket
+        .join_until(Instant::now() + Duration::from_secs(5))
+        .unwrap();
+
+    drop(scene);
+    execution.request_shutdown(ilium_execution::ShutdownMode::Cancel);
+    execution
+        .join_until_background(Instant::now() + Duration::from_secs(5))
+        .unwrap();
+}
+
+#[test]
 fn fictional_worlds_are_deterministic_and_seed_dependent() {
     let never = AtomicBool::new(false);
     for world in WorldId::FICTIONAL {

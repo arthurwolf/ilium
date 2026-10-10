@@ -3,7 +3,7 @@
 use super::address_settings::{AddressProvider, AddressSearchSettings};
 use crate::{
     location::GeoLocation,
-    source::{default_cache_dir, provider_host_lease, USER_AGENT},
+    source::{default_cache_dir, provider_host_lease, ProviderHostLease, USER_AGENT},
 };
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
@@ -123,7 +123,7 @@ fn search_with_cache_using(
     query: &str,
     cache_dir: &Path,
     lease_dir: &Path,
-    fetch_response: impl FnOnce(&str) -> Result<Vec<u8>, String>,
+    fetch_response: impl FnOnce(&str, &ProviderHostLease) -> Result<Vec<u8>, String>,
 ) -> Result<Vec<GeoLocation>, String> {
     let query = query.trim();
     if query.is_empty() || query.len() > MAX_QUERY_BYTES || query.chars().any(char::is_control) {
@@ -164,7 +164,7 @@ fn search_with_cache_using(
     validate_address_uri(&url)?;
     // Hold a process-safe host lease through fetch and cache publication. A
     // second client rechecks the shared cache after it acquires this lease.
-    let _lease = provider_host_lease(&url, lease_dir, SPACING, Instant::now() + TIMEOUT, None)
+    let lease = provider_host_lease(&url, lease_dir, SPACING, Instant::now() + TIMEOUT, None)
         .map_err(|error| format!("Address service admission: {error}"))?;
     if let Some(mut results) = read_cache(&path, settings.provider, &url) {
         if settings.provider == AddressProvider::CityOnly {
@@ -172,7 +172,7 @@ fn search_with_cache_using(
         }
         return Ok(results);
     }
-    let bytes = fetch_response(&url)?;
+    let bytes = fetch_response(&url, &lease)?;
     let mut results = parse_response(settings.provider, &bytes)?;
     if settings.provider == AddressProvider::CityOnly {
         rank_city_results(&mut results, query);
@@ -196,7 +196,7 @@ fn request_url(provider: AddressProvider, endpoint: &str, query: &str) -> Result
             format!("?name={escaped}&count={MAX_RESULTS}&language=en&format=json")
         }
         AddressProvider::Disabled => {
-            return Err("This address provider has no HTTPS request".into())
+            return Err("This address provider has no HTTPS request".into());
         }
     };
     let url = format!("{endpoint}{suffix}");
@@ -257,7 +257,7 @@ fn validate_address_uri(url: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn fetch(url: &str) -> Result<Vec<u8>, String> {
+fn fetch(url: &str, lease: &ProviderHostLease) -> Result<Vec<u8>, String> {
     validate_address_uri(url)?;
     let gate = GATE.get_or_init(Default::default);
     let _permit = gate.reserve(Instant::now())?;
@@ -283,6 +283,12 @@ fn fetch(url: &str) -> Result<Vec<u8>, String> {
         .get("retry-after")
         .and_then(|value| value.to_str().ok());
     if let Some(seconds) = cooldown_seconds(status, retry_after) {
+        if let Err(error) =
+            lease.defer_for(Duration::from_secs(seconds.max(ERROR_COOLDOWN.as_secs())))
+        {
+            gate.defer(Instant::now(), u64::MAX);
+            return Err(format!("Address service cooldown persistence: {error}"));
+        }
         gate.defer(Instant::now(), seconds);
     }
     if !(200..300).contains(&status) {
@@ -702,8 +708,10 @@ mod tests {
     #[test]
     fn process_safe_admission_rechecks_address_cache_before_second_provider_call() {
         let cache = tempfile::tempdir().unwrap();
-        let mut settings = AddressSearchSettings::default();
-        settings.photon_endpoint = "https://address-cache-race.invalid/api/".into();
+        let settings = AddressSearchSettings {
+            photon_endpoint: "https://address-cache-race.invalid/api/".into(),
+            ..AddressSearchSettings::default()
+        };
         let (entered_tx, entered_rx) = std::sync::mpsc::channel();
         let (release_tx, release_rx) = std::sync::mpsc::channel();
         let first_cache = cache.path().to_path_buf();
@@ -715,7 +723,7 @@ mod tests {
                 "Paris",
                 &first_cache,
                 &first_lease_dir,
-                move |_| {
+                move |_, _lease| {
                     entered_tx.send(()).unwrap();
                     release_rx.recv().unwrap();
                     Ok(ADDRESS_SAMPLE.as_bytes().to_vec())
@@ -726,9 +734,13 @@ mod tests {
         let second_cache = cache.path().to_path_buf();
         let second_lease_dir = cache.path().join("provider-admission");
         let second = std::thread::spawn(move || {
-            search_with_cache_using(&settings, "Paris", &second_cache, &second_lease_dir, |_| {
-                panic!("address cache hit must suppress duplicate provider request")
-            })
+            search_with_cache_using(
+                &settings,
+                "Paris",
+                &second_cache,
+                &second_lease_dir,
+                |_, _lease| panic!("address cache hit must suppress duplicate provider request"),
+            )
         });
         release_tx.send(()).unwrap();
         assert_eq!(first.join().unwrap().unwrap().len(), 5);

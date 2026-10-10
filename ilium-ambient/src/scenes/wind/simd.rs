@@ -315,6 +315,7 @@ fn selected_path() -> KernelPath {
     }
 }
 
+#[allow(clippy::too_many_arguments)] // Scalar oracle inputs mirror the explicit simulation state.
 fn scalar_lane(
     state: &mut State,
     inverse_masses: &[f32],
@@ -490,6 +491,7 @@ fn wrap_any(value: f32, extent: f32) -> f32 {
     }
 }
 
+#[allow(clippy::too_many_arguments)] // Scalar reference preserves parity with target-feature kernels.
 fn scalar_step(
     state: &mut State,
     inverse_masses: &[f32],
@@ -533,6 +535,7 @@ mod x86 {
     // Fused arithmetic changes rounding slightly; the dense-frame tests bound
     // accumulated state error and compare the resulting raster occupancy.
     #[target_feature(enable = "avx2,fma")]
+    #[allow(clippy::too_many_arguments)] // SIMD registers are independent lane inputs; bundling adds loads/copies.
     unsafe fn integrate_avx2_fma(
         x: __m256,
         y: __m256,
@@ -567,6 +570,7 @@ mod x86 {
     }
 
     #[target_feature(enable = "avx512f,fma")]
+    #[allow(clippy::too_many_arguments)] // SIMD registers are independent lane inputs; bundling adds loads/copies.
     unsafe fn integrate_avx512_fma(
         x: __m512,
         y: __m512,
@@ -601,6 +605,7 @@ mod x86 {
     }
 
     #[target_feature(enable = "avx2")]
+    #[allow(clippy::too_many_arguments)] // Preserve scalar/SIMD kernel input parity.
     pub(super) unsafe fn step_avx2(
         state: &mut State,
         use_fma: bool,
@@ -904,6 +909,7 @@ mod x86 {
     }
 
     #[inline]
+    #[allow(clippy::too_many_arguments)] // Scalar block mirrors the vector kernel contract.
     fn scalar_block(
         state: &mut State,
         masses: &[f32],
@@ -987,6 +993,7 @@ mod x86 {
 
     // AVX-512 is runtime-selected after Rust's feature detector reports AVX-512F.
     #[target_feature(enable = "avx512f")]
+    #[allow(clippy::too_many_arguments)] // Preserve scalar/SIMD kernel input parity.
     pub(super) unsafe fn step_avx512(
         state: &mut State,
         use_fma: bool,
@@ -1261,9 +1268,9 @@ mod tests {
     fn swept_collision_probes_intermediate_cells_in_both_directions_and_across_wrap() {
         let (width, height) = (8, 4);
         let mut mask = vec![0; width * height];
-        mask[1 * width + 2] = 1;
-        mask[1 * width] = 1;
-        mask[1 * width + width - 1] = 1;
+        mask[width + 2] = 1;
+        mask[width] = 1;
+        mask[width + width - 1] = 1;
         mask[3 * width + 2] = 1;
         let mut packed_mask = Vec::new();
         fill_packed_collision_mask(&mut packed_mask, &mask);
@@ -1944,7 +1951,7 @@ mod tests {
 
     #[test]
     fn scalar_lane_bounces_when_a_fast_dot_crosses_an_occupied_cell() {
-        let mut dots = vec![Dot {
+        let dots = vec![Dot {
             x: 1.9,
             y: 1.5,
             vx: 45.0,
@@ -1954,7 +1961,7 @@ mod tests {
         let masses = [1.0];
         let force = vec![[0.0, 0.0]; 8 * 4];
         let mut mask = vec![0; 8 * 4];
-        mask[1 * 8 + 2] = 1;
+        mask[8 + 2] = 1;
         let mut state = State::default();
         assert!(state.prepare(&dots, &masses, &force, &mask, 8, 4));
 
@@ -1997,7 +2004,7 @@ mod tests {
         let masses = [1.0; 16];
         let force = vec![[0.0, 0.0]; 8 * 4];
         let mut mask = vec![0; 8 * 4];
-        mask[1 * 8 + 2] = 1;
+        mask[8 + 2] = 1;
         let mut state = State::default();
 
         assert!(state
@@ -2241,7 +2248,7 @@ mod tests {
         let masses = vec![1.0; count];
         let force = vec![[0.0, 0.0]; 8 * 4];
         let mut mask = vec![0; 8 * 4];
-        mask[1 * 8 + 2] = 1;
+        mask[8 + 2] = 1;
         let mut state = State::default();
         assert!(state.prepare(&dots, &masses, &force, &mask, 8, 4));
 
@@ -2313,7 +2320,7 @@ mod tests {
         let masses = vec![1.0; count];
         let force = vec![[0.0, 0.0]; 8 * 4];
         let mut mask = vec![0; 8 * 4];
-        mask[1 * 8 + 2] = 1;
+        mask[8 + 2] = 1;
         let mut actual_state = State::default();
         let mut expected_state = State::default();
         assert!(actual_state.prepare(&dots, &masses, &force, &mask, 8, 4));

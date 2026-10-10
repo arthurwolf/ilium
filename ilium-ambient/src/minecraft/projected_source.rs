@@ -104,6 +104,7 @@ pub fn qualify(
     )
 }
 
+#[allow(clippy::too_many_arguments)] // Preserve the public qualification boundary's explicit authorities.
 pub fn qualify_with_progress(
     base: &PreparedMap,
     bound: &BoundMap,
@@ -148,6 +149,7 @@ pub fn qualify_pinned(
     )
 }
 
+#[allow(clippy::too_many_arguments)] // Preserve the pinned-source qualification contract.
 pub fn qualify_pinned_with_progress(
     base: &PreparedMap,
     bound: &BoundMap,
@@ -170,6 +172,7 @@ pub fn qualify_pinned_with_progress(
     )
 }
 
+#[allow(clippy::too_many_arguments)] // Shared implementation mirrors both explicit public boundaries.
 fn qualify_source(
     base: &PreparedMap,
     bound: &BoundMap,

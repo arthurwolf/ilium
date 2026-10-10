@@ -338,20 +338,17 @@ mod tests {
         assert_eq!(result.chunks.len(), 3);
         let inventory = updates
             .iter()
-            .filter(|update| update.stage == ScanStage::RegionDirectory)
-            .last()
+            .rfind(|update| update.stage == ScanStage::RegionDirectory)
             .expect("directory enumeration reports its final measured total");
         assert_eq!((inventory.completed, inventory.total), (3, Some(3)));
         let headers = updates
             .iter()
-            .filter(|update| update.stage == ScanStage::RegionHeaders)
-            .last()
+            .rfind(|update| update.stage == ScanStage::RegionHeaders)
             .expect("region header reads report their final measured total");
         assert_eq!((headers.completed, headers.total), (2, Some(2)));
         let slots = updates
             .iter()
-            .filter(|update| update.stage == ScanStage::ChunkSlots)
-            .last()
+            .rfind(|update| update.stage == ScanStage::ChunkSlots)
             .expect("chunk-slot indexing reports its final measured total");
         assert_eq!((slots.completed, slots.total), (2048, Some(2048)));
     }
@@ -505,8 +502,7 @@ mod tests {
         assert_eq!(result.chunks.len(), 1);
         let terminal = updates
             .iter()
-            .filter(|update| update.stage == ScanStage::ChunkSlots)
-            .last()
+            .rfind(|update| update.stage == ScanStage::ChunkSlots)
             .expect("pinned scan reports completed slot work");
         assert_eq!((terminal.completed, terminal.total), (2048, Some(2048)));
     }

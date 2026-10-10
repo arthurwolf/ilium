@@ -625,7 +625,7 @@ mod palette_scene_tests {
             }
         }
 
-        let mut scene = PaletteScene::new(Box::new(EvidenceScene), ScenePalette::default());
+        let scene = PaletteScene::new(Box::new(EvidenceScene), ScenePalette::default());
         let evidence = scene
             .saved_world_frame_evidence()
             .expect("saved frame should retain its render evidence");

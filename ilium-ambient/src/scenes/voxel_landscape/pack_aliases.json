@@ -1,5 +1,13 @@
 {
   "aliases": {
+    "java-default-1.19.3": {
+      "minecraft:block/wildflowers": [
+        "assets/minecraft/textures/block/dandelion.png"
+      ],
+      "minecraft:block/wildflowers_stem": [
+        "assets/minecraft/textures/block/tall_grass_bottom.png"
+      ]
+    },
     "goodvibes": {
       "minecraft:block/acacia_log": [
         "textures/block/acacia_log.png"

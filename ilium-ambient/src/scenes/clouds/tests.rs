@@ -5,7 +5,7 @@ use crate::debug::{render_frame, Rendered};
 use crate::raster::DitherMode;
 use crate::scenes::night_lights::tiles::test_support::FakeFetcher;
 use crate::scenes::night_lights::tiles::{tile_bounds, GeoGrid, TileError, TileId, UtcTime};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::SystemTime;
 
 // --- synthetic weather ---------------------------------------------------------
@@ -40,6 +40,103 @@ fn query<'a>(url: &'a str, key: &str) -> &'a str {
     let marker = format!("{key}=");
     let start = url.find(&marker).unwrap() + marker.len();
     url[start..].split('&').next().unwrap()
+}
+
+#[test]
+fn local_cloud_grid_is_bounded_for_extreme_terminal_aspect_ratios() {
+    let (width, height) = local_grid_size(80, usize::MAX / 2);
+    assert!(width.checked_mul(height).unwrap() <= MAX_CLOUD_GRID_PIXELS);
+    assert!(height >= 32);
+}
+
+#[test]
+fn cloud_worker_admission_refusal_is_visible_and_retryable() {
+    let (execution, resources) = crate::resources::isolated_test_resources();
+    let mut held = Vec::new();
+    while let Ok(reservation) = resources.reserve_worker(crate::resources::WorkerCost {
+        threads: 1,
+        resident_bytes: 1,
+    }) {
+        held.push(reservation);
+        assert!(held.len() < 64, "isolated worker quota did not fill");
+    }
+    assert!(!held.is_empty());
+
+    let cache = tempfile::tempdir().unwrap();
+    let env = SceneEnv::for_test(cache.path().to_path_buf(), resources);
+    let requests = Arc::new(AtomicUsize::new(0));
+    let observed_requests = Arc::clone(&requests);
+    let fetcher = Arc::new(FakeFetcher::new(move |_, _| {
+        observed_requests.fetch_add(1, Ordering::Relaxed);
+        Err(TileError::Network("offline".into()))
+    }));
+    let mut scene = CloudsScene::with_parts(
+        &CloudsSettings::default(),
+        &env,
+        fetcher,
+        fixed_now(),
+        no_land(),
+    );
+
+    render_frame(&mut scene, 80, 24, Duration::ZERO);
+    assert!(scene.worker.is_none());
+    assert!(scene
+        .problem
+        .as_deref()
+        .is_some_and(|problem| problem.contains("admission refused")));
+    assert_eq!(requests.load(Ordering::Relaxed), 0);
+
+    drop(held);
+    render_frame(&mut scene, 80, 24, Duration::ZERO);
+    let worker = scene.worker.take().expect("worker admission should retry");
+    let retirement = worker.request_stop().expect("worker has a join ticket");
+    drop(scene.receiver.take());
+    retirement
+        .join_until(std::time::Instant::now() + Duration::from_secs(3))
+        .unwrap();
+    drop(scene);
+    drop(execution);
+}
+
+#[test]
+fn cloud_worker_panic_is_reported_and_does_not_restart_immediately() {
+    let (execution, resources) = crate::resources::isolated_test_resources();
+    let cache = tempfile::tempdir().unwrap();
+    let env = SceneEnv::for_test(cache.path().to_path_buf(), resources);
+    let fetcher = Arc::new(FakeFetcher::new(|_, _| -> Result<Vec<u8>, TileError> {
+        panic!("injected cloud worker failure")
+    }));
+    let mut scene = CloudsScene::with_parts(
+        &CloudsSettings::default(),
+        &env,
+        fetcher,
+        fixed_now(),
+        no_land(),
+    );
+
+    render_frame(&mut scene, 80, 24, Duration::ZERO);
+    let ticket = scene
+        .worker
+        .as_ref()
+        .and_then(Worker::join_observer)
+        .expect("started worker ticket");
+    ticket
+        .join_until(std::time::Instant::now() + Duration::from_secs(3))
+        .unwrap();
+    assert_eq!(
+        ticket.exit(),
+        Some(ilium_platform::owned_worker::WorkerExit::Panicked)
+    );
+
+    render_frame(&mut scene, 80, 24, Duration::ZERO);
+    assert!(scene.worker.is_none());
+    assert!(scene
+        .problem
+        .as_deref()
+        .is_some_and(|problem| problem.contains("worker exited unexpectedly")));
+    assert!(scene.worker_retry_after.is_some());
+    drop(scene);
+    drop(execution);
 }
 
 fn wms_map_png(url: &str) -> Vec<u8> {

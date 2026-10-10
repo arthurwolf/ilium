@@ -146,19 +146,6 @@ pub fn prepare_pinned(
     prepare_source(input, Some((source, native_jar)))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::display_work_limit;
-
-    #[test]
-    fn display_work_admission_scales_with_retained_map_chunks() {
-        assert_eq!(display_work_limit(0), 1_000_000);
-        assert_eq!(display_work_limit(160), 17_000_000);
-        assert_eq!(display_work_limit(384), 39_400_000);
-        assert!(display_work_limit(384) > display_work_limit(160));
-    }
-}
-
 fn prepare_source(
     input: Inputs<'_>,
     source: Option<(
@@ -430,4 +417,17 @@ fn prepare_source(
         camera_height,
         _tiles_charge: tiles_charge,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::display_work_limit;
+
+    #[test]
+    fn display_work_admission_scales_with_retained_map_chunks() {
+        assert_eq!(display_work_limit(0), 1_000_000);
+        assert_eq!(display_work_limit(160), 17_000_000);
+        assert_eq!(display_work_limit(384), 39_400_000);
+        assert!(display_work_limit(384) > display_work_limit(160));
+    }
 }

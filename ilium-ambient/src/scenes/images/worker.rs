@@ -478,10 +478,12 @@ fn load_entry(
         &entry.name,
         config.limits,
         (request.max_width, request.max_height),
-        &config.resources,
-        stop,
-        &config.capture_storage,
-        &config.failure_fallback,
+        super::prepared::PreparationEnv {
+            resources: &config.resources,
+            stop,
+            capture_storage: &config.capture_storage,
+            emergency: &config.failure_fallback,
+        },
     )
     .map_err(LoadFailure::Prepared)
 }

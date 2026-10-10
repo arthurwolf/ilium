@@ -6,7 +6,7 @@ use super::{
     poll::Poller,
     series::{self, DataSeries},
 };
-use crate::source::http_get_stoppable;
+use crate::{resources::AmbientResources, source::http_get_stoppable};
 use std::{
     sync::atomic::{AtomicBool, Ordering},
     time::Duration,
@@ -89,11 +89,13 @@ fn get(url: &str, stop: &AtomicBool) -> Result<Vec<u8>, String> {
 }
 
 pub fn graph(
+    resources: &AmbientResources,
     source: &'static GraphSource,
     requested_seconds: u64,
     window_minutes: i32,
 ) -> Result<Poller<DataSeries>, String> {
     Poller::start(
+        resources,
         "live-graph",
         Duration::from_secs(requested_seconds),
         Duration::from_secs(source.minimum_poll_seconds),
@@ -185,8 +187,12 @@ fn merge_candles(data: &mut DataSeries, start_ms: i64, end_ms: i64) {
         .collect();
 }
 
-pub fn earthquakes(requested_seconds: u64) -> Result<Poller<Vec<Earthquake>>, String> {
+pub fn earthquakes(
+    resources: &AmbientResources,
+    requested_seconds: u64,
+) -> Result<Poller<Vec<Earthquake>>, String> {
     Poller::start(
+        resources,
         "live-earthquakes",
         Duration::from_secs(requested_seconds),
         Duration::from_secs(60),
@@ -204,8 +210,12 @@ pub fn earthquakes(requested_seconds: u64) -> Result<Poller<Vec<Earthquake>>, St
 /// Digitraffic reports received AIS positions around Finnish waters; it is
 /// not a global ship inventory. ureq's default gzip feature supplies the
 /// mandatory compressed transfer and bounds decompressed bytes in http_get.
-pub fn boats(requested_seconds: u64) -> Result<Poller<Vec<Position>>, String> {
+pub fn boats(
+    resources: &AmbientResources,
+    requested_seconds: u64,
+) -> Result<Poller<Vec<Position>>, String> {
     positions(
+        resources,
         "live-boats",
         BOATS,
         requested_seconds,
@@ -216,8 +226,12 @@ pub fn boats(requested_seconds: u64) -> Result<Poller<Vec<Position>>, String> {
 
 /// Anonymous OpenSky grants 400 daily credits. An unfiltered world query
 /// costs four: a fifteen-minute request floor stays below that daily budget.
-pub fn aircraft(requested_seconds: u64) -> Result<Poller<Vec<Position>>, String> {
+pub fn aircraft(
+    resources: &AmbientResources,
+    requested_seconds: u64,
+) -> Result<Poller<Vec<Position>>, String> {
     positions(
+        resources,
         "live-aircraft",
         AIRCRAFT,
         requested_seconds,
@@ -227,6 +241,7 @@ pub fn aircraft(requested_seconds: u64) -> Result<Poller<Vec<Position>>, String>
 }
 
 fn positions(
+    resources: &AmbientResources,
     name: &str,
     url: &'static str,
     requested: u64,
@@ -234,6 +249,7 @@ fn positions(
     decode: fn(&[u8]) -> Result<parse::Decoded<Position>, String>,
 ) -> Result<Poller<Vec<Position>>, String> {
     Poller::start(
+        resources,
         name,
         Duration::from_secs(requested),
         Duration::from_secs(minimum),

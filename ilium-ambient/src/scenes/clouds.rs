@@ -15,6 +15,7 @@ use self::worker::{CloudFrame, FrameSet, Job, Update};
 use crate::control::{self, Control, ControlValue, SceneSettings};
 use crate::location::GeoLocation;
 use crate::raster::smoothstep;
+use crate::resources::{AmbientResources, WorkerCost};
 use crate::scene::{Frame, Scene, SceneEnv};
 use crate::scenes::night_lights::projection::{self, DotTable, Projection, View};
 use crate::scenes::night_lights::tiles::{system_clock, GeoBox, HttpFetcher, NowFn, TileFetcher};
@@ -24,7 +25,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -423,11 +424,28 @@ pub(crate) fn loop_position(
 // ---------------------------------------------------------------------------
 // Scene
 
+// At most 24 RGB+luma grids of 1,048,576 pixels (~96 MiB), plus a replacement
+// frame set and decoder working memory during refresh.
+const CLOUDS_WORKER_BYTES: usize = 384 * 1024 * 1024;
+const UPDATE_QUEUE_CAPACITY: usize = 1;
+const MAX_CLOUD_GRID_PIXELS: usize = 1_048_576;
+const WORKER_FAILURE_BACKOFF: Duration = Duration::from_secs(5);
+
+fn local_grid_size(dots_w: usize, dots_h: usize) -> (usize, usize) {
+    let width = dots_w.clamp(64, 960);
+    let requested_height = (width as f64 * dots_h as f64 / dots_w.max(1) as f64).round() as usize;
+    let height = requested_height
+        .max(32)
+        .min(MAX_CLOUD_GRID_PIXELS / width.max(1));
+    (width, height)
+}
+
 type LandFn = Box<dyn Fn(f64, f64) -> bool + Send>;
 
 pub struct CloudsScene {
     // Declared first so the worker is stopped before anything else is dropped.
     worker: Option<Worker>,
+    resources: AmbientResources,
     settings: CloudsSettings,
     location: GeoLocation,
     cache_dir: PathBuf,
@@ -443,6 +461,7 @@ pub struct CloudsScene {
     set: Option<Arc<FrameSet>>,
     progress: Option<String>,
     problem: Option<String>,
+    worker_retry_after: Option<Instant>,
     shown_label: Option<String>,
     located: Option<(View, Arc<DotTable>)>,
     palette: ScenePalette,
@@ -497,6 +516,7 @@ impl CloudsScene {
     ) -> Self {
         Self {
             worker: None,
+            resources: env.resources.clone(),
             settings: settings.normalized(),
             location: env.location.normalized(),
             cache_dir: env.cache_dir.clone(),
@@ -509,6 +529,7 @@ impl CloudsScene {
             set: None,
             progress: None,
             problem: None,
+            worker_retry_after: None,
             shown_label: None,
             located: None,
             palette: env.palette.clone(),
@@ -536,16 +557,32 @@ impl CloudsScene {
             dots_w,
             dots_h,
         );
-        let width = dots_w.clamp(64, 960);
-        let height = (width as f64 * dots_h as f64 / dots_w.max(1) as f64).round() as usize;
-        (bbox, width, height.max(32))
+        let (width, height) = local_grid_size(dots_w, dots_h);
+        (bbox, width, height)
     }
 
     fn ensure_worker(&mut self, dots_w: usize, dots_h: usize) {
+        self.observe_worker_exit();
         if self.started || dots_w == 0 || dots_h == 0 {
             return;
         }
-        self.started = true;
+        if self
+            .worker_retry_after
+            .is_some_and(|retry_after| Instant::now() < retry_after)
+        {
+            return;
+        }
+        self.worker_retry_after = None;
+        let reservation = match self.resources.reserve_worker(WorkerCost {
+            threads: 1,
+            resident_bytes: CLOUDS_WORKER_BYTES,
+        }) {
+            Ok(reservation) => reservation,
+            Err(error) => {
+                self.problem = Some(format!("Clouds worker admission refused: {error:?}"));
+                return;
+            }
+        };
         let (bbox, grid_width, grid_height) = self.plan_view(dots_w, dots_h);
         let source = choose_source(
             self.settings.source,
@@ -565,12 +602,39 @@ impl CloudsScene {
             fetcher: Arc::clone(&self.fetcher),
             now: Arc::clone(&self.now),
         };
-        let (sender, receiver) = mpsc::channel();
-        self.receiver = Some(receiver);
-        self.view_box = Some(bbox);
-        self.worker = Some(Worker::spawn("clouds", move |stop| {
+        let (sender, receiver) = mpsc::sync_channel(UPDATE_QUEUE_CAPACITY);
+        let worker = Worker::start_admitted("clouds", reservation, move |stop| {
             worker::run_worker(job, sender, stop);
-        }));
+        });
+        match worker {
+            Ok(worker) => {
+                self.started = true;
+                self.receiver = Some(receiver);
+                self.view_box = Some(bbox);
+                self.worker = Some(worker);
+                self.problem = None;
+            }
+            Err(error) => {
+                self.problem = Some(format!("Clouds worker could not start: {error}"));
+            }
+        }
+    }
+
+    fn observe_worker_exit(&mut self) {
+        let exit = self
+            .worker
+            .as_ref()
+            .and_then(Worker::join_observer)
+            .and_then(|ticket| ticket.exit());
+        let Some(exit) = exit else { return };
+        self.worker.take();
+        self.receiver = None;
+        self.started = false;
+        self.progress = None;
+        self.worker_retry_after = Some(Instant::now() + WORKER_FAILURE_BACKOFF);
+        self.problem = Some(format!(
+            "Clouds worker exited unexpectedly ({exit:?}); retrying shortly"
+        ));
     }
 
     fn apply(&mut self, update: Update) {

@@ -102,8 +102,43 @@ fn direct_subpixel_scaling_preserves_legacy_raster_mapping() {
             frame.raster.dots.fill(0.0);
             WindScene::draw_dots_deduplicated(&mut frame, &[dot], &mut Vec::new());
             assert_eq!(frame.raster.dots, scalar_pixels, "dense path ({x}, {y})");
+
+            frame.raster.dots.fill(0.0);
+            WindScene::draw_positions_deduplicated_from_sim(
+                &mut frame,
+                std::iter::once((dot.x, dot.y)),
+                &mut Vec::new(),
+            );
+            assert_eq!(
+                frame.raster.dots, scalar_pixels,
+                "validated simulation fast path ({x}, {y})"
+            );
         }
     }
+}
+
+#[test]
+fn simulation_raster_fast_path_handles_an_empty_screen() {
+    let mut raster = Raster::default();
+    raster.resize(0, 0);
+    let mut cell_colors = Vec::new();
+    let mut frame = Frame {
+        raster: &mut raster,
+        cell_colors: &mut cell_colors,
+        width: 0,
+        height: 0,
+        time: Duration::ZERO,
+        wall: Duration::ZERO,
+        now: SystemTime::UNIX_EPOCH,
+    };
+
+    WindScene::draw_positions_deduplicated_from_sim(
+        &mut frame,
+        std::iter::once((0.0, 0.0)),
+        &mut Vec::new(),
+    );
+
+    assert!(frame.raster.dots.is_empty());
 }
 
 #[test]

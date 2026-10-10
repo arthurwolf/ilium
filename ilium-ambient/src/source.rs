@@ -205,6 +205,23 @@ const PROVIDER_HOST_SLOTS: u64 = 64;
 /// the complete request, and the timestamp survives process restarts.
 pub(crate) struct ProviderHostLease {
     _lock: ExclusiveFileLock,
+    state_dir: PathBuf,
+    cooldown_name: std::ffi::OsString,
+}
+
+impl ProviderHostLease {
+    /// Persist a provider-directed backoff while this host's admission lock is
+    /// still held, so every Ilium client observes the same retry boundary.
+    pub(crate) fn defer_for(&self, delay: Duration) -> Result<(), FetchError> {
+        let directory =
+            secure_fs::NoFollowDirectory::open_root(&self.state_dir).map_err(|error| {
+                FetchError::Request(format!("provider cooldown directory: {error}"))
+            })?;
+        let previous = read_last_request(&directory, &self.cooldown_name)?;
+        let until = epoch_millis()?.saturating_add(delay.as_millis());
+        let until = previous.map_or(until, |previous| previous.max(until));
+        write_last_request(&self.state_dir, &self.cooldown_name, until)
+    }
 }
 
 fn host_of(url: &str) -> String {
@@ -238,7 +255,7 @@ fn read_last_request(
         Err(error) => {
             return Err(FetchError::Request(format!(
                 "provider admission read: {error}"
-            )))
+            )));
         }
     };
     secure_fs::restrict_open_file_to_owner(&file)
@@ -299,6 +316,7 @@ pub(crate) fn provider_host_lease(
     let key = host_key(&host) % PROVIDER_HOST_SLOTS;
     let lock_path = state_dir.join(format!("provider-{key:016x}.lock"));
     let state_name = std::ffi::OsString::from(format!("provider-{key:016x}.time"));
+    let cooldown_name = std::ffi::OsString::from(format!("provider-{key:016x}.cooldown"));
     loop {
         if stop.is_some_and(|flag| flag.load(Ordering::Relaxed)) {
             return Err(FetchError::Cancelled);
@@ -321,23 +339,27 @@ pub(crate) fn provider_host_lease(
             FetchError::Request(format!("provider admission directory: {error}"))
         })?;
         let previous = read_last_request(&directory, &state_name)?;
+        let cooldown_until = read_last_request(&directory, &cooldown_name)?;
         let clock_now = epoch_millis()?;
-        if let Some(previous) = previous {
-            let spacing_ms = spacing.as_millis();
-            let ready_at = previous.saturating_add(spacing_ms);
-            if ready_at > clock_now {
-                let wait =
-                    Duration::from_millis((ready_at - clock_now).min(u128::from(u64::MAX)) as u64);
-                if wait >= deadline.saturating_duration_since(Instant::now()) {
-                    return Err(FetchError::Timeout);
-                }
-                std::thread::sleep(wait.min(Duration::from_millis(20)));
-                drop(lock);
-                continue;
+        let spacing_ready_at =
+            previous.map(|previous| previous.saturating_add(spacing.as_millis()));
+        let ready_at = spacing_ready_at.into_iter().chain(cooldown_until).max();
+        if let Some(ready_at) = ready_at.filter(|ready_at| *ready_at > clock_now) {
+            let wait =
+                Duration::from_millis((ready_at - clock_now).min(u128::from(u64::MAX)) as u64);
+            if wait >= deadline.saturating_duration_since(Instant::now()) {
+                return Err(FetchError::Timeout);
             }
+            std::thread::sleep(wait.min(Duration::from_millis(20)));
+            drop(lock);
+            continue;
         }
         write_last_request(state_dir, &state_name, clock_now)?;
-        return Ok(ProviderHostLease { _lock: lock });
+        return Ok(ProviderHostLease {
+            _lock: lock,
+            state_dir: state_dir.to_path_buf(),
+            cooldown_name,
+        });
     }
 }
 
@@ -719,7 +741,7 @@ fn read_fresh_cache(
         .and_then(|modified| modified.elapsed().ok());
     if let Some(age) = cached_age {
         if age <= max_age {
-            match read_bounded_file(&path, max_bytes) {
+            match read_bounded_file(path, max_bytes) {
                 Ok(bytes) => return Ok(Some(bytes)),
                 Err(FetchError::TooLarge(limit)) => return Err(FetchError::TooLarge(limit)),
                 Err(_) => {}
@@ -863,13 +885,42 @@ mod tests {
     }
 
     #[test]
-    fn host_lease_refuses_requests_during_a_shared_provider_cooldown() {
+    fn host_lease_refuses_same_host_requests_during_a_shared_provider_cooldown() {
         let url = "https://cooldown-expiry.invalid/data";
+        let same_host_url = "https://cooldown-expiry.invalid/another-endpoint";
         let directory = tempfile::tempdir().unwrap();
         let key = host_key(&host_of(url)) % PROVIDER_HOST_SLOTS;
         let cooldown_name = std::ffi::OsString::from(format!("provider-{key:016x}.cooldown"));
         let retry_at = epoch_millis().unwrap() + 5_000;
         write_last_request(directory.path(), &cooldown_name, retry_at).unwrap();
+
+        assert!(matches!(
+            provider_host_lease(
+                same_host_url,
+                directory.path(),
+                Duration::ZERO,
+                Instant::now() + Duration::from_millis(10),
+                None,
+            ),
+            Err(FetchError::Timeout)
+        ));
+    }
+
+    #[test]
+    fn provider_lease_persists_cooldown_before_releasing_host_ownership() {
+        let url = "https://provider-cooldown-write.invalid/data";
+        let directory = tempfile::tempdir().unwrap();
+        let lease = provider_host_lease(
+            url,
+            directory.path(),
+            Duration::ZERO,
+            Instant::now() + Duration::from_secs(1),
+            None,
+        )
+        .unwrap();
+        lease.defer_for(Duration::from_secs(5)).unwrap();
+        lease.defer_for(Duration::from_secs(1)).unwrap();
+        drop(lease);
 
         assert!(matches!(
             provider_host_lease(
@@ -881,6 +932,25 @@ mod tests {
             ),
             Err(FetchError::Timeout)
         ));
+    }
+
+    #[test]
+    fn host_lease_allows_requests_after_a_shared_provider_cooldown_expires() {
+        let url = "https://expired-cooldown.invalid/data";
+        let directory = tempfile::tempdir().unwrap();
+        let key = host_key(&host_of(url)) % PROVIDER_HOST_SLOTS;
+        let cooldown_name = std::ffi::OsString::from(format!("provider-{key:016x}.cooldown"));
+        let expired_at = epoch_millis().unwrap().saturating_sub(5_000);
+        write_last_request(directory.path(), &cooldown_name, expired_at).unwrap();
+
+        let lease = provider_host_lease(
+            url,
+            directory.path(),
+            Duration::ZERO,
+            Instant::now() + Duration::from_millis(100),
+            None,
+        );
+        assert!(lease.is_ok(), "expired cooldown should not block admission");
     }
 
     #[test]

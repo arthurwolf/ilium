@@ -3,6 +3,7 @@
 use super::decode::{
     decode_image_cancellable_with_alloc, inspect_dimensions_cancellable, DecodeLimits, DecodedImage,
 };
+use super::prepared::PreparationEnv;
 use crate::resources::{AmbientResources, Stored};
 use ilium_execution::{Job, JobContext, JobCost, JobOutcome, JobPoll, Lane, RejectReason};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -211,23 +212,24 @@ pub(super) fn decode(
     name: &str,
     limits: DecodeLimits,
     target: (u32, u32),
-    resources: &AmbientResources,
-    stop: &Arc<AtomicBool>,
-    capture_storage: &Arc<ilium_execution::StorageAdmission>,
-    emergency: &Arc<Stored<String>>,
+    env: PreparationEnv<'_>,
 ) -> Result<DecodedImage, Arc<Stored<String>>> {
+    let PreparationEnv {
+        resources,
+        stop,
+        capture_storage,
+        emergency,
+    } = env;
     let fail = |message| super::failure::retain(message, resources, stop, emergency, None);
     let source = Arc::new(source);
-    let metadata = inspect_dimensions(source.clone(), limits, resources, stop)
-        .map_err(|message| fail(message))?;
+    let metadata = inspect_dimensions(source.clone(), limits, resources, stop).map_err(&fail)?;
     let dimensions = metadata.dimensions;
     let max_alloc = u64::from(dimensions.0)
         .checked_mul(u64::from(dimensions.1))
         .and_then(|pixels| pixels.checked_mul(6))
         .ok_or_else(|| fail("image decoder allocation cost overflow".to_owned()))?
         .min(1 << 30);
-    let cost = cost(source.view(), dimensions, name.len(), target, max_alloc)
-        .map_err(|message| fail(message))?;
+    let cost = cost(source.view(), dimensions, name.len(), target, max_alloc).map_err(&fail)?;
     let maximum = resources.finite().usage().limits;
     if cost.input_bytes > maximum.input_bytes || cost.result_bytes > maximum.result_bytes {
         return Err(fail(

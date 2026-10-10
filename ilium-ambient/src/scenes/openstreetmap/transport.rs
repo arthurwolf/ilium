@@ -1,6 +1,7 @@
 //! Explicit Overpass transport on an already-admitted OSM worker.
 //! Resolver/rate ownership adapted from the recorded bounded advisor proposal.
 use super::bundle::MAX_JSON_BYTES;
+use crate::source::{default_cache_dir, provider_host_lease};
 use std::{
     io::Read,
     sync::{
@@ -78,6 +79,14 @@ pub fn fetch(url: &str, stop: &AtomicBool) -> Result<Vec<u8>, String> {
     static GATE: OnceLock<Gate> = OnceLock::new();
     let gate = GATE.get_or_init(Gate::default);
     let _permit = gate.reserve(Instant::now())?;
+    let lease = provider_host_lease(
+        url,
+        &default_cache_dir().join("provider-admission"),
+        SPACING,
+        Instant::now() + Duration::from_secs(20),
+        Some(stop),
+    )
+    .map_err(|error| format!("OSM provider admission: {error}"))?;
     let config = ureq::Agent::config_builder()
         .https_only(true)
         .max_redirects(0)
@@ -106,6 +115,10 @@ pub fn fetch(url: &str, stop: &AtomicBool) -> Result<Vec<u8>, String> {
                 .and_then(|value| value.trim().parse::<u64>().ok())
                 .unwrap_or(u64::MAX)
         });
+        if let Err(error) = lease.defer_for(Duration::from_secs(seconds.max(SPACING.as_secs()))) {
+            gate.defer(Instant::now(), u64::MAX);
+            return Err(format!("OSM provider cooldown persistence: {error}"));
+        }
         gate.defer(Instant::now(), seconds);
     }
     if !(200..300).contains(&status) {

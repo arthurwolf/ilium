@@ -23,9 +23,9 @@ impl ChessScene {
     // changes. Monochrome scenes may ignore it. Today `PaletteScene` (scene.rs),
     // which `create_scene` wraps around every scene, shifts this scene's cell
     // colours onto the palette by brightness.
-    pub fn new(settings: &ChessSettings, _env: &SceneEnv) -> Self {
+    pub fn new(settings: &ChessSettings, env: &SceneEnv) -> Self {
         let mut scene = Self::offline(settings);
-        match LiveTv::start() {
+        match LiveTv::start(&env.resources) {
             Ok(live) => scene.live = Some(live),
             Err(error) => scene.startup_error = Some(error),
         }

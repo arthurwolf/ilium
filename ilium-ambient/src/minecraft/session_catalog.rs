@@ -262,6 +262,7 @@ pub fn prepare_repository_pinned(
     )
 }
 
+#[allow(clippy::too_many_arguments)] // Keep source authority, limits, cancellation and progress explicit.
 pub fn prepare_repository_pinned_with_progress(
     root_label: &Path,
     root: Arc<ilium_platform::animation_files::PinnedDirectory>,
@@ -782,6 +783,7 @@ fn inventory_with_progress(
         progress,
     )
 }
+#[cfg(test)]
 fn collect_inventory(
     root: &Path,
     handle: &NoFollowDirectory,

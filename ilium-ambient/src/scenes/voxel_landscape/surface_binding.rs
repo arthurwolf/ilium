@@ -232,7 +232,9 @@ fn transparent_block_medium(id: &ResourceId) -> Option<ResourceId> {
     full_glass.then(|| id.clone())
 }
 fn compatibility_reason(id: &ResourceId) -> Result<Label> {
-    Label::new(&format!("Original Ilium geometry for {id}; selected-pack image required; source-native block model unverified"))
+    Label::new(&format!(
+        "Original Ilium geometry for {id}; selected-pack image required; source-native block model unverified"
+    ))
 }
 fn add_compatibility(
     definitions: &mut DefinitionSet,
@@ -425,7 +427,9 @@ fn request_with_fallback_aliases(
         _ => None,
     };
     if let Some(alternate) = alternate {
-        let reason=Label::new(&format!("Authored selected-pack compatibility: {id} absent; visibly use {alternate}; not native {id} art"))?;
+        let reason = Label::new(&format!(
+            "Authored selected-pack compatibility: {id} absent; visibly use {alternate}; not native {id} art"
+        ))?;
         let alternate = ResourceId::parse(alternate)?;
         candidates.push(TextureCandidate {
             pack: pack.clone(),
@@ -550,7 +554,9 @@ fn apply_generated_plasticator_campfire_animation(
                 MissingAnimation::ExplicitFrames {
                     frames,
                     interpolate: false,
-                    reason: Label::new("Original generated Plasticator campfire fire: eight distinct 16x16 source cells; Ilium compatibility playback at 4 ticks per frame, not pack-authored timing")?,
+                    reason: Label::new(
+                        "Original generated Plasticator campfire fire: eight distinct 16x16 source cells; Ilium compatibility playback at 4 ticks per frame, not pack-authored timing",
+                    )?,
                 },
             )
         }
@@ -561,7 +567,9 @@ fn apply_generated_plasticator_campfire_animation(
             // avoids invented timing while retaining exact selected pixels.
             MissingAnimation::StaticCrop {
                 rect: PixelRect::whole(16, 16),
-                reason: Label::new("Original generated Plasticator lit logs: four pixel-identical 16x16 source cells; Ilium static first-cell crop, not authored timing")?,
+                reason: Label::new(
+                    "Original generated Plasticator lit logs: four pixel-identical 16x16 source cells; Ilium static first-cell crop, not authored timing",
+                )?,
             },
         ),
         _ => return Ok(()),
@@ -781,7 +789,7 @@ struct BindingSources {
 
 enum BindingPackOwner {
     Selected(Vec<LayeredPack>),
-    InstalledNative(crate::minecraft::native_assets::NativeSources),
+    InstalledNative(Box<crate::minecraft::native_assets::NativeSources>),
 }
 
 impl BindingPackOwner {
@@ -829,16 +837,16 @@ impl BindingSources {
                 crate::minecraft::native_assets::Error::Asset(error) => error,
                 error => AssetError::Unsupported(error.to_string()),
             })?;
-            let source_sha256 = Some(native.provenance().native_archive_sha256.clone());
+            let source_sha256 = Some(native.provenance().native_archive_sha256);
             return Ok(Self {
-                pack_owner: BindingPackOwner::InstalledNative(native),
+                pack_owner: BindingPackOwner::InstalledNative(Box::new(native)),
                 limits,
                 budget,
                 source_sha256,
                 goodvibes: false,
                 plasticator: false,
                 exact_plasticator_campfire_source: false,
-                aliases: BTreeMap::new(),
+                aliases: explicit_aliases("java-default-1.19.3")?,
                 fallback_aliases: BTreeMap::new(),
                 fallback_goodvibes: false,
                 fallback_unavailable: false,
@@ -2489,6 +2497,26 @@ mod supplied_tests {
                         if path.as_str() == "assets/minecraft/textures/block/beehive_end.png"
                 )
         }));
+    }
+
+    #[test]
+    fn java_default_aliases_cover_generated_wildflower_materials() {
+        let aliases = explicit_aliases("java-default-1.19.3").unwrap();
+        for (material, expected_path) in [
+            (
+                "minecraft:block/wildflowers",
+                "assets/minecraft/textures/block/dandelion.png",
+            ),
+            (
+                "minecraft:block/wildflowers_stem",
+                "assets/minecraft/textures/block/tall_grass_bottom.png",
+            ),
+        ] {
+            let material = ResourceId::parse(material).unwrap();
+            let candidates = aliases.get(&material).expect("compatibility alias");
+            assert_eq!(candidates.len(), 1);
+            assert_eq!(candidates[0].as_str(), expected_path);
+        }
     }
 
     #[test]

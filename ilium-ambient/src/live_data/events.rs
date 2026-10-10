@@ -310,6 +310,7 @@ mod tests {
     fn feed_refuses_before_starting_when_shared_worker_admission_is_full() {
         let (_execution, resources) = crate::resources::isolated_test_resources();
         let quota = resources.finite().quota_group();
+        let baseline_threads = quota.snapshot().worker_threads;
         let blocker = resources
             .reserve_worker(WorkerCost {
                 threads: 16,
@@ -322,10 +323,10 @@ mod tests {
             Err(error) => error,
         };
         assert!(error.contains("admission unavailable"));
-        assert_eq!(quota.snapshot().worker_threads, 16);
+        assert_eq!(quota.snapshot().worker_threads, baseline_threads + 16);
 
         drop(blocker);
-        assert_eq!(quota.snapshot().worker_threads, 0);
+        assert_eq!(quota.snapshot().worker_threads, baseline_threads);
     }
 
     fn line(id: &str, second: i64, bot: bool) -> Vec<u8> {

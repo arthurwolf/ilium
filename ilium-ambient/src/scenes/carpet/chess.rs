@@ -287,7 +287,7 @@ impl CarpetChess {
         if live {
             if !self.live_started {
                 self.live_started = true;
-                match LiveTv::start() {
+                match LiveTv::start(&self.resources) {
                     Ok(feed) => self.live = Some(feed),
                     Err(error) => self.status_text = Some(error),
                 }

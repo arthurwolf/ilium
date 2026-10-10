@@ -1,6 +1,9 @@
 //! Owned preparation and bounded handoff; the animation thread performs no I/O.
 use super::loader;
-use crate::source::Worker;
+use crate::{
+    resources::{AmbientResources, WorkerCost},
+    source::Worker,
+};
 use std::{
     collections::BTreeSet,
     path::PathBuf,
@@ -62,8 +65,13 @@ pub struct PreparationWorker<T: Send + Sync + 'static> {
 }
 impl<T: Send + Sync + 'static> PreparationWorker<T> {
     pub fn start_with(
+        resources: &AmbientResources,
+        cost: WorkerCost,
         mut prepare: impl FnMut(&Request, &dyn Fn() -> bool) -> Result<T, String> + Send + 'static,
-    ) -> std::io::Result<Self> {
+    ) -> Result<Self, String> {
+        let reservation = resources
+            .reserve_worker(cost)
+            .map_err(|error| format!("saved preparation admission rejected: {error:?}"))?;
         let shared = Arc::new(Shared {
             pending: Mutex::new(Pending {
                 request: None,
@@ -76,7 +84,7 @@ impl<T: Send + Sync + 'static> PreparationWorker<T> {
         });
         let state = Arc::clone(&shared);
         let (wake, receiver) = mpsc::sync_channel(1);
-        let worker = Worker::try_spawn("minecraft-saved", move |stop| {
+        let worker = Worker::start_admitted("minecraft-saved", reservation, move |stop| {
             ilium_platform::thread_priority::lower_current_thread(
                 ilium_platform::thread_priority::WorkerPriority::BelowNormal,
             );
@@ -168,7 +176,8 @@ impl<T: Send + Sync + 'static> PreparationWorker<T> {
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .take();
             drop(output);
-        })?;
+        })
+        .map_err(|error| format!("saved preparation worker failed to start: {error}"))?;
         Ok(Self {
             worker: Some(worker),
             shared,
@@ -275,8 +284,8 @@ impl<T: Send + Sync + 'static> PreparationWorker<T> {
 }
 
 impl PreparationWorker<loader::LoadedWindow> {
-    pub fn start_loader() -> std::io::Result<Self> {
-        Self::start_with(|request, cancelled| {
+    pub fn start_loader(resources: &AmbientResources, cost: WorkerCost) -> Result<Self, String> {
+        Self::start_with(resources, cost, |request, cancelled| {
             loader::load_window(
                 &request.region_directory,
                 &request.chunks,

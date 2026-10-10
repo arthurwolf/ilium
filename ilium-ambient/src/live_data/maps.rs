@@ -1,7 +1,9 @@
 //! Public observed geography: cached coastlines and truthful live markers.
+#[cfg(test)]
+use super::fleet_cache::FleetBatch;
 use super::{
     fetch,
-    fleet_cache::{FleetBatch, FleetFeed, FleetMeta, FleetSource, FleetView}, // Shared source cache and custody.
+    fleet_cache::{FleetFeed, FleetMeta, FleetSource, FleetView}, // Shared source cache and custody.
     fleet_layer::FleetLayer, // Scene-owned preparation orchestration.
     map,
     map_markers::{marker_center, MarkerKey}, // Reuse reviewed pure geometry.
@@ -33,9 +35,13 @@ impl MapKind {
     }
     fn attribution(self) -> &'static str {
         match self {
-            Self::Earthquakes=>"USGS — worldwide reported earthquakes, all reported magnitudes",
-            Self::Aircraft=>"OpenSky — worldwide received airborne positions; coverage is incomplete; anonymous budget limits refresh to 15 min",
-            Self::Boats=>"OpenSeaFeed — incomplete reported AIS reception; position age unavailable", // Default, never a complete physical inventory.
+            Self::Earthquakes => "USGS — worldwide reported earthquakes, all reported magnitudes",
+            Self::Aircraft => {
+                "OpenSky — worldwide received airborne positions; coverage is incomplete; anonymous budget limits refresh to 15 min"
+            }
+            Self::Boats => {
+                "OpenSeaFeed — incomplete reported AIS reception; position age unavailable"
+            } // Default, never a complete physical inventory.
         }
     } // End block.
 } // End block.
@@ -67,9 +73,22 @@ impl BoatSource {
     } // Lead with limitations.
     fn info(self) -> [(&'static str, &'static str, &'static str); 6] {
         // Short individual read-only fields, not a truncated status tail.
-        let (credit, provider, coverage, changes, times) = match self { // Provider-specific terms and semantics.
-            Self::OpenSeaFeed => (super::openseafeed::ATTRIBUTION, super::openseafeed::PROVIDER_URL, super::openseafeed::COVERAGE, super::openseafeed::CHANGES, "Position age unavailable. Snapshot build, latest ANY AIS update and network receipt are separate times."), // No invented coordinate freshness.
-            Self::Digitraffic => ("Fintraffic / Digitraffic · CC BY 4.0", "https://www.digitraffic.fi/en/marine-traffic/", "Finnish waters only; incomplete received AIS coverage; reported identities are not authenticated.", "Invalid rows omitted; coordinates projected; unavailable headings remain unknown.", "timestampExternal is the reported position timestamp; local receipt is separate."), // Preserve regional source semantics.
+        let (credit, provider, coverage, changes, times) = match self {
+            // Provider-specific terms and semantics.
+            Self::OpenSeaFeed => (
+                super::openseafeed::ATTRIBUTION,
+                super::openseafeed::PROVIDER_URL,
+                super::openseafeed::COVERAGE,
+                super::openseafeed::CHANGES,
+                "Position age unavailable. Snapshot build, latest ANY AIS update and network receipt are separate times.",
+            ), // No invented coordinate freshness.
+            Self::Digitraffic => (
+                "Fintraffic / Digitraffic · CC BY 4.0",
+                "https://www.digitraffic.fi/en/marine-traffic/",
+                "Finnish waters only; incomplete received AIS coverage; reported identities are not authenticated.",
+                "Invalid rows omitted; coordinates projected; unavailable headings remain unknown.",
+                "timestampExternal is the reported position timestamp; local receipt is separate.",
+            ), // Preserve regional source semantics.
         }; // End block.
         [
             ("boat_credit", "Read credit", credit),
@@ -315,7 +334,12 @@ impl LiveMapScene {
         self.startup_error = None;
         let seconds = self.settings.effective_poll_seconds(self.kind);
         let result = match self.kind {
-            MapKind::Earthquakes => fetch::earthquakes(seconds).map(MapWorker::Quakes),
+            MapKind::Earthquakes => self
+                .resources
+                .as_ref()
+                .ok_or_else(|| "Live earthquake admission is unavailable".to_owned())
+                .and_then(|resources| fetch::earthquakes(resources, seconds))
+                .map(MapWorker::Quakes),
             MapKind::Aircraft => self
                 .resources
                 .clone()
@@ -652,6 +676,7 @@ impl Scene for LiveMapScene {
                     show_heading: self.settings.show_heading,
                 },
                 frame.wall,
+                self.resources.as_ref(),
             ); // The layer assigns both monotonic generations.
             self.label_width = frame.width;
             self.label_height = frame.height; // Preserve native-glyph bounds after resize.

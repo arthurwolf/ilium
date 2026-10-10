@@ -5,32 +5,22 @@ use crate::scene::{Frame, OccupancyMask, Scene, SceneEnv};
 use crate::style::ScenePalette;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GrowthPattern {
+    #[default]
     Branching,
     Rings,
     Veins,
     Carpet,
 }
-impl Default for GrowthPattern {
-    fn default() -> Self {
-        Self::Branching
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GrowthColorMode {
+    #[default]
     Monochrome,
     Palette,
 }
-impl Default for GrowthColorMode {
-    fn default() -> Self {
-        Self::Monochrome
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GrowthSettings {
@@ -415,7 +405,7 @@ impl Scene for GrowthScene {
     fn render(&mut self, frame: &mut Frame<'_>) {
         self.ensure(frame.width, frame.height);
         let now = frame.time.as_secs_f32();
-        let dt = (now - self.last_time).max(0.0).min(0.25);
+        let dt = (now - self.last_time).clamp(0.0, 0.25);
         self.last_time = now;
         if now - self.last_reseed >= self.settings.reseed_seconds as f32 {
             self.last_reseed = now;
@@ -480,7 +470,7 @@ impl Scene for GrowthScene {
                 let shape = match self.settings.pattern {
                     GrowthPattern::Branching => {
                         avg * (1.0
-                            + (Self::hash(x as u32 * 31 ^ y as u32 * 17) % 100) as f32
+                            + (Self::hash((x as u32 * 31) ^ (y as u32 * 17)) % 100) as f32
                                 / (260.0 - self.settings.branch_angle as f32))
                     }
                     GrowthPattern::Rings => {

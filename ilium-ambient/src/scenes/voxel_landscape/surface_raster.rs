@@ -13,6 +13,7 @@ use super::{
     surface_mesh::{AlphaMode, BoundQuad, FaceOwner, PreparedMesh},
 };
 use std::time::Duration;
+const MAX_TRANSLUCENT_LAYERS: u8 = 12;
 #[derive(Clone, Copy, Debug)]
 pub struct RasterLimits {
     pub pixels: usize,
@@ -24,7 +25,7 @@ impl Default for RasterLimits {
     fn default() -> Self {
         Self {
             pixels: 1_048_576,
-            layers: 8,
+            layers: MAX_TRANSLUCENT_LAYERS,
             triangles: 2_000_000,
             sample_tests: 64_000_000,
         }
@@ -34,7 +35,8 @@ impl RasterLimits {
     fn validate(self) -> Result<()> {
         if self.pixels > 1_048_576
             || self.pixels == 0
-            || !(1..=8).contains(&self.layers)
+            || self.layers == 0
+            || self.layers > MAX_TRANSLUCENT_LAYERS
             || self.triangles == 0
             || self.triangles > 2_000_000
             || self.sample_tests == 0
@@ -66,7 +68,7 @@ struct Fragment {
 #[derive(Clone, Copy, Debug)]
 pub struct PixelResult {
     pub color: LinearRgba,
-    pub contributors: [Option<FaceOwner>; 9],
+    pub contributors: [Option<FaceOwner>; MAX_TRANSLUCENT_LAYERS as usize + 1],
     pub front_owner: Option<FaceOwner>,
 }
 pub trait FragmentShader {
@@ -503,7 +505,7 @@ impl RasterFrame {
         let opaque = self.opaque[index];
         let mut result = PixelResult {
             color: opaque.map(|v| v.color).unwrap_or(LinearRgba::CLEAR),
-            contributors: [None; 9],
+            contributors: [None; MAX_TRANSLUCENT_LAYERS as usize + 1],
             front_owner: opaque.map(|v| v.rank.owner),
         };
         let mut owners = 0;
@@ -511,7 +513,8 @@ impl RasterFrame {
             result.contributors[owners] = Some(opaque.rank.owner);
             owners += 1;
         }
-        let mut ordered: [Option<Fragment>; 8] = [None; 8];
+        let mut ordered: [Option<Fragment>; MAX_TRANSLUCENT_LAYERS as usize] =
+            [None; MAX_TRANSLUCENT_LAYERS as usize];
         let mut count = 0;
         let start = index * usize::from(self.limits.layers);
         for value in self.blends[start..start + usize::from(self.counts[index])]

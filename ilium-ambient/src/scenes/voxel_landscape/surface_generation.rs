@@ -2767,7 +2767,7 @@ mod tests {
             world.fluids.contains_key(&[-15202, -16479, 62]),
             "original collision water must remain present"
         );
-        for (position, _) in &world.fluids {
+        for position in world.fluids.keys() {
             let ground = i32::from(world.columns[&[position[0], position[1]]].height) - 1;
             for z in (ground + 1)..=position[2] {
                 assert!(

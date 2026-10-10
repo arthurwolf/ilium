@@ -323,6 +323,7 @@ impl Scan<'_> {
 
 /// Find every image named by a `;`-separated list of directories and globs.
 /// The result is sorted and free of duplicates.
+#[cfg(test)]
 pub fn discover_images(spec: &str, recursive: bool, stop: &AtomicBool) -> Discovery {
     discover_with_job_stop(spec, recursive, stop, None)
 }
