@@ -181,6 +181,17 @@ enum ChatCommand {
     Context {
         #[arg(long, default_value_t = 40)]
         limit: usize,
+        /// Print only records this reader has not seen yet (nothing when none
+        /// are new). The reader is `--reader`, else `ILIUM_PANE_ID`, else the
+        /// hook's `session_id` read from standard input.
+        #[arg(long)]
+        since_last_read: bool,
+        /// Cap the printed context at this many bytes; newer records win.
+        #[arg(long)]
+        max_bytes: Option<usize>,
+        /// Explicit reader identity for `--since-last-read`.
+        #[arg(long)]
+        reader: Option<String>,
     },
     /// Print the most recent room records for direct terminal inspection.
     Tail {
@@ -493,6 +504,55 @@ async fn dispatch(cli: Cli) -> Result<(), CliError> {
     }
 }
 
+/// The parts of an agent lifecycle hook's JSON standard input that chat
+/// context uses. Both Claude Code and Codex send `session_id` and
+/// `hook_event_name`.
+#[derive(Default)]
+struct HookInput {
+    session_id: Option<String>,
+    is_session_start: bool,
+}
+
+/// Bound on hook standard input; real hook payloads are a few kilobytes.
+const HOOK_INPUT_LIMIT_BYTES: u64 = 1024 * 1024;
+/// A hook closes standard input right after writing it. Anything else (an
+/// interactive shell, an inherited open pipe) must not stall the command.
+const HOOK_INPUT_WAIT: std::time::Duration = std::time::Duration::from_millis(300);
+
+fn read_hook_input() -> HookInput {
+    use std::io::{IsTerminal, Read};
+    if std::io::stdin().is_terminal() {
+        return HookInput::default();
+    }
+    let (sender, receiver) = std::sync::mpsc::channel();
+    // Detached on purpose: if standard input never reaches end of file, the
+    // reader stays blocked until this short-lived CLI process exits.
+    std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let result = std::io::stdin()
+            .take(HOOK_INPUT_LIMIT_BYTES)
+            .read_to_end(&mut bytes);
+        let _ = sender.send(result.map(|_| bytes));
+    });
+    let Ok(Ok(bytes)) = receiver.recv_timeout(HOOK_INPUT_WAIT) else {
+        return HookInput::default();
+    };
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        return HookInput::default();
+    };
+    HookInput {
+        session_id: value
+            .get("session_id")
+            .and_then(serde_json::Value::as_str)
+            .filter(|id| !id.is_empty())
+            .map(str::to_string),
+        is_session_start: value
+            .get("hook_event_name")
+            .and_then(serde_json::Value::as_str)
+            == Some("SessionStart"),
+    }
+}
+
 fn chat(command: ChatCommand, cwd: &Path) -> Result<(), CliError> {
     // `paths::canonicalize` strips Windows' extended-length `\\?\` prefix:
     // this value is printed straight to the user below ("chatroom ready at
@@ -514,9 +574,41 @@ fn chat(command: ChatCommand, cwd: &Path) -> Result<(), CliError> {
             println!("chatroom message sent");
             Ok(())
         }
-        ChatCommand::Context { limit } => {
+        ChatCommand::Context {
+            limit,
+            since_last_read,
+            max_bytes,
+            reader,
+        } => {
             let project_root = chatroom_project_root(&cwd);
-            println!("{}", ilium_client::chatroom::context(&project_root, limit)?);
+            let hook_input = if since_last_read {
+                read_hook_input()
+            } else {
+                HookInput::default()
+            };
+            let reader_key = reader
+                .or_else(|| {
+                    std::env::var("ILIUM_PANE_ID")
+                        .ok()
+                        .filter(|key| !key.is_empty())
+                })
+                .or(hook_input.session_id);
+            let max_bytes = max_bytes.unwrap_or(usize::MAX);
+            let output = match reader_key.as_deref() {
+                Some(key) if since_last_read => ilium_client::chatroom::unread_context(
+                    &project_root,
+                    limit,
+                    max_bytes,
+                    &ilium_client::chatroom::UnreadReader {
+                        key,
+                        is_session_start: hook_input.is_session_start,
+                    },
+                )?,
+                _ => ilium_client::chatroom::capped_context(&project_root, limit, max_bytes)?,
+            };
+            if !output.is_empty() {
+                println!("{output}");
+            }
             Ok(())
         }
         ChatCommand::Tail { limit } => {

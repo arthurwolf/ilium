@@ -1,9 +1,11 @@
 //! Explicit release qualification, using real server delivery and PTY rendering.
 use super::*;
 
-// Qualification covers the user's 100+ pane load. The server's shared
-// 2 GiB worker budget admits 128 Unix PTYs (five 2 MiB workers each), the two
-// 32 MiB CPU workers, and leaves replay/output headroom.
+// Qualification covers the user's 100+ pane load. PTY sessions are charged
+// to their own per-pane quota (bounded only by the owned-worker slot table),
+// not to the shared replay/output pool. Never lower this count to make the
+// gate pass: a lowered gate hid the capacity cut that dropped 22 panes on
+// 2026-10-09.
 const PANE_COUNT: usize = 128;
 const BURST_LINES: usize = 1024;
 const BURST_LINE_WIDTH: usize = 256;
@@ -134,9 +136,38 @@ async fn no_pool_release_renders_128_panes_and_measures_click_latency() {
     );
     let client_binary = std::path::PathBuf::from(ilium_binary());
     let matching_server_binary = client_binary.with_file_name("ilium-server");
+    let matching_server_binary = if matching_server_binary.is_file() {
+        matching_server_binary
+    } else {
+        // `cargo test --bin ilium-server` builds a test harness, not the
+        // executable the client launches. Build the release server under a
+        // separate target directory so this nested Cargo invocation does not
+        // contend with the outer test process's target lock.
+        let workspace_manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("ilium package is inside the workspace")
+            .join("Cargo.toml");
+        let target_root = client_binary
+            .parent()
+            .and_then(std::path::Path::parent)
+            .expect("release client binary is inside target/release");
+        let server_target = target_root.join("blank-pane-server");
+        let status = std::process::Command::new("cargo")
+            .args(["build", "--release", "--manifest-path"])
+            .arg(workspace_manifest)
+            .args(["-p", "ilium-server", "--bin", "ilium-server", "--target-dir"])
+            .arg(&server_target)
+            .status()
+            .expect("start the matching release server build on the remote test host");
+        assert!(
+            status.success(),
+            "matching release server build failed: {status}"
+        );
+        server_target.join("release/ilium-server")
+    };
     assert!(
         matching_server_binary.is_file(),
-        "release qualification needs the matching server beside the client: {}",
+        "release qualification needs the matching server executable: {}",
         matching_server_binary.display()
     );
     let temp_root = tempfile::tempdir().unwrap();
