@@ -24,7 +24,7 @@ use crate::cost_settings::{
     QUOTA_FIXED_PRESETS,
 };
 use crate::theme;
-use crate::value_control::{NUMBER_DECREMENT_GLYPH, NUMBER_INCREMENT_GLYPH};
+use crate::value_control::{leader_span, NUMBER_DECREMENT_GLYPH, NUMBER_INCREMENT_GLYPH};
 
 /// Left margin shared with the other settings tabs.
 const INSET: u16 = 2;
@@ -611,7 +611,7 @@ pub fn view(app: &App, selected_row: usize, width: u16) -> CostView {
                 visibility_label,
                 if option.enabled { Style::new() } else { dim() },
             ),
-            Span::raw(" ".repeat(padding)),
+            leader_span(padding),
             Span::styled(
                 format!("← {} + →", option.visibility.label()),
                 control_style,
@@ -704,7 +704,7 @@ fn push_control(
     };
     lines.push(Line::from(vec![
         Span::styled(label, label_style),
-        Span::raw(" ".repeat(padding)),
+        leader_span(padding),
         Span::styled(shown, control_style),
     ]));
     for text in wrap(
@@ -1118,6 +1118,194 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn cost_choice_right_click_reverses_and_plus_opens_the_complete_dialog() {
+        use crate::app::{Mode, SettingsState, SettingsTab};
+        use crate::cost_model::CostMetric;
+        use crate::value_dialog::ValueDialogState;
+        use crate::value_dialog_host::ValueTarget;
+        use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::new(
+            "cost-choice-dialog-test".to_owned(),
+            directory.path().to_owned(),
+        );
+        app.config_dir = Some(directory.path().to_owned());
+        app.cost_settings.metric = CostMetric::Dollars;
+        app.set_screen_area(Rect::new(0, 0, 130, 260));
+        app.mode = Mode::Settings(SettingsState {
+            tab: SettingsTab::Cost,
+            ..SettingsState::default()
+        });
+        let Mode::Settings(state) = &app.mode else {
+            panic!("Cost settings fixture");
+        };
+        let content_area =
+            crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, &app, state)
+                .content_area;
+        let current_metric = app.cost_settings.metric;
+        let current_index = CostMetric::ALL
+            .iter()
+            .position(|metric| *metric == current_metric)
+            .expect("current metric is in its catalog");
+        let previous_metric =
+            CostMetric::ALL[(current_index + CostMetric::ALL.len() - 1) % CostMetric::ALL.len()];
+        let current_row = CostRow::Metric(current_metric);
+        let current_span = view(&app, 0, content_area.width)
+            .rows
+            .into_iter()
+            .find(|span| span.row == current_row)
+            .expect("metric selector is visible");
+        let current_control = value_control(content_area, 0, &current_span, &app)
+            .expect("metric selector uses shared control")
+            .geometry();
+
+        crate::mouse::handle_mouse_event(
+            &mut app,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Right),
+                column: current_control.value.x,
+                row: current_control.value.y,
+                modifiers: KeyModifiers::empty(),
+            },
+        );
+        assert_eq!(app.cost_settings.metric, previous_metric);
+
+        let row = CostRow::Metric(app.cost_settings.metric);
+        let span = view(&app, 0, content_area.width)
+            .rows
+            .into_iter()
+            .find(|span| span.row == row)
+            .expect("metric selector remains visible after stepping");
+        let open = value_control(content_area, 0, &span, &app)
+            .expect("metric selector uses shared control")
+            .geometry()
+            .open;
+        crate::mouse::handle_mouse_event(
+            &mut app,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: open.x,
+                row: open.y,
+                modifiers: KeyModifiers::empty(),
+            },
+        );
+
+        let Mode::ValueDialog(host) = &app.mode else {
+            panic!("plus opens the shared value dialog");
+        };
+        assert!(matches!(
+            &host.target,
+            ValueTarget::Cost { target, .. } if target.row == row
+        ));
+        let ValueDialogState::Choice(choice) = &host.dialog else {
+            panic!("cost selector opens a choice list");
+        };
+        assert_eq!(choice.options().len(), CostMetric::ALL.len());
+
+        let document = crate::value_dialog::dialog_layout(app.layout.screen_area).document;
+        crate::mouse::handle_mouse_event(
+            &mut app,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: document.x.saturating_add(2),
+                row: document.y,
+                modifiers: KeyModifiers::empty(),
+            },
+        );
+        assert_eq!(app.cost_settings.metric, CostMetric::Dollars);
+        app.settle_filesystem_for_test();
+        assert_eq!(
+            crate::config::load(directory.path()).unwrap().cost.metric,
+            CostMetric::Dollars
+        );
+    }
+
+    #[test]
+    fn clicking_cost_number_star_opens_keyboard_entry_dialog() {
+        use crate::app::{Mode, SettingsState, SettingsTab};
+        use crate::cost_model::Calibration;
+        use crate::value_dialog::ValueDialogState;
+        use crate::value_dialog_host::ValueTarget;
+        use crossterm::event::{
+            Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+        };
+
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::new(
+            "cost-number-dialog-test".to_owned(),
+            directory.path().to_owned(),
+        );
+        app.config_dir = Some(directory.path().to_owned());
+        app.cost_settings.calibration = Calibration::Budget;
+        app.set_screen_area(Rect::new(0, 0, 130, 260));
+        app.mode = Mode::Settings(SettingsState {
+            tab: SettingsTab::Cost,
+            ..SettingsState::default()
+        });
+        let Mode::Settings(state) = &app.mode else {
+            panic!("Cost settings fixture");
+        };
+        let content_area =
+            crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, &app, state)
+                .content_area;
+        let row = CostRow::Budget;
+        let span = view(&app, 0, content_area.width)
+            .rows
+            .into_iter()
+            .find(|span| span.row == row)
+            .expect("budget number is visible in Budget calibration");
+        let open = value_control(content_area, 0, &span, &app)
+            .expect("budget uses shared numeric control")
+            .geometry()
+            .open;
+
+        crate::mouse::handle_mouse_event(
+            &mut app,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: open.x,
+                row: open.y,
+                modifiers: KeyModifiers::empty(),
+            },
+        );
+
+        let Mode::ValueDialog(host) = &app.mode else {
+            panic!("star opens the shared number dialog");
+        };
+        assert!(matches!(
+            &host.target,
+            ValueTarget::Cost { target, .. } if target.row == row
+        ));
+        assert!(matches!(&host.dialog, ValueDialogState::Number(_)));
+
+        let draft_length = match &app.mode {
+            Mode::ValueDialog(host) => match &host.dialog {
+                ValueDialogState::Number(number) => number.draft.buf.chars().count(),
+                ValueDialogState::Choice(_) => unreachable!("number dialog was asserted above"),
+            },
+            _ => unreachable!("number dialog was asserted above"),
+        };
+        let press = |app: &mut App, code| {
+            crate::keys::handle_event(app, Event::Key(KeyEvent::new(code, KeyModifiers::NONE)));
+        };
+        for _ in 0..draft_length {
+            press(&mut app, KeyCode::Backspace);
+        }
+        for character in "17.125".chars() {
+            press(&mut app, KeyCode::Char(character));
+        }
+        press(&mut app, KeyCode::Enter);
+        app.settle_filesystem_for_test();
+        assert_eq!(app.cost_settings.budget_usd, 17.125);
+        assert_eq!(
+            crate::config::load(directory.path()).unwrap().cost,
+            app.cost_settings
+        );
+        assert!(matches!(app.mode, Mode::Settings(_)));
     }
 
     #[test]

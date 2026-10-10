@@ -496,6 +496,110 @@ mod tests {
     }
 
     #[test]
+    fn numeric_star_accepts_direct_entry_and_persists_remote_compaction_value() {
+        use crossterm::event::KeyCode;
+
+        let (directory, mut app) = settings_app();
+        app.remote_compaction_settings.privacy_banner_dismissed = true;
+        let row = RemoteCompactionRow::Threshold;
+        let index = crate::remote_compaction_settings_ui::rows(&app)
+            .iter()
+            .position(|candidate| *candidate == row)
+            .expect("threshold row exists");
+        let crate::app::Mode::Settings(state) = &app.mode else {
+            panic!("settings fixture");
+        };
+        let (_, control) =
+            crate::settings_ui::settings_number_control(content_area(&app), &app, state, index)
+                .expect("threshold uses the shared numeric control");
+        let open = control.geometry().open;
+        click(&mut app, open.x, open.y);
+
+        let crate::app::Mode::ValueDialog(host) = &app.mode else {
+            panic!("star opens direct numeric entry");
+        };
+        let draft_length = match &host.dialog {
+            crate::value_dialog::ValueDialogState::Number(number) => {
+                number.draft.buf.chars().count()
+            }
+            crate::value_dialog::ValueDialogState::Choice(_) => {
+                panic!("threshold uses a number dialog")
+            }
+        };
+        for _ in 0..draft_length {
+            press(&mut app, KeyCode::Backspace);
+        }
+        for character in "67".chars() {
+            press(&mut app, KeyCode::Char(character));
+        }
+        press(&mut app, KeyCode::Enter);
+        app.settle_filesystem_for_test();
+
+        assert_eq!(app.remote_compaction_settings.threshold_percent, 67);
+        assert_eq!(saved(&directory).threshold_percent, 67);
+        assert!(matches!(app.mode, crate::app::Mode::Settings(_)));
+    }
+
+    #[test]
+    fn technique_plus_opens_full_catalog_and_pointer_selection_persists() {
+        use crate::remote_compaction_settings::TechniqueTarget;
+
+        let (directory, mut app) = settings_app();
+        app.remote_compaction_settings.privacy_banner_dismissed = true;
+        let target = TechniqueTarget::Claude;
+        let selected = *Technique::ALL
+            .last()
+            .expect("technique catalog is nonempty");
+        let wanted = Technique::ALL[0];
+        assert_ne!(selected, wanted);
+        *app.remote_compaction_settings.technique_mut(target) = selected;
+
+        let row = RemoteCompactionRow::Technique(target);
+        let index = crate::remote_compaction_settings_ui::rows(&app)
+            .iter()
+            .position(|candidate| *candidate == row)
+            .expect("Claude technique row exists");
+        let crate::app::Mode::Settings(state) = &app.mode else {
+            panic!("settings fixture");
+        };
+        let (_, control) =
+            crate::settings_ui::settings_choice_control(content_area(&app), &app, state, index)
+                .expect("technique uses the shared choice control");
+        let open = control.geometry().open;
+        click(&mut app, open.x, open.y);
+
+        let crate::app::Mode::ValueDialog(host) = &app.mode else {
+            panic!("plus opens the complete technique catalog");
+        };
+        assert!(matches!(
+            &host.target,
+            crate::value_dialog_host::ValueTarget::SettingsChoice {
+                field: crate::value_settings_choice::SettingsChoice::RemoteTechnique(found),
+                ..
+            } if *found == target
+        ));
+        let crate::value_dialog::ValueDialogState::Choice(dialog) = &host.dialog else {
+            panic!("techniques use a choice dialog");
+        };
+        assert_eq!(dialog.options().len(), Technique::ALL.len());
+        let wanted_index = dialog
+            .options()
+            .iter()
+            .position(|option| option.id == wanted.id())
+            .expect("full catalog contains the selected technique");
+        let document = crate::value_dialog::dialog_layout(app.layout.screen_area).document;
+        click(
+            &mut app,
+            document.x.saturating_add(2),
+            document.y.saturating_add(wanted_index as u16),
+        );
+        app.settle_filesystem_for_test();
+
+        assert_eq!(app.remote_compaction_settings.technique(target), wanted);
+        assert_eq!(saved(&directory).technique(target), wanted);
+    }
+
+    #[test]
     fn the_prompt_row_opens_the_editor_on_the_stored_text() {
         let (_directory, mut app) = app_with_config_dir();
         app.remote_compaction_settings.custom_prompt = "Line one\nLine two".into();

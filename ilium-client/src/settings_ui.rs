@@ -48,6 +48,7 @@ use crate::icon_settings::{
 use crate::keymap::{self, Action, KeyBinding, KeymapPreset, ShortcutBase, SHORTCUT_BASE_PRESETS};
 use crate::layout::centered_rect;
 use crate::theme::{self, ColorScheme};
+use crate::value_control::leader_span;
 
 /// Fixed header height: a title line (with the close button right-aligned
 /// on it) plus a dim "Esc or q to close" hint line before the tab list /
@@ -383,8 +384,15 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
         theme::block(true).title(theme::chrome_title(state.tab.label())),
         layout.content_frame_area,
     );
-    let instructions_height =
-        crate::instruction_settings::panel_height(state.tab, layout.content_area);
+    let compact_kilo_privacy = state.tab == SettingsTab::Inference
+        && app.inference_settings.selected_provider
+            == ilium_inference::InferenceProviderKind::KiloGateway
+        && layout.content_area.height <= 8;
+    let instructions_height = if compact_kilo_privacy {
+        0
+    } else {
+        crate::instruction_settings::panel_height(state.tab, layout.content_area)
+    };
     if instructions_height > 0 {
         let panel = Rect {
             height: instructions_height,
@@ -1006,10 +1014,10 @@ pub fn settings_help_anchors(
             }
         }
         SettingsTab::Inference => {
-            let warning = inference_warning_line_count(
-                &app.inference_settings,
-                layout.content_area.width.saturating_sub(1),
-            ) as u16;
+            let content_width = layout.content_area.width.saturating_sub(1);
+            let warning =
+                inference_warning_line_count(&app.inference_settings, content_width) as u16;
+            let top_padding = inference_top_padding(&app.inference_settings, content_width) as u16;
             let test_log_offset = inference_operation_log_lines(
                 &app.inference_settings,
                 &app.inference_test_state,
@@ -1040,7 +1048,7 @@ pub fn settings_help_anchors(
                     &mut anchors,
                     layout,
                     id,
-                    1 + warning + test_log_offset + i as u16 * 3,
+                    top_padding + warning + test_log_offset + i as u16 * 3,
                     state.scroll,
                     state.selected_row == i,
                 );
@@ -3057,6 +3065,19 @@ fn inference_warning_line_count(
     }
 }
 
+fn inference_top_padding(
+    settings: &ilium_inference::InferenceSettings,
+    content_width: u16,
+) -> usize {
+    if settings.selected_provider == ilium_inference::InferenceProviderKind::KiloGateway
+        && content_width <= 28
+    {
+        0
+    } else {
+        usize::from(APPEARANCE_TOP_PADDING)
+    }
+}
+
 fn inference_lines(
     settings: &ilium_inference::InferenceSettings,
     test_result: Option<&crate::inference_test::InferenceTestResult>,
@@ -3067,7 +3088,7 @@ fn inference_lines(
     content_width: u16,
 ) -> Vec<Line<'static>> {
     let rows = inference_rows(settings);
-    let mut lines = vec![Line::from("")];
+    let mut lines = vec![Line::from(""); inference_top_padding(settings, content_width)];
     let warning_lines = inference_warning_lines(settings, content_width);
     if !warning_lines.is_empty() {
         lines.extend(warning_lines);
@@ -3094,7 +3115,7 @@ fn inference_lines(
         lines.push(Line::from(vec![
             Span::raw(" ".repeat(usize::from(ROW_LEFT_INSET))),
             Span::styled(label, label_style),
-            Span::raw(" ".repeat(padding)),
+            leader_span(padding),
             Span::styled(inference_value(row, settings, model_discovery), value_style),
         ]));
         let description = match row {
@@ -3525,7 +3546,8 @@ pub fn inference_content_hit(
     let warning_lines =
         inference_warning_line_count(settings, content_area.width.saturating_sub(1));
     let line = usize::from(position.y.saturating_sub(content_area.y)) + usize::from(scroll);
-    let offset = line.checked_sub(usize::from(APPEARANCE_TOP_PADDING) + warning_lines)?;
+    let top_padding = inference_top_padding(settings, content_area.width.saturating_sub(1));
+    let offset = line.checked_sub(top_padding + warning_lines)?;
     if offset % usize::from(APPEARANCE_ROW_HEIGHT) != 0 {
         return None;
     }
@@ -3588,7 +3610,7 @@ fn kanban_board_lines(settings: &KanbanBoardSettings, selected_row: usize) -> Ve
         lines.push(Line::from(vec![
             Span::raw(" ".repeat(usize::from(ROW_LEFT_INSET))),
             Span::styled(label, label_style),
-            Span::raw(" ".repeat(padding)),
+            leader_span(padding),
             Span::styled(kanban_board_row_value(row, settings), value_style),
         ]));
         lines.push(Line::from(Span::styled(
@@ -3951,7 +3973,7 @@ fn sound_lines(
         lines.push(Line::from(vec![
             Span::raw(" ".repeat(usize::from(ROW_LEFT_INSET))),
             Span::styled(label, label_style),
-            Span::raw(" ".repeat(padding)),
+            leader_span(padding),
             Span::styled(
                 sound_row_value(row, settings, notifications, discovery),
                 value_style,
@@ -4084,7 +4106,7 @@ fn keyboard_lines(keyboard: &KeyboardSettings, bindings: &[KeyBinding]) -> Vec<L
                 label,
                 Style::new().add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
             ),
-            Span::raw(" ".repeat(padding)),
+            leader_span(padding),
             Span::styled(
                 control,
                 theme::selected_style().add_modifier(Modifier::BOLD),
@@ -4776,15 +4798,16 @@ fn settings_control_row(
         }
         SettingsTab::Inference => {
             let current = *inference_rows(&app.inference_settings).get(row)?;
-            let warning =
-                inference_warning_line_count(&app.inference_settings, area.width.saturating_sub(1));
+            let content_width = area.width.saturating_sub(1);
+            let warning = inference_warning_line_count(&app.inference_settings, content_width);
+            let top_padding = inference_top_padding(&app.inference_settings, content_width);
             let logs = inference_operation_log_lines(
                 &app.inference_settings,
                 &app.inference_test_state,
                 &app.model_discovery,
             )
             .len();
-            let y = usize::from(APPEARANCE_TOP_PADDING)
+            let y = top_padding
                 .checked_add(warning)?
                 .checked_add(logs)?
                 .checked_add(row.checked_mul(usize::from(APPEARANCE_ROW_HEIGHT))?)?;
@@ -5119,7 +5142,7 @@ fn setting_lines(rows: &[(&str, String, &str)], selected_row: usize) -> Vec<Line
         lines.push(Line::from(vec![
             Span::raw(" ".repeat(usize::from(ROW_LEFT_INSET))),
             Span::styled((*label).to_string(), label_style),
-            Span::raw(" ".repeat(padding)),
+            leader_span(padding),
             Span::styled(format!("‹ {value} ›"), control_style),
         ]));
         lines.push(Line::from(Span::styled(
@@ -5697,7 +5720,7 @@ fn appearance_row_line(
     Line::from(vec![
         Span::raw(" ".repeat(usize::from(ROW_LEFT_INSET))),
         Span::styled(label, label_style),
-        Span::raw(" ".repeat(padding)),
+        leader_span(padding),
         Span::styled(control, control_style),
     ])
 }
@@ -5906,7 +5929,7 @@ fn monitoring_setting_line(
     Line::from(vec![
         Span::raw(" ".repeat(usize::from(ROW_LEFT_INSET))),
         Span::styled(label, style),
-        Span::raw(" ".repeat(padding)),
+        leader_span(padding),
         Span::styled(displayed_value, style),
     ])
 }
@@ -6168,6 +6191,7 @@ mod number_control_tests {
             for tab in [
                 SettingsTab::Appearance,
                 SettingsTab::AgentMonitoring,
+                SettingsTab::RemoteCompaction,
                 SettingsTab::Terminal,
                 SettingsTab::Editor,
                 SettingsTab::KanbanBoard,
@@ -6270,6 +6294,7 @@ mod number_control_tests {
             for tab in [
                 SettingsTab::Appearance,
                 SettingsTab::AgentMonitoring,
+                SettingsTab::RemoteCompaction,
                 SettingsTab::Terminal,
                 SettingsTab::Editor,
                 SettingsTab::KanbanBoard,
@@ -6564,6 +6589,7 @@ mod number_control_tests {
             SettingsTab::Appearance,
             SettingsTab::AgentMonitoring,
             SettingsTab::RemoteCompaction,
+            SettingsTab::Titles,
             SettingsTab::Terminal,
             SettingsTab::Editor,
             SettingsTab::VoiceControl,
@@ -9336,24 +9362,6 @@ mod tests {
     fn kilo_gateway_wrapped_warning_keeps_inference_rows_clickable() {
         let mut settings = ilium_inference::InferenceSettings::default();
         settings.selected_provider = ilium_inference::InferenceProviderKind::KiloGateway;
-        let area = Rect::new(0, 0, 40, 20);
-        let lines = inference_warning_lines(&settings, area.width.saturating_sub(1)).len();
-        assert!(lines > 1, "the narrow panel should wrap the warning");
-        let first_row_y = area.y + APPEARANCE_TOP_PADDING + lines as u16 + 1;
-        assert!(inference_content_hit(
-            area,
-            0,
-            Position::new(area.x + ROW_LEFT_INSET, first_row_y),
-            &settings,
-        )
-        .is_some());
-        assert!(inference_content_hit(
-            area,
-            0,
-            Position::new(area.x + ROW_LEFT_INSET, area.y + APPEARANCE_TOP_PADDING + 2),
-            &settings,
-        )
-        .is_none());
         let project_directory = tempfile::tempdir().unwrap();
         let mut app = App::new(
             "kilo-warning-hit-layout-test".to_owned(),
@@ -9364,17 +9372,38 @@ mod tests {
             tab: SettingsTab::Inference,
             ..SettingsState::default()
         };
-        let layout_area = Rect::new(5, 7, area.width, area.height);
-        let (row_area, _, _) = settings_control_row(layout_area, &app, &state, 0).unwrap();
-        assert_eq!(
-            row_area.y,
-            layout_area.y
-                + APPEARANCE_TOP_PADDING
-                + inference_warning_line_count(
-                    &app.inference_settings,
-                    layout_area.width.saturating_sub(1),
-                ) as u16
-        );
+        for width in [40, 60] {
+            let area = Rect::new(0, 0, width, 20);
+            let content_width = area.width.saturating_sub(1);
+            let lines = inference_warning_lines(&app.inference_settings, content_width).len();
+            let top_padding = inference_top_padding(&app.inference_settings, content_width) as u16;
+            assert!(lines > 1, "the narrow panel should wrap the warning");
+            let first_row_y = area.y + top_padding + lines as u16 + 1;
+            assert!(inference_content_hit(
+                area,
+                0,
+                Position::new(area.x + ROW_LEFT_INSET, first_row_y),
+                &app.inference_settings,
+            )
+            .is_some());
+            assert!(inference_content_hit(
+                area,
+                0,
+                Position::new(area.x + ROW_LEFT_INSET, area.y + top_padding + 2),
+                &app.inference_settings,
+            )
+            .is_none());
+
+            let layout_area = Rect::new(5, 7, width, area.height);
+            let (row_area, _, _) = settings_control_row(layout_area, &app, &state, 0).unwrap();
+            assert_eq!(
+                row_area.y,
+                layout_area.y
+                    + top_padding
+                    + inference_warning_line_count(&app.inference_settings, content_width) as u16,
+                "rendered control geometry must share the compact warning offset at {width} columns"
+            );
+        }
     }
 
     #[test]
@@ -9453,22 +9482,48 @@ mod tests {
             tab: SettingsTab::Inference,
             ..SettingsState::default()
         };
-        let screen = Rect::new(0, 0, 80, 24);
-        let layout = compute_layout_for_mode(screen, &app, &state);
-        let mut terminal = Terminal::new(TestBackend::new(screen.width, screen.height)).unwrap();
-        terminal
-            .draw(|frame| render(frame, screen, &app, &state))
-            .unwrap();
-        let buffer = terminal.backend().buffer();
-        let title_row = (0..screen.height)
-            .find(|y| {
-                (layout.content_area.x..layout.content_area.right())
-                    .map(|x| buffer[(x, *y)].symbol())
-                    .collect::<String>()
-                    .contains("Privacy notice")
-            })
-            .expect("rendered Inference tab shows the privacy-panel title");
-        assert_eq!(buffer[(layout.content_area.x, title_row)].symbol(), "╭");
-        crate::ui_capture::save("kilo-gateway-privacy-panel-80x24", &terminal);
+        for (width, height) in [(120, 40), (80, 24), (60, 20), (40, 12)] {
+            let screen = Rect::new(0, 0, width, height);
+            let layout = compute_layout_for_mode(screen, &app, &state);
+            let mut terminal =
+                Terminal::new(TestBackend::new(screen.width, screen.height)).unwrap();
+            terminal
+                .draw(|frame| render(frame, screen, &app, &state))
+                .unwrap();
+            let buffer = terminal.backend().buffer();
+            let title_row = (layout.content_area.y..layout.content_area.bottom())
+                .find(|y| {
+                    (layout.content_area.x..layout.content_area.right())
+                        .map(|x| buffer[(x, *y)].symbol())
+                        .collect::<String>()
+                        .contains("Privacy")
+                })
+                .unwrap_or_else(|| panic!("privacy-panel title missing at {width}x{height}"));
+            assert_eq!(
+                buffer[(layout.content_area.x, title_row)].symbol(),
+                "╭",
+                "privacy panel must retain its rounded frame at {width}x{height}"
+            );
+            let bottom_row = (title_row + 1..layout.content_area.bottom())
+                .find(|y| buffer[(layout.content_area.x, *y)].symbol() == "╰")
+                .unwrap_or_else(|| panic!("privacy-panel bottom is clipped at {width}x{height}"));
+            let rendered = (title_row..=bottom_row)
+                .flat_map(|y| {
+                    (layout.content_area.x + 1..layout.content_area.right() - 1)
+                        .map(move |x| buffer[(x, y)].symbol())
+                })
+                .collect::<String>()
+                .chars()
+                .filter(|character| !character.is_whitespace())
+                .collect::<String>();
+            assert!(
+                rendered.contains(&expected),
+                "visible privacy panel must retain the full warning at {width}x{height}"
+            );
+            crate::ui_capture::save(
+                &format!("kilo-gateway-privacy-panel-{width}x{height}"),
+                &terminal,
+            );
+        }
     }
 }

@@ -2,7 +2,8 @@
 //! The caller owns focus, option identities, validation, mutation and persistence.
 use crossterm::event::KeyCode;
 use ratatui::layout::{Position, Rect};
-use ratatui::style::Style;
+use ratatui::style::{Color, Style};
+use ratatui::text::Span;
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 use unicode_segmentation::UnicodeSegmentation;
@@ -98,10 +99,10 @@ impl ValueControl {
         } else {
             spec.label_width
         };
-        // Wide numeric glyphs need two terminal cells and a matching hit target.
+        // Numeric step controls use literal one-cell minus and plus signs.
         let step_width = match spec.kind {
             ControlKind::Choice => 1,
-            ControlKind::Number => 2,
+            ControlKind::Number => 1,
         };
         let chrome = 2 * step_width + 4;
         let value_cells = cell_width(spec.value).min(usize::from(row.width)) as u16;
@@ -208,6 +209,15 @@ impl ValueControl {
         );
         paint(frame, geometry.label, &self.label_text, styles.label);
         paint(frame, geometry.value, &self.value_text, styles.value);
+        let leader_style = leader_style(styles);
+        for run in self.leader_runs() {
+            paint(
+                frame,
+                run,
+                &LEADER_GLYPH.repeat(usize::from(run.width)),
+                leader_style,
+            );
+        }
         let glyphs = match self.kind {
             ControlKind::Choice => ["←", "→", "+"],
             ControlKind::Number => [NUMBER_DECREMENT_GLYPH, NUMBER_INCREMENT_GLYPH, "*"],
@@ -225,6 +235,37 @@ impl ValueControl {
             };
             paint(frame, rectangle, glyphs[index], style);
         }
+    }
+    /// Empty cell runs between neighbouring ink (label text, buttons, value)
+    /// that receive the dotted leader. Each run keeps one blank cell on both
+    /// sides so the dots never touch text or glyphs; runs shorter than
+    /// `LEADER_MIN_WIDTH` stay blank, so compact toolbars stay uncluttered.
+    fn leader_runs(&self) -> Vec<Rect> {
+        let geometry = self.geometry;
+        let label = Rect::new(
+            geometry.label.x,
+            geometry.row.y,
+            cell_width(&self.label_text) as u16,
+            1,
+        );
+        let mut inks: Vec<Rect> = [
+            label,
+            geometry.previous,
+            geometry.value,
+            geometry.next,
+            geometry.open,
+        ]
+        .into_iter()
+        .filter(|rectangle| rectangle.width > 0)
+        .collect();
+        inks.sort_by_key(|rectangle| rectangle.x);
+        inks.windows(2)
+            .filter_map(|pair| {
+                let width = pair[1].x.checked_sub(pair[0].right())?.checked_sub(2)?;
+                (width >= LEADER_MIN_WIDTH)
+                    .then(|| Rect::new(pair[0].right() + 1, geometry.row.y, width, 1))
+            })
+            .collect()
     }
     pub fn hit(&self, position: Position, button: PointerButton) -> Option<ControlAction> {
         if !self.geometry.row.contains(position) {
@@ -302,10 +343,35 @@ impl ValueControl {
         enabled.then_some(action)
     }
 }
+/// Dotted leader drawn between a row's label, buttons and value. Inert: it is
+/// not part of any hit target.
+pub const LEADER_GLYPH: &str = "…";
+/// Shortest interior run (in cells) that receives leader dots.
+pub const LEADER_MIN_WIDTH: u16 = 3;
+/// Leader for text-built rows (`Label ……… ‹ value ›`): `width` cells with one
+/// blank cell at each end and grey dots between. Same rule as `ValueControl`:
+/// runs below the minimum stay blank.
+pub fn leader_span(width: usize) -> Span<'static> {
+    if width < usize::from(LEADER_MIN_WIDTH) + 2 {
+        return Span::raw(" ".repeat(width));
+    }
+    Span::styled(
+        format!(" {} ", LEADER_GLYPH.repeat(width - 2)),
+        Style::new().fg(Color::DarkGray),
+    )
+}
+/// Grey dots that keep the row background of the cells they sit on.
+fn leader_style(styles: ControlStyles) -> Style {
+    let mut style = Style::new().fg(Color::DarkGray);
+    if let Some(background) = styles.background.bg.or(styles.label.bg).or(styles.value.bg) {
+        style = style.bg(background);
+    }
+    style
+}
 /// Decrement marker used by numeric controls.
-pub const NUMBER_DECREMENT_GLYPH: &str = "➖";
+pub const NUMBER_DECREMENT_GLYPH: &str = "-";
 /// Increment marker used by numeric controls.
-pub const NUMBER_INCREMENT_GLYPH: &str = "➕";
+pub const NUMBER_INCREMENT_GLYPH: &str = "+";
 pub fn cell_width(text: &str) -> usize {
     UnicodeSegmentation::graphemes(text, true)
         .map(UnicodeWidthStr::width)
@@ -422,13 +488,13 @@ mod tests {
     }
 
     #[test]
-    fn seven_cells_render_wide_numeric_step_targets_with_full_hit_ranges() {
+    fn seven_cells_render_single_cell_numeric_step_targets() {
         let control = ValueControl::new(Rect::new(0, 0, 7, 1), spec(ControlKind::Number, "7"));
         let geometry = control.geometry();
-        assert_eq!(geometry.previous, Rect::new(0, 0, 2, 1));
-        assert_eq!(geometry.value_slot, Rect::new(2, 0, 2, 1));
+        assert_eq!(geometry.previous, Rect::new(0, 0, 1, 1));
+        assert_eq!(geometry.value_slot, Rect::new(1, 0, 4, 1));
         assert_eq!(geometry.value, Rect::new(2, 0, 1, 1));
-        assert_eq!(geometry.next, Rect::new(4, 0, 2, 1));
+        assert_eq!(geometry.next, Rect::new(5, 0, 1, 1));
         assert_eq!(geometry.open, Rect::new(6, 0, 1, 1));
 
         let mut terminal = Terminal::new(TestBackend::new(7, 1)).unwrap();
@@ -438,16 +504,16 @@ mod tests {
         let buffer = terminal.backend().buffer();
         assert_eq!(buffer[(0, 0)].symbol(), NUMBER_DECREMENT_GLYPH);
         assert_eq!(buffer[(2, 0)].symbol(), "7");
-        assert_eq!(buffer[(4, 0)].symbol(), NUMBER_INCREMENT_GLYPH);
+        assert_eq!(buffer[(5, 0)].symbol(), NUMBER_INCREMENT_GLYPH);
         assert_eq!(buffer[(6, 0)].symbol(), "*");
 
-        for x in 0..2 {
+        for x in 0..1 {
             assert_eq!(
                 control.hit(Position::new(x, 0), PointerButton::Left),
                 Some(ControlAction::Decrement)
             );
         }
-        for x in 4..6 {
+        for x in 5..6 {
             assert_eq!(
                 control.hit(Position::new(x, 0), PointerButton::Left),
                 Some(ControlAction::Increment)
@@ -545,8 +611,8 @@ mod tests {
                 assert_eq!(geometry.previous.width, 0, "width {width}");
                 assert_eq!(geometry.next.width, 0, "width {width}");
             } else {
-                assert_eq!(geometry.previous.width, 2, "width {width}");
-                assert_eq!(geometry.next.width, 2, "width {width}");
+                assert_eq!(geometry.previous.width, 1, "width {width}");
+                assert_eq!(geometry.next.width, 1, "width {width}");
             }
             assert_eq!(
                 control.hit(
@@ -578,11 +644,13 @@ mod tests {
         }
     }
     #[test]
-    fn number_buttons_use_utf8_glyphs_and_two_cell_targets() {
+    fn number_buttons_use_ascii_glyphs_and_single_cell_targets() {
+        assert_eq!(NUMBER_DECREMENT_GLYPH, "-");
+        assert_eq!(NUMBER_INCREMENT_GLYPH, "+");
         let control = ValueControl::new(Rect::new(0, 0, 18, 1), spec(ControlKind::Number, "42"));
         let geometry = control.geometry();
-        assert_eq!(geometry.previous.width, 2);
-        assert_eq!(geometry.next.width, 2);
+        assert_eq!(geometry.previous.width, 1);
+        assert_eq!(geometry.next.width, 1);
         assert_eq!(geometry.open.width, 1);
         let left_padding = geometry.value.x - geometry.value_slot.x;
         let right_padding = geometry.value_slot.right() - geometry.value.right();
@@ -675,7 +743,7 @@ mod tests {
     #[test]
     fn number_is_centered_and_padding_is_inert() {
         let control = ValueControl::new(Rect::new(2, 1, 13, 1), spec(ControlKind::Number, "42"));
-        assert_eq!(control.geometry().value_slot, Rect::new(5, 1, 5, 1));
+        assert_eq!(control.geometry().value_slot, Rect::new(4, 1, 7, 1));
         assert_eq!(control.geometry().value, Rect::new(6, 1, 2, 1));
         let mut terminal = Terminal::new(TestBackend::new(18, 3)).unwrap();
         terminal
@@ -686,6 +754,7 @@ mod tests {
             buffer.cell((2, 1)).unwrap().symbol(),
             NUMBER_DECREMENT_GLYPH
         );
+        // The single-cell increment glyph starts at its button's first cell (12).
         assert_eq!(
             buffer.cell((12, 1)).unwrap().symbol(),
             NUMBER_INCREMENT_GLYPH
@@ -693,9 +762,9 @@ mod tests {
         assert_eq!(buffer.cell((14, 1)).unwrap().symbol(), "*");
         for x in 1_u16..=15 {
             let expected = match x {
-                2 | 3 => Some(ControlAction::Decrement),
+                2 => Some(ControlAction::Decrement),
                 6 | 7 | 14 => Some(ControlAction::EditNumber),
-                11 | 12 => Some(ControlAction::Increment),
+                12 => Some(ControlAction::Increment),
                 _ => None,
             };
             assert_eq!(

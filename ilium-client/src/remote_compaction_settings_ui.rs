@@ -19,7 +19,7 @@ use crate::remote_compaction_settings::{
     RemoteCompactionSettings, TechniqueTarget, THRESHOLD_PERCENT_RANGE,
 };
 use crate::theme;
-use crate::value_control::{NUMBER_DECREMENT_GLYPH, NUMBER_INCREMENT_GLYPH};
+use crate::value_control::{leader_span, NUMBER_DECREMENT_GLYPH, NUMBER_INCREMENT_GLYPH};
 
 /// Left margin shared with the other settings tabs.
 const INSET: u16 = 2;
@@ -574,7 +574,7 @@ pub fn view(app: &App, selected_row: usize, width: u16) -> RemoteCompactionView 
                 };
                 lines.push(Line::from(vec![
                     Span::styled(label, label_style),
-                    Span::raw(" ".repeat(padding)),
+                    leader_span(padding),
                     Span::styled(shown, control_style),
                 ]));
                 push_description(&mut lines, row, app, body_width);

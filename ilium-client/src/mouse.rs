@@ -5620,25 +5620,15 @@ mod settings_title_choice_mouse_tests {
 
         assert_eq!(state.selected_row, 0);
         assert_eq!(
-            crate::value_settings_choice::SettingsChoice::at(
-                &app,
-                state.tab,
-                state.selected_row
-            ),
+            crate::value_settings_choice::SettingsChoice::at(&app, state.tab, state.selected_row),
             Some(crate::value_settings_choice::SettingsChoice::TitleStyle)
         );
-        let layout = crate::settings_ui::compute_layout_for_mode(
-            app.layout.screen_area,
-            &app,
-            &state,
+        let layout =
+            crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, &app, &state);
+        assert!(
+            crate::settings_ui::settings_choice_control(layout.content_area, &app, &state, 0)
+                .is_some()
         );
-        assert!(crate::settings_ui::settings_choice_control(
-            layout.content_area,
-            &app,
-            &state,
-            0
-        )
-        .is_some());
     }
 
     #[test]
@@ -5653,24 +5643,20 @@ mod settings_title_choice_mouse_tests {
         });
 
         for (button, expected) in [
-            (MouseButton::Left, ilium_inference::TitleStyle::Summarization),
+            (
+                MouseButton::Left,
+                ilium_inference::TitleStyle::Summarization,
+            ),
             (MouseButton::Right, ilium_inference::TitleStyle::Labeling),
         ] {
             let Mode::Settings(state) = &app.mode else {
                 panic!("settings expected");
             };
-            let layout = crate::settings_ui::compute_layout_for_mode(
-                app.layout.screen_area,
-                &app,
-                state,
-            );
-            let (_, control) = crate::settings_ui::settings_choice_control(
-                layout.content_area,
-                &app,
-                state,
-                0,
-            )
-            .expect("Title style uses the shared choice control");
+            let layout =
+                crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, &app, state);
+            let (_, control) =
+                crate::settings_ui::settings_choice_control(layout.content_area, &app, state, 0)
+                    .expect("Title style uses the shared choice control");
             let value = control.geometry().value;
             handle_mouse_event(
                 &mut app,
@@ -5697,18 +5683,11 @@ mod settings_title_choice_mouse_tests {
         let Mode::Settings(state) = &app.mode else {
             panic!("settings expected");
         };
-        let layout = crate::settings_ui::compute_layout_for_mode(
-            app.layout.screen_area,
-            &app,
-            state,
-        );
-        let (_, control) = crate::settings_ui::settings_choice_control(
-            layout.content_area,
-            &app,
-            state,
-            0,
-        )
-        .expect("Title style uses the shared choice control");
+        let layout =
+            crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, &app, state);
+        let (_, control) =
+            crate::settings_ui::settings_choice_control(layout.content_area, &app, state, 0)
+                .expect("Title style uses the shared choice control");
         let open = control.geometry().open;
         handle_mouse_event(
             &mut app,

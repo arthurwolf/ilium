@@ -13,6 +13,7 @@
 //! settings. Each of the three regions (`Region`) scrolls independently, so a
 //! screen position is resolved through a `Scrolls` triple.
 
+use crate::value_control::leader_span;
 use crate::{
     animation_rows::{AnimationRow, Region, RowKind, RowModel, RowView},
     app::{App, SettingsState},
@@ -21,6 +22,7 @@ use crate::{
 use ratatui::{
     layout::{Position, Rect},
     style::{Color, Modifier, Style},
+    text::{Line, Span},
     widgets::{Block, Clear, Paragraph, Wrap},
     Frame,
 };
@@ -249,12 +251,18 @@ fn saved_scene_activity_sections(report: &str) -> (String, String) {
         }
     }
 
+    let current_work_and_route_eta = match (current_work, route_eta) {
+        (Some(work), Some(route)) => Some(format!("{work}; {route}")),
+        (Some(work), None) => Some(work.to_owned()),
+        (None, Some(route)) => Some(route.to_owned()),
+        (None, None) => None,
+    };
+
     (
         [
             progress,
-            route_eta,
+            current_work_and_route_eta.as_deref(),
             total_eta,
-            current_work,
             elapsed,
             stage_eta,
         ]
@@ -272,8 +280,26 @@ fn wrapped_rows(text: &str, width: u16) -> u16 {
         .line_count(width.max(1)) as u16
 }
 
+fn activity_footer_rows(detail_rows: u16, width: u16, summary: &str, activity: &str) -> (u16, u16) {
+    let available_rows = detail_rows.saturating_sub(pinned_control_help_rows(detail_rows));
+    let total_activity_rows = wrapped_rows(activity, width);
+    let reserved_activity_rows = u16::from(total_activity_rows > 0 && available_rows >= 3);
+    let summary_rows =
+        wrapped_rows(summary, width).min(available_rows.saturating_sub(reserved_activity_rows));
+    (summary_rows, available_rows.saturating_sub(summary_rows))
+}
+
+fn pinned_control_help_rows(detail_rows: u16) -> u16 {
+    detail_rows.saturating_sub(2).min(PINNED_CONTROL_HELP_ROWS)
+}
+
 pub(crate) fn has_saved_scene_activity(app: &App) -> bool {
-    saved_scene_activity_report(&app.animation_row_model()).is_some()
+    let context = app.animation_row_context();
+    context.effective_kind == Some(AnimationKind::VoxelLandscape)
+        && context
+            .scene_status
+            .as_deref()
+            .is_some_and(|status| status.lines().count() > 1)
 }
 
 pub(crate) fn page_saved_scene_activity(app: &App, state: &mut SettingsState, older: bool) -> bool {
@@ -291,10 +317,7 @@ pub(crate) fn page_saved_scene_activity(app: &App, state: &mut SettingsState, ol
     let footer_height = footer_rows(area, &model);
     let panel = layout_with_footer(area, footer_height).panel;
     let detail_rows = footer_height.saturating_sub(2 + credits);
-    let summary_rows = wrapped_rows(&summary, panel.width);
-    let activity_rows = detail_rows
-        .saturating_sub(PINNED_CONTROL_HELP_ROWS)
-        .saturating_sub(summary_rows);
+    let (_, activity_rows) = activity_footer_rows(detail_rows, panel.width, &summary, &activity);
     let total_rows = wrapped_rows(&activity, panel.width);
     let maximum_scroll = total_rows.saturating_sub(activity_rows);
 
@@ -332,7 +355,7 @@ fn credit_footer_rows(area: Rect, model: &RowModel) -> u16 {
         .map(|url| UnicodeWidthStr::width(*url) + 14)
         .max()
         .unwrap_or(0);
-    if area.height < 12
+    if area.height < 16
         || area.width.saturating_sub(layout(area).panel.width) as usize >= longest.max(16)
     {
         0
@@ -958,12 +981,15 @@ fn draw_value_row(frame: &mut Frame, row_area: Rect, view: &RowView, style: Styl
         |marker| marker.value_width,
     );
     let value = bracketed_value(view);
-    let text = format!(
-        "{:<label_width$} {}",
-        fit(&view.label, label_width),
-        fit(&value, value_width)
-    );
-    frame.render_widget(Paragraph::new(text).style(style), row_area);
+    let label_text = fit(&view.label, label_width);
+    let label_padding = label_width.saturating_sub(UnicodeWidthStr::width(label_text.as_str()));
+    let line = Line::from(vec![
+        Span::raw(label_text),
+        leader_span(label_padding),
+        Span::raw(" "),
+        Span::raw(fit(&value, value_width)),
+    ]);
+    frame.render_widget(Paragraph::new(line).style(style), row_area);
     if let Some(marker) = marker {
         frame.render_widget(
             Paragraph::new(marker.text).style(style.add_modifier(Modifier::DIM)),
@@ -1353,7 +1379,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
                 Rect::new(panel.x, footer_top, panel.width, detail_rows),
             );
         } else {
-            let pinned_rows = detail_rows.min(PINNED_CONTROL_HELP_ROWS);
+            let pinned_rows = pinned_control_help_rows(detail_rows);
             frame.render_widget(
                 Paragraph::new(control_help.as_str())
                     .style(ink)
@@ -1363,8 +1389,11 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
             let summary = activity_sections
                 .as_ref()
                 .map_or("", |(summary, _)| summary.as_str());
-            let summary_rows =
-                wrapped_rows(summary, panel.width).min(detail_rows.saturating_sub(pinned_rows));
+            let activity_text = activity_sections
+                .as_ref()
+                .map_or("", |(_, activity)| activity.as_str());
+            let (summary_rows, activity_rows) =
+                activity_footer_rows(detail_rows, panel.width, summary, activity_text);
             if summary_rows > 0 {
                 frame.render_widget(
                     Paragraph::new(summary).style(ink).wrap(Wrap { trim: true }),
@@ -1375,14 +1404,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
                 panel.x,
                 footer_top + pinned_rows + summary_rows,
                 panel.width,
-                detail_rows
-                    .saturating_sub(pinned_rows)
-                    .saturating_sub(summary_rows),
+                activity_rows,
             );
             if activity_area.height > 0 {
-                let activity_text = activity_sections
-                    .as_ref()
-                    .map_or("", |(_, activity)| activity.as_str());
                 let activity = Paragraph::new(activity_text)
                     .style(ink)
                     .wrap(Wrap { trim: true });
@@ -2085,13 +2109,8 @@ mod tests {
                 "left-click advances the animation selector at width {width}"
             );
             let stepped_model = app.animation_row_model();
-            let stepped_control = value_control(
-                content_area(&app),
-                &stepped_model,
-                row,
-                Scrolls::default(),
-            )
-            .unwrap();
+            let stepped_control =
+                value_control(content_area(&app), &stepped_model, row, Scrolls::default()).unwrap();
             let stepped_value = stepped_control.geometry().value;
             pointer(
                 &mut app,
@@ -2674,9 +2693,10 @@ mod tests {
             .map(|index| format!("+00:{index:02} Activity item {index}"))
             .collect::<Vec<_>>()
             .join("\n");
-        *probe.status.lock().unwrap() = Some(format!(
+        let status = format!(
             "Saved worlds [====......] phase 3/6\nNow: Reading map chunks\nElapsed: 00:42\nETA: about 00:24 for this measured scan\nTotal ETA: incomplete; route checks remain\nRoute ETA: about 00:12; based on 1 completed candidate\nRecent activity:\n{events}"
-        ));
+        );
+        prepare_saved_scene_activity(&mut app, &probe, 100, 20, &status);
 
         let initial = screen_text(&draw(&mut app, 100, 20)).join("\n");
         let control_help = selected_control_help(&app.animation_row_model(), selected);
@@ -2744,8 +2764,12 @@ mod tests {
         app.animation_settings.kind = AnimationKind::VoxelLandscape;
         let selected = row_index(&app, &AnimationRow::Common("speed"));
         set_selected_row(&mut app, selected);
-        *probe.status.lock().unwrap() = Some(
-            "Saved worlds [====......] phase 3/6\nNow: Reading map chunks\nElapsed: 00:42\nETA: about 00:24 for this measured scan\nTotal ETA: incomplete; route checks remain\nRoute ETA: about 00:12; based on 1 completed candidate\nRecent activity:\n+00:19 Loaded 64 chunks".to_owned(),
+        prepare_saved_scene_activity(
+            &mut app,
+            &probe,
+            80,
+            12,
+            "Saved worlds [====......] phase 3/6\nNow: Reading map chunks\nElapsed: 00:42\nETA: about 00:24 for this measured scan\nTotal ETA: incomplete; route checks remain\nRoute ETA: about 00:12; based on 1 completed candidate\nRecent activity:\n+00:19 Loaded 64 chunks",
         );
 
         let rendered = screen_text(&draw(&mut app, 80, 12)).join("\n");
@@ -2769,10 +2793,16 @@ mod tests {
             .map(|index| format!("+00:{index:02} Activity item {index}"))
             .collect::<Vec<_>>()
             .join("\n");
-        *probe.status.lock().unwrap() = Some(format!(
+        let status = format!(
             "Saved worlds [====......] phase 3/6\nNow: Reading map chunks\nElapsed: 00:42\nETA: 00:18 for this scan\nRecent activity:\n{events}"
-        ));
+        );
+        prepare_saved_scene_activity(&mut app, &probe, 100, 20, &status);
 
+        let _ = draw(&mut app, 100, 20);
+        assert!(
+            has_saved_scene_activity(&app),
+            "live scene details should route ? to the activity panel"
+        );
         key(&mut app, KeyCode::Char('?'));
         for _ in 0..8 {
             key(&mut app, KeyCode::PageDown);
@@ -2795,10 +2825,12 @@ mod tests {
             .map(|index| format!("+00:{index:02} Activity item {index}"))
             .collect::<Vec<_>>()
             .join("\n");
-        *probe.status.lock().unwrap() = Some(format!(
+        let status = format!(
             "Saved worlds [====......] phase 3/6\nNow: Reading map chunks\nElapsed: 00:42\nETA: 00:18 for this scan\nRecent activity:\n{events}"
-        ));
+        );
+        prepare_saved_scene_activity(&mut app, &probe, 100, 20, &status);
 
+        let _ = draw(&mut app, 100, 20);
         key(&mut app, KeyCode::Char('?'));
         for _ in 0..8 {
             key(&mut app, KeyCode::PageDown);
@@ -2814,10 +2846,12 @@ mod tests {
     #[test]
     fn saved_scene_progress_and_activity_are_visible_in_the_rendered_panel() {
         let (mut app, probe, _project) = settings_app(100, 30);
-        app.animation_settings.kind = AnimationKind::VoxelLandscape;
-        *probe.status.lock().unwrap() = Some(
-            "Saved worlds [====..] phase 4/6\nNow: Reading region 12 of 30\nElapsed: 00:42\nETA: 00:18 for this scan\nTotal ETA: incomplete; route checks remain\nRecent activity:\n+00:08 Found 420 allocated chunks\n+00:19 Loaded 64 covered chunks"
-                .to_owned(),
+        prepare_saved_scene_activity(
+            &mut app,
+            &probe,
+            100,
+            30,
+            "Saved worlds [====..] phase 4/6\nNow: Reading region 12 of 30\nElapsed: 00:42\nETA: 00:18 for this scan\nTotal ETA: incomplete; route checks remain\nRecent activity:\n+00:08 Found 420 allocated chunks\n+00:19 Loaded 64 covered chunks",
         );
 
         let terminal = draw(&mut app, 100, 30);
@@ -2882,6 +2916,24 @@ mod tests {
             ..Default::default()
         });
         (app, probe, project)
+    }
+
+    fn prepare_saved_scene_activity(
+        app: &mut App,
+        probe: &FakeProbe,
+        width: u16,
+        height: u16,
+        status: &str,
+    ) {
+        app.animation_settings.kind = AnimationKind::VoxelLandscape;
+        *probe.status.lock().unwrap() = Some(status.to_owned());
+        app.animation_frame.render(
+            &app.animation_settings,
+            width,
+            height,
+            std::time::Duration::ZERO,
+        );
+        app.animation_frame.settle_for_test();
     }
 
     #[test]

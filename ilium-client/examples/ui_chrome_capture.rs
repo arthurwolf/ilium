@@ -204,10 +204,22 @@ fn capture() -> Result<(), Box<dyn Error>> {
             ("terminal-populated", ilium_client::app::Mode::Normal),
             ("terminal-split-horizontal", ilium_client::app::Mode::Normal),
             ("terminal-split-vertical", ilium_client::app::Mode::Normal),
-            ("location-empty", synthetic_location_picker("empty")),
-            ("location-results-first", synthetic_location_picker("first")),
-            ("location-results-last", synthetic_location_picker("last")),
-            ("location-search-failed", synthetic_location_picker("failed")),
+            (
+                "location-empty",
+                synthetic_location_picker("empty", output.join("synthetic-workspace")),
+            ),
+            (
+                "location-results-first",
+                synthetic_location_picker("first", output.join("synthetic-workspace")),
+            ),
+            (
+                "location-results-last",
+                synthetic_location_picker("last", output.join("synthetic-workspace")),
+            ),
+            (
+                "location-search-failed",
+                synthetic_location_picker("failed", output.join("synthetic-workspace")),
+            ),
             ("voice-prompt-empty", ilium_client::app::Mode::VoicePromptEditor(Box::new(ilium_client::voice_settings::VoicePromptEditorState::new("")))),
             ("voice-prompt-overflow", ilium_client::app::Mode::VoicePromptEditor(Box::new(ilium_client::voice_settings::VoicePromptEditorState::new(&"Synthetic voice instructions: preserve readable spacing and Unicode 界.\n".repeat(80))))),
             ("conversion-stopping", ilium_client::app::Mode::ConvertSession),
@@ -460,18 +472,13 @@ fn capture() -> Result<(), Box<dyn Error>> {
             app.config_dir = Some(output.join("synthetic-workspace"));
             app.set_screen_area(Rect::new(0, 0, width, height));
             if name == "settings-help" {
-                let parent = ilium_client::app::Mode::Settings(SettingsState {
-                    tab: SettingsTab::VoiceControl,
-                    ..SettingsState::default()
-                });
-                let help = ilium_client::app::Mode::SettingsHelp(
+                app.mode = ilium_client::app::Mode::SettingsHelp(
                     ilium_client::settings_help::dialog::SettingsHelpState::new(
                         "VOICE-03",
                         1,
                         ilium_client::config::MotionLevel::Off,
                     ),
                 );
-                app.push_modal_over(parent, help);
             } else if name == "settings-icon-catalogue" {
                 app.mode = ilium_client::app::Mode::Settings(SettingsState {
                     tab: SettingsTab::Icons,
@@ -487,71 +494,38 @@ fn capture() -> Result<(), Box<dyn Error>> {
                     ..SettingsState::default()
                 });
             } else if name == "settings-value-number" {
-                let parent = ilium_client::app::Mode::Settings(SettingsState {
-                    tab: SettingsTab::AgentMonitoring,
-                    ..SettingsState::default()
-                });
-                let target = ilium_client::value_dialog_host::ValueTarget::SettingsNumber {
-                    field: ilium_client::value_settings::SettingsNumber::Ui(
+                let dialog = ilium_client::value_dialog_host::ValueDialogHost::settings_number(
+                    ilium_client::value_settings::SettingsNumber::Ui(
                         ilium_client::value_settings::UiNumber::ProgressLines,
                     ),
-                    directory: output.join("synthetic-workspace"),
-                    inference_revision: None,
-                    autosave: None,
-                };
-                let dialog = ilium_client::value_dialog_host::ValueDialogHost::number_host(
-                    target,
-                    ilium_client::value_dialog::NumberDialogState::new("Progress rows", "4"),
-                );
-                app.push_modal_over(
-                    parent,
-                    ilium_client::app::Mode::ValueDialog(Box::new(dialog)),
-                );
+                    &app,
+                    output.join("synthetic-workspace"),
+                )?;
+                app.mode = ilium_client::app::Mode::ValueDialog(Box::new(dialog));
             } else if name == "voice-api-key-prompt" {
-                let parent = ilium_client::app::Mode::Settings(SettingsState {
-                    tab: SettingsTab::VoiceControl,
-                    ..SettingsState::default()
-                });
-                app.push_modal_over(
-                    parent,
-                    ilium_client::app::Mode::VoiceSettingPrompt(
-                        ilium_client::voice_settings::VoiceSettingField::ApiKey,
-                        ilium_client::text_prompt::TextPromptState::new(
-                            "synthetic-voice-key-never-valid",
-                        ),
+                app.mode = ilium_client::app::Mode::VoiceSettingPrompt(
+                    ilium_client::voice_settings::VoiceSettingField::ApiKey,
+                    ilium_client::text_prompt::TextPromptState::new(
+                        "synthetic-voice-key-never-valid",
                     ),
                 );
             } else if name == "agent-setup-path-prompt" {
-                let parent = ilium_client::app::Mode::Settings(SettingsState {
-                    tab: SettingsTab::Setup,
-                    ..SettingsState::default()
-                });
-                app.push_modal_over(
-                    parent,
-                    ilium_client::app::Mode::AgentSetupPathPrompt(
-                        ilium_client::agent_feature_setup::AgentFeature::Progress,
-                        ilium_client::text_prompt::TextPromptState::new(
-                            "/synthetic/agent-instructions.md",
-                        ),
+                app.mode = ilium_client::app::Mode::AgentSetupPathPrompt(
+                    ilium_client::agent_feature_setup::AgentFeature::Progress,
+                    ilium_client::text_prompt::TextPromptState::new(
+                        "/synthetic/agent-instructions.md",
                     ),
                 );
             } else if name == "animation-text-prompt" {
-                let parent = ilium_client::app::Mode::Settings(SettingsState {
-                    tab: SettingsTab::Animations,
-                    ..SettingsState::default()
-                });
-                app.push_modal_over(
-                    parent,
-                    ilium_client::app::Mode::AnimationTextPrompt(
-                        ilium_client::app::AnimationPromptTarget {
-                            control: "synthetic-title",
-                            label: "Synthetic title".to_owned(),
-                            hint: "Enter a title for the preview",
-                            error: Some("Synthetic validation message".to_owned()),
-                        },
-                        ilium_client::text_prompt::TextPromptState::new(
-                            "Synthetic animation title",
-                        ),
+                app.mode = ilium_client::app::Mode::AnimationTextPrompt(
+                    ilium_client::app::AnimationPromptTarget {
+                        control: "synthetic-title",
+                        label: "Synthetic title".to_owned(),
+                        hint: "Enter a title for the preview",
+                        error: Some("Synthetic validation message".to_owned()),
+                    },
+                    ilium_client::text_prompt::TextPromptState::new(
+                        "Synthetic animation title",
                     ),
                 );
             } else if name == "agent-setup-offer" {
@@ -595,23 +569,11 @@ fn capture() -> Result<(), Box<dyn Error>> {
                 } else {
                     ilium_client::app::Mode::BoardPathPicker(Box::new(overlay))
                 };
-                let parent = if name == "board-path-picker" {
-                    synthetic_board(ilium_client::app::BoardStorageKind::MarkdownFile)
-                } else {
-                    ilium_client::app::Mode::Normal
-                };
-                app.push_modal_over(parent, mode);
+                app.mode = mode;
             } else if name == "text-trigger-dialog" {
-                let parent = ilium_client::app::Mode::Settings(SettingsState {
-                    tab: SettingsTab::TextTriggers,
-                    ..SettingsState::default()
-                });
-                app.push_modal_over(
-                    parent,
-                    ilium_client::app::Mode::TextTriggerDialog(Box::new(
-                        ilium_client::text_trigger_dialog::TextTriggerDialogState::new(None),
-                    )),
-                );
+                app.mode = ilium_client::app::Mode::TextTriggerDialog(Box::new(
+                    ilium_client::text_trigger_dialog::TextTriggerDialogState::new(None),
+                ));
             } else if name.starts_with("stats-") {
                 let group = app
                     .tree
@@ -1241,12 +1203,14 @@ fn configure_synthetic_conversion(app: &mut App, name: &str) {
     app.mode = ilium_client::app::Mode::ConvertSession;
 }
 
-fn synthetic_location_picker(kind: &str) -> ilium_client::app::Mode {
-    use ilium_client::location_picker::{LocationPickerState, PickerFocus};
-    let mut picker = LocationPickerState::new(
-        ilium_ambient::GeoLocation::new("Synthetic observer", 48.86, 2.35),
-        None,
-    );
+fn synthetic_location_picker(kind: &str, directory: PathBuf) -> ilium_client::app::Mode {
+    let mut app = App::new("synthetic-location-capture".to_owned(), directory.clone());
+    app.config_dir = Some(directory);
+    app.open_location_picker();
+    let ilium_client::app::Mode::LocationPicker(picker) = &mut app.mode else {
+        return app.mode;
+    };
+    picker.candidate = ilium_ambient::GeoLocation::new("Synthetic observer", 48.86, 2.35);
     if matches!(kind, "first" | "last") {
         picker.results = (0..24)
             .map(|index| {
@@ -1259,12 +1223,11 @@ fn synthetic_location_picker(kind: &str) -> ilium_client::app::Mode {
             .collect();
         picker.selected_result = if kind == "last" { 23 } else { 0 };
         picker.candidate = picker.results[picker.selected_result].clone();
-        picker.focus = PickerFocus::Results;
     } else if kind == "failed" {
         picker.status =
             Some("Synthetic address provider unavailable; enter coordinates directly".to_owned());
     }
-    ilium_client::app::Mode::LocationPicker(Box::new(picker))
+    std::mem::replace(&mut app.mode, ilium_client::app::Mode::Normal)
 }
 
 fn configure_synthetic_terminals(
@@ -1281,7 +1244,6 @@ fn configure_synthetic_terminals(
         .tree
         .add_pane(group, "Build output", PaneContentKind::Terminal)?;
     let mut first_view = TerminalView::new(height, width);
-    first_view.feed(b"Synthetic terminal output\r\nCompile progress 12/20\r\nAll fixture text is invented.\r\n$ ready");
     app.panes
         .insert(first, PaneRuntime::Terminal(Box::new(first_view)));
     app.right_panel_target = if name == "terminal-populated" {
@@ -1291,9 +1253,6 @@ fn configure_synthetic_terminals(
             .tree
             .add_pane(group, "Review notes", PaneContentKind::Terminal)?;
         let mut second_view = TerminalView::new(height, width);
-        second_view.feed(
-            b"Synthetic review notes\r\nCheck titles, breathing room and boundaries.\r\n$ ready",
-        );
         app.panes
             .insert(second, PaneRuntime::Terminal(Box::new(second_view)));
         let orientation = if name == "terminal-split-horizontal" {

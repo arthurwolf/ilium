@@ -1,6 +1,11 @@
 //! Shared instruction inputs: each location edits the same persisted value.
 use crate::app::{App, SettingsTab};
-use ratatui::{layout::Rect, text::Line, widgets::Paragraph, Frame};
+use ratatui::{
+    layout::Rect,
+    text::Line,
+    widgets::{Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
+    Frame,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InstructionField {
@@ -125,15 +130,24 @@ pub fn first_visible(tab: SettingsTab, area: Rect, selection: usize) -> usize {
         .saturating_sub(visible.saturating_sub(1))
         .min(count.saturating_sub(visible))
 }
+
+fn visible_field_count(area: Rect) -> usize {
+    (usize::from(area.height.saturating_sub(1)) / 3).max(1)
+}
+
 pub fn render(frame: &mut Frame, area: Rect, app: &App, tab: SettingsTab, selection: usize) {
+    let field_count = fields(tab).len();
+    let visible_fields = visible_field_count(area).min(field_count);
+    let first = first_visible(tab, area, selection);
+    let overflow = field_count > visible_fields && area.width > 1 && area.height > 0;
+    let text_area = Rect {
+        width: area.width.saturating_sub(u16::from(overflow)),
+        ..area
+    };
     let mut lines = vec![Line::from(
         "Additional instructions · i: focus · Enter: edit · Delete: clear",
     )];
-    for (index, field) in fields(tab)
-        .iter()
-        .enumerate()
-        .skip(first_visible(tab, area, selection))
-    {
+    for (index, field) in fields(tab).iter().enumerate().skip(first) {
         let marker = if selection == SELECTION_BASE + index {
             "›"
         } else {
@@ -146,7 +160,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, tab: SettingsTab, select
                 .value(app)
                 .chars()
                 .map(|character| if character == '\n' { ' ' } else { character })
-                .take(usize::from(area.width.saturating_sub(8)))
+                .take(usize::from(text_area.width.saturating_sub(8)))
                 .collect()
         };
         lines.push(Line::from(format!(
@@ -156,7 +170,20 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, tab: SettingsTab, select
         lines.push(Line::from(format!("  {}", field.compact_description())));
         lines.push(Line::default());
     }
-    frame.render_widget(Paragraph::new(lines), area);
+    frame.render_widget(Paragraph::new(lines), text_area);
+    if overflow {
+        let mut scrollbar = ScrollbarState::new(field_count)
+            .viewport_content_length(visible_fields)
+            .position(first);
+        frame.render_stateful_widget(
+            Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                .begin_symbol(None)
+                .end_symbol(None)
+                .track_symbol(Some("│")),
+            Rect::new(area.right().saturating_sub(1), area.y, 1, area.height),
+            &mut scrollbar,
+        );
+    }
 }
 impl App {
     pub fn settings_open_instruction(&mut self, field: InstructionField) {
@@ -274,6 +301,33 @@ mod tests {
             first_visible(SettingsTab::LlmInstructions, area, SELECTION_BASE + 6),
             4
         );
+    }
+
+    #[test]
+    fn instruction_panel_shows_a_scrollbar_only_when_fields_overflow() {
+        let app = App::new("instructions".into(), std::env::temp_dir());
+        for (width, height, expected) in [(40, 8, true), (120, 40, false)] {
+            let backend = ratatui::backend::TestBackend::new(width, height);
+            let mut terminal = ratatui::Terminal::new(backend).unwrap();
+            terminal
+                .draw(|frame| {
+                    render(
+                        frame,
+                        Rect::new(0, 0, width, height),
+                        &app,
+                        SettingsTab::LlmInstructions,
+                        SELECTION_BASE,
+                    )
+                })
+                .unwrap();
+            let has_track = (0..height).any(|y| {
+                terminal.backend().buffer()[(width - 1, y)]
+                    .symbol()
+                    .chars()
+                    .any(|symbol| !symbol.is_whitespace())
+            });
+            assert_eq!(has_track, expected, "{width}x{height}");
+        }
     }
 }
 

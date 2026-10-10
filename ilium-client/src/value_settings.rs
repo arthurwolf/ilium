@@ -811,6 +811,7 @@ mod tests {
             "all-numeric-settings-controls".into(),
             directory.path().into(),
         );
+        app.config_dir = Some(directory.path().to_owned());
         app.agent_detection_settings = Some(ilium_ipc::AgentDetectionSettings {
             working_poll_seconds: 15,
             idle_poll_seconds: 45,
@@ -888,6 +889,30 @@ mod tests {
                         );
                     }
                 }
+
+                app.mode = Mode::Settings(SettingsState {
+                    tab,
+                    selected_row: row,
+                    ..SettingsState::default()
+                });
+                app.begin_settings_number_dialog(field);
+                let Mode::ValueDialog(host) = std::mem::replace(&mut app.mode, Mode::Normal) else {
+                    panic!("{tab:?}/{row} must open its numeric dialog");
+                };
+                assert!(
+                    matches!(&host.dialog, ValueDialogState::Number(_)),
+                    "{tab:?}/{row} must open a number editor"
+                );
+                assert!(
+                    matches!(
+                        &host.target,
+                        crate::value_dialog_host::ValueTarget::SettingsNumber { field: actual, .. }
+                            | crate::value_dialog_host::ValueTarget::DetectionNumber { field: actual, .. }
+                            if *actual == field
+                    ),
+                    "{tab:?}/{row} dialog must target {field:?}"
+                );
+                app.finish_value_dialog(host, DialogOutcome::Cancel);
             }
         }
 

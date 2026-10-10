@@ -150,6 +150,11 @@ Every background animation (built-in, hosted `ilium-ambient` scene, Wikipedia, a
 
 - Never "fix" an icon rendering or width issue by replacing the normal UTF-8 icons with plain stable glyphs. Diagnose and correct the rendering, cell-width, or diff behavior while keeping normal icons as the default. A stable-glyph mode may exist only as an explicit, opt-in user preference.
 
+## Form row leaders
+
+- Every form row whose label and control can sit far apart (settings rows, dialogs, any full-width input) connects them with grey dotted leaders made of `…` (U+2026, one cell). Use `value_control::leader_span` for text-built rows and `ValueControl` for shared controls; never pad the gap with plain spaces. Leaders are inert: they are never part of a hit target.
+- Shared rule: one blank cell on each side of the dots; a gap shorter than five cells stays blank. Leaders never overwrite label text, glyphs or values.
+
 <!-- ilium-agent-feature: chatroom -->
 If `CHATROOM.md` exists in the project root, read recent coordination with `ilium chat context --limit 40` when beginning work and before changing shared areas. Use `ilium chat send --message "..."` only for a task claim or release, blocker, dependency, material discovery or decision, or a handoff; do not post routine progress narration. Never rewrite `CHATROOM.md` directly.
 <!-- /ilium-agent-feature: chatroom -->

@@ -215,6 +215,8 @@ async fn worker_preserves_exact_preview_semantics_and_regex_work_is_off_ui() {
 
     wait_ready(&mut owner, &mut state);
 
+    // Intentionally invalid literal: clippy's invalid_regex lint would reject it, but the test needs the real parser error text.
+    #[allow(clippy::invalid_regex)]
     let expected_invalid = format!(
         "Invalid regexp: {}",
         regex::Regex::new("(").expect_err("invalid test regexp"),

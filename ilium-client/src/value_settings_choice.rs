@@ -1518,6 +1518,8 @@ mod tests {
     #[test]
     fn every_settings_choice_retains_its_full_catalog_and_current_identity() {
         let mut app = App::new("choice-catalog".into(), std::env::temp_dir());
+        let config_directory = std::env::temp_dir().join("ilium-choice-catalog-test");
+        app.config_dir = Some(config_directory);
         app.inference_settings.ollama.model = "synthetic-authored-ollama".into();
         app.inference_settings.openai.model = "synthetic-authored-openai".into();
         let expected = [
@@ -1562,6 +1564,13 @@ mod tests {
         ];
         assert_eq!(expected.len(), SettingsChoice::ALL.len());
         for (field, expected) in SettingsChoice::ALL.into_iter().zip(expected) {
+            app.inference_settings.selected_provider = match field {
+                SettingsChoice::KiloModel => ilium_inference::InferenceProviderKind::KiloGateway,
+                SettingsChoice::OllamaModel => ilium_inference::InferenceProviderKind::Ollama,
+                SettingsChoice::OpenAiModel => ilium_inference::InferenceProviderKind::OpenAi,
+                SettingsChoice::AnthropicModel => ilium_inference::InferenceProviderKind::Anthropic,
+                _ => app.inference_settings.selected_provider,
+            };
             let (options, selected) = field.options(&app);
             assert_eq!(options.len(), expected, "{field:?}");
             assert!(options
@@ -1582,6 +1591,39 @@ mod tests {
             };
             assert_eq!(dialog.options().len(), expected);
             assert_eq!(dialog.selected_id, Some(selected));
+
+            let location = crate::app::SettingsTab::ALL
+                .into_iter()
+                .find_map(|tab| {
+                    (0..crate::settings_ui::settings_number_row_count(&app, tab))
+                        .find(|row| SettingsChoice::at(&app, tab, *row) == Some(field))
+                        .map(|row| (tab, row))
+                })
+                .unwrap_or_else(|| panic!("{field:?} must have a settings row"));
+            app.mode = Mode::Settings(SettingsState {
+                tab: location.0,
+                selected_row: location.1,
+                ..SettingsState::default()
+            });
+            app.begin_settings_choice_dialog(field);
+            let Mode::ValueDialog(host) = std::mem::replace(&mut app.mode, Mode::Normal) else {
+                panic!("{field:?} plus control must open a dialog");
+            };
+            assert!(
+                matches!(
+                    &host.target,
+                    crate::value_dialog_host::ValueTarget::SettingsChoice {
+                        field: actual,
+                        ..
+                    } if *actual == field
+                ),
+                "{field:?} dialog must retain its target identity"
+            );
+            let ValueDialogState::Choice(opened) = &host.dialog else {
+                panic!("{field:?} must open its complete choice catalog");
+            };
+            assert_eq!(opened.options().len(), expected, "{field:?} dialog catalog");
+            app.finish_value_dialog(host, DialogOutcome::Cancel);
         }
     }
 
