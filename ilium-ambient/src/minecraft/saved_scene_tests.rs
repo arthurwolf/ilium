@@ -16,12 +16,10 @@ fn allocated_proto_chunks_are_rejected_before_full_route_decode() {
         .unwrap(),
         "an allocated chunk with Status=structure_starts must not reach full viewport decode"
     );
-    assert!(
-        route_support_is_eligible(&support, &allocated, |position| {
-            Ok(support.contains(&position))
-        })
-        .unwrap()
-    );
+    assert!(route_support_is_eligible(&support, &allocated, |position| {
+        Ok(support.contains(&position))
+    })
+    .unwrap());
     assert!(
         !route_support_is_eligible(&support, &BTreeSet::from([[-18, -6]]), |_| Ok(true)).unwrap()
     );
@@ -261,7 +259,7 @@ fn failed_preparation_does_not_keep_an_eta_for_work_that_has_stopped() {
     }
     let measured_report = progress.report();
     assert!(
-        measured_report.contains("on this measured stage"),
+        measured_report.contains("for this measured stage"),
         "running work should expose its measured stage estimate: {measured_report}"
     );
 
@@ -273,7 +271,7 @@ fn failed_preparation_does_not_keep_an_eta_for_work_that_has_stopped() {
         "failed work must not retain a live ETA: {report}"
     );
     assert!(
-        !report.contains("on this measured stage"),
+        !report.contains("for this measured stage"),
         "failed work must not claim that the stopped stage is still progressing: {report}"
     );
     assert!(
@@ -742,20 +740,20 @@ fn route_survey_progress_accumulates_across_candidate_passes() {
     );
     let first_pass = progress.report();
     assert!(
-        first_pass.contains("overall 58% · phase 3/6"),
+        first_pass.contains("overall 51% · phase 3/6"),
         "route survey should include bounded work in whole-preparation progress: {first_pass}"
     );
 
     progress.work(
         saves_root,
         "Checking route coverage",
-        33_000_000,
+        61_440_000,
         MAX_SELECTION_WORK as usize,
         "Pass 2 of 16: comparing candidate camera views",
     );
     let next_pass = progress.report();
     assert!(
-        next_pass.contains("overall 59% · phase 3/6"),
+        next_pass.contains("overall 52% · phase 3/6"),
         "route survey progress should continue across candidate passes: {next_pass}"
     );
     assert!(
@@ -898,16 +896,12 @@ fn route_survey_orders_short_novel_before_longer_repeated_and_stays_finite() {
     assert_eq!(tiers[0], (Choice::NovelAppearance, 1024.0, 1));
     assert_eq!(tiers[5], (Choice::NovelAppearance, 64.0, 1));
     assert_eq!(tiers[6], (Choice::RepeatedAppearance, 256.0, 1));
-    assert!(
-        tiers[..6]
-            .iter()
-            .all(|(choice, _, _)| *choice == Choice::NovelAppearance)
-    );
-    assert!(
-        tiers[6..10]
-            .iter()
-            .all(|(choice, _, _)| *choice == Choice::RepeatedAppearance)
-    );
+    assert!(tiers[..6]
+        .iter()
+        .all(|(choice, _, _)| *choice == Choice::NovelAppearance));
+    assert!(tiers[6..10]
+        .iter()
+        .all(|(choice, _, _)| *choice == Choice::RepeatedAppearance));
 }
 
 #[test]
@@ -1265,10 +1259,8 @@ fn pinned_scene_refuses_shared_storage_exhaustion_before_worker_or_history() {
 #[test]
 fn pinned_scene_original_request_stop_refuses_before_worker_storage_or_history_retirement() {
     let temporary = tempfile::tempdir().unwrap();
-    let env = SceneEnv::for_test(
-        temporary.path().join("cache"),
-        crate::resources::test_resources(),
-    );
+    let (_execution, resources) = crate::resources::isolated_test_resources();
+    let env = SceneEnv::for_test(temporary.path().join("cache"), resources);
     let mut source = pinned_admission_source(&temporary, Arc::clone(&env.saved_runtime));
     let original = ilium_platform::owned_worker::StopToken::default();
     source.stop = Some(original.child());

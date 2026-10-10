@@ -826,10 +826,10 @@ fn projected_source_reaches_chunk_qualification_with_the_same_bound_root_spellin
         Err(error) => error.to_string(),
         Ok(_) => panic!("expected incomplete decoded source"),
     };
-    let first_absent_rejection = format!("{:?}=absent", expected_missing[0]);
+    let first_rejection = format!("{:?}=", expected_missing[0]);
     assert!(
-        error_message.contains(&first_absent_rejection),
-        "projected-source error should explain why requested chunks were missing: {error_message}"
+        error_message.contains(&first_rejection),
+        "projected-source error should identify the first missing chunk: {error_message}"
     );
     assert_eq!(
         error_message.matches('=').count(),

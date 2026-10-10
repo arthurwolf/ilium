@@ -22,23 +22,23 @@ use crate::{
     control::SceneSettings,
     raster::PaintedOwner,
     resources::{AmbientResources, WorkerCost},
-    scene::{Frame, FrameReceiptId, MAX_SCENE_RECEIPT_SLOTS, Scene, SceneEnv},
+    scene::{Frame, FrameReceiptId, Scene, SceneEnv, MAX_SCENE_RECEIPT_SLOTS},
     source::Worker,
     style::ScenePalette,
     voxel_landscape::{
-        Retirement, VoxelLandscapeScene, VoxelLandscapeSettings,
         assets::budget::{ByteBudget, Cancel, Reservation},
         composite_selected,
         surface_raster::{self, DirectionalLight, RasterFrame, RasterLimits},
+        Retirement, VoxelLandscapeScene, VoxelLandscapeSettings,
     },
 };
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     path::PathBuf,
     sync::{
-        Arc, Mutex, TryLockError,
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         mpsc::{self, SyncSender},
+        Arc, Mutex, TryLockError,
     },
     time::{Duration, Instant},
 };
