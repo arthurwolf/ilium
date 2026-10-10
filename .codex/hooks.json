@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "ilium chat context --limit 40",
+            "command": "ilium chat context --limit 40 --since-last-read --max-bytes 2048",
             "timeout": 10,
             "statusMessage": "Checking ilium chatroom"
           }
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "ilium chat context --limit 40",
+            "command": "ilium chat context --limit 40 --since-last-read --max-bytes 2048",
             "timeout": 10,
             "statusMessage": "Checking ilium chatroom"
           }

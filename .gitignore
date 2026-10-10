@@ -14,6 +14,7 @@ target/
 !/docs/tasks/01-overworld-texture-pack-shipping.md
 /data/
 /CHATROOM.md
+/CHATROOM.archive.md
 
 # Task-owned hashed development inputs for remote UI qualification.
 /.ni-build-ui-sdk/

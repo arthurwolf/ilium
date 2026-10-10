@@ -11,7 +11,7 @@ holding `ilium` and `ilium-server`, fills it with synthetic Codex-like panes
   * voluntary + involuntary context switches summed over all threads
   * thread count and resident memory
   * key-to-visible latency: a tree-navigation key is sent through tmux and the
-    rendered screen is captured until it changes
+    rendered screen is captured until the sidebar selection highlight moves
 
 Every line on stdout is one JSON object with a `type` field
 (`progress`, `sample`, `latency`, `result`, `warning`, `error`).
@@ -264,7 +264,12 @@ class IsolatedSession:
                 self.client_pid = int(pane_pid)
                 return
             time.sleep(0.2)
-        raise RuntimeError("isolated ilium session did not start within 30 s")
+        screen = self.tmux("capture-pane", "-p", "-t", "bench:0.0", capture=True)
+        raise RuntimeError(
+            "isolated ilium session did not start within 30 s: "
+            f"server_pid={self.server_pid} pane_pid={pane_pid!r} "
+            f"screen_tail={screen.strip()[-600:]!r}"
+        )
 
     def add_panes(self):
         modes = (
@@ -274,14 +279,20 @@ class IsolatedSession:
         modes += ["idle"] * max(0, self.arguments.panes - len(modes))
         random.Random(7).shuffle(modes)
         for index, mode in enumerate(modes):
-            self.ilium(
-                "new-pane",
-                "--",
-                self.agent,
-                mode,
-                "--threads",
-                str(self.arguments.agent_threads),
-            )
+            try:
+                self.ilium(
+                    "new-pane",
+                    "--",
+                    self.agent,
+                    mode,
+                    "--threads",
+                    str(self.arguments.agent_threads),
+                )
+            except subprocess.CalledProcessError as error:
+                raise RuntimeError(
+                    f"new-pane {index + 1} of {len(modes)} failed (exit {error.returncode}): "
+                    f"stderr={error.stderr.strip()[-800:]!r} stdout={error.stdout.strip()[-400:]!r}"
+                ) from error
             if index % 25 == 24:
                 emit({"type": "progress", "step": "add_panes", "created": index + 1, "total": len(modes)}, self.sink)
         return modes
@@ -308,10 +319,23 @@ class IsolatedSession:
     def capture(self):
         return self.tmux("capture-pane", "-e", "-p", "-t", "bench:0.0", capture=True)
 
+    def selected_row(self):
+        """Row index of the sidebar selection highlight: the first screen row
+        whose sidebar part (before the panel divider) sets a background
+        colour. Comparing only this row index, not the whole screen, keeps
+        animated status glyphs and repainting panes from counting as the
+        key's effect."""
+        for index, line in enumerate(self.capture().splitlines()):
+            parts = line.split("\u2502")
+            sidebar = "\u2502".join(parts[:2]) if len(parts) > 2 else line
+            if "\x1b[48;" in sidebar:
+                return index
+        return None
+
     def measure_latency(self, presses):
         """Moves the sidebar selection with the arrow keys after focusing the
-        tree (prefix, then `w`), timing each press until the rendered screen
-        (with colours, so a moved highlight counts) differs."""
+        tree (prefix, then `w`), timing each press until the selection
+        highlight is drawn on a different row."""
         samples = []
         timeouts = 0
         self.tmux("send-keys", "-t", "bench:0.0", "C-b")
@@ -320,12 +344,12 @@ class IsolatedSession:
         time.sleep(0.5)
         for index in range(presses):
             key = "Down" if index % 2 == 0 else "Up"
-            before = self.capture()
+            before = self.selected_row()
             started = time.perf_counter()
             self.tmux("send-keys", "-t", "bench:0.0", key)
             changed = False
             while time.perf_counter() - started < 3.0:
-                if self.capture() != before:
+                if self.selected_row() != before:
                     changed = True
                     break
             elapsed_ms = (time.perf_counter() - started) * 1000
