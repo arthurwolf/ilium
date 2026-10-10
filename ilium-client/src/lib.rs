@@ -422,11 +422,12 @@ fn server_event_damage(app: &App, event: &ilium_ipc::ServerEvent) -> ServerEvent
                 needs_immediate_redraw: is_visible,
             }
         }
-        ServerEvent::TerminalReplay { pane_id, .. }
-        | ServerEvent::ScreenUpdate { pane_id, .. } => ServerEventDamage {
-            needs_redraw: app.is_pane_displayed(*pane_id),
-            needs_immediate_redraw: false,
-        },
+        ServerEvent::TerminalReplay { pane_id, .. } | ServerEvent::ScreenUpdate { pane_id, .. } => {
+            ServerEventDamage {
+                needs_redraw: app.is_pane_displayed(*pane_id),
+                needs_immediate_redraw: false,
+            }
+        }
         // Per-pane state that background panes report continuously. With
         // hundreds of agents these arrive many times a second; each one used
         // to force an immediate full redraw, bypassing the output frame cap.

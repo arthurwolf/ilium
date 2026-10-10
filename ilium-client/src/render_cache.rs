@@ -1060,6 +1060,33 @@ mod tests {
     }
 
     #[test]
+    fn pane_node_changed_updates_one_pane_and_rejects_a_move() {
+        let mut app = app();
+        let mut tree = ilium_core::Tree::new();
+        let first_group = tree.add_group(ROOT_ID, "first").unwrap();
+        let second_group = tree.add_group(ROOT_ID, "second").unwrap();
+        let pane_id = tree
+            .add_pane(first_group, "old title", PaneContentKind::Terminal)
+            .unwrap();
+        apply(&mut app, ServerEvent::TreeSnapshot(tree));
+
+        let mut renamed = app.tree.get(pane_id).unwrap().clone();
+        renamed.name = "new title".to_owned();
+        apply(&mut app, ServerEvent::PaneNodeChanged(Box::new(renamed)));
+        assert_eq!(app.tree.get(pane_id).unwrap().name, "new title");
+
+        // A pane-only update must never move a pane; a move needs a full
+        // snapshot so both parents' child lists change together.
+        let mut moved = app.tree.get(pane_id).unwrap().clone();
+        moved.parent = Some(second_group);
+        moved.name = "moved title".to_owned();
+        apply(&mut app, ServerEvent::PaneNodeChanged(Box::new(moved)));
+        let pane = app.tree.get(pane_id).unwrap();
+        assert_eq!(pane.parent, Some(first_group));
+        assert_eq!(pane.name, "new title");
+    }
+
+    #[test]
     fn replayed_pane_frozen_event_restores_the_unfreeze_marker() {
         let mut app = app();
         let mut tree = ilium_core::Tree::new();

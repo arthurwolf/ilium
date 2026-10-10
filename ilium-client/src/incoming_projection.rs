@@ -59,6 +59,14 @@ impl ProjectionRetention {
                 update.reset_tree = true;
                 (Slot::Tree, None)
             }
+            PaneNodeChanged(node) => {
+                if !app.tree.get(node.id).is_some_and(ilium_core::Node::is_pane)
+                    || !ilium_core::Node::is_pane(node)
+                {
+                    return update;
+                }
+                (Slot::Tree, Some(node.id))
+            }
             PaneStateSnapshot {
                 detection_evidence, ..
             } => {
@@ -290,4 +298,46 @@ pub(crate) fn projection_metadata_bytes(event: &ServerEvent) -> usize {
         .saturating_mul(2)
         .saturating_mul(std::mem::size_of::<Key>())
         .saturating_add(512)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ilium_core::{PaneContentKind, ROOT_ID};
+
+    #[test]
+    fn pane_node_change_retains_only_the_replaced_pane_tree_slot() {
+        let mut app = App::new("projection-test".into(), Default::default());
+        let group_id = app.tree.add_group(ROOT_ID, "group").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group_id, "pane", PaneContentKind::Terminal)
+            .unwrap();
+        let pane = app.tree.get(pane_id).unwrap().clone();
+
+        let update =
+            ProjectionRetention::prepare(&ServerEvent::PaneNodeChanged(Box::new(pane)), &app);
+
+        assert_eq!(
+            update.keys,
+            [Key {
+                slot: Slot::Tree,
+                scope: Some(pane_id),
+            }]
+        );
+        assert!(!update.reset_tree);
+    }
+
+    #[test]
+    fn pane_node_change_for_non_pane_is_ignored() {
+        let mut app = App::new("projection-test".into(), Default::default());
+        let group_id = app.tree.add_group(ROOT_ID, "group").unwrap();
+        let group = app.tree.get(group_id).unwrap().clone();
+
+        let update =
+            ProjectionRetention::prepare(&ServerEvent::PaneNodeChanged(Box::new(group)), &app);
+
+        assert!(update.keys.is_empty());
+        assert!(!update.reset_tree);
+    }
 }

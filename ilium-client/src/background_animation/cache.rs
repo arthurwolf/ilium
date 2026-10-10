@@ -5,7 +5,7 @@ use ilium_ambient::resources::WorkerCost;
 use ilium_ambient::source::Worker;
 use ilium_execution::StorageAdmission;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{mpsc, Arc};
+use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
 pub(crate) const CACHE_FPS: u32 = 30;
@@ -164,16 +164,35 @@ impl AnimationLoopCache {
         {
             return;
         }
+        let worker_cost = WorkerCost {
+            threads: 1,
+            resident_bytes: CACHE_WORKER_BYTES,
+        };
+        let limits = self.resources.finite().quota_group().snapshot().limits;
+        let Some(required_worker_bytes) = self
+            .status
+            .estimated_bytes
+            .checked_add(worker_cost.resident_bytes)
+        else {
+            self.status.is_limited = true;
+            return;
+        };
+        // These ceilings are immutable for this execution identity. Refuse a
+        // cache that can never fit, while keeping current occupancy/admission
+        // contention retryable below.
+        if worker_cost.threads > limits.worker_threads
+            || required_worker_bytes > limits.worker_bytes
+        {
+            self.status.is_limited = true;
+            return;
+        }
         // Admission is shared with every client and retained before cloning
         // settings/resources or allocating the packed frame batch.
         let storage = match self.resources.reserve_storage(self.status.estimated_bytes) {
             Ok(storage) => storage,
             Err(_) => return,
         };
-        let worker_reservation = match self.resources.reserve_worker(WorkerCost {
-            threads: 1,
-            resident_bytes: CACHE_WORKER_BYTES,
-        }) {
+        let worker_reservation = match self.resources.reserve_worker(worker_cost) {
             Ok(reservation) => reservation,
             Err(_) => return,
         };
@@ -406,6 +425,71 @@ mod tests {
     }
 
     #[test]
+    fn loop_cache_reports_worker_quota_that_can_never_fit() {
+        let quota = QuotaGroup::new(QuotaLimits {
+            clients: 4,
+            jobs: 8,
+            service_jobs: 0,
+            input_bytes: 1024 * 1024,
+            result_bytes: 1024 * 1024,
+            worker_threads: 4,
+            worker_bytes: 8 * 1024 * 1024,
+        });
+        let mut execution = Execution::start(
+            quota.clone(),
+            ExecutionConfig {
+                cpu: LaneConfig {
+                    threads: 1,
+                    queue_slots: 2,
+                    priority: None,
+                    resident_bytes_per_thread: 1024 * 1024,
+                },
+                io: LaneConfig {
+                    threads: 0,
+                    queue_slots: 0,
+                    priority: None,
+                    resident_bytes_per_thread: 0,
+                },
+                service: LaneConfig {
+                    threads: 0,
+                    queue_slots: 0,
+                    priority: None,
+                    resident_bytes_per_thread: 0,
+                },
+            },
+        )
+        .unwrap();
+        let client = execution
+            .client(ClientLimits {
+                jobs: 8,
+                service_jobs: 0,
+                input_bytes: 1024 * 1024,
+                result_bytes: 1024 * 1024,
+            })
+            .unwrap();
+        let resources = ilium_ambient::resources::AmbientResources::new(client);
+        let mut cache = AnimationLoopCache::new(resources);
+        let settings = AnimationSettings {
+            loop_seconds: 1,
+            ..Default::default()
+        };
+
+        cache.begin(&settings, 24, 12);
+
+        assert!(cache.build.is_none());
+        assert!(
+            cache.status().is_limited,
+            "a worker cost above the immutable shared ceiling must be reported as limited"
+        );
+        assert!(!cache.status().has_error);
+        drop(cache);
+        execution.request_shutdown(ShutdownMode::Cancel);
+        execution
+            .join_until_background(Instant::now() + Duration::from_secs(5))
+            .unwrap();
+    }
+
+    #[test]
     fn loop_cache_waits_for_shared_admission_and_retains_frame_storage_credit() {
         let (mut execution, resources, quota) = isolated_resources();
         let baseline = quota.snapshot();
@@ -428,6 +512,10 @@ mod tests {
             !cache.status().has_error,
             "temporary quota pressure is retryable"
         );
+        assert!(
+            !cache.status().is_limited,
+            "current storage pressure must not be confused with an immutable limit"
+        );
         drop(blocker);
 
         let available_threads = quota
@@ -444,6 +532,10 @@ mod tests {
         assert!(
             cache.build.is_none(),
             "cache worker must wait for shared thread admission"
+        );
+        assert!(
+            !cache.status().is_limited,
+            "current thread pressure must remain retryable"
         );
         drop(thread_blocker);
 

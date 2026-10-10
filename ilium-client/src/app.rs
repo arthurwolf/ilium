@@ -3885,20 +3885,35 @@ impl App {
 
     pub(crate) fn queue_request(&mut self, request: ClientRequest) -> bool {
         if self.try_queue_terminal_request(request).is_err() {
-            self.status_message=Some("Request rejected before admission: bounded request/input credits are unavailable; retry after pending work completes".into());
+            self.show_request_admission_error();
             return false;
         }
         true
     }
+
+    fn show_request_admission_error(&mut self) {
+        self.status_message = Some(
+            "Request rejected before admission: bounded request/input credits are unavailable; retry after pending work completes"
+                .into(),
+        );
+    }
+
+    fn try_admit_terminal_request(
+        &self,
+        request: ClientRequest,
+    ) -> Result<crate::ipc_preparation::AdmittedRequest, Box<ClientRequest>> {
+        let Some(client) = &self.outbound_admission else {
+            return Err(Box::new(request));
+        };
+        crate::ipc_preparation::admit_request(client, request)
+            .map_err(|error| Box::new(error.value))
+    }
+
     pub(crate) fn try_queue_terminal_request(
         &mut self,
         request: ClientRequest,
     ) -> Result<(), Box<ClientRequest>> {
-        let Some(client) = &self.outbound_admission else {
-            return Err(Box::new(request));
-        };
-        let request = crate::ipc_preparation::admit_request(client, request)
-            .map_err(|error| Box::new(error.value))?;
+        let request = self.try_admit_terminal_request(request)?;
         if self.terminal_parsing.is_some() {
             let pane = match request.view() {
                 ClientRequest::KeyInput { pane_id, .. }
@@ -6840,6 +6855,13 @@ impl App {
         self.cached_setup_needs_install(feature, path)
     }
 
+    /// True when the global instruction file already carries the current
+    /// `feature` teaching, so no project needs its own copy.
+    fn global_setup_covers(&mut self, feature: AgentFeature) -> bool {
+        self.agent_setup_global_file(feature)
+            .is_some_and(|path| self.setup_feature_needs_install(feature, &path) == Some(false))
+    }
+
     fn queue_agent_setup_prompt_global(&mut self) {
         if self.agent_setup_settings.never_ask_global || self.has_seen_global_setup_prompt {
             return;
@@ -6893,6 +6915,8 @@ impl App {
         else {
             return;
         };
+        let chatroom = chatroom && !self.global_setup_covers(AgentFeature::Chatroom);
+        let progress = progress && !self.global_setup_covers(AgentFeature::Progress);
         if !chatroom && !progress {
             return;
         }
@@ -15834,13 +15858,22 @@ impl App {
             self.status_message = Some("This pane is not frozen".to_string());
             return;
         }
+        // Reserve the essential replacement request before focus traffic can
+        // consume the final outbound admission credit. Queue it after focus so
+        // the server still sees the old pane's focus transition first.
+        let unfreeze_request =
+            match self.try_admit_terminal_request(ClientRequest::UnfreezePane { pane_id }) {
+                Ok(request) => request,
+                Err(_) => {
+                    self.show_request_admission_error();
+                    return;
+                }
+            };
         self.auto_freeze_since.remove(&pane_id);
         // Focus must reach the server while the frozen pane still exists;
         // UnfreezePane replaces it with a new pane ID.
         self.focus_pane(pane_id);
-        if !self.queue_request(ClientRequest::UnfreezePane { pane_id }) {
-            return;
-        }
+        self.queue_terminal_request_after_barrier(unfreeze_request);
         // Carry focus across the server's new pane ID at the same tree slot.
         self.remember_replacement_focus(pane_id);
         self.status_message = Some("Unfreezing agent…".to_string());
@@ -21579,7 +21612,7 @@ mod tests {
             ilium_inference::InferenceProviderKind::KiloGateway,
             ilium_inference::kilo_gateway_model_catalog_url(),
             Duration::from_millis(100),
-            Ok(vec!["stepfun/step-3.7-flash:free".to_string()]),
+            Ok(vec!["stepfun/step-5-preview-free".to_string()]),
         );
         app.settle_model_catalog_for_test();
 
@@ -21589,7 +21622,7 @@ mod tests {
         );
         assert!(app
             .kilo_gateway_models
-            .contains(&"stepfun/step-3.7-flash:free".to_string()));
+            .contains(&"stepfun/step-5-preview-free".to_string()));
         app.settings_adjust_kilo_gateway_model(1);
         assert_eq!(app.inference_settings.kilo_gateway.model, "kilo-auto/free");
     }
@@ -22287,7 +22320,9 @@ mod tests {
     #[test]
     fn agent_message_dialog_sends_selected_snapshot_agents_and_preserves_message() {
         use crate::agent_message_dialog::Outcome;
+        let (mut execution, client) = native_paste_bank();
         let mut app = app();
+        app.outbound_admission = Some(client.clone());
         let project = app
             .tree
             .add_project(PathBuf::from("/tmp/message-send"))
@@ -22356,6 +22391,14 @@ mod tests {
                 }
             ));
         }
+        app.outbound_admission = None;
+        drop(app);
+        drop(client);
+        execution.request_shutdown(ilium_execution::ShutdownMode::Cancel);
+        let report = execution
+            .join_until_background(Instant::now() + Duration::from_secs(5))
+            .unwrap();
+        assert!(report.shutdown_complete);
     }
 
     #[test]
@@ -22417,7 +22460,14 @@ mod tests {
             .unwrap();
         assert!(!removed_row.checked);
         assert!(matches!(removed_row.state, RecipientState::Unavailable(_)));
-        assert_eq!(state.selected_ids(), vec![retained]);
+        let retained_row = state
+            .recipients
+            .iter()
+            .find(|row| row.pane_id == retained)
+            .unwrap();
+        assert!(!retained_row.checked);
+        assert_eq!(retained_row.state, RecipientState::Queued);
+        assert!(state.selected_ids().is_empty());
     }
 
     #[test]
@@ -22482,7 +22532,14 @@ mod tests {
             .unwrap();
         assert!(!moved_row.checked);
         assert!(matches!(moved_row.state, RecipientState::Unavailable(_)));
-        assert_eq!(state.selected_ids(), vec![retained]);
+        let retained_row = state
+            .recipients
+            .iter()
+            .find(|row| row.pane_id == retained)
+            .unwrap();
+        assert!(!retained_row.checked);
+        assert_eq!(retained_row.state, RecipientState::Queued);
+        assert!(state.selected_ids().is_empty());
     }
 
     #[test]
@@ -23462,6 +23519,42 @@ mod tests {
         assert!(app.take_outbound_requests().into_iter().any(|request| {
             matches!(request, ClientRequest::UnfreezePane { pane_id: requested } if requested == pane_id)
         }));
+    }
+
+    #[test]
+    fn unfreeze_request_is_admitted_before_focus_when_only_one_slot_remains() {
+        let (mut execution, client) = native_paste_bank();
+        let mut app = app();
+        app.outbound_admission = Some(client.clone());
+        app.focus = FocusTarget::Tree;
+        let group = app.tree.add_group(ROOT_ID, "work").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "frozen agent", PaneContentKind::Terminal)
+            .unwrap();
+        app.frozen_panes.insert(pane_id);
+        let holds: Vec<_> = (0..31)
+            .map(|_| crate::ipc_preparation::reserve_request(&client, 4096).unwrap())
+            .collect();
+
+        app.action_unfreeze_agent(pane_id);
+
+        let unfreeze_was_queued = app.take_outbound_requests().into_iter().any(|request| {
+            matches!(request, ClientRequest::UnfreezePane { pane_id: requested } if requested == pane_id)
+        });
+        drop(holds);
+        app.outbound_admission = None;
+        drop(app);
+        execution.request_shutdown(ilium_execution::ShutdownMode::Cancel);
+        let report = execution
+            .join_until_background(Instant::now() + Duration::from_secs(5))
+            .unwrap();
+
+        assert!(report.shutdown_complete);
+        assert!(
+            unfreeze_was_queued,
+            "focus traffic consumed the final outbound admission slot"
+        );
     }
 
     #[test]
@@ -28109,7 +28202,7 @@ mod tests {
     }
 
     #[test]
-    fn automatic_setup_teaches_claude_and_codex_globally_and_per_project() {
+    fn automatic_setup_teaches_claude_and_codex_globally_without_project_copies() {
         let directory = tempfile::tempdir().unwrap();
         let project = directory.path().join("project");
         let home = directory.path().join("home");
@@ -28123,12 +28216,9 @@ mod tests {
         app.reconcile_agent_setup_prompts();
         app.settle_filesystem_for_test();
 
-        for target in [
-            home.join(".claude/CLAUDE.md"),
-            home.join(".codex/AGENTS.md"),
-            project.join("CLAUDE.md"),
-            project.join("AGENTS.md"),
-        ] {
+        assert!(!project.join("CLAUDE.md").exists());
+        assert!(!project.join("AGENTS.md").exists());
+        for target in [home.join(".claude/CLAUDE.md"), home.join(".codex/AGENTS.md")] {
             for feature in AgentFeature::ALL {
                 assert_eq!(
                     crate::agent_feature_setup::status(&target, feature).unwrap(),

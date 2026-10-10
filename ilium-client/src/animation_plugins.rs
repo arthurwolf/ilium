@@ -990,7 +990,7 @@ impl PluginPanelModel {
                 .map(|issue| {
                     format!(
                         "{}: {}",
-                        issue.path.display(),
+                        display_text(&issue.path.display().to_string(), 512),
                         display_text(&issue.message, 512)
                     )
                 })

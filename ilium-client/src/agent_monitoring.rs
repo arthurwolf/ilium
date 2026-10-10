@@ -17,6 +17,10 @@ pub enum AgentMonitoringMode {
     Attention,
 }
 
+impl AgentMonitoringMode {
+    pub const ALL: [Self; 2] = [Self::Normal, Self::Attention];
+}
+
 /// How Attention mode still shows that an agent is actively working while it
 /// has no attention-worthy status. Normal mode always shows the working
 /// animation, so this only applies when Attention would otherwise be blank.

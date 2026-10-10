@@ -433,7 +433,7 @@ pub fn tooltip_for(
         AgentToolbarAction::Fast => "Toggle fast mode (sends /fast)".to_string(),
         AgentToolbarAction::CycleEffort => {
             format!(
-                "Requested effort: {} · left/right click cycles · + opens all choices",
+                "Requested effort: {} · left-click value to advance; right-click to reverse · + opens all choices",
                 effort.short_label()
             )
         }

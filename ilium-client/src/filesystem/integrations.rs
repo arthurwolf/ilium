@@ -145,7 +145,12 @@ impl Job for IntegrationJob {
                 for target in snapshot.targets {
                     let current = crate::agent_feature_setup::status(&target.path, target.feature)
                         .map_err(bounded_error);
+                    // Automatic upkeep only writes the global instruction files, which
+                    // already cover every project; per-project copies would duplicate
+                    // them, and a new project AGENTS.md would hide that project's
+                    // CLAUDE.md from Codex. Project files are only installed on request.
                     if snapshot.automatic
+                        && target.project.is_none()
                         && !matches!(
                             current,
                             Ok(FeatureSetupStatus::Managed | FeatureSetupStatus::ManagedFuture)
