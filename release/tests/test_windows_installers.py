@@ -160,6 +160,13 @@ class WorkflowTests(unittest.TestCase):
             self.assertIn(expected, text)
         self.assertIn('windows-installers', [step.get('with', {}).get('name') for step in job['steps']])
 
+    def test_native_windows_toolchain_install_retries_bounded_transient_feed_failures(self):
+        job = self.workflow['jobs']['native']
+        install = next(step for step in job['steps'] if step.get('name', '').startswith('Windows Visual Studio 2022 Build Tools'))
+        run = install['run']
+        for expected in ('$maximumAttempts = 4', '$attempt -le $maximumAttempts', 'HTTP\\s*(429|5\\d\\d)', 'Service Unavailable', '$attempt -eq $maximumAttempts', 'Start-Sleep -Seconds $delaySeconds', 'No Visual Studio 2022'):
+            self.assertIn(expected, run)
+
     def test_aggregate_consumes_installers_and_attestation_covers_them(self):
         aggregate = self.workflow['jobs']['aggregate']
         self.assertIn('windows-installers', aggregate['needs'])

@@ -78,8 +78,22 @@ jobs:
       if: matrix.os == 'windows'
       shell: pwsh
       run: |
-        choco install visualstudio2022buildtools -y --no-progress --package-parameters "--add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --quiet --norestart --wait"
-        if ($LASTEXITCODE -notin 0, 3010) { throw "Build Tools install failed: $LASTEXITCODE" }
+        $maximumAttempts = 4
+        for ($attempt = 1; $attempt -le $maximumAttempts; $attempt++) {
+          $installOutput = & choco install visualstudio2022buildtools -y --no-progress --package-parameters "--add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --quiet --norestart --wait" 2>&1
+          $installExitCode = $LASTEXITCODE
+          $installOutput | ForEach-Object { Write-Host $_ }
+          if ($installExitCode -in 0, 3010) { break }
+          $outputText = $installOutput -join "`n"
+          $transientFeedFailure = $outputText -match '(?i)(HTTP\s*(429|5\d\d)|Response status code.*\b(429|5\d\d)\b|Service Unavailable|temporarily unavailable|timed out|connection reset|name resolution)'
+          if (-not $transientFeedFailure -or $attempt -eq $maximumAttempts) {
+            throw "Build Tools install failed with exit $installExitCode on attempt $attempt of $maximumAttempts"
+          }
+          $delaySeconds = 15 * [Math]::Pow(2, $attempt - 1)
+          Write-Host "Chocolatey feed failure; retrying in $delaySeconds seconds (attempt $($attempt + 1) of $maximumAttempts)."
+          Start-Sleep -Seconds $delaySeconds
+        }
+        if ($installExitCode -notin 0, 3010) { throw "Build Tools install failed: $installExitCode" }
         $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
         $found = & $vswhere -latest -version "[17.0,18.0)" -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
         if (-not $found) { throw "No Visual Studio 2022 installation after the Build Tools install" }
