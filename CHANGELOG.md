@@ -13,12 +13,22 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 
 ## [Unreleased]
 
+### Changed
+- Wide settings and form rows now connect each label to its controls with grey `…` leaders, so the label, `-`/`+` steppers and value stay easy to match on wide terminals.
+- Number controls use literal single-cell `-` and `+` steppers around the centered value, with `*` for direct entry.
+- Animation selectors, including OSM city choices, use left/right stepping and a `+` dialog with the full option list.
+- Agent Monitoring can show each session's selected model icon in the tree; this setting is off by default and falls back to provider icons for unsupported models.
+
 ### Fixed
+- The LLM Instructions list now shows a scrollbar when compact panels hide fields, while keeping text clear of the track.
+- Compact Inference Settings keep the full Kilo Gateway privacy warning and its panel border visible by reclaiming unused top spacing.
+- Focused visible terminals now take parser priority over visible sibling backlogs, so newly selected agent output is applied first under queue pressure.
 - Migrated Kilo StepFun defaults and test fixtures to `stepfun/step-5-preview-free`. Running processes and installed binaries require a separate release update.
 - Inland lake shaping now fades at wetland climate boundaries, preventing abrupt height and water changes at neighboring columns.
 - Saved-world preparation progress now rounds partial phases consistently.
+- Compact saved-world preparation footers keep the progress bar and measured route ETA visible together, while retaining recent activity when space permits.
 
-- Unfreezing a frozen pane reserves request capacity before focus updates, preventing focus traffic from consuming the slot needed to resume the saved agent session.
+- Unfreezing reserves request capacity before focus updates, including frozen-screen button clicks, so focus traffic cannot consume the slot needed to resume the saved agent session.
 - Agent Cost metric and calibration settings now use shared left/right selectors and full choice dialogs.
 - Compact Settings navigation uses readable short labels beside semantic icons when full tab titles do not fit.
 - Animation loop caches now report when their fixed worker and frame-storage cost can never fit the shared quota; temporary pressure remains retryable.
@@ -31,6 +41,7 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
   - Each start keeps an exact copy of the loaded snapshot as `.ilium/sessions/<name>.pre-restore.json`, even with backups turned off.
   - A plain `claude` pane whose generated conversation id was not verified yet is saved with that id, and restored with `claude --resume <id>` when the transcript exists. Previously it restarted as a blank `claude`.
 - Terminal capacity: each PTY now has its own quota that scales with the pane count (up to about 1,600 panes on Unix), instead of sharing the server's 512 MiB pool, which stopped a 128-pane restore after about 25 panes. PTY worker stacks went from 2 MiB to 4 MiB. The shared server pool is now 4 GiB.
+- Background jobs that declared a resource cost smaller than their own closure or result type are admitted at the size they need, instead of failing with `InvalidCost`. This broke worktree creation, setup probes and notifications when the declared cost was too small.
 - New always-on lifecycle log `.ilium/logs/<session>.lifecycle.jsonl`: server start with the executable and its install record, restore result, failed and retried starts, who requested each close, closed panes, shutdown.
 - `make install` now installs only from a verified build receipt (`make install RECEIPT=<job id>`) and writes `<binary>.build.json` beside each executable.
 - Sessions with hundreds of agents stay responsive (many-agent scale pass, see `PERFORMANCE.md`):
