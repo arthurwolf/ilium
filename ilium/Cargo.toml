@@ -28,6 +28,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time"]
 tracing = "0.1.44"
 
 [dev-dependencies]
+ilium-ambient = { version = "0.1.1", path = "../ilium-ambient" }
 ilium-pty = { version = "0.1.1", path = "../ilium-pty" }
 ilium-test-fixtures = { version = "0.1.1", path = "../ilium-test-fixtures" }
 sysinfo = "0.39.6"

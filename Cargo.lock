@@ -2708,6 +2708,7 @@ dependencies = [
  "clap",
  "directories",
  "futures-util",
+ "ilium-ambient",
  "ilium-client",
  "ilium-core",
  "ilium-ipc",
