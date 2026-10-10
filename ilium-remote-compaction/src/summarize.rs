@@ -256,7 +256,7 @@ pub(crate) fn summarize_history(
                     ));
                     let partial_summary = partials.last().map(String::as_str).or_else(|| {
                         merge_partials_exceeded_limit
-                            .then(|| running.as_deref())
+                            .then_some(running.as_deref())
                             .flatten()
                     });
                     return fallback_result(prepared, partial_summary, chunks_done);
@@ -272,7 +272,7 @@ pub(crate) fn summarize_history(
                 ));
                 let partial_summary = partials.last().map(String::as_str).or_else(|| {
                     merge_partials_exceeded_limit
-                        .then(|| running.as_deref())
+                        .then_some(running.as_deref())
                         .flatten()
                 });
                 return fallback_result(prepared, partial_summary, chunks_done);

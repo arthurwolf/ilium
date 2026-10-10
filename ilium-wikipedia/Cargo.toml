@@ -9,6 +9,7 @@ repository.workspace = true
 [dependencies]
 ilium-http = { version = "0.1.1", path = "../ilium-http" }
 ilium-ambient = { path = "../ilium-ambient" }
+ilium-execution = { path = "../ilium-execution" }
 ilium-platform = { path = "../ilium-platform" }
 scraper = "0.27.0"
 html5ever = "0.39.0"

@@ -11,6 +11,7 @@ use crate::error::CompactionError;
 use crate::transcript_io::{read_transcript_bytes, FileSnapshot, TailShape};
 
 const MAX_APPENDED_VERIFY_BYTES: usize = 16 * 1024 * 1024;
+type AppendedVerifier<'a> = dyn Fn(&Path, u64, &[u8]) -> Result<(), String> + 'a;
 
 /// What a successful rewrite produced.
 pub(crate) struct Committed {
@@ -169,7 +170,7 @@ pub(crate) fn commit_rewrite(
     shape: TailShape,
     appended: &[u8],
     keep_backups: usize,
-    verify: &dyn Fn(&Path, u64, &[u8]) -> Result<(), String>,
+    verify: &AppendedVerifier<'_>,
 ) -> Result<Committed, CompactionError> {
     let current = read_transcript_bytes(path)?;
     if FileSnapshot::of(&current) != snapshot {
@@ -226,7 +227,7 @@ fn write_and_swap(
     shape: TailShape,
     appended: &[u8],
     permissions: &fs::Permissions,
-    verify: &dyn Fn(&Path, u64, &[u8]) -> Result<(), String>,
+    verify: &AppendedVerifier<'_>,
 ) -> Result<(), CompactionError> {
     if appended.len() > MAX_APPENDED_VERIFY_BYTES {
         return Err(CompactionError::Verification(format!(

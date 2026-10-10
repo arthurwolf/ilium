@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{DateTime, Timelike, Utc};
+use ilium_ambient::resources::{AmbientResources, Stored, WorkerCost};
 use ilium_ambient::source::{sleep_unless_stopped, Worker};
 use rand::seq::SliceRandom;
 
@@ -14,10 +15,17 @@ use crate::fetch::{cached_get, fetch_image, html_url, public_url, CachedBytes, M
 use crate::{main_page_titles, parse_article, Block, Document};
 
 pub enum LoaderEvent {
-    Loaded(Arc<Document>),
+    Loaded(Stored<Arc<Document>>),
     Status(String),
     Failed(String),
+    AdmissionRefused(String),
 }
+
+const MIB: usize = 1024 * 1024;
+const PAGE_LOADER_WORKER_BYTES: usize = 384 * MIB;
+// MAX_TOTAL_PIXELS bounds retained RGBA image bytes at 128 MiB. The extra
+// headroom covers article text, parser output, and collection metadata.
+const ARTICLE_STORAGE_BYTES: usize = 192 * MIB;
 
 /// One owned, low-priority worker with one queued request and four events.
 /// The presentation thread never waits for HTTP or worker cleanup.
@@ -29,16 +37,30 @@ pub struct PageLoader {
 }
 
 impl PageLoader {
-    pub fn start(cache_dir: PathBuf) -> Result<Self, String> {
+    pub fn start(cache_dir: PathBuf, resources: &AmbientResources) -> Result<Self, String> {
+        let reservation = resources
+            .reserve_worker(WorkerCost {
+                threads: 1,
+                resident_bytes: PAGE_LOADER_WORKER_BYTES,
+            })
+            .map_err(|reason| format!("Wikipedia worker admission: {reason:?}"))?;
         let (requests, receiver) = mpsc::sync_channel(1);
         let (sender, events) = mpsc::sync_channel(4);
         let pending = Arc::new(AtomicBool::new(false));
         let worker_pending = Arc::clone(&pending);
-        let worker = Worker::try_spawn("wikipedia", move |stop| {
+        let worker_resources = resources.clone();
+        let worker = Worker::start_admitted("wikipedia", reservation, move |stop| {
             ilium_platform::thread_priority::lower_current_thread(
                 ilium_platform::thread_priority::WorkerPriority::Lowest,
             );
-            run_worker(&cache_dir, receiver, sender, worker_pending, &stop);
+            run_worker(
+                &cache_dir,
+                receiver,
+                sender,
+                worker_pending,
+                worker_resources,
+                &stop,
+            );
         })
         .map_err(|error| format!("Wikipedia worker: {error}"))?;
         Ok(Self {
@@ -98,6 +120,21 @@ struct Rotation {
     titles: Vec<String>,
     previous: Option<String>,
     warnings: Vec<String>,
+}
+
+fn reserve_article_storage(
+    resources: &AmbientResources,
+    rotation: &mut Rotation,
+    title: &str,
+) -> Result<Arc<ilium_execution::StorageAdmission>, ilium_execution::RejectReason> {
+    match resources.reserve_storage(ARTICLE_STORAGE_BYTES) {
+        Ok(storage) => Ok(storage),
+        Err(reason) => {
+            // Admission pressure must not consume a semantic article update.
+            rotation.titles.push(title.to_owned());
+            Err(reason)
+        }
+    }
 }
 
 impl Rotation {
@@ -248,6 +285,7 @@ fn run_worker(
     receiver: Receiver<()>,
     sender: SyncSender<LoaderEvent>,
     pending: Arc<AtomicBool>,
+    resources: AmbientResources,
     stop: &AtomicBool,
 ) {
     let mut rotation = Rotation::default();
@@ -259,6 +297,7 @@ fn run_worker(
             Err(mpsc::RecvTimeoutError::Disconnected) => return,
         }
         let mut result = Err("Wikipedia article loading failed".into());
+        let mut admission_refused = false;
         for attempt in 0..3 {
             if stop.load(Ordering::Relaxed) {
                 return;
@@ -282,18 +321,29 @@ fn run_worker(
                 let title = rotation
                     .next()
                     .ok_or("Wikipedia Main Page has no remaining article")?;
+                let storage = match reserve_article_storage(&resources, &mut rotation, &title) {
+                    Ok(storage) => storage,
+                    Err(reason) => {
+                        admission_refused = true;
+                        return Err(format!("Wikipedia article storage admission: {reason:?}"));
+                    }
+                };
                 let mut document = load_article(cache, &title, &rotation.date, &sender, stop)?;
                 document.warnings.extend(rotation.warnings.clone());
-                Ok(document)
+                Ok((Arc::new(document), storage))
             })();
             if result.is_ok() {
                 failures = 0;
                 break;
             }
+            if admission_refused {
+                break;
+            }
             failures = failures.saturating_add(1);
         }
         let event = match result {
-            Ok(document) => LoaderEvent::Loaded(Arc::new(document)),
+            Ok((document, storage)) => LoaderEvent::Loaded(Stored::new(document, storage)),
+            Err(error) if admission_refused => LoaderEvent::AdmissionRefused(error),
             Err(error) => LoaderEvent::Failed(error),
         };
         terminal_event(&sender, event, stop);
@@ -304,6 +354,87 @@ fn run_worker(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ilium_execution::{Execution, ExecutionConfig, LaneConfig, QuotaGroup, QuotaLimits};
+    use std::time::Instant;
+
+    fn resources(
+        worker_bytes: usize,
+        result_bytes: usize,
+    ) -> (Execution, QuotaGroup, AmbientResources) {
+        let quota = QuotaGroup::new(QuotaLimits {
+            clients: 1,
+            jobs: 2,
+            service_jobs: 0,
+            input_bytes: 4096,
+            result_bytes,
+            worker_threads: 1,
+            worker_bytes,
+        });
+        let execution = Execution::start(
+            quota.clone(),
+            ExecutionConfig {
+                cpu: LaneConfig {
+                    threads: 1,
+                    queue_slots: 1,
+                    priority: None,
+                    resident_bytes_per_thread: MIB,
+                },
+                io: LaneConfig {
+                    threads: 0,
+                    queue_slots: 0,
+                    priority: None,
+                    resident_bytes_per_thread: 0,
+                },
+                service: LaneConfig {
+                    threads: 0,
+                    queue_slots: 0,
+                    priority: None,
+                    resident_bytes_per_thread: 0,
+                },
+            },
+        )
+        .unwrap();
+        let client = execution
+            .client(ilium_execution::ClientLimits {
+                jobs: 2,
+                service_jobs: 0,
+                input_bytes: 4096,
+                result_bytes,
+            })
+            .unwrap();
+        (execution, quota, AmbientResources::new(client))
+    }
+
+    #[test]
+    fn page_loader_refuses_before_spawning_when_worker_budget_is_exhausted() {
+        let (mut execution, quota, resources) = resources(2 * MIB, 1024);
+        let error = PageLoader::start(PathBuf::new(), &resources)
+            .err()
+            .expect("worker admission must fail");
+        assert!(error.contains("Wikipedia worker admission"));
+        assert_eq!(quota.snapshot().worker_threads, 1);
+        execution.request_shutdown(ilium_execution::ShutdownMode::Cancel);
+        let joined = execution
+            .join_until_background(Instant::now() + Duration::from_secs(5))
+            .unwrap();
+        assert_eq!(joined.remaining_workers, 0);
+    }
+
+    #[test]
+    fn article_storage_refusal_keeps_the_selected_title_for_retry() {
+        let (mut execution, quota, resources) = resources(4 * MIB, 8);
+        let mut rotation = Rotation::default();
+        rotation.replace("today".into(), vec!["First".into(), "Second".into()]);
+        let title = rotation.next().unwrap();
+        assert!(reserve_article_storage(&resources, &mut rotation, title.clone()).is_err());
+        assert_eq!(rotation.titles.last(), Some(&title));
+        assert_eq!(quota.snapshot().result_bytes, 0);
+        execution.request_shutdown(ilium_execution::ShutdownMode::Cancel);
+        let joined = execution
+            .join_until_background(Instant::now() + Duration::from_secs(5))
+            .unwrap();
+        assert_eq!(joined.remaining_workers, 0);
+    }
 
     #[test]
     fn daily_rotation_exhausts_each_article_before_repeating() {

@@ -10,7 +10,7 @@
 use std::ffi::OsString;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -28,6 +28,12 @@ const POLL_INTERVAL: Duration = Duration::from_millis(100);
 const GRACEFUL_EXIT_WAIT: Duration = Duration::from_secs(2);
 /// Upper bound on waiting for the reader threads to see EOF after a failure.
 const READER_EOF_WAIT: Duration = Duration::from_secs(2);
+/// Maximum bytes retained from one app-server stdout protocol record.
+const APP_SERVER_LINE_LIMIT_BYTES: usize = 1024 * 1024;
+/// Maximum bytes retained from one diagnostic line before its remainder is drained.
+const STDERR_LINE_LIMIT_BYTES: usize = 8 * 1024;
+/// Bound queued records independently of each stream's one in-flight record.
+const INCOMING_QUEUE_CAPACITY: usize = 2;
 /// Stderr lines remembered for error messages.
 const STDERR_TAIL_LINES: usize = 12;
 
@@ -39,7 +45,13 @@ enum Incoming {
     Message(Value),
     Garbage(String),
     Stderr(String),
+    ProtocolError(String),
     Closed,
+}
+
+enum BoundedLine {
+    Line { bytes: Vec<u8>, truncated: bool },
+    TooLong,
 }
 
 /// What a message handler wants the wait loop to do next.
@@ -97,30 +109,17 @@ impl AppServer {
         let stdin = child.stdin.take();
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
-        let (sender, incoming) = mpsc::channel();
+        let (sender, incoming) = mpsc::sync_channel(INCOMING_QUEUE_CAPACITY);
         let mut readers = Vec::new();
         if let Some(stdout) = stdout {
             let sender = sender.clone();
             readers.push(std::thread::spawn(move || {
-                for line in BufReader::new(stdout).lines().map_while(Result::ok) {
-                    let item = match serde_json::from_str::<Value>(&line) {
-                        Ok(value) => Incoming::Message(value),
-                        Err(_) => Incoming::Garbage(line),
-                    };
-                    if sender.send(item).is_err() {
-                        return;
-                    }
-                }
-                let _ = sender.send(Incoming::Closed);
+                read_stdout(BufReader::new(stdout), sender)
             }));
         }
         if let Some(stderr) = stderr {
             readers.push(std::thread::spawn(move || {
-                for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-                    if sender.send(Incoming::Stderr(line)).is_err() {
-                        return;
-                    }
-                }
+                read_stderr(BufReader::new(stderr), sender)
             }));
         }
         Ok(Self {
@@ -223,6 +222,9 @@ impl AppServer {
                     reporter.log(format!("codex stderr: {}", single_line(&line, 300)));
                     self.remember_stderr(line);
                 }
+                Ok(Incoming::ProtocolError(message)) => {
+                    return Err(ConvertError::CodexProtocol(message));
+                }
                 Ok(Incoming::Closed) | Err(RecvTimeoutError::Disconnected) => {
                     return Err(self.exited_error());
                 }
@@ -239,14 +241,22 @@ impl AppServer {
         let _ = self.guard.terminate();
         let deadline = Instant::now() + READER_EOF_WAIT;
         while Instant::now() < deadline && self.readers.iter().any(|reader| !reader.is_finished()) {
-            std::thread::sleep(Duration::from_millis(5));
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            match self.incoming.recv_timeout(POLL_INTERVAL.min(remaining)) {
+                Ok(Incoming::Stderr(line)) => self.remember_stderr(line),
+                Ok(_) | Err(RecvTimeoutError::Timeout | RecvTimeoutError::Disconnected) => {}
+            }
         }
+        self.drain_queued_stderr();
+        ConvertError::CodexExited(self.tail_text())
+    }
+
+    fn drain_queued_stderr(&mut self) {
         while let Ok(item) = self.incoming.try_recv() {
             if let Incoming::Stderr(line) = item {
                 self.remember_stderr(line);
             }
         }
-        ConvertError::CodexExited(self.tail_text())
     }
 
     fn refuse_server_request(
@@ -280,15 +290,179 @@ impl AppServer {
         let _ = self.guard.terminate();
         let _ = self.child.kill();
         let _ = self.child.wait();
+        // Bounded sends can wait behind the receiver. Drain while the readers
+        // finish so queue backpressure cannot deadlock their joins.
+        while self.readers.iter().any(|reader| !reader.is_finished()) {
+            let wait = POLL_INTERVAL.min(Duration::from_millis(20));
+            match self.incoming.recv_timeout(wait) {
+                Ok(Incoming::Stderr(line)) => self.remember_stderr(line),
+                Ok(_) | Err(RecvTimeoutError::Timeout | RecvTimeoutError::Disconnected) => {}
+            }
+        }
         for reader in self.readers.drain(..) {
             let _ = reader.join();
         }
+        self.drain_queued_stderr();
     }
 }
 
 impl Drop for AppServer {
     fn drop(&mut self) {
         self.shutdown();
+    }
+}
+
+fn read_stdout(mut reader: impl BufRead, sender: SyncSender<Incoming>) {
+    loop {
+        match read_bounded_line(&mut reader, APP_SERVER_LINE_LIMIT_BYTES, false) {
+            Ok(Some(BoundedLine::Line { bytes, .. })) => {
+                let line = match String::from_utf8(bytes) {
+                    Ok(line) => line,
+                    Err(_) => {
+                        let _ = sender.send(Incoming::ProtocolError(
+                            "Codex app-server stdout contained invalid UTF-8".into(),
+                        ));
+                        return;
+                    }
+                };
+                let item = match serde_json::from_str::<Value>(&line) {
+                    Ok(value) => Incoming::Message(value),
+                    Err(_) => Incoming::Garbage(line),
+                };
+                if sender.send(item).is_err() {
+                    return;
+                }
+            }
+            Ok(Some(BoundedLine::TooLong)) => {
+                let _ = sender.send(Incoming::ProtocolError(
+                    "Codex app-server stdout line exceeds the 1 MiB line limit".into(),
+                ));
+                return;
+            }
+            Ok(None) => break,
+            Err(error) => {
+                let _ = sender.send(Incoming::ProtocolError(format!(
+                    "Failed to read Codex app-server stdout: {error}"
+                )));
+                return;
+            }
+        }
+    }
+    let _ = sender.send(Incoming::Closed);
+}
+
+fn read_stderr(mut reader: impl BufRead, sender: SyncSender<Incoming>) {
+    loop {
+        match read_bounded_line(&mut reader, STDERR_LINE_LIMIT_BYTES, true) {
+            Ok(Some(BoundedLine::Line { bytes, truncated })) => {
+                let mut line = String::from_utf8_lossy(&bytes).into_owned();
+                if truncated {
+                    line.push_str(" [truncated at 8 KiB]");
+                }
+                if sender.send(Incoming::Stderr(line)).is_err() {
+                    return;
+                }
+            }
+            Ok(Some(BoundedLine::TooLong)) => {
+                let _ = sender.send(Incoming::Stderr(
+                    "Codex app-server stderr line exceeds its bounded capture limit".into(),
+                ));
+                return;
+            }
+            Ok(None) => return,
+            Err(error) => {
+                let _ = sender.send(Incoming::Stderr(format!(
+                    "Codex app-server stderr read failed: {error}"
+                )));
+                return;
+            }
+        }
+    }
+}
+
+/// Reads one line while retaining at most `limit` bytes. With
+/// `truncate_and_drain`, oversized diagnostics are clipped and the remainder
+/// of that line is consumed so the next record stays aligned.
+fn read_bounded_line(
+    reader: &mut impl BufRead,
+    limit: usize,
+    truncate_and_drain: bool,
+) -> std::io::Result<Option<BoundedLine>> {
+    let mut bytes = Vec::with_capacity(limit.min(8 * 1024));
+    let mut truncated = false;
+    loop {
+        let available = reader.fill_buf()?;
+        if available.is_empty() {
+            if bytes.is_empty() && !truncated {
+                return Ok(None);
+            }
+            return Ok(Some(BoundedLine::Line { bytes, truncated }));
+        }
+        let newline = available.iter().position(|byte| *byte == b'\n');
+        let content_length = newline.unwrap_or(available.len());
+        let consumed = content_length + usize::from(newline.is_some());
+        let remaining = limit.saturating_sub(bytes.len());
+        let retained = content_length.min(remaining);
+        bytes.extend_from_slice(&available[..retained]);
+        if retained < content_length {
+            truncated = true;
+        }
+        reader.consume(consumed);
+        if truncated && !truncate_and_drain {
+            return Ok(Some(BoundedLine::TooLong));
+        }
+        if newline.is_some() {
+            if bytes.last() == Some(&b'\r') {
+                bytes.pop();
+            }
+            return Ok(Some(BoundedLine::Line { bytes, truncated }));
+        }
+    }
+}
+
+#[cfg(test)]
+mod bounded_line_tests {
+    use super::{read_bounded_line, BoundedLine};
+    use std::io::{BufReader, Cursor};
+
+    #[test]
+    fn protocol_lines_over_the_limit_are_rejected() {
+        let mut reader = BufReader::new(Cursor::new(b"123456\nnext\n"));
+        assert!(matches!(
+            read_bounded_line(&mut reader, 5, false).unwrap(),
+            Some(BoundedLine::TooLong)
+        ));
+    }
+
+    #[test]
+    fn oversized_diagnostics_are_clipped_and_leave_the_next_line_aligned() {
+        let mut reader = BufReader::new(Cursor::new(b"abcdefgh\nnext\n"));
+        assert!(matches!(
+            read_bounded_line(&mut reader, 4, true).unwrap(),
+            Some(BoundedLine::Line {
+                bytes,
+                truncated: true
+            }) if bytes == b"abcd"
+        ));
+        assert!(matches!(
+            read_bounded_line(&mut reader, 4, true).unwrap(),
+            Some(BoundedLine::Line {
+                bytes,
+                truncated: false
+            }) if bytes == b"next"
+        ));
+    }
+
+    #[test]
+    fn line_exactly_at_the_protocol_limit_is_accepted() {
+        let mut reader = BufReader::new(Cursor::new(b"12345\n"));
+        assert!(matches!(
+            read_bounded_line(&mut reader, 5, false).unwrap(),
+            Some(BoundedLine::Line {
+                bytes,
+                truncated: false
+            }) if bytes == b"12345"
+        ));
     }
 }
 

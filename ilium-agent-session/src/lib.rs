@@ -1575,7 +1575,10 @@ mod tests {
         let path = write_claude_transcript(home.path(), project.path(), project.path(), session_id);
         let authoritative = std::fs::read(&path).unwrap();
         assert!(authoritative.len() < 512);
+        // The fixture record has no trailing newline; terminate it so the
+        // filler lines do not fuse into the authoritative JSON line.
         let mut content = authoritative;
+        content.push(b'\n');
         content.extend(b"{}\n".repeat(512));
         std::fs::write(&path, content).unwrap();
         let locator = TranscriptLocator::new_bounded(

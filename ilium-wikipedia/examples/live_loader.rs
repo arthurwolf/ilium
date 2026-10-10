@@ -2,7 +2,13 @@
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use ilium_ambient::resources::AmbientResources;
+use ilium_execution::{
+    ClientLimits, Execution, ExecutionConfig, LaneConfig, QuotaGroup, QuotaLimits,
+};
 use ilium_wikipedia::{LoaderEvent, PageLoader};
+
+const MIB: usize = 1024 * 1024;
 
 fn main() {
     if let Err(error) = run() {
@@ -35,7 +41,45 @@ fn run() -> Result<(), String> {
     if !(1..=300).contains(&deadline_seconds) {
         return Err("deadline must be 1..300 seconds".into());
     }
-    let loader = PageLoader::start(cache_dir.ok_or("--cache-dir is required")?)?;
+    let quota = QuotaGroup::new(QuotaLimits {
+        clients: 1,
+        jobs: 4,
+        service_jobs: 0,
+        input_bytes: 16 * MIB,
+        result_bytes: 192 * MIB,
+        worker_threads: 3,
+        worker_bytes: 512 * MIB,
+    });
+    let lane = LaneConfig {
+        threads: 1,
+        queue_slots: 2,
+        priority: None,
+        resident_bytes_per_thread: MIB,
+    };
+    let execution = Execution::start(
+        quota.clone(),
+        ExecutionConfig {
+            cpu: lane,
+            io: lane,
+            service: LaneConfig {
+                threads: 0,
+                queue_slots: 0,
+                priority: None,
+                resident_bytes_per_thread: 0,
+            },
+        },
+    )
+    .map_err(|error| format!("execution startup: {error:?}"))?;
+    let client = execution
+        .client(ClientLimits {
+            jobs: 4,
+            service_jobs: 0,
+            input_bytes: 16 * MIB,
+            result_bytes: 192 * MIB,
+        })
+        .map_err(|reason| format!("execution client admission: {reason:?}"))?;
+    let resources = AmbientResources::new(client);
+    let loader = PageLoader::start(cache_dir.ok_or("--cache-dir is required")?, &resources)?;
     if !loader.request_next() {
         return Err("Wikipedia request was not admitted".into());
     }
@@ -43,6 +87,7 @@ fn run() -> Result<(), String> {
     while started.elapsed() < Duration::from_secs(deadline_seconds) {
         match loader.try_recv() {
             Some(LoaderEvent::Loaded(document)) => {
+                let document = document.view();
                 println!(
                     "{}",
                     serde_json::json!({"type":"result", "title":document.title, "url":document.url, "revision":document.revision, "date":document.date, "blocks":document.blocks.len(), "images":document.images.len(), "warnings":document.warnings})
@@ -54,6 +99,7 @@ fn run() -> Result<(), String> {
                 serde_json::json!({"type":"progress", "message":message})
             ),
             Some(LoaderEvent::Failed(error)) => return Err(error),
+            Some(LoaderEvent::AdmissionRefused(reason)) => return Err(reason),
             None => std::thread::sleep(Duration::from_millis(20)),
         }
     }

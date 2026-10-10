@@ -79,10 +79,12 @@ fn every_wait_exit_status_is_named() {
 }
 
 #[test]
-fn replacing_a_running_monitor_is_explained() {
+fn several_monitors_and_replacing_are_explained() {
     let text = instructions();
     for required in [
-        "`monitor-active`",
+        "up to 8 monitors",
+        "`monitor-ambiguous`",
+        "always pass the monitor ID",
         "`--replace`",
         "one probe",
         "may-also-arrive",

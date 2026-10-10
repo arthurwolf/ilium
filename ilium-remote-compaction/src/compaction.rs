@@ -200,7 +200,7 @@ fn write_claude(
         parsed.shape,
         &serialize_lines(&records),
         request.options.keep_backups,
-        &|path, offset, bytes| verify_claude(path, offset, bytes, expected_new, &session_id),
+        &move |path, offset, bytes| verify_claude(path, offset, bytes, expected_new, &session_id),
     )
 }
 
@@ -253,7 +253,7 @@ fn write_codex(
         parsed.shape,
         &serialize_lines(&built.records),
         request.options.keep_backups,
-        &|path, offset, bytes| {
+        &move |path, offset, bytes| {
             verify_codex(
                 path,
                 offset,
