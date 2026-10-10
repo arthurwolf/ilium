@@ -113,23 +113,26 @@ The `make` target is aimed at Linux and macOS; on Windows copy the files manuall
 
 ## make install
 
-`make install` builds the release binaries and installs all three executables and both animation packages into one directory.
+`make install RECEIPT=<job id>` installs the release binaries from a verified build and copies both animation packages into one directory. It does not build. `RECEIPT` names the build-service receipt of the `make build` run; `tools/install-from-receipt.py` checks that the receipt reports success and that each binary's SHA-256 matches the receipt, then replaces each executable atomically, keeps the previous one as `<name>.prev`, and writes `<name>.build.json` beside it. The server records that file in its lifecycle log at every start, so you can see which build ran.
 
 | Make variable | Default | Meaning |
 | --- | --- | --- |
 | `CARGO_HOME` | `$HOME/.cargo` | Cargo home; used to derive `BIN_DIR`. |
 | `BIN_DIR` | `$(CARGO_HOME)/bin` | Destination directory. |
 
-Targets: `build` (release build of the three binaries), `install` (build, then copy), `test` (`cargo test --workspace`).
+| `RECEIPT` | none (required) | Build receipt (job id or receipt directory) of the release build to install. |
 
-1. Run `make install`. This installs into `~/.cargo/bin` (or `$CARGO_HOME/bin`).
-2. For another destination:
+Targets: `build` (release build of the three binaries), `install` (verified install from `RECEIPT`), `test` (`cargo test --workspace`).
+
+1. Run `make build` and note the job id it reports.
+2. Run `make install RECEIPT=<job id>`. This installs into `~/.cargo/bin` (or `$CARGO_HOME/bin`).
+3. For another destination:
 
    ```sh
-   make install BIN_DIR="$HOME/.local/bin"
+   make install RECEIPT=<job id> BIN_DIR="$HOME/.local/bin"
    ```
 
-3. Add that directory to `PATH` if it is not already.
+4. Add that directory to `PATH` if it is not already.
 
 Executables are installed with mode 755 and the animation packages with mode 644, side by side, which is what animation discovery expects.
 

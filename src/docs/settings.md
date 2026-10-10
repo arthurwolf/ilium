@@ -24,7 +24,7 @@ Ilium keeps almost every preference in one full-screen Settings view and in a pl
 
 Choice controls show `← value + →`. Click the arrows to step backward or forward, or click `+` to open the full clickable list. A left click on the value moves forward; a right click moves backward. The list shows the current choice and any unavailable options with their reasons.
 
-Number controls show `➖ value ➕ *`, with the value centered. Click `➖` or `➕` to change it by the field's normal step. Click `*` to type an exact value, then press `Enter` to confirm or `Esc` to cancel. The field's limits still apply. On rows too narrow for both two-cell step buttons, Ilium keeps the centered value and `*` entry target and omits the step buttons. These controls are also used for choices and numbers in animation settings, dialogs, toolbars and guided setup.
+Number controls show `- value + *`, with the value centered. Click `-` or `+` to change it by the field's normal step. Click `*` to type an exact value, then press `Enter` to confirm or `Esc` to cancel. The field's limits still apply. On rows too narrow to fit both step buttons alongside the value and entry target, Ilium keeps the centered value and `*` entry target and omits the step buttons. These controls are also used for choices and numbers in animation settings, dialogs, toolbars and guided setup.
 
 Use `Ctrl+B ?` (or the Keyboard tab) to see the active key map. Each tab ends or begins with the controls specific to it; some tabs (for example Animations, Keyboard and Setup) have richer interactions described below.
 

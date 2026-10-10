@@ -401,7 +401,7 @@ Setup does four things, all idempotent:
 
 1. Creates `CHATROOM.md` (title `# ILIUM CHATROOM`, a marker line, a short guidance paragraph and a `## Messages` heading). It never overwrites an existing file; a symlinked or non-regular `CHATROOM.md` is refused.
 2. Adds `/CHATROOM.md` to the project's `.gitignore` (creating the file if needed).
-3. Merges Ilium's hooks into `.claude/settings.local.json` and `.codex/hooks.json` for the `SessionStart` and `UserPromptSubmit` events. Each hook runs `ilium chat context --limit 40` (timeout 10 seconds, status message "Checking ilium chatroom"), so every agent session and prompt starts with the recent room history. Existing hooks and other settings are preserved; invalid JSON in those files stops the merge with an error instead of overwriting them.
+3. Merges Ilium's hooks into `.claude/settings.local.json` and `.codex/hooks.json` for the `SessionStart` and `UserPromptSubmit` events. Each hook runs `ilium chat context --limit 40 --since-last-read --max-bytes 2048` (timeout 10 seconds, status message "Checking ilium chatroom"): a session start receives the recent room history, and each later prompt receives only records that agent has not seen, at most 2 KB, or nothing. Older Ilium hook commands are upgraded in place. Existing hooks and other settings are preserved; invalid JSON in those files stops the merge with an error instead of overwriting them.
 4. Installs the managed Chatroom instruction block in the agent instruction files (see [Agent setup](#agent-setup)).
 
 A project that already has a room gets its integrations repaired when Ilium starts; Ilium never creates a room merely by looking at a project.
@@ -420,7 +420,7 @@ A project with a room shows a **Chatroom** entry in the tree. Select it to open 
 | --- | --- |
 | `ilium chat init` | Create the room and integrations (above). |
 | `ilium chat send --message "..." [--author NAME]` | Append one message. The author defaults to `ILIUM_CHATROOM_AUTHOR`, then `AGENT_NAME`, then `agent`. Prints `chatroom message sent`. |
-| `ilium chat context [--limit N]` | Print the last N messages (default 40) as plain text suitable for injection into an agent turn. This is what the hooks run. |
+| `ilium chat context [--limit N] [--since-last-read] [--max-bytes N]` | Print the last N messages (default 40) as plain text suitable for injection into an agent turn; with `--since-last-read`, only messages this reader has not seen; with `--max-bytes`, newest messages first within the cap. This is what the hooks run. |
 | `ilium chat tail [--limit N]` | Print the last N records (default 100) as `timestamp \| author \| content` for inspection. |
 
 `--cwd` selects the project directory. If the current directory is inside a project that has a room, Ilium walks up to the nearest ancestor holding `CHATROOM.md`, so agents started in a subdirectory still reach the right room.
@@ -456,7 +456,7 @@ Ilium ships two short instruction blocks for agents: **Chatroom** (when and how 
 | --- | --- |
 | Global (Claude) | `~/.claude/CLAUDE.md`, or the custom path chosen for that feature in Settings |
 | Global (Codex) | `~/.codex/AGENTS.md` |
-| Each open project | `CLAUDE.md` and `AGENTS.md` in the project root |
+| Each open project | `CLAUDE.md` and `AGENTS.md` in the project root, only when you install there from the Setup tab |
 
 Edits are **marker-delimited blocks**, so only text between Ilium's own markers is ever replaced or removed:
 
@@ -466,9 +466,9 @@ Edits are **marker-delimited blocks**, so only text between Ilium's own markers 
 <!-- /ilium-agent-feature: chatroom -->
 ```
 
-The Progress block also carries a schema version (`<!-- ilium-agent-feature: progress version=6 -->`), which lets Ilium upgrade an older block and leave a newer one alone. Text around the block is preserved. If a file already contains wording that looks like the Ilium instruction but has no markers, Ilium reports it as "Instruction detected" and does **not** treat it as its own or delete it. Files larger than 512 KiB are not modified. A symlinked instruction file stays a symlink after an update (for example `AGENTS.md` linking to `CLAUDE.md`).
+The Progress block also carries a schema version (`<!-- ilium-agent-feature: progress version=9 -->`), which lets Ilium upgrade an older block and leave a newer one alone. Text around the block is preserved. If a file already contains wording that looks like the Ilium instruction but has no markers, Ilium reports it as "Instruction detected" and does **not** treat it as its own or delete it. Files larger than 512 KiB are not modified. A symlinked instruction file stays a symlink after an update (for example `AGENTS.md` linking to `CLAUDE.md`).
 
-Ilium installs and refreshes these blocks automatically when it attaches to a session and when projects open; it does not wait for you to visit Settings. Treat the instruction files as managed by Ilium for these two blocks. Write your own instructions anywhere outside the markers.
+Ilium installs and refreshes the global blocks automatically when it attaches to a session and when projects open; it does not wait for you to visit Settings. The global files already apply to every project, so Ilium never adds project copies on its own: they would repeat the same text, and a new project `AGENTS.md` would stop Codex from reading that project's `CLAUDE.md`. Treat the instruction files as managed by Ilium for these two blocks. Write your own instructions anywhere outside the markers.
 
 ### The Setup tab
 

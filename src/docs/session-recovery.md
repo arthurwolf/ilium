@@ -31,6 +31,8 @@ Related pages: [Worktrees](worktrees.md), [Agent monitoring](agent-monitoring.md
 | --- | --- |
 | Session snapshot | `<project>/.ilium/sessions/<session name>.json` |
 | Rolling backups | `<project>/.ilium/backups/<session name>/` |
+| Pre-restore copies | `<project>/.ilium/sessions/<session name>.pre-restore.json` (last start) and `.pre-restore.1.json` (the start before) |
+| Lifecycle log | `<project>/.ilium/logs/<session name>.lifecycle.jsonl` (rotated once to `.jsonl.1` at 8 MiB) |
 | Global configuration | `~/.config/ilium/config.toml` on Linux |
 | Server socket | A per-session socket under `$XDG_RUNTIME_DIR/ilium/` (or the OS temp directory) |
 
@@ -76,7 +78,8 @@ When the server starts and finds a snapshot, it replaces the empty tree with the
 - Detected Claude Code, Codex and Antigravity panes are relaunched with their provider's resume command (see below).
 - Editor panes reopen the file path they had (or an empty picker if none was chosen). Unsaved editor buffers are not part of the snapshot.
 - Pending scheduled inputs keep their deadlines, and conservatively recoverable progress monitors are re-established.
-- A pane whose command can no longer be started (for example its program was uninstalled) is logged and dropped rather than left as an empty node.
+- A pane that cannot be started (for example its directory is gone, or the server is short of resources) is never removed. It keeps its place in the tree and its saved command, which stays in every later snapshot. Ilium shows a "Restore incomplete" message naming the panes and the first error, and retries them automatically after 5 s, 15 s, 30 s, 60 s, 120 s and then every 5 minutes, until each one starts or you close it. Typing into such a pane shows why it is not running yet.
+- Each start keeps an exact copy of the snapshot it loaded as `.pre-restore.json`, whether backups are enabled or not.
 - A worktree pane whose directory is missing stays visible and is not resumed from a different checkout.
 
 What does not survive:
@@ -118,6 +121,7 @@ During normal use Ilium notices which conversation each detected agent is runnin
 Conditions:
 
 - A resume command is saved only when Ilium has **verified** the session (the identifier belongs to this pane's agent, project and launch directory). Otherwise the pane just starts the agent fresh.
+- A plain `claude` pane gets its conversation id from Ilium at launch (`claude --session-id <id>`). If the server stops before that conversation is verified, the snapshot keeps the id; on restore Ilium runs `claude --resume <id>` when Claude Code has a transcript for it, and the same `--session-id` otherwise.
 - Resume works only while the provider still has the data. If a transcript was deleted or rotated, the agent cannot resume it.
 - Resuming restores the conversation, not process state. Commands the agent started earlier are not running any more.
 - Claude Code may show a "resume full session" prompt. Ilium answers that known prompt once per agent process (setting `auto_answer_interstitial_prompts` under `[detection]`).
@@ -172,7 +176,8 @@ Notes:
 | Panes are empty after a restart | The pane had no verified agent session, or the provider data is gone. The agent starts fresh |
 | Nothing restored | Recovery policy is Start fresh, or you chose Discard. Restore a copy from `.ilium/backups/<session>/` |
 | I see "Restore previous session?" | Policy is Ask before restoring. Choose Restore to rebuild or Discard to start fresh |
-| A pane vanished on restore | Its command could no longer be spawned and was dropped. Check the program is still installed |
+| "Restore incomplete" message | Some saved panes could not start. They are kept and retried automatically; the message names them and the first error. Details are in `.ilium/logs/<session>.lifecycle.jsonl` |
+| Need to know which build ran, or who closed a pane | Read `.ilium/logs/<session>.lifecycle.jsonl`: one JSON line per server start (with the executable and its install record), restore result, failed start, retry, close request and closed pane |
 | New server binary not in use | Run `ilium --restart-server` (this restarts the project's server and relaunches panes) |
 | Session data appears in `git status` | Add `.ilium/` to `.gitignore` |
 | Conversion entry missing | Not a Claude or Codex agent, no verified transcript yet, a worktree pane, or another conversion is running |

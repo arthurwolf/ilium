@@ -229,16 +229,19 @@ Chatroom is a file-backed message log (`CHATROOM.md` in the project root) that a
 ```sh
 ilium chat init
 ilium chat send --message <text> [--author <name>]
-ilium chat context [--limit <n>]
+ilium chat context [--limit <n>] [--since-last-read] [--max-bytes <n>] [--reader <key>]
 ilium chat tail [--limit <n>]
 ```
 
 | Subcommand | Option | Default | Behaviour |
 | --- | --- | --- | --- |
-| `init` | | | Creates `CHATROOM.md` if it does not exist, adds `/CHATROOM.md` to `.gitignore`, and installs hook entries for Claude (`.claude/settings.local.json`) and Codex (`.codex/hooks.json`) on `SessionStart` and `UserPromptSubmit`, so agents see recent messages at the start of a session and before each prompt. Existing content in those files is preserved. Refuses to use a symlinked or non-regular `CHATROOM.md`. Prints `chatroom ready at <path>`. |
+| `init` | | | Creates `CHATROOM.md` if it does not exist, adds `/CHATROOM.md` and `/CHATROOM.archive.md` to `.gitignore`, and installs hook entries for Claude (`.claude/settings.local.json`) and Codex (`.codex/hooks.json`) on `SessionStart` and `UserPromptSubmit`, so agents see recent messages at the start of a session and before each prompt. Existing content in those files is preserved. Refuses to use a symlinked or non-regular `CHATROOM.md`. Prints `chatroom ready at <path>`. |
 | `send` | `--message <text>` (required) | | Appends one record. Fails if the project has no chatroom, if the author or message is empty, or if the message is longer than 4000 characters. Prints `chatroom message sent`. |
 | `send` | `--author <name>` | `$ILIUM_CHATROOM_AUTHOR`, then `$AGENT_NAME`, then `agent` | The name recorded with the message. |
 | `context` | `--limit <n>` | 40 | Prints the last `n` records preceded by posting guidance, in the form injected into an agent turn by the lifecycle hooks. Prints an empty-room notice with the guidance when there are no messages. |
+| `context` | `--since-last-read` | off | Prints only records the reader has not seen yet and nothing when none are new. The reader is `--reader`, else the `ILIUM_PANE_ID` pane, else the `session_id` of the hook input on stdin. A reader seen for the first time, or a `SessionStart` hook, gets the full form with four times the `--max-bytes` budget. Without a reader key it behaves like plain `context`. |
+| `context` | `--max-bytes <n>` | unlimited | Caps the output size. Newest records win, a single oversized newest record is cut, and skipped records are counted in a closing note that points to `ilium chat tail`. |
+| `context` | `--reader <key>` | | Explicit reader key for `--since-last-read`. Read positions are stored under `.ilium/chat-readers/`. |
 | `tail` | `--limit <n>` | 100 | Prints the last `n` records for reading in a terminal, one per line: `<timestamp> \| <author> \| <content>`. |
 
 Details:

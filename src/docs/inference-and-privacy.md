@@ -45,7 +45,7 @@ Only the fields relevant to the selected provider are shown. Switching providers
 
 Provider notes:
 
-- **Kilo Gateway.** The default free model is `stepfun/step-3.7-flash:free`. Kilo's default free model was marked as permitting prompt training when last checked (2026-09-27). Review Kilo's [data and usage guidance](https://kilo.ai/docs/getting-started/using-kilo-for-free) before sending project text. The Kilo model row warns that requests may be used for training; that warning is real, not decorative.
+- **Kilo Gateway.** The default free model is `stepfun/step-5-preview-free` (migrated 2026-10-10). Kilo's default free model was marked as permitting prompt training when last checked (2026-09-27). Review Kilo's [data and usage guidance](https://kilo.ai/docs/getting-started/using-kilo-for-free) before sending project text. The Kilo model row warns that requests may be used for training; that warning is real, not decorative.
 - **Ollama.** Fully local: prompts go to the server at the URL you set. Use this when titles and organization must never leave your machine.
 - **OpenAI-compatible.** Also works with other services that implement the same HTTP interface; set the URL accordingly. Official OpenAI uses `max_completion_tokens` with documented per-model maxima and omits the limit for unknown model IDs.
 - **Anthropic.** Uses the Anthropic API directly. A blank URL resolves to the Anthropic default.
@@ -184,7 +184,7 @@ title_style = "labeling"             # labeling | summarization
 restructure_prompt_token_limit = 200000
 
 [inference.kilo_gateway]
-model = "stepfun/step-3.7-flash:free"
+model = "stepfun/step-5-preview-free"
 
 [inference.ollama]
 base_url = "http://127.0.0.1:11434"

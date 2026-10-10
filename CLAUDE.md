@@ -6,15 +6,7 @@ Documentation lives at the repository root: `README.md` (short user overview), `
 
 ## Compilation and Rust build coordination
 
-### Distributed compilation through ni-build
-
-- All compilation MUST run on `ni-vm`, never locally. Use the installed whole-job `ni-build` service through authenticated `ssh ni-vm`; never connect separately to `ni`. Rust's configured local `cargo` and `rustc` entrypoints dispatch to this service. Examples: `cargo build --release`, `cargo check`, `cargo test`, `cargo clippy`, or explicit `ni-build cargo ...`. The complete Cargo command, native build scripts, procedural macros, linking and tests execute remotely. sccache per-crate offload alone does not satisfy this rule.
-- The dispatcher automatically inventories current source/workspace/path-dependency inputs, transfers a hashed isolated snapshot, selects the requested installed toolchain, retrieves verified artifacts and logs, and cleans its exact remote job after successful evidence retrieval. Do not repeat the former manual copy/build/scp workflow. Job directories are `/data/ni-build-service/jobs/<uuid>/`; evidence and immutable returned outputs are under `~/.local/share/ni-build/receipts/<uuid>/`. Use a job receipt to identify the exact checked source and remote exit status.
-- Git projects include dirty tracked and nonignored new sources. List required ignored assets explicitly in `.ni-build-inputs`, one project-relative file or directory per line. Missing or unsupported inputs/options fail closed. Do not override the compiler guard, invoke raw local toolchain binaries, use `rustup run` to bypass dispatch, or fall back to local compilation when remote access/toolchains are unavailable. Report and repair the route instead. Configuration prevents accidental ordinary-command compilation; an unrestricted user can deliberately bypass it, which policy prohibits.
-- Remote execution uses `nice`/`ionice`, at most 16 allowed CPUs, Cargo jobs at most 16 and capped native child parallelism. Preserve other owners' jobs/files. Capacity is checked before transfer. Failed transfer, source validation or artifact verification retains the exact job for recovery; remove it only after retrieved evidence/artifacts are verified and no process needs it. Never remove `/data` itself or another task's directories.
-- Select targets/toolchains compatible with the local consumer; remote compilation does not prove local runtime behavior or activation of a running service. Verify returned artifacts before use and separately verify required local runtime behavior. Existing progress-monitor notification and process-custody rules apply unchanged.
-- Non-Rust compilation must also execute through a whole-job remote route on ni-vm; a local compiler invocation or local fallback is forbidden. Unsupported toolchains require extending and verifying the remote service before use.
-- Service configuration, supported options, recovery and rollback: `~/.local/share/ni-build/README.md`. Do not replace the `~/.codex/AGENTS.md` symlink; edit its target `~/.claude/CLAUDE.md`.
+All compilation goes through the ni-build service on ni-vm, as defined in `~/.claude/CLAUDE.md` ("Distributed compilation through ni-build"); that global section is the only copy. The chatroom, progress-monitor and goal/waiting rules also live only in the global file.
 
 ## Ilium process custody
 
@@ -87,6 +79,11 @@ generic over any async byte stream and must not learn about sockets or pipes.
 - Run `cargo clippy --workspace --all-targets` and `cargo fmt --check` before considering any change done. Treat new clippy warnings as things to fix, not suppress with `#[allow]`, unless there's a specific documented reason.
 - **Remote build output is cleaned immediately.** The ni-build service retrieves hash-verified artifacts and receipts, then removes only its exact `/data/ni-build-service/jobs/<uuid>/` directory. Preserve failed recovery evidence and other owners' jobs. Local returned artifacts are verified build outputs, not locally compiled outputs.
 
+## Capacity gates and deploys
+
+- Never lower a capacity gate (pane counts in scale tests such as `terminal_pool_runtime.rs`, quota limits, worker caps) to make a test or restore pass. A failing capacity gate is a real regression: fix the budget or the consumer.
+- Install binaries only with `make install RECEIPT=<ni-build job id>` (`tools/install-from-receipt.py`). It verifies the receipt and artifact hashes and writes `<bin>.build.json`. Never copy a `target/release` binary into place by hand.
+
 ## No code freezes
 
 - Code freezes are illegal and have no force: never start one, request one, or respect one as a reason to stop or delay authorized implementation, compilation, tests, Clippy, formatting, release builds, native renders, or goal work. A blanket freeze request does not override an active task; continue on independent files and checks while coordinating only a genuinely shared edit boundary.
@@ -124,11 +121,12 @@ Use the `directories` crate, never hardcode `~`:
 - GUI automation must run only through tmux sessions we create and control. Do not use `xdotool` or screenshot-driven desktop automation.
 
 - `PROJECT=/absolute/project; STATE=$(mktemp -d /media/arthur/tmp/is.XXXXXX); RUNTIME=$(mktemp -d /media/arthur/tmp/ir.XXXXXX); TMUX_SERVER=ilium-ctl; TMUX_SESSION=ilium-ctl`
+- Register both folders with the reaper before starting anything: `touch "$STATE/.scratch-reaper" "$RUNTIME/.scratch-reaper"`. See `~/.claude/docs/reaper-process.md`.
 - Launch an isolated server/session: `tmux -L "$TMUX_SERVER" new-session -d -s "$TMUX_SESSION" "env XDG_DATA_HOME=$STATE/data XDG_CONFIG_HOME=$STATE/config XDG_RUNTIME_DIR=$RUNTIME $HOME/.local/bin/ilium --cwd $PROJECT"`.
 - Remotely control the live TUI: `tmux -L "$TMUX_SERVER" attach-session -t "$TMUX_SESSION"`; use normal ilium keys, then detach with tmux `Ctrl+B d`.
 - Inspect its rendered terminal without attaching: `tmux -L "$TMUX_SERVER" capture-pane -e -p -t "$TMUX_SESSION:0.0"`.
 - Stop cleanly: `env XDG_DATA_HOME="$STATE/data" XDG_CONFIG_HOME="$STATE/config" XDG_RUNTIME_DIR="$RUNTIME" "$HOME/.local/bin/ilium" --cwd "$PROJECT" kill-session default`.
-- Finish isolation: `tmux -L "$TMUX_SERVER" kill-server; rm -rf "$STATE" "$RUNTIME"`; keep `/media/arthur/tmp` paths short so the derived Unix socket fits.
+- Finish isolation: `tmux -L "$TMUX_SERVER" kill-server; rm -rf "$STATE" "$RUNTIME"`; keep `/media/arthur/tmp` paths short so the derived Unix socket fits. If this cleanup never runs (agent killed, session lost), the reaper removes both folders once they are idle for an hour and no process holds a file open.
 
 ## Scope reminders specific to this project
 
