@@ -14,6 +14,7 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 ## [Unreleased]
 
 ### Changed
+- The progress-monitor instructions Ilium installs for agents (version 11) use a unit-test run as the example progress message instead of a release build, so agents are not nudged toward release builds; installed instruction blocks are refreshed automatically.
 - Codex session conversion now bounds app-server output records and queued reader events, clipping oversized diagnostics and failing closed on oversized protocol lines.
 - Live ambient data pollers and fleet-marker preparers now reserve persistent worker capacity from the host's shared quota before starting.
 - Lichess TV stream workers now reserve host-shared thread and stack capacity before connecting.

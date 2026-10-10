@@ -86,6 +86,15 @@ fn baseline_source(name: &str, source: &str) -> String {
     {
         return "sound source must be system_beep or sound_file".to_owned();
     }
+    // The progress example message changed from a release-build example to a
+    // unit-test example in version 11. Normalize only that example sentence so
+    // the immutable extraction hash still guards every other byte.
+    if name == "agent/progress-instructions" {
+        return source.replace(
+            "Running the focused unit tests of the ilium-client crate - test 14 of 22",
+            "Building the release binaries of the ilium terminal app - compiling crate 14 of 22",
+        );
+    }
     let fields: &[&str] = match name {
         "agent/ask-for-update" => &["custom_instructions"],
         "naming/project-name" => &["project_naming", "naming_and_organization"],
