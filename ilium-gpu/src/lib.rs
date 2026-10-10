@@ -16,15 +16,19 @@ mod shaders;
 mod wgpu_backend;
 
 use ilium_ambient::gpu::{set_gpu_availability, GpuAvailability, GpuRunner, GpuUnavailable};
-use ilium_ambient::resources::{AmbientResources, WorkerCost};
+use ilium_ambient::resources::AmbientResources;
+#[cfg(any(feature = "gpu", test))]
+use ilium_ambient::resources::WorkerCost;
 use ilium_ambient::source::Worker;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
+#[cfg(feature = "gpu")]
 use std::time::Instant;
 
 static PROBE_STARTED: AtomicBool = AtomicBool::new(false);
 static RUNNER: OnceLock<Arc<dyn GpuRunner>> = OnceLock::new();
 static RUNNER_SOURCE: OnceLock<Arc<dyn GpuRunner>> = OnceLock::new();
+#[cfg(any(feature = "gpu", test))]
 const GPU_PROBE_STACK_BYTES: usize = 2 * 1024 * 1024;
 
 /// Owns the admitted GPU capability probe for the client session.
@@ -72,6 +76,7 @@ pub fn start_probe(resources: AmbientResources) -> Option<GpuProbeOwner> {
     }
 }
 
+#[cfg(any(feature = "gpu", test))]
 fn spawn_probe_worker(
     resources: &AmbientResources,
     task: impl FnOnce(Arc<AtomicBool>) + Send + 'static,

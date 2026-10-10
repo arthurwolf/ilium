@@ -697,6 +697,9 @@ fn spawn_confined(
         "--dev",
         "/dev",
     ]);
+    if std::env::var_os("ILIUM_ANIMATION_SANDBOX_DIAGNOSTICS").is_some() {
+        command.args(["--setenv", "ILIUM_ANIMATION_SANDBOX_DIAGNOSTICS", "1"]);
+    }
     for library_root in ["/lib", "/lib64"] {
         // AArch64 distributions need not have /lib64. Bind only roots that
         // actually exist; /usr remains the mandatory runtime root.
@@ -719,7 +722,15 @@ fn spawn_confined(
         .args(arguments)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null());
+        .stderr(
+            if std::env::var_os("ILIUM_ANIMATION_SANDBOX_DIAGNOSTICS").is_some() {
+                // Opt-in diagnostics are useful for isolated contract tests. Keep
+                // production helpers silent so sandbox setup cannot corrupt a TUI.
+                Stdio::inherit()
+            } else {
+                Stdio::null()
+            },
+        );
     // SAFETY: forked-child closure uses only async-signal-safe OS primitives.
     // The preopened cgroup descriptor names this exact newly created domain;
     // numeric limits and descriptor are captured before fork.

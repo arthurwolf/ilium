@@ -607,7 +607,7 @@ impl Execution {
                             source,
                         },
                         execution: Some(execution),
-                    })
+                    });
                 }
             };
             execution.workers.push(WorkerRecord { lane, owner });
@@ -909,6 +909,12 @@ impl Client {
             return Err(RejectReason::Closed.into());
         }
         let bank = &self.shared.banks[lane.index()];
+        // A lane with no workers or no queue slots can never admit work. Report
+        // that as a terminal capability refusal: QueueFull is retryable, and a
+        // retrying admission loop would otherwise wait forever on a dead lane.
+        if bank.config.threads == 0 || bank.config.queue_slots == 0 {
+            return Err(RejectReason::InvalidCost.into());
+        }
         if bank.signal.pending.load(Ordering::Acquire) >= bank.config.queue_slots {
             return Err(RejectReason::QueueFull.into());
         }

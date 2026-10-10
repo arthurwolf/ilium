@@ -210,10 +210,13 @@ impl HeapBytes for ProgressWaitOutcome {
 }
 impl HeapBytes for ProgressMonitorStatus {
     fn heap_bytes(&self) -> usize {
-        let ProgressMonitorStatus { pane_id, progress } = self;
+        let ProgressMonitorStatus {
+            pane_id,
+            progress_monitors,
+        } = self;
         0usize
             .saturating_add(pane_id.heap_bytes())
-            .saturating_add(progress.heap_bytes())
+            .saturating_add(progress_monitors.heap_bytes())
     }
 }
 impl HeapBytes for WorkspaceGitVersion {
@@ -636,9 +639,12 @@ impl HeapBytes for ServerEvent {
             } => 0usize
                 .saturating_add(pane_id.heap_bytes())
                 .saturating_add(last_prompt.heap_bytes()),
-            Self::PaneProgressChanged { pane_id, progress } => 0usize
+            Self::PaneProgressChanged {
+                pane_id,
+                progress_monitors,
+            } => 0usize
                 .saturating_add(pane_id.heap_bytes())
-                .saturating_add(progress.heap_bytes()),
+                .saturating_add(progress_monitors.heap_bytes()),
             Self::ProgressMonitorEnabledChanged { enabled } => {
                 0usize.saturating_add(enabled.heap_bytes())
             }
@@ -806,6 +812,7 @@ impl HeapBytes for ProgressMonitorRejectionCode {
             Self::ProbeIoFailed => 0usize,
             Self::PaneNotFound => 0usize,
             Self::StaleMonitor => 0usize,
+            Self::TooManyMonitors => 0usize,
         }
     }
 }

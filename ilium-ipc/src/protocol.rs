@@ -169,6 +169,8 @@ pub enum ProgressMonitorRejectionCode {
     ProbeIoFailed,
     PaneNotFound,
     StaleMonitor,
+    /// The pane already holds the maximum number of monitors.
+    TooManyMonitors,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -198,9 +200,13 @@ pub struct ProgressMonitorAccepted {
 pub enum ProgressWaitEnd {
     /// The task reported done/error, or the monitor itself failed.
     Settled,
-    /// A newer `set` replaced the waited monitor.
+    /// Sent only by servers that held one monitor per pane, when a newer
+    /// `set` replaced the waited monitor. Kept so this variant's index stays
+    /// stable on the wire: a new `ilium` command still decodes replies from
+    /// an older running server. Current servers report `Cleared` instead.
     Superseded,
-    /// The monitor was cleared, or monitoring was switched off.
+    /// The monitor was cleared (explicitly, by `set --replace`, or with its
+    /// pane), or monitoring was switched off.
     Cleared,
 }
 
@@ -217,11 +223,15 @@ pub struct ProgressWaitOutcome {
     pub composer_notice_suppressed: bool,
 }
 
-/// Correlated machine-readable status returned by `ilium progress status`.
+/// Correlated machine-readable status returned by `ilium progress status`:
+/// every monitor registered on the pane, in registration order.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProgressMonitorStatus {
     pub pane_id: NodeId,
-    pub progress: Option<PaneProgress>,
+    /// Keeps the former `Option` wire layout for zero or one monitor (see
+    /// `ilium_core::option_compatible_list`).
+    #[serde(with = "ilium_core::option_compatible_list")]
+    pub progress_monitors: Vec<PaneProgress>,
 }
 
 /// Version used to decide whether this repository supports safe worktree
@@ -790,8 +800,10 @@ pub enum ClientRequest {
         pane_id: NodeId,
         command: String,
     },
-    /// Transactionally preflights and then installs (or replaces) one
-    /// server-owned monitor. The correlated result is
+    /// Transactionally preflights and then adds one server-owned monitor
+    /// beside the pane's other monitors. Re-sending an identical request for
+    /// a still-registered monitor returns that monitor instead of a second
+    /// one. The correlated result is
     /// [`ServerEvent::ProgressMonitorSetCompleted`].
     SetPaneProgressMonitor {
         request_id: u64,
@@ -799,13 +811,15 @@ pub enum ClientRequest {
         command: String,
         interval_seconds: u32,
     },
-    /// Returns the live registration/report state for one pane.
+    /// Returns the live registration/report state of every monitor of one
+    /// pane.
     GetPaneProgressMonitorStatus {
         request_id: u64,
         pane_id: NodeId,
     },
-    /// Stops `pane_id`'s monitor and clears presentation state. Supplying an
-    /// ID fences the clear so a stale agent cannot remove its replacement.
+    /// Stops and removes one monitor (`Some(id)`) or every monitor (`None`)
+    /// of `pane_id` and clears their presentation state. An ID that is not
+    /// registered on the pane is rejected as stale.
     ClearPaneProgressMonitor {
         request_id: u64,
         pane_id: NodeId,
@@ -828,7 +842,9 @@ pub enum ClientRequest {
     },
     /// Inserts literal text into one terminal, then delivers a separate Enter
     /// after the receiving application has had time to process the insertion.
-    /// Unlike `KeyInput`, this is a semantic submission, not a raw byte write.
+    /// Unlike `KeyInput`, this is a semantic submission, not a raw byte write:
+    /// the server sends the text as one bracketed paste when the application
+    /// negotiated it, so paste heuristics cannot turn the Enter into a newline.
     SubmitTerminalText {
         pane_id: NodeId,
         text: String,
@@ -984,8 +1000,8 @@ pub enum ClientRequest {
         generation: u64,
         action: AntigravityStatuslineAction,
     },
-    /// Held open by `ilium progress wait` until monitor `monitor_id` settles,
-    /// is replaced, or is cleared. While the waiter's connection is alive the
+    /// Held open by `ilium progress wait` until monitor `monitor_id` settles
+    /// or is cleared. While the waiter's connection is alive the
     /// server returns the outcome here instead of typing it into the agent's
     /// composer. The correlated reply is [`ServerEvent::ProgressWaitCompleted`].
     /// Appended to preserve every existing bincode request discriminant.
@@ -993,6 +1009,17 @@ pub enum ClientRequest {
         request_id: u64,
         pane_id: NodeId,
         monitor_id: u64,
+    },
+    /// Inserts literal text into one terminal as a paste, without pressing
+    /// Enter. The server, which owns every pane's live terminal modes, picks
+    /// the framing: one bracketed paste when the application negotiated it,
+    /// plain bytes otherwise (refused for multi-line text, whose line breaks
+    /// would act as Enter presses). Clients never know the modes of panes
+    /// they have not rendered, so they must not decide this themselves.
+    /// Appended to preserve every existing bincode request discriminant.
+    PasteTerminalText {
+        pane_id: NodeId,
+        text: String,
     },
 }
 
@@ -1056,6 +1083,7 @@ impl ClientRequest {
             Self::GetPaneProgressMonitorStatus { .. } => "get_pane_progress_monitor_status",
             Self::ClearPaneProgressMonitor { .. } => "clear_pane_progress_monitor",
             Self::WaitPaneProgressMonitor { .. } => "wait_pane_progress_monitor",
+            Self::PasteTerminalText { .. } => "paste_terminal_text",
             Self::UpdateProgressMonitorEnabled { .. } => "update_progress_monitor_enabled",
             Self::UpdateTextTriggers { .. } => "update_text_triggers",
             Self::SubmitTerminalText { .. } => "submit_terminal_text",
@@ -1298,16 +1326,17 @@ pub enum ServerEvent {
         pane_id: NodeId,
         last_prompt: Option<String>,
     },
-    /// A pane's progress-monitor report changed: a new tick was parsed, the
-    /// monitor was started (`Some` with an initial unknown-progress value is
-    /// never sent -- the first event only follows a successfully parsed
-    /// tick), or it was cleared (`None`) by `ClearPaneProgressMonitor`, pane
+    /// A pane's progress monitors changed: a new tick was parsed, a monitor
+    /// was registered, or one was removed by `ClearPaneProgressMonitor`, pane
     /// close, or the server's own progress-monitor setting being disabled
-    /// mid-run. Appended last to preserve every existing bincode
-    /// discriminant.
+    /// mid-run. Carries the pane's complete monitor list (empty when none is
+    /// left), so coalescing keeps only the newest list per pane.
     PaneProgressChanged {
         pane_id: NodeId,
-        progress: Option<PaneProgress>,
+        /// Keeps the former `Option` wire layout for zero or one monitor, so
+        /// a new client still decodes this event from an older server.
+        #[serde(with = "ilium_core::option_compatible_list")]
+        progress_monitors: Vec<PaneProgress>,
     },
     /// The detached server accepted a live progress-monitor-enabled update --
     /// same shape as `DebugLoggingChanged`. Appended last to preserve every
@@ -1337,11 +1366,15 @@ pub enum ServerEvent {
         pane_id: NodeId,
         result: Result<ProgressMonitorStatus, ProgressMonitorRejection>,
     },
-    /// Confirms a fenced clear. `None` means the pane had no active monitor.
+    /// Confirms a clear with the removed monitor ids (empty when the pane
+    /// had no monitor).
     ProgressMonitorCleared {
         request_id: u64,
         pane_id: NodeId,
-        result: Result<Option<u64>, ProgressMonitorRejection>,
+        /// Keeps the former `Result<Option<u64>, _>` wire layout when at most
+        /// one monitor was removed.
+        #[serde(with = "ilium_core::option_compatible_list::in_result")]
+        result: Result<Vec<u64>, ProgressMonitorRejection>,
     },
     /// A `SubmitVoiceText` offered to this one voice-hosting client. Sent
     /// only to the registered client currently being asked (never broadcast),

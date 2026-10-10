@@ -421,8 +421,8 @@ pub enum SoundError {
 /// an already-running agent, not evidence that a new turn just started.
 pub fn event_for_transition(previous: Option<&PaneStatus>, new: &PaneStatus) -> Option<SoundEvent> {
     let previous =
-        previous.map(|status| ilium_core::project_pane_signals(status, None, false, None));
-    let new = ilium_core::project_pane_signals(new, None, false, None);
+        previous.map(|status| ilium_core::project_pane_signals(status, &[], false, None));
+    let new = ilium_core::project_pane_signals(new, &[], false, None);
     event_for_signals(previous.as_ref(), &new)
 }
 

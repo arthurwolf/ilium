@@ -142,7 +142,7 @@ mod tests {
             AgentAvailability::Exited(AgentExitOutcome::Unknown),
         ] {
             let status = PaneStatus::AgentUnavailable(Box::new(recovery(availability)));
-            let signals = project_pane_signals(&status, None, false, None);
+            let signals = project_pane_signals(&status, &[], false, None);
             assert_eq!(signals.objective, ObjectiveSignal::None);
             assert_eq!(signals.now, NowSignal::AgentUnavailable(availability));
         }

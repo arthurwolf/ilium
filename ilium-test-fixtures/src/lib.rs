@@ -326,10 +326,29 @@ fn fixture_binary_candidates(test_executable: &Path) -> Vec<PathBuf> {
         }
     }
 
-    directories
+    let mut candidates: Vec<PathBuf> = directories
         .into_iter()
         .map(|directory| directory.join(&binary_name))
-        .collect()
+        .collect();
+
+    // `cargo test -p ...` builds a bin only as `deps/<name_with_underscores>-<hash>`
+    // and does not copy it to the profile root, so the search above misses it.
+    // Such a name has no extension (`.d` dep-info files are excluded).
+    let hashed_prefix = format!("{}-", FIXTURE_BINARY_NAME.replace('-', "_"));
+    if let Some(deps_directory) = test_executable.parent() {
+        if let Ok(entries) = std::fs::read_dir(deps_directory) {
+            for entry in entries.flatten() {
+                let file_name = entry.file_name();
+                let Some(name) = file_name.to_str() else {
+                    continue;
+                };
+                if name.starts_with(&hashed_prefix) && !name.contains('.') {
+                    candidates.push(entry.path());
+                }
+            }
+        }
+    }
+    candidates
 }
 
 // Owner-only: this copy is never run by anything but this test process's own

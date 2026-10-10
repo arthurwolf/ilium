@@ -14,6 +14,7 @@ pub mod allocation;
 pub use allocation::AllocationSize;
 pub mod agent_recovery;
 pub mod animation_recommendation;
+pub mod option_compatible_list;
 
 pub use agent_recovery::{AgentAvailability, AgentExitOutcome, AgentProcessKey, AgentRecovery};
 
@@ -961,6 +962,47 @@ impl TaskSignal {
     }
 }
 
+/// Picks the monitor that speaks for a pane with several monitors, for the
+/// one-glyph presentations (sidebar slot, tooltips, notifications). The
+/// order is: an unread error or failed monitor, an unread done result, the
+/// live task that is least complete (it gates the pane), then the most
+/// recently registered settled monitor.
+pub fn representative_progress(progress_monitors: &[PaneProgress]) -> Option<&PaneProgress> {
+    let unread_failure = progress_monitors.iter().find(|progress| {
+        progress.has_unread_outcome()
+            && (progress.report.status == ProgressTaskStatus::Error
+                || progress.monitor_health.is_failed())
+    });
+    if unread_failure.is_some() {
+        return unread_failure;
+    }
+    let unread_done = progress_monitors
+        .iter()
+        .find(|progress| progress.has_unread_outcome());
+    if unread_done.is_some() {
+        return unread_done;
+    }
+    let least_complete_live = progress_monitors
+        .iter()
+        .filter(|progress| progress.is_live())
+        .min_by(|left, right| left.report.percent.total_cmp(&right.report.percent));
+    least_complete_live.or_else(|| progress_monitors.last())
+}
+
+/// True when at least one monitor still observes an unfinished task.
+pub fn has_live_progress(progress_monitors: &[PaneProgress]) -> bool {
+    progress_monitors.iter().any(PaneProgress::is_live)
+}
+
+fn validate_pane_progress(pane_id: NodeId, progress: &PaneProgress) -> Result<(), TreeError> {
+    progress
+        .validate()
+        .map_err(|error| TreeError::InvalidPaneProgress {
+            pane_id,
+            reason: error.to_string(),
+        })
+}
+
 /// Maps a percentage to `0..=TASK_PROGRESS_BUCKETS`. Exactly zero is bucket
 /// 0; any started work shows at least one step, and only 100 fills the bar.
 pub fn task_progress_bucket(percent: f32) -> u8 {
@@ -1018,10 +1060,11 @@ pub struct PaneSignals {
 /// otherwise a live task outranks a goal and a scheduled input comes last.
 pub fn project_pane_signals(
     status: &PaneStatus,
-    progress: Option<&PaneProgress>,
+    progress_monitors: &[PaneProgress],
     has_scheduled_input: bool,
     shell_output: Option<ShellOutputPhase>,
 ) -> PaneSignals {
+    let progress = representative_progress(progress_monitors);
     let agent = match status {
         PaneStatus::Agent(agent) => agent.clone(),
         PaneStatus::AgentUnavailable(recovery) => {
@@ -1061,7 +1104,7 @@ pub fn project_pane_signals(
     };
     let (objective, objective_rule) =
         project_objective_signal(progress, agent.goal, has_scheduled_input);
-    let is_monitor_live = progress.is_some_and(PaneProgress::is_live);
+    let is_monitor_live = has_live_progress(progress_monitors);
     let (now, now_rule) = match agent.turn {
         AgentTurn::WaitingApproval => (NowSignal::NeedsApproval, "A1"),
         AgentTurn::Working => (NowSignal::Working, "A2"),
@@ -1480,11 +1523,16 @@ pub enum NodeKind {
         /// existing recovery snapshots compatible.
         #[serde(default)]
         last_prompt: Option<String>,
-        /// This terminal pane's active long-running-task progress, if a
-        /// monitor command is currently reporting one. `serde(default)`
-        /// keeps existing recovery snapshots compatible.
-        #[serde(default)]
-        progress: Option<Box<PaneProgress>>,
+        /// Every progress monitor registered on this terminal pane, in
+        /// registration order (several long-running tasks may be watched at
+        /// once). `serde(default)` keeps existing recovery snapshots
+        /// compatible; the former single `progress` field of old snapshots is
+        /// ignored because restore re-installs monitors from the session's
+        /// persisted monitor list. On the bincode IPC wire the list keeps
+        /// the old `Option` layout for zero or one monitor, so a new client
+        /// still decodes trees from an older running server.
+        #[serde(default, with = "crate::option_compatible_list")]
+        progress_monitors: Vec<PaneProgress>,
         /// Actual spawn directory, including for a plain pane launched from
         /// a subdirectory. Old snapshots fall back to their project root.
         #[serde(default)]
@@ -2520,7 +2568,7 @@ impl Tree {
                     scheduled_input: None,
                     prompt_queue: Vec::new(),
                     last_prompt: None,
-                    progress: None,
+                    progress_monitors: Vec::new(),
                     launch_cwd: None,
                     workspace: None,
                 },
@@ -2589,7 +2637,7 @@ impl Tree {
                     scheduled_input: None,
                     prompt_queue: Vec::new(),
                     last_prompt: None,
-                    progress: None,
+                    progress_monitors: Vec::new(),
                     launch_cwd: None,
                     workspace: None,
                 },
@@ -3798,25 +3846,28 @@ impl Tree {
         }
     }
 
-    /// Marks a pane's unread task outcome (terminal result or failed
-    /// monitor) as seen. Returns the updated progress only when something
+    /// Marks every unread task outcome (terminal result or failed monitor)
+    /// of a pane as seen. Returns the updated monitors only when something
     /// changed, so callers broadcast exactly one event per real transition.
     /// A still-live monitor is never touched: there is no outcome to read.
     pub fn acknowledge_progress_outcome(
         &mut self,
         id: NodeId,
-    ) -> Result<Option<PaneProgress>, TreeError> {
-        let NodeKind::Pane { progress, .. } = &mut self.get_mut(id)?.kind else {
+    ) -> Result<Vec<PaneProgress>, TreeError> {
+        let NodeKind::Pane {
+            progress_monitors, ..
+        } = &mut self.get_mut(id)?.kind
+        else {
             return Err(TreeError::NotAPane(id));
         };
-        let Some(progress) = progress.as_deref_mut() else {
-            return Ok(None);
-        };
-        if !progress.has_unread_outcome() {
-            return Ok(None);
+        let mut acknowledged = Vec::new();
+        for progress in progress_monitors.iter_mut() {
+            if progress.has_unread_outcome() {
+                progress.attention = ProgressAttention::Acknowledged;
+                acknowledged.push(progress.clone());
+            }
         }
-        progress.attention = ProgressAttention::Acknowledged;
-        Ok(Some(progress.clone()))
+        Ok(acknowledged)
     }
 
     /// Acknowledges that the user has seen a completed agent turn. Only
@@ -4020,18 +4071,68 @@ impl Tree {
         Ok(())
     }
 
-    /// Records (or, with `None`, clears) a terminal pane's active
-    /// long-running-task progress. Invalid externally sourced state is
-    /// rejected rather than silently normalized at this persistence boundary.
-    pub fn set_pane_progress(
+    /// Records one monitor's progress on a terminal pane: replaces the entry
+    /// with the same monitor id, or appends a newly registered monitor.
+    /// Invalid externally sourced state is rejected rather than silently
+    /// normalized at this persistence boundary.
+    pub fn upsert_pane_progress(
         &mut self,
         id: NodeId,
-        progress: Option<PaneProgress>,
+        progress: PaneProgress,
     ) -> Result<(), TreeError> {
+        validate_pane_progress(id, &progress)?;
+        let field = self.terminal_progress_monitors_mut(id)?;
+        match field
+            .iter_mut()
+            .find(|existing| existing.monitor_id == progress.monitor_id)
+        {
+            Some(existing) => *existing = progress,
+            None => field.push(progress),
+        }
+        Ok(())
+    }
+
+    /// Removes one monitor's progress from a pane. Returns whether it was
+    /// present.
+    pub fn remove_pane_progress(&mut self, id: NodeId, monitor_id: u64) -> Result<bool, TreeError> {
+        let field = self.terminal_progress_monitors_mut(id)?;
+        let before = field.len();
+        field.retain(|progress| progress.monitor_id != monitor_id);
+        Ok(field.len() != before)
+    }
+
+    /// Replaces a pane's whole monitor list, as a client does when the
+    /// server publishes the pane's current monitors. Every entry is
+    /// validated and monitor ids must be unique.
+    pub fn replace_pane_progress(
+        &mut self,
+        id: NodeId,
+        progress_monitors: Vec<PaneProgress>,
+    ) -> Result<(), TreeError> {
+        for (index, progress) in progress_monitors.iter().enumerate() {
+            validate_pane_progress(id, progress)?;
+            if progress_monitors[..index]
+                .iter()
+                .any(|earlier| earlier.monitor_id == progress.monitor_id)
+            {
+                return Err(TreeError::InvalidPaneProgress {
+                    pane_id: id,
+                    reason: format!("monitor id {} appears twice", progress.monitor_id),
+                });
+            }
+        }
+        *self.terminal_progress_monitors_mut(id)? = progress_monitors;
+        Ok(())
+    }
+
+    fn terminal_progress_monitors_mut(
+        &mut self,
+        id: NodeId,
+    ) -> Result<&mut Vec<PaneProgress>, TreeError> {
         let node = self.get_mut(id)?;
         let NodeKind::Pane {
             content,
-            progress: field,
+            progress_monitors,
             ..
         } = &mut node.kind
         else {
@@ -4040,16 +4141,7 @@ impl Tree {
         if *content != PaneContentKind::Terminal {
             return Err(TreeError::NotATerminal(id));
         }
-        if let Some(progress) = progress.as_ref() {
-            progress
-                .validate()
-                .map_err(|error| TreeError::InvalidPaneProgress {
-                    pane_id: id,
-                    reason: error.to_string(),
-                })?;
-        }
-        *field = progress.map(Box::new);
-        Ok(())
+        Ok(progress_monitors)
     }
 
     /// Returns the FIFO head without consuming it. The server persists its
@@ -4163,13 +4255,22 @@ impl Tree {
         }
     }
 
-    /// Returns this terminal pane's active long-running-task progress, if
-    /// any monitor command is currently reporting one.
-    pub fn pane_progress(&self, id: NodeId) -> Option<&PaneProgress> {
-        match &self.get(id)?.kind {
-            NodeKind::Pane { progress, .. } => progress.as_deref(),
-            NodeKind::Container(_) | NodeKind::Folder { .. } => None,
+    /// Returns every progress monitor registered on this pane, in
+    /// registration order; empty for unknown ids and non-pane nodes.
+    pub fn pane_progress(&self, id: NodeId) -> &[PaneProgress] {
+        match self.get(id).map(|node| &node.kind) {
+            Some(NodeKind::Pane {
+                progress_monitors, ..
+            }) => progress_monitors,
+            _ => &[],
         }
+    }
+
+    /// Returns one monitor's progress on a pane, if it is registered there.
+    pub fn pane_monitor_progress(&self, id: NodeId, monitor_id: u64) -> Option<&PaneProgress> {
+        self.pane_progress(id)
+            .iter()
+            .find(|progress| progress.monitor_id == monitor_id)
     }
 
     /// True if `ancestor` is `node` itself or a transitive parent of `node`.
@@ -6052,7 +6153,7 @@ mod tests {
     }
 
     #[test]
-    fn set_pane_progress_round_trips_strictly_and_rejects_non_terminal_panes() {
+    fn pane_progress_list_round_trips_strictly_and_rejects_non_terminal_panes() {
         let mut tree = Tree::new();
         let group = tree.add_group(ROOT_ID, "work").unwrap();
         let terminal = tree
@@ -6062,7 +6163,7 @@ mod tests {
             .add_pane(group, "notes", PaneContentKind::Editor)
             .unwrap();
 
-        assert_eq!(tree.pane_progress(terminal), None);
+        assert!(tree.pane_progress(terminal).is_empty());
         let progress = PaneProgress::new(
             7,
             ProgressTaskReport::new(
@@ -6077,26 +6178,47 @@ mod tests {
             1234,
         )
         .unwrap();
-        tree.set_pane_progress(terminal, Some(progress.clone()))
+        tree.upsert_pane_progress(terminal, progress.clone())
             .unwrap();
-        assert_eq!(tree.pane_progress(terminal), Some(&progress));
+        assert_eq!(
+            tree.pane_progress(terminal),
+            std::slice::from_ref(&progress)
+        );
+
+        let mut second = progress.clone();
+        second.monitor_id = 8;
+        second.report.percent = 10.0;
+        tree.upsert_pane_progress(terminal, second.clone()).unwrap();
+        let mut updated = progress.clone();
+        updated.report.percent = 50.0;
+        tree.upsert_pane_progress(terminal, updated.clone())
+            .unwrap();
+        assert_eq!(
+            tree.pane_progress(terminal),
+            &[updated.clone(), second.clone()]
+        );
+        assert_eq!(tree.pane_monitor_progress(terminal, 8), Some(&second));
 
         let mut invalid = progress.clone();
         invalid.report.percent = f32::NAN;
         assert!(matches!(
-            tree.set_pane_progress(terminal, Some(invalid)),
+            tree.upsert_pane_progress(terminal, invalid),
             Err(TreeError::InvalidPaneProgress { pane_id, .. }) if pane_id == terminal
         ));
-        assert_eq!(tree.pane_progress(terminal), Some(&progress));
+        assert!(matches!(
+            tree.replace_pane_progress(terminal, vec![second.clone(), second.clone()]),
+            Err(TreeError::InvalidPaneProgress { .. })
+        ));
+        assert_eq!(tree.pane_progress(terminal).len(), 2);
 
-        tree.set_pane_progress(terminal, None).unwrap();
-        assert_eq!(tree.pane_progress(terminal), None);
+        assert!(tree.remove_pane_progress(terminal, 7).unwrap());
+        assert!(!tree.remove_pane_progress(terminal, 7).unwrap());
+        assert_eq!(tree.pane_progress(terminal), std::slice::from_ref(&second));
+        tree.replace_pane_progress(terminal, Vec::new()).unwrap();
+        assert!(tree.pane_progress(terminal).is_empty());
 
         assert!(matches!(
-            tree.set_pane_progress(
-                editor,
-                Some(progress)
-            ),
+            tree.upsert_pane_progress(editor, progress),
             Err(TreeError::NotATerminal(id)) if id == editor
         ));
     }
@@ -7590,7 +7712,8 @@ mod pane_signal_tests {
             AgentActivity::Working,
             Some(GoalState::Active),
         );
-        let signals = project_pane_signals(&status, Some(&running(42.0)), false, None);
+        let signals =
+            project_pane_signals(&status, std::slice::from_ref(&running(42.0)), false, None);
         assert_eq!(
             signals.objective,
             ObjectiveSignal::Task(TaskSignal::Running {
@@ -7605,7 +7728,8 @@ mod pane_signal_tests {
             AgentActivity::Working,
             Some(GoalState::Blocked),
         );
-        let signals = project_pane_signals(&blocked, Some(&running(42.0)), false, None);
+        let signals =
+            project_pane_signals(&blocked, std::slice::from_ref(&running(42.0)), false, None);
         assert_eq!(signals.objective, ObjectiveSignal::Goal(GoalState::Blocked));
         assert_eq!((signals.objective_rule, signals.now_rule), ("B3", "A2"));
     }
@@ -7613,7 +7737,12 @@ mod pane_signal_tests {
     #[test]
     fn idle_agent_with_live_monitor_is_parked_not_finished() {
         let without_goal = PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Done, None);
-        let signals = project_pane_signals(&without_goal, Some(&running(84.0)), false, None);
+        let signals = project_pane_signals(
+            &without_goal,
+            std::slice::from_ref(&running(84.0)),
+            false,
+            None,
+        );
         assert_eq!(
             signals.objective,
             ObjectiveSignal::Task(TaskSignal::Running {
@@ -7629,7 +7758,12 @@ mod pane_signal_tests {
             AgentActivity::Idle,
             Some(GoalState::Paused),
         );
-        let signals = project_pane_signals(&with_goal, Some(&running(84.0)), false, None);
+        let signals = project_pane_signals(
+            &with_goal,
+            std::slice::from_ref(&running(84.0)),
+            false,
+            None,
+        );
         assert!(matches!(
             signals.objective,
             ObjectiveSignal::Task(TaskSignal::Running { bucket: 11, .. })
@@ -7644,8 +7778,12 @@ mod pane_signal_tests {
             AgentActivity::Idle,
             Some(GoalState::Active),
         );
-        let unread =
-            project_pane_signals(&status, Some(&done(ProgressAttention::Unread)), false, None);
+        let unread = project_pane_signals(
+            &status,
+            std::slice::from_ref(&done(ProgressAttention::Unread)),
+            false,
+            None,
+        );
         assert_eq!(
             unread.objective,
             ObjectiveSignal::Task(TaskSignal::Done { unread: true })
@@ -7653,7 +7791,7 @@ mod pane_signal_tests {
         assert_eq!(unread.now, NowSignal::Idle);
         let seen = project_pane_signals(
             &status,
-            Some(&done(ProgressAttention::Acknowledged)),
+            std::slice::from_ref(&done(ProgressAttention::Acknowledged)),
             false,
             None,
         );
@@ -7664,10 +7802,11 @@ mod pane_signal_tests {
     #[test]
     fn scheduled_input_never_replaces_the_turn_and_yields_to_goals_and_tasks() {
         let status = PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Working, None);
-        let signals = project_pane_signals(&status, None, true, None);
+        let signals = project_pane_signals(&status, &[], true, None);
         assert_eq!(signals.objective, ObjectiveSignal::ScheduledInput);
         assert_eq!(signals.now, NowSignal::Working);
-        let with_task = project_pane_signals(&status, Some(&running(10.0)), true, None);
+        let with_task =
+            project_pane_signals(&status, std::slice::from_ref(&running(10.0)), true, None);
         assert!(matches!(with_task.objective, ObjectiveSignal::Task(_)));
     }
 
@@ -7675,7 +7814,7 @@ mod pane_signal_tests {
     fn plain_shell_shows_its_task_and_output_liveness() {
         let signals = project_pane_signals(
             &PaneStatus::PlainShell,
-            Some(&running(50.0)),
+            std::slice::from_ref(&running(50.0)),
             false,
             Some(ShellOutputPhase::Fast),
         );
@@ -7828,7 +7967,7 @@ mod pane_signal_tests {
                                         goal: None,
                                         completion_unread,
                                     }),
-                                    report.as_ref(),
+                                    report.as_slice(),
                                     scheduled,
                                     shell_output,
                                 ),
@@ -7843,7 +7982,7 @@ mod pane_signal_tests {
                                         goal: None,
                                         completion_unread,
                                     }),
-                                    report.as_ref(),
+                                    report.as_slice(),
                                     scheduled,
                                     shell_output,
                                 ),
@@ -7859,7 +7998,7 @@ mod pane_signal_tests {
                                             goal: Some(goal),
                                             completion_unread,
                                         }),
-                                        report.as_ref(),
+                                        report.as_slice(),
                                         scheduled,
                                         shell_output,
                                     ),
@@ -7878,7 +8017,7 @@ mod pane_signal_tests {
                     record_pair(
                         project_pane_signals(
                             &PaneStatus::PlainShell,
-                            report.as_ref(),
+                            report.as_slice(),
                             scheduled,
                             shell_output,
                         ),
@@ -7938,13 +8077,58 @@ mod pane_signal_tests {
         let pane = tree
             .add_pane(group, "agent", PaneContentKind::Terminal)
             .unwrap();
-        tree.set_pane_progress(pane, Some(running(5.0))).unwrap();
-        assert_eq!(tree.acknowledge_progress_outcome(pane).unwrap(), None);
-        tree.set_pane_progress(pane, Some(done(ProgressAttention::Unread)))
-            .unwrap();
-        let acknowledged = tree.acknowledge_progress_outcome(pane).unwrap().unwrap();
-        assert_eq!(acknowledged.attention, ProgressAttention::Acknowledged);
-        assert_eq!(tree.acknowledge_progress_outcome(pane).unwrap(), None);
+        let mut live = running(5.0);
+        live.monitor_id = 1;
+        tree.upsert_pane_progress(pane, live.clone()).unwrap();
+        assert!(tree.acknowledge_progress_outcome(pane).unwrap().is_empty());
+        let mut finished = done(ProgressAttention::Unread);
+        finished.monitor_id = 2;
+        tree.upsert_pane_progress(pane, finished).unwrap();
+        let acknowledged = tree.acknowledge_progress_outcome(pane).unwrap();
+        assert_eq!(acknowledged.len(), 1);
+        assert_eq!(acknowledged[0].monitor_id, 2);
+        assert_eq!(acknowledged[0].attention, ProgressAttention::Acknowledged);
+        assert!(tree.acknowledge_progress_outcome(pane).unwrap().is_empty());
+        assert_eq!(tree.pane_monitor_progress(pane, 1), Some(&live));
+    }
+
+    #[test]
+    fn representative_progress_prefers_unread_failures_then_results_then_the_slowest_live_task() {
+        let mut slow = running(20.0);
+        slow.monitor_id = 1;
+        let mut fast = running(80.0);
+        fast.monitor_id = 2;
+        assert_eq!(
+            representative_progress(&[fast.clone(), slow.clone()]).map(|p| p.monitor_id),
+            Some(1)
+        );
+        assert!(has_live_progress(&[fast.clone(), slow.clone()]));
+        let mut finished = done(ProgressAttention::Unread);
+        finished.monitor_id = 3;
+        assert_eq!(
+            representative_progress(&[slow.clone(), finished.clone()]).map(|p| p.monitor_id),
+            Some(3)
+        );
+        let mut failed = progress(
+            ProgressTaskStatus::Error,
+            30.0,
+            ProgressMonitorHealth::Healthy,
+            ProgressAttention::Unread,
+        );
+        failed.monitor_id = 4;
+        assert_eq!(
+            representative_progress(&[finished.clone(), slow.clone(), failed.clone()])
+                .map(|p| p.monitor_id),
+            Some(4)
+        );
+        let mut seen = finished.clone();
+        seen.attention = ProgressAttention::Acknowledged;
+        assert!(!has_live_progress(std::slice::from_ref(&seen)));
+        assert_eq!(
+            representative_progress(&[seen.clone(), slow.clone()]).map(|p| p.monitor_id),
+            Some(1)
+        );
+        assert_eq!(representative_progress(&[]), None);
     }
 
     #[test]

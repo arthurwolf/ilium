@@ -548,7 +548,7 @@ impl AllocationSize for NodeKind {
                 scheduled_input,
                 prompt_queue,
                 last_prompt,
-                progress,
+                progress_monitors,
                 launch_cwd,
                 workspace,
             } => 0usize
@@ -559,7 +559,7 @@ impl AllocationSize for NodeKind {
                 .saturating_add(scheduled_input.heap_bytes())
                 .saturating_add(prompt_queue.heap_bytes())
                 .saturating_add(last_prompt.heap_bytes())
-                .saturating_add(progress.heap_bytes())
+                .saturating_add(progress_monitors.heap_bytes())
                 .saturating_add(launch_cwd.heap_bytes())
                 .saturating_add(workspace.heap_bytes()),
             Self::Folder {

@@ -504,6 +504,10 @@ mod tests {
                 pane_id: NodeId(2),
                 monitor_id: 7,
             },
+            ClientRequest::PasteTerminalText {
+                pane_id: NodeId(2),
+                text: "first line\nsecond line".to_string(),
+            },
             ClientRequest::UpdateProgressMonitorEnabled { enabled: true },
             ClientRequest::RegisterVoiceTextReceiver,
             ClientRequest::SubmitVoiceText {
@@ -833,11 +837,19 @@ mod tests {
             },
             ServerEvent::PaneProgressChanged {
                 pane_id: NodeId(2),
-                progress: Some(sample_progress()),
+                progress_monitors: vec![sample_progress()],
             },
             ServerEvent::PaneProgressChanged {
                 pane_id: NodeId(2),
-                progress: None,
+                progress_monitors: Vec::new(),
+            },
+            ServerEvent::PaneProgressChanged {
+                pane_id: NodeId(2),
+                progress_monitors: vec![sample_progress(), {
+                    let mut second = sample_progress();
+                    second.monitor_id = 8;
+                    second
+                }],
             },
             ServerEvent::ProgressMonitorEnabledChanged { enabled: false },
             ServerEvent::ProgressMonitorCheckCompleted {
@@ -861,13 +873,23 @@ mod tests {
                 pane_id: NodeId(2),
                 result: Ok(ProgressMonitorStatus {
                     pane_id: NodeId(2),
-                    progress: Some(sample_progress()),
+                    progress_monitors: vec![sample_progress()],
                 }),
             },
             ServerEvent::ProgressMonitorCleared {
                 request_id: 43,
                 pane_id: NodeId(2),
-                result: Ok(Some(7)),
+                result: Ok(vec![7, 9]),
+            },
+            ServerEvent::ProgressMonitorCleared {
+                request_id: 46,
+                pane_id: NodeId(2),
+                result: Ok(vec![7]),
+            },
+            ServerEvent::ProgressMonitorCleared {
+                request_id: 47,
+                pane_id: NodeId(2),
+                result: Ok(Vec::new()),
             },
             ServerEvent::ProgressWaitCompleted {
                 request_id: 44,
@@ -884,7 +906,7 @@ mod tests {
                 pane_id: NodeId(2),
                 result: Ok(ProgressWaitOutcome {
                     monitor_id: 7,
-                    end: ProgressWaitEnd::Superseded,
+                    end: ProgressWaitEnd::Cleared,
                     progress: None,
                     composer_notice_suppressed: false,
                 }),
@@ -1183,6 +1205,81 @@ mod tests {
             prompt_epoch: Some("epoch-2".to_string()),
         };
         assert!(!submitted_user_input.is_high_frequency_diagnostic());
+    }
+
+    /// The pane monitor list replaced a single `Option` on the wire. A new
+    /// `ilium` command must still decode an older running server's frames
+    /// (no item or one item), and an older reader must refuse rather than
+    /// misread a frame with several monitors.
+    #[test]
+    fn monitor_lists_keep_the_former_option_wire_layout() {
+        #[derive(Debug, PartialEq, Serialize, Deserialize)]
+        struct Current {
+            #[serde(with = "ilium_core::option_compatible_list")]
+            monitors: Vec<ilium_core::PaneProgress>,
+            trailing: u32,
+        }
+        #[derive(Debug, PartialEq, Serialize, Deserialize)]
+        struct Former {
+            monitors: Option<Box<ilium_core::PaneProgress>>,
+            trailing: u32,
+        }
+        use bincode::Options;
+        let decode = |bytes: &[u8]| {
+            bincode::DefaultOptions::new()
+                .with_fixint_encoding()
+                .deserialize::<Current>(bytes)
+        };
+        for former in [
+            Former {
+                monitors: None,
+                trailing: 77,
+            },
+            Former {
+                monitors: Some(Box::new(sample_progress())),
+                trailing: 77,
+            },
+        ] {
+            let current = Current {
+                monitors: former
+                    .monitors
+                    .iter()
+                    .map(|item| (**item).clone())
+                    .collect(),
+                trailing: 77,
+            };
+            let former_bytes = bincode::serialize(&former).expect("serialize former");
+            assert_eq!(
+                bincode::serialize(&current).expect("serialize current"),
+                former_bytes
+            );
+            assert_eq!(decode(&former_bytes).expect("decode former bytes"), current);
+        }
+
+        let mut second = sample_progress();
+        second.monitor_id = 8;
+        let several = Current {
+            monitors: vec![sample_progress(), second],
+            trailing: 77,
+        };
+        let bytes = bincode::serialize(&several).expect("serialize several");
+        assert_eq!(decode(&bytes).expect("decode several"), several);
+        assert!(bincode::deserialize::<Former>(&bytes).is_err());
+
+        // The clear reply's `Ok` side follows the same rule inside `Result`.
+        let cleared = ServerEvent::ProgressMonitorCleared {
+            request_id: 5,
+            pane_id: NodeId(2),
+            result: Ok(vec![7]),
+        };
+        let cleared_bytes = bincode::serialize(&cleared).expect("serialize cleared");
+        let former_tail = bincode::serialize(&(
+            5_u64,
+            NodeId(2),
+            Ok::<Option<u64>, ProgressMonitorRejection>(Some(7)),
+        ))
+        .expect("serialize former clear payload");
+        assert_eq!(&cleared_bytes[4..], former_tail.as_slice());
     }
 
     /// The voice-text messages form one contiguous block of variants at the
