@@ -5,8 +5,15 @@ use ilium_execution::QuotaGroup;
 use ilium_platform::owned_worker::{reserve_owned_worker, WorkerReservation};
 use std::{io, sync::Arc};
 
-const WORKER_RESIDENT_BYTES: usize = 2 * 1024 * 1024;
-const PTY_WORKER_COUNT: usize = if cfg!(windows) { 6 } else { 5 };
+/// Explicit stack size of every PTY worker thread. This is a virtual
+/// reservation that the kernel backs with memory only as a thread actually
+/// touches it; 4 MiB doubles Rust's 2 MiB default so deep terminal parsing
+/// never needs to be the reason a pane fails.
+pub const PTY_WORKER_STACK_BYTES: usize = 4 * 1024 * 1024;
+/// Persistent OS workers one PTY session owns until its physical join.
+pub const PTY_WORKERS_PER_SESSION: usize = if cfg!(windows) { 6 } else { 5 };
+const WORKER_RESIDENT_BYTES: usize = PTY_WORKER_STACK_BYTES;
+const PTY_WORKER_COUNT: usize = PTY_WORKERS_PER_SESSION;
 
 type Custody = Arc<dyn Send + Sync>;
 pub(crate) type PtyWorkerReservation = WorkerReservation<Custody>;

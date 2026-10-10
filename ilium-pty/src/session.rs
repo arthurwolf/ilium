@@ -1419,7 +1419,7 @@ mod tests {
             input_bytes: 0,
             result_bytes: 0,
             worker_threads: worker_count,
-            worker_bytes: worker_count * 2 * 1024 * 1024,
+            worker_bytes: worker_count * crate::PTY_WORKER_STACK_BYTES,
         });
         let mut session = PtySession::spawn_with_quota(
             PtyCommand::new("/bin/sh", std::env::temp_dir(), 24, 80)
@@ -1449,7 +1449,7 @@ mod tests {
             input_bytes: 0,
             result_bytes: 0,
             worker_threads: worker_count - 1,
-            worker_bytes: worker_count * 2 * 1024 * 1024,
+            worker_bytes: worker_count * crate::PTY_WORKER_STACK_BYTES,
         });
         let marker = std::env::temp_dir().join(format!(
             "ilium-pty-admission-{}-{}.marker",

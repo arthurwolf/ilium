@@ -4,7 +4,7 @@
 
 use super::{PtyWriter, WriteFailure, WriteFailureKind, WriteSuccess};
 use crate::owned_worker::{
-    OwnedWorker, StopToken, WorkerKind, WorkerReservation, WorkerTicket, reserve_owned_worker,
+    reserve_owned_worker, OwnedWorker, StopToken, WorkerKind, WorkerReservation, WorkerTicket,
 };
 use std::io;
 use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError};

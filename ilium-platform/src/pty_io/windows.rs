@@ -107,7 +107,7 @@ impl PumpWriter {
         let (requests, incoming) = mpsc::sync_channel::<WriteJob>(1);
         let retained = Arc::new(std::sync::Mutex::new(None));
         let park_writer = Arc::clone(&retained);
-        let body = move |pump_stop| {
+        let body = move |pump_stop: StopToken| {
             while !pump_stop.is_stopped() {
                 let job = match incoming.recv_timeout(CHECK_INTERVAL) {
                     Ok(job) => job,

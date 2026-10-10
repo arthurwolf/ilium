@@ -417,7 +417,7 @@ impl PinnedDirectory {
         {
             windows_list(self, maximum)
         }
-        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
         {
             Err(unsupported())
         }
@@ -546,7 +546,7 @@ impl PinnedDirectory {
             }
             let stat = unsafe { stat.assume_init() };
             if stat.st_mode & libc::S_IFMT != libc::S_IFDIR
-                || stat.st_dev != expected.device
+                || u64::try_from(stat.st_dev).ok() != Some(expected.device)
                 || stat.st_ino != expected.inode
             {
                 return Err(io::Error::other("clip directory changed before removal"));
@@ -1214,6 +1214,28 @@ mod tests {
                 inode: expected.ino(),
             }
         );
+    }
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn remove_empty_child_requires_matching_device_and_inode() {
+        let fixture = tempfile::tempdir().unwrap();
+        let root = PinnedDirectory::from_host(Arc::new(
+            NoFollowDirectory::open_root(fixture.path()).unwrap(),
+        ))
+        .unwrap();
+        std::fs::create_dir(fixture.path().join("child")).unwrap();
+        let child = root.child("child", false).unwrap();
+        let identity = child.identity();
+
+        let mismatched_device = FileIdentity {
+            device: identity.device.wrapping_add(1),
+            inode: identity.inode,
+        };
+        assert!(root.remove_empty_child("child", mismatched_device).is_err());
+        assert!(fixture.path().join("child").is_dir());
+
+        root.remove_empty_child("child", identity).unwrap();
+        assert!(!fixture.path().join("child").exists());
     }
     #[test]
     fn namespace_mutation_lease_serializes_independent_root_views() {

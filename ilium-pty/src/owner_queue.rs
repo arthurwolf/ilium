@@ -7,9 +7,9 @@ use crate::delivery::{
 };
 use crossterm::event::MouseEvent;
 use ilium_platform::owned_worker::{
-    OwnedWorker, StopToken, WorkerKind, WorkerReservation, reserve_owned_worker,
+    reserve_owned_worker, OwnedWorker, StopToken, WorkerKind, WorkerReservation,
 };
-use ilium_platform::pty_io::{OUTPUT_CHUNK_BYTES, ReadMessage, WriteFailureKind};
+use ilium_platform::pty_io::{ReadMessage, WriteFailureKind, OUTPUT_CHUNK_BYTES};
 use std::cell::Cell;
 use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex};

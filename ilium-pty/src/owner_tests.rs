@@ -1,6 +1,7 @@
 use super::*;
+use ilium_platform::owned_worker::spawn_owned;
 use ilium_platform::pty_io::{IoFailure, PtyWriter, WriteFailure, WriteFailureKind, WriteSuccess};
-use std::sync::{Mutex, mpsc};
+use std::sync::{mpsc, Mutex};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Trace {
@@ -248,11 +249,10 @@ impl Harness {
         }
     }
     fn output(&self, bytes: &[u8]) {
-        assert!(
-            self.input
-                .queue
-                .output(ReadMessage::Data(Arc::from(bytes)), &self.input.queue.stop)
-        );
+        assert!(self
+            .input
+            .queue
+            .output(ReadMessage::Data(Arc::from(bytes)), &self.input.queue.stop));
     }
     fn fence(&self) {
         self.input.write(b"fence").unwrap().wait_blocking().unwrap();
@@ -1016,12 +1016,10 @@ fn terminal_failure_settles_active_input(message: ReadMessage) {
         .started
         .recv_timeout(Duration::from_secs(2))
         .unwrap();
-    assert!(
-        harness
-            .input
-            .queue
-            .output(message, &harness.input.queue.stop)
-    );
+    assert!(harness
+        .input
+        .queue
+        .output(message, &harness.input.queue.stop));
     eventually(|| matches!(harness.input.status(), OwnerStatus::Stopped { .. }));
     let deadline = Instant::now() + Duration::from_millis(300);
     while observer.result().is_none() && Instant::now() < deadline {
@@ -1190,13 +1188,11 @@ fn resize_epoch_fences_same_size_resizes_without_rejecting_output_or_rollback() 
     ));
     assert_eq!(current(), ((64, 80), 3));
     let writer = harness.parser.write().unwrap();
-    assert!(
-        harness
-            .screen_reader
-            .clone()
-            .try_with_screen_and_resize_epoch(|_, _| ())
-            .is_none()
-    );
+    assert!(harness
+        .screen_reader
+        .clone()
+        .try_with_screen_and_resize_epoch(|_, _| ())
+        .is_none());
     drop(writer);
     harness.output(b"more output");
     harness.fence();

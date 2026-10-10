@@ -32,6 +32,7 @@ mod query;
 mod screen_reader;
 mod session;
 
+pub use admission::{PTY_WORKERS_PER_SESSION, PTY_WORKER_STACK_BYTES};
 pub use delivery::{
     Delivery, DeliveryError, DeliveryFailure, DeliveryObserver, DeliveryReceipt, OperationKind,
     ShutdownReason,

@@ -996,6 +996,16 @@ impl Reservation {
             .1
     }
 
+    /// The lane this reservation admits work to.
+    pub fn lane(&self) -> Lane {
+        self.lane
+    }
+
+    /// The cost this reservation charged at admission.
+    pub fn cost(&self) -> JobCost {
+        self.cost
+    }
+
     /// Type-size preflight before a caller performs stateful preparation. Heap
     /// capacities and scratch still require the caller's own JobCost audit.
     pub fn validate_job_type<J: Job>(&self) -> Result<(), RejectReason> {
