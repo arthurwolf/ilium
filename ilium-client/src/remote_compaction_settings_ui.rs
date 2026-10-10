@@ -730,9 +730,7 @@ pub fn hit_with_button(
         RemoteCompactionRowKind::Toggle | RemoteCompactionRowKind::Editor => HitAction::Adjust(0),
         RemoteCompactionRowKind::ReadOnly => HitAction::Select,
         RemoteCompactionRowKind::Stepper | RemoteCompactionRowKind::Select => {
-            let Some(control) = value_control(content_area, scroll, span, app) else {
-                return None;
-            };
+            let control = value_control(content_area, scroll, span, app)?;
             match control.hit(position, button) {
                 Some(crate::value_control::ControlAction::PreviousChoice)
                 | Some(crate::value_control::ControlAction::Decrement) => HitAction::Adjust(-1),

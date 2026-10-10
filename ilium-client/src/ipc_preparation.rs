@@ -217,6 +217,7 @@ pub(crate) fn request_retained_bytes(request: &ilium_ipc::ClientRequest) -> usiz
             count.optional_string(prompt_epoch);
         }
         R::SubmitTerminalText { text, .. }
+        | R::PasteTerminalText { text, .. }
         | R::SchedulePaneInput { text, .. }
         | R::EnqueuePrompt { text, .. } => count.string(text),
         R::RenameNode {

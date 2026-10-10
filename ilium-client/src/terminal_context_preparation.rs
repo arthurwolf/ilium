@@ -438,7 +438,7 @@ impl TerminalContextPreparation {
             identity: source.identity.clone(),
             ordinal: source.ordinal,
             source: source.preparation_snapshot()?,
-            charge: source.capture_charge(cost.result_bytes as usize)?,
+            charge: source.capture_charge(cost.result_bytes)?,
         };
         let receipt = reservation.submit(job).map_err(|rejected| {
             format!("Smart Copy preparation submission: {:?}", rejected.reason)

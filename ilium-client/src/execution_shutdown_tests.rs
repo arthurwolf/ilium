@@ -383,13 +383,8 @@ async fn earlier_cleanup_failure_cannot_discard_actual_execution_custody() {
 
 #[test]
 fn observer_spawn_panic_returns_original_bank_custody() {
-    struct Wake;
-    impl std::task::Wake for Wake {
-        fn wake(self: Arc<Self>) {}
-    }
     let (execution, quota) = isolated_bank();
-    let waker = std::task::Waker::from(Arc::new(Wake));
-    let mut context = std::task::Context::from_waker(&waker);
+    let mut context = std::task::Context::from_waker(std::task::Waker::noop());
     let mut shutdown = Box::pin(execution_shutdown::shutdown_with(
         execution,
         Instant::now() + Duration::from_secs(5),

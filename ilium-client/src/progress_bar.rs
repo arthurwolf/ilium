@@ -63,32 +63,7 @@ pub fn render(
         .constraints([Constraint::Length(1), Constraint::Min(0)])
         .areas(area);
 
-    // Domain validation rejects non-finite/out-of-range reports, but the
-    // renderer remains defensive because one bad restored value must never
-    // crash the entire TUI.
-    let percent = progress.report.percent.clamp(0.0, 100.0);
-    let ratio = (f64::from(percent) / 100.0).clamp(0.0, 1.0);
-    let (icon, status_label, status_tone) = status_presentation(progress);
-    let status_color = tone_color(status_tone, scheme);
-    // Mirrors the sidebar's bold/dim result glyph: an outcome nobody has
-    // looked at yet says so until the pane is focused or typed into.
-    let unread = if progress.has_unread_outcome() {
-        "  · unread"
-    } else {
-        ""
-    };
-    let label = format!("{icon} {status_label}  {percent:.0}%{unread}");
-    let gauge = LineGauge::default()
-        .ratio(ratio)
-        .label(Line::from(Span::styled(
-            label,
-            Style::new().fg(status_color).add_modifier(Modifier::BOLD),
-        )))
-        .filled_symbol(symbols::shade::FULL)
-        .unfilled_symbol(symbols::shade::LIGHT)
-        .filled_style(Style::new().fg(status_color).add_modifier(Modifier::BOLD))
-        .unfilled_style(Style::new().fg(theme::muted_accent_bg(scheme)));
-    frame.render_widget(gauge, gauge_area);
+    render_gauge(frame, gauge_area, progress, "", scheme);
 
     let lines: Vec<Line> = detail_rows(
         progress,
@@ -111,6 +86,165 @@ pub fn render(
         Paragraph::new(lines).style(theme::last_prompt_style(scheme)),
         detail_area,
     );
+}
+
+/// Renders every visible monitor of one pane in the fixed footer slot. One
+/// monitor keeps the full single-task footer. Several monitors share the
+/// slot: one gauge row each in registration order (so a row always belongs
+/// to the same monitor), a final `+N more` row when they do not all fit, and
+/// any spare rows carry the monitors' one-line messages.
+pub fn render_monitors(
+    frame: &mut Frame,
+    area: Rect,
+    monitors: &[&PaneProgress],
+    max_detail_lines: u16,
+    scheme: ColorScheme,
+) {
+    match monitors {
+        [] => {}
+        [only] => render(frame, area, Some(only), max_detail_lines, scheme),
+        _ => render_several(frame, area, monitors, scheme),
+    }
+}
+
+/// How several monitors share `height` footer rows: how many get a gauge row
+/// and whether the last row says how many more there are.
+fn several_monitor_rows(count: usize, height: u16) -> (usize, bool) {
+    let height = usize::from(height);
+    if count <= height {
+        (count, false)
+    } else if height <= 1 {
+        (height, true)
+    } else {
+        (height - 1, true)
+    }
+}
+
+/// The index (into the same `monitors` slice `render_monitors` drew) of the
+/// monitor whose gauge or message sits on footer row `row_offset`.
+pub fn monitor_at_row(count: usize, height: u16, row_offset: u16) -> Option<usize> {
+    if count <= 1 {
+        return (count == 1).then_some(0);
+    }
+    let (gauges, has_more_row) = several_monitor_rows(count, height);
+    let row = usize::from(row_offset);
+    if row < gauges {
+        return Some(row);
+    }
+    if has_more_row {
+        return None;
+    }
+    // Spare rows below the gauges list messages in the same order.
+    let message_index = row - gauges;
+    (message_index < count).then_some(message_index)
+}
+
+fn render_several(frame: &mut Frame, area: Rect, monitors: &[&PaneProgress], scheme: ColorScheme) {
+    if area.height == 0 {
+        return;
+    }
+    frame.render_widget(
+        Paragraph::new("").style(theme::last_prompt_style(scheme)),
+        area,
+    );
+    let (gauges, has_more_row) = several_monitor_rows(monitors.len(), area.height);
+    let hidden = monitors.len() - gauges;
+    for (row, progress) in monitors.iter().take(gauges).enumerate() {
+        let row_area = Rect::new(area.x, area.y + row as u16, area.width, 1);
+        let suffix = if has_more_row && area.height == 1 {
+            format!(" · +{hidden} more")
+        } else {
+            String::new()
+        };
+        render_gauge(
+            frame,
+            row_area,
+            progress,
+            &format!(" · {}{suffix}", progress.report.job_id),
+            scheme,
+        );
+    }
+    if has_more_row && area.height > 1 {
+        let row_area = Rect::new(area.x, area.y + gauges as u16, area.width, 1);
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                format!("+{hidden} more monitors · `ilium progress status` lists them"),
+                Style::new().add_modifier(Modifier::DIM),
+            )))
+            .style(theme::last_prompt_style(scheme)),
+            row_area,
+        );
+        return;
+    }
+    let spare_rows = usize::from(area.height) - gauges;
+    let lines: Vec<Line> = monitors
+        .iter()
+        .take(spare_rows)
+        .map(|progress| {
+            let (_, _, tone) = status_presentation(progress);
+            let mut style = Style::new();
+            if let Some(color) = detail_tone_color(tone, scheme) {
+                style = style.fg(color);
+            }
+            let text = progress
+                .report
+                .error
+                .as_deref()
+                .filter(|error| !error.is_empty())
+                .unwrap_or(&progress.report.message);
+            Line::from(Span::styled(
+                format!("{}: {}", progress.report.job_id, text),
+                style,
+            ))
+        })
+        .collect();
+    let message_area = Rect::new(
+        area.x,
+        area.y + gauges as u16,
+        area.width,
+        area.height - gauges as u16,
+    );
+    frame.render_widget(
+        Paragraph::new(lines).style(theme::last_prompt_style(scheme)),
+        message_area,
+    );
+}
+
+/// One status gauge row: icon, status, percent, unread marker, then
+/// `label_suffix`.
+fn render_gauge(
+    frame: &mut Frame,
+    area: Rect,
+    progress: &PaneProgress,
+    label_suffix: &str,
+    scheme: ColorScheme,
+) {
+    // Domain validation rejects non-finite/out-of-range reports, but the
+    // renderer remains defensive because one bad restored value must never
+    // crash the entire TUI.
+    let percent = progress.report.percent.clamp(0.0, 100.0);
+    let ratio = (f64::from(percent) / 100.0).clamp(0.0, 1.0);
+    let (icon, status_label, status_tone) = status_presentation(progress);
+    let status_color = tone_color(status_tone, scheme);
+    // Mirrors the sidebar's bold/dim result glyph: an outcome nobody has
+    // looked at yet says so until the pane is focused or typed into.
+    let unread = if progress.has_unread_outcome() {
+        "  · unread"
+    } else {
+        ""
+    };
+    let label = format!("{icon} {status_label}  {percent:.0}%{unread}{label_suffix}");
+    let gauge = LineGauge::default()
+        .ratio(ratio)
+        .label(Line::from(Span::styled(
+            label,
+            Style::new().fg(status_color).add_modifier(Modifier::BOLD),
+        )))
+        .filled_symbol(symbols::shade::FULL)
+        .unfilled_symbol(symbols::shade::LIGHT)
+        .filled_style(Style::new().fg(status_color).add_modifier(Modifier::BOLD))
+        .unfilled_style(Style::new().fg(theme::muted_accent_bg(scheme)));
+    frame.render_widget(gauge, area);
 }
 
 /// Hover content for a report's long description: the compact message as the
@@ -311,6 +445,70 @@ mod tests {
                     .collect::<String>()
             })
             .collect()
+    }
+
+    fn rendered_monitor_rows(monitors: &[&PaneProgress], width: u16, height: u16) -> Vec<String> {
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        terminal
+            .draw(|frame| {
+                render_monitors(
+                    frame,
+                    frame.area(),
+                    monitors,
+                    height.saturating_sub(1),
+                    ColorScheme::Dark,
+                );
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        (0..height)
+            .map(|y| {
+                (0..width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect()
+    }
+
+    fn monitor(monitor_id: u64, job_id: &str, percent: f32) -> PaneProgress {
+        let mut progress = progress(ProgressTaskStatus::Running, percent, "working", None).unwrap();
+        progress.monitor_id = monitor_id;
+        progress.report.job_id = job_id.to_string();
+        progress
+    }
+
+    #[test]
+    fn several_monitors_share_the_footer_one_gauge_row_each() {
+        let build = monitor(1, "build", 20.0);
+        let tests = monitor(2, "tests", 70.0);
+        let rows = rendered_monitor_rows(&[&build, &tests], 60, 4);
+        assert!(
+            rows[0].contains("20%") && rows[0].contains("build"),
+            "{rows:?}"
+        );
+        assert!(
+            rows[1].contains("70%") && rows[1].contains("tests"),
+            "{rows:?}"
+        );
+        assert!(rows[2].contains("build: working"), "{rows:?}");
+        assert_eq!(monitor_at_row(2, 4, 0), Some(0));
+        assert_eq!(monitor_at_row(2, 4, 1), Some(1));
+        assert_eq!(monitor_at_row(2, 4, 3), Some(1));
+    }
+
+    #[test]
+    fn monitors_that_do_not_fit_are_counted_on_the_last_row() {
+        let monitors: Vec<PaneProgress> = (1..=5)
+            .map(|index| monitor(index, &format!("job-{index}"), 10.0))
+            .collect();
+        let references: Vec<&PaneProgress> = monitors.iter().collect();
+        let rows = rendered_monitor_rows(&references, 60, 3);
+        assert!(rows[0].contains("job-1"), "{rows:?}");
+        assert!(rows[1].contains("job-2"), "{rows:?}");
+        assert!(rows[2].contains("+3 more monitors"), "{rows:?}");
+        assert_eq!(monitor_at_row(5, 3, 2), None);
+        let single_row = rendered_monitor_rows(&references, 60, 1);
+        assert!(single_row[0].contains("+4 more"), "{single_row:?}");
     }
 
     #[test]

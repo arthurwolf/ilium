@@ -119,6 +119,10 @@ impl App {
         let mut changed = false;
         while let Some((intent, completion)) = files.poll() {
             changed = true;
+            let check_room = matches!(&intent, IntegrationIntent::CheckRoom(_));
+            if check_room {
+                self.chatroom_stamp_pending = false;
+            }
             let mut result = None;
             let hold = match completion {
                 WriteCompletion::Outcome { outcome, .. } => {
@@ -149,6 +153,31 @@ impl App {
             let Some(result) = result else {
                 continue;
             };
+            if let IntegrationIntent::CheckRoom(requested) = &intent {
+                match result {
+                    Ok(mut result) => {
+                        if let Some(room) = result.rooms.pop() {
+                            let current = self.tree.get(requested.id).and_then(Node::project_path);
+                            if current == Some(requested.path.as_path()) {
+                                let observed = Some((requested.id, room.stamp));
+                                if self.chatroom_file_stamp != observed {
+                                    self.chatroom_file_stamp = observed;
+                                    let queued = self
+                                        .integration_snapshot(false)
+                                        .and_then(|snapshot| files.want(snapshot));
+                                    if let Err(error) = queued {
+                                        self.status_message = Some(error);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        self.status_message = Some(format!("Chatroom check failed: {error}"));
+                    }
+                }
+                continue;
+            }
             match result {
                 Err(error) => {
                     if let IntegrationIntent::Append { room, draft } = &intent {
@@ -207,6 +236,10 @@ impl App {
                         let current = self.tree.get(room.room.id).and_then(Node::project_path);
                         if current != Some(room.room.path.as_path()) {
                             continue;
+                        }
+                        if matches!(self.right_panel_target, RightPanelTarget::Chatroom { project_id } if project_id == room.room.id)
+                        {
+                            self.chatroom_file_stamp = Some((room.room.id, room.stamp));
                         }
                         match room.result {
                             Ok((exists, messages)) => {
@@ -281,6 +314,7 @@ impl App {
                                     Some("Managed agent instructions updated".into())
                             }
                             IntegrationIntent::Maintenance(_) => {}
+                            IntegrationIntent::CheckRoom(_) => {}
                         }
                     } else {
                         let prefix = if matches!(intent, IntegrationIntent::Append { .. }) {

@@ -2,6 +2,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use ilium_ambient::resources::{AmbientResources, Stored};
 use ilium_wikipedia::{Document, LoaderEvent, PageLoader};
 
 use super::{scroll::PageScroll, WikipediaSettings};
@@ -9,8 +10,8 @@ use super::{scroll::PageScroll, WikipediaSettings};
 #[derive(Default)]
 pub(crate) struct WikipediaRuntime {
     loader: Option<PageLoader>,
-    document: Option<Arc<Document>>,
-    prefetched: Option<Arc<Document>>,
+    document: Option<Arc<Stored<Arc<Document>>>>,
+    prefetched: Option<Arc<Stored<Arc<Document>>>>,
     scroll: Option<PageScroll>,
     last_elapsed: Option<Duration>,
     is_clock_reset: bool,
@@ -38,7 +39,13 @@ impl WikipediaRuntime {
         *self = Self::default();
     }
 
-    pub fn document(&self) -> Option<&Arc<Document>> {
+    pub fn document(&self) -> Option<&Document> {
+        self.document
+            .as_ref()
+            .map(|article| article.view().as_ref())
+    }
+
+    pub fn loaded_document(&self) -> Option<&Arc<Stored<Arc<Document>>>> {
         self.document.as_ref()
     }
 
@@ -76,14 +83,28 @@ impl WikipediaRuntime {
 
     /// Called only while a real background or deliberate preview is visible.
     /// Tests inject semantic documents and never start HTTP incidentally.
-    pub fn poll(&mut self, settings: &WikipediaSettings, elapsed: Duration) {
+    pub fn poll(
+        &mut self,
+        settings: &WikipediaSettings,
+        elapsed: Duration,
+        resources: Option<&AmbientResources>,
+    ) {
         #[cfg(not(test))]
         if self.loader.is_none() && elapsed >= self.retry_after {
-            match PageLoader::start(ilium_ambient::source::default_cache_dir().join("wikipedia")) {
+            let Some(resources) = resources else {
+                self.loading_status = "Wikipedia worker admission is not configured".into();
+                self.retry_after = elapsed.saturating_add(Duration::from_secs(30));
+                self.refresh_status();
+                return;
+            };
+            match PageLoader::start(
+                ilium_ambient::source::default_cache_dir().join("wikipedia"),
+                resources,
+            ) {
                 Ok(loader) => self.loader = Some(loader),
                 Err(error) => {
                     self.loading_status = error;
-                    self.retry_after = elapsed.saturating_add(Duration::from_secs(30));
+                    self.retry_after = elapsed.saturating_add(Duration::from_secs(1));
                 }
             }
         }
@@ -92,8 +113,9 @@ impl WikipediaRuntime {
                 LoaderEvent::Loaded(document) => {
                     self.pending = false;
                     self.loading_status.clear();
+                    let document = Arc::new(document);
                     if self.document.is_none() {
-                        self.activate(document, settings, elapsed);
+                        self.activate_loaded(document, settings, elapsed);
                     } else {
                         self.prefetched = Some(document);
                     }
@@ -103,6 +125,11 @@ impl WikipediaRuntime {
                     self.pending = false;
                     self.loading_status = error;
                     self.retry_after = elapsed.saturating_add(Duration::from_secs(30));
+                }
+                LoaderEvent::AdmissionRefused(reason) => {
+                    self.pending = false;
+                    self.loading_status = reason;
+                    self.retry_after = elapsed.saturating_add(Duration::from_secs(1));
                 }
             }
         }
@@ -171,14 +198,14 @@ impl WikipediaRuntime {
             // Hold the actual page at its bottom while the next load finishes.
             return false;
         };
-        self.activate(document, settings, elapsed);
+        self.activate_loaded(document, settings, elapsed);
         self.refresh_status();
         true
     }
 
-    fn activate(
+    fn activate_loaded(
         &mut self,
-        document: Arc<Document>,
+        document: Arc<Stored<Arc<Document>>>,
         settings: &WikipediaSettings,
         elapsed: Duration,
     ) {
@@ -189,8 +216,23 @@ impl WikipediaRuntime {
         self.generation = self.generation.wrapping_add(1);
     }
 
+    #[cfg(test)]
+    fn activate(
+        &mut self,
+        document: Arc<Document>,
+        settings: &WikipediaSettings,
+        elapsed: Duration,
+    ) {
+        let storage =
+            ilium_ambient::resources::AmbientResources::new(crate::execution::test_client())
+                .reserve_storage(1)
+                .expect("test storage admission");
+        self.activate_loaded(Arc::new(Stored::new(document, storage)), settings, elapsed);
+    }
+
     fn refresh_status(&mut self) {
         self.status = if let Some(document) = &self.document {
+            let document = document.view();
             let revision = document
                 .revision
                 .as_deref()
@@ -217,6 +259,10 @@ impl WikipediaRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ilium_execution::{
+        ClientLimits, Execution, ExecutionConfig, LaneConfig, QuotaGroup, QuotaLimits, ShutdownMode,
+    };
+    use std::time::Instant;
 
     fn article(title: &str) -> Arc<Document> {
         Arc::new(
@@ -230,6 +276,88 @@ mod tests {
         )
     }
 
+    fn stored_article(title: &str) -> Arc<Stored<Arc<Document>>> {
+        let storage =
+            ilium_ambient::resources::AmbientResources::new(crate::execution::test_client())
+                .reserve_storage(1)
+                .expect("test storage admission");
+        Arc::new(Stored::new(article(title), storage))
+    }
+
+    #[test]
+    fn article_storage_follows_current_and_prefetched_ownership() {
+        let quota = QuotaGroup::new(QuotaLimits {
+            clients: 1,
+            jobs: 1,
+            service_jobs: 0,
+            input_bytes: 4096,
+            result_bytes: 64,
+            worker_threads: 1,
+            worker_bytes: 2 * 1024 * 1024,
+        });
+        let execution = Execution::start(
+            quota.clone(),
+            ExecutionConfig {
+                cpu: LaneConfig {
+                    threads: 1,
+                    queue_slots: 1,
+                    priority: None,
+                    resident_bytes_per_thread: 1024 * 1024,
+                },
+                io: LaneConfig {
+                    threads: 0,
+                    queue_slots: 0,
+                    priority: None,
+                    resident_bytes_per_thread: 0,
+                },
+                service: LaneConfig {
+                    threads: 0,
+                    queue_slots: 0,
+                    priority: None,
+                    resident_bytes_per_thread: 0,
+                },
+            },
+        )
+        .unwrap();
+        let client = execution
+            .client(ClientLimits {
+                jobs: 1,
+                service_jobs: 0,
+                input_bytes: 4096,
+                result_bytes: 64,
+            })
+            .unwrap();
+        let resources = AmbientResources::new(client);
+        let first = Arc::new(Stored::new(
+            article("First"),
+            resources.reserve_storage(16).unwrap(),
+        ));
+        let second = Arc::new(Stored::new(
+            article("Second"),
+            resources.reserve_storage(16).unwrap(),
+        ));
+        let settings = WikipediaSettings {
+            dwell_seconds: 0,
+            scroll_tenths: 10,
+            ..Default::default()
+        };
+        let mut runtime = WikipediaRuntime::default();
+        runtime.activate_loaded(first, &settings, Duration::ZERO);
+        runtime.prefetched = Some(second);
+        assert_eq!(quota.snapshot().result_bytes, 32);
+        assert!(runtime.advance(&settings, Duration::from_secs(1), 0.0, 100));
+        assert_eq!(runtime.document().unwrap().title, "Second");
+        assert_eq!(quota.snapshot().result_bytes, 16);
+        runtime.release();
+        assert_eq!(quota.snapshot().result_bytes, 0);
+        let mut execution = execution;
+        execution.request_shutdown(ShutdownMode::Cancel);
+        let joined = execution
+            .join_until_background(Instant::now() + Duration::from_secs(5))
+            .unwrap();
+        assert_eq!(joined.remaining_workers, 0);
+    }
+
     #[test]
     fn prefetch_waits_for_full_scroll_and_bottom_dwell() {
         let settings = WikipediaSettings {
@@ -239,7 +367,7 @@ mod tests {
         };
         let mut runtime = WikipediaRuntime::default();
         runtime.activate(article("First"), &settings, Duration::ZERO);
-        runtime.prefetched = Some(article("Second"));
+        runtime.prefetched = Some(stored_article("Second"));
         assert!(!runtime.advance(&settings, Duration::from_secs(12), 10.0, 100));
         assert_eq!(runtime.document().unwrap().title, "First");
         assert!(runtime.advance(&settings, Duration::from_secs(14), 10.0, 100));
@@ -257,13 +385,13 @@ mod tests {
         };
         let mut runtime = WikipediaRuntime::default();
         runtime.activate(article("First"), &settings, Duration::ZERO);
-        runtime.prefetched = Some(article("Second"));
+        runtime.prefetched = Some(stored_article("Second"));
         assert!(!runtime.advance(&settings, Duration::from_secs(100), 0.0, 100));
         settings.scroll_tenths = 10;
         runtime.prefetched = None;
         assert!(!runtime.advance(&settings, Duration::from_secs(200), 0.0, 100));
         assert_eq!(runtime.document().unwrap().title, "First");
-        runtime.prefetched = Some(article("Second"));
+        runtime.prefetched = Some(stored_article("Second"));
         assert!(runtime.advance(&settings, Duration::from_secs(201), 0.0, 100));
         runtime.release();
         assert!(runtime.document().is_none());
@@ -373,7 +501,7 @@ mod tests {
         let mut runtime = WikipediaRuntime::default();
         runtime.activate(article("First"), &settings, Duration::ZERO);
         assert!(!runtime.advance(&settings, Duration::from_secs(4), 0.0, 100));
-        runtime.prefetched = Some(article("Second"));
+        runtime.prefetched = Some(stored_article("Second"));
         assert!(!runtime.advance(&settings, Duration::ZERO, 0.0, 100));
         assert_eq!(runtime.document().unwrap().title, "First");
     }
@@ -388,7 +516,7 @@ mod tests {
         let mut runtime = WikipediaRuntime::default();
         runtime.activate(Arc::new(document), &settings, Duration::ZERO);
         runtime.loading_status = "Loading next page".into();
-        runtime.poll(&settings, Duration::ZERO);
+        runtime.poll(&settings, Duration::ZERO, None);
         assert!(runtime.status().unwrap().contains("2026-10-01"));
         assert!(runtime.status().unwrap().contains("Loading next page"));
         runtime.advance(&settings, Duration::ZERO, 50.0, 100);

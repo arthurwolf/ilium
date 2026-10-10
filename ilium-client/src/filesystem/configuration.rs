@@ -45,6 +45,10 @@ pub enum ConfigurationChange {
     },
     Animation(Box<crate::background_animation::AnimationSettings>),
     Separators(bool),
+    ProjectName {
+        proposal: crate::project_naming::ProjectNameBootstrap,
+        decision: crate::naming_workers::AutomaticAiDecisionFence,
+    },
 }
 pub enum ConfigurationSaved {
     Plain,
@@ -53,6 +57,7 @@ pub enum ConfigurationSaved {
     TextTriggers(TextTriggerSettings),
     Animation(Box<crate::background_animation::AnimationSettings>),
     Separators(bool),
+    ProjectName(crate::project_naming::ProjectNameBootstrap),
 }
 pub struct ConfigurationFailure {
     pub message: String,
@@ -153,6 +158,27 @@ impl Job for ConfigurationWrite {
                         observed_session: None,
                         observed_agent_setup: None,
                     });
+            }
+            ProjectName { proposal, decision } => {
+                if !decision.is_current() {
+                    return Err(ConfigurationFailure {
+                        message: "Automatic project naming decision changed before persistence"
+                            .into(),
+                        observed_session: None,
+                        observed_agent_setup: None,
+                    });
+                }
+                return crate::project_naming::persist_inferred_project_name_with_fence(
+                    directory,
+                    proposal,
+                    Some(&decision),
+                )
+                .map(ConfigurationSaved::ProjectName)
+                .map_err(|error| ConfigurationFailure {
+                    message: error.to_string(),
+                    observed_session: None,
+                    observed_agent_setup: None,
+                });
             }
         };
         result.map_err(|error| {
@@ -257,6 +283,13 @@ impl ConfigurationChange {
                     + std::mem::size_of::<crate::background_animation::AnimationSettings>()
             }
             Terminal(_) | Editor(_) | Session { .. } | Keyboard(_) | Kanban(_) | Separators(_) => 0,
+            ProjectName {
+                proposal: value, ..
+            } => {
+                std::mem::size_of::<crate::project_naming::ProjectNameBootstrap>()
+                    + value.project_name.capacity()
+                    + value.icon.as_ref().map_or(0, String::capacity)
+            }
             Git(value) => serialized_bound(value)?,
             ResetPlanning(value) => serialized_bound(value)?,
             Cost(value) => serialized_bound(value)?,
@@ -334,6 +367,23 @@ impl ConfigurationChange {
             Debug(value) => Debug(normalize(&value)?),
             Api(value) => Api(normalize(&value)?),
             Animation(value) => Animation(normalize(&value)?),
+            ProjectName {
+                proposal: value,
+                decision,
+            } => {
+                if value.project_name.capacity() > 8 * 1024
+                    || value
+                        .icon
+                        .as_ref()
+                        .is_some_and(|icon| icon.capacity() > 8 * 1024)
+                {
+                    return Err("Project name configuration exceeds retained limit".into());
+                }
+                ProjectName {
+                    proposal: value,
+                    decision,
+                }
+            }
             AgentSetup { previous, desired } => AgentSetup {
                 previous: normalize(&previous)?,
                 desired: normalize(&desired)?,

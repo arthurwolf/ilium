@@ -52,7 +52,7 @@ pub fn reconcile_app_setting(
     let reconciler = APP_RECONCILER.get_or_init(|| Mutex::new(AppReconciler::default()));
     let now = Instant::now();
     let generation = {
-        let mut state = reconciler
+        let state = reconciler
             .lock()
             .map_err(|_| "Claude model bridge state is unavailable".to_owned())?;
         if state

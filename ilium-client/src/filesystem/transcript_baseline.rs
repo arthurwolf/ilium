@@ -147,6 +147,7 @@ impl BaselineFiles {
             ClientRequest::KeyInput { pane_id, .. }
             | ClientRequest::UserKeyInput { pane_id, .. }
             | ClientRequest::SubmitTerminalText { pane_id, .. }
+            | ClientRequest::PasteTerminalText { pane_id, .. }
             | ClientRequest::MouseInput { pane_id, .. } => *pane_id,
             _ => return Err(Box::new(request)),
         };
@@ -359,6 +360,7 @@ impl App {
             ClientRequest::KeyInput { pane_id, .. }
             | ClientRequest::UserKeyInput { pane_id, .. }
             | ClientRequest::SubmitTerminalText { pane_id, .. }
+            | ClientRequest::PasteTerminalText { pane_id, .. }
             | ClientRequest::MouseInput { pane_id, .. } => *pane_id,
             _ => return Err(Box::new(request)),
         };

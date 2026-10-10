@@ -59,6 +59,21 @@ impl AutomaticAiDecision {
     }
 }
 
+/// Keeps an asynchronous side effect tied to the automatic-AI decision that
+/// admitted it. The shared word is updated by the event loop when policy or
+/// onboarding changes.
+#[derive(Clone)]
+pub(crate) struct AutomaticAiDecisionFence {
+    expected: u64,
+    current: Arc<AtomicU64>,
+}
+
+impl AutomaticAiDecisionFence {
+    pub(crate) fn is_current(&self) -> bool {
+        self.expected & 1 != 0 && self.current.load(Ordering::SeqCst) == self.expected
+    }
+}
+
 /// A finished background naming result, forwarded into the main event loop.
 pub enum NamingWorkerEvent {
     Prepared {
@@ -627,6 +642,16 @@ impl NamingWorkers {
 
     pub fn is_current_automatic_ai_decision(&self, decision: AutomaticAiDecision) -> bool {
         decision.is_current(&self.automatic_ai_decision)
+    }
+
+    pub(crate) fn automatic_ai_decision_fence(
+        &self,
+        decision: AutomaticAiDecision,
+    ) -> AutomaticAiDecisionFence {
+        AutomaticAiDecisionFence {
+            expected: decision.0,
+            current: Arc::clone(&self.automatic_ai_decision),
+        }
     }
 
     /// Spawns the one-shot project-name bootstrap worker, unless one is

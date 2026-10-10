@@ -61,6 +61,10 @@ struct PreviewJob {
     request: SoundPreviewRequest,
     #[cfg(test)]
     worker_probe: std::sync::mpsc::Sender<std::thread::ThreadId>,
+    #[cfg(test)]
+    revision_probe: std::sync::mpsc::Sender<u64>,
+    #[cfg(test)]
+    wait_for_cancellation: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -78,6 +82,15 @@ impl Job for PreviewJob {
     fn run(self, context: JobContext) -> Result<Self::Output, Self::Error> {
         #[cfg(test)]
         let _ = self.worker_probe.send(std::thread::current().id());
+        #[cfg(test)]
+        let _ = self.revision_probe.send(self.request.revision);
+        #[cfg(test)]
+        if self.wait_for_cancellation {
+            while !context.stop_requested() {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            return Err(PreviewFailure::Cancelled);
+        }
         if context.stop_requested() {
             return Err(PreviewFailure::Cancelled);
         }
@@ -115,6 +128,12 @@ pub(crate) struct SoundStudioPreview {
     worker_probe: std::sync::mpsc::Sender<std::thread::ThreadId>,
     #[cfg(test)]
     worker_probe_rx: std::sync::mpsc::Receiver<std::thread::ThreadId>,
+    #[cfg(test)]
+    revision_probe: std::sync::mpsc::Sender<u64>,
+    #[cfg(test)]
+    revision_probe_rx: std::sync::mpsc::Receiver<u64>,
+    #[cfg(test)]
+    wait_for_cancellation: bool,
 }
 
 impl SoundStudioPreview {
@@ -123,6 +142,8 @@ impl SoundStudioPreview {
         let wake = Arc::clone(&notification);
         #[cfg(test)]
         let (worker_probe, worker_probe_rx) = std::sync::mpsc::channel();
+        #[cfg(test)]
+        let (revision_probe, revision_probe_rx) = std::sync::mpsc::channel();
         Self {
             client: client.with_completion_wake(move || wake.notify_one()),
             notification,
@@ -137,6 +158,12 @@ impl SoundStudioPreview {
             worker_probe,
             #[cfg(test)]
             worker_probe_rx,
+            #[cfg(test)]
+            revision_probe,
+            #[cfg(test)]
+            revision_probe_rx,
+            #[cfg(test)]
+            wait_for_cancellation: false,
         }
     }
 
@@ -313,6 +340,10 @@ impl SoundStudioPreview {
             request,
             #[cfg(test)]
             worker_probe: self.worker_probe.clone(),
+            #[cfg(test)]
+            revision_probe: self.revision_probe.clone(),
+            #[cfg(test)]
+            wait_for_cancellation: std::mem::take(&mut self.wait_for_cancellation),
         }) {
             Ok(receipt) => self.running = Some(Running { key, receipt }),
             Err(rejected) if retryable(rejected.reason) => {
@@ -337,6 +368,26 @@ impl SoundStudioPreview {
             self.ready = None;
         }
     }
+}
+
+fn same_key(left: &PreviewKey, right: &PreviewKey) -> bool {
+    left.revision == right.revision && Arc::ptr_eq(&left.identity, &right.identity)
+}
+
+fn same_result(result: &PreparedSoundPreview, key: &PreviewKey) -> bool {
+    result.revision == key.revision && Arc::ptr_eq(&result.studio_identity, &key.identity)
+}
+
+fn retryable(reason: RejectReason) -> bool {
+    matches!(
+        reason,
+        RejectReason::Busy
+            | RejectReason::QueueFull
+            | RejectReason::JobLimit
+            | RejectReason::InputBytes
+            | RejectReason::ResultBytes
+            | RejectReason::WorkerBytes
+    )
 }
 
 #[cfg(test)]
@@ -430,24 +481,64 @@ mod tests {
             .join_until_background(Instant::now() + Duration::from_secs(2))
             .expect("preview CPU worker joins");
     }
-}
 
-fn same_key(left: &PreviewKey, right: &PreviewKey) -> bool {
-    left.revision == right.revision && Arc::ptr_eq(&left.identity, &right.identity)
-}
+    #[test]
+    fn newer_design_cancels_running_preview_and_coalesces_to_latest_revision() {
+        let (mut execution, _quota, client) = execution();
+        let mut preview = SoundStudioPreview::new(client);
+        preview.wait_for_cancellation = true;
+        let mut studio =
+            super::super::studio::SoundStudio::new(ilium_sound::SoundSettings::default());
 
-fn same_result(result: &PreparedSoundPreview, key: &PreviewKey) -> bool {
-    result.revision == key.revision && Arc::ptr_eq(&result.studio_identity, &key.identity)
-}
+        assert!(preview.request(studio.preview_request(), Instant::now()));
+        assert_eq!(
+            preview
+                .revision_probe_rx
+                .recv_timeout(Duration::from_secs(1))
+                .expect("first preview starts"),
+            0
+        );
 
-fn retryable(reason: RejectReason) -> bool {
-    matches!(
-        reason,
-        RejectReason::Busy
-            | RejectReason::QueueFull
-            | RejectReason::JobLimit
-            | RejectReason::InputBytes
-            | RejectReason::ResultBytes
-            | RejectReason::WorkerBytes
-    )
+        studio.changed();
+        assert!(preview.request(studio.preview_request(), Instant::now()));
+        studio.changed();
+        assert!(preview.request(studio.preview_request(), Instant::now()));
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let mut started_revisions = Vec::new();
+        while Instant::now() < deadline && !started_revisions.contains(&2) {
+            preview.collect(Instant::now());
+            while let Ok(revision) = preview.revision_probe_rx.try_recv() {
+                started_revisions.push(revision);
+            }
+            if !started_revisions.contains(&2) {
+                std::thread::sleep(Duration::from_millis(2));
+            }
+        }
+        assert_eq!(
+            started_revisions,
+            vec![2],
+            "intermediate revision must coalesce"
+        );
+
+        let ready = (0..400)
+            .find_map(|_| {
+                preview.collect(Instant::now());
+                let result = preview.take_ready();
+                if result.is_none() {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                result
+            })
+            .expect("latest preview should complete");
+        assert!(studio.install_preview(ready));
+        assert_eq!(studio.preview_columns().len(), PREVIEW_COLUMNS);
+
+        preview.close();
+        drop(preview);
+        execution.request_shutdown(ShutdownMode::Drain);
+        execution
+            .join_until_background(Instant::now() + Duration::from_secs(2))
+            .expect("preview CPU worker joins");
+    }
 }

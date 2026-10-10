@@ -199,7 +199,7 @@ pub fn build_document(
 
     for (event_index, event) in TriggerEvent::ALL.into_iter().enumerate() {
         let start_row = lines.len() as u16;
-        let has_frame = usable_width >= EVENT_FRAME_WIDTH + 1;
+        let has_frame = usable_width > EVENT_FRAME_WIDTH;
         let inner_width = if has_frame {
             usable_width - EVENT_FRAME_WIDTH
         } else {
@@ -336,7 +336,7 @@ pub fn build_document(
                     .filter(|chip| usize::from(chip.row) == row)
                     .cloned()
                 {
-                    chip.row = start_row + 1 + chip.row;
+                    chip.row += start_row + 1;
                     chip.start_column = chip.start_column.saturating_add(1);
                     chip.end_column = chip.end_column.saturating_add(1);
                     chips.push(chip);
@@ -349,7 +349,7 @@ pub fn build_document(
             ]));
         } else {
             for mut chip in event_chips {
-                chip.row = start_row + chip.row;
+                chip.row += start_row;
                 chips.push(chip);
             }
             lines.extend(event_lines);

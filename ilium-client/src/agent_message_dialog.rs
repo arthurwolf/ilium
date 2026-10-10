@@ -448,11 +448,9 @@ pub fn draw(frame: &mut Frame<'_>, screen: Rect, state: &AgentMessageDialog) {
         let thumb_length = (visible_rows * visible_rows / state.recipients.len()).max(1);
         let max_thumb_top = visible_rows.saturating_sub(thumb_length);
         let max_offset = state.recipients.len().saturating_sub(visible_rows);
-        let thumb_top = if max_offset == 0 {
-            0
-        } else {
-            offset * max_thumb_top / max_offset
-        };
+        let thumb_top = (offset * max_thumb_top)
+            .checked_div(max_offset)
+            .unwrap_or(0);
         let track = (0..visible_rows)
             .map(|row| {
                 if (thumb_top..thumb_top + thumb_length).contains(&row) {

@@ -122,7 +122,7 @@ struct AdmittedArchive {
 }
 
 fn read_admitted_archive(
-    mut archive: impl Read,
+    archive: impl Read,
     expected_size: usize,
     quota: &QuotaGroup,
 ) -> Result<AdmittedArchive> {
@@ -209,112 +209,6 @@ pub async fn probe() -> Result<()> {
         (Err(error), Ok(())) => Err(error),
         (Ok(()), Err(error)) => Err(error).context("probe bank shutdown"),
         (Ok(()), Ok(())) => Ok(()),
-    }
-}
-
-#[cfg(test)]
-mod archive_admission_tests {
-    use super::*;
-    use ilium_execution::QuotaLimits;
-    use std::sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    };
-
-    fn quota(worker_bytes: usize) -> QuotaGroup {
-        QuotaGroup::new(QuotaLimits {
-            clients: 0,
-            jobs: 0,
-            service_jobs: 0,
-            input_bytes: 0,
-            result_bytes: 0,
-            worker_threads: 0,
-            worker_bytes,
-        })
-    }
-
-    struct ReadCounter(Arc<AtomicUsize>);
-    impl Read for ReadCounter {
-        fn read(&mut self, _buffer: &mut [u8]) -> io::Result<usize> {
-            self.0.fetch_add(1, Ordering::SeqCst);
-            Ok(0)
-        }
-    }
-
-    #[test]
-    fn installed_archive_admission_precedes_read_and_covers_buffer_lifetime() {
-        let small_quota = quota(4);
-        let reads = Arc::new(AtomicUsize::new(0));
-        let result = read_admitted_archive(ReadCounter(Arc::clone(&reads)), 4, &small_quota);
-        assert!(
-            result.is_err(),
-            "size-plus-one reservation should exceed quota"
-        );
-        assert_eq!(reads.load(Ordering::SeqCst), 0);
-        assert_eq!(small_quota.snapshot().worker_bytes, 0);
-
-        let exact_quota = quota(5);
-        let admitted = read_admitted_archive(io::Cursor::new(b"pack"), 4, &exact_quota)
-            .expect("archive read is admitted");
-        assert_eq!(admitted.bytes.as_slice(), b"pack");
-        assert_eq!(exact_quota.snapshot().worker_bytes, 5);
-        drop(admitted);
-        assert_eq!(exact_quota.snapshot().worker_bytes, 0);
-    }
-
-    #[test]
-    fn changed_or_oversized_installed_archive_releases_admission() {
-        let quota = quota(16);
-        assert!(read_admitted_archive(io::Cursor::new(b"larger"), 4, &quota).is_err());
-        assert_eq!(quota.snapshot().worker_bytes, 0);
-
-        let maximum = usize::try_from(PackageLimits::default().archive_bytes).unwrap();
-        assert!(read_admitted_archive(io::Cursor::new([]), maximum + 1, &quota).is_err());
-        assert_eq!(quota.snapshot().worker_bytes, 0);
-    }
-
-    #[test]
-    fn installed_archive_path_rejects_non_files_and_keeps_file_admission() {
-        let directory = tempfile::tempdir().expect("temporary archive directory");
-        let quota = quota(5);
-        assert!(admitted_archive_from_path(directory.path(), &quota).is_err());
-        assert_eq!(quota.snapshot().worker_bytes, 0);
-
-        let path = directory.path().join("package.iliumanim");
-        fs::write(&path, b"pack").expect("write temporary archive");
-        assert_eq!(
-            digest_installed_file(&path).expect("stream installed-file digest"),
-            digest(b"pack")
-        );
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::symlink;
-            let link = directory.path().join("linked-package.iliumanim");
-            symlink(&path, &link).expect("create symlink fixture");
-            assert!(admitted_archive_from_path(&link, &quota).is_err());
-            assert!(digest_installed_file(&link).is_err());
-            assert_eq!(quota.snapshot().worker_bytes, 0);
-        }
-        let archive = admitted_archive_from_path(&path, &quota).expect("admit archive file");
-        assert_eq!(archive.bytes.as_slice(), b"pack");
-        assert_eq!(quota.snapshot().worker_bytes, 5);
-        drop(archive);
-        assert_eq!(quota.snapshot().worker_bytes, 0);
-    }
-
-    #[test]
-    fn multiple_installed_archive_leases_remain_charged_together() {
-        let quota = quota(10);
-        let first = read_admitted_archive(io::Cursor::new(b"one!"), 4, &quota)
-            .expect("first archive is admitted");
-        let second = read_admitted_archive(io::Cursor::new(b"two!"), 4, &quota)
-            .expect("second archive is admitted");
-        assert_eq!(quota.snapshot().worker_bytes, 10);
-
-        drop(first);
-        assert_eq!(quota.snapshot().worker_bytes, 5);
-        drop(second);
-        assert_eq!(quota.snapshot().worker_bytes, 0);
     }
 }
 
@@ -541,4 +435,110 @@ async fn probe_with_bank(bank: &execution::ClientExecution) -> Result<()> {
         "gate":"installed_animation","publication_allowed":false,
         "packages":release::PACKAGES.iter().map(|item| item.0).collect::<Vec<_>>()}))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod archive_admission_tests {
+    use super::*;
+    use ilium_execution::QuotaLimits;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    fn quota(worker_bytes: usize) -> QuotaGroup {
+        QuotaGroup::new(QuotaLimits {
+            clients: 0,
+            jobs: 0,
+            service_jobs: 0,
+            input_bytes: 0,
+            result_bytes: 0,
+            worker_threads: 0,
+            worker_bytes,
+        })
+    }
+
+    struct ReadCounter(Arc<AtomicUsize>);
+    impl Read for ReadCounter {
+        fn read(&mut self, _buffer: &mut [u8]) -> io::Result<usize> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Ok(0)
+        }
+    }
+
+    #[test]
+    fn installed_archive_admission_precedes_read_and_covers_buffer_lifetime() {
+        let small_quota = quota(4);
+        let reads = Arc::new(AtomicUsize::new(0));
+        let result = read_admitted_archive(ReadCounter(Arc::clone(&reads)), 4, &small_quota);
+        assert!(
+            result.is_err(),
+            "size-plus-one reservation should exceed quota"
+        );
+        assert_eq!(reads.load(Ordering::SeqCst), 0);
+        assert_eq!(small_quota.snapshot().worker_bytes, 0);
+
+        let exact_quota = quota(5);
+        let admitted = read_admitted_archive(io::Cursor::new(b"pack"), 4, &exact_quota)
+            .expect("archive read is admitted");
+        assert_eq!(admitted.bytes.as_slice(), b"pack");
+        assert_eq!(exact_quota.snapshot().worker_bytes, 5);
+        drop(admitted);
+        assert_eq!(exact_quota.snapshot().worker_bytes, 0);
+    }
+
+    #[test]
+    fn changed_or_oversized_installed_archive_releases_admission() {
+        let quota = quota(16);
+        assert!(read_admitted_archive(io::Cursor::new(b"larger"), 4, &quota).is_err());
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+
+        let maximum = usize::try_from(PackageLimits::default().archive_bytes).unwrap();
+        assert!(read_admitted_archive(io::Cursor::new([]), maximum + 1, &quota).is_err());
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+    }
+
+    #[test]
+    fn installed_archive_path_rejects_non_files_and_keeps_file_admission() {
+        let directory = tempfile::tempdir().expect("temporary archive directory");
+        let quota = quota(5);
+        assert!(admitted_archive_from_path(directory.path(), &quota).is_err());
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+
+        let path = directory.path().join("package.iliumanim");
+        fs::write(&path, b"pack").expect("write temporary archive");
+        assert_eq!(
+            digest_installed_file(&path).expect("stream installed-file digest"),
+            digest(b"pack")
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            let link = directory.path().join("linked-package.iliumanim");
+            symlink(&path, &link).expect("create symlink fixture");
+            assert!(admitted_archive_from_path(&link, &quota).is_err());
+            assert!(digest_installed_file(&link).is_err());
+            assert_eq!(quota.snapshot().worker_bytes, 0);
+        }
+        let archive = admitted_archive_from_path(&path, &quota).expect("admit archive file");
+        assert_eq!(archive.bytes.as_slice(), b"pack");
+        assert_eq!(quota.snapshot().worker_bytes, 5);
+        drop(archive);
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+    }
+
+    #[test]
+    fn multiple_installed_archive_leases_remain_charged_together() {
+        let quota = quota(10);
+        let first = read_admitted_archive(io::Cursor::new(b"one!"), 4, &quota)
+            .expect("first archive is admitted");
+        let second = read_admitted_archive(io::Cursor::new(b"two!"), 4, &quota)
+            .expect("second archive is admitted");
+        assert_eq!(quota.snapshot().worker_bytes, 10);
+
+        drop(first);
+        assert_eq!(quota.snapshot().worker_bytes, 5);
+        drop(second);
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+    }
 }

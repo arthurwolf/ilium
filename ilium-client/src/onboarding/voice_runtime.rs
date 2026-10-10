@@ -504,17 +504,14 @@ impl VoiceDemoRuntime {
                 self.refresh_control_state();
                 Ok(())
             }
-            Err(PrepareRefusal::Admission(reason))
-                if matches!(
-                    reason,
-                    RejectReason::Busy
-                        | RejectReason::WorkerBytes
-                        | RejectReason::QueueFull
-                        | RejectReason::JobLimit
-                        | RejectReason::InputBytes
-                        | RejectReason::ResultBytes
-                ) =>
-            {
+            Err(PrepareRefusal::Admission(
+                RejectReason::Busy
+                | RejectReason::WorkerBytes
+                | RejectReason::QueueFull
+                | RejectReason::JobLimit
+                | RejectReason::InputBytes
+                | RejectReason::ResultBytes,
+            )) => {
                 self.pending_test = Some(pending);
                 self.startup_retry_at = Some(Instant::now() + std::time::Duration::from_millis(20));
                 self.refresh_control_state();

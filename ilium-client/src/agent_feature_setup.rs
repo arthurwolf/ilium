@@ -49,7 +49,7 @@ impl AgentFeature {
     const fn current_version(self) -> Option<u32> {
         match self {
             Self::Chatroom => None,
-            Self::Progress => Some(9),
+            Self::Progress => Some(10),
         }
     }
 
@@ -585,7 +585,7 @@ mod tests {
 
         let contents = fs::read_to_string(&target).unwrap();
         assert!(!contents.contains("as a progress monitor"));
-        assert!(contents.contains("ilium-agent-feature: progress version=9"));
+        assert!(contents.contains("ilium-agent-feature: progress version=10"));
         assert!(contents.contains("you MUST block with `ilium progress wait <monitor_id>`"));
         assert!(contents.contains("--wait"));
         assert!(contents.contains("at least three minutes"));
@@ -835,7 +835,7 @@ mod tests {
         install(&target, AgentFeature::Progress).unwrap();
         let updated = fs::read_to_string(&target).unwrap();
         assert!(updated.contains("# User policy"));
-        assert!(updated.contains("version=9"));
+        assert!(updated.contains("version=10"));
         assert!(!updated.contains("version=99"));
     }
 

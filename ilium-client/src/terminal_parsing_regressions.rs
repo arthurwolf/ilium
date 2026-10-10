@@ -28,6 +28,20 @@ struct ParserFixture {
 
 impl ParserFixture {
     fn start() -> Self {
+        let (execution, parsing) = Self::start_parts();
+        Self {
+            parsing,
+            execution,
+            views: HashMap::new(),
+            snapshots: HashMap::new(),
+            completed: Vec::new(),
+            evidence: Vec::new(),
+            errors: Vec::new(),
+            barriers: Vec::new(),
+        }
+    }
+
+    fn start_parts() -> (Execution, TerminalParsing) {
         let quota = QuotaGroup::new(QuotaLimits {
             clients: 1,
             jobs: 1,
@@ -67,16 +81,7 @@ impl ParserFixture {
             .unwrap();
 
         let parsing = TerminalParsing::start(client, 256).unwrap();
-        Self {
-            parsing,
-            execution,
-            views: HashMap::new(),
-            snapshots: HashMap::new(),
-            completed: Vec::new(),
-            evidence: Vec::new(),
-            errors: Vec::new(),
-            barriers: Vec::new(),
-        }
+        (execution, parsing)
     }
 
     fn attach(&mut self, pane_id: NodeId, rows: u16, columns: u16) {
@@ -795,4 +800,23 @@ fn large_intact_delta_publishes_first_content_before_final_ordinal() {
     assert!(fixture.views[&pane]
         .with_screen(|screen| screen.contents())
         .contains('x'));
+}
+
+/// Shutdown is complete only after the parser's receipt releases its Service
+/// claim. The owner must drop the parser before observing shutdown, as the
+/// client teardown does; a live receipt keeps the completed outcome charged.
+#[test]
+fn parser_receipt_must_be_released_before_execution_shutdown_completes() {
+    let (mut execution, mut parsing) = ParserFixture::start_parts();
+    parsing.cancel();
+    execution.request_shutdown(ShutdownMode::Cancel);
+    let held = execution.join_until_background(Instant::now() + TEST_WAIT).unwrap();
+    assert_eq!(held.remaining_workers, 0, "parser worker did not retire");
+    assert!(
+        !held.shutdown_complete,
+        "a live parser receipt must keep its Service claim charged"
+    );
+    drop(parsing);
+    let released = execution.join_until_background(Instant::now() + TEST_WAIT).unwrap();
+    assert!(released.shutdown_complete, "{:?}", released.health.lanes);
 }

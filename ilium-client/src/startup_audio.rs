@@ -103,9 +103,11 @@ async fn discover_with(
     let completed = Arc::new(Notify::new());
     let wake = Arc::clone(&completed);
     let client = client.with_completion_wake(move || wake.notify_one());
-    // Admission precedes every filesystem/native-library call. The fixed
-    // declaration and output audit do not bound opaque library scratch or the
-    // environment-root collector; those producers still need capped APIs.
+    // Admission precedes every filesystem/native-library call. Sound-root and
+    // tree traversal, retained text, device count, and device-name bytes each
+    // have producer-side caps. CPAL's transient native enumeration scratch is
+    // opaque to this output audit and remains covered only by the fixed job
+    // declaration and shared I/O worker admission.
     let receipt = client
         .try_submit(
             Lane::Io,

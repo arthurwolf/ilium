@@ -136,29 +136,52 @@ pub fn apply_naming_worker_event(
         }
         NamingWorkerEvent::ProjectName { decision, result } => {
             workers.project_name_worker_finished();
-            app.is_project_name_loading = false;
             if app.onboarding.is_some()
                 || !app.onboarding_progress.automatic_ai_allowed()
                 || !workers.is_current_automatic_ai_decision(decision)
             {
+                app.is_project_name_loading = false;
                 tracing::debug!("discarding project name after AI decision changed");
                 return;
             }
-            // The worker only computed a proposal. This synchronous commit is
-            // serialized with the event loop's onboarding decision changes.
-            match result.and_then(|proposal| {
-                crate::project_naming::persist_inferred_project_name(&app.session_cwd, proposal)
-            }) {
-                Ok(bootstrap) => {
+            match result {
+                Ok(bootstrap)
+                    if bootstrap.source == crate::project_naming::ProjectNameSource::Stored =>
+                {
+                    app.is_project_name_loading = false;
                     tracing::info!(
                         project_name = %bootstrap.project_name,
                         project_icon = ?bootstrap.icon,
-                        "project naming completed"
+                        "loaded stored project name"
                     );
                     app.project_name = Some(bootstrap.project_name);
                     app.project_icon = bootstrap.icon;
                 }
+                Ok(bootstrap) => {
+                    let decision_fence = workers.automatic_ai_decision_fence(decision);
+                    let change =
+                        crate::filesystem::configuration::ConfigurationChange::ProjectName {
+                            proposal: bootstrap,
+                            decision: decision_fence,
+                        };
+                    let intent =
+                        crate::filesystem::configurations::ConfigurationIntent::ProjectName;
+                    if let Err(err) =
+                        app.enqueue_configuration(app.session_cwd.clone(), change, intent)
+                    {
+                        app.is_project_name_loading = false;
+                        tracing::error!(
+                            error_characters = err.chars().count(),
+                            "project name write was not admitted"
+                        );
+                        app.status_message =
+                            Some(format!("Could not save inferred project name: {err}"));
+                    } else {
+                        app.status_message = Some("Saving project name…".into());
+                    }
+                }
                 Err(err) => {
+                    app.is_project_name_loading = false;
                     tracing::error!(
                         error_characters = err.to_string().chars().count(),
                         "project naming failed"
@@ -810,7 +833,7 @@ mod tests {
     }
 
     #[test]
-    fn accepted_project_name_result_commits_before_publication() {
+    fn accepted_project_name_publishes_only_after_io_acknowledgement() {
         let cwd = tempfile::tempdir().unwrap();
         let mut app = App::new("test".to_string(), cwd.path().to_path_buf());
         app.is_project_name_loading = true;
@@ -831,12 +854,103 @@ mod tests {
             },
         );
 
+        assert!(app.is_project_name_loading);
+        assert_eq!(app.project_name, None);
+        assert_eq!(app.configuration_admission.accepted, 1);
+
+        app.settle_filesystem_for_test();
+
         assert!(!app.is_project_name_loading);
         assert_eq!(app.project_name.as_deref(), Some("Accepted Name"));
         assert_eq!(app.project_icon.as_deref(), Some("✦"));
         let saved = crate::project_config::load(cwd.path()).unwrap();
         assert_eq!(saved.project_name.as_deref(), Some("Accepted Name"));
         assert_eq!(saved.project_icon.as_deref(), Some("✦"));
+    }
+
+    #[test]
+    fn revoked_project_name_decision_during_write_does_not_publish() {
+        let cwd = tempfile::tempdir().unwrap();
+        let (lock_held_tx, lock_held_rx) = std::sync::mpsc::channel();
+        let (release_lock_tx, release_lock_rx) = std::sync::mpsc::channel();
+        let lock_cwd = cwd.path().to_path_buf();
+        let lock_holder = std::thread::spawn(move || {
+            crate::project_config::update(&lock_cwd, |config| {
+                lock_held_tx.send(()).unwrap();
+                release_lock_rx.recv().unwrap();
+                config.show_project_separators = true;
+            })
+            .unwrap();
+        });
+        lock_held_rx.recv().unwrap();
+        let mut app = App::new("test".to_string(), cwd.path().to_path_buf());
+        app.is_project_name_loading = true;
+        let (events_tx, _events_rx) = tokio::sync::mpsc::channel(1);
+        let mut workers =
+            NamingWorkers::new(events_tx, &ilium_inference::InferenceSettings::default()).unwrap();
+
+        apply_naming_worker_event(
+            &mut app,
+            &mut workers,
+            NamingWorkerEvent::ProjectName {
+                decision: crate::naming_workers::AutomaticAiDecision::new(0, true),
+                result: Ok(crate::project_naming::ProjectNameBootstrap {
+                    project_name: "Revoked Name".to_string(),
+                    icon: Some("✦".to_string()),
+                    source: crate::project_naming::ProjectNameSource::Inferred,
+                }),
+            },
+        );
+        assert!(app.is_project_name_loading);
+        assert_eq!(app.project_name, None);
+
+        workers.set_automatic_ai_decision(1, false);
+        release_lock_tx.send(()).unwrap();
+        lock_holder.join().unwrap();
+        app.settle_filesystem_for_test();
+
+        assert!(!app.is_project_name_loading);
+        assert_eq!(app.project_name, None);
+        let saved = crate::project_config::load(cwd.path()).unwrap();
+        assert_eq!(saved.project_name, None);
+        assert!(saved.show_project_separators);
+    }
+
+    #[test]
+    fn asynchronous_project_name_commit_returns_the_concurrent_stored_winner() {
+        let cwd = tempfile::tempdir().unwrap();
+        crate::project_config::update(cwd.path(), |config| {
+            config.project_name = Some("Concurrent Winner".into());
+            config.project_icon = Some("🧭".into());
+        })
+        .unwrap();
+        let mut app = App::new("test".to_string(), cwd.path().to_path_buf());
+        app.is_project_name_loading = true;
+        let (events_tx, _events_rx) = tokio::sync::mpsc::channel(1);
+        let mut workers =
+            NamingWorkers::new(events_tx, &ilium_inference::InferenceSettings::default()).unwrap();
+
+        apply_naming_worker_event(
+            &mut app,
+            &mut workers,
+            NamingWorkerEvent::ProjectName {
+                decision: crate::naming_workers::AutomaticAiDecision::new(0, true),
+                result: Ok(crate::project_naming::ProjectNameBootstrap {
+                    project_name: "Proposed Name".into(),
+                    icon: Some("✦".into()),
+                    source: crate::project_naming::ProjectNameSource::Inferred,
+                }),
+            },
+        );
+
+        assert_eq!(app.project_name, None);
+        app.settle_filesystem_for_test();
+
+        assert_eq!(app.project_name.as_deref(), Some("Concurrent Winner"));
+        assert_eq!(app.project_icon.as_deref(), Some("🧭"));
+        let saved = crate::project_config::load(cwd.path()).unwrap();
+        assert_eq!(saved.project_name.as_deref(), Some("Concurrent Winner"));
+        assert_eq!(saved.project_icon.as_deref(), Some("🧭"));
     }
 
     #[test]

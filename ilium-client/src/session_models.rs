@@ -90,6 +90,7 @@ struct Owner {
     generation: u64,
 }
 
+#[derive(Default)]
 pub(crate) struct SessionModelCache {
     client: Option<Client>,
     entries: BTreeMap<NodeId, Entry>,
@@ -100,21 +101,6 @@ pub(crate) struct SessionModelCache {
     generation: u64,
     #[cfg(test)]
     claude_config_dir_for_test: Option<PathBuf>,
-}
-impl Default for SessionModelCache {
-    fn default() -> Self {
-        Self {
-            client: None,
-            entries: BTreeMap::new(),
-            codex_screen_models: BTreeMap::new(),
-            last_codex_screen_scan: None,
-            pending: None,
-            last_scheduled: None,
-            generation: 0,
-            #[cfg(test)]
-            claude_config_dir_for_test: None,
-        }
-    }
 }
 impl std::fmt::Debug for SessionModelCache {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -175,6 +161,7 @@ impl SessionModelCache {
             .model
             .as_deref()
     }
+    #[cfg(test)]
     pub(crate) fn diagnostic(&self, pane: NodeId, request: &StatsRequest) -> Option<&str> {
         self.entries
             .get(&pane)
@@ -187,9 +174,8 @@ impl SessionModelCache {
     /// so callers check this before building the screens they would pass to
     /// `refresh_codex_screen_models`, not after.
     fn codex_screen_scan_is_due(&self, now: Instant) -> bool {
-        !self
-            .last_codex_screen_scan
-            .is_some_and(|last| now.saturating_duration_since(last) < CODEX_SCREEN_REFRESH)
+        self.last_codex_screen_scan
+            .is_none_or(|last| now.saturating_duration_since(last) >= CODEX_SCREEN_REFRESH)
     }
     fn refresh_codex_screen_models(
         &mut self,
@@ -599,8 +585,7 @@ fn codex_status_line_model(contents: &str) -> Option<String> {
     contents
         .lines()
         .rev()
-        .filter(|line| !line.trim().is_empty())
-        .next()
+        .find(|line| !line.trim().is_empty())
         .and_then(|line| {
             let leading_segment = line.split_once(" · ")?.0.trim();
             let candidate = leading_segment.split_ascii_whitespace().next()?;
@@ -1055,7 +1040,7 @@ mod tests {
         app.session_models.entries.get_mut(&pane).unwrap().model = Some("claude-sonnet-5".into());
 
         assert!(
-            app.current_tree_models().get(&pane).is_none(),
+            !app.current_tree_models().contains_key(&pane),
             "an active Claude session must not show a stale transcript model before a live status-line observation"
         );
     }
@@ -1091,7 +1076,7 @@ mod tests {
 
         app.session_models.invalidate_model_icons();
 
-        assert!(app.current_tree_models().get(&pane).is_none());
+        assert!(!app.current_tree_models().contains_key(&pane));
     }
 
     #[test]

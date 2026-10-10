@@ -125,7 +125,7 @@ pub(crate) struct Stream {
     last_seek_thread: Option<std::thread::ThreadId>,
     #[cfg(test)]
     row_drop_probe: Option<std::sync::mpsc::Sender<std::thread::ThreadId>>,
-    allocation: Arc<ilium_execution::StorageAdmission>,
+    _allocation: Arc<ilium_execution::StorageAdmission>,
     window_allocation: Arc<ilium_execution::StorageAdmission>,
 }
 impl Stream {
@@ -206,7 +206,7 @@ impl Stream {
             last_seek_thread: None,
             #[cfg(test)]
             row_drop_probe: None,
-            allocation,
+            _allocation: allocation,
             window_allocation,
         })
     }
@@ -359,7 +359,7 @@ impl Stream {
         }
     }
     fn checkpoint(&mut self) {
-        if self.visual % self.stride != 0 {
+        if !self.visual.is_multiple_of(self.stride) {
             return;
         }
         if self.samples.len() == MAX_SAMPLES {
@@ -498,7 +498,7 @@ impl Stream {
         let final_boundary = self
             .pending
             .grapheme_indices(true)
-            .last()
+            .next_back()
             .map(|(byte, _)| byte);
         let until = if chunk.end_of_line {
             self.pending.len()

@@ -17,6 +17,18 @@ pub fn footer_is_visible(
             < u64::from(hide_after_seconds) * 1000
 }
 
+/// The monitors whose footer rows are still shown, in registration order.
+pub fn visible_monitors(
+    monitors: &[PaneProgress],
+    hide_after_seconds: u32,
+    now_unix_millis: u64,
+) -> Vec<&PaneProgress> {
+    monitors
+        .iter()
+        .filter(|progress| footer_is_visible(Some(progress), hide_after_seconds, now_unix_millis))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

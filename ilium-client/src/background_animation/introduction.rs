@@ -1,0 +1,73 @@
+//! Two-sentence introductions shown at the top of each animation's settings.
+//! Kept apart from `AnimationKind::description`, which stays the one-line
+//! scene-list help.
+
+use super::AnimationKind;
+
+impl AnimationKind {
+    /// What this animation is and what it is about, in two sentences.
+    pub fn introduction(self) -> &'static str {
+        match self {
+            Self::Shoreline => "A diagonal wash of water runs up a beach, leaving fine foam, wet sand and scattered grains. It is a calm study of the moment where waves meet land.",
+            Self::MoonlitWater => "Crossing wavelets break up the reflection of a moon on the sea, which widens and narrows as the water moves. It shows how light behaves on a restless surface at night.",
+            Self::SleepingRidge => "Layered clouds and valley mist drift slowly over quiet, ridged hills. It is a still landscape in which only the weather moves.",
+            Self::WindyHillside => "A hillside of fine grass and seed heads bends in traveling gusts of wind. It shows how a whole meadow responds to a single breeze.",
+            Self::TeaSteam => "Thin translucent wisps of steam curl up from a rounded porcelain cup. It is a small, quiet still life in motion.",
+            Self::Kelp => "Clusters of tapering ribbons sway and twist through layered underwater currents. It mimics a kelp forest moving with the flow of the sea.",
+            Self::StoneCaustics => "A web of moving light bends over smooth stones, pebbles and sparse sand. It recreates the bright, shifting pattern that sunlight casts on the bottom of a shallow pool.",
+            Self::Cloudlets => "Soft islands of cloud gather, join and separate as they drift across the sky. It shows how small weather systems form and dissolve.",
+            Self::TwoRipples => "Two wave sources send outward crests that brighten and dim where their fields meet. It is a simple view of interference, the way two waves combine.",
+            Self::QuietPond => "Notched lily pads rest on a pond while faint reflections drift beneath the surface. It is a slow, peaceful view of still water.",
+            Self::Pipes => "Dithered black-and-white pipes grow through three-dimensional space, in the style of the classic screensaver. The pattern builds steadily as each pipe turns and branches.",
+            Self::Stars => "This shows the real night sky above your location, right now, as a star map. It lets you look up at the stars without leaving your desk.",
+            Self::NightLights => "City lights seen from orbit are drawn on a borderless map of the dark Earth. The glowing clusters show where people live on the night side of the planet.",
+            Self::Clouds => "Live weather-satellite imagery shows clouds across the globe or over your location. It keeps the sky on screen in step with the real one.",
+            Self::Video => "Plays video files, folders or URLs as dithered Braille. It turns any moving picture into a text-mode image on your screen.",
+            Self::Spectrum => "A spectrum analyzer draws whatever your system is playing as bars of frequency. It shows the sound of your music or audio in real time.",
+            Self::Images => "Colored Braille images come from files, folders or URLs, with a slow pan and zoom. It turns a photo collection into a gentle, moving slideshow.",
+            Self::DitherWater => "Bayer-dithered one-bit water shows drifting caustic bands, a horizon fade and slow ripple rings. It shows how a simple ordered dither can suggest the shimmer of a lake or sea.",
+            Self::AtlanticDusk => "Dithered sea and sky move through a full day, from drifting clouds and a sinking sun to the moon and stars. It is a slow, complete day and night cycle over the ocean.",
+            Self::CubeClock => "A quiet clock sits beside a slowly turning dotted cube. It is a calm timepiece you can leave running in the background.",
+            Self::BoxMachine => "A generative machine of boxes and rails slowly builds and rearranges itself. It is an abstract mechanical scene that keeps reassembling its parts.",
+            Self::MachineScreen => "A generative machine display shows scanning patterns and glyph-like blocks. It resembles an old instrument screen that is always reading something.",
+            Self::FbmClouds => "Domain-warped noise clouds are thresholded into one-bit dots. It is rendered in software and runs in slow motion by default.",
+            Self::DitheredWaves => "A layered wave shader is rendered on the CPU with ordered dithering. It runs in software and in slow motion by default, so the waves move gently.",
+            Self::DithrPatterns => "A set of dithr-style animated patterns, each with selectable dither algorithms. It is a showcase for comparing how different dithering methods look.",
+            Self::HexExpedition => "An endless explorer's hex map is generated as you watch, from jungle and desert to volcanic lands. A slow camera pans across animated water, trees, smoke, fires and lava.",
+            Self::VectorTd => "A tower defense game plays itself, with an AI building, upgrading and unlocking glowing vector towers. It fights waves of monsters, level after level, across several maps.",
+            Self::Wikipedia => "Today's Wikipedia articles scroll slowly as readable text or as font-rendered Braille, with images and infoboxes. It turns the day's encyclopedia into a background you can read.",
+            Self::GalacticEmpires => "Procedural star empires expand along hyperlanes, negotiate, fight and unify. A slow camera circles the galaxy as their story unfolds.",
+            Self::VoxelLandscape => "A seeded isometric block world of forests, deserts, villages, caves and ravines drifts past. It can be shown in monochrome or pastel dithering.",
+            Self::SolarSystem => "Eight planets orbit the Sun at distance and size scales you can change, in simulated time. It is a model of our solar system that you can watch in motion.",
+            Self::TopographicMaps => "Contour maps of Earth, the Moon, Mars, Venus, Mercury, Ceres and fictional worlds are drawn from real elevation surveys. They pan slowly across a flat map or turn as a globe, both drawn in Braille dots.",
+            Self::Graph => "Public observations are shown as Braille lines, bars or OHLC candles, from selectable sources and time scales. It is a live chart of the data you choose.",
+            Self::Pi => "Exact digits of Pi appear as terminal text or Braille, scrolling with a separate hue for each digit. It is a view of the famous infinite decimal.",
+            Self::Earthquakes => "USGS earthquake events of every reported magnitude appear on a coastline map. Pulsing markers and magnitude labels show where the ground has recently moved.",
+            Self::Aircraft => "OpenSky's reported airborne positions appear worldwide on a map, updated anonymously every fifteen minutes. It shows the air traffic overhead, as it is reported.",
+            Self::Boats => "Received AIS ship positions are drawn on a world coastline, from OpenSeaFeed or Finnish Digitraffic. Coverage is incomplete, so not every vessel at sea appears.",
+            Self::Chess => "The featured Lichess TV game is shown as its actual positions, with dithered piece silhouettes. It follows a live game as it is played.",
+            Self::OpenStreetMap => "Real OpenStreetMap streets, buildings, waterways, parks and railways are drawn around ten world places. Braille dots show fixed or panning cameras, so you can explore the map.",
+            Self::Carpet => "Isometric hatch lines lift over hidden moving spheres and tubes that play several small games and simulations. Among them are mouse hunters, Snake, Life, chess, a DVD ball, planets and clocks.",
+            Self::Wind => "Dots are blown across the empty parts of your screen by a fixed or rotating wind. Scrolling and new text push them around.",
+            Self::Growth => "A fungal colony grows from seeded points and branches across the screen. The pointer and foreground text clear parts of it as it spreads.",
+            Self::Semantic => "This shows the animation recommended during tree reorganization for the selected project or entry. It follows the structure of your work rather than a fixed choice.",
+            Self::Aurora => "Luminous curtains of light sway above a dark horizon. Hills and optional seeded trees can be adjusted.",
+            Self::Pollen => "Small specks drift and brighten only inside a slowly swaying shaft of sunlight. It recreates a quiet afternoon in a sunlit room.",
+            Self::Fireflies => "Seeded wandering lights gather into a shared pulse, then drift out of step again. It shows how a group can synchronize and fall apart.",
+            Self::WindowSunlight => "One or several sheared window projections move across the field, with optional pollen. Panes can be set to 2 x 2 or 2 x 3 layouts.",
+            Self::Frost => "Fine branching ice grows and retreats around the screen edges or a foreground character mask. It frosts the border of your view.",
+            Self::Lighthouse => "A small dark lighthouse sweeps its light over short shimmering marks on the sea. It is a patient watch over dark water.",
+            Self::PaperFold => "An angular dragon-curve trace folds and opens again, pausing between movements. It shows a line that grows by repeated folding.",
+            Self::Embroidery => "A moving stitch progressively reveals a delicate geometric flower. It looks like a needle slowly completing a pattern.",
+            Self::PrimeConstellations => "A slow sweep reveals prime-number alignments on an Ulam spiral. It makes the hidden patterns of primes visible as shapes.",
+            Self::Wallpaper => "Repeated geometric motifs rotate into temporary larger shapes. It is a tiling pattern that keeps forming new figures from the same tiles.",
+            Self::UnfinishedCircle => "Imperfect concentric arcs slowly turn, and their wandering gaps sometimes line up. It is a circle that never quite closes.",
+            Self::NeedleThreads => "Drifting curved threads gather through one narrow opening and then fan apart. It resembles threads being drawn through the eye of a needle.",
+            Self::HesitatingInk => "A gently curling stroke pauses, resumes, fades and begins again. It is a line of ink that moves with hesitation.",
+            Self::CropCircles => "Several visible drawers trace bounded geometric formations across a textured field. The formations appear to be made by an unseen hand.",
+            Self::DelayedReflection => "A swaying curve has a reflected partner that follows slightly behind, with gentle distortion. It shows a line and its echo moving out of step.",
+            Self::AlmostTouching => "Two arcs approach, linger near one another and retreat without meeting. It is a study of a near contact that never happens.",
+            Self::HiddenWheel => "Orbiting dashes briefly light up to suggest a wheel whose rim is never drawn. You see the wheel only through the lights that circle it.",
+        }
+    }
+}

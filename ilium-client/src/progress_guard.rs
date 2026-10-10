@@ -16,6 +16,7 @@
 //! error exits 2) lets every call through instead of refusing all of them.
 
 use std::io::Read;
+use std::path::{Path, PathBuf};
 
 /// Claude Code's default Bash timeout is two minutes; a caller asking for
 /// more than three expects a task the progress contract covers.
@@ -84,6 +85,107 @@ pub fn refusal_output() -> serde_json::Value {
     })
 }
 
+/// Hook command written into Claude Code project settings.
+pub const HOOK_COMMAND: &str = "ilium progress guard || true";
+
+/// Earlier command text that `ensure_installed` rewrites to `HOOK_COMMAND`.
+const LEGACY_HOOK_COMMAND: &str = "ilium progress guard";
+
+/// Claude Code reads project hooks from `.claude/settings.local.json`.
+pub fn project_settings_path(project_root: &Path) -> PathBuf {
+    project_root.join(".claude").join("settings.local.json")
+}
+
+/// Keeps one guard hook in a project's Claude settings. Idempotent. A
+/// user-written wrapper that already runs `ilium progress guard` is kept as
+/// written; other hooks and keys are preserved; the file is replaced
+/// atomically so a crash never leaves a half-written settings file.
+pub fn ensure_installed(project_root: &Path) -> anyhow::Result<()> {
+    let path = project_settings_path(project_root);
+    let existing = match std::fs::read_to_string(&path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => return Err(error.into()),
+    };
+    let mut root: serde_json::Value = if existing.trim().is_empty() {
+        serde_json::json!({})
+    } else {
+        serde_json::from_str(&existing)
+            .map_err(|error| anyhow::anyhow!("could not merge {}: {error}", path.display()))?
+    };
+    let Some(root_object) = root.as_object_mut() else {
+        anyhow::bail!("{} must contain a JSON object", path.display());
+    };
+    let hooks = root_object
+        .entry("hooks")
+        .or_insert_with(|| serde_json::json!({}));
+    let Some(hooks) = hooks.as_object_mut() else {
+        anyhow::bail!("{}.hooks must be a JSON object", path.display());
+    };
+    let groups = hooks
+        .entry("PreToolUse")
+        .or_insert_with(|| serde_json::json!([]));
+    let Some(groups) = groups.as_array_mut() else {
+        anyhow::bail!("{}.hooks.PreToolUse must be an array", path.display());
+    };
+
+    let mut changed = false;
+    for command in groups.iter_mut().flat_map(hook_commands_mut) {
+        if command.as_str() == Some(LEGACY_HOOK_COMMAND) {
+            *command = serde_json::Value::String(HOOK_COMMAND.to_string());
+            changed = true;
+        }
+    }
+    let already_installed = groups.iter().any(|group| {
+        group
+            .get("hooks")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|hooks| {
+                hooks.iter().any(|hook| {
+                    hook.get("command")
+                        .and_then(serde_json::Value::as_str)
+                        .is_some_and(|command| command.contains(LEGACY_HOOK_COMMAND))
+                })
+            })
+    });
+    if !already_installed {
+        groups.push(serde_json::json!({
+            "matcher": "Bash",
+            "hooks": [{"type": "command", "command": HOOK_COMMAND, "timeout": 10}],
+        }));
+        changed = true;
+    }
+    if !changed {
+        return Ok(());
+    }
+    write_atomically(&path, &serde_json::to_string_pretty(&root)?)
+}
+
+/// Mutable `command` values of one `PreToolUse` group's hooks.
+fn hook_commands_mut(group: &mut serde_json::Value) -> Vec<&mut serde_json::Value> {
+    group
+        .get_mut("hooks")
+        .and_then(serde_json::Value::as_array_mut)
+        .map(|hooks| {
+            hooks
+                .iter_mut()
+                .filter_map(|hook| hook.get_mut("command"))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn write_atomically(path: &Path, contents: &str) -> anyhow::Result<()> {
+    let directory = path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("{} has no parent directory", path.display()))?;
+    std::fs::create_dir_all(directory)?;
+    let temporary = path.with_extension("json.ilium-tmp");
+    std::fs::write(&temporary, contents)?;
+    std::fs::rename(&temporary, path)?;
+    Ok(())
+}
+
 /// Runs the hook: reads the payload from stdin, prints the refusal JSON when
 /// the call is refused, and returns the process exit status, which is always
 /// 0 (see the module comment).
@@ -115,7 +217,10 @@ pub fn run() -> u8 {
 
 #[cfg(test)]
 mod tests {
-    use super::{evaluate, refusal_output, GuardDecision};
+    use super::{
+        ensure_installed, evaluate, project_settings_path, refusal_output, GuardDecision,
+        HOOK_COMMAND,
+    };
     use serde_json::json;
 
     fn bash(input: serde_json::Value) -> serde_json::Value {
@@ -149,6 +254,74 @@ mod tests {
         ] {
             assert_eq!(evaluate(&input, true), GuardDecision::Allow, "{input}");
         }
+    }
+
+    fn settings(directory: &std::path::Path) -> serde_json::Value {
+        let contents = std::fs::read_to_string(super::project_settings_path(directory)).unwrap();
+        serde_json::from_str(&contents).unwrap()
+    }
+
+    fn guard_commands(root: &serde_json::Value) -> Vec<String> {
+        root["hooks"]["PreToolUse"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|group| group["hooks"].as_array().unwrap().clone())
+            .filter_map(|hook| hook["command"].as_str().map(str::to_string))
+            .filter(|command| command.contains("ilium progress guard"))
+            .collect()
+    }
+
+    #[test]
+    fn installer_writes_one_bash_guard_and_is_idempotent() {
+        let directory = tempfile::tempdir().unwrap();
+        ensure_installed(directory.path()).unwrap();
+        ensure_installed(directory.path()).unwrap();
+        let root = settings(directory.path());
+        assert_eq!(guard_commands(&root), vec![HOOK_COMMAND.to_string()]);
+        assert_eq!(root["hooks"]["PreToolUse"][0]["matcher"], "Bash");
+    }
+
+    #[test]
+    fn installer_rewrites_the_legacy_command_and_keeps_other_hooks() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = project_settings_path(directory.path());
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            r#"{"model":"x","hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"ilium progress guard","timeout":10}]},{"matcher":"Edit","hooks":[{"type":"command","command":"other"}]}]}}"#,
+        )
+        .unwrap();
+        ensure_installed(directory.path()).unwrap();
+        let root = settings(directory.path());
+        assert_eq!(root["model"], "x");
+        assert_eq!(guard_commands(&root), vec![HOOK_COMMAND.to_string()]);
+        assert_eq!(
+            root["hooks"]["PreToolUse"][1]["hooks"][0]["command"],
+            "other"
+        );
+    }
+
+    #[test]
+    fn installer_keeps_a_user_written_guard_wrapper() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = project_settings_path(directory.path());
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let wrapper = "ilium progress --help 2>/dev/null | grep -qE '^ +guard( |$)' || exit 0; exec ilium progress guard";
+        let original = serde_json::json!({"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": wrapper, "timeout": 10}]}]}});
+        std::fs::write(&path, original.to_string()).unwrap();
+        ensure_installed(directory.path()).unwrap();
+        assert_eq!(settings(directory.path()), original);
+    }
+
+    #[test]
+    fn installer_rejects_a_settings_file_that_is_not_an_object() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = project_settings_path(directory.path());
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "[1]").unwrap();
+        assert!(ensure_installed(directory.path()).is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "[1]");
     }
 
     #[test]

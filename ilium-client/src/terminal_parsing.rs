@@ -61,6 +61,7 @@ impl ParserMemoryGovernor {
         })
     }
 
+    #[cfg(test)]
     fn normal_limit(&self) -> usize {
         self.normal_limit
     }
@@ -108,10 +109,12 @@ impl ParserMemoryGovernor {
         })
     }
 
+    #[cfg(test)]
     pub(crate) fn snapshot(&self) -> ilium_execution::QuotaSnapshot {
         self.quota.snapshot()
     }
 
+    #[cfg(test)]
     pub(crate) fn shares_root(&self, other: &Self) -> bool {
         self.quota.shares_root(&other.quota)
     }
@@ -125,12 +128,13 @@ pub(crate) struct ParserStorageLease {
 }
 
 impl ParserStorageLease {
-    fn shares_root(&self, governor: &ParserMemoryGovernor) -> bool {
-        self.root.shares_root(&governor.quota)
-    }
-
     pub(crate) fn resident_bytes(&self) -> usize {
         self.root.resident_bytes()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn shares_root(&self, governor: &ParserMemoryGovernor) -> bool {
+        self.root.shares_root(&governor.quota)
     }
 }
 
@@ -811,6 +815,7 @@ impl TerminalParsing {
             budget_bytes,
         )
     }
+    #[cfg(test)]
     pub(crate) fn pool_enabled(&self) -> bool {
         self.shared.state_limit.load(Ordering::Acquire) != 0
     }
@@ -1731,6 +1736,28 @@ fn try_state_budget(
     Err("terminal state allocation deferred before processing the next byte slice".into())
 }
 
+struct ExitWake(Arc<Notify>);
+impl Drop for ExitWake {
+    fn drop(&mut self) {
+        self.0.notify_one();
+    }
+}
+fn cancellation_report(shared: &Shared) -> Result<(), String> {
+    let queue = shared
+        .queue
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let count = queue.commands.len() + queue.active_commands;
+    let bytes = queue.bytes.saturating_add(queue.active_bytes);
+    if count == 0 {
+        Ok(())
+    } else {
+        Err(format!(
+            "Terminal parser shutdown cancelled {count} admitted commands ({bytes} retained bytes) before completion"
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1845,6 +1872,7 @@ mod tests {
 
     #[test]
     fn parser_governors_are_isolated_or_shared_by_injection() {
+        assert_eq!(crate::execution::TERMINAL_STORAGE_BYTES, usize::MAX);
         let first = crate::execution::terminal_storage_quota();
         let second = crate::execution::terminal_storage_quota();
         let first_clone = first.clone();
@@ -1873,6 +1901,7 @@ mod tests {
         let shared = crate::execution::terminal_storage_quota();
         let (_first_bank, first_parser) = Bank::start_with_storage(0, shared.clone());
         let (_second_bank, second_parser) = Bank::start_with_storage(0, shared);
+        assert!(!first_parser.pool_enabled());
         assert!(first_parser
             .shared
             .storage
@@ -2557,7 +2586,7 @@ mod tests {
         let (_bank, parsing) = Bank::start();
         let mut view = TerminalView::new(4, 30);
         attach(&parsing, NodeId(4), &mut view);
-        let mut bytes = vec![b'x'; 512 * 1024];
+        let bytes = vec![b'x'; 512 * 1024];
         offer(
             &mut view,
             PaneCommand::Replay {
@@ -3021,10 +3050,7 @@ mod tests {
                     && snapshot.visible.contents().contains("small pane remains visible"))
         });
         let ParseResult::Published {
-            target,
-            ordinal,
-            snapshot,
-            ..
+            ordinal, snapshot, ..
         } = published
         else {
             unreachable!()
@@ -3424,27 +3450,5 @@ mod tests {
         assert!(!view.admit_resize(4096, 4096));
         assert_eq!(view.desired_size, (3, 20));
         assert!(view.admission_error.is_some());
-    }
-}
-
-struct ExitWake(Arc<Notify>);
-impl Drop for ExitWake {
-    fn drop(&mut self) {
-        self.0.notify_one();
-    }
-}
-fn cancellation_report(shared: &Shared) -> Result<(), String> {
-    let queue = shared
-        .queue
-        .lock()
-        .unwrap_or_else(|error| error.into_inner());
-    let count = queue.commands.len() + queue.active_commands;
-    let bytes = queue.bytes.saturating_add(queue.active_bytes);
-    if count == 0 {
-        Ok(())
-    } else {
-        Err(format!(
-            "Terminal parser shutdown cancelled {count} admitted commands ({bytes} retained bytes) before completion"
-        ))
     }
 }

@@ -103,7 +103,7 @@ pub struct ValueDialogHost {
 }
 
 impl ValueDialogHost {
-    pub(crate) fn number_host(
+    pub fn number_host(
         target: ValueTarget,
         dialog: crate::value_dialog::NumberDialogState,
     ) -> Self {

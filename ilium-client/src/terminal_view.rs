@@ -383,7 +383,7 @@ pub(crate) struct TerminalState {
     render_revision: u64,
     /// Presentation cache uses interior mutability because drawing is a
     /// logically read-only operation on terminal state.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "ui-capture"))]
     render_cache: RefCell<Option<TerminalRenderCache>>,
 }
 
@@ -392,7 +392,7 @@ impl TerminalState {
     /// send `ClientRequest::ResizePane` promptly after creating a pane so
     /// the server-side PTY matches, and this view's own `resize` keeps the
     /// local parser matching whatever the client's own layout computed.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "ui-capture"))]
     pub fn new(rows: u16, cols: u16) -> Self {
         Self::with_scrollback_budget_mib(rows, cols, 32)
     }
@@ -425,7 +425,7 @@ impl TerminalState {
             visible_row_fingerprints,
             visible_text_dimensions,
             render_revision: 0,
-            #[cfg(test)]
+            #[cfg(any(test, feature = "ui-capture"))]
             render_cache: RefCell::new(None),
         }
     }
@@ -444,7 +444,7 @@ impl TerminalState {
     /// historical viewport is intentionally untouched, so streaming output
     /// cannot move the rows the user is reading or lengthen their route back
     /// to the live tail.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "ui-capture"))]
     pub fn feed(&mut self, bytes: &[u8]) {
         self.observe_osc8_links(bytes);
         self.append_history(bytes);
@@ -459,7 +459,7 @@ impl TerminalState {
     /// Attach starts from a blank view; lag repair leaves a detached
     /// historical snapshot untouched and ignores stale replays so recovery
     /// cannot move the visible viewport or roll the live screen backward.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "ui-capture"))]
     pub fn apply_replay(&mut self, bytes: &[u8], through_sequence: u64, _is_complete: bool) {
         if through_sequence <= self.last_output_sequence {
             return;
@@ -497,7 +497,7 @@ impl TerminalState {
     /// caller requested ordinary-terminal activity tracking. The fingerprint
     /// check is allocation-free; changed updates capture bounded row evidence.
     /// Known agent panes skip the O(visible cells) fingerprint entirely.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "ui-capture"))]
     pub fn apply_live_output(
         &mut self,
         first_sequence: u64,
@@ -516,7 +516,7 @@ impl TerminalState {
 
     /// Applies one accepted output batch and returns bounded parsed-screen
     /// evidence only when tracked visible text actually changed.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "ui-capture"))]
     pub(crate) fn apply_live_output_with_evidence(
         &mut self,
         first_sequence: u64,
@@ -611,7 +611,7 @@ impl TerminalState {
         })
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "ui-capture"))]
     pub fn osc8_link_at(&self, line: &str, column: usize) -> Option<String> {
         // `column` is a terminal *cell* index (as reported by the mouse
         // event), while `label.len()`/`line.find` operate in bytes. Agent
@@ -724,7 +724,7 @@ impl TerminalState {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "ui-capture"))]
     pub(crate) fn observe_osc8_for_benchmark(&mut self, bytes: &[u8]) {
         self.observe_osc8_links(bytes);
     }
@@ -820,7 +820,7 @@ impl TerminalState {
 
     /// Copies cached terminal cells into the frame, rebuilding the cache only
     /// after visible terminal state or geometry changes.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "ui-capture"))]
     pub fn render_screen(&self, area: Rect, destination: &mut Buffer) {
         if area.is_empty() {
             return;
@@ -942,7 +942,7 @@ impl TerminalState {
 
     /// Returns all output retained for workspace search, including bytes the
     /// visible parser has already rotated out of its render scrollback.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "ui-capture"))]
     pub fn searchable_history(&self) -> Vec<u8> {
         self.collect_retained_history()
     }
@@ -951,7 +951,7 @@ impl TerminalState {
     /// Escape sequences control the terminal display rather than representing
     /// user-visible history, so copying them would leak cursor and color
     /// commands into the destination application.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "ui-capture"))]
     pub fn copyable_history(&self) -> String {
         let retained_history = self.collect_retained_history();
         String::from_utf8_lossy(&strip_ansi_escapes::strip(&retained_history)).into_owned()
@@ -1043,7 +1043,7 @@ impl TerminalState {
         self.invalidate_render();
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "ui-capture"))]
     pub fn last_output_sequence(&self) -> u64 {
         self.last_output_sequence
     }
@@ -1123,7 +1123,7 @@ impl TerminalState {
         bytes
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "ui-capture"))]
     pub(crate) fn append_history_for_benchmark(&mut self, bytes: &[u8]) {
         self.append_history(bytes);
     }
@@ -1269,7 +1269,7 @@ impl PaintedTerminal {
             self.snapshot.visible.size().0,
         )
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "ui-capture"))]
     pub(crate) fn osc8_link_at(&self, line: &str, column: usize) -> Option<String> {
         let column = crate::terminal_links::cell_column_to_byte_offset(line, column);
         self.snapshot
@@ -2217,7 +2217,7 @@ pub struct TerminalView {
     pub(crate) admission_pressure: Option<crate::terminal_parsing::ParserPressure>,
     pub(crate) applied_ordinal: u64,
     render_cache: RefCell<Option<TerminalRenderCache>>,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "ui-capture"))]
     standalone: Option<TerminalState>,
 }
 impl TerminalView {
@@ -2239,20 +2239,20 @@ impl TerminalView {
             admission_pressure: None,
             applied_ordinal: 0,
             render_cache: RefCell::new(None),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "ui-capture"))]
             standalone: Some(TerminalState::with_scrollback_budget_mib(
                 rows, cols, budget_mib,
             )),
         }
     }
     pub(crate) fn painted_source(&self) -> PaintedTerminal {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "ui-capture"))]
         let snapshot = self
             .standalone
             .as_ref()
             .map(|state| Arc::new(state.publish()))
             .unwrap_or_else(|| self.display_snapshot());
-        #[cfg(not(test))]
+        #[cfg(not(any(test, feature = "ui-capture")))]
         let snapshot = self.display_snapshot();
         let live = snapshot
             .allocation_charge
@@ -2341,7 +2341,7 @@ impl TerminalView {
             .is_some_and(|frontend| frontend.confirm_removed(identity))
     }
     pub(crate) fn try_preparation_snapshot(&self) -> Result<PreparationSnapshot, String> {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "ui-capture"))]
         if let Some(state) = &self.standalone {
             return Ok(PreparationSnapshot {
                 snapshot: Arc::new(state.publish()),
@@ -2384,7 +2384,7 @@ impl TerminalView {
         }
     }
     pub fn with_screen<R>(&self, f: impl FnOnce(&vt100::Screen) -> R) -> R {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "ui-capture"))]
         if let Some(state) = &self.standalone {
             return state.with_screen(f);
         }
@@ -2392,7 +2392,7 @@ impl TerminalView {
         f(&snapshot.visible)
     }
     pub fn render_screen(&self, area: Rect, destination: &mut Buffer) {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "ui-capture"))]
         if let Some(state) = &self.standalone {
             state.render_screen(area, destination);
             return;
@@ -2433,7 +2433,7 @@ impl TerminalView {
             self.admission_error = Some(error);
             return false;
         }
-        #[cfg(test)]
+        #[cfg(any(test, feature = "ui-capture"))]
         if let Some(state) = &mut self.standalone {
             state.resize(rows, cols);
             self.desired_size = (rows, cols);
@@ -2457,7 +2457,7 @@ impl TerminalView {
         true
     }
     pub fn set_scrollback_budget_mib(&mut self, budget: u16) {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "ui-capture"))]
         if let Some(state) = &mut self.standalone {
             state.set_scrollback_budget_mib(budget);
             self.budget_mib = budget;
@@ -2470,7 +2470,7 @@ impl TerminalView {
         self.command(crate::terminal_parsing::PaneCommand::Budget(budget));
     }
     pub fn scroll_up(&mut self, lines: u16) {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "ui-capture"))]
         if let Some(state) = &mut self.standalone {
             state.scroll_up(lines);
             return;
@@ -2478,7 +2478,7 @@ impl TerminalView {
         self.command(crate::terminal_parsing::PaneCommand::ScrollUp(lines));
     }
     pub fn scroll_down(&mut self, lines: u16) {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "ui-capture"))]
         if let Some(state) = &mut self.standalone {
             state.scroll_down(lines);
             return;
@@ -2486,7 +2486,7 @@ impl TerminalView {
         self.command(crate::terminal_parsing::PaneCommand::ScrollDown(lines));
     }
     pub fn scroll_to_bottom(&mut self) {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "ui-capture"))]
         if let Some(state) = &mut self.standalone {
             state.scroll_to_bottom();
             return;
@@ -2494,7 +2494,7 @@ impl TerminalView {
         self.command(crate::terminal_parsing::PaneCommand::Bottom);
     }
     pub(crate) fn jump_to_search_history(&mut self, byte: usize, origin: Arc<()>) {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "ui-capture"))]
         if let Some(state) = &mut self.standalone {
             if state.history_origin_matches(&origin) {
                 state.jump_to_history_byte(byte);
@@ -2507,7 +2507,7 @@ impl TerminalView {
         self.command(crate::terminal_parsing::PaneCommand::HistoryFenced { byte, origin });
     }
     pub fn jump_to_history_byte(&mut self, byte: usize) {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "ui-capture"))]
         if let Some(state) = &mut self.standalone {
             state.jump_to_history_byte(byte);
             return;
@@ -2515,7 +2515,7 @@ impl TerminalView {
         self.command(crate::terminal_parsing::PaneCommand::History(byte));
     }
     pub fn synchronize_visible_text_fingerprint(&mut self) {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "ui-capture"))]
         if let Some(state) = &mut self.standalone {
             state.synchronize_visible_text_fingerprint();
             return;
@@ -2523,21 +2523,21 @@ impl TerminalView {
         self.command(crate::terminal_parsing::PaneCommand::Fingerprint);
     }
     pub fn is_scrolled_back(&self) -> bool {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "ui-capture"))]
         if let Some(state) = &self.standalone {
             return state.is_scrolled_back();
         }
         self.snapshot.scrolled_back
     }
     pub fn scrollback_position(&self) -> usize {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "ui-capture"))]
         if let Some(state) = &self.standalone {
             return state.scrollback_position();
         }
         self.snapshot.scrollback_position
     }
     pub fn scrollback_total(&self) -> usize {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "ui-capture"))]
         if let Some(state) = &self.standalone {
             return state.scrollback_total();
         }
@@ -2547,28 +2547,28 @@ impl TerminalView {
         self.with_screen(|screen| screen.size().0)
     }
     pub fn wants_mouse_protocol(&self) -> bool {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "ui-capture"))]
         if let Some(state) = &self.standalone {
             return state.wants_mouse_protocol();
         }
         self.snapshot.mouse
     }
     pub fn wants_bracketed_paste(&self) -> bool {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "ui-capture"))]
         if let Some(state) = &self.standalone {
             return state.wants_bracketed_paste();
         }
         self.snapshot.paste
     }
     pub(crate) fn search_history_origin(&self) -> Arc<()> {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "ui-capture"))]
         if let Some(state) = &self.standalone {
             return Arc::clone(&state.history_origin);
         }
         Arc::clone(&self.snapshot.history.origin)
     }
     pub(crate) fn search_history_len(&self) -> usize {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "ui-capture"))]
         if let Some(state) = &self.standalone {
             return state.history_retained_len;
         }
@@ -2577,7 +2577,7 @@ impl TerminalView {
     pub(crate) fn try_searchable_history_snapshot(
         &self,
     ) -> Result<TerminalHistorySnapshot, String> {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "ui-capture"))]
         if let Some(state) = &self.standalone {
             return Ok(state.searchable_history_snapshot());
         }
@@ -2591,22 +2591,22 @@ impl TerminalView {
         history._pin_charge = pin;
         Ok(history)
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "ui-capture"))]
     pub fn searchable_history_snapshot(&self) -> TerminalHistorySnapshot {
         self.try_searchable_history_snapshot()
             .expect("test history pin admission")
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "ui-capture"))]
     pub fn searchable_history(&self) -> Vec<u8> {
         self.searchable_history_snapshot().to_vec()
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "ui-capture"))]
     pub fn copyable_history(&self) -> String {
         String::from_utf8_lossy(&strip_ansi_escapes::strip(self.searchable_history())).into_owned()
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "ui-capture"))]
     pub fn osc8_link_at(&self, line: &str, column: usize) -> Option<String> {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "ui-capture"))]
         if let Some(state) = &self.standalone {
             return state.osc8_link_at(line, column);
         }
@@ -2622,31 +2622,33 @@ impl TerminalView {
                     .then(|| target.clone())
             })
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "ui-capture"))]
     pub(crate) fn observe_osc8_for_benchmark(&mut self, bytes: &[u8]) {
         if let Some(state) = &mut self.standalone {
             state.observe_osc8_for_benchmark(bytes);
         }
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "ui-capture"))]
     pub(crate) fn append_history_for_benchmark(&mut self, bytes: &[u8]) {
         if let Some(state) = &mut self.standalone {
             state.append_history_for_benchmark(bytes);
         }
     }
-    #[cfg(test)]
+    /// Feeds raw terminal bytes into the view. Also used by the
+    /// `ui_chrome_capture` example to build synthetic screens.
+    #[cfg(any(test, feature = "ui-capture"))]
     pub fn feed(&mut self, bytes: &[u8]) {
         if let Some(state) = &mut self.standalone {
             state.feed(bytes);
         }
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "ui-capture"))]
     pub fn apply_replay(&mut self, bytes: &[u8], sequence: u64, complete: bool) {
         if let Some(state) = &mut self.standalone {
             state.apply_replay(bytes, sequence, complete);
         }
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "ui-capture"))]
     pub fn apply_live_output(
         &mut self,
         first: u64,
@@ -2657,7 +2659,7 @@ impl TerminalView {
         self.apply_live_output_with_evidence(first, sequence, bytes, track)
             .is_some()
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "ui-capture"))]
     pub(crate) fn apply_live_output_with_evidence(
         &mut self,
         first: u64,
@@ -2670,18 +2672,18 @@ impl TerminalView {
             .and_then(|state| state.apply_live_output_with_evidence(first, sequence, bytes, track))
     }
     pub fn last_output_sequence(&self) -> u64 {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "ui-capture"))]
         if let Some(state) = &self.standalone {
             return state.last_output_sequence;
         }
         self.snapshot.sequence
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "ui-capture"))]
     pub(crate) fn attach_frontend(&mut self, frontend: crate::terminal_parsing::PaneFrontend) {
         self.standalone = None;
         self.frontend = Some(frontend);
     }
-    #[cfg(not(test))]
+    #[cfg(not(any(test, feature = "ui-capture")))]
     pub(crate) fn attach_frontend(&mut self, frontend: crate::terminal_parsing::PaneFrontend) {
         self.frontend = Some(frontend);
     }

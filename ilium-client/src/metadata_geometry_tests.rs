@@ -76,7 +76,7 @@ fn prompt_and_progress_content_changes_do_not_resize_the_terminal() {
             &mut app,
             ServerEvent::PaneProgressChanged {
                 pane_id,
-                progress: Some(progress),
+                progress_monitors: vec![progress],
             },
         );
         assert_eq!(app.pane_viewport(pane_id).unwrap().content_area, before);
@@ -89,7 +89,7 @@ fn prompt_and_progress_content_changes_do_not_resize_the_terminal() {
         &mut app,
         ServerEvent::PaneProgressChanged {
             pane_id,
-            progress: None,
+            progress_monitors: Vec::new(),
         },
     );
     assert_eq!(app.pane_viewport(pane_id).unwrap().content_area, before);
@@ -143,7 +143,7 @@ fn hiding_a_completed_footer_preserves_its_slot_and_result() {
         &mut app,
         ServerEvent::PaneProgressChanged {
             pane_id,
-            progress: Some(progress),
+            progress_monitors: vec![progress],
         },
     );
     app.take_outbound_requests();
@@ -152,7 +152,7 @@ fn hiding_a_completed_footer_preserves_its_slot_and_result() {
     assert!(app.tick_completed_progress_display(61_000));
     assert!(!app.shows_progress_footer(pane_id));
     assert_eq!(app.pane_viewport(pane_id).unwrap(), before);
-    assert!(app.tree.pane_progress(pane_id).is_some());
+    assert!(!app.tree.pane_progress(pane_id).is_empty());
     assert!(app.take_outbound_requests().is_empty());
 }
 

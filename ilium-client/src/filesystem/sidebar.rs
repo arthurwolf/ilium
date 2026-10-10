@@ -301,6 +301,59 @@ impl Drop for SidebarFiles {
 }
 
 #[cfg(test)]
+pub(crate) fn prepared_for_test(
+    tree: &ilium_core::Tree,
+    opened: &HashSet<Vec<NodeId>>,
+) -> Retained<SidebarSnapshot> {
+    let roots = tree
+        .all_ids()
+        .filter_map(|id| match &tree.get(id)?.kind {
+            ilium_core::NodeKind::Folder { path, .. } => {
+                Some((id, path.clone(), crate::tree_ui::tree_path(tree, id)))
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .into_boxed_slice()
+        .into_vec();
+    let mut request = SidebarRead {
+        roots,
+        opened: opened.clone(),
+    };
+    let client = crate::execution::test_client();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let mut receipt = loop {
+        match client.try_submit(ilium_execution::Lane::Io, SidebarRead::COST, request) {
+            Ok(receipt) => break receipt,
+            Err(rejected) => {
+                request = rejected.value;
+                assert!(
+                    Instant::now() < deadline,
+                    "sidebar fixture admission failed: {:?}",
+                    rejected.reason
+                );
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+    };
+    loop {
+        match receipt.try_take() {
+            JobPoll::Ready(outcome) => {
+                return outcome.map(|outcome| match outcome {
+                    JobOutcome::Finished(Ok(snapshot)) => snapshot,
+                    _ => panic!("sidebar fixture preparation failed"),
+                });
+            }
+            JobPoll::Pending => {
+                assert!(Instant::now() < deadline, "sidebar fixture never completed");
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            _ => panic!("sidebar fixture receipt lost"),
+        }
+    }
+}
+
+#[cfg(test)]
 mod capacity_tests {
     use super::*;
 
@@ -403,59 +456,6 @@ impl crate::app::App {
                 ));
                 true
             }
-        }
-    }
-}
-
-#[cfg(test)]
-pub(crate) fn prepared_for_test(
-    tree: &ilium_core::Tree,
-    opened: &HashSet<Vec<NodeId>>,
-) -> Retained<SidebarSnapshot> {
-    let roots = tree
-        .all_ids()
-        .filter_map(|id| match &tree.get(id)?.kind {
-            ilium_core::NodeKind::Folder { path, .. } => {
-                Some((id, path.clone(), crate::tree_ui::tree_path(tree, id)))
-            }
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .into_boxed_slice()
-        .into_vec();
-    let mut request = SidebarRead {
-        roots,
-        opened: opened.clone(),
-    };
-    let client = crate::execution::test_client();
-    let deadline = Instant::now() + Duration::from_secs(20);
-    let mut receipt = loop {
-        match client.try_submit(ilium_execution::Lane::Io, SidebarRead::COST, request) {
-            Ok(receipt) => break receipt,
-            Err(rejected) => {
-                request = rejected.value;
-                assert!(
-                    Instant::now() < deadline,
-                    "sidebar fixture admission failed: {:?}",
-                    rejected.reason
-                );
-                std::thread::sleep(Duration::from_millis(1));
-            }
-        }
-    };
-    loop {
-        match receipt.try_take() {
-            JobPoll::Ready(outcome) => {
-                return outcome.map(|outcome| match outcome {
-                    JobOutcome::Finished(Ok(snapshot)) => snapshot,
-                    _ => panic!("sidebar fixture preparation failed"),
-                });
-            }
-            JobPoll::Pending => {
-                assert!(Instant::now() < deadline, "sidebar fixture never completed");
-                std::thread::sleep(Duration::from_millis(1));
-            }
-            _ => panic!("sidebar fixture receipt lost"),
         }
     }
 }

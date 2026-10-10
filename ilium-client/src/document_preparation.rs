@@ -753,6 +753,29 @@ mod tests {
         let mut replacement = pane("note.rs", &["# New"]);
         assert!(!replacement.install_preparation(prepared, &picker, 40));
     }
+
+    #[test]
+    fn markdown_setting_changes_discard_prepared_results() {
+        let mut preparation = DocumentPreparation::new(crate::execution::test_client());
+        let picker = Picker::halfblocks();
+        let mut editor = pane("settings.md", &["# Heading", "long body text"]);
+        editor.view_mode = crate::editor_pane::EditorViewMode::Rendered;
+
+        preparation
+            .request(NodeId(4), &editor, 80, &picker)
+            .unwrap();
+        let prepared = completion(&mut preparation);
+        editor.heading_rendering = HeadingRendering::PlainText;
+        assert!(!editor.install_preparation(prepared, &picker, 80));
+
+        preparation
+            .request(NodeId(4), &editor, 80, &picker)
+            .unwrap();
+        let prepared = completion(&mut preparation);
+        editor.line_display = LineDisplay::Wrap;
+        assert!(!editor.install_preparation(prepared, &picker, 80));
+    }
+
     #[test]
     fn overload_keeps_source_and_cancellation_releases_pane_slot() {
         let client = crate::execution::test_document_client();

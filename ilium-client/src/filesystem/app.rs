@@ -241,13 +241,15 @@ impl App {
                 self.editor_load_retry_positions.remove(&pane_id);
                 continue;
             };
-            if !self.editor_path_holds.contains_key(&pane_id) {
+            if let std::collections::hash_map::Entry::Vacant(entry) =
+                self.editor_path_holds.entry(pane_id)
+            {
                 let Ok(hold) = crate::execution::process_quota().reserve_external_storage(
                     path.capacity().saturating_mul(4).saturating_add(4096),
                 ) else {
                     continue;
                 };
-                self.editor_path_holds.insert(pane_id, Arc::new(hold));
+                entry.insert(Arc::new(hold));
             }
             if self.panes.contains_key(&pane_id) {
                 self.editor_path_event_holds.remove(&pane_id);
@@ -543,8 +545,10 @@ impl App {
                                 "Stale editor model retained; CPU retirement admission is full"
                                     .into(),
                             );
-                            if !self.panes.contains_key(&target.pane_id) {
-                                self.panes.insert(target.pane_id, PaneRuntime::Editor(pane));
+                            if let std::collections::hash_map::Entry::Vacant(entry) =
+                                self.panes.entry(target.pane_id)
+                            {
+                                entry.insert(PaneRuntime::Editor(pane));
                             }
                         }
                     }
@@ -755,6 +759,54 @@ impl App {
     }
 }
 
+impl App {
+    fn close_explorers(&mut self) {
+        fn close(mode: &mut Mode) {
+            match mode {
+                Mode::Explorer(overlay, _)
+                | Mode::FolderExplorer(overlay, _)
+                | Mode::ProjectFolderExplorer(overlay, _)
+                | Mode::BoardPathPicker(overlay) => overlay.close_preparation(),
+                _ => {}
+            }
+        }
+        close(&mut self.mode);
+        for mode in &mut self.modal_stack {
+            close(mode);
+        }
+        self.explorer_execution = None;
+    }
+    #[cfg(test)]
+    fn explorer_preparation_pending(&self) -> bool {
+        fn pending(mode: &Mode) -> bool {
+            match mode {
+                Mode::Explorer(overlay, _)
+                | Mode::FolderExplorer(overlay, _)
+                | Mode::ProjectFolderExplorer(overlay, _)
+                | Mode::BoardPathPicker(overlay) => overlay.preparation_pending(),
+                _ => false,
+            }
+        }
+        pending(&self.mode) || self.modal_stack.iter().any(pending)
+    }
+    fn collect_explorers(&mut self) -> bool {
+        fn poll_mode(mode: &mut Mode) -> bool {
+            match mode {
+                Mode::Explorer(overlay, _)
+                | Mode::FolderExplorer(overlay, _)
+                | Mode::ProjectFolderExplorer(overlay, _)
+                | Mode::BoardPathPicker(overlay) => overlay.poll(),
+                _ => false,
+            }
+        }
+        let mut changed = poll_mode(&mut self.mode);
+        for mode in &mut self.modal_stack {
+            changed |= poll_mode(mode);
+        }
+        changed
+    }
+}
+
 #[cfg(test)]
 mod shutdown_drain_tests {
     use super::*;
@@ -914,53 +966,5 @@ mod shutdown_drain_tests {
                 .unwrap()
                 .shutdown_complete
         );
-    }
-}
-
-impl App {
-    fn close_explorers(&mut self) {
-        fn close(mode: &mut Mode) {
-            match mode {
-                Mode::Explorer(overlay, _)
-                | Mode::FolderExplorer(overlay, _)
-                | Mode::ProjectFolderExplorer(overlay, _)
-                | Mode::BoardPathPicker(overlay) => overlay.close_preparation(),
-                _ => {}
-            }
-        }
-        close(&mut self.mode);
-        for mode in &mut self.modal_stack {
-            close(mode);
-        }
-        self.explorer_execution = None;
-    }
-    #[cfg(test)]
-    fn explorer_preparation_pending(&self) -> bool {
-        fn pending(mode: &Mode) -> bool {
-            match mode {
-                Mode::Explorer(overlay, _)
-                | Mode::FolderExplorer(overlay, _)
-                | Mode::ProjectFolderExplorer(overlay, _)
-                | Mode::BoardPathPicker(overlay) => overlay.preparation_pending(),
-                _ => false,
-            }
-        }
-        pending(&self.mode) || self.modal_stack.iter().any(pending)
-    }
-    fn collect_explorers(&mut self) -> bool {
-        fn poll_mode(mode: &mut Mode) -> bool {
-            match mode {
-                Mode::Explorer(overlay, _)
-                | Mode::FolderExplorer(overlay, _)
-                | Mode::ProjectFolderExplorer(overlay, _)
-                | Mode::BoardPathPicker(overlay) => overlay.poll(),
-                _ => false,
-            }
-        }
-        let mut changed = poll_mode(&mut self.mode);
-        for mode in &mut self.modal_stack {
-            changed |= poll_mode(mode);
-        }
-        changed
     }
 }

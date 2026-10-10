@@ -232,6 +232,7 @@ impl Default for VoicePreparation {
     }
 }
 impl VoicePreparation {
+    #[cfg(test)]
     pub fn new(client: Client) -> Self {
         let mut owner = Self::default();
         owner.configure(client);
@@ -242,8 +243,10 @@ impl VoicePreparation {
         self.client = Some(client.with_completion_wake(move || wake.notify_one()));
     }
     pub fn new_with_notification(client: Client, notification: Arc<Notify>) -> Self {
-        let mut owner = Self::default();
-        owner.notification = notification;
+        let mut owner = Self {
+            notification,
+            ..Self::default()
+        };
         owner.configure(client);
         owner
     }

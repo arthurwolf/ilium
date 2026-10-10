@@ -925,11 +925,10 @@ pub fn hit_with_button(
         if virtual_line != span.control_line || virtual_x < span.control_x {
             return None;
         }
-        if virtual_x == span.control_x {
-            -1
-        } else if is_choice
-            && button == crate::value_control::PointerButton::Right
-            && virtual_x > span.control_x
+        if virtual_x == span.control_x
+            || (is_choice
+                && button == crate::value_control::PointerButton::Right
+                && virtual_x > span.control_x)
         {
             -1
         } else {

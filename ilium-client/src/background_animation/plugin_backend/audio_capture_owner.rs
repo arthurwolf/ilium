@@ -306,8 +306,8 @@ impl AudioOwner {
                 "Original audio activation missing".into(),
             )
         })?;
-        let (monotonic_ms, captured_at_epoch_ms) = audio_clock()
-            .map_err(|error| ilium_animation_js::error::AnimationError::Runtime(error))?;
+        let (monotonic_ms, captured_at_epoch_ms) =
+            audio_clock().map_err(ilium_animation_js::error::AnimationError::Runtime)?;
         match service.poll(
             monotonic_ms,
             captured_at_epoch_ms,

@@ -749,14 +749,15 @@ impl SelectionOwner {
 /// Recoverable deadline custody; a timeout is not a delivery or join receipt.
 /// The error can be downcast and retained while the original CPU receipt settles.
 pub struct SelectionShutdownCustody {
-    custody: std::sync::Mutex<(
-        SelectionOwner,
-        VecDeque<SelectionCompletion>,
-        Option<SmartCopyPreview>,
-        VecDeque<RestoredSelection>,
-        Option<SmartCopySession>,
-    )>,
+    custody: std::sync::Mutex<ShutdownCustodyState>,
 }
+type ShutdownCustodyState = (
+    SelectionOwner,
+    VecDeque<SelectionCompletion>,
+    Option<SmartCopyPreview>,
+    VecDeque<RestoredSelection>,
+    Option<SmartCopySession>,
+);
 impl SelectionShutdownCustody {
     pub(crate) fn new(
         owner: SelectionOwner,

@@ -8,8 +8,10 @@ use std::time::{Duration, Instant};
 
 #[test]
 fn configuration_command_normalizes_spare_capacity_before_retention() {
-    let mut value = crate::config::GitSettings::default();
-    value.setup_command = String::with_capacity(2 * 1024 * 1024);
+    let mut value = crate::config::GitSettings {
+        setup_command: String::with_capacity(2 * 1024 * 1024),
+        ..Default::default()
+    };
     value.setup_command.push_str("true");
     let normalized = ConfigurationChange::Git(value).normalize().unwrap();
     let ConfigurationChange::Git(value) = &normalized else {
@@ -340,6 +342,69 @@ fn integration_append_is_nonblocking_ordered_and_acknowledges_readback() {
         1
     );
     assert_eq!(files.pending(), 0);
+}
+
+#[test]
+fn chatroom_fingerprint_is_returned_by_ordered_io_job() {
+    use super::integrations::{IntegrationFiles, IntegrationIntent, RoomTarget};
+
+    let directory = tempfile::tempdir().unwrap();
+    crate::chatroom::initialize(directory.path()).unwrap();
+    let room = RoomTarget {
+        id: ilium_core::NodeId(43),
+        path: directory.path().to_path_buf(),
+    };
+    let mut files = IntegrationFiles::new(
+        crate::execution::test_client(),
+        Arc::new(tokio::sync::Notify::new()),
+    );
+
+    files
+        .enqueue(IntegrationIntent::CheckRoom(room.clone()))
+        .unwrap();
+    let first = collect_room_check(&mut files);
+    let expected_first = std::fs::metadata(crate::chatroom::path_for_project(&room.path)).unwrap();
+    assert_eq!(first.0, room.id);
+    assert_eq!(first.1, expected_first.len());
+
+    crate::chatroom::append_message(directory.path(), "external", "second message").unwrap();
+    files
+        .enqueue(IntegrationIntent::CheckRoom(room.clone()))
+        .unwrap();
+    let second = collect_room_check(&mut files);
+    assert_eq!(second.0, room.id);
+    assert!(
+        second.1 > first.1,
+        "changed room must have a new fingerprint"
+    );
+    assert_eq!(files.pending(), 0);
+}
+
+fn collect_room_check(
+    files: &mut super::integrations::IntegrationFiles,
+) -> (ilium_core::NodeId, u64) {
+    use super::integrations::IntegrationIntent;
+    use super::ordered::WriteCompletion;
+    use ilium_execution::JobOutcome;
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if let Some((intent, completion)) = files.poll() {
+            assert!(matches!(intent, IntegrationIntent::CheckRoom(_)));
+            let WriteCompletion::Outcome { outcome, .. } = completion else {
+                panic!("room check receipt was lost");
+            };
+            let JobOutcome::Finished(Ok(result)) = outcome.view() else {
+                panic!("room check failed");
+            };
+            let room = result.rooms.first().expect("room result");
+            assert!(room.result.as_ref().unwrap().0);
+            let (_, length) = room.stamp.expect("room stamp");
+            return (room.room.id, length);
+        }
+        assert!(Instant::now() < deadline, "room check did not finish");
+        std::thread::sleep(Duration::from_millis(1));
+    }
 }
 
 #[test]

@@ -916,7 +916,7 @@ mod tests {
             }
         }
 
-        assert_eq!(binding_count, 28, "all numeric settings rows must be bound");
+        assert_eq!(binding_count, 26, "all numeric settings rows must be bound");
     }
 
     #[test]

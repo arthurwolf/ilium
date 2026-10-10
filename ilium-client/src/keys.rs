@@ -1664,7 +1664,6 @@ fn handle_text_trigger_dialog_event(
                     state.save_error = Some(error.clone());
                 }
                 app.status_message = Some(error);
-                return;
             }
             // The exact durable receipt closes this dialog. Input remains
             // editable while saving; a later edit fences the dismissal.

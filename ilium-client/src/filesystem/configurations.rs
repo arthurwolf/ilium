@@ -74,6 +74,7 @@ pub(crate) enum ConfigurationIntent {
         location_storage: Option<Arc<ilium_execution::StorageAdmission>>,
     },
     Separators,
+    ProjectName,
 }
 pub struct ConfigurationFiles {
     writer: OrderedWriter<ConfigurationWrite>,

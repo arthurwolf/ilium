@@ -138,12 +138,13 @@ impl PasteReplay {
         keys
     }
 
+    #[cfg(test)]
     pub(crate) fn consumed_bytes(&self) -> usize {
         self.cursor.consumed_bytes
     }
 
     pub(crate) fn is_complete(&self) -> bool {
-        let crossterm::event::Event::Paste(text) = self.original.view() else {
+        let crossterm::event::Event::Paste(_) = self.original.view() else {
             unreachable!("PasteReplay retains its original Paste event")
         };
         self.cursor.consumed_bytes == self.replay_end_bytes

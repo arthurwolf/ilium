@@ -135,7 +135,9 @@ impl ValueControl {
         let geometry = &mut prepared.geometry;
         geometry.label = Rect::new(row.x, row.y, label_width, 1);
         prepared.label_text = clip_cells(spec.label, label_width);
-        if control_width < 2 * step_width + 2 {
+        let number_needs_compact_layout =
+            spec.kind == ControlKind::Number && control_width < 2 * step_width + 4;
+        if control_width < 2 * step_width + 2 || number_needs_compact_layout {
             geometry.open = Rect::new(control_x + control_width - 1, row.y, 1, 1);
             geometry.value_slot = Rect::new(control_x, row.y, control_width - 1, 1);
         } else {
@@ -348,6 +350,8 @@ impl ValueControl {
 pub const LEADER_GLYPH: &str = "…";
 /// Shortest interior run (in cells) that receives leader dots.
 pub const LEADER_MIN_WIDTH: u16 = 3;
+/// Dark grey for leader dots: close to the background, still visible.
+const LEADER_COLOR: Color = Color::Rgb(0x4a, 0x4a, 0x4a);
 /// Leader for text-built rows (`Label ……… ‹ value ›`): `width` cells with one
 /// blank cell at each end and grey dots between. Same rule as `ValueControl`:
 /// runs below the minimum stay blank.
@@ -357,12 +361,12 @@ pub fn leader_span(width: usize) -> Span<'static> {
     }
     Span::styled(
         format!(" {} ", LEADER_GLYPH.repeat(width - 2)),
-        Style::new().fg(Color::DarkGray),
+        Style::new().fg(LEADER_COLOR),
     )
 }
 /// Grey dots that keep the row background of the cells they sit on.
 fn leader_style(styles: ControlStyles) -> Style {
-    let mut style = Style::new().fg(Color::DarkGray);
+    let mut style = Style::new().fg(LEADER_COLOR);
     if let Some(background) = styles.background.bg.or(styles.label.bg).or(styles.value.bg) {
         style = style.bg(background);
     }
@@ -457,13 +461,13 @@ mod tests {
     }
 
     #[test]
-    fn five_cells_keep_direct_entry_visible_when_wide_steppers_do_not_fit() {
+    fn five_cells_keep_all_numeric_controls_visible() {
         let control = ValueControl::new(Rect::new(0, 0, 5, 1), spec(ControlKind::Number, "7"));
         let geometry = control.geometry();
-        assert_eq!(geometry.previous.width, 0);
-        assert_eq!(geometry.value_slot, Rect::new(0, 0, 4, 1));
+        assert_eq!(geometry.previous, Rect::new(0, 0, 1, 1));
+        assert_eq!(geometry.value_slot, Rect::new(1, 0, 2, 1));
         assert_eq!(geometry.value, Rect::new(1, 0, 1, 1));
-        assert_eq!(geometry.next.width, 0);
+        assert_eq!(geometry.next, Rect::new(3, 0, 1, 1));
         assert_eq!(geometry.open, Rect::new(4, 0, 1, 1));
 
         let mut terminal = Terminal::new(TestBackend::new(5, 1)).unwrap();
@@ -471,16 +475,23 @@ mod tests {
             .draw(|frame| control.render(frame, ControlStyles::default()))
             .unwrap();
         let buffer = terminal.backend().buffer();
-        assert_eq!(buffer[(0, 0)].symbol(), " ");
+        assert_eq!(buffer[(0, 0)].symbol(), NUMBER_DECREMENT_GLYPH);
         assert_eq!(buffer[(1, 0)].symbol(), "7");
+        assert_eq!(buffer[(3, 0)].symbol(), NUMBER_INCREMENT_GLYPH);
         assert_eq!(buffer[(4, 0)].symbol(), "*");
 
-        assert_eq!(control.hit(Position::new(0, 0), PointerButton::Left), None);
+        assert_eq!(
+            control.hit(Position::new(0, 0), PointerButton::Left),
+            Some(ControlAction::Decrement)
+        );
         assert_eq!(
             control.hit(Position::new(1, 0), PointerButton::Left),
             Some(ControlAction::EditNumber)
         );
-        assert_eq!(control.hit(Position::new(3, 0), PointerButton::Left), None);
+        assert_eq!(
+            control.hit(Position::new(3, 0), PointerButton::Left),
+            Some(ControlAction::Increment)
+        );
         assert_eq!(
             control.hit(Position::new(4, 0), PointerButton::Left),
             Some(ControlAction::EditNumber)

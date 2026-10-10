@@ -175,8 +175,24 @@ pub(super) async fn shutdown_with(
             ))),
             Some(Ok(report)) => {
                 let cpu = &report.health.lanes[0];
+                let lanes = report
+                    .health
+                    .lanes
+                    .iter()
+                    .enumerate()
+                    .map(|(index, lane)| {
+                        format!(
+                            "lane {index}: waiting_or_reserved {}, enqueued {}, service_claims {}, running {}",
+                            lane.waiting_or_reserved,
+                            lane.enqueued,
+                            lane.retained_service_claims,
+                            lane.running
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("; ");
                 Some(io::Error::other(format!(
-                    "execution shutdown incomplete: {} retirement originals live, {} in recovery custody; admitted work remains",
+                    "execution shutdown incomplete: {} retirement originals live, {} in recovery custody; admitted work remains ({lanes})",
                     cpu.retirement_live, cpu.retirement_recovery_pending
                 )))
             }

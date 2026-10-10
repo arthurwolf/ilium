@@ -2318,9 +2318,20 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
         }
         if panel.contains(position) && matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
         {
-            let index = usize::from(position.y.saturating_sub(panel.y + 1)) / 3
-                + crate::instruction_settings::first_visible(state.tab, panel, state.selected_row);
-            if position.y > panel.y {
+            if let Some(selection) =
+                crate::instruction_settings::scrollbar_selection_at(state.tab, panel, position)
+            {
+                state.selected_row = selection;
+                app.mode = Mode::Settings(state);
+                return;
+            }
+            if position.y >= panel.y.saturating_add(2) {
+                let index = usize::from(position.y.saturating_sub(panel.y + 2)) / 3
+                    + crate::instruction_settings::first_visible(
+                        state.tab,
+                        panel,
+                        state.selected_row,
+                    );
                 if let Some(field) = crate::instruction_settings::fields(state.tab)
                     .get(index)
                     .copied()
@@ -6481,7 +6492,7 @@ mod agent_monitoring_icon_control_tests {
         app.ui_settings.agent_tree_model_icons = false;
         let screen = Rect::new(0, 0, 160, 80);
         app.set_screen_area(screen);
-        let mut state = SettingsState {
+        let state = SettingsState {
             tab: SettingsTab::AgentMonitoring,
             ..SettingsState::default()
         };

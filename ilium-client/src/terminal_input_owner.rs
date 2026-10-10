@@ -98,6 +98,13 @@ pub fn input_storage_bytes() -> usize {
         + 2 * size_of::<usize>()
 }
 
+type InputProbeRequest = (oneshot::Sender<io::Result<Option<Picker>>>, Arc<AtomicBool>);
+type NativeInputStart = (
+    InputOwner,
+    InputReceiver,
+    oneshot::Receiver<io::Result<Option<Picker>>>,
+);
+
 #[derive(Debug, thiserror::Error)]
 pub enum InputStartError {
     #[error("another terminal input session is active or still retiring")]
@@ -580,14 +587,7 @@ impl InputReservation {
     pub(crate) fn start_with_image_probe(
         self,
         keyboard_enhancement_pushed: Arc<AtomicBool>,
-    ) -> Result<
-        (
-            InputOwner,
-            InputReceiver,
-            oneshot::Receiver<io::Result<Option<Picker>>>,
-        ),
-        InputStartError,
-    > {
+    ) -> Result<NativeInputStart, InputStartError> {
         let (probe_sender, probe_receiver) = oneshot::channel();
         let factory = InputReaderFactory::Native(Arc::clone(&self.claim));
         let (owner, receiver) = self.start_with_reader_and_probe(
@@ -608,7 +608,7 @@ impl InputReservation {
     fn start_with_reader_and_probe(
         self,
         factory: InputReaderFactory,
-        probe_sender: Option<(oneshot::Sender<io::Result<Option<Picker>>>, Arc<AtomicBool>)>,
+        probe_sender: Option<InputProbeRequest>,
     ) -> Result<(InputOwner, InputReceiver), InputStartError> {
         let mut events = VecDeque::new();
         events
@@ -775,7 +775,7 @@ impl RootNativeStorage {
             .mandatory_bytes
             .checked_add(retained_bytes)
             .and_then(|value| value.checked_add(bytes));
-        if !required.is_some_and(|required| required <= self.quota.snapshot().limits.worker_bytes) {
+        if required.is_none_or(|required| required > self.quota.snapshot().limits.worker_bytes) {
             // This immutable cost proof does not acquire or speculate about
             // another owner's credit. No new backing or debit is created.
             *self
@@ -1297,7 +1297,7 @@ fn enqueue_leased_original(
                 }
                 Err(RejectReason::Busy)
                     if !shared.stop.is_stopped()
-                        && !deadline.is_some_and(|when| Instant::now() >= when) =>
+                        && deadline.is_none_or(|when| Instant::now() < when) =>
                 {
                     // This same allocation remains in custody; no subsequent
                     // native input read can overtake it.

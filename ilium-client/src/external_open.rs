@@ -47,11 +47,14 @@ struct OpenJob {
     pending: Retained<Pending>,
 }
 
+#[cfg(test)]
+type OpenFixture = Arc<dyn Fn(&OpenTarget) -> io::Result<()> + Send + Sync>;
+
 #[derive(Clone)]
 enum OpenHandle {
     Platform(ExternalOpenHandle),
     #[cfg(test)]
-    Fixture(Arc<dyn Fn(&OpenTarget) -> io::Result<()> + Send + Sync>),
+    Fixture(OpenFixture),
 }
 
 impl OpenHandle {

@@ -1317,6 +1317,10 @@ mod tests {
                     directory.path().into(),
                 );
                 app.config_dir = Some(directory.path().into());
+                if field == SettingsChoice::LeftPanelSizingMode {
+                    app.ui_settings.left_panel_sizing.mode =
+                        crate::config::LeftPanelSizingMode::Fixed;
+                }
                 app.set_screen_area(Rect::new(0, 0, width, 80));
                 app.mode = Mode::Settings(SettingsState {
                     tab,
@@ -1551,6 +1555,7 @@ mod tests {
                 .len(),
             1,
             1,
+            1,
             crate::icon_settings::TASK_PROGRESS_STYLE_NAMES.len(),
             crate::config::GitDefaultWhere::ALL.len(),
             crate::config::GitDefaultBase::ALL.len(),
@@ -1575,7 +1580,7 @@ mod tests {
             assert_eq!(options.len(), expected, "{field:?}");
             assert!(options
                 .iter()
-                .all(|option| option.disabled_reason.is_none()));
+                .all(|option| { option.disabled_reason.is_none() || option.id == selected }));
             assert_eq!(
                 options
                     .iter()

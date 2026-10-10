@@ -1955,6 +1955,18 @@ impl WikipediaRenderer {
         self.work.packed_viewports = self.work.packed_viewports.saturating_add(1);
         Ok(&self.cells)
     }
+
+    /// Keep a last-good layout visible while a replacement layout is admitted.
+    /// A resized viewport may ask for more cells than this older frame owns, so
+    /// clip only this retained view instead of clearing it as an invalid render.
+    pub fn render_retained(&mut self, rows: u16, offset_rows: f64) -> Result<&[RenderCell]> {
+        let row_limit = if self.columns == 0 {
+            0
+        } else {
+            (MAX_CELLS / usize::from(self.columns)).min(usize::from(MAX_ROWS)) as u16
+        };
+        self.render(rows.min(row_limit), offset_rows)
+    }
     fn paint_view(&mut self, top: u32) -> Result<()> {
         const BITS: [[u8; 2]; 4] = [[1, 8], [2, 16], [4, 32], [64, 128]];
         let width = usize::from(self.columns);

@@ -1545,7 +1545,7 @@ pub(crate) fn restore_top_level_json_value_text(
         (Some(member), Some(raw)) => {
             replace_range(text, member.value_start..member.value_end, raw)?
         }
-        (None, Some(raw)) => {
+        (None, Some(_)) => {
             let value = replacement_value
                 .as_ref()
                 .expect("parsed replacement exists");

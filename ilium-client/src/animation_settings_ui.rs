@@ -33,6 +33,9 @@ use unicode_width::UnicodeWidthStr;
 pub const PANEL_WIDTH: u16 = 112;
 /// Rows above each list: the column heading.
 const HEADER_ROWS: u16 = 1;
+/// Rows of the selected animation's two-sentence introduction, between the
+/// controls heading and the controls list. Longer text is clipped on narrow panels.
+const INTRODUCTION_ROWS: u16 = 4;
 /// Default rows below the lists: two help lines, the status line and key hint.
 const FOOTER_ROWS: u16 = 4;
 /// Maximum live preparation-log rows that may displace the settings list.
@@ -104,6 +107,8 @@ pub struct AnimationLayout {
     pub global_heading: Rect,
     pub global: Rect,
     pub controls_heading: Rect,
+    /// The selected animation's introduction, above the controls list.
+    pub controls_intro: Rect,
     pub controls_rows: Rect,
 }
 
@@ -162,6 +167,7 @@ pub fn layout_with_footer(area: Rect, footer: u16) -> AnimationLayout {
     let list_width = left.saturating_sub(2);
     let controls_x = area.x + left + gap;
     let controls_width = width.saturating_sub(left + gap);
+    let intro_rows = INTRODUCTION_ROWS.min(available.saturating_sub(HEADER_ROWS));
     let scene_y = area.y + HEADER_ROWS;
     let nav_y = scene_y + scene_rows;
     let global_heading_y = nav_y + NAV_ROWS;
@@ -190,11 +196,17 @@ pub fn layout_with_footer(area: Rect, footer: u16) -> AnimationLayout {
             controls_width.saturating_sub(1),
             1.min(available),
         ),
-        controls_rows: Rect::new(
+        controls_intro: Rect::new(
             controls_x,
             area.y + HEADER_ROWS,
             controls_width.saturating_sub(1),
-            available.saturating_sub(HEADER_ROWS),
+            intro_rows,
+        ),
+        controls_rows: Rect::new(
+            controls_x,
+            area.y + HEADER_ROWS + intro_rows,
+            controls_width.saturating_sub(1),
+            available.saturating_sub(HEADER_ROWS + intro_rows),
         ),
     }
 }
@@ -272,6 +284,26 @@ fn saved_scene_activity_sections(report: &str) -> (String, String) {
         .join("\n"),
         activity.join("\n"),
     )
+}
+
+fn compact_saved_scene_status(summary: &str, width: usize) -> Option<String> {
+    let progress = summary
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix("Scene Status:")
+                .or_else(|| line.strip_prefix("Scene status:"))
+        })?
+        .trim()
+        .replace("Saved worlds ", "Saved ")
+        .replace(" phase ", " ");
+    let route_eta = summary.lines().find_map(|line| {
+        line.split_once("Route ETA:")
+            .map(|(_, value)| value.split(';').next().unwrap_or(value).trim())
+    });
+    let status = route_eta.map_or(progress.clone(), |eta| {
+        format!("{progress} · Route ETA: {eta}")
+    });
+    Some(fit(&status, width))
 }
 
 fn wrapped_rows(text: &str, width: u16) -> u16 {
@@ -382,7 +414,7 @@ fn footer_rows(area: Rect, model: &RowModel) -> u16 {
     let requested = summary_rows + activity_rows + PINNED_CONTROL_HELP_ROWS + 2 + credits;
     // PageUp/PageDown makes the bounded live-log viewport fully navigable;
     // on short terminals the settings regions take priority over its footer.
-    requested.min(maximum_footer)
+    requested.min(maximum_footer.max(u16::from(area.height > HEADER_ROWS + 2)))
 }
 
 fn geometry(area: Rect, model: &RowModel) -> AnimationLayout {
@@ -1288,6 +1320,14 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
             layout.controls_heading,
         );
     }
+    if layout.controls_intro.height > 0 {
+        frame.render_widget(
+            Paragraph::new(app.animation_settings.kind.introduction())
+                .style(ink)
+                .wrap(Wrap { trim: true }),
+            layout.controls_intro,
+        );
+    }
     for region in [Region::Global, Region::Controls] {
         draw_section_headings(frame, area, &model, region, scrolls.get(region), ink);
     }
@@ -1368,6 +1408,13 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
     let detail_rows = footer_height.saturating_sub(2 + credits);
     let status_y = footer_top + detail_rows;
     let activity_visible = live_activity.is_some();
+    let compact_activity_status = if detail_rows == 0 {
+        activity_sections
+            .as_ref()
+            .and_then(|(summary, _)| compact_saved_scene_status(summary, usize::from(panel.width)))
+    } else {
+        None
+    };
     if live_activity.is_some() {
         if state.animation_detail_show_help {
             let help = Paragraph::new(control_help.as_str())
@@ -1427,15 +1474,17 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
         );
     }
     let semantic_error = app.semantic_animation_error();
+    let generic_saved_status = "Saved automatically for this project.";
+    let status_message = app
+        .status_message
+        .as_deref()
+        .filter(|message| *message != generic_saved_status)
+        .or(semantic_error.as_deref())
+        .or(compact_activity_status.as_deref())
+        .or(app.status_message.as_deref())
+        .unwrap_or(generic_saved_status);
     frame.render_widget(
-        Paragraph::new(fit(
-            app.status_message
-                .as_deref()
-                .or(semantic_error.as_deref())
-                .unwrap_or("Saved automatically for this project."),
-            usize::from(panel.width),
-        ))
-        .style(ink),
+        Paragraph::new(fit(status_message, usize::from(panel.width))).style(ink),
         Rect::new(panel.x, status_y, panel.width, 1),
     );
     let instructions = if activity_visible {
@@ -2168,11 +2217,19 @@ mod tests {
                 app.animation_settings.ambient.openstreetmap.place, next_place,
                 "left-click advances the OSM city selector at width {width}"
             );
+            let previous = {
+                let model = app.animation_row_model();
+                let row = row_index(&app, &AnimationRow::SceneControl("place"));
+                value_control(content_area(&app), &model, row, Scrolls::default())
+                    .expect("OSM place selector remains rendered after changing cities")
+                    .geometry()
+                    .value
+            };
             pointer(
                 &mut app,
                 MouseEventKind::Down(MouseButton::Right),
-                value.x,
-                value.y,
+                previous.x,
+                previous.y,
             );
             assert_eq!(
                 app.animation_settings.ambient.openstreetmap.place, current_place,
@@ -2771,10 +2828,17 @@ mod tests {
             12,
             "Saved worlds [====......] phase 3/6\nNow: Reading map chunks\nElapsed: 00:42\nETA: about 00:24 for this measured scan\nTotal ETA: incomplete; route checks remain\nRoute ETA: about 00:12; based on 1 completed candidate\nRecent activity:\n+00:19 Loaded 64 chunks",
         );
+        assert!(
+            app.animation_row_context()
+                .scene_status
+                .as_deref()
+                .is_some_and(|status| status.starts_with("Saved worlds [====......] phase 3/6")),
+            "the active animation preview must publish the preparation status before drawing"
+        );
 
         let rendered = screen_text(&draw(&mut app, 80, 12)).join("\n");
         assert!(
-            rendered.contains("Saved worlds [====......] phase 3/6"),
+            rendered.contains("Saved [====......] 3/6"),
             "the preparation progress bar should remain visible on a short terminal: {rendered}"
         );
         assert!(
@@ -2926,6 +2990,10 @@ mod tests {
         status: &str,
     ) {
         app.animation_settings.kind = AnimationKind::VoxelLandscape;
+        // Opening Settings -> Animations actively previews the selected scene
+        // even when its background toggle is off. Model that preview in this
+        // fixture so the status row receives the hosted scene's live report.
+        app.animation_settings.enabled = true;
         *probe.status.lock().unwrap() = Some(status.to_owned());
         app.animation_frame.render(
             &app.animation_settings,

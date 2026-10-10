@@ -3006,10 +3006,12 @@ fn inference_warning_lines(
     if settings.selected_provider == ilium_inference::InferenceProviderKind::KiloGateway {
         let width = content_width.max(3);
         let inner_width = width.saturating_sub(2);
-        let wrapped = wrapped_setting_description(
-            "Kilo Gateway is useful to try things out. Do not send secrets: requests may be used for LLM training.",
-            inner_width,
-        );
+        let message = if width < 32 {
+            "Kilo Gateway: Do not send secrets. Requests may be used for LLM training."
+        } else {
+            "Kilo Gateway is useful to try things out. Do not send secrets: requests may be used for LLM training."
+        };
+        let wrapped = wrapped_setting_description(message, inner_width);
         let border = theme::border_style(false);
         let preferred_title = if width >= 24 {
             " ⚠ Privacy notice "
@@ -6472,6 +6474,7 @@ mod number_control_tests {
         // the neighboring test covers an empty/single discovered catalog.
         app.ollama_models = vec!["synthetic-model-a".into(), "synthetic-model-b".into()];
         app.openai_models = vec!["synthetic-model-a".into(), "synthetic-model-b".into()];
+        app.anthropic_models = vec!["synthetic-model-a".into(), "synthetic-model-b".into()];
         app.voice_input_devices = vec!["Test microphone".into()];
         app.voice_output_devices = vec!["Test speaker".into()];
         app.sound_discovery.sounds = vec![ilium_sound::SystemSound {
@@ -6576,6 +6579,7 @@ mod number_control_tests {
         let mut app = App::new("compact-choice-chrome".into(), directory.path().into());
         app.ollama_models = vec!["synthetic-model-a".into(), "synthetic-model-b".into()];
         app.openai_models = vec!["synthetic-model-a".into(), "synthetic-model-b".into()];
+        app.anthropic_models = vec!["synthetic-model-a".into(), "synthetic-model-b".into()];
         app.voice_input_devices = vec!["Test microphone".into()];
         app.voice_output_devices = vec!["Test speaker".into()];
         app.sound_discovery.sounds = vec![ilium_sound::SystemSound {
@@ -8062,9 +8066,10 @@ mod tests {
         for width in [60, 160] {
             let area = Rect::new(0, 0, width, 90);
             let view = agent_monitoring_view(&app, 0, area.width);
-            assert!(view.lines.iter().any(|line| line
-                .to_string()
-                .contains("Normal mode: two status positions")));
+            assert!(view.lines.iter().any(|line| {
+                line.to_string()
+                    .contains("Normal mode: two status positions")
+            }));
             assert!(view
                 .lines
                 .iter()
@@ -9411,11 +9416,16 @@ mod tests {
         let mut settings = ilium_inference::InferenceSettings::default();
         settings.selected_provider = ilium_inference::InferenceProviderKind::KiloGateway;
         let expected = "Kilo Gateway is useful to try things out. Do not send secrets: requests may be used for LLM training.";
-        let expected: String = expected
-            .chars()
-            .filter(|character| !character.is_whitespace())
-            .collect();
         for width in [10, 14, 22, 40, 80] {
+            let expected = if width < 32 {
+                "Kilo Gateway: Do not send secrets. Requests may be used for LLM training."
+            } else {
+                expected
+            };
+            let expected: String = expected
+                .chars()
+                .filter(|character| !character.is_whitespace())
+                .collect();
             let warning = inference_warning_lines(&settings, width);
             assert!(
                 warning
@@ -9425,10 +9435,15 @@ mod tests {
             );
             let rendered = warning
                 .iter()
-                .map(ToString::to_string)
+                .flat_map(|line| {
+                    line.spans
+                        .iter()
+                        .filter(|span| span.content.as_ref() != "│")
+                        .map(|span| span.content.as_ref())
+                })
                 .collect::<String>()
                 .chars()
-                .filter(|character| !character.is_whitespace())
+                .filter(|character| !character.is_whitespace() && *character != '│')
                 .collect::<String>();
             assert!(
                 rendered.contains(&expected),
@@ -9458,20 +9473,27 @@ mod tests {
         let warning_frame_end =
             warning_frame_start + inference_warning_line_count(&settings, 40) - 2;
         assert!(lines[warning_frame_end].to_string().starts_with('╰'));
-        let warning = lines[warning_start..]
+        let warning = inference_warning_lines(&settings, 40);
+        let rendered_warning = lines[warning_start..warning_start + warning.len()]
             .iter()
-            .take_while(|line| line.width() > 0)
-            .collect::<Vec<_>>();
+            .flat_map(|line| {
+                line.spans
+                    .iter()
+                    .filter(|span| span.content.as_ref() != "│")
+                    .map(|span| span.content.as_ref())
+            })
+            .collect::<String>();
         assert!(warning.iter().all(|line| line.width() <= 40));
-        let rendered = warning
-            .iter()
-            .map(|line| line.to_string())
-            .collect::<String>()
+        let rendered = rendered_warning
+            .chars()
+            .filter(|character| !character.is_whitespace())
+            .collect::<String>();
+        let expected_composed = expected
             .chars()
             .filter(|character| !character.is_whitespace())
             .collect::<String>();
         assert!(
-            rendered.contains(&expected),
+            rendered.contains(&expected_composed),
             "privacy warning text must remain complete"
         );
 
@@ -9485,6 +9507,15 @@ mod tests {
         for (width, height) in [(120, 40), (80, 24), (60, 20), (40, 12)] {
             let screen = Rect::new(0, 0, width, height);
             let layout = compute_layout_for_mode(screen, &app, &state);
+            let expected = if layout.content_area.width.saturating_sub(1) < 32 {
+                "Kilo Gateway: Do not send secrets. Requests may be used for LLM training."
+            } else {
+                "Kilo Gateway is useful to try things out. Do not send secrets: requests may be used for LLM training."
+            };
+            let expected: String = expected
+                .chars()
+                .filter(|character| !character.is_whitespace())
+                .collect();
             let mut terminal =
                 Terminal::new(TestBackend::new(screen.width, screen.height)).unwrap();
             terminal
@@ -9514,11 +9545,11 @@ mod tests {
                 })
                 .collect::<String>()
                 .chars()
-                .filter(|character| !character.is_whitespace())
+                .filter(|character| !character.is_whitespace() && *character != '│')
                 .collect::<String>();
             assert!(
                 rendered.contains(&expected),
-                "visible privacy panel must retain the full warning at {width}x{height}"
+                "visible privacy panel at {width}x{height} expected {expected:?}, rendered {rendered:?}"
             );
             crate::ui_capture::save(
                 &format!("kilo-gateway-privacy-panel-{width}x{height}"),

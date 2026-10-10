@@ -268,6 +268,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         )?;
         let (mut compose, mut display, mut buffer_setup, mut pipeline) =
             (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        let mut worker_completion = Vec::with_capacity(frames as usize - 1);
         for n in 0..frames {
             let elapsed = Duration::from_nanos(u64::from(n) * 1_000_000_000 / 30);
             let preparation = Instant::now();
@@ -282,10 +283,14 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 std::thread::sleep(Duration::from_millis(1));
             }
+            let completion_us = preparation.elapsed().as_secs_f64() * 1e6;
             println!(
                 "{}",
-                serde_json::json!({"type":"result","stage":"worker_completion","scene":kind,"frame":n,"us":preparation.elapsed().as_secs_f64()*1e6,"scope":"request to collected worker result; 1ms harness polling"})
+                serde_json::json!({"type":"result","stage":"worker_completion","scene":kind,"frame":n,"us":completion_us,"scope":"request to collected worker result; 1ms harness polling"})
             );
+            if n > 0 {
+                worker_completion.push(completion_us);
+            }
             let pipeline_start = Instant::now();
             let mut buffer = if foreground == "empty" {
                 Buffer::empty(area)
@@ -324,6 +329,15 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             buffer_setup.push(setup.as_secs_f64() * 1e6);
             std::hint::black_box(terminal.backend());
         }
+        summarize(
+            "worker_completion",
+            kind,
+            width,
+            height,
+            density,
+            worker_completion,
+            serde_json::json!({"scope":"request to collected worker result; 1ms harness polling; excludes PTY, terminal emulator, CPU/RSS"}),
+        );
         summarize(
             "ready_pipeline_total",
             kind,

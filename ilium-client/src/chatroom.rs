@@ -80,6 +80,7 @@ pub fn initialize(project_root: &Path) -> anyhow::Result<()> {
         ensure_gitignore(project_root)?;
         ensure_codex_hooks(project_root)?;
         ensure_claude_hooks(project_root)?;
+        crate::progress_guard::ensure_installed(project_root)?;
         Ok(())
     })
 }
@@ -95,6 +96,7 @@ pub fn ensure_integrations(project_root: &Path) -> anyhow::Result<bool> {
         ensure_gitignore(project_root)?;
         ensure_codex_hooks(project_root)?;
         ensure_claude_hooks(project_root)?;
+        crate::progress_guard::ensure_installed(project_root)?;
         Ok(true)
     })
 }

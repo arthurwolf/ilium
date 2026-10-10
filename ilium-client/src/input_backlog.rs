@@ -52,6 +52,21 @@ impl<T> InputBacklog<T> {
     }
 }
 
+/// Serve already-read original input before receiving any later native bytes.
+pub(super) struct BacklogReady<'a, S: crate::ReadyInput> {
+    pub backlog: &'a mut InputBacklog<S::Item>,
+    pub upstream: &'a mut S,
+}
+impl<S: crate::ReadyInput> crate::ReadyInput for BacklogReady<'_, S> {
+    type Item = S::Item;
+    fn try_next(&mut self) -> Result<Self::Item, tokio::sync::mpsc::error::TryRecvError> {
+        match self.backlog.take_front() {
+            Some(original) => Ok(original),
+            None => self.upstream.try_next(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -124,21 +139,6 @@ mod tests {
                     assert_eq!(actual, expected);
                 }
             }
-        }
-    }
-}
-
-/// Serve already-read original input before receiving any later native bytes.
-pub(super) struct BacklogReady<'a, S: crate::ReadyInput> {
-    pub backlog: &'a mut InputBacklog<S::Item>,
-    pub upstream: &'a mut S,
-}
-impl<S: crate::ReadyInput> crate::ReadyInput for BacklogReady<'_, S> {
-    type Item = S::Item;
-    fn try_next(&mut self) -> Result<Self::Item, tokio::sync::mpsc::error::TryRecvError> {
-        match self.backlog.take_front() {
-            Some(original) => Ok(original),
-            None => self.upstream.try_next(),
         }
     }
 }

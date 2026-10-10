@@ -414,6 +414,16 @@ mod tests {
             input_bytes: 0,
             result_bytes: 0,
         });
+        let (worker, observations, release) = controlled_with_quota(quota.clone());
+        (worker, quota, observations, release)
+    }
+    fn controlled_with_quota(
+        quota: QuotaGroup,
+    ) -> (
+        IconSearchWorkers,
+        mpsc::Receiver<String>,
+        mpsc::SyncSender<()>,
+    ) {
         let (entered, observations) = mpsc::sync_channel(8);
         let (release, wait) = mpsc::sync_channel(8);
         let wait = Arc::new(Mutex::new(wait));
@@ -426,8 +436,7 @@ mod tests {
             },
         );
         (
-            IconSearchWorkers::with_factory(quota.clone(), factory),
-            quota,
+            IconSearchWorkers::with_factory(quota, factory),
             observations,
             release,
         )
@@ -489,6 +498,52 @@ mod tests {
             ticket.join_until(Instant::now() + WAIT),
             Ok(WorkerExit::Joined)
         );
+    }
+    #[test]
+    fn shared_quota_prevents_duplicate_icon_owner_threads_with_remaining_capacity() {
+        let quota = QuotaGroup::new(ilium_execution::QuotaLimits {
+            worker_threads: 2,
+            worker_bytes: 2 * OWNER_BYTES + 4 * REQUEST_RESULT_BYTES,
+            clients: 0,
+            jobs: 0,
+            service_jobs: 0,
+            input_bytes: 0,
+            result_bytes: 0,
+        });
+        let (mut first, entered, release) = controlled_with_quota(quota.clone());
+        let (mut second, second_entered, second_release) = controlled_with_quota(quota.clone());
+        admit(&mut first, request(1, "first owner"));
+        entered.recv_timeout(WAIT).unwrap();
+        let original = request(2, "second owner");
+        let original_query = original.query.as_ptr();
+        let second_result = second.try_request(original);
+        if second_result.is_ok() {
+            second_entered.recv_timeout(WAIT).unwrap();
+        }
+        let first_ticket = first.worker.as_ref().unwrap().ticket();
+        let second_ticket = second.worker.as_ref().map(|owner| owner.ticket());
+        release.send(()).unwrap();
+        second_release.send(()).unwrap();
+        drop(first);
+        drop(second);
+        assert_eq!(
+            first_ticket.join_until(Instant::now() + WAIT),
+            Ok(WorkerExit::Joined)
+        );
+        if let Some(ticket) = second_ticket {
+            assert_eq!(
+                ticket.join_until(Instant::now() + WAIT),
+                Ok(WorkerExit::Joined)
+            );
+        }
+        assert_eq!(quota.snapshot().worker_threads, 0);
+        assert!(
+            second_result.is_err(),
+            "one execution quota must admit only one icon-search owner even when thread capacity remains"
+        );
+        let returned = second_result.unwrap_err();
+        assert_eq!(returned.query, "second owner");
+        assert_eq!(returned.query.as_ptr(), original_query);
     }
     #[test]
     fn old_completion_cannot_overwrite_a_newer_query_failure() {

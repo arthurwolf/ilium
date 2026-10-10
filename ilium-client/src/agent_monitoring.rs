@@ -233,17 +233,20 @@ pub fn displayed_pane_signals(
     include_progress_reports: bool,
     running_indicator: AttentionRunningIndicator,
     status: &PaneStatus,
-    progress: Option<&PaneProgress>,
+    progress_monitors: &[PaneProgress],
     has_scheduled_input: bool,
     shell_output: Option<ShellOutputPhase>,
 ) -> PaneSignals {
     // Historical agent identity has one explicit unavailable projection in
     // every mode. Attention overrides apply only to live agent activity.
     if mode == AgentMonitoringMode::Normal || status.agent_recovery().is_some() {
-        return project_pane_signals(status, progress, has_scheduled_input, shell_output);
+        return project_pane_signals(status, progress_monitors, has_scheduled_input, shell_output);
     }
 
-    let progress = attention_progress_for_policy(progress, include_progress_reports);
+    let progress = attention_progress_for_policy(
+        ilium_core::representative_progress(progress_monitors),
+        include_progress_reports,
+    );
     let target = attention_status_target(status, progress);
     let (objective, mut now) = attention_signals_for_target(status, progress, target);
     if running_indicator.uses_status_slot() && is_running_quietly(status, target) {
@@ -512,7 +515,7 @@ mod tests {
                 true,
                 indicator,
                 &working,
-                None,
+                &[],
                 false,
                 None,
             );
@@ -525,7 +528,7 @@ mod tests {
             true,
             AttentionRunningIndicator::Spinner,
             &approval,
-            None,
+            &[],
             false,
             None,
         );
@@ -537,7 +540,7 @@ mod tests {
             true,
             AttentionRunningIndicator::Spinner,
             &idle,
-            None,
+            &[],
             false,
             None,
         );
@@ -566,7 +569,7 @@ mod tests {
                     false,
                     AttentionRunningIndicator::Icon,
                     &working,
-                    Some(&report),
+                    std::slice::from_ref(&report),
                     false,
                     None,
                 );
@@ -578,7 +581,7 @@ mod tests {
                     true,
                     AttentionRunningIndicator::Icon,
                     &working,
-                    Some(&report),
+                    std::slice::from_ref(&report),
                     false,
                     None,
                 );
@@ -590,7 +593,7 @@ mod tests {
                     false,
                     AttentionRunningIndicator::Icon,
                     &working,
-                    Some(&report),
+                    std::slice::from_ref(&report),
                     false,
                     None,
                 );
@@ -599,7 +602,7 @@ mod tests {
                     true,
                     AttentionRunningIndicator::Icon,
                     &working,
-                    Some(&report),
+                    std::slice::from_ref(&report),
                     false,
                     None,
                 );
@@ -612,7 +615,7 @@ mod tests {
             false,
             AttentionRunningIndicator::Icon,
             &agent(AgentActivity::WaitingApproval, Some(GoalState::Blocked)),
-            Some(&report),
+            std::slice::from_ref(&report),
             false,
             None,
         );
@@ -622,7 +625,7 @@ mod tests {
             false,
             AttentionRunningIndicator::Icon,
             &agent(AgentActivity::Working, Some(GoalState::Blocked)),
-            Some(&report),
+            std::slice::from_ref(&report),
             false,
             None,
         );

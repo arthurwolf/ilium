@@ -312,10 +312,10 @@ impl ExactWorkers {
     }
     pub(super) fn publish(&mut self, sender: &Sender<NamingWorkerEvent>) {
         while let Some((pane, generation, prepared)) = self.ready.pop_front() {
-            if !self
+            if self
                 .contexts
                 .get(&pane)
-                .is_some_and(|current| current.generation == generation)
+                .is_none_or(|current| current.generation != generation)
             {
                 continue;
             }

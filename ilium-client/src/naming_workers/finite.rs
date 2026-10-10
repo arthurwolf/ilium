@@ -227,7 +227,7 @@ fn run_request(
             input.pane_id,
             provider_allowed(cancelled, decision, word).and_then(|()| {
                 catch_worker_panic("terminal title", || {
-                    crate::terminal_naming::infer_terminal_title(settings, &*input)
+                    crate::terminal_naming::infer_terminal_title(settings, &input)
                 })
             }),
             trigger,

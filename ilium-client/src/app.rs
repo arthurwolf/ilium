@@ -2053,7 +2053,9 @@ pub struct App {
     /// visible room is re-read, and only when its file stamp changed.
     next_chatroom_repair_at: Option<Instant>,
     /// Stamp of the visible room file at the last queued reconcile.
-    chatroom_file_stamp: Option<(NodeId, Option<(std::time::SystemTime, u64)>)>,
+    pub(crate) chatroom_file_stamp: Option<(NodeId, Option<(std::time::SystemTime, u64)>)>,
+    /// At most one filesystem-owned visible-room fingerprint request is outstanding.
+    pub(crate) chatroom_stamp_pending: bool,
     /// On-demand history caches are separate from the render tree so normal
     /// structural snapshots never carry or clone the retained journal.
     pub agent_debug_logs: HashMap<NodeId, AgentDebugLogCache>,
@@ -2751,6 +2753,7 @@ impl App {
             next_chatroom_reconcile_at: None,
             next_chatroom_repair_at: None,
             chatroom_file_stamp: None,
+            chatroom_stamp_pending: false,
             agent_debug_logs: HashMap::new(),
             pane_detection_evidence: HashMap::new(),
             agent_debug_log_filter: AgentDebugLogFilter::default(),
@@ -3179,7 +3182,7 @@ impl App {
 
     /// Opens a child when input dispatch has already moved its parent state
     /// out of `App::mode`. This is the normal keyboard/mouse handler path.
-    pub(crate) fn push_modal_over(&mut self, parent: Mode, modal: Mode) {
+    pub fn push_modal_over(&mut self, parent: Mode, modal: Mode) {
         self.mode = parent;
         self.push_modal(modal);
     }
@@ -3930,6 +3933,7 @@ impl App {
                 ClientRequest::KeyInput { pane_id, .. }
                 | ClientRequest::UserKeyInput { pane_id, .. }
                 | ClientRequest::SubmitTerminalText { pane_id, .. }
+                | ClientRequest::PasteTerminalText { pane_id, .. }
                 | ClientRequest::MouseInput { pane_id, .. } => Some(*pane_id),
                 _ => None,
             };
@@ -4034,7 +4038,8 @@ impl App {
                     },
                 ))
             }
-            ClientRequest::SubmitTerminalText { pane_id, .. } => {
+            ClientRequest::SubmitTerminalText { pane_id, .. }
+            | ClientRequest::PasteTerminalText { pane_id, .. } => {
                 Some((*pane_id, TerminalActivityCause::TerminalTextQueued))
             }
             _ => None,
@@ -4098,6 +4103,20 @@ impl App {
             text,
             source,
         })
+    }
+
+    /// Queues one paste without Enter. The server chooses the paste framing
+    /// from the pane's live terminal modes, which this client only knows for
+    /// panes it has rendered.
+    pub(crate) fn send_terminal_paste(
+        &mut self,
+        pane_id: NodeId,
+        text: String,
+    ) -> Result<(), Box<ClientRequest>> {
+        if let Some(PaneRuntime::Terminal(view)) = self.panes.get_mut(&pane_id) {
+            view.scroll_to_bottom();
+        }
+        self.try_queue_terminal_request(ClientRequest::PasteTerminalText { pane_id, text })
     }
 
     /// Reports one successful editor/board mutation to the server-owned
@@ -4529,12 +4548,34 @@ impl App {
     /// immediately rather than lingering until the server's own clearing
     /// broadcast arrives.
     pub fn shows_progress_footer(&self, pane_id: NodeId) -> bool {
-        self.ui_settings.progress_monitor_enabled
-            && crate::progress_display::footer_is_visible(
-                self.tree.pane_progress(pane_id),
-                self.ui_settings.completed_progress_hide_after_seconds,
-                self.progress_display_now_unix_millis,
-            )
+        !self.visible_progress_monitors(pane_id).is_empty()
+    }
+
+    /// The pane's monitors whose footer rows are shown now, in registration
+    /// order; empty when the feature is off.
+    pub fn visible_progress_monitors(&self, pane_id: NodeId) -> Vec<&ilium_core::PaneProgress> {
+        if !self.ui_settings.progress_monitor_enabled {
+            return Vec::new();
+        }
+        crate::progress_display::visible_monitors(
+            self.tree.pane_progress(pane_id),
+            self.ui_settings.completed_progress_hide_after_seconds,
+            self.progress_display_now_unix_millis,
+        )
+    }
+
+    /// The monitor under footer row `position` of pane `pane_id`, if any.
+    pub(crate) fn progress_monitor_at(
+        &self,
+        pane_id: NodeId,
+        progress_area: ratatui::layout::Rect,
+        position: ratatui::layout::Position,
+    ) -> Option<&ilium_core::PaneProgress> {
+        let visible = self.visible_progress_monitors(pane_id);
+        let row_offset = position.y.checked_sub(progress_area.y)?;
+        let index =
+            crate::progress_bar::monitor_at_row(visible.len(), progress_area.height, row_offset)?;
+        visible.get(index).copied()
     }
 
     /// Hides expired result text without resizing or mutating retained data.
@@ -5058,18 +5099,16 @@ impl App {
         self.next_chatroom_repair_at = None;
     }
 
-    /// Stat fingerprint of the visible room's file, or `None` when no room is
-    /// visible. One stat per deadline replaces re-reading every project's
-    /// instruction files and the room on each second.
-    fn visible_chatroom_stamp(&self) -> Option<(NodeId, Option<(std::time::SystemTime, u64)>)> {
+    /// Identifies the visible room for a fingerprint job without touching the filesystem.
+    fn visible_chatroom_target(&self) -> Option<crate::filesystem::integrations::RoomTarget> {
         let RightPanelTarget::Chatroom { project_id } = self.right_panel_target else {
             return None;
         };
         let project_root = self.tree.get(project_id).and_then(Node::project_path)?;
-        let stamp = std::fs::metadata(crate::chatroom::path_for_project(project_root))
-            .ok()
-            .and_then(|metadata| Some((metadata.modified().ok()?, metadata.len())));
-        Some((project_id, stamp))
+        Some(crate::filesystem::integrations::RoomTarget {
+            id: project_id,
+            path: project_root.to_path_buf(),
+        })
     }
 
     /// Reconciles chatroom files only when their independent deadline is due.
@@ -5085,15 +5124,28 @@ impl App {
         }
         self.next_chatroom_reconcile_at = Some(now + CHATROOM_RECONCILE_INTERVAL);
         let repair_due = self.next_chatroom_repair_at.is_none_or(|at| now >= at);
-        let stamp = self.visible_chatroom_stamp();
-        if !repair_due && stamp == self.chatroom_file_stamp {
-            return false;
-        }
         if repair_due {
             self.next_chatroom_repair_at = Some(now + CHATROOM_REPAIR_INTERVAL);
+            return self.reconcile_chatroom_projects();
         }
-        self.chatroom_file_stamp = stamp;
-        self.reconcile_chatroom_projects()
+        let Some(room) = self.visible_chatroom_target() else {
+            return false;
+        };
+        if self.chatroom_stamp_pending {
+            return false;
+        }
+        let result = self
+            .integration_files
+            .as_mut()
+            .ok_or_else(|| "Integration workers unavailable".to_owned())
+            .and_then(|files| {
+                files.enqueue(crate::filesystem::integrations::IntegrationIntent::CheckRoom(room))
+            });
+        match result {
+            Ok(()) => self.chatroom_stamp_pending = true,
+            Err(error) => self.status_message = Some(error),
+        }
+        false
     }
 
     /// Handles text entry directly in the room's composer. The user is the
@@ -16140,15 +16192,9 @@ impl App {
             self.mode = Mode::AgentMessageDialog(state);
             return;
         }
-        if (text.contains('\n') || text.contains('\r'))
-            && selected.iter().any(|pane_id| {
-                !matches!(self.panes.get(pane_id), Some(PaneRuntime::Terminal(view)) if view.wants_bracketed_paste())
-            })
-        {
-            state.error = Some("Multiline messages need bracketed paste enabled in every selected agent terminal".into());
-            self.mode = Mode::AgentMessageDialog(state);
-            return;
-        }
+        // No client-side paste-mode check: this client only knows the terminal
+        // modes of panes it has rendered. The server frames each message from
+        // the pane's live screen and reports a pane that cannot take it.
         let scope = current_scope.expect("scope validated above");
         let mut queued = 0;
         let mut failed = 0;
@@ -16175,22 +16221,7 @@ impl App {
                 )
                 .is_ok()
             } else {
-                // Resolve paste mode for each live terminal, including retries.
-                // Embedded newlines retain their ordinary paste semantics.
-                let bytes = match self.panes.get_mut(&pane_id) {
-                    Some(PaneRuntime::Terminal(view)) => {
-                        view.scroll_to_bottom();
-                        if view.wants_bracketed_paste() {
-                            Some(encode_bracketed_paste(&text))
-                        } else {
-                            Some(text.as_bytes().to_vec())
-                        }
-                    }
-                    _ => None,
-                };
-                bytes.is_some_and(|bytes| {
-                    self.send_user_terminal_bytes(pane_id, bytes, None).is_ok()
-                })
+                self.send_terminal_paste(pane_id, text.clone()).is_ok()
             };
             if admitted {
                 recipient.checked = false;
@@ -18189,11 +18220,10 @@ impl App {
             && viewport
                 .progress_area
                 .is_some_and(|area| area.contains(position))
-            && self.shows_progress_footer(id)
-            && self
-                .tree
-                .pane_progress(id)
-                .is_some_and(|progress| !progress.report.details.is_empty()))
+            && viewport.progress_area.is_some_and(|area| {
+                self.progress_monitor_at(id, area, position)
+                    .is_some_and(|progress| !progress.report.details.is_empty())
+            }))
         .then_some((id, position));
         // The hamburger sits on the border/title row, outside `content_area`
         // entirely, so it must be checked before the `content_area` bail-out
@@ -20469,7 +20499,9 @@ mod tests {
             1000,
         )
         .unwrap();
-        app.tree.set_pane_progress(pane_id, Some(progress)).unwrap();
+        app.tree
+            .replace_pane_progress(pane_id, vec![progress])
+            .unwrap();
         app.set_screen_area(Rect::new(0, 0, 120, 40));
         let progress_area = app.pane_viewport(pane_id).unwrap().progress_area.unwrap();
         let on_footer = Position::new(progress_area.x + 2, progress_area.y);
@@ -20509,6 +20541,30 @@ mod tests {
             .map(|cell| cell.symbol())
             .collect::<String>();
         assert!(!rendered.contains("you asked for a deployable build"));
+
+        // A second monitor gets its own footer row, and hovering that row
+        // explains the second monitor rather than the first.
+        let mut second = app.tree.pane_progress(pane_id)[0].clone();
+        second.monitor_id = 18;
+        second.report.job_id = "test-suite".to_owned();
+        second.report.details = "What: run the integration tests".to_owned();
+        app.tree.upsert_pane_progress(pane_id, second).unwrap();
+        assert!(progress_area.height >= 2);
+        let on_second_row = Position::new(progress_area.x + 2, progress_area.y + 1);
+        app.handle_pane_mouse(event(on_second_row), on_second_row);
+        assert_eq!(app.hovered_progress, Some((pane_id, on_second_row)));
+        terminal
+            .draw(|frame| crate::ui::draw(frame, &mut app))
+            .unwrap();
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        assert!(rendered.contains("run the integration tests"));
+        assert!(!rendered.contains("you asked for a deployable build"));
     }
 
     #[test]
@@ -20541,7 +20597,7 @@ mod tests {
         )
         .unwrap();
         app.tree
-            .set_pane_progress(pane_id, Some(progress.clone()))
+            .replace_pane_progress(pane_id, vec![progress.clone()])
             .unwrap();
         app.set_screen_area(Rect::new(0, 0, 120, 40));
         let before = app.pane_viewport(pane_id).unwrap();
@@ -20576,14 +20632,19 @@ mod tests {
             .map(|cell| cell.symbol())
             .collect::<String>();
         assert!(!rendered.contains("retained expiry footer marker"));
-        assert_eq!(app.tree.pane_progress(pane_id), Some(&progress));
+        assert_eq!(
+            app.tree.pane_progress(pane_id),
+            std::slice::from_ref(&progress)
+        );
         assert!(!app.tick_completed_progress_display(62_000));
         assert!(app.take_outbound_requests().is_empty());
 
         let mut running = progress.clone();
         running.monitor_id = 18;
         running.report.status = ProgressTaskStatus::Running;
-        app.tree.set_pane_progress(pane_id, Some(running)).unwrap();
+        app.tree
+            .replace_pane_progress(pane_id, vec![running])
+            .unwrap();
         app.resize_displayed_panes(PaneResizeCause::RightPanelPresentation);
         assert!(app.pane_viewport(pane_id).unwrap().progress_area.is_some());
     }
@@ -20624,7 +20685,9 @@ mod tests {
                     1000,
                 )
                 .unwrap();
-                app.tree.set_pane_progress(pane_id, Some(progress)).unwrap();
+                app.tree
+                    .replace_pane_progress(pane_id, vec![progress])
+                    .unwrap();
             }
             let split_id = app
                 .tree
@@ -20647,7 +20710,7 @@ mod tests {
             assert_eq!(done_after, done_before);
             assert!(!app.shows_progress_footer(done));
             assert_eq!(busy_after, busy_before);
-            assert!(app.tree.pane_progress(done).is_some());
+            assert!(!app.tree.pane_progress(done).is_empty());
             assert!(app.take_outbound_requests().is_empty());
             app.ui_settings.completed_progress_hide_after_seconds = 0;
             app.resize_displayed_panes(PaneResizeCause::UserInterfaceSettings);
@@ -22660,91 +22723,87 @@ mod tests {
 
         assert_eq!(
             app.take_outbound_requests(),
-            vec![ClientRequest::UserKeyInput {
+            vec![ClientRequest::PasteTerminalText {
                 pane_id: pane,
-                bytes: b"hello agent".to_vec(),
-                submission: None,
-                prompt_epoch: None,
+                text: "hello agent".to_owned(),
             }],
-            "disabling Enter sends only the message bytes"
+            "disabling Enter asks the server to paste only the message text"
         );
     }
 
+    /// The client's copy of a pane's paste mode is stale or missing for panes
+    /// it never rendered, so multiline text goes to the server, which frames it
+    /// from the live screen. A stale "paste off" must not block delivery.
     #[test]
-    fn agent_message_dialog_keeps_multiline_text_until_every_recipient_supports_paste() {
+    fn agent_message_dialog_leaves_multiline_paste_mode_to_the_server() {
         use crate::agent_message_dialog::Outcome;
-        let mut app = app();
-        let project = app
-            .tree
-            .add_project(PathBuf::from("/tmp/message-paste-mode"))
-            .unwrap();
-        let first = app
-            .tree
-            .add_pane(project, "paste-ready", PaneContentKind::Terminal)
-            .unwrap();
-        let second = app
-            .tree
-            .add_pane(project, "plain-terminal", PaneContentKind::Terminal)
-            .unwrap();
-        for pane in [first, second] {
-            app.tree
-                .set_pane_status(
-                    pane,
-                    PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Idle, None),
-                )
+        for press_enter in [true, false] {
+            let mut app = app();
+            let project = app
+                .tree
+                .add_project(PathBuf::from("/tmp/message-paste-mode"))
                 .unwrap();
-        }
-        let mut paste_ready = TerminalView::new(24, 80);
-        paste_ready.feed(b"\x1b[?2004h");
-        app.panes
-            .insert(first, PaneRuntime::Terminal(Box::new(paste_ready)));
-        let mut plain_terminal = TerminalView::new(24, 80);
-        plain_terminal.feed(b"\x1b[?2004l");
-        app.panes
-            .insert(second, PaneRuntime::Terminal(Box::new(plain_terminal)));
+            let first = app
+                .tree
+                .add_pane(project, "paste-ready", PaneContentKind::Terminal)
+                .unwrap();
+            let second = app
+                .tree
+                .add_pane(project, "never-rendered", PaneContentKind::Terminal)
+                .unwrap();
+            for pane in [first, second] {
+                app.tree
+                    .set_pane_status(
+                        pane,
+                        PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Idle, None),
+                    )
+                    .unwrap();
+            }
+            let mut paste_ready = TerminalView::new(24, 80);
+            paste_ready.feed(b"\x1b[?2004h");
+            app.panes
+                .insert(first, PaneRuntime::Terminal(Box::new(paste_ready)));
+            let mut stale_terminal = TerminalView::new(24, 80);
+            stale_terminal.feed(b"\x1b[?2004l");
+            app.panes
+                .insert(second, PaneRuntime::Terminal(Box::new(stale_terminal)));
 
-        app.open_agent_message_dialog(project);
-        let Mode::AgentMessageDialog(mut state) = std::mem::replace(&mut app.mode, Mode::Normal)
-        else {
-            panic!("message dialog missing");
-        };
-        state.message.insert_str("first line\nsecond line");
-        app.finish_agent_message_dialog(state, Outcome::Send);
+            app.open_agent_message_dialog(project);
+            let Mode::AgentMessageDialog(mut state) =
+                std::mem::replace(&mut app.mode, Mode::Normal)
+            else {
+                panic!("message dialog missing");
+            };
+            state.press_enter = press_enter;
+            state.message.insert_str("first line\nsecond line");
+            app.finish_agent_message_dialog(state, Outcome::Send);
 
-        assert!(
-            app.take_outbound_requests().is_empty(),
-            "preflight must reject the whole selection before queuing to the paste-ready terminal"
-        );
-        let Mode::AgentMessageDialog(mut state) = std::mem::replace(&mut app.mode, Mode::Normal)
-        else {
-            panic!("multiline message was discarded");
-        };
-        assert_eq!(state.text(), "first line\nsecond line");
-        assert_eq!(state.selected_ids(), vec![first, second]);
-        assert!(state
-            .error
-            .as_deref()
-            .is_some_and(|error| error.contains("bracketed paste")));
-
-        let mut plain_terminal = TerminalView::new(24, 80);
-        plain_terminal.feed(b"\x1b[?2004h");
-        app.panes
-            .insert(second, PaneRuntime::Terminal(Box::new(plain_terminal)));
-        state.press_enter = false;
-        state.error = None;
-        app.finish_agent_message_dialog(state, Outcome::Send);
-
-        let requests = app.take_outbound_requests();
-        assert_eq!(
-            requests.len(),
-            2,
-            "both recipients queue after paste support is enabled"
-        );
-        for request in requests {
-            assert!(
-                matches!(request, ClientRequest::UserKeyInput { pane_id, bytes, .. }
-                if [first, second].contains(&pane_id) && bytes == b"\x1b[200~first line\nsecond line\x1b[201~")
-            );
+            if let Mode::AgentMessageDialog(state) = &app.mode {
+                panic!(
+                    "the dialog must close once every recipient is queued: {:?}",
+                    state.error
+                );
+            }
+            let requests = app.take_outbound_requests();
+            assert_eq!(requests.len(), 2, "both recipients queue");
+            for request in requests {
+                let delivered = match request {
+                    ClientRequest::SubmitTerminalText {
+                        pane_id,
+                        text,
+                        source: PromptSubmissionSource::Keyboard,
+                    } if press_enter => (pane_id, text),
+                    ClientRequest::PasteTerminalText { pane_id, text } if !press_enter => {
+                        (pane_id, text)
+                    }
+                    other => panic!("unexpected request {other:?}"),
+                };
+                assert!([first, second].contains(&delivered.0));
+                assert_eq!(
+                    delivered.1, "first line\nsecond line",
+                    "the server receives literal text and chooses the framing"
+                );
+            }
         }
     }
 
@@ -23742,6 +23801,10 @@ mod tests {
         app.right_panel_target = RightPanelTarget::Pane { pane_id };
         app.focus = FocusTarget::Tree;
         app.set_screen_area(Rect::new(0, 0, 120, 40));
+        let setup_requests = app.take_outbound_requests();
+        assert!(setup_requests.iter().any(|request| {
+            matches!(request, ClientRequest::ResizePane { pane_id: requested, .. } if *requested == pane_id)
+        }));
         let holds: Vec<_> = (0..31)
             .map(|_| crate::ipc_preparation::reserve_request(&client, 4096).unwrap())
             .collect();
@@ -28327,7 +28390,7 @@ mod tests {
         app.next_chatroom_reconcile_at = Some(now + CHATROOM_RECONCILE_INTERVAL);
         assert!(!app.tick_chatroom_projects(now + CHATROOM_RECONCILE_INTERVAL));
         assert_eq!(app.next_chatroom_repair_at, Some(repair_at));
-        assert!(app.visible_chatroom_stamp().is_none());
+        assert!(app.visible_chatroom_target().is_none());
 
         app.request_chatroom_reconcile();
         assert_eq!(

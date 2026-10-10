@@ -1860,7 +1860,7 @@ struct AdmittedAnimationArchive {
     _admission: StorageAdmission,
 }
 fn read_admitted_animation_archive(
-    mut archive: impl Read,
+    archive: impl Read,
     expected_size: usize,
     quota: &QuotaGroup,
 ) -> Result<AdmittedAnimationArchive, String> {
@@ -1980,7 +1980,7 @@ impl Job for SetupJob {
                 "Selected animation package is not installed or has a conflicting ID".to_owned()
             })?;
         let selection = selection.validate(descriptor)?;
-        let mut archive = File::open(&descriptor.archive_path)
+        let archive = File::open(&descriptor.archive_path)
             .map_err(|error| format!("Open animation package: {error}"))?;
         let size = usize::try_from(archive.metadata().map_err(|error| error.to_string())?.len())
             .map_err(|_| "Animation package size".to_owned())?;
@@ -3234,7 +3234,7 @@ impl PluginBackend {
                     &recording.sequence_captures,
                 )
             } else {
-                instance.certify_source_capture_replay(&frozen, &source_captures)
+                instance.certify_source_capture_replay(&frozen, source_captures)
             }
             .map_err(|error| error.to_string())?;
             let native_evidence = if recorded_count == 0 {
@@ -3630,7 +3630,7 @@ impl PluginBackend {
                 workflow
                     .presentation
                     .as_mut()
-                    .or_else(|| delegated_presentation.as_deref_mut())
+                    .or(delegated_presentation.as_deref_mut())
             {
                 presentation.http.cancel_all();
                 presentation.sources.cancel_all();
@@ -3682,7 +3682,7 @@ impl PluginBackend {
         if let Some(presentation) = workflow
             .presentation
             .as_mut()
-            .or_else(|| delegated_presentation.as_deref_mut())
+            .or(delegated_presentation.as_deref_mut())
         {
             revoke_presentation(presentation);
         }
@@ -3745,7 +3745,7 @@ impl PluginBackend {
             if let Some(presentation) = workflow
                 .presentation
                 .as_mut()
-                .or_else(|| delegated_presentation.as_deref_mut())
+                .or(delegated_presentation.as_deref_mut())
             {
                 release_presentation_after_helper_retirement(presentation)
                     .map_err(|error| error.to_string())?;
@@ -5305,7 +5305,7 @@ fn take(planes: &mut BTreeMap<String, Vec<u8>>, name: &str) -> Result<Vec<u8>, S
         .ok_or_else(|| format!("Missing plugin plane {name}"))
 }
 fn words(bytes: Vec<u8>) -> Result<Vec<u32>, String> {
-    if bytes.len() % 4 != 0 {
+    if !bytes.len().is_multiple_of(4) {
         return Err("Malformed plugin u32 plane".into());
     }
     Ok(bytes
@@ -5352,6 +5352,7 @@ fn decode_planes(
         },
     })
 }
+#[cfg(test)]
 fn pack_cells(
     snapshot: &Snapshot,
     settings: &AnimationSettings,
@@ -5526,6 +5527,7 @@ fn overlay_native_text<'a>(
     }
     Ok(())
 }
+#[cfg(test)]
 fn cells_from_packed(
     shape: Shape,
     packed: &ilium_animation_js::surface::PackedSurface,

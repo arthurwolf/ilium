@@ -8,6 +8,8 @@ use std::{
     time::{Duration, Instant},
 };
 const MIB: usize = 1024 * 1024;
+const GENERAL_RESULT_BYTES: usize = 768 * MIB;
+const AMBIENT_RESULT_BYTES: usize = 640 * MIB;
 const CPU_THREADS: usize = 2;
 const IO_THREADS: usize = 4;
 const SERVICE_THREADS: usize = 1;
@@ -20,11 +22,9 @@ const SERVICE_THREADS: usize = 1;
 // owners compete with these same roles and the unchanged4096 MiB allowance.
 // This declared scenario does not bound unadmitted libraries or allocator RSS.
 const PROCESS_WORKER_THREADS: usize = CPU_THREADS + IO_THREADS + SERVICE_THREADS + 27 + 3 + 1 + 6;
-// Parser allocations have independent custody; other finite owners keep their original limit.
-const PROCESS_WORKER_BYTES: usize = 4096 * MIB;
 // The optional parser-state/snapshot pool is controlled by terminal settings.
-// Keep the shared ledger for ownership accounting, but do not impose another
-// aggregate storage ceiling when that pool is Off.
+// Keep shared storage custody without a second aggregate ceiling when that pool is Off.
+const PROCESS_WORKER_BYTES: usize = 4096 * MIB;
 pub(crate) const TERMINAL_STORAGE_BYTES: usize = usize::MAX;
 pub(crate) const TERMINAL_REPLACEMENT_HEADROOM: usize = 8 * 128 * MIB;
 
@@ -146,7 +146,7 @@ pub(crate) fn general_admission_group() -> Result<ilium_execution::AdmissionGrou
             jobs: 60,
             service_jobs: 1,
             input_bytes: 512 * MIB,
-            result_bytes: 512 * MIB,
+            result_bytes: GENERAL_RESULT_BYTES,
         },
     )
 }
@@ -239,7 +239,7 @@ impl ClientStartupState {
                         jobs: 60,
                         service_jobs: 1,
                         input_bytes: 512 * MIB,
-                        result_bytes: 512 * MIB,
+                        result_bytes: GENERAL_RESULT_BYTES,
                     },
                 )
                 .map_err(StartError::Admission)?,
@@ -532,7 +532,10 @@ impl ClientExecution {
             // admits one ordinary 4K photo without weakening the shared
             // execution bank's aggregate quota.
             input_bytes: 384 * MIB,
-            result_bytes: 128 * MIB,
+            // Wikipedia transitions retain the current and prefetched
+            // articles plus old and new renderer layouts (576 MiB declared).
+            // Keep headroom for that overlap inside the process-root 768 MiB.
+            result_bytes: AMBIENT_RESULT_BYTES,
         })?;
         Ok(ilium_ambient::resources::AmbientResources::new(finite))
     }
@@ -646,6 +649,78 @@ mod composition_tests {
         assert_eq!(config.service.priority, None);
         assert_eq!(config.cpu.priority, Some(WorkerPriority::BelowNormal));
         assert_eq!(config.io.priority, Some(WorkerPriority::BelowNormal));
+    }
+
+    #[test]
+    fn ambient_storage_admits_wikipedia_replacement_overlap() {
+        let quota = QuotaGroup::new(QuotaLimits {
+            clients: 8,
+            jobs: 64,
+            service_jobs: 1,
+            input_bytes: 768 * MIB,
+            result_bytes: 768 * MIB,
+            worker_threads: 1,
+            worker_bytes: MIB,
+        });
+        let general_limits = ClientLimits {
+            jobs: 60,
+            service_jobs: 1,
+            input_bytes: 512 * MIB,
+            result_bytes: GENERAL_RESULT_BYTES,
+        };
+        let general_group = quota.admission_group(general_limits).unwrap();
+        let disabled_lane = LaneConfig {
+            threads: 0,
+            queue_slots: 0,
+            priority: None,
+            resident_bytes_per_thread: 0,
+        };
+        let execution = Execution::start(
+            quota.clone(),
+            ExecutionConfig {
+                cpu: LaneConfig {
+                    threads: 1,
+                    queue_slots: 1,
+                    priority: None,
+                    resident_bytes_per_thread: MIB,
+                },
+                io: disabled_lane,
+                service: disabled_lane,
+            },
+        )
+        .unwrap();
+        let general = execution
+            .client_in_group(&general_group, general_limits)
+            .unwrap();
+        let location_search = general
+            .child(ClientLimits {
+                jobs: 1,
+                service_jobs: 0,
+                input_bytes: 16 * MIB,
+                result_bytes: 4 * MIB,
+            })
+            .unwrap();
+        let client_execution = ClientExecution {
+            execution,
+            general,
+            location_search,
+            terminal_storage: terminal_storage_quota(),
+        };
+        let resources = client_execution.ambient_resources().unwrap();
+        let charges = [192, 96, 192, 96].map(|mib| {
+            resources
+                .reserve_storage(mib * MIB)
+                .unwrap_or_else(|reason| panic!("Wikipedia overlap admission: {reason:?}"))
+        });
+        assert_eq!(quota.snapshot().result_bytes, 576 * MIB);
+        drop(charges);
+        drop(resources);
+        let ClientExecution { mut execution, .. } = client_execution;
+        execution.request_shutdown(ShutdownMode::Cancel);
+        let joined = execution
+            .join_until_background(Instant::now() + Duration::from_secs(5))
+            .unwrap();
+        assert_eq!(joined.remaining_workers, 0);
     }
 
     #[test]

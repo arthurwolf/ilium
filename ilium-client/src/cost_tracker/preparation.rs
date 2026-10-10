@@ -496,8 +496,10 @@ impl CostTracker {
                 false
             }
             _ => {
-                let mut engine = DerivedCosts::default();
-                engine.overlay = Arc::clone(&self.published);
+                let engine = DerivedCosts {
+                    overlay: Arc::clone(&self.published),
+                    ..Default::default()
+                };
                 self.engine = Some(engine);
                 self.identity = None;
                 self.diagnostic = Some("Cost CPU worker failed; previous overlay retained".into());
@@ -535,8 +537,8 @@ fn settings_bytes(settings: &CostSettings) -> usize {
     std::mem::size_of::<CostSettings>()
         + settings
             .prices
-            .iter()
-            .map(|(name, _)| name.capacity() + 256)
+            .keys()
+            .map(|name| name.capacity() + 256)
             .sum::<usize>()
 }
 pub(super) fn pane_storage(stats: &SessionStats) -> Result<(Arc<StorageAdmission>, usize), String> {

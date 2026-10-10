@@ -65,6 +65,13 @@ pub struct Rejected<T> {
     pub value: T,
 }
 
+/// A rejected emission that hands back its lease, surviving bits and world emissions.
+type WorldEmissionRejected<Lease> = Rejected<(
+    Lease,
+    Vec<u8>,
+    Vec<ilium_animation_js::native_worlds::WorldEmission>,
+)>;
+
 #[derive(Debug)]
 pub struct SnapshotCell {
     pub glyph: char,
@@ -456,14 +463,7 @@ impl PresentationLease {
         self,
         surviving: Vec<u8>,
         world_emissions: Vec<ilium_animation_js::native_worlds::WorldEmission>,
-    ) -> Result<
-        EmissionReceipt,
-        Rejected<(
-            Self,
-            Vec<u8>,
-            Vec<ilium_animation_js::native_worlds::WorldEmission>,
-        )>,
-    > {
+    ) -> Result<EmissionReceipt, WorldEmissionRejected<Self>> {
         if surviving.capacity() > MAX_CELLS
             || surviving.len() != self.frame.cells.len()
             || surviving
@@ -1234,8 +1234,7 @@ fn run(
             loop {
                 native_wake |= native_wake_receiver.try_recv().is_ok();
                 task_due |= task_deadline.is_some_and(|deadline| Instant::now() >= deadline);
-                if (stop.is_stopped() && !shutdown_started)
-                    || (!shutdown_started && mailbox.latest.is_some())
+                if (!shutdown_started && (stop.is_stopped() || mailbox.latest.is_some()))
                     || !mailbox.receipts.is_empty()
                     || native_wake
                     || task_due
@@ -2696,7 +2695,19 @@ mod tests {
             }
         }
         assert_eq!(service.try_pause(17), Err(AdmissionError::Full));
+        let stale = service.try_request(request(1, 1)).unwrap_err();
+        assert_eq!(stale.reason, AdmissionError::Stale);
+        assert_eq!(stale.value.revision, 1);
         release.send(()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            let status = service.try_status().expect("worker status");
+            if status.stale > 0 && service.shared.configurations.load(Ordering::Acquire) == 0 {
+                break;
+            }
+            assert!(Instant::now() < deadline, "pause receipts did not drain");
+            std::thread::yield_now();
+        }
         let ticket = service.ticket();
         drop(service);
         assert!(ticket

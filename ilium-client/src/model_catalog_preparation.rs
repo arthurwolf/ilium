@@ -130,6 +130,7 @@ fn normalize(request: &mut CatalogRequest, context: &JobContext) -> Result<(), S
     Ok(())
 }
 /// At most one active/retiring job and one replaceable desired catalog.
+#[cfg_attr(not(test), derive(Default))]
 pub(crate) struct ModelCatalogPreparation {
     client: Option<Client>,
     pending: Option<CatalogRequest>,
@@ -138,19 +139,11 @@ pub(crate) struct ModelCatalogPreparation {
     closed: bool,
     diagnostic: Option<String>,
 }
+#[cfg(test)]
 impl Default for ModelCatalogPreparation {
     fn default() -> Self {
         Self {
-            client: {
-                #[cfg(test)]
-                {
-                    Some(crate::execution::test_client())
-                }
-                #[cfg(not(test))]
-                {
-                    None
-                }
-            },
+            client: Some(crate::execution::test_client()),
             pending: None,
             active: None,
             generation: 0,

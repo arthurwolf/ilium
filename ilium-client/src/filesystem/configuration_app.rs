@@ -295,6 +295,9 @@ impl App {
                 }
                 WriteCompletion::Rejected { rejection, .. } => {
                     let message = format!("Settings remain unsaved: {:?}", rejection.reason);
+                    if matches!(&intent, Some(ConfigurationIntent::ProjectName)) {
+                        self.is_project_name_loading = false;
+                    }
                     if let Some(ConfigurationIntent::Animation {
                         picker: Some(save), ..
                     }) = &intent
@@ -316,6 +319,9 @@ impl App {
                 WriteCompletion::Lost { .. } => {
                     let message =
                         "Configuration receipt lost; publication is unconfirmed".to_owned();
+                    if matches!(&intent, Some(ConfigurationIntent::ProjectName)) {
+                        self.is_project_name_loading = false;
+                    }
                     if let Some(ConfigurationIntent::Animation {
                         picker: Some(save), ..
                     }) = &intent
@@ -428,6 +434,16 @@ impl App {
                             }
                         }
                         ConfigurationSaved::Separators(_) => {}
+                        ConfigurationSaved::ProjectName(bootstrap) => {
+                            tracing::info!(
+                                project_name = %bootstrap.project_name,
+                                project_icon = ?bootstrap.icon,
+                                "project naming completed"
+                            );
+                            self.project_name = Some(bootstrap.project_name);
+                            self.project_icon = bootstrap.icon;
+                            self.is_project_name_loading = false;
+                        }
                         ConfigurationSaved::Plain => {}
                     }
                     if let Some(ConfigurationIntent::Onboarding { revision, dismiss }) = &intent {
@@ -451,6 +467,9 @@ impl App {
                         Some(ConfigurationIntent::TextTriggers { .. }) => {
                             "Text Triggers saved to disk".into()
                         }
+                        Some(ConfigurationIntent::ProjectName) => {
+                            "Project name saved to disk".into()
+                        }
                         _ => "Settings saved to disk".into(),
                     });
                 }
@@ -458,6 +477,7 @@ impl App {
                     let failure_label = match &intent {
                         Some(ConfigurationIntent::Plain { label, .. }) => *label,
                         Some(ConfigurationIntent::Animation { .. }) => "animation settings",
+                        Some(ConfigurationIntent::ProjectName) => "project name",
                         _ => "settings",
                     };
                     let animation_failure =
@@ -505,6 +525,9 @@ impl App {
                     // error. Never overwrite a subsequent edit or blindly roll
                     // back an already changed file.
                     match intent {
+                        Some(ConfigurationIntent::ProjectName) => {
+                            self.is_project_name_loading = false;
+                        }
                         Some(ConfigurationIntent::Session { desired })
                             if self.session_settings == desired =>
                         {

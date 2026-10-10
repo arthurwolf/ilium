@@ -58,9 +58,9 @@ struct StatuslineState {
 pub fn enabled_runtime_action() -> Result<ilium_ipc::AntigravityStatuslineAction, String> {
     #[cfg(test)]
     {
-        return Ok(ilium_ipc::AntigravityStatuslineAction::SetCommand {
+        Ok(ilium_ipc::AntigravityStatuslineAction::SetCommand {
             command: "ilium __antigravity-model-statusline".to_owned(),
-        });
+        })
     }
     #[cfg(not(test))]
     {
@@ -82,7 +82,7 @@ pub fn enabled_runtime_action() -> Result<ilium_ipc::AntigravityStatuslineAction
 pub fn disabled_runtime_action() -> Result<ilium_ipc::AntigravityStatuslineAction, String> {
     #[cfg(test)]
     {
-        return Ok(ilium_ipc::AntigravityStatuslineAction::CancelPending);
+        Ok(ilium_ipc::AntigravityStatuslineAction::CancelPending)
     }
     #[cfg(not(test))]
     {
@@ -186,7 +186,7 @@ pub fn reconcile_setting(enabled: bool, executable: Option<&Path>) -> Result<(),
     #[cfg(test)]
     {
         let _ = (enabled, executable);
-        return Ok(());
+        Ok(())
     }
     #[cfg(not(test))]
     {
@@ -215,7 +215,7 @@ fn reconcile_setting_in(
     if !enabled && !state_path.exists() {
         return Ok(());
     }
-    fs::create_dir_all(&config_directory).map_err(|error| error.to_string())?;
+    fs::create_dir_all(config_directory).map_err(|error| error.to_string())?;
     let _lock = ExclusiveFileLock::try_acquire(lock_path)
         .map_err(|error| error.to_string())?
         .ok_or_else(|| {
@@ -874,7 +874,7 @@ pub(crate) fn enable_capture_for_test(home: &Path) -> io::Result<()> {
     fs::create_dir_all(&config_directory)?;
     let executable = std::env::current_exe()?;
     reconcile_setting_in(&config_directory, &lock_path, true, Some(&executable))
-        .map_err(|error| io::Error::other(error))
+        .map_err(io::Error::other)
 }
 
 #[cfg(test)]

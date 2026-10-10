@@ -963,6 +963,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn retained_acknowledged_buffers_keep_distinct_frame_admission() {
+        let quota = test_quota();
+        let mut presenter =
+            Presenter::start(CrosstermBackend::new(Vec::<u8>::new()), &quota).unwrap();
+        let mut retained = Vec::new();
+        for frame_id in 1..=(FRAME_SLOTS + 1) {
+            presenter
+                .submit(frame(
+                    &presenter,
+                    frame_id as u64,
+                    &format!("FRAME_{frame_id}"),
+                ))
+                .unwrap();
+            let acknowledged = presenter.acknowledgements.recv().await.unwrap().unwrap();
+            retained.push(acknowledged.frame.buffer.clone());
+        }
+
+        assert!(retained
+            .windows(2)
+            .all(|pair| !Arc::ptr_eq(&pair[0], &pair[1])));
+        assert!(
+            presenter.try_reserve().is_none(),
+            "retained frame buffers must keep their distinct storage admission"
+        );
+
+        drop(retained.remove(0));
+        assert!(presenter.try_reserve().is_some());
+        drop(retained);
+        presenter.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
     async fn failure_receipts_share_original_storage_after_actual_worker_join() {
         let quota = test_quota();
         let (entered, _) = std::sync::mpsc::channel();

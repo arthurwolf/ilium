@@ -382,6 +382,7 @@ impl ClipboardService {
     }
     /// Only observes actual OS-thread joins. A stuck helper is this service's
     /// own child; killing it breaks pipe I/O without touching user processes.
+    #[cfg(test)]
     pub(crate) async fn shutdown(self) -> io::Result<()> {
         self.shutdown_with_acknowledgements().await.0
     }

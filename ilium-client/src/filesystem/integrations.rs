@@ -54,12 +54,14 @@ impl Maintenance {
 }
 pub(crate) enum IntegrationJob {
     Maintain(Maintenance),
+    CheckRoom(RoomTarget),
     Append { room: RoomTarget, message: String },
     AddRoom { room: RoomTarget },
     Install { targets: Vec<FeatureTarget> },
 }
 pub(crate) struct RoomResult {
     pub room: RoomTarget,
+    pub stamp: Option<(std::time::SystemTime, u64)>,
     pub result: Result<(bool, Option<Vec<crate::chatroom::ChatMessage>>), String>,
 }
 pub(crate) struct IntegrationResult {
@@ -108,6 +110,9 @@ fn install(target: &FeatureTarget) -> Result<(), String> {
 }
 
 fn room_result(room: RoomTarget, visible: bool, repair: bool) -> RoomResult {
+    // Capture before reading. If another process appends after this point, the
+    // next fingerprint check sees the changed stamp even if this read raced it.
+    let stamp = visible.then(|| room_file_stamp(&room.path)).flatten();
     let result = (|| -> Result<_, String> {
         let exists = if repair {
             crate::chatroom::ensure_integrations(&room.path).map_err(bounded_error)?
@@ -121,13 +126,37 @@ fn room_result(room: RoomTarget, visible: bool, repair: bool) -> RoomResult {
         };
         Ok((exists, messages))
     })();
-    RoomResult { room, result }
+    RoomResult {
+        room,
+        stamp,
+        result,
+    }
+}
+fn room_file_stamp(project: &std::path::Path) -> Option<(std::time::SystemTime, u64)> {
+    std::fs::metadata(crate::chatroom::path_for_project(project))
+        .ok()
+        .and_then(|metadata| Some((metadata.modified().ok()?, metadata.len())))
 }
 impl IntegrationJob {
     pub const COST: JobCost = JobCost {
         input_bytes: 32 * 1024 * 1024,
         result_bytes: 16 * 1024 * 1024,
     };
+
+    fn cost(&self) -> JobCost {
+        match self {
+            // The executor refuses a submit whose declared bytes are below the
+            // job or output type size, so CheckRoom must cover the full
+            // IntegrationJob/IntegrationResult types, not only the room payload.
+            Self::CheckRoom(room) => JobCost {
+                input_bytes: std::mem::size_of::<Self>().saturating_add(room.path.capacity()),
+                result_bytes: std::mem::size_of::<IntegrationResult>()
+                    .max(std::mem::size_of::<String>())
+                    .saturating_add(std::mem::size_of::<RoomResult>()),
+            },
+            _ => Self::COST,
+        }
+    }
 }
 impl Job for IntegrationJob {
     type Output = IntegrationResult;
@@ -168,6 +197,14 @@ impl Job for IntegrationJob {
                     let visible = Some(room.id) == snapshot.visible;
                     result.rooms.push(room_result(room, visible, true));
                 }
+            }
+            Self::CheckRoom(room) => {
+                let stamp = room_file_stamp(&room.path);
+                result.rooms.push(RoomResult {
+                    room,
+                    result: Ok((stamp.is_some(), None)),
+                    stamp,
+                });
             }
             Self::Append { room, message } => {
                 crate::chatroom::append_message(&room.path, "user", &message)
@@ -212,6 +249,7 @@ impl Job for IntegrationJob {
 #[derive(Clone)]
 pub(crate) enum IntegrationIntent {
     Maintenance(Maintenance),
+    CheckRoom(RoomTarget),
     Append {
         room: RoomTarget,
         draft: String,
@@ -273,7 +311,9 @@ impl IntegrationFiles {
             return Err("Integration writer admission closed".into());
         }
         match &intent {
-            IntegrationIntent::Append { room, .. } | IntegrationIntent::AddRoom(room)
+            IntegrationIntent::CheckRoom(room)
+            | IntegrationIntent::Append { room, .. }
+            | IntegrationIntent::AddRoom(room)
                 if room.path.capacity() > 64 * 1024 =>
             {
                 return Err("Chatroom target exceeds retained path limit".into());
@@ -297,6 +337,7 @@ impl IntegrationFiles {
                 snapshot.checked()?;
                 IntegrationJob::Maintain(snapshot.clone())
             }
+            IntegrationIntent::CheckRoom(room) => IntegrationJob::CheckRoom(room.clone()),
             IntegrationIntent::Append { room, draft } => IntegrationJob::Append {
                 room: room.clone(),
                 message: draft.clone(),
@@ -315,9 +356,10 @@ impl IntegrationFiles {
                 }
             }
         };
+        let cost = job.cost();
         let id = self
             .writer
-            .enqueue_detailed(IntegrationJob::COST, job)
+            .enqueue_detailed(cost, job)
             .map_err(|rejected| {
                 format!("Integration operation not admitted: {:?}", rejected.failure)
             })?;
@@ -356,6 +398,7 @@ impl IntegrationFiles {
 }
 fn same_explicit(first: &IntegrationIntent, second: &IntegrationIntent) -> bool {
     match (first, second) {
+        (IntegrationIntent::CheckRoom(a), IntegrationIntent::CheckRoom(b)) => a == b,
         (
             IntegrationIntent::Append {
                 room: a,

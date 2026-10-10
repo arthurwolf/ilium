@@ -1243,7 +1243,7 @@ fn configure_synthetic_terminals(
     let first = app
         .tree
         .add_pane(group, "Build output", PaneContentKind::Terminal)?;
-    let mut first_view = TerminalView::new(height, width);
+    let first_view = TerminalView::new(height, width);
     app.panes
         .insert(first, PaneRuntime::Terminal(Box::new(first_view)));
     app.right_panel_target = if name == "terminal-populated" {
@@ -1252,7 +1252,7 @@ fn configure_synthetic_terminals(
         let second = app
             .tree
             .add_pane(group, "Review notes", PaneContentKind::Terminal)?;
-        let mut second_view = TerminalView::new(height, width);
+        let second_view = TerminalView::new(height, width);
         app.panes
             .insert(second, PaneRuntime::Terminal(Box::new(second_view)));
         let orientation = if name == "terminal-split-horizontal" {

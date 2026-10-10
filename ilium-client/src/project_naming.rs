@@ -116,11 +116,22 @@ pub(crate) fn persist_inferred_project_name(
     cwd: &Path,
     proposal: ProjectNameBootstrap,
 ) -> anyhow::Result<ProjectNameBootstrap> {
+    persist_inferred_project_name_with_fence(cwd, proposal, None)
+}
+
+pub(crate) fn persist_inferred_project_name_with_fence(
+    cwd: &Path,
+    proposal: ProjectNameBootstrap,
+    decision: Option<&crate::naming_workers::AutomaticAiDecisionFence>,
+) -> anyhow::Result<ProjectNameBootstrap> {
     if proposal.source == ProjectNameSource::Stored {
         return Ok(proposal);
     }
     let mut accepted = proposal.clone();
-    project_config::update(cwd, |config| {
+    let updated = project_config::update_if(cwd, |config| {
+        if decision.is_some_and(|fence| !fence.is_current()) {
+            return false;
+        }
         if let Some(project_name) = stored_project_name(config) {
             accepted = ProjectNameBootstrap {
                 project_name,
@@ -134,7 +145,11 @@ pub(crate) fn persist_inferred_project_name(
             config.project_name = Some(proposal.project_name.clone());
             config.project_icon = proposal.icon.clone();
         }
+        true
     })?;
+    if !updated {
+        anyhow::bail!("Automatic project naming decision changed before persistence");
+    }
     Ok(accepted)
 }
 

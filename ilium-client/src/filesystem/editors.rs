@@ -50,7 +50,6 @@ struct PendingFrozenScreenParse {
 }
 
 struct PendingFrozenScreenSave {
-    target: FrozenScreenTarget,
     receipt: Receipt<SerializeFrozenScreen>,
     write_slot: EditorWriteSlot,
 }
@@ -368,7 +367,6 @@ impl EditorFiles {
             .push((write_id, target.clone()));
         match reservation.submit(SerializeFrozenScreen { screen }) {
             Ok(receipt) => self.frozen_screen_saves.push(PendingFrozenScreenSave {
-                target,
                 receipt,
                 write_slot,
             }),
@@ -751,10 +749,10 @@ impl EditorFiles {
                             self.retirements.push_front(pane);
                         }
                     }
-                    self.retirement_receipts.remove(index);
+                    drop(self.retirement_receipts.remove(index));
                 }
                 JobPoll::Lost | JobPoll::Taken => {
-                    self.retirement_receipts.remove(index);
+                    drop(self.retirement_receipts.remove(index));
                 }
             }
         }

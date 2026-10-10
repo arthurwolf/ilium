@@ -14,6 +14,8 @@ path = "src/lib.rs"
 # Optional GPU rendering for the GPU-capable background scenes (pulls in wgpu).
 gpu = ["ilium-gpu/gpu"]
 qualification-test-support = ["ilium-animation-js/qualification-test-support"]
+# Exposes test-only terminal fixtures to the ui_chrome_capture example.
+ui-capture = []
 
 [dependencies]
 ilium-http = { version = "0.1.1", path = "../ilium-http" }
@@ -77,3 +79,7 @@ uuid = { version = "1.23.5", features = ["v4"] }
 ilium-server = { version = "0.1.1", path = "../ilium-server" }
 tempfile = "3.27.0"
 zip = { version = "8.6", default-features = false, features = ["deflate"] }
+
+[[example]]
+name = "ui_chrome_capture"
+required-features = ["ui-capture"]

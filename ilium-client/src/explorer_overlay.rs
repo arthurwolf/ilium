@@ -857,6 +857,14 @@ fn format_modified(modified: SystemTime, now: SystemTime) -> String {
     }
 }
 
+impl Drop for ExplorerOverlay {
+    fn drop(&mut self) {
+        if let Some((_, receipt)) = &self.active {
+            receipt.cancel();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -1493,13 +1501,5 @@ mod tests {
             [Column::Name, Column::Size]
         ));
         assert!(matches!(visible_columns(20).as_slice(), [Column::Name]));
-    }
-}
-
-impl Drop for ExplorerOverlay {
-    fn drop(&mut self) {
-        if let Some((_, receipt)) = &self.active {
-            receipt.cancel();
-        }
     }
 }

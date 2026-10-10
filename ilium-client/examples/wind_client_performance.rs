@@ -18,9 +18,10 @@ use std::{
 };
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
-const SOURCES: [&str; 12] = [
+const SOURCES: [&str; 13] = [
     "ilium-client/examples/wind_client_performance.rs",
     "ilium-client/src/background_animation/mod.rs",
+    "ilium-client/src/background_animation/pack_simd.rs",
     "ilium-client/src/background_animation/host.rs",
     "ilium-ambient/src/scenes/wind/sim.rs",
     "ilium-ambient/src/scenes/wind/flow.rs",
@@ -32,7 +33,10 @@ const SOURCES: [&str; 12] = [
     "ilium-ambient/src/dither.rs",
     "ilium-ambient/src/style.rs",
 ];
-const OPTIONAL_SOURCES: [&str; 1] = ["ilium-ambient/src/scenes/wind/simd.rs"];
+const OPTIONAL_SOURCES: [&str; 2] = [
+    "ilium-ambient/src/scenes/wind/simd.rs",
+    "ilium-client/src/background_animation/pack_simd.rs",
+];
 
 fn hash_source_files(
     source_root: &Path,
@@ -131,10 +135,12 @@ fn parse_pointer_position(value: &str) -> Result<[f32; 2]> {
     Ok(position)
 }
 
+type PointerWorkload = (&'static str, Option<[f32; 2]>);
+
 fn pointer_workloads(
     paired_pointer: bool,
     pointer: Option<[f32; 2]>,
-) -> Result<Vec<(&'static str, Option<[f32; 2]>)>> {
+) -> Result<Vec<PointerWorkload>> {
     if paired_pointer && pointer.is_some() {
         return Err("--paired-pointer cannot be combined with --pointer".into());
     }

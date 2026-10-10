@@ -500,7 +500,7 @@ impl PaintedTreeRows {
             })
             .or_else(|| {
                 (self.cost_option.visibility == crate::cost_settings::CostVisibility::Always)
-                    .then(|| self.selected_node)
+                    .then_some(self.selected_node)
                     .flatten()
                     .and_then(|id| {
                         self.values
@@ -974,7 +974,7 @@ fn build_item(
             status,
             scheduled_input,
             prompt_queue,
-            progress,
+            progress_monitors,
             workspace,
             ..
         } => {
@@ -1037,7 +1037,7 @@ fn build_item(
                     agent_model: context.agent_models.get(&node.id).map(String::as_str),
                     icons: context.icons,
                     editor_filename: editor_filename.as_deref(),
-                    progress: progress.as_deref(),
+                    progress: progress_monitors,
                     has_scheduled_input: scheduled_input.is_some(),
                     use_stable_glyphs: context.use_stable_glyphs,
                     agent_monitoring_mode: context.agent_monitoring_mode,
@@ -1473,8 +1473,9 @@ struct PaneLabelContext<'a> {
     agent_model: Option<&'a str>,
     icons: &'a IconSettings,
     editor_filename: Option<&'a str>,
-    /// The pane's monitored task, if any; feeds both state slots.
-    progress: Option<&'a PaneProgress>,
+    /// The pane's monitored tasks, in registration order; feed both state
+    /// slots.
+    progress: &'a [PaneProgress],
     /// Whether a durable scheduled input is pending (its countdown is part
     /// of the title text; the long-term slot may show its marker).
     has_scheduled_input: bool,
@@ -1649,7 +1650,7 @@ fn pane_label_with_icons(
             crate::agent_monitoring::attention_status_target(
                 status,
                 crate::agent_monitoring::attention_progress_for_policy(
-                    progress,
+                    ilium_core::representative_progress(progress),
                     attention_progress_reports,
                 ),
             ),
@@ -1719,60 +1720,6 @@ fn attention_running_span(
     }
 }
 
-pub(crate) fn agent_monitoring_demo_rows(
-    mode: crate::agent_monitoring::AgentMonitoringMode,
-    settings: &crate::config::UiSettings,
-) -> Vec<Line<'static>> {
-    let examples = [
-        (
-            "service",
-            PaneStatus::from_activity(
-                AgentClass::Codex,
-                AgentActivity::Working,
-                Some(ilium_core::GoalState::Active),
-            ),
-        ),
-        (
-            "blocked review",
-            PaneStatus::from_activity(
-                AgentClass::Claude,
-                AgentActivity::Idle,
-                Some(ilium_core::GoalState::Blocked),
-            ),
-        ),
-        (
-            "finished task",
-            PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Done, None),
-        ),
-    ];
-    let mut rows = vec![Line::from("  ▾ demo project")];
-    for (name, status) in examples {
-        let line = pane_label_with_icons(
-            &status,
-            name,
-            PaneLabelContext {
-                elapsed_ms: 0,
-                is_title_loading: false,
-                terminal_activity_phase: None,
-                agent_identifiers: &settings.agent_identifiers,
-                agent_model: None,
-                icons: &settings.icons,
-                editor_filename: None,
-                progress: None,
-                has_scheduled_input: false,
-                use_stable_glyphs: settings.use_stable_glyphs,
-                agent_monitoring_mode: mode,
-                attention_progress_reports: settings.attention_progress_reports,
-                attention_running_indicator: settings.attention_running_indicator,
-            },
-        );
-        let mut spans = vec![Span::raw("    ├ ")];
-        spans.extend(line.spans);
-        rows.push(Line::from(spans));
-    }
-    rows
-}
-
 /// Default-icon wrapper retained for focused unit tests and callers that do
 /// not own the global settings object. Production tree rendering always uses
 /// `pane_label_with_icons` with the live persisted icon map.
@@ -1808,7 +1755,7 @@ fn pane_label(
             agent_identifiers,
             icons: &icons,
             editor_filename,
-            progress: None,
+            progress: &[],
             has_scheduled_input: false,
             use_stable_glyphs: false,
             agent_model: None,
@@ -3116,7 +3063,7 @@ mod tests {
                         agent_model: None,
                         icons: &icons,
                         editor_filename: None,
-                        progress: None,
+                        progress: &[],
                         has_scheduled_input: false,
                         use_stable_glyphs: stable,
                         agent_monitoring_mode: mode,
@@ -3277,7 +3224,7 @@ mod tests {
                     agent_model: None,
                     icons: &icons,
                     editor_filename: None,
-                    progress: None,
+                    progress: &[],
                     has_scheduled_input: false,
                     use_stable_glyphs,
                     agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
@@ -3836,7 +3783,7 @@ mod tests {
                     agent_model: model,
                     icons: &icons,
                     editor_filename: None,
-                    progress: None,
+                    progress: &[],
                     has_scheduled_input: false,
                     use_stable_glyphs: false,
                     agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
@@ -3893,7 +3840,7 @@ mod tests {
                 agent_model: Some("gpt-6-astra"),
                 icons: &icons,
                 editor_filename: None,
-                progress: None,
+                progress: &[],
                 has_scheduled_input: false,
                 use_stable_glyphs: false,
                 agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
@@ -3923,7 +3870,7 @@ mod tests {
                 agent_model: Some("gpt-5.6-terra"),
                 icons: &icons,
                 editor_filename: None,
-                progress: None,
+                progress: &[],
                 has_scheduled_input: false,
                 use_stable_glyphs: false,
                 agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
@@ -4146,7 +4093,7 @@ mod tests {
                         agent_model: None,
                         icons: &icons,
                         editor_filename: None,
-                        progress: None,
+                        progress: &[],
                         has_scheduled_input: false,
                         use_stable_glyphs: false,
                         agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
@@ -4171,7 +4118,7 @@ mod tests {
                 agent_model: None,
                 icons: &icons,
                 editor_filename: None,
-                progress: None,
+                progress: &[],
                 has_scheduled_input: false,
                 use_stable_glyphs: false,
                 agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
@@ -4357,7 +4304,7 @@ mod tests {
                 agent_model: None,
                 icons: &icons,
                 editor_filename: None,
-                progress: None,
+                progress: &[],
                 has_scheduled_input: false,
                 use_stable_glyphs: false,
                 agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
@@ -5786,7 +5733,7 @@ mod tests {
                 agent_model: None,
                 icons: &icons,
                 editor_filename: None,
-                progress: None,
+                progress: &[],
                 has_scheduled_input: true,
                 use_stable_glyphs: false,
                 agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,

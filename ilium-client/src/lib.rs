@@ -97,7 +97,7 @@ pub mod keymap;
 pub mod keys;
 pub mod last_prompt_banner;
 pub mod layout;
-mod location_picker;
+pub mod location_picker;
 pub mod markdown;
 pub mod media_control;
 pub mod minimap;
@@ -2424,7 +2424,10 @@ async fn run_inner(
             editor.clear_preparation();
         }
     }
-    if let Some(parsing) = &mut app.terminal_parsing {
+    // Dropping the parser releases its receipt. A completed, uncollected
+    // outcome keeps the Service claim charged, so it must go before the
+    // execution shutdown observes the bank.
+    if let Some(mut parsing) = app.terminal_parsing.take() {
         parsing.cancel();
     }
     let animation_shutdown_result = app

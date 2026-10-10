@@ -395,7 +395,15 @@ fn draw_progress_tooltip(frame: &mut Frame, app: &App) {
     let Some((pane_id, anchor)) = app.hovered_progress else {
         return;
     };
-    let Some(progress) = app.tree.pane_progress(pane_id) else {
+    let Some(progress_area) = app
+        .pane_viewports()
+        .into_iter()
+        .find(|viewport| viewport.pane_id == pane_id)
+        .and_then(|viewport| viewport.progress_area)
+    else {
+        return;
+    };
+    let Some(progress) = app.progress_monitor_at(pane_id, progress_area, anchor) else {
         return;
     };
     let content = crate::progress_bar::details_tooltip(progress);
@@ -496,7 +504,7 @@ fn status_tooltip_content(
     }
     let NodeKind::Pane {
         status,
-        progress,
+        progress_monitors,
         scheduled_input,
         ..
     } = &node.kind
@@ -512,10 +520,13 @@ fn status_tooltip_content(
         app.ui_settings.attention_progress_reports,
         app.ui_settings.attention_running_indicator,
         status,
-        progress.as_deref(),
+        progress_monitors,
         scheduled_input.is_some(),
         shell_output,
     );
+    // The tree row shows one glyph for all of the pane's monitors; explain
+    // the monitor that glyph represents.
+    let progress = ilium_core::representative_progress(progress_monitors);
     let explanation = match slot {
         StatusSlot::Identity => Some(identity_explanation(status)),
         StatusSlot::Objective => objective_explanation(signals.objective),
@@ -538,7 +549,7 @@ fn status_tooltip_content(
                 ilium_core::ObjectiveSignal::Goal(_) => recorded_reason(
                     detection.and_then(|evidence| evidence.goal.as_ref()),
                 ).or_else(|| Some("Why: this goal phase is in the current server status; the confirming provider row is not available yet.".to_string())),
-                ilium_core::ObjectiveSignal::Task(_) => progress.as_deref().map(|progress| {
+                ilium_core::ObjectiveSignal::Task(_) => progress.map(|progress| {
                     format!(
                         "Why: monitor #{} reported job «{}» as {:?} at {:.1}%; observation is {}. Report message «{}».{} Received at Unix millisecond {}.",
                         progress.monitor_id,
@@ -570,7 +581,7 @@ fn status_tooltip_content(
                     "Why: {}. Historical agent identity and recovery data remain available; the terminal has no confirmed live agent composer.",
                     availability.label(),
                 )),
-                ilium_core::NowSignal::Parked => progress.as_deref().map(|progress| format!(
+                ilium_core::NowSignal::Parked => progress.map(|progress| format!(
                     "Why: the agent is idle while live monitor #{} watches job «{}»; the monitor suppresses the finished alert.",
                     progress.monitor_id,
                     crate::status_icons::safe_tooltip_text(&progress.report.job_id),
@@ -2733,10 +2744,10 @@ fn draw_pane_runtime(
         if matches!(runtime, PaneRuntime::Terminal(_))
             && app.shows_progress_footer(viewport.pane_id)
         {
-            crate::progress_bar::render(
+            crate::progress_bar::render_monitors(
                 frame,
                 progress_area,
-                app.tree.pane_progress(viewport.pane_id),
+                &app.visible_progress_monitors(viewport.pane_id),
                 app.ui_settings.progress_max_lines.into(),
                 app.ui_settings.color_scheme,
             );
@@ -5196,8 +5207,10 @@ mod context_menu_visual_tests {
             Some(&TerminalContextAction::ShowAgentDebugLog)
         );
         for icons in [true, false] {
-            let mut ui = crate::config::UiSettings::default();
-            ui.show_context_menu_icons = icons;
+            let ui = crate::config::UiSettings {
+                show_context_menu_icons: icons,
+                ..Default::default()
+            };
             let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
             terminal
                 .draw(|frame| draw_terminal_pane_context_menu(frame, &menu, &ui))

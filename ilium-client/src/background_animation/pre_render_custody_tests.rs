@@ -498,7 +498,7 @@ fn presentation_settles_two_pure_create_yields_before_procedural_replay() {
 
 #[test]
 fn live_replay_freeze_acknowledges_an_explicit_empty_source_set() {
-    let fixture = Fixture::new(&LIVE_EMPTY_REPLAY_FREEZE_SCRIPT, AnimationMode::Live);
+    let fixture = Fixture::new(LIVE_EMPTY_REPLAY_FREEZE_SCRIPT, AnimationMode::Live);
     let (mut instance, review) = fixture
         .verified(AnimationMode::Live)
         .prepare_without_rights()

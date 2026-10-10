@@ -86,13 +86,16 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             None
         }
         ServerEvent::PaneFrozen { pane_id, result } => {
-            if result.is_ok() {
-                app.frozen_panes.insert(pane_id);
-                app.restore_frozen_screen(pane_id);
-            } else {
-                app.frozen_panes.remove(&pane_id);
-                app.discard_frozen_screen_restore(pane_id);
-                app.status_message = Some(format!("Agent freeze failed: {}", result.unwrap_err()));
+            match result {
+                Ok(_) => {
+                    app.frozen_panes.insert(pane_id);
+                    app.restore_frozen_screen(pane_id);
+                }
+                Err(error) => {
+                    app.frozen_panes.remove(&pane_id);
+                    app.discard_frozen_screen_restore(pane_id);
+                    app.status_message = Some(format!("Agent freeze failed: {error}"));
+                }
             }
             None
         }
@@ -533,8 +536,11 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             }
             None
         }
-        ServerEvent::PaneProgressChanged { pane_id, progress } => {
-            if let Err(error) = app.tree.set_pane_progress(pane_id, progress) {
+        ServerEvent::PaneProgressChanged {
+            pane_id,
+            progress_monitors,
+        } => {
+            if let Err(error) = app.tree.replace_pane_progress(pane_id, progress_monitors) {
                 tracing::warn!("dropping PaneProgressChanged for pane {pane_id:?}: {error}");
             }
             None

@@ -1,7 +1,7 @@
 //! Shared instruction inputs: each location edits the same persisted value.
 use crate::app::{App, SettingsTab};
 use ratatui::{
-    layout::Rect,
+    layout::{Position, Rect},
     text::Line,
     widgets::{Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
     Frame,
@@ -123,7 +123,7 @@ pub fn panel_height(tab: SettingsTab, area: Rect) -> u16 {
 }
 pub fn first_visible(tab: SettingsTab, area: Rect, selection: usize) -> usize {
     let count = fields(tab).len();
-    let visible = (usize::from(area.height.saturating_sub(1)) / 3).max(1);
+    let visible = visible_field_count(area);
     selection
         .saturating_sub(SELECTION_BASE)
         .min(count.saturating_sub(1))
@@ -132,7 +132,29 @@ pub fn first_visible(tab: SettingsTab, area: Rect, selection: usize) -> usize {
 }
 
 fn visible_field_count(area: Rect) -> usize {
-    (usize::from(area.height.saturating_sub(1)) / 3).max(1)
+    (usize::from(area.height.saturating_sub(2)) / 3).max(1)
+}
+
+/// Maps a click on an overflowing instruction panel's track to the selected
+/// field that places the corresponding document window in view.
+pub fn scrollbar_selection_at(tab: SettingsTab, area: Rect, position: Position) -> Option<usize> {
+    let field_count = fields(tab).len();
+    let visible_fields = visible_field_count(area).min(field_count);
+    if field_count <= visible_fields
+        || area.width <= 1
+        || area.height == 0
+        || position.x != area.right().saturating_sub(1)
+        || position.y < area.y.saturating_add(2)
+        || position.y >= area.bottom()
+    {
+        return None;
+    }
+
+    let maximum_first = field_count.saturating_sub(visible_fields);
+    let track_height = usize::from(area.height.saturating_sub(2)).max(1);
+    let track_row = usize::from(position.y.saturating_sub(area.y.saturating_add(2)));
+    let first = track_row.saturating_mul(maximum_first) / track_height;
+    Some(SELECTION_BASE + first + visible_fields.saturating_sub(1))
 }
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App, tab: SettingsTab, selection: usize) {
@@ -144,9 +166,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, tab: SettingsTab, select
         width: area.width.saturating_sub(u16::from(overflow)),
         ..area
     };
-    let mut lines = vec![Line::from(
-        "Additional instructions · i: focus · Enter: edit · Delete: clear",
-    )];
+    let mut lines = vec![
+        Line::from("Additional instructions"),
+        Line::from("i: focus · Enter: edit · Delete: clear"),
+    ];
     for (index, field) in fields(tab).iter().enumerate().skip(first) {
         let marker = if selection == SELECTION_BASE + index {
             "›"
@@ -180,7 +203,12 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, tab: SettingsTab, select
                 .begin_symbol(None)
                 .end_symbol(None)
                 .track_symbol(Some("│")),
-            Rect::new(area.right().saturating_sub(1), area.y, 1, area.height),
+            Rect::new(
+                area.right().saturating_sub(1),
+                area.y.saturating_add(2),
+                1,
+                area.height.saturating_sub(2),
+            ),
             &mut scrollbar,
         );
     }
@@ -247,6 +275,54 @@ mod tests {
     }
 
     #[test]
+    fn instruction_header_actions_are_not_field_click_targets() {
+        let mut app = App::new("instruction-header-click".into(), std::env::temp_dir());
+        app.set_screen_area(Rect::new(0, 0, 60, 20));
+        app.mode = crate::app::Mode::Settings(crate::app::SettingsState {
+            tab: SettingsTab::LlmInstructions,
+            ..Default::default()
+        });
+        let layout = crate::settings_ui::compute_layout_for_mode(
+            app.layout.screen_area,
+            &app,
+            match &app.mode {
+                crate::app::Mode::Settings(state) => state,
+                _ => unreachable!(),
+            },
+        );
+        let panel = Rect {
+            height: panel_height(SettingsTab::LlmInstructions, layout.content_area),
+            ..layout.content_area
+        };
+
+        crate::mouse::handle_mouse_event(
+            &mut app,
+            crossterm::event::MouseEvent {
+                kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+                column: panel.x + 3,
+                row: panel.y + 1,
+                modifiers: crossterm::event::KeyModifiers::NONE,
+            },
+        );
+        assert!(matches!(app.mode, crate::app::Mode::Settings(_)));
+
+        crate::mouse::handle_mouse_event(
+            &mut app,
+            crossterm::event::MouseEvent {
+                kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+                column: panel.x + 3,
+                row: panel.y + 2,
+                modifiers: crossterm::event::KeyModifiers::NONE,
+            },
+        );
+        assert!(matches!(
+            &app.mode,
+            crate::app::Mode::VoicePromptEditor(editor)
+                if editor.instruction_field == InstructionField::Voice
+        ));
+    }
+
+    #[test]
     fn all_inputs_persist_through_the_same_values_and_clear() {
         let directory = tempfile::tempdir().unwrap();
         let mut app = App::new("instructions".into(), directory.path().to_path_buf());
@@ -301,6 +377,73 @@ mod tests {
             first_visible(SettingsTab::LlmInstructions, area, SELECTION_BASE + 6),
             4
         );
+    }
+
+    #[test]
+    fn instruction_scrollbar_click_moves_the_visible_field_window() {
+        let tab = SettingsTab::LlmInstructions;
+        let area = Rect::new(8, 4, 40, 12);
+        let top = scrollbar_selection_at(tab, area, Position::new(area.right() - 1, area.y + 2))
+            .expect("top of overflowing track below the header");
+        let bottom = scrollbar_selection_at(
+            tab,
+            area,
+            Position::new(area.right() - 1, area.bottom() - 1),
+        )
+        .expect("bottom of overflowing track");
+
+        assert_eq!(first_visible(tab, area, top), 0);
+        assert_eq!(first_visible(tab, area, bottom), 5);
+        assert_eq!(
+            scrollbar_selection_at(tab, area, Position::new(area.right() - 2, area.y + 5),),
+            None,
+            "clicking beside the track must remain a field-row action"
+        );
+        assert_eq!(
+            scrollbar_selection_at(tab, Rect::new(8, 4, 120, 26), Position::new(127, 4),),
+            None,
+            "a fitting panel must not treat its last column as a scrollbar"
+        );
+    }
+
+    #[test]
+    fn instruction_scrollbar_click_selects_a_field_without_opening_its_editor() {
+        let mut app = App::new("instruction-scrollbar-click".into(), std::env::temp_dir());
+        app.set_screen_area(Rect::new(0, 0, 60, 20));
+        app.mode = crate::app::Mode::Settings(crate::app::SettingsState {
+            tab: SettingsTab::LlmInstructions,
+            ..Default::default()
+        });
+        let layout = crate::settings_ui::compute_layout_for_mode(
+            app.layout.screen_area,
+            &app,
+            match &app.mode {
+                crate::app::Mode::Settings(state) => state,
+                _ => unreachable!(),
+            },
+        );
+        let panel = Rect {
+            height: panel_height(SettingsTab::LlmInstructions, layout.content_area),
+            ..layout.content_area
+        };
+        let position = Position::new(panel.right() - 1, panel.bottom() - 1);
+        let expected = scrollbar_selection_at(SettingsTab::LlmInstructions, panel, position)
+            .expect("the short terminal should show an overflowing instruction panel");
+
+        crate::mouse::handle_mouse_event(
+            &mut app,
+            crossterm::event::MouseEvent {
+                kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+                column: position.x,
+                row: position.y,
+                modifiers: crossterm::event::KeyModifiers::NONE,
+            },
+        );
+
+        assert!(matches!(
+            &app.mode,
+            crate::app::Mode::Settings(state) if state.selected_row == expected
+        ));
     }
 
     #[test]

@@ -185,6 +185,21 @@ pub fn load(cwd: &Path) -> anyhow::Result<ProjectConfig> {
 /// Applies a project-config update while preserving fields written by a
 /// concurrent naming or settings operation in another attached client.
 pub fn update(cwd: &Path, mutate: impl FnOnce(&mut ProjectConfig)) -> anyhow::Result<()> {
+    update_if(cwd, |config| {
+        mutate(config);
+        true
+    })
+    .map(|_| ())
+}
+
+/// Applies an update under the project-config lock only when its final
+/// admission predicate still holds. Returning false skips serialization and
+/// replacement, which lets asynchronous callers recheck cancellation after
+/// waiting for another process's lock.
+pub(crate) fn update_if(
+    cwd: &Path,
+    mutate: impl FnOnce(&mut ProjectConfig) -> bool,
+) -> anyhow::Result<bool> {
     let path = cwd.join(RELATIVE_PATH);
     let Some(parent) = path.parent() else {
         anyhow::bail!("project config path {path:?} has no parent");
@@ -194,8 +209,11 @@ pub fn update(cwd: &Path, mutate: impl FnOnce(&mut ProjectConfig)) -> anyhow::Re
     let lock_path = parent.join(".config.yaml.lock");
     let _lock = ExclusiveFileLock::acquire(&lock_path)?;
     let mut config = load(cwd)?;
-    mutate(&mut config);
-    save_unlocked(cwd, &config)
+    if !mutate(&mut config) {
+        return Ok(false);
+    }
+    save_unlocked(cwd, &config)?;
+    Ok(true)
 }
 
 /// Persists one project-scoped UI setting without replacing project metadata.

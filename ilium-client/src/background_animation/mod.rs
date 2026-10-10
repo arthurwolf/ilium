@@ -14,6 +14,8 @@ use std::time::{Duration, SystemTime};
 mod cache;
 mod controls;
 mod host;
+mod introduction;
+mod pack_simd;
 mod parameters;
 mod plugin_backend;
 mod raster;
@@ -617,7 +619,8 @@ pub struct AnimationFrame {
 
 impl AnimationFrame {
     pub fn configure_resources(&mut self, resources: ilium_ambient::resources::AmbientResources) {
-        self.host.configure_resources(resources);
+        self.host.configure_resources(resources.clone());
+        self.wikipedia.configure_resources(resources);
     }
 
     pub fn width(&self) -> u16 {
@@ -1134,29 +1137,14 @@ impl AnimationFrame {
             }
             self.threshold_key = Some(threshold_key);
         }
-        // Each cell row consumes four contiguous dot rows. Two-dot chunks
-        // retain the Braille bit order without per-dot coordinate arithmetic.
-        for ((dots, thresholds), cells) in dots
-            .chunks_exact(dot_row_width * 4)
-            .zip(self.thresholds.chunks_exact(dot_row_width * 4))
-            .zip(self.cells.chunks_exact_mut(width))
-        {
-            cells.fill(0);
-            for ((dot_row, threshold_row), bits) in dots
-                .chunks_exact(dot_row_width)
-                .zip(thresholds.chunks_exact(dot_row_width))
-                .zip(BITS)
-            {
-                for ((cell, pair), threshold_pair) in cells
-                    .iter_mut()
-                    .zip(dot_row.chunks_exact(2))
-                    .zip(threshold_row.chunks_exact(2))
-                {
-                    *cell |= (u8::from(pair[0] * density > threshold_pair[0]) * bits[0])
-                        | (u8::from(pair[1] * density > threshold_pair[1]) * bits[1]);
-                }
-            }
-        }
+        pack_simd::pack_thresholded(
+            dots,
+            &self.thresholds,
+            width,
+            usize::from(self.height),
+            density,
+            &mut self.cells,
+        );
     }
 }
 

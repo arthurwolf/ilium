@@ -1146,10 +1146,9 @@ impl EditorPane {
         }
         #[cfg(test)]
         {
-            return self
-                .source_visual_rows(viewport_width)
+            self.source_visual_rows(viewport_width)
                 .get(visual_row)
-                .copied();
+                .copied()
         }
         #[cfg(not(test))]
         {
