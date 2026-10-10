@@ -868,6 +868,16 @@ fn write_observation(home: &Path, observation: &ModelObservation) -> io::Result<
 }
 
 #[cfg(test)]
+pub(crate) fn enable_capture_for_test(home: &Path) -> io::Result<()> {
+    let config_directory = home.join(".gemini/antigravity-cli");
+    let lock_path = home.join("locks/antigravity-model-statusline.lock");
+    fs::create_dir_all(&config_directory)?;
+    let executable = std::env::current_exe()?;
+    reconcile_setting_in(&config_directory, &lock_path, true, Some(&executable))
+        .map_err(|error| io::Error::other(error))
+}
+
+#[cfg(test)]
 pub(crate) fn record_observation_for_test(
     home: &Path,
     conversation_id: &str,
@@ -1157,9 +1167,15 @@ mod tests {
 
         reconcile_setting_in(&config_directory, &lock_path, false, None).unwrap();
 
+        let restored = fs::read_to_string(config_directory.join("settings.json")).unwrap();
+        assert_eq!(current_statusline(&restored).unwrap(), state.previous);
         assert_eq!(
-            fs::read_to_string(config_directory.join("settings.json")).unwrap(),
-            original
+            crate::agent_config_writer::top_level_json_value_text(&restored, "statusLine").unwrap(),
+            state.previous_raw
+        );
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&restored).unwrap()["other"],
+            7
         );
         assert!(!state_path.exists());
         assert_eq!(

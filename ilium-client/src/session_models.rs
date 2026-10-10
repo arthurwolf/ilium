@@ -600,10 +600,20 @@ fn codex_status_line_model(contents: &str) -> Option<String> {
         .lines()
         .rev()
         .filter(|line| !line.trim().is_empty())
-        .take(6)
-        .find_map(|line| {
+        .next()
+        .and_then(|line| {
             let leading_segment = line.split_once(" · ")?.0.trim();
             let candidate = leading_segment.split_ascii_whitespace().next()?;
+            // The status line reports an API model identifier (for example,
+            // `gpt-6.1-sol`), while short toolbar labels such as `Sol` are
+            // ambiguous in terminal output and can also occur in conversation
+            // text. Only accept the canonical identifier form here.
+            if !candidate
+                .get(..4)
+                .is_some_and(|prefix| prefix.eq_ignore_ascii_case("gpt-"))
+            {
+                return None;
+            }
             crate::agent_toolbar::model_icon_glyph(
                 AgentClass::Codex,
                 candidate,
@@ -1230,7 +1240,7 @@ mod tests {
         );
         let next_scan = no_screen_scan + CODEX_SCREEN_REFRESH;
         let screens = app.live_codex_screens(&contexts);
-        assert!(app
+        assert!(!app
             .session_models
             .refresh_codex_screen_models(screens, next_scan));
         assert!(
@@ -1373,6 +1383,7 @@ mod tests {
         let mut expected_models = BTreeMap::new();
         let antigravity_conversations = home.path().join(".gemini/antigravity-cli/conversations");
         std::fs::create_dir_all(&antigravity_conversations).unwrap();
+        crate::antigravity_model_statusline::enable_capture_for_test(home.path()).unwrap();
         for index in 0..21_u64 {
             let id = format!("00000000-0000-4000-8000-{index:012x}");
             let (class, model) = match index % 3 {
@@ -1502,6 +1513,7 @@ mod tests {
             ),
         )
         .unwrap();
+        crate::antigravity_model_statusline::enable_capture_for_test(home.path()).unwrap();
         crate::antigravity_model_statusline::record_observation_for_test(
             home.path(),
             id,
