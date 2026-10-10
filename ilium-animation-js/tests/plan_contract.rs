@@ -32,11 +32,14 @@ fn audio_products_are_independent_and_bounded() {
 }
 
 #[test]
-fn live_only_inputs_cannot_silently_become_offline_recordings() {
+fn pre_rendered_plan_can_bind_recording_created_during_create() {
     let plan = json!({"format":"gray8","fps":30,"inputs":{"pointer":{"max_hz":30}},"replay":{"seed":0,"duration_seconds":10,"seamless":false}});
-    assert!(
-        AnimationPlan::parse(&plan, AnimationMode::PreRendered, PlanBudget::default()).is_err()
-    );
+    let parsed =
+        AnimationPlan::parse(&plan, AnimationMode::PreRendered, PlanBudget::default()).unwrap();
+    assert_eq!(parsed.inputs.pointer.as_ref().unwrap().max_hz, 30.0);
+    let replay = parsed.replay.unwrap();
+    assert_eq!(replay.duration_seconds, 10.0);
+    assert!(replay.input_recording.is_none());
 }
 
 #[test]

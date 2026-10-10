@@ -7,4 +7,5 @@ runner = [
     "--scope",
     "--property=Delegate=yes",
     "--expand-environment=no",
+    "--setenv=ILIUM_ANIMATION_SANDBOX_DIAGNOSTICS=1",
 ]

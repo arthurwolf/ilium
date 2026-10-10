@@ -1,5 +1,7 @@
 #![cfg(all(feature = "v8-runtime", feature = "native-host"))]
 //! Real helper/finite-bank qualification; never a synthetic service response.
+mod common;
+
 use ilium_ambient::resources::AmbientResources;
 use ilium_animation_js::{
     engine::{ArraySpec, CreateState, TypedArrayKind},
@@ -23,7 +25,6 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
     io::{Cursor, Write},
-    path::PathBuf,
     sync::mpsc,
     time::{Duration, Instant},
 };
@@ -42,10 +43,7 @@ fn archive(source: &str, id: &str) -> Vec<u8> {
 }
 fn instance(bytes: &[u8], quota: QuotaGroup, id: u64) -> (PackageInstance, CreateState) {
     let verifier = TrustVerifier::from_release_inventory(Vec::new()).unwrap();
-    let helper = PathBuf::from(
-        std::env::var_os("ILIUM_ANIMATION_HELPER")
-            .expect("qualification needs the exact newly built helper"),
-    );
+    let helper = common::helper_path();
     let settings = json!({});
     let environment = json!({"cell_width":1,"cell_height":1,"dot_width":2,"dot_height":4});
     let verified = PackageInstance::verify(InstancePreparation {

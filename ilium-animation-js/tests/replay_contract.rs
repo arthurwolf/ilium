@@ -1,6 +1,8 @@
 //! Public replay boundary checks. The detailed cache/player algorithms live
 //! in replay's private test module; no public test constructs a certificate or
 //! a terminal-flush proof from arbitrary fields.
+mod common;
+
 use ilium_animation_js::replay::{FrozenInputs, InputFamily, ReplayCache, ReplayLimits};
 use ilium_execution::{QuotaGroup, QuotaLimits};
 
@@ -88,11 +90,9 @@ fn actual_prepared_helper_issues_opaque_source_free_replay_certificate() {
     use std::{
         collections::BTreeMap,
         io::{Cursor, Write},
-        path::Path,
     };
 
-    let executable = std::env::var("ILIUM_ANIMATION_HELPER")
-        .expect("real built ILIUM_ANIMATION_HELPER required for native replay qualification");
+    let executable = common::helper_path();
     let source = b"export function plan(){return {fps:2,output:{mode:'cells',format:'mask8',update:'replace'},inputs:{},replay:{seed:3,duration_seconds:1,seamless:false}}} export async function create(){return {render(){},dispose(){}}}";
     let manifest = json!({"api_version":1,"id":"replay-native-contract","name":"Replay native contract","version":"1.0.0","entry":"entry.mjs","modes":["pre_rendered"],"settings":{"type":"object","properties":{}},"files":[{"path":"entry.mjs","bytes":source.len(),"sha256":format!("{:x}",Sha256::digest(source))}]});
     let mut archive = zip::ZipWriter::new(Cursor::new(Vec::new()));
@@ -121,7 +121,7 @@ fn actual_prepared_helper_issues_opaque_source_free_replay_certificate() {
     let verified = PackageInstance::verify(InstancePreparation {
         archive: &bytes,
         verifier: &verifier,
-        helper_executable: Path::new(&executable),
+        helper_executable: &executable,
         trusted_bootstrap: TRUSTED_BOOTSTRAP,
         settings: &settings,
         mode: AnimationMode::PreRendered,

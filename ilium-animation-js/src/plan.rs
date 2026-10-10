@@ -158,17 +158,6 @@ impl InputDemands {
             && self.astronomy.is_none()
             && self.weather.is_none()
     }
-    fn requires_recording(&self) -> bool {
-        self.pointer.is_some()
-            || self.location.is_some()
-            || self.audio.is_some()
-            || self.series.is_some()
-            || self.earthquakes.is_some()
-            || self.aircraft.is_some()
-            || self.boats.is_some()
-            || self.chess.is_some()
-            || self.weather.is_some()
-    }
     fn validate(&self, budget: PlanBudget) -> Result<()> {
         let rates = [
             self.pointer.as_ref().map(|x| x.max_hz),
@@ -422,7 +411,7 @@ impl AnimationPlan {
             }
         }
         if mode == AnimationMode::PreRendered {
-            let replay = plan.replay.as_ref().ok_or_else(|| {
+            plan.replay.as_ref().ok_or_else(|| {
                 AnimationError::Runtime(
                     "pre-rendered mode requires explicit replay metadata".into(),
                 )

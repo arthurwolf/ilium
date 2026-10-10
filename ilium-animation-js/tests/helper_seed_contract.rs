@@ -1,5 +1,7 @@
 #![cfg(feature = "v8-runtime")]
 //! Pure binary preflight plus actual, explicitly qualified private helper IPC.
+mod common;
+
 use ilium_animation_js::{
     engine::{ArraySpec, ServiceAuthority, TypedArrayKind}, // Bind the real native activation explicitly before helper seed or creation.
     helper::validate_seed_planes,
@@ -97,10 +99,7 @@ fn actual_helper_binary_seed_roundtrip_detaches_and_reseeds_without_json_pixels(
     use ilium_execution::{QuotaGroup, QuotaLimits};
     use serde_json::json;
     use sha2::{Digest, Sha256};
-    use std::{
-        io::{Cursor, Write},
-        path::PathBuf,
-    };
+    use std::io::{Cursor, Write};
     let source = "export function plan(){return {output:{mode:'pixels',format:'gray32',update:'replace'},fps:30,inputs:{},permissions:[]}}; let old;export async function create(host){return {render(context,frame){host.status.log('info','seeded render');if(old&&old.byteLength!==0)throw Error('old_not_detached');old=frame.gray;frame.gray[0]=0.75;frame.present()},dispose(){}}}";
     let manifest = json!({"api_version":1,"id":"helper-seed-contract","name":"Helper seed contract","version":"1.0.0","entry":"entry.mjs","modes":["live"],"settings":{"type":"object","properties":{}},"files":[{"path":"entry.mjs","bytes":source.len(),"sha256":format!("{:x}",Sha256::digest(source.as_bytes()))}]});
     let mut archive = zip::ZipWriter::new(Cursor::new(Vec::new()));
@@ -123,10 +122,7 @@ fn actual_helper_binary_seed_roundtrip_detaches_and_reseeds_without_json_pixels(
         worker_threads: 32,
         worker_bytes: 1024 * 1024 * 1024,
     });
-    let executable = PathBuf::from(
-        std::env::var_os("ILIUM_ANIMATION_HELPER")
-            .expect("qualification needs ILIUM_ANIMATION_HELPER"),
-    );
+    let executable = common::helper_path();
     let mut helper = HelperSession::launch(
         &executable,
         &archive,
@@ -211,10 +207,7 @@ fn actual_service_helper(
     }; // Use supplied helper/package owners.
     use serde_json::json; // Keep archive metadata informational.
     use sha2::{Digest, Sha256}; // Bind exact fixture module bytes.
-    use std::{
-        io::{Cursor, Write},
-        path::PathBuf,
-    }; // Use the actual built helper path.
+    use std::io::{Cursor, Write}; // Use the actual built helper path.
     let manifest = json!({"api_version":1,"id":"helper-service-contract","name":"Helper service contract","version":"1.0.0","entry":"entry.mjs","modes":["live"],"settings":{"type":"object","properties":{}},"files":[{"path":"entry.mjs","bytes":source.len(),"sha256":format!("{:x}",Sha256::digest(source.as_bytes()))}]}); // Preserve validated source bytes.
     let mut archive = zip::ZipWriter::new(Cursor::new(Vec::new())); // Build a complete fixture archive.
     let options =
@@ -227,10 +220,7 @@ fn actual_service_helper(
         .unwrap(); // Preserve the frozen manifest ABI.
     let bytes = archive.finish().unwrap().into_inner(); // Keep actual archive bytes through launch.
     let package = Package::from_bytes(&bytes, PackageLimits::default()).unwrap(); // Use actual package validation/digest.
-    let executable = PathBuf::from(
-        std::env::var_os("ILIUM_ANIMATION_HELPER")
-            .expect("qualification needs ILIUM_ANIMATION_HELPER"),
-    ); // Require real native prerequisites.
+    let executable = common::helper_path(); // Use the matching built native helper by default.
     let bootstrap = "globalThis.__ilium_configure_ambient=(mode,seed)=>{if(mode!=='live'||seed!==0)throw Error('fixture_live_only');};globalThis.__ilium_host=Object.freeze({http:{request:payload=>__ilium_dispatch('http.request',payload)}});globalThis.__ilium_make_frame=()=>({gray:new Float32Array(4),present(){this.submitted=true;}});globalThis.__ilium_finish_frame=frame=>({metadata:{submitted:!!frame.submitted},planes:{gray:frame.gray}});globalThis.__ilium_accept_frame=()=>{};"; // Transport fixture only; no native HTTP.
     let mut helper = HelperSession::launch(
         &executable,
@@ -274,6 +264,7 @@ fn actual_helper_binary_requests_completion_ack_and_cancel_wait_for_explicit_pum
     use ilium_animation_js::engine::{
         CompletionState, CreateState, EngineLimits, ServiceAuthority, ServicePhase, ServiceValue,
     }; // Use actual native payload owners.
+    use ilium_animation_js::helper::HelperLimits; // Match the real helper session's preparation ceiling.
     use serde_json::json; // Keep markers separate from bytes.
     let stamp = ServiceAuthority {
         instance_id: 83,
@@ -316,7 +307,8 @@ fn actual_helper_binary_requests_completion_ack_and_cancel_wait_for_explicit_pum
         assert_eq!(request.phase, ServicePhase::Create); // Use native acquisition phase.
         assert_eq!(request.payload.planes(), &expected); // Snapshot before guest mutation.
         assert_eq!(request.payload.arrays().len(), 4); // Preserve four types across IPC.
-        assert!(request.remaining_ms() <= EngineLimits::default().preparation_ms); // Never restart request deadlines.
+        assert!(request.timeout_ms <= HelperLimits::default().engine.preparation_ms); // Keep each wire deadline within the helper's configured preparation budget.
+        assert!(request.remaining_ms() <= request.timeout_ms); // Do not extend the remaining wire deadline after receipt.
         assert_eq!(
             request.payload.metadata()["views"]["u8"],
             json!({"$ilium_binary":"b0"})

@@ -19,9 +19,12 @@ fn main() {
         std::process::exit(64);
     }
     #[cfg(feature = "v8-runtime")]
-    if ilium_animation_js::helper::run_helper_ipc().is_err() {
+    if let Err(error) = ilium_animation_js::helper::run_helper_ipc() {
         // Never place diagnostics in a binary transport, and never attempt an
         // unrestricted fallback when initialization/isolation fails.
+        if std::env::var_os("ILIUM_ANIMATION_SANDBOX_DIAGNOSTICS").is_some() {
+            eprintln!("animation helper initialization failed: {error}");
+        }
         std::process::exit(70);
     }
     #[cfg(not(feature = "v8-runtime"))]

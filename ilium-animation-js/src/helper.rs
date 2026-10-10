@@ -262,13 +262,14 @@ impl HelperLimits {
 }
 impl Default for HelperLimits {
     fn default() -> Self {
-        let mut engine = EngineLimits::default();
         // Keep the native host deadline above the longest bounded package
         // preparation window while leaving the standalone engine default intact.
-        engine.preparation_ms = 20_000;
         Self {
             sandbox: SandboxLimits::default(),
-            engine,
+            engine: EngineLimits {
+                preparation_ms: 20_000,
+                ..EngineLimits::default()
+            },
             operation_timeout: Duration::from_secs(25),
         }
     }
@@ -1321,6 +1322,65 @@ impl HelperSession {
                 return Err(error);
             } // Broken transport invalidates uncertain delivery.
             Err(_) => {
+                if sequence == 0
+                    && std::env::var_os("ILIUM_ANIMATION_SANDBOX_DIAGNOSTICS").is_some()
+                {
+                    if let Some(child) = self.child.as_mut() {
+                        let exit_status = child.try_wait();
+                        let usage = child.resource_usage();
+                        eprintln!(
+                            "animation helper startup timed out: pid={}, exit_status={exit_status:?}, resource_usage={usage:?}.",
+                            child.id()
+                        );
+                        let parent_pid = child.id();
+                        let parent_path = format!("/proc/{parent_pid}");
+                        let parent_wait = std::fs::read_to_string(format!("{parent_path}/wchan"));
+                        let children = std::fs::read_to_string(format!(
+                            "{parent_path}/task/{parent_pid}/children"
+                        ));
+                        let parent_command = std::fs::read(format!("{parent_path}/cmdline"));
+                        eprintln!(
+                            "animation helper process snapshot: parent_wchan={parent_wait:?}, children={children:?}, parent_cmdline={parent_command:?}."
+                        );
+                        let process_details = |pid: &str| {
+                            let process_path = format!("/proc/{pid}");
+                            let status = std::fs::read_to_string(format!("{process_path}/status"));
+                            let stat = std::fs::read_to_string(format!("{process_path}/stat"));
+                            let scheduling =
+                                std::fs::read_to_string(format!("{process_path}/schedstat"));
+                            let descriptors: Vec<_> = (0..=2)
+                                .map(|descriptor| {
+                                    std::fs::read_link(format!("{process_path}/fd/{descriptor}"))
+                                })
+                                .collect();
+                            (status, stat, scheduling, descriptors)
+                        };
+                        let parent_details = process_details(&parent_pid.to_string());
+                        eprintln!(
+                            "animation helper parent state: status={:?}, stat={:?}, schedstat={:?}, fds={:?}.",
+                            parent_details.0,
+                            parent_details.1,
+                            parent_details.2,
+                            parent_details.3
+                        );
+                        if let Ok(children) = children {
+                            for child_pid in children.split_whitespace().take(8) {
+                                let child_path = format!("/proc/{child_pid}");
+                                let wait_channel =
+                                    std::fs::read_to_string(format!("{child_path}/wchan"));
+                                let command = std::fs::read(format!("{child_path}/cmdline"));
+                                let details = process_details(child_pid);
+                                eprintln!(
+                                    "animation helper child snapshot: pid={child_pid}, wchan={wait_channel:?}, cmdline={command:?}, status={:?}, stat={:?}, schedstat={:?}, fds={:?}.",
+                                    details.0,
+                                    details.1,
+                                    details.2,
+                                    details.3
+                                );
+                            }
+                        }
+                    }
+                }
                 let _ = self.cancel();
                 return Err(invalid("helper response deadline/EOF"));
             } // Notification and EOF are not physical-retirement certificates.
@@ -2333,9 +2393,16 @@ impl ChildServices {
         Ok((packet, None)) // A new acquiring command is required for new work.
     } // End one-event paging.
 } // No native service implementation is fabricated by transport bookkeeping.
+fn helper_startup_checkpoint(stage: &'static str) {
+    if std::env::var_os("ILIUM_ANIMATION_SANDBOX_DIAGNOSTICS").is_some() {
+        eprintln!("animation helper startup checkpoint: {stage}");
+    }
+}
+
 /// Trusted helper entrypoint. The first binary packet is package bytes; loading
 /// executable modules is deliberately after kernel isolation verification/seal.
 pub fn run_helper_ipc() -> Result<()> {
+    helper_startup_checkpoint("ipc entry");
     let mut input = std::io::stdin().lock();
     let mut output = std::io::stdout().lock();
     run_helper_ipc_transport(&mut input, &mut output)
@@ -2366,7 +2433,9 @@ fn run_helper_ipc_inner(
     mut output: &mut impl Write,
     startup_authority: &mut Option<HelperAuthority>,
 ) -> Result<()> {
+    helper_startup_checkpoint("initial packet read start");
     let mut initial = read_packet(&mut input)?;
+    helper_startup_checkpoint("initial packet read complete");
     if initial.envelope.kind != "command" || initial.envelope.sequence != 0 {
         return Err(invalid("first packet must initialize"));
     }
@@ -2393,8 +2462,12 @@ fn run_helper_ipc_inner(
         return Err(AnimationError::Budget("helper startup payload".into()));
     }
     let limits: SandboxLimits = sandbox.into();
+    helper_startup_checkpoint("kernel environment verification start");
     animation_sandbox::verify_helper_environment(limits)?;
+    helper_startup_checkpoint("kernel environment verification complete");
+    helper_startup_checkpoint("helper executable digest start");
     let helper_build_digest = loaded_helper_digest()?;
+    helper_startup_checkpoint("helper executable digest complete");
     let memory_bytes =
         usize::try_from(limits.memory_bytes).map_err(|_| invalid("memory bound overflow"))?;
     let quota = QuotaGroup::new(QuotaLimits {
@@ -2413,7 +2486,9 @@ fn run_helper_ipc_inner(
         .planes
         .remove("archive")
         .ok_or_else(|| invalid("missing archive bytes"))?;
+    helper_startup_checkpoint("package archive validation start");
     let package = Arc::new(Package::from_bytes(&archive, PackageLimits::default())?);
+    helper_startup_checkpoint("package archive validation complete");
     if package.digest() != authority.package_digest {
         return Err(AnimationError::Integrity(
             "helper immutable package identity mismatch".into(),
@@ -2421,16 +2496,24 @@ fn run_helper_ipc_inner(
     }
     drop(archive);
     drop(initial);
+    helper_startup_checkpoint("V8 platform initialization start");
     engine::initialize_engine(quota.clone(), 1)?;
+    helper_startup_checkpoint("V8 platform initialization complete");
     let frame_byte_limit = engine.frame_bytes;
     let engine_limits: EngineLimits = engine.into(); // Retain actual configured service bounds for native completion copies.
+    helper_startup_checkpoint("V8 isolate construction start");
     let mut engine = Engine::new(package, engine_limits.clone(), quota.clone())?; // Keep the existing precharged child root for every later copy.
+    helper_startup_checkpoint("V8 isolate construction complete");
     engine.install_bootstrap(&bootstrap)?;
+    helper_startup_checkpoint("trusted bootstrap installation complete");
     // Both modes need the trusted lifecycle declaration. Live configuration
     // returns before changing Date or Math.random; replay alone seals them.
     engine.configure_ambient(mode, ambient_seed)?;
+    helper_startup_checkpoint("ambient setup complete");
     let proof = animation_sandbox::seal_current_helper()?;
+    helper_startup_checkpoint("seccomp seal complete");
     engine.load()?;
+    helper_startup_checkpoint("package modules loaded");
     // From this point the command loop owns terminal diagnostics. A failed
     // ready write must not append a second packet to a partly written response.
     *startup_authority = None;

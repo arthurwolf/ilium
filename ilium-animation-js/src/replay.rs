@@ -950,6 +950,7 @@ impl ReplayCertification {
             Some(frozen),
         )
     }
+    #[allow(clippy::too_many_arguments)] // Keep replay certification inputs explicit and source-bound.
     pub(crate) fn sealed_source_sequence(
         package: &Package,
         plan: &AnimationPlan,

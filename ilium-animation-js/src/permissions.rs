@@ -1909,7 +1909,7 @@ mod tests {
             Err(PermissionError::WrongBroker)
         ));
 
-        original.revoke(net()).expect("revoke original channel");
+        let _ = original.revoke(net()).expect("revoke original channel");
         assert!(matches!(
             original.check_source_capture_fence(&fence),
             Err(PermissionError::Stale)

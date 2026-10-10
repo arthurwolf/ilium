@@ -1,5 +1,7 @@
 //! Real helper process and original broker activation for pure task yields.
 #![cfg(all(feature = "v8-runtime", feature = "native-host"))]
+mod common;
+
 use ilium_animation_js::{
     engine::CreateState,
     helper::HelperLimits,
@@ -16,7 +18,6 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
     io::{Cursor, Write},
-    path::Path,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -38,11 +39,21 @@ fn accepted(
     quota: QuotaGroup,
     mode: AnimationMode,
 ) -> (PackageInstance, CreateState) {
-    let executable = std::env::var("ILIUM_ANIMATION_HELPER")
-        .expect("real built ILIUM_ANIMATION_HELPER required for native task qualification");
+    accepted_with_preparation(source, instance_id, quota, mode, 10_000)
+}
+
+fn accepted_with_preparation(
+    source: &str,
+    instance_id: u64,
+    quota: QuotaGroup,
+    mode: AnimationMode,
+    preparation_ms: u64,
+) -> (PackageInstance, CreateState) {
+    let executable = common::helper_path();
     let manifest = json!({"api_version":1,"id":"native-task-helper-contract",
         "name":"Native task helper contract","version":"1.0.0","entry":"entry.mjs",
         "modes":[if mode == AnimationMode::PreRendered {"pre_rendered"} else {"live"}],
+        "limits":{"preparation_ms":preparation_ms},
         "settings":{"type":"object","properties":{}},
         "files":[{"path":"entry.mjs","bytes":source.len(),
             "sha256":format!("{:x}",Sha256::digest(source.as_bytes()))}]});
@@ -62,7 +73,7 @@ fn accepted(
     let verified = PackageInstance::verify(InstancePreparation {
         archive: &bytes,
         verifier: &verifier,
-        helper_executable: Path::new(&executable),
+        helper_executable: &executable,
         trusted_bootstrap: TRUSTED_BOOTSTRAP,
         settings: &settings,
         mode,
@@ -386,7 +397,9 @@ fn expired_awaiting_callbacks_free_live_slots_beyond_thirty_two_and_ack_late_clo
           return {render(){},dispose(){}};
         }"#;
     let quota = quota();
-    let (mut instance, creation) = accepted(source, 409, quota.clone(), AnimationMode::Live);
+    // This deliberately performs 35 serial native round-trips before creation completes.
+    let (mut instance, creation) =
+        accepted_with_preparation(source, 409, quota.clone(), AnimationMode::Live, 20_000);
     assert_eq!(creation, CreateState::Pending);
     let mut tasks = NativeTaskHost::new(quota, instance.engine_limits().clone()).unwrap();
     for index in 0..35 {

@@ -17,10 +17,6 @@ use std::sync::{Arc, Mutex};
 
 const CAPTURE_METADATA_BYTES: usize = 64 * 1024;
 
-fn denied(text: &'static str) -> AnimationError {
-    AnimationError::PermissionDenied(text.into())
-}
-
 fn charge(quota: &QuotaGroup) -> Result<StorageAdmission> {
     quota
         .reserve_external_storage(CAPTURE_METADATA_BYTES)
@@ -69,6 +65,7 @@ impl NativeCapturedFeed {
     /// `snapshot` must be the exact Arc returned by the live SourceDispatcher.
     /// The resident limit is checked against that actual admitted payload and
     /// image inventory before capture metadata is admitted.
+    #[allow(clippy::too_many_arguments)] // Each capture fence, lease and identity remains explicit at this security boundary.
     pub(crate) fn from_native_source(
         instance: &PackageInstance,
         owner: Arc<Mutex<PermissionBroker>>,
@@ -216,15 +213,6 @@ impl NativeCapturedFeed {
             Ok(())
         })?
     }
-
-    /// No production snapshot getter is exposed. The replay owner instead asks
-    /// this capture to make a bounded metadata copy under its activation fence;
-    /// the replay recording separately retains this capture owner and verifies
-    /// that the copied value still matches the original admitted snapshot.
-    #[cfg(test)]
-    pub(crate) fn original_snapshot_for_identity_test(&self) -> &Arc<AdmittedSourceSnapshot> {
-        &self.snapshot
-    }
 }
 
 impl std::fmt::Debug for NativeCapturedFeed {
@@ -233,19 +221,5 @@ impl std::fmt::Debug for NativeCapturedFeed {
             .debug_struct("NativeCapturedFeed")
             .field("summary", &self.summary)
             .finish_non_exhaustive()
-    }
-}
-
-impl NativeCapturedFeed {
-    #[cfg(test)]
-    pub(crate) fn original_image_pixels_for_identity_test(
-        &self,
-        index: usize,
-    ) -> Result<&Arc<crate::native_media::Admitted<crate::native_media::ImagePixels>>> {
-        self.snapshot
-            .native_images()
-            .get(index)
-            .map(crate::sources::NativeSourceImage::admitted_pixels)
-            .ok_or_else(|| denied("native source capture image index"))
     }
 }
