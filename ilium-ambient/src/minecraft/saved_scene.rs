@@ -22,23 +22,23 @@ use crate::{
     control::SceneSettings,
     raster::PaintedOwner,
     resources::{AmbientResources, WorkerCost},
-    scene::{Frame, FrameReceiptId, Scene, SceneEnv, MAX_SCENE_RECEIPT_SLOTS},
+    scene::{Frame, FrameReceiptId, MAX_SCENE_RECEIPT_SLOTS, Scene, SceneEnv},
     source::Worker,
     style::ScenePalette,
     voxel_landscape::{
+        Retirement, VoxelLandscapeScene, VoxelLandscapeSettings,
         assets::budget::{ByteBudget, Cancel, Reservation},
         composite_selected,
         surface_raster::{self, DirectionalLight, RasterFrame, RasterLimits},
-        Retirement, VoxelLandscapeScene, VoxelLandscapeSettings,
     },
 };
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     path::PathBuf,
     sync::{
+        Arc, Mutex, TryLockError,
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         mpsc::{self, SyncSender},
-        Arc, Mutex, TryLockError,
     },
     time::{Duration, Instant},
 };
@@ -849,6 +849,7 @@ fn advance_overall_progress(
     let completed_phases = completed_phases.saturating_mul(100);
     let percent = completed_phases
         .saturating_add(phase_percent.min(100))
+        .saturating_add(PREPARATION_PROGRESS_PHASES / 2)
         .checked_div(PREPARATION_PROGRESS_PHASES)
         .unwrap_or(0)
         .min(100);

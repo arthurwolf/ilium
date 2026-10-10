@@ -728,11 +728,12 @@ export async function create(host){
     assert_eq!(imported.len(), 1);
     let image_id = &imported[0];
     assert!(drawing.owns_source_image(image_id));
-    let original_image = completion
-        .authorized_output(&instance)
-        .unwrap()
-        .native_images()[0]
-        .clone();
+    let crate::native_source_host::NativeSourceOutput::Operation(original_output) =
+        completion.authorized_output(&instance).unwrap()
+    else {
+        panic!("native source completion must retain its operation output");
+    };
+    let original_image = original_output.native_images()[0].clone();
     let repeated_descriptor = drawing
         .retain_source_image(&mut instance, &original_image)
         .unwrap();

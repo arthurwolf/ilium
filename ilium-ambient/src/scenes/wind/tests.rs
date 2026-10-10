@@ -65,8 +65,9 @@ fn direct_subpixel_scaling_preserves_legacy_raster_mapping() {
         2.0,
         f32::from_bits(0x407f_ffff),
     ];
+    let frame_height = frame.height as f32;
     for &x in &edge_values {
-        for &y in &edge_values[..7] {
+        for &y in edge_values.iter().filter(|&&y| y < frame_height) {
             frame.raster.dots.fill(0.0);
             let dot = super::sim::Dot {
                 x,

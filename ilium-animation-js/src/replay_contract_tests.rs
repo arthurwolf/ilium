@@ -232,6 +232,7 @@ impl Fixture {
             frames,
             seamless: replay.seamless,
             frozen,
+            source_sequence: None,
             evidence: self.evidence.clone(),
             lineage,
             recorded_video: false, // This synthetic fixture performs no recorded native video open.
@@ -1221,11 +1222,15 @@ fn cache_delivery_and_pending_emission_recheck_current_authority() {
 fn frozen_input_capture_retains_ordered_native_values_and_enforces_total_limit() {
     let quota = root(8 << 20);
     let mut first_planes = BTreeMap::new();
-    first_planes.insert("samples".into(), vec![1, 2, 3, 4]);
+    first_planes.insert("b0".into(), vec![1, 2, 3, 4]);
     let first_value = ServiceValue::copy_from_host(
-        &json!({"provider":"fixture","revision":3}),
+        &json!({
+            "provider":"fixture",
+            "revision":3,
+            "samples":{"$ilium_binary":"b0"}
+        }),
         &[ArraySpec {
-            name: "samples".into(),
+            name: "b0".into(),
             kind: TypedArrayKind::U8,
             elements: 4,
         }],
@@ -1258,7 +1263,7 @@ fn frozen_input_capture_retains_ordered_native_values_and_enforces_total_limit()
     let snapshots = vec![first_snapshot, second_snapshot];
     let measured_bytes = snapshots
         .iter()
-        .map(FrozenInputSnapshot::wire_bytes)
+        .map(|snapshot| snapshot.wire_bytes().unwrap())
         .sum::<usize>();
     let capture = FrozenInputs::from_capture(
         quota.clone(),
@@ -1275,10 +1280,7 @@ fn frozen_input_capture_retains_ordered_native_values_and_enforces_total_limit()
     assert_eq!(capture.snapshots().len(), 2);
     assert_eq!(capture.snapshots()[0].handle_id(), "series:primary");
     assert_eq!(capture.snapshots()[0].revision(), 3);
-    assert_eq!(
-        capture.snapshots()[0].value().planes()["samples"],
-        [1, 2, 3, 4]
-    );
+    assert_eq!(capture.snapshots()[0].value().planes()["b0"], [1, 2, 3, 4]);
     assert_eq!(capture.snapshots()[1].handle_id(), "weather:local");
 
     let repeated = FrozenInputs::from_capture(
@@ -1493,7 +1495,7 @@ fn frozen_source_sequence_carries_forward_unchanged_feeds_between_sparse_updates
         .unwrap()
     };
     let sequence = FrozenSourceSequence::from_native(
-        quota,
+        quota.clone(),
         3_000,
         vec![
             FrozenSourceFrame::from_native(
@@ -1571,8 +1573,12 @@ fn frozen_source_sequence_refuses_missing_start_duplicate_revisions_and_limits()
         1 << 20,
     )
     .is_err());
-    assert!(
-        FrozenSourceSequence::from_native(quota, 1_000, vec![make_frame(0, 1)], 0, 1 << 20,)
-            .is_err()
-    );
+    assert!(FrozenSourceSequence::from_native(
+        quota.clone(),
+        1_000,
+        vec![make_frame(0, 1)],
+        0,
+        1 << 20,
+    )
+    .is_err());
 }

@@ -1263,15 +1263,20 @@ mod tests {
         let mut mask = vec![0; width * height];
         mask[1 * width + 2] = 1;
         mask[1 * width] = 1;
+        mask[1 * width + width - 1] = 1;
+        mask[3 * width + 2] = 1;
         let mut packed_mask = Vec::new();
         fill_packed_collision_mask(&mut packed_mask, &mask);
 
         assert!(swept_x_blocked(&packed_mask, width, height, 1, 3, 1));
         assert!(swept_x_blocked(&packed_mask, width, height, 3, 1, 1));
         assert!(swept_x_blocked(&packed_mask, width, height, 7, 9, 1));
+        assert!(swept_x_blocked(&packed_mask, width, height, 0, -2, 1));
         assert!(!swept_x_blocked(&packed_mask, width, height, 3, 4, 1));
         assert!(swept_y_blocked(&packed_mask, width, height, 0, 2, 2));
         assert!(swept_y_blocked(&packed_mask, width, height, 2, 0, 2));
+        assert!(swept_y_blocked(&packed_mask, width, height, 3, 5, 2));
+        assert!(swept_y_blocked(&packed_mask, width, height, 0, -2, 2));
     }
 
     #[test]
@@ -1390,6 +1395,9 @@ mod tests {
                             }
                         }
                     }
+                    // The test calls the low-level kernels directly, bypassing
+                    // `State::step_wrapped`, which normally marks this cache dirty.
+                    state.dirty = true;
                     state.flush_to_dots(&mut actual);
                     let mut max_delta = 0.0_f32;
                     let mut reference_raster = vec![false; 160 * 50];
@@ -2062,6 +2070,24 @@ mod tests {
 
     #[cfg(target_arch = "x86_64")]
     #[test]
+    fn avx2_pointer_force_matches_scalar_for_20003_dots_when_runtime_supported() {
+        if !std::arch::is_x86_feature_detected!("avx2") {
+            return;
+        }
+        assert_forced_pointer_kernel_with_count(KernelPath::Avx2, 20_003);
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn avx512_pointer_force_matches_scalar_for_20003_dots_when_runtime_supported() {
+        if !std::arch::is_x86_feature_detected!("avx512f") {
+            return;
+        }
+        assert_forced_pointer_kernel_with_count(KernelPath::Avx512, 20_003);
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[test]
     fn avx2_kernel_bounces_before_an_occupied_intermediate_cell() {
         if !std::arch::is_x86_feature_detected!("avx2") {
             return;
@@ -2097,7 +2123,11 @@ mod tests {
             KernelPath::Avx512 | KernelPath::Avx512Fma => 16,
             KernelPath::Scalar => unreachable!(),
         };
-        let count = lanes * 2 + 3;
+        assert_forced_pointer_kernel_with_count(path, lanes * 2 + 3);
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    fn assert_forced_pointer_kernel_with_count(path: KernelPath, count: usize) {
         let pointer = [0.5, 0.5];
         let (width, height) = (160, 50);
         let mut expected = fixture(count);
@@ -2115,6 +2145,12 @@ mod tests {
         for dot in expected.iter_mut().skip(5) {
             dot.x = 20.0 + (dot.x as usize % 20) as f32;
             dot.y = 5.0 + (dot.y as usize % 10) as f32;
+        }
+        if count == 20_003 {
+            for (dot, x) in expected.iter_mut().skip(count - 3).zip([80.5, 86.0, 85.99]) {
+                dot.x = x;
+                dot.y = 25.0;
+            }
         }
         let mut actual = expected.clone();
         let masses = vec![0.75; count];

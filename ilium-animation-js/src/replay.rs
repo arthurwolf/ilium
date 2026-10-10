@@ -474,6 +474,14 @@ impl FrozenSourceSequence {
                 revisions.insert(snapshot.handle_id.clone(), snapshot.revision);
                 frame_bytes = add(frame_bytes, snapshot.wire_bytes()?)?;
                 frame_metadata_bytes = add(frame_metadata_bytes, snapshot.handle_id.capacity())?;
+                frame_metadata_bytes = add(
+                    frame_metadata_bytes,
+                    snapshot
+                        .native_images
+                        .capacity()
+                        .checked_mul(size_of::<NativeSourceImage>())
+                        .ok_or_else(|| failure("source sequence image owner metadata size"))?,
+                )?;
                 frame_digest.update(capture_digest(std::slice::from_ref(snapshot))?);
             }
             if inventory.as_ref().is_some_and(|expected| {

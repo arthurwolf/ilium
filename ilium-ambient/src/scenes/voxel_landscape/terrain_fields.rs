@@ -298,6 +298,26 @@ impl TerrainFields {
                 island_weight,
                 uncarved_height,
             )
+            .map(|(lake_height, lake_water)| {
+                // Lake eligibility changes discretely at the wetland climate
+                // boundary. Fade its geometry and water into the wetland shelf
+                // so that neighboring samples do not form a one-column cliff.
+                let lake_weight = 1.0 - wet_weight;
+                let height = blend(
+                    f64::from(uncarved_height),
+                    f64::from(lake_height),
+                    lake_weight,
+                )
+                .round()
+                .clamp(4.0, f64::from(SURFACE_MAX_HEIGHT)) as i16;
+                let water = lake_water
+                    .map(|level| {
+                        blend(f64::from(SURFACE_SEA_LEVEL), f64::from(level), lake_weight).round()
+                            as i16
+                    })
+                    .filter(|&level| height < level);
+                (height, water)
+            })
         };
         let uncarved_height = lake.map_or(uncarved_height, |(height, _)| height);
         let valley_strength = if rivers && !island {

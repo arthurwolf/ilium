@@ -863,6 +863,27 @@ mod tests {
     }
 
     #[test]
+    fn host_lease_refuses_requests_during_a_shared_provider_cooldown() {
+        let url = "https://cooldown-expiry.invalid/data";
+        let directory = tempfile::tempdir().unwrap();
+        let key = host_key(&host_of(url)) % PROVIDER_HOST_SLOTS;
+        let cooldown_name = std::ffi::OsString::from(format!("provider-{key:016x}.cooldown"));
+        let retry_at = epoch_millis().unwrap() + 5_000;
+        write_last_request(directory.path(), &cooldown_name, retry_at).unwrap();
+
+        assert!(matches!(
+            provider_host_lease(
+                url,
+                directory.path(),
+                Duration::ZERO,
+                Instant::now() + Duration::from_millis(10),
+                None,
+            ),
+            Err(FetchError::Timeout)
+        ));
+    }
+
+    #[test]
     fn cached_fetch_rechecks_after_another_process_publishes_the_miss() {
         let directory = tempfile::tempdir().unwrap();
         let cache = directory.path().join("shared-cache");

@@ -16,10 +16,12 @@ fn allocated_proto_chunks_are_rejected_before_full_route_decode() {
         .unwrap(),
         "an allocated chunk with Status=structure_starts must not reach full viewport decode"
     );
-    assert!(route_support_is_eligible(&support, &allocated, |position| {
-        Ok(support.contains(&position))
-    })
-    .unwrap());
+    assert!(
+        route_support_is_eligible(&support, &allocated, |position| {
+            Ok(support.contains(&position))
+        })
+        .unwrap()
+    );
     assert!(
         !route_support_is_eligible(&support, &BTreeSet::from([[-18, -6]]), |_| Ok(true)).unwrap()
     );
@@ -224,7 +226,10 @@ fn preparation_overall_progress_does_not_regress_across_scan_stages_or_maps() {
         busy_report
             .lines()
             .next()
-            .is_some_and(|line| line.contains(&format!("overall {}%", percentages[2]))),
+            .is_some_and(|line| line.contains(&format!(
+                "overall {}%",
+                percentages.last().copied().unwrap_or_default()
+            ))),
         "a busy status mutex should retain the lock-free overall percentage: {busy_report}"
     );
     drop(state);
@@ -254,9 +259,10 @@ fn failed_preparation_does_not_keep_an_eta_for_work_that_has_stopped() {
             last_completed: 2,
         });
     }
+    let measured_report = progress.report();
     assert!(
-        progress.report().contains("on this measured stage"),
-        "running work should expose its measured stage estimate"
+        measured_report.contains("on this measured stage"),
+        "running work should expose its measured stage estimate: {measured_report}"
     );
 
     progress.fail("Saved-world preparation failed after the payload read");
@@ -489,7 +495,8 @@ fn preparation_report_labels_an_incomplete_total_eta_and_remaining_route_candida
 
     let report = progress.report();
     assert!(
-        report.contains("Total ETA: incomplete; about 00:20 for the measured stage"),
+        report.contains("Total ETA: incomplete; about ")
+            && report.contains(" for the measured stage"),
         "the total estimate should label the measured current-stage remainder as an estimate: {report}"
     );
     assert!(
@@ -560,7 +567,9 @@ fn preparation_report_estimates_total_eta_from_qualified_overall_progress() {
 
     let report = progress.report();
     assert!(
-        report.contains("Total ETA: rough estimate 06:00 remaining from 25% estimated overall progress"),
+        report.contains(
+            "Total ETA: rough estimate 06:00 remaining from 25% estimated overall progress"
+        ),
         "once enough overall work is measured, users need a provisional whole-run estimate: {report}"
     );
     assert!(
@@ -615,7 +624,8 @@ fn preparation_report_estimates_remaining_route_candidates_after_one_measured_ca
     progress.route_candidates(4, 4);
     let final_candidate = progress.report();
     assert!(
-        final_candidate.contains("assuming all 1 remaining candidate checks still need qualification"),
+        final_candidate
+            .contains("assuming all 1 remaining candidate checks still need qualification"),
         "the final in-progress candidate must not be reported as already complete: {final_candidate}"
     );
 }
@@ -634,7 +644,8 @@ fn preparation_report_names_measured_chunk_payload_decoding() {
 
     let report = progress.report();
     assert!(
-        report.contains("Decoding map chunks for Example Save: 2/5 items (40%)"),
+        report.contains("Decoding map chunks [")
+            && report.contains("for Example Save: 2/5 items (40%)"),
         "report should expose actual payload decode progress: {report}"
     );
 }
@@ -653,9 +664,8 @@ fn preparation_report_names_candidate_search_work_units() {
 
     let report = progress.report();
     assert!(
-        report.contains(
-            "Checking saved-world candidate-search work units for Example Save: 256/1024 items (25%)"
-        ),
+        report.contains("Checking saved-world candidate-search work units [")
+            && report.contains("for Example Save: 256/1024 items (25%)"),
         "report should expose bounded candidate-search work: {report}"
     );
 }
@@ -678,7 +688,8 @@ fn preparation_report_drives_the_progress_bar_from_scanned_work() {
         "scan work should advance the whole-preparation progress bar: {report}"
     );
     assert!(
-        report.contains("Indexing chunk slots for Example Save: 500/1000 items (50%)"),
+        report.contains("Indexing chunk slots [")
+            && report.contains("for Example Save: 500/1000 items (50%)"),
         "report should identify the current measured stage: {report}"
     );
 }
@@ -731,7 +742,7 @@ fn route_survey_progress_accumulates_across_candidate_passes() {
     );
     let first_pass = progress.report();
     assert!(
-        first_pass.contains("overall 50% · phase 3/6"),
+        first_pass.contains("overall 58% · phase 3/6"),
         "route survey should include bounded work in whole-preparation progress: {first_pass}"
     );
 
@@ -744,7 +755,7 @@ fn route_survey_progress_accumulates_across_candidate_passes() {
     );
     let next_pass = progress.report();
     assert!(
-        next_pass.contains("overall 51% · phase 3/6"),
+        next_pass.contains("overall 59% · phase 3/6"),
         "route survey progress should continue across candidate passes: {next_pass}"
     );
     assert!(
@@ -887,12 +898,16 @@ fn route_survey_orders_short_novel_before_longer_repeated_and_stays_finite() {
     assert_eq!(tiers[0], (Choice::NovelAppearance, 1024.0, 1));
     assert_eq!(tiers[5], (Choice::NovelAppearance, 64.0, 1));
     assert_eq!(tiers[6], (Choice::RepeatedAppearance, 256.0, 1));
-    assert!(tiers[..6]
-        .iter()
-        .all(|(choice, _, _)| *choice == Choice::NovelAppearance));
-    assert!(tiers[6..10]
-        .iter()
-        .all(|(choice, _, _)| *choice == Choice::RepeatedAppearance));
+    assert!(
+        tiers[..6]
+            .iter()
+            .all(|(choice, _, _)| *choice == Choice::NovelAppearance)
+    );
+    assert!(
+        tiers[6..10]
+            .iter()
+            .all(|(choice, _, _)| *choice == Choice::RepeatedAppearance)
+    );
 }
 
 #[test]

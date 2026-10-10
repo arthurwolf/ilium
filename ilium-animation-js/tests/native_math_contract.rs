@@ -578,6 +578,31 @@ fn stale_epoch_withholds_completed_payload_and_queue_delay_counts_toward_deadlin
         .is_err());
     drop(service);
     let mut service = NativeMath::new(resources.clone(), quota.clone(), 2).unwrap();
+    let blocker = execution
+        .client(ClientLimits {
+            jobs: 2,
+            service_jobs: 0,
+            input_bytes: 1024,
+            result_bytes: 1024,
+        })
+        .unwrap();
+    let (started_sender, started) = mpsc::sync_channel(1);
+    let (release_sender, release) = mpsc::sync_channel(1);
+    let blocker_receipt = blocker
+        .try_submit(
+            Lane::Cpu,
+            JobCost {
+                input_bytes: 256,
+                result_bytes: 256,
+            },
+            move |_: ilium_execution::JobContext| -> Result<(), ()> {
+                started_sender.send(()).unwrap();
+                release.recv_timeout(Duration::from_secs(2)).unwrap();
+                Ok(())
+            },
+        )
+        .unwrap();
+    started.recv_timeout(Duration::from_secs(2)).unwrap();
     let expired = MathRequest::new(
         MathInput::from_host(&[0., 0.], quota.clone()).unwrap(),
         KernelParameters::Noise {
@@ -586,12 +611,14 @@ fn stale_epoch_withholds_completed_payload_and_queue_delay_counts_toward_deadlin
             octaves: 4,
         },
         1024,
-        1,
+        100,
     )
     .unwrap();
-    // Intentional timing input for a deadline test, not task completion polling.
-    std::thread::sleep(Duration::from_millis(3));
     let handle = service.submit(expired, 2).unwrap();
+    // Keep the real CPU worker occupied past this accepted request's deadline.
+    std::thread::sleep(Duration::from_millis(120));
+    release_sender.send(()).unwrap();
+    drop(blocker_receipt);
     wake.recv_timeout(Duration::from_secs(2)).unwrap();
     let ComputeStatus::Failed(message) = service.poll(&handle, 2).unwrap() else {
         panic!("expired job must fail");
@@ -613,6 +640,7 @@ fn stale_epoch_withholds_completed_payload_and_queue_delay_counts_toward_deadlin
         )
         .is_err());
     drop(service);
+    drop(blocker);
     drop(resources);
     drop(execution);
 }
