@@ -517,10 +517,12 @@ async fn worktree_paths_absent(
 }
 
 async fn remove_created_parent(client: &ExecutionClient, parent: PathBuf) -> Result<(), String> {
-    run_worktree_path_io(client, vec![parent], 1, |mut paths, _| {
+    let removed = run_worktree_path_io(client, vec![parent], 1, |mut paths, _| {
         std::fs::remove_dir(paths.remove(0))
     })
     .await?;
+    // The retained charge covers only the removal; the unit result carries nothing.
+    drop(removed);
     Ok(())
 }
 
@@ -544,7 +546,7 @@ async fn repo_facts_path_metadata(
         let encoded_path_bytes = batch
             .iter()
             .map(|worktree| worktree.path.as_os_str().as_encoded_bytes().len())
-            .chain(includes_gitmodules.then(|| gitmodules.as_os_str().as_encoded_bytes().len()))
+            .chain(includes_gitmodules.then_some(gitmodules.as_os_str().as_encoded_bytes().len()))
             .try_fold(0usize, |total, bytes| {
                 (bytes <= MAX_NEW_WORKTREE_PATH_BYTES)
                     .then(|| total.checked_add(bytes.max(1)))
@@ -1646,7 +1648,7 @@ mod tests {
             let (release, wait) = std::sync::mpsc::sync_channel(1);
             releases.push(release);
             blockers.push(tokio::spawn(async move {
-                worker_client
+                let _ = worker_client
                     .run_reserved(reservation, move |_| {
                         worker_started.add_permits(1);
                         let _ = wait.recv();
@@ -1715,7 +1717,7 @@ mod tests {
             let (release, wait) = std::sync::mpsc::sync_channel(1);
             releases.push(release);
             blockers.push(tokio::spawn(async move {
-                worker_client
+                let _ = worker_client
                     .run_reserved(reservation, move |_| {
                         worker_started.add_permits(1);
                         let _ = wait.recv();

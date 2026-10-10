@@ -2437,10 +2437,13 @@ async fn run_due_panes_with_hook(
                     .get(&pane_id)
                     .map(|discovered| &discovered.session_id)
                     != runtime.session_id.as_ref();
-            let session_is_ambiguously_claimed = runtime
-                .session_id
-                .as_ref()
-                .is_some_and(|session_id| captured_ambiguous_session_ids.contains(session_id));
+            // A duplicate that appeared while evidence was running exists only
+            // in `current_ambiguous`; the captured set alone would keep it.
+            let session_is_ambiguously_claimed =
+                runtime.session_id.as_ref().is_some_and(|session_id| {
+                    captured_ambiguous_session_ids.contains(session_id)
+                        || current_ambiguous.contains(session_id)
+                });
             let should_clear_session_id = session_identity_is_stale(
                 runtime.is_session_identity_invalidated,
                 session_belongs_to_different_class,

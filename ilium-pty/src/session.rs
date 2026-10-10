@@ -1649,6 +1649,18 @@ mod tests {
         assert_eq!(replay.bytes, b"first-later");
     }
 
+    /// Models the real safety-cap path: the oldest chunk is discarded and only
+    /// then does `is_complete` become false. Flipping the flag while the oldest
+    /// chunk is still retained describes a state the journal cannot reach.
+    fn discard_oldest_chunk(journal: &mut OutputJournal) {
+        let removed = journal
+            .chunks
+            .pop_front()
+            .expect("a truncation test needs a retained chunk to discard");
+        journal.retained_bytes = journal.retained_bytes.saturating_sub(removed.bytes.len());
+        journal.is_complete = false;
+    }
+
     #[test]
     fn replay_prefix_is_bounded_at_sequence_boundaries_and_keeps_reset() {
         let mut journal = journal();
@@ -1661,11 +1673,13 @@ mod tests {
         assert_eq!(prefix.bytes, b"first");
         assert!(prefix.is_complete);
 
-        journal.is_complete = false;
-        assert!(journal.replay_prefix(7).is_none());
-        let truncated_prefix = journal.replay_prefix(8).unwrap();
-        assert_eq!(truncated_prefix.through_sequence, 1);
-        assert_eq!(truncated_prefix.bytes, b"\x1bcfirst");
+        discard_oldest_chunk(&mut journal);
+        // The reset takes two of the budget bytes, leaving no room for the
+        // seven-byte retained tail.
+        assert!(journal.replay_prefix(8).is_none());
+        let truncated_prefix = journal.replay_prefix(9).unwrap();
+        assert_eq!(truncated_prefix.through_sequence, 2);
+        assert_eq!(truncated_prefix.bytes, b"\x1bc-second");
         assert!(!truncated_prefix.is_complete);
     }
 
@@ -1675,11 +1689,14 @@ mod tests {
         journal.append(b"first");
         journal.append(b"-second");
 
-        let PtyOutputRecovery::Replay(replay) = journal.recovery_prefix_after(0, 5).unwrap() else {
-            panic!("a consumer behind the journal must receive a replay prefix");
+        // The oldest chunk is still retained, so a fresh consumer continues
+        // from the contiguous delta; replay is reserved for consumers behind
+        // the retained window (see the truncation tests).
+        let PtyOutputRecovery::Delta(first) = journal.recovery_prefix_after(0, 5).unwrap() else {
+            panic!("a consumer inside the retained window must receive a contiguous delta");
         };
-        assert_eq!(replay.through_sequence, 1);
-        assert_eq!(replay.bytes, b"first");
+        assert_eq!(first.sequence, 1);
+        assert_eq!(first.bytes.as_ref(), b"first");
 
         let PtyOutputRecovery::Delta(delta) = journal.recovery_prefix_after(1, 7).unwrap() else {
             panic!("a current consumer must receive a contiguous delta");
@@ -1702,23 +1719,24 @@ mod tests {
         let mut journal = journal();
         journal.append(b"first");
         journal.append(b"-second");
-        journal.is_complete = false;
+        discard_oldest_chunk(&mut journal);
+        journal.append(b"-third");
 
-        let PtyOutputRecovery::Replay(replay) = journal.recovery_prefix_after(0, 8).unwrap() else {
+        let PtyOutputRecovery::Replay(replay) = journal.recovery_prefix_after(0, 9).unwrap() else {
             panic!("a consumer behind a truncated journal must receive a replay prefix");
         };
-        assert_eq!(replay.through_sequence, 1);
-        assert_eq!(replay.bytes, b"\x1bcfirst");
+        assert_eq!(replay.through_sequence, 2);
+        assert_eq!(replay.bytes, b"\x1bc-second");
         assert!(!replay.is_complete);
 
         let PtyOutputRecovery::Delta(delta) = journal
-            .recovery_prefix_after(replay.through_sequence, 8)
+            .recovery_prefix_after(replay.through_sequence, 9)
             .unwrap()
         else {
             panic!("after applying the reset-bearing prefix, the next frame must be a delta");
         };
-        assert_eq!(delta.sequence, 2);
-        assert_eq!(delta.bytes.as_ref(), b"-second");
+        assert_eq!(delta.sequence, 3);
+        assert_eq!(delta.bytes.as_ref(), b"-third");
     }
 
     #[test]

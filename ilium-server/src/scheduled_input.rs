@@ -17,7 +17,7 @@ use ilium_ipc::{PromptSubmissionSource, ServerEvent};
 use tokio::task::JoinHandle;
 
 use crate::ipc::handlers::{
-    broadcast_and_persist, submit_terminal_text, write_scheduled_key_input,
+    broadcast_pane_and_persist, submit_terminal_text, write_scheduled_key_input,
 };
 use crate::pane::PaneResource;
 use crate::state::ServerState;
@@ -111,7 +111,7 @@ async fn execute_due_inputs(state: &Arc<ServerState>) {
             .map(|(pane_id, scheduled_input)| (pane_id, scheduled_input.clone()))
             .collect()
     };
-    let mut tree_changed = false;
+    let mut cleared_panes: Vec<NodeId> = Vec::new();
     for (pane_id, scheduled_input) in due_inputs {
         // Keep schedule replacement outside the final check/write/clear
         // window. The pane input gate reserves the text-to-Enter sequence
@@ -171,10 +171,14 @@ async fn execute_due_inputs(state: &Arc<ServerState>) {
             tree.clear_scheduled_pane_input_if_matches(pane_id, &scheduled_input)
                 .unwrap_or(false)
         };
-        tree_changed |= cleared;
+        if cleared {
+            cleared_panes.push(pane_id);
+        }
     }
-    if tree_changed {
-        broadcast_and_persist(state).await;
+    // Each cleared countdown changes only its own pane node; send those nodes
+    // rather than the whole tree, so N due countdowns do not cost N full snapshots.
+    for pane_id in cleared_panes {
+        broadcast_pane_and_persist(state, pane_id).await;
     }
 }
 

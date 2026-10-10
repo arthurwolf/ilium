@@ -218,3 +218,192 @@ async fn redeliver(state: &Arc<ServerState>, pane_id: NodeId, monitor_id: u64) {
     );
     state.request_snapshot_save();
 }
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::time::Duration;
+
+    use ilium_core::{AgentClass, NodeId, ProgressTaskReport, ProgressTaskStatus};
+
+    use super::*;
+    use crate::pane::{ProgressDeliveryState, TerminalOrigin};
+    use crate::progress_monitor::ProgressMonitorRegistration;
+
+    const MONITOR_ID: u64 = 7;
+
+    fn progress(status: ProgressTaskStatus, percent: f32) -> PaneProgress {
+        let report = ProgressTaskReport::new(
+            "job".to_string(),
+            status,
+            percent,
+            String::new(),
+            String::new(),
+            (status == ProgressTaskStatus::Error).then(|| "failed".to_string()),
+        )
+        .expect("valid report");
+        PaneProgress::new(MONITOR_ID, report, 1).expect("valid progress")
+    }
+
+    /// A real terminal runtime over `cat`, the same fixture the pane tests use.
+    fn runtime() -> TerminalPaneRuntime {
+        let directory = tempfile::tempdir().expect("isolated directory");
+        let session = ilium_pty::PtySession::spawn(
+            ilium_pty::PtyCommand::new("/bin/sh", directory.path(), 24, 80)
+                .arg("-c")
+                .arg("exec cat"),
+        )
+        .expect("fixture PTY");
+        TerminalPaneRuntime::new(
+            session,
+            TerminalOrigin::PlainShell,
+            None,
+            Duration::from_secs(1),
+        )
+    }
+
+    fn install(runtime: &mut TerminalPaneRuntime, status: ProgressTaskStatus, percent: f32) {
+        runtime
+            .install_progress_monitor(ProgressMonitorRegistration {
+                monitor_id: MONITOR_ID,
+                pane_id: NodeId(1),
+                command: "/bin/true".to_string(),
+                interval: Duration::from_secs(5),
+                initial_progress: progress(status, percent),
+            })
+            .expect("accepted monitor");
+    }
+
+    fn set_delivery(runtime: &mut TerminalPaneRuntime, delivery: ProgressDeliveryState) {
+        runtime
+            .progress_monitor
+            .as_mut()
+            .expect("installed monitor")
+            .result_delivery = delivery;
+    }
+
+    fn finish(mut runtime: TerminalPaneRuntime) {
+        runtime.session.kill().expect("close fixture");
+    }
+
+    #[test]
+    fn running_monitor_without_observation_task_is_stopped() {
+        let mut runtime = runtime();
+        install(&mut runtime, ProgressTaskStatus::Running, 40.0);
+        assert_eq!(
+            runtime.progress_reconcile_action(),
+            ProgressReconcileAction::ObservationStopped {
+                monitor_id: MONITOR_ID
+            }
+        );
+        finish(runtime);
+    }
+
+    #[tokio::test]
+    async fn running_monitor_with_live_observation_task_is_left_alone() {
+        let mut runtime = runtime();
+        install(&mut runtime, ProgressTaskStatus::Running, 40.0);
+        runtime.set_progress_monitor_task(tokio::spawn(std::future::pending::<()>()));
+        assert_eq!(
+            runtime.progress_reconcile_action(),
+            ProgressReconcileAction::None
+        );
+        runtime.cancel_progress_delivery_task();
+        finish(runtime);
+    }
+
+    #[tokio::test]
+    async fn settled_outcome_not_yet_in_composer_is_redelivered_once() {
+        let mut runtime = runtime();
+        runtime.detected_agent_class = Some(AgentClass::Codex);
+        install(&mut runtime, ProgressTaskStatus::Done, 100.0);
+        set_delivery(&mut runtime, ProgressDeliveryState::NotQueued);
+        assert_eq!(
+            runtime.progress_reconcile_action(),
+            ProgressReconcileAction::Redeliver {
+                monitor_id: MONITOR_ID,
+                possible_duplicate: false,
+            }
+        );
+        finish(runtime);
+    }
+
+    #[tokio::test]
+    async fn uncertain_and_attempted_outcomes_are_redelivered_as_possible_duplicates() {
+        for delivery in [
+            ProgressDeliveryState::Attempted,
+            ProgressDeliveryState::Uncertain,
+        ] {
+            let mut runtime = runtime();
+            runtime.detected_agent_class = Some(AgentClass::Codex);
+            install(&mut runtime, ProgressTaskStatus::Error, 50.0);
+            set_delivery(&mut runtime, delivery);
+            assert_eq!(
+                runtime.progress_reconcile_action(),
+                ProgressReconcileAction::Redeliver {
+                    monitor_id: MONITOR_ID,
+                    possible_duplicate: true,
+                },
+                "{delivery:?}"
+            );
+            finish(runtime);
+        }
+    }
+
+    #[tokio::test]
+    async fn delivered_outcome_is_never_redelivered() {
+        for delivery in [
+            ProgressDeliveryState::DeliveredToPty,
+            ProgressDeliveryState::CollectedByWaiter,
+        ] {
+            let mut runtime = runtime();
+            runtime.detected_agent_class = Some(AgentClass::Codex);
+            install(&mut runtime, ProgressTaskStatus::Done, 100.0);
+            set_delivery(&mut runtime, delivery);
+            assert_eq!(
+                runtime.progress_reconcile_action(),
+                ProgressReconcileAction::None,
+                "{delivery:?}"
+            );
+            finish(runtime);
+        }
+    }
+
+    #[tokio::test]
+    async fn outcome_without_supported_composer_is_not_redelivered() {
+        let mut runtime = runtime();
+        install(&mut runtime, ProgressTaskStatus::Done, 100.0);
+        set_delivery(&mut runtime, ProgressDeliveryState::NotQueued);
+        assert_eq!(
+            runtime.progress_reconcile_action(),
+            ProgressReconcileAction::None
+        );
+        finish(runtime);
+    }
+
+    #[tokio::test]
+    async fn outcome_with_live_delivery_task_is_left_alone() {
+        let mut runtime = runtime();
+        runtime.detected_agent_class = Some(AgentClass::Codex);
+        install(&mut runtime, ProgressTaskStatus::Done, 100.0);
+        set_delivery(&mut runtime, ProgressDeliveryState::Queued);
+        runtime.set_progress_delivery_task(tokio::spawn(std::future::pending::<()>()));
+        assert_eq!(
+            runtime.progress_reconcile_action(),
+            ProgressReconcileAction::None
+        );
+        runtime.cancel_progress_delivery_task();
+        finish(runtime);
+    }
+
+    #[test]
+    fn failed_evidence_is_sticky_failed_health_with_the_reason() {
+        let failed = failed_progress(&progress(ProgressTaskStatus::Running, 40.0), "lost task")
+            .expect("failed evidence validates");
+        assert!(failed.monitor_health.is_failed());
+        assert!(matches!(
+            &failed.monitor_health,
+            ProgressMonitorHealth::Failed { last_error, .. } if last_error == "lost task"
+        ));
+        assert_eq!(failed.monitor_id, MONITOR_ID);
+    }
+}

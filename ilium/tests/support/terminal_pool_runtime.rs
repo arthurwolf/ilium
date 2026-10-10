@@ -155,7 +155,13 @@ async fn no_pool_release_renders_128_panes_and_measures_click_latency() {
         let status = std::process::Command::new("cargo")
             .args(["build", "--release", "--manifest-path"])
             .arg(workspace_manifest)
-            .args(["-p", "ilium-server", "--bin", "ilium-server", "--target-dir"])
+            .args([
+                "-p",
+                "ilium-server",
+                "--bin",
+                "ilium-server",
+                "--target-dir",
+            ])
             .arg(&server_target)
             .status()
             .expect("start the matching release server build on the remote test host");
@@ -212,8 +218,24 @@ async fn no_pool_release_renders_128_panes_and_measures_click_latency() {
         .fold(command, |command, (key, value)| {
             command.env(key, value.to_string_lossy().to_string())
         });
+    let mut server_search_paths = vec![matching_server_binary
+        .parent()
+        .expect("matching release server has a parent directory")
+        .to_path_buf()];
+    if let Some(path) = std::env::var_os("PATH") {
+        server_search_paths.extend(std::env::split_paths(&path));
+    }
+    let server_search_path =
+        std::env::join_paths(server_search_paths).expect("matching server path must be valid");
+    let command = command.env("PATH", server_search_path.to_string_lossy().into_owned());
     let mut tui = PtySession::spawn(command).unwrap();
-    assert!(wait_until(|| tui.screen_text().contains(PROJECT_NAME), WAIT_TIMEOUT).await);
+    let client_started =
+        wait_until(|| tui.screen_text().contains(PROJECT_NAME), WAIT_TIMEOUT).await;
+    assert!(
+        client_started,
+        "isolated release client did not render the project; screen: {:?}",
+        tui.screen_text()
+    );
     let (socket, server_pid) = isolated_server_identity(&xdg, &project_dir).await;
     #[cfg(target_os = "linux")]
     assert_eq!(

@@ -553,7 +553,10 @@ mod tests {
     async fn marker_reads_wait_for_shared_io_capacity() {
         let execution = crate::execution::ServerExecution::start().expect("execution bank");
         let execution_client = execution.client.clone();
-        let client = client();
+        // Blockers must saturate the same bank the read uses. Parking workers
+        // on the shared static bank would starve every later test that uses it
+        // if an assertion panicked before the barrier released them.
+        let client = execution_client.clone();
         let barrier = std::sync::Arc::new(std::sync::Barrier::new(3));
         let started = std::sync::Arc::new(tokio::sync::Semaphore::new(0));
         let mut blockers = Vec::new();
@@ -572,7 +575,7 @@ mod tests {
             let worker_started = std::sync::Arc::clone(&started);
             let worker_client = client.clone();
             blockers.push(tokio::spawn(async move {
-                worker_client
+                let _ = worker_client
                     .run_reserved(reservation, move |_| {
                         worker_started.add_permits(1);
                         worker_barrier.wait();

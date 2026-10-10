@@ -13,7 +13,7 @@ use ilium_agent_debug::{
 use ilium_core::{NodeId, QueuedPrompt};
 use ilium_ipc::PromptSubmissionSource;
 
-use crate::ipc::handlers::{broadcast_and_persist, submit_terminal_text_locked};
+use crate::ipc::handlers::{broadcast_pane_and_persist, submit_terminal_text_locked};
 use crate::pane::PaneResource;
 use crate::state::ServerState;
 
@@ -126,7 +126,8 @@ pub(crate) async fn deliver_next_after_completion(state: &ServerState, pane_id: 
     drop(_transaction);
     match acknowledged {
         Ok(true) => {
-            broadcast_and_persist(state).await;
+            // Acknowledgement mutates only this pane's node, so send that node alone.
+            broadcast_pane_and_persist(state, pane_id).await;
             let _ = crate::agent_debug::record(
                 state,
                 pane_id,

@@ -1,5 +1,5 @@
 use super::*;
-use ilium_platform::owned_worker::spawn_owned;
+use ilium_platform::owned_worker::{reserve_owned_worker, spawn_owned};
 use ilium_platform::pty_io::{IoFailure, PtyWriter, WriteFailure, WriteFailureKind, WriteSuccess};
 use std::sync::{mpsc, Mutex};
 
@@ -183,7 +183,11 @@ impl Harness {
         };
         let screen_reader = terminal.screen_reader.clone();
         let expiry_worker = queue.start_expiry_worker().unwrap();
-        let writer = AsyncWriter::spawn(
+        // Production wires writer completion back to the owner queue (see
+        // `Session` spawn in owner.rs); the harness must do the same, or a
+        // completed write leaves the owner asleep until its write deadline.
+        let completion_queue = Arc::clone(&queue);
+        let writer = AsyncWriter::spawn_reserved_with_completion_wake(
             Box::new(Writer {
                 trace: Arc::clone(&trace),
                 gate,
@@ -191,6 +195,8 @@ impl Harness {
             }),
             queue.stop.child(),
             || {},
+            move || completion_queue.wake(),
+            reserve_owned_worker(None, ()).unwrap(),
         )
         .unwrap();
         let writer_tickets = writer.tickets();
