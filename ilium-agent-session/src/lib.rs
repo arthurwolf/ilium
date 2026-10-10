@@ -406,7 +406,7 @@ pub const STAGED_METADATA_JOB_LIMIT: usize = 2_048;
 #[derive(Debug)]
 pub enum StagedMetadataStep {
     Batch {
-        cursor: StagedMetadataCursor,
+        cursor: Box<StagedMetadataCursor>,
         lines: Vec<Vec<u8>>,
     },
     Finished(Option<VerifiedTranscript>),
@@ -481,7 +481,7 @@ impl StagedMetadataCursor {
                     && identity.project_cwd.as_deref().is_some_and(|cwd| {
                         same_canonical_project(Path::new(cwd), &self.locator.project_cwd)
                     });
-                return StagedMetadataStep::Finished(matches.then(|| VerifiedTranscript {
+                return StagedMetadataStep::Finished(matches.then_some(VerifiedTranscript {
                     session_id: self.session_id,
                     path: self.path,
                 }));
@@ -630,7 +630,7 @@ impl StagedMetadataCursor {
             StagedMetadataStep::Finished(None)
         } else {
             StagedMetadataStep::Batch {
-                cursor: self,
+                cursor: Box::new(self),
                 lines,
             }
         }
@@ -1370,7 +1370,7 @@ mod tests {
                     lines,
                 } => {
                     parsed = Some(next.parse_batch(&lines));
-                    cursor = next;
+                    cursor = *next;
                 }
                 StagedMetadataStep::Finished(transcript) => return transcript,
             }
@@ -1454,6 +1454,7 @@ mod tests {
         let StagedMetadataStep::Batch { cursor, lines } = cursor.advance(None) else {
             panic!("first batch must be read")
         };
+        let cursor = *cursor;
         let parsed = cursor.parse_batch(&lines);
         locator.mark_metadata_parse_failure(MetadataParseFailure::WorkerFailed);
         assert!(matches!(
@@ -1500,7 +1501,7 @@ mod tests {
             .begin_staged_metadata(&AgentClass::Claude, &path)
             .expect("bounded transcript cursor");
         let (cursor, lines) = match cursor.advance(None) {
-            StagedMetadataStep::Batch { cursor, lines } => (cursor, lines),
+            StagedMetadataStep::Batch { cursor, lines } => (*cursor, lines),
             StagedMetadataStep::Finished(result) => {
                 panic!("cursor finished before yielding metadata: {result:?}")
             }
@@ -1553,7 +1554,7 @@ mod tests {
                     assert!(lines.len() <= STAGED_BATCH_LINES);
                     batches += 1;
                     parsed = Some(next.parse_batch(&lines));
-                    cursor = next;
+                    cursor = *next;
                 }
                 StagedMetadataStep::Finished(verified) => break verified,
             }
