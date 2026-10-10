@@ -93,6 +93,7 @@ struct PumpWriter {
 }
 
 impl PumpWriter {
+    #[cfg(test)]
     fn spawn(writer: Box<dyn Write + Send>, stop: StopToken) -> io::Result<Self> {
         Self::spawn_reserved(writer, stop, None::<WorkerReservation<()>>)
     }

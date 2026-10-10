@@ -854,8 +854,8 @@ fn system_handle_table_with_limit(maximum_bytes: usize) -> Option<SystemHandleTa
     const SYSTEM_EXTENDED_HANDLE_INFORMATION: i32 = 64;
     /// Enough for a lightly loaded machine on the first try.
     const INITIAL_BYTES: usize = 1 << 20;
-    /// A machine with a genuinely enormous handle table is not worth an
-    /// unbounded allocation; the caller degrades to "no answer".
+    // A machine with a genuinely enormous handle table is not worth an
+    // unbounded allocation; the caller degrades to "no answer".
     let maximum_bytes = maximum_bytes.min(256 << 20);
 
     let mut bytes = INITIAL_BYTES;

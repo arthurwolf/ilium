@@ -545,8 +545,12 @@ impl PinnedDirectory {
                 return Err(io::Error::last_os_error());
             }
             let stat = unsafe { stat.assume_init() };
+            #[cfg(target_os = "linux")]
+            let device_matches = stat.st_dev == expected.device;
+            #[cfg(target_os = "macos")]
+            let device_matches = u64::try_from(stat.st_dev).ok() == Some(expected.device);
             if stat.st_mode & libc::S_IFMT != libc::S_IFDIR
-                || u64::try_from(stat.st_dev).ok() != Some(expected.device)
+                || !device_matches
                 || stat.st_ino != expected.inode
             {
                 return Err(io::Error::other("clip directory changed before removal"));
@@ -1023,7 +1027,7 @@ fn windows_list_with_progress(
                 .ok_or_else(|| {
                     io::Error::new(io::ErrorKind::InvalidData, "directory name overflow")
                 })?;
-            if name_bytes % 2 != 0 || name_end > BUFFER_BYTES {
+            if !name_bytes.is_multiple_of(2) || name_end > BUFFER_BYTES {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     "invalid directory entry name length",
@@ -1074,7 +1078,7 @@ fn windows_list_with_progress(
             if next == 0 {
                 break;
             }
-            if next % 8 != 0
+            if !next.is_multiple_of(8)
                 || offset
                     .checked_add(next)
                     .is_none_or(|next| next >= BUFFER_BYTES)

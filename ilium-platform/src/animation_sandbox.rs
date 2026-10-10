@@ -10,7 +10,7 @@
 use std::{
     io,
     path::{Path, PathBuf},
-    process::{Child, ChildStdin, ChildStdout, Command, ExitStatus, Stdio},
+    process::{Child, ChildStdin, ChildStdout, ExitStatus},
 };
 
 /// Resolve the separately installed helper beside the real client executable.
@@ -86,6 +86,7 @@ impl Default for SandboxLimits {
     }
 }
 impl SandboxLimits {
+    #[cfg(target_os = "linux")]
     fn validate(self) -> io::Result<Self> {
         if !(64 * 1024 * 1024..=4 * 1024 * 1024 * 1024).contains(&self.memory_bytes)
             || !(4..=64).contains(&self.maximum_tasks)
@@ -644,6 +645,7 @@ fn spawn_confined(
     limits: SandboxLimits,
 ) -> io::Result<SandboxChild> {
     use std::os::unix::process::CommandExt;
+    use std::process::{Command, Stdio};
     let limits = limits.validate()?;
     let executable = executable.canonicalize()?;
     if !executable.is_file() {
