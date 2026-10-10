@@ -923,13 +923,15 @@ async fn actual_saved_world_route_emits_selected_pack_frames_and_preserves_input
         },
     )
     .unwrap();
-    let mut settings = AnimationSettings::default();
-    settings.enabled = true;
-    settings.kind = AnimationKind::VoxelLandscape;
-    settings.playback_mode = AnimationPlaybackMode::Live;
-    settings.speed_percent = 300;
-    settings.density_percent = 100;
-    settings.fps_limit = 12;
+    let mut settings = AnimationSettings {
+        enabled: true,
+        kind: AnimationKind::VoxelLandscape,
+        playback_mode: AnimationPlaybackMode::Live,
+        speed_percent: 300,
+        density_percent: 100,
+        fps_limit: 12,
+        ..Default::default()
+    };
     settings.ambient.voxel_landscape.saved_maps.source =
         serde_json::from_value(serde_json::json!("saved_maps")).unwrap();
     settings.ambient.voxel_landscape.saved_maps.saves_folder =

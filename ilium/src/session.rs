@@ -336,6 +336,83 @@ pub fn list_sessions(cwd: &Path) -> Result<Vec<SessionListing>, CliError> {
     Ok(sessions)
 }
 
+/// One live session endpoint of any project on this machine.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LiveSessionSocket {
+    pub socket_path: PathBuf,
+    /// Session names the endpoint's file name can encode, most likely first.
+    /// Attaching with the wrong one is refused by the server, so callers try
+    /// them in order.
+    pub session_name_candidates: Vec<String>,
+}
+
+/// Every live session endpoint in the session socket directory, across all
+/// projects, sorted by path. Only file-system endpoints (Unix domain sockets)
+/// are listed. Dead endpoints are cleaned up exactly as `is_session_live`
+/// does.
+pub fn list_live_session_sockets() -> Result<Vec<LiveSessionSocket>, CliError> {
+    let socket_dir = runtime_socket_dir()?;
+    let entries = std::fs::read_dir(&socket_dir).map_err(|source| CliError::SessionStorage {
+        path: socket_dir.clone(),
+        source,
+    })?;
+    let mut sockets = Vec::new();
+    for entry in entries {
+        let Ok(entry) = entry else {
+            continue;
+        };
+        let socket_path = entry.path();
+        if socket_path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            != Some("sock")
+        {
+            continue;
+        }
+        let Some(socket_key) = socket_path.file_stem().and_then(|stem| stem.to_str()) else {
+            continue;
+        };
+        let session_name_candidates = session_name_candidates(socket_key);
+        if session_name_candidates.is_empty() || !is_session_live(&socket_path) {
+            continue;
+        }
+        sockets.push(LiveSessionSocket {
+            socket_path,
+            session_name_candidates,
+        });
+    }
+    sockets.sort_by(|left, right| left.socket_path.cmp(&right.socket_path));
+    Ok(sockets)
+}
+
+/// The session names a socket key (`<slug>-<12 hex digest>-<session>`, see
+/// `socket_key`) can end with. Both the slug and the session name may contain
+/// `-` and hex digits, so every digest-shaped split is a candidate; the
+/// right-most split (the shortest name) comes first because session names are
+/// short and slugs are long.
+pub fn session_name_candidates(socket_key: &str) -> Vec<String> {
+    const DIGEST_HEX_DIGITS: usize = 12;
+    let bytes = socket_key.as_bytes();
+    let mut candidates = Vec::new();
+    for start in (0..bytes.len()).rev() {
+        let digest_end = start + 1 + DIGEST_HEX_DIGITS;
+        if bytes[start] != b'-' || digest_end >= bytes.len() || bytes[digest_end] != b'-' {
+            continue;
+        }
+        let is_digest = bytes[start + 1..digest_end]
+            .iter()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(byte));
+        if !is_digest {
+            continue;
+        }
+        let session_name = &socket_key[digest_end + 1..];
+        if validate_session_name(session_name).is_ok() {
+            candidates.push(session_name.to_owned());
+        }
+    }
+    candidates
+}
+
 fn first_existing_server_binary(
     candidate_paths: impl IntoIterator<Item = PathBuf>,
 ) -> Option<PathBuf> {
@@ -813,6 +890,28 @@ fn is_process_running(process_id: u32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn session_name_candidates_recover_the_name_from_any_socket_key() {
+        let socket_dir = Path::new("/run/user/1000/ilium");
+        for (project, session_name) in [
+            ("/home/me/dev/ilium", "default"),
+            ("/w/a-0123456789ab-b", "default"),
+            ("/w/x", "review-2"),
+            ("/w/x", "a-0123456789ab-b"),
+        ] {
+            let key = socket_key_in(socket_dir, Path::new(project), session_name);
+            let candidates = session_name_candidates(&key);
+            assert!(
+                candidates.iter().any(|candidate| candidate == session_name),
+                "{key}: {candidates:?}"
+            );
+        }
+        let ordinary = socket_key_in(socket_dir, Path::new("/home/me/p"), "default");
+        assert_eq!(session_name_candidates(&ordinary), vec!["default"]);
+        assert!(session_name_candidates("agent-setup-01cfc33a7fbf1112").is_empty());
+        assert!(session_name_candidates("no-digest-here").is_empty());
+    }
 
     #[test]
     fn projects_with_the_same_logical_name_never_share_state() {

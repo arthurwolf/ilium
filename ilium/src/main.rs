@@ -22,6 +22,10 @@
 
 use ilium::session;
 
+mod broadcast;
+mod pane_filter;
+mod pane_scan;
+mod panes;
 mod progress_wait;
 mod voice;
 
@@ -42,6 +46,11 @@ use ilium_platform::paths;
 /// How long the `new-pane`/`kill-session` one-shot subcommands wait for
 /// the server to confirm a request before giving up and reporting failure.
 const REQUEST_CONFIRMATION_TIMEOUT: Duration = Duration::from_secs(5);
+/// `new-pane` confirmation covers the server spawning the agent process and
+/// persisting the tree before it broadcasts. Under host load a spawn can
+/// exceed the 5 s budget (measured 3.5 s spikes at load 26 on 12 cores), so
+/// this request gets a longer wait than the attach and kill confirmations.
+const NEW_PANE_CONFIRMATION_TIMEOUT: Duration = Duration::from_secs(30);
 const WORKSPACE_FACTS_TIMEOUT: Duration = Duration::from_secs(30);
 const WORKSPACE_CREATION_TIMEOUT: Duration = Duration::from_secs(180);
 
@@ -148,8 +157,8 @@ enum Command {
         #[command(subcommand)]
         command: ProgressCommand,
     },
-    /// Same as `ilium progress wait`: blocks until this pane's progress
-    /// monitor (or MONITOR_ID) settles, then prints one JSONL line.
+    /// Same as `ilium progress wait`: blocks until MONITOR_ID (or this pane's
+    /// only running monitor) settles, then prints one JSONL line.
     Wait {
         monitor_id: Option<u64>,
         #[arg(long)]
@@ -161,6 +170,16 @@ enum Command {
         #[command(subcommand)]
         command: voice::VoiceCommand,
     },
+    /// List the panes of every running Ilium session on this machine, across
+    /// all projects, that pass the pane selection options. Shows exactly
+    /// which panes `broadcast` would address. Output is JSONL.
+    Panes(panes::PanesArgs),
+    /// Send a message to every running agent, across all projects and
+    /// sessions on this machine, that passes the pane selection options.
+    /// The message is typed into each agent and submitted, as the client's
+    /// "Send message to all" does. The pane running this command is skipped
+    /// unless --include-self is given. Output is JSONL.
+    Broadcast(broadcast::BroadcastArgs),
 }
 
 /// Local chatroom operations intentionally avoid the detached server: agents
@@ -212,10 +231,12 @@ enum ProgressCommand {
         #[arg(long)]
         command: String,
     },
-    /// Validates, then atomically starts or replaces this pane's monitor. The
-    /// command waits for a correlated server acknowledgement containing the
-    /// monitor ID and accepted first report; silence is never acceptance.
-    /// Probe stdout follows the same contract as `progress check`.
+    /// Validates, then atomically adds a monitor to this pane (a pane holds up
+    /// to eight; re-sending the exact command of a running monitor returns
+    /// that monitor). The command waits for a correlated server
+    /// acknowledgement containing the monitor ID and accepted first report;
+    /// silence is never acceptance. Probe stdout follows the same contract as
+    /// `progress check`.
     ///
     /// WORKING DIRECTORY: `command` is spawned by the ilium SERVER process,
     /// not by the pane's own shell -- despite running "in the pane", it does
@@ -259,20 +280,20 @@ enum ProgressCommand {
         /// running). Omit to wait as long as the task takes.
         #[arg(long, requires = "wait")]
         timeout_seconds: Option<u64>,
-        /// Replace a monitor that is still running. Without this, `set`
-        /// refuses so a second `set` cannot silently discard a running job's
-        /// monitor and its notification.
+        /// Clear every monitor of this pane (running ones included) before
+        /// adding this one. Without it, `set` adds beside the others.
         #[arg(long)]
         replace: bool,
     },
-    /// Blocks until this pane's monitor (or MONITOR_ID) reports done or
-    /// error, or the monitor fails, is replaced, or is cleared. Prints one
-    /// JSONL line and exits 0 done, 3 task error, 4 monitor failed (outcome
-    /// unknown), 5 replaced/cleared/no monitor, 6 timeout. While this command
-    /// is waiting, the result is returned here instead of being typed into
-    /// the agent's prompt.
+    /// Blocks until MONITOR_ID reports done or error, or the monitor fails or
+    /// is cleared. Prints one JSONL line and exits 0 done, 3 task error, 4
+    /// monitor failed (outcome unknown), 5 cleared/no monitor, 6 timeout, 2
+    /// when no ID was given and the pane has several candidate monitors.
+    /// While this command is waiting, the result is returned here instead of
+    /// being typed into the agent's prompt.
     Wait {
-        /// Monitor to wait for; defaults to the pane's current monitor.
+        /// Monitor to wait for; defaults to the pane's only running monitor
+        /// (or its only monitor).
         monitor_id: Option<u64>,
         /// Give up after this many seconds (exit 6). Omit to wait as long as
         /// the task takes.
@@ -287,14 +308,17 @@ enum ProgressCommand {
     /// help on purpose: the project hook runs it only when `ilium progress
     /// --help` names `guard`.
     Guard,
-    /// Returns the current registration, latest report, and monitor health.
+    /// Lists every monitor of this pane with its latest report and health.
     Status,
-    /// Stops the active monitor and clears its retained progress. Supplying a
-    /// monitor ID fences the operation so a stale agent cannot clear a newer
-    /// replacement.
+    /// Stops a monitor and clears its retained progress. Without
+    /// `--monitor-id`, clears the pane's only monitor; with several, pass
+    /// `--monitor-id` or `--all`.
     Clear {
-        #[arg(long)]
+        #[arg(long, conflicts_with = "all")]
         monitor_id: Option<u64>,
+        /// Clear every monitor of this pane.
+        #[arg(long)]
+        all: bool,
     },
 }
 
@@ -520,6 +544,8 @@ async fn dispatch(cli: Cli) -> Result<(), CliError> {
             .await
         }
         Some(Command::Voice { command }) => voice::voice(command, &cli.cwd).await,
+        Some(Command::Panes(args)) => panes::panes(args, &cli.cwd).await,
+        Some(Command::Broadcast(args)) => broadcast::broadcast(args, &cli.cwd).await,
     }
 }
 
@@ -728,7 +754,7 @@ enum ProgressResponse {
     },
     Clear {
         pane_id: ilium_core::NodeId,
-        result: Result<Option<u64>, ilium_ipc::ProgressMonitorRejection>,
+        result: Result<Vec<u64>, ilium_ipc::ProgressMonitorRejection>,
     },
 }
 
@@ -804,9 +830,8 @@ async fn progress(command: ProgressCommand) -> Result<(), CliError> {
             timeout_seconds,
             replace,
         } => {
-            if !replace {
-                refuse_replacing_running_monitor(&mut connection, identity.pane_id, request_id)
-                    .await?;
+            if replace {
+                clear_all_before_replace(&mut connection, identity.pane_id, request_id).await?;
             }
             if wait {
                 wait_after_set = Some(timeout_seconds);
@@ -829,14 +854,19 @@ async fn progress(command: ProgressCommand) -> Result<(), CliError> {
             },
             ExpectedProgressResponse::Status,
         ),
-        ProgressCommand::Clear { monitor_id } => (
-            ilium_ipc::ClientRequest::ClearPaneProgressMonitor {
-                request_id,
-                pane_id: identity.pane_id,
-                expected_monitor_id: monitor_id,
-            },
-            ExpectedProgressResponse::Clear,
-        ),
+        ProgressCommand::Clear { monitor_id, all } => {
+            if monitor_id.is_none() && !all {
+                refuse_ambiguous_clear(&mut connection, identity.pane_id, request_id).await?;
+            }
+            (
+                ilium_ipc::ClientRequest::ClearPaneProgressMonitor {
+                    request_id,
+                    pane_id: identity.pane_id,
+                    expected_monitor_id: monitor_id,
+                },
+                ExpectedProgressResponse::Clear,
+            )
+        }
     };
     if connection.requests.send(request).await.is_err() {
         let error = CliError::ServerReportedError(
@@ -902,14 +932,18 @@ async fn finish_progress_wait(
     connection: ilium_client::connection::Connection,
     pane_id: ilium_core::NodeId,
     request_id: u64,
-    result: Result<progress_wait::WaitReport, CliError>,
+    result: Result<Result<progress_wait::WaitReport, progress_wait::AmbiguousMonitor>, CliError>,
 ) -> Result<(), CliError> {
     let _ = connection
         .requests
         .send(ilium_ipc::ClientRequest::Detach)
         .await;
     match result {
-        Ok(report) => {
+        Ok(Err(ambiguous)) => {
+            print_monitor_ambiguous("wait", request_id, pane_id, &ambiguous);
+            Err(CliError::ExitStatus(2))
+        }
+        Ok(Ok(report)) => {
             report.print();
             match report.exit_code() {
                 0 => Ok(()),
@@ -929,48 +963,139 @@ async fn finish_progress_wait(
     }
 }
 
-/// `set` without `--replace` must not discard a monitor whose task is still
-/// running: that silently loses the earlier job's notification.
-async fn refuse_replacing_running_monitor(
+/// Reads the pane's monitors for a pre-check; prints the usual failure
+/// record when that read fails.
+async fn read_pane_monitors(
+    connection: &mut ilium_client::connection::Connection,
+    pane_id: ilium_core::NodeId,
+    operation: &str,
+    request_id: u64,
+) -> Result<Vec<ilium_core::PaneProgress>, CliError> {
+    progress_wait::current_monitors(connection, pane_id)
+        .await
+        .inspect_err(|error| {
+            print_progress_request_failure(
+                operation,
+                request_id,
+                Some(pane_id),
+                "status-failed",
+                error,
+            );
+        })
+}
+
+fn print_monitor_ambiguous(
+    operation: &str,
+    request_id: u64,
+    pane_id: ilium_core::NodeId,
+    ambiguous: &progress_wait::AmbiguousMonitor,
+) {
+    let monitor_ids = ambiguous
+        .monitors
+        .iter()
+        .map(|progress| progress.monitor_id.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    println!(
+        "{{\"type\":\"progress_rejected\",\"operation\":{},\"request_id\":{request_id},\"pane_id\":{},\"code\":\"monitor-ambiguous\",\"monitor_ids\":[{monitor_ids}],\"message\":{}}}",
+        json_string(operation),
+        pane_id.0,
+        json_string(&ambiguous.message())
+    );
+}
+
+/// `clear` without an ID must not silently stop several monitors, some of
+/// which may belong to another agent sharing this pane.
+async fn refuse_ambiguous_clear(
     connection: &mut ilium_client::connection::Connection,
     pane_id: ilium_core::NodeId,
     request_id: u64,
 ) -> Result<(), CliError> {
-    let current = match progress_wait::current_monitor(connection, pane_id).await {
-        Ok(current) => current,
-        Err(error) => {
-            print_progress_request_failure(
-                "set",
-                request_id,
-                Some(pane_id),
-                "status-failed",
-                &error,
-            );
-            return Err(error);
-        }
-    };
-    let Some(current) = current else {
-        return Ok(());
-    };
-    if current.is_terminal() || current.monitor_health.is_failed() {
+    let monitors = read_pane_monitors(connection, pane_id, "clear", request_id).await?;
+    if monitors.len() <= 1 {
         return Ok(());
     }
-    let message = format!(
-        "pane already has running monitor {} (job {}, {:.0}%). Wait for it with `ilium progress \
-         wait {}`, use one probe that covers the whole pipeline, or pass --replace to discard it",
-        current.monitor_id, current.report.job_id, current.report.percent, current.monitor_id
-    );
+    let ambiguous = progress_wait::AmbiguousMonitor { monitors };
+    let monitor_ids = ambiguous
+        .monitors
+        .iter()
+        .map(|progress| progress.monitor_id.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
     println!(
-        "{{\"type\":\"progress_rejected\",\"operation\":\"set\",\"request_id\":{request_id},\"pane_id\":{},\"code\":\"monitor-active\",\"active_monitor_id\":{},\"message\":{}}}",
+        "{{\"type\":\"progress_rejected\",\"operation\":\"clear\",\"request_id\":{request_id},\"pane_id\":{},\"code\":\"monitor-ambiguous\",\"monitor_ids\":[{monitor_ids}],\"message\":{}}}",
         pane_id.0,
-        current.monitor_id,
-        json_string(&message)
+        json_string(
+            "this pane has several progress monitors; pass --monitor-id <id> or --all"
+        )
     );
     let _ = connection
         .requests
         .send(ilium_ipc::ClientRequest::Detach)
         .await;
-    Err(CliError::ServerReportedError(message))
+    Err(CliError::ExitStatus(2))
+}
+
+/// `set --replace`: clears every monitor of the pane, then the caller adds
+/// the new one.
+async fn clear_all_before_replace(
+    connection: &mut ilium_client::connection::Connection,
+    pane_id: ilium_core::NodeId,
+    request_id: u64,
+) -> Result<(), CliError> {
+    let clear_request_id = next_progress_request_id();
+    let sent = connection
+        .requests
+        .send(ilium_ipc::ClientRequest::ClearPaneProgressMonitor {
+            request_id: clear_request_id,
+            pane_id,
+            expected_monitor_id: None,
+        })
+        .await;
+    let response = match sent {
+        Ok(()) => {
+            wait_for_progress_response(
+                connection,
+                clear_request_id,
+                ExpectedProgressResponse::Clear,
+            )
+            .await
+        }
+        Err(_) => Err(CliError::ServerReportedError(
+            "connection closed before the request was sent".to_string(),
+        )),
+    };
+    let (response, _retention) = match response {
+        Ok(response) => response.into_parts(),
+        Err(error) => {
+            print_progress_request_failure(
+                "set",
+                request_id,
+                Some(pane_id),
+                "replace-failed",
+                &error,
+            );
+            return Err(error);
+        }
+    };
+    match response {
+        ProgressResponse::Clear { result: Ok(_), .. } => Ok(()),
+        ProgressResponse::Clear {
+            result: Err(rejection),
+            ..
+        } => {
+            let error = CliError::ServerReportedError(rejection.message);
+            print_progress_request_failure(
+                "set",
+                request_id,
+                Some(pane_id),
+                "replace-failed",
+                &error,
+            );
+            Err(error)
+        }
+        _ => Ok(()),
+    }
 }
 
 fn print_progress_request_failure(
@@ -1109,14 +1234,17 @@ fn print_progress_response(
         },
         ProgressResponse::Status { pane_id, result } => match result {
             Ok(status) => {
-                let progress = status
-                    .progress
-                    .as_ref()
-                    .map_or_else(|| "null".to_string(), pane_progress_json);
+                let monitors = status
+                    .progress_monitors
+                    .iter()
+                    .map(pane_progress_json)
+                    .collect::<Vec<_>>()
+                    .join(",");
                 println!(
-                    "{{\"type\":\"progress_status\",\"request_id\":{request_id},\"pane_id\":{},\"active\":{},\"progress\":{progress}}}",
+                    "{{\"type\":\"progress_status\",\"request_id\":{request_id},\"pane_id\":{},\"monitor_count\":{},\"running\":{},\"monitors\":[{monitors}]}}",
                     pane_id.0,
-                    status.progress.is_some()
+                    status.progress_monitors.len(),
+                    ilium_core::has_live_progress(&status.progress_monitors)
                 );
                 Ok(())
             }
@@ -1128,13 +1256,16 @@ fn print_progress_response(
             ),
         },
         ProgressResponse::Clear { pane_id, result } => match result {
-            Ok(cleared_monitor_id) => {
-                let cleared_id = cleared_monitor_id
-                    .map_or_else(|| "null".to_string(), |monitor_id| monitor_id.to_string());
+            Ok(cleared_monitor_ids) => {
+                let cleared_ids = cleared_monitor_ids
+                    .iter()
+                    .map(u64::to_string)
+                    .collect::<Vec<_>>()
+                    .join(",");
                 println!(
-                    "{{\"type\":\"progress_clear\",\"request_id\":{request_id},\"pane_id\":{},\"cleared\":{},\"cleared_monitor_id\":{cleared_id}}}",
+                    "{{\"type\":\"progress_clear\",\"request_id\":{request_id},\"pane_id\":{},\"cleared\":{},\"cleared_monitor_ids\":[{cleared_ids}]}}",
                     pane_id.0,
-                    cleared_monitor_id.is_some()
+                    !cleared_monitor_ids.is_empty()
                 );
                 Ok(())
             }
@@ -1236,6 +1367,7 @@ const fn progress_rejection_code_name(
         ilium_ipc::ProgressMonitorRejectionCode::ProbeIoFailed => "probe-io-failed",
         ilium_ipc::ProgressMonitorRejectionCode::PaneNotFound => "pane-not-found",
         ilium_ipc::ProgressMonitorRejectionCode::StaleMonitor => "stale-monitor",
+        ilium_ipc::ProgressMonitorRejectionCode::TooManyMonitors => "too-many-monitors",
     }
 }
 
@@ -1470,14 +1602,14 @@ async fn run_new_workspace_pane(
     ilium_core::validate_branch_name(branch).map_err(|error| {
         CliError::ServerReportedError(format!("invalid worktree branch {branch:?}: {error}"))
     })?;
-    // Snapshot the same persisted Git setting as the TUI before starting the
-    // detached server. A malformed config must not silently skip setup.
-    let setup_command = ilium_platform::paths::config_dir()
-        .map(|directory| {
-            ilium_client::config::load(&directory).map(|config| config.git.setup_command)
-        })
+    // Snapshot the same persisted Git settings as the TUI before starting the
+    // detached server. A malformed config must not silently skip setup or
+    // place the worktree somewhere other than the configured location.
+    let git_settings = ilium_platform::paths::config_dir()
+        .map(|directory| ilium_client::config::load(&directory).map(|config| config.git))
         .transpose()?
         .unwrap_or_default();
+    let setup_command = git_settings.setup_command.clone();
     let project_session = session::resolve_project_session(cwd, session_name)?;
     let log_path = session::ensure_server_running(&project_session).await?;
     initialize_cli_logging(&log_path)?;
@@ -1573,7 +1705,7 @@ async fn run_new_workspace_pane(
     .await
     .map_err(|_| CliError::ServerReportedError("repository query timed out".into()))??;
 
-    let path = default_workspace_path(&facts, branch)?;
+    let path = default_workspace_path(&facts, branch, &git_settings.worktree_location_template)?;
     let base_ref = base.unwrap_or(&facts.default_base_ref);
     let spec = if setup_command.trim().is_empty() {
         WorkspaceCreateSpec::New {
@@ -1663,7 +1795,15 @@ fn workspace_provider(cmd: &[String]) -> Result<BuiltinAgentProvider, CliError> 
     }
 }
 
-fn default_workspace_path(facts: &RepoFacts, branch: &str) -> Result<PathBuf, CliError> {
+/// Expands `git.worktree_location_template` exactly as the TUI dialog does, so
+/// `ilium new-pane --worktree` and the dialog always pick the same path. A
+/// template that does not resolve to an absolute path falls back to
+/// `<main checkout>/.ilium/worktrees/<branch slug>`.
+fn default_workspace_path(
+    facts: &RepoFacts,
+    branch: &str,
+    worktree_location_template: &str,
+) -> Result<PathBuf, CliError> {
     // Git lists the main worktree first. The session may have started from a
     // linked checkout, so its `checkout_root` is not necessarily the repo's
     // stable location for sibling worktrees.
@@ -1679,16 +1819,21 @@ fn default_workspace_path(facts: &RepoFacts, branch: &str) -> Result<PathBuf, Cl
     let parent = main_root.parent().ok_or_else(|| {
         CliError::ServerReportedError("repository main worktree has no parent directory".into())
     })?;
-    let mut directory_name = main_root
-        .file_name()
-        .ok_or_else(|| {
-            CliError::ServerReportedError("repository main worktree has no name".into())
-        })?
-        .to_os_string();
-    directory_name.push(".worktrees");
-    Ok(parent
-        .join(directory_name)
-        .join(ilium_core::slugify_branch(branch)))
+    let repo_name = main_root.file_name().ok_or_else(|| {
+        CliError::ServerReportedError("repository main worktree has no name".into())
+    })?;
+    let slug = ilium_core::slugify_branch(branch);
+    let rendered = ilium_core::expand_worktree_path_template(
+        worktree_location_template,
+        main_root,
+        parent,
+        &repo_name.to_string_lossy(),
+        &slug,
+    );
+    if rendered.is_absolute() {
+        return Ok(rendered);
+    }
+    Ok(main_root.join(".ilium").join("worktrees").join(slug))
 }
 
 const fn workspace_stage_name(stage: WorkspaceCreateStage) -> &'static str {
@@ -1738,7 +1883,12 @@ async fn new_pane(
         while let Some(event) = connection.events.recv().await {
             let (event, _event_retention) = event.into_parts();
             match event {
-                ilium_ipc::ServerEvent::TreeSnapshot(tree) => {
+                // The attach reply is a `PaneStateSnapshot` (see
+                // `ilium-server` `send_initial_state`), not a `TreeSnapshot`.
+                // Accepting only `TreeSnapshot` here made every `new-pane`
+                // wait out the full confirmation timeout before sending.
+                ilium_ipc::ServerEvent::TreeSnapshot(tree)
+                | ilium_ipc::ServerEvent::PaneStateSnapshot { tree, .. } => {
                     return Ok(Some(tree.panes().count()));
                 }
                 ilium_ipc::ServerEvent::Error { message } => {
@@ -1777,7 +1927,7 @@ async fn new_pane(
             CliError::ServerReportedError("connection closed before NewPane was sent".to_string())
         })?;
 
-    let outcome = tokio::time::timeout(REQUEST_CONFIRMATION_TIMEOUT, async {
+    let outcome = tokio::time::timeout(NEW_PANE_CONFIRMATION_TIMEOUT, async {
         while let Some(event) = connection.events.recv().await {
             let (event, _event_retention) = event.into_parts();
             match event {
@@ -2091,9 +2241,31 @@ mod tests {
                 patch: 0,
             },
         };
+        let default_template =
+            ilium_client::config::GitSettings::default().worktree_location_template;
         assert_eq!(
-            default_workspace_path(&facts, "agent/fix-login").unwrap(),
+            default_workspace_path(&facts, "agent/fix-login", &default_template).unwrap(),
             work.join("api.worktrees").join("agent-fix-login")
+        );
+        // The CLI must honour the same setting as the TUI dialog.
+        let custom_template = format!(
+            "{}/{{repo_name}}.worktrees/{{branch_slug}}",
+            work.join("external").display()
+        );
+        assert_eq!(
+            default_workspace_path(&facts, "agent/fix-login", &custom_template).unwrap(),
+            work.join("external")
+                .join("api.worktrees")
+                .join("agent-fix-login")
+        );
+        // A template that does not resolve to an absolute path falls back to
+        // the main checkout, as the dialog does.
+        assert_eq!(
+            default_workspace_path(&facts, "agent/fix-login", "relative/{branch_slug}").unwrap(),
+            work.join("api")
+                .join(".ilium")
+                .join("worktrees")
+                .join("agent-fix-login")
         );
     }
 
@@ -2277,7 +2449,10 @@ mod tests {
         assert!(matches!(
             unfenced.command,
             Some(Command::Progress {
-                command: ProgressCommand::Clear { monitor_id: None }
+                command: ProgressCommand::Clear {
+                    monitor_id: None,
+                    all: false
+                }
             })
         ));
 
@@ -2287,10 +2462,26 @@ mod tests {
             fenced.command,
             Some(Command::Progress {
                 command: ProgressCommand::Clear {
-                    monitor_id: Some(99)
+                    monitor_id: Some(99),
+                    all: false
                 }
             })
         ));
+
+        let all = Cli::try_parse_from(["ilium", "progress", "clear", "--all"]).unwrap();
+        assert!(matches!(
+            all.command,
+            Some(Command::Progress {
+                command: ProgressCommand::Clear {
+                    monitor_id: None,
+                    all: true
+                }
+            })
+        ));
+        assert!(
+            Cli::try_parse_from(["ilium", "progress", "clear", "--all", "--monitor-id", "99"])
+                .is_err()
+        );
     }
 
     #[test]

@@ -2,6 +2,10 @@
 //! progress monitor settles, so an agent can wait the way it waits for any
 //! other long command instead of polling or expecting a typed notification.
 //!
+//! A pane can hold several monitors. Without an explicit monitor ID the wait
+//! picks the only unsettled one (or the only one at all); when that choice is
+//! ambiguous it refuses and lists the IDs instead of guessing.
+//!
 //! The server holds the request open and, while this process stays connected,
 //! hands the outcome to it instead of typing a notification into the agent's
 //! composer. If this process dies, the server falls back to that
@@ -43,10 +47,67 @@ pub(crate) struct WaitReport {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum WaitReportEnd {
     Settled,
-    Superseded,
     Cleared,
     NoMonitor,
     TimedOut,
+}
+
+/// Why `wait` without a monitor ID could not choose one.
+pub(crate) struct AmbiguousMonitor {
+    pub(crate) monitors: Vec<PaneProgress>,
+}
+
+impl AmbiguousMonitor {
+    pub(crate) fn message(&self) -> String {
+        let listed = self
+            .monitors
+            .iter()
+            .map(|progress| {
+                format!(
+                    "{} (job {}, {:.0}%)",
+                    progress.monitor_id, progress.report.job_id, progress.report.percent
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!(
+            "this pane has several progress monitors: {listed}. Name one: `ilium progress wait \
+             <monitor_id>`"
+        )
+    }
+}
+
+/// How `wait` resolved the monitor to wait for.
+pub(crate) enum MonitorChoice {
+    Chosen(u64),
+    NoMonitor,
+    Ambiguous(AmbiguousMonitor),
+}
+
+/// Picks the monitor a wait without an explicit ID refers to: the only
+/// unsettled monitor, else the only monitor; anything else is ambiguous.
+pub(crate) fn choose_monitor(monitors: &[PaneProgress]) -> MonitorChoice {
+    let mut unsettled = monitors.iter().filter(|progress| !is_settled(progress));
+    match (unsettled.next(), unsettled.next()) {
+        (Some(progress), None) => return MonitorChoice::Chosen(progress.monitor_id),
+        (Some(_), Some(_)) => {
+            return MonitorChoice::Ambiguous(AmbiguousMonitor {
+                monitors: monitors
+                    .iter()
+                    .filter(|progress| !is_settled(progress))
+                    .cloned()
+                    .collect(),
+            })
+        }
+        (None, _) => {}
+    }
+    match monitors {
+        [] => MonitorChoice::NoMonitor,
+        [only] => MonitorChoice::Chosen(only.monitor_id),
+        _ => MonitorChoice::Ambiguous(AmbiguousMonitor {
+            monitors: monitors.to_vec(),
+        }),
+    }
 }
 
 impl WaitReport {
@@ -58,7 +119,6 @@ impl WaitReport {
                 Some(progress) if progress.report.status == ProgressTaskStatus::Error => "error",
                 _ => "monitor-failed",
             },
-            WaitReportEnd::Superseded => "replaced",
             WaitReportEnd::Cleared => "cleared",
             WaitReportEnd::NoMonitor => "no-monitor",
             WaitReportEnd::TimedOut => "still-running",
@@ -83,8 +143,10 @@ impl WaitReport {
                 "The probe stopped working, so the task outcome is unknown. Check the task \
                  directly; do not assume success."
             }
-            "replaced" => "A newer `ilium progress set` replaced this monitor. Wait for that one.",
-            "cleared" => "The monitor was cleared or monitoring was switched off.",
+            "cleared" => {
+                "The monitor was cleared, or is not registered on this pane. Check `ilium \
+                 progress status`."
+            }
             "no-monitor" => {
                 "This pane has no progress monitor. Register one with `ilium progress set`."
             }
@@ -123,12 +185,11 @@ fn is_settled(progress: &PaneProgress) -> bool {
     progress.is_terminal() || progress.monitor_health.is_failed()
 }
 
-/// Reads the pane's current monitor. Used to pick the monitor to wait for
-/// and by `set` to refuse silently replacing a running monitor.
-pub(crate) async fn current_monitor(
+/// Reads every monitor registered on the pane, in registration order.
+pub(crate) async fn current_monitors(
     connection: &mut Connection,
     pane_id: NodeId,
-) -> Result<Option<PaneProgress>, CliError> {
+) -> Result<Vec<PaneProgress>, CliError> {
     let request_id = next_progress_request_id();
     send(
         connection,
@@ -149,7 +210,7 @@ pub(crate) async fn current_monitor(
             {
                 if response_id == request_id {
                     return result
-                        .map(|status| status.progress)
+                        .map(|status| status.progress_monitors)
                         .map_err(|rejection| CliError::ServerReportedError(rejection.message));
                 }
             }
@@ -170,13 +231,14 @@ async fn send(connection: &Connection, request: ClientRequest) -> Result<(), Cli
     })
 }
 
-/// Waits for `monitor_id` (or the pane's current monitor) to settle.
+/// Waits for `monitor_id` (or the pane's only candidate monitor, see
+/// `choose_monitor`) to settle.
 pub(crate) async fn wait_for_monitor(
     connection: &mut Connection,
     pane_id: NodeId,
     monitor_id: Option<u64>,
     timeout: Option<Duration>,
-) -> Result<WaitReport, CliError> {
+) -> Result<Result<WaitReport, AmbiguousMonitor>, CliError> {
     let started = Instant::now();
     let report = |monitor_id, end, progress, composer_notice_suppressed| WaitReport {
         pane_id,
@@ -188,9 +250,12 @@ pub(crate) async fn wait_for_monitor(
     };
     let monitor_id = match monitor_id {
         Some(monitor_id) => monitor_id,
-        None => match current_monitor(connection, pane_id).await? {
-            Some(progress) => progress.monitor_id,
-            None => return Ok(report(None, WaitReportEnd::NoMonitor, None, false)),
+        None => match choose_monitor(&current_monitors(connection, pane_id).await?) {
+            MonitorChoice::Chosen(monitor_id) => monitor_id,
+            MonitorChoice::NoMonitor => {
+                return Ok(Ok(report(None, WaitReportEnd::NoMonitor, None, false)))
+            }
+            MonitorChoice::Ambiguous(ambiguous) => return Ok(Err(ambiguous)),
         },
     };
     let wait_request_id = next_progress_request_id();
@@ -208,6 +273,9 @@ pub(crate) async fn wait_for_monitor(
     let mut next_check = tokio::time::Instant::now() + LIVENESS_CHECK_INTERVAL;
     let mut status_request_id = None;
     let mut settled_from_status: Option<PaneProgress> = None;
+    // The latest report seen by a liveness check, returned on a timeout so the
+    // caller sees how far the task got without a separate status request.
+    let mut last_seen: Option<PaneProgress> = None;
     loop {
         let timeout_sleep = async {
             match deadline {
@@ -220,8 +288,9 @@ pub(crate) async fn wait_for_monitor(
                 let Some(event) = event else {
                     return Err(CliError::ServerReportedError(
                         "the ilium server closed the connection while waiting. It may have \
-                         restarted, or the running server predates `ilium progress wait`; the \
-                         monitor's normal composer notification still applies"
+                         restarted, or the running server is older than this `ilium` command \
+                         (restart Ilium after installing a new build); the monitor's normal \
+                         composer notification still applies"
                             .to_string(),
                     ));
                 };
@@ -234,51 +303,54 @@ pub(crate) async fn wait_for_monitor(
                             .map_err(|rejection| CliError::ServerReportedError(rejection.message))?;
                         let end = match outcome.end {
                             ProgressWaitEnd::Settled => WaitReportEnd::Settled,
-                            ProgressWaitEnd::Superseded => WaitReportEnd::Superseded,
-                            ProgressWaitEnd::Cleared => WaitReportEnd::Cleared,
+                            // An older server reports a replaced monitor as
+                            // `Superseded`; for the waiter it is gone either way.
+                            ProgressWaitEnd::Superseded | ProgressWaitEnd::Cleared => {
+                                WaitReportEnd::Cleared
+                            }
                         };
-                        return Ok(report(
+                        return Ok(Ok(report(
                             Some(monitor_id),
                             end,
                             outcome.progress,
                             outcome.composer_notice_suppressed,
-                        ));
+                        )));
                     }
                     ServerEvent::ProgressMonitorStatusReported { request_id, result, .. }
                         if Some(request_id) == status_request_id =>
                     {
                         status_request_id = None;
                         let progress = match result {
-                            Ok(status) => status.progress,
+                            Ok(status) => status
+                                .progress_monitors
+                                .into_iter()
+                                .find(|progress| progress.monitor_id == monitor_id),
                             Err(rejection) => {
                                 return Err(CliError::ServerReportedError(rejection.message))
                             }
                         };
                         match progress {
                             None => {
-                                return Ok(report(Some(monitor_id), WaitReportEnd::Cleared, None, false))
-                            }
-                            Some(progress) if progress.monitor_id != monitor_id => {
-                                return Ok(report(
+                                return Ok(Ok(report(
                                     Some(monitor_id),
-                                    WaitReportEnd::Superseded,
+                                    WaitReportEnd::Cleared,
                                     None,
                                     false,
-                                ))
+                                )))
                             }
                             Some(progress) if is_settled(&progress) => {
                                 if settled_from_status.is_some() {
-                                    return Ok(report(
+                                    return Ok(Ok(report(
                                         Some(monitor_id),
                                         WaitReportEnd::Settled,
                                         Some(progress),
                                         false,
-                                    ));
+                                    )));
                                 }
                                 settled_from_status = Some(progress);
                                 next_check = tokio::time::Instant::now() + SETTLED_REPLY_GRACE;
                             }
-                            Some(_) => {}
+                            Some(progress) => last_seen = Some(progress),
                         }
                     }
                     _ => {}
@@ -295,8 +367,71 @@ pub(crate) async fn wait_for_monitor(
                 next_check = tokio::time::Instant::now() + LIVENESS_CHECK_INTERVAL;
             }
             () = timeout_sleep => {
-                return Ok(report(Some(monitor_id), WaitReportEnd::TimedOut, None, false));
+                return Ok(Ok(report(
+                    Some(monitor_id),
+                    WaitReportEnd::TimedOut,
+                    last_seen,
+                    false,
+                )));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ilium_core::{ProgressMonitorHealth, ProgressTaskReport};
+
+    use super::*;
+
+    fn monitor(monitor_id: u64, status: ProgressTaskStatus) -> PaneProgress {
+        PaneProgress {
+            monitor_id,
+            report: ProgressTaskReport {
+                job_id: format!("job-{monitor_id}"),
+                status,
+                percent: 10.0,
+                message: String::new(),
+                details: String::new(),
+                error: (status == ProgressTaskStatus::Error).then(|| "failed".to_string()),
+            },
+            monitor_health: ProgressMonitorHealth::Healthy,
+            last_observed_unix_millis: 1,
+            attention: Default::default(),
+        }
+    }
+
+    #[test]
+    fn a_wait_without_an_id_picks_the_only_unsettled_monitor_or_refuses_to_guess() {
+        assert!(matches!(choose_monitor(&[]), MonitorChoice::NoMonitor));
+        let done = monitor(1, ProgressTaskStatus::Done);
+        let running = monitor(2, ProgressTaskStatus::Running);
+        let other_running = monitor(3, ProgressTaskStatus::Running);
+        assert!(matches!(
+            choose_monitor(std::slice::from_ref(&done)),
+            MonitorChoice::Chosen(1)
+        ));
+        assert!(matches!(
+            choose_monitor(&[done.clone(), running.clone()]),
+            MonitorChoice::Chosen(2)
+        ));
+        let MonitorChoice::Ambiguous(ambiguous) =
+            choose_monitor(&[done.clone(), running, other_running])
+        else {
+            panic!("two running monitors must be ambiguous");
+        };
+        assert_eq!(
+            ambiguous
+                .monitors
+                .iter()
+                .map(|progress| progress.monitor_id)
+                .collect::<Vec<_>>(),
+            vec![2, 3]
+        );
+        assert!(ambiguous.message().contains("ilium progress wait"));
+        assert!(matches!(
+            choose_monitor(&[done, monitor(4, ProgressTaskStatus::Error)]),
+            MonitorChoice::Ambiguous(_)
+        ));
     }
 }

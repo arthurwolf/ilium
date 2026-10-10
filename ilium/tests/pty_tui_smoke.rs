@@ -1262,7 +1262,12 @@ async fn completed_progress_footer_expires_during_continuous_pty_output() {
                 ..
             } = event
             {
-                return result.unwrap().progress.expect("retained terminal result");
+                return result
+                    .unwrap()
+                    .progress_monitors
+                    .into_iter()
+                    .next()
+                    .expect("retained terminal result");
             }
         }
         panic!("server closed before retained-result readback");

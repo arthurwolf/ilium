@@ -130,10 +130,9 @@ async fn select_and_measure(
 #[tokio::test]
 #[ignore = "explicit 128-pane release runtime qualification"]
 async fn no_pool_release_renders_128_panes_and_measures_click_latency() {
-    assert!(
-        !cfg!(debug_assertions),
-        "release qualification must launch the optimized client binary"
-    );
+    if cfg!(debug_assertions) {
+        panic!("release qualification must launch the optimized client binary");
+    }
     let client_binary = std::path::PathBuf::from(ilium_binary());
     let matching_server_binary = client_binary.with_file_name("ilium-server");
     let matching_server_binary = if matching_server_binary.is_file() {
