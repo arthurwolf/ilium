@@ -156,8 +156,8 @@ def validate_intel_commands(receipt, workspace=None):
     source, build_directory = PurePosixPath(ort[0]), PurePosixPath(ort[10])
     require(source.is_absolute() and source.name == "build.sh" and source.parent.name == "onnxruntime-058787ceead760166e3c50a0a4cba8a833a6f53f" and ".." not in source.parts, "Intel ORT command is not from the pinned source tree")
     require(build_directory.is_absolute() and ".." not in build_directory.parts and re.fullmatch(r"[1-9][0-9]?", ort[5]) and 1 <= int(ort[5]) <= 64, "Intel ORT build directory/parallel evidence differs")
-    expected_ort = [ort[0], "--config", "Release", "--build_shared_lib", "--parallel", ort[5], "--use_xcode", "--skip_submodule_sync", "--compile_no_warning_as_error", "--build_dir", ort[10], "--cmake_extra_defines", "CMAKE_OSX_ARCHITECTURES=x86_64"]
-    require(ort == expected_ort, "Intel ORT command differs from the reviewed Xcode/x86_64 recipe")
+    expected_ort = [ort[0], "--config", "Release", "--build_shared_lib", "--parallel", ort[5], "--cmake_generator=Ninja", "--skip_submodule_sync", "--compile_no_warning_as_error", "--build_dir", ort[10], "--cmake_extra_defines", "CMAKE_OSX_ARCHITECTURES=x86_64"]
+    require(ort == expected_ort, "Intel ORT command differs from the reviewed Ninja/x86_64 recipe")
     cargo = receipt.get("cargo_command")
     require(isinstance(cargo, list) and len(cargo) == 14 and all(isinstance(value, str) for value in cargo), "Intel Cargo command evidence is missing/malformed")
     manifest = PurePosixPath(cargo[5])

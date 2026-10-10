@@ -46,7 +46,7 @@ class NativeAuditTests(unittest.TestCase):
             "toolchain": {**{name: {"command": command, "stdout": output, "stderr": ""} for name, (command, output) in toolchains.items()}, "python": "3.11.7 (synthetic fixture)"},
             "runtime": {"path": str(native / "build/Release/Release/libonnxruntime.1.24.2.dylib"), "version": "1.24.2", "sha256": "b" * 64},
             "environment": {"ORT_LIB_LOCATION": str(native / "build/Release/Release"), "ORT_LIB_PATH": str(native / "build/Release/Release"), "ORT_PREFER_DYNAMIC_LINK": "1", "CARGO_HOME": str(native / "cargo-home"), "CARGO_TARGET_DIR": str(native / "cargo-target")},
-            "ort_command": [str(native / f"source/onnxruntime-{commit}/build.sh"), "--config", "Release", "--build_shared_lib", "--parallel", "4", "--use_xcode", "--skip_submodule_sync", "--compile_no_warning_as_error", "--build_dir", str(native / "build"), "--cmake_extra_defines", "CMAKE_OSX_ARCHITECTURES=x86_64"],
+            "ort_command": [str(native / f"source/onnxruntime-{commit}/build.sh"), "--config", "Release", "--build_shared_lib", "--parallel", "4", "--cmake_generator=Ninja", "--skip_submodule_sync", "--compile_no_warning_as_error", "--build_dir", str(native / "build"), "--cmake_extra_defines", "CMAKE_OSX_ARCHITECTURES=x86_64"],
             "cargo_command": ["cargo", "build", "--locked", "--release", "--manifest-path", str(native / "workspace/Cargo.toml"), "--target", "x86_64-apple-darwin", "--bin", "ilium", "--bin", "ilium-server", "--bin", "ilium-animation-helper"],
         }
 
@@ -298,7 +298,7 @@ class NativeAuditTests(unittest.TestCase):
         runtimes = [{"name": "libonnxruntime.1.24.2.dylib", "version": "1.24.2", "sha256": "b" * 64}]
         mutations = [
             ("ort_command", None), ("cargo_command", None),
-            ("ort_command", [value for value in baseline["ort_command"] if value != "--use_xcode"]),
+            ("ort_command", [value for value in baseline["ort_command"] if value != "--cmake_generator=Ninja"]),
             ("ort_command", ["CMAKE_OSX_ARCHITECTURES=arm64" if value == "CMAKE_OSX_ARCHITECTURES=x86_64" else value for value in baseline["ort_command"]]),
             ("cargo_command", ["aarch64-apple-darwin" if value == "x86_64-apple-darwin" else value for value in baseline["cargo_command"]]),
             ("cargo_command", baseline["cargo_command"][:-2]),
@@ -447,7 +447,7 @@ class NativeAuditTests(unittest.TestCase):
         build = self.module("build_intel_ort")
         self.assertTrue(hasattr(build, "build_command"), "pinned source archive build command is missing")
         command = build.build_command(Path("/native/source"), Path("/native/build"), 4)
-        self.assertEqual(command, ["/native/source/build.sh", "--config", "Release", "--build_shared_lib", "--parallel", "4", "--use_xcode", "--skip_submodule_sync", "--compile_no_warning_as_error", "--build_dir", "/native/build", "--cmake_extra_defines", "CMAKE_OSX_ARCHITECTURES=x86_64"])
+        self.assertEqual(command, ["/native/source/build.sh", "--config", "Release", "--build_shared_lib", "--parallel", "4", "--cmake_generator=Ninja", "--skip_submodule_sync", "--compile_no_warning_as_error", "--build_dir", "/native/build", "--cmake_extra_defines", "CMAKE_OSX_ARCHITECTURES=x86_64"])
         environment = build.cargo_environment(Path("/native/ort"), Path("/native/cargo-home"), Path("/native/cargo-target"))
         self.assertEqual(environment["ORT_LIB_LOCATION"], "/native/ort")
         self.assertEqual(environment["ORT_LIB_PATH"], "/native/ort")
