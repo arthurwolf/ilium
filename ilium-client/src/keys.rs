@@ -2885,7 +2885,10 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
         return;
     }
 
-    if key.code == KeyCode::Char('?') {
+    if key.code == KeyCode::Char('?')
+        && !(state.tab == SettingsTab::Animations
+            && crate::animation_settings_ui::has_saved_scene_activity(app))
+    {
         let layout =
             crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, app, &state);
         if let Some(anchor) = crate::settings_ui::settings_help_anchors(&layout, app, &state)
@@ -3053,21 +3056,13 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
         }
         KeyCode::Tab => {
             state.tab = state.tab.next();
-            state.selected_row = usize::from(
-                state.tab == SettingsTab::Titles
-                    && app.inference_settings.title_style
-                        == ilium_inference::TitleStyle::Summarization,
-            );
+            state.selected_row = 0;
             state.trigger_action_cursor = 0;
             state.scroll = 0;
         }
         KeyCode::BackTab => {
             state.tab = state.tab.previous();
-            state.selected_row = usize::from(
-                state.tab == SettingsTab::Titles
-                    && app.inference_settings.title_style
-                        == ilium_inference::TitleStyle::Summarization,
-            );
+            state.selected_row = 0;
             state.trigger_action_cursor = 0;
             state.scroll = 0;
         }
@@ -3316,19 +3311,6 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
                 app.settings_remove_custom_agent_signature(index);
                 state.selected_row = state.selected_row.saturating_sub(1);
             }
-        }
-        KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Titles => {
-            state.selected_row = state.selected_row.saturating_sub(1);
-        }
-        KeyCode::Down | KeyCode::Char('j') if state.tab == SettingsTab::Titles => {
-            state.selected_row = (state.selected_row + 1).min(1);
-        }
-        KeyCode::Enter | KeyCode::Char(' ') if state.tab == SettingsTab::Titles => {
-            app.settings_select_title_style(if state.selected_row == 0 {
-                ilium_inference::TitleStyle::Labeling
-            } else {
-                ilium_inference::TitleStyle::Summarization
-            });
         }
         KeyCode::Up | KeyCode::Char('k') if state.tab == SettingsTab::Inference => {
             state.selected_row = state.selected_row.saturating_sub(1);
@@ -5157,15 +5139,15 @@ mod indent_outdent_tests {
             _ => panic!("settings should stay open"),
         };
 
-        // Enter on a radio card chooses it and reveals its parameter row
-        // without moving the selection off the card.
-        let budget_card = row_index(&app, CostRow::Calibration(Calibration::Budget));
-        for _ in 0..budget_card {
+        // The shared calibration selector steps to Budget and reveals its
+        // parameter row without moving selection away from the selector.
+        let calibration_row = row_index(&app, CostRow::Calibration(Calibration::OwnHistory));
+        for _ in 0..calibration_row {
             press(&mut app, KeyCode::Down);
         }
-        press(&mut app, KeyCode::Enter);
+        press(&mut app, KeyCode::Right);
         assert_eq!(app.cost_settings.calibration, Calibration::Budget);
-        assert_eq!(selected(&app), budget_card);
+        assert_eq!(selected(&app), calibration_row);
         assert!(crate::cost_settings_ui::rows(&app).contains(&CostRow::Budget));
 
         // Space toggles an option; Right on its visibility row flips it.

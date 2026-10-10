@@ -1,8 +1,8 @@
 //! The "Agent Cost" settings tab.
 //!
-//! One scrollable page in three parts: radio cards choosing how "expensive"
-//! is decided (each with a live preview of the thresholds it would use right
-//! now), the parameter of the chosen calibration, and one block per display
+//! One scrollable page in three parts: shared selectors choosing what to
+//! measure and how "expensive" is decided (with a live threshold preview),
+//! the parameter of the chosen calibration, and one block per display
 //! option with an enable checkbox and a visibility selector. Geometry is
 //! produced once by [`view`] and shared by rendering, mouse hit testing,
 //! help anchors and keyboard scrolling, so they cannot drift apart.
@@ -309,6 +309,8 @@ fn sample_for(display: CostDisplay, settings: &CostSettings) -> (String, CostLev
 
 fn param_label(row: CostRow) -> &'static str {
     match row {
+        CostRow::Metric(_) => "Measure",
+        CostRow::Calibration(_) => "Rating",
         CostRow::QuotaWindow => "Quota window",
         CostRow::FixedPreset => "Fixed bands",
         CostRow::HistoryDays => "History window",
@@ -331,6 +333,8 @@ fn param_value(row: CostRow, app: &App) -> String {
         }
     };
     match row {
+        CostRow::Metric(_) => settings.metric.label().to_owned(),
+        CostRow::Calibration(_) => settings.calibration.label().to_owned(),
         CostRow::QuotaWindow => settings.quota_window.label().to_owned(),
         CostRow::FixedPreset => {
             let (presets, cuts): (&[[f64; 4]], _) = match settings.metric {
@@ -380,6 +384,14 @@ fn param_description(row: CostRow, app: &App) -> String {
     let overlay = app.cost_tracker.overlay();
     let is_quota = app.cost_settings.metric == CostMetric::Quota;
     match row {
+        CostRow::Metric(_) => format!(
+            "{} Choose whether Agent Cost measures estimated API dollars or Codex plan quota. The full list is available from +.",
+            metric_blurb(app.cost_settings.metric)
+        ),
+        CostRow::Calibration(_) => format!(
+            "{} The full list of rating methods is available from +.",
+            calibration_blurb(app.cost_settings.calibration, &app.cost_settings)
+        ),
         CostRow::QuotaWindow => {
             "Which Codex rate-limit window the quota figures follow: the short rolling window \
              or the longer weekly one. Press Enter or click to switch."
@@ -446,10 +458,6 @@ pub fn view(app: &App, selected_row: usize, width: u16) -> CostView {
     let is_selected = |row: CostRow| all_rows.get(selected_row) == Some(&row);
     let body_width = usize::from(width.saturating_sub(BODY_INDENT + 3)).max(20);
     let selected_style = theme::selected_style().add_modifier(Modifier::BOLD);
-    let accent = Style::new()
-        .fg(theme::accent_bg())
-        .add_modifier(Modifier::BOLD);
-
     let mut lines: Vec<Line<'static>> = Vec::new();
     let mut spans_out: Vec<RowSpan> = Vec::new();
     let control_x = INSET + LABEL_WIDTH;
@@ -473,44 +481,16 @@ pub fn view(app: &App, selected_row: usize, width: u16) -> CostView {
     // ---- what is measured
     lines.push(section_bar("WHAT IS MEASURED?", "MEASURED", width));
     lines.push(Line::from(""));
-    for metric in CostMetric::ALL {
-        let row = CostRow::Metric(metric);
-        let first_line = lines.len() as u16;
-        let active = settings.metric == metric;
-        let marker = if active { "◉" } else { "○" };
-        let default_tag = if metric == CostMetric::Dollars {
-            "  (default)"
-        } else {
-            ""
-        };
-        let title_style = if is_selected(row) {
-            selected_style
-        } else if active {
-            accent
-        } else {
-            Style::new()
-        };
-        lines.push(Line::from(Span::styled(
-            format!("  {marker} {}{default_tag}", metric.label()),
-            title_style,
-        )));
-        let body_style = if active { Style::new() } else { dim() };
-        for text in wrap(metric_blurb(metric), body_width) {
-            lines.push(Line::from(Span::styled(
-                format!("{}{text}", " ".repeat(usize::from(BODY_INDENT))),
-                body_style,
-            )));
-        }
-        let last_line = lines.len() as u16 - 1;
-        spans_out.push(RowSpan {
-            row,
-            first_line,
-            last_line,
-            control_line: first_line,
-            control_x: 0,
-        });
-        lines.push(Line::from(""));
-    }
+    let metric_row = CostRow::Metric(settings.metric);
+    push_control(
+        &mut lines,
+        &mut spans_out,
+        app,
+        metric_row,
+        is_selected(metric_row),
+        control_x,
+        width,
+    );
     if all_rows.contains(&CostRow::QuotaWindow) {
         push_control(
             &mut lines,
@@ -530,64 +510,36 @@ pub fn view(app: &App, selected_row: usize, width: u16) -> CostView {
         width,
     ));
     lines.push(Line::from(""));
-    for calibration in Calibration::ALL {
-        let row = CostRow::Calibration(calibration);
-        let first_line = lines.len() as u16;
-        let active = settings.calibration == calibration;
-        let marker = if active { "◉" } else { "○" };
-        let default_tag = if calibration == Calibration::OwnHistory {
-            "  (default)"
-        } else {
-            ""
-        };
-        let title = format!("  {marker} {}{default_tag}", calibration.label());
-        let title_style = if is_selected(row) {
-            selected_style
-        } else if active {
-            accent
-        } else {
-            Style::new()
-        };
-        lines.push(Line::from(Span::styled(title, title_style)));
-        let body_style = if active { Style::new() } else { dim() };
-        for text in wrap(&calibration_blurb(calibration, settings), body_width) {
-            lines.push(Line::from(Span::styled(
-                format!("{}{text}", " ".repeat(usize::from(BODY_INDENT))),
-                body_style,
-            )));
-        }
-        lines.push(ladder_line(app, calibration));
-        let last_line = lines.len() as u16 - 1;
-        spans_out.push(RowSpan {
-            row,
-            first_line,
-            last_line,
-            control_line: first_line,
-            control_x: 0,
-        });
-        lines.push(Line::from(""));
+    let calibration_row = CostRow::Calibration(settings.calibration);
+    push_control(
+        &mut lines,
+        &mut spans_out,
+        app,
+        calibration_row,
+        is_selected(calibration_row),
+        control_x,
+        width,
+    );
+    lines.push(ladder_line(app, settings.calibration));
+    lines.push(Line::from(""));
 
-        // The parameter of the active calibration follows its card.
-        if active {
-            for parameter in [
-                CostRow::FixedPreset,
-                CostRow::HistoryDays,
-                CostRow::Budget,
-                CostRow::BurnPreset,
-            ] {
-                if !all_rows.contains(&parameter) {
-                    continue;
-                }
-                push_control(
-                    &mut lines,
-                    &mut spans_out,
-                    app,
-                    parameter,
-                    is_selected(parameter),
-                    control_x,
-                    width,
-                );
-            }
+    // The active calibration's parameter follows its selector.
+    for parameter in [
+        CostRow::FixedPreset,
+        CostRow::HistoryDays,
+        CostRow::Budget,
+        CostRow::BurnPreset,
+    ] {
+        if all_rows.contains(&parameter) {
+            push_control(
+                &mut lines,
+                &mut spans_out,
+                app,
+                parameter,
+                is_selected(parameter),
+                control_x,
+                width,
+            );
         }
     }
 
@@ -961,7 +913,11 @@ pub fn hit_with_button(
     );
     let is_choice = matches!(
         span.row,
-        CostRow::FixedPreset | CostRow::BurnPreset | CostRow::Visibility(_)
+        CostRow::Metric(_)
+            | CostRow::Calibration(_)
+            | CostRow::FixedPreset
+            | CostRow::BurnPreset
+            | CostRow::Visibility(_)
     );
     let direction = if is_number || is_choice {
         // Only the painted control steps; the label and description lines
@@ -1169,21 +1125,13 @@ mod tests {
         let app = app();
         let view = view(&app, 0, 110);
         let page = text(&view);
-        for calibration in Calibration::ALL {
-            assert!(
-                page.contains(calibration.label()),
-                "{}",
-                calibration.label()
-            );
-        }
-        assert!(page.contains("◉ Relative to your history  (default)"));
-        assert!(page.contains("○ Fixed bands"));
+        assert!(page.contains("← Relative to your history + →"));
         assert!(
             page.contains("<$1"),
             "fixed ladder starts below the first cut: {page}"
         );
         assert!(page.contains("≥$50"));
-        assert!(page.contains("$/h") || page.contains("/h"));
+        assert!(page.contains("History window"));
     }
 
     #[test]
@@ -1198,7 +1146,7 @@ mod tests {
         assert!(page.contains("← Only when hovering the entry + →"));
         assert!(page.contains("Sparkline window"));
         assert!(
-            page.contains("➖ 6 h ➕ *"),
+            page.contains("- 6 h + *"),
             "default window is six hours: {page}"
         );
     }
@@ -1271,9 +1219,16 @@ mod tests {
             "description lines do not step the value"
         );
 
-        let card = span_of(CostRow::Calibration(Calibration::Budget));
-        let click = hit(area, 0, Position::new(20, card.first_line + 1), &app).unwrap();
-        assert_eq!(click.row, CostRow::Calibration(Calibration::Budget));
+        let selector = span_of(CostRow::Calibration(Calibration::OwnHistory));
+        let click = hit(
+            area,
+            0,
+            Position::new(selector.control_x + 1, selector.control_line),
+            &app,
+        )
+        .unwrap();
+        assert_eq!(click.row, CostRow::Calibration(Calibration::OwnHistory));
+        assert_eq!(click.direction, 1);
     }
 
     #[test]
@@ -1283,7 +1238,7 @@ mod tests {
         app.cost_settings.calibration = Calibration::Budget;
         let page = text(&view(&app, 0, 110));
         assert!(page.contains("Budget per agent"));
-        assert!(page.contains("➖ $10 ➕ *"));
+        assert!(page.contains("- $10 + *"));
         assert!(!page.contains("History window"));
     }
 
@@ -1301,19 +1256,18 @@ mod tests {
     }
 
     #[test]
-    fn metric_cards_are_always_listed_and_quota_switches_every_unit() {
+    fn metric_selector_switches_every_unit_and_quota_window() {
         let mut app = app();
         let page = text(&view(&app, 0, 110));
         assert!(page.contains("WHAT IS MEASURED?"));
-        assert!(page.contains("◉ API dollars  (default)"));
-        assert!(page.contains("○ Plan quota"));
+        assert!(page.contains("← API dollars + →"));
         assert!(!page.contains("Quota window"));
         assert!(page.contains("<$1.00"), "dollar ladders by default");
 
         app.cost_settings.metric = CostMetric::Quota;
         let view = view(&app, 0, 110);
         let page = text(&view);
-        assert!(page.contains("◉ Plan quota"));
+        assert!(page.contains("← Plan quota + →"));
         assert!(page.contains("← Short window + →"));
         assert!(page.contains("<1.0%"), "fixed-band ladder is in percent");
         assert!(!page.contains("<$1.00"));
@@ -1323,30 +1277,41 @@ mod tests {
             .iter()
             .filter(|span| matches!(span.row, CostRow::Metric(_) | CostRow::QuotaWindow))
             .count();
-        assert_eq!(metric_rows, 3);
+        assert_eq!(metric_rows, 2);
 
         app.cost_settings.calibration = Calibration::Budget;
         let page = text(&super::view(&app, 0, 110));
         assert!(
-            page.contains("➖ 10% ➕ *"),
+            page.contains("- 10% + *"),
             "budget is a share of the window"
         );
         assert!(page.contains("quota_budget_percent"));
     }
 
     #[test]
-    fn clicking_a_metric_card_or_the_window_row_activates_it() {
+    fn clicking_a_metric_control_steps_it_and_the_window_row_toggles() {
         let app = app();
         let area = Rect::new(0, 0, 110, 60);
         let view = view(&app, 0, 110);
-        let quota_card = view
+        let metric = view
             .rows
             .iter()
-            .find(|span| span.row == CostRow::Metric(CostMetric::Quota))
+            .find(|span| matches!(span.row, CostRow::Metric(_)))
             .unwrap();
-        let click = hit(area, 0, Position::new(10, quota_card.first_line + 1), &app).unwrap();
-        assert_eq!(click.row, CostRow::Metric(CostMetric::Quota));
-        assert_eq!(click.direction, 0);
+        let control = value_control(area, 0, metric, &app).unwrap();
+        let geometry = control.geometry();
+        assert_eq!(
+            value_hit(
+                area,
+                0,
+                Position::new(geometry.value.x, geometry.value.y),
+                crate::value_control::PointerButton::Left,
+                &app,
+            )
+            .unwrap()
+            .2,
+            crate::value_control::ControlAction::NextChoice
+        );
 
         let mut quota_app = app;
         quota_app.cost_settings.metric = CostMetric::Quota;

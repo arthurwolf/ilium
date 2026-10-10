@@ -775,7 +775,7 @@ mod tests {
         screen_text_at(state, banner, 100, 44)
     }
 
-    const PRIVACY_NOTICE: &str = "Remote compaction sends this session's transcript (your prompts, code and tool output, possibly including secrets) to Kilo Gateway / stepfun/step-3.7-flash:free as currently configured in the Inference tab. That is a privacy decision.";
+    const PRIVACY_NOTICE: &str = "Remote compaction sends this session's transcript (your prompts, code and tool output, possibly including secrets) to Kilo Gateway / stepfun/step-5-preview-free as currently configured in the Inference tab. That is a privacy decision.";
 
     #[test]
     fn events_update_steps_progress_tokens_and_log() {
@@ -884,7 +884,7 @@ mod tests {
                 "tool output",
                 "secrets",
                 "Kilo Gateway",
-                "stepfun/step-3.7-flash:free",
+                "stepfun/step-5-preview-free",
                 "Failed:",
                 "safely",
                 "Enter resume",

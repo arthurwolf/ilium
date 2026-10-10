@@ -468,6 +468,7 @@ impl ValueDialogHost {
                 inference_revision: matches!(
                     field,
                     crate::value_settings_choice::SettingsChoice::InferenceProvider
+                        | crate::value_settings_choice::SettingsChoice::TitleStyle
                         | crate::value_settings_choice::SettingsChoice::KiloModel
                         | crate::value_settings_choice::SettingsChoice::OllamaModel
                         | crate::value_settings_choice::SettingsChoice::OpenAiModel

@@ -922,12 +922,12 @@ mod tests {
         }
         assert!(page.contains("[ ] Remote compaction"));
         assert!(page.contains("[x] Redact secrets"));
-        assert!(page.contains("➖ 65% ➕ *"));
+        assert!(page.contains("- 65% + *"));
         assert!(page.contains("← Claude Code + →"));
         assert!(page.contains("← Codex + →"));
         assert!(page.contains("the real upstream prompt"));
-        assert!(page.contains("➖ 20k tokens ➕ *"));
-        assert!(page.contains("➖ 2 min ➕ *"));
+        assert!(page.contains("- 20k tokens + *"));
+        assert!(page.contains("- 2 min + *"));
         assert!(page.contains("Kilo Gateway / "));
         assert!(page.contains("Change it there"));
     }

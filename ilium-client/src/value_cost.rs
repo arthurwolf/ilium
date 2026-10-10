@@ -16,7 +16,12 @@ pub struct CostValueTarget {
 pub fn is_choice(row: CostRow) -> bool {
     matches!(
         row,
-        CostRow::QuotaWindow | CostRow::FixedPreset | CostRow::BurnPreset | CostRow::Visibility(_)
+        CostRow::Metric(_)
+            | CostRow::QuotaWindow
+            | CostRow::Calibration(_)
+            | CostRow::FixedPreset
+            | CostRow::BurnPreset
+            | CostRow::Visibility(_)
     )
 }
 
@@ -42,6 +47,8 @@ impl CostValueTarget {
 
     pub fn title(&self) -> String {
         match self.row {
+            CostRow::Metric(_) => "Cost metric".into(),
+            CostRow::Calibration(_) => "Cost rating".into(),
             CostRow::QuotaWindow => "Quota window".into(),
             CostRow::FixedPreset => "Fixed thresholds".into(),
             CostRow::BurnPreset => "Burn thresholds".into(),
@@ -83,6 +90,25 @@ impl CostValueTarget {
             )));
         }
         let (mut entries, selected): (Vec<(String, String)>, String) = match self.row {
+            CostRow::Metric(_) => (
+                CostMetric::ALL
+                    .into_iter()
+                    .map(|metric| (metric_id(metric).into(), metric.label().into()))
+                    .collect(),
+                metric_id(settings.metric).into(),
+            ),
+            CostRow::Calibration(_) => (
+                Calibration::ALL
+                    .into_iter()
+                    .map(|calibration| {
+                        (
+                            calibration_id(calibration).into(),
+                            calibration.label().into(),
+                        )
+                    })
+                    .collect(),
+                calibration_id(settings.calibration).into(),
+            ),
             CostRow::QuotaWindow => (
                 QuotaWindow::ALL
                     .into_iter()
@@ -166,6 +192,18 @@ impl CostValueTarget {
     pub fn set_choice(&self, settings: &mut CostSettings, id: &str) -> Result<(), String> {
         self.validate(settings)?;
         match self.row {
+            CostRow::Metric(_) => {
+                settings.metric = CostMetric::ALL
+                    .into_iter()
+                    .find(|metric| metric_id(*metric) == id)
+                    .ok_or("Unknown cost metric")?;
+            }
+            CostRow::Calibration(_) => {
+                settings.calibration = Calibration::ALL
+                    .into_iter()
+                    .find(|calibration| calibration_id(*calibration) == id)
+                    .ok_or("Unknown cost rating")?;
+            }
             CostRow::QuotaWindow => {
                 settings.quota_window = QuotaWindow::ALL
                     .into_iter()
@@ -220,9 +258,50 @@ impl CostValueTarget {
     }
 }
 
+fn metric_id(metric: CostMetric) -> &'static str {
+    match metric {
+        CostMetric::Dollars => "dollars",
+        CostMetric::Quota => "quota",
+    }
+}
+
+fn calibration_id(calibration: Calibration) -> &'static str {
+    match calibration {
+        Calibration::FixedBands => "fixed_bands",
+        Calibration::PeerRelative => "peer_relative",
+        Calibration::OwnHistory => "own_history",
+        Calibration::Budget => "budget",
+        Calibration::BurnRate => "burn_rate",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn selectors_offer_the_full_metric_and_calibration_catalogs() {
+        let mut settings = CostSettings::default();
+        let metric = CostValueTarget::new(&settings, CostRow::Metric(settings.metric)).unwrap();
+        let ValueDialogState::Choice(metric_dialog) = metric.dialog(&settings).unwrap() else {
+            panic!("metric should be a choice dialog");
+        };
+        assert_eq!(metric_dialog.options().len(), CostMetric::ALL.len());
+        metric.set_choice(&mut settings, "quota").unwrap();
+        assert_eq!(settings.metric, CostMetric::Quota);
+
+        let calibration =
+            CostValueTarget::new(&settings, CostRow::Calibration(settings.calibration)).unwrap();
+        let ValueDialogState::Choice(calibration_dialog) = calibration.dialog(&settings).unwrap()
+        else {
+            panic!("calibration should be a choice dialog");
+        };
+        assert_eq!(calibration_dialog.options().len(), Calibration::ALL.len());
+        calibration.set_choice(&mut settings, "burn_rate").unwrap();
+        assert_eq!(settings.calibration, Calibration::BurnRate);
+        assert!(calibration.set_choice(&mut settings, "unknown").is_err());
+    }
+
     #[test]
     fn custom_thresholds_and_every_preset_are_recoverable_without_cycling() {
         let mut settings = CostSettings {

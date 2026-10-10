@@ -2236,10 +2236,7 @@ fn select_settings_pointer_tab(
         return;
     }
     state.tab = tab;
-    state.selected_row = usize::from(
-        tab == crate::app::SettingsTab::Titles
-            && app.inference_settings.title_style == ilium_inference::TitleStyle::Summarization,
-    );
+    state.selected_row = 0;
     if tab == crate::app::SettingsTab::Animations {
         state.selected_row = crate::background_animation::AnimationKind::ALL
             .iter()
@@ -3087,16 +3084,6 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                         }
                     }
                 }
-            } else if state.tab == crate::app::SettingsTab::Titles {
-                if let Some(style) = crate::settings_ui::title_style_content_hit(
-                    layout.content_area,
-                    state.scroll,
-                    position,
-                ) {
-                    state.selected_row =
-                        usize::from(style == ilium_inference::TitleStyle::Summarization);
-                    app.settings_select_title_style(style);
-                }
             } else if state.tab == crate::app::SettingsTab::Inference {
                 if let Some((row, direction)) = crate::settings_ui::inference_content_hit_with_test(
                     layout.content_area,
@@ -3209,10 +3196,6 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                     app,
                 ) {
                     match hit {
-                        crate::settings_ui::AgentMonitoringContentHit::Mode(mode) => {
-                            state.selected_row = 0;
-                            app.settings_set_agent_monitoring_mode(mode);
-                        }
                         crate::settings_ui::AgentMonitoringContentHit::Row { row, direction } => {
                             let rows = crate::settings_ui::agent_monitoring_rows(app);
                             state.selected_row = rows
@@ -3377,10 +3360,6 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                     &app.ui_settings,
                 ) {
                     match hit {
-                        crate::settings_ui::AppearanceContentHit::Mode(mode) => {
-                            state.selected_row = 0;
-                            app.settings_set_left_panel_sizing_mode(mode);
-                        }
                         crate::settings_ui::AppearanceContentHit::Row { row, direction } => {
                             let rows = crate::app::AppearanceRow::visible(
                                 app.ui_settings.left_panel_sizing.mode,
@@ -5580,9 +5559,12 @@ mod cost_settings_mouse_tests {
             CostVisibility::Always
         );
 
-        // A radio card anywhere inside it.
-        let budget = span_of(&app, content, CostRow::Calibration(Calibration::Budget));
-        click(&mut app, content.x + 10, content.y + budget.first_line + 1);
+        // The calibration value advances with left-click.
+        let rating = span_of(&app, content, CostRow::Calibration(Calibration::OwnHistory));
+        let rating_control =
+            crate::cost_settings_ui::value_control(content, 0, &rating, &app).unwrap();
+        let rating_value = rating_control.geometry().value;
+        click(&mut app, rating_value.x, rating_value.y);
         assert_eq!(app.cost_settings.calibration, Calibration::Budget);
 
         // The parameter row that appeared: its rendered increment/decrement buttons.
@@ -5608,6 +5590,149 @@ mod cost_settings_mouse_tests {
             panic!("settings stay open");
         };
         assert!(state.selected_row > 0, "a click moves the selection");
+    }
+}
+
+#[cfg(test)]
+mod settings_title_choice_mouse_tests {
+    use super::*;
+    use crate::app::{App, SettingsState, SettingsTab};
+    use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+
+    #[test]
+    fn switching_to_titles_keeps_the_shared_choice_on_row_zero() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::new("title-choice-tab".into(), directory.path().into());
+        app.set_screen_area(Rect::new(0, 0, 100, 32));
+        app.inference_settings.title_style = ilium_inference::TitleStyle::Summarization;
+        let mut state = SettingsState {
+            tab: SettingsTab::Appearance,
+            selected_row: 7,
+            ..SettingsState::default()
+        };
+
+        select_settings_pointer_tab(
+            &app,
+            &mut state,
+            SettingsTab::Titles,
+            Rect::new(0, 0, 100, 32),
+        );
+
+        assert_eq!(state.selected_row, 0);
+        assert_eq!(
+            crate::value_settings_choice::SettingsChoice::at(
+                &app,
+                state.tab,
+                state.selected_row
+            ),
+            Some(crate::value_settings_choice::SettingsChoice::TitleStyle)
+        );
+        let layout = crate::settings_ui::compute_layout_for_mode(
+            app.layout.screen_area,
+            &app,
+            &state,
+        );
+        assert!(crate::settings_ui::settings_choice_control(
+            layout.content_area,
+            &app,
+            &state,
+            0
+        )
+        .is_some());
+    }
+
+    #[test]
+    fn title_choice_value_clicks_reverse_and_plus_opens_the_full_list() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::new("title-choice-pointer".into(), directory.path().into());
+        app.config_dir = Some(directory.path().into());
+        app.set_screen_area(Rect::new(0, 0, 100, 32));
+        app.mode = Mode::Settings(SettingsState {
+            tab: SettingsTab::Titles,
+            ..SettingsState::default()
+        });
+
+        for (button, expected) in [
+            (MouseButton::Left, ilium_inference::TitleStyle::Summarization),
+            (MouseButton::Right, ilium_inference::TitleStyle::Labeling),
+        ] {
+            let Mode::Settings(state) = &app.mode else {
+                panic!("settings expected");
+            };
+            let layout = crate::settings_ui::compute_layout_for_mode(
+                app.layout.screen_area,
+                &app,
+                state,
+            );
+            let (_, control) = crate::settings_ui::settings_choice_control(
+                layout.content_area,
+                &app,
+                state,
+                0,
+            )
+            .expect("Title style uses the shared choice control");
+            let value = control.geometry().value;
+            handle_mouse_event(
+                &mut app,
+                MouseEvent {
+                    kind: MouseEventKind::Down(button),
+                    column: value.x,
+                    row: value.y,
+                    modifiers: KeyModifiers::NONE,
+                },
+            );
+            assert_eq!(app.inference_settings.title_style, expected);
+            app.settle_filesystem_for_test();
+        }
+        let loaded = crate::config::load(directory.path()).unwrap();
+        assert_eq!(
+            loaded.inference.title_style,
+            ilium_inference::TitleStyle::Labeling
+        );
+        assert_eq!(
+            loaded.inference.selected_provider,
+            app.inference_settings.selected_provider
+        );
+
+        let Mode::Settings(state) = &app.mode else {
+            panic!("settings expected");
+        };
+        let layout = crate::settings_ui::compute_layout_for_mode(
+            app.layout.screen_area,
+            &app,
+            state,
+        );
+        let (_, control) = crate::settings_ui::settings_choice_control(
+            layout.content_area,
+            &app,
+            state,
+            0,
+        )
+        .expect("Title style uses the shared choice control");
+        let open = control.geometry().open;
+        handle_mouse_event(
+            &mut app,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: open.x,
+                row: open.y,
+                modifiers: KeyModifiers::NONE,
+            },
+        );
+        let Mode::ValueDialog(host) = &app.mode else {
+            panic!("plus should open the full title-style list");
+        };
+        assert!(matches!(
+            &host.target,
+            crate::value_dialog_host::ValueTarget::SettingsChoice {
+                field: crate::value_settings_choice::SettingsChoice::TitleStyle,
+                ..
+            }
+        ));
+        let crate::value_dialog::ValueDialogState::Choice(dialog) = &host.dialog else {
+            panic!("title style list should use a choice dialog");
+        };
+        assert_eq!(dialog.options().len(), 2);
     }
 }
 

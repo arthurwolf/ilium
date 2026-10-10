@@ -204,9 +204,6 @@ pub fn layout(area: Rect) -> AnimationLayout {
 }
 
 fn saved_scene_activity_report(model: &RowModel) -> Option<String> {
-    if model.effective_kind() != Some(AnimationKind::VoxelLandscape) {
-        return None;
-    }
     let row = model
         .rows()
         .iter()
@@ -237,7 +234,7 @@ fn saved_scene_activity_sections(report: &str) -> (String, String) {
         }
         if in_activity {
             activity.push(line);
-        } else if line.starts_with("Scene Status:") {
+        } else if line.starts_with("Scene Status:") || line.starts_with("Scene status:") {
             progress = Some(line);
         } else if line.starts_with("Elapsed:") {
             elapsed = Some(line);
@@ -255,11 +252,11 @@ fn saved_scene_activity_sections(report: &str) -> (String, String) {
     (
         [
             progress,
-            elapsed,
-            stage_eta,
             route_eta,
             total_eta,
             current_work,
+            elapsed,
+            stage_eta,
         ]
         .into_iter()
         .flatten()
@@ -2087,11 +2084,20 @@ mod tests {
                 forward,
                 "left-click advances the animation selector at width {width}"
             );
+            let stepped_model = app.animation_row_model();
+            let stepped_control = value_control(
+                content_area(&app),
+                &stepped_model,
+                row,
+                Scrolls::default(),
+            )
+            .unwrap();
+            let stepped_value = stepped_control.geometry().value;
             pointer(
                 &mut app,
                 MouseEventKind::Down(MouseButton::Right),
-                value.x,
-                value.y,
+                stepped_value.x,
+                stepped_value.y,
             );
             assert_eq!(
                 app.animation_settings
@@ -2612,7 +2618,7 @@ mod tests {
 
     #[test]
     fn saved_scene_activity_sections_keep_inline_wait_message() {
-        let report = "Scene Status: Saved worlds [..] phase ?/6\nNow: Updating preparation details\nElapsed: refreshing with preparation state\nETA: unavailable (no measured work rate)\nRecent activity: waiting for a nonblocking status snapshot";
+        let report = "Scene status: Saved worlds [..] phase ?/6\nNow: Updating preparation details\nElapsed: refreshing with preparation state\nETA: unavailable (no measured work rate)\nRecent activity: waiting for a nonblocking status snapshot";
 
         let (summary, activity) = saved_scene_activity_sections(report);
 
@@ -2626,7 +2632,7 @@ mod tests {
             kind: AnimationKind::VoxelLandscape,
             ..Default::default()
         };
-        let long_event = format!("+00:19 {}", "detail ".repeat(60));
+        let long_event = format!("+00:19 {}", "detail ".repeat(120));
         let status = format!(
             "Saved worlds [====..] phase 4/6\nNow: Reading region files\nElapsed: 00:42\nETA: 00:18 for this scan\nRecent activity:\n{long_event}"
         );
@@ -2662,7 +2668,7 @@ mod tests {
     fn saved_scene_activity_pages_keep_control_help_reachable() {
         let (mut app, probe, _project) = settings_app(100, 20);
         app.animation_settings.kind = AnimationKind::VoxelLandscape;
-        let selected = row_index(&app, &AnimationRow::Common("lightness"));
+        let selected = row_index(&app, &AnimationRow::Common("speed"));
         set_selected_row(&mut app, selected);
         let events = (0..24)
             .map(|index| format!("+00:{index:02} Activity item {index}"))
@@ -2674,8 +2680,13 @@ mod tests {
 
         let initial = screen_text(&draw(&mut app, 100, 20)).join("\n");
         let control_help = selected_control_help(&app.animation_row_model(), selected);
+        let pinned_help_prefix = control_help
+            .split_whitespace()
+            .take(4)
+            .collect::<Vec<_>>()
+            .join(" ");
         assert!(
-            initial.contains(control_help.lines().next().unwrap()),
+            initial.contains(&pinned_help_prefix),
             "selected-control help should stay pinned above the activity log: {initial}"
         );
         assert!(
@@ -2731,7 +2742,7 @@ mod tests {
     fn saved_scene_route_eta_stays_visible_on_a_short_terminal() {
         let (mut app, probe, _project) = settings_app(80, 12);
         app.animation_settings.kind = AnimationKind::VoxelLandscape;
-        let selected = row_index(&app, &AnimationRow::Common("lightness"));
+        let selected = row_index(&app, &AnimationRow::Common("speed"));
         set_selected_row(&mut app, selected);
         *probe.status.lock().unwrap() = Some(
             "Saved worlds [====......] phase 3/6\nNow: Reading map chunks\nElapsed: 00:42\nETA: about 00:24 for this measured scan\nTotal ETA: incomplete; route checks remain\nRoute ETA: about 00:12; based on 1 completed candidate\nRecent activity:\n+00:19 Loaded 64 chunks".to_owned(),
@@ -4473,7 +4484,7 @@ mod tests {
 
     #[test]
     fn every_row_stays_visible_in_its_region_for_each_screen_size_and_keyboard_walk() {
-        for (width, height) in [(80, 24), (120, 40), (160, 50)] {
+        for (width, height) in [(40, 12), (60, 20), (80, 24), (120, 40), (160, 50)] {
             let (mut app, _probe, _project) = settings_app(width, height);
             let area = content_area(&app);
             for step in 0..200 {

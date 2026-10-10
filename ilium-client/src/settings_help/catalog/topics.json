@@ -4,7 +4,7 @@
     "title": "Display mode",
     "explanation": "“Show objective and current-activity statuses separately in Normal mode, or emphasize the highest-priority signal in Attention mode while keeping agent identity separate.”",
     "specimen": "Use a paused-goal fixture that is also waiting for user approval:\n\nNORMAL\nObjective    Current activity   Identity   Title\n[P] paused   [?] approval       Codex      parser\n\nATTENTION\nSelected signal                Identity   Title\n[?] approval                   Codex      parser\n\nThe paused goal still exists; it is not cleared.\n\nThese are semantic enlargements of the actual tree row, not additional permanent columns. Add a compact priority caption:\n\napproval > failed monitor > task error\n> non-active goal > unread successful task\n> unread completed turn",
-    "states": "Normal and Attention, with identical underlying evidence. Attention changes which signal is presented, not the goal, approval state, identity, or title. By default, Progress reports in Attention is Off: approval, stopped goals and unread agent turns take priority, followed by the selected running indicator. The failure-first caption applies only when Progress reports in Attention is On.",
+    "states": "Normal and Attention, with identical underlying evidence. The selected mode appears in the shared selector and + opens both options. Attention changes which signal is presented, not the goal, approval state, identity, or title. By default, Progress reports in Attention is Off: approval, stopped goals and unread agent turns take priority, followed by the selected running indicator. The failure-first caption applies only when Progress reports in Attention is On.",
     "motion": "None; paired stills make suppression versus deletion clear.",
     "caveat": "Use the actual selector for ties and cases without the listed priority signals; those fallback details are not supplied. On narrow terminals, stack the two mode specimens rather than merging the independent regions.",
     "frames": [
@@ -907,8 +907,8 @@
     "title": "Left panel sizing mode",
     "explanation": "“Choose whether the left panel keeps one width, changes with focus, or changes with focus only on narrower terminals.”",
     "specimen": "Use a miniature multiplexer with three tree rows and a terminal pane. Above it, show the selected policy, simulated terminal width, and whether the tree has pointer or keyboard focus. Step through the policies using this example:\n\nExample: fixed 20 / unfocused 14 / focused 24\nWidth threshold: 100 terminal columns\n\nPolicy                  Tree active   Elsewhere\nFixed                        20           20\nFocus-dependent              24           14\nWidth-dependent, width 99    24           14\nWidth-dependent, width 100   24           24\n\nEach selected comparison renders the actual tree–terminal boundary beneath the table; the tree contents remain identical.",
-    "states": "All three policies, both focus conditions, and both sides of the Width-dependent threshold.",
-    "motion": "A single focus transition can demonstrate easing under Full. Reduced and Off show the target width immediately; provide still comparisons when playback is disabled.",
+    "states": "All three policies, both focus conditions, and both sides of the Width-dependent threshold. The selected policy appears in the shared selector; + opens the full list.",
+    "motion": "Left-click advances and right-click reverses the selector; + opens all three policies. A single focus transition can demonstrate easing under Full. Reduced and Off show the target width immediately; provide still comparisons when playback is disabled.",
     "caveat": "The simulated terminal width is not the width of the help dialog’s right half. Label it explicitly, and show a cropped terminal specimen rather than falsely compressing terminal cells.",
     "frames": [
       "POLICY: WIDTH-DEPENDENT\nTree focused:   [TREE 24] | Terminal\n",
@@ -1236,8 +1236,8 @@
     "title": "Fixed bands",
     "explanation": "“Rate every agent against the same fixed dollar thresholds, so a given amount always reads the same.”",
     "specimen": "The five-level ladder with its cut points, e.g.\n\n▁ <$1   ▂ ≥$1   ▄ ≥$5   ▆ ≥$20   █ ≥$50\n\nand two agents, $0.80 and $22, landing on ▁ and ▆.",
-    "states": "Selected and unselected radio card; the ladder shows the current preset.",
-    "motion": "static.",
+    "states": "The active method appears in the shared selector; + opens every method, and the ladder shows the current preset.",
+    "motion": "Left-click advances; right-click goes back. The arrows step in either direction.",
     "caveat": "Predictable but arbitrary: pick the preset under the card to match how much you usually spend. Custom cut points are set as fixed_cuts in config.toml.",
     "frames": [
       "FIXED BANDS\n▁ <$1   ▂ ≥$1   ▄ ≥$5   ▆ ≥$20   █ ≥$50\n$0.80 → ▁     $22 → ▆\n"
@@ -1248,8 +1248,8 @@
     "title": "Relative to open agents",
     "explanation": "“Rate each agent against the median of the agents open right now, so the outlier stands out.”",
     "specimen": "Three agents at $2, $4 and $6 (median $4):\n\n$2 → ▂   $4 → ▄   $6 → ▄\n\nand a fourth at $30 → █. The ladder is drawn as multiples of the median (0.25x, 0.75x, 1.5x, 3x).",
-    "states": "Ladder recomputed whenever agents open, close or spend.",
-    "motion": "static; the ladder moves as the open agents change.",
+    "states": "The active method appears in the shared selector; + opens every method. The ladder is recomputed whenever agents open, close or spend.",
+    "motion": "Left-click advances; right-click goes back. The arrows step in either direction; the ladder moves as agents change.",
     "caveat": "Says nothing about absolute size: if every agent is expensive, none looks expensive. Agents that have spent nothing are ignored when taking the median.",
     "frames": [
       "PEERS: $2 $4 $6 (median $4)\n$2 → ▂   $4 → ▄   $6 → ▄\nadd one at $30 → █\n"
@@ -1260,8 +1260,8 @@
     "title": "Relative to your history",
     "explanation": "“Rate each agent against percentiles of your own past sessions, so the scale fits how you actually work. This is the default.”",
     "specimen": "Your sessions over the last 90 days form a distribution; the ladder steps up at its 25th, 50th, 80th and 95th percentile:\n\n▁ <$0.40   ▂ ≥$0.40   ▄ ≥$1.30   ▆ ≥$5.20   █ ≥$16",
-    "states": "Scanning (fixed bands stand in), ready, and too little history (fewer than eight sessions, fixed bands stand in).",
-    "motion": "the first scan runs in the background at lowest priority; later scans reuse a cache.",
+    "states": "The active method appears in the shared selector; + opens every method. Scanning (fixed bands stand in), ready, and too little history (fewer than eight sessions, fixed bands stand in).",
+    "motion": "Left-click advances; right-click goes back. The arrows step in either direction; the first scan runs at lowest priority and later scans reuse a cache.",
     "caveat": "Only a bounded tail of each transcript is read: Claude Code's own recorded total, or Codex's cumulative token count priced at list prices. Sessions without a recorded total are skipped.",
     "frames": [
       "HISTORY (90 days)\n▁ <$0.40   ▂ ≥$0.40   ▄ ≥$1.30   ▆ ≥$5.20   █ ≥$16\n",
@@ -1273,8 +1273,8 @@
     "title": "Budget",
     "explanation": "“Indicators fill toward a dollar budget for each agent, and a red ! appears once an agent passes it.”",
     "specimen": "Budget $10: the ladder steps at 20%, 40%, 60% and 80% of it.\n\n$1 → ▰▱▱▱▱   $5 → ▰▰▰▱▱   $9 → ▰▰▰▰▰   $12 → ▰▰▰▰▰ !",
-    "states": "Under budget and over budget.",
-    "motion": "static.",
+    "states": "The active method appears in the shared selector; + opens every method. Under budget and over budget.",
+    "motion": "Left-click advances; right-click goes back. The arrows step in either direction.",
     "caveat": "The budget is per agent session, not per day or per project.",
     "frames": [
       "BUDGET $10\n$1 → ▰▱▱▱▱   $5 → ▰▰▰▱▱\n$9 → ▰▰▰▰▰   $12 → ▰▰▰▰▰ !\n"
@@ -1285,8 +1285,8 @@
     "title": "Burn rate",
     "explanation": "“Rate how fast an agent is spending right now in dollars per hour, instead of its running total.”",
     "specimen": "An old $40 session that is idle reads ▁, while a new session burning $12 per hour reads █:\n\n▁ <$0.50/h   ▂ ≥$0.50/h   ▄ ≥$2/h   ▆ ≥$5/h   █ ≥$15/h",
-    "states": "Idle versus actively spending.",
-    "motion": "updates as the agent spends; measured over the last 15 minutes.",
+    "states": "The active method appears in the shared selector; + opens every method. Idle versus actively spending.",
+    "motion": "Left-click advances; right-click goes back. The arrows step in either direction; the rate updates over the last 15 minutes.",
     "caveat": "Total and burn-rate calibration use different numbers, so the dollar figure shown beside the level is still the running total.",
     "frames": [
       "BURN RATE\nidle $40 session → ▁\nnew session at $12/h → █\n"
@@ -1477,12 +1477,12 @@
     "id": "COST-21",
     "title": "Measure API dollars",
     "explanation": "“Measure each agent in estimated dollars at API list prices.”",
-    "specimen": "The default. A card marked ◉ with its description; figures read `$4.30`, `~$41.0`.",
-    "states": "Selected and unselected radio card.",
-    "motion": "static.",
+    "specimen": "The default. A shared selector reads `← API dollars + →`; figures read `$4.30`, `~$41.0`.",
+    "states": "Selected value with left/right step targets and a + button that opens the full choice list.",
+    "motion": "Left-click advances; right-click goes back. The arrows step in either direction.",
     "caveat": "Works for Claude Code and Codex. Subscription plans are not billed this amount, so treat it as relative weight. Prices come from a built-in table that [cost.prices] in config.toml can override.",
     "frames": [
-      "WHAT IS MEASURED?\n◉ API dollars  (default)\n○ Plan quota\n"
+      "WHAT IS MEASURED?\nMeasure     ← API dollars + →\n"
     ]
   },
   {
@@ -1490,8 +1490,8 @@
     "title": "Measure plan quota",
     "explanation": "“Measure each agent in percentage points of the plan's rate-limit window that were used up while it ran.”",
     "specimen": "Figures read `3.2%`, `12%`; rates read `4.0%/h`. Calibrations, thresholds, budget and history all switch to that unit.",
-    "states": "Selected and unselected radio card; choosing it adds a Quota window row below.",
-    "motion": "static.",
+    "states": "Selected value with left/right step targets and a + button that opens the full choice list; choosing it adds a Quota window row below.",
+    "motion": "Left-click advances; right-click goes back. The arrows step in either direction.",
     "caveat": "Only Codex transcripts record quota, and it is the whole account's use, so agents running at the same time are counted together. Claude Code agents show no indicator under this metric; their detail card says why and still shows the dollar estimate.",
     "frames": [
       "Figures read `3.2%`, `12%`; rates read `4.0%/h`. Calibrations, thresholds, budget and history all switch to that unit.\n"

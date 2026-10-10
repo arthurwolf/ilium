@@ -372,14 +372,26 @@ impl CostSettings {
     pub fn adjust(&mut self, row: CostRow, direction: i32) -> bool {
         let before = self.clone();
         match row {
-            CostRow::Metric(metric) => self.metric = metric,
+            CostRow::Metric(metric) => {
+                self.metric = if direction == 0 {
+                    metric
+                } else {
+                    step_selection(&CostMetric::ALL, self.metric, direction)
+                }
+            }
             CostRow::QuotaWindow => {
                 self.quota_window = match self.quota_window {
                     QuotaWindow::Primary => QuotaWindow::Secondary,
                     QuotaWindow::Secondary => QuotaWindow::Primary,
                 }
             }
-            CostRow::Calibration(calibration) => self.calibration = calibration,
+            CostRow::Calibration(calibration) => {
+                self.calibration = if direction == 0 {
+                    calibration
+                } else {
+                    step_selection(&Calibration::ALL, self.calibration, direction)
+                }
+            }
             CostRow::FixedPreset => match self.metric {
                 CostMetric::Dollars => {
                     self.fixed_cuts = step_preset(&FIXED_PRESETS, self.fixed_cuts, direction)
@@ -443,6 +455,21 @@ fn is_ascending_positive(cuts: &[f64; 4]) -> bool {
     cuts.iter().all(|cut| cut.is_finite() && *cut > 0.0) && cuts.windows(2).all(|p| p[0] < p[1])
 }
 
+fn step_selection<T: Copy + PartialEq, const N: usize>(
+    choices: &[T; N],
+    current: T,
+    direction: i32,
+) -> T {
+    let Some(index) = choices.iter().position(|choice| *choice == current) else {
+        return choices[0];
+    };
+    if direction < 0 {
+        choices[(index + N - 1) % N]
+    } else {
+        choices[(index + 1) % N]
+    }
+}
+
 /// Moves to the next/previous ladder value; a value not on the ladder (a
 /// hand-edited file) snaps to the nearest one in the requested direction.
 /// Activating with `direction == 0` steps forward.
@@ -493,11 +520,11 @@ pub fn is_preset(presets: &[[f64; 4]], cuts: [f64; 4]) -> bool {
 /// One selectable row of the Cost settings tab.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CostRow {
-    /// Radio card choosing what is measured.
+    /// Shared selector choosing what is measured.
     Metric(CostMetric),
     /// Which Codex rate-limit window the quota metric follows.
     QuotaWindow,
-    /// Radio card choosing how "expensive" is decided.
+    /// Shared selector choosing how "expensive" is decided.
     Calibration(Calibration),
     FixedPreset,
     HistoryDays,
@@ -514,13 +541,13 @@ pub enum CostRow {
 
 impl CostRow {
     /// Every row in display order. Parameter rows appear only for the active
-    /// calibration, directly after the radio cards.
+    /// calibration, directly after its selector.
     pub fn rows(settings: &CostSettings) -> Vec<Self> {
-        let mut rows: Vec<Self> = CostMetric::ALL.iter().copied().map(Self::Metric).collect();
+        let mut rows = vec![Self::Metric(settings.metric)];
         if settings.metric == CostMetric::Quota {
             rows.push(Self::QuotaWindow);
         }
-        rows.extend(Calibration::ALL.iter().copied().map(Self::Calibration));
+        rows.push(Self::Calibration(settings.calibration));
         match settings.calibration {
             Calibration::FixedBands => rows.push(Self::FixedPreset),
             Calibration::PeerRelative => {}
@@ -713,8 +740,8 @@ mod tests {
         let rows = CostRow::rows(&settings);
         assert_eq!(
             rows.len(),
-            2 + 5 + 16 + 3,
-            "metric cards, calibration cards, options, tail"
+            1 + 1 + 16 + 3,
+            "metric selector, calibration selector, options, tail"
         );
     }
 
@@ -847,11 +874,11 @@ mod tests {
         assert_eq!(settings.metric, CostMetric::Dollars);
         assert!(!CostRow::rows(&settings).contains(&CostRow::QuotaWindow));
 
-        assert!(settings.adjust(CostRow::Metric(CostMetric::Quota), 0));
+        assert!(settings.adjust(CostRow::Metric(CostMetric::Dollars), 1));
         let rows = CostRow::rows(&settings);
-        assert_eq!(rows[0], CostRow::Metric(CostMetric::Dollars));
-        assert_eq!(rows[1], CostRow::Metric(CostMetric::Quota));
-        assert_eq!(rows[2], CostRow::QuotaWindow);
+        assert_eq!(rows[0], CostRow::Metric(CostMetric::Quota));
+        assert_eq!(rows[1], CostRow::QuotaWindow);
+        assert_eq!(rows[2], CostRow::Calibration(Calibration::OwnHistory));
 
         // The parameter rows now edit the quota values, not the dollar ones.
         let dollar_bands = settings.fixed_cuts;

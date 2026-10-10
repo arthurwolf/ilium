@@ -20,6 +20,8 @@ pub enum SettingsChoice {
     Motion,
     SidebarDensity,
     AttentionIndicator,
+    LeftPanelSizingMode,
+    AgentMonitoringMode,
     VoiceModel,
     VoiceName,
     VoiceReasoning,
@@ -29,6 +31,7 @@ pub enum SettingsChoice {
     VoiceOutputDevice,
     SoundSource,
     SoundFile,
+    TitleStyle,
     ResetTimeDisplay,
     InferenceProvider,
     KiloModel,
@@ -144,7 +147,7 @@ fn catalog<T: Copy + std::fmt::Debug + PartialEq>(
 }
 
 impl SettingsChoice {
-    pub const ALL: [Self; 34] = [
+    pub const ALL: [Self; 37] = [
         Self::TerminalDirectory,
         Self::EditorLineDisplay,
         Self::EditorMarkdown,
@@ -154,6 +157,8 @@ impl SettingsChoice {
         Self::Motion,
         Self::SidebarDensity,
         Self::AttentionIndicator,
+        Self::LeftPanelSizingMode,
+        Self::AgentMonitoringMode,
         Self::VoiceModel,
         Self::VoiceName,
         Self::VoiceReasoning,
@@ -163,6 +168,7 @@ impl SettingsChoice {
         Self::VoiceOutputDevice,
         Self::SoundSource,
         Self::SoundFile,
+        Self::TitleStyle,
         Self::ResetTimeDisplay,
         Self::InferenceProvider,
         Self::KiloModel,
@@ -256,6 +262,7 @@ impl SettingsChoice {
             {
                 Some(Self::TerminalDirectory)
             }
+            SettingsTab::Titles if row == 0 => Some(Self::TitleStyle),
             SettingsTab::Editor => match EditorRow::ALL.get(row) {
                 Some(EditorRow::LineDisplay) => Some(Self::EditorLineDisplay),
                 Some(EditorRow::MarkdownDefault) => Some(Self::EditorMarkdown),
@@ -263,6 +270,7 @@ impl SettingsChoice {
             },
             SettingsTab::Appearance => {
                 match AppearanceRow::visible(app.ui_settings.left_panel_sizing.mode).get(row) {
+                    Some(AppearanceRow::LeftPanelSizingMode) => Some(Self::LeftPanelSizingMode),
                     Some(AppearanceRow::ProgressFillStyle) => Some(Self::ProgressFillStyle),
                     Some(AppearanceRow::TreeOrder) => Some(Self::TreeOrder),
                     Some(AppearanceRow::AgentIdentifierMode) => Some(Self::AgentIdentifier),
@@ -274,6 +282,7 @@ impl SettingsChoice {
             }
             SettingsTab::AgentMonitoring => {
                 match crate::settings_ui::agent_monitoring_rows(app).get(row) {
+                    Some(AgentMonitoringRow::Mode) => Some(Self::AgentMonitoringMode),
                     Some(AgentMonitoringRow::AttentionRunningIndicator) => {
                         Some(Self::AttentionIndicator)
                     }
@@ -302,6 +311,7 @@ impl SettingsChoice {
             Self::ResetTimeDisplay => "Time display",
             Self::SoundSource => "Sound source",
             Self::SoundFile => "Sound file",
+            Self::TitleStyle => "Title style",
             Self::VoiceModel => "Model",
             Self::VoiceName => "Voice",
             Self::VoiceReasoning => "Reasoning effort",
@@ -318,6 +328,8 @@ impl SettingsChoice {
             Self::Motion => "Motion level",
             Self::SidebarDensity => "Sidebar density",
             Self::AttentionIndicator => "Attention running indicator",
+            Self::LeftPanelSizingMode => "Left panel sizing",
+            Self::AgentMonitoringMode => "Agent Monitoring mode",
             Self::RemoteTechnique(TechniqueTarget::Claude) => "Claude technique",
             Self::RemoteTechnique(TechniqueTarget::Codex) => "Codex technique",
             Self::RemoteTechnique(TechniqueTarget::Other) => "Other agents technique",
@@ -435,6 +447,17 @@ impl SettingsChoice {
                 |value| value.label().into(),
             ),
             Self::SoundFile => sound_file_catalog(app),
+            Self::TitleStyle => catalog(
+                &[
+                    ilium_inference::TitleStyle::Labeling,
+                    ilium_inference::TitleStyle::Summarization,
+                ],
+                app.inference_settings.title_style,
+                |value| match value {
+                    ilium_inference::TitleStyle::Labeling => "Labeling".into(),
+                    ilium_inference::TitleStyle::Summarization => "Summarization".into(),
+                },
+            ),
             Self::VoiceModel => catalog(
                 &ilium_voice::VoiceModel::ALL,
                 app.voice_settings.model,
@@ -513,6 +536,16 @@ impl SettingsChoice {
             Self::AttentionIndicator => catalog(
                 &crate::agent_monitoring::AttentionRunningIndicator::ALL,
                 app.ui_settings.attention_running_indicator,
+                |value| value.label().into(),
+            ),
+            Self::LeftPanelSizingMode => catalog(
+                &crate::config::LeftPanelSizingMode::ALL,
+                app.ui_settings.left_panel_sizing.mode,
+                |value| value.label().into(),
+            ),
+            Self::AgentMonitoringMode => catalog(
+                &crate::agent_monitoring::AgentMonitoringMode::ALL,
+                app.ui_settings.agent_monitoring_mode,
                 |value| value.label().into(),
             ),
             Self::RemoteTechnique(target) => (
@@ -742,6 +775,7 @@ impl App {
         if matches!(
             field,
             SettingsChoice::InferenceProvider
+                | SettingsChoice::TitleStyle
                 | SettingsChoice::KiloModel
                 | SettingsChoice::OllamaModel
                 | SettingsChoice::OpenAiModel
@@ -754,6 +788,15 @@ impl App {
                         .into_iter()
                         .find(|provider| format!("{provider:?}") == id)
                         .ok_or("Provider is unavailable")?
+                }
+                SettingsChoice::TitleStyle => {
+                    desired.title_style = [
+                        ilium_inference::TitleStyle::Labeling,
+                        ilium_inference::TitleStyle::Summarization,
+                    ]
+                    .into_iter()
+                    .find(|value| format!("{value:?}") == id)
+                    .ok_or("Title style is unavailable")?;
                 }
                 SettingsChoice::KiloModel => desired.kilo_gateway.model = id.into(),
                 SettingsChoice::OllamaModel => desired.ollama.model = id.into(),
@@ -803,6 +846,7 @@ impl App {
                 terminal.smart_copy_light_key
             ),
             SettingsChoice::InferenceProvider
+            | SettingsChoice::TitleStyle
             | SettingsChoice::KiloModel
             | SettingsChoice::OllamaModel
             | SettingsChoice::OpenAiModel
@@ -910,6 +954,18 @@ impl App {
                 select!(
                     crate::agent_monitoring::AttentionRunningIndicator::ALL,
                     ui.attention_running_indicator
+                );
+            }
+            SettingsChoice::LeftPanelSizingMode => {
+                select!(
+                    crate::config::LeftPanelSizingMode::ALL,
+                    ui.left_panel_sizing.mode
+                );
+            }
+            SettingsChoice::AgentMonitoringMode => {
+                select!(
+                    crate::agent_monitoring::AgentMonitoringMode::ALL,
+                    ui.agent_monitoring_mode
                 );
             }
             SettingsChoice::RemoteTechnique(target) => {
@@ -1234,6 +1290,110 @@ mod tests {
     }
 
     #[test]
+    fn display_mode_selectors_share_pointer_direction_and_full_dialogs() {
+        use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+        use ratatui::layout::Rect;
+
+        for (tab, field, expected_left, expected_right, expected_options) in [
+            (
+                SettingsTab::Appearance,
+                SettingsChoice::LeftPanelSizingMode,
+                "FocusDependent",
+                "Fixed",
+                crate::config::LeftPanelSizingMode::ALL.len(),
+            ),
+            (
+                SettingsTab::AgentMonitoring,
+                SettingsChoice::AgentMonitoringMode,
+                "Attention",
+                "Normal",
+                crate::agent_monitoring::AgentMonitoringMode::ALL.len(),
+            ),
+        ] {
+            for width in [140, 80] {
+                let directory = tempfile::tempdir().unwrap();
+                let mut app = App::new(
+                    format!("display-mode-pointer-{width}"),
+                    directory.path().into(),
+                );
+                app.config_dir = Some(directory.path().into());
+                app.set_screen_area(Rect::new(0, 0, width, 80));
+                app.mode = Mode::Settings(SettingsState {
+                    tab,
+                    selected_row: 0,
+                    ..SettingsState::default()
+                });
+                for (button, expected) in [
+                    (MouseButton::Left, expected_left),
+                    (MouseButton::Right, expected_right),
+                ] {
+                    let Mode::Settings(state) = &app.mode else {
+                        panic!("settings mode");
+                    };
+                    let layout = crate::settings_ui::compute_layout_for_mode(
+                        app.layout.screen_area,
+                        &app,
+                        state,
+                    );
+                    let (_, control) = crate::settings_ui::settings_choice_control(
+                        layout.content_area,
+                        &app,
+                        state,
+                        0,
+                    )
+                    .expect("display mode uses shared selector");
+                    let value = control.geometry().value;
+                    crate::mouse::handle_mouse_event(
+                        &mut app,
+                        MouseEvent {
+                            kind: MouseEventKind::Down(button),
+                            column: value.x,
+                            row: value.y,
+                            modifiers: KeyModifiers::NONE,
+                        },
+                    );
+                    let (options, selected) = field.options(&app);
+                    assert_eq!(selected, expected, "{tab:?} {width}");
+                    assert_eq!(options.len(), expected_options, "{tab:?} {width}");
+                }
+
+                let Mode::Settings(state) = &app.mode else {
+                    panic!("settings mode");
+                };
+                let layout = crate::settings_ui::compute_layout_for_mode(
+                    app.layout.screen_area,
+                    &app,
+                    state,
+                );
+                let (_, control) = crate::settings_ui::settings_choice_control(
+                    layout.content_area,
+                    &app,
+                    state,
+                    0,
+                )
+                .expect("display mode uses shared selector");
+                let open = control.geometry().open;
+                crate::mouse::handle_mouse_event(
+                    &mut app,
+                    MouseEvent {
+                        kind: MouseEventKind::Down(MouseButton::Left),
+                        column: open.x,
+                        row: open.y,
+                        modifiers: KeyModifiers::NONE,
+                    },
+                );
+                let Mode::ValueDialog(host) = &app.mode else {
+                    panic!("+ opens the full catalog");
+                };
+                let ValueDialogState::Choice(dialog) = &host.dialog else {
+                    panic!("choice dialog");
+                };
+                assert_eq!(dialog.options().len(), expected_options, "{tab:?} {width}");
+            }
+        }
+    }
+
+    #[test]
     fn discovered_model_catalogs_are_complete_deduplicated_and_keep_authored_current() {
         let mut app = App::new("synthetic-full-model-catalogs".into(), std::env::temp_dir());
         for field in [
@@ -1370,6 +1530,8 @@ mod tests {
             3,
             3,
             6,
+            crate::config::LeftPanelSizingMode::ALL.len(),
+            crate::agent_monitoring::AgentMonitoringMode::ALL.len(),
             2,
             10,
             3,
@@ -1379,6 +1541,7 @@ mod tests {
             1,
             5,
             1,
+            2,
             2,
             ilium_inference::InferenceProviderKind::ALL.len(),
             crate::value_inference::OnboardingInference::KiloModel
@@ -1420,6 +1583,110 @@ mod tests {
             assert_eq!(dialog.options().len(), expected);
             assert_eq!(dialog.selected_id, Some(selected));
         }
+    }
+
+    #[test]
+    fn title_style_choice_uses_full_catalog_and_persists_without_changing_provider() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::new("title-style-choice".into(), directory.path().into());
+        app.config_dir = Some(directory.path().into());
+        let provider = app.inference_settings.selected_provider;
+        let (options, selected) = SettingsChoice::TitleStyle.options(&app);
+        assert_eq!(options.len(), 2);
+        assert_eq!(selected, "Labeling");
+
+        app.save_settings_choice(
+            SettingsChoice::TitleStyle,
+            "Summarization",
+            directory.path().into(),
+            None,
+        )
+        .unwrap();
+        app.settle_filesystem_for_test();
+
+        let loaded = crate::config::load(directory.path()).unwrap();
+        assert_eq!(
+            loaded.inference.title_style,
+            ilium_inference::TitleStyle::Summarization
+        );
+        assert_eq!(loaded.inference.selected_provider, provider);
+    }
+
+    #[test]
+    fn display_modes_use_full_catalogs_and_persist_through_ui_settings() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::new("display-mode-choices".into(), directory.path().into());
+        app.config_dir = Some(directory.path().into());
+
+        assert_eq!(
+            SettingsChoice::at(&app, SettingsTab::Appearance, 0),
+            Some(SettingsChoice::LeftPanelSizingMode)
+        );
+        assert_eq!(
+            SettingsChoice::at(&app, SettingsTab::AgentMonitoring, 0),
+            Some(SettingsChoice::AgentMonitoringMode)
+        );
+        for (field, expected_labels) in [
+            (
+                SettingsChoice::LeftPanelSizingMode,
+                vec!["Fixed", "Focus-dependent", "Width-dependent"],
+            ),
+            (
+                SettingsChoice::AgentMonitoringMode,
+                vec!["Normal", "Attention"],
+            ),
+        ] {
+            let (options, selected) = field.options(&app);
+            assert_eq!(
+                options
+                    .iter()
+                    .map(|option| option.label.as_str())
+                    .collect::<Vec<_>>(),
+                expected_labels
+            );
+            assert!(options.iter().any(|option| option.id == selected));
+            let ValueDialogState::Choice(dialog) = field.dialog(&app).unwrap() else {
+                panic!("full selector dialog");
+            };
+            assert_eq!(dialog.options().len(), expected_labels.len());
+        }
+
+        let panel_mode_id = SettingsChoice::LeftPanelSizingMode.options(&app).0[1]
+            .id
+            .clone();
+        app.save_settings_choice(
+            SettingsChoice::LeftPanelSizingMode,
+            &panel_mode_id,
+            directory.path().into(),
+            None,
+        )
+        .unwrap();
+        app.settle_filesystem_for_test();
+        assert_eq!(
+            app.ui_settings.left_panel_sizing.mode,
+            crate::config::LeftPanelSizingMode::FocusDependent
+        );
+
+        let attention_id = SettingsChoice::AgentMonitoringMode.options(&app).0[1]
+            .id
+            .clone();
+        app.save_settings_choice(
+            SettingsChoice::AgentMonitoringMode,
+            &attention_id,
+            directory.path().into(),
+            None,
+        )
+        .unwrap();
+        app.settle_filesystem_for_test();
+        let saved = crate::config::load(directory.path()).unwrap().ui;
+        assert_eq!(
+            saved.left_panel_sizing.mode,
+            crate::config::LeftPanelSizingMode::FocusDependent
+        );
+        assert_eq!(
+            saved.agent_monitoring_mode,
+            crate::agent_monitoring::AgentMonitoringMode::Attention
+        );
     }
 
     #[test]

@@ -2037,9 +2037,9 @@ mod tests {
             let geometry = latitude.geometry();
             assert_eq!(
                 buffer[(geometry.previous.x, geometry.previous.y)].symbol(),
-                "➖"
+                "-"
             );
-            assert_eq!(buffer[(geometry.next.x, geometry.next.y)].symbol(), "➕");
+            assert_eq!(buffer[(geometry.next.x, geometry.next.y)].symbol(), "+");
             assert_eq!(buffer[(geometry.open.x, geometry.open.y)].symbol(), "*");
             if geometry.previous.width > 0 {
                 assert_eq!(
