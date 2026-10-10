@@ -243,7 +243,7 @@ async fn deliver_when_ready(
                 {
                     continue;
                 }
-                set_result_delivery(runtime, ProgressDeliveryState::Attempted)?;
+                set_result_delivery(runtime, monitor_id, ProgressDeliveryState::Attempted)?;
             }
             // The attempted state is the replay fence for this irreversible
             // PTY effect. It must be on disk before any bytes can reach the
@@ -277,7 +277,7 @@ async fn deliver_when_ready(
                 if !runtime.is_current_progress_monitor(monitor_id) {
                     return Err("progress monitor changed during delivery".to_string());
                 }
-                set_result_delivery(runtime, ProgressDeliveryState::DeliveredToPty)?;
+                set_result_delivery(runtime, monitor_id, ProgressDeliveryState::DeliveredToPty)?;
             }
             state.request_snapshot_save();
             return Ok(());
@@ -305,10 +305,9 @@ async fn outcome_was_collected_by_waiter(
     let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
         return false;
     };
-    runtime.is_current_progress_monitor(monitor_id)
-        && runtime.progress_monitor.as_ref().is_some_and(|monitor| {
-            monitor.result_delivery == ProgressDeliveryState::CollectedByWaiter
-        })
+    runtime
+        .progress_monitor(monitor_id)
+        .is_some_and(|monitor| monitor.result_delivery == ProgressDeliveryState::CollectedByWaiter)
 }
 
 async fn readiness_snapshot(state: &ServerState, pane_id: NodeId, monitor_id: u64) -> bool {
@@ -336,21 +335,19 @@ pub(crate) fn runtime_has_ready_composer(runtime: &crate::pane::TerminalPaneRunt
 }
 
 fn result_delivery_is_queued(runtime: &crate::pane::TerminalPaneRuntime, monitor_id: u64) -> bool {
-    runtime.is_current_progress_monitor(monitor_id)
-        && runtime
-            .progress_monitor
-            .as_ref()
-            .is_some_and(|monitor| matches!(monitor.result_delivery, ProgressDeliveryState::Queued))
+    runtime
+        .progress_monitor(monitor_id)
+        .is_some_and(|monitor| matches!(monitor.result_delivery, ProgressDeliveryState::Queued))
 }
 
 fn set_result_delivery(
     runtime: &mut crate::pane::TerminalPaneRuntime,
+    monitor_id: u64,
     delivery: ProgressDeliveryState,
 ) -> Result<(), String> {
     let monitor = runtime
-        .progress_monitor
-        .as_mut()
-        .ok_or_else(|| "progress monitor was cleared".to_string())?;
+        .progress_monitor_mut(monitor_id)
+        .ok_or_else(|| format!("progress monitor {monitor_id} was cleared"))?;
     monitor.result_delivery = delivery;
     Ok(())
 }
@@ -365,10 +362,7 @@ async fn rollback_delivery_attempt(state: &ServerState, pane_id: NodeId, monitor
     let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) else {
         return;
     };
-    if !runtime.is_current_progress_monitor(monitor_id) {
-        return;
-    }
-    let Some(monitor) = runtime.progress_monitor.as_mut() else {
+    let Some(monitor) = runtime.progress_monitor_mut(monitor_id) else {
         return;
     };
     if monitor.result_delivery == ProgressDeliveryState::Attempted {
@@ -383,10 +377,7 @@ async fn mark_delivery_uncertain(state: &ServerState, pane_id: NodeId, monitor_i
     let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) else {
         return;
     };
-    if !runtime.is_current_progress_monitor(monitor_id) {
-        return;
-    }
-    let Some(monitor) = runtime.progress_monitor.as_mut() else {
+    let Some(monitor) = runtime.progress_monitor_mut(monitor_id) else {
         return;
     };
     monitor.result_delivery = ProgressDeliveryState::Uncertain;
@@ -403,18 +394,14 @@ async fn queue_result_delivery(
     let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) else {
         return Err("pane closed before result delivery".to_string());
     };
-    if !runtime.is_current_progress_monitor(monitor_id) {
-        return Err(format!("progress monitor {monitor_id} is stale"));
-    }
     let has_supported_composer = runtime
         .detected_agent_class
         .as_ref()
         .and_then(ilium_core::AgentClass::provider)
         .is_some();
-    let monitor = runtime
-        .progress_monitor
-        .as_mut()
-        .expect("current monitor was checked above");
+    let Some(monitor) = runtime.progress_monitor_mut(monitor_id) else {
+        return Err(format!("progress monitor {monitor_id} is stale"));
+    };
     match monitor.result_delivery {
         ProgressDeliveryState::Attempted
         | ProgressDeliveryState::DeliveredToPty

@@ -138,7 +138,6 @@ async fn create_agent(
         // observe that disconnect at its safe rollback boundaries. Three
         // progress events fit in this channel while the receiver is held.
         let (request_tx, _request_rx) = tokio::sync::mpsc::channel(4);
-        let (start_tx, start_rx) = tokio::sync::oneshot::channel();
         let (result_tx, result_rx) = tokio::sync::oneshot::channel();
         let creation_state = Arc::clone(&state);
         let options = CreateAgentOptions {
@@ -151,22 +150,21 @@ async fn create_agent(
             wait_for_prompt: true,
         };
         let creation_lookup_retention = Arc::clone(&lookup_retention);
-        let handle = tokio::spawn(async move {
+        let admission = state.spawn_workspace_mutation_task(async move {
             let _lookup_retention = creation_lookup_retention;
-            if start_rx.await.is_err() {
-                return;
-            }
             let reply = crate::ipc::EventReply::Legacy(&request_tx);
             let result = create_agent_in_workspace(&creation_state, options, Some(&reply)).await;
             let _ = result_tx.send(result);
         });
-        if !state.track_workspace_creation_task(handle) {
-            return Err(api_error(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "session is shutting down",
-            ));
+        if let Err(rejection) = admission {
+            let message = match rejection {
+                crate::state::WorkspaceTaskRejection::ShuttingDown => "session is shutting down",
+                crate::state::WorkspaceTaskRejection::AtCapacity => {
+                    "workspace operation capacity is full"
+                }
+            };
+            return Err(api_error(StatusCode::SERVICE_UNAVAILABLE, message));
         }
-        let _ = start_tx.send(());
         result_rx.await.map_err(|error| {
             api_error(
                 StatusCode::INTERNAL_SERVER_ERROR,

@@ -109,12 +109,12 @@ async fn retry_loop(weak: Weak<ServerState>) {
     }
 }
 
-/// A placeholder due for a retry: its pane, saved kind, progress monitor and
+/// A placeholder due for a retry: its pane, saved kind, progress monitors and
 /// last known terminal size.
 type PendingRetry = (
     NodeId,
     PaneSnapshotKind,
-    Option<PersistedProgressMonitor>,
+    Vec<PersistedProgressMonitor>,
     Option<(u16, u16)>,
 );
 
@@ -128,7 +128,7 @@ pub(crate) async fn retry_unrestored_panes(state: &Arc<ServerState>) -> bool {
                 PaneResource::Unrestored(unrestored) if unrestored.failure.is_some() => Some((
                     *pane_id,
                     unrestored.kind.clone(),
-                    unrestored.progress_monitor.clone(),
+                    unrestored.progress_monitors.clone(),
                     unrestored.size,
                 )),
                 _ => None,
@@ -140,12 +140,13 @@ pub(crate) async fn retry_unrestored_panes(state: &Arc<ServerState>) -> bool {
     }
     let mut started = Vec::new();
     let mut is_any_remaining = false;
-    for (pane_id, kind, progress_monitor, size) in pending {
+    for (pane_id, kind, progress_monitors, size) in pending {
         match crate::start_snapshot_pane(state, pane_id, kind).await {
             SnapshotPaneStart::Started { missing_workspace } => {
                 started.push(pane_id);
                 apply_requested_size(state, pane_id, size).await;
-                restore_progress_monitor(state, pane_id, progress_monitor, missing_workspace).await;
+                restore_progress_monitors(state, pane_id, progress_monitors, missing_workspace)
+                    .await;
                 let _ = crate::agent_debug::record(
                     state,
                     pane_id,
@@ -201,25 +202,27 @@ async fn apply_requested_size(state: &Arc<ServerState>, pane_id: NodeId, size: O
     }
 }
 
-async fn restore_progress_monitor(
+async fn restore_progress_monitors(
     state: &Arc<ServerState>,
     pane_id: NodeId,
-    progress_monitor: Option<PersistedProgressMonitor>,
+    progress_monitors: Vec<PersistedProgressMonitor>,
     missing_workspace: bool,
 ) {
-    let Some(progress_monitor) = progress_monitor else {
+    if progress_monitors.is_empty() {
         return;
-    };
+    }
     if missing_workspace {
         if let Some(PaneResource::Terminal(runtime)) = state.panes.write().await.get_mut(&pane_id) {
-            runtime.deferred_progress_monitor = Some(progress_monitor);
+            runtime.deferred_progress_monitors = progress_monitors;
         }
         return;
     }
-    if let Err(error) =
-        crate::ipc::handlers::restore_persisted_progress_monitor(state, progress_monitor).await
-    {
-        tracing::warn!(pane_id = pane_id.0, %error, "retried pane progress monitor not restored");
+    for progress_monitor in progress_monitors {
+        if let Err(error) =
+            crate::ipc::handlers::restore_persisted_progress_monitor(state, progress_monitor).await
+        {
+            tracing::warn!(pane_id = pane_id.0, %error, "retried pane progress monitor not restored");
+        }
     }
 }
 

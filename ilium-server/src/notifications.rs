@@ -29,8 +29,8 @@ use ilium_sound::{NotificationEvent, NotificationSettings};
 #[cfg(test)]
 pub fn is_finished_transition(previous: Option<&PaneStatus>, new: &PaneStatus) -> bool {
     let previous =
-        previous.map(|status| ilium_core::project_pane_signals(status, None, false, None));
-    let new = ilium_core::project_pane_signals(new, None, false, None);
+        previous.map(|status| ilium_core::project_pane_signals(status, &[], false, None));
+    let new = ilium_core::project_pane_signals(new, &[], false, None);
     is_finished_signal_transition(previous.as_ref(), &new)
 }
 
@@ -120,7 +120,7 @@ pub fn is_task_outcome_redundant(
         return false;
     }
     matches!(
-        ilium_core::project_pane_signals(status, Some(progress), false, None).now,
+        ilium_core::project_pane_signals(status, std::slice::from_ref(progress), false, None).now,
         NowSignal::Idle | NowSignal::FinishedUnread | NowSignal::Parked
     )
 }
@@ -133,7 +133,8 @@ pub fn is_agent_mid_turn(
 ) -> bool {
     matches!(status, ilium_core::PaneStatus::Agent(_))
         && matches!(
-            ilium_core::project_pane_signals(status, Some(progress), false, None).now,
+            ilium_core::project_pane_signals(status, std::slice::from_ref(progress), false, None)
+                .now,
             NowSignal::Working
                 | NowSignal::WaitingSubagents
                 | NowSignal::Settling

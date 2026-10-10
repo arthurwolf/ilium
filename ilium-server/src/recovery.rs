@@ -397,10 +397,6 @@ mod tests {
     use std::task::Poll;
     use std::time::Duration;
 
-    use ilium_core::ROOT_ID;
-    use ilium_ipc::ServerEvent;
-    use tokio::sync::mpsc;
-
     use super::{AttachStatus, Refusal};
     use crate::config::{DetectionConfig, NotificationsConfig};
     use crate::execution::ServerExecution;
@@ -408,6 +404,8 @@ mod tests {
     use crate::persistence;
     use crate::state::{ServerState, ServerStateOptions};
     use crate::task_guard::AbortOnDropHandle;
+    use ilium_core::ROOT_ID;
+    use ilium_ipc::ServerEvent;
 
     fn state(directory: &tempfile::TempDir) -> Arc<ServerState> {
         let (sound_requests, _sound_receiver) = crate::sounds::test_channel(1);

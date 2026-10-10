@@ -53,6 +53,14 @@ pub async fn wait_until(mut condition: impl FnMut() -> bool, timeout: Duration) 
     }
 }
 
+/// First 80 characters of each event's Debug form, for failure messages.
+fn summarize_events(events: &[ServerEvent]) -> Vec<String> {
+    events
+        .iter()
+        .map(|event| format!("{event:?}").chars().take(80).collect())
+        .collect()
+}
+
 /// Reads the attach stream before a test sends mutations.
 pub async fn read_initial_state(
     stream: &mut SessionStream,
@@ -60,9 +68,16 @@ pub async fn read_initial_state(
 ) -> (Tree, Vec<ServerEvent>) {
     let mut tree = None;
     let mut observed = Vec::new();
-    tokio::time::timeout(timeout, async {
+    let outcome = tokio::time::timeout(timeout, async {
         loop {
-            let event: ServerEvent = read_frame(stream).await.expect("initial server event");
+            let event: ServerEvent = match read_frame(stream).await {
+                Ok(event) => event,
+                Err(error) => panic!(
+                    "initial server event failed: {error:?}; received {} events before it: {:#?}",
+                    observed.len(),
+                    summarize_events(&observed)
+                ),
+            };
             match &event {
                 ServerEvent::PaneStateSnapshot { tree: snapshot, .. } => {
                     tree = Some(snapshot.clone());
@@ -79,8 +94,16 @@ pub async fn read_initial_state(
             observed.push(event);
         }
     })
-    .await
-    .expect("initial state before timeout");
+    .await;
+    if outcome.is_err() {
+        // The test binary has no tracing subscriber, so the received event
+        // sequence is the only evidence of where attach stalled.
+        panic!(
+            "initial state not complete after {timeout:?}; received {} events: {:#?}",
+            observed.len(),
+            summarize_events(&observed)
+        );
+    }
     (tree.expect("initial state includes a tree"), observed)
 }
 

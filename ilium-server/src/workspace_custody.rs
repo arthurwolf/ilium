@@ -230,6 +230,7 @@ impl CustodyTicket {
     /// `processes_using_directory(root)` returned an empty list.
     /// A failed acknowledgement after unlink has an uncertain disk outcome;
     /// callers must not claim that custody was cleared or retry automatically.
+    #[cfg(test)]
     pub(crate) async fn clear_after_proof(&self, client: &ExecutionClient) -> Result<(), String> {
         let reservation = reserve_io(
             client,

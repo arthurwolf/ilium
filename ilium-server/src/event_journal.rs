@@ -38,7 +38,7 @@ pub(crate) enum JournalRefusal {
 }
 
 pub(crate) struct PublishFailure {
-    pub(crate) event: ServerEvent,
+    pub(crate) event: Box<ServerEvent>,
     pub(crate) refusal: JournalRefusal,
 }
 
@@ -52,7 +52,7 @@ impl std::fmt::Debug for PublishFailure {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("PublishFailure")
-            .field("event_kind", &std::mem::discriminant(&self.event))
+            .field("event_kind", &std::mem::discriminant(self.event.as_ref()))
             .field("refusal", &self.refusal)
             .finish()
     }
@@ -301,7 +301,12 @@ impl EventJournal {
     ) -> Result<u64, PublishFailure> {
         let reservation = match self.reserve(payload_bytes) {
             Ok(reservation) => reservation,
-            Err(refusal) => return Err(PublishFailure { event, refusal }),
+            Err(refusal) => {
+                return Err(PublishFailure {
+                    event: Box::new(event),
+                    refusal,
+                });
+            }
         };
         reservation.commit(event)
     }
@@ -361,7 +366,7 @@ impl EventReservation {
             slot.state = previous;
             self.active = false;
             return Err(PublishFailure {
-                event,
+                event: Box::new(event),
                 refusal: JournalRefusal::OutOfOrder,
             });
         };
@@ -421,6 +426,10 @@ pub(crate) struct JournalEvent {
 impl JournalEvent {
     pub(crate) fn event(&self) -> &ServerEvent {
         &self.entry.event
+    }
+
+    pub(crate) fn shared_event(&self) -> Arc<ServerEvent> {
+        Arc::clone(&self.entry.event)
     }
 }
 
@@ -654,13 +663,13 @@ mod tests {
         };
         let failure = journal.try_publish(original.clone(), 64).unwrap_err();
         assert_eq!(failure.refusal, JournalRefusal::EntryLimit);
-        assert_eq!(failure.event, original);
+        assert_eq!(*failure.event, original);
         assert_eq!(journal.retained().0, 1);
 
         let first = subscription.recv().await.unwrap().unwrap();
         subscription.acknowledge(first_sequence).unwrap();
         drop(first);
-        let retry_sequence = journal.try_publish(failure.event, 64).unwrap();
+        let retry_sequence = journal.try_publish(*failure.event, 64).unwrap();
         assert_eq!(retry_sequence, first_sequence + 1);
         let retried = subscription.recv().await.unwrap().unwrap();
         assert!(matches!(
@@ -788,7 +797,7 @@ mod tests {
         let _subscription = journal.subscribe().unwrap();
         let original = state_event(1);
         let failure = journal.try_publish(original.clone(), 128).unwrap_err();
-        assert_eq!(failure.event, original);
+        assert_eq!(*failure.event, original);
         assert_eq!(
             failure.refusal,
             JournalRefusal::Storage(RejectReason::WorkerBytes)
@@ -801,7 +810,7 @@ mod tests {
         let _subscription = journal.subscribe().unwrap();
         let original = state_event(1);
         let failure = journal.try_publish(original.clone(), 128).unwrap_err();
-        assert_eq!(failure.event, original);
+        assert_eq!(*failure.event, original);
         assert_eq!(failure.refusal, JournalRefusal::ByteLimit);
     }
 

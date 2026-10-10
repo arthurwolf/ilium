@@ -198,9 +198,24 @@ where
     S: AsyncRead + AsyncWrite + Send + 'static,
 {
     let (read_half, write_half) = tokio::io::split(stream);
-    let (direct_tx, direct_rx) = DirectEventSender::channel(DIRECT_CHANNEL_CAPACITY);
+    let Some(execution) = state.execution.get() else {
+        tracing::error!("connection accepted before server execution was initialized");
+        return;
+    };
+    let (direct_tx, direct_rx) =
+        DirectEventSender::admitted_channel(DIRECT_CHANNEL_CAPACITY, execution.client.clone());
     let (stream_control_tx, stream_control_rx) = mpsc::channel(STREAM_CONTROL_CHANNEL_CAPACITY);
     let broadcast_rx = state.events.subscribe_shared();
+    let ordered_subscription = match state.events.subscribe_ordered() {
+        Ok(subscription) => subscription,
+        Err(error) => {
+            tracing::warn!(
+                ?error,
+                "connection could not join the ordered event journal"
+            );
+            return;
+        }
+    };
     // A connection subscribes to broadcasts before its Attach request is
     // handled so it cannot miss output produced during the handshake. The
     // writer must nevertheless hold those broadcasts until the complete
@@ -218,9 +233,10 @@ where
         attach_phase_tx,
         stream_control_tx,
     );
-    let writer = write_replies(
+    let writer = write_replies_ordered(
         write_half,
         broadcast_rx,
+        ordered_subscription,
         direct_rx,
         attach_phase_rx,
         stream_control_rx,
@@ -421,15 +437,60 @@ async fn read_requests<R>(
     }
 }
 
-/// Forwards both this connection's direct replies and every session-wide
-/// broadcast event to the client, until the underlying stream errors (the
-/// client is gone), the broadcast sender is gone (the whole server is
-/// gone), or the reader loop ends (see `read_requests`) -- at which point
-/// any broadcast already queued for this connection is drained and sent
-/// before returning.
+/// Forwards direct replies and session events from the ordered journal and
+/// legacy broadcast to this client. A journal cursor advances only after its
+/// event is flushed or intentionally filtered.
 async fn write_replies<W, E>(
     write_half: W,
+    broadcast_rx: tokio::sync::broadcast::Receiver<E>,
+    direct_rx: DirectEventReceiver,
+    attach_phase_rx: watch::Receiver<AttachPhase>,
+    stream_control_rx: mpsc::Receiver<StreamControlCommand>,
+    resynchronization_state: Option<Arc<ServerState>>,
+) where
+    W: AsyncWrite + Unpin,
+    E: Into<Arc<ServerEvent>> + Clone,
+{
+    write_replies_inner(
+        write_half,
+        broadcast_rx,
+        None,
+        direct_rx,
+        attach_phase_rx,
+        stream_control_rx,
+        resynchronization_state,
+    )
+    .await;
+}
+
+async fn write_replies_ordered<W, E>(
+    write_half: W,
+    broadcast_rx: tokio::sync::broadcast::Receiver<E>,
+    ordered_rx: crate::state::OrderedEventSubscription,
+    direct_rx: DirectEventReceiver,
+    attach_phase_rx: watch::Receiver<AttachPhase>,
+    stream_control_rx: mpsc::Receiver<StreamControlCommand>,
+    resynchronization_state: Option<Arc<ServerState>>,
+) where
+    W: AsyncWrite + Unpin,
+    E: Into<Arc<ServerEvent>> + Clone,
+{
+    write_replies_inner(
+        write_half,
+        broadcast_rx,
+        Some(ordered_rx),
+        direct_rx,
+        attach_phase_rx,
+        stream_control_rx,
+        resynchronization_state,
+    )
+    .await;
+}
+
+async fn write_replies_inner<W, E>(
+    write_half: W,
     mut broadcast_rx: tokio::sync::broadcast::Receiver<E>,
+    mut ordered_rx: Option<crate::state::OrderedEventSubscription>,
     mut direct_rx: DirectEventReceiver,
     mut attach_phase_rx: watch::Receiver<AttachPhase>,
     mut stream_control_rx: mpsc::Receiver<StreamControlCommand>,
@@ -447,11 +508,13 @@ async fn write_replies<W, E>(
     // switches this to `All` before its full replay is assembled.
     let mut terminal_stream_selection = TerminalStreamSelection::None;
     let mut is_stream_control_open = true;
+    let mut is_ordered_journal_open = ordered_rx.is_some();
     let mut pending_stream_control = None;
     let mut frame_writer = FrameWriter::new(write_half);
 
     loop {
         let has_pending_stream_control = pending_stream_control.is_some();
+        let ordered_journal_open = is_ordered_journal_open;
         // While an Attach handler is building its replay batch, drain direct
         // events but leave broadcasts queued. A later Attach returns to this
         // phase because reattachment has the same ordering contract.
@@ -479,12 +542,14 @@ async fn write_replies<W, E>(
                         }
                         continue;
                     }
-                    None => return,
+                    None => {
+                        return;
+                    }
                 },
             }
         }
 
-        let (event, is_broadcast, producer_storage) = tokio::select! {
+        let (event, is_session_event, producer_storage, journal_sequence) = tokio::select! {
             biased;
             // Checked ahead of `attach_changed`: this connection's reader
             // task owns both `direct_tx` and `attach_phase_tx` and drops
@@ -498,7 +563,7 @@ async fn write_replies<W, E>(
             // Draining `direct_rx` first guarantees that never happens.
             direct_event = direct_rx.recv_queued() => match direct_event {
                 Some(QueuedServerEvent { event, producer_storage }) => {
-                    (Arc::new(event), false, producer_storage)
+                    (Arc::new(event), false, producer_storage, None)
                 },
                 // The reader loop ended (Detach/KillSession/EOF/decode
                 // error): no more requests will ever be dispatched on this
@@ -615,8 +680,27 @@ async fn write_replies<W, E>(
                 }
                 continue;
             },
+            ordered_result = async {
+                match ordered_rx.as_ref().filter(|_| ordered_journal_open) {
+                    Some(subscription) => subscription.recv().await,
+                    None => std::future::pending().await,
+                }
+            } => match ordered_result {
+                Ok(Some(event)) => {
+                    let sequence = event.sequence;
+                    (event.shared_event(), true, None, Some(sequence))
+                }
+                Ok(None) => {
+                    is_ordered_journal_open = false;
+                    continue;
+                }
+                Err(error) => {
+                    tracing::warn!(?error, "ordered server event journal lost its cursor; closing connection");
+                    break;
+                }
+            },
             broadcast_result = broadcast_rx.recv() => match broadcast_result {
-                Ok(event) => (event.into(), true, None),
+                Ok(event) => (event.into(), true, None, None),
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
                     tracing::warn!("connection lagged behind the session broadcast, skipped {skipped} event(s)");
                     if let Some(state) = &resynchronization_state {
@@ -636,11 +720,16 @@ async fn write_replies<W, E>(
                 // The session's broadcast sender only drops with
                 // `ServerState` itself, i.e. the whole server is gone --
                 // nothing more this connection can do.
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                    break;
+                }
             },
         };
 
-        if is_broadcast && !should_forward_terminal_event(&event, &terminal_stream_selection) {
+        if is_session_event && !should_forward_terminal_event(&event, &terminal_stream_selection) {
+            if !acknowledge_ordered_event(&ordered_rx, journal_sequence) {
+                break;
+            }
             continue;
         }
 
@@ -648,7 +737,10 @@ async fn write_replies<W, E>(
         // watermark in `broadcast_rx`. Do not spend socket bandwidth sending
         // bytes the client must discard, which otherwise helps recreate the
         // same overrun immediately after repair.
-        if is_broadcast && is_redundant_terminal_event(&event, &delivered_terminal_sequences) {
+        if is_session_event && is_redundant_terminal_event(&event, &delivered_terminal_sequences) {
+            if !acknowledge_ordered_event(&ordered_rx, journal_sequence) {
+                break;
+            }
             continue;
         }
 
@@ -658,7 +750,7 @@ async fn write_replies<W, E>(
         // Direct Attach replays never pass through this branch.
         // An Attach phase change can race this select's direct reply. Origin,
         // rather than the sampled phase, keeps the full direct replay intact.
-        let (event, producer_storage) = if is_broadcast {
+        let (event, producer_storage) = if is_session_event {
             match normalize_broadcast_terminal_replay(
                 event,
                 &delivered_terminal_sequences,
@@ -667,7 +759,12 @@ async fn write_replies<W, E>(
             .await
             {
                 Ok(Some(event)) => event,
-                Ok(None) => continue,
+                Ok(None) => {
+                    if !acknowledge_ordered_event(&ordered_rx, journal_sequence) {
+                        break;
+                    }
+                    continue;
+                }
                 Err(error) => {
                     tracing::warn!(%error, "broadcast replay recovery failed; closing connection to preserve byte ordering");
                     break;
@@ -682,7 +779,9 @@ async fn write_replies<W, E>(
         // terminal bytes, while dropping the whole frame would lose its
         // suffix. Recover again from the authoritative pane journal instead,
         // which emits exactly the missing contiguous tail.
-        if is_broadcast && screen_update_requires_recovery(&event, &delivered_terminal_sequences) {
+        if is_session_event
+            && screen_update_requires_recovery(&event, &delivered_terminal_sequences)
+        {
             if let Some(state) = &resynchronization_state {
                 tracing::warn!("terminal output frame was not contiguous; resynchronizing");
                 if !write_resynchronization(
@@ -693,6 +792,9 @@ async fn write_replies<W, E>(
                 )
                 .await
                 {
+                    break;
+                }
+                if !acknowledge_ordered_event(&ordered_rx, journal_sequence) {
                     break;
                 }
                 continue;
@@ -711,6 +813,32 @@ async fn write_replies<W, E>(
             tracing::warn!("connection write failed, closing: {error}");
             break;
         }
+        if !acknowledge_ordered_event(&ordered_rx, journal_sequence) {
+            break;
+        }
+    }
+}
+
+fn acknowledge_ordered_event(
+    subscription: &Option<crate::state::OrderedEventSubscription>,
+    sequence: Option<u64>,
+) -> bool {
+    match (subscription, sequence) {
+        (Some(subscription), Some(sequence)) => match subscription.acknowledge(sequence) {
+            Ok(()) => true,
+            Err(error) => {
+                tracing::warn!(
+                    ?error,
+                    sequence,
+                    "could not acknowledge ordered server event"
+                );
+                false
+            }
+        },
+        // Broadcast events carry no journal sequence and need no acknowledgment;
+        // refusing them here closed every connection on its first broadcast.
+        (_, None) => true,
+        _ => false,
     }
 }
 
@@ -857,6 +985,7 @@ where
 /// selected pane is repaired through the current journal sequence before
 /// queued live frames resume; duplicate queued prefixes are then discarded by
 /// the existing watermark checks.
+#[allow(clippy::too_many_arguments)] // Writer-owned delivery watermarks and stream-control state remain explicit.
 async fn apply_visible_pane_selection<W>(
     frame_writer: &mut FrameWriter<W>,
     state: &ServerState,
@@ -1247,12 +1376,22 @@ where
     #[cfg(test)]
     encoded_storage_tests::observe_storage_wait(&stored);
     let storage = match producer_storage {
-        Some(storage) if storage.resident_bytes() >= stored.storage_bytes => storage,
+        Some(storage)
+            if storage.shares_root(&preparation.quota_group())
+                && storage.resident_bytes() >= stored.storage_bytes =>
+        {
+            storage
+        }
         Some(storage) => {
             drop(storage);
-            return Err(ilium_ipc::IpcError::Io(std::io::Error::other(
-                "producer storage admission is smaller than encoded output",
-            )));
+            preparation
+                .reserve_storage(stored.storage_bytes)
+                .await
+                .map_err(|error| {
+                    ilium_ipc::IpcError::Io(std::io::Error::other(format!(
+                        "server encoded storage admission after producer lease mismatch: {error:?}"
+                    )))
+                })?
         }
         None => preparation
             .reserve_storage(stored.storage_bytes)
@@ -2409,15 +2548,20 @@ mod ordered_journal_connection_regressions {
         }));
         let execution = crate::execution::ServerExecution::start().expect("execution bank");
         assert!(state.events.initialize_journal(execution.quota_group()));
+        let ordered_subscription = state
+            .events
+            .subscribe_ordered()
+            .expect("connection joins initialized journal");
 
         let (server_stream, mut client_stream) = duplex(4096);
         let (_broadcast_tx, broadcast_rx) = tokio::sync::broadcast::channel::<Arc<ServerEvent>>(8);
         let (direct_tx, direct_rx) = DirectEventSender::channel(8);
         let (phase_tx, phase_rx) = watch::channel(AttachPhase::Ready);
         let (stream_control_tx, stream_control_rx) = mpsc::channel(1);
-        let writer = tokio::spawn(write_replies(
+        let writer = tokio::spawn(write_replies_ordered(
             server_stream,
             broadcast_rx,
+            ordered_subscription,
             direct_rx,
             phase_rx,
             stream_control_rx,
@@ -2438,22 +2582,24 @@ mod ordered_journal_connection_regressions {
             .expect("writer acknowledges stream control");
         phase_tx.send_replace(AttachPhase::Ready);
 
-        let event = ServerEvent::NodeActivityChanged {
-            node_id: NodeId(17),
-            activity_revision: 42,
-        };
-        state
-            .events
-            .try_publish_ordered(event.clone(), 64)
-            .expect("event is admitted into the ordered journal");
-        let received = timeout(
-            Duration::from_secs(2),
-            read_frame::<ServerEvent, _>(&mut client_stream),
-        )
-        .await
-        .expect("ordered event is delivered")
-        .expect("event frame decodes");
-        assert_eq!(received, event);
+        for revision in [42, 43] {
+            let event = ServerEvent::NodeActivityChanged {
+                node_id: NodeId(17),
+                activity_revision: revision,
+            };
+            state
+                .events
+                .try_publish_ordered(event.clone(), 64)
+                .expect("event is admitted into the ordered journal");
+            let received = timeout(
+                Duration::from_secs(2),
+                read_frame::<ServerEvent, _>(&mut client_stream),
+            )
+            .await
+            .expect("ordered event is delivered")
+            .expect("event frame decodes");
+            assert_eq!(received, event);
+        }
 
         drop(direct_tx);
         writer.await.expect("writer task joins");

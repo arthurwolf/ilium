@@ -200,7 +200,6 @@ pub async fn verify_path_staged(
                 "metadata job limit reached before reading transcript",
             ));
         }
-        prepaid_io = false;
         let (input, previous_retention) = pending.into_parts();
         let next = execution
             .run(
@@ -378,6 +377,7 @@ async fn open_files_staged(
     }))
 }
 
+#[allow(clippy::too_many_arguments)] // Preserve explicit process, transcript and exclusion evidence inputs.
 pub async fn discover_with_trace_staged(
     execution: &crate::execution::ExecutionClient,
     snapshot: Option<&ProcessDiscoverySnapshot>,
@@ -540,6 +540,11 @@ pub async fn discover_with_trace_staged(
 
 /// Bounded evidence variant. A partial filesystem scan never proves exclusive
 /// ownership, even if an earlier rank appeared to find one admissible ID.
+#[cfg(test)]
+#[expect(
+    dead_code,
+    reason = "retained as an internal test entry point for structured session discovery evidence"
+)]
 pub fn discover_with_trace_bounded(
     system: &System,
     pid: Pid,
@@ -574,6 +579,11 @@ pub fn discover_with_trace_bounded(
 /// evidence to explain every accepted, skipped, and rejected phase in the
 /// agent debug view. Startup arguments are ignored after an in-process session
 /// transition because they still describe the identity used at launch.
+#[cfg(test)]
+#[expect(
+    dead_code,
+    reason = "retained as an internal test entry point for structured session discovery evidence"
+)]
 pub fn discover_with_trace(
     system: &System,
     pid: Pid,
@@ -757,6 +767,7 @@ pub fn discover_with_trace(
     }
 }
 
+#[cfg(test)]
 fn verified_and_unclaimed(
     locator: &TranscriptLocator,
     class: &AgentClass,
@@ -782,6 +793,11 @@ fn from_arguments(class: &AgentClass, arguments: &[String]) -> Option<String> {
 /// caller must fall back to other evidence rather than concluding the agent
 /// has no session. `ilium_platform::process_info` documents which platforms
 /// can answer.
+#[cfg(test)]
+#[expect(
+    dead_code,
+    reason = "retained for test-only open-transcript evidence inspection"
+)]
 fn from_open_files(
     pid: u32,
     class: &AgentClass,
@@ -900,24 +916,46 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn staged_verification_uses_the_shared_io_and_cpu_bank() {
+    async fn staged_verification_uses_io_and_cpu_lanes() {
         let home = tempfile::tempdir().unwrap();
         let project = tempfile::tempdir().unwrap();
         let session_id = "95fd0645-3331-408b-a7e5-36e6007bfb78";
         write_claude_transcript(home.path(), project.path(), session_id);
         let locator =
             TranscriptLocator::new_bounded(home.path(), project.path(), TRANSCRIPT_READ_LIMITS);
-        let client = crate::execution::test_general_client();
-
-        let verified = verify_session_staged(&client, &locator, &AgentClass::Claude, session_id)
-            .await
+        let owner = crate::execution::ServerExecution::start().expect("execution bank");
+        let monitor = owner.test_monitor();
+        let path = locator
+            .staged_candidate_paths_for_session(&AgentClass::Claude, session_id)
+            .pop()
             .unwrap();
+        let authoritative = std::fs::read(&path).unwrap();
+        let mut content = b"{}\n".to_vec();
+        content.extend(authoritative);
+        std::fs::write(path, content).unwrap();
+        let before = monitor.health();
+
+        let verified =
+            verify_session_staged(&owner.client, &locator, &AgentClass::Claude, session_id)
+                .await
+                .unwrap();
 
         assert_eq!(
             verified.map(|transcript| transcript.session_id),
             Some(session_id.into())
         );
         assert!(!locator.read_limit_reached());
+        let after = monitor.health();
+        // Execution health preserves the canonical [CPU, I/O, service] lane order.
+        assert!(
+            after.lanes[0].succeeded > before.lanes[0].succeeded,
+            "staged transcript JSON must be decoded on the CPU lane"
+        );
+        assert!(
+            after.lanes[1].succeeded > before.lanes[1].succeeded,
+            "staged transcript discovery and reads must use the I/O lane"
+        );
+        owner.request_shutdown();
     }
 
     #[tokio::test]

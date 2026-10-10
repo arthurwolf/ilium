@@ -569,23 +569,22 @@ pub(crate) async fn capture_snapshot(
         for (node_id, resource) in panes.iter() {
             let kind = match resource {
                 PaneResource::Terminal(runtime) => {
-                    let progress_monitor = progress_override
-                        .filter(|progress_monitor| progress_monitor.pane_id == *node_id)
-                        .cloned()
-                        .or_else(|| runtime.progress_monitor_snapshot(*node_id))
-                        .or_else(|| runtime.deferred_progress_monitor.clone());
-                    if let Some(progress_monitor) = progress_monitor {
-                        progress_monitors.push(progress_monitor);
-                    }
+                    // A staged registration is persisted beside the pane's
+                    // live monitors: `set` adds a monitor, it never replaces.
+                    progress_monitors.extend(runtime.progress_monitor_snapshots(*node_id));
+                    progress_monitors.extend(runtime.deferred_progress_monitors.iter().cloned());
+                    progress_monitors.extend(
+                        progress_override
+                            .filter(|progress_monitor| progress_monitor.pane_id == *node_id)
+                            .cloned(),
+                    );
                     PaneSnapshotKind::Terminal(snapshot_terminal_origin(runtime))
                 }
                 PaneResource::Editor { path } => PaneSnapshotKind::Editor { path: path.clone() },
                 // A pane whose process has not started yet is saved exactly
                 // as it was loaded, so a failed restore can never erase it.
                 PaneResource::Unrestored(unrestored) => {
-                    if let Some(progress_monitor) = &unrestored.progress_monitor {
-                        progress_monitors.push(progress_monitor.clone());
-                    }
+                    progress_monitors.extend(unrestored.progress_monitors.iter().cloned());
                     unrestored.kind.clone()
                 }
             };
@@ -662,9 +661,10 @@ fn capture_estimated_bytes(
                 };
                 kind.saturating_add(1024).saturating_add(
                     unrestored
-                        .progress_monitor
-                        .as_ref()
-                        .map_or(0, estimated_monitor_bytes),
+                        .progress_monitors
+                        .iter()
+                        .map(estimated_monitor_bytes)
+                        .fold(0, usize::saturating_add),
                 )
             }
             PaneResource::Terminal(runtime) => {
@@ -681,14 +681,14 @@ fn capture_estimated_bytes(
                     .saturating_add(runtime.session_id.as_ref().map_or(0, String::capacity))
                     .saturating_mul(8)
                     .saturating_add(1024);
-                if let Some(monitor) = &runtime.progress_monitor {
+                for monitor in runtime.progress_monitors() {
                     amount = amount
                         .saturating_add(monitor.command.capacity())
                         .saturating_add(crate::snapshot_io::estimated_progress_bytes(
                             &monitor.latest_progress,
                         ));
                 }
-                if let Some(monitor) = &runtime.deferred_progress_monitor {
+                for monitor in &runtime.deferred_progress_monitors {
                     amount = amount.saturating_add(estimated_monitor_bytes(monitor));
                 }
                 amount

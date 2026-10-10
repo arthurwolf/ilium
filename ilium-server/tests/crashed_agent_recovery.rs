@@ -71,7 +71,7 @@ fn assert_recovery(tree: &Tree, pane_id: NodeId, class: &AgentClass, prompt: &st
     );
     assert!(
         matches!(
-            project_pane_signals(status, None, false, None).now,
+            project_pane_signals(status, &[], false, None).now,
             NowSignal::AgentUnavailable(_)
         ),
         "historical Working evidence must not project as live activity"

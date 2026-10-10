@@ -19,7 +19,7 @@ use tokio::sync::{watch, Mutex};
 use tokio::task::JoinHandle;
 
 use crate::progress_monitor::{
-    ProgressMonitorFence, ProgressMonitorGeneration, ProgressMonitorRegistration,
+    ProgressMonitorFence, ProgressMonitorRegistration, MAX_PROGRESS_MONITORS_PER_PANE,
 };
 use crate::shell_title::ShellCommandTracker;
 
@@ -147,7 +147,7 @@ pub enum ProgressDeliveryState {
 }
 
 /// What the progress reconciler (`crate::progress_watchdog`) must do for one
-/// pane so that an agent waiting on a monitor can never wait on nothing.
+/// monitor so that an agent waiting on it can never wait on nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ProgressReconcileAction {
     /// Nothing is wrong, or work is still legitimately in flight.
@@ -209,6 +209,41 @@ pub struct ProgressMonitorRuntimeState {
     pub interval: Duration,
     pub latest_progress: PaneProgress,
     pub result_delivery: ProgressDeliveryState,
+}
+
+impl ProgressMonitorRuntimeState {
+    /// The task reported done/error, or the monitor itself failed.
+    pub fn is_settled(&self) -> bool {
+        self.latest_progress.is_terminal() || self.latest_progress.monitor_health.is_failed()
+    }
+}
+
+/// One registered monitor plus the background work that serves it. Each
+/// monitor owns its own probe loop, delivery task and fence, so monitors on
+/// the same pane start, settle and stop independently.
+struct ProgressMonitorSlot {
+    state: ProgressMonitorRuntimeState,
+    fence: ProgressMonitorFence,
+    /// The probe loop (see `crate::progress_monitor::spawn`).
+    monitor_task: Option<JoinHandle<()>>,
+    /// Pause/result/resume waiter for this monitor's outcome. Separate from
+    /// the probe task so probing can stop while a safe composer is still
+    /// pending.
+    delivery_task: Option<JoinHandle<()>>,
+    /// Terminal side effects are emitted once per monitor, even if a
+    /// coordinator callback is repeated after the final report was stored.
+    outcome_notified: bool,
+}
+
+impl ProgressMonitorSlot {
+    fn stop_tasks(&mut self) {
+        if let Some(task) = self.monitor_task.take() {
+            task.abort();
+        }
+        if let Some(task) = self.delivery_task.take() {
+            task.abort();
+        }
+    }
 }
 
 /// What a terminal pane was spawned to run -- kept separate from
@@ -278,10 +313,10 @@ pub struct TerminalPaneRuntime {
     /// A validated worktree could not be found at restore time. Automated
     /// input producers must not deliver workspace-targeted text to the shell.
     pub missing_workspace: Option<String>,
-    /// A persisted monitor remains authored state while its worktree is
-    /// missing. It must survive subsequent snapshots without probing or
-    /// delivering its command in the fallback shell.
-    pub deferred_progress_monitor: Option<crate::persistence::PersistedProgressMonitor>,
+    /// Persisted monitors remain authored state while their worktree is
+    /// missing. They must survive subsequent snapshots without probing or
+    /// delivering their commands in the fallback shell.
+    pub deferred_progress_monitors: Vec<crate::persistence::PersistedProgressMonitor>,
     pub shell_command_tracker: Option<ShellCommandTracker>,
     /// Observes submitted agent slash commands only so an in-process
     /// `/resume`-style transition can invalidate launch-time identity before
@@ -389,16 +424,8 @@ pub struct TerminalPaneRuntime {
     /// Waits for an `ilium new-pane` command to exit, then hands the actual
     /// close to a separate task. Pane-owned so closing the pane cancels it.
     close_on_exit_task: Option<JoinHandle<()>>,
-    /// This pane's active progress-monitor loop (see
-    /// `crate::progress_monitor`), if `SetPaneProgressMonitor` started one.
-    /// Owned here so replacing it (a fresh `SetPaneProgressMonitor` call) or
-    /// closing the pane has a single, unambiguous place to cancel the
-    /// previous run -- same rationale as `initial_prompt_task`.
-    progress_monitor_task: Option<JoinHandle<()>>,
-    /// Pause/result/resume waiter for the active monitor. Separate from the
-    /// probe task so terminal probing can stop while a safe composer is still
-    /// pending. Replacement and clear cancel both.
-    progress_delivery_task: Option<JoinHandle<()>>,
+    /// Every monitor registered on this pane, in registration order.
+    progress_monitors: Vec<ProgressMonitorSlot>,
     /// Held `ilium progress wait` requests. Each waiter's reply channel ends
     /// with its client connection, which is how a settle detects that no
     /// waiter is left to receive the outcome.
@@ -406,15 +433,9 @@ pub struct TerminalPaneRuntime {
     /// Live status-line delivery for the current Antigravity invocation.
     pub antigravity_statusline_generation: u64,
     antigravity_statusline_delivery_task: Option<JoinHandle<()>>,
-    /// Atomic generation fence shared with the probe and delivery tasks.
-    pub progress_monitor_generation: ProgressMonitorGeneration,
-    /// Serializes registration replacement/clear with the final readiness
-    /// check and full text-to-Enter submission of progress-owned effects.
+    /// Serializes registration and clear with the final readiness check and
+    /// full text-to-Enter submission of progress-owned effects.
     pub progress_effect_gate: std::sync::Arc<Mutex<()>>,
-    pub progress_monitor: Option<ProgressMonitorRuntimeState>,
-    /// Terminal side effects are emitted once per monitor identity, even if
-    /// a coordinator callback is repeated after the final report was stored.
-    notified_progress_outcome_monitor_id: Option<u64>,
 }
 
 impl TerminalPaneRuntime {
@@ -443,7 +464,7 @@ impl TerminalPaneRuntime {
             origin,
             deferred_workspace_origin: None,
             missing_workspace: None,
-            deferred_progress_monitor: None,
+            deferred_progress_monitors: Vec::new(),
             detection_schedule: DetectionSchedule {
                 // Checked on the very next detection tick rather than
                 // waiting a full interval -- a freshly-spawned pane's
@@ -483,15 +504,11 @@ impl TerminalPaneRuntime {
             forward_task: None,
             initial_prompt_task: None,
             close_on_exit_task: None,
-            progress_monitor_task: None,
-            progress_delivery_task: None,
+            progress_monitors: Vec::new(),
             progress_waiters: Vec::new(),
             antigravity_statusline_generation: 0,
             antigravity_statusline_delivery_task: None,
-            progress_monitor_generation: ProgressMonitorGeneration::default(),
             progress_effect_gate: std::sync::Arc::new(Mutex::new(())),
-            progress_monitor: None,
-            notified_progress_outcome_monitor_id: None,
         }
     }
 
@@ -570,13 +587,13 @@ impl TerminalPaneRuntime {
 
     pub(crate) fn cancel_agent_owned_delivery(&mut self) {
         self.cancel_initial_prompt_delivery();
-        self.cancel_progress_delivery_task();
+        self.cancel_progress_delivery_tasks();
         self.cancel_auto_answer_task();
         if let Some(task) = self.antigravity_statusline_delivery_task.take() {
             task.abort();
         }
-        if let Some(monitor) = self.progress_monitor.as_mut() {
-            monitor.result_delivery = match monitor.result_delivery {
+        for slot in &mut self.progress_monitors {
+            slot.state.result_delivery = match slot.state.result_delivery {
                 ProgressDeliveryState::Queued => ProgressDeliveryState::NotDeliverable,
                 ProgressDeliveryState::Attempted => ProgressDeliveryState::Uncertain,
                 other => other,
@@ -683,18 +700,72 @@ impl TerminalPaneRuntime {
         }
     }
 
-    /// Installs this pane's progress-monitor loop task, aborting any
-    /// previous one -- a fresh `SetPaneProgressMonitor` call always replaces
-    /// rather than stacking a second concurrent loop on the same pane.
-    pub fn set_progress_monitor_task(&mut self, task: JoinHandle<()>) {
-        if let Some(previous_task) = self.progress_monitor_task.replace(task) {
-            previous_task.abort();
+    fn progress_slot(&self, monitor_id: u64) -> Option<&ProgressMonitorSlot> {
+        self.progress_monitors
+            .iter()
+            .find(|slot| slot.state.monitor_id == monitor_id)
+    }
+
+    fn progress_slot_mut(&mut self, monitor_id: u64) -> Option<&mut ProgressMonitorSlot> {
+        self.progress_monitors
+            .iter_mut()
+            .find(|slot| slot.state.monitor_id == monitor_id)
+    }
+
+    /// Every monitor registered on this pane, in registration order.
+    pub fn progress_monitors(&self) -> impl Iterator<Item = &ProgressMonitorRuntimeState> {
+        self.progress_monitors.iter().map(|slot| &slot.state)
+    }
+
+    pub fn progress_monitor(&self, monitor_id: u64) -> Option<&ProgressMonitorRuntimeState> {
+        self.progress_slot(monitor_id).map(|slot| &slot.state)
+    }
+
+    pub fn progress_monitor_mut(
+        &mut self,
+        monitor_id: u64,
+    ) -> Option<&mut ProgressMonitorRuntimeState> {
+        self.progress_slot_mut(monitor_id)
+            .map(|slot| &mut slot.state)
+    }
+
+    pub fn progress_monitor_ids(&self) -> Vec<u64> {
+        self.progress_monitors
+            .iter()
+            .map(|slot| slot.state.monitor_id)
+            .collect()
+    }
+
+    /// The latest report of every monitor, in registration order: the value
+    /// the pure tree mirrors for this pane.
+    pub fn progress_reports(&self) -> Vec<PaneProgress> {
+        self.progress_monitors
+            .iter()
+            .map(|slot| slot.state.latest_progress.clone())
+            .collect()
+    }
+
+    /// Installs one monitor's probe-loop task. A task for a monitor that was
+    /// cleared in the meantime is aborted at once.
+    pub fn set_progress_monitor_task(&mut self, monitor_id: u64, task: JoinHandle<()>) {
+        match self.progress_slot_mut(monitor_id) {
+            Some(slot) => {
+                if let Some(previous_task) = slot.monitor_task.replace(task) {
+                    previous_task.abort();
+                }
+            }
+            None => task.abort(),
         }
     }
 
-    pub fn set_progress_delivery_task(&mut self, task: JoinHandle<()>) {
-        if let Some(previous_task) = self.progress_delivery_task.replace(task) {
-            previous_task.abort();
+    pub fn set_progress_delivery_task(&mut self, monitor_id: u64, task: JoinHandle<()>) {
+        match self.progress_slot_mut(monitor_id) {
+            Some(slot) => {
+                if let Some(previous_task) = slot.delivery_task.replace(task) {
+                    previous_task.abort();
+                }
+            }
+            None => task.abort(),
         }
     }
 
@@ -702,22 +773,19 @@ impl TerminalPaneRuntime {
         task.is_some_and(|task| !task.is_finished())
     }
 
-    /// Classifies this pane's progress monitor for the periodic reconciler.
-    /// Pure and cheap: it only reads task liveness and persisted delivery
-    /// state, so it can run under the pane registry read guard and be
-    /// re-evaluated under the write guard before acting.
-    pub(crate) fn progress_reconcile_action(&self) -> ProgressReconcileAction {
-        let Some(monitor) = self.progress_monitor.as_ref() else {
+    /// Classifies one monitor for the periodic reconciler. Pure and cheap:
+    /// it only reads task liveness and persisted delivery state, so it can
+    /// run under the pane registry read guard and be re-evaluated under the
+    /// write guard before acting.
+    pub(crate) fn progress_reconcile_action(&self, monitor_id: u64) -> ProgressReconcileAction {
+        let Some(slot) = self.progress_slot(monitor_id) else {
             return ProgressReconcileAction::None;
         };
-        let monitor_id = monitor.monitor_id;
-        if !self.is_current_progress_monitor(monitor_id) {
+        if !slot.fence.is_current() {
             return ProgressReconcileAction::None;
         }
-        let progress = &monitor.latest_progress;
-        let is_settled = progress.is_terminal() || progress.monitor_health.is_failed();
-        let is_monitor_task_live = Self::is_task_live(self.progress_monitor_task.as_ref());
-        if !is_settled {
+        let is_monitor_task_live = Self::is_task_live(slot.monitor_task.as_ref());
+        if !slot.state.is_settled() {
             return if is_monitor_task_live {
                 ProgressReconcileAction::None
             } else {
@@ -725,7 +793,7 @@ impl TerminalPaneRuntime {
             };
         }
         // The monitor task also awaits the live delivery of its own outcome.
-        if is_monitor_task_live || Self::is_task_live(self.progress_delivery_task.as_ref()) {
+        if is_monitor_task_live || Self::is_task_live(slot.delivery_task.as_ref()) {
             return ProgressReconcileAction::None;
         }
         let has_supported_composer = self
@@ -736,7 +804,7 @@ impl TerminalPaneRuntime {
         if !has_supported_composer {
             return ProgressReconcileAction::None;
         }
-        match monitor.result_delivery {
+        match slot.state.result_delivery {
             ProgressDeliveryState::DeliveredToPty | ProgressDeliveryState::CollectedByWaiter => {
                 ProgressReconcileAction::None
             }
@@ -757,69 +825,128 @@ impl TerminalPaneRuntime {
 
     /// Makes an unfinished delivery retryable again. Only the reconciler
     /// calls this, after `progress_reconcile_action` said `Redeliver`.
-    pub(crate) fn requeue_progress_delivery(&mut self) {
-        if let Some(monitor) = self.progress_monitor.as_mut() {
-            monitor.result_delivery = ProgressDeliveryState::Queued;
+    pub(crate) fn requeue_progress_delivery(&mut self, monitor_id: u64) {
+        if let Some(slot) = self.progress_slot_mut(monitor_id) {
+            slot.state.result_delivery = ProgressDeliveryState::Queued;
         }
     }
 
-    pub fn cancel_progress_delivery_task(&mut self) {
-        if let Some(task) = self.progress_delivery_task.take() {
+    #[cfg(test)]
+    pub fn cancel_progress_delivery_task(&mut self, monitor_id: u64) {
+        if let Some(task) = self
+            .progress_slot_mut(monitor_id)
+            .and_then(|slot| slot.delivery_task.take())
+        {
             task.abort();
+        }
+    }
+
+    fn cancel_progress_delivery_tasks(&mut self) {
+        for slot in &mut self.progress_monitors {
+            if let Some(task) = slot.delivery_task.take() {
+                task.abort();
+            }
+        }
+    }
+
+    /// Stops one monitor's probe and delivery tasks, keeping its
+    /// registration and latest report as evidence.
+    pub fn stop_progress_monitor_tasks(&mut self, monitor_id: u64) {
+        if let Some(slot) = self.progress_slot_mut(monitor_id) {
+            slot.stop_tasks();
         }
     }
 
     /// Stops all automated progress work without discarding the accepted
-    /// registration, sticky terminal evidence, or generation. Used by the
+    /// registrations, sticky terminal evidence, or fences. Used by the
     /// global feature switch; explicit clear remains the destructive action.
     pub fn stop_progress_tasks_preserving_state(&mut self) {
-        if let Some(task) = self.progress_monitor_task.take() {
-            task.abort();
+        for slot in &mut self.progress_monitors {
+            slot.stop_tasks();
         }
-        self.cancel_progress_delivery_task();
     }
 
-    /// Commits an already-preflighted registration. The caller must hold the
-    /// pane's `progress_effect_gate`, making replacement atomic with respect
-    /// to any delivery's final validation and delayed Enter.
+    /// A settled monitor whose outcome needs no further work: its tasks have
+    /// ended and its result was handed over (or cannot be). A new
+    /// registration may retire it, as the former single monitor slot was
+    /// overwritten by the next `set`.
+    fn is_progress_monitor_retirable(&self, slot: &ProgressMonitorSlot, command: &str) -> bool {
+        slot.state.is_settled()
+            && !Self::is_task_live(slot.monitor_task.as_ref())
+            && !Self::is_task_live(slot.delivery_task.as_ref())
+            && (slot.state.command == command
+                || self.progress_reconcile_action(slot.state.monitor_id)
+                    == ProgressReconcileAction::None)
+    }
+
+    /// Whether a registration of `command` fits, counting the monitors it
+    /// would retire.
+    pub fn has_progress_monitor_capacity_for(&self, command: &str) -> bool {
+        let kept = self
+            .progress_monitors
+            .iter()
+            .filter(|slot| !self.is_progress_monitor_retirable(slot, command))
+            .count();
+        kept < MAX_PROGRESS_MONITORS_PER_PANE
+    }
+
+    /// Removes the retirable settled monitors before `command` is
+    /// registered. Returns their ids.
+    pub fn retire_settled_progress_monitors(&mut self, command: &str) -> Vec<u64> {
+        let retired: Vec<u64> = self
+            .progress_monitors
+            .iter()
+            .filter(|slot| self.is_progress_monitor_retirable(slot, command))
+            .map(|slot| slot.state.monitor_id)
+            .collect();
+        for monitor_id in &retired {
+            self.cancel_progress_monitor(*monitor_id);
+        }
+        retired
+    }
+
+    /// Commits an already-preflighted registration beside the pane's other
+    /// monitors. The caller must hold the pane's `progress_effect_gate`,
+    /// making the addition atomic with respect to any delivery's final
+    /// validation and delayed Enter.
     pub fn install_progress_monitor(
         &mut self,
         registration: ProgressMonitorRegistration,
     ) -> Result<ProgressMonitorFence, String> {
         registration.validate().map_err(|error| error.to_string())?;
-        // Validate every rejectable condition before aborting the old tasks so
-        // a rejected replacement leaves the previous accepted monitor intact.
-        let fence = self
-            .progress_monitor_generation
-            .activate(registration.monitor_id)
+        if self.progress_slot(registration.monitor_id).is_some() {
+            return Err(format!(
+                "progress monitor {} is already registered on this pane",
+                registration.monitor_id
+            ));
+        }
+        if self.progress_monitors.len() >= MAX_PROGRESS_MONITORS_PER_PANE {
+            return Err(format!(
+                "this pane already has {MAX_PROGRESS_MONITORS_PER_PANE} progress monitors"
+            ));
+        }
+        let fence = ProgressMonitorFence::activate(registration.monitor_id)
             .map_err(|error| error.to_string())?;
-        if let Some(task) = self.progress_monitor_task.take() {
-            task.abort();
-        }
-        if let Some(task) = self.progress_delivery_task.take() {
-            task.abort();
-        }
-        let new_monitor_id = registration.monitor_id;
-        self.end_progress_waiters(
-            |waited_monitor_id| waited_monitor_id != new_monitor_id,
-            ilium_ipc::ProgressWaitEnd::Superseded,
-        );
-        self.progress_monitor = Some(ProgressMonitorRuntimeState {
-            monitor_id: registration.monitor_id,
-            command: registration.command,
-            interval: registration.interval,
-            latest_progress: registration.initial_progress,
-            result_delivery: ProgressDeliveryState::NotQueued,
+        self.progress_monitors.push(ProgressMonitorSlot {
+            state: ProgressMonitorRuntimeState {
+                monitor_id: registration.monitor_id,
+                command: registration.command,
+                interval: registration.interval,
+                latest_progress: registration.initial_progress,
+                result_delivery: ProgressDeliveryState::NotQueued,
+            },
+            fence: fence.clone(),
+            monitor_task: None,
+            delivery_task: None,
+            outcome_notified: false,
         });
         Ok(fence)
     }
 
+    /// True while `monitor_id` is registered here and has not been cleared.
     pub fn is_current_progress_monitor(&self, monitor_id: u64) -> bool {
-        self.progress_monitor_generation.current() == Some(monitor_id)
-            && self
-                .progress_monitor
-                .as_ref()
-                .is_some_and(|monitor| monitor.monitor_id == monitor_id)
+        self.progress_slot(monitor_id)
+            .is_some_and(|slot| slot.fence.is_current())
     }
 
     pub fn update_progress_monitor_progress(
@@ -830,10 +957,10 @@ impl TerminalPaneRuntime {
         if progress.monitor_id != monitor_id || !self.is_current_progress_monitor(monitor_id) {
             return false;
         }
-        let Some(monitor) = self.progress_monitor.as_mut() else {
+        let Some(slot) = self.progress_slot_mut(monitor_id) else {
             return false;
         };
-        monitor.latest_progress = progress;
+        slot.state.latest_progress = progress;
         true
     }
 
@@ -844,22 +971,21 @@ impl TerminalPaneRuntime {
     pub fn collect_progress_outcome_by_waiter(&mut self, monitor_id: u64) -> Result<bool, String> {
         if !self.is_current_progress_monitor(monitor_id) {
             return Err(format!(
-                "progress monitor {monitor_id} is not this pane's current monitor"
+                "progress monitor {monitor_id} is not registered on this pane"
             ));
         }
-        let Some(monitor) = self.progress_monitor.as_mut() else {
+        let Some(slot) = self.progress_slot_mut(monitor_id) else {
             return Err("progress monitor was cleared".to_string());
         };
-        let progress = &monitor.latest_progress;
-        if !progress.is_terminal() && !progress.monitor_health.is_failed() {
+        if !slot.state.is_settled() {
             return Err(format!("progress monitor {monitor_id} has not settled yet"));
         }
-        match monitor.result_delivery {
+        match slot.state.result_delivery {
             ProgressDeliveryState::NotQueued
             | ProgressDeliveryState::Queued
             | ProgressDeliveryState::NotDeliverable
             | ProgressDeliveryState::CollectedByWaiter => {
-                monitor.result_delivery = ProgressDeliveryState::CollectedByWaiter;
+                slot.state.result_delivery = ProgressDeliveryState::CollectedByWaiter;
                 Ok(true)
             }
             ProgressDeliveryState::Attempted
@@ -874,49 +1000,48 @@ impl TerminalPaneRuntime {
         if !self.is_current_progress_monitor(monitor_id) {
             return;
         }
-        if let Some(monitor) = self.progress_monitor.as_mut() {
-            if monitor.result_delivery == ProgressDeliveryState::CollectedByWaiter {
-                monitor.result_delivery = ProgressDeliveryState::NotQueued;
+        if let Some(slot) = self.progress_slot_mut(monitor_id) {
+            if slot.state.result_delivery == ProgressDeliveryState::CollectedByWaiter {
+                slot.state.result_delivery = ProgressDeliveryState::NotQueued;
             }
         }
     }
 
     pub fn claim_progress_outcome_notification(&mut self, monitor_id: u64) -> bool {
-        if !self.is_current_progress_monitor(monitor_id)
-            || !self.progress_monitor.as_ref().is_some_and(|monitor| {
-                monitor.latest_progress.is_terminal()
-                    || monitor.latest_progress.monitor_health.is_failed()
-            })
-            || self.notified_progress_outcome_monitor_id == Some(monitor_id)
-        {
+        if !self.is_current_progress_monitor(monitor_id) {
             return false;
         }
-        self.notified_progress_outcome_monitor_id = Some(monitor_id);
+        let Some(slot) = self.progress_slot_mut(monitor_id) else {
+            return false;
+        };
+        if !slot.state.is_settled() || slot.outcome_notified {
+            return false;
+        }
+        slot.outcome_notified = true;
         true
     }
 
     pub fn progress_monitor_status(&self, pane_id: NodeId) -> ProgressMonitorStatus {
         ProgressMonitorStatus {
             pane_id,
-            progress: self
-                .progress_monitor
-                .as_ref()
-                .map(|monitor| monitor.latest_progress.clone()),
+            progress_monitors: self.progress_reports(),
         }
     }
 
-    pub fn progress_monitor_snapshot(
+    pub fn progress_monitor_snapshots(
         &self,
         pane_id: NodeId,
-    ) -> Option<crate::persistence::PersistedProgressMonitor> {
-        let monitor = self.progress_monitor.as_ref()?;
-        Some(crate::persistence::PersistedProgressMonitor {
-            pane_id,
-            command: monitor.command.clone(),
-            interval_seconds: monitor.interval.as_secs(),
-            latest_progress: monitor.latest_progress.clone(),
-            result_delivery: monitor.result_delivery.into(),
-        })
+    ) -> Vec<crate::persistence::PersistedProgressMonitor> {
+        self.progress_monitors
+            .iter()
+            .map(|slot| crate::persistence::PersistedProgressMonitor {
+                pane_id,
+                command: slot.state.command.clone(),
+                interval_seconds: slot.state.interval.as_secs(),
+                latest_progress: slot.state.latest_progress.clone(),
+                result_delivery: slot.state.result_delivery.into(),
+            })
+            .collect()
     }
 
     /// Applies crash-recovery delivery evidence. Only a caller that separately
@@ -924,31 +1049,47 @@ impl TerminalPaneRuntime {
     /// evidence.
     pub fn restore_progress_delivery_state(
         &mut self,
+        monitor_id: u64,
         result_delivery: crate::persistence::PersistedProgressDeliveryState,
     ) -> Result<(), String> {
-        let monitor = self
-            .progress_monitor
-            .as_mut()
-            .ok_or_else(|| "no progress monitor is installed".to_string())?;
-        monitor.result_delivery = result_delivery.into();
+        let slot = self
+            .progress_slot_mut(monitor_id)
+            .ok_or_else(|| format!("progress monitor {monitor_id} is not installed"))?;
+        slot.state.result_delivery = result_delivery.into();
         Ok(())
     }
 
-    /// Cancels this pane's active progress-monitor loop, if any. Used by
-    /// `ClearPaneProgressMonitor` and by the server's own progress-monitor
-    /// setting being disabled mid-run.
-    pub fn cancel_progress_monitor(&mut self) {
-        if let Some(task) = self.progress_monitor_task.take() {
-            task.abort();
-        }
-        if let Some(task) = self.progress_delivery_task.take() {
-            task.abort();
-        }
-        if let Some(monitor) = self.progress_monitor.take() {
-            self.progress_monitor_generation
-                .clear_if_current(monitor.monitor_id);
+    /// Stops and removes one monitor, ending its held waits as cleared.
+    /// Returns whether it was registered.
+    pub fn cancel_progress_monitor(&mut self, monitor_id: u64) -> bool {
+        let Some(index) = self
+            .progress_monitors
+            .iter()
+            .position(|slot| slot.state.monitor_id == monitor_id)
+        else {
+            return false;
+        };
+        let mut slot = self.progress_monitors.remove(index);
+        slot.stop_tasks();
+        slot.fence.deactivate();
+        self.end_progress_waiters(
+            |waited_monitor_id| waited_monitor_id == monitor_id,
+            ilium_ipc::ProgressWaitEnd::Cleared,
+        );
+        true
+    }
+
+    /// Stops and removes every monitor of this pane. Used by an unfenced
+    /// clear, pane close, and the server's own progress-monitor setting being
+    /// disabled mid-run. Returns the removed monitor ids.
+    pub fn cancel_progress_monitors(&mut self) -> Vec<u64> {
+        let removed: Vec<u64> = self.progress_monitor_ids();
+        for mut slot in std::mem::take(&mut self.progress_monitors) {
+            slot.stop_tasks();
+            slot.fence.deactivate();
         }
         self.end_progress_waiters(|_| true, ilium_ipc::ProgressWaitEnd::Cleared);
+        removed
     }
 
     /// Holds a `wait` request until its monitor settles, is replaced, or is
@@ -1013,7 +1154,7 @@ impl TerminalPaneRuntime {
             task.abort();
         }
         self.cancel_auto_answer_task();
-        self.cancel_progress_monitor();
+        self.cancel_progress_monitors();
         if let Some(task) = self.antigravity_statusline_delivery_task.take() {
             task.abort();
         }
@@ -1185,8 +1326,8 @@ pub enum PaneResource {
 pub struct UnrestoredPane {
     /// The saved kind, persisted unchanged while the pane stays unrestored.
     pub kind: PaneSnapshotKind,
-    /// The saved progress monitor, re-registered once the pane starts.
-    pub progress_monitor: Option<crate::persistence::PersistedProgressMonitor>,
+    /// The saved progress monitors, re-registered once the pane starts.
+    pub progress_monitors: Vec<crate::persistence::PersistedProgressMonitor>,
     /// Why the last start failed; `None` while the first attempt is queued.
     pub failure: Option<String>,
     /// Failed start attempts so far.
@@ -1199,7 +1340,7 @@ impl UnrestoredPane {
     pub fn queued(kind: PaneSnapshotKind) -> Self {
         Self {
             kind,
-            progress_monitor: None,
+            progress_monitors: Vec::new(),
             failure: None,
             attempts: 0,
             size: None,

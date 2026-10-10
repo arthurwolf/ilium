@@ -186,6 +186,7 @@ pub(crate) async fn update_running_panes(
     });
 }
 
+#[allow(clippy::too_many_arguments)] // Keep pane, process, input and status-line generation guards explicit.
 async fn deliver_when_ready(
     state: &ServerState,
     pane_id: NodeId,

@@ -5,7 +5,7 @@
 //! task through its probe.
 
 use std::process::Stdio;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -129,48 +129,41 @@ impl ProgressMonitorRegistration {
     }
 }
 
-/// Per-pane generation source used to fence late work after replacement.
-#[derive(Debug, Clone, Default)]
-pub struct ProgressMonitorGeneration(Arc<AtomicU64>);
+/// Most monitors one pane may hold at once. Several long-running tasks (an
+/// agent and its subagents share one pane) each get their own monitor; the
+/// bound keeps a runaway registration loop from spawning unbounded probes.
+pub const MAX_PROGRESS_MONITORS_PER_PANE: usize = 8;
 
-impl ProgressMonitorGeneration {
-    pub fn activate(&self, monitor_id: u64) -> Result<ProgressMonitorFence, ProgressProbeError> {
+/// Fences late work of one monitor after it was cleared. Every monitor has
+/// its own active flag, shared by its probe loop and delivery task, so
+/// clearing one monitor never disturbs another on the same pane.
+#[derive(Debug, Clone)]
+pub struct ProgressMonitorFence {
+    active: Arc<AtomicBool>,
+    monitor_id: u64,
+}
+
+impl ProgressMonitorFence {
+    pub fn activate(monitor_id: u64) -> Result<Self, ProgressProbeError> {
         if monitor_id == 0 {
             return Err(probe_error(
                 ProgressProbeFailureKind::InvalidRequest,
                 "monitor ID must be non-zero",
             ));
         }
-        self.0.store(monitor_id, Ordering::Release);
-        Ok(ProgressMonitorFence {
-            active_monitor_id: Arc::clone(&self.0),
+        Ok(Self {
+            active: Arc::new(AtomicBool::new(true)),
             monitor_id,
         })
     }
 
-    pub fn clear_if_current(&self, monitor_id: u64) -> bool {
-        self.0
-            .compare_exchange(monitor_id, 0, Ordering::AcqRel, Ordering::Acquire)
-            .is_ok()
+    /// Ends this monitor's authority to publish or deliver anything.
+    pub fn deactivate(&self) {
+        self.active.store(false, Ordering::Release);
     }
 
-    pub fn current(&self) -> Option<u64> {
-        match self.0.load(Ordering::Acquire) {
-            0 => None,
-            monitor_id => Some(monitor_id),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct ProgressMonitorFence {
-    active_monitor_id: Arc<AtomicU64>,
-    monitor_id: u64,
-}
-
-impl ProgressMonitorFence {
     pub fn is_current(&self) -> bool {
-        self.active_monitor_id.load(Ordering::Acquire) == self.monitor_id
+        self.active.load(Ordering::Acquire)
     }
 
     pub const fn monitor_id(&self) -> u64 {
@@ -186,7 +179,9 @@ pub enum ProgressMonitorOutcome {
         error: ProgressProbeError,
     },
     Disabled,
-    Superseded,
+    /// The monitor was cleared (explicitly, by `set --replace`, or with its
+    /// pane) while observing.
+    Cleared,
     PaneUnavailable,
 }
 
@@ -211,7 +206,7 @@ pub fn spawn(
 ) -> JoinHandle<ProgressMonitorOutcome> {
     tokio::spawn(async move {
         if registration.validate().is_err() || !fence.is_current() {
-            return ProgressMonitorOutcome::Superseded;
+            return ProgressMonitorOutcome::Cleared;
         }
         let mut latest = registration.initial_progress;
         if latest.is_terminal() {
@@ -224,7 +219,7 @@ pub fn spawn(
         loop {
             tokio::time::sleep(registration.interval).await;
             if !fence.is_current() {
-                return ProgressMonitorOutcome::Superseded;
+                return ProgressMonitorOutcome::Cleared;
             }
             if !state.is_progress_monitor_enabled() {
                 return ProgressMonitorOutcome::Disabled;
@@ -233,7 +228,7 @@ pub fn spawn(
             match run_probe(&registration.command, ProbeExecutionLimits::default()).await {
                 Ok(report) => {
                     if !fence.is_current() {
-                        return ProgressMonitorOutcome::Superseded;
+                        return ProgressMonitorOutcome::Cleared;
                     }
                     let report =
                         match validate_next_report(&expected_job_id, previous_status, report) {
@@ -262,7 +257,7 @@ pub fn spawn(
                         return if fence.is_current() {
                             ProgressMonitorOutcome::PaneUnavailable
                         } else {
-                            ProgressMonitorOutcome::Superseded
+                            ProgressMonitorOutcome::Cleared
                         };
                     }
                     if latest.is_terminal() {
@@ -297,7 +292,7 @@ async fn record_observation_failure(
     error: ProgressProbeError,
 ) -> Option<ProgressMonitorOutcome> {
     if !fence.is_current() {
-        return Some(ProgressMonitorOutcome::Superseded);
+        return Some(ProgressMonitorOutcome::Cleared);
     }
     *consecutive_failures = consecutive_failures.saturating_add(1);
     let last_error = bounded_monitor_error(&error.message);
@@ -316,7 +311,7 @@ async fn record_observation_failure(
         return Some(if fence.is_current() {
             ProgressMonitorOutcome::PaneUnavailable
         } else {
-            ProgressMonitorOutcome::Superseded
+            ProgressMonitorOutcome::Cleared
         });
     }
     latest
@@ -349,17 +344,18 @@ async fn publish_progress(
         return false;
     }
     if tree
-        .set_pane_progress(pane_id, Some(progress.clone()))
+        .upsert_pane_progress(pane_id, progress.clone())
         .is_err()
     {
         return false;
     }
+    let progress_monitors = runtime.progress_reports();
     drop(panes);
     drop(tree);
     state.request_snapshot_save();
     state.broadcast(ServerEvent::PaneProgressChanged {
         pane_id,
-        progress: Some(progress.clone()),
+        progress_monitors,
     });
     true
 }
@@ -918,16 +914,15 @@ mod tests {
     }
 
     #[test]
-    fn generation_fence_invalidates_replaced_and_cleared_monitors() {
-        let generation = ProgressMonitorGeneration::default();
-        let first = generation.activate(1).unwrap();
-        assert!(first.is_current());
-        let second = generation.activate(2).unwrap();
-        assert!(!first.is_current());
+    fn monitor_fences_are_independent_per_monitor() {
+        let first = ProgressMonitorFence::activate(1).unwrap();
+        let second = ProgressMonitorFence::activate(2).unwrap();
+        let first_task_copy = first.clone();
+        assert!(first.is_current() && second.is_current());
+        first.deactivate();
+        assert!(!first_task_copy.is_current());
         assert!(second.is_current());
-        assert!(!generation.clear_if_current(1));
-        assert!(generation.clear_if_current(2));
-        assert!(!second.is_current());
+        assert!(ProgressMonitorFence::activate(0).is_err());
     }
 
     #[test]

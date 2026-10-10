@@ -65,17 +65,28 @@ pub(crate) async fn reconcile(
         let panes = state.panes.read().await;
         panes
             .iter()
-            .filter_map(|(pane_id, resource)| match resource {
-                PaneResource::Terminal(runtime) => match runtime.progress_reconcile_action() {
-                    ProgressReconcileAction::None => None,
-                    action => Some((*pane_id, action)),
-                },
-                _ => None,
+            .flat_map(|(pane_id, resource)| match resource {
+                PaneResource::Terminal(runtime) => runtime
+                    .progress_monitor_ids()
+                    .into_iter()
+                    .filter_map(
+                        |monitor_id| match runtime.progress_reconcile_action(monitor_id) {
+                            ProgressReconcileAction::None => None,
+                            action => Some((*pane_id, action)),
+                        },
+                    )
+                    .collect::<Vec<_>>(),
+                _ => Vec::new(),
             })
             .collect()
     };
-    // Generations that no longer exist cannot be retried; forget them.
-    attempts.retain(|(pane_id, _), _| actions.iter().any(|(candidate, _)| candidate == pane_id));
+    // Monitors that no longer need work cannot be retried; forget them.
+    attempts.retain(|(pane_id, monitor_id), _| {
+        actions.iter().any(|(candidate, action)| {
+            candidate == pane_id
+                && matches!(action, ProgressReconcileAction::Redeliver { monitor_id: id, .. } if id == monitor_id)
+        })
+    });
     for (pane_id, action) in actions {
         match action {
             ProgressReconcileAction::None => {}
@@ -111,26 +122,26 @@ fn failed_progress(progress: &PaneProgress, reason: &str) -> Option<PaneProgress
     }
 }
 
-/// Converts a nonterminal monitor into sticky failed evidence in place, stopping
-/// its tasks. The caller holds the tree and pane registry write guards. Returns
-/// the new presentation to broadcast, or `None` when nothing changed.
+/// Converts one nonterminal monitor into sticky failed evidence in place,
+/// stopping its tasks. The caller holds the tree and pane registry write
+/// guards. Returns the failed report, or `None` when nothing changed.
 pub(crate) fn mark_observation_stopped(
     tree: &mut ilium_core::Tree,
     pane_id: NodeId,
     runtime: &mut TerminalPaneRuntime,
+    monitor_id: u64,
     reason: &str,
 ) -> Option<PaneProgress> {
-    let monitor = runtime.progress_monitor.as_ref()?;
-    let monitor_id = monitor.monitor_id;
-    if monitor.latest_progress.is_terminal() || monitor.latest_progress.monitor_health.is_failed() {
+    let monitor = runtime.progress_monitor(monitor_id)?;
+    if monitor.is_settled() {
         return None;
     }
     let failed = failed_progress(&monitor.latest_progress, reason)?;
-    runtime.stop_progress_tasks_preserving_state();
+    runtime.stop_progress_monitor_tasks(monitor_id);
     if !runtime.update_progress_monitor_progress(monitor_id, failed.clone()) {
         return None;
     }
-    if let Err(error) = tree.set_pane_progress(pane_id, Some(failed.clone())) {
+    if let Err(error) = tree.upsert_pane_progress(pane_id, failed.clone()) {
         tracing::warn!(pane_id = pane_id.0, monitor_id, %error, "could not present stopped monitor");
     }
     Some(failed)
@@ -150,17 +161,20 @@ async fn stop_observation(
         };
         // Re-evaluate under the write guard: the monitor may have settled or
         // been replaced since the read-guard pass.
-        if runtime.progress_reconcile_action()
+        if runtime.progress_reconcile_action(monitor_id)
             != (ProgressReconcileAction::ObservationStopped { monitor_id })
         {
             return;
         }
-        let Some(failed) = mark_observation_stopped(&mut tree, pane_id, runtime, reason) else {
+        let Some(failed) =
+            mark_observation_stopped(&mut tree, pane_id, runtime, monitor_id, reason)
+        else {
             return;
         };
         runtime.claim_progress_outcome_notification(monitor_id);
-        failed
+        (failed, runtime.progress_reports())
     };
+    let (failed, progress_monitors) = failed;
     tracing::warn!(
         pane_id = pane_id.0,
         monitor_id,
@@ -168,7 +182,7 @@ async fn stop_observation(
     );
     state.broadcast(ServerEvent::PaneProgressChanged {
         pane_id,
-        progress: Some(failed.clone()),
+        progress_monitors,
     });
     state.request_snapshot_save();
     crate::ipc::handlers::alert_task_outcome(state, pane_id, &failed).await;
@@ -181,24 +195,19 @@ async fn redeliver(state: &Arc<ServerState>, pane_id: NodeId, monitor_id: u64) {
         return;
     };
     let ProgressReconcileAction::Redeliver {
-        monitor_id: current_monitor_id,
-        possible_duplicate,
-    } = runtime.progress_reconcile_action()
+        possible_duplicate, ..
+    } = runtime.progress_reconcile_action(monitor_id)
     else {
         return;
     };
-    if current_monitor_id != monitor_id {
-        return;
-    }
     let Some(progress) = runtime
-        .progress_monitor
-        .as_ref()
+        .progress_monitor(monitor_id)
         .map(|monitor| monitor.latest_progress.clone())
     else {
         return;
     };
     let message = crate::agent_delivery::settled_result_message(&progress, possible_duplicate);
-    runtime.requeue_progress_delivery();
+    runtime.requeue_progress_delivery(monitor_id);
     let delivery_state = Arc::clone(state);
     let task = tokio::spawn(async move {
         if let Err(error) =
@@ -208,7 +217,7 @@ async fn redeliver(state: &Arc<ServerState>, pane_id: NodeId, monitor_id: u64) {
             tracing::warn!(pane_id = pane_id.0, monitor_id, %error, "reconciled progress delivery stopped");
         }
     });
-    runtime.set_progress_delivery_task(task);
+    runtime.set_progress_delivery_task(monitor_id, task);
     drop(panes);
     tracing::info!(
         pane_id = pane_id.0,
@@ -221,13 +230,17 @@ async fn redeliver(state: &Arc<ServerState>, pane_id: NodeId, monitor_id: u64) {
 
 #[cfg(all(test, unix))]
 mod tests {
+    use std::collections::HashMap;
     use std::time::Duration;
 
-    use ilium_core::{AgentClass, NodeId, ProgressTaskReport, ProgressTaskStatus};
+    use ilium_core::{
+        AgentClass, NodeId, ProgressMonitorHealth, ProgressTaskReport, ProgressTaskStatus,
+    };
 
     use super::*;
-    use crate::pane::{ProgressDeliveryState, TerminalOrigin};
+    use crate::pane::{PaneResource, ProgressDeliveryState, TerminalOrigin};
     use crate::progress_monitor::ProgressMonitorRegistration;
+    use crate::state::{ServerState, ServerStateOptions};
 
     const MONITOR_ID: u64 = 7;
 
@@ -275,8 +288,7 @@ mod tests {
 
     fn set_delivery(runtime: &mut TerminalPaneRuntime, delivery: ProgressDeliveryState) {
         runtime
-            .progress_monitor
-            .as_mut()
+            .progress_monitor_mut(MONITOR_ID)
             .expect("installed monitor")
             .result_delivery = delivery;
     }
@@ -290,7 +302,7 @@ mod tests {
         let mut runtime = runtime();
         install(&mut runtime, ProgressTaskStatus::Running, 40.0);
         assert_eq!(
-            runtime.progress_reconcile_action(),
+            runtime.progress_reconcile_action(MONITOR_ID),
             ProgressReconcileAction::ObservationStopped {
                 monitor_id: MONITOR_ID
             }
@@ -302,12 +314,12 @@ mod tests {
     async fn running_monitor_with_live_observation_task_is_left_alone() {
         let mut runtime = runtime();
         install(&mut runtime, ProgressTaskStatus::Running, 40.0);
-        runtime.set_progress_monitor_task(tokio::spawn(std::future::pending::<()>()));
+        runtime.set_progress_monitor_task(MONITOR_ID, tokio::spawn(std::future::pending::<()>()));
         assert_eq!(
-            runtime.progress_reconcile_action(),
+            runtime.progress_reconcile_action(MONITOR_ID),
             ProgressReconcileAction::None
         );
-        runtime.cancel_progress_delivery_task();
+        runtime.cancel_progress_delivery_task(MONITOR_ID);
         finish(runtime);
     }
 
@@ -318,7 +330,7 @@ mod tests {
         install(&mut runtime, ProgressTaskStatus::Done, 100.0);
         set_delivery(&mut runtime, ProgressDeliveryState::NotQueued);
         assert_eq!(
-            runtime.progress_reconcile_action(),
+            runtime.progress_reconcile_action(MONITOR_ID),
             ProgressReconcileAction::Redeliver {
                 monitor_id: MONITOR_ID,
                 possible_duplicate: false,
@@ -338,7 +350,7 @@ mod tests {
             install(&mut runtime, ProgressTaskStatus::Error, 50.0);
             set_delivery(&mut runtime, delivery);
             assert_eq!(
-                runtime.progress_reconcile_action(),
+                runtime.progress_reconcile_action(MONITOR_ID),
                 ProgressReconcileAction::Redeliver {
                     monitor_id: MONITOR_ID,
                     possible_duplicate: true,
@@ -360,7 +372,7 @@ mod tests {
             install(&mut runtime, ProgressTaskStatus::Done, 100.0);
             set_delivery(&mut runtime, delivery);
             assert_eq!(
-                runtime.progress_reconcile_action(),
+                runtime.progress_reconcile_action(MONITOR_ID),
                 ProgressReconcileAction::None,
                 "{delivery:?}"
             );
@@ -374,7 +386,7 @@ mod tests {
         install(&mut runtime, ProgressTaskStatus::Done, 100.0);
         set_delivery(&mut runtime, ProgressDeliveryState::NotQueued);
         assert_eq!(
-            runtime.progress_reconcile_action(),
+            runtime.progress_reconcile_action(MONITOR_ID),
             ProgressReconcileAction::None
         );
         finish(runtime);
@@ -386,12 +398,12 @@ mod tests {
         runtime.detected_agent_class = Some(AgentClass::Codex);
         install(&mut runtime, ProgressTaskStatus::Done, 100.0);
         set_delivery(&mut runtime, ProgressDeliveryState::Queued);
-        runtime.set_progress_delivery_task(tokio::spawn(std::future::pending::<()>()));
+        runtime.set_progress_delivery_task(MONITOR_ID, tokio::spawn(std::future::pending::<()>()));
         assert_eq!(
-            runtime.progress_reconcile_action(),
+            runtime.progress_reconcile_action(MONITOR_ID),
             ProgressReconcileAction::None
         );
-        runtime.cancel_progress_delivery_task();
+        runtime.cancel_progress_delivery_task(MONITOR_ID);
         finish(runtime);
     }
 
@@ -405,5 +417,61 @@ mod tests {
             ProgressMonitorHealth::Failed { last_error, .. } if last_error == "lost task"
         ));
         assert_eq!(failed.monitor_id, MONITOR_ID);
+    }
+
+    fn server_state(directory: &tempfile::TempDir) -> ServerState {
+        let (sound_requests, _playback_task) = crate::sounds::spawn(
+            Arc::new(crate::NoopSoundPlayer),
+            crate::execution::test_general_client(),
+        );
+        ServerState::new(ServerStateOptions {
+            session_name: "watchdog-test".to_string(),
+            session_cwd: directory.path().to_path_buf(),
+            home_dir: directory.path().to_path_buf(),
+            snapshot_path: directory.path().join("watchdog-test.snapshot.json"),
+            socket_path: directory.path().join("watchdog-test.sock"),
+            detection_config: crate::config::DetectionConfig::default(),
+            notifications_config: crate::config::NotificationsConfig::default(),
+            sound_settings: crate::sounds::test_settings(ilium_sound::SoundSettings::default()),
+            sound_requests,
+            custom_signatures: Vec::new(),
+            agent_debug_menu_enabled: false,
+            progress_monitor_enabled: true,
+        })
+    }
+
+    /// Full pass over a server registry: a monitor whose observation task
+    /// vanished becomes sticky failed evidence, and a second pass is a no-op.
+    #[tokio::test]
+    async fn reconcile_fails_a_monitor_whose_observation_task_vanished() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let state = Arc::new(server_state(&directory));
+        let mut runtime = runtime();
+        install(&mut runtime, ProgressTaskStatus::Running, 40.0);
+        state
+            .panes
+            .write()
+            .await
+            .insert(NodeId(1), PaneResource::Terminal(Box::new(runtime)));
+        let mut attempts = HashMap::new();
+
+        reconcile(&state, &mut attempts).await;
+        let first = failed_monitor_reason(&state).await;
+        assert_eq!(first.as_deref(), Some(OBSERVATION_STOPPED_UNEXPECTEDLY));
+
+        reconcile(&state, &mut attempts).await;
+        assert_eq!(failed_monitor_reason(&state).await, first);
+    }
+
+    async fn failed_monitor_reason(state: &ServerState) -> Option<String> {
+        let panes = state.panes.read().await;
+        let Some(PaneResource::Terminal(runtime)) = panes.get(&NodeId(1)) else {
+            return None;
+        };
+        let monitor = runtime.progress_monitors().next()?;
+        match &monitor.latest_progress.monitor_health {
+            ProgressMonitorHealth::Failed { last_error, .. } => Some(last_error.clone()),
+            ProgressMonitorHealth::Healthy | ProgressMonitorHealth::Degraded { .. } => None,
+        }
     }
 }

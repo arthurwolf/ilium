@@ -129,6 +129,7 @@ struct FileCursor {
 }
 
 impl FileCursor {
+    #[cfg(test)]
     fn new(byte_offset: u64) -> Self {
         Self {
             generation: None,

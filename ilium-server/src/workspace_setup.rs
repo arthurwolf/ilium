@@ -418,7 +418,9 @@ mod tests {
     #[tokio::test]
     async fn process_group_exit_probe_is_admitted_to_the_shared_io_bank() {
         let execution = crate::execution::ServerExecution::start().expect("execution bank");
-        let before = execution.test_monitor().health().lanes[1].enqueued;
+        // `succeeded` is cumulative; `enqueued` is live queue depth and reads
+        // zero again once the probe has run, so it cannot prove admission.
+        let before = execution.test_monitor().health().lanes[1].succeeded;
         let temporary = tempfile::tempdir().expect("temporary worktree");
         let root = ilium_platform::paths::canonicalize(temporary.path()).expect("canonical root");
 
@@ -433,7 +435,7 @@ mod tests {
         .await
         .expect("successful setup");
 
-        let after = execution.test_monitor().health().lanes[1].enqueued;
+        let after = execution.test_monitor().health().lanes[1].succeeded;
         assert_eq!(
             after,
             before + 1,

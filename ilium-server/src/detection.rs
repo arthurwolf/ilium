@@ -1045,7 +1045,7 @@ async fn run_due_panes_with_hook(
             reservation,
             move |context: ilium_execution::JobContext| -> Result<_, std::io::Error> {
                 before_evidence();
-                let mut system = process_table
+                let system = process_table
                     .system
                     .lock()
                     .map_err(|_| std::io::Error::other("process table lock poisoned"))?;
@@ -1182,7 +1182,7 @@ async fn run_due_panes_with_hook(
                         snapshots
                     };
 
-                    let mut classifications: Vec<ClassifiedPane> = identified_panes
+                    let classifications: Vec<ClassifiedPane> = identified_panes
                         .into_iter()
                         .map(|identified| {
                             let due_pane = identified.due;
@@ -2232,18 +2232,18 @@ async fn run_due_panes_with_hook(
                     .map(|node| match &node.kind {
                         ilium_core::NodeKind::Pane {
                             status,
-                            progress,
+                            progress_monitors,
                             scheduled_input,
                             ..
                         } => (
                             Some(status.clone()),
-                            progress.clone(),
+                            progress_monitors.clone(),
                             scheduled_input.is_some(),
                         ),
                         ilium_core::NodeKind::Container(_)
-                        | ilium_core::NodeKind::Folder { .. } => (None, None, false),
+                        | ilium_core::NodeKind::Folder { .. } => (None, Vec::new(), false),
                     })
-                    .unwrap_or((None, None, false));
+                    .unwrap_or((None, Vec::new(), false));
 
             // The detector reports a raw turn. Completion memory and the
             // one-sample Idle hold belong to this server reducer.
@@ -2255,9 +2255,8 @@ async fn run_due_panes_with_hook(
             // notification) -- `ilium_core::project_pane_signals` shows it as
             // parked instead.
             let is_parked_on_monitor = runtime
-                .progress_monitor
-                .as_ref()
-                .is_some_and(|monitor| monitor.latest_progress.is_live());
+                .progress_monitors()
+                .any(|monitor| monitor.latest_progress.is_live());
             let same_process = classified_pane.identity.as_ref().is_some_and(|identity| {
                 previous_process_key.as_ref() == Some(&agent_process_key(identity))
             });
@@ -2309,14 +2308,14 @@ async fn run_due_panes_with_hook(
                 };
                 ilium_core::project_pane_signals(
                     effect_baseline.as_ref().unwrap_or(status),
-                    previous_progress.as_deref(),
+                    &previous_progress,
                     has_scheduled_input,
                     None,
                 )
             });
             let new_signals = ilium_core::project_pane_signals(
                 &new_status,
-                previous_progress.as_deref(),
+                &previous_progress,
                 has_scheduled_input,
                 None,
             );
@@ -2671,10 +2670,7 @@ async fn run_due_panes_with_hook(
                     "Applied pane state",
                     describe_pane_status(
                         &new_status,
-                        runtime
-                            .progress_monitor
-                            .as_ref()
-                            .map(|monitor| &monitor.latest_progress),
+                        &runtime.progress_reports(),
                         tree.get(pane_id).is_some_and(|node| {
                             matches!(
                                 &node.kind,
@@ -3228,7 +3224,7 @@ fn explain_session_decision(
 
 fn describe_pane_status(
     status: &PaneStatus,
-    progress: Option<&ilium_core::PaneProgress>,
+    progress: &[ilium_core::PaneProgress],
     has_scheduled_input: bool,
 ) -> String {
     let state = match status {
@@ -4394,7 +4390,7 @@ mod tests {
             AgentActivity::Working,
             Some(ilium_core::GoalState::Blocked),
         );
-        let description = describe_pane_status(&status, None, true);
+        let description = describe_pane_status(&status, &[], true);
         assert!(description.contains("Projected objective B3: Goal(Blocked)"));
         assert!(description.contains("projected now A2: Working"));
     }
@@ -4811,10 +4807,12 @@ mod tests {
     fn discovery_and_evidence_reservations_fit_the_shared_result_budget() {
         // Both are held at once during a tick; the rest of the server shares
         // the same foundation budget, so they must leave real headroom.
-        assert!(
-            EVIDENCE_RESULT_BYTES + DISCOVERY_RESULT_BYTES
-                <= crate::execution::GENERAL_RESULT_BYTES * 3 / 4
-        );
+        const {
+            assert!(
+                EVIDENCE_RESULT_BYTES + DISCOVERY_RESULT_BYTES
+                    <= crate::execution::GENERAL_RESULT_BYTES * 3 / 4
+            );
+        }
     }
 
     #[test]

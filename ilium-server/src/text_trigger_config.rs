@@ -42,7 +42,13 @@ pub(crate) async fn snapshot(state: &ServerState) -> ServerEvent {
     }
 }
 
-pub(crate) async fn refresh(state: &ServerState) -> Result<ServerEvent, String> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RefreshOutcome {
+    Changed,
+    Unchanged,
+}
+
+pub(crate) async fn refresh(state: &ServerState) -> Result<RefreshOutcome, String> {
     refresh_with(state, |path| async move {
         // The worker owns only the path. Cancelling the awaiting owner cannot
         // leave a detached worker that installs a late result into state.
@@ -87,6 +93,19 @@ pub(crate) async fn refresh(state: &ServerState) -> Result<ServerEvent, String> 
     .await
 }
 
+pub(crate) async fn accept_candidate(
+    state: &ServerState,
+    candidate: crate::text_triggers::AcceptedCandidate,
+) -> Result<RefreshOutcome, String> {
+    let _transaction = state.text_trigger_settings_transaction.lock().await;
+    let changed = commit_candidate(state, candidate, true).await?;
+    Ok(if changed {
+        RefreshOutcome::Changed
+    } else {
+        RefreshOutcome::Unchanged
+    })
+}
+
 struct LoadedCandidate {
     settings: Option<TextTriggerSettings>,
     storage: Option<std::sync::Arc<ilium_execution::StorageAdmission>>,
@@ -100,7 +119,7 @@ impl From<Option<TextTriggerSettings>> for LoadedCandidate {
     }
 }
 
-async fn refresh_with<F, Fut>(state: &ServerState, load: F) -> Result<ServerEvent, String>
+async fn refresh_with<F, Fut>(state: &ServerState, load: F) -> Result<RefreshOutcome, String>
 where
     F: FnOnce(PathBuf) -> Fut,
     Fut: Future<Output = Result<LoadedCandidate, String>>,
@@ -114,15 +133,26 @@ where
         .ok_or_else(|| "no durable Text Trigger source is configured".to_owned())?;
     let mut loaded = load(path).await?;
     let Some(settings) = loaded.settings.take() else {
-        return Ok(snapshot(state).await);
+        return Ok(RefreshOutcome::Unchanged);
     };
     let validated =
         crate::text_triggers::validate_in_worker(state, settings, loaded.storage.take()).await?;
+    let changed = commit_candidate(state, validated, true).await?;
+    Ok(if changed {
+        RefreshOutcome::Changed
+    } else {
+        RefreshOutcome::Unchanged
+    })
+}
+
+async fn commit_candidate(
+    state: &ServerState,
+    validated: crate::text_triggers::AcceptedCandidate,
+    skip_unchanged: bool,
+) -> Result<bool, String> {
     let mut current = state.text_trigger_settings.write().await;
-    if current.settings == validated.settings {
-        return Ok(ServerEvent::TextTriggersChanged {
-            settings: current.settings.clone(),
-        });
+    if skip_unchanged && current.settings == validated.settings {
+        return Ok(false);
     }
     let revision = current
         .revision
@@ -133,15 +163,25 @@ where
         retention,
         ..
     } = validated;
+    let payload_bytes = crate::text_triggers::settings_bytes(&settings)
+        .ok_or_else(|| "Text Trigger event size is invalid".to_owned())?;
+    let reservation = state
+        .events
+        .reserve_ordered(payload_bytes)
+        .map_err(|refusal| format!("Text Trigger event admission refused: {refusal:?}"))?;
+    let event = ServerEvent::TextTriggersChanged {
+        settings: settings.clone(),
+    };
+    reservation.commit(event).map_err(|failure| {
+        format!(
+            "Text Trigger event publication failed: {:?}",
+            failure.refusal
+        )
+    })?;
     current.settings = settings;
     current.revision = revision;
     current.retention = Some(retention);
-    let event = ServerEvent::TextTriggersChanged {
-        settings: current.settings.clone(),
-    };
-    // Publish inside the transaction so acceptance and broadcast order agree.
-    state.broadcast(event.clone());
-    Ok(event)
+    Ok(true)
 }
 
 #[cfg(test)]
@@ -179,6 +219,10 @@ mod durability_tests {
             agent_debug_menu_enabled: false,
             progress_monitor_enabled: false,
         }));
+        let execution = crate::execution::test_general_client();
+        assert!(state
+            .events
+            .initialize_journal(execution.foundation.quota_group()));
         state
             .text_trigger_config_path
             .set(directory.join("config.toml"))
@@ -220,7 +264,21 @@ mod durability_tests {
         assert_eq!(candidate.settings, original);
         assert!(std::sync::Arc::strong_count(&candidate.retention) >= 1);
         std::fs::write(directory.path().join("config.toml"), document(&original)).unwrap();
-        refresh(&state).await.unwrap();
+        let subscriber = state.events.subscribe_ordered().unwrap();
+        let mut legacy_subscriber = state.events.subscribe_owned();
+        assert_eq!(refresh(&state).await.unwrap(), RefreshOutcome::Changed);
+        let accepted = snapshot(&state).await;
+        let delivered = timeout(WAIT, subscriber.recv())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(delivered.event(), &accepted);
+        subscriber.acknowledge(delivered.sequence).unwrap();
+        assert!(matches!(
+            legacy_subscriber.try_recv(),
+            Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+        ));
         assert!(state.text_trigger_settings.read().await.retention.is_some());
         let mut invalid = rules("bad");
         invalid.triggers[0].regexp = "[".to_owned();
@@ -228,6 +286,40 @@ mod durability_tests {
         assert!(refresh(&state).await.is_err());
         assert_eq!(state.text_trigger_settings.read().await.settings, original);
         assert_eq!(state.text_trigger_settings.read().await.revision, 1);
+    }
+
+    #[tokio::test]
+    async fn accepting_identical_settings_does_not_publish_or_advance_revision() {
+        let directory = tempfile::tempdir().unwrap();
+        let (state, _sound) = state_at(directory.path());
+        let subscriber = state.events.subscribe_ordered().unwrap();
+
+        let candidate = crate::text_triggers::validate_in_worker(&state, rules("same"), None)
+            .await
+            .unwrap();
+        assert_eq!(
+            accept_candidate(&state, candidate).await.unwrap(),
+            RefreshOutcome::Changed
+        );
+        let delivered = timeout(WAIT, subscriber.recv())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        subscriber.acknowledge(delivered.sequence).unwrap();
+        assert_eq!(state.text_trigger_settings.read().await.revision, 1);
+
+        let duplicate = crate::text_triggers::validate_in_worker(&state, rules("same"), None)
+            .await
+            .unwrap();
+        assert_eq!(
+            accept_candidate(&state, duplicate).await.unwrap(),
+            RefreshOutcome::Unchanged
+        );
+        assert_eq!(state.text_trigger_settings.read().await.revision, 1);
+        assert!(timeout(Duration::from_millis(5), subscriber.recv())
+            .await
+            .is_err());
     }
 
     #[tokio::test]
@@ -253,7 +345,8 @@ mod durability_tests {
         let path = directory.path().join("config.toml");
         let original = rules("retained");
         std::fs::write(&path, document(&original)).unwrap();
-        let accepted = refresh(&state).await.unwrap();
+        assert_eq!(refresh(&state).await.unwrap(), RefreshOutcome::Changed);
+        let accepted = snapshot(&state).await;
         let mut bad_regex = original.clone();
         bad_regex.triggers[0].regexp = "[".to_owned();
         let mut bad_id = original.clone();
@@ -281,7 +374,8 @@ mod durability_tests {
         assert!(refresh(&state).await.is_err());
         assert_eq!(snapshot(&state).await, accepted);
         std::fs::write(&path, "[sound]\nsource = 'system_beep'").unwrap();
-        assert_eq!(refresh(&state).await.unwrap(), accepted);
+        assert_eq!(refresh(&state).await.unwrap(), RefreshOutcome::Unchanged);
+        assert_eq!(snapshot(&state).await, accepted);
         std::fs::write(
             &path,
             format!(
@@ -290,7 +384,8 @@ mod durability_tests {
             ),
         )
         .unwrap();
-        assert_eq!(refresh(&state).await.unwrap(), accepted);
+        assert_eq!(refresh(&state).await.unwrap(), RefreshOutcome::Unchanged);
+        assert_eq!(snapshot(&state).await, accepted);
         assert_eq!(state.text_trigger_settings.read().await.revision, 1);
     }
 
@@ -302,12 +397,15 @@ mod durability_tests {
         std::fs::write(&path, document(&rules("old"))).unwrap();
         refresh(&state).await.unwrap();
         std::fs::write(&path, document(&TextTriggerSettings::default())).unwrap();
-        let empty = refresh(&state).await.unwrap();
+        assert_eq!(refresh(&state).await.unwrap(), RefreshOutcome::Changed);
+        let empty = snapshot(&state).await;
         assert_eq!(state.text_trigger_settings.read().await.revision, 2);
-        assert_eq!(refresh(&state).await.unwrap(), empty);
+        assert_eq!(refresh(&state).await.unwrap(), RefreshOutcome::Unchanged);
+        assert_eq!(snapshot(&state).await, empty);
         assert_eq!(state.text_trigger_settings.read().await.revision, 2);
         let (fresh, _fresh_sound) = state_at(directory.path());
-        assert_eq!(refresh(&fresh).await.unwrap(), empty);
+        assert_eq!(refresh(&fresh).await.unwrap(), RefreshOutcome::Unchanged);
+        assert_eq!(snapshot(&fresh).await, empty);
         assert_eq!(fresh.text_trigger_settings.read().await.revision, 0);
     }
 
@@ -342,12 +440,12 @@ mod durability_tests {
     }
 
     #[tokio::test]
-    async fn text_trigger_revision_exhaustion_refuses_change_without_broadcast() {
+    async fn text_trigger_revision_exhaustion_refuses_change_without_event() {
         let directory = tempfile::tempdir().unwrap();
         let (state, _sound) = state_at(directory.path());
         state.text_trigger_settings.write().await.revision = u64::MAX;
         let before = snapshot(&state).await;
-        let mut events = state.events.subscribe_owned();
+        let events = state.events.subscribe_ordered().unwrap();
         assert!(
             refresh_with(&state, |_| async { Ok(Some(rules("new")).into()) })
                 .await
@@ -355,10 +453,38 @@ mod durability_tests {
         );
         assert_eq!(snapshot(&state).await, before);
         assert_eq!(state.text_trigger_settings.read().await.revision, u64::MAX);
-        assert!(matches!(
-            events.try_recv(),
-            Err(tokio::sync::broadcast::error::TryRecvError::Empty)
-        ));
+        assert!(timeout(Duration::from_millis(5), events.recv())
+            .await
+            .is_err());
+    }
+
+    #[tokio::test]
+    async fn text_trigger_event_admission_refusal_keeps_the_accepted_rules() {
+        let directory = tempfile::tempdir().unwrap();
+        let (state, _sound) = state_at(directory.path());
+        let _subscriber = state.events.subscribe_ordered().unwrap();
+        for _ in 0..crate::state::MAXIMUM_ORDERED_EVENT_ENTRIES {
+            state
+                .events
+                .try_publish_ordered(
+                    ServerEvent::Error {
+                        message: "x".to_owned(),
+                    },
+                    1,
+                )
+                .unwrap();
+        }
+
+        let original = snapshot(&state).await;
+        let error = refresh_with(&state, |_| async {
+            Ok(Some(rules("new accepted rules")).into())
+        })
+        .await
+        .unwrap_err();
+
+        assert!(error.contains("EntryLimit"), "unexpected refusal: {error}");
+        assert_eq!(snapshot(&state).await, original);
+        assert_eq!(state.text_trigger_settings.read().await.revision, 0);
     }
 }
 

@@ -12,8 +12,12 @@
 #[allow(dead_code)] // The next connection-writer slice consumes the cursor API.
 #[path = "event_journal.rs"]
 mod event_journal;
+pub(crate) use event_journal::EventSubscription as OrderedEventSubscription;
+#[cfg(test)]
+pub(crate) const MAXIMUM_ORDERED_EVENT_ENTRIES: usize = event_journal::DEFAULT_MAXIMUM_ENTRIES;
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -66,6 +70,19 @@ impl ServerEvents {
             .is_ok()
     }
 
+    /// Reserve ordered journal capacity before constructing or committing a
+    /// session event. Callers retain their original state until `commit`
+    /// succeeds; this path intentionally does not also publish to broadcast.
+    pub(crate) fn reserve_ordered(
+        &self,
+        payload_bytes: usize,
+    ) -> Result<event_journal::EventReservation, event_journal::JournalRefusal> {
+        self.journal
+            .get()
+            .ok_or(event_journal::JournalRefusal::NotInitialized)?
+            .reserve(payload_bytes)
+    }
+
     #[cfg(test)]
     pub(crate) fn try_publish_ordered(
         &self,
@@ -75,13 +92,12 @@ impl ServerEvents {
         match self.journal.get() {
             Some(journal) => journal.try_publish(event, payload_bytes),
             None => Err(event_journal::PublishFailure {
-                event,
+                event: Box::new(event),
                 refusal: event_journal::JournalRefusal::NotInitialized,
             }),
         }
     }
 
-    #[allow(dead_code)]
     pub(crate) fn subscribe_ordered(
         &self,
     ) -> Result<event_journal::EventSubscription, event_journal::JournalRefusal> {
@@ -135,9 +151,17 @@ pub(crate) const MAXIMUM_CACHED_PROGRESS_SET_REQUESTS: usize = 512;
 pub(crate) type ProgressSetResult =
     Result<ilium_ipc::ProgressMonitorAccepted, ilium_ipc::ProgressMonitorRejection>;
 
-/// Creation and removal requests outlive their IPC connections once Git may have changed
-/// the repository. Shutdown stops accepting requests, then joins every task
-/// before the server process can abandon an in-flight worktree mutation.
+/// Worktree creation, pruning, removal, and automatic close requests outlive
+/// their IPC connections once Git may have changed the repository. Shutdown
+/// stops accepting requests, then joins every task before the server exits.
+pub(crate) const MAXIMUM_WORKSPACE_MUTATION_TASKS: usize = 16;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WorkspaceTaskRejection {
+    ShuttingDown,
+    AtCapacity,
+}
+
 #[derive(Default)]
 struct WorkspaceCreationTasks {
     closed: bool,
@@ -450,22 +474,25 @@ impl ServerState {
         drop(task);
     }
 
-    /// Reuse the existing shutdown-drained registry for all workspace mutations.
-    pub(crate) fn track_workspace_mutation_task(&self, handle: JoinHandle<()>) -> bool {
-        self.track_workspace_creation_task(handle)
-    }
-
-    /// The task waits on its start gate until this registration succeeds.
-    /// A request racing server shutdown is rejected before it can run Git.
-    pub(crate) fn track_workspace_creation_task(&self, handle: JoinHandle<()>) -> bool {
+    /// Admit before spawning so rejected mutations never start and consume no task slot.
+    pub(crate) fn spawn_workspace_mutation_task<F>(
+        &self,
+        future: F,
+    ) -> Result<(), WorkspaceTaskRejection>
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
         let mut tasks = self.workspace_creation_tasks.lock().unwrap();
         if tasks.closed {
-            handle.abort();
-            return false;
+            return Err(WorkspaceTaskRejection::ShuttingDown);
         }
         tasks.handles.retain(|task| !task.is_finished());
+        if tasks.handles.len() >= MAXIMUM_WORKSPACE_MUTATION_TASKS {
+            return Err(WorkspaceTaskRejection::AtCapacity);
+        }
+        let handle = tokio::spawn(future);
         tasks.handles.push(handle);
-        true
+        Ok(())
     }
 
     pub(crate) fn accepts_workspace_creation(&self) -> bool {
@@ -932,6 +959,54 @@ mod tests {
             agent_debug_menu_enabled: false,
             progress_monitor_enabled: true,
         })
+    }
+
+    #[tokio::test]
+    async fn workspace_mutation_registry_refuses_jobs_after_its_capacity() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let state = test_state(&directory);
+        let mut releases = Vec::new();
+        let (finished, mut completions) =
+            tokio::sync::mpsc::channel(MAXIMUM_WORKSPACE_MUTATION_TASKS);
+        for _ in 0..MAXIMUM_WORKSPACE_MUTATION_TASKS {
+            let (release, wait) = tokio::sync::oneshot::channel();
+            let finished = finished.clone();
+            state
+                .spawn_workspace_mutation_task(async move {
+                    let _ = wait.await;
+                    let _ = finished.send(()).await;
+                })
+                .expect("tasks within the configured bound should be admitted");
+            releases.push(release);
+        }
+
+        let rejected_started = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let rejected_started_task = Arc::clone(&rejected_started);
+        let rejection = state.spawn_workspace_mutation_task(async move {
+            rejected_started_task.store(true, std::sync::atomic::Ordering::SeqCst);
+        });
+        assert_eq!(rejection, Err(WorkspaceTaskRejection::AtCapacity));
+        assert!(!rejected_started.load(std::sync::atomic::Ordering::SeqCst));
+
+        for release in releases {
+            let _ = release.send(());
+        }
+        for _ in 0..MAXIMUM_WORKSPACE_MUTATION_TASKS {
+            completions
+                .recv()
+                .await
+                .expect("every admitted task should finish");
+        }
+        tokio::task::yield_now().await;
+        assert!(
+            state.spawn_workspace_mutation_task(async {}).is_ok(),
+            "finished tasks should release their admission slots"
+        );
+        state.finish_workspace_creation_tasks().await;
+        assert_eq!(
+            state.spawn_workspace_mutation_task(async {}),
+            Err(WorkspaceTaskRejection::ShuttingDown)
+        );
     }
 
     #[tokio::test]

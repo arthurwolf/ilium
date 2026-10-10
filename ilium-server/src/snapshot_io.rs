@@ -772,7 +772,7 @@ pub(crate) fn estimated_tree_bytes(tree: &ilium_core::Tree) -> usize {
                 scheduled_input,
                 prompt_queue,
                 last_prompt,
-                progress,
+                progress_monitors,
                 launch_cwd,
                 workspace,
                 ..
@@ -800,7 +800,7 @@ pub(crate) fn estimated_tree_bytes(tree: &ilium_core::Tree) -> usize {
                     add(prompt.text.capacity());
                 }
                 add(optional(last_prompt));
-                if let Some(progress) = progress {
+                for progress in progress_monitors {
                     add(progress_size(progress));
                 }
                 if let Some(path) = launch_cwd {
@@ -1545,7 +1545,7 @@ mod tests {
             })
             .unwrap_or_else(|_| panic!("semantic submit"));
         let semantic_state = Arc::clone(&state);
-        let task = tokio::spawn(async move {
+        let task = async move {
             loop {
                 let notified = wake.notified();
                 tokio::pin!(notified);
@@ -1572,8 +1572,8 @@ mod tests {
                 .rename_node(ROOT_ID, "accepted work drained", None, None)
                 .expect("mutation");
             semantic_state.request_snapshot_save();
-        });
-        assert!(state.track_workspace_mutation_task(task));
+        };
+        assert!(state.spawn_workspace_mutation_task(task).is_ok());
         let mut writer = crate::task_guard::AbortOnDropHandle::new(
             persistence::spawn_snapshot_writer(Arc::clone(&state)),
         );

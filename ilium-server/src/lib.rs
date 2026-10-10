@@ -692,7 +692,7 @@ async fn restore_snapshot_data(
         // therefore never leave an unfenced stale percentage on screen.
         let pane_ids: Vec<ilium_core::NodeId> = tree.all_ids().collect();
         for pane_id in pane_ids {
-            let _ = tree.set_pane_progress(pane_id, None);
+            let _ = tree.replace_pane_progress(pane_id, Vec::new());
         }
         // Keep the write guard held across the unconditional pane-registry
         // drain below -- see `ipc::handlers::spawn_and_register_pane_in_directory`'s
@@ -811,14 +811,14 @@ async fn restore_snapshot_data(
             // again once the pane starts.
             let mut panes = state.panes.write().await;
             if let Some(pane::PaneResource::Unrestored(unrestored)) = panes.get_mut(&pane_id) {
-                unrestored.progress_monitor = Some(persisted_monitor);
+                unrestored.progress_monitors.push(persisted_monitor);
             }
             continue;
         }
         if missing_workspace_pane_ids.contains(&pane_id) {
             let mut panes = state.panes.write().await;
             if let Some(pane::PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) {
-                runtime.deferred_progress_monitor = Some(persisted_monitor);
+                runtime.deferred_progress_monitors.push(persisted_monitor);
             }
             continue;
         }
@@ -1174,8 +1174,8 @@ mod restore_tests {
         assert_eq!(runtime.deferred_workspace_origin, Some(original));
         assert!(runtime.missing_workspace.is_some());
         assert_eq!(
-            runtime.deferred_progress_monitor,
-            Some(persisted_monitor.clone())
+            runtime.deferred_progress_monitors,
+            vec![persisted_monitor.clone()]
         );
         drop(panes);
         assert_eq!(

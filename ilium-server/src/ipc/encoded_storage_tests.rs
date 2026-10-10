@@ -178,6 +178,51 @@ async fn two_blocked_flushes_do_not_hold_all_encoder_jobs_or_claim_delivery() {
     fixture.finish().await;
 }
 
+#[tokio::test]
+async fn authoritative_text_trigger_snapshot_replaces_an_undersized_queue_lease() {
+    let fixture = Fixture::new();
+    let mut current = ilium_ipc::TextTriggerSettings::default();
+    current.triggers.push(ilium_ipc::TextTrigger {
+        message: "x".repeat(1024 * 1024),
+        ..Default::default()
+    });
+    let current_bytes = crate::text_triggers::settings_bytes(&current).unwrap();
+    let current_storage = fixture
+        .general
+        .reserve_storage(current_bytes)
+        .await
+        .unwrap();
+    {
+        let mut versioned = fixture.state.text_trigger_settings.write().await;
+        versioned.settings = current;
+        versioned.retention = Some(current_storage);
+    }
+
+    let mut writer = FrameWriter::new(tokio::io::sink());
+    let mut delivered = HashMap::new();
+    let result = write_server_event_admitted(
+        &mut writer,
+        Arc::new(ServerEvent::TextTriggersChanged {
+            settings: ilium_ipc::TextTriggerSettings::default(),
+        }),
+        Some(Arc::new(fixture.quota.reserve_external_storage(1).unwrap())),
+        &mut delivered,
+        Some(&fixture.state),
+    )
+    .await;
+    assert!(
+        result.is_ok(),
+        "authoritative snapshot must acquire exact writer storage: {result:?}"
+    );
+
+    {
+        let mut versioned = fixture.state.text_trigger_settings.write().await;
+        versioned.settings = ilium_ipc::TextTriggerSettings::default();
+        versioned.retention = None;
+    }
+    fixture.finish().await;
+}
+
 #[derive(Default)]
 struct FailedFlush {
     bytes: Vec<u8>,

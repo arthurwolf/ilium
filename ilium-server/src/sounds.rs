@@ -738,8 +738,10 @@ mod tests {
         task.await.unwrap();
     }
 
+    type RecordedSound = (Option<SoundEvent>, Option<Vec<u8>>);
+
     struct PreparedRecordingPlayer {
-        calls: Arc<Mutex<Vec<(Option<SoundEvent>, Option<Vec<u8>>)>>>,
+        calls: Arc<Mutex<Vec<RecordedSound>>>,
     }
 
     impl SoundPlayer for PreparedRecordingPlayer {

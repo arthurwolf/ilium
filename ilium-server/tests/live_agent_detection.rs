@@ -1377,14 +1377,15 @@ async fn progress_completion_notifies_a_codex_agent_without_touching_its_goal() 
             event,
             ServerEvent::PaneProgressChanged {
                 pane_id: changed_id,
-                progress: Some(progress),
+                progress_monitors,
             } if *changed_id == pane_id
-                && progress.report.status == ilium_core::ProgressTaskStatus::Running
+                && progress_monitors.len() == 1
+                && progress_monitors[0].report.status == ilium_core::ProgressTaskStatus::Running
         )
     })
     .await;
     let ServerEvent::PaneProgressChanged {
-        progress: Some(running_progress),
+        progress_monitors: running_progress,
         ..
     } = running_progress
     else {
@@ -1397,7 +1398,7 @@ async fn progress_completion_notifies_a_codex_agent_without_touching_its_goal() 
             goal: Some(ilium_core::GoalState::Active),
             completion_unread: false,
         }),
-        Some(&running_progress),
+        &running_progress,
         false,
         None,
     );
@@ -1417,9 +1418,11 @@ async fn progress_completion_notifies_a_codex_agent_without_touching_its_goal() 
             event,
             ServerEvent::PaneProgressChanged {
                 pane_id: changed_id,
-                progress: Some(progress),
+                progress_monitors,
             } if *changed_id == pane_id
-                && progress.report.status == ilium_core::ProgressTaskStatus::Done
+                && progress_monitors
+                    .iter()
+                    .any(|progress| progress.report.status == ilium_core::ProgressTaskStatus::Done)
         )
     })
     .await;

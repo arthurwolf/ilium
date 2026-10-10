@@ -28,7 +28,6 @@ use ilium_platform::paths;
 use ilium_pty::{
     OwnerStatus, PtyError, PtyInput, PtyOutputRecovery, PtyOutputRecoveryEstimate, ShutdownReason,
 };
-use tokio::sync::{mpsc, oneshot};
 
 use crate::foreground_observation::{self, ProbeObservation, ProbeRequest};
 use crate::ipc::DirectEventSender;
@@ -138,31 +137,30 @@ pub async fn handle_request(
                 // Configured servers use the durable file as their authority.
                 // A delayed client's payload must not replace a newer save.
                 match crate::text_trigger_config::refresh(state).await {
-                    Ok(snapshot) => send_direct(direct_tx, snapshot).await,
+                    Ok(crate::text_trigger_config::RefreshOutcome::Changed) => {}
+                    Ok(crate::text_trigger_config::RefreshOutcome::Unchanged) => {
+                        send_direct(direct_tx, crate::text_trigger_config::snapshot(state).await)
+                            .await;
+                    }
                     Err(message) => send_direct_error(direct_tx, message).await,
                 }
                 return false;
             }
-            let settings =
+            let candidate =
                 match crate::text_triggers::validate_in_worker(state, settings, None).await {
-                    Ok(settings) => settings,
+                    Ok(candidate) => candidate,
                     Err(message) => {
                         send_direct_error(direct_tx, message).await;
                         return false;
                     }
                 };
-            let crate::text_triggers::AcceptedCandidate {
-                settings,
-                retention,
-                ..
-            } = settings;
-            let mut accepted = state.text_trigger_settings.write().await;
-            accepted.settings = settings;
-            accepted.revision = accepted.revision.saturating_add(1);
-            accepted.retention = Some(retention);
-            let settings = accepted.settings.clone();
-            drop(accepted);
-            state.broadcast(ServerEvent::TextTriggersChanged { settings });
+            match crate::text_trigger_config::accept_candidate(state, candidate).await {
+                Ok(crate::text_trigger_config::RefreshOutcome::Changed) => {}
+                Ok(crate::text_trigger_config::RefreshOutcome::Unchanged) => {
+                    send_direct(direct_tx, crate::text_trigger_config::snapshot(state).await).await;
+                }
+                Err(message) => send_direct_error(direct_tx, message).await,
+            }
             false
         }
         ClientRequest::UpdateAgentDetectionSettings {
@@ -269,11 +267,7 @@ pub async fn handle_request(
             // must never drop a future while Git has an in-flight mutation.
             let creation_state = Arc::clone(state);
             let reply_sender = direct_tx.clone();
-            let (start_tx, start_rx) = oneshot::channel();
-            let handle = tokio::spawn(async move {
-                if start_rx.await.is_err() {
-                    return;
-                }
+            let admission = state.spawn_workspace_mutation_task(async move {
                 let reply = crate::ipc::EventReply::Direct(&reply_sender);
                 let result = crate::workspace::create_agent_in_workspace(
                     &creation_state,
@@ -310,13 +304,19 @@ pub async fn handle_request(
                     );
                 }
             });
-            if state.track_workspace_creation_task(handle) {
-                let _ = start_tx.send(());
-            } else {
+            if let Err(rejection) = admission {
+                let error = match rejection {
+                    crate::state::WorkspaceTaskRejection::ShuttingDown => {
+                        "session is shutting down"
+                    }
+                    crate::state::WorkspaceTaskRejection::AtCapacity => {
+                        "workspace operation capacity is full"
+                    }
+                };
                 let _ = direct_tx
                     .send(ServerEvent::WorkspaceCreateFailed {
                         request_id,
-                        error: "session is shutting down".into(),
+                        error: error.into(),
                     })
                     .await;
             }
@@ -669,6 +669,10 @@ pub async fn handle_request(
             if let Err(message) = submit_terminal_text(state, pane_id, &text, source).await {
                 send_direct_error(direct_tx, message).await;
             }
+            false
+        }
+        ClientRequest::PasteTerminalText { pane_id, text } => {
+            paste_terminal_text(state, pane_id, &text, direct_tx).await;
             false
         }
         ClientRequest::RegisterVoiceTextReceiver => {
@@ -3169,8 +3173,28 @@ async fn install_progress_monitor(
             ),
         ));
     }
-    // Preflight occurs before the effect gate and before replacement: a bad
-    // candidate never interrupts the monitor that is already active.
+    // An identical registration of a monitor that is still observing its
+    // task returns that monitor: a retried or repeated `set` must not start
+    // a second probe loop for the same job.
+    {
+        let panes = state.panes.read().await;
+        if let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) {
+            if let Some(existing) = runtime
+                .progress_monitors()
+                .find(|monitor| monitor.command == command && !monitor.is_settled())
+            {
+                return Ok(ilium_ipc::ProgressMonitorAccepted {
+                    monitor_id: existing.monitor_id,
+                    progress: existing.latest_progress.clone(),
+                });
+            }
+            if !runtime.has_progress_monitor_capacity_for(&command) {
+                return Err(too_many_progress_monitors_rejection(runtime));
+            }
+        }
+    }
+    // Preflight occurs before the effect gate: a bad candidate never
+    // interrupts the monitors that are already active.
     let preflight = crate::progress_monitor::preflight(&command)
         .await
         .map_err(|error| error.rejection())?;
@@ -3198,6 +3222,23 @@ async fn install_progress_monitor(
         monitor_id,
         progress,
     })
+}
+
+fn too_many_progress_monitors_rejection(
+    runtime: &crate::pane::TerminalPaneRuntime,
+) -> ilium_ipc::ProgressMonitorRejection {
+    let live: Vec<String> = runtime
+        .progress_monitors()
+        .map(|monitor| monitor.monitor_id.to_string())
+        .collect();
+    progress_rejection(
+        ilium_ipc::ProgressMonitorRejectionCode::TooManyMonitors,
+        format!(
+            "this pane already has {} progress monitors (ids {}); wait for one to finish or clear one with `ilium progress clear --monitor-id <id>`",
+            crate::progress_monitor::MAX_PROGRESS_MONITORS_PER_PANE,
+            live.join(", ")
+        ),
+    )
 }
 
 async fn commit_progress_monitor(
@@ -3274,6 +3315,16 @@ async fn commit_progress_monitor(
         )
         .await);
     }
+    if !runtime.has_progress_monitor_capacity_for(&registration.command) {
+        let rejection = too_many_progress_monitors_rejection(runtime);
+        drop(panes);
+        drop(tree);
+        drop(snapshot_write_guard);
+        return Err(repair_rejected_staged_progress_monitor(state, rejection).await);
+    }
+    // Finished monitors whose results were already handed over, and a
+    // finished run of the same probe, make room for the new registration.
+    runtime.retire_settled_progress_monitors(&registration.command);
     let fence = match runtime.install_progress_monitor(registration.clone()) {
         Ok(fence) => fence,
         Err(message) => {
@@ -3287,8 +3338,9 @@ async fn commit_progress_monitor(
             return Err(repair_rejected_staged_progress_monitor(state, rejection).await);
         }
     };
-    if let Err(error) = tree.set_pane_progress(pane_id, Some(progress.clone())) {
-        runtime.cancel_progress_monitor();
+    let progress_monitors = runtime.progress_reports();
+    if let Err(error) = tree.replace_pane_progress(pane_id, progress_monitors.clone()) {
+        runtime.cancel_progress_monitor(monitor_id);
         let rejection = progress_rejection(
             ilium_ipc::ProgressMonitorRejectionCode::PaneNotFound,
             error.to_string(),
@@ -3311,17 +3363,16 @@ async fn commit_progress_monitor(
             }
         }
     });
-    runtime.set_progress_monitor_task(outcome_task);
+    runtime.set_progress_monitor_task(monitor_id, outcome_task);
     drop(panes);
     drop(tree);
     // The live monitor now exactly matches the staged bytes. Releasing this
     // guard lets a background writer proceed, but it can only build from the
-    // committed state and therefore cannot overwrite the durable acceptance
-    // with the previous monitor.
+    // committed state and therefore cannot overwrite the durable acceptance.
     drop(snapshot_write_guard);
     state.broadcast(ServerEvent::PaneProgressChanged {
         pane_id,
-        progress: Some(progress),
+        progress_monitors,
     });
     state.request_snapshot_save();
     Ok(())
@@ -3468,7 +3519,7 @@ async fn handle_progress_monitor_outcome(
             crate::agent_delivery::monitor_failure_message(&progress, &error.message)
         }
         crate::progress_monitor::ProgressMonitorOutcome::Disabled
-        | crate::progress_monitor::ProgressMonitorOutcome::Superseded
+        | crate::progress_monitor::ProgressMonitorOutcome::Cleared
         | crate::progress_monitor::ProgressMonitorOutcome::PaneUnavailable => return,
     };
     if let Err(error) =
@@ -3538,9 +3589,8 @@ async fn handle_wait_pane_progress_monitor(
         return;
     };
     let current = runtime
-        .progress_monitor
-        .as_ref()
-        .map(|monitor| (monitor.monitor_id, monitor.latest_progress.clone()));
+        .progress_monitor(monitor_id)
+        .map(|monitor| monitor.latest_progress.clone());
     let immediate = match current {
         None => Some(ilium_ipc::ProgressWaitOutcome {
             monitor_id,
@@ -3548,13 +3598,7 @@ async fn handle_wait_pane_progress_monitor(
             progress: None,
             composer_notice_suppressed: false,
         }),
-        Some((current_id, _)) if current_id != monitor_id => Some(ilium_ipc::ProgressWaitOutcome {
-            monitor_id,
-            end: ilium_ipc::ProgressWaitEnd::Superseded,
-            progress: None,
-            composer_notice_suppressed: false,
-        }),
-        Some((_, progress)) if progress.is_terminal() || progress.monitor_health.is_failed() => {
+        Some(progress) if progress.is_terminal() || progress.monitor_health.is_failed() => {
             let composer_notice_suppressed = runtime
                 .collect_progress_outcome_by_waiter(monitor_id)
                 .unwrap_or(false);
@@ -3661,8 +3705,9 @@ async fn hand_outcome_to_progress_waiters(
     false
 }
 
-/// Stops one generation and clears its sticky presentation. A supplied ID is
-/// an optimistic-concurrency fence, so an old agent cannot clear a replacement.
+/// Stops one monitor (`Some(id)`) or every monitor (`None`) of a pane and
+/// clears their sticky presentation. An id that is not registered on the
+/// pane is rejected, so an old agent cannot clear an unrelated monitor.
 async fn handle_clear_pane_progress_monitor(
     state: &Arc<ServerState>,
     request_id: u64,
@@ -3679,56 +3724,42 @@ async fn handle_clear_pane_progress_monitor(
             _ => None,
         }
     };
-    let result = if let Some(effect_gate) = effect_gate {
-        let _effect_guard = effect_gate.lock().await;
-        let mut tree = state.tree.write().await;
-        let mut panes = state.panes.write().await;
-        let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) else {
-            send_direct(
-                direct_tx,
-                ServerEvent::ProgressMonitorCleared {
-                    request_id,
-                    pane_id,
-                    result: Err(progress_rejection(
-                        ilium_ipc::ProgressMonitorRejectionCode::PaneNotFound,
-                        format!("pane {pane_id:?} closed before clear"),
-                    )),
-                },
-            )
-            .await;
-            return;
-        };
-        let current = runtime
-            .progress_monitor
-            .as_ref()
-            .map(|monitor| monitor.monitor_id);
-        if expected_monitor_id.is_some() && expected_monitor_id != current {
-            Err(progress_rejection(
-                ilium_ipc::ProgressMonitorRejectionCode::StaleMonitor,
-                format!(
-                    "expected progress monitor {:?}, but current monitor is {:?}",
-                    expected_monitor_id, current
-                ),
-            ))
-        } else {
-            runtime.cancel_progress_monitor();
-            let _ = tree.set_pane_progress(pane_id, None);
-            Ok(current)
-        }
-    } else {
-        Err(progress_rejection(
+    let pane_not_found = |message: String| {
+        progress_rejection(
             ilium_ipc::ProgressMonitorRejectionCode::PaneNotFound,
-            format!("pane {pane_id:?} is not a live terminal pane"),
-        ))
+            message,
+        )
     };
-    if result.is_ok() {
-        state.broadcast(ServerEvent::PaneProgressChanged {
-            pane_id,
-            progress: None,
-        });
-        state.request_snapshot_save();
-        crate::persistence::flush_pending_snapshot(state).await;
-    }
+    let result = match effect_gate {
+        None => Err(pane_not_found(format!(
+            "pane {pane_id:?} is not a live terminal pane"
+        ))),
+        Some(effect_gate) => {
+            let _effect_guard = effect_gate.lock().await;
+            let mut tree = state.tree.write().await;
+            let mut panes = state.panes.write().await;
+            match panes.get_mut(&pane_id) {
+                Some(PaneResource::Terminal(runtime)) => {
+                    clear_progress_monitors(&mut tree, runtime, pane_id, expected_monitor_id)
+                }
+                _ => Err(pane_not_found(format!(
+                    "pane {pane_id:?} closed before clear"
+                ))),
+            }
+        }
+    };
+    let result = match result {
+        Ok((cleared, remaining)) => {
+            state.broadcast(ServerEvent::PaneProgressChanged {
+                pane_id,
+                progress_monitors: remaining,
+            });
+            state.request_snapshot_save();
+            crate::persistence::flush_pending_snapshot(state).await;
+            Ok(cleared)
+        }
+        Err(rejection) => Err(rejection),
+    };
     send_direct(
         direct_tx,
         ServerEvent::ProgressMonitorCleared {
@@ -3738,6 +3769,32 @@ async fn handle_clear_pane_progress_monitor(
         },
     )
     .await;
+}
+
+/// Removes the requested monitors from the runtime and the tree. Returns the
+/// removed ids and the monitors that remain.
+fn clear_progress_monitors(
+    tree: &mut ilium_core::Tree,
+    runtime: &mut crate::pane::TerminalPaneRuntime,
+    pane_id: NodeId,
+    expected_monitor_id: Option<u64>,
+) -> Result<(Vec<u64>, Vec<ilium_core::PaneProgress>), ilium_ipc::ProgressMonitorRejection> {
+    let cleared = match expected_monitor_id {
+        Some(monitor_id) if runtime.cancel_progress_monitor(monitor_id) => vec![monitor_id],
+        Some(monitor_id) => {
+            return Err(progress_rejection(
+                ilium_ipc::ProgressMonitorRejectionCode::StaleMonitor,
+                format!(
+                "progress monitor {monitor_id} is not registered on this pane (registered: {:?})",
+                runtime.progress_monitor_ids()
+            ),
+            ))
+        }
+        None => runtime.cancel_progress_monitors(),
+    };
+    let remaining = runtime.progress_reports();
+    let _ = tree.replace_pane_progress(pane_id, remaining.clone());
+    Ok((cleared, remaining))
 }
 
 /// Reconstitutes one persisted registration after its pane has respawned.
@@ -3836,9 +3893,9 @@ pub(crate) async fn restore_persisted_progress_monitor(
         .install_progress_monitor(registration.clone())
         .map_err(|error| format!("persisted monitor was rejected: {error}"))?;
     runtime
-        .restore_progress_delivery_state(persisted.result_delivery)
+        .restore_progress_delivery_state(monitor_id, persisted.result_delivery)
         .map_err(|error| format!("persisted delivery state was rejected: {error}"))?;
-    tree.set_pane_progress(pane_id, Some(progress.clone()))
+    tree.upsert_pane_progress(pane_id, progress.clone())
         .map_err(|error| error.to_string())?;
 
     if should_run_probe {
@@ -3856,7 +3913,7 @@ pub(crate) async fn restore_persisted_progress_monitor(
                 }
             }
         });
-        runtime.set_progress_monitor_task(task);
+        runtime.set_progress_monitor_task(monitor_id, task);
     } else if should_deliver {
         let message = if let Some(restoration_failure) = restoration_failure {
             ilium_prompts::render_value(
@@ -3881,13 +3938,14 @@ pub(crate) async fn restore_persisted_progress_monitor(
                 tracing::warn!(pane_id = pane_id.0, monitor_id, %error, "restored progress result delivery stopped");
             }
         });
-        runtime.set_progress_delivery_task(task);
+        runtime.set_progress_delivery_task(monitor_id, task);
     }
+    let progress_monitors = runtime.progress_reports();
     drop(panes);
     drop(tree);
     state.broadcast(ServerEvent::PaneProgressChanged {
         pane_id,
-        progress: Some(progress),
+        progress_monitors,
     });
     state.request_snapshot_save();
     Ok(())
@@ -3925,33 +3983,32 @@ async fn handle_update_progress_monitor_enabled(state: &Arc<ServerState>, enable
         let PaneResource::Terminal(runtime) = resource else {
             continue;
         };
-        let preserve_evidence = runtime.progress_monitor.as_ref().is_some_and(|monitor| {
-            monitor.latest_progress.is_terminal()
-                || monitor.latest_progress.monitor_health.is_failed()
-        });
-        if preserve_evidence {
-            runtime.stop_progress_tasks_preserving_state();
-        } else if runtime.progress_monitor.is_some() {
-            // Removing the registration would leave its agent waiting for a
-            // result that can never arrive. Keep sticky failed evidence
+        let mut changed = false;
+        for monitor_id in runtime.progress_monitor_ids() {
+            // Removing a live registration would leave its agent waiting for
+            // a result that can never arrive. Keep sticky failed evidence
             // instead; the reconciler tells the agent once monitoring is
-            // enabled again.
-            if let Some(failed) = crate::progress_watchdog::mark_observation_stopped(
+            // enabled again. Settled evidence is kept as it is.
+            changed |= crate::progress_watchdog::mark_observation_stopped(
                 &mut tree,
                 *pane_id,
                 runtime,
+                monitor_id,
                 crate::progress_watchdog::OBSERVATION_DISABLED,
-            ) {
-                stopped_progress.push((*pane_id, failed));
-            }
+            )
+            .is_some();
+        }
+        runtime.stop_progress_tasks_preserving_state();
+        if changed {
+            stopped_progress.push((*pane_id, runtime.progress_reports()));
         }
     }
     drop(panes);
     drop(tree);
-    for (pane_id, progress) in stopped_progress {
+    for (pane_id, progress_monitors) in stopped_progress {
         state.broadcast(ServerEvent::PaneProgressChanged {
             pane_id,
-            progress: Some(progress),
+            progress_monitors,
         });
     }
     state.request_snapshot_save();
@@ -4503,9 +4560,8 @@ async fn check_close_on_exit(state: &Arc<ServerState>, pane_id: NodeId) -> Close
     // A live progress monitor still owes its agent a final report; closing
     // the pane now would cancel it. Wait until the monitor reaches an outcome.
     let is_monitor_live = runtime
-        .progress_monitor
-        .as_ref()
-        .is_some_and(|monitor| monitor.latest_progress.is_live());
+        .progress_monitors()
+        .any(|monitor| monitor.latest_progress.is_live());
     if is_monitor_live {
         CloseOnExitCheck::Running
     } else {
@@ -4530,15 +4586,25 @@ async fn start_close_on_exit_watcher(state: &Arc<ServerState>, pane_id: NodeId) 
             }
             tokio::time::sleep(CLOSE_ON_EXIT_POLL_INTERVAL).await;
         }
+        let Some(execution) = watcher_state.execution.get() else {
+            tracing::error!(
+                ?pane_id,
+                "auto-close skipped: server execution not initialized"
+            );
+            return;
+        };
+        let execution_client = execution.client.clone();
         let close_state = Arc::clone(&watcher_state);
-        let close = tokio::spawn(async move {
+        let admission = watcher_state.spawn_workspace_mutation_task(async move {
             // No client asked for this close, so errors have nowhere to go.
-            let (silent_sender, _silent_receiver) = DirectEventSender::channel(1);
+            // Admitted (not the test-only `channel`) so production storage accounting applies.
+            let (silent_sender, _silent_receiver) =
+                DirectEventSender::admitted_channel(1, execution_client);
             crate::lifecycle_log::record_close_request(&close_state, pane_id, "close_on_exit");
             handle_close_pane(&close_state, pane_id, &silent_sender).await;
         });
-        if !watcher_state.track_workspace_mutation_task(close) {
-            tracing::warn!("server is shutting down; pane {pane_id:?} will not auto-close");
+        if let Err(rejection) = admission {
+            tracing::warn!(?rejection, "pane {pane_id:?} auto-close was not admitted");
         }
     });
     let mut panes = state.panes.write().await;
@@ -5234,6 +5300,7 @@ pub(crate) enum RegisterPaneError {
 /// a loaded snapshot). Keeping this in one place means a future change to
 /// how a terminal's output-forwarder task is spawned, or how its detection
 /// schedule is seeded, can never drift between the two call sites.
+#[cfg(test)]
 pub(crate) async fn spawn_and_register_pane(
     state: &Arc<ServerState>,
     pane_id: NodeId,
@@ -5773,6 +5840,7 @@ async fn broadcast_terminal_recovery_after(
 /// Builds the smallest terminal event needed when one connection makes a
 /// previously hidden pane visible. Hidden output remains in the PTY-owned
 /// journal; no session-global parser or subscription state is duplicated.
+#[cfg(test)]
 pub(crate) async fn terminal_recovery_event(
     state: &ServerState,
     pane_id: NodeId,
@@ -6061,11 +6129,7 @@ async fn start_retained_workspace_prune(
     let mutation_state = Arc::clone(state);
     let reply_sender = direct_tx.clone();
     let rejection_target = target.clone();
-    let (start_tx, start_rx) = oneshot::channel();
-    let handle = tokio::spawn(async move {
-        if start_rx.await.is_err() {
-            return;
-        }
+    let admission = state.spawn_workspace_mutation_task(async move {
         let reply = crate::ipc::EventReply::Direct(&reply_sender);
         let result = crate::workspace_prune::remove_retained(
             &mutation_state,
@@ -6084,11 +6148,16 @@ async fn start_retained_workspace_prune(
         };
         let _ = tokio::time::timeout(std::time::Duration::from_secs(5), reply.send(event)).await;
     });
-    if state.track_workspace_mutation_task(handle) {
-        let _ = start_tx.send(());
+    if admission.is_ok() {
         return;
     }
-    let result = crate::workspace_prune::blocked("session is shutting down; no mutation started");
+    let message = match admission {
+        Err(crate::state::WorkspaceTaskRejection::AtCapacity) => {
+            "workspace operation capacity is full; no mutation started"
+        }
+        _ => "session is shutting down; no mutation started",
+    };
+    let result = crate::workspace_prune::blocked(message);
     let event = ServerEvent::WorkspacePruneCompleted {
         request_id,
         project,
@@ -6108,11 +6177,7 @@ async fn handle_workspace_removal(
 ) {
     let mutation_state = Arc::clone(state);
     let reply = direct_tx.clone();
-    let (start_tx, start_rx) = oneshot::channel();
-    let handle = tokio::spawn(async move {
-        if start_rx.await.is_err() {
-            return;
-        }
+    let admission = state.spawn_workspace_mutation_task(async move {
         if reply.is_closed() {
             return;
         }
@@ -6126,14 +6191,19 @@ async fn handle_workspace_removal(
         )
         .await;
     });
-    if state.track_workspace_mutation_task(handle) {
-        let _ = start_tx.send(());
+    if admission.is_ok() {
         return;
     }
+    let reason = match admission {
+        Err(crate::state::WorkspaceTaskRejection::AtCapacity) => {
+            "workspace operation capacity is full; no mutation started"
+        }
+        _ => "session is shutting down; no mutation started",
+    };
     let event = ServerEvent::WorkspaceRemovalBlocked {
         request_id,
         pane_id,
-        reasons: vec!["session is shutting down; no mutation started".into()],
+        reasons: vec![reason.into()],
     };
     let _ = tokio::time::timeout(std::time::Duration::from_secs(5), direct_tx.send(event)).await;
 }
@@ -6326,25 +6396,29 @@ async fn acknowledge_progress_outcome_for_input(
                     %error,
                     "progress outcome acknowledgement rejected"
                 );
-                None
+                Vec::new()
             }
         };
-        if let Some(progress) = acknowledged.as_ref() {
-            // The runtime copy is what crash-recovery persists; keep both in
-            // step so a restart does not resurrect an already-read outcome.
-            if let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) {
-                runtime.update_progress_monitor_progress(progress.monitor_id, progress.clone());
-            }
+        if acknowledged.is_empty() {
+            return;
         }
-        acknowledged
+        // The runtime copy is what crash-recovery persists; keep both in
+        // step so a restart does not resurrect an already-read outcome.
+        match panes.get_mut(&pane_id) {
+            Some(PaneResource::Terminal(runtime)) => {
+                for progress in &acknowledged {
+                    runtime.update_progress_monitor_progress(progress.monitor_id, progress.clone());
+                }
+                runtime.progress_reports()
+            }
+            _ => tree.pane_progress(pane_id).to_vec(),
+        }
     };
-    if let Some(progress) = acknowledged {
-        state.request_snapshot_save();
-        state.broadcast(ServerEvent::PaneProgressChanged {
-            pane_id,
-            progress: Some(progress),
-        });
-    }
+    state.request_snapshot_save();
+    state.broadcast(ServerEvent::PaneProgressChanged {
+        pane_id,
+        progress_monitors: acknowledged,
+    });
 }
 
 async fn handle_key_input(
@@ -6669,12 +6743,51 @@ pub(crate) async fn submit_terminal_text_locked(
             return Err(format!("pane {pane_id:?} changed before text insertion"));
         }
     }
+    let body = terminal_text_body(state, pane_id, text).await?;
+    submit_terminal_body_locked(state, pane_id, &body, source, input_gate).await
+}
+
+/// Frames `text` for the pane's current terminal modes, read from the
+/// server's own screen (the only copy that has seen every byte). A refusal
+/// names the pane and explains the terminal feature in plain words, because
+/// it is shown to the user as-is.
+async fn terminal_text_body(
+    state: &ServerState,
+    pane_id: NodeId,
+    text: &str,
+) -> Result<Vec<u8>, String> {
     let wants_bracketed_paste =
         crate::pane::read_current_terminal_screen(state, pane_id, vt100::Screen::bracketed_paste)
             .await
             .ok_or_else(|| format!("pane {pane_id:?} has no current screen for text insertion"))?;
-    let body = automated_submission_body(text.as_bytes(), wants_bracketed_paste)?;
-    submit_terminal_body_locked(state, pane_id, &body, source, input_gate).await
+    match automated_submission_body(text.as_bytes(), wants_bracketed_paste) {
+        Ok(body) => Ok(body),
+        Err(reason) => {
+            let name = state
+                .tree
+                .read()
+                .await
+                .get(pane_id)
+                .map(|node| node.name.clone())
+                .unwrap_or_else(|| format!("pane {}", pane_id.0));
+            Err(format!("Message not sent to \"{name}\": {reason}"))
+        }
+    }
+}
+
+/// Pastes text without pressing Enter. Used by "Send message to all" when
+/// its Enter option is off; the bytes then follow the ordinary user-input
+/// path, exactly as if the user had pasted into that pane.
+async fn paste_terminal_text(
+    state: &Arc<ServerState>,
+    pane_id: NodeId,
+    text: &str,
+    direct_tx: &DirectEventSender,
+) {
+    match terminal_text_body(state, pane_id, text).await {
+        Ok(body) => handle_key_input(state, pane_id, &body, None, true, None, direct_tx).await,
+        Err(message) => send_direct_error(direct_tx, message).await,
+    }
 }
 
 pub(crate) async fn submit_terminal_body_locked(
@@ -6799,9 +6912,19 @@ pub(crate) async fn submit_terminal_body_locked(
     Ok(())
 }
 
-/// A multiline agent prompt must be one paste operation so inner newlines do
-/// not become premature Enter presses. Initial-agent prompts arrive already
-/// framed; all other automatic producers carry literal UTF-8 text.
+/// Automated text goes in as one bracketed paste whenever the application
+/// negotiated bracketed paste, single-line text included. Typed as raw keys,
+/// a long message reaches Codex as a fast stream that its paste-burst
+/// heuristic buffers as a paste; Codex consumes those keys more slowly than
+/// the PTY accepts them, so the later Enter lands inside its 120 ms
+/// "Enter inserts a newline" window and the message is never sent (verified
+/// live with a 957-character message and Codex 0.162.1). An explicit paste
+/// clears that window, so the Enter then submits. Claude Code accepts both.
+///
+/// Single-line slash commands stay typed keys: agents open their command
+/// popups from typed `/` input, and the model/effort toolbar depends on it.
+/// Initial-agent prompts arrive already framed; all other automatic
+/// producers carry literal UTF-8 text.
 fn automated_submission_body(bytes: &[u8], wants_bracketed_paste: bool) -> Result<Vec<u8>, String> {
     const PASTE_START: &[u8] = b"\x1b[200~";
     const PASTE_END: &[u8] = b"\x1b[201~";
@@ -6809,13 +6932,24 @@ fn automated_submission_body(bytes: &[u8], wants_bracketed_paste: bool) -> Resul
         return Ok(bytes.to_vec());
     };
     if text.contains("\x1b[200~") || text.contains("\x1b[201~") {
-        return Err("terminal submission contains a bracketed-paste delimiter".to_owned());
+        return Err(
+            "the text contains a bracketed-paste marker (ESC [200~ or ESC [201~), which would \
+             end the paste early and let the rest arrive as typed keys"
+                .to_owned(),
+        );
     }
-    if !text.contains(['\r', '\n']) {
+    let is_multiline = text.contains(['\r', '\n']);
+    if !is_multiline && (!wants_bracketed_paste || text.starts_with('/')) {
         return Ok(bytes.to_vec());
     }
     if !wants_bracketed_paste {
-        return Err("multiline terminal submission requires bracketed-paste support".to_owned());
+        return Err(
+            "the program in that pane has not switched on bracketed paste, the terminal \
+             feature that lets a multi-line message arrive as one block. Without it every \
+             line break would act as an Enter key press and send the lines as separate, \
+             partial messages. Send a single line instead, or type the message in that pane."
+                .to_owned(),
+        );
     }
     let mut framed = Vec::with_capacity(PASTE_START.len() + bytes.len() + PASTE_END.len());
     framed.extend_from_slice(PASTE_START);
@@ -6971,6 +7105,41 @@ where
     ProbeFuture:
         std::future::Future<Output = Result<ProbeObservation, foreground_observation::ProbeError>>,
 {
+    write_key_input_unlocked_with_probe_and_admission_hook(
+        state,
+        pane_id,
+        bytes,
+        submission,
+        origin,
+        expected_input_gate,
+        probe,
+        || async {},
+    )
+    .await
+}
+
+async fn write_key_input_unlocked_with_probe_and_admission_hook<
+    Probe,
+    ProbeFuture,
+    Hook,
+    HookFuture,
+>(
+    state: &ServerState,
+    pane_id: NodeId,
+    bytes: &[u8],
+    submission: Option<PromptSubmissionSource>,
+    origin: InputWriteOrigin<'_>,
+    expected_input_gate: &std::sync::Arc<tokio::sync::Mutex<()>>,
+    probe: Probe,
+    after_admission: Hook,
+) -> Result<(), String>
+where
+    Probe: FnOnce(ProbeRequest) -> ProbeFuture,
+    ProbeFuture:
+        std::future::Future<Output = Result<ProbeObservation, foreground_observation::ProbeError>>,
+    Hook: FnOnce() -> HookFuture,
+    HookFuture: std::future::Future<Output = ()>,
+{
     write_key_input_unlocked_with_marker(
         state,
         pane_id,
@@ -6980,6 +7149,7 @@ where
         expected_input_gate,
         probe,
         None,
+        after_admission,
     )
     .await
 }
@@ -7002,11 +7172,13 @@ pub(crate) async fn write_key_input_unlocked_with_screen_marker(
         expected_input_gate,
         |request| foreground_observation::observe(state, request),
         Some(screen_changed),
+        || async {},
     )
     .await
 }
 
-async fn write_key_input_unlocked_with_marker<Probe, ProbeFuture>(
+#[allow(clippy::too_many_arguments)] // Separate PTY, ownership, preflight and observer authorities stay explicit.
+async fn write_key_input_unlocked_with_marker<Probe, ProbeFuture, Hook, HookFuture>(
     state: &ServerState,
     pane_id: NodeId,
     bytes: &[u8],
@@ -7014,12 +7186,15 @@ async fn write_key_input_unlocked_with_marker<Probe, ProbeFuture>(
     origin: InputWriteOrigin<'_>,
     expected_input_gate: &std::sync::Arc<tokio::sync::Mutex<()>>,
     probe: Probe,
-    mut screen_changed: Option<&mut tokio::sync::watch::Receiver<()>>,
+    screen_changed: Option<&mut tokio::sync::watch::Receiver<()>>,
+    after_admission: Hook,
 ) -> Result<(), String>
 where
     Probe: FnOnce(ProbeRequest) -> ProbeFuture,
     ProbeFuture:
         std::future::Future<Output = Result<ProbeObservation, foreground_observation::ProbeError>>,
+    Hook: FnOnce() -> HookFuture,
+    HookFuture: std::future::Future<Output = ()>,
 {
     let InputWriteOrigin {
         is_initial_prompt,
@@ -7145,8 +7320,8 @@ where
                 .filter(|observed| observed.same_runtime(runtime))
                 .is_some_and(|observed| observed.shell_owns_terminal() == Some(true));
         let statusline_receipt = if required_statusline_generation.is_some() {
-            if let Some(screen_changed) = screen_changed.as_deref_mut() {
-                let _ = *screen_changed.borrow_and_update();
+            if let Some(screen_changed) = screen_changed {
+                screen_changed.borrow_and_update();
             }
             Some(
                 runtime
@@ -7177,6 +7352,9 @@ where
             .write(bytes)
             .map_err(|error| format!("failed to admit input for pane {pane_id:?}: {error}"))?,
     };
+    // Tests can pause receipt collection here after queue admission without
+    // changing the PTY writer or retaining either shared registry lock.
+    after_admission().await;
     let delivered = if is_user_directed || expected_process.is_none() {
         Some(receipt.wait().await)
     } else {
@@ -8043,6 +8221,123 @@ mod tests {
             .session
             .kill()
             .expect("close replacement fixture");
+        owner.request_shutdown();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn admitted_input_receipt_cannot_book_activity_on_replacement_pane() {
+        const STALE: &[u8] = b"stale-post-admission\r";
+        let directory = tempfile::tempdir().expect("isolated directory");
+        let state = snapshot_io_handler_state(&directory);
+        let pane_id = shell_title_fixture(&state, &directory).await;
+        let input_gate = pane_input_gate(&state, pane_id).await.expect("input gate");
+        let mut events = state.events.subscribe_owned();
+        let owner = crate::execution::ServerExecution::start().expect("finite server bank");
+        let client = owner.client.clone();
+        let (admitted_tx, admitted_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+        let task_state = Arc::clone(&state);
+        let input_task = tokio::spawn(async move {
+            let _gate_guard = input_gate.lock().await;
+            write_key_input_unlocked_with_probe_and_admission_hook(
+                &task_state,
+                pane_id,
+                STALE,
+                Some(PromptSubmissionSource::QueuedPrompt),
+                InputWriteOrigin {
+                    is_initial_prompt: false,
+                    is_user_directed: true,
+                    prompt_epoch: None,
+                    expected_invocation: None,
+                    required_ready_agent_class: None,
+                    required_statusline_generation: None,
+                },
+                &input_gate,
+                move |request| async move {
+                    foreground_observation::observe_with(
+                        &client,
+                        request,
+                        Duration::from_secs(5),
+                        |_, _| (Some(true), None),
+                    )
+                    .await
+                },
+                move || async move {
+                    let _ = admitted_tx.send(());
+                    release_rx.await.expect("release admitted receipt");
+                },
+            )
+            .await
+        });
+        admitted_rx.await.expect("old PTY input admitted");
+
+        let replacement = ilium_pty::PtySession::spawn(
+            ilium_pty::PtyCommand::new("/bin/sh", directory.path(), 24, 80)
+                .arg("-c")
+                .arg("exec cat"),
+        )
+        .expect("replacement PTY");
+        let previous = tokio::time::timeout(Duration::from_secs(2), async {
+            let _tree = state.tree.write().await;
+            state
+                .panes
+                .write()
+                .await
+                .insert(
+                    pane_id,
+                    PaneResource::Terminal(Box::new(crate::pane::TerminalPaneRuntime::new(
+                        replacement,
+                        TerminalOrigin::PlainShell,
+                        None,
+                        Duration::from_secs(1),
+                    ))),
+                )
+                .expect("original PTY")
+        })
+        .await
+        .expect("receipt wait must not hold tree or panes guards");
+        release_tx.send(()).expect("release receipt collection");
+        tokio::time::timeout(Duration::from_secs(5), input_task)
+            .await
+            .expect("old input receipt settles")
+            .expect("input handler task")
+            .expect("old-session completion is not a replacement error");
+
+        while let Ok(event) = events.try_recv() {
+            assert!(
+                !matches!(event, ServerEvent::PanePromptSubmitted { pane_id: changed, .. }
+                if changed == pane_id)
+            );
+        }
+        assert_eq!(
+            state
+                .tree
+                .read()
+                .await
+                .get(pane_id)
+                .expect("replacement pane")
+                .name,
+            "original"
+        );
+        let removed = { state.panes.write().await.remove(&pane_id) };
+        let Some(PaneResource::Terminal(mut new_runtime)) = removed else {
+            panic!("replacement fixture remains terminal");
+        };
+        assert_no_stale_input_after_sentinel(
+            &new_runtime.session,
+            STALE,
+            b"replacement-sentinel\r",
+        )
+        .await;
+        new_runtime
+            .session
+            .kill()
+            .expect("close replacement fixture");
+        let PaneResource::Terminal(mut old_runtime) = previous else {
+            panic!("original fixture remains terminal");
+        };
+        old_runtime.session.kill().expect("close original fixture");
         owner.request_shutdown();
     }
 
@@ -9783,9 +10078,26 @@ mod tests {
             automated_submission_body(b"/model", true).unwrap(),
             b"/model"
         );
+        assert!(automated_submission_body(b"first\nsecond", false)
+            .unwrap_err()
+            .contains("has not switched on bracketed paste"));
+    }
+
+    /// Codex's paste-burst heuristic turns the Enter after a long typed
+    /// message into a newline; an explicit paste cannot be misread that way.
+    #[test]
+    fn automated_single_line_body_is_one_paste_when_negotiated() {
         assert_eq!(
-            automated_submission_body(b"first\nsecond", false).unwrap_err(),
-            "multiline terminal submission requires bracketed-paste support"
+            automated_submission_body(b"Reply with OK", true).unwrap(),
+            b"\x1b[200~Reply with OK\x1b[201~"
+        );
+        assert_eq!(
+            automated_submission_body(b"Reply with OK", false).unwrap(),
+            b"Reply with OK"
+        );
+        assert_eq!(
+            automated_submission_body(b"/effort max", true).unwrap(),
+            b"/effort max"
         );
     }
 
@@ -10725,12 +11037,16 @@ mod tests {
     async fn wait_test_delivery(
         state: &Arc<ServerState>,
         pane_id: NodeId,
+        monitor_id: u64,
     ) -> crate::pane::ProgressDeliveryState {
         let panes = state.panes.read().await;
         let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
             panic!("fixture pane must remain terminal");
         };
-        runtime.progress_monitor.as_ref().unwrap().result_delivery
+        runtime
+            .progress_monitor(monitor_id)
+            .unwrap()
+            .result_delivery
     }
 
     async fn next_wait_reply(
@@ -10763,7 +11079,7 @@ mod tests {
         assert!(outcome.composer_notice_suppressed);
         assert_eq!(outcome.progress, Some(done));
         assert_eq!(
-            wait_test_delivery(&state, pane_id).await,
+            wait_test_delivery(&state, pane_id, 7).await,
             crate::pane::ProgressDeliveryState::CollectedByWaiter
         );
         {
@@ -10772,7 +11088,7 @@ mod tests {
                 panic!("fixture pane must remain terminal");
             };
             assert_eq!(
-                runtime.progress_reconcile_action(),
+                runtime.progress_reconcile_action(7),
                 crate::pane::ProgressReconcileAction::None,
                 "a collected outcome is never redelivered"
             );
@@ -10786,7 +11102,7 @@ mod tests {
         let done = settle_wait_test_monitor(&state, pane_id, 8).await;
         assert!(!hand_outcome_to_progress_waiters(&state, pane_id, 8, &done).await);
         assert_eq!(
-            wait_test_delivery(&state, pane_id).await,
+            wait_test_delivery(&state, pane_id, 8).await,
             crate::pane::ProgressDeliveryState::NotQueued
         );
 
@@ -10799,35 +11115,53 @@ mod tests {
         assert_eq!(outcome.end, ilium_ipc::ProgressWaitEnd::Settled);
         assert!(outcome.composer_notice_suppressed);
 
-        // Replacement and clear both end a held wait.
+        // A second monitor on the same pane never disturbs a held wait: each
+        // waiter ends only with its own monitor.
         install_wait_test_monitor(&state, pane_id, 9).await;
-        let (reply, mut receiver) = DirectEventSender::channel(8);
-        handle_wait_pane_progress_monitor(&state, 44, pane_id, 9, &reply).await;
+        let (reply_nine, mut receiver_nine) = DirectEventSender::channel(8);
+        handle_wait_pane_progress_monitor(&state, 44, pane_id, 9, &reply_nine).await;
         install_wait_test_monitor(&state, pane_id, 10).await;
-        let outcome = next_wait_reply(&mut receiver)
+        let (reply_ten, mut receiver_ten) = DirectEventSender::channel(8);
+        handle_wait_pane_progress_monitor(&state, 45, pane_id, 10, &reply_ten).await;
+        assert!(
+            next_wait_reply(&mut receiver_nine).await.is_none(),
+            "adding monitor 10 leaves the wait on monitor 9 held"
+        );
+        let done_ten = settle_wait_test_monitor(&state, pane_id, 10).await;
+        assert!(hand_outcome_to_progress_waiters(&state, pane_id, 10, &done_ten).await);
+        let outcome = next_wait_reply(&mut receiver_ten)
             .await
-            .expect("superseded reply");
-        assert_eq!(outcome.end, ilium_ipc::ProgressWaitEnd::Superseded);
-        assert!(!outcome.composer_notice_suppressed);
+            .expect("monitor 10 settled");
+        assert_eq!(outcome.monitor_id, 10);
+        assert_eq!(outcome.end, ilium_ipc::ProgressWaitEnd::Settled);
+        assert!(
+            next_wait_reply(&mut receiver_nine).await.is_none(),
+            "monitor 10 settling leaves the wait on monitor 9 held"
+        );
 
-        let (reply, mut receiver) = DirectEventSender::channel(8);
-        handle_wait_pane_progress_monitor(&state, 45, pane_id, 10, &reply).await;
+        // Clearing one monitor ends only its own held wait.
         {
             let mut panes = state.panes.write().await;
             let PaneResource::Terminal(runtime) = panes.get_mut(&pane_id).unwrap() else {
                 panic!("fixture pane must remain terminal");
             };
-            runtime.cancel_progress_monitor();
+            assert!(runtime.cancel_progress_monitor(9));
+            assert!(runtime.progress_monitor(10).is_some());
         }
-        let outcome = next_wait_reply(&mut receiver).await.expect("cleared reply");
+        let outcome = next_wait_reply(&mut receiver_nine)
+            .await
+            .expect("cleared reply");
+        assert_eq!(outcome.monitor_id, 9);
         assert_eq!(outcome.end, ilium_ipc::ProgressWaitEnd::Cleared);
+        assert!(!outcome.composer_notice_suppressed);
 
-        // Waiting with a stale ID reports the replacement immediately.
+        // Waiting on a monitor that no longer exists reports it cleared at
+        // once.
         install_wait_test_monitor(&state, pane_id, 11).await;
         let (reply, mut receiver) = DirectEventSender::channel(8);
         handle_wait_pane_progress_monitor(&state, 46, pane_id, 9, &reply).await;
         let outcome = next_wait_reply(&mut receiver).await.expect("stale reply");
-        assert_eq!(outcome.end, ilium_ipc::ProgressWaitEnd::Superseded);
+        assert_eq!(outcome.end, ilium_ipc::ProgressWaitEnd::Cleared);
         teardown_state_panes(&state);
     }
 
@@ -10895,7 +11229,7 @@ mod tests {
             .unwrap();
         // Running with no coordinator task: nothing can ever settle it.
         assert_eq!(
-            runtime.progress_reconcile_action(),
+            runtime.progress_reconcile_action(7),
             Action::ObservationStopped { monitor_id: 7 }
         );
         let done =
@@ -10904,10 +11238,10 @@ mod tests {
         assert!(runtime.update_progress_monitor_progress(7, done));
 
         runtime
-            .restore_progress_delivery_state(Persisted::NotDeliverable)
+            .restore_progress_delivery_state(7, Persisted::NotDeliverable)
             .unwrap();
         assert_eq!(
-            runtime.progress_reconcile_action(),
+            runtime.progress_reconcile_action(7),
             Action::None,
             "a plain shell has no composer, so nothing may be typed into it"
         );
@@ -10920,9 +11254,11 @@ mod tests {
             (Persisted::Attempted, true),
             (Persisted::Uncertain, true),
         ] {
-            runtime.restore_progress_delivery_state(persisted).unwrap();
+            runtime
+                .restore_progress_delivery_state(7, persisted)
+                .unwrap();
             assert_eq!(
-                runtime.progress_reconcile_action(),
+                runtime.progress_reconcile_action(7),
                 Action::Redeliver {
                     monitor_id: 7,
                     possible_duplicate: expected
@@ -10931,9 +11267,9 @@ mod tests {
             );
         }
         runtime
-            .restore_progress_delivery_state(Persisted::DeliveredToPty)
+            .restore_progress_delivery_state(7, Persisted::DeliveredToPty)
             .unwrap();
-        assert_eq!(runtime.progress_reconcile_action(), Action::None);
+        assert_eq!(runtime.progress_reconcile_action(7), Action::None);
         drop(panes);
         teardown_state_panes(&state);
     }
@@ -10990,18 +11326,13 @@ mod tests {
             assert!(!runtime.claim_progress_outcome_notification(monitor_id));
         }
         assert!(!runtime.claim_progress_outcome_notification(1));
-        let final_progress = runtime
-            .progress_monitor
-            .as_ref()
-            .unwrap()
-            .latest_progress
-            .clone();
+        let final_progress = runtime.progress_monitor(2).unwrap().latest_progress.clone();
         drop(panes);
         state
             .tree
             .write()
             .await
-            .set_pane_progress(pane_id, Some(final_progress.clone()))
+            .replace_pane_progress(pane_id, vec![final_progress.clone()])
             .unwrap();
         crate::agent_delivery::deliver_result(
             Arc::clone(&state),
@@ -11016,13 +11347,13 @@ mod tests {
             panic!("fixture pane must remain terminal");
         };
         assert_eq!(
-            runtime.progress_monitor.as_ref().unwrap().result_delivery,
+            runtime.progress_monitor(2).unwrap().result_delivery,
             crate::pane::ProgressDeliveryState::NotDeliverable
         );
         drop(panes);
         assert_eq!(
             state.tree.read().await.pane_progress(pane_id),
-            Some(&final_progress)
+            std::slice::from_ref(&final_progress)
         );
         teardown_state_panes(&state);
     }
@@ -11065,8 +11396,10 @@ mod tests {
                 match events.recv().await {
                     Ok(ServerEvent::PaneProgressChanged {
                         pane_id: event_pane_id,
-                        progress: Some(progress),
-                    }) if event_pane_id == pane_id => break progress,
+                        progress_monitors,
+                    }) if event_pane_id == pane_id && progress_monitors.len() == 1 => {
+                        break progress_monitors.into_iter().next().unwrap()
+                    }
                     Ok(_) => {}
                     Err(error) => panic!("progress event stream closed: {error}"),
                 }
@@ -11078,7 +11411,7 @@ mod tests {
         assert_eq!(progress.report.message, "frame 10/100");
         assert_eq!(
             state.tree.read().await.pane_progress(pane_id),
-            Some(&progress)
+            std::slice::from_ref(&progress)
         );
 
         teardown_state_panes(&state);
@@ -11166,11 +11499,13 @@ mod tests {
             Some(ServerEvent::ProgressMonitorStatusReported {
                 request_id: 18,
                 result: Ok(ilium_ipc::ProgressMonitorStatus {
-                    progress: Some(progress),
+                    progress_monitors,
                     ..
                 }),
                 ..
-            }) if progress.monitor_id == accepted_id && progress.report.job_id == "kept-job"
+            }) if progress_monitors.len() == 1
+                && progress_monitors[0].monitor_id == accepted_id
+                && progress_monitors[0].report.job_id == "kept-job"
         ));
         teardown_state_panes(&state);
     }
@@ -11369,12 +11704,13 @@ mod tests {
             direct_rx.recv().await,
             Some(ServerEvent::ProgressMonitorStatusReported {
                 result: Ok(ilium_ipc::ProgressMonitorStatus {
-                    progress: Some(progress),
+                    progress_monitors,
                     ..
                 }),
                 ..
-            }) if progress.monitor_id == preserved_monitor_id
-                && progress.report.job_id == "preserved-job"
+            }) if progress_monitors.len() == 1
+                && progress_monitors[0].monitor_id == preserved_monitor_id
+                && progress_monitors[0].report.job_id == "preserved-job"
         ));
 
         teardown_state_panes(&state);
@@ -11398,7 +11734,7 @@ mod tests {
             let PaneResource::Terminal(runtime) = panes.get(&pane_id).unwrap() else {
                 panic!("fixture pane must remain terminal");
             };
-            let monitor = runtime.progress_monitor.as_ref().unwrap();
+            let monitor = runtime.progress_monitors().next().unwrap();
             (monitor.latest_progress.clone(), monitor.result_delivery)
         };
         assert!(matches!(
@@ -11422,7 +11758,7 @@ mod tests {
         ));
         assert_eq!(
             state.tree.read().await.pane_progress(pane_id),
-            Some(&progress)
+            std::slice::from_ref(&progress)
         );
 
         teardown_state_panes(&state);
@@ -11448,6 +11784,7 @@ mod tests {
             .read()
             .await
             .pane_progress(pane_id)
+            .first()
             .cloned()
             .expect("failed restore evidence remains visible");
         assert!(matches!(
@@ -11463,7 +11800,11 @@ mod tests {
             let PaneResource::Terminal(runtime) = panes.get(&pane_id).unwrap() else {
                 panic!("fixture pane must remain terminal");
             };
-            runtime.progress_monitor.as_ref().unwrap().result_delivery
+            let monitor_id = runtime.progress_monitor_ids()[0];
+            runtime
+                .progress_monitor(monitor_id)
+                .unwrap()
+                .result_delivery
         };
         assert_eq!(
             delivery,
@@ -11506,9 +11847,12 @@ mod tests {
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 if let Ok(ServerEvent::PaneProgressChanged {
-                    progress: Some(_), ..
+                    progress_monitors, ..
                 }) = events.recv().await
                 {
+                    if progress_monitors.is_empty() {
+                        continue;
+                    }
                     break;
                 }
             }
@@ -11530,19 +11874,19 @@ mod tests {
             direct_rx.recv().await,
             Some(ServerEvent::ProgressMonitorCleared {
                 request_id: 22,
-                result: Ok(Some(id)),
+                result: Ok(ids),
                 ..
-            }) if id == monitor_id
+            }) if ids == vec![monitor_id]
         ));
 
         let cleared = tokio::time::timeout(Duration::from_secs(2), async {
             loop {
                 if let Ok(ServerEvent::PaneProgressChanged {
                     pane_id: event_pane_id,
-                    progress: None,
+                    progress_monitors,
                 }) = events.recv().await
                 {
-                    if event_pane_id == pane_id {
+                    if event_pane_id == pane_id && progress_monitors.is_empty() {
                         break true;
                     }
                 }
@@ -11550,8 +11894,8 @@ mod tests {
         })
         .await
         .unwrap_or(false);
-        assert!(cleared, "clearing must broadcast a None progress event");
-        assert_eq!(state.tree.read().await.pane_progress(pane_id), None);
+        assert!(cleared, "clearing must broadcast an empty monitor list");
+        assert!(state.tree.read().await.pane_progress(pane_id).is_empty());
 
         // The loop must actually have stopped, not merely have its last
         // report cleared -- give it several intervals' worth of time and
@@ -11559,9 +11903,12 @@ mod tests {
         let resurfaced = tokio::time::timeout(Duration::from_secs(3), async {
             loop {
                 if let Ok(ServerEvent::PaneProgressChanged {
-                    progress: Some(_), ..
+                    progress_monitors, ..
                 }) = events.recv().await
                 {
+                    if progress_monitors.is_empty() {
+                        continue;
+                    }
                     return true;
                 }
             }
@@ -11572,6 +11919,130 @@ mod tests {
             !resurfaced,
             "a cleared monitor must not keep reporting afterward"
         );
+
+        teardown_state_panes(&state);
+    }
+
+    #[tokio::test]
+    async fn one_pane_runs_several_monitors_and_clears_them_independently() {
+        let (state, pane_id, _directory) =
+            state_with_one_terminal_pane("progress-monitor-several-per-pane").await;
+        let (direct_tx, mut direct_rx) = DirectEventSender::channel(4);
+        let build_command = crate::progress_monitor::test_probes::emit_text(
+            r#"{"job_id":"build","status":"running","percent":10,"message":"compiling"}"#,
+        );
+        let tests_command = crate::progress_monitor::test_probes::emit_text(
+            r#"{"job_id":"tests","status":"running","percent":60,"message":"testing"}"#,
+        );
+        let (state_ref, direct_tx_ref) = (&state, &direct_tx);
+        let set = move |request_id: u64, command: String| {
+            handle_request(
+                state_ref,
+                ClientRequest::SetPaneProgressMonitor {
+                    request_id,
+                    pane_id,
+                    command,
+                    interval_seconds: 60,
+                },
+                direct_tx_ref,
+            )
+        };
+        set(61, build_command.clone()).await;
+        let build_id = match direct_rx.recv().await.unwrap() {
+            ServerEvent::ProgressMonitorSetCompleted {
+                result: Ok(accepted),
+                ..
+            } => accepted.monitor_id,
+            event => panic!("unexpected build registration: {event:?}"),
+        };
+        set(62, tests_command.clone()).await;
+        let tests_id = match direct_rx.recv().await.unwrap() {
+            ServerEvent::ProgressMonitorSetCompleted {
+                result: Ok(accepted),
+                ..
+            } => accepted.monitor_id,
+            event => panic!("unexpected tests registration: {event:?}"),
+        };
+        assert_ne!(build_id, tests_id, "a second set adds a monitor");
+
+        // Registering the same probe again returns the live monitor instead
+        // of a duplicate.
+        set(63, build_command.clone()).await;
+        match direct_rx.recv().await.unwrap() {
+            ServerEvent::ProgressMonitorSetCompleted {
+                result: Ok(accepted),
+                ..
+            } => assert_eq!(accepted.monitor_id, build_id),
+            event => panic!("unexpected repeated registration: {event:?}"),
+        }
+        {
+            let tree = state.tree.read().await;
+            let monitor_ids: Vec<u64> = tree
+                .pane_progress(pane_id)
+                .iter()
+                .map(|progress| progress.monitor_id)
+                .collect();
+            assert_eq!(monitor_ids, vec![build_id, tests_id]);
+        }
+
+        handle_request(
+            &state,
+            ClientRequest::ClearPaneProgressMonitor {
+                request_id: 64,
+                pane_id,
+                expected_monitor_id: Some(build_id),
+            },
+            &direct_tx,
+        )
+        .await;
+        assert!(matches!(
+            direct_rx.recv().await,
+            Some(ServerEvent::ProgressMonitorCleared {
+                request_id: 64,
+                result: Ok(ids),
+                ..
+            }) if ids == vec![build_id]
+        ));
+        handle_request(
+            &state,
+            ClientRequest::GetPaneProgressMonitorStatus {
+                request_id: 65,
+                pane_id,
+            },
+            &direct_tx,
+        )
+        .await;
+        assert!(matches!(
+            direct_rx.recv().await,
+            Some(ServerEvent::ProgressMonitorStatusReported {
+                result: Ok(ilium_ipc::ProgressMonitorStatus {
+                    progress_monitors,
+                    ..
+                }),
+                ..
+            }) if progress_monitors.len() == 1 && progress_monitors[0].monitor_id == tests_id
+        ));
+
+        // An unfenced clear removes every remaining monitor.
+        handle_request(
+            &state,
+            ClientRequest::ClearPaneProgressMonitor {
+                request_id: 66,
+                pane_id,
+                expected_monitor_id: None,
+            },
+            &direct_tx,
+        )
+        .await;
+        assert!(matches!(
+            direct_rx.recv().await,
+            Some(ServerEvent::ProgressMonitorCleared {
+                request_id: 66,
+                result: Ok(ids),
+                ..
+            }) if ids == vec![tests_id]
+        ));
+        assert!(state.tree.read().await.pane_progress(pane_id).is_empty());
 
         teardown_state_panes(&state);
     }
@@ -11672,7 +12143,8 @@ mod tests {
             while !finished.is_finished() {
                 tokio::task::yield_now().await;
             }
-            runtime.set_progress_monitor_task(finished);
+            let monitor_id = runtime.progress_monitor_ids()[0];
+            runtime.set_progress_monitor_task(monitor_id, finished);
         }
 
         let mut attempts = std::collections::HashMap::new();
@@ -11683,8 +12155,12 @@ mod tests {
                 match events.recv().await {
                     Ok(ServerEvent::PaneProgressChanged {
                         pane_id: event_pane_id,
-                        progress: Some(progress),
-                    }) if event_pane_id == pane_id && progress.monitor_health.is_failed() => {
+                        progress_monitors,
+                    }) if event_pane_id == pane_id
+                        && progress_monitors
+                            .iter()
+                            .any(|progress| progress.monitor_health.is_failed()) =>
+                    {
                         return true;
                     }
                     Ok(_) => {}
@@ -11733,9 +12209,12 @@ mod tests {
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 if let Ok(ServerEvent::PaneProgressChanged {
-                    progress: Some(_), ..
+                    progress_monitors, ..
                 }) = events.recv().await
                 {
+                    if progress_monitors.is_empty() {
+                        continue;
+                    }
                     break;
                 }
             }
@@ -11756,8 +12235,12 @@ mod tests {
                     Ok(ServerEvent::ProgressMonitorEnabledChanged { enabled: false }) => {}
                     Ok(ServerEvent::PaneProgressChanged {
                         pane_id: event_pane_id,
-                        progress: Some(progress),
-                    }) if event_pane_id == pane_id && progress.monitor_health.is_failed() => {
+                        progress_monitors,
+                    }) if event_pane_id == pane_id
+                        && progress_monitors
+                            .iter()
+                            .any(|progress| progress.monitor_health.is_failed()) =>
+                    {
                         return true;
                     }
                     Ok(_) => {}
