@@ -580,6 +580,14 @@ pub(crate) async fn capture_snapshot(
                     PaneSnapshotKind::Terminal(snapshot_terminal_origin(runtime))
                 }
                 PaneResource::Editor { path } => PaneSnapshotKind::Editor { path: path.clone() },
+                // A pane whose process has not started yet is saved exactly
+                // as it was loaded, so a failed restore can never erase it.
+                PaneResource::Unrestored(unrestored) => {
+                    if let Some(progress_monitor) = &unrestored.progress_monitor {
+                        progress_monitors.push(progress_monitor.clone());
+                    }
+                    unrestored.kind.clone()
+                }
             };
             pane_snapshots.push(PaneSnapshot {
                 node_id: *node_id,
@@ -639,6 +647,26 @@ fn capture_estimated_bytes(
             PaneResource::Editor { path } => path
                 .as_ref()
                 .map_or(0, |path| path.capacity().saturating_mul(2)),
+            PaneResource::Unrestored(unrestored) => {
+                let kind = match &unrestored.kind {
+                    PaneSnapshotKind::Editor { path } => path
+                        .as_ref()
+                        .map_or(0, |path| path.capacity().saturating_mul(2)),
+                    PaneSnapshotKind::Terminal(TerminalOrigin::Command(command)) => {
+                        command.capacity().saturating_mul(8)
+                    }
+                    PaneSnapshotKind::Terminal(TerminalOrigin::Frozen { resume_command }) => {
+                        resume_command.capacity().saturating_mul(8)
+                    }
+                    PaneSnapshotKind::Terminal(TerminalOrigin::PlainShell) => 0,
+                };
+                kind.saturating_add(1024).saturating_add(
+                    unrestored
+                        .progress_monitor
+                        .as_ref()
+                        .map_or(0, estimated_monitor_bytes),
+                )
+            }
             PaneResource::Terminal(runtime) => {
                 let origin = runtime
                     .deferred_workspace_origin
@@ -695,6 +723,7 @@ fn snapshot_terminal_origin(runtime: &crate::pane::TerminalPaneRuntime) -> Termi
     snapshot_origin_from_identity(
         &runtime.origin,
         runtime.session_id.as_deref(),
+        runtime.pending_generated_session_id.as_deref(),
         runtime.is_session_identity_invalidated,
     )
 }
@@ -703,14 +732,28 @@ fn snapshot_terminal_origin(runtime: &crate::pane::TerminalPaneRuntime) -> Termi
 /// Arbitrary user commands are immutable. During an in-process transition,
 /// the previous resume ID is known stale, so a crash can safely restore only
 /// a fresh bare agent until the replacement identity is proven.
+///
+/// A fresh exact `claude` launch whose generated `--session-id` detection has
+/// not confirmed yet is saved with that id, so a restart before
+/// confirmation still reopens the same conversation instead of a blank one.
 fn snapshot_origin_from_identity(
     origin: &TerminalOrigin,
     session_id: Option<&str>,
+    pending_generated_session_id: Option<&str>,
     is_session_identity_invalidated: bool,
 ) -> TerminalOrigin {
     let TerminalOrigin::Command(command) = origin else {
         return origin.clone();
     };
+    if session_id.is_none() && !is_session_identity_invalidated {
+        if let Some(pending) = pending_generated_session_id {
+            if command == "claude"
+                || crate::pane::generated_claude_session_id(command) == Some(pending)
+            {
+                return TerminalOrigin::Command(format!("claude --session-id {pending}"));
+            }
+        }
+    }
     let provider = BuiltinAgentProvider::from_command_line(command)
         .or_else(|| persisted_resume_binding(command).map(|binding| binding.provider));
     let Some(provider) = provider else {
@@ -2425,11 +2468,11 @@ root:
             TerminalOrigin::Command(format!("codex resume {}", shell_quote(old_session_id)));
 
         assert_eq!(
-            snapshot_origin_from_identity(&old_origin, Some(new_session_id), false),
+            snapshot_origin_from_identity(&old_origin, Some(new_session_id), None, false),
             TerminalOrigin::Command(format!("codex resume {}", shell_quote(new_session_id)))
         );
         assert_eq!(
-            snapshot_origin_from_identity(&old_origin, None, true),
+            snapshot_origin_from_identity(&old_origin, None, None, true),
             TerminalOrigin::Command("codex".to_string())
         );
         let old_antigravity_origin = TerminalOrigin::Command(format!(
@@ -2437,23 +2480,70 @@ root:
             shell_quote(old_session_id)
         ));
         assert_eq!(
-            snapshot_origin_from_identity(&old_antigravity_origin, Some(new_session_id), false),
+            snapshot_origin_from_identity(
+                &old_antigravity_origin,
+                Some(new_session_id),
+                None,
+                false
+            ),
             TerminalOrigin::Command(format!(
                 "agy --conversation {}",
                 shell_quote(new_session_id)
             ))
         );
         assert_eq!(
-            snapshot_origin_from_identity(&old_antigravity_origin, None, true),
+            snapshot_origin_from_identity(&old_antigravity_origin, None, None, true),
             TerminalOrigin::Command("agy".to_string())
         );
         assert_eq!(
             snapshot_origin_from_identity(
                 &TerminalOrigin::Command("custom-agent --resume value".to_string()),
                 Some(new_session_id),
+                None,
                 true,
             ),
             TerminalOrigin::Command("custom-agent --resume value".to_string())
+        );
+    }
+
+    /// A restart before detection confirmed a fresh Claude pane's generated
+    /// id must reopen that conversation, not a blank `claude`.
+    #[test]
+    fn unconfirmed_generated_claude_id_is_saved_with_the_pane() {
+        let pending = "55555555-5555-4555-8555-555555555555";
+        let saved = TerminalOrigin::Command(format!("claude --session-id {pending}"));
+        assert_eq!(
+            snapshot_origin_from_identity(
+                &TerminalOrigin::Command("claude".to_string()),
+                None,
+                Some(pending),
+                false
+            ),
+            saved
+        );
+        assert_eq!(
+            snapshot_origin_from_identity(&saved, None, Some(pending), false),
+            saved
+        );
+        // A known stale identity still restores only a fresh agent.
+        assert_eq!(
+            snapshot_origin_from_identity(
+                &TerminalOrigin::Command("claude".to_string()),
+                None,
+                Some(pending),
+                true
+            ),
+            TerminalOrigin::Command("claude".to_string())
+        );
+        // A user's own command is never rewritten.
+        assert_eq!(
+            snapshot_origin_from_identity(
+                &TerminalOrigin::Command("claude --model opus".to_string()),
+                None,
+                Some(pending),
+                false
+            ),
+            TerminalOrigin::Command("claude --model opus".to_string())
         );
     }
 }

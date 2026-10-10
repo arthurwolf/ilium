@@ -33,7 +33,7 @@ use tokio::task::JoinHandle;
 use crate::foreground_observation::{self, ProbeRequest};
 use crate::notifications::{self, PendingNotification};
 use crate::pane::{
-    AutoAnswerAttempt, AutoAnswerPhase, ConfirmedGoalOwner, PaneResource, agent_process_key,
+    agent_process_key, AutoAnswerAttempt, AutoAnswerPhase, ConfirmedGoalOwner, PaneResource,
 };
 use crate::sounds;
 use crate::state::ServerState;
@@ -519,7 +519,7 @@ async fn next_detection_delay(state: &ServerState, now: Instant) -> Option<Durat
     minimum_detection_delay(
         panes.values().filter_map(|resource| match resource {
             PaneResource::Terminal(runtime) => Some(runtime.detection_schedule.next_due),
-            PaneResource::Editor { .. } => None,
+            PaneResource::Editor { .. } | PaneResource::Unrestored(_) => None,
         }),
         now,
     )
@@ -893,7 +893,9 @@ async fn run_due_panes_with_hook(
                             .as_ref()
                             .map(|session_id| (session_id.clone(), *pane_id))
                     }
-                    PaneResource::Terminal(_) | PaneResource::Editor { .. } => None,
+                    PaneResource::Terminal(_)
+                    | PaneResource::Editor { .. }
+                    | PaneResource::Unrestored(_) => None,
                 }
             }));
         // Select the batch by deadline, oldest first, before building any
@@ -906,7 +908,7 @@ async fn run_due_panes_with_hook(
                     PaneResource::Terminal(runtime) => {
                         Some((runtime.detection_schedule.next_due, *pane_id))
                     }
-                    PaneResource::Editor { .. } => None,
+                    PaneResource::Editor { .. } | PaneResource::Unrestored(_) => None,
                 }),
             now,
             MAX_DUE_PANES,
@@ -3800,12 +3802,10 @@ mod tests {
             agent_debug_menu_enabled: false,
             progress_monitor_enabled: true,
         }));
-        assert!(
-            state
-                .execution
-                .set(crate::execution::ServerExecution::start().expect("bank"))
-                .is_ok()
-        );
+        assert!(state
+            .execution
+            .set(crate::execution::ServerExecution::start().expect("bank"))
+            .is_ok());
         let group_id = state
             .tree
             .write()
@@ -3927,12 +3927,10 @@ mod tests {
             agent_debug_menu_enabled: false,
             progress_monitor_enabled: true,
         }));
-        assert!(
-            state
-                .execution
-                .set(crate::execution::ServerExecution::start().expect("bank"))
-                .is_ok()
-        );
+        assert!(state
+            .execution
+            .set(crate::execution::ServerExecution::start().expect("bank"))
+            .is_ok());
         let group_id = state
             .tree
             .write()
@@ -4046,12 +4044,10 @@ mod tests {
             agent_debug_menu_enabled: false,
             progress_monitor_enabled: true,
         }));
-        assert!(
-            state
-                .execution
-                .set(crate::execution::ServerExecution::start().expect("bank"))
-                .is_ok()
-        );
+        assert!(state
+            .execution
+            .set(crate::execution::ServerExecution::start().expect("bank"))
+            .is_ok());
         let group = state
             .tree
             .write()
@@ -4331,14 +4327,12 @@ mod tests {
             })
         ));
         assert_eq!(reused_pid_without_evidence.confirmed_goal_owner, None);
-        assert!(
-            explain_goal_decision(
-                &reused_pid_without_evidence.status,
-                reused_pid_without_evidence.goal_evidence,
-                reused_pid_without_evidence.goal_was_retained,
-            )
-            .starts_with("Unknown —")
-        );
+        assert!(explain_goal_decision(
+            &reused_pid_without_evidence.status,
+            reused_pid_without_evidence.goal_evidence,
+            reused_pid_without_evidence.goal_was_retained,
+        )
+        .starts_with("Unknown —"));
     }
 
     #[test]

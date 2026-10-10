@@ -19,7 +19,7 @@ use ilium_platform::{paths, secure_fs};
 
 use crate::execution::ExecutionClient;
 use crate::ipc::handlers::{
-    RegisterPaneError, broadcast_and_persist, spawn_and_register_pane_in_directory,
+    broadcast_and_persist, spawn_and_register_pane_in_directory, RegisterPaneError,
 };
 use crate::pane::{PaneSnapshotKind, TerminalOrigin};
 use crate::state::{ServerState, WorkspaceClosePreference};
@@ -444,8 +444,8 @@ async fn run_worktree_path_io<T: Send + 'static>(
     paths: Vec<PathBuf>,
     result_bytes: usize,
     operation: impl FnOnce(Vec<PathBuf>, ilium_execution::JobContext) -> std::io::Result<T>
-    + Send
-    + 'static,
+        + Send
+        + 'static,
 ) -> Result<Retained<T>, String> {
     if paths.is_empty() {
         return Err("worktree path I/O requires at least one path".into());

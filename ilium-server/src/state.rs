@@ -393,6 +393,11 @@ pub struct ServerState {
     /// Broker between `ilium voice say` connections and the interactive
     /// client that hosts the voice session (see `crate::voice_relay`).
     pub(crate) voice_text: crate::voice_relay::VoiceTextRelay,
+    /// The single task retrying saved panes that failed to start (see
+    /// `crate::unrestored`). Replaced on each restore, aborted on shutdown.
+    unrestored_retry_task: std::sync::Mutex<Option<crate::task_guard::AbortOnDropHandle<()>>>,
+    /// Always-on, size-capped server lifecycle log (see `crate::lifecycle_log`).
+    pub(crate) lifecycle_log: std::sync::OnceLock<crate::lifecycle_log::LifecycleLog>,
     // Declared last so restored data fields drop before this final state lease.
     restored_snapshot_storage: std::sync::Mutex<Option<Arc<ilium_execution::StorageAdmission>>>,
 }
@@ -423,6 +428,26 @@ impl ServerState {
             .entry(common_dir.to_path_buf())
             .or_insert_with(|| std::sync::Arc::new(Mutex::new(())))
             .clone()
+    }
+
+    /// Installs the unrestored-pane retry task, aborting any previous one.
+    pub(crate) fn set_unrestored_retry_task(&self, handle: JoinHandle<()>) {
+        let previous = self
+            .unrestored_retry_task
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .replace(crate::task_guard::AbortOnDropHandle::new(handle));
+        drop(previous);
+    }
+
+    /// Aborts the unrestored-pane retry task during shutdown.
+    pub(crate) fn stop_unrestored_retry_task(&self) {
+        let task = self
+            .unrestored_retry_task
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .take();
+        drop(task);
     }
 
     /// Reuse the existing shutdown-drained registry for all workspace mutations.
@@ -537,6 +562,8 @@ impl ServerState {
             next_progress_monitor_id: std::sync::atomic::AtomicU64::new(1),
             progress_set_requests: Mutex::new(ProgressSetRequestCache::default()),
             voice_text: crate::voice_relay::VoiceTextRelay::default(),
+            unrestored_retry_task: std::sync::Mutex::new(None),
+            lifecycle_log: std::sync::OnceLock::new(),
             restored_snapshot_storage: std::sync::Mutex::new(None),
         }
     }

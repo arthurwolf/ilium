@@ -12,13 +12,31 @@ const MIB: usize = 1024 * 1024;
 // currently visible terminal's bounded recovery frame, even when general
 // event and worker storage is saturated.
 const VISIBLE_RECOVERY_BYTES: usize = 64 * MIB;
-// Sized for the many-agent target of 512 panes: each Unix PTY session declares
-// five (Windows: six) 2 MiB worker stacks, virtual reservations that are
-// mostly never touched.
-const PROCESS_WORKER_BYTES: usize = 7168 * MIB;
+// Shared ceiling for event, replay, recovery, codec and CPU worker storage.
+// PTY sessions are deliberately NOT charged here: a fixed pool shared with
+// unrelated consumers once admitted only 25 panes during a restore and
+// silently dropped every later one. See `pty_quota_limits`.
+const PROCESS_WORKER_BYTES: usize = 4096 * MIB;
 /// Many-agent design target: panes one server must admit.
 #[cfg(test)]
-const TARGET_PTY_SESSIONS: usize = 512;
+const TARGET_PTY_SESSIONS: usize = 1024;
+
+/// PTY admission scales with the number of panes: every session debits its
+/// own exact worker set, and the only ceiling is the platform's owned-worker
+/// slot table (the real finite resource: OS threads with join custody), not a
+/// byte pool shared with other consumers.
+fn pty_quota_limits() -> QuotaLimits {
+    let worker_threads = ilium_platform::owned_worker::MAX_OWNED_WORKERS;
+    QuotaLimits {
+        clients: 0,
+        jobs: 0,
+        service_jobs: 0,
+        input_bytes: 0,
+        result_bytes: 0,
+        worker_threads,
+        worker_bytes: worker_threads * ilium_pty::PTY_WORKER_STACK_BYTES,
+    }
+}
 // Distinct tenants reserve output headroom even while request handlers wait
 // for backpressured PTY/direct replies. These are declared allocation limits,
 // not an RSS estimate. They are shared across connections, never per client.
@@ -35,6 +53,7 @@ const PROCESS_RESULT_BYTES: usize = GENERAL_RESULT_BYTES + 4 * 192 * MIB + 2 * 1
 pub struct ServerResources {
     quota: QuotaGroup,
     visible_recovery_quota: QuotaGroup,
+    pty_quota: QuotaGroup,
     completed: Arc<Notify>,
 }
 
@@ -49,10 +68,9 @@ impl ServerResources {
                 service_jobs: 0,
                 input_bytes: PROCESS_INPUT_BYTES,
                 result_bytes: PROCESS_RESULT_BYTES,
-                // Keep room for at least 512 Unix PTY sessions (five 2 MiB
-                // workers each), the two 32 MiB CPU workers, and concurrent
-                // replay/output storage. The former 1024-thread / 2 GiB limits
-                // refused new panes at about 195, below the 200+ agent target.
+                // PTY workers are charged to `pty_quota`; this ceiling covers
+                // the two 32 MiB CPU workers and concurrent replay/output
+                // storage for any number of panes.
                 worker_threads: ilium_platform::owned_worker::MAX_OWNED_WORKERS,
                 worker_bytes: PROCESS_WORKER_BYTES - VISIBLE_RECOVERY_BYTES,
             },
@@ -74,6 +92,7 @@ impl ServerResources {
         Self {
             quota,
             visible_recovery_quota,
+            pty_quota: QuotaGroup::new(pty_quota_limits()),
             completed,
         }
     }
@@ -117,6 +136,8 @@ pub(crate) struct ServerExecution {
     pub(crate) visible_recovery: ExecutionClient,
     pub(crate) decoder: ExecutionClient,
     pub(crate) encoder: ExecutionClient,
+    /// PTY session admission, separate from the shared byte ceiling.
+    pty_quota: QuotaGroup,
 }
 #[derive(Clone)]
 pub(crate) struct ExecutionClient {
@@ -166,6 +187,11 @@ impl ServerExecution {
         self.client.quota.clone()
     }
 
+    /// The quota every terminal pane's PTY workers are charged to.
+    pub(crate) fn pty_quota_group(&self) -> QuotaGroup {
+        self.pty_quota.clone()
+    }
+
     #[cfg(test)]
     pub(crate) fn start() -> io::Result<Self> {
         Self::start_with_resources(ServerResources::new())
@@ -175,6 +201,7 @@ impl ServerExecution {
         let ServerResources {
             quota,
             visible_recovery_quota,
+            pty_quota,
             completed,
         } = resources;
         let lane = |threads, resident_bytes_per_thread| LaneConfig {
@@ -241,6 +268,7 @@ impl ServerExecution {
             visible_recovery,
             decoder,
             encoder,
+            pty_quota,
         })
     }
     #[cfg(test)]
@@ -387,7 +415,7 @@ impl ExecutionClient {
     ) -> Result<Retained<J::Output>, ExecutionError<J::Error>> {
         let reservation = self
             .foundation
-            .try_reserve(lane, cost)
+            .try_reserve(lane, cost_covering_job::<J>(cost))
             .map_err(ExecutionError::Rejected)?;
         self.run_reserved(reservation, job).await
     }
@@ -396,6 +424,21 @@ impl ExecutionClient {
         reservation: ilium_execution::Reservation,
         job: J,
     ) -> Result<Retained<J::Output>, ExecutionError<J::Error>> {
+        // A reservation whose cost is smaller than the job value or its result
+        // slot would be refused at submit. Re-admit it at the covering cost
+        // instead, so an under-declared caller waits for capacity rather than
+        // failing its whole operation (the 2026-10-10 worktree, setup-probe and
+        // notification failures were all this).
+        let reservation = if reservation.validate_job_type::<J>().is_err() {
+            let lane = reservation.lane();
+            let cost = cost_covering_job::<J>(reservation.cost());
+            drop(reservation);
+            self.reserve(lane, cost)
+                .await
+                .map_err(ExecutionError::Rejected)?
+        } else {
+            reservation
+        };
         let receipt = reservation
             .submit(job)
             .map_err(|rejected| ExecutionError::Rejected(rejected.reason))?;
@@ -437,6 +480,19 @@ impl ExecutionClient {
     }
 }
 
+/// Raises a declared cost so it covers the job value itself and its result
+/// slot. Callers count the heap data a job carries; the closure's inline size
+/// and its output or error type are easy to miss, and the execution bank
+/// refuses an under-declared job with `InvalidCost`.
+fn cost_covering_job<J: Job>(cost: JobCost) -> JobCost {
+    JobCost {
+        input_bytes: cost.input_bytes.max(std::mem::size_of::<J>()),
+        result_bytes: cost
+            .result_bytes
+            .max(std::mem::size_of::<J::Output>().max(std::mem::size_of::<J::Error>())),
+    }
+}
+
 #[cfg(test)]
 fn test_owner() -> &'static ServerExecution {
     static OWNER: std::sync::OnceLock<ServerExecution> = std::sync::OnceLock::new();
@@ -464,11 +520,10 @@ mod tests {
     use std::time::Duration;
 
     #[test]
-    fn process_worker_budget_admits_the_target_pty_count_with_replay_headroom() {
+    fn process_worker_budget_keeps_the_visible_recovery_share_inside_the_ceiling() {
         let resources = ServerResources::new();
-        let quota = resources.quota_group();
         assert_eq!(
-            quota.snapshot().limits.worker_bytes
+            resources.quota_group().snapshot().limits.worker_bytes
                 + resources
                     .visible_recovery_quota
                     .snapshot()
@@ -477,24 +532,45 @@ mod tests {
             PROCESS_WORKER_BYTES,
             "the reserved visible-recovery share stays inside the process ceiling"
         );
-        let _cpu_workers = quota
-            .reserve_external_worker(2, 64 * MIB)
-            .expect("the two CPU workers fit the process quota");
-        let pty_workers_per_session = if cfg!(windows) { 6 } else { 5 };
-        let _pty_workers = quota
-            .reserve_external_worker(
-                TARGET_PTY_SESSIONS * pty_workers_per_session,
-                TARGET_PTY_SESSIONS * pty_workers_per_session * 2 * MIB,
-            )
-            .expect("the target PTY session count fits the process quota");
-        let replay_headroom = quota
-            .reserve_external_storage(256 * MIB)
-            .expect("the target PTY session count retains replay/output headroom");
+    }
+
+    /// The 2026-10-09 restore lost every pane after the 25th because PTYs and
+    /// replay storage competed for one fixed byte pool. PTY admission must
+    /// stay available for the target pane count even when that shared pool is
+    /// completely exhausted by other consumers.
+    #[test]
+    fn pty_admission_scales_with_pane_count_independently_of_the_shared_pool() {
+        let resources = ServerResources::new();
+        let shared = resources.quota_group();
+        let shared_limit = shared.snapshot().limits.worker_bytes;
+        let _saturated = shared
+            .reserve_external_storage(shared_limit)
+            .expect("other consumers may fill the whole shared pool");
+        assert!(shared.reserve_external_storage(1).is_err());
+
+        let pty_quota = resources.pty_quota.clone();
+        let sessions = (0..TARGET_PTY_SESSIONS)
+            .map(|session| {
+                pty_quota
+                    .reserve_external_worker(
+                        ilium_pty::PTY_WORKERS_PER_SESSION,
+                        ilium_pty::PTY_WORKERS_PER_SESSION * ilium_pty::PTY_WORKER_STACK_BYTES,
+                    )
+                    .unwrap_or_else(|reason| {
+                        panic!(
+                            "PTY session {session} refused while shared pool is full: {reason:?}"
+                        )
+                    })
+            })
+            .collect::<Vec<_>>();
         assert_eq!(
-            quota.snapshot().worker_bytes,
-            64 * MIB + TARGET_PTY_SESSIONS * pty_workers_per_session * 2 * MIB + 256 * MIB
+            pty_quota.snapshot().worker_threads,
+            TARGET_PTY_SESSIONS * ilium_pty::PTY_WORKERS_PER_SESSION
         );
-        drop(replay_headroom);
+        assert_eq!(shared.snapshot().worker_bytes, shared_limit);
+        drop(sessions);
+        assert_eq!(pty_quota.snapshot().worker_threads, 0);
+        assert_eq!(pty_quota.snapshot().worker_bytes, 0);
     }
 
     #[test]
@@ -634,6 +710,38 @@ mod tests {
             Err(ilium_execution::RejectReason::InputBytes)
         ));
         drop((general, readers, writers));
+    }
+
+    /// Callers often count only the heap data a job carries. A cost smaller
+    /// than the closure or its error type used to fail the whole operation
+    /// with `InvalidCost` (worktree creation, setup exit probes, notifications).
+    #[tokio::test]
+    async fn under_declared_job_cost_is_raised_to_cover_the_job() {
+        let owner = ServerExecution::start().expect("execution");
+        let payload = [7_u8; 256];
+        let tiny = JobCost {
+            input_bytes: 1,
+            result_bytes: 1,
+        };
+        let reservation = owner
+            .client
+            .reserve(Lane::Io, tiny)
+            .await
+            .expect("tiny reservation");
+        let reserved = owner
+            .client
+            .run_reserved(reservation, move |_| {
+                Ok::<_, io::Error>(payload.iter().map(|byte| u64::from(*byte)).sum::<u64>())
+            })
+            .await
+            .expect("an under-declared reservation is re-admitted, not refused");
+        assert_eq!(*reserved.view(), 7 * 256);
+        let direct = owner
+            .client
+            .run(Lane::Io, tiny, move |_| Ok::<_, io::Error>(payload.len()))
+            .await
+            .expect("an under-declared run is admitted at the covering cost");
+        assert_eq!(*direct.view(), 256);
     }
 
     #[tokio::test]

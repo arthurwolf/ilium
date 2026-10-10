@@ -492,6 +492,12 @@ impl EventSubscription {
                         (SlotReadiness::Cancelled, released)
                     }
                     SlotReadiness::Committed(entry) => {
+                        // Single consumer: an entry already handed out must be
+                        // acknowledged before the next receive, or two copies
+                        // of one event could be written out of order.
+                        if self.delivered.load(Ordering::Acquire) == cursor {
+                            return Err(JournalRefusal::OutOfOrder);
+                        }
                         self.delivered.store(cursor, Ordering::Release);
                         drop(state);
                         (SlotReadiness::Committed(entry), Vec::new())
@@ -680,6 +686,7 @@ mod tests {
 
         subscription.acknowledge(sequence).unwrap();
         drop(first);
+        journal.close();
         assert!(subscription.recv().await.unwrap().is_none());
     }
 

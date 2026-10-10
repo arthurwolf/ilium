@@ -30,6 +30,7 @@ mod git_status;
 mod http_api;
 mod initial_prompt;
 mod ipc;
+mod lifecycle_log;
 mod mouse;
 mod notifications;
 mod pane;
@@ -54,6 +55,7 @@ mod task_guard;
 mod text_trigger_config;
 mod text_triggers;
 mod title_eligibility;
+mod unrestored;
 mod voice_relay;
 mod workspace;
 mod workspace_custody;
@@ -226,6 +228,28 @@ pub async fn run_with_resources(
     if !state.events.initialize_journal(execution.quota_group()) {
         return Err(std::io::Error::other("server event journal was already initialized").into());
     }
+    let lifecycle_path =
+        lifecycle_log::path_for_snapshot(&state.snapshot_path, &state.session_name);
+    if state
+        .lifecycle_log
+        .set(lifecycle_log::LifecycleLog::start(
+            execution.client.clone(),
+            lifecycle_path,
+        ))
+        .is_err()
+    {
+        return Err(std::io::Error::other("server lifecycle log was already started").into());
+    }
+    let (executable, build) = read_build_identity(&execution.client).await;
+    lifecycle_log::record(
+        &state,
+        lifecycle_log::LifecycleEvent::ServerStarted {
+            executable,
+            build,
+            session: state.session_name.clone(),
+            snapshot_path: state.snapshot_path.display().to_string(),
+        },
+    );
     let startup = startup_progress::Publisher::bind(&state, &options.socket_path).await;
     if let Some(phase) = &startup {
         phase
@@ -247,6 +271,10 @@ pub async fn run_with_resources(
     // Capture before loading can normalize an older snapshot in place, and
     // before StartFresh's first write can replace the existing session.
     let initial_backup_bucket = session_backups::capture_on_start(&state).await;
+    // The rolling backups above are bucketed per half hour, so two starts in
+    // one bucket share one copy. Keep the exact file each of the last two
+    // starts loaded as well, independent of the backup setting.
+    preserve_pre_restore_copy(&state).await;
 
     if !matches!(options.session_recovery, SessionRecoveryConfig::StartFresh) {
         if let Some(phase) = &startup {
@@ -383,7 +411,11 @@ pub(crate) async fn drain_session_work(
     if let Err(error) = &recovery_result {
         tracing::error!(%error, "session recovery did not settle successfully");
     }
+    state.stop_unrestored_retry_task();
     state.finish_workspace_creation_tasks().await;
+    if let Some(log) = state.lifecycle_log.get() {
+        log.shutdown().await;
+    }
 
     // No coordinator may retain a dirty claim when final persistence starts.
     // Finish its original in-flight ACK/failure bookkeeping before inspecting
@@ -539,6 +571,77 @@ pub(crate) async fn restore_snapshot(
     }
 }
 
+/// The running executable and the install record written beside it by
+/// `tools/install-from-receipt.py` (`<executable>.build.json`).
+async fn read_build_identity(
+    client: &execution::ExecutionClient,
+) -> (Option<String>, Option<serde_json::Value>) {
+    let Ok(executable) = std::env::current_exe() else {
+        return (None, None);
+    };
+    let executable_text = executable.display().to_string();
+    let mut record_path = executable.into_os_string();
+    record_path.push(".build.json");
+    let record_path = std::path::PathBuf::from(record_path);
+    let cost = ilium_execution::JobCost {
+        input_bytes: 256 * 1024,
+        result_bytes: 256 * 1024,
+    };
+    let result = client
+        .run(ilium_execution::Lane::Io, cost, move |_context| {
+            let metadata = std::fs::metadata(&record_path)?;
+            if metadata.len() > 64 * 1024 {
+                return Err(std::io::Error::other("install record is too large"));
+            }
+            std::fs::read(&record_path)
+        })
+        .await;
+    let build = match result {
+        Ok(bytes) => serde_json::from_slice(&bytes.into_parts().0).ok(),
+        Err(_) => None,
+    };
+    (Some(executable_text), build)
+}
+
+/// Copies the snapshot about to be loaded to `<name>.pre-restore.json`,
+/// keeping the previous start's copy as `<name>.pre-restore.1.json`.
+async fn preserve_pre_restore_copy(state: &Arc<ServerState>) {
+    let Some(execution) = state.execution.get() else {
+        return;
+    };
+    let source = state.snapshot_path.clone();
+    let Some(stem) = source
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().into_owned())
+    else {
+        return;
+    };
+    let current = source.with_file_name(format!("{stem}.pre-restore.json"));
+    let previous = source.with_file_name(format!("{stem}.pre-restore.1.json"));
+    let cost = ilium_execution::JobCost {
+        input_bytes: 64 * 1024,
+        result_bytes: 4096,
+    };
+    let result = execution
+        .client
+        .run(ilium_execution::Lane::Io, cost, move |_context| {
+            if !source.is_file() {
+                return Ok(());
+            }
+            if current.is_file() {
+                std::fs::rename(&current, &previous)?;
+            }
+            let temporary = current.with_extension("json.partial");
+            std::fs::copy(&source, &temporary)?;
+            ilium_platform::secure_fs::restrict_file_to_owner(&temporary)?;
+            std::fs::rename(&temporary, &current)
+        })
+        .await;
+    if let Err(error) = result {
+        tracing::warn!(?error, "pre-restore snapshot copy failed");
+    }
+}
+
 async fn restore_snapshot_data(
     state: &Arc<ServerState>,
     mut snapshot: persistence::SessionSnapshot,
@@ -609,6 +712,19 @@ async fn restore_snapshot_data(
         for (pane_id, resource) in panes.drain() {
             ipc::handlers::teardown_pane_resource(pane_id, resource);
         }
+        // Every saved pane is registered as unrestored before any process
+        // starts. A snapshot written mid-restore, or after a failed start,
+        // therefore still contains every saved pane exactly as loaded.
+        for pane_snapshot in &snapshot.panes {
+            if tree.get(pane_snapshot.node_id).is_some() {
+                panes.insert(
+                    pane_snapshot.node_id,
+                    pane::PaneResource::Unrestored(Box::new(pane::UnrestoredPane::queued(
+                        pane_snapshot.kind.clone(),
+                    ))),
+                );
+            }
+        }
         drop(panes);
     }
     drop(publish_guard);
@@ -616,7 +732,7 @@ async fn restore_snapshot_data(
     state.recovery.after_restore_publication.notify_waiters();
     state.workspace_git_status_cache.write().await.clear();
 
-    let mut failed_pane_ids = Vec::new();
+    let mut failed_panes: Vec<(ilium_core::NodeId, String)> = Vec::new();
     let mut missing_workspace_pane_ids = Vec::new();
     for (restored_count, pane_snapshot) in snapshot.panes.into_iter().enumerate() {
         let node_id = pane_snapshot.node_id;
@@ -625,94 +741,11 @@ async fn restore_snapshot_data(
                 .publish_pane(state, node_id, restored_count, pane_count)
                 .await;
         }
-        let (saved_location, project_root) = {
-            let tree = state.tree.read().await;
-            (
-                tree.pane_workspace(node_id).map(|workspace| {
-                    (
-                        tree.pane_cwd(node_id).map(std::path::Path::to_path_buf),
-                        workspace.clone(),
-                    )
-                }),
-                tree.project_path_for(node_id)
-                    .map(std::path::Path::to_path_buf)
-                    .unwrap_or_else(|| state.session_cwd.clone()),
-            )
-        };
-        let had_workspace = saved_location.is_some();
-        let (kind, cwd, deferred_workspace) = match (saved_location, pane_snapshot.kind) {
-            (Some((Some(saved_cwd), workspace)), pane::PaneSnapshotKind::Terminal(origin)) => {
-                let target = match state.execution.get() {
-                    Some(execution) => {
-                        workspace::restore_target(&execution.client, &saved_cwd, &workspace).await
-                    }
-                    None => {
-                        workspace::RestoreTarget::Missing("execution service is unavailable".into())
-                    }
-                };
-                match target {
-                    workspace::RestoreTarget::Ready => {
-                        (pane::PaneSnapshotKind::Terminal(origin), saved_cwd, None)
-                    }
-                    workspace::RestoreTarget::Missing(reason) => {
-                        tracing::warn!(pane_id = node_id.0, %reason, "saved worktree is unavailable; restoring a safe project-root shell");
-                        state.broadcast(ilium_ipc::ServerEvent::Error {
-                            message: format!(
-                                "Pane {node_id:?} worktree is unavailable; its original command and queued input were held: {reason}"
-                            ),
-                        });
-                        missing_workspace_pane_ids.push(node_id);
-                        let mut tree = state.tree.write().await;
-                        let _ = tree.set_pane_status(node_id, ilium_core::PaneStatus::PlainShell);
-                        (
-                            pane::PaneSnapshotKind::Terminal(pane::TerminalOrigin::PlainShell),
-                            project_root.clone(),
-                            Some((origin, reason)),
-                        )
-                    }
+        match start_snapshot_pane(state, node_id, pane_snapshot.kind).await {
+            SnapshotPaneStart::Started { missing_workspace } => {
+                if missing_workspace {
+                    missing_workspace_pane_ids.push(node_id);
                 }
-            }
-            (Some((None, _)), pane::PaneSnapshotKind::Terminal(origin)) => {
-                let reason = "saved worktree pane has no launch directory".to_string();
-                missing_workspace_pane_ids.push(node_id);
-                let mut tree = state.tree.write().await;
-                let _ = tree.set_pane_status(node_id, ilium_core::PaneStatus::PlainShell);
-                (
-                    pane::PaneSnapshotKind::Terminal(pane::TerminalOrigin::PlainShell),
-                    project_root.clone(),
-                    Some((origin, reason)),
-                )
-            }
-            (_, kind) => {
-                let cwd = {
-                    let tree = state.tree.read().await;
-                    tree.pane_cwd(node_id)
-                        .map(std::path::Path::to_path_buf)
-                        .unwrap_or(project_root)
-                };
-                (kind, cwd, None)
-            }
-        };
-        let spawn_result = match deferred_workspace {
-            Some(deferred) => {
-                ipc::handlers::spawn_and_register_pane_with_deferred_workspace(
-                    state,
-                    node_id,
-                    kind,
-                    &cwd,
-                    Some(deferred),
-                    None,
-                )
-                .await
-            }
-            None if had_workspace => {
-                ipc::handlers::spawn_and_register_pane_in_directory(state, node_id, kind, &cwd)
-                    .await
-            }
-            None => ipc::handlers::spawn_and_register_pane(state, node_id, kind).await,
-        };
-        match spawn_result {
-            Ok(()) => {
                 let _ = crate::agent_debug::record(
                     state,
                     node_id,
@@ -724,86 +757,71 @@ async fn restore_snapshot_data(
                 )
                 .await;
             }
-            Err(ipc::handlers::RegisterPaneError::NodeRemoved(_)) => {
-                // A concurrent request removed `node_id` from the tree
-                // (e.g. `ClosePane`) while this snapshot's own respawn loop
-                // was mid-flight on it; `spawn_and_register_pane` already
-                // tore the freshly-spawned resource back down, and the tree
-                // node is already gone, so -- unlike the `Spawn` failure
-                // case below -- there is no tree cleanup left to do and
-                // this is not a respawn failure worth reporting to the
-                // user.
-            }
-            Err(ipc::handlers::RegisterPaneError::Spawn(error)) => {
+            // A concurrent request (e.g. `ClosePane`) removed the node while
+            // this restore loop was mid-flight on it. The remover already
+            // broadcast the tree without it; nothing is left to report.
+            SnapshotPaneStart::Removed => {}
+            SnapshotPaneStart::Failed(reason) => {
                 tracing::warn!(
-                    "failed to respawn pane {node_id:?} from crash-recovery snapshot, dropping \
-                     it from the restored tree: {error}"
+                    pane_id = node_id.0,
+                    %reason,
+                    "failed to start pane from crash-recovery snapshot; keeping it for retry"
                 );
-                let mut tree = state.tree.write().await;
-                // `node_id` was just loaded as part of this same snapshot's
-                // tree above, so it is expected to always be present here;
-                // still logged rather than silently discarded in case that
-                // invariant is ever violated by a future bug.
-                if let Err(remove_error) = tree.remove_node(node_id) {
-                    tracing::warn!(
-                        "crash-recovery restore could not remove failed pane {node_id:?} from \
-                         the tree: {remove_error}"
-                    );
-                }
-                failed_pane_ids.push(node_id);
+                unrestored::record_start_failure(state, node_id, &reason).await;
+                failed_panes.push((node_id, reason));
             }
         }
     }
 
-    if failed_pane_ids.is_empty() {
+    lifecycle_log::record(
+        state,
+        lifecycle_log::LifecycleEvent::RestoreFinished {
+            saved_panes: pane_count,
+            failed_panes: failed_panes.iter().map(|(pane_id, _)| pane_id.0).collect(),
+        },
+    );
+    if failed_panes.is_empty() {
         tracing::info!(
             "restored {pane_count} pane(s) from crash-recovery snapshot for session {:?}",
             state.session_name
         );
     } else {
-        // A journal belongs to the live pane lifecycle rather than merely
-        // to a numeric tree id. A pane that cannot be respawned must not
-        // leave sensitive history orphaned in every future snapshot.
-        state.agent_debug.remove(&failed_pane_ids).await;
-        let mut preferences = state.workspace_close_preferences.write().await;
-        for pane_id in &failed_pane_ids {
-            preferences.remove(pane_id);
-        }
-        drop(preferences);
-
+        // Failed panes keep their tree node, journal, close preference and
+        // saved command. They are never dropped: the snapshot keeps them
+        // exactly as loaded and the retry task starts them later.
         tracing::warn!(
             "restored {} of {pane_count} pane(s) from crash-recovery snapshot for session {:?}; \
-             {} failed to respawn and were dropped: {failed_pane_ids:?}",
-            pane_count - failed_pane_ids.len(),
+             {} could not start and are kept for retry: {failed_panes:?}",
+            pane_count - failed_panes.len(),
             state.session_name,
-            failed_pane_ids.len()
+            failed_panes.len()
         );
-        // The in-memory tree just diverged from the on-disk snapshot (it
-        // no longer contains the pane(s) that failed to respawn), and
-        // nothing else on this startup path mutates the tree again to
-        // naturally trigger a save. Without this, a server that crashes
-        // again before any user-driven mutation would leave the stale,
-        // still-failing pane(s) in the persisted snapshot forever,
-        // repeating this same failed respawn on every future restart.
-        state.request_snapshot_save();
+        state.broadcast(ilium_ipc::ServerEvent::Error {
+            message: unrestored::failure_summary(pane_count, &failed_panes),
+        });
+        unrestored::spawn_retry_task(state);
     }
 
     let persisted_monitor_count = persisted_progress_monitors.len();
     let mut restored_monitor_count = 0_usize;
     for persisted_monitor in persisted_progress_monitors {
-        if failed_pane_ids.contains(&persisted_monitor.pane_id) {
+        let pane_id = persisted_monitor.pane_id;
+        if failed_panes.iter().any(|(failed, _)| *failed == pane_id) {
+            // Keep the monitor with the unrestored pane; it is registered
+            // again once the pane starts.
+            let mut panes = state.panes.write().await;
+            if let Some(pane::PaneResource::Unrestored(unrestored)) = panes.get_mut(&pane_id) {
+                unrestored.progress_monitor = Some(persisted_monitor);
+            }
             continue;
         }
-        if missing_workspace_pane_ids.contains(&persisted_monitor.pane_id) {
+        if missing_workspace_pane_ids.contains(&pane_id) {
             let mut panes = state.panes.write().await;
-            if let Some(pane::PaneResource::Terminal(runtime)) =
-                panes.get_mut(&persisted_monitor.pane_id)
-            {
+            if let Some(pane::PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) {
                 runtime.deferred_progress_monitor = Some(persisted_monitor);
             }
             continue;
         }
-        let pane_id = persisted_monitor.pane_id;
         match ipc::handlers::restore_persisted_progress_monitor(state, persisted_monitor).await {
             Ok(()) => restored_monitor_count += 1,
             Err(error) => {
@@ -838,6 +856,152 @@ async fn restore_snapshot_data(
     state.scheduled_input_changed.notify_one();
     if let Some(phase) = &startup {
         phase.finish().await;
+    }
+}
+
+/// Outcome of starting one saved pane.
+pub(crate) enum SnapshotPaneStart {
+    /// The pane now has a live resource. `missing_workspace` means its saved
+    /// worktree was gone and a project-root shell holds the original command.
+    Started { missing_workspace: bool },
+    /// A concurrent request removed the pane's tree node.
+    Removed,
+    /// Starting failed; the pane stays registered as unrestored.
+    Failed(String),
+}
+
+/// Starts one saved pane in its saved location. Used by the startup restore
+/// and by the unrestored-pane retry task, so both follow identical rules.
+pub(crate) async fn start_snapshot_pane(
+    state: &Arc<ServerState>,
+    node_id: ilium_core::NodeId,
+    kind: pane::PaneSnapshotKind,
+) -> SnapshotPaneStart {
+    // An empty saved directory means "not recorded": use the project root.
+    let (saved_location, project_root) = {
+        let tree = state.tree.read().await;
+        (
+            tree.pane_workspace(node_id).map(|workspace| {
+                (
+                    tree.pane_cwd(node_id)
+                        .filter(|cwd| !cwd.as_os_str().is_empty())
+                        .map(std::path::Path::to_path_buf),
+                    workspace.clone(),
+                )
+            }),
+            tree.project_path_for(node_id)
+                .filter(|path| !path.as_os_str().is_empty())
+                .map(std::path::Path::to_path_buf)
+                .unwrap_or_else(|| state.session_cwd.clone()),
+        )
+    };
+    let (kind, cwd, deferred_workspace) = match (saved_location, kind) {
+        (Some((Some(saved_cwd), workspace)), pane::PaneSnapshotKind::Terminal(origin)) => {
+            let target = match state.execution.get() {
+                Some(execution) => {
+                    workspace::restore_target(&execution.client, &saved_cwd, &workspace).await
+                }
+                None => {
+                    workspace::RestoreTarget::Missing("execution service is unavailable".into())
+                }
+            };
+            match target {
+                workspace::RestoreTarget::Ready => {
+                    (pane::PaneSnapshotKind::Terminal(origin), saved_cwd, None)
+                }
+                workspace::RestoreTarget::Missing(reason) => {
+                    tracing::warn!(pane_id = node_id.0, %reason, "saved worktree is unavailable; restoring a safe project-root shell");
+                    state.broadcast(ilium_ipc::ServerEvent::Error {
+                        message: format!(
+                            "Pane {node_id:?} worktree is unavailable; its original command and queued input were held: {reason}"
+                        ),
+                    });
+                    let mut tree = state.tree.write().await;
+                    let _ = tree.set_pane_status(node_id, ilium_core::PaneStatus::PlainShell);
+                    (
+                        pane::PaneSnapshotKind::Terminal(pane::TerminalOrigin::PlainShell),
+                        project_root.clone(),
+                        Some((origin, reason)),
+                    )
+                }
+            }
+        }
+        (Some((None, _)), pane::PaneSnapshotKind::Terminal(origin)) => {
+            let reason = "saved worktree pane has no launch directory".to_string();
+            let mut tree = state.tree.write().await;
+            let _ = tree.set_pane_status(node_id, ilium_core::PaneStatus::PlainShell);
+            (
+                pane::PaneSnapshotKind::Terminal(pane::TerminalOrigin::PlainShell),
+                project_root.clone(),
+                Some((origin, reason)),
+            )
+        }
+        (_, kind) => {
+            let saved_cwd = {
+                let tree = state.tree.read().await;
+                tree.pane_cwd(node_id)
+                    .filter(|cwd| !cwd.as_os_str().is_empty())
+                    .map(std::path::Path::to_path_buf)
+            };
+            match saved_cwd {
+                Some(saved_cwd) if saved_cwd.is_dir() => (kind, saved_cwd, None),
+                // A shell or editor loses nothing by opening at the project
+                // root when its old directory is gone.
+                Some(_)
+                    if matches!(
+                        kind,
+                        pane::PaneSnapshotKind::Editor { .. }
+                            | pane::PaneSnapshotKind::Terminal(pane::TerminalOrigin::PlainShell)
+                    ) =>
+                {
+                    (kind, project_root, None)
+                }
+                // An agent resumes by directory, so a different directory
+                // would silently start the wrong conversation. Keep it.
+                Some(saved_cwd) => {
+                    return SnapshotPaneStart::Failed(format!(
+                        "launch directory {} does not exist",
+                        saved_cwd.display()
+                    ));
+                }
+                None => (kind, project_root, None),
+            }
+        }
+    };
+    let missing_workspace = deferred_workspace.is_some();
+    let spawn_result = match deferred_workspace {
+        Some(deferred) => {
+            ipc::handlers::spawn_and_register_pane_with_deferred_workspace(
+                state,
+                node_id,
+                kind,
+                &cwd,
+                Some(deferred),
+                None,
+            )
+            .await
+        }
+        None => {
+            ipc::handlers::spawn_and_register_pane_in_directory(state, node_id, kind, &cwd).await
+        }
+    };
+    match spawn_result {
+        Ok(()) => SnapshotPaneStart::Started { missing_workspace },
+        Err(ipc::handlers::RegisterPaneError::Spawn(error)) => {
+            SnapshotPaneStart::Failed(error.to_string())
+        }
+        Err(ipc::handlers::RegisterPaneError::NodeRemoved(_)) => {
+            // Admission refuses without removing a node that still has a
+            // registered (unrestored) resource; only a real removal is final.
+            if state.tree.read().await.get(node_id).is_some() {
+                SnapshotPaneStart::Failed(format!(
+                    "launch directory {} was refused or changed during admission",
+                    cwd.display()
+                ))
+            } else {
+                SnapshotPaneStart::Removed
+            }
+        }
     }
 }
 
@@ -895,8 +1059,8 @@ mod restore_tests {
     use std::path::PathBuf;
     use std::time::Duration;
 
-    use ilium_core::{PaneContentKind, ROOT_ID, Tree};
-    use ilium_ipc::{ClientRequest, ServerEvent, read_frame, write_frame};
+    use ilium_core::{PaneContentKind, Tree, ROOT_ID};
+    use ilium_ipc::{read_frame, write_frame, ClientRequest, ServerEvent};
     use ilium_transport::SessionStream;
 
     use super::*;
@@ -925,6 +1089,12 @@ mod restore_tests {
             agent_debug_menu_enabled: false,
             progress_monitor_enabled: true,
         }));
+        // Pane admission runs repository probes on the execution service, so a
+        // fixture without one would have every spawn rejected and its node removed.
+        assert!(state
+            .execution
+            .set(crate::execution::ServerExecution::start().expect("finite server bank"))
+            .is_ok());
         let project_root = ilium_platform::paths::canonicalize(directory.path())
             .expect("canonical fixture root")
             .join("nested-project");
@@ -1045,6 +1215,134 @@ mod restore_tests {
 
         let resource = state.panes.write().await.remove(&pane_id).unwrap();
         crate::ipc::handlers::teardown_pane_resource(pane_id, resource);
+    }
+
+    /// A saved pane that cannot start must never be deleted by the restore:
+    /// it keeps its tree node, is held as an unrestored placeholder, and the
+    /// next snapshot still carries its original command for a later retry.
+    #[tokio::test]
+    async fn failed_pane_start_keeps_the_saved_pane_and_its_command() {
+        let directory = tempfile::tempdir().expect("create tempdir");
+        let (sound_requests, _playback_task) = crate::sounds::spawn(
+            Arc::new(NoopSoundPlayer),
+            crate::execution::test_general_client(),
+        );
+        let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
+            session_name: "failed-start-test".to_string(),
+            session_cwd: ilium_platform::paths::canonicalize(directory.path())
+                .expect("canonical test launch directory"),
+            home_dir: directory.path().to_path_buf(),
+            snapshot_path: directory.path().join("snapshot.json"),
+            socket_path: directory.path().join("session.sock"),
+            detection_config: DetectionConfig::default(),
+            notifications_config: crate::config::NotificationsConfig::default(),
+            sound_settings: crate::sounds::test_settings(ilium_sound::SoundSettings::default()),
+            sound_requests,
+            custom_signatures: Vec::new(),
+            agent_debug_menu_enabled: false,
+            progress_monitor_enabled: true,
+        }));
+        // Pane admission runs repository probes on the execution service, so a
+        // fixture without one would have every spawn rejected and its node removed.
+        assert!(state
+            .execution
+            .set(crate::execution::ServerExecution::start().expect("finite server bank"))
+            .is_ok());
+        let mut tree = Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let failing_pane = tree
+            .add_pane(group, "Saved agent", PaneContentKind::Terminal)
+            .unwrap();
+        tree.set_pane_launch_cwd(failing_pane, directory.path().join("deleted-directory"))
+            .unwrap();
+        let healthy_pane = tree
+            .add_pane(group, "Healthy", PaneContentKind::Terminal)
+            .unwrap();
+        let original = TerminalOrigin::Command("codex resume 'saved-conversation'".into());
+        restore_snapshot_data(
+            &state,
+            SessionSnapshot {
+                version: 3,
+                tree,
+                panes: vec![
+                    PaneSnapshot {
+                        node_id: failing_pane,
+                        kind: PaneSnapshotKind::Terminal(original.clone()),
+                    },
+                    PaneSnapshot {
+                        node_id: healthy_pane,
+                        kind: PaneSnapshotKind::Terminal(TerminalOrigin::Command(
+                            long_running_pane_command(),
+                        )),
+                    },
+                ],
+                agent_debug_logs: Vec::new(),
+                progress_monitors: Vec::new(),
+                workspace_close_preferences: Vec::new(),
+            },
+        )
+        .await;
+
+        assert!(
+            state.tree.read().await.get(failing_pane).is_some(),
+            "a pane that failed to start must keep its tree node"
+        );
+        {
+            let panes = state.panes.read().await;
+            let Some(crate::pane::PaneResource::Unrestored(unrestored)) = panes.get(&failing_pane)
+            else {
+                panic!("a pane that failed to start must be held as unrestored");
+            };
+            assert_eq!(
+                unrestored.kind,
+                PaneSnapshotKind::Terminal(original.clone())
+            );
+            assert_eq!(unrestored.attempts, 1);
+            assert!(
+                unrestored
+                    .failure
+                    .as_deref()
+                    .is_some_and(|failure| failure.contains("does not exist")),
+                "{:?}",
+                unrestored.failure
+            );
+            assert!(matches!(
+                panes.get(&healthy_pane),
+                Some(crate::pane::PaneResource::Terminal(_))
+            ));
+        }
+        let input = crate::ipc::handlers::submit_terminal_text(
+            &state,
+            failing_pane,
+            "hello",
+            ilium_ipc::PromptSubmissionSource::ScheduledInput,
+        )
+        .await;
+        assert!(
+            input.is_err(),
+            "input to an unrestored pane must be refused"
+        );
+
+        crate::persistence::save_snapshot(&state).await.unwrap();
+        let saved = crate::persistence::load_snapshot(&directory.path().join("snapshot.json"))
+            .await
+            .unwrap()
+            .unwrap();
+        let saved_kind = saved
+            .panes
+            .iter()
+            .find(|pane| pane.node_id == failing_pane)
+            .map(|pane| pane.kind.clone());
+        assert_eq!(saved_kind, Some(PaneSnapshotKind::Terminal(original)));
+        assert!(saved.tree.get(failing_pane).is_some());
+
+        state.stop_unrestored_retry_task();
+        let mut panes = state.panes.write().await;
+        for pane_id in [failing_pane, healthy_pane] {
+            if let Some(resource) = panes.remove(&pane_id) {
+                crate::ipc::handlers::teardown_pane_resource(pane_id, resource);
+            }
+        }
     }
 
     /// Mirrors `ilium-server/tests/smoke.rs`'s helper of the same name --
@@ -1383,6 +1681,12 @@ mod restore_tests {
             agent_debug_menu_enabled: false,
             progress_monitor_enabled: true,
         }));
+        // Pane admission runs repository probes on the execution service, so a
+        // fixture without one would have every spawn rejected and its node removed.
+        assert!(state
+            .execution
+            .set(crate::execution::ServerExecution::start().expect("finite server bank"))
+            .is_ok());
 
         let orphan_pane_id = {
             let mut tree = state.tree.write().await;
@@ -1465,6 +1769,12 @@ mod restore_tests {
             agent_debug_menu_enabled: false,
             progress_monitor_enabled: true,
         }));
+        // Pane admission runs repository probes on the execution service, so a
+        // fixture without one would have every spawn rejected and its node removed.
+        assert!(state
+            .execution
+            .set(crate::execution::ServerExecution::start().expect("finite server bank"))
+            .is_ok());
 
         // Same shape as the plain orphan-teardown test above: one launch
         // project, one group, then one pane. The pane lands at `NodeId(3)`.

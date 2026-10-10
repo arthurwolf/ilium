@@ -36,8 +36,8 @@ use crate::mouse::to_crossterm_event;
 use crate::pane;
 use crate::pane::{PaneResource, PaneSnapshotKind, TerminalOrigin};
 use crate::state::{
-    MAXIMUM_CACHED_PROGRESS_SET_REQUESTS, ProgressSetRequestIdentity, ProgressSetRequestOutcome,
-    ProgressSetRequestRecord, ProgressSetResult, ServerState,
+    ProgressSetRequestIdentity, ProgressSetRequestOutcome, ProgressSetRequestRecord,
+    ProgressSetResult, ServerState, MAXIMUM_CACHED_PROGRESS_SET_REQUESTS,
 };
 use crate::title_eligibility::{
     self, CollectedTitleEvidence, TitleEvidenceCandidate, TitleRuntimeSnapshot,
@@ -351,6 +351,7 @@ pub async fn handle_request(
             disposition,
         } => {
             if disposition == ilium_ipc::WorkspaceDisposition::Keep {
+                crate::lifecycle_log::record_close_request(state, pane_id, "client_keep_workspace");
                 handle_close_pane(state, pane_id, direct_tx).await;
             } else {
                 handle_workspace_removal(
@@ -416,6 +417,7 @@ pub async fn handle_request(
             false
         }
         ClientRequest::ClosePane { pane_id } => {
+            crate::lifecycle_log::record_close_request(state, pane_id, "client");
             handle_close_pane(state, pane_id, direct_tx).await;
             false
         }
@@ -1825,7 +1827,7 @@ async fn admitted_state_synchronization_events(
                     PaneResource::Terminal(runtime) => synchronization
                         .estimate_for(*pane_id, &runtime.session)
                         .map(|estimate| (*pane_id, estimate)),
-                    PaneResource::Editor { .. } => None,
+                    PaneResource::Editor { .. } | PaneResource::Unrestored(_) => None,
                 })
                 .collect::<HashMap<_, _>>();
             let snapshot_bytes = crate::snapshot_io::estimated_tree_bytes(&tree)
@@ -1891,7 +1893,7 @@ async fn admitted_state_synchronization_events(
                             .detection_evidence
                             .clone()
                             .map(|evidence| (*pane_id, evidence)),
-                        PaneResource::Editor { .. } => None,
+                        PaneResource::Editor { .. } | PaneResource::Unrestored(_) => None,
                     })
                     .collect();
                 let mut matched_estimates = HashSet::new();
@@ -1940,6 +1942,7 @@ async fn admitted_state_synchronization_events(
                                 path: path.clone(),
                             });
                         }
+                        PaneResource::Unrestored(_) => {}
                     }
                 }
                 if stale || matched_estimates.len() != estimates.len() {
@@ -2038,7 +2041,7 @@ async fn state_synchronization_events(
                     .detection_evidence
                     .clone()
                     .map(|evidence| (*pane_id, evidence)),
-                PaneResource::Editor { .. } => None,
+                PaneResource::Editor { .. } | PaneResource::Unrestored(_) => None,
             })
             .collect();
         let replay_events = panes
@@ -2072,6 +2075,7 @@ async fn state_synchronization_events(
                     pane_id: *pane_id,
                     path: path.clone(),
                 }],
+                PaneResource::Unrestored(_) => Vec::new(),
             })
             .collect();
         (snapshot, detection_evidence, replay_events)
@@ -2602,6 +2606,14 @@ async fn handle_revert_project_restructure(
     if let Some(panes) = &mut panes {
         for pane_id in &orphaned_pane_ids {
             if let Some(resource) = panes.remove(pane_id) {
+                crate::lifecycle_log::record(
+                    state,
+                    crate::lifecycle_log::LifecycleEvent::PaneClosed {
+                        pane_id: pane_id.0,
+                        reason: "restructure_revert",
+                        resource: crate::lifecycle_log::describe_resource(&resource),
+                    },
+                );
                 teardown_pane_resource(*pane_id, resource);
             }
         }
@@ -4121,11 +4133,11 @@ async fn save_agent_detection_settings_reserved(
     config_dir: std::path::PathBuf,
     settings: ilium_ipc::AgentDetectionSettings,
     write: impl FnOnce(
-        &std::path::Path,
-        &ilium_ipc::AgentDetectionSettings,
-    ) -> Result<(), ilium_ipc::AgentDetectionSettingsError>
-    + Send
-    + 'static,
+            &std::path::Path,
+            &ilium_ipc::AgentDetectionSettings,
+        ) -> Result<(), ilium_ipc::AgentDetectionSettingsError>
+        + Send
+        + 'static,
 ) -> Result<(), ilium_ipc::AgentDetectionSettingsError> {
     match client
         .run_reserved(reservation, move |_context| {
@@ -4181,7 +4193,9 @@ async fn handle_set_pane_focus(state: &Arc<ServerState>, pane_id: NodeId, focuse
                     true,
                 )
             }
-            Some(PaneResource::Editor { .. }) | None => (false, false),
+            Some(PaneResource::Editor { .. } | PaneResource::Unrestored(_)) | None => {
+                (false, false)
+            }
         }
     };
 
@@ -4520,6 +4534,7 @@ async fn start_close_on_exit_watcher(state: &Arc<ServerState>, pane_id: NodeId) 
         let close = tokio::spawn(async move {
             // No client asked for this close, so errors have nowhere to go.
             let (silent_sender, _silent_receiver) = DirectEventSender::channel(1);
+            crate::lifecycle_log::record_close_request(&close_state, pane_id, "close_on_exit");
             handle_close_pane(&close_state, pane_id, &silent_sender).await;
         });
         if !watcher_state.track_workspace_mutation_task(close) {
@@ -4810,7 +4825,7 @@ async fn handle_replace_pane_with_command(
             .get(&pane_id)
             .and_then(|resource| match resource {
                 PaneResource::Terminal(runtime) => runtime.custody_ticket.clone(),
-                PaneResource::Editor { .. } => None,
+                PaneResource::Editor { .. } | PaneResource::Unrestored(_) => None,
             })
     };
     let continuity_observation = {
@@ -5359,7 +5374,7 @@ pub(crate) async fn spawn_and_register_pane_with_deferred_workspace(
                     std::io::Error::other("server execution admission is not initialized").into(),
                 )
             })?;
-            let quota = execution.quota_group();
+            let quota = execution.pty_quota_group();
             let spawned = pane::spawn_terminal_session(&origin, cwd, &identity, &quota)?;
             let pending_generated_session_id = spawned.session_id;
             let session = spawned.session;
@@ -5863,7 +5878,7 @@ async fn teardown_closed_pane_resource(
             .custody_ticket
             .as_ref()
             .map(|ticket| ticket.worktree_root().as_os_str().len()),
-        PaneResource::Editor { .. } => None,
+        PaneResource::Editor { .. } | PaneResource::Unrestored(_) => None,
     };
     let Some(input_bytes) = path_bytes
         .and_then(|bytes| CUSTODY_SCAN_WORKING_BYTES.checked_add(bytes.saturating_mul(4)))
@@ -5926,7 +5941,9 @@ async fn teardown_closed_pane_resource(
                             .map_err(|error| format!("worktree custody clear failed: {error}"))
                     })
                 }
-                PaneResource::Editor { .. } => Err("custody resource was not terminal".into()),
+                PaneResource::Editor { .. } | PaneResource::Unrestored(_) => {
+                    Err("custody resource was not terminal".into())
+                }
             };
             Ok::<_, std::convert::Infallible>((resource, proof))
         })
@@ -6006,6 +6023,14 @@ async fn handle_close_pane_with_spawn_guard(
     drop(panes);
     drop(tree);
     for (id, resource) in closed_resources {
+        crate::lifecycle_log::record(
+            state,
+            crate::lifecycle_log::LifecycleEvent::PaneClosed {
+                pane_id: id.0,
+                reason: "close_pane_request",
+                resource: crate::lifecycle_log::describe_resource(&resource),
+            },
+        );
         teardown_closed_pane_resource(state, id, resource).await;
     }
     let mut preferences = state.workspace_close_preferences.write().await;
@@ -6163,6 +6188,7 @@ async fn complete_workspace_removal(
     };
     let pane_exists = state.tree.read().await.get(pane_id).is_some();
     if close && pane_exists {
+        crate::lifecycle_log::record_close_request(state, pane_id, "workspace_removal");
         handle_close_pane(state, pane_id, direct_tx).await;
     }
     let _ = tokio::time::timeout(std::time::Duration::from_secs(5), direct_tx.send(event)).await;
@@ -6175,6 +6201,30 @@ async fn complete_workspace_removal(
     }
 }
 
+/// A pane still waiting to start keeps the requested size instead of
+/// rejecting it, so the PTY opens at the client's real geometry later.
+async fn remember_unrestored_pane_size(
+    state: &Arc<ServerState>,
+    pane_id: NodeId,
+    rows: u16,
+    cols: u16,
+) -> bool {
+    if !matches!(
+        state.panes.read().await.get(&pane_id),
+        Some(PaneResource::Unrestored(_))
+    ) {
+        return false;
+    }
+    let mut panes = state.panes.write().await;
+    match panes.get_mut(&pane_id) {
+        Some(PaneResource::Unrestored(unrestored)) => {
+            unrestored.size = Some((rows, cols));
+            true
+        }
+        _ => false,
+    }
+}
+
 async fn handle_resize_pane(
     state: &Arc<ServerState>,
     pane_id: NodeId,
@@ -6183,12 +6233,18 @@ async fn handle_resize_pane(
     cause: PaneResizeCause,
     direct_tx: &DirectEventSender,
 ) {
+    if remember_unrestored_pane_size(state, pane_id, rows, cols).await {
+        return;
+    }
     let input = {
         let panes = state.panes.read().await;
         match panes.get(&pane_id) {
             Some(PaneResource::Terminal(runtime)) => Ok(runtime.session.input_handle()),
             Some(PaneResource::Editor { .. }) => {
                 Err(format!("pane {pane_id:?} is an editor, not a terminal"))
+            }
+            Some(PaneResource::Unrestored(unrestored)) => {
+                Err(unrestored.unavailable_message(pane_id))
             }
             None => Err(format!("no pane found for node {pane_id:?}")),
         }
@@ -6459,6 +6515,7 @@ async fn pane_input_gate(
         Some(PaneResource::Editor { .. }) => {
             Err(format!("pane {pane_id:?} is an editor, not a terminal"))
         }
+        Some(PaneResource::Unrestored(unrestored)) => Err(unrestored.unavailable_message(pane_id)),
         None => Err(format!("no pane found for node {pane_id:?}")),
     }
 }
@@ -7392,7 +7449,7 @@ where
                 }
             }
         }
-        Some(PaneResource::Editor { .. }) | None => return Ok(()),
+        Some(PaneResource::Editor { .. } | PaneResource::Unrestored(_)) | None => return Ok(()),
     };
     drop(panes);
     drop(tree);
@@ -7705,6 +7762,9 @@ async fn handle_mouse_input(
             Some(PaneResource::Editor { .. }) => {
                 Err(format!("pane {pane_id:?} is an editor, not a terminal"))
             }
+            Some(PaneResource::Unrestored(unrestored)) => {
+                Err(unrestored.unavailable_message(pane_id))
+            }
             None => Err(format!("no pane found for node {pane_id:?}")),
         }
     };
@@ -7878,11 +7938,9 @@ mod tests {
                     .windows(sentinel_text.len())
                     .any(|window| window == sentinel_text)
                 {
-                    assert!(
-                        !output
-                            .windows(stale_text.len())
-                            .any(|window| window == stale_text)
-                    );
+                    assert!(!output
+                        .windows(stale_text.len())
+                        .any(|window| window == stale_text));
                     break;
                 }
                 changed.changed().await.expect("fixture reader stays live");
@@ -8216,12 +8274,10 @@ mod tests {
     async fn blocked_termination_releases_registry_and_never_kills_replacement() {
         let directory = tempfile::tempdir().expect("isolated directory");
         let state = snapshot_io_handler_state(&directory);
-        assert!(
-            state
-                .execution
-                .set(crate::execution::ServerExecution::start().expect("bank"))
-                .is_ok()
-        );
+        assert!(state
+            .execution
+            .set(crate::execution::ServerExecution::start().expect("bank"))
+            .is_ok());
         let pane_id = shell_title_fixture(&state, &directory).await;
         let (started_tx, started_rx) = tokio::sync::oneshot::channel();
         let (release_tx, release_rx) = std::sync::mpsc::channel();
@@ -8269,11 +8325,9 @@ mod tests {
             .await
             .expect("callback completes")
             .expect("termination task");
-        assert!(
-            result
-                .expect_err("replacement result must refuse")
-                .contains("changed during termination")
-        );
+        assert!(result
+            .expect_err("replacement result must refuse")
+            .contains("changed during termination"));
         let replacement = state
             .panes
             .write()
@@ -8316,12 +8370,10 @@ mod tests {
                 "refused operation cannot signal child"
             );
         }
-        assert!(
-            state
-                .execution
-                .set(crate::execution::ServerExecution::start().expect("bank"))
-                .is_ok()
-        );
+        assert!(state
+            .execution
+            .set(crate::execution::ServerExecution::start().expect("bank"))
+            .is_ok());
         terminate_pane_process_with_work(&state, pane_id, |control| {
             control.kill_direct_child().map_err(std::io::Error::other)
         })
@@ -8340,12 +8392,10 @@ mod tests {
     async fn termination_deadline_retains_physical_native_admission() {
         let directory = tempfile::tempdir().expect("isolated directory");
         let state = snapshot_io_handler_state(&directory);
-        assert!(
-            state
-                .execution
-                .set(crate::execution::ServerExecution::start().expect("bank"))
-                .is_ok()
-        );
+        assert!(state
+            .execution
+            .set(crate::execution::ServerExecution::start().expect("bank"))
+            .is_ok());
         let pane_id = shell_title_fixture(&state, &directory).await;
         let (started_tx, started_rx) = tokio::sync::oneshot::channel();
         let (release_tx, release_rx) = std::sync::mpsc::channel();
@@ -8361,11 +8411,9 @@ mod tests {
         });
         started_rx.await.expect("physical callback starts");
         let result = task.await.expect("caller ends after its deadline");
-        assert!(
-            result
-                .expect_err("blocked native must time out")
-                .contains("outcome is uncertain")
-        );
+        assert!(result
+            .expect_err("blocked native must time out")
+            .contains("outcome is uncertain"));
         let owner = state.execution.get().expect("bank");
         let full_cost = ilium_execution::JobCost {
             input_bytes: 512 * 1024 * 1024,
@@ -8400,12 +8448,10 @@ mod tests {
     async fn blocked_focused_directory_probe_releases_guards_and_rejects_focus_change() {
         let directory = tempfile::tempdir().expect("isolated directory");
         let state = snapshot_io_handler_state(&directory);
-        assert!(
-            state
-                .execution
-                .set(crate::execution::ServerExecution::start().expect("bank"))
-                .is_ok()
-        );
+        assert!(state
+            .execution
+            .set(crate::execution::ServerExecution::start().expect("bank"))
+            .is_ok());
         let pane_id = shell_title_fixture(&state, &directory).await;
         {
             let mut panes = state.panes.write().await;
@@ -9231,13 +9277,11 @@ mod tests {
             }],
             ..valid.clone()
         };
-        assert!(
-            agent_detection_settings_save_cost(
-                &directory.path().to_path_buf(),
-                &oversized_settings,
-            )
-            .is_err()
-        );
+        assert!(agent_detection_settings_save_cost(
+            &directory.path().to_path_buf(),
+            &oversized_settings,
+        )
+        .is_err());
 
         let oversized_path = std::path::PathBuf::from("x".repeat(64 * 1024 + 1));
         assert!(agent_detection_settings_save_cost(&oversized_path, &valid).is_err());
@@ -9312,6 +9356,12 @@ mod tests {
             agent_debug_menu_enabled: false,
             progress_monitor_enabled: true,
         }));
+        // Pane admission runs repository probes on the execution service, so a
+        // fixture without one would have every spawn rejected and its node removed.
+        assert!(state
+            .execution
+            .set(crate::execution::ServerExecution::start().expect("finite server bank"))
+            .is_ok());
         let pane_id = {
             let mut tree = state.tree.write().await;
             let project_id = tree.project_ids()[0];
@@ -9342,16 +9392,12 @@ mod tests {
                 ilium_core::AgentActivity::Working,
                 None,
             );
-            assert!(
-                runtime
-                    .automated_agent_input_rejection(&unverified_agent, None)
-                    .is_some()
-            );
-            assert!(
-                runtime
-                    .automated_agent_input_rejection(&PaneStatus::PlainShell, None)
-                    .is_none()
-            );
+            assert!(runtime
+                .automated_agent_input_rejection(&unverified_agent, None)
+                .is_some());
+            assert!(runtime
+                .automated_agent_input_rejection(&PaneStatus::PlainShell, None)
+                .is_none());
             runtime.agent_process_key = Some(owner.clone());
             runtime.agent_generation = 7;
             runtime.session_id = Some("verified-session".to_string());
@@ -9580,6 +9626,12 @@ mod tests {
             agent_debug_menu_enabled: false,
             progress_monitor_enabled: true,
         }));
+        // Pane admission runs repository probes on the execution service, so a
+        // fixture without one would have every spawn rejected and its node removed.
+        assert!(state
+            .execution
+            .set(crate::execution::ServerExecution::start().expect("finite server bank"))
+            .is_ok());
         let pane_id = {
             let mut tree = state.tree.write().await;
             let project_id = tree.project_ids()[0];
@@ -9648,11 +9700,9 @@ mod tests {
             runtime.agent_generation = expected.generation.checked_add(1).unwrap();
             assert!(Arc::ptr_eq(&runtime.input_gate, &input_gate));
             assert!(input.same_session(&runtime.session.input_handle()));
-            assert!(
-                runtime
-                    .automated_agent_input_rejection(&PaneStatus::PlainShell, None)
-                    .is_none()
-            );
+            assert!(runtime
+                .automated_agent_input_rejection(&PaneStatus::PlainShell, None)
+                .is_none());
         }
         let enter_result = write_key_input_unlocked(
             &state,
@@ -10057,10 +10107,9 @@ mod tests {
         ));
         {
             let tree = state.tree.read().await;
-            assert!(
-                tree.project_has_unrestructured_activity(project_id)
-                    .unwrap()
-            );
+            assert!(tree
+                .project_has_unrestructured_activity(project_id)
+                .unwrap());
             assert!(tree.get(pane_id).unwrap().has_activity_since_focus());
         }
 
@@ -10172,6 +10221,12 @@ mod tests {
             agent_debug_menu_enabled: false,
             progress_monitor_enabled: true,
         }));
+        // Pane admission runs repository probes on the execution service, so a
+        // fixture without one would have every spawn rejected and its node removed.
+        assert!(state
+            .execution
+            .set(crate::execution::ServerExecution::start().expect("finite server bank"))
+            .is_ok());
         let pane_id = {
             let mut tree = state.tree.write().await;
             let project_id = tree.project_ids()[0];
@@ -10267,6 +10322,12 @@ mod tests {
             agent_debug_menu_enabled: false,
             progress_monitor_enabled: true,
         }));
+        // Pane admission runs repository probes on the execution service, so a
+        // fixture without one would have every spawn rejected and its node removed.
+        assert!(state
+            .execution
+            .set(crate::execution::ServerExecution::start().expect("finite server bank"))
+            .is_ok());
         let pane_id = {
             let mut tree = state.tree.write().await;
             let project_id = tree.project_ids()[0];
@@ -10320,17 +10381,15 @@ mod tests {
         )
         .await
         .expect("replacement isolated PTY");
-        assert!(
-            !submit_text_trigger_if_current(
-                &state,
-                pane_id,
-                "owner-fenced-trigger",
-                "fresh owner literal receipt",
-                &original_input,
-            )
-            .await
-            .expect("stale semantic decision rejected")
-        );
+        assert!(!submit_text_trigger_if_current(
+            &state,
+            pane_id,
+            "owner-fenced-trigger",
+            "fresh owner literal receipt",
+            &original_input,
+        )
+        .await
+        .expect("stale semantic decision rejected"));
         let replacement_input = {
             let panes = state.panes.read().await;
             let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
@@ -10338,17 +10397,15 @@ mod tests {
             };
             runtime.session.input_handle()
         };
-        assert!(
-            submit_text_trigger_if_current(
-                &state,
-                pane_id,
-                "owner-fenced-trigger",
-                "fresh owner literal receipt",
-                &replacement_input,
-            )
-            .await
-            .expect("fresh semantic decision acknowledged")
-        );
+        assert!(submit_text_trigger_if_current(
+            &state,
+            pane_id,
+            "owner-fenced-trigger",
+            "fresh owner literal receipt",
+            &replacement_input,
+        )
+        .await
+        .expect("fresh semantic decision acknowledged"));
         wait_for_settled_output_sequence(&state, pane_id).await;
         let text =
             crate::pane::read_current_terminal_screen(&state, pane_id, vt100::Screen::contents)
@@ -10392,12 +10449,10 @@ mod tests {
     async fn visible_recovery_uses_reserved_storage_when_general_quota_is_full() {
         let directory = tempfile::tempdir().expect("create visible recovery admission directory");
         let state = snapshot_io_handler_state(&directory);
-        assert!(
-            state
-                .execution
-                .set(crate::execution::ServerExecution::start().expect("finite server bank"))
-                .is_ok()
-        );
+        assert!(state
+            .execution
+            .set(crate::execution::ServerExecution::start().expect("finite server bank"))
+            .is_ok());
         let execution = state.execution.get().expect("execution bank");
         let general_before = execution.client.quota_group().snapshot();
         let general_remaining = general_before
@@ -10439,12 +10494,8 @@ mod tests {
     async fn initial_state_snapshot_stays_byte_admitted_until_direct_queue_consumes_it() {
         let (state, _pane_id, _directory) =
             state_with_one_terminal_pane("initial-state-snapshot-storage").await;
-        assert!(
-            state
-                .execution
-                .set(crate::execution::ServerExecution::start().expect("finite server bank"))
-                .is_ok()
-        );
+        // The fixture already installed the execution service its pane spawn needs.
+        assert!(state.execution.get().is_some());
         let (direct_tx, mut direct_rx) = DirectEventSender::channel(16);
 
         send_initial_state(&state, &direct_tx, false).await;
@@ -11770,6 +11821,12 @@ mod tests {
             agent_debug_menu_enabled: false,
             progress_monitor_enabled: true,
         }));
+        // Pane admission runs repository probes on the execution service, so a
+        // fixture without one would have every spawn rejected and its node removed.
+        assert!(state
+            .execution
+            .set(crate::execution::ServerExecution::start().expect("finite server bank"))
+            .is_ok());
         let (missing_pane_id, current_pane_id) = {
             let mut tree = state.tree.write().await;
             let project_id = tree
@@ -12052,11 +12109,9 @@ mod tests {
             panic!("successful restructure should broadcast a tree snapshot");
         };
         assert!(snapshot.get(original_group).is_none());
-        assert!(
-            snapshot
-                .get(split_view)
-                .is_some_and(ilium_core::Node::is_split_view)
-        );
+        assert!(snapshot
+            .get(split_view)
+            .is_some_and(ilium_core::Node::is_split_view));
         assert_eq!(snapshot.children_of(split_view).unwrap(), &[first, second]);
         assert_eq!(
             snapshot.split_orientation(split_view),
@@ -12073,11 +12128,9 @@ mod tests {
                 .last_restructure_activity_revision,
             Some(inference_tree.get(first).unwrap().activity_revision)
         );
-        assert!(
-            snapshot
-                .project_has_unrestructured_activity(project_id)
-                .unwrap()
-        );
+        assert!(snapshot
+            .project_has_unrestructured_activity(project_id)
+            .unwrap());
         assert_eq!(
             state.restructure_undo.lock().await.get(&project_id),
             Some(&before_apply)
@@ -12164,6 +12217,12 @@ mod tests {
             agent_debug_menu_enabled: true,
             progress_monitor_enabled: true,
         }));
+        // Pane admission runs repository probes on the execution service, so a
+        // fixture without one would have every spawn rejected and its node removed.
+        assert!(state
+            .execution
+            .set(crate::execution::ServerExecution::start().expect("finite server bank"))
+            .is_ok());
 
         let project_id = state
             .tree
@@ -12343,13 +12402,11 @@ mod tests {
             Some(&before)
         );
         let accepted = state.tree.read().await.clone();
-        assert!(
-            accepted
-                .get(project_id)
-                .unwrap()
-                .inferred_animation
-                .is_some()
-        );
+        assert!(accepted
+            .get(project_id)
+            .unwrap()
+            .inferred_animation
+            .is_some());
         assert!(accepted.get(pane_id).unwrap().inferred_animation.is_some());
         assert!(state.panes.read().await.is_empty());
         let attach = initial_state_events(&state, false, false).await;
@@ -12414,13 +12471,11 @@ mod tests {
             std::task::Poll::Ready(())
         })
         .await;
-        assert!(
-            state
-                .restructure_undo
-                .try_lock()
-                .unwrap()
-                .contains_key(&project_id)
-        );
+        assert!(state
+            .restructure_undo
+            .try_lock()
+            .unwrap()
+            .contains_key(&project_id));
         drop(held_tree);
         tokio::time::timeout(Duration::from_secs(5), revert)
             .await
@@ -12429,13 +12484,11 @@ mod tests {
         assert!(undone.get(project_id).unwrap().inferred_animation.is_none());
         assert!(undone.get(pane_id).unwrap().inferred_animation.is_none());
         assert_eq!(undone.project_animation_generation(project_id).unwrap(), 2);
-        assert!(
-            !state
-                .restructure_undo
-                .lock()
-                .await
-                .contains_key(&project_id)
-        );
+        assert!(!state
+            .restructure_undo
+            .lock()
+            .await
+            .contains_key(&project_id));
     }
     mod title_safety_regressions {
         include!("title_safety_tests.rs");

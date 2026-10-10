@@ -148,7 +148,8 @@ fn run(request: &ConversionRequest, cancel: &AtomicBool, timeouts: Timeouts) -> 
     let mut events = Vec::new();
     let result = {
         let mut sink = |event| events.push(event);
-        let mut reporter = Reporter::new(&mut sink, &|| cancel.load(Ordering::Relaxed), 6);
+        let is_cancelled = || cancel.load(Ordering::Relaxed);
+        let mut reporter = Reporter::new(&mut sink, &is_cancelled, 6);
         convert(request, &mut reporter, &timeouts)
     };
     Run { result, events }
@@ -415,7 +416,8 @@ fn cancelling_while_waiting_kills_the_child_promptly() {
             }
             events.push(event);
         };
-        let mut reporter = Reporter::new(&mut sink, &|| cancel.load(Ordering::Relaxed), 6);
+        let is_cancelled = || cancel.load(Ordering::Relaxed);
+        let mut reporter = Reporter::new(&mut sink, &is_cancelled, 6);
         convert(&request, &mut reporter, &timeouts).unwrap_err()
     };
     assert!(matches!(error, ConvertError::Cancelled), "{error}");
@@ -500,7 +502,8 @@ fn cancellation_at_inspection_step_precedes_transcript_reads() {
                 cancel.store(true, Ordering::Relaxed);
             }
         };
-        let mut reporter = Reporter::new(&mut sink, &|| cancel.load(Ordering::Relaxed), 6);
+        let is_cancelled = || cancel.load(Ordering::Relaxed);
+        let mut reporter = Reporter::new(&mut sink, &is_cancelled, 6);
         convert(&request, &mut reporter, &quick_timeouts()).unwrap_err()
     };
     assert!(

@@ -1429,7 +1429,7 @@ mod tests {
     use ilium_ipc::read_frame;
     use tokio::io::duplex;
     use tokio::sync::{broadcast, mpsc, watch};
-    use tokio::time::{Duration, timeout};
+    use tokio::time::{timeout, Duration};
 
     use super::*;
 
@@ -1689,14 +1689,12 @@ mod tests {
                 bytes: b"hidden-before-subscription".to_vec(),
             })
             .unwrap();
-        assert!(
-            timeout(
-                Duration::from_millis(50),
-                read_frame::<ServerEvent, _>(&mut client_stream),
-            )
-            .await
-            .is_err()
-        );
+        assert!(timeout(
+            Duration::from_millis(50),
+            read_frame::<ServerEvent, _>(&mut client_stream),
+        )
+        .await
+        .is_err());
 
         let tree_event = ServerEvent::TreeSnapshot(Tree::new());
         broadcast_tx.send(tree_event.clone()).unwrap();
@@ -2176,8 +2174,8 @@ mod tests {
 mod text_trigger_writer_tests {
     use super::*;
     use ilium_ipc::{TextTrigger, TextTriggerSettings};
-    use tokio::io::{AsyncReadExt, duplex};
-    use tokio::time::{Duration, timeout};
+    use tokio::io::{duplex, AsyncReadExt};
+    use tokio::time::{timeout, Duration};
     const WAIT: Duration = Duration::from_secs(5);
     struct Task<T>(tokio::task::JoinHandle<T>);
     impl<T> Drop for Task<T> {
@@ -2343,19 +2341,17 @@ mod text_trigger_writer_tests {
         let expected_count = handlers::resynchronization_events(&state, &sequences)
             .await
             .len();
-        assert!(
-            timeout(
-                WAIT,
-                write_resynchronization(
-                    &mut writer,
-                    &state,
-                    &mut sequences,
-                    &TerminalStreamSelection::None
-                )
+        assert!(timeout(
+            WAIT,
+            write_resynchronization(
+                &mut writer,
+                &state,
+                &mut sequences,
+                &TerminalStreamSelection::None
             )
-            .await
-            .unwrap()
-        );
+        )
+        .await
+        .unwrap());
         write_server_event(&mut writer, event("A"), &mut sequences, Some(&state))
             .await
             .unwrap();
@@ -2415,7 +2411,7 @@ mod ordered_journal_connection_regressions {
         assert!(state.events.initialize_journal(execution.quota_group()));
 
         let (server_stream, mut client_stream) = duplex(4096);
-        let (_broadcast_tx, broadcast_rx) = tokio::sync::broadcast::channel(8);
+        let (_broadcast_tx, broadcast_rx) = tokio::sync::broadcast::channel::<Arc<ServerEvent>>(8);
         let (direct_tx, direct_rx) = DirectEventSender::channel(8);
         let (phase_tx, phase_rx) = watch::channel(AttachPhase::Ready);
         let (stream_control_tx, stream_control_rx) = mpsc::channel(1);
@@ -2467,9 +2463,9 @@ mod ordered_journal_connection_regressions {
 #[cfg(test)]
 mod text_trigger_ordering_regressions {
     use super::*;
-    use ilium_ipc::{TextTrigger, TextTriggerSettings, read_frame};
+    use ilium_ipc::{read_frame, TextTrigger, TextTriggerSettings};
     use tokio::io::duplex;
-    use tokio::time::{Duration, timeout};
+    use tokio::time::{timeout, Duration};
 
     async fn assert_newer_rules_survive_queued_old_event(lag: bool, drain: bool) {
         let directory = tempfile::tempdir().expect("private directory");

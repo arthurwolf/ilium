@@ -105,7 +105,7 @@ where
     F: Fn() -> bool + Send + Sync,
 {
     use ilium_platform::process_control::{
-        ProcessTreeGuard, lower_background_child_priority, prepare_process_tree,
+        lower_background_child_priority, prepare_process_tree, ProcessTreeGuard,
     };
     use std::process::Stdio;
 
@@ -508,8 +508,8 @@ mod tests {
     #[tokio::test]
     async fn cancellation_stops_the_supervised_command_and_retains_its_files() {
         use std::sync::{
-            Arc,
             atomic::{AtomicBool, Ordering},
+            Arc,
         };
         let temp = tempfile::tempdir().unwrap();
         let root = ilium_platform::paths::canonicalize(temp.path()).unwrap();

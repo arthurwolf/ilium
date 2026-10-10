@@ -893,7 +893,9 @@ async fn stop_pane(
                         },
                     }
                 }
-                PaneResource::Editor { .. } => Err("workspace pane has no terminal process".into()),
+                PaneResource::Editor { .. } | PaneResource::Unrestored(_) => {
+                    Err("workspace pane has no terminal process".into())
+                }
             };
             Ok::<_, std::convert::Infallible>((resource, outcome, restore_resource))
         })
@@ -916,12 +918,28 @@ async fn stop_pane(
             drop(panes);
             drop(tree);
         }
+        crate::lifecycle_log::record(
+            state,
+            crate::lifecycle_log::LifecycleEvent::PaneClosed {
+                pane_id: pane_id.0,
+                reason: "workspace_prune",
+                resource: crate::lifecycle_log::describe_resource(&resource),
+            },
+        );
         resource.abort_background_tasks();
         return Err((
             format!("PTY stopped but worktree custody remains: {error}"),
             true,
         ));
     }
+    crate::lifecycle_log::record(
+        state,
+        crate::lifecycle_log::LifecycleEvent::PaneClosed {
+            pane_id: pane_id.0,
+            reason: "workspace_prune",
+            resource: crate::lifecycle_log::describe_resource(&resource),
+        },
+    );
     resource.abort_background_tasks();
     drop(resource);
     Ok(())

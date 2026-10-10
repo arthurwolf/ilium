@@ -1173,12 +1173,55 @@ pub enum PaneResource {
     Editor {
         path: Option<PathBuf>,
     },
+    /// A restored pane that has no live process yet: its restore is queued,
+    /// or starting it failed and a retry is pending. The original snapshot
+    /// kind is kept so a failed start never drops the pane from the tree or
+    /// from the next snapshot.
+    Unrestored(Box<UnrestoredPane>),
+}
+
+/// Everything needed to start a snapshot pane later, exactly as saved.
+#[derive(Debug, Clone)]
+pub struct UnrestoredPane {
+    /// The saved kind, persisted unchanged while the pane stays unrestored.
+    pub kind: PaneSnapshotKind,
+    /// The saved progress monitor, re-registered once the pane starts.
+    pub progress_monitor: Option<crate::persistence::PersistedProgressMonitor>,
+    /// Why the last start failed; `None` while the first attempt is queued.
+    pub failure: Option<String>,
+    /// Failed start attempts so far.
+    pub attempts: u32,
+    /// Latest size a client asked for, applied once the pane starts.
+    pub size: Option<(u16, u16)>,
+}
+
+impl UnrestoredPane {
+    pub fn queued(kind: PaneSnapshotKind) -> Self {
+        Self {
+            kind,
+            progress_monitor: None,
+            failure: None,
+            attempts: 0,
+            size: None,
+        }
+    }
+
+    /// The message shown when input reaches a pane that has no process.
+    pub fn unavailable_message(&self, pane_id: NodeId) -> String {
+        match &self.failure {
+            Some(failure) => format!(
+                "pane {pane_id:?} is not running yet: starting it failed ({failure}); \
+                 ilium retries automatically"
+            ),
+            None => format!("pane {pane_id:?} is still being restored"),
+        }
+    }
 }
 
 impl PaneResource {
     /// Cancels any background tasks this resource owns. A no-op for
-    /// `Editor` (it owns none). Called on `ClosePane`/session teardown
-    /// before the resource is dropped.
+    /// `Editor` and `Unrestored` (they own none). Called on
+    /// `ClosePane`/session teardown before the resource is dropped.
     pub fn abort_background_tasks(&mut self) {
         if let PaneResource::Terminal(runtime) = self {
             runtime.abort_background_tasks();
@@ -1203,10 +1246,40 @@ struct TerminalLaunchPlan {
     session_id: Option<String>,
 }
 
+/// The UUID in an ilium-generated `claude --session-id <uuid>` command, the
+/// form a snapshot keeps for a fresh Claude pane whose transcript detection
+/// had not confirmed yet.
+pub(crate) fn generated_claude_session_id(command_line: &str) -> Option<&str> {
+    let session_id = command_line.strip_prefix("claude --session-id ")?;
+    uuid::Uuid::parse_str(session_id).ok()?;
+    Some(session_id)
+}
+
 /// Builds the shell command and any identity ilium can know before spawn.
 /// Exact fresh Claude launches receive a UUID through Claude's supported
 /// `--session-id` flag; all other commands remain byte-for-byte user-owned.
-fn terminal_launch_plan(origin: &TerminalOrigin) -> TerminalLaunchPlan {
+/// A restored `claude --session-id <uuid>` resumes that conversation when
+/// its transcript exists (Claude refuses to reuse an existing id) and keeps
+/// the same id otherwise, so the conversation is never lost either way.
+fn terminal_launch_plan(
+    origin: &TerminalOrigin,
+    claude_transcript_exists: impl FnOnce(&str) -> bool,
+) -> TerminalLaunchPlan {
+    if let TerminalOrigin::Command(command_line) = origin {
+        if let Some(session_id) = generated_claude_session_id(command_line) {
+            return if claude_transcript_exists(session_id) {
+                TerminalLaunchPlan {
+                    command_line: Some(format!("claude --resume {session_id}")),
+                    session_id: None,
+                }
+            } else {
+                TerminalLaunchPlan {
+                    command_line: Some(command_line.clone()),
+                    session_id: Some(session_id.to_string()),
+                }
+            };
+        }
+    }
     match origin {
         TerminalOrigin::PlainShell => TerminalLaunchPlan {
             command_line: None,
@@ -1289,7 +1362,11 @@ pub fn spawn_terminal_session(
     quota: &ilium_execution::QuotaGroup,
 ) -> Result<SpawnedTerminalSession, PtyError> {
     let (shell, command_flag) = shell_command();
-    let launch_plan = terminal_launch_plan(origin);
+    let launch_plan = terminal_launch_plan(origin, |session_id| {
+        directories::BaseDirs::new().is_some_and(|base| {
+            ilium_agent_session::claude_transcript_path(base.home_dir(), cwd, session_id).is_file()
+        })
+    });
     let command = match launch_plan.command_line {
         None => PtyCommand::new(shell, cwd, DEFAULT_PANE_ROWS, DEFAULT_PANE_COLS),
         Some(command_line) => PtyCommand::new(shell, cwd, DEFAULT_PANE_ROWS, DEFAULT_PANE_COLS)
@@ -1360,7 +1437,7 @@ mod tests {
 
     #[test]
     fn exact_fresh_claude_launch_gets_a_matching_uuid_argument() {
-        let plan = terminal_launch_plan(&TerminalOrigin::Command("claude".to_string()));
+        let plan = terminal_launch_plan(&TerminalOrigin::Command("claude".to_string()), |_| false);
         let session_id = plan.session_id.expect("generated session id");
 
         assert!(uuid::Uuid::parse_str(&session_id).is_ok());
@@ -1371,9 +1448,32 @@ mod tests {
     }
 
     #[test]
+    fn restored_generated_claude_id_resumes_only_when_its_transcript_exists() {
+        let session_id = "0b0c3a52-6a5e-4c1f-9d55-2a8e9f1b7c10";
+        let origin = TerminalOrigin::Command(format!("claude --session-id {session_id}"));
+
+        let resumed = terminal_launch_plan(&origin, |id| id == session_id);
+        assert_eq!(
+            resumed.command_line,
+            Some(format!("claude --resume {session_id}"))
+        );
+        assert_eq!(resumed.session_id, None);
+
+        let fresh = terminal_launch_plan(&origin, |_| false);
+        assert_eq!(
+            fresh.command_line,
+            Some(format!("claude --session-id {session_id}"))
+        );
+        assert_eq!(fresh.session_id.as_deref(), Some(session_id));
+    }
+
+    #[test]
     fn non_exact_commands_are_not_rewritten() {
         for command_line in ["codex", "claude --dangerously-skip-permissions"] {
-            let plan = terminal_launch_plan(&TerminalOrigin::Command(command_line.to_string()));
+            let plan =
+                terminal_launch_plan(&TerminalOrigin::Command(command_line.to_string()), |_| {
+                    false
+                });
             assert_eq!(plan.command_line.as_deref(), Some(command_line));
             assert_eq!(plan.session_id, None);
         }

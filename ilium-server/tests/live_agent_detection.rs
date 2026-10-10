@@ -1934,6 +1934,7 @@ async fn codex_clear_rebinds_the_same_process_to_its_new_open_transcript() {
                 session_id,
                 process_id,
                 title_generation,
+                ..
             } if *changed_id == pane_id
                 && session_id == new_session_id
                 && *process_id == initial_process_id
