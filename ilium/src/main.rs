@@ -279,6 +279,14 @@ enum ProgressCommand {
         #[arg(long)]
         timeout_seconds: Option<u64>,
     },
+    /// Claude Code `PreToolUse` hook (installed by Ilium into project
+    /// `.claude/settings.local.json`). Reads the hook payload on stdin and,
+    /// inside an Ilium pane, refuses a foreground Bash call with a tool
+    /// timeout above three minutes that is not an `ilium progress` command:
+    /// exit 0 with a deny decision on stdout. Otherwise exits 0. Listed in
+    /// help on purpose: the project hook runs it only when `ilium progress
+    /// --help` names `guard`.
+    Guard,
     /// Returns the current registration, latest report, and monitor health.
     Status,
     /// Stops the active monitor and clears its retained progress. Supplying a
@@ -296,6 +304,7 @@ impl ProgressCommand {
             Self::Check { .. } => "check",
             Self::Set { .. } => "set",
             Self::Wait { .. } => "wait",
+            Self::Guard => "guard",
             Self::Status => "status",
             Self::Clear { .. } => "clear",
         }
@@ -337,6 +346,16 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         };
+    }
+    // Runs before every Bash call of a hooked Claude Code session, so it skips
+    // the runtime and quota bootstrap below.
+    if matches!(
+        &cli.command,
+        Some(Command::Progress {
+            command: ProgressCommand::Guard
+        })
+    ) {
+        return ExitCode::from(ilium_client::progress_guard::run());
     }
     if matches!(&cli.command, Some(Command::ClaudeModelStatusline)) {
         return match ilium_client::claude_model_statusline::run_statusline_helper() {
@@ -714,6 +733,11 @@ enum ProgressResponse {
 }
 
 async fn progress(command: ProgressCommand) -> Result<(), CliError> {
+    if matches!(command, ProgressCommand::Guard) {
+        // `main` runs the guard before any runtime setup; reaching here means
+        // there is nothing to refuse.
+        return Ok(());
+    }
     let request_id = next_progress_request_id();
     let operation = command.operation_name();
     let identity = match pane_identity_from_env() {
@@ -797,6 +821,7 @@ async fn progress(command: ProgressCommand) -> Result<(), CliError> {
                 ExpectedProgressResponse::Set,
             )
         }
+        ProgressCommand::Guard => return Ok(()),
         ProgressCommand::Status => (
             ilium_ipc::ClientRequest::GetPaneProgressMonitorStatus {
                 request_id,

@@ -835,7 +835,7 @@ mod tests {
         install(&target, AgentFeature::Progress).unwrap();
         let updated = fs::read_to_string(&target).unwrap();
         assert!(updated.contains("# User policy"));
-        assert!(updated.contains("version=7"));
+        assert!(updated.contains("version=9"));
         assert!(!updated.contains("version=99"));
     }
 
