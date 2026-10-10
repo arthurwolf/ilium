@@ -192,7 +192,7 @@ pub async fn verify_path_staged(
     let Some(cursor) = cursor else {
         return Ok(None);
     };
-    let mut pending = retention.retain((cursor, None));
+    let mut pending = retention.retain((Box::new(cursor), None));
     let mut prepaid_io = false;
     loop {
         if !prepaid_io && !locator.claim_staged_jobs(1) {
