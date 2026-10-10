@@ -6,9 +6,9 @@ use crate::delivery::{
     ShutdownReason,
 };
 use crossterm::event::MouseEvent;
-use ilium_platform::owned_worker::{
-    reserve_owned_worker, OwnedWorker, StopToken, WorkerKind, WorkerReservation,
-};
+#[cfg(test)]
+use ilium_platform::owned_worker::reserve_owned_worker;
+use ilium_platform::owned_worker::{OwnedWorker, StopToken, WorkerKind, WorkerReservation};
 use ilium_platform::pty_io::{ReadMessage, WriteFailureKind, OUTPUT_CHUNK_BYTES};
 use std::cell::Cell;
 use std::collections::VecDeque;
@@ -134,6 +134,7 @@ impl Queue {
     /// Queued commands have never reached the writer. An independent owned
     /// deadline worker completes them as proven zero delivery even when the
     /// state owner is held at an earlier reply or native control operation.
+    #[cfg(test)]
     pub(crate) fn start_expiry_worker(self: &Arc<Self>) -> std::io::Result<OwnedWorker> {
         let reservation = reserve_owned_worker(None, ())?;
         self.start_expiry_worker_reserved(reservation)

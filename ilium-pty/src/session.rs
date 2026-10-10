@@ -446,6 +446,7 @@ impl OutputJournal {
     /// Copies the largest retained replay prefix that ends at a PTY read
     /// boundary and fits within `max_bytes`. A truncated journal includes its
     /// parser reset in that budget so a consumer can safely render the tail.
+    #[cfg(test)]
     fn replay_prefix(&self, max_bytes: usize) -> Option<PtyOutputReplay> {
         self.replay_prefix_through(max_bytes, self.next_sequence)
     }

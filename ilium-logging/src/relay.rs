@@ -425,6 +425,7 @@ impl Write for RelayWriter {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+#[cfg(test)]
 pub(crate) enum RelayFrame {
     Event(Vec<u8>),
     Flush,
@@ -455,6 +456,7 @@ where
     read_ack(stream).await
 }
 
+#[cfg(test)]
 pub(crate) async fn read_frame<R>(stream: &mut R) -> io::Result<RelayFrame>
 where
     R: AsyncRead + Unpin,
