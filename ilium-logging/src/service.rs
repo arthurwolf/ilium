@@ -192,7 +192,7 @@ impl LoggingShutdownReport {
 #[derive(Debug)]
 pub struct LoggingShutdownDeadline {
     worker_id: u64,
-    pending: Mutex<LoggingShutdown>,
+    pending: Box<Mutex<LoggingShutdown>>,
 }
 impl LoggingShutdownDeadline {
     pub fn into_pending(self) -> LoggingShutdown {
@@ -256,7 +256,7 @@ impl LoggingShutdown {
     pub fn into_deadline(self) -> LoggingShutdownDeadline {
         LoggingShutdownDeadline {
             worker_id: self.ticket.id(),
-            pending: Mutex::new(self),
+            pending: Box::new(Mutex::new(self)),
         }
     }
     /// Process-exit/background only. Both waits consume the same absolute
