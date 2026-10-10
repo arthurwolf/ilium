@@ -375,6 +375,8 @@ This mapping covers application source call sites captured before extraction. Li
 | `ilium-client/src/chatroom.rs:148` | [agent/chatroom-empty-context](templates/agent/chatroom-empty-context.hbs) | `CHATROOM_EMPTY_CONTEXT` |
 | `ilium-client/src/chatroom.rs:152` | [agent/chatroom-context](templates/agent/chatroom-context.hbs) | `CHATROOM_CONTEXT` |
 | `ilium-client/src/chatroom.rs:156` | [agent/chatroom-context-row](templates/agent/chatroom-context-row.hbs) | `CHATROOM_CONTEXT_ROW` |
+| `ilium-client/src/chatroom.rs` (`unread_context`) | [agent/chatroom-unread-context](templates/agent/chatroom-unread-context.hbs) | `CHATROOM_UNREAD_CONTEXT` |
+| `ilium-client/src/chatroom.rs` (`render_capped`) | [agent/chatroom-omitted](templates/agent/chatroom-omitted.hbs) | `CHATROOM_OMITTED` |
 | `ilium-client/src/chatroom.rs:187` | [agent/chatroom-title](templates/agent/chatroom-title.hbs) | `CHATROOM_TITLE` |
 | `ilium-client/src/chatroom.rs:190` | [agent/chatroom-header-guidance](templates/agent/chatroom-header-guidance.hbs) | `CHATROOM_HEADER_GUIDANCE` |
 | `ilium-client/src/chatroom.rs:192` | [agent/chatroom-messages-heading](templates/agent/chatroom-messages-heading.hbs) | `CHATROOM_MESSAGES_HEADING` |

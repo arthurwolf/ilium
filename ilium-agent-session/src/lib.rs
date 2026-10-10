@@ -1162,6 +1162,18 @@ fn canonical_or_original(path: &Path) -> PathBuf {
     ilium_platform::paths::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
+/// Where Claude Code stores the transcript of `session_id` for a session
+/// launched in `launch_cwd`. A path, not a proof: the file may not exist yet
+/// (Claude writes it with the first message).
+pub fn claude_transcript_path(home: &Path, launch_cwd: &Path, session_id: &str) -> PathBuf {
+    home.join(".claude")
+        .join("projects")
+        .join(slugify_claude_project_path(&canonical_or_original(
+            launch_cwd,
+        )))
+        .join(format!("{session_id}.jsonl"))
+}
+
 fn slugify_claude_project_path(cwd: &Path) -> String {
     cwd.to_string_lossy()
         .chars()

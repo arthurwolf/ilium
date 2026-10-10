@@ -27,7 +27,7 @@ pub const DEFAULT_OPENROUTER_MODEL: &str = "openrouter/free";
 /// router's 1,000,000-token context window rejects that with HTTP 400
 /// (`context_length_exceeded`, observed 2026-09-26), which would make the
 /// default-on AI titling and restructuring fail on first boot.
-pub const DEFAULT_KILO_GATEWAY_SELECTED_MODEL: &str = "stepfun/step-3.7-flash:free";
+pub const DEFAULT_KILO_GATEWAY_SELECTED_MODEL: &str = "stepfun/step-5-preview-free";
 pub const DEFAULT_PROXY_DATABASE_URI: &str = "mongodb://127.0.0.1:27017";
 pub const DEFAULT_PROXY_DATABASE_NAME: &str = "money";
 pub const DEFAULT_PROXY_COLLECTION_NAME: &str = "paid_proxies";
@@ -1572,8 +1572,21 @@ fn openai_compatible_response_text(
     response_text(value, &["choices", "0", "message", "content"])
 }
 
+/// Documented output-token maximum per Anthropic model. The Messages API
+/// rejects any `max_tokens` above the model's cap with a 400, so the
+/// fallback budget is never sent to Anthropic.
+/// https://docs.anthropic.com/en/docs/about-claude/models/overview
+fn anthropic_max_output_tokens(model: &str) -> u32 {
+    match model {
+        "claude-haiku-4-5" | "claude-haiku-4-5-20251001" => 64_000,
+        _ => 128_000,
+    }
+}
+
 /// Builds a Messages API request. `temperature` is deliberately absent:
 /// claude-haiku-5-5 rejects it with a 400 error, so the provider default applies.
+/// `max_tokens` is the model's documented maximum, mirroring the official OpenAI
+/// path: the caller's fallback budget is not transmitted.
 fn anthropic_messages_payload(
     model: &str,
     request: &InferenceRequest,
@@ -1582,7 +1595,7 @@ fn anthropic_messages_payload(
     let mut body = serde_json::json!({
         "model": model,
         "system": request.system_prompt,
-        "max_tokens": request.max_tokens,
+        "max_tokens": anthropic_max_output_tokens(model),
         "messages": [{"role": "user", "content": request.user_prompt}]
     });
     if stream {
@@ -1982,10 +1995,22 @@ mod tests {
             assert!(body.get("temperature").is_none(), "stream={stream}");
             assert_eq!(body["model"], "claude-haiku-5-5");
             assert_eq!(body["system"], "Return JSON only.");
-            assert_eq!(body["max_tokens"], 512);
+            assert_eq!(body["max_tokens"], 128_000);
             assert_eq!(body["messages"][0]["content"], "user fixture");
             assert_eq!(body.get("stream").is_some(), stream);
         }
+    }
+
+    #[test]
+    fn anthropic_max_tokens_never_exceeds_model_output_cap() {
+        let request = InferenceRequest::json_only("user fixture");
+        for model in ["claude-haiku-5-5", "claude-opus-5-5", "claude-sonnet-5-5"] {
+            let body = anthropic_messages_payload(model, &request, false);
+            assert_eq!(body["max_tokens"], 128_000, "{model}");
+        }
+        let body = anthropic_messages_payload("claude-haiku-4-5", &request, false);
+        assert_eq!(body["max_tokens"], 64_000);
+        assert!(body["max_tokens"].as_u64().unwrap() <= 128_000);
     }
 
     #[test]

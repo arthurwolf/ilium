@@ -37,6 +37,14 @@ pub const CHATROOM_CONTEXT: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/templates/agent/chatroom-context.hbs"
 ));
+pub const CHATROOM_UNREAD_CONTEXT: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/templates/agent/chatroom-unread-context.hbs"
+));
+pub const CHATROOM_OMITTED: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/templates/agent/chatroom-omitted.hbs"
+));
 pub const CHATROOM_CONTEXT_ROW: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/templates/agent/chatroom-context-row.hbs"
@@ -97,6 +105,8 @@ pub const TEMPLATES: &[(&str, &str)] = &[
     ("agent/chatroom-record-row", CHATROOM_RECORD_ROW),
     ("agent/chatroom-empty-context", CHATROOM_EMPTY_CONTEXT),
     ("agent/chatroom-context", CHATROOM_CONTEXT),
+    ("agent/chatroom-unread-context", CHATROOM_UNREAD_CONTEXT),
+    ("agent/chatroom-omitted", CHATROOM_OMITTED),
     ("agent/chatroom-context-row", CHATROOM_CONTEXT_ROW),
     ("agent/chatroom-title", CHATROOM_TITLE),
     ("agent/chatroom-header-guidance", CHATROOM_HEADER_GUIDANCE),

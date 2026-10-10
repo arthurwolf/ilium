@@ -875,18 +875,18 @@ mod tests {
     #[test]
     fn explicit_request_preserves_selected_model_and_token_budget() {
         let request = CompletionRequest::new(
-            "stepfun/step-3.7-flash:free",
+            "stepfun/step-5-preview-free",
             vec![ChatMessage::user("restructure this project")],
             4096,
         );
 
-        assert_eq!(request.model, "stepfun/step-3.7-flash:free");
+        assert_eq!(request.model, "stepfun/step-5-preview-free");
         assert_eq!(request.max_tokens, 4096);
     }
 
     #[test]
     fn selected_model_and_restructure_budget_reach_the_http_payload() {
-        let response_body = r#"{"model":"stepfun/step-3.7-flash:free","choices":[{"message":{"content":"{}"},"finish_reason":"stop"}]}"#;
+        let response_body = r#"{"model":"stepfun/step-5-preview-free","choices":[{"message":{"content":"{}"},"finish_reason":"stop"}]}"#;
         let (base_url, request_receiver) = spawn_http_response("200 OK", response_body);
         let client = KiloGatewayClient::new(
             base_url,
@@ -897,7 +897,7 @@ mod tests {
             },
         );
         let request = CompletionRequest::new(
-            "stepfun/step-3.7-flash:free",
+            "stepfun/step-5-preview-free",
             vec![ChatMessage::user("restructure")],
             4096,
         );
@@ -913,7 +913,7 @@ mod tests {
             .expect("captured HTTP body");
         let request_json: serde_json::Value =
             serde_json::from_str(request_body).expect("valid request JSON");
-        assert_eq!(request_json["model"], "stepfun/step-3.7-flash:free");
+        assert_eq!(request_json["model"], "stepfun/step-5-preview-free");
         assert_eq!(request_json["max_tokens"], 4096);
     }
 
