@@ -810,13 +810,17 @@ fn parser_receipt_must_be_released_before_execution_shutdown_completes() {
     let (mut execution, mut parsing) = ParserFixture::start_parts();
     parsing.cancel();
     execution.request_shutdown(ShutdownMode::Cancel);
-    let held = execution.join_until_background(Instant::now() + TEST_WAIT).unwrap();
+    let held = execution
+        .join_until_background(Instant::now() + TEST_WAIT)
+        .unwrap();
     assert_eq!(held.remaining_workers, 0, "parser worker did not retire");
     assert!(
         !held.shutdown_complete,
         "a live parser receipt must keep its Service claim charged"
     );
     drop(parsing);
-    let released = execution.join_until_background(Instant::now() + TEST_WAIT).unwrap();
+    let released = execution
+        .join_until_background(Instant::now() + TEST_WAIT)
+        .unwrap();
     assert!(released.shutdown_complete, "{:?}", released.health.lanes);
 }
