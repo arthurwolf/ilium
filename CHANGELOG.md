@@ -14,6 +14,7 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 ## [Unreleased]
 
 ### Changed
+- The Beach animation's V8 render deadline is 250 ms instead of 100 ms, and the host ceiling for every V8 render moved with it. The cold first frame of Beach Rich took 119.6 ms, so the old budget aborted it with a deadline error; steady frames stay near 33 ms.
 - The progress-monitor instructions Ilium installs for agents (version 11) use a unit-test run as the example progress message instead of a release build, so agents are not nudged toward release builds; installed instruction blocks are refreshed automatically.
 - Codex session conversion now bounds app-server output records and queued reader events, clipping oversized diagnostics and failing closed on oversized protocol lines.
 - Live ambient data pollers and fleet-marker preparers now reserve persistent worker capacity from the host's shared quota before starting.
