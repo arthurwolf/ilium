@@ -426,7 +426,7 @@ mod tests {
         let mut rotation = Rotation::default();
         rotation.replace("today".into(), vec!["First".into(), "Second".into()]);
         let title = rotation.next().unwrap();
-        assert!(reserve_article_storage(&resources, &mut rotation, title.clone()).is_err());
+        assert!(reserve_article_storage(&resources, &mut rotation, &title).is_err());
         assert_eq!(rotation.titles.last(), Some(&title));
         assert_eq!(quota.snapshot().result_bytes, 0);
         execution.request_shutdown(ilium_execution::ShutdownMode::Cancel);

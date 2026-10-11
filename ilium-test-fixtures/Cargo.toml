@@ -22,6 +22,11 @@ ilium-pty = { version = "0.1.1", path = "../ilium-pty" }
 tempfile = "3.27.0"
 vt100 = "0.16.2"
 
+# `harness = false`: `cargo test` compiles this bin into `deps/` in test mode,
+# and by default that build runs libtest's `main`, which rejects the fake CLI's
+# own argv (`--resume`) and exits before any pane detection can see it. Without
+# the harness the fixture's own `main` runs, as the tests expect.
 [[bin]]
 name = "ilium-fixture-agent"
 path = "src/bin/ilium_fixture_agent.rs"
+harness = false

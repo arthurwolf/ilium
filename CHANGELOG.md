@@ -69,6 +69,7 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 - Compact saved-world preparation footers keep the progress bar and measured route ETA visible together, with a one-line fallback on short terminals and recent activity when space permits.
 
 - Unfreezing reserves request capacity before focus updates, including frozen-screen button clicks, so focus traffic cannot consume the slot needed to resume the saved agent session.
+- Unfreezing a pane now moves focus to the resumed agent in the same position. Before, the panel could stay empty or show another pane while the resumed agent was running.
 - Agent Cost metric and calibration settings now use shared left/right selectors and full choice dialogs.
 - Compact Settings navigation uses readable short labels beside semantic icons when full tab titles do not fit.
 - Animation loop caches now report when their fixed worker and frame-storage cost can never fit the shared quota; temporary pressure remains retryable.

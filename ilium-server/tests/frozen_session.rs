@@ -26,15 +26,23 @@ static FIXTURE_PATH_LOCK: Mutex<()> = Mutex::new(());
 
 struct FixturePath {
     previous: Option<OsString>,
+    previous_zdotdir: Option<OsString>,
     _lock: MutexGuard<'static, ()>,
 }
 
 impl FixturePath {
+    /// Puts the fixture directory first on `PATH` and points `ZDOTDIR` at it.
+    ///
+    /// The pane shell is `$SHELL -c`, and a user `~/.zshenv` can prepend
+    /// `~/.local/bin`-style directories, so the real `claude` on the machine
+    /// would win over the fixture. An empty `ZDOTDIR` (the fixture directory
+    /// holds no `.zshenv`) keeps the pane's `PATH` exactly as the test set it.
     fn prepend(directory: &Path) -> Self {
         let lock = FIXTURE_PATH_LOCK
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let previous = std::env::var_os("PATH");
+        let previous_zdotdir = std::env::var_os("ZDOTDIR");
         let mut search_paths = vec![directory.to_path_buf()];
         if let Some(previous) = previous.as_deref() {
             search_paths.extend(std::env::split_paths(previous));
@@ -42,8 +50,10 @@ impl FixturePath {
         let path = std::env::join_paths(search_paths)
             .expect("fixture and original directories produce a valid PATH");
         std::env::set_var("PATH", path);
+        std::env::set_var("ZDOTDIR", directory);
         Self {
             previous,
+            previous_zdotdir,
             _lock: lock,
         }
     }
@@ -51,10 +61,13 @@ impl FixturePath {
 
 impl Drop for FixturePath {
     fn drop(&mut self) {
-        if let Some(previous) = self.previous.take() {
-            std::env::set_var("PATH", previous);
-        } else {
-            std::env::remove_var("PATH");
+        match self.previous.take() {
+            Some(previous) => std::env::set_var("PATH", previous),
+            None => std::env::remove_var("PATH"),
+        }
+        match self.previous_zdotdir.take() {
+            Some(previous) => std::env::set_var("ZDOTDIR", previous),
+            None => std::env::remove_var("ZDOTDIR"),
         }
     }
 }
@@ -118,9 +131,12 @@ async fn create_detected_claude_pane(client: &mut SessionStream) -> NodeId {
     .expect("Claude fixture is detected with its requested session ID")
 }
 
-fn write_verified_claude_transcript(server: &TestServer, session_id: &str) {
-    let resolved_cwd = ilium_platform::paths::canonicalize(&server.project_cwd)
-        .unwrap_or_else(|_| server.project_cwd.clone());
+/// Writes the transcript Claude would keep for a session started in `project_cwd`.
+/// Detection only accepts a session whose transcript names the pane's project,
+/// so a worktree pane needs its own transcript under the worktree's slug.
+fn write_verified_claude_transcript(server: &TestServer, project_cwd: &Path, session_id: &str) {
+    let resolved_cwd = ilium_platform::paths::canonicalize(project_cwd)
+        .unwrap_or_else(|_| project_cwd.to_path_buf());
     let slug: String = resolved_cwd
         .to_string_lossy()
         .chars()
@@ -139,7 +155,7 @@ fn write_verified_claude_transcript(server: &TestServer, session_id: &str) {
         serde_json::json!({
             "type": "user",
             "sessionId": session_id,
-            "cwd": server.project_cwd,
+            "cwd": project_cwd,
             "message": {"content": "integration test prompt"}
         })
         .to_string()
@@ -162,22 +178,15 @@ fn run_git(directory: &Path, arguments: &[&str]) {
     );
 }
 
-async fn unfreeze_to_detected_replacement(
-    client: &mut SessionStream,
-    frozen_pane_id: NodeId,
-) -> NodeId {
-    write_frame(
-        client,
-        &ClientRequest::UnfreezePane {
-            pane_id: frozen_pane_id,
-        },
-    )
-    .await
-    .expect("send UnfreezePane");
-
-    wait_for_detected_replacement(client, frozen_pane_id)
-        .await
-        .0
+/// Parent and child index of a pane: the slot a replacement must reoccupy.
+fn tree_slot(tree: &ilium_core::Tree, pane_id: NodeId) -> Option<(NodeId, usize)> {
+    let parent = tree.parent_of(pane_id)?;
+    let index = tree
+        .children_of(parent)
+        .ok()?
+        .iter()
+        .position(|child| *child == pane_id)?;
+    Some((parent, index))
 }
 
 async fn wait_for_detected_replacement(
@@ -239,7 +248,7 @@ async fn unfreeze_restarts_the_saved_provider_session_and_recovers_its_identity(
         auto_answer_interstitial_prompts: true,
     };
     let mut server = TestServer::start_with_detection_config(session_name, detection_config).await;
-    write_verified_claude_transcript(&server, SESSION_ID);
+    write_verified_claude_transcript(&server, &server.project_cwd, SESSION_ID);
     let mut client = attach(&server, session_name).await;
     let frozen_pane_id = create_detected_claude_pane(&mut client).await;
 
@@ -276,7 +285,8 @@ async fn unfreeze_restarts_the_saved_provider_session_and_recovers_its_identity(
     )
     .await
     .expect("reattach after freezing");
-    let (_, initial_events) = read_initial_state(&mut client, Duration::from_secs(5)).await;
+    let (initial_tree, initial_events) =
+        read_initial_state(&mut client, Duration::from_secs(5)).await;
     assert!(
         initial_events.iter().any(|event| matches!(
             event,
@@ -287,9 +297,25 @@ async fn unfreeze_restarts_the_saved_provider_session_and_recovers_its_identity(
         )),
         "reattaching must restore the server's frozen-pane marker"
     );
+    let frozen_slot = tree_slot(&initial_tree, frozen_pane_id)
+        .expect("frozen pane keeps its tree slot before unfreeze");
 
-    let replacement_id = unfreeze_to_detected_replacement(&mut client, frozen_pane_id).await;
+    write_frame(
+        &mut client,
+        &ClientRequest::UnfreezePane {
+            pane_id: frozen_pane_id,
+        },
+    )
+    .await
+    .expect("send UnfreezePane");
+    let (replacement_id, replacement_tree) =
+        wait_for_detected_replacement(&mut client, frozen_pane_id).await;
     assert_ne!(replacement_id, frozen_pane_id);
+    assert_eq!(
+        tree_slot(&replacement_tree, replacement_id),
+        Some(frozen_slot),
+        "the replacement must take the frozen pane's parent and child index"
+    );
 
     write_frame(&mut client, &ClientRequest::KillSession)
         .await
@@ -358,6 +384,7 @@ async fn unfreeze_preserves_worktree_ownership() {
         _ => unreachable!("event predicate accepts only workspace results"),
     };
 
+    write_verified_claude_transcript(&server, &worktree_root, SESSION_ID);
     write_frame(
         &mut client,
         &ClientRequest::ReplacePaneWithCommand {
