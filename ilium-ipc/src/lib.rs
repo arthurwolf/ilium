@@ -80,6 +80,12 @@ pub mod pane_env {
 
 #[cfg(test)]
 mod tests {
+    /// Reads the bincode variant index (the first four bytes) of a wire value.
+    fn variant_index<T: serde::Serialize>(value: &T) -> u32 {
+        let bytes = bincode::serialize(value).expect("serializable");
+        u32::from_le_bytes(bytes[..4].try_into().expect("four-byte variant index"))
+    }
+
     use std::io::Cursor;
     use std::path::PathBuf;
 
@@ -1334,10 +1340,6 @@ mod tests {
     /// index in the first four bytes.
     #[test]
     fn voice_text_variants_are_contiguous() {
-        fn variant_index<T: serde::Serialize>(value: &T) -> u32 {
-            let bytes = bincode::serialize(value).expect("serializable");
-            u32::from_le_bytes(bytes[..4].try_into().expect("four-byte variant index"))
-        }
         let register = variant_index(&ClientRequest::RegisterVoiceTextReceiver);
         let submit = variant_index(&ClientRequest::SubmitVoiceText {
             request_id: 1,
@@ -1370,11 +1372,6 @@ mod tests {
 
     #[test]
     fn workspace_variants_preserve_close_pane_wire_layout() {
-        fn variant_index<T: serde::Serialize>(value: &T) -> u32 {
-            let bytes = bincode::serialize(value).expect("serializable");
-            u32::from_le_bytes(bytes[..4].try_into().expect("four-byte variant index"))
-        }
-
         assert_eq!(
             bincode::serialize(&ClientRequest::ClosePane { pane_id: NodeId(2) })
                 .expect("serializable"),
