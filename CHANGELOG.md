@@ -13,6 +13,9 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 
 ## [Unreleased]
 
+### Added
+- `ilium recap` writes a short (at most 40 words) and a long (at most 250 words) factual recap of each selected agent or shell pane, using the same selection options as `ilium panes` and `ilium broadcast`. Agent recaps read only the transcript bound to the pane's own session and project; shell recaps read bounded screen text. Output is JSONL or Markdown, with explicit states (`summarized`, `idle`, `denied`, `unavailable`, `stale`, `failed`), evidence age, validated file pointers, and goal state read from the transcript rather than written by the model.
+
 ### Changed
 - The progress-monitor instructions Ilium installs for agents (version 11) use a unit-test run as the example progress message instead of a release build, so agents are not nudged toward release builds; installed instruction blocks are refreshed automatically.
 - Codex session conversion now bounds app-server output records and queued reader events, clipping oversized diagnostics and failing closed on oversized protocol lines.

@@ -27,6 +27,7 @@ mod pane_filter;
 mod pane_scan;
 mod panes;
 mod progress_wait;
+mod recap;
 mod voice;
 
 use std::ffi::OsString;
@@ -174,6 +175,10 @@ enum Command {
     /// all projects, that pass the pane selection options. Shows exactly
     /// which panes `broadcast` would address. Output is JSONL.
     Panes(panes::PanesArgs),
+    /// Factual short and long recaps of selected agent and shell panes.
+    /// Agent recaps read only the transcript bound to the pane's session;
+    /// shell recaps read bounded screen text. Output is JSONL by default.
+    Recap(recap::RecapArgs),
     /// Send a message to every running agent, across all projects and
     /// sessions on this machine, that passes the pane selection options.
     /// The message is typed into each agent and submitted, as the client's
@@ -545,6 +550,7 @@ async fn dispatch(cli: Cli) -> Result<(), CliError> {
         }
         Some(Command::Voice { command }) => voice::voice(command, &cli.cwd).await,
         Some(Command::Panes(args)) => panes::panes(args, &cli.cwd).await,
+        Some(Command::Recap(args)) => recap::recap(args, &cli.cwd).await,
         Some(Command::Broadcast(args)) => broadcast::broadcast(args, &cli.cwd).await,
     }
 }

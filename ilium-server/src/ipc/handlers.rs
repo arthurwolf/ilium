@@ -111,6 +111,34 @@ pub async fn handle_request(
     direct_tx: &DirectEventSender,
 ) -> bool {
     match request {
+        ClientRequest::GetPaneRecapScreen { pane_id } => {
+            let captured = {
+                let panes = state.panes.read().await;
+                match panes.get(&pane_id) {
+                    Some(PaneResource::Terminal(runtime)) => Some((
+                        runtime.session.input_handle(),
+                        runtime.session.current_screen_reader(),
+                    )),
+                    _ => None,
+                }
+            };
+            let result = match captured {
+                None => Err("terminal pane unavailable".to_owned()),
+                Some((input, reader)) => {
+                    let result = reader
+                        .try_text_with_limit(64 * 1024)
+                        .unwrap_or(Err("current terminal screen busy"))
+                        .map_err(str::to_owned);
+                    if pane::terminal_reader_is_current(state, pane_id, &input).await {
+                        result
+                    } else {
+                        Err("terminal pane replaced during evidence capture".to_owned())
+                    }
+                }
+            };
+            send_direct(direct_tx, ServerEvent::PaneRecapScreen { pane_id, result }).await;
+            false
+        }
         ClientRequest::Attach { session } => {
             handle_attach(state, &session, direct_tx, true).await;
             false

@@ -106,6 +106,7 @@ mod model_catalog_preparation;
 pub mod mouse;
 pub mod naming;
 pub mod naming_workers;
+pub mod recap;
 mod normal_voice;
 pub mod onboarding;
 pub mod open_target;

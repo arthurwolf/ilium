@@ -796,6 +796,7 @@ impl HeapBytes for ServerEvent {
                 0usize.saturating_add(succeeded.heap_bytes())
             }
             Self::PaneNodeChanged(node) => 0usize.saturating_add(node.heap_bytes()),
+            Self::PaneRecapScreen { result, .. } => result.heap_bytes(),
         }
     }
 }
