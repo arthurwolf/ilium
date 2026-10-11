@@ -2,6 +2,7 @@
 //! Measures render/pack wall time and Braille differences for every mode whose
 //! inputs can be held locally. Lichess TV is reported as unmeasured because the
 //! native and guest implementations need an authenticated live game source.
+use ilium_ambient::resources::AmbientResources;
 use ilium_ambient::CarpetSettings;
 use ilium_animation_js::{
     engine::{
@@ -20,7 +21,6 @@ use ilium_animation_js::{
 use ilium_client::background_animation::{
     AnimationFrame, AnimationKind, AnimationSettings, DitherMode,
 };
-use ilium_ambient::resources::AmbientResources;
 use ilium_execution::{
     ClientLimits, Execution, ExecutionConfig, LaneConfig, QuotaGroup, QuotaLimits,
 };
