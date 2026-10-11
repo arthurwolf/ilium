@@ -49,7 +49,7 @@ impl AgentFeature {
     const fn current_version(self) -> Option<u32> {
         match self {
             Self::Chatroom => None,
-            Self::Progress => Some(11),
+            Self::Progress => Some(12),
         }
     }
 
@@ -585,7 +585,7 @@ mod tests {
 
         let contents = fs::read_to_string(&target).unwrap();
         assert!(!contents.contains("as a progress monitor"));
-        assert!(contents.contains("ilium-agent-feature: progress version=11"));
+        assert!(contents.contains("ilium-agent-feature: progress version=12"));
         assert!(contents.contains("you MUST block with `ilium progress wait <monitor_id>`"));
         assert!(contents.contains("--wait"));
         assert!(contents.contains("at least three minutes"));
@@ -621,6 +621,31 @@ mod tests {
             );
         }
         assert!(instruction.contains("must not poll"));
+    }
+
+    /// A fresh install must teach what to do with a monitor's result, not
+    /// only how to register one; these rules once lived only in hand-written
+    /// user instructions.
+    #[test]
+    fn progress_instruction_teaches_result_handling() {
+        let instruction = AgentFeature::Progress.instruction();
+        for required in [
+            "never through `ilium new-pane`",
+            "Read `percent` from a structured source",
+            "never the outcome of the user's request",
+            "on `done`, verify the result",
+            "on `error`, inspect that attempt's retained evidence once",
+            "while `running`, do every step that does not need its result",
+            "when the outcome is unknown",
+            "A pasted monitor report is an event inside the current request",
+            "go straight back to `ilium progress wait <monitor_id>`",
+        ] {
+            assert!(
+                instruction.contains(required),
+                "progress instruction must contain {required:?}"
+            );
+        }
+        assert!(AgentFeature::Progress.is_detected(instruction));
     }
 
     #[test]
@@ -835,7 +860,7 @@ mod tests {
         install(&target, AgentFeature::Progress).unwrap();
         let updated = fs::read_to_string(&target).unwrap();
         assert!(updated.contains("# User policy"));
-        assert!(updated.contains("version=11"));
+        assert!(updated.contains("version=12"));
         assert!(!updated.contains("version=99"));
     }
 

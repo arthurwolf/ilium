@@ -450,7 +450,7 @@ The guidance deliberately discourages chatter. Agents are told to read recent co
 
 ## Agent setup
 
-Ilium ships two short instruction blocks for agents: **Chatroom** (when and how to use the room) and **Progress** (hand any task expected to take three minutes or more to the progress monitor, and never poll). To be effective they have to be in the files Claude Code and Codex read at start-up, so Ilium maintains them for you.
+Ilium ships two short instruction blocks for agents: **Chatroom** (when and how to use the room) and **Progress** (hand any task expected to take three minutes or more to the progress monitor, never poll, and treat each monitor result as one attempt: verify a success, inspect and retry a failure, check the task directly when the outcome is unknown, then continue the request). To be effective they have to be in the files Claude Code and Codex read at start-up, so Ilium maintains them for you.
 
 ### What gets edited
 
@@ -468,7 +468,7 @@ Edits are **marker-delimited blocks**, so only text between Ilium's own markers 
 <!-- /ilium-agent-feature: chatroom -->
 ```
 
-The Progress block also carries a schema version (`<!-- ilium-agent-feature: progress version=9 -->`), which lets Ilium upgrade an older block and leave a newer one alone. Text around the block is preserved. If a file already contains wording that looks like the Ilium instruction but has no markers, Ilium reports it as "Instruction detected" and does **not** treat it as its own or delete it. Files larger than 512 KiB are not modified. A symlinked instruction file stays a symlink after an update (for example `AGENTS.md` linking to `CLAUDE.md`).
+The Progress block also carries a schema version (`<!-- ilium-agent-feature: progress version=12 -->`), which lets Ilium upgrade an older block and leave a newer one alone. Text around the block is preserved. If a file already contains wording that looks like the Ilium instruction but has no markers, Ilium reports it as "Instruction detected" and does **not** treat it as its own or delete it. Files larger than 512 KiB are not modified. A symlinked instruction file stays a symlink after an update (for example `AGENTS.md` linking to `CLAUDE.md`).
 
 Ilium installs and refreshes the global blocks automatically when it attaches to a session and when projects open; it does not wait for you to visit Settings. The global files already apply to every project, so Ilium never adds project copies on its own: they would repeat the same text, and a new project `AGENTS.md` would stop Codex from reading that project's `CLAUDE.md`. Treat the instruction files as managed by Ilium for these two blocks. Write your own instructions anywhere outside the markers.
 
