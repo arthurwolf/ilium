@@ -4449,15 +4449,20 @@ async fn handle_new_pane(
     // Resolve the live-terminal policy before creating the tree node. The
     // eventual node and its actual launch cwd must appear in one tree write,
     // even if another request snapshots the session while spawning awaits.
-    let cwd_candidate = candidate_new_pane_working_directory(state, working_directory).await;
-    if matches!(working_directory, NewPaneWorkingDirectory::WorkspacePane(_))
-        && cwd_candidate.is_none()
+    let cwd_candidate = candidate_new_pane_working_directory(state, &working_directory).await;
+    if matches!(
+        working_directory,
+        NewPaneWorkingDirectory::WorkspacePane(_) | NewPaneWorkingDirectory::Directory(_)
+    ) && cwd_candidate.is_none()
     {
-        send_direct_error(
-            direct_tx,
-            "worktree pane or its launch directory is unavailable".to_string(),
-        )
-        .await;
+        let message = match &working_directory {
+            NewPaneWorkingDirectory::Directory(path) => format!(
+                "working directory {} is not an existing directory",
+                path.display()
+            ),
+            _ => "worktree pane or its launch directory is unavailable".to_string(),
+        };
+        send_direct_error(direct_tx, message).await;
         return;
     }
 
@@ -5213,7 +5218,7 @@ pub(crate) async fn create_agent_with_prompt(
 /// tree write that inserts the pane, so its persisted cwd is never stale.
 async fn candidate_new_pane_working_directory(
     state: &ServerState,
-    working_directory: NewPaneWorkingDirectory,
+    working_directory: &NewPaneWorkingDirectory,
 ) -> Option<std::path::PathBuf> {
     match working_directory {
         NewPaneWorkingDirectory::ProjectRoot => None,
@@ -5226,7 +5231,16 @@ async fn candidate_new_pane_working_directory(
         NewPaneWorkingDirectory::LastUsed => {
             state.last_terminal_working_directory.lock().await.clone()
         }
+        NewPaneWorkingDirectory::Directory(path) => {
+            let path = path.clone();
+            tokio::task::spawn_blocking(move || std::fs::canonicalize(path))
+                .await
+                .ok()?
+                .ok()
+                .filter(|resolved| resolved.is_dir())
+        }
         NewPaneWorkingDirectory::WorkspacePane(pane_id) => {
+            let pane_id = *pane_id;
             let tree = state.tree.read().await;
             tree.pane_workspace(pane_id)
                 .and_then(|workspace| {
@@ -8819,7 +8833,7 @@ mod tests {
             runtime.detection_schedule.client_focused = true;
         }
         let current =
-            candidate_new_pane_working_directory(&state, NewPaneWorkingDirectory::FocusedTerminal)
+            candidate_new_pane_working_directory(&state, &NewPaneWorkingDirectory::FocusedTerminal)
                 .await;
         assert_eq!(current.as_deref(), Some(directory.path()));
         if let Some(PaneResource::Terminal(mut runtime)) =

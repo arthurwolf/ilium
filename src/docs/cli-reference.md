@@ -280,7 +280,7 @@ ilium progress set    --command '<probe>' [--interval-seconds <n>] [--wait [--ti
 ilium progress wait   [<monitor_id>] [--timeout-seconds <n>]
 ilium wait            [<monitor_id>] [--timeout-seconds <n>]
 ilium progress status
-ilium progress clear  [--monitor-id <id> | --all]
+ilium progress clear  [--monitor-id <id> [--running] | --all]
 ```
 
 Requirements:
@@ -384,7 +384,8 @@ Stops monitors and clears their retained results.
 
 | Option | Meaning |
 | --- | --- |
-| `--monitor-id <id>` | Clear only this monitor. If it no longer exists, the request is rejected with `stale-monitor` and the other monitors are untouched. |
+| `--monitor-id <id>` | Clear only this monitor. If it no longer exists, the request is rejected with `stale-monitor` and the other monitors are untouched. If its task is still running, the request is refused with `monitor-running` (exit 2), because on a pane shared by several agents the ID may belong to another agent's task. |
+| `--running` | With `--monitor-id`: also clear the monitor when its task is still running. |
 | `--all` | Clear every monitor of the pane. |
 | (neither) | Clears the only monitor; refused with `monitor-ambiguous` when the pane has several. |
 

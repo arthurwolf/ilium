@@ -201,6 +201,11 @@ mod tests {
                 kind: NewPaneKind::CommandClosingOnExit("sleep 1".to_string()),
                 working_directory: NewPaneWorkingDirectory::ProjectRoot,
             },
+            ClientRequest::NewPane {
+                parent_group: NodeId(1),
+                kind: NewPaneKind::PlainShell,
+                working_directory: NewPaneWorkingDirectory::Directory(PathBuf::from("/tmp/work")),
+            },
             ClientRequest::ClosePane { pane_id: NodeId(2) },
             ClientRequest::MoveNode {
                 node_id: NodeId(2),

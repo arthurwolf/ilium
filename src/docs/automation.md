@@ -230,7 +230,7 @@ Every command prints **one JSONL record** to stdout on success (one JSON object 
 | `ilium progress set --command '<probe>' [--interval-seconds N] [--wait [--timeout-seconds S]] [--replace]` | Validate, then atomically add a monitor to this pane. Waits for a server acknowledgement that contains the monitor id and the accepted first report. With `--wait`, then blocks exactly like `ilium progress wait` and prints a second line. Other monitors of the pane keep running; `--replace` clears all of them first. | `progress_set` (then `progress_wait`) |
 | `ilium progress wait [MONITOR_ID] [--timeout-seconds S]` | Block until the monitor reports `done` or `error`, fails or is cleared. Without an id it picks the pane's only unsettled monitor (else its only monitor) and refuses with `monitor-ambiguous` (exit 2) when there are several. `ilium wait` is the same command. | `progress_wait` |
 | `ilium progress status` | Every monitor of this pane: registration, latest report and monitor health (`monitor_count`, `running`, `monitors`). | `progress_status` |
-| `ilium progress clear [--monitor-id ID \| --all]` | Stop a monitor and clear its retained progress. With `--monitor-id`, only that exact monitor. Without it, the pane's only monitor; with several, it refuses with `monitor-ambiguous` unless `--all` is given. | (clear result) |
+| `ilium progress clear [--monitor-id ID \| --all]` | Stop a monitor and clear its retained progress. With `--monitor-id`, only that exact monitor, refused with `monitor-running` while its task still runs unless `--running` is given. Without it, the pane's only monitor; with several, it refuses with `monitor-ambiguous` unless `--all` is given. | (clear result) |
 
 
 ### Waiting for a monitor

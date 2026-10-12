@@ -15939,7 +15939,9 @@ impl App {
             ContextMenuAction::ToggleGroup => {
                 self.toggle_selected_tree_node();
             }
-            ContextMenuAction::NewTerminal => self.action_new_terminal(),
+            ContextMenuAction::NewTerminal => {
+                self.action_new_terminal();
+            }
             ContextMenuAction::NewAgent(provider) => {
                 self.action_new_command_pane(provider.command_line());
             }

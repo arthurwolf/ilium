@@ -718,11 +718,9 @@ mod tests {
             FeatureSetupStatus::NotInstalled
         );
         uninstall(&target, AgentFeature::Progress).unwrap();
-        assert!(
-            fs::read_to_string(&target)
-                .unwrap()
-                .contains("Use ilium progress")
-        );
+        assert!(fs::read_to_string(&target)
+            .unwrap()
+            .contains("Use ilium progress"));
     }
 
     #[test]
@@ -747,11 +745,9 @@ mod tests {
             FeatureSetupStatus::DetectedUnmanaged
         );
         uninstall(&target, AgentFeature::Progress).unwrap();
-        assert!(
-            fs::read_to_string(&target)
-                .unwrap()
-                .contains("The agent MUST NOT poll")
-        );
+        assert!(fs::read_to_string(&target)
+            .unwrap()
+            .contains("The agent MUST NOT poll"));
     }
 
     #[test]
@@ -943,17 +939,13 @@ mod tests {
 
         install(&link, AgentFeature::Progress).unwrap();
 
-        assert!(
-            fs::symlink_metadata(&link)
-                .unwrap()
-                .file_type()
-                .is_symlink()
-        );
-        assert!(
-            fs::read_to_string(&target)
-                .unwrap()
-                .contains("ilium-agent-feature: progress")
-        );
+        assert!(fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert!(fs::read_to_string(&target)
+            .unwrap()
+            .contains("ilium-agent-feature: progress"));
     }
 
     #[cfg(unix)]
