@@ -109,8 +109,11 @@ fn mars_has_its_big_volcano_and_deep_basin() {
 #[test]
 fn world_loading_retries_after_shared_worker_capacity_returns() {
     let (mut execution, resources) = crate::resources::isolated_test_resources();
+    // Leave less than one heightfield admission (storage + worker bytes) free,
+    // so the worker is refused while the storage reservation alone would fit.
+    let heightfield_admission_bytes = MAX_HEIGHTFIELD_BYTES + HEIGHTFIELD_WORKER_BYTES;
     let pressure = resources
-        .reserve_storage(2304 * 1024 * 1024)
+        .reserve_storage(resources.free_worker_bytes() - heightfield_admission_bytes + 1)
         .expect("fill the isolated fixture's physical allocation budget");
     let env = SceneEnv::for_test(std::env::temp_dir(), resources);
     let mut scene = TopographicMapsScene::new(&settings_for(WorldId::Mars), &env);
@@ -222,7 +225,19 @@ fn failed_world_loader_retries_after_backoff() {
         ._worker
         .join_observer()
         .unwrap();
-    render_loaded(&mut scene, next_time, 80, 24);
+    // `render_loaded` returns as soon as any world is shown, which is the
+    // retained previous world here; wait for the retried world itself.
+    for _ in 0..500 {
+        render(&mut scene, next_time, 80, 24);
+        if scene
+            .current
+            .as_ref()
+            .is_some_and(|loaded| loaded.id == desired)
+        {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
     assert_eq!(scene.current.as_ref().unwrap().id, desired);
     retry_ticket
         .join_until(Instant::now() + Duration::from_secs(5))
@@ -519,7 +534,7 @@ fn settings_survive_serde() {
 #[test]
 fn status_names_the_world_and_spacing() {
     let mut scene = scene(&settings_for(WorldId::Moon));
-    assert_eq!(scene.status(), None);
+    assert_eq!(scene.status().as_deref(), Some("Loading world…"));
     render(&mut scene, 0.0, 40, 12);
     assert!(scene
         .status()

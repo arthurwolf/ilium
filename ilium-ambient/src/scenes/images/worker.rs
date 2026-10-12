@@ -527,8 +527,10 @@ mod tests {
             clients: 1,
             jobs: 4,
             service_jobs: 0,
-            input_bytes: 64 * 1024 * 1024,
-            result_bytes: 64 * 1024 * 1024,
+            // A 32 MiB download reserves twice its size as input; the job
+            // limits must admit it so the storage refusal is what is tested.
+            input_bytes: 128 * 1024 * 1024,
+            result_bytes: 128 * 1024 * 1024,
             worker_threads: 4,
             worker_bytes: 8 * 1024 * 1024,
         });
@@ -557,8 +559,8 @@ mod tests {
             .client(ClientLimits {
                 jobs: 4,
                 service_jobs: 0,
-                input_bytes: 64 * 1024 * 1024,
-                result_bytes: 64 * 1024 * 1024,
+                input_bytes: 128 * 1024 * 1024,
+                result_bytes: 128 * 1024 * 1024,
             })
             .expect("isolated image client");
         (execution, crate::resources::AmbientResources::new(finite))

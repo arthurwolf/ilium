@@ -329,6 +329,14 @@ impl LiveMapScene {
             feed_retry_at: std::time::Duration::from_secs(1), // Initial failed admission can retry after one scene second.
         }
     }
+    /// Fixtures use the admitted host resources that `new` always supplies.
+    /// Without them the fleet layer correctly refuses to start its preparer.
+    #[cfg(test)]
+    fn offline_with_test_resources(kind: MapKind, settings: MapSettings) -> Self {
+        let mut scene = Self::offline(kind, settings);
+        scene.resources = Some(crate::resources::test_resources());
+        scene
+    }
     fn start_worker(&mut self) {
         self.worker = None;
         self.startup_error = None;
@@ -927,7 +935,8 @@ mod tests {
     #[test] // Exercise settings transitions through the actual asynchronous scene renderer.
     fn fleet_geometry_survives_color_and_poll_edits_but_not_source_or_brightness() {
         // Synthetic source data only.
-        let mut scene = LiveMapScene::offline(MapKind::Boats, MapSettings::default()); // No subscriptions or HTTP in this fixture.
+        let mut scene =
+            LiveMapScene::offline_with_test_resources(MapKind::Boats, MapSettings::default()); // No subscriptions or HTTP in this fixture.
         let data = Arc::new(vec![
             Position::new("fixture".into(), 0.0, 0.0, None).unwrap()
         ]); // Usable unknown-age position.
@@ -1043,7 +1052,8 @@ mod tests {
         state.received(90000, Some(1000));
         let mut error_state = FeedState::default();
         error_state.failed("first replacement request failed".into());
-        let mut boats = LiveMapScene::offline(MapKind::Boats, MapSettings::default());
+        let mut boats =
+            LiveMapScene::offline_with_test_resources(MapKind::Boats, MapSettings::default());
         boats.accept_positions(Arc::new(Snapshot {
             data: Some(Arc::new(vec![
                 Position::new("a".into(), 0.0, 0.0, Some(1000)).unwrap(), // Existing fixture supplies a known coordinate time.
@@ -1057,7 +1067,8 @@ mod tests {
         assert_eq!(boats.state.received_ms, state.received_ms);
         assert_eq!(boats.state.observed_ms, state.observed_ms);
         assert_eq!(boats.state.error, error_state.error);
-        let mut earthquakes = LiveMapScene::offline(MapKind::Earthquakes, MapSettings::default());
+        let mut earthquakes =
+            LiveMapScene::offline_with_test_resources(MapKind::Earthquakes, MapSettings::default());
         earthquakes.accept_quakes(Arc::new(Snapshot {
             data: Some(Arc::new(vec![quake("a", 0.0, None)])),
             state: state.clone(),
@@ -1076,7 +1087,8 @@ mod tests {
     }
     #[test]
     fn initial_replacement_worker_snapshot_cannot_hide_last_good_timestamps() {
-        let mut scene = LiveMapScene::offline(MapKind::Boats, MapSettings::default());
+        let mut scene =
+            LiveMapScene::offline_with_test_resources(MapKind::Boats, MapSettings::default());
         let mut state = FeedState::default();
         state.received(90000, Some(1000));
         scene.accept_positions(Arc::new(Snapshot {
@@ -1092,7 +1104,7 @@ mod tests {
     }
     #[test]
     fn native_label_brightness_follows_marker_brightness_and_zero_hides_labels() {
-        let mut scene = LiveMapScene::offline(
+        let mut scene = LiveMapScene::offline_with_test_resources(
             MapKind::Earthquakes,
             MapSettings {
                 marker_brightness_percent: 50,
@@ -1119,7 +1131,8 @@ mod tests {
     }
     #[test]
     fn all_magnitudes_have_markers_and_zero_negative_unknown_labels() {
-        let mut scene = LiveMapScene::offline(MapKind::Earthquakes, MapSettings::default());
+        let mut scene =
+            LiveMapScene::offline_with_test_resources(MapKind::Earthquakes, MapSettings::default());
         scene.accept_quakes(Arc::new(Snapshot {
             data: Some(Arc::new(vec![
                 quake("a", -120.0, Some(-0.7)),
@@ -1151,7 +1164,7 @@ mod tests {
             marker_brightness_percent: 100,
             ..Default::default()
         };
-        let mut scene = LiveMapScene::offline(MapKind::Boats, settings);
+        let mut scene = LiveMapScene::offline_with_test_resources(MapKind::Boats, settings);
         scene.accept_positions(Arc::new(Snapshot {
             data: Some(Arc::new(vec![
                 Position::new("a".into(), 0.0, 0.0, Some(1000)).unwrap(), // Existing fixture supplies a known coordinate time.
@@ -1176,7 +1189,8 @@ mod tests {
     }
     #[test]
     fn dateline_poles_tiny_and_empty_viewports_stay_bounded() {
-        let mut scene = LiveMapScene::offline(MapKind::Earthquakes, MapSettings::default());
+        let mut scene =
+            LiveMapScene::offline_with_test_resources(MapKind::Earthquakes, MapSettings::default());
         scene.accept_quakes(Arc::new(Snapshot {
             data: Some(Arc::new(vec![
                 quake("a", 180.0, Some(0.0)),
@@ -1201,7 +1215,7 @@ mod tests {
             show_heading: true,
             ..Default::default()
         };
-        let mut scene = LiveMapScene::offline(MapKind::Aircraft, settings);
+        let mut scene = LiveMapScene::offline_with_test_resources(MapKind::Aircraft, settings);
         let mut position = Position::new("a".into(), 15.0, 20.0, Some(1000)).unwrap(); // Existing fixture supplies a known coordinate time.
         position.heading_degrees = Some(0.0);
         let snapshot = Arc::new(Snapshot {
@@ -1223,7 +1237,8 @@ mod tests {
     }
     #[test]
     fn default_aircraft_are_single_undithered_dots_twice_as_bright_as_the_map() {
-        let mut scene = LiveMapScene::offline(MapKind::Aircraft, MapSettings::default());
+        let mut scene =
+            LiveMapScene::offline_with_test_resources(MapKind::Aircraft, MapSettings::default());
         let mut position = Position::new("ocean".into(), -35.0, 40.0, Some(1000)).unwrap(); // Mid-Atlantic, far from any land.
         position.heading_degrees = Some(45.0);
         scene.accept_positions(Arc::new(Snapshot {
@@ -1247,7 +1262,7 @@ mod tests {
     }
     #[test]
     fn failed_and_malformed_fetch_keeps_last_good_and_freshness_separate() {
-        let mut scene = LiveMapScene::offline(
+        let mut scene = LiveMapScene::offline_with_test_resources(
             MapKind::Boats,
             MapSettings {
                 boat_source: BoatSource::Digitraffic,
@@ -1310,7 +1325,8 @@ mod tests {
     }
     #[test]
     fn earthquakes_pulse_without_changing_location_and_colliding_labels_omit_only_text() {
-        let mut scene = LiveMapScene::offline(MapKind::Earthquakes, MapSettings::default());
+        let mut scene =
+            LiveMapScene::offline_with_test_resources(MapKind::Earthquakes, MapSettings::default());
         scene.accept_quakes(Arc::new(Snapshot {
             data: Some(Arc::new(vec![
                 quake("a", 0.0, Some(5.0)),

@@ -622,8 +622,11 @@ mod tests {
         worker.try_submit_latest(&input).unwrap();
         let deadline = Instant::now() + Duration::from_secs(2);
         let prepared = loop {
-            if let Some(prepared) = worker.try_latest(input.key).unwrap() {
-                break prepared;
+            match worker.try_latest(input.key) {
+                Ok(Some(prepared)) => break prepared,
+                // Momentary ledger contention with the marker thread; poll again.
+                Ok(None) | Err(MarkerError::Busy) => {}
+                Err(error) => panic!("marker latest failed: {error:?}"),
             }
             assert!(Instant::now() < deadline, "marker preparation timed out");
             std::thread::yield_now();

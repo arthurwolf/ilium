@@ -20,6 +20,7 @@ use super::{
     surface_raster::{
         draw_fluid_mesh, draw_mesh, draw_mesh_inner, linear_to_srgb_byte, DirectionalLight,
         FlatShader, FragmentShader, PixelResult, RasterFrame, RasterLimits, Vertex,
+        MAX_TRANSLUCENT_LAYERS,
     },
 };
 use std::{
@@ -1730,7 +1731,13 @@ fn fluid_pixels(
         .collect()
 }
 
-fn pixel_signature(pixel: &PixelResult) -> (LinearRgba, Option<FaceOwner>, [Option<FaceOwner>; 9]) {
+fn pixel_signature(
+    pixel: &PixelResult,
+) -> (
+    LinearRgba,
+    Option<FaceOwner>,
+    [Option<FaceOwner>; MAX_TRANSLUCENT_LAYERS as usize + 1],
+) {
     (pixel.color, pixel.front_owner, pixel.contributors)
 }
 

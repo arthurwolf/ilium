@@ -914,19 +914,42 @@ mod tests {
     }
 
     /// Wait for a few analyses, then render `frames` frames 40 ms apart.
+    /// A `Busy` refusal of the shared test client is momentary contention, not a
+    /// capture failure: rebuild the scene (the factory is consumed by the refused
+    /// spawn) until it is admitted or the deadline passes.
     fn live_scene(
         settings: &SpectrumSettings,
         frequency: f32,
         amplitude: f32,
     ) -> (SpectrumScene, Arc<AtomicBool>) {
-        let (factory, dropped) = sine_factory(frequency, amplitude);
-        let scene = SpectrumScene::with_factory(settings, factory);
-        let shared = Arc::clone(&scene.shared);
-        assert!(wait_until(|| shared
-            .lock()
-            .map(|state| state.snapshot.seq >= 4)
-            .unwrap_or(false)));
-        (scene, dropped)
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let (factory, dropped) = sine_factory(frequency, amplitude);
+            let scene = SpectrumScene::with_factory(settings, factory);
+            let shared = Arc::clone(&scene.shared);
+            wait_until(|| {
+                shared
+                    .lock()
+                    .map(|state| {
+                        state.snapshot.seq >= 4 || matches!(state.status, WorkerStatus::Failed(_))
+                    })
+                    .unwrap_or(false)
+            });
+            let refused_busy = shared
+                .lock()
+                .map(|state| {
+                    matches!(&state.status, WorkerStatus::Failed(message) if message.ends_with("Busy"))
+                })
+                .unwrap_or(false);
+            if refused_busy && Instant::now() < deadline {
+                continue;
+            }
+            assert!(shared
+                .lock()
+                .map(|state| state.snapshot.seq >= 4)
+                .unwrap_or(false));
+            return (scene, dropped);
+        }
     }
 
     fn run_frames(

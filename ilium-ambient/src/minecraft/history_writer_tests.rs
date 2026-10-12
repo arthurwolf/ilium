@@ -582,7 +582,8 @@ fn blocked_commit_keeps_its_independent_host_claim_after_writer_drop_until_join(
     ticket
         .join_until(Instant::now() + Duration::from_secs(5))
         .unwrap();
-    assert_eq!(quota.snapshot().worker_threads, 2);
+    // A successful join releases thread admission while the ticket stays alive.
+    assert_eq!(quota.snapshot().worker_threads, 1);
     drop(ticket);
     assert_eq!(quota.snapshot().worker_threads, 1);
     assert_eq!(quota.snapshot().worker_bytes, baseline);
