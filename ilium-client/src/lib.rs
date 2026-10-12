@@ -1778,7 +1778,7 @@ async fn run_inner(
                 .expect("remote compaction owner is initialized before the event loop")
                 .spawn(job)
             {
-                app.apply_remote_compaction_worker_event(*event);
+                app.apply_remote_compaction_worker_event(event);
                 needs_redraw = true;
                 needs_immediate_redraw = true;
             }
