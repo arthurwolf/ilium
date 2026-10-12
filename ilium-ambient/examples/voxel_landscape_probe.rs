@@ -699,8 +699,10 @@ fn main() -> std::process::ExitCode {
 #[cfg(test)]
 mod tests {
     use super::{
-        covered_texture_pixels, parse_matrix_arguments, selected_pack, VoxelLandscapeSettings,
+        covered_texture_pixels, generated_center_biome, parse_matrix_arguments, selected_pack,
+        VoxelLandscapeSettings,
     };
+    use ilium_ambient::control::SceneSettings;
     use std::collections::BTreeMap;
 
     fn matrix_arguments() -> Vec<String> {
