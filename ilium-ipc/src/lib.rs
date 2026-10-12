@@ -504,6 +504,7 @@ mod tests {
                 pane_id: NodeId(2),
                 monitor_id: 7,
             },
+            ClientRequest::GetPaneRecapScreen { pane_id: NodeId(2) },
             ClientRequest::PasteTerminalText {
                 pane_id: NodeId(2),
                 text: "first line\nsecond line".to_string(),
@@ -1129,6 +1130,14 @@ mod tests {
                 pane_id: NodeId(2),
                 reasons: vec!["worktree has uncommitted changes".to_string()],
             },
+            ServerEvent::PaneRecapScreen {
+                pane_id: NodeId(2),
+                result: Ok("bounded screen".to_owned()),
+            },
+            ServerEvent::PaneRecapScreen {
+                pane_id: NodeId(2),
+                result: Err("busy".to_owned()),
+            },
             ServerEvent::SoundPreviewCompleted { succeeded: true },
             ServerEvent::PaneNodeChanged(Box::new(
                 sample_tree()
@@ -1153,6 +1162,48 @@ mod tests {
             .with_fields(vec![AgentDebugField::plain("provider", "Kilo Gateway")]),
         )
         .expect("non-detection sample must append")
+    }
+
+    #[tokio::test]
+    async fn recap_screen_frames_round_trip_with_owned_allocation_accounting() {
+        fn variant_index<T: serde::Serialize>(value: &T) -> u32 {
+            let bytes = bincode::serialize(value).expect("serializable");
+            u32::from_le_bytes(bytes[..4].try_into().expect("four-byte variant index"))
+        }
+        let request = ClientRequest::GetPaneRecapScreen {
+            pane_id: NodeId(42),
+        };
+        let encoded = encode_frame(&request).unwrap();
+        assert_eq!(
+            decode_bounded_frame::<ClientRequest>(&encoded).unwrap(),
+            request
+        );
+        assert_eq!(
+            variant_index(&request),
+            variant_index(&ClientRequest::PasteTerminalText {
+                pane_id: NodeId(42),
+                text: String::new()
+            }) + 1
+        );
+        for result in [
+            Ok("current screen marker".to_owned()),
+            Err("current screen busy".to_owned()),
+        ] {
+            let event = ServerEvent::PaneRecapScreen {
+                pane_id: NodeId(42),
+                result,
+            };
+            let encoded = encode_frame(&event).unwrap();
+            assert_eq!(
+                decode_bounded_frame::<ServerEvent>(&encoded).unwrap(),
+                event
+            );
+            assert!(event.retained_bytes() > std::mem::size_of::<ServerEvent>());
+            let mut bytes = Vec::new();
+            write_frame(&mut bytes, &event).await.unwrap();
+            let decoded: ServerEvent = read_frame(&mut Cursor::new(bytes)).await.unwrap();
+            assert_eq!(decoded, event);
+        }
     }
 
     #[tokio::test]

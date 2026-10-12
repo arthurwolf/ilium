@@ -133,6 +133,25 @@ pub enum TreeToolbarAction {
 }
 
 impl TreeToolbarAction {
+    /// One distinct bit per button, for the compact pending-spinner set.
+    pub(crate) fn pending_bit(self) -> u16 {
+        1 << match self {
+            Self::Search => 0,
+            Self::Shell => 1,
+            Self::Agent(BuiltinAgentProvider::Claude) => 2,
+            Self::Agent(BuiltinAgentProvider::Codex) => 3,
+            Self::Agent(BuiltinAgentProvider::Antigravity) => 4,
+            Self::Editor => 5,
+            Self::Board => 6,
+            Self::Group => 7,
+            Self::Project => 8,
+            Self::Split => 9,
+            Self::Folder => 10,
+            Self::Restructure => 11,
+            Self::Settings => 12,
+        }
+    }
+
     /// Ordered left-aligned creation actions. Settings is intentionally not
     /// part of this list because its geometry is anchored independently.
     const LEFT_ALIGNED: [Self; 11] = [
@@ -642,6 +661,9 @@ pub struct TreeHoverState {
     /// `toolbar_hovered` because the pointer can sit in the toolbar strip's
     /// dead space (past the last button) without targeting one.
     pub toolbar_action: Option<TreeToolbarAction>,
+    /// Bit set (see `TreeToolbarAction::pending_bit`) of buttons whose accepted
+    /// click is still waiting for the server; they draw a spinner.
+    pub pending_toolbar: u16,
 }
 
 /// All transient presentation state for one tree render. Grouping it keeps
@@ -2576,7 +2598,14 @@ pub(crate) fn render(
         );
     }
     if is_toolbar_visible(options.focused, options.hover.toolbar_hovered) {
-        draw_toolbar(frame, area, options.hover.toolbar_action, options.icons);
+        draw_toolbar(
+            frame,
+            area,
+            options.hover.toolbar_action,
+            options.hover.pending_toolbar,
+            options.terminal_activity_elapsed_ms,
+            options.icons,
+        );
     }
     painted
 }
@@ -2913,6 +2942,8 @@ fn draw_toolbar(
     frame: &mut Frame,
     area: Rect,
     hovered: Option<TreeToolbarAction>,
+    pending: u16,
+    spinner_elapsed_ms: u128,
     icons: &IconSettings,
 ) {
     let toolbar = toolbar_area(area);
@@ -2928,10 +2959,13 @@ fn draw_toolbar(
         } else {
             Style::new().fg(action.accent())
         };
-        let button = Paragraph::new(Line::from(Span::styled(
-            format!(" {} ", action.glyph(icons)),
-            style,
-        )));
+        let glyph = if pending & action.pending_bit() != 0 {
+            let frame_index = (spinner_elapsed_ms / SPINNER_FRAME_MS) as usize % SPINNER_FRAMES.len();
+            SPINNER_FRAMES[frame_index].to_string()
+        } else {
+            action.glyph(icons).to_string()
+        };
+        let button = Paragraph::new(Line::from(Span::styled(format!(" {glyph} "), style)));
         frame.render_widget(button, button_area);
     }
 

@@ -923,27 +923,42 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
     )
     .await
     .expect("write NewPane request");
-    let event = expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(event, ServerEvent::TreeSnapshot(_))
+    // The pane is registered, and so visible to the detection loop, before
+    // the NewPane handler broadcasts its TreeSnapshot (repository admission
+    // runs in between). On a loaded host detection can therefore resolve the
+    // session first, so the events read while waiting for the snapshot are
+    // kept and searched instead of being discarded.
+    let mut events_before_snapshot = Vec::new();
+    let tree = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match read_frame(&mut client).await.expect("read a server event") {
+                ServerEvent::TreeSnapshot(tree) => break tree,
+                other => events_before_snapshot.push(other),
+            }
+        }
     })
-    .await;
-    let ServerEvent::TreeSnapshot(tree) = event else {
-        unreachable!("predicate only matches TreeSnapshot");
-    };
+    .await
+    .expect("NewPane must broadcast a TreeSnapshot");
     let pane_id = first_launch_project_pane(&tree);
     let project_id = tree
         .project_ancestor(pane_id)
         .expect("the launched pane must belong to a project");
     assert_ne!(tree.parent_of(pane_id), Some(project_id));
 
-    let resolved_event = expect_event(&mut client, WAIT_TIMEOUT, |event| {
+    let is_resolution_of_pane = |event: &ServerEvent| {
         matches!(
             event,
             ServerEvent::PaneSessionIdResolved { pane_id: changed_id, .. }
                 if *changed_id == pane_id
         )
-    })
-    .await;
+    };
+    let early_resolution = events_before_snapshot
+        .into_iter()
+        .find(|event| is_resolution_of_pane(event));
+    let resolved_event = match early_resolution {
+        Some(event) => event,
+        None => expect_event(&mut client, WAIT_TIMEOUT, is_resolution_of_pane).await,
+    };
     let ServerEvent::PaneSessionIdResolved {
         session_id,
         process_id,

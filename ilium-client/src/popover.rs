@@ -234,7 +234,7 @@ pub fn render(
     if !geometry.compact {
         frame.render_widget(theme::block(false), geometry.area);
         frame.render_widget(
-            Paragraph::new(format!("Click icon: new {} here", popover.provider.label()))
+            Paragraph::new(header_text(popover))
                 .style(Style::new().fg(label_color(scheme))),
             geometry.header,
         );
@@ -248,7 +248,14 @@ pub fn render(
         };
         let selected = popover.hovered == Some(PopoverHit::Choice(choice));
         let style = if !popover.enabled {
-            Style::new().fg(disabled_color(scheme))
+            // Still answer the pointer: a greyed button that ignores hover looks
+            // broken. The header says why it cannot be used yet.
+            let dim = Style::new().fg(disabled_color(scheme));
+            if selected {
+                dim.add_modifier(Modifier::UNDERLINED)
+            } else {
+                dim
+            }
         } else if selected {
             Style::new()
                 .fg(theme::accent_fg())
@@ -259,6 +266,17 @@ pub fn render(
         };
         frame.render_widget(Paragraph::new(label).style(style), area);
     }
+}
+
+/// Header line: the launch hint, or why the worktree choices are not usable.
+fn header_text(popover: &AgentPopover) -> String {
+    if popover.enabled {
+        return format!("Click icon: new {} here", popover.provider.label());
+    }
+    popover
+        .unavailable_reason
+        .clone()
+        .unwrap_or_else(|| "Worktrees are unavailable".to_string())
 }
 
 fn label_color(scheme: ColorScheme) -> Color {

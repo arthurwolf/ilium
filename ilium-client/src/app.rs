@@ -2325,6 +2325,10 @@ pub struct App {
     pub(crate) statistics_diagnostic: Option<String>,
     pub tree_toolbar_hovered: bool,
     pub hovered_tree_toolbar_action: Option<TreeToolbarAction>,
+    /// Toolbar buttons whose click was accepted but whose server-side work
+    /// (spawning a pane, creating a worktree) has not been confirmed yet.
+    /// The button shows a spinner meanwhile so a slow creation is visible.
+    pending_toolbar_actions: Vec<(TreeToolbarAction, Instant)>,
     /// The footer agent icon's hover or pinned worktree actions.
     pub agent_popover: Option<AgentPopover>,
     agent_popover_last_visible: bool,
@@ -2926,6 +2930,7 @@ impl App {
             statistics_diagnostic: None,
             tree_toolbar_hovered: false,
             hovered_tree_toolbar_action: None,
+            pending_toolbar_actions: Vec::new(),
             agent_popover: None,
             agent_popover_last_visible: false,
             animation_hover: None,
@@ -11130,6 +11135,14 @@ impl App {
             }
         }
 
+        if !self.pending_toolbar_actions.is_empty() {
+            requirements.is_active = true;
+            retain_minimum_delay(
+                &mut requirements.next_semantic_delay,
+                Duration::from_millis(90),
+            );
+        }
+
         if self.smart_copy_preview.is_some() {
             requirements.is_active = true;
             retain_minimum_delay(
@@ -12695,6 +12708,73 @@ impl App {
         }
     }
 
+    /// Longest a toolbar spinner may show without a server confirmation.
+    const PENDING_TOOLBAR_TIMEOUT: Duration = Duration::from_secs(120);
+
+    pub(crate) fn begin_pending_toolbar_action(&mut self, action: TreeToolbarAction) {
+        if self.pending_toolbar_actions.len() >= 16 {
+            self.pending_toolbar_actions.remove(0);
+        }
+        self.pending_toolbar_actions.push((action, Instant::now()));
+    }
+
+    /// Ends the oldest pending spinner for `action` (one click, one spinner).
+    pub(crate) fn finish_pending_toolbar_action(&mut self, action: TreeToolbarAction) {
+        if let Some(index) = self
+            .pending_toolbar_actions
+            .iter()
+            .position(|(pending, _)| *pending == action)
+        {
+            self.pending_toolbar_actions.remove(index);
+        }
+    }
+
+    /// Ends the oldest pending shell or agent spinner: a confirmed new
+    /// terminal pane cannot be attributed to one button more precisely.
+    fn finish_oldest_pending_terminal_toolbar_action(&mut self) {
+        if let Some(index) = self.pending_toolbar_actions.iter().position(|(pending, _)| {
+            matches!(
+                pending,
+                TreeToolbarAction::Shell | TreeToolbarAction::Agent(_)
+            )
+        }) {
+            self.pending_toolbar_actions.remove(index);
+        }
+    }
+
+    fn clear_pending_workspace_toolbar_actions(&mut self) {
+        if let Some(index) = self
+            .pending_toolbar_actions
+            .iter()
+            .position(|(pending, _)| matches!(pending, TreeToolbarAction::Agent(_)))
+        {
+            self.pending_toolbar_actions.remove(index);
+        }
+    }
+
+    pub(crate) fn pending_toolbar_mask(&self) -> u16 {
+        self.pending_toolbar_actions
+            .iter()
+            .fold(0, |mask, (action, _)| mask | action.pending_bit())
+    }
+
+    /// Drops spinners whose confirmation never arrived.
+    pub fn tick_pending_toolbar_actions(&mut self, now: Instant) -> bool {
+        let before = self.pending_toolbar_actions.len();
+        self.pending_toolbar_actions.retain(|(_, started)| {
+            now.saturating_duration_since(*started) < Self::PENDING_TOOLBAR_TIMEOUT
+        });
+        before != self.pending_toolbar_actions.len()
+    }
+
+    /// The toolbar button a `NewPane` command line belongs to.
+    fn toolbar_action_for_command(command_line: &str) -> TreeToolbarAction {
+        BuiltinAgentProvider::ALL
+            .into_iter()
+            .find(|provider| provider.command_line() == command_line)
+            .map_or(TreeToolbarAction::Shell, TreeToolbarAction::Agent)
+    }
+
     /// Queues a `NewPane` request for a plain shell under `parent_group`
     /// (the caller resolves that group -- see `group_for_new_node`).
     pub fn request_new_terminal(&mut self, parent_group: NodeId) -> bool {
@@ -12705,6 +12785,7 @@ impl App {
         });
         if admitted {
             self.record_pending_pane_focus(parent_group, PaneContentKind::Terminal, "shell".into());
+            self.begin_pending_toolbar_action(TreeToolbarAction::Shell);
         }
         admitted
     }
@@ -12713,6 +12794,7 @@ impl App {
     /// `claude`, `codex`, `agy`) under `parent_group`.
     pub fn request_new_command_pane(&mut self, parent_group: NodeId, command_line: String) -> bool {
         let pending_title = command_line.clone();
+        let toolbar_action = Self::toolbar_action_for_command(&command_line);
         let admitted = self.queue_request(ClientRequest::NewPane {
             parent_group,
             kind: ilium_ipc::NewPaneKind::Command(command_line),
@@ -12720,6 +12802,7 @@ impl App {
         });
         if admitted {
             self.record_pending_pane_focus(parent_group, PaneContentKind::Terminal, pending_title);
+            self.begin_pending_toolbar_action(toolbar_action);
         }
         admitted
     }
@@ -12734,6 +12817,7 @@ impl App {
         initial_input: String,
     ) -> bool {
         let pending_title = command_line.clone();
+        let toolbar_action = Self::toolbar_action_for_command(&command_line);
         let admitted = self.queue_request(ClientRequest::NewPane {
             parent_group,
             kind: ilium_ipc::NewPaneKind::CommandWithInitialInput {
@@ -12744,6 +12828,7 @@ impl App {
         });
         if admitted {
             self.record_pending_pane_focus(parent_group, PaneContentKind::Terminal, pending_title);
+            self.begin_pending_toolbar_action(toolbar_action);
         }
         admitted
     }
@@ -13660,8 +13745,14 @@ impl App {
             hover_candidate: None,
         });
         let project = self.tree.project_ancestor(target).unwrap_or(ROOT_ID);
-        let request_id = self.request_workspace_repo_facts(project);
+        let (request_id, admitted) = self.request_workspace_repo_facts(project);
         self.active_workspace_menu_query = Some((request_id, project));
+        if !admitted {
+            if let Mode::ContextMenu(menu) = &mut self.mode {
+                menu.worktree_unavailable_reason =
+                    Some("Git check was rejected because the UI is busy; reopen the menu".into());
+            }
+        }
     }
 
     pub(crate) fn next_workspace_request_id(&mut self) -> u64 {
@@ -13670,13 +13761,15 @@ impl App {
         request_id
     }
 
-    fn request_workspace_repo_facts(&mut self, project: NodeId) -> u64 {
+    /// Returns the request id and whether the request was admitted; a refused
+    /// query will never be answered, so callers must surface that.
+    fn request_workspace_repo_facts(&mut self, project: NodeId) -> (u64, bool) {
         let request_id = self.next_workspace_request_id();
-        self.queue_request(ClientRequest::QueryRepoFacts {
+        let admitted = self.queue_request(ClientRequest::QueryRepoFacts {
             request_id,
             project,
         });
-        request_id
+        (request_id, admitted)
     }
 
     /// Opens the same prompt-first form from a tree menu, footer icon, or
@@ -13708,8 +13801,15 @@ impl App {
                 mode,
                 self.git_settings.clone(),
             )));
-        let request_id = self.request_workspace_repo_facts(project);
+        let (request_id, admitted) = self.request_workspace_repo_facts(project);
         self.active_workspace_dialog_query = Some((request_id, project));
+        if !admitted {
+            if let Mode::CreateAgentWorkspace(state) = &mut self.mode {
+                state.set_create_error(
+                    "Git check was rejected because the UI is busy; close and reopen this dialog",
+                );
+            }
+        }
     }
 
     pub fn submit_create_agent_workspace(&mut self, mut state: Box<WorktreeDialogState>) {
@@ -13771,6 +13871,7 @@ impl App {
             return;
         }
         self.active_workspace_create_request_id = Some(request_id);
+        self.begin_pending_toolbar_action(TreeToolbarAction::Agent(provider));
         state.set_stage(ilium_ipc::WorkspaceCreateStage::CreatingWorktree);
         self.mode = Mode::CreateAgentWorkspace(state);
     }
@@ -13976,6 +14077,7 @@ impl App {
             return;
         }
         self.active_workspace_create_request_id = None;
+        self.clear_pending_workspace_toolbar_actions();
         self.mode = Mode::Normal;
         self.status_message = Some(format!("Agent started in worktree (pane {})", pane_id.0));
         if self.tree.get(pane_id).is_some() {
@@ -13988,6 +14090,7 @@ impl App {
             return;
         }
         self.active_workspace_create_request_id = None;
+        self.clear_pending_workspace_toolbar_actions();
         if let Mode::CreateAgentWorkspace(state) = &mut self.mode {
             state.set_create_error(error);
             state.status_retention = self.processing_event_retention.clone();
@@ -14123,8 +14226,14 @@ impl App {
         self.agent_popover_last_visible = pin;
         let parent_group = self.group_for_new_node();
         let project = self.tree.project_ancestor(parent_group).unwrap_or(ROOT_ID);
-        let request_id = self.request_workspace_repo_facts(project);
+        let (request_id, admitted) = self.request_workspace_repo_facts(project);
         self.active_workspace_popover_query = Some((request_id, project));
+        if !admitted {
+            if let Some(popover) = &mut self.agent_popover {
+                popover.unavailable_reason =
+                    Some("Git check rejected: UI is busy; move away and hover again".into());
+            }
+        }
     }
 
     pub fn update_agent_popover_pointer(&mut self, position: Position, now: Instant) {
@@ -16291,9 +16400,9 @@ impl App {
 
     /// Creates a plain shell pane under the currently targeted group and
     /// focuses the create-group/normal dialog back to `Normal`.
-    pub fn action_new_terminal(&mut self) {
+    pub fn action_new_terminal(&mut self) -> bool {
         let parent = self.group_for_new_node();
-        self.request_new_terminal(parent);
+        self.request_new_terminal(parent)
     }
 
     fn request_new_terminal_in_worktree(&mut self, pane_id: NodeId) {
@@ -16855,6 +16964,7 @@ impl App {
             return false;
         };
         self.pending_pane_focuses.remove(index);
+        self.finish_oldest_pending_terminal_toolbar_action();
         true
     }
 

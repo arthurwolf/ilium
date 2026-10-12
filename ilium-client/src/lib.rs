@@ -122,6 +122,7 @@ pub mod project_naming;
 pub mod prompt_queue;
 mod provider_admission; // Bounded IO preflight retains original request ownership.
 mod proxy_database;
+pub mod recap;
 pub mod release_animation;
 pub mod release_embedding;
 pub mod remote_compaction_app;

@@ -1021,6 +1021,12 @@ pub enum ClientRequest {
         pane_id: NodeId,
         text: String,
     },
+    /// Read one current screen for recap, without subscribing to terminal journals.
+    /// Server bounds text at 64 KiB and reports busy/oversized/replaced panes explicitly.
+    /// Appended to preserve all prior request discriminants.
+    GetPaneRecapScreen {
+        pane_id: NodeId,
+    },
 }
 
 impl ClientRequest {
@@ -1029,6 +1035,7 @@ impl ClientRequest {
     /// decision instead of silently disappearing from the major-action trail.
     pub const fn diagnostic_name(&self) -> &'static str {
         match self {
+            Self::GetPaneRecapScreen { .. } => "get_pane_recap_screen",
             Self::Attach { .. } => "attach",
             Self::UserKeyInput { .. } => "user_key_input",
             Self::ReportAgentPromptFromTranscript { .. } => "report_agent_prompt_from_transcript",
@@ -1517,4 +1524,10 @@ pub enum ServerEvent {
     /// panes the session holds. Structural changes still send a snapshot.
     /// Appended to preserve existing bincode discriminants.
     PaneNodeChanged(Box<ilium_core::Node>),
+    /// Direct, bounded reply to GetPaneRecapScreen; no retained journal is read.
+    /// Appended to preserve all prior event discriminants.
+    PaneRecapScreen {
+        pane_id: NodeId,
+        result: Result<String, String>,
+    },
 }

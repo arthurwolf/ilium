@@ -249,7 +249,7 @@ Every command prints **one JSONL record** to stdout on success (one JSON object 
 
 The record also carries `composer_notice`: `suppressed` means the server did not, and will not, type a result message for this monitor, because this command delivered it. `may-also-arrive` means a message was already typed (or may be) and is a duplicate of this record. If the wait command is killed or the agent stops it, the server falls back to typing the message, so nothing is lost.
 
-Without `--timeout-seconds` the command waits as long as the job takes. Agent tools that limit a command's run time either move it to the background (Claude Code) or need a timeout that fits the tool: pick a `--timeout-seconds` below the tool's limit and run the command again on exit status 6.
+Without `--timeout-seconds` the command waits as long as the job takes, which is what agents should use: one wait that ends only when the task ends. Agent tools that limit a command's run time should run it with their longest wait (Claude Code: as a background command; Codex: `yield_time_ms` equal to `background_terminal_max_timeout`) instead of looping on short timeouts.
 
 The usual way to run a long job is one command that registers the monitor and waits for it:
 
@@ -450,7 +450,7 @@ The guidance deliberately discourages chatter. Agents are told to read recent co
 
 ## Agent setup
 
-Ilium ships two short instruction blocks for agents: **Chatroom** (when and how to use the room) and **Progress** (hand any task expected to take three minutes or more to the progress monitor, and never poll). To be effective they have to be in the files Claude Code and Codex read at start-up, so Ilium maintains them for you.
+Ilium ships two short instruction blocks for agents: **Chatroom** (when and how to use the room) and **Progress** (hand any task expected to take three minutes or more to the progress monitor, never poll, and treat each monitor result as one attempt: verify a success, inspect and retry a failure, check the task directly when the outcome is unknown, then continue the request; after a reboot or Ilium restart, find the restored monitor by its job id and check the task once). To be effective they have to be in the files Claude Code and Codex read at start-up, so Ilium maintains them for you.
 
 ### What gets edited
 
@@ -468,7 +468,7 @@ Edits are **marker-delimited blocks**, so only text between Ilium's own markers 
 <!-- /ilium-agent-feature: chatroom -->
 ```
 
-The Progress block also carries a schema version (`<!-- ilium-agent-feature: progress version=9 -->`), which lets Ilium upgrade an older block and leave a newer one alone. Text around the block is preserved. If a file already contains wording that looks like the Ilium instruction but has no markers, Ilium reports it as "Instruction detected" and does **not** treat it as its own or delete it. Files larger than 512 KiB are not modified. A symlinked instruction file stays a symlink after an update (for example `AGENTS.md` linking to `CLAUDE.md`).
+The Progress block also carries a schema version (`<!-- ilium-agent-feature: progress version=13 -->`), which lets Ilium upgrade an older block and leave a newer one alone. Text around the block is preserved. If a file already contains wording that looks like the Ilium instruction but has no markers, Ilium reports it as "Instruction detected" and does **not** treat it as its own or delete it. Files larger than 512 KiB are not modified. A symlinked instruction file stays a symlink after an update (for example `AGENTS.md` linking to `CLAUDE.md`).
 
 Ilium installs and refreshes the global blocks automatically when it attaches to a session and when projects open; it does not wait for you to visit Settings. The global files already apply to every project, so Ilium never adds project copies on its own: they would repeat the same text, and a new project `AGENTS.md` would stop Codex from reading that project's `CLAUDE.md`. Treat the instruction files as managed by Ilium for these two blocks. Write your own instructions anywhere outside the markers.
 
