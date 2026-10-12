@@ -712,7 +712,7 @@ pub fn settings_help_anchors(
                 );
             }
         }
-        SettingsTab::About => {}
+        SettingsTab::About | SettingsTab::Padding => {}
         SettingsTab::Cost => {
             let all_rows = crate::cost_settings_ui::rows(app);
             for (topic_id, line, row) in
@@ -1752,7 +1752,7 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
             .lines
             .len() as u16,
         SettingsTab::Api => api_lines(&app.api_settings, selected_row).len() as u16,
-        SettingsTab::LlmInstructions => 0,
+        SettingsTab::LlmInstructions | SettingsTab::Padding => 0,
         SettingsTab::About => about_lines().len() as u16,
     };
     total_lines.saturating_sub(content_area.height)
