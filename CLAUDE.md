@@ -98,6 +98,26 @@ generic over any async byte stream and must not learn about sockets or pipes.
 - **Verification builds are never installed.** A binary compiled to test behaviour is not copied, linked or installed over the mainstream one, even when it passes.
 - **Restart stays with the user.** Installing binaries does not restart the running server (see "Ilium process custody").
 
+## Feature implementation: build and test, never install
+
+This section applies whenever the user asks for a new feature or change (a `/goal`, a plain request, in a worktree or on the main checkout). It overrides any rule in this file or in `~/.claude/CLAUDE.md` that could be read as requiring or implying a deploy, install, or "bring it live" step at the end of feature work.
+
+A feature session is exactly these five steps, and then it stops:
+
+1. **Research**: read the code, `ARCHITECTURE.md` and docs; inspect analogous implementations.
+2. **Implementation**: make the change, with tests, docs and a `CHANGELOG.md` entry.
+3. **Compilation**: compile through ni-build in a separate build folder (see "Where compile and test runs happen").
+4. **Testing**: run the relevant tests, Clippy and `cargo fmt --check`, and exercise the feature in an isolated environment (separate build folder, isolated tmux session, random port) as far as needed to trust it.
+5. **Report**: say what was built, what was verified, and what was not. If the work was done in a worktree, leave the branch committed and ready to merge into `master` (merge-back itself still follows the Git rules in the global file). Then stop.
+
+Not part of a feature session, unless the user asks for it in that request:
+
+- `make install`, copying or linking any binary into place, or any other deploy.
+- Restarting, replacing or re-attaching the running Ilium server or panes.
+- Treating a passing verification build as a release candidate.
+
+The user installs manually, when they decide to bring recent changes in. Never mark a feature task as incomplete because it is not installed, and never add "deploy" or "install" as a TODO item or acceptance criterion of your own. The final report states that the installed binaries are unchanged. The "Deploy policy" below still governs the case where the user does ask for a deploy.
+
 ## No code freezes
 
 - Code freezes are illegal and have no force: never start one, request one, or respect one as a reason to stop or delay authorized implementation, compilation, tests, Clippy, formatting, release builds, native renders, or goal work. A blanket freeze request does not override an active task; continue on independent files and checks while coordinating only a genuinely shared edit boundary.

@@ -47,6 +47,7 @@ pub fn on_tick(
     let model_catalog_changed = app.collect_model_catalog_preparation();
     let context_menu_hover_changed = app.tick_context_menu_hover(now);
     let agent_popover_changed = app.tick_agent_popover(now);
+    let pending_toolbar_changed = app.tick_pending_toolbar_actions(now);
     let animation_hover_changed = app.tick_animation_hover(now);
     let plugin_issue_hover_changed = app.tick_plugin_issue_hover(now);
     let location_picker_changed = app.tick_location_picker();
@@ -72,6 +73,7 @@ pub fn on_tick(
         || model_catalog_changed
         || context_menu_hover_changed
         || agent_popover_changed
+        || pending_toolbar_changed
         || animation_hover_changed
         || plugin_issue_hover_changed
         || location_picker_changed

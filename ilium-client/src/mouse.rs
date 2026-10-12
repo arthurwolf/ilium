@@ -130,9 +130,18 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
     if !app.pointer_geometry_is_current() {
         // A completed menu action changes mode before its matching release.
         // Discard that stale release without replacing the action's result.
-        if !matches!(mouse.kind, MouseEventKind::Up(_)) {
+        // Only a press is worth announcing: hover motion would overwrite the
+        // message on every cell, and the press is replayed once the frame lands.
+        if matches!(mouse.kind, MouseEventKind::Down(_)) {
             app.status_message =
-                Some("Waiting for terminal presentation before pointer input".into());
+                Some("Screen is still redrawing; your click will run when it is ready".into());
+        }
+        // Hover feedback reads only live layout, so it stays responsive.
+        if matches!(mouse.kind, MouseEventKind::Moved)
+            && matches!(app.mode, Mode::Normal)
+            && app.layout.tree_area.contains(Position::new(mouse.column, mouse.row))
+        {
+            update_tree_hover(app, Position::new(mouse.column, mouse.row));
         }
         // Keep the latest press so a click made just after a state change (a
         // menu item right after the menu opened) is not lost.
@@ -1457,13 +1466,21 @@ fn execute_tree_toolbar_action(app: &mut App, action: TreeToolbarAction) {
             app.action_request_restructure();
             return;
         }
-        TreeToolbarAction::Shell => app.action_new_terminal(),
+        TreeToolbarAction::Shell => {
+            if !app.action_new_terminal() {
+                // `queue_request` already explained the refusal; a success
+                // message here would hide it.
+                return;
+            }
+        }
         TreeToolbarAction::Agent(provider) => {
             app.agent_popover = None;
-            app.action_new_command_pane(provider.command_line());
+            if !app.action_new_command_pane(provider.command_line()) {
+                return;
+            }
         }
     }
-    app.status_message = Some(format!("Created {}", action.description()));
+    app.status_message = Some(format!("{}…", action.description()));
 }
 
 /// Handles an activated context-menu entry or dismisses a click outside.
@@ -6141,7 +6158,7 @@ mod tree_pane_focus_release_tests {
         handle_mouse_event(&mut app, event(MouseEventKind::Down(MouseButton::Left)));
         assert_eq!(
             app.status_message.as_deref(),
-            Some("Waiting for terminal presentation before pointer input")
+            Some("Screen is still redrawing; your click will run when it is ready")
         );
         assert!(app.take_outbound_requests().is_empty());
     }
@@ -6668,4 +6685,33 @@ mod frozen_agent_context_mouse_tests {
         assert_eq!(app.active_pane_id(), Some(replacement));
         assert!(app.pending_replacement_focus.is_none());
     }
+    #[test]
+    fn refused_toolbar_agent_click_keeps_the_refusal_and_shows_no_spinner() {
+        let mut app = App::new("toolbar-refusal".into(), std::env::temp_dir());
+        app.outbound_admission = None;
+        execute_tree_toolbar_action(
+            &mut app,
+            TreeToolbarAction::Agent(ilium_core::BuiltinAgentProvider::Claude),
+        );
+        assert!(app
+            .status_message
+            .as_deref()
+            .is_some_and(|message| message.starts_with("Request rejected")));
+        assert_eq!(app.pending_toolbar_mask(), 0);
+    }
+
+    #[test]
+    fn pending_toolbar_buttons_have_distinct_bits_and_finish_once() {
+        let mut app = App::new("toolbar-pending".into(), std::env::temp_dir());
+        let claude = TreeToolbarAction::Agent(ilium_core::BuiltinAgentProvider::Claude);
+        app.begin_pending_toolbar_action(claude);
+        app.begin_pending_toolbar_action(TreeToolbarAction::Shell);
+        assert_eq!(
+            app.pending_toolbar_mask(),
+            claude.pending_bit() | TreeToolbarAction::Shell.pending_bit()
+        );
+        app.finish_pending_toolbar_action(claude);
+        assert_eq!(app.pending_toolbar_mask(), TreeToolbarAction::Shell.pending_bit());
+    }
+
 }
