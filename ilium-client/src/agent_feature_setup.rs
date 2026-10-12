@@ -49,7 +49,7 @@ impl AgentFeature {
     const fn current_version(self) -> Option<u32> {
         match self {
             Self::Chatroom => None,
-            Self::Progress => Some(12),
+            Self::Progress => Some(13),
         }
     }
 
@@ -585,7 +585,7 @@ mod tests {
 
         let contents = fs::read_to_string(&target).unwrap();
         assert!(!contents.contains("as a progress monitor"));
-        assert!(contents.contains("ilium-agent-feature: progress version=12"));
+        assert!(contents.contains("ilium-agent-feature: progress version=13"));
         assert!(contents.contains("you MUST block with `ilium progress wait <monitor_id>`"));
         assert!(contents.contains("--wait"));
         assert!(contents.contains("at least three minutes"));
@@ -639,6 +639,9 @@ mod tests {
             "when the outcome is unknown",
             "A pasted monitor report is an event inside the current request",
             "go straight back to `ilium progress wait <monitor_id>`",
+            "Make the probe notice a vanished task",
+            "ends every earlier wait",
+            "find your monitor by `job_id`",
         ] {
             assert!(
                 instruction.contains(required),
@@ -715,9 +718,11 @@ mod tests {
             FeatureSetupStatus::NotInstalled
         );
         uninstall(&target, AgentFeature::Progress).unwrap();
-        assert!(fs::read_to_string(&target)
-            .unwrap()
-            .contains("Use ilium progress"));
+        assert!(
+            fs::read_to_string(&target)
+                .unwrap()
+                .contains("Use ilium progress")
+        );
     }
 
     #[test]
@@ -742,9 +747,11 @@ mod tests {
             FeatureSetupStatus::DetectedUnmanaged
         );
         uninstall(&target, AgentFeature::Progress).unwrap();
-        assert!(fs::read_to_string(&target)
-            .unwrap()
-            .contains("The agent MUST NOT poll"));
+        assert!(
+            fs::read_to_string(&target)
+                .unwrap()
+                .contains("The agent MUST NOT poll")
+        );
     }
 
     #[test]
@@ -860,7 +867,7 @@ mod tests {
         install(&target, AgentFeature::Progress).unwrap();
         let updated = fs::read_to_string(&target).unwrap();
         assert!(updated.contains("# User policy"));
-        assert!(updated.contains("version=12"));
+        assert!(updated.contains("version=13"));
         assert!(!updated.contains("version=99"));
     }
 
@@ -936,13 +943,17 @@ mod tests {
 
         install(&link, AgentFeature::Progress).unwrap();
 
-        assert!(fs::symlink_metadata(&link)
-            .unwrap()
-            .file_type()
-            .is_symlink());
-        assert!(fs::read_to_string(&target)
-            .unwrap()
-            .contains("ilium-agent-feature: progress"));
+        assert!(
+            fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert!(
+            fs::read_to_string(&target)
+                .unwrap()
+                .contains("ilium-agent-feature: progress")
+        );
     }
 
     #[cfg(unix)]

@@ -25,7 +25,7 @@ const LONG_FOREGROUND_MILLISECONDS: u64 = 180_000;
 /// Bounded hook input; Claude Code sends one small JSON object.
 const MAX_INPUT_BYTES: u64 = 1024 * 1024;
 
-pub const REFUSAL: &str = "Ilium: this pane requires a progress monitor for commands that may run 3 minutes or more; do not run them in the foreground. Start the command detached (setsid -f, output to a log), write a probe, run 'ilium progress check --command <probe>', then 'ilium progress set --command <probe> --interval-seconds <n> --wait --timeout-seconds 590' with Bash timeout 600000. If this command is short, rerun it with a Bash timeout of at most 180000.";
+pub const REFUSAL: &str = "Ilium: this pane requires a progress monitor for commands that may run 3 minutes or more; do not run them in the foreground. Start the command detached (setsid -f, output to a log), write a probe, run 'ilium progress check --command <probe>', then 'ilium progress set --command <probe> --interval-seconds <n> --wait' as a background Bash command, without --timeout-seconds. If this command is short, rerun it with a Bash timeout of at most 180000.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GuardDecision {
