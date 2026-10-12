@@ -160,7 +160,8 @@ ilium ctl bookmark ID [--off]
 ilium ctl expand ID / collapse ID
 ilium ctl lock-closed ID [--off]
 ilium ctl change-folder PROJECT PATH     directory new entries of a project start in
-ilium ctl revert-restructure             undo the last automatic reorganization
+ilium ctl revert-restructure [--project P]  undo the last automatic reorganization
+ilium ctl restructure PLAN.json [--project P]  apply a restructure plan (JSON file)
 
 Parents must be projects or groups; panes cannot contain nodes.
 ",
@@ -185,8 +186,8 @@ POST /create_agent                       the original endpoint, unchanged
 
 Operations (the \"op\" values): rename close move_step reparent new_project
 new_group new_folder change_project_folder new_pane send_text send_keys schedule
-enqueue clear_queue bookmark expand lock_closed terminate revert_restructure
-kill_session. Fields match the CLI flags; ilium ctl ops lists them with examples.
+enqueue clear_queue bookmark expand lock_closed terminate apply_restructure
+revert_restructure revert_project_restructure kill_session. Fields match the CLI flags; ilium ctl ops lists them with examples.
 
 Errors: JSON {\"error\": \"...\"} with 400 (bad request or selector), 404 (no such
 node), 409 (ambiguous selector), 503 (session shutting down). A successful

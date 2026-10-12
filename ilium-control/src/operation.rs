@@ -11,8 +11,8 @@ use std::path::PathBuf;
 
 use ilium_core::AgentProvider as _;
 use ilium_core::{
-    BuiltinAgentProvider, ContainerKind, NodeId, NodeKind, PromptQueueDelivery, Tree,
-    TreeMoveDirection, ROOT_ID,
+    BuiltinAgentProvider, ContainerKind, NodeId, NodeKind, PromptQueueDelivery, RestructurePlan,
+    Tree, TreeMoveDirection, ROOT_ID,
 };
 use ilium_ipc::{
     ClientRequest, NewPaneKind, NewPaneWorkingDirectory, PromptSubmissionSource,
@@ -193,8 +193,17 @@ pub enum Operation {
     LockClosed { node: u64, locked: bool },
     /// Stop the process in a pane without closing the pane.
     Terminate { pane: u64 },
+    /// Replace the tree (or one project's contents) with a restructure plan.
+    /// The plan must mention every existing pane and folder exactly once.
+    ApplyRestructure {
+        plan: RestructurePlan,
+        #[serde(default)]
+        project: Option<u64>,
+    },
     /// Undo the most recent session-wide restructure.
     RevertRestructure,
+    /// Undo the latest restructure of one project.
+    RevertProjectRestructure { project: u64 },
     /// End the session: every pane process stops.
     KillSession,
 }
@@ -331,7 +340,9 @@ impl Operation {
             Self::Expand { .. } => "expand",
             Self::LockClosed { .. } => "lock_closed",
             Self::Terminate { .. } => "terminate",
+            Self::ApplyRestructure { .. } => "apply_restructure",
             Self::RevertRestructure => "revert_restructure",
+            Self::RevertProjectRestructure { .. } => "revert_project_restructure",
             Self::KillSession => "kill_session",
         }
     }
@@ -544,7 +555,22 @@ impl Operation {
             Self::Terminate { pane } => ClientRequest::TerminatePaneProcess {
                 pane_id: require_pane(tree, *pane)?,
             },
+            Self::ApplyRestructure { plan, project } => match project {
+                None => ClientRequest::ApplyRestructurePlan {
+                    plan: plan.clone(),
+                    title_observations: Vec::new(),
+                },
+                Some(project) => ClientRequest::ApplyProjectRestructurePlan {
+                    project_id: require_project(tree, *project)?,
+                    plan: plan.clone(),
+                    inference_activity_revisions: Vec::new(),
+                    title_observations: Vec::new(),
+                },
+            },
             Self::RevertRestructure => ClientRequest::RevertLastRestructure,
+            Self::RevertProjectRestructure { project } => ClientRequest::RevertProjectRestructure {
+                project_id: require_project(tree, *project)?,
+            },
             Self::KillSession => ClientRequest::KillSession,
         };
         Ok(vec![request])
@@ -635,7 +661,10 @@ impl Operation {
                 };
                 (current == *locked).then(|| json!({"node": node, "locked_closed": locked}))
             }
-            Self::RevertRestructure => (before != after).then(|| json!({"reverted": true})),
+            Self::ApplyRestructure { .. } => (before != after).then(|| json!({"applied": true})),
+            Self::RevertRestructure | Self::RevertProjectRestructure { .. } => {
+                (before != after).then(|| json!({"reverted": true}))
+            }
             Self::SendText { .. }
             | Self::SendKeys { .. }
             | Self::Schedule { .. }
