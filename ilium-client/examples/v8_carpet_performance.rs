@@ -380,7 +380,7 @@ fn measure(options: &Options, package: &Arc<Package>, quota: &QuotaGroup, mode: 
     let mut surface = Surface::new(1, 1, shape)?;
     // Without admitted resources the hosted scene is a MissingResources text
     // placeholder, which made the native side ~0.2 ms and mismatched the V8 side.
-    let mut native_execution = Execution::start(
+    let native_execution = Execution::start(
         quota.clone(),
         ExecutionConfig {
             cpu: native_lane(),
