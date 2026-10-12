@@ -53,6 +53,14 @@ pub struct PaneViewport {
     pub last_prompt_area: Option<Rect>,
     /// Fixed progress slot at the bottom, including hidden retained results.
     pub progress_area: Option<Rect>,
+    /// One-row frame rule below the agent toolbar, full outer width so its
+    /// ends land on the pane's side borders. It doubles as the top edge of
+    /// the prompt banner. Present only when frames are on and a row is spare.
+    pub toolbar_rule: Option<Rect>,
+    /// One-row frame rule below the prompt slot.
+    pub last_prompt_bottom_rule: Option<Rect>,
+    /// One-row frame rule above the progress slot.
+    pub progress_rule: Option<Rect>,
 }
 
 impl PaneViewport {
@@ -71,13 +79,22 @@ impl PaneViewport {
             toolbar_area: None,
             last_prompt_area: None,
             progress_area: None,
+            toolbar_rule: None,
+            last_prompt_bottom_rule: None,
+            progress_rule: None,
         }
+    }
+
+    /// A one-row, full-outer-width strip at row `y`, so a rule drawn there
+    /// reaches the pane's side borders and forms `├`/`┤` joints with them.
+    fn rule_row(&self, y: u16) -> Rect {
+        Rect::new(self.outer_area.x, y, self.outer_area.width, 1)
     }
 
     /// Reserves one row at the top of `content_area` for the agent toolbar,
     /// returning the adjusted viewport. A no-op on an already-empty content
     /// area so a sliver-sized split can't underflow into a huge `Rect`.
-    pub fn with_agent_toolbar_reserved(self) -> Self {
+    pub fn with_agent_toolbar_reserved(self, frames: bool) -> Self {
         if self.content_area.height <= 1 {
             return self;
         }
@@ -87,21 +104,29 @@ impl PaneViewport {
             self.content_area.width,
             1,
         );
+        // The rule needs a row beyond the toolbar and the terminal's one.
+        let has_rule = frames && self.content_area.height >= 3;
+        let used = 1 + u16::from(has_rule);
         let content_area = Rect::new(
             self.content_area.x,
-            self.content_area.y.saturating_add(1),
+            self.content_area.y.saturating_add(used),
             self.content_area.width,
-            self.content_area.height.saturating_sub(1),
+            self.content_area.height.saturating_sub(used),
         );
         Self {
             content_area,
             toolbar_area: Some(toolbar_area),
+            toolbar_rule: has_rule.then(|| self.rule_row(toolbar_area.y + 1)),
             ..self
         }
     }
 
     /// Reserves the configured prompt budget while retaining one terminal row.
-    pub fn with_last_prompt_reserved(self, rows: u16) -> Self {
+    /// The rule below the prompt is added only when `frames` is on and rows
+    /// remain beyond the prompt, the terminal row and `keep_free_rows` (rows
+    /// later reservations such as the progress footer still need), so a short
+    /// pane loses its rule before it loses prompt or terminal rows.
+    pub fn with_last_prompt_reserved(self, rows: u16, keep_free_rows: u16, frames: bool) -> Self {
         if self.content_area.height <= 1 || rows == 0 {
             return self;
         }
@@ -112,15 +137,19 @@ impl PaneViewport {
             self.content_area.width,
             rows,
         );
+        let remaining = self.content_area.height - rows;
+        let has_rule = frames && remaining >= 2u16.saturating_add(keep_free_rows);
+        let rule_rows = u16::from(has_rule);
         let content_area = Rect::new(
             self.content_area.x,
-            self.content_area.y.saturating_add(rows),
+            self.content_area.y + rows + rule_rows,
             self.content_area.width,
-            self.content_area.height.saturating_sub(rows),
+            remaining - rule_rows,
         );
         Self {
             content_area,
             last_prompt_area: Some(last_prompt_area),
+            last_prompt_bottom_rule: has_rule.then(|| self.rule_row(last_prompt_area.bottom())),
             ..self
         }
     }
@@ -130,26 +159,27 @@ impl PaneViewport {
     /// the opposite end from [`Self::with_last_prompt_reserved`]. A no-op on
     /// an already-empty content area or a zero-row request, for the same
     /// underflow-safety reason as that method.
-    pub fn with_progress_reserved(self, rows: u16) -> Self {
+    pub fn with_progress_reserved(self, rows: u16, frames: bool) -> Self {
         if self.content_area.height <= 1 || rows == 0 {
             return self;
         }
         let rows = rows.min(self.content_area.height - 1);
-        let progress_area = Rect::new(
-            self.content_area.x,
-            self.content_area.y + self.content_area.height - rows,
-            self.content_area.width,
-            rows,
-        );
+        // The rule above the footer needs one more row than the footer and the
+        // terminal's single retained row; otherwise it is simply omitted.
+        let has_rule = frames && self.content_area.height - rows >= 2;
+        let rule_rows = u16::from(has_rule);
+        let progress_y = self.content_area.y + self.content_area.height - rows;
+        let progress_area = Rect::new(self.content_area.x, progress_y, self.content_area.width, rows);
         let content_area = Rect::new(
             self.content_area.x,
             self.content_area.y,
             self.content_area.width,
-            self.content_area.height - rows,
+            self.content_area.height - rows - rule_rows,
         );
         Self {
             content_area,
             progress_area: Some(progress_area),
+            progress_rule: has_rule.then(|| self.rule_row(progress_y - 1)),
             ..self
         }
     }
@@ -300,7 +330,7 @@ mod tests {
         let viewport = viewports[0];
         assert_eq!(viewport.toolbar_area, None);
 
-        let reserved = viewport.with_agent_toolbar_reserved();
+        let reserved = viewport.with_agent_toolbar_reserved(false);
         assert_eq!(reserved.outer_area, viewport.outer_area);
         assert_eq!(
             reserved.toolbar_area,
@@ -329,7 +359,7 @@ mod tests {
             SplitOrientation::Horizontal,
             &ids(1),
         );
-        let reserved = viewports[0].with_agent_toolbar_reserved();
+        let reserved = viewports[0].with_agent_toolbar_reserved(false);
         assert_eq!(reserved.toolbar_area, None);
         assert_eq!(reserved.content_area.height, 0);
     }

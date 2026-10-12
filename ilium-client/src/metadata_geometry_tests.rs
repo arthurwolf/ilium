@@ -312,9 +312,9 @@ fn metadata_reservation_preserves_one_terminal_row_in_a_small_split() {
     for viewport in viewports {
         assert!(viewport.content_area.height > 0);
         let with_slots = viewport
-            .with_agent_toolbar_reserved()
-            .with_last_prompt_reserved(4)
-            .with_progress_reserved(5);
+            .with_agent_toolbar_reserved(false)
+            .with_last_prompt_reserved(4, 0, false)
+            .with_progress_reserved(5, false);
         assert!(with_slots.content_area.height >= 1);
         assert!(with_slots
             .outer_area

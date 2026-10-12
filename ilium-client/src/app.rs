@@ -467,6 +467,8 @@ pub enum SettingsTab {
     TextTriggers,
     Icons,
     Appearance,
+    /// Panel padding modes and fine-tuning.
+    Padding,
     Animations,
     Terminal,
     Editor,
@@ -647,8 +649,9 @@ impl InferenceTestState {
 
 impl SettingsTab {
     /// Every tab, in the order the tab list renders them.
-    pub const ALL: [SettingsTab; 25] = [
+    pub const ALL: [SettingsTab; 26] = [
         Self::Appearance,
+        Self::Padding,
         Self::Icons,
         Self::AgentMonitoring,
         Self::Cost,
@@ -685,6 +688,7 @@ impl SettingsTab {
             Self::TextTriggers => "Text Triggers",
             Self::Icons => "Icons",
             Self::Appearance => "User Interface",
+            Self::Padding => "Padding",
             Self::Animations => "Animations",
             Self::Terminal => "Terminal",
             Self::Editor => "Editor",
@@ -748,6 +752,7 @@ pub enum AppearanceRow {
     ContextMenuIcons,
     AgentToolbar,
     ShowToolbarLabels,
+    SectionFrames,
     LastPrompt,
     LastPromptMaxLines,
     ProgressMonitor,
@@ -765,7 +770,7 @@ pub enum AppearanceRow {
 }
 
 impl AppearanceRow {
-    const GENERAL: [AppearanceRow; 24] = [
+    const GENERAL: [AppearanceRow; 25] = [
         Self::TreeOrder,
         Self::ProjectSeparators,
         Self::TreeRowManagementControls,
@@ -779,6 +784,7 @@ impl AppearanceRow {
         Self::ContextMenuIcons,
         Self::AgentToolbar,
         Self::ShowToolbarLabels,
+        Self::SectionFrames,
         Self::LastPrompt,
         Self::LastPromptMaxLines,
         Self::TerminalTextSelection,
@@ -1120,6 +1126,8 @@ pub struct SettingsState {
     /// keyboard. It is separate from `selected_row`: a picker may be opened
     /// from a scrolled table row without changing table navigation.
     pub keyboard_picker: Option<Action>,
+    /// Hover, threshold editing and the fine-tuning dialog of the Padding tab.
+    pub padding: crate::padding_ui::PaddingUiState,
     /// Horizontal chip cursor in the selected Triggers event. Zero is None;
     /// later positions follow that event's available action registry.
     pub trigger_action_cursor: usize,
@@ -1246,6 +1254,7 @@ impl SettingsState {
             icons_preview_real: false,
             icon_picker: None,
             keyboard_picker: None,
+            padding: crate::padding_ui::PaddingUiState::default(),
             trigger_action_cursor: 0,
         }
     }
@@ -2171,6 +2180,8 @@ pub struct App {
     pub keybindings: Vec<KeyBinding>,
     /// Live card-preview settings shared by every board pane in this client.
     pub kanban_board_settings: KanbanBoardSettings,
+    /// Panel padding (see [`crate::padding`]).
+    pub padding_settings: crate::padding::PaddingSettings,
     /// Live user-global sound choices and the catalogue discovered once on
     /// the shared I/O bank before the interactive loop starts.
     pub sound_settings: ilium_sound::SoundSettings,
@@ -2837,6 +2848,7 @@ impl App {
             keyboard_settings: KeyboardSettings::default(),
             keybindings: keymap::LEADER_BINDINGS.to_vec(),
             kanban_board_settings: KanbanBoardSettings::default(),
+            padding_settings: crate::padding::PaddingSettings::default(),
             sound_settings: ilium_sound::SoundSettings::default(),
             notification_settings: ilium_sound::NotificationSettings::default(),
             sound_discovery: ilium_sound::SoundDiscovery::default(),
@@ -4450,7 +4462,11 @@ impl App {
         };
         viewports
             .into_iter()
-            .map(|viewport| {
+            .map(|mut viewport| {
+                // Padding moves every pane kind's content inside its border;
+                // the rules and borders keep the full outer width.
+                let panel = self.padding_panel_for_pane(viewport.pane_id);
+                viewport.content_area = self.padding_for(panel).inset(viewport.content_area);
                 let is_terminal = self.tree.get(viewport.pane_id).is_some_and(|node| {
                     matches!(
                         &node.kind,
@@ -4465,7 +4481,7 @@ impl App {
                 }
                 // Reserve before interaction: metadata changes only redraw these slots.
                 let viewport = if self.ui_settings.agent_toolbar_enabled {
-                    viewport.with_agent_toolbar_reserved()
+                    viewport.with_agent_toolbar_reserved(self.ui_settings.section_frames_enabled)
                 } else {
                     viewport
                 };
@@ -4486,14 +4502,26 @@ impl App {
                             .height
                             .saturating_sub(1 + minimum_progress_rows),
                     );
-                    viewport.with_last_prompt_reserved(prompt_rows)
+                    viewport.with_last_prompt_reserved(
+                        prompt_rows,
+                        // Footer rows plus its frame rule stay available.
+                        if minimum_progress_rows > 0 {
+                            minimum_progress_rows + 1
+                        } else {
+                            0
+                        },
+                        self.ui_settings.section_frames_enabled,
+                    )
                 } else {
                     viewport
                 };
                 if self.ui_settings.progress_monitor_enabled {
-                    viewport.with_progress_reserved(crate::progress_bar::reserved_height(
-                        self.ui_settings.progress_max_lines.into(),
-                    ))
+                    viewport.with_progress_reserved(
+                        crate::progress_bar::reserved_height(
+                            self.ui_settings.progress_max_lines.into(),
+                        ),
+                        self.ui_settings.section_frames_enabled,
+                    )
                 } else {
                     viewport
                 }
@@ -5457,6 +5485,7 @@ impl App {
             return;
         }
         self.layout = layout;
+        self.sync_padding();
         self.resize_displayed_panes(resize_cause);
 
         // Markdown parsing and rasterization can be materially more
@@ -5495,6 +5524,7 @@ impl App {
     /// `crate::config::load`) and again by every settings-screen control
     /// that changes a value (see `apply_and_persist_ui_settings`).
     pub fn apply_ui_settings(&mut self, ui: UiSettings) {
+        crate::theme::set_section_frames_enabled(ui.section_frames_enabled);
         let model_icons_enabled = ui.agent_tree_model_icons;
         let model_icons_were_enabled = self.ui_settings.agent_tree_model_icons;
         if model_icons_enabled != model_icons_were_enabled {
@@ -9798,6 +9828,15 @@ impl App {
         self.apply_and_persist_ui_settings(ui);
     }
 
+    /// Switches the frame rules around the toolbar, prompt banner and progress
+    /// footer. The rules occupy reserved rows, so the PTYs must be resized.
+    pub fn settings_toggle_section_frames(&mut self) {
+        let mut ui = self.ui_settings.clone();
+        ui.section_frames_enabled = !ui.section_frames_enabled;
+        self.apply_and_persist_ui_settings(ui);
+        self.resize_displayed_panes(PaneResizeCause::UserInterfaceSettings);
+    }
+
     /// Switches the last-prompt banner on or off. Toggling it on or off
     /// changes `content_area` (see `PaneViewport::with_last_prompt_reserved`)
     /// just like the toolbar's own toggle, and therefore needs an explicit
@@ -10856,6 +10895,7 @@ impl App {
             AppearanceRow::ContextMenuIcons => self.settings_toggle_context_menu_icons(),
             AppearanceRow::AgentToolbar => self.settings_toggle_agent_toolbar(),
             AppearanceRow::ShowToolbarLabels => self.settings_toggle_toolbar_labels(),
+            AppearanceRow::SectionFrames => self.settings_toggle_section_frames(),
             AppearanceRow::LastPrompt => self.settings_toggle_last_prompt(),
             AppearanceRow::LastPromptMaxLines => {
                 self.settings_adjust_last_prompt_max_lines(direction)

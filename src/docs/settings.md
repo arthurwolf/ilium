@@ -82,7 +82,9 @@ Left panel sizing:
 | Focused panel width | 16 to 80 cells (Focus-dependent and Width-dependent) | 44 |
 | Minimum terminal width | 40 to 500 cells (Width-dependent only) | 120 |
 
-Fixed keeps one width. Focus-dependent shrinks the panel to the unfocused width when neither pointer nor keyboard focus is in the tree. Width-dependent does the same only on terminals narrower than the minimum terminal width; on roomy terminals the panel stays at its focused width. Hidden values stay saved when you switch cards, so comparing modes never loses your tuning.
+On roomy Settings screens (82 or more columns of content) the mode is chosen from three cards. Each card shows what the mode does, two proportional bars (`focus` is the panel width while you use the tree, `away` is the width otherwise) and its current values; the active card carries a `● selected` badge. Click a card, or press Left/Right (`+` or Enter lists all three). On narrower screens the same choice is one selector row: left-click advances, right-click goes back, `+` opens the list.
+
+Fixed keeps one width. Focus-dependent shrinks the panel to the unfocused width when neither pointer nor keyboard focus is in the tree. Width-dependent does the same only on terminals narrower than the minimum terminal width; on roomy terminals the panel stays at its focused width. Hidden values stay saved when you switch modes, so comparing modes never loses your tuning.
 
 General options:
 
@@ -101,6 +103,7 @@ General options:
 | Context-menu icons | On / Off | On |
 | Agent toolbar | On / Off. Toolbar above detected-agent panes | On |
 | Agent toolbar labels | On / Off | On |
+| Section frames | On / Off. Draws rounded rules joined to the pane border around the agent toolbar, last-prompt banner, progress footer and the left panel's toolbar; Off gives their rows back to the terminal | On |
 | Last prompt banner | On / Off. Shows the last exactly reconstructed prompt submitted to a detected agent | On |
 | Last prompt banner lines | 1 to 20 | 4 |
 | Terminal text selection | On / Off. Left-drag selects locally instead of forwarding to the foreground app | On |
@@ -365,7 +368,7 @@ Accepted spellings for common enumerated values:
 | `editor.line_display` | `clip`, `wrap` |
 | `session.recovery_policy` | `restore_automatically`, `ask_before_restore`, `start_fresh` |
 
-Other `[ui]` keys: `left_panel_fixed_width`, `left_panel_unfocused_width`, `left_panel_focused_width`, `left_panel_minimum_terminal_width`, `claude_agent_icon`, `codex_agent_icon`, `antigravity_agent_icon`, `use_stable_glyphs`, `show_inferred_title_icons`, `show_tree_row_management_controls`, `agent_debug_menu_enabled`, `show_context_menu_icons`, `agent_toolbar_enabled`, `show_toolbar_labels`, `last_prompt_enabled`, `last_prompt_max_lines`, `agent_monitoring_mode`, `attention_running_indicator`, `progress_monitor_enabled`, `progress_max_lines`, `completed_progress_hide_after_seconds`, `terminal_text_selection_enabled`, `lock_closed_enabled`, `auto_remove_empty_groups`, `task_progress_frames`.
+Other `[ui]` keys: `left_panel_fixed_width`, `left_panel_unfocused_width`, `left_panel_focused_width`, `left_panel_minimum_terminal_width`, `claude_agent_icon`, `codex_agent_icon`, `antigravity_agent_icon`, `use_stable_glyphs`, `show_inferred_title_icons`, `show_tree_row_management_controls`, `agent_debug_menu_enabled`, `show_context_menu_icons`, `agent_toolbar_enabled`, `show_toolbar_labels`, `section_frames_enabled`, `last_prompt_enabled`, `last_prompt_max_lines`, `agent_monitoring_mode`, `attention_running_indicator`, `progress_monitor_enabled`, `progress_max_lines`, `completed_progress_hide_after_seconds`, `terminal_text_selection_enabled`, `lock_closed_enabled`, `auto_remove_empty_groups`, `task_progress_frames`.
 
 An invalid value (for example a tree width outside 16 to 80, or an unknown enumerated string) makes that table fail validation with a message naming the key; fix or remove the key.
 

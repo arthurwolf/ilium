@@ -267,6 +267,8 @@ Every row has an in-app help topic (open it from the row).
 
 Two optional per-pane displays sit above a detected agent's terminal.
 
+When **Section frames** (`[ui].section_frames_enabled`, default on) is on, rounded rules joined to the pane border separate the toolbar, the prompt banner (which sits behind a quote gutter with side padding) and the progress footer (an eighth-block gauge, right-aligned percentage and a dotted detail gutter). Each rule uses one extra row, shown only while its section has content. Turning frames off removes the rules and returns their rows to the terminal.
+
 - **Last prompt banner** (`[ui].last_prompt_enabled`, default on). Shows the last prompt Ilium could reconstruct exactly as submitted to the agent. If later input cannot be recognised, the banner keeps the last captured prompt rather than guessing. **Last prompt banner lines** (`[ui].last_prompt_max_lines`, 1 to 20, default 4) fixes how many rows are reserved; longer prompts wrap and keep their beginning and end.
 - **Agent toolbar** (`[ui].agent_toolbar_enabled`, default on). Action buttons above detected agents (for example compact, clear, model, effort, stop, copy screen, Smart Copy, copy last message; which appear depends on the agent). Hide or reopen it from the pane's icon or the right-click menu (**Hide agent toolbar** / **Show agent toolbar**). **Agent toolbar labels** adds text after the icons.
 
