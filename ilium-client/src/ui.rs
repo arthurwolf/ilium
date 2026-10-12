@@ -734,6 +734,8 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) -> Option<Posit
     let focused_pane_id = app.focused_pane_id();
     let tree_order = app.effective_tree_order();
     let agent_models = app.current_tree_models();
+    // Read before `render` takes `&mut app.tree_state`; the hover state only needs the mask.
+    let pending_toolbar = app.pending_toolbar_mask();
     let mut painted_rows = tree_ui::render(
         frame,
         layout.tree_area,
@@ -779,7 +781,7 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) -> Option<Posit
                 node: app.hovered_tree_node,
                 toolbar_hovered: app.tree_toolbar_hovered,
                 toolbar_action: app.hovered_tree_toolbar_action,
-                pending_toolbar: app.pending_toolbar_mask(),
+                pending_toolbar,
                 show_management_actions: app.ui_settings.show_tree_row_management_controls,
             },
             sidebar_files: &app.sidebar_snapshot,

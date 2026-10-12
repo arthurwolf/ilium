@@ -161,6 +161,18 @@ fn first_launch_project_pane(tree: &ilium_core::Tree) -> NodeId {
         .expect("default group is a container")[0]
 }
 
+/// Returns the pane's node as carried by a tree-changing event. A change
+/// confined to one pane (a title, a title reset) is published as
+/// `PaneNodeChanged`; a structural change is published as a full
+/// `TreeSnapshot`. Assertions about the pane must accept either form.
+fn pane_node_in_event(event: &ServerEvent, pane_id: NodeId) -> Option<&ilium_core::Node> {
+    match event {
+        ServerEvent::TreeSnapshot(tree) => tree.get(pane_id),
+        ServerEvent::PaneNodeChanged(node) if node.id == pane_id => Some(node.as_ref()),
+        _ => None,
+    }
+}
+
 #[tokio::test]
 async fn focusing_a_finished_agent_clears_its_bell_through_live_ipc() {
     let fake_bin_dir = tempfile::tempdir().expect("create tempdir for the finished fake codex");
@@ -993,11 +1005,8 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
     .await
     .expect("set an inferred title for the old session");
     let _ = expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(
-            event,
-            ServerEvent::TreeSnapshot(tree)
-                if tree.get(pane_id).is_some_and(|node| node.name == "Title From The Old Session")
-        )
+        pane_node_in_event(event, pane_id)
+            .is_some_and(|node| node.name == "Title From The Old Session")
     })
     .await;
 
@@ -1036,27 +1045,22 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
     })
     .await
     .expect("timed out waiting for both Claude /clear transitions");
-    let reset_after_clear = expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(
-            event,
-            ServerEvent::TreeSnapshot(tree)
-                if tree.get(pane_id).is_some_and(|node| {
-                    node.name == "<new>"
-                        && node.short_name.is_none()
-                        && node.inferred_icon.is_none()
-                        && node.parent == Some(project_id)
-                        && matches!(
-                            &node.kind,
-                            ilium_core::NodeKind::Pane {
-                                title_source: ilium_core::PaneTitleSource::Automatic,
-                                ..
-                            }
-                        )
-                })
-        )
+    let _ = expect_event(&mut client, Duration::from_secs(5), |event| {
+        pane_node_in_event(event, pane_id).is_some_and(|node| {
+            node.name == "<new>"
+                && node.short_name.is_none()
+                && node.inferred_icon.is_none()
+                && node.parent == Some(project_id)
+                && matches!(
+                    &node.kind,
+                    ilium_core::NodeKind::Pane {
+                        title_source: ilium_core::PaneTitleSource::Automatic,
+                        ..
+                    }
+                )
+        })
     })
     .await;
-    assert!(matches!(reset_after_clear, ServerEvent::TreeSnapshot(_)));
 
     write_frame(
         &mut client,

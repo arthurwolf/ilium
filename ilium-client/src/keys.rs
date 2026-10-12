@@ -933,7 +933,9 @@ fn handle_search_event(app: &mut App, mut state: Box<SearchState>, event: &Event
 /// Runs one leader-key action.
 fn execute_action(app: &mut App, action: Action) {
     match action {
-        Action::NewTerminal => app.action_new_terminal(),
+        Action::NewTerminal => {
+            app.action_new_terminal();
+        }
         Action::NewAgentWorktree => app.open_create_agent_workspace_dialog(
             ilium_core::BuiltinAgentProvider::Claude,
             app.selected_node_id().unwrap_or(ilium_core::ROOT_ID),
