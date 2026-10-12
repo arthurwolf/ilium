@@ -89,7 +89,7 @@ pub enum NewPaneKind {
 /// Server-side starting-directory strategy for a newly spawned terminal.
 /// The client chooses the policy from its persisted settings, while the
 /// server resolves live process cwd information it alone owns.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NewPaneWorkingDirectory {
     ProjectRoot,
     FocusedTerminal,
@@ -97,6 +97,11 @@ pub enum NewPaneWorkingDirectory {
     /// Resolve the recorded launch directory of this workspace pane on the
     /// server, so a context-menu action never trusts a client-supplied path.
     WorkspacePane(NodeId),
+    /// Start in this exact directory, chosen by a program driving the session
+    /// (`ilium ctl new-pane --cwd`, the HTTP API). The server canonicalizes it
+    /// and refuses anything that is not an existing directory. Appended so
+    /// every earlier bincode variant index stays stable.
+    Directory(PathBuf),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
