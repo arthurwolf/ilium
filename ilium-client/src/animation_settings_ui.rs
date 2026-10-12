@@ -1868,6 +1868,17 @@ mod tests {
                                 vec![None]
                             };
                             for effective_kind in effective_kinds {
+                                // Each effective kind changes which rows exist, not how a row is
+                                // drawn or hit-tested: cross it with one playback/colour combination
+                                // only, otherwise Semantic multiplies the whole matrix by the kind
+                                // count and the test runs for tens of minutes.
+                                if effective_kind.is_some()
+                                    && (playback_mode != AnimationPlaybackMode::Loop
+                                        || scene_uses_cell_colors
+                                        || color_mode != ilium_ambient::style::ColorMode::Color)
+                                {
+                                    continue;
+                                }
                                 let context = RowContext {
                                     effective_kind,
                                     scene_uses_cell_colors,
