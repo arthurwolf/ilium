@@ -91,7 +91,10 @@ pub(crate) async fn attach(socket: &LiveSessionSocket) -> Result<AttachedSession
     Err(last_error)
 }
 
-async fn attach_as(socket_path: &Path, session_name: &str) -> Result<AttachedSession, String> {
+pub(crate) async fn attach_as(
+    socket_path: &Path,
+    session_name: &str,
+) -> Result<AttachedSession, String> {
     let mut connection = Connection::connect(socket_path, session_name.to_owned())
         .await
         .map_err(|error| format!("cannot connect: {error}"))?;

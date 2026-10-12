@@ -23,6 +23,7 @@
 use ilium::session;
 
 mod broadcast;
+mod close_pane;
 mod pane_filter;
 mod pane_scan;
 mod panes;
@@ -180,6 +181,10 @@ enum Command {
     /// "Send message to all" does. The pane running this command is skipped
     /// unless --include-self is given. Output is JSONL.
     Broadcast(broadcast::BroadcastArgs),
+    /// Close a pane of this session, by default the pane this command runs
+    /// in. `--worktree remove` also removes the pane's Ilium-created Git
+    /// worktree when it is clean, merged and unused. Output is JSONL.
+    ClosePane(close_pane::ClosePaneArgs),
 }
 
 /// Local chatroom operations intentionally avoid the detached server: agents
@@ -546,6 +551,7 @@ async fn dispatch(cli: Cli) -> Result<(), CliError> {
         Some(Command::Voice { command }) => voice::voice(command, &cli.cwd).await,
         Some(Command::Panes(args)) => panes::panes(args, &cli.cwd).await,
         Some(Command::Broadcast(args)) => broadcast::broadcast(args, &cli.cwd).await,
+        Some(Command::ClosePane(args)) => close_pane::close_pane(args).await,
     }
 }
 
