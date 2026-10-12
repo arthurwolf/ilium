@@ -7118,6 +7118,9 @@ where
     .await
 }
 
+// Eight arguments: `after_admission` is the test seam for the admission path.
+// The production wrapper above passes a no-op for it.
+#[allow(clippy::too_many_arguments)]
 async fn write_key_input_unlocked_with_probe_and_admission_hook<
     Probe,
     ProbeFuture,
