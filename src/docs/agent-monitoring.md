@@ -89,6 +89,8 @@ Every pane row has three icon slots before its title.
 | Objective | The agent's `/goal`, a monitored task, or a scheduled input |
 | Now | What the agent is doing this moment |
 
+With **Settings -> Agent Monitoring -> Model icons** on, the identity slot shows the session's selected model icon instead of the provider icon. The setting is off by default (`[ui].agent_tree_model_icons`), and models without an icon fall back to the provider icon.
+
 Identity renders as an icon by default. In **Settings -> User Interface** you can choose full name, one letter, the configured icon, or no identifier. Every glyph below is configurable in **Settings -> Icons** and under `[ui]` in `config.toml`.
 
 Hover any row to see a popover with the meaning and a grey "why" line giving the rule that selected the icon and the evidence observed.

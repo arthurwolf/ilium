@@ -127,6 +127,7 @@ Choose the glyph for each configurable role: group, top-level destination, proje
 | Progress monitor | Turns supervision of registered long-running tasks on or off (default on) |
 | Progress footer lines | 1 to 20 detail rows below the status line (default 4) |
 | Hide completed progress after | Seconds a finished task footer stays; 0 or Never keeps it (default 60, steps of 30) |
+| Model icons | Off by default. When on, the identity slot shows the session's selected model icon (the same icon as the agent toolbar); models without an icon fall back to the provider icon |
 | Progress fill style | Character family for progress frames |
 | Working poll interval | Seconds between detection checks for working agents (default 10) |
 | Idle poll interval | Seconds between checks for idle agents (default 45) |
