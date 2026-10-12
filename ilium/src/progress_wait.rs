@@ -18,7 +18,9 @@ use ilium_client::connection::Connection;
 use ilium_core::{NodeId, PaneProgress, ProgressTaskStatus};
 use ilium_ipc::{ClientRequest, ProgressWaitEnd, ServerEvent};
 
-use crate::{json_string, next_progress_request_id, pane_progress_json, CliError};
+use crate::{
+    json_string, next_progress_request_id, pane_progress_json, CliError, SERVER_BUILD_MISMATCH_HINT,
+};
 
 /// Exit statuses of a wait. 1 (CLI or connection failure) and 2 (usage) keep
 /// their usual meaning; the rest name the monitor outcome.
@@ -229,9 +231,9 @@ pub(crate) async fn current_monitors(
                 }
             }
         }
-        Err(CliError::ServerReportedError(
-            "connection closed before the progress status arrived".to_string(),
-        ))
+        Err(CliError::ServerReportedError(format!(
+            "connection closed before the progress status arrived; {SERVER_BUILD_MISMATCH_HINT}"
+        )))
     })
     .await
     .map_err(|_| {
