@@ -676,6 +676,40 @@ impl Operation {
     }
 }
 
+/// One example of every operation, for `ilium ctl ops` and the HTTP guide.
+/// `RestructurePlan` is shown with an empty plan; real plans come from files.
+pub fn examples() -> Vec<Operation> {
+    vec![
+        Operation::Rename { node: 12, title: "Login fix".into() },
+        Operation::Close { pane: 12, worktree: WorktreeAction::Keep },
+        Operation::MoveStep { node: 12, direction: StepDirection::Up },
+        Operation::Reparent { node: 12, parent: 5, index: Some(0) },
+        Operation::NewProject { path: PathBuf::from("/abs/path/to/repo") },
+        Operation::NewGroup { parent: 5, name: "Experiments".into() },
+        Operation::NewFolder { parent: 5, path: PathBuf::from("/abs/path/to/folder") },
+        Operation::ChangeProjectFolder { project: 5, path: PathBuf::from("/abs/path") },
+        Operation::NewPane {
+            parent: Some(5),
+            launch: PaneLaunch::Agent { provider: AgentProvider::Claude, prompt: Some("Fix the failing test".into()) },
+            cwd: Some(PathBuf::from("/abs/path/subdir")),
+            keep_open: false,
+        },
+        Operation::SendText { pane: 12, text: "run the tests".into(), enter: true },
+        Operation::SendKeys { pane: 12, keys: vec!["ctrl-c".into(), "enter".into()] },
+        Operation::Schedule { pane: 12, delay_seconds: 600, text: "status?".into(), enter: true },
+        Operation::Enqueue { pane: 12, text: "next step".into(), delivery: QueueDelivery::Once },
+        Operation::ClearQueue { pane: 12 },
+        Operation::Bookmark { node: 12, on: true },
+        Operation::Expand { node: 5, expanded: false },
+        Operation::LockClosed { node: 5, locked: true },
+        Operation::Terminate { pane: 12 },
+        Operation::ApplyRestructure { plan: RestructurePlan { children: Vec::new() }, project: Some(5) },
+        Operation::RevertRestructure,
+        Operation::RevertProjectRestructure { project: 5 },
+        Operation::KillSession,
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -689,6 +723,16 @@ mod tests {
             .add_pane(group, "shell".to_owned(), PaneContentKind::Terminal)
             .unwrap();
         (tree, project, group, pane)
+    }
+
+    #[test]
+    fn every_example_round_trips_and_names_are_unique() {
+        let mut names = std::collections::HashSet::new();
+        for example in examples() {
+            let text = serde_json::to_string(&example).unwrap();
+            assert_eq!(serde_json::from_str::<Operation>(&text).unwrap(), example);
+            assert!(names.insert(example.name()), "{}", example.name());
+        }
     }
 
     #[test]
