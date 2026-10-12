@@ -1778,7 +1778,7 @@ async fn run_inner(
                 .expect("remote compaction owner is initialized before the event loop")
                 .spawn(job)
             {
-                app.apply_remote_compaction_worker_event(event);
+                app.apply_remote_compaction_worker_event(*event);
                 needs_redraw = true;
                 needs_immediate_redraw = true;
             }
@@ -4193,6 +4193,10 @@ fn synchronize_debug_logging_from_server(app: &mut App, enabled: bool) {
 /// Consecutive mouse-motion reports are coalesced to their newest position:
 /// only that position can determine the current hover state, while keeping
 /// every non-motion event in order preserves click, drag, and scroll input.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each argument is a distinct owner of the input pump (app, receiver, workers, backlogs, home directory); the callers hold them separately"
+)]
 fn dispatch_ready_input_events<S>(
     app: &mut App,
     input_rx: &mut S,
@@ -4407,7 +4411,7 @@ fn retain_interrupted_key_paste(
 
 trait InputBatchItem: Sized {
     fn view(&self) -> Option<&Event>;
-    fn coalesce_motion(self) -> Result<(), Self>;
+    fn coalesce_motion(self) -> Result<(), Box<Self>>;
 }
 
 impl InputBatchItem
@@ -4419,10 +4423,12 @@ impl InputBatchItem
             .map(terminal_input_owner::InputEvent::view)
     }
 
-    fn coalesce_motion(self) -> Result<(), Self> {
+    fn coalesce_motion(self) -> Result<(), Box<Self>> {
         match self {
-            Ok(event) => event.coalesce_motion().map_err(Ok),
-            Err(error) => Err(Err(error)),
+            Ok(event) => event
+                .coalesce_motion()
+                .map_err(|event| Box::new(Ok(*event))),
+            Err(error) => Err(Box::new(Err(error))),
         }
     }
 }
@@ -4456,11 +4462,11 @@ impl InputBatchItem for Event {
         Some(self)
     }
 
-    fn coalesce_motion(self) -> Result<(), Self> {
+    fn coalesce_motion(self) -> Result<(), Box<Self>> {
         if is_mouse_motion(Some(&self)) {
             Ok(())
         } else {
-            Err(self)
+            Err(Box::new(self))
         }
     }
 }
@@ -4542,7 +4548,7 @@ fn for_each_ready_input_event_until<S: ReadyInput>(
                     match newest_motion.coalesce_motion() {
                         Ok(()) => newest_motion = candidate,
                         Err(original) => {
-                            newest_motion = original;
+                            newest_motion = *original;
                             next = Some(candidate);
                             break;
                         }

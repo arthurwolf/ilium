@@ -268,6 +268,10 @@ pub struct ChatroomViewState {
 
 /// The input-handling mode. Most keys are dispatched differently
 /// depending on this; see `crate::keys`.
+#[expect(
+    clippy::large_enum_variant,
+    reason = "Mode holds one value at a time; boxing its largest variant would touch several hundred construction and match sites with no behaviour change"
+)]
 pub enum Mode {
     Normal,
     LeaderPending,
@@ -6072,16 +6076,15 @@ impl App {
                 }
             }
         }
-        if self.pending_voice_interaction_requests.capacity() < 64 {
-            if self
+        if self.pending_voice_interaction_requests.capacity() < 64
+            && self
                 .pending_voice_interaction_requests
                 .try_reserve_exact(64 - self.pending_voice_interaction_requests.len())
                 .is_err()
-            {
-                self.status_message =
-                    Some("Voice push-to-talk allocation refused; edge not admitted".into());
-                return;
-            }
+        {
+            self.status_message =
+                Some("Voice push-to-talk allocation refused; edge not admitted".into());
+            return;
         }
         self.pending_voice_interaction_requests.push(request);
     }
@@ -8954,9 +8957,7 @@ impl App {
                 issue_details,
             }
         };
-        if !model.issue_details.is_empty()
-            && !model.rows.iter().any(|row| *row == PluginPanelRow::Issues)
-        {
+        if !model.issue_details.is_empty() && !model.rows.contains(&PluginPanelRow::Issues) {
             model.rows.push(PluginPanelRow::Issues);
             model.labels.push(format!(
                 "{} package/runtime issue(s)",
@@ -10093,6 +10094,7 @@ impl App {
         }
         true
     }
+    #[cfg(test)]
     fn complete_smart_copy_capture(
         &mut self,
         pane_id: NodeId,
@@ -10372,10 +10374,10 @@ impl App {
         if self.smart_copy_light.is_none() && !retry {
             return;
         }
-        if !self
+        if self
             .smart_copy_session
             .as_ref()
-            .is_some_and(|session| session.selected_count() > 0)
+            .is_none_or(|session| session.selected_count() == 0)
         {
             self.exit_smart_copy();
             return;
@@ -10461,16 +10463,15 @@ impl App {
         }
         // Restoration is also CPU-owned; failed originals stay in order when
         // admission is refused, never clone plaintext or become inaccessible.
-        if !self.light_copy_shutdown {
-            if self
+        if !self.light_copy_shutdown
+            && self
                 .light_copy_recovery
                 .front()
                 .is_some_and(|original| original.original().is_some())
-            {
-                if let Some(original) = self.light_copy_recovery.pop_front() {
-                    if let Err(original) = owner.recover(original) {
-                        self.light_copy_recovery.push_front(original);
-                    }
+        {
+            if let Some(original) = self.light_copy_recovery.pop_front() {
+                if let Err(original) = owner.recover(original) {
+                    self.light_copy_recovery.push_front(original);
                 }
             }
         }
@@ -18645,10 +18646,10 @@ impl App {
     /// that is refused for budget can retry after this. Returns whether a pin
     /// was actually released.
     fn release_foreign_selection_pin(&mut self, pane_id: NodeId) -> bool {
-        if !self
+        if self
             .terminal_selection_source
             .as_ref()
-            .is_some_and(|(owner, _)| *owner != pane_id)
+            .is_none_or(|(owner, _)| *owner == pane_id)
         {
             return false;
         }
@@ -19223,6 +19224,10 @@ impl App {
 /// "- [ ] ..." item) simply won't be found rather than risk mutating the
 /// wrong character.
 #[cfg(test)]
+#[expect(
+    dead_code,
+    reason = "hit-test seam kept for the checkbox mapping; no test calls it yet"
+)]
 fn checkbox_at(
     editor: &EditorPane,
     content_area: Rect,

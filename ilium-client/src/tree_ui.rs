@@ -3322,6 +3322,10 @@ mod tests {
         )
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "render entry point takes every independent tree input; bundling them would only move the list into a single-use struct"
+    )]
     fn render_tree_buffer_with_models(
         tree: &Tree,
         state: &mut TreeState<NodeId>,

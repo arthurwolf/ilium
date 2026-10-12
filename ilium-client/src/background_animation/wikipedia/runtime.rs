@@ -89,6 +89,8 @@ impl WikipediaRuntime {
         elapsed: Duration,
         resources: Option<&AmbientResources>,
     ) {
+        #[cfg(test)]
+        let _ = resources;
         #[cfg(not(test))]
         if self.loader.is_none() && elapsed >= self.retry_after {
             let Some(resources) = resources else {

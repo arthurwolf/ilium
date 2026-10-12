@@ -4485,9 +4485,9 @@ fn appearance_row_label(row: AppearanceRow) -> &'static str {
 }
 
 fn format_duration(seconds: u64) -> String {
-    if seconds % 86_400 == 0 {
+    if seconds.is_multiple_of(86_400) {
         format!("{} days", seconds / 86_400)
-    } else if seconds % 3_600 == 0 {
+    } else if seconds.is_multiple_of(3_600) {
         format!("{} hours", seconds / 3_600)
     } else {
         format!("{} minutes", seconds / 60)
@@ -5082,7 +5082,7 @@ pub(crate) fn settings_status_icon_control(
         ControlSpec {
             kind: ControlKind::Choice,
             label: &label,
-            value: &value,
+            value,
             label_width,
             previous_enabled: true,
             next_enabled: true,
@@ -6050,7 +6050,6 @@ pub fn agent_monitoring_content_hit(
         .y
         .saturating_sub(content_area.y)
         .saturating_add(scroll);
-    let virtual_x = position.x.saturating_sub(content_area.x);
     let row = view
         .row_lines
         .into_iter()
@@ -6095,7 +6094,6 @@ pub fn appearance_content_hit(
         .y
         .saturating_sub(content_area.y)
         .saturating_add(scroll);
-    let virtual_x = position.x.saturating_sub(content_area.x);
     let row = view
         .row_lines
         .into_iter()
@@ -9365,8 +9363,10 @@ mod tests {
 
     #[test]
     fn kilo_gateway_wrapped_warning_keeps_inference_rows_clickable() {
-        let mut settings = ilium_inference::InferenceSettings::default();
-        settings.selected_provider = ilium_inference::InferenceProviderKind::KiloGateway;
+        let settings = ilium_inference::InferenceSettings {
+            selected_provider: ilium_inference::InferenceProviderKind::KiloGateway,
+            ..ilium_inference::InferenceSettings::default()
+        };
         let project_directory = tempfile::tempdir().unwrap();
         let mut app = App::new(
             "kilo-warning-hit-layout-test".to_owned(),
@@ -9413,8 +9413,10 @@ mod tests {
 
     #[test]
     fn kilo_gateway_warning_wraps_without_dropping_its_privacy_notice() {
-        let mut settings = ilium_inference::InferenceSettings::default();
-        settings.selected_provider = ilium_inference::InferenceProviderKind::KiloGateway;
+        let settings = ilium_inference::InferenceSettings {
+            selected_provider: ilium_inference::InferenceProviderKind::KiloGateway,
+            ..ilium_inference::InferenceSettings::default()
+        };
         let expected = "Kilo Gateway is useful to try things out. Do not send secrets: requests may be used for LLM training.";
         for width in [10, 14, 22, 40, 80] {
             let expected = if width < 32 {

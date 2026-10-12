@@ -89,6 +89,10 @@ impl EditorInputBacklog {
             .is_some_and(|total| total <= self.max_bytes)
     }
 
+    #[expect(
+        clippy::result_large_err,
+        reason = "the rejected event is handed back by value so the caller keeps ownership of the input bytes; boxing would add an allocation per rejected paste"
+    )]
     pub(crate) fn push(
         &mut self,
         event: Result<InputEvent, InputFailure>,
