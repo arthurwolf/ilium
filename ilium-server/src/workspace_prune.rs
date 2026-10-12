@@ -546,6 +546,12 @@ pub(crate) async fn directory_users(
         .map_err(|error| format!("worktree process scan job failed: {error}"))
 }
 
+/// Confirms the process scan can run without requiring an empty user list.
+/// Used before stopping an owned pane, whose own process is still a user.
+async fn worktree_scan_available(client: &ExecutionClient, root: &Path) -> Result<(), String> {
+    directory_users(client, root).await.map(drop)
+}
+
 /// This observation never kills an unrelated process and force never bypasses failure.
 async fn unused_directory(client: &ExecutionClient, root: &Path) -> Result<(), String> {
     let retained = directory_users(client, root).await?;
@@ -968,7 +974,7 @@ async fn execute_locked(
         Ok(client) => client,
         Err(error) => return (blocked(error), false),
     };
-    if let Err(error) = unused_directory(client, &target.worktree_root).await {
+    if let Err(error) = worktree_scan_available(client, &target.worktree_root).await {
         return (blocked(error), false);
     }
     let pane_closed = if let Some(pane_id) = permitted_pane {
