@@ -8847,6 +8847,11 @@ mod tests {
     {
         let directory = tempfile::tempdir().expect("isolated title directory");
         let state = snapshot_io_handler_state(&directory);
+        let execution =
+            crate::execution::ServerExecution::start().expect("title evidence I/O bank");
+        let journal_quota = execution.quota_group();
+        assert!(state.execution.set(execution).is_ok());
+        assert!(state.events.initialize_journal(journal_quota));
         let pane_id = shell_title_fixture(&state, &directory).await;
         let input = {
             let mut tree = state.tree.write().await;

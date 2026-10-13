@@ -1049,7 +1049,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn slow_subscriber_preserves_prompt_after_replaceable_state_burst() {
+    async fn slow_subscriber_detects_lag_then_receives_latest_state_and_prompt() {
         let events = ServerEvents::new();
         let mut subscriber = events.subscribe_shared();
         let pane_id = NodeId(19);
@@ -1065,13 +1065,23 @@ mod tests {
             source: ilium_ipc::PromptSubmissionSource::Keyboard,
         });
 
+        assert!(
+            matches!(
+                subscriber.recv().await,
+                Err(broadcast::error::RecvError::Lagged(2))
+            ),
+            "the bounded ring must explicitly signal two overwritten state events"
+        );
+        // A connection repairs replaceable state from the authoritative
+        // snapshot after Lagged, then drains this retained tail. The prompt
+        // is semantic and must remain after the burst in this tail.
         let mut latest_activity_revision = None;
         let mut prompt_seen = false;
-        for _ in 0..=EVENT_CHANNEL_CAPACITY {
+        for _ in 0..EVENT_CHANNEL_CAPACITY {
             let event = subscriber
                 .recv()
                 .await
-                .expect("slow subscriber must not lose an accepted semantic event");
+                .expect("retained tail is readable after lag repair");
             match event.as_ref() {
                 ServerEvent::NodeActivityChanged {
                     activity_revision, ..

@@ -21,6 +21,8 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 
 ### Changed
 
+- Server test fixtures initialize execution admission and event journals, verify subscriber lag recovery, and retain process-inspection refusal checks.
+
 - Saved-world catalogs report zero payload bytes for directories consistently across platforms. Provider-crash fixtures retry only transient executable-write conflicts, with bounded attempts; worktree-removal tests retain refusal checks when the host denies process-directory inspection.
 - Image decode diagnostics retain the filename at metadata preflight; image-storage and world-loading fixtures now exercise their intended failure and recovery paths with the actual allocation accounting.
 - Wikipedia layout retries physical storage pressure while retaining the previous article frame; storage-lifetime tests now check the physical allocation budget and wait for actual worker retirement.

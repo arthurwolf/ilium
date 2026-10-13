@@ -200,9 +200,14 @@ mod tests {
         let mut owner = crate::execution::ServerExecution::start().unwrap();
         let execution = owner.client.clone();
         let quota = owner.quota_group();
-        let _saturated = quota
-            .reserve_external_storage(quota.snapshot().limits.worker_bytes)
-            .unwrap();
+        let snapshot = quota.snapshot();
+        let remaining_storage = snapshot
+            .limits
+            .worker_bytes
+            .checked_sub(snapshot.worker_bytes)
+            .expect("execution residents fit the worker-byte ceiling");
+        assert!(remaining_storage > 0);
+        let _saturated = quota.reserve_external_storage(remaining_storage).unwrap();
         let (sender, receiver) = DirectEventSender::admitted_channel(1, execution);
         drop(receiver);
 

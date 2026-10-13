@@ -2,7 +2,7 @@
 //! (see [`connection`]), dispatching requests through [`handlers`].
 
 mod connection;
-mod direct_events;
+pub(crate) mod direct_events;
 pub(crate) use direct_events::DirectEventSender;
 pub(crate) use direct_events::EventReply;
 // `pub(crate)`, not private: `crate::run`'s crash-recovery restore path
@@ -188,6 +188,14 @@ mod tests {
                 agent_debug_menu_enabled: false,
                 progress_monitor_enabled: true,
             }));
+            // Production starts the execution bank and ordered journal before
+            // the accept loop. Without them `connection::handle` rejects each
+            // accepted stream before the registry behavior is exercised.
+            let execution = crate::execution::ServerExecution::start()
+                .expect("isolated listener execution bank");
+            let journal_quota = execution.quota_group();
+            assert!(state.execution.set(execution).is_ok());
+            assert!(state.events.initialize_journal(journal_quota));
             let loop_state = Arc::clone(&state);
             // Mirrors `run`'s outer shutdown select: a saturated accept loop
             // must remain cancellable even though it does not call accept.

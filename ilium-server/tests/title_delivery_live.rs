@@ -176,6 +176,10 @@ async fn acknowledged_authored_enter_authorizes_title_before_request_history_flu
                         node.presentation_revision > original.presentation_revision
                     });
                 }
+                ServerEvent::PaneNodeChanged(node) if node.id == pane_id => {
+                    observed_revision_fence |=
+                        node.presentation_revision > original.presentation_revision;
+                }
                 ServerEvent::PanePromptSubmitted {
                     pane_id: submitted,
                     source,
