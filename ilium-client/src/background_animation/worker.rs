@@ -2700,8 +2700,11 @@ mod tests {
         release.send(()).unwrap();
         let deadline = Instant::now() + Duration::from_secs(3);
         loop {
-            let status = service.try_status().expect("worker status");
-            if status.stale > 0 && service.shared.configurations.load(Ordering::Acquire) == 0 {
+            // Status collection is deliberately nonblocking. The actor may
+            // hold its mailbox while consuming the newly released pauses.
+            if service.try_status().is_some_and(|status| {
+                status.stale > 0 && service.shared.configurations.load(Ordering::Acquire) == 0
+            }) {
                 break;
             }
             assert!(Instant::now() < deadline, "pause receipts did not drain");

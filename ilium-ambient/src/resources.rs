@@ -254,9 +254,10 @@ mod tests {
         ticket
             .join_until(Instant::now() + Duration::from_secs(5))
             .unwrap();
-        // The actual join is complete; the explicitly retained ticket still
-        // owns the supervisor wake state and its original physical claim.
-        assert_eq!(quota.snapshot().worker_threads, 2);
+        // A completed ticket observes retirement without retaining the native
+        // thread's physical claim. Blocked-worker custody is checked above.
+        assert_eq!(quota.snapshot().worker_threads, 1);
+        assert_eq!(quota.snapshot().worker_bytes, baseline);
         drop(ticket);
         assert_eq!(quota.snapshot().worker_threads, 1);
         assert_eq!(quota.snapshot().worker_bytes, baseline);
