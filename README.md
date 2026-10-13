@@ -1,6 +1,6 @@
 <p align="center"><img src="assets/ilium-mark.svg" alt="" width="68" height="68"></p>
 <h1 align="center">Ilium</h1>
-<p align="center"><strong>AI names agents and organizes your project tree.</strong><br>Keep agent work, terminals, editors, and boards together, with activity in view.</p>
+<p align="center"><strong>Running 100+ CLI agents across dozens of projects and need some help auto-organizing that mess?</strong><br>Keep agent work, terminals, editors, and boards together, with activity in view.</p>
 <p align="center"><sub>Linux · macOS · Windows · Rust · MIT</sub></p>
 <p align="center"><a href="#quick-start">Quick start</a> · <a href="#daily-use">Daily use</a> · <a href="#see-it-in-action">Demos</a> · <a href="#what-ilium-does">Features</a> · <a href="src/docs/README.md">Full documentation</a></p>
 
