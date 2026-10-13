@@ -5,11 +5,15 @@ use super::*;
 // to their own per-pane quota (bounded only by the owned-worker slot table),
 // not to the shared replay/output pool. Never lower this count to make the
 // gate pass: a lowered gate hid the capacity cut that dropped 22 panes on
-// 2026-10-09.
-const PANE_COUNT: usize = 128;
-const BURST_LINES: usize = 1024;
+// 2026-10-09. The product target is at least 200 panes.
+const PANE_COUNT: usize = 200;
+// 16384 lines of 257 bytes is about 4 MiB of retained output per pane, the
+// scale of a long agent transcript, not a token burst.
+const BURST_LINES: usize = 16384;
 const BURST_LINE_WIDTH: usize = 256;
 const BURST_BYTES_PER_PANE: usize = BURST_LINES * (BURST_LINE_WIDTH + 1);
+// The noise ends with a complete CSI (ESC [ 0 m) so the last ESC cannot swallow
+// the first byte of the marker that follows.
 const LARGE_FIRST_PANE_NOISE_BYTES: usize = 24 * 1024 * 1024;
 const SELECTION_LIMIT: Duration = Duration::from_secs(5);
 
@@ -50,8 +54,12 @@ async fn select_and_measure(
     let title = format!("pool-{number:03}");
     let marker = format!("INNER-PANE-{number:03}");
     tui.write(b"\x02w").expect("focus isolated tree");
+    // The sidebar holds PANE_COUNT rows plus group rows, so one pass in a
+    // single direction can miss a title that sits above the viewport after a
+    // selection moved the list. Search both directions with a budget that
+    // covers the whole tree twice; the bound is a harness limit, not a timing one.
     let mut row = None;
-    for _ in 0..PANE_COUNT {
+    for step in 0..(PANE_COUNT * 4) {
         row = tui.with_screen(|screen| {
             rows_containing_before_column(screen, &title, TREE_TEXT_COLUMNS)
                 .into_iter()
@@ -60,7 +68,8 @@ async fn select_and_measure(
         if row.is_some() {
             break;
         }
-        tui.write(&sgr_mouse_down(if backwards { 64 } else { 65 }, 8, 15))
+        let scroll_up = backwards != (step / PANE_COUNT % 2 == 1);
+        tui.write(&sgr_mouse_down(if scroll_up { 64 } else { 65 }, 8, 15))
             .expect("scroll isolated tree");
         tokio::time::sleep(Duration::from_millis(30)).await;
     }
@@ -86,6 +95,7 @@ async fn select_and_measure(
     tui.write(&sgr_mouse_down(0, 8, row)).unwrap();
     tui.write(&sgr_mouse_up(8, row)).unwrap();
     tui.write(b"\r").unwrap();
+    let buffered_tag = format!("BUFFERED-LINE-{number:03}");
     let first_content_ms = if number == 0 && pass == "burst-forward" {
         let appeared = wait_until(
             || {
@@ -100,6 +110,15 @@ async fn select_and_measure(
             "the selected large-output pane showed no first content before completion"
         );
         Some(started.elapsed().as_secs_f64() * 1000.0)
+    } else if number != 0 {
+        // Every other pane shows buffered transcript lines before, or together
+        // with, its final marker; measure when the first pane content appears.
+        let appeared = wait_until(
+            || inner_marker_visible(tui, &buffered_tag) || inner_marker_visible(tui, &marker),
+            SELECTION_LIMIT.saturating_sub(started.elapsed()),
+        )
+        .await;
+        appeared.then(|| started.elapsed().as_secs_f64() * 1000.0)
     } else {
         None
     };
@@ -118,6 +137,14 @@ async fn select_and_measure(
         "screen": tui.screen_text(),
     });
     println!("{result}");
+    if let Some(path) = std::env::var_os("ILIUM_PANE_LATENCY_RECEIPT") {
+        // Incremental JSONL so an interrupted run still leaves evidence.
+        let mut jsonl = path;
+        jsonl.push(".jsonl");
+        if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(jsonl) {
+            let _ = std::io::Write::write_all(&mut file, format!("{result}\n").as_bytes());
+        }
+    }
     assert!(displayed, "inner content absent for {title}: {result}");
     assert!(
         elapsed_ms <= SELECTION_LIMIT.as_secs_f64() * 1000.0,
@@ -128,8 +155,8 @@ async fn select_and_measure(
 
 #[cfg(unix)]
 #[tokio::test]
-#[ignore = "explicit 128-pane release runtime qualification"]
-async fn no_pool_release_renders_128_panes_and_measures_click_latency() {
+#[ignore = "explicit 200-pane release runtime qualification"]
+async fn no_pool_release_renders_200_panes_and_measures_click_latency() {
     if cfg!(debug_assertions) {
         panic!("release qualification must launch the optimized client binary");
     }
@@ -253,20 +280,21 @@ async fn no_pool_release_renders_128_panes_and_measures_click_latency() {
         let marker = format!("INNER-PANE-{number:03}");
         let script = if number == 0 {
             format!(
-                "while [ ! -e \"$1\" ]; do /bin/sleep 0.02; done; printf '\\n\\n\\n\\n\\n\\n\\n\\nFIRST-CONTENT-000\\n'; /usr/bin/head -c {} /dev/zero | /usr/bin/tr '\\000' '\\033'; printf '\\n\\n%s\\n' \"$2\"; /bin/sleep 0.1; : > \"$3\"; exec /bin/cat",
+                "while [ ! -e \"$1\" ]; do /bin/sleep 0.02; done; printf '\\n\\n\\n\\n\\n\\n\\n\\nFIRST-CONTENT-000\\n'; /usr/bin/head -c {} /dev/zero | /usr/bin/tr '\\000' '\\033'; printf '\\033[0m\\n\\n%s\\n' \"$2\"; /bin/sleep 0.1; : > \"$3\"; exec /bin/cat",
                 LARGE_FIRST_PANE_NOISE_BYTES
             )
         } else {
             format!(
-                "while [ ! -e \"$1\" ]; do /bin/sleep 0.02; done; i=0; while [ \"$i\" -lt {BURST_LINES} ]; do printf \"%{BURST_LINE_WIDTH}s\\n\" \"\"; i=$((i + 1)); done; printf \"\\n\\n\\n%s\\n\" \"$2\"; exec /bin/cat"
+                "while [ ! -e \"$1\" ]; do /bin/sleep 0.02; done; /usr/bin/yes \"$4 $(printf '%{BURST_LINE_WIDTH}s' '')\" | /usr/bin/head -n {BURST_LINES}; printf \"\\n\\n\\n%s\\n\" \"$2\"; exec /bin/cat"
             )
         };
         let command = format!(
-            "/bin/sh -c {} ilium-pane-fixture {} {} {}",
+            "/bin/sh -c {} ilium-pane-fixture {} {} {} {}",
             shell_quote(&script),
             shell_quote(&release_file.to_string_lossy()),
             shell_quote(&marker),
             shell_quote(&first_pane_output_complete.to_string_lossy()),
+            shell_quote(&format!("BUFFERED-LINE-{number:03}")),
         );
         connection
             .requests
@@ -296,7 +324,7 @@ async fn no_pool_release_renders_128_panes_and_measures_click_latency() {
             .unwrap();
         receive_tree_snapshot(&mut connection, "name isolated marker pane").await;
     }
-    // Keep all PTYs alive but silent until the full 128-pane load exists, then
+    // Keep all PTYs alive but silent until the full 200-pane load exists, then
     // release their first output together before timing the initial reveal pass.
     let burst_released_at = std::time::Instant::now();
     std::fs::write(&release_file, b"release").unwrap();

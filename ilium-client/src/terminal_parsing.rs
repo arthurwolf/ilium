@@ -146,6 +146,27 @@ impl Drop for ParserStorageLease {
     }
 }
 
+/// Admission contends with other accounting briefly (a worker releasing a
+/// retired engine holds the ledger gate for a few instructions). A single
+/// `try_lock` miss is not pressure, so retry briefly before reporting it;
+/// otherwise a pane fails admission and waits for a later retry, which shows
+/// as delayed terminal content when many panes attach at once.
+const STORAGE_BUSY_RETRY_WINDOW: std::time::Duration = std::time::Duration::from_millis(500);
+
+fn reserve_engine_storage_retrying_busy(
+    storage: &Arc<ParserMemoryGovernor>,
+) -> Result<ParserStorageLease, RejectReason> {
+    let deadline = std::time::Instant::now() + STORAGE_BUSY_RETRY_WINDOW;
+    loop {
+        match storage.reserve_external_storage(MAX_STATE_BYTES) {
+            Err(RejectReason::Busy) if std::time::Instant::now() < deadline => {
+                std::thread::yield_now();
+            }
+            result => return result,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(usize)]
 pub(crate) enum ParserPressure {
@@ -881,11 +902,7 @@ impl TerminalParsing {
             view.admission_pressure = Some(ParserPressure::PaneLimit);
             return Err(error);
         }
-        let storage = match self
-            .shared
-            .storage
-            .reserve_external_storage(MAX_STATE_BYTES)
-        {
+        let storage = match reserve_engine_storage_retrying_busy(&self.shared.storage) {
             Ok(storage) => storage,
             Err(error) => {
                 view.admission_pressure = Some(match error {
@@ -3107,12 +3124,12 @@ mod tests {
     }
 
     #[test]
-    fn default_unpooled_parser_admits_128_panes_with_distinct_contents_and_revisits() {
+    fn default_unpooled_parser_admits_256_panes_with_distinct_contents_and_revisits() {
         let (_bank, parsing) =
             Bank::start_with_storage(0, crate::execution::terminal_storage_quota());
         assert!(!parsing.pool_enabled());
-        let mut panes = Vec::with_capacity(128);
-        for index in 0..128 {
+        let mut panes = Vec::with_capacity(256);
+        for index in 0..256 {
             let id = NodeId(index as u64 + 1);
             let mut view = TerminalView::new(24, 80);
             attach(&parsing, id, &mut view);
@@ -3127,7 +3144,7 @@ mod tests {
             );
             panes.push((id, view));
         }
-        // Admit the full 128-pane registration/output burst before waiting so
+        // Admit the full 256-pane registration/output burst before waiting so
         // this exercises queued parser work instead of serial pane visits.
         wait_installed(&parsing, &mut panes);
         let original_sources: Vec<_> = panes
@@ -3142,14 +3159,14 @@ mod tests {
             .iter()
             .map(|(_, view)| view.frontend.as_ref().unwrap().target.alive.clone())
             .collect();
-        assert_eq!(parsing.engine_claims(), 128);
+        assert_eq!(parsing.engine_claims(), 256);
         assert_eq!(
             parsing.shared.snapshot_bytes.load(Ordering::Acquire),
             original_bytes
         );
         assert_eq!(
             parsing.shared.storage.snapshot().worker_bytes,
-            128 * MAX_STATE_BYTES + original_bytes
+            256 * MAX_STATE_BYTES + original_bytes
         );
         for (index, (_, view)) in panes.iter_mut().enumerate() {
             assert_eq!(view.last_output_sequence(), 1);
@@ -3192,14 +3209,14 @@ mod tests {
                 format!("pane-{index:03} ready")
             );
         }
-        assert_eq!(parsing.engine_claims(), 128);
+        assert_eq!(parsing.engine_claims(), 256);
         assert_eq!(
             parsing.shared.snapshot_bytes.load(Ordering::Acquire),
             original_bytes + current_bytes
         );
         assert_eq!(
             parsing.shared.storage.snapshot().worker_bytes,
-            128 * MAX_STATE_BYTES + original_bytes + current_bytes
+            256 * MAX_STATE_BYTES + original_bytes + current_bytes
         );
         drop(original_sources);
         assert_eq!(
