@@ -1,0 +1,67 @@
+{
+  "api": "ilium:plugin@0.1.0",
+  "id": "ilium.core.kanban",
+  "name": "Kanban",
+  "version": "0.1.0",
+  "publisher": "Ilium",
+  "description": "The Kanban plugin has the id ilium.core.kanban and runs on the client side.",
+  "license": "MIT",
+  "client": {
+    "entry": "client.wasm",
+    "world": "ilium:client/base@0.1.0"
+  },
+  "capabilities": {
+    "client": [
+      "panes.provide-kind",
+      "fs.read:project",
+      "fs.write:project",
+      "fs.watch",
+      "fs.pick",
+      "fs.read:picked",
+      "editor.read",
+      "settings.write-kernel:kanban-board"
+    ]
+  },
+  "activation": [
+    "pane-kind:kanban"
+  ],
+  "contributes": {
+    "pane_kinds": [
+      {
+        "id": "board",
+        "title": "Board",
+        "icon": "layout-kanban",
+        "primitive": "basic",
+        "wants_keys": true,
+        "persist": "metadata"
+      }
+    ],
+    "settings": [
+      {
+        "kind": "tab",
+        "id": "kanban",
+        "title": "Kanban Board",
+        "scope": "client",
+        "rows": [
+          {
+            "type": "toggle",
+            "key": "card_preview",
+            "title": "Card preview",
+            "default": true
+          },
+          {
+            "type": "number",
+            "key": "column_width",
+            "title": "Column width",
+            "minimum": 12,
+            "maximum": 60,
+            "step": 1,
+            "unit": "cells",
+            "default": 24
+          }
+        ]
+      }
+    ]
+  },
+  "limits_tier": "first-party"
+}

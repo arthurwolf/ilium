@@ -1,0 +1,85 @@
+{
+  "api": "ilium:plugin@0.1.0",
+  "id": "ilium.core.agent-toolbar",
+  "name": "Agent toolbar",
+  "version": "0.1.0",
+  "publisher": "Ilium",
+  "description": "The Agent toolbar plugin has the id ilium.core.agent-toolbar and runs on both sides.",
+  "license": "MIT",
+  "server": {
+    "entry": "server.wasm",
+    "world": "ilium:server/base@0.1.0"
+  },
+  "client": {
+    "entry": "client.wasm",
+    "world": "ilium:client/base@0.1.0"
+  },
+  "capabilities": {
+    "server": [
+      "agent.read",
+      "agent.read-prompts",
+      "agent.transcript",
+      "agent.control",
+      "journal.read"
+    ],
+    "client": [
+      "agent.read",
+      "agent.read-prompts",
+      "ui.chrome"
+    ]
+  },
+  "activation": [
+    "event:agent-state-changed",
+    "startup"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "id": "compact",
+        "title": "Compact agent context"
+      },
+      {
+        "id": "history",
+        "title": "Show agent debug history"
+      }
+    ],
+    "tree_toolbar": [
+      {
+        "id": "compact",
+        "icon": "arrows-minimize",
+        "label": "Compact",
+        "command": "compact"
+      }
+    ],
+    "row_actions": [
+      {
+        "id": "history",
+        "icon": "history",
+        "label": "Debug history",
+        "command": "history",
+        "applies_to": [
+          "agent"
+        ],
+        "order": 200
+      }
+    ],
+    "pane_frame_slots": [
+      {
+        "id": "prompt",
+        "placement": "banner",
+        "applies_to": "agents"
+      },
+      {
+        "id": "model",
+        "placement": "header-text",
+        "applies_to": "agents"
+      },
+      {
+        "id": "recover",
+        "placement": "footer-row",
+        "applies_to": "agents"
+      }
+    ]
+  },
+  "limits_tier": "first-party"
+}

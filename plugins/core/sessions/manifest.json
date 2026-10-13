@@ -1,0 +1,33 @@
+{
+  "api": "ilium:plugin@0.1.0",
+  "id": "ilium.core.sessions",
+  "name": "Sessions",
+  "version": "0.1.0",
+  "publisher": "Ilium",
+  "description": "A session is one project's tree of groups and panes together with the processes that run in it.",
+  "license": "MIT",
+  "server": {
+    "entry": "server.wasm",
+    "world": "ilium:server/base@0.1.0"
+  },
+  "client": {
+    "entry": "client.wasm",
+    "world": "ilium:client/base@0.1.0"
+  },
+  "capabilities": {
+    "server": [
+      "panes.read",
+      "panes.lifecycle",
+      "tree.restructure",
+      "agent.read"
+    ],
+    "client": [
+      "settings.write-kernel:session"
+    ]
+  },
+  "activation": [
+    "startup",
+    "view:sessions.list"
+  ],
+  "limits_tier": "first-party"
+}

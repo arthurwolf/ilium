@@ -1,0 +1,42 @@
+{
+  "api": "ilium:plugin@0.1.0",
+  "id": "ilium.core.progress",
+  "name": "Progress",
+  "version": "0.1.0",
+  "publisher": "Ilium",
+  "description": "Progress monitors let a long task show how far it is.",
+  "license": "MIT",
+  "server": {
+    "entry": "server.wasm",
+    "world": "ilium:server/base@0.1.0"
+  },
+  "client": {
+    "entry": "client.wasm",
+    "world": "ilium:client/base@0.1.0"
+  },
+  "capabilities": {
+    "server": [
+      "cli.contribute",
+      "process.run:sh",
+      "process.long-lived",
+      "settings.read-kernel:agent-monitoring"
+    ],
+    "client": [
+      "ui.chrome",
+      "settings.read-kernel:agent-monitoring"
+    ]
+  },
+  "activation": [
+    "startup"
+  ],
+  "contributes": {
+    "cli": {
+      "name": "progress",
+      "summary": "Progress monitors",
+      "output": "jsonl",
+      "requires_server": true,
+      "aliases": ["wait"]
+    }
+  },
+  "limits_tier": "first-party"
+}

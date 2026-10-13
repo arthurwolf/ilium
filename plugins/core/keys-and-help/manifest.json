@@ -1,0 +1,94 @@
+{
+  "api": "ilium:plugin@0.1.0",
+  "id": "ilium.core.keys-and-help",
+  "name": "Keys and help",
+  "version": "0.1.0",
+  "publisher": "Ilium",
+  "description": "The Keys and help plugin (id ilium.core.keys-and-help, side: client) is the plugin form of Ilium's keyboard and help surfaces.",
+  "license": "MIT",
+  "client": {
+    "entry": "client.wasm",
+    "world": "ilium:client/base@0.1.0",
+    "exports": [
+      "views"
+    ]
+  },
+  "capabilities": {
+    "client": [
+      "keymap.read",
+      "settings.read-kernel:keyboard",
+      "help.read",
+      "plugins.manage",
+      "ui.panels",
+      "settings.write-kernel:keyboard"
+    ]
+  },
+  "activation": [
+    "command:keys-and-help.open",
+    "settings:keyboard"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "id": "show-keys",
+        "title": "Show the key reference",
+        "category": "Help",
+        "keywords": [
+          "shortcut",
+          "binding"
+        ]
+      },
+      {
+        "id": "show-plugins",
+        "title": "Manage plugins",
+        "category": "Help"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "ilium.core.keys-and-help/show-keys",
+        "chord": "?",
+        "mode": "prefix"
+      }
+    ],
+    "panels": [
+      {
+        "id": "keys",
+        "title": "Keys",
+        "modal": false
+      },
+      {
+        "id": "plugins",
+        "title": "Plugins",
+        "modal": false
+      }
+    ],
+    "help": [
+      {
+        "id": "keys-overview",
+        "file": "help/keys-overview.md",
+        "title": "Keys"
+      }
+    ],
+    "settings": [
+      {
+        "kind": "section",
+        "id": "chords",
+        "tab": "keyboard",
+        "placement": "end",
+        "title": "Plugin keys",
+        "scope": "client",
+        "rows": [
+          {
+            "type": "keybinding",
+            "key": "show_keys",
+            "title": "Key reference",
+            "command": "show-keys",
+            "default": "?"
+          }
+        ]
+      }
+    ]
+  },
+  "limits_tier": "first-party"
+}

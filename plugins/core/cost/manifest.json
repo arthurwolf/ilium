@@ -1,0 +1,130 @@
+{
+  "api": "ilium:plugin@0.1.0",
+  "id": "ilium.core.cost",
+  "name": "Cost",
+  "version": "0.1.0",
+  "publisher": "Ilium",
+  "description": "The Cost plugin has the id ilium.core.cost and runs on both sides.",
+  "license": "MIT",
+  "server": {
+    "entry": "server.wasm",
+    "world": "ilium:server/base@0.1.0",
+    "exports": [
+      "service-provider"
+    ]
+  },
+  "client": {
+    "entry": "client.wasm",
+    "world": "ilium:client/base@0.1.0"
+  },
+  "capabilities": {
+    "server": [
+      "agent.read",
+      "agent.transcript",
+      "tree.decorate",
+      "http:status.anthropic.com",
+      "http:status.openai.com",
+      "services.provide:ilium.core.cost/usage",
+      "settings.contribute:agent-cost",
+      "settings.write-kernel:agent-cost"
+    ],
+    "client": [
+      "ui.panels",
+      "settings.write-kernel:reset-planning"
+    ]
+  },
+  "activation": [
+    "startup",
+    "view:cost.panel"
+  ],
+  "contributes": {
+    "decoration_slots": [
+      {
+        "id": "cost",
+        "placement": "badge",
+        "priority": 40,
+        "trailing": true
+      }
+    ],
+    "tree_orderings": [
+      {
+        "id": "by-cost",
+        "title": "Cost, highest first",
+        "slot": "cost"
+      }
+    ],
+    "services": {
+      "ilium.core.cost/usage": {
+        "usage": {
+          "params": {
+            "type": "object",
+            "properties": {
+              "window": {
+                "type": "string"
+              }
+            }
+          },
+          "result": {
+            "type": "object",
+            "properties": {
+              "panes": {
+                "type": "object"
+              }
+            },
+            "required": [
+              "panes"
+            ]
+          }
+        }
+      }
+    },
+    "settings": [
+      {
+        "kind": "section",
+        "id": "cost-display",
+        "tab": "agent-cost",
+        "placement": "end",
+        "title": "Display",
+        "scope": "server",
+        "rows": [
+          {
+            "type": "choice",
+            "key": "unit",
+            "title": "Unit",
+            "default": "dollars",
+            "options": [
+              {
+                "value": "dollars",
+                "title": "Dollars"
+              },
+              {
+                "value": "quota",
+                "title": "Quota percent"
+              }
+            ]
+          },
+          {
+            "type": "multi-choice",
+            "key": "display",
+            "title": "Display",
+            "default": [
+              "tree",
+              "status"
+            ],
+            "options": [
+              {
+                "value": "tree",
+                "title": "Tree rows"
+              },
+              {
+                "value": "status",
+                "title": "Status bar"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "limits_tier": "first-party"
+}

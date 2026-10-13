@@ -1,0 +1,71 @@
+{
+  "api": "ilium:plugin@0.1.0",
+  "id": "ilium.core.search",
+  "name": "Search",
+  "version": "0.1.0",
+  "publisher": "Ilium",
+  "description": "The Workspace search plugin (id ilium.core.search, sides: server and client) is the plugin form of Ilium's workspace search.",
+  "license": "MIT",
+  "server": {
+    "entry": "server.wasm",
+    "world": "ilium:server/base@0.1.0",
+    "exports": [
+      "job-runner"
+    ]
+  },
+  "client": {
+    "entry": "client.wasm",
+    "world": "ilium:client/base@0.1.0",
+    "exports": [
+      "views"
+    ]
+  },
+  "capabilities": {
+    "server": [
+      "inference.embed",
+      "tree.read",
+      "terminal.read-screen",
+      "fs.read:project",
+      "jobs.run"
+    ],
+    "client": [
+      "ui.panels"
+    ]
+  },
+  "activation": [
+    "command:search",
+    "job:index",
+    "view:search.panel"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "id": "open",
+        "title": "Search the workspace",
+        "category": "Search"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "ilium.core.search/open",
+        "chord": "/",
+        "mode": "prefix"
+      }
+    ],
+    "panels": [
+      {
+        "id": "search",
+        "title": "Search",
+        "modal": true
+      }
+    ],
+    "jobs": [
+      {
+        "kind": "scan-files",
+        "deadline_ms": 120000,
+        "memory_mib": 128
+      }
+    ]
+  },
+  "limits_tier": "first-party"
+}

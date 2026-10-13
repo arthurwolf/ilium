@@ -1,0 +1,45 @@
+{
+  "api": "ilium:plugin@0.1.0",
+  "id": "ilium.core.smart-copy",
+  "name": "Smart copy",
+  "version": "0.1.0",
+  "publisher": "Ilium",
+  "description": "The Smart Copy plugin (ilium.core.smart-copy, side both) owns selection and copying in terminal panes: mouse selection of regions, the terminal right-click menu, Smart Copy light (paths, commands and hashes recognised from cell styles) and ",
+  "license": "MIT",
+  "server": {
+    "entry": "server.wasm",
+    "world": "ilium:server/base@0.1.0"
+  },
+  "client": {
+    "entry": "client.wasm",
+    "world": "ilium:client/base@0.1.0"
+  },
+  "capabilities": {
+    "server": [
+      "terminal.read-cells",
+      "terminal.read-screen",
+      "inference"
+    ],
+    "client": [
+      "terminal.read-screen",
+      "terminal.pointer",
+      "clipboard.write",
+      "inference"
+    ]
+  },
+  "activation": [
+    "service:copy",
+    "command:smart-copy"
+  ],
+  "contributes": {
+    "context_menu": [
+      {
+        "id": "smart-copy",
+        "title": "Smart Copy",
+        "command": "smart-copy",
+        "target": "terminal"
+      }
+    ]
+  },
+  "limits_tier": "first-party"
+}

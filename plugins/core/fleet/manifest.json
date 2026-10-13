@@ -1,0 +1,79 @@
+{
+  "api": "ilium:plugin@0.1.0",
+  "id": "ilium.core.fleet",
+  "name": "Fleet",
+  "version": "0.1.0",
+  "publisher": "Ilium",
+  "description": "The Fleet plugin has the id ilium.core.fleet and runs on both sides.",
+  "license": "MIT",
+  "server": {
+    "entry": "server.wasm",
+    "world": "ilium:server/base@0.1.0"
+  },
+  "client": {
+    "entry": "client.wasm",
+    "world": "ilium:client/base@0.1.0"
+  },
+  "capabilities": {
+    "server": [
+      "cli.contribute",
+      "sessions.cross",
+      "http-api.route:/create_agent",
+      "terminal.write",
+      "panes.create",
+      "panes.read",
+      "agent.read",
+      "messages.peer:ilium.core.notifications",
+      "services.use:ilium.core.cost/usage"
+    ],
+    "client": [
+      "ui.panels",
+      "settings.write-kernel:api"
+    ]
+  },
+  "activation": [
+    "cli:panes",
+    "cli:broadcast",
+    "http:/create_agent",
+    "service:broadcast",
+    "command:ask-for-update"
+  ],
+  "contributes": {
+    "cli": [
+      {
+        "name": "panes",
+        "summary": "List panes in every session",
+        "output": "jsonl",
+        "requires_server": false
+      },
+      {
+        "name": "broadcast",
+        "summary": "Send a line to agents",
+        "output": "jsonl",
+        "requires_server": false,
+        "argument_groups": [
+          "pane-selector"
+        ]
+      },
+      {
+        "name": "new-pane",
+        "summary": "Create a pane",
+        "output": "mixed",
+        "requires_server": true
+      }
+    ],
+    "http_routes": [
+      {
+        "method": "POST",
+        "path": "/create_agent"
+      }
+    ],
+    "commands": [
+      {
+        "id": "ask-for-update",
+        "title": "Ask for update"
+      }
+    ]
+  },
+  "limits_tier": "first-party"
+}

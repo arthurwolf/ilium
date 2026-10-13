@@ -1,0 +1,30 @@
+{
+  "api": "ilium:plugin@0.1.0",
+  "id": "ilium.core.notifications",
+  "name": "Notifications",
+  "version": "0.1.0",
+  "publisher": "Ilium",
+  "description": "Notifications is the plugin form of Ilium's alerts.",
+  "license": "MIT",
+  "server": {
+    "entry": "server.wasm",
+    "world": "ilium:server/base@0.1.0"
+  },
+  "capabilities": {
+    "server": [
+      "sound.play",
+      "notify.desktop",
+      "agent.read",
+      "tree.read",
+      "tree.attention"
+    ],
+    "client": [
+      "notify.toast",
+      "settings.write-kernel:sound"
+    ]
+  },
+  "activation": [
+    "startup"
+  ],
+  "limits_tier": "first-party"
+}
