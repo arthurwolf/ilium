@@ -732,6 +732,7 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) -> Option<Posit
     }
     let tree_focused = matches!(app.focus, FocusTarget::Tree);
     let focused_pane_id = app.focused_pane_id();
+    let pending_toolbar_mask = app.pending_toolbar_mask();
     let tree_order = app.effective_tree_order();
     let agent_models = app.current_tree_models();
     let mut painted_rows = tree_ui::render(
@@ -779,7 +780,7 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) -> Option<Posit
                 node: app.hovered_tree_node,
                 toolbar_hovered: app.tree_toolbar_hovered,
                 toolbar_action: app.hovered_tree_toolbar_action,
-                pending_toolbar: app.pending_toolbar_mask(),
+                pending_toolbar: pending_toolbar_mask,
                 show_management_actions: app.ui_settings.show_tree_row_management_controls,
             },
             sidebar_files: &app.sidebar_snapshot,
