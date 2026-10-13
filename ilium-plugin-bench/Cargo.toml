@@ -1,0 +1,16 @@
+[package]
+name = "ilium-plugin-bench"
+description = "Benchmark programs B1..B24 and budget tests of the Ilium plugin host (test-only)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+ilium-plugin-host = { version = "0.1.1", path = "../ilium-plugin-host", features = ["testing"] }
+ilium-plugin-testkit = { version = "0.1.1", path = "../ilium-plugin-testkit" }
+
+[dev-dependencies]
+proptest = "1"

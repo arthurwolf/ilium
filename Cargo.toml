@@ -39,7 +39,10 @@ members = [
     "ilium-plugin-sdk-macros",
     "ilium-plugin-sdk",
     "ilium-plugin-testkit",
+    "ilium-plugin-conformance",
+    "ilium-plugin-bench",
     "plugins/core/*",
+    "plugins/fixtures/*",
 ]
 # The patched third-party crate remains a dependency, not an ilium workspace
 # package; this also lets its own upstream-style unit tests run independently.
