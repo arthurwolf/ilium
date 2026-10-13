@@ -603,9 +603,13 @@ mod tests {
         let digest = build_agent_digest(
             &AgentClass::Claude,
             &window(vec![
-                claude_user("<command-name>/goal</command-name><command-args>first objective</command-args>"),
+                claude_user(
+                    "<command-name>/goal</command-name><command-args>first objective</command-args>",
+                ),
                 claude_goal_status("first objective", false),
-                claude_user("<command-name>/goal</command-name><command-args>second objective</command-args>"),
+                claude_user(
+                    "<command-name>/goal</command-name><command-args>second objective</command-args>",
+                ),
                 claude_goal_status("second objective", true),
             ]),
         );

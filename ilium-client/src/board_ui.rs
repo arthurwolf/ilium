@@ -495,9 +495,19 @@ fn board_hint_lines(is_detail_open: bool, width: u16) -> Vec<&'static str> {
         0..=10 => vec![],
         11..=18 => vec!["Enter opens"],
         19..=28 => vec!["Enter opens", "n new card", "c/e edit · d delete"],
-        29..=38 => vec!["Arrows move · Enter details", "n card · c col · e name", "d delete · Shift/drag move"],
-        39..=118 => vec!["←→ cols · ↑↓ cards · Enter details", "n card · c column · e rename · d delete", "Shift+←/→ move · drag cards"],
-        _ => vec!["←/→ column · ↑/↓ header/card · Enter details · n card · c column · e rename · d delete · Shift+arrows move · drag cards"],
+        29..=38 => vec![
+            "Arrows move · Enter details",
+            "n card · c col · e name",
+            "d delete · Shift/drag move",
+        ],
+        39..=118 => vec![
+            "←→ cols · ↑↓ cards · Enter details",
+            "n card · c column · e rename · d delete",
+            "Shift+←/→ move · drag cards",
+        ],
+        _ => vec![
+            "←/→ column · ↑/↓ header/card · Enter details · n card · c column · e rename · d delete · Shift+arrows move · drag cards",
+        ],
     }
 }
 

@@ -354,9 +354,9 @@ impl Presenter {
     pub fn outstanding_frames(&self) -> usize {
         self.slots.used.load(Ordering::Acquire)
     }
-    pub fn submit(&self, frame: PreparedFrame) -> Result<(), SubmissionError> {
+    pub fn submit(&self, frame: PreparedFrame) -> Result<(), Box<SubmissionError>> {
         if !Arc::ptr_eq(&frame._reservation.0, &self.slots) {
-            return Err(SubmissionError {
+            return Err(Box::new(SubmissionError {
                 error: guarded_failure(
                     io::Error::new(
                         io::ErrorKind::InvalidInput,
@@ -365,11 +365,11 @@ impl Presenter {
                     frame._reservation.0.allocation.clone(),
                 ),
                 frame,
-            });
+            }));
         }
         let mut queue = self.shared.queue.lock().unwrap_or_else(|e| e.into_inner());
         if queue.closing || queue.frames.len() >= FRAME_SLOTS {
-            return Err(SubmissionError {
+            return Err(Box::new(SubmissionError {
                 error: guarded_failure(
                     io::Error::new(
                         io::ErrorKind::BrokenPipe,
@@ -378,7 +378,7 @@ impl Presenter {
                     frame._reservation.0.allocation.clone(),
                 ),
                 frame,
-            });
+            }));
         }
         queue.frames.push_back(frame);
         drop(queue);

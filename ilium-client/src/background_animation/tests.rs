@@ -1227,7 +1227,11 @@ fn packing_matches_reference_for_every_braille_pattern_and_density_boundary() {
                                     }
                                 }
                             }
-                            assert_eq!(frame.cells[y * usize::from(width) + x], expected, "size={width}x{height}, pattern={pattern}, density={density}, dither={dither:?}");
+                            assert_eq!(
+                                frame.cells[y * usize::from(width) + x],
+                                expected,
+                                "size={width}x{height}, pattern={pattern}, density={density}, dither={dither:?}"
+                            );
                         }
                     }
                 }
