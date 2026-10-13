@@ -21,6 +21,8 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 
 ### Changed
 
+- The loopback HTTP API exposes shared remote-control routes under `/v1`; CLI controls validate edge moves and confirm mutation outcomes consistently.
+
 - Tree toolbar buttons show a braille spinner while a click waits on something slow: the server confirming a new shell, agent or worktree pane, a new group, project or folder (until the tree gains the node), and the Restructure button for as long as its project LLM jobs run. Spinners time out after 120 seconds. A refused click now keeps its explanation instead of a success message, a refused Git check is reported in the worktree menu, popover and dialog, the disabled worktree popover answers hover and states why it is unavailable, and tree hover stays responsive while the screen redraws.
 - Menu actions that wait on the server (close, move, rename, remove worktree, change project folder, restart pane, restructure apply and revert) show a labelled braille spinner in the status line after 0.5 seconds; freeze, unfreeze, stop process, prune worktree and the worktree checks that precede a dialog show it for at most 10 seconds. New Board, Editor and Split buttons spin until the tree gains the node.
 

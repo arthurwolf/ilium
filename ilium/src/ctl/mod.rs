@@ -22,6 +22,7 @@ pub(crate) use args::CtlArgs;
 use crate::CliError;
 
 /// A failure already shaped for JSONL output.
+#[derive(Debug)]
 pub(crate) struct CtlFailure {
     pub(crate) code: &'static str,
     pub(crate) message: String,
@@ -30,13 +31,25 @@ pub(crate) struct CtlFailure {
 
 impl CtlFailure {
     pub(crate) fn usage(message: impl Into<String>) -> Self {
-        Self { code: "invalid-argument", message: message.into(), exit: 2 }
+        Self {
+            code: "invalid-argument",
+            message: message.into(),
+            exit: 2,
+        }
     }
     pub(crate) fn rejected(message: impl Into<String>) -> Self {
-        Self { code: "rejected", message: message.into(), exit: 3 }
+        Self {
+            code: "rejected",
+            message: message.into(),
+            exit: 3,
+        }
     }
     pub(crate) fn no_session(message: impl Into<String>) -> Self {
-        Self { code: "no-session", message: message.into(), exit: 4 }
+        Self {
+            code: "no-session",
+            message: message.into(),
+            exit: 4,
+        }
     }
 }
 
@@ -46,7 +59,11 @@ impl From<ilium_control::SelectError> for CtlFailure {
             ilium_control::SelectError::Ambiguous { .. } => "ambiguous-selector",
             _ => "not-found",
         };
-        Self { code, message: error.to_string(), exit: 2 }
+        Self {
+            code,
+            message: error.to_string(),
+            exit: 2,
+        }
     }
 }
 

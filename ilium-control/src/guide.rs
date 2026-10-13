@@ -28,7 +28,7 @@ first, then act on them.
 
 2. Create things
    ilium ctl new-pane --project myproject                     shell in a project
-   ilium ctl new-pane --project myproject --cwd /abs/subdir   shell in a folder
+   ilium ctl new-pane --project myproject --workdir /abs/subdir   shell in a folder
    ilium ctl new-pane --agent claude --prompt 'Fix the failing test'
    ilium ctl new-pane --agent codex --worktree --branch fix-login --prompt 'Fix login'
    ilium ctl new-pane -- cargo test                           run a command
@@ -104,14 +104,14 @@ Agent states: working, waiting_approval, waiting_subagents, settling, idle, done
         body: "\
 CREATING THINGS
 
-ilium ctl new-pane [--project P | --parent ID] [--cwd DIR] [--keep-open]
+ilium ctl new-pane [--project P | --parent ID] [--workdir DIR] [--keep-open]
                    [--agent claude|codex|agy [--prompt TEXT]]
                    [--worktree --branch NAME [--base REF]] [-- CMD...]
 
   --project P       the project node to place the pane in (id, path, or name).
                     An absolute path that is not yet a project is added first.
   --parent ID       a specific project or group node instead.
-  --cwd DIR         start the process in this absolute directory.
+  --workdir DIR     start the process in this absolute directory.
   --agent A         start a built-in agent CLI; --prompt is typed once its
                     composer is ready.
   --worktree        create a new Git worktree on --branch (from --base, default
@@ -233,7 +233,13 @@ mod tests {
 
     #[test]
     fn essentials_cover_read_create_control_and_arrange() {
-        for command in ["ilium ctl tree", "ilium ctl new-pane", "ilium ctl send", "ilium ctl move", "--worktree"] {
+        for command in [
+            "ilium ctl tree",
+            "ilium ctl new-pane",
+            "ilium ctl send",
+            "ilium ctl move",
+            "--worktree",
+        ] {
             assert!(ESSENTIALS.contains(command), "{command}");
         }
     }

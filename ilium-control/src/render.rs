@@ -146,7 +146,9 @@ fn yaml_block(value: &Value, indent: usize, out: &mut String) {
                     let mut nested = String::new();
                     yaml_block(item, indent + 2, &mut nested);
                     // First line of a nested block rides on the dash.
-                    let trimmed = nested.strip_prefix(&" ".repeat(indent + 2)).unwrap_or(&nested);
+                    let trimmed = nested
+                        .strip_prefix(&" ".repeat(indent + 2))
+                        .unwrap_or(&nested);
                     let _ = write!(out, "{pad}- {trimmed}");
                 } else {
                     let _ = writeln!(out, "{pad}- {}", scalar(item));
@@ -230,7 +232,8 @@ fn markdown_generic(value: &Value, level: usize, out: &mut String) {
     match value {
         Value::Object(map) => {
             for (key, child) in map {
-                if matches!(child, Value::Object(_) | Value::Array(_)) && !is_empty_collection(child)
+                if matches!(child, Value::Object(_) | Value::Array(_))
+                    && !is_empty_collection(child)
                 {
                     let _ = writeln!(out, "{pad}- **{key}**:");
                     markdown_generic(child, level + 1, out);
@@ -285,7 +288,13 @@ mod tests {
         let value = json!({"a": 1, "list": [{"x": "y", "n": null}, 2], "empty": [], "q k": "yes"});
         let text = yaml(&value);
         assert!(text.contains("a: 1\n"));
-        assert!(text.contains("list:\n  - n: null\n    x: \"y\"\n  - 2\n"));
+        // Key order depends on whether another crate enables serde_json's
+        // `preserve_order`, so accept either order of the item's two keys.
+        assert!(
+            text.contains("list:\n  - n: null\n    x: \"y\"\n  - 2\n")
+                || text.contains("list:\n  - x: \"y\"\n    n: null\n  - 2\n"),
+            "{text}"
+        );
         assert!(text.contains("empty: []\n"));
         assert!(text.contains("\"q k\": \"yes\"\n"));
     }

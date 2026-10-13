@@ -210,8 +210,22 @@ pub enum Operation {
 
 /// Names for the keys `SendKeys` accepts, for error messages and the guide.
 pub const NAMED_KEYS: &[&str] = &[
-    "enter", "esc", "tab", "backspace", "space", "up", "down", "right", "left", "home", "end",
-    "pageup", "pagedown", "delete", "ctrl-<letter>", "text:<literal>",
+    "enter",
+    "esc",
+    "tab",
+    "backspace",
+    "space",
+    "up",
+    "down",
+    "right",
+    "left",
+    "home",
+    "end",
+    "pageup",
+    "pagedown",
+    "delete",
+    "ctrl-<letter>",
+    "text:<literal>",
 ];
 
 /// Bytes a terminal expects for one named key.
@@ -381,13 +395,40 @@ impl Operation {
                     },
                 }
             }
-            Self::MoveStep { node, direction } => ClientRequest::MoveNode {
-                node_id: require_existing(tree, *node)?,
-                direction: match direction {
-                    StepDirection::Up => TreeMoveDirection::Up,
-                    StepDirection::Down => TreeMoveDirection::Down,
-                },
-            },
+            Self::MoveStep { node, direction } => {
+                let node_id = require_existing(tree, *node)?;
+                // A step past either end changes nothing and could never be
+                // confirmed, so refuse it up front.
+                let siblings = tree
+                    .parent_of(node_id)
+                    .and_then(|parent| tree.children_of(parent).ok());
+                if let Some(siblings) = siblings {
+                    let index = siblings.iter().position(|id| *id == node_id);
+                    let at_edge = match direction {
+                        StepDirection::Up => index == Some(0),
+                        StepDirection::Down => {
+                            index.is_some_and(|index| index + 1 == siblings.len())
+                        }
+                    };
+                    if at_edge {
+                        return Err(OperationError::Invalid(format!(
+                            "node {node} is already the {} among its siblings",
+                            if matches!(direction, StepDirection::Up) {
+                                "first"
+                            } else {
+                                "last"
+                            }
+                        )));
+                    }
+                }
+                ClientRequest::MoveNode {
+                    node_id,
+                    direction: match direction {
+                        StepDirection::Up => TreeMoveDirection::Up,
+                        StepDirection::Down => TreeMoveDirection::Down,
+                    },
+                }
+            }
             Self::Reparent {
                 node,
                 parent,
@@ -599,18 +640,19 @@ impl Operation {
             let mut added: Vec<NodeId> = after.all_ids().filter(|id| !known.contains(id)).collect();
             added.sort();
             let wanted = added.into_iter().find(|id| {
-                after
-                    .get(*id)
-                    .is_some_and(|node| kind.is_none_or(|kind| crate::view::node_kind_name(node) == kind))
+                after.get(*id).is_some_and(|node| {
+                    kind.is_none_or(|kind| crate::view::node_kind_name(node) == kind)
+                })
             })?;
             Some(json!({"created": wanted.0}))
         };
         match self {
             Self::Rename { node, title } => (after.get(NodeId(*node))?.name == *title)
                 .then(|| json!({"node": node, "title": title})),
-            Self::Close { pane, .. } => {
-                after.get(NodeId(*pane)).is_none().then(|| json!({"closed": pane}))
-            }
+            Self::Close { pane, .. } => after
+                .get(NodeId(*pane))
+                .is_none()
+                .then(|| json!({"closed": pane})),
             Self::MoveStep { node, .. } => {
                 let position = |tree: &Tree| {
                     let parent = tree.parent_of(NodeId(*node))?;
@@ -621,11 +663,16 @@ impl Operation {
                 (current.is_some() && current != previous)
                     .then(|| json!({"node": node, "parent": current.map(|c| c.0 .0), "index": current.map(|c| c.1)}))
             }
-            Self::Reparent { node, parent, index } => {
+            Self::Reparent {
+                node,
+                parent,
+                index,
+            } => {
                 let current_parent = after.parent_of(NodeId(*node))?;
                 let siblings = after.children_of(current_parent).ok()?;
                 let position = siblings.iter().position(|id| id.0 == *node)?;
-                let wants_index = index.is_none_or(|index| index.min(siblings.len() - 1) == position);
+                let wants_index =
+                    index.is_none_or(|index| index.min(siblings.len() - 1) == position);
                 (current_parent.0 == *parent && wants_index)
                     .then(|| json!({"node": node, "parent": parent, "index": position}))
             }
@@ -680,30 +727,84 @@ impl Operation {
 /// `RestructurePlan` is shown with an empty plan; real plans come from files.
 pub fn examples() -> Vec<Operation> {
     vec![
-        Operation::Rename { node: 12, title: "Login fix".into() },
-        Operation::Close { pane: 12, worktree: WorktreeAction::Keep },
-        Operation::MoveStep { node: 12, direction: StepDirection::Up },
-        Operation::Reparent { node: 12, parent: 5, index: Some(0) },
-        Operation::NewProject { path: PathBuf::from("/abs/path/to/repo") },
-        Operation::NewGroup { parent: 5, name: "Experiments".into() },
-        Operation::NewFolder { parent: 5, path: PathBuf::from("/abs/path/to/folder") },
-        Operation::ChangeProjectFolder { project: 5, path: PathBuf::from("/abs/path") },
+        Operation::Rename {
+            node: 12,
+            title: "Login fix".into(),
+        },
+        Operation::Close {
+            pane: 12,
+            worktree: WorktreeAction::Keep,
+        },
+        Operation::MoveStep {
+            node: 12,
+            direction: StepDirection::Up,
+        },
+        Operation::Reparent {
+            node: 12,
+            parent: 5,
+            index: Some(0),
+        },
+        Operation::NewProject {
+            path: PathBuf::from("/abs/path/to/repo"),
+        },
+        Operation::NewGroup {
+            parent: 5,
+            name: "Experiments".into(),
+        },
+        Operation::NewFolder {
+            parent: 5,
+            path: PathBuf::from("/abs/path/to/folder"),
+        },
+        Operation::ChangeProjectFolder {
+            project: 5,
+            path: PathBuf::from("/abs/path"),
+        },
         Operation::NewPane {
             parent: Some(5),
-            launch: PaneLaunch::Agent { provider: AgentProvider::Claude, prompt: Some("Fix the failing test".into()) },
+            launch: PaneLaunch::Agent {
+                provider: AgentProvider::Claude,
+                prompt: Some("Fix the failing test".into()),
+            },
             cwd: Some(PathBuf::from("/abs/path/subdir")),
             keep_open: false,
         },
-        Operation::SendText { pane: 12, text: "run the tests".into(), enter: true },
-        Operation::SendKeys { pane: 12, keys: vec!["ctrl-c".into(), "enter".into()] },
-        Operation::Schedule { pane: 12, delay_seconds: 600, text: "status?".into(), enter: true },
-        Operation::Enqueue { pane: 12, text: "next step".into(), delivery: QueueDelivery::Once },
+        Operation::SendText {
+            pane: 12,
+            text: "run the tests".into(),
+            enter: true,
+        },
+        Operation::SendKeys {
+            pane: 12,
+            keys: vec!["ctrl-c".into(), "enter".into()],
+        },
+        Operation::Schedule {
+            pane: 12,
+            delay_seconds: 600,
+            text: "status?".into(),
+            enter: true,
+        },
+        Operation::Enqueue {
+            pane: 12,
+            text: "next step".into(),
+            delivery: QueueDelivery::Once,
+        },
         Operation::ClearQueue { pane: 12 },
         Operation::Bookmark { node: 12, on: true },
-        Operation::Expand { node: 5, expanded: false },
-        Operation::LockClosed { node: 5, locked: true },
+        Operation::Expand {
+            node: 5,
+            expanded: false,
+        },
+        Operation::LockClosed {
+            node: 5,
+            locked: true,
+        },
         Operation::Terminate { pane: 12 },
-        Operation::ApplyRestructure { plan: RestructurePlan { children: Vec::new() }, project: Some(5) },
+        Operation::ApplyRestructure {
+            plan: RestructurePlan {
+                children: Vec::new(),
+            },
+            project: Some(5),
+        },
         Operation::RevertRestructure,
         Operation::RevertProjectRestructure { project: 5 },
         Operation::KillSession,
@@ -748,7 +849,10 @@ mod tests {
         );
         let text = serde_json::to_string(&operation).unwrap();
         assert!(text.contains(r#""op":"rename""#));
-        assert!(serde_json::from_str::<Operation>(r#"{"op":"rename","node":4,"title":"x","extra":1}"#).is_err());
+        assert!(serde_json::from_str::<Operation>(
+            r#"{"op":"rename","node":4,"title":"x","extra":1}"#
+        )
+        .is_err());
     }
 
     #[test]
@@ -771,23 +875,44 @@ mod tests {
     #[test]
     fn rename_validates_the_node_and_title() {
         let (tree, _, _, pane) = sample();
-        let ok = Operation::Rename { node: pane.0, title: "new".into() };
+        let ok = Operation::Rename {
+            node: pane.0,
+            title: "new".into(),
+        };
         assert!(matches!(
             ok.requests(&tree, 1).unwrap()[0],
             ClientRequest::RenameNode { .. }
         ));
-        let missing = Operation::Rename { node: 999, title: "new".into() };
-        assert_eq!(missing.requests(&tree, 1), Err(OperationError::NoSuchNode(999)));
-        let empty = Operation::Rename { node: pane.0, title: " ".into() };
-        assert!(matches!(empty.requests(&tree, 1), Err(OperationError::Invalid(_))));
-        let root = Operation::Rename { node: 0, title: "x".into() };
+        let missing = Operation::Rename {
+            node: 999,
+            title: "new".into(),
+        };
+        assert_eq!(
+            missing.requests(&tree, 1),
+            Err(OperationError::NoSuchNode(999))
+        );
+        let empty = Operation::Rename {
+            node: pane.0,
+            title: " ".into(),
+        };
+        assert!(matches!(
+            empty.requests(&tree, 1),
+            Err(OperationError::Invalid(_))
+        ));
+        let root = Operation::Rename {
+            node: 0,
+            title: "x".into(),
+        };
         assert!(root.requests(&tree, 1).is_err());
     }
 
     #[test]
     fn pane_operations_reject_groups() {
         let (tree, _, group, _) = sample();
-        let close = Operation::Close { pane: group.0, worktree: WorktreeAction::Keep };
+        let close = Operation::Close {
+            pane: group.0,
+            worktree: WorktreeAction::Keep,
+        };
         assert!(matches!(
             close.requests(&tree, 1),
             Err(OperationError::WrongKind { .. })
@@ -797,10 +922,13 @@ mod tests {
     #[test]
     fn close_with_worktree_action_uses_the_disposition_request() {
         let (tree, _, _, pane) = sample();
-        let request = Operation::Close { pane: pane.0, worktree: WorktreeAction::RemoveAndBranch }
-            .requests(&tree, 7)
-            .unwrap()
-            .remove(0);
+        let request = Operation::Close {
+            pane: pane.0,
+            worktree: WorktreeAction::RemoveAndBranch,
+        }
+        .requests(&tree, 7)
+        .unwrap()
+        .remove(0);
         assert!(matches!(
             request,
             ClientRequest::ClosePaneWithWorkspaceDisposition {
@@ -816,17 +944,30 @@ mod tests {
         let (tree, project, ..) = sample();
         let operation = Operation::NewPane {
             parent: Some(project.0),
-            launch: PaneLaunch::Agent { provider: AgentProvider::Codex, prompt: Some("go".into()) },
+            launch: PaneLaunch::Agent {
+                provider: AgentProvider::Codex,
+                prompt: Some("go".into()),
+            },
             cwd: Some(PathBuf::from("/tmp/alpha/sub")),
             keep_open: false,
         };
         let request = operation.requests(&tree, 1).unwrap().remove(0);
-        let ClientRequest::NewPane { parent_group, kind, working_directory } = request else {
+        let ClientRequest::NewPane {
+            parent_group,
+            kind,
+            working_directory,
+        } = request
+        else {
             panic!("expected NewPane");
         };
         assert_eq!(parent_group, project);
-        assert!(matches!(kind, NewPaneKind::CommandWithInitialInput { ref command_line, .. } if command_line == "codex"));
-        assert_eq!(working_directory, NewPaneWorkingDirectory::Directory(PathBuf::from("/tmp/alpha/sub")));
+        assert!(
+            matches!(kind, NewPaneKind::CommandWithInitialInput { ref command_line, .. } if command_line == "codex")
+        );
+        assert_eq!(
+            working_directory,
+            NewPaneWorkingDirectory::Directory(PathBuf::from("/tmp/alpha/sub"))
+        );
         let relative = Operation::NewPane {
             parent: None,
             launch: PaneLaunch::Shell,
@@ -841,14 +982,28 @@ mod tests {
         let (tree, ..) = sample();
         let make = |keep_open| Operation::NewPane {
             parent: None,
-            launch: PaneLaunch::Command { command: "ls".into() },
+            launch: PaneLaunch::Command {
+                command: "ls".into(),
+            },
             cwd: None,
             keep_open,
         };
         let closing = make(false).requests(&tree, 1).unwrap().remove(0);
         let kept = make(true).requests(&tree, 1).unwrap().remove(0);
-        assert!(matches!(closing, ClientRequest::NewPane { kind: NewPaneKind::CommandClosingOnExit(_), .. }));
-        assert!(matches!(kept, ClientRequest::NewPane { kind: NewPaneKind::Command(_), .. }));
+        assert!(matches!(
+            closing,
+            ClientRequest::NewPane {
+                kind: NewPaneKind::CommandClosingOnExit(_),
+                ..
+            }
+        ));
+        assert!(matches!(
+            kept,
+            ClientRequest::NewPane {
+                kind: NewPaneKind::Command(_),
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -865,8 +1020,13 @@ mod tests {
     fn outcome_detects_rename_close_and_creation() {
         let (before, project, group, pane) = sample();
         let mut after = before.clone();
-        after.rename_node(pane, "renamed".to_owned(), None, None).ok();
-        let rename = Operation::Rename { node: pane.0, title: "renamed".into() };
+        after
+            .rename_node(pane, "renamed".to_owned(), None, None)
+            .ok();
+        let rename = Operation::Rename {
+            node: pane.0,
+            title: "renamed".into(),
+        };
         if after.get(pane).unwrap().name == "renamed" {
             assert!(rename.outcome(&before, &after).is_some());
         }
@@ -874,23 +1034,66 @@ mod tests {
 
         let mut closed = before.clone();
         closed.remove_node(pane).unwrap();
-        let close = Operation::Close { pane: pane.0, worktree: WorktreeAction::Keep };
+        let close = Operation::Close {
+            pane: pane.0,
+            worktree: WorktreeAction::Keep,
+        };
         assert!(close.outcome(&before, &closed).is_some());
         assert!(close.outcome(&before, &before).is_none());
 
         let mut grown = before.clone();
-        let new_pane = grown.add_pane(group, "n".to_owned(), PaneContentKind::Terminal).unwrap();
-        let operation = Operation::NewPane { parent: Some(project.0), launch: PaneLaunch::Shell, cwd: None, keep_open: false };
-        assert_eq!(operation.outcome(&before, &grown), Some(json!({"created": new_pane.0})));
+        let new_pane = grown
+            .add_pane(group, "n".to_owned(), PaneContentKind::Terminal)
+            .unwrap();
+        let operation = Operation::NewPane {
+            parent: Some(project.0),
+            launch: PaneLaunch::Shell,
+            cwd: None,
+            keep_open: false,
+        };
+        assert_eq!(
+            operation.outcome(&before, &grown),
+            Some(json!({"created": new_pane.0}))
+        );
+    }
+
+    #[test]
+    fn move_step_past_either_end_is_refused() {
+        let (tree, _, first, second) = {
+            let mut tree = Tree::new();
+            let project = tree.add_project(PathBuf::from("/tmp/p")).unwrap();
+            let first = tree.add_group(project, "a").unwrap();
+            let second = tree.add_group(project, "b").unwrap();
+            (tree, project, first, second)
+        };
+        let up = |node: NodeId| Operation::MoveStep {
+            node: node.0,
+            direction: StepDirection::Up,
+        };
+        let down = |node: NodeId| Operation::MoveStep {
+            node: node.0,
+            direction: StepDirection::Down,
+        };
+        assert!(up(first).requests(&tree, 1).is_err());
+        assert!(down(second).requests(&tree, 1).is_err());
+        assert!(up(second).requests(&tree, 1).is_ok());
+        assert!(down(first).requests(&tree, 1).is_ok());
     }
 
     #[test]
     fn move_step_outcome_needs_a_position_change() {
         let (mut before, _, group, first) = sample();
-        let second = before.add_pane(group, "two".to_owned(), PaneContentKind::Terminal).unwrap();
+        let second = before
+            .add_pane(group, "two".to_owned(), PaneContentKind::Terminal)
+            .unwrap();
         let mut after = before.clone();
-        after.move_node_one_step(second, TreeMoveDirection::Up).unwrap();
-        let step = Operation::MoveStep { node: second.0, direction: StepDirection::Up };
+        after
+            .move_node_one_step(second, TreeMoveDirection::Up)
+            .unwrap();
+        let step = Operation::MoveStep {
+            node: second.0,
+            direction: StepDirection::Up,
+        };
         assert!(step.outcome(&before, &after).is_some());
         assert!(step.outcome(&before, &before).is_none());
         let _ = first;
