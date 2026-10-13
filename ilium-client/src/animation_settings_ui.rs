@@ -1848,7 +1848,8 @@ mod tests {
         let mut checked_choices = 0;
         let mut checked_numbers = 0;
         for kind in AnimationKind::ALL {
-            for variant in conditional_scene_variants(kind) {
+            for (variant_index, variant) in conditional_scene_variants(kind).into_iter().enumerate()
+            {
                 for playback_mode in [AnimationPlaybackMode::Loop, AnimationPlaybackMode::Live] {
                     for scene_uses_cell_colors in [false, true] {
                         for color_mode in [
@@ -1867,13 +1868,34 @@ mod tests {
                                 vec![None]
                             };
                             for effective_kind in effective_kinds {
+                                // Each effective kind changes which rows exist, not how a row is
+                                // drawn or hit-tested: cross it with one playback/colour combination
+                                // only, otherwise Semantic multiplies the whole matrix by the kind
+                                // count and the test runs for tens of minutes.
+                                // Playback and colour mode only add or remove shared rows, which
+                                // the first variant of each kind already exercises in every
+                                // combination; later variants differ in scene rows alone.
+                                if (variant_index > 0 || effective_kind.is_some())
+                                    && (playback_mode != AnimationPlaybackMode::Loop
+                                        || scene_uses_cell_colors
+                                        || color_mode != ilium_ambient::style::ColorMode::Color)
+                                {
+                                    continue;
+                                }
                                 let context = RowContext {
                                     effective_kind,
                                     scene_uses_cell_colors,
                                     ..Default::default()
                                 };
                                 let model = RowModel::new(&settings, &context);
-                                for (width, height) in [(80, 24), (120, 40), (160, 50)] {
+                                // Later variants differ from the first only in scene rows, so one
+                                // size is enough there; the first variant covers every size.
+                                let sizes: &[(u16, u16)] = if variant_index == 0 {
+                                    &[(80, 24), (120, 40), (160, 50)]
+                                } else {
+                                    &[(80, 24)]
+                                };
+                                for &(width, height) in sizes {
                                     let area = Rect::new(0, 0, width, height);
                                     let mut terminal =
                                         Terminal::new(TestBackend::new(width, height)).unwrap();

@@ -485,6 +485,32 @@ mod tests {
         assert!(monitor_error.contains("probe timed out"));
     }
 
+    /// Every result message names the next action, so an agent that never
+    /// read the managed progress instructions still continues its request.
+    #[test]
+    fn every_result_message_ends_with_its_next_action() {
+        let done = terminal_result_message(&progress(ProgressTaskStatus::Done));
+        assert!(done.ends_with(
+            "Next: verify this result, then continue with the next step of your current request."
+        ));
+        let task_error = terminal_result_message(&progress(ProgressTaskStatus::Error));
+        assert!(task_error.ends_with("retry, and continue your current request."));
+        assert!(task_error.contains("retained evidence once"));
+        let unknown_next = "Next: do not assume success or failure; check the task directly, then continue your current request.";
+        let unknown = terminal_result_message(&progress(ProgressTaskStatus::Running));
+        assert!(unknown.ends_with(unknown_next));
+        let monitor_error =
+            monitor_failure_message(&progress(ProgressTaskStatus::Running), "probe timed out");
+        assert!(monitor_error.ends_with(unknown_next));
+        // The headline stays on the first line, where transcript statistics
+        // classify the outcome.
+        assert!(done
+            .lines()
+            .next()
+            .unwrap()
+            .ends_with("completed successfully."));
+    }
+
     #[test]
     fn task_controlled_delivery_text_drops_terminal_controls_and_is_bounded() {
         let source = format!(

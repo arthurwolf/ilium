@@ -207,6 +207,11 @@ mod tests {
                 kind: NewPaneKind::CommandClosingOnExit("sleep 1".to_string()),
                 working_directory: NewPaneWorkingDirectory::ProjectRoot,
             },
+            ClientRequest::NewPane {
+                parent_group: NodeId(1),
+                kind: NewPaneKind::PlainShell,
+                working_directory: NewPaneWorkingDirectory::Directory(PathBuf::from("/tmp/work")),
+            },
             ClientRequest::ClosePane { pane_id: NodeId(2) },
             ClientRequest::MoveNode {
                 node_id: NodeId(2),
@@ -1172,6 +1177,10 @@ mod tests {
 
     #[tokio::test]
     async fn recap_screen_frames_round_trip_with_owned_allocation_accounting() {
+        fn variant_index<T: serde::Serialize>(value: &T) -> u32 {
+            let bytes = bincode::serialize(value).expect("serializable");
+            u32::from_le_bytes(bytes[..4].try_into().expect("four-byte variant index"))
+        }
         let request = ClientRequest::GetPaneRecapScreen {
             pane_id: NodeId(42),
         };
@@ -1335,9 +1344,15 @@ mod tests {
         assert_eq!(&cleared_bytes[4..], former_tail.as_slice());
     }
 
+    /// bincode's fixed-width encoding puts the enum variant index in the
+    /// first four bytes. Shared by every test that compares variant order.
+    fn variant_index<T: serde::Serialize>(value: &T) -> u32 {
+        let bytes = bincode::serialize(value).expect("serializable");
+        u32::from_le_bytes(bytes[..4].try_into().expect("four-byte variant index"))
+    }
+
     /// The voice-text messages form one contiguous block of variants at the
-    /// end of each enum. bincode's fixed-width encoding puts the variant
-    /// index in the first four bytes.
+    /// end of each enum.
     #[test]
     fn voice_text_variants_are_contiguous() {
         let register = variant_index(&ClientRequest::RegisterVoiceTextReceiver);

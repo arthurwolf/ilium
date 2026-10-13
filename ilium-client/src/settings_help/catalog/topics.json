@@ -907,8 +907,8 @@
     "title": "Left panel sizing mode",
     "explanation": "“Choose whether the left panel keeps one width, changes with focus, or changes with focus only on narrower terminals.”",
     "specimen": "Use a miniature multiplexer with three tree rows and a terminal pane. Above it, show the selected policy, simulated terminal width, and whether the tree has pointer or keyboard focus. Step through the policies using this example:\n\nExample: fixed 20 / unfocused 14 / focused 24\nWidth threshold: 100 terminal columns\n\nPolicy                  Tree active   Elsewhere\nFixed                        20           20\nFocus-dependent              24           14\nWidth-dependent, width 99    24           14\nWidth-dependent, width 100   24           24\n\nEach selected comparison renders the actual tree–terminal boundary beneath the table; the tree contents remain identical.",
-    "states": "All three policies, both focus conditions, and both sides of the Width-dependent threshold. The selected policy appears in the shared selector; + opens the full list.",
-    "motion": "Left-click advances and right-click reverses the selector; + opens all three policies. A single focus transition can demonstrate easing under Full. Reduced and Off show the target width immediately; provide still comparisons when playback is disabled.",
+    "states": "All three policies, both focus conditions, and both sides of the Width-dependent threshold. The selected policy appears as the highlighted card on wide screens and in the shared selector on narrow ones; + opens the full list.",
+    "motion": "Clicking a card selects it; on narrow screens left-click advances and right-click reverses the selector. + opens all three policies. A single focus transition can demonstrate easing under Full. Reduced and Off show the target width immediately; provide still comparisons when playback is disabled.",
     "caveat": "The simulated terminal width is not the width of the help dialog’s right half. Label it explicitly, and show a cropped terminal specimen rather than falsely compressing terminal cells.",
     "frames": [
       "POLICY: WIDTH-DEPENDENT\nTree focused:   [TREE 24] | Terminal\n",
@@ -4496,6 +4496,18 @@
     "frames": [
       "Off: Working agent with failed task → working indicator",
       "On: Working agent with failed task → failed task icon"
+    ]
+  },
+  {
+    "id": "AP-33",
+    "title": "Section frames",
+    "explanation": "“Frame the toolbar, last prompt and progress footer with rounded rules joined to the pane border.”",
+    "specimen": "Show a detected-agent pane with its toolbar, last prompt and one progress monitor, twice at the same width:\n\nFrames ON\n╭─ pane ───────────────────────╮\n│ toolbar                      │\n├─ ❯ last prompt ──────────────┤\n│ ▎ Explain this test          │\n├──────────────────────────────┤\n│ terminal                     │\n├─ ◔ monitors ─────────────────┤\n│ ◐ running ▕███▍    ▏  42%    │\n╰──────────────────────────────╯\n\nFrames OFF\nThe same content with no rules; the rows they used belong to the terminal.",
+    "states": "On draws the rules and reserves their rows; Off removes them and returns those rows to the terminal.",
+    "motion": "None.",
+    "caveat": "Toggling resizes every displayed terminal, because the rules occupy reserved rows.",
+    "frames": [
+      "Show a detected-agent pane with its toolbar, last prompt and one progress monitor, twice at the same width:\n\nFrames ON\n╭─ pane ───────────────────────╮\n│ toolbar                      │\n├─ ❯ last prompt ──────────────┤\n│ ▎ Explain this test          │\n├──────────────────────────────┤\n│ terminal                     │\n├─ ◔ monitors ─────────────────┤\n│ ◐ running ▕███▍    ▏  42%    │\n╰──────────────────────────────╯\n\nFrames OFF\nThe same content with no rules; the rows they used belong to the terminal."
     ]
   }
 ]

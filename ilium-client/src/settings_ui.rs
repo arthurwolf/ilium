@@ -70,6 +70,20 @@ const TAB_ROW_HEIGHT: u16 = 2;
 const APPEARANCE_TOP_PADDING: u16 = 1;
 const APPEARANCE_ROW_HEIGHT: u16 = 3;
 
+/// Left-panel sizing cards. Each card needs 26 cells to hold its longest
+/// title (`↔  Width-dependent`), the `focus`/`away` bar diagram and the value
+/// line without truncation; three cards plus two gaps is the narrowest
+/// content width at which they still read as a side-by-side choice. Below
+/// it the sizing policy falls back to the compact shared selector row.
+const SIZING_CARD_MINIMUM_WIDTH: u16 = 26;
+const SIZING_CARD_GAP: u16 = 2;
+const SIZING_CARD_HEIGHT: u16 = 7;
+/// Panel widths are drawn against the largest value the settings accept.
+const SIZING_CARD_BAR_SCALE_COLUMNS: u16 = 80;
+/// Content width from which the sizing policy is shown as cards.
+pub const SIZING_CARDS_MINIMUM_CONTENT_WIDTH: u16 =
+    SIZING_CARD_MINIMUM_WIDTH * 3 + SIZING_CARD_GAP * 2;
+
 /// Column where a row's value control (`‹ value ›`) begins -- two leading
 /// spaces plus the padded label column. Shared by rendering and
 /// [`appearance_content_hit`].
@@ -507,6 +521,12 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
             let lines = keyboard_lines(&app.keyboard_settings, &app.keybindings);
             render_scrollable(frame, layout.content_area, lines, state.scroll);
         }
+        SettingsTab::Padding => {
+            crate::padding_ui::render(frame, layout.content_area, app, state);
+            if let Some(dialog) = &state.padding.dialog {
+                crate::padding_dialog::render(frame, area, app, dialog);
+            }
+        }
         SettingsTab::KanbanBoard => {
             let lines = kanban_board_lines(&app.kanban_board_settings, state.selected_row);
             render_scrollable(frame, layout.content_area, lines, state.scroll);
@@ -692,7 +712,7 @@ pub fn settings_help_anchors(
                 );
             }
         }
-        SettingsTab::About => {}
+        SettingsTab::About | SettingsTab::Padding => {}
         SettingsTab::Cost => {
             let all_rows = crate::cost_settings_ui::rows(app);
             for (topic_id, line, row) in
@@ -910,18 +930,23 @@ pub fn settings_help_anchors(
             );
         }
         SettingsTab::Appearance => {
-            push_help_anchor(
-                &mut anchors,
-                layout,
-                "AP-01",
-                4,
-                state.scroll,
-                state.selected_row == 0,
-            );
             let view = appearance_view(
                 &app.ui_settings,
                 state.selected_row,
                 layout.content_area.width,
+            );
+            // With cards there is no sizing row line, so anchor on the cards.
+            let sizing_anchor_line = view
+                .card_hits
+                .first()
+                .map_or(4, |card| card.start_line.into());
+            push_help_anchor(
+                &mut anchors,
+                layout,
+                "AP-01",
+                sizing_anchor_line,
+                state.scroll,
+                state.selected_row == 0,
             );
             for (row, line) in view.row_lines {
                 let id = match row {
@@ -942,6 +967,7 @@ pub fn settings_help_anchors(
                     AppearanceRow::ContextMenuIcons => "AP-15",
                     AppearanceRow::AgentToolbar => "AP-16",
                     AppearanceRow::ShowToolbarLabels => "AP-17",
+                    AppearanceRow::SectionFrames => "AP-33",
                     AppearanceRow::LastPrompt => "AP-18",
                     AppearanceRow::LastPromptMaxLines => "AP-19",
                     AppearanceRow::ProgressMonitor => "AP-20",
@@ -1219,6 +1245,7 @@ pub fn close_button_hit(header_area: Rect, position: Position) -> bool {
 fn tab_icon(tab: SettingsTab) -> &'static str {
     match tab {
         SettingsTab::Appearance => "◐",
+        SettingsTab::Padding => "▢",
         SettingsTab::Icons => "▦",
         SettingsTab::AgentMonitoring => "◉",
         SettingsTab::Cost => "¤",
@@ -1725,7 +1752,7 @@ pub fn max_scroll(tab: SettingsTab, app: &App, selected_row: usize, content_area
             .lines
             .len() as u16,
         SettingsTab::Api => api_lines(&app.api_settings, selected_row).len() as u16,
-        SettingsTab::LlmInstructions => 0,
+        SettingsTab::LlmInstructions | SettingsTab::Padding => 0,
         SettingsTab::About => about_lines().len() as u16,
     };
     total_lines.saturating_sub(content_area.height)
@@ -4467,6 +4494,7 @@ fn appearance_row_label(row: AppearanceRow) -> &'static str {
         AppearanceRow::ContextMenuIcons => "Right-click menu icons",
         AppearanceRow::AgentToolbar => "Agent toolbar",
         AppearanceRow::ShowToolbarLabels => "Agent toolbar labels",
+        AppearanceRow::SectionFrames => "Section frames",
         AppearanceRow::LastPrompt => "Last prompt banner",
         AppearanceRow::LastPromptMaxLines => "Last prompt banner lines",
         AppearanceRow::ProgressMonitor => "Progress monitor",
@@ -4545,6 +4573,9 @@ fn appearance_row_description(row: AppearanceRow) -> &'static str {
         }
         AppearanceRow::ShowToolbarLabels => {
             "Show a text label after every agent-toolbar icon, turning the compact icon row into a traditional, easier-to-read text menu."
+        }
+        AppearanceRow::SectionFrames => {
+            "Draw rounded frame rules, joined to the pane border, around the agent toolbar, the last-prompt banner, the progress footer and the left panel's toolbar. Off removes the rules and gives their rows back to the terminal."
         }
         AppearanceRow::LastPrompt => {
             "Show the last prompt you typed or pasted and submitted into a detected agent pane, in a banner below its toolbar. Only an exactly-reconstructed submission updates it -- an unrecognised input leaves the previous prompt showing."
@@ -4664,6 +4695,13 @@ fn appearance_row_value(row: AppearanceRow, ui: &UiSettings) -> String {
                 "Off (icons only)".to_string()
             }
         }
+        AppearanceRow::SectionFrames => {
+            if ui.section_frames_enabled {
+                "On".to_string()
+            } else {
+                "Off".to_string()
+            }
+        }
         AppearanceRow::LastPrompt => {
             if ui.last_prompt_enabled {
                 "On".to_string()
@@ -4777,6 +4815,7 @@ fn settings_control_row(
             let current_row =
                 *AppearanceRow::visible(app.ui_settings.left_panel_sizing.mode).get(row)?;
             let view = appearance_view(&app.ui_settings, state.selected_row, area.width);
+            // Cards replace the shared selector row at wide widths.
             let (_, line) = view
                 .row_lines
                 .iter()
@@ -5688,9 +5727,26 @@ fn on_off(value: bool) -> String {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SizingCardHit {
+    mode: LeftPanelSizingMode,
+    start_x: u16,
+    end_x: u16,
+    start_line: u16,
+    end_line: u16,
+}
+
 struct AppearanceView {
     lines: Vec<Line<'static>>,
+    /// Empty when the content area is too narrow for cards and the shared
+    /// selector row stands in for them.
+    card_hits: Vec<SizingCardHit>,
     row_lines: Vec<(AppearanceRow, u16)>,
+}
+
+/// Whether the left-panel sizing policy renders as cards at this width.
+fn sizing_cards_fit(content_width: u16) -> bool {
+    content_width >= SIZING_CARDS_MINIMUM_CONTENT_WIDTH
 }
 
 fn appearance_control_label_width(content_width: u16) -> u16 {
@@ -5747,6 +5803,176 @@ fn left_panel_policy_summary(ui: &UiSettings) -> String {
     }
 }
 
+
+fn sizing_card_text(mode: LeftPanelSizingMode) -> (&'static str, &'static str) {
+    match mode {
+        LeftPanelSizingMode::Fixed => ("▣  Fixed", "Always one width"),
+        LeftPanelSizingMode::FocusDependent => ("◉  Focus-dependent", "Grows when you use it"),
+        LeftPanelSizingMode::TerminalWidthDependent => {
+            ("↔  Width-dependent", "Adapts to the terminal")
+        }
+    }
+}
+
+/// `(focused, away)` panel widths a card draws as its two bars.
+fn sizing_card_widths(mode: LeftPanelSizingMode, ui: &UiSettings) -> (u16, u16) {
+    let sizing = &ui.left_panel_sizing;
+    match mode {
+        LeftPanelSizingMode::Fixed => (sizing.fixed_width, sizing.fixed_width),
+        LeftPanelSizingMode::FocusDependent | LeftPanelSizingMode::TerminalWidthDependent => {
+            (sizing.focused_width, sizing.unfocused_width)
+        }
+    }
+}
+
+fn sizing_card_value(mode: LeftPanelSizingMode, ui: &UiSettings) -> String {
+    let sizing = &ui.left_panel_sizing;
+    match mode {
+        LeftPanelSizingMode::Fixed => format!("{} columns", sizing.fixed_width),
+        LeftPanelSizingMode::FocusDependent => {
+            format!("{} ↔ {} columns", sizing.unfocused_width, sizing.focused_width)
+        }
+        LeftPanelSizingMode::TerminalWidthDependent => format!(
+            "≥{} wide: {} columns",
+            sizing.minimum_terminal_width, sizing.focused_width
+        ),
+    }
+}
+
+/// A proportional bar: `columns` out of the setting maximum, at least one cell.
+fn sizing_card_bar(columns: u16, cells: usize) -> (String, String) {
+    let scale = usize::from(SIZING_CARD_BAR_SCALE_COLUMNS);
+    let filled = ((usize::from(columns) * cells + scale / 2) / scale).clamp(1, cells.max(1));
+    ("█".repeat(filled), "░".repeat(cells.saturating_sub(filled)))
+}
+
+fn pad_card_content(mut spans: Vec<Span<'static>>, inner_width: usize) -> Vec<Span<'static>> {
+    let used: usize = spans
+        .iter()
+        .map(|span| UnicodeWidthStr::width(span.content.as_ref()))
+        .sum();
+    spans.push(Span::raw(" ".repeat(inner_width.saturating_sub(used))));
+    spans
+}
+
+/// One card as `SIZING_CARD_HEIGHT` lines of styled spans, exactly `width`
+/// cells wide. The active card is accented; it gets a heavy border while the
+/// sizing row has keyboard selection so the focus ring stays visible.
+fn sizing_card_lines(
+    mode: LeftPanelSizingMode,
+    ui: &UiSettings,
+    width: u16,
+    selected_row: usize,
+) -> Vec<Vec<Span<'static>>> {
+    let active = mode == ui.left_panel_sizing.mode;
+    let focused = active && selected_row == 0;
+    let (top, bottom, side, rule) = if focused {
+        (("┏", "┓"), ("┗", "┛"), "┃", "━")
+    } else {
+        (("╭", "╮"), ("╰", "╯"), "│", "─")
+    };
+    let accent = Style::new().fg(theme::accent_bg());
+    let dim = Style::new().add_modifier(Modifier::DIM);
+    let (border_style, text_style, bar_style, empty_style) = if active {
+        (
+            accent.add_modifier(Modifier::BOLD),
+            Style::new().add_modifier(Modifier::BOLD),
+            accent,
+            dim,
+        )
+    } else {
+        (dim, dim, dim, dim)
+    };
+    let width = usize::from(width.max(4));
+    let inner = width - 2;
+    let (title, description) = sizing_card_text(mode);
+    let (focus_columns, away_columns) = sizing_card_widths(mode, ui);
+    let bar_cells = inner.saturating_sub(8).max(1);
+
+    let framed = |content: Vec<Span<'static>>| -> Vec<Span<'static>> {
+        let mut line = vec![Span::styled(side, border_style)];
+        line.extend(pad_card_content(content, inner));
+        line.push(Span::styled(side, border_style));
+        line
+    };
+    let bar_line = |label: &'static str, columns: u16| -> Vec<Span<'static>> {
+        let (filled, empty) = sizing_card_bar(columns, bar_cells);
+        framed(vec![
+            Span::styled(format!(" {label:<6}"), text_style),
+            Span::styled(filled, bar_style),
+            Span::styled(empty, empty_style),
+        ])
+    };
+    let badge = if active { "● selected" } else { "" };
+    let title_text = truncate_icon_text(&format!(" {title}"), inner);
+    let badge_room = inner.saturating_sub(UnicodeWidthStr::width(title_text.as_str()) + 1);
+    let title_content = if !badge.is_empty() && UnicodeWidthStr::width(badge) <= badge_room {
+        let gap = badge_room - UnicodeWidthStr::width(badge);
+        vec![
+            Span::styled(title_text, text_style),
+            Span::raw(" ".repeat(gap)),
+            Span::styled(badge, accent),
+        ]
+    } else {
+        vec![Span::styled(title_text, text_style)]
+    };
+
+    vec![
+        vec![Span::styled(
+            format!("{}{}{}", top.0, rule.repeat(inner), top.1),
+            border_style,
+        )],
+        framed(title_content),
+        framed(vec![Span::styled(
+            truncate_icon_text(&format!(" {description}"), inner),
+            dim,
+        )]),
+        bar_line("focus", focus_columns),
+        bar_line("away", away_columns),
+        framed(vec![Span::styled(
+            truncate_icon_text(&format!(" {}", sizing_card_value(mode, ui)), inner),
+            text_style,
+        )]),
+        vec![Span::styled(
+            format!("{}{}{}", bottom.0, rule.repeat(inner), bottom.1),
+            border_style,
+        )],
+    ]
+}
+
+fn push_sizing_cards(
+    view: &mut AppearanceView,
+    ui: &UiSettings,
+    selected_row: usize,
+    content_width: u16,
+) {
+    let count = LeftPanelSizingMode::ALL.len() as u16;
+    let card_width = content_width.saturating_sub(SIZING_CARD_GAP * (count - 1)) / count;
+    let start_line = view.lines.len() as u16;
+    let cards = LeftPanelSizingMode::ALL
+        .map(|mode| sizing_card_lines(mode, ui, card_width, selected_row));
+    for line_index in 0..usize::from(SIZING_CARD_HEIGHT) {
+        let mut spans = Vec::new();
+        for (card_index, card) in cards.iter().enumerate() {
+            if card_index > 0 {
+                spans.push(Span::raw(" ".repeat(usize::from(SIZING_CARD_GAP))));
+            }
+            spans.extend(card[line_index].iter().cloned());
+        }
+        view.lines.push(Line::from(spans));
+    }
+    for (card_index, mode) in LeftPanelSizingMode::ALL.into_iter().enumerate() {
+        let start_x = card_index as u16 * (card_width + SIZING_CARD_GAP);
+        view.card_hits.push(SizingCardHit {
+            mode,
+            start_x,
+            end_x: start_x + card_width,
+            start_line,
+            end_line: start_line + SIZING_CARD_HEIGHT,
+        });
+    }
+}
+
 fn appearance_view(ui: &UiSettings, selected_row: usize, content_width: u16) -> AppearanceView {
     let mut view = AppearanceView {
         lines: vec![
@@ -5756,6 +5982,7 @@ fn appearance_view(ui: &UiSettings, selected_row: usize, content_width: u16) -> 
                 Style::new().add_modifier(Modifier::BOLD),
             )),
         ],
+        card_hits: Vec::new(),
         row_lines: Vec::new(),
     };
     view.lines.extend(
@@ -5767,7 +5994,18 @@ fn appearance_view(ui: &UiSettings, selected_row: usize, content_width: u16) -> 
         .map(|line| Line::from(Span::styled(line, Style::new().add_modifier(Modifier::DIM)))),
     );
     view.lines.push(Line::from(""));
+    let cards = sizing_cards_fit(content_width);
+    if cards {
+        push_sizing_cards(&mut view, ui, selected_row, content_width);
+        view.lines.push(Line::from(Span::styled(
+            "Click a card or press \u{2190} \u{2192} to switch; + lists them all.",
+            Style::new().add_modifier(Modifier::DIM),
+        )));
+    }
     view.lines.push(Line::from(""));
+    if !cards {
+        view.lines.push(Line::from(""));
+    }
     view.lines.push(Line::from(Span::styled(
         format!("{} settings", ui.left_panel_sizing.mode.label()),
         Style::new().add_modifier(Modifier::BOLD),
@@ -5782,6 +6020,10 @@ fn appearance_view(ui: &UiSettings, selected_row: usize, content_width: u16) -> 
     let rows = AppearanceRow::visible(ui.left_panel_sizing.mode);
     let label_width = appearance_control_label_width(content_width);
     for (index, row) in rows.into_iter().enumerate() {
+        // The cards above already are the sizing-mode control.
+        if cards && row == AppearanceRow::LeftPanelSizingMode {
+            continue;
+        }
         if row == AppearanceRow::TreeOrder {
             view.lines.push(Line::from(""));
             view.lines.push(Line::from(Span::styled(
@@ -6074,6 +6316,7 @@ pub fn agent_monitoring_content_hit(
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppearanceContentHit {
+    Mode(LeftPanelSizingMode),
     Row { row: AppearanceRow, direction: i32 },
 }
 
@@ -6094,6 +6337,13 @@ pub fn appearance_content_hit(
         .y
         .saturating_sub(content_area.y)
         .saturating_add(scroll);
+    let virtual_x = position.x.saturating_sub(content_area.x);
+    if let Some(card) = view.card_hits.iter().find(|card| {
+        (card.start_line..card.end_line).contains(&virtual_line)
+            && (card.start_x..card.end_x).contains(&virtual_x)
+    }) {
+        return Some(AppearanceContentHit::Mode(card.mode));
+    }
     let row = view
         .row_lines
         .into_iter()
@@ -8161,9 +8411,148 @@ mod tests {
         assert_eq!(monitoring_row_value(model_icon_row, &app), "On");
     }
 
+    fn sizing_text(view: &AppearanceView) -> String {
+        view.lines
+            .iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn sizing_cards_replace_the_selector_row_from_the_minimum_width() {
+        let ui = UiSettings::default();
+
+        let narrow = appearance_view(&ui, 0, SIZING_CARDS_MINIMUM_CONTENT_WIDTH - 1);
+        assert!(narrow.card_hits.is_empty());
+        assert!(narrow
+            .row_lines
+            .iter()
+            .any(|(row, _)| *row == AppearanceRow::LeftPanelSizingMode));
+        assert!(!sizing_text(&narrow).contains("╭"));
+
+        let wide = appearance_view(&ui, 0, SIZING_CARDS_MINIMUM_CONTENT_WIDTH);
+        assert_eq!(wide.card_hits.len(), 3);
+        assert!(!wide
+            .row_lines
+            .iter()
+            .any(|(row, _)| *row == AppearanceRow::LeftPanelSizingMode));
+        // Mode-specific rows and general options stay reachable.
+        assert!(wide
+            .row_lines
+            .iter()
+            .any(|(row, _)| *row == AppearanceRow::TreeOrder));
+        let text = sizing_text(&wide);
+        for title in ["Fixed", "Focus-dependent", "Width-dependent", "focus", "away"] {
+            assert!(text.contains(title), "missing {title}");
+        }
+    }
+
+    #[test]
+    fn sizing_cards_are_side_by_side_equal_width_and_exactly_fit() {
+        let ui = UiSettings::default();
+        for width in [
+            SIZING_CARDS_MINIMUM_CONTENT_WIDTH,
+            SIZING_CARDS_MINIMUM_CONTENT_WIDTH + 1,
+            100,
+            140,
+            200,
+        ] {
+            let view = appearance_view(&ui, 0, width);
+            let hits = &view.card_hits;
+            assert_eq!(hits.len(), 3);
+            assert!(hits.iter().all(|hit| hit.start_line == hits[0].start_line));
+            assert!(hits[0].end_x < hits[1].start_x && hits[1].end_x < hits[2].start_x);
+            assert!(hits[2].end_x <= width);
+            let card_width = hits[0].end_x - hits[0].start_x;
+            assert!(card_width >= SIZING_CARD_MINIMUM_WIDTH);
+            assert!(hits.iter().all(|hit| hit.end_x - hit.start_x == card_width));
+            for line in &view.lines
+                [usize::from(hits[0].start_line)..usize::from(hits[0].end_line)]
+            {
+                let rendered = line.to_string();
+                assert_eq!(
+                    UnicodeWidthStr::width(rendered.as_str()),
+                    usize::from(hits[2].end_x),
+                    "card row must be exactly as wide as its hit zones at width {width}: {rendered}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn clicking_a_sizing_card_selects_its_mode() {
+        let area = Rect::new(0, 0, 120, 40);
+        let ui = UiSettings::default();
+        let view = appearance_view(&ui, 0, area.width);
+        for (index, card) in view.card_hits.iter().enumerate() {
+            let middle = Position::new(
+                area.x + (card.start_x + card.end_x) / 2,
+                area.y + card.start_line + 2,
+            );
+            assert_eq!(
+                appearance_content_hit(area, 0, middle, &ui),
+                Some(AppearanceContentHit::Mode(LeftPanelSizingMode::ALL[index]))
+            );
+            // The corners belong to the card too, the gap between cards does not.
+            assert_eq!(
+                appearance_content_hit(
+                    area,
+                    0,
+                    Position::new(area.x + card.start_x, area.y + card.start_line),
+                    &ui
+                ),
+                Some(AppearanceContentHit::Mode(LeftPanelSizingMode::ALL[index]))
+            );
+        }
+        let gap = Position::new(
+            area.x + view.card_hits[0].end_x,
+            area.y + view.card_hits[0].start_line + 2,
+        );
+        assert_eq!(appearance_content_hit(area, 0, gap, &ui), None);
+        // Scrolling moves the hit zone with the content.
+        let scrolled = Position::new(
+            area.x + 5,
+            area.y + view.card_hits[0].start_line + 2 - 1,
+        );
+        assert_eq!(
+            appearance_content_hit(area, 1, scrolled, &ui),
+            Some(AppearanceContentHit::Mode(LeftPanelSizingMode::ALL[0]))
+        );
+    }
+
+    #[test]
+    fn sizing_card_bars_show_the_configured_widths() {
+        let mut ui = UiSettings::default();
+        ui.left_panel_sizing.fixed_width = 80;
+        let (filled, empty) = sizing_card_bar(80, 16);
+        assert_eq!((filled.chars().count(), empty.chars().count()), (16, 0));
+        let (filled, empty) = sizing_card_bar(16, 16);
+        assert_eq!((filled.chars().count(), empty.chars().count()), (3, 13));
+        // Never an invisible bar, never wider than the card.
+        let (filled, _) = sizing_card_bar(0, 16);
+        assert_eq!(filled.chars().count(), 1);
+        let (filled, empty) = sizing_card_bar(500, 10);
+        assert_eq!(filled.chars().count() + empty.chars().count(), 10);
+        assert_eq!(sizing_card_widths(LeftPanelSizingMode::Fixed, &ui), (80, 80));
+    }
+
+    #[test]
+    fn only_the_active_sizing_card_is_marked_and_the_focus_ring_follows_selection() {
+        let mut ui = UiSettings::default();
+        ui.left_panel_sizing.mode = LeftPanelSizingMode::FocusDependent;
+        let selected = sizing_text(&appearance_view(&ui, 0, 120));
+        assert_eq!(selected.matches("● selected").count(), 1);
+        assert!(selected.contains('┏'));
+        let unselected = sizing_text(&appearance_view(&ui, 3, 120));
+        assert_eq!(unselected.matches("● selected").count(), 1);
+        assert!(!unselected.contains('┏'));
+    }
+
     #[test]
     fn appearance_content_hit_uses_shared_selector_row_and_mode_specific_controls() {
-        let area = Rect::new(0, 0, 90, 30);
+        // Narrower than SIZING_CARDS_MINIMUM_CONTENT_WIDTH: the selector row stands in.
+        let area = Rect::new(0, 0, SIZING_CARDS_MINIMUM_CONTENT_WIDTH - 1, 30);
         let ui = UiSettings::default();
         let view = appearance_view(&ui, 0, area.width);
         let control_start_x = area.x + ROW_LEFT_INSET + appearance_control_label_width(area.width);

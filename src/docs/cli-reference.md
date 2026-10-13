@@ -280,7 +280,7 @@ ilium progress set    --command '<probe>' [--interval-seconds <n>] [--wait [--ti
 ilium progress wait   [<monitor_id>] [--timeout-seconds <n>]
 ilium wait            [<monitor_id>] [--timeout-seconds <n>]
 ilium progress status
-ilium progress clear  [--monitor-id <id> | --all]
+ilium progress clear  [--monitor-id <id> [--running] | --all]
 ```
 
 Requirements:
@@ -331,7 +331,7 @@ Validates the probe, then atomically adds a monitor to this pane, and waits for 
 | `--command <probe>` | required | The probe command line. |
 | `--interval-seconds <n>` | 1 | How often the probe re-runs, from 1 to 86400 (24 hours). |
 | `--wait` | off | After the acknowledgement line, block like `ilium progress wait <monitor_id>` and print its `progress_wait` line. |
-| `--timeout-seconds <n>` | none | With `--wait`: stop waiting after this many seconds (exit 6). Use a value below your shell tool's command time limit. |
+| `--timeout-seconds <n>` | none | With `--wait`: stop waiting after this many seconds (exit 6). Agents should leave it out and give the command their tool's longest wait instead. |
 | `--replace` | off | Clear every monitor of this pane first. Use only on purpose. |
 
 ```sh
@@ -384,7 +384,8 @@ Stops monitors and clears their retained results.
 
 | Option | Meaning |
 | --- | --- |
-| `--monitor-id <id>` | Clear only this monitor. If it no longer exists, the request is rejected with `stale-monitor` and the other monitors are untouched. |
+| `--monitor-id <id>` | Clear only this monitor. If it no longer exists, the request is rejected with `stale-monitor` and the other monitors are untouched. If its task is still running, the request is refused with `monitor-running` (exit 2), because on a pane shared by several agents the ID may belong to another agent's task. |
+| `--running` | With `--monitor-id`: also clear the monitor when its task is still running. |
 | `--all` | Clear every monitor of the pane. |
 | (neither) | Clears the only monitor; refused with `monitor-ambiguous` when the pane has several. |
 
@@ -414,12 +415,11 @@ probe='cat /tmp/tests.status.json'
 
 # 3. Validate, then register and block until the task settles.
 ilium progress check --command "$probe"
-ilium progress set   --command "$probe" --interval-seconds 5 --wait --timeout-seconds 590
+# Run it with the longest wait your tool allows (in Claude Code, as a background
+# command); no --timeout-seconds, so it returns only when the task ends.
+ilium progress set   --command "$probe" --interval-seconds 5 --wait
 
-# 4. If it printed exit 6 (still running), keep waiting on the monitor ID it printed:
-ilium progress wait 3 --timeout-seconds 590
-
-# 5. After handling the result:
+# 4. After handling the result:
 ilium progress clear --monitor-id 3
 ```
 

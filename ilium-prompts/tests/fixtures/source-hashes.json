@@ -37,7 +37,7 @@
   },
   {
     "name": "agent/progress-instructions",
-    "sha256": "772ce6e8fa52380bf8ca3eb1c8b98b7f3cd691a3a10fc7761a485be77577c4b8"
+    "sha256": "58ec19fe8d27e894b2ba20680639cbfaee9dfa323de260e25db6cb2cdc3caf42"
   },
   {
     "name": "agent/coordination-guidance",
@@ -1313,11 +1313,11 @@
   },
   {
     "name": "agent/progress-done",
-    "sha256": "d5091e02b1aec211cafbf6507c9a5716796c725fc16d609ec37a7c25e2ca3626"
+    "sha256": "6f331d1497b9cf38c254c23d104e130badc4adbdc772cc42154bb5d3c0b98a73"
   },
   {
     "name": "agent/progress-error",
-    "sha256": "e6350758ea342fac3195b7effad4e88085d82ce6e47630c1a001b1ec366d2a15"
+    "sha256": "b3026ea9005f81d9aedd7ae1a32f65dd14eeef4eed3cfc4476ada4a76ea06a74"
   },
   {
     "name": "agent/progress-unspecified-error",
@@ -1325,11 +1325,11 @@
   },
   {
     "name": "agent/progress-unknown",
-    "sha256": "c3fd23aac0579cf17f4bc9af03107b345251d2b16662f1013571ffef6c902451"
+    "sha256": "7653582ccde84904c8723944b436f2d45f8c4940606bf1cb28c0fd6e98f29007"
   },
   {
     "name": "agent/progress-monitor-failure",
-    "sha256": "e8a368e516ca0e529a10a72e6c4d4bb6ee904e0e3d66e4f57a7cb3948d3464f1"
+    "sha256": "718f7b44b6727c58ae35921cbc06197b55c56d0d8c1f54fc3379884c67826d81"
   },
   {
     "name": "agent/progress-empty-status",
