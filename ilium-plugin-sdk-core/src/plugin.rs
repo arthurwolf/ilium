@@ -1,11 +1,6 @@
 //! Plugin traits and the host handle (manual: rust-sdk.md "Traits", "Calling the host").
 
-use crate::generated::exports::{
-    ExportAnnotator, ExportCatalogProvider, ExportDetector, ExportHandler, ExportHookHandler,
-    ExportInferenceProvider, ExportJobRunner, ExportLifecycle, ExportMenuProvider, ExportMigrator,
-    ExportRenderer, ExportServiceProvider, ExportSettingsValidate, ExportTokenProvider,
-    ExportViews, ExportVirtualRowsProvider,
-};
+use crate::generated::exports::ExportLifecycle;
 use crate::generated::host::InstanceState;
 use crate::generated::anim::FrameInput;
 use crate::generated::types::{Activation, DeactivationReason, Event, PluginError, Submission};
@@ -32,35 +27,35 @@ impl<T: Lifecycle> ExportLifecycle for T {
     }
 }
 /// Page trait `Handler`: `on_events` (rust-sdk.md "Traits").
-pub use ExportHandler as Handler;
+pub use crate::generated::exports::ExportHandler as Handler;
 /// Page trait `Views`: `render` and `on_action` (rust-sdk.md "Traits").
-pub use ExportViews as Views;
+pub use crate::generated::exports::ExportViews as Views;
 /// Page trait `Detector` (rust-sdk.md "Traits").
-pub use ExportDetector as Detector;
+pub use crate::generated::exports::ExportDetector as Detector;
 /// Page trait `JobRunner` (rust-sdk.md "Traits").
-pub use ExportJobRunner as JobRunner;
+pub use crate::generated::exports::ExportJobRunner as JobRunner;
 /// Page trait `ServiceProvider` (rust-sdk.md "Traits").
-pub use ExportServiceProvider as ServiceProvider;
+pub use crate::generated::exports::ExportServiceProvider as ServiceProvider;
 /// Page trait `InferenceProvider` (rust-sdk.md "Traits").
-pub use ExportInferenceProvider as InferenceProvider;
+pub use crate::generated::exports::ExportInferenceProvider as InferenceProvider;
 /// Page trait `Annotator` (rust-sdk.md "Traits").
-pub use ExportAnnotator as Annotator;
+pub use crate::generated::exports::ExportAnnotator as Annotator;
 /// Page trait `CatalogProvider` (rust-sdk.md "Traits").
-pub use ExportCatalogProvider as CatalogProvider;
+pub use crate::generated::exports::ExportCatalogProvider as CatalogProvider;
 /// Page trait `MenuProvider` (rust-sdk.md "Traits").
-pub use ExportMenuProvider as MenuProvider;
+pub use crate::generated::exports::ExportMenuProvider as MenuProvider;
 /// Page trait `VirtualRowsProvider` (rust-sdk.md "Traits").
-pub use ExportVirtualRowsProvider as VirtualRowsProvider;
+pub use crate::generated::exports::ExportVirtualRowsProvider as VirtualRowsProvider;
 /// Page trait `TokenProvider` (rust-sdk.md "Traits").
-pub use ExportTokenProvider as TokenProvider;
+pub use crate::generated::exports::ExportTokenProvider as TokenProvider;
 /// Page trait `HookHandler` (rust-sdk.md "Traits").
-pub use ExportHookHandler as HookHandler;
+pub use crate::generated::exports::ExportHookHandler as HookHandler;
 /// Page trait `Renderer` for scene renderers in component mode (rust-sdk.md "Traits").
-pub use ExportRenderer as Renderer;
+pub use crate::generated::exports::ExportRenderer as Renderer;
 /// Page trait `SettingsValidate` (rust-sdk.md "Traits").
-pub use ExportSettingsValidate as SettingsValidate;
+pub use crate::generated::exports::ExportSettingsValidate as SettingsValidate;
 /// Page trait `Migrator` (rust-sdk.md "Traits").
-pub use ExportMigrator as Migrator;
+pub use crate::generated::exports::ExportMigrator as Migrator;
 
 /// Every plugin struct implements `Default` and the lifecycle trait (rust-sdk.md "Plugin structure").
 pub trait Plugin: Default + Lifecycle {}

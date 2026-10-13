@@ -1,7 +1,6 @@
 //! UI tree builder (rust-sdk.md "Building a UI tree"). Widget constructors are plain data; the
 //! tree assembly and validation are stubs.
 
-use crate::generated::types::*;
 
 /// Widget constructors, one per `Widget` case, taking the case payload.
 pub mod widgets {

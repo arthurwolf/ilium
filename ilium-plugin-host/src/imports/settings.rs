@@ -55,9 +55,12 @@ impl HostSettings for SettingsImport {
         unimplemented!("host::imports::settings::set_info_rich")
     }
 
-    fn set_meter(&mut self, id: String, segments: Vec<MeterSegment>) -> Result<(), PluginError>;
-    fn open(&mut self, target: String) -> Result<(), PluginError> {
+    fn set_meter(&mut self, id: String, segments: Vec<MeterSegment>) -> Result<(), PluginError> {
         unimplemented!("host::imports::settings::set_meter")
+    }
+
+    fn open(&mut self, target: String) -> Result<(), PluginError> {
+        unimplemented!("host::imports::settings::open")
     }
 
     fn list_settings(&mut self) -> Vec<SettingsRef> {
