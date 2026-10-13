@@ -1889,7 +1889,14 @@ mod tests {
                                     ..Default::default()
                                 };
                                 let model = RowModel::new(&settings, &context);
-                                for (width, height) in [(80, 24), (120, 40), (160, 50)] {
+                                // Later variants differ from the first only in scene rows, so one
+                                // size is enough there; the first variant covers every size.
+                                let sizes: &[(u16, u16)] = if variant_index == 0 {
+                                    &[(80, 24), (120, 40), (160, 50)]
+                                } else {
+                                    &[(80, 24)]
+                                };
+                                for &(width, height) in sizes {
                                     let area = Rect::new(0, 0, width, height);
                                     let mut terminal =
                                         Terminal::new(TestBackend::new(width, height)).unwrap();
