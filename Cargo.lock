@@ -475,6 +475,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "bit-set"
+version = "0.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "56d87354e4229f54a44f7bf2435906a4656dba36026ab6eaca629a2c436a691c"
+dependencies = [
+ "bit-vec 0.10.1",
+]
+
+[[package]]
 name = "bit-vec"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -485,6 +494,16 @@ name = "bit-vec"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b71798fca2c1fe1086445a7258a4bc81e6e49dcd24c8d0dd9a1e57395b603f51"
+
+[[package]]
+name = "bit-vec"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5727b15fa97d4f4fee0a3b7c3d550ed0269f54329207b86388de918604e31269"
+dependencies = [
+ "borsh",
+ "serde",
+]
 
 [[package]]
 name = "bitflags"
@@ -548,6 +567,30 @@ dependencies = [
  "futures-io",
  "futures-lite",
  "piper",
+]
+
+[[package]]
+name = "borsh"
+version = "1.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "553c5d846a6ba5150c65e3b1b8ec073bcf1abc20f9b7220de384a4443ea4e20a"
+dependencies = [
+ "borsh-derive",
+ "bytes",
+ "cfg_aliases 0.2.2",
+]
+
+[[package]]
+name = "borsh-derive"
+version = "1.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "12cdfe656708a01f89b451a7d36466e6fe6c414de0aa18fc54f864f6f9ca9f56"
+dependencies = [
+ "once_cell",
+ "proc-macro-crate",
+ "proc-macro2",
+ "quote",
+ "syn 3.0.6",
 ]
 
 [[package]]
@@ -996,6 +1039,12 @@ name = "core-foundation-sys"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
+
+[[package]]
+name = "core_detect"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f8f80099a98041a3d1622845c271458a2d73e688351bf3cb999266764b81d48"
 
 [[package]]
 name = "core_maths"
@@ -1570,7 +1619,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1703,7 +1752,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2016,6 +2065,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "54614a3312934d066701a80f20f15fa3b56d67ac7722b39eea5b4c9dd1d66c94"
 dependencies = [
  "thread_local",
+]
+
+[[package]]
+name = "generator"
+version = "0.8.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "54ade96dc9003043bce7c035c85a9df5a858bfb2039c5a2e6fdf00f324f6c551"
+dependencies = [
+ "cc",
+ "cfg-if",
+ "libc",
+ "log",
+ "rustversion",
+ "windows-link 0.2.1",
+ "windows-result 0.4.1",
 ]
 
 [[package]]
@@ -2657,6 +2721,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "id-arena"
+version = "2.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3d3067d79b975e8844ca9eb072e16b31c3c1c36928edf9c6789548c524d0d954"
+
+[[package]]
 name = "ident_case"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2716,9 +2786,12 @@ dependencies = [
  "ilium-ipc",
  "ilium-logging",
  "ilium-platform",
+ "ilium-plugin-host",
+ "ilium-plugin-testkit",
  "ilium-pty",
  "ilium-test-fixtures",
  "ilium-transport",
+ "proptest",
  "regex",
  "serde_json",
  "sha2 0.10.9",
@@ -2826,6 +2899,8 @@ dependencies = [
  "ilium-ipc",
  "ilium-logging",
  "ilium-platform",
+ "ilium-plugin-host",
+ "ilium-plugin-testkit",
  "ilium-prompts",
  "ilium-remote-compaction",
  "ilium-server",
@@ -2836,6 +2911,7 @@ dependencies = [
  "ilium-wikipedia",
  "image",
  "mongodb",
+ "proptest",
  "pulldown-cmark",
  "ratatui",
  "ratatui-image",
@@ -2958,7 +3034,10 @@ dependencies = [
  "bincode",
  "ilium-agent-debug",
  "ilium-core",
+ "ilium-plugin-host",
+ "ilium-plugin-testkit",
  "ilium-sound",
+ "proptest",
  "serde",
  "thiserror 2.0.18",
  "tokio",
@@ -3007,6 +3086,360 @@ dependencies = [
  "tempfile",
  "tracing",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "ilium-plugin-api"
+version = "0.1.1"
+dependencies = [
+ "proptest",
+ "semver",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "ilium-plugin-core-agent-detect"
+version = "0.1.1"
+dependencies = [
+ "ilium-plugin-sdk",
+ "proptest",
+ "serde_json",
+]
+
+[[package]]
+name = "ilium-plugin-core-agent-setup"
+version = "0.1.1"
+dependencies = [
+ "ilium-plugin-sdk",
+ "proptest",
+ "serde_json",
+]
+
+[[package]]
+name = "ilium-plugin-core-agent-toolbar"
+version = "0.1.1"
+dependencies = [
+ "ilium-plugin-sdk",
+ "proptest",
+ "serde_json",
+]
+
+[[package]]
+name = "ilium-plugin-core-ambient"
+version = "0.1.1"
+dependencies = [
+ "ilium-plugin-sdk",
+ "proptest",
+ "serde_json",
+]
+
+[[package]]
+name = "ilium-plugin-core-chatroom"
+version = "0.1.1"
+dependencies = [
+ "ilium-plugin-sdk",
+ "proptest",
+ "serde_json",
+]
+
+[[package]]
+name = "ilium-plugin-core-compaction"
+version = "0.1.1"
+dependencies = [
+ "ilium-plugin-sdk",
+ "proptest",
+ "serde_json",
+]
+
+[[package]]
+name = "ilium-plugin-core-cost"
+version = "0.1.1"
+dependencies = [
+ "ilium-plugin-sdk",
+ "proptest",
+ "serde_json",
+]
+
+[[package]]
+name = "ilium-plugin-core-diagnostics"
+version = "0.1.1"
+dependencies = [
+ "ilium-plugin-sdk",
+ "proptest",
+ "serde_json",
+]
+
+[[package]]
+name = "ilium-plugin-core-editor"
+version = "0.1.1"
+dependencies = [
+ "ilium-plugin-sdk",
+ "proptest",
+ "serde_json",
+]
+
+[[package]]
+name = "ilium-plugin-core-fleet"
+version = "0.1.1"
+dependencies = [
+ "ilium-plugin-sdk",
+ "proptest",
+ "serde_json",
+]
+
+[[package]]
+name = "ilium-plugin-core-inference"
+version = "0.1.1"
+dependencies = [
+ "ilium-plugin-sdk",
+ "proptest",
+ "serde_json",
+]
+
+[[package]]
+name = "ilium-plugin-core-kanban"
+version = "0.1.1"
+dependencies = [
+ "ilium-plugin-sdk",
+ "proptest",
+ "serde_json",
+]
+
+[[package]]
+name = "ilium-plugin-core-keys-and-help"
+version = "0.1.1"
+dependencies = [
+ "ilium-plugin-sdk",
+ "proptest",
+ "serde_json",
+]
+
+[[package]]
+name = "ilium-plugin-core-layout"
+version = "0.1.1"
+dependencies = [
+ "ilium-plugin-sdk",
+ "proptest",
+ "serde_json",
+]
+
+[[package]]
+name = "ilium-plugin-core-notifications"
+version = "0.1.1"
+dependencies = [
+ "ilium-plugin-sdk",
+ "proptest",
+ "serde_json",
+]
+
+[[package]]
+name = "ilium-plugin-core-progress"
+version = "0.1.1"
+dependencies = [
+ "ilium-plugin-sdk",
+ "proptest",
+ "serde_json",
+]
+
+[[package]]
+name = "ilium-plugin-core-recap"
+version = "0.1.1"
+dependencies = [
+ "ilium-plugin-sdk",
+ "proptest",
+ "serde_json",
+]
+
+[[package]]
+name = "ilium-plugin-core-scenes"
+version = "0.1.1"
+dependencies = [
+ "ilium-plugin-sdk",
+ "proptest",
+ "serde_json",
+]
+
+[[package]]
+name = "ilium-plugin-core-scheduler"
+version = "0.1.1"
+dependencies = [
+ "ilium-plugin-sdk",
+ "proptest",
+ "serde_json",
+]
+
+[[package]]
+name = "ilium-plugin-core-search"
+version = "0.1.1"
+dependencies = [
+ "ilium-plugin-sdk",
+ "proptest",
+ "serde_json",
+]
+
+[[package]]
+name = "ilium-plugin-core-session-convert"
+version = "0.1.1"
+dependencies = [
+ "ilium-plugin-sdk",
+ "proptest",
+ "serde_json",
+]
+
+[[package]]
+name = "ilium-plugin-core-sessions"
+version = "0.1.1"
+dependencies = [
+ "ilium-plugin-sdk",
+ "proptest",
+ "serde_json",
+]
+
+[[package]]
+name = "ilium-plugin-core-settings"
+version = "0.1.1"
+dependencies = [
+ "ilium-plugin-sdk",
+ "proptest",
+ "serde_json",
+]
+
+[[package]]
+name = "ilium-plugin-core-smart-copy"
+version = "0.1.1"
+dependencies = [
+ "ilium-plugin-sdk",
+ "proptest",
+ "serde_json",
+]
+
+[[package]]
+name = "ilium-plugin-core-terminal"
+version = "0.1.1"
+dependencies = [
+ "ilium-plugin-sdk",
+ "proptest",
+ "serde_json",
+]
+
+[[package]]
+name = "ilium-plugin-core-text-triggers"
+version = "0.1.1"
+dependencies = [
+ "ilium-plugin-sdk",
+ "proptest",
+ "serde_json",
+]
+
+[[package]]
+name = "ilium-plugin-core-titles"
+version = "0.1.1"
+dependencies = [
+ "ilium-plugin-sdk",
+ "proptest",
+ "serde_json",
+]
+
+[[package]]
+name = "ilium-plugin-core-tree"
+version = "0.1.1"
+dependencies = [
+ "ilium-plugin-sdk",
+ "proptest",
+ "serde_json",
+]
+
+[[package]]
+name = "ilium-plugin-core-voice"
+version = "0.1.1"
+dependencies = [
+ "ilium-plugin-sdk",
+ "proptest",
+ "serde_json",
+]
+
+[[package]]
+name = "ilium-plugin-core-worktrees"
+version = "0.1.1"
+dependencies = [
+ "ilium-plugin-sdk",
+ "proptest",
+ "serde_json",
+]
+
+[[package]]
+name = "ilium-plugin-helper"
+version = "0.1.1"
+dependencies = [
+ "ilium-platform",
+ "ilium-plugin-api",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "ilium-plugin-host"
+version = "0.1.1"
+dependencies = [
+ "ilium-execution",
+ "ilium-logging",
+ "ilium-platform",
+ "ilium-plugin-api",
+ "loom",
+ "proptest",
+ "semver",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "toml",
+]
+
+[[package]]
+name = "ilium-plugin-sdk"
+version = "0.1.1"
+dependencies = [
+ "ilium-plugin-sdk-core",
+ "ilium-plugin-sdk-macros",
+ "ilium-plugin-testkit",
+]
+
+[[package]]
+name = "ilium-plugin-sdk-core"
+version = "0.1.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "wit-bindgen",
+]
+
+[[package]]
+name = "ilium-plugin-sdk-macros"
+version = "0.1.1"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.118",
+]
+
+[[package]]
+name = "ilium-plugin-testkit"
+version = "0.1.1"
+dependencies = [
+ "ilium-plugin-sdk-core",
+ "proptest",
+ "rand 0.9.5",
+ "rand_chacha 0.9.0",
+ "serde",
+ "serde_json",
+ "similar",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -3067,12 +3500,16 @@ dependencies = [
  "ilium-ipc",
  "ilium-logging",
  "ilium-platform",
+ "ilium-plugin-api",
+ "ilium-plugin-host",
+ "ilium-plugin-testkit",
  "ilium-prompts",
  "ilium-pty",
  "ilium-sound",
  "ilium-test-fixtures",
  "ilium-transport",
  "notify-rust",
+ "proptest",
  "regex",
  "regex-automata",
  "serde",
@@ -3206,7 +3643,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "525e9ff3e1a4be2fbea1fdf0e98686a6d98b4d8f937e1bf7402245af1909e8c3"
 dependencies = [
  "byteorder-lite",
- "quick-error",
+ "quick-error 2.0.1",
 ]
 
 [[package]]
@@ -3217,6 +3654,8 @@ checksum = "d466e9454f08e4a911e14806c24e16fba1b4c121d1ea474396f396069cf949d9"
 dependencies = [
  "equivalent",
  "hashbrown 0.17.1",
+ "serde",
+ "serde_core",
 ]
 
 [[package]]
@@ -3436,6 +3875,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
+name = "leb128fmt"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "09edd9e8b54e49e587e4f6295a7d29c3ea94d469cb40ab8ca70b288248a81db2"
+
+[[package]]
 name = "libc"
 version = "0.2.186"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3521,6 +3966,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 
 [[package]]
+name = "loom"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "419e0dc8046cb947daa77eb95ae174acfbddb7673b4151f56d1eed8e93fbfaca"
+dependencies = [
+ "cfg-if",
+ "generator",
+ "scoped-tls",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "lru"
 version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3564,6 +4022,17 @@ name = "mach2"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dae608c151f68243f2b000364e1f7b186d9c29845f7d2d85bd31b9ad77ad552b"
+
+[[package]]
+name = "macro-string"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "59a9dbbfc75d2688ed057456ce8a3ee3f48d12eec09229f560f3643b9f275653"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.118",
+]
 
 [[package]]
 name = "macro_magic"
@@ -4039,7 +4508,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4965,6 +5434,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3d595e54a326bc53c1c197b32d295e14b169e3cfeaa8dc82b529f947fba6bcf5"
 
 [[package]]
+name = "proptest"
+version = "1.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b8530004ccb15eae51c7e40009fbe317f341f804db54dc033eec1c50be28cfa0"
+dependencies = [
+ "bit-set 0.11.1",
+ "bit-vec 0.10.1",
+ "bitflags 2.13.0",
+ "chacha20",
+ "core_detect",
+ "num-traits",
+ "rand 0.10.2",
+ "rand_xorshift",
+ "regex-syntax",
+ "rusty-fork",
+ "tempfile",
+ "unarray",
+]
+
+[[package]]
 name = "pulldown-cmark"
 version = "0.13.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5008,6 +5497,12 @@ dependencies = [
  "ref-cast",
  "wide",
 ]
+
+[[package]]
+name = "quick-error"
+version = "1.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1d01941d82fa2ab50be1e79e6714289dd7cde78eba4c074bc5a4374f650dfe0"
 
 [[package]]
 name = "quick-error"
@@ -5176,6 +5671,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "16abd0c1b639e9eb4d7c50c0b8100b0d0f849be2349829c740fe8e6eb4816429"
 dependencies = [
  "rand_core 0.5.1",
+]
+
+[[package]]
+name = "rand_xorshift"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "60aa6af80be32871323012e02e6e65f8a7cc7890931ae421d217ad8fe0df2ccf"
+dependencies = [
+ "rand_core 0.10.1",
 ]
 
 [[package]]
@@ -5601,7 +6105,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5668,6 +6172,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 
 [[package]]
+name = "rusty-fork"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cc6bf79ff24e648f6da1f8d1f011e9cac26491b619e6b9280f2b47f1774e6ee2"
+dependencies = [
+ "fnv",
+ "quick-error 1.2.3",
+ "tempfile",
+ "wait-timeout",
+]
+
+[[package]]
 name = "rustybuzz"
 version = "0.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5729,6 +6245,12 @@ checksum = "91c1b7e4904c873ef0710c1f407dde2e6287de2bebc1bbbf7d430bb7cbffd939"
 dependencies = [
  "windows-sys 0.61.2",
 ]
+
+[[package]]
+name = "scoped-tls"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e1cf6437eb19a8f4a6cc0f7dca544973b0b78843adbfeb3683d1a94a0024a294"
 
 [[package]]
 name = "scopeguard"
@@ -6090,6 +6612,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
 
 [[package]]
+name = "similar"
+version = "2.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbbb5d9659141646ae647b42fe094daf6c6192d1620870b449d9557f748b2daa"
+
+[[package]]
 name = "siphasher"
 version = "0.3.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6444,10 +6972,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6627,7 +7155,7 @@ dependencies = [
  "fax",
  "flate2",
  "half",
- "quick-error",
+ "quick-error 2.0.1",
  "weezl",
  "zune-jpeg",
 ]
@@ -7138,6 +7666,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "unarray"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eaea85b334db583fe3274d12b4cd1880032beab409c0d774be044d4480ab9a94"
+
+[[package]]
 name = "unicase"
 version = "2.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7414,6 +7948,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "wait-timeout"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "09ac3b126d3914f9849036f826e054cbabdc8519970b8998ddaf3b5bd3c65f11"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "walkdir"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7510,6 +8053,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "wasm-encoder"
+version = "0.247.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "30b6733b8b91d010a6ac5b0fb237dc46a19650bc4c67db66857e2e787d437204"
+dependencies = [
+ "leb128fmt",
+ "wasmparser",
+]
+
+[[package]]
+name = "wasm-metadata"
+version = "0.247.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "665fe59e56cc9b419ca6fcca56673e3421d1a5011e3b65caf6b726fd9e041d10"
+dependencies = [
+ "anyhow",
+ "indexmap",
+ "wasm-encoder",
+ "wasmparser",
+]
+
+[[package]]
 name = "wasm-streams"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7520,6 +8085,18 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+]
+
+[[package]]
+name = "wasmparser"
+version = "0.247.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8e6fb4c2bee46c5ea4d40f8cdb5c131725cd976718ec56f1c8e82fbde5fa2a80"
+dependencies = [
+ "bitflags 2.13.0",
+ "hashbrown 0.17.1",
+ "indexmap",
+ "semver",
 ]
 
 [[package]]
@@ -7853,7 +8430,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -8284,6 +8861,91 @@ name = "wit-bindgen"
 version = "0.57.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
+dependencies = [
+ "bitflags 2.13.0",
+ "wit-bindgen-rust-macro",
+]
+
+[[package]]
+name = "wit-bindgen-core"
+version = "0.57.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "02dee27a2dc20d1008016c742ec9fc6ea498492994ba3750be7454cbc97ff04c"
+dependencies = [
+ "anyhow",
+ "heck",
+ "wit-parser",
+]
+
+[[package]]
+name = "wit-bindgen-rust"
+version = "0.57.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b5007dae772945b7a5003d69d90a3a4a78929d41f19d004e980c4259a6af4484"
+dependencies = [
+ "anyhow",
+ "heck",
+ "indexmap",
+ "prettyplease",
+ "syn 2.0.118",
+ "wasm-metadata",
+ "wit-bindgen-core",
+ "wit-component",
+]
+
+[[package]]
+name = "wit-bindgen-rust-macro"
+version = "0.57.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af9237d678e3513ad24e96fe98beacdc0db6405284ba2a2400418cf0d42caa89"
+dependencies = [
+ "anyhow",
+ "macro-string",
+ "prettyplease",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.118",
+ "wit-bindgen-core",
+ "wit-bindgen-rust",
+]
+
+[[package]]
+name = "wit-component"
+version = "0.247.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9d567162a6b9843080e5e0053f696623ff694bae8ae017c9ec536d1873bbe3d8"
+dependencies = [
+ "anyhow",
+ "bitflags 2.13.0",
+ "indexmap",
+ "log",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "wasm-encoder",
+ "wasm-metadata",
+ "wasmparser",
+ "wit-parser",
+]
+
+[[package]]
+name = "wit-parser"
+version = "0.247.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8ffe4064318cdf3c08cb99343b44c039fcefe61ccdf58aa9975285f13d74d1fc"
+dependencies = [
+ "anyhow",
+ "hashbrown 0.17.1",
+ "id-arena",
+ "indexmap",
+ "log",
+ "semver",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "unicode-xid",
+ "wasmparser",
+]
 
 [[package]]
 name = "writeable"

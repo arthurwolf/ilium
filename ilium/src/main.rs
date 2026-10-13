@@ -26,6 +26,7 @@ mod broadcast;
 mod pane_filter;
 mod pane_scan;
 mod panes;
+mod plugin_cmd;
 mod progress_wait;
 mod recap;
 mod voice;

@@ -112,6 +112,7 @@ pub mod open_target;
 pub mod outbound_requests;
 pub mod pane_title;
 pub mod paths;
+pub mod plugin_host;
 pub mod popover;
 pub mod presentation;
 pub mod progress_bar;

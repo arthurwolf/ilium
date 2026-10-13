@@ -22,6 +22,7 @@ ilium-inference = { version = "0.1.1", path = "../ilium-inference" }
 ilium-pty = { version = "0.1.1", path = "../ilium-pty" }
 ilium-core = { version = "0.1.1", path = "../ilium-core" }
 ilium-ipc = { version = "0.1.1", path = "../ilium-ipc" }
+ilium-plugin-host = { version = "0.1.1", path = "../ilium-plugin-host" }
 ilium-logging = { version = "0.1.1", path = "../ilium-logging" }
 ilium-transport = { version = "0.1.1", path = "../ilium-transport" }
 ilium-platform = { version = "0.1.1", path = "../ilium-platform" }
@@ -32,6 +33,10 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal
 tracing = "0.1.44"
 
 [dev-dependencies]
+# Plugin platform test lanes (test-plan.md section 1.5).
+ilium-plugin-host = { version = "0.1.1", path = "../ilium-plugin-host", features = ["testing"] }
+ilium-plugin-testkit = { version = "0.1.1", path = "../ilium-plugin-testkit" }
+proptest = "1"
 ilium-ambient = { version = "0.1.1", path = "../ilium-ambient" }
 ilium-test-fixtures = { version = "0.1.1", path = "../ilium-test-fixtures" }
 sysinfo = "0.39.6"

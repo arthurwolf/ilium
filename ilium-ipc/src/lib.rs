@@ -15,6 +15,7 @@ mod allocation;
 mod bounded_decode;
 mod error;
 mod framing;
+pub mod plugin;
 mod protocol;
 mod startup;
 mod terminal_bytes;
