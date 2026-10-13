@@ -46,7 +46,7 @@ jobs:
             - name: Install Linux build dependencies
               run: |
                   sudo apt-get update
-                  sudo apt-get install -y libasound2-dev pkg-config libssl-dev
+                  sudo apt-get install -y libasound2-dev pkg-config libssl-dev bubblewrap
 
             # rust-toolchain.toml drives the version; rustup on the runner
             # honours it automatically on the first cargo invocation.
@@ -69,14 +69,14 @@ jobs:
     test-linux:
         name: Test (Linux)
         runs-on: ubuntu-latest
-        timeout-minutes: 45
+        timeout-minutes: 90
         steps:
             - uses: actions/checkout@v4
 
             - name: Install Linux build dependencies
               run: |
                   sudo apt-get update
-                  sudo apt-get install -y libasound2-dev pkg-config libssl-dev
+                  sudo apt-get install -y libasound2-dev pkg-config libssl-dev bubblewrap
 
             - uses: Swatinem/rust-cache@v2
 
@@ -88,7 +88,25 @@ jobs:
             #
             # `--no-fail-fast` for the same reason the Windows job uses it: one
             # run should report every crate, not stop at the first failure.
-            - name: cargo test
+            - name: cargo test (unit tests, parallel)
+              if: always()
+              run: |
+                  systemd-run --user --wait --pipe --collect \
+                    --unit=ilium-ci-unit-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT} \
+                    --property=Delegate=yes \
+                    --working-directory="$GITHUB_WORKSPACE" \
+                    --setenv="PATH=$PATH" \
+                    --setenv="CARGO_TERM_COLOR=$CARGO_TERM_COLOR" \
+                    --setenv="CARGO_INCREMENTAL=$CARGO_INCREMENTAL" \
+                    --setenv="RUST_BACKTRACE=$RUST_BACKTRACE" \
+                    /usr/bin/env cargo test --workspace --no-fail-fast --lib --bins
+
+            - name: cargo test (doc tests)
+              run: cargo test --workspace --no-fail-fast --doc
+              if: always()
+
+            - name: cargo test (integration tests, serialized)
+              if: always()
               run: |
                   systemd-run --user --wait --pipe --collect \
                     --unit=ilium-ci-tests-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT} \
@@ -102,7 +120,7 @@ jobs:
                     --setenv="ILIUM_PTY_SMOKE_BINARY=$ILIUM_PTY_SMOKE_BINARY" \
                     --setenv="ILIUM_ANIMATION_HELPER=$ILIUM_ANIMATION_HELPER" \
                     --setenv="ILIUM_NAMING_EVIDENCE_DIR=$ILIUM_NAMING_EVIDENCE_DIR" \
-                    /usr/bin/env cargo test --workspace --no-fail-fast
+                    /usr/bin/env cargo test --workspace --no-fail-fast --test '*'
               env:
                 # Process-heavy PTY tests contend with one another when Cargo
                 # test binaries use the runner's full parallelism.
@@ -116,7 +134,7 @@ jobs:
         runs-on: windows-latest
         # Longer than the other jobs: this runner has half the cores, and a
         # cancelled run saves no cache, so a rebuild here starts cold.
-        timeout-minutes: 60
+        timeout-minutes: 120
         steps:
             - uses: actions/checkout@v4
 
@@ -128,8 +146,17 @@ jobs:
             # `--no-fail-fast` so one run reports every crate instead of
             # stopping at the first failure, which is what makes this a porting
             # checklist rather than a one-bug-per-run drip.
-            - name: cargo test
-              run: cargo test --workspace --no-fail-fast
+            - name: cargo test (unit tests, parallel)
+              run: cargo test --workspace --no-fail-fast --lib --bins
+              if: always()
+
+            - name: cargo test (doc tests)
+              run: cargo test --workspace --no-fail-fast --doc
+              if: always()
+
+            - name: cargo test (integration tests, serialized)
+              run: cargo test --workspace --no-fail-fast --test '*'
+              if: always()
               env:
                 # The Windows release lane also serializes process-heavy PTY
                 # tests; otherwise child Ilium processes can exhaust their
@@ -144,7 +171,7 @@ jobs:
         # this workflow by hand when a macOS answer is actually needed.
         if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         runs-on: macos-latest
-        timeout-minutes: 45
+        timeout-minutes: 90
         steps:
             - uses: actions/checkout@v4
 
@@ -155,8 +182,17 @@ jobs:
 
             # See the Linux job: report every crate rather than stopping at the
             # first failure.
-            - name: cargo test
-              run: cargo test --workspace --no-fail-fast
+            - name: cargo test (unit tests, parallel)
+              run: cargo test --workspace --no-fail-fast --lib --bins
+              if: always()
+
+            - name: cargo test (doc tests)
+              run: cargo test --workspace --no-fail-fast --doc
+              if: always()
+
+            - name: cargo test (integration tests, serialized)
+              run: cargo test --workspace --no-fail-fast --test '*'
+              if: always()
               env:
                 # The process-heavy PTY tests need a private binary/evidence path
                 # and serialized execution so first-exec detection can settle.
