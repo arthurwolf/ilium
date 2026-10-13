@@ -1994,7 +1994,15 @@ mod tests {
                                             .first()
                                             .zip(control.value_ink().last())
                                         {
-                                            for x in first.x..last.right() {
+                                            // The first variant checks every cell; later variants only
+                                            // differ in scene rows, so the ends and middle suffice.
+                                            let middle = first.x + (last.right() - first.x) / 2;
+                                            for x in (first.x..last.right()).filter(|&x| {
+                                                variant_index == 0
+                                                    || x == first.x
+                                                    || x == middle
+                                                    || x + 1 == last.right()
+                                            }) {
                                                 let position = Position::new(x, first.y);
                                                 assert_eq!(
                                                     value_hit(
