@@ -45,6 +45,7 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 
 ### Added
 - Every animation's settings open with a two-sentence introduction of what the animation is and what it shows.
+- Worktree agents that Ilium starts with a prompt get the wrap-up steps appended to that prompt: commit, merge into the recorded base branch, then `ilium close-pane --worktree remove` last.
 - `ilium broadcast` sends a message to every running agent across all projects and sessions on this machine, or only to the agents a selection keeps; `--when-idle` queues it for busy agents, `--dry-run` shows the recipients first, and the calling pane is skipped unless `--include-self` is given.
 - `ilium panes` lists the panes of every running session as JSONL. It shares one set of selection options with `ilium broadcast`: substring and regular-expression text filters over chosen fields with `--invert`, project lists by directory or folder name, `--exclude-project`, `--here`, session, agent, agent state, pane kind and pane id.
 - `ilium progress guard` is a Claude Code `PreToolUse` hook that Ilium installs into each chatroom project's `.claude/settings.local.json`. Inside an Ilium pane it refuses a foreground Bash call with a timeout over three minutes unless the call is an `ilium progress` or `ilium wait` command or runs in the background. Outside a pane, and for malformed hook input, it allows the call.

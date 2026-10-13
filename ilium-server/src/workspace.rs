@@ -873,6 +873,15 @@ pub(crate) struct CreateAgentOptions {
     pub wait_for_prompt: bool,
 }
 
+/// Adds the worktree wrap-up steps after the user's own prompt, so the agent
+/// learns how to close its worktree with `ilium close-pane` when it finishes.
+fn with_worktree_wrap_up(initial_input: String) -> String {
+    format!(
+        "{initial_input}\n\n{}",
+        ilium_prompts::agent::WORKTREE_WRAP_UP_INSTRUCTIONS.trim_end()
+    )
+}
+
 pub(crate) async fn create_agent_in_workspace(
     state: &Arc<ServerState>,
     options: CreateAgentOptions,
@@ -890,6 +899,19 @@ pub(crate) async fn create_agent_in_workspace(
         initial_input,
         wait_for_prompt,
     } = options;
+    // Only worktrees Ilium creates get the wrap-up instruction: an existing
+    // checkout is never removed by `ilium close-pane --worktree remove`.
+    let creates_worktree = matches!(
+        spec,
+        WorkspaceCreateSpec::New { .. } | WorkspaceCreateSpec::NewAtDefaultPath { .. }
+    );
+    let initial_input = initial_input.map(|input| {
+        if creates_worktree {
+            with_worktree_wrap_up(input)
+        } else {
+            input
+        }
+    });
     let project_cwd = match &project_override {
         Some(path) => path.clone(),
         None => project_directory(state, parent_group).await?,
@@ -1624,6 +1646,14 @@ mod tests {
     use super::*;
     use std::process::Command;
     use tempfile::TempDir;
+
+    #[test]
+    fn worktree_agent_prompt_keeps_user_text_then_wrap_up_steps() {
+        let prompt = with_worktree_wrap_up("fix the parser".to_string());
+        assert!(prompt.starts_with("fix the parser\n\n"));
+        assert!(prompt.contains("ilium close-pane --worktree remove"));
+        assert!(!prompt.ends_with('\n'));
+    }
 
     #[tokio::test]
     async fn new_worktree_path_preparation_waits_for_bounded_io_admission() {
