@@ -623,6 +623,8 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             app.receive_workspace_close_offer(request_id, pane_id, can_offer);
             None
         }
+        // One-shot recap consumers own this direct reply; it is not UI state.
+        ServerEvent::PaneRecapScreen { .. } => None,
         ServerEvent::AntigravityStatuslineCompleted { .. } => None,
         ServerEvent::VoiceTextOffered {
             request_id,

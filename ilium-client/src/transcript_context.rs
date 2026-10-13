@@ -204,7 +204,7 @@ pub fn recent_user_prompts(
         .collect())
 }
 
-fn extract_transcript_entries(
+pub(crate) fn extract_transcript_entries(
     class: &AgentClass,
     lines: impl Iterator<Item = String>,
 ) -> Vec<TranscriptEntry> {

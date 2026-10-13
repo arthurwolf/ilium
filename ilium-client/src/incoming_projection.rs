@@ -132,7 +132,8 @@ impl ProjectionRetention {
                 (Slot::Debug(entry.sequence), Some(*pane_id))
             }
             ProjectRestructureRejected { project_id, .. } => (global, Some(*project_id)),
-            ScreenUpdate { .. }
+            PaneRecapScreen { .. }
+            | ScreenUpdate { .. }
             | TerminalReplay { .. }
             | VoiceTextOffered { .. }
             | VoiceTextResult { .. }

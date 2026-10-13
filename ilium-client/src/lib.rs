@@ -115,6 +115,11 @@ pub mod paths;
 pub mod popover;
 pub mod presentation;
 pub mod progress_bar;
+pub mod padding;
+pub mod padding_app;
+pub mod padding_dialog;
+pub mod padding_ui;
+pub mod section_frame;
 pub mod progress_display;
 pub mod progress_guard;
 pub mod project_config;
@@ -122,6 +127,7 @@ pub mod project_naming;
 pub mod prompt_queue;
 mod provider_admission; // Bounded IO preflight retains original request ownership.
 mod proxy_database;
+pub mod recap;
 pub mod release_animation;
 pub mod release_embedding;
 pub mod remote_compaction_app;
@@ -999,6 +1005,8 @@ async fn run_inner(
     app.keyboard_settings = config.keyboard;
     app.keybindings = config.keybindings;
     app.kanban_board_settings = config.kanban_board;
+    app.padding_settings = config.padding;
+    app.sync_padding();
     app.apply_sound_settings(config.sound);
     app.apply_notification_settings(config.notifications);
     app.apply_inference_settings(config.inference);

@@ -9,10 +9,11 @@
 use ilium_core::{PaneProgress, ProgressMonitorHealth, ProgressTaskStatus};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::symbols;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{LineGauge, Paragraph};
+use ratatui::widgets::Paragraph;
 use ratatui::Frame;
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 use crate::last_prompt_banner::wrap_lines;
 use crate::theme::{self, ColorScheme};
@@ -63,25 +64,43 @@ pub fn render(
         .constraints([Constraint::Length(1), Constraint::Min(0)])
         .areas(area);
 
-    render_gauge(frame, gauge_area, progress, "", scheme);
+    render_gauge(frame, gauge_area, progress, None, scheme);
 
-    let lines: Vec<Line> = detail_rows(
+    // Details sit under the gauge's label, behind a dotted gutter, with the
+    // same side padding as the gauge row.
+    let pad = side_padding(detail_area.width);
+    let gutter_width = if detail_area.width > 2 * pad + DETAIL_GUTTER_WIDTH + 8 {
+        DETAIL_GUTTER_WIDTH
+    } else {
+        0
+    };
+    let text_width = detail_area.width.saturating_sub(2 * pad + gutter_width);
+    let rows = detail_rows(
         progress,
-        detail_area.width,
+        text_width.max(1),
         max_detail_lines.min(detail_area.height),
-    )
-    .into_iter()
-    .map(|row| {
-        let mut style = Style::new();
-        if let Some(color) = detail_tone_color(row.tone, scheme) {
-            style = style.fg(color);
-        }
-        if row.tone == DetailTone::Identity || row.is_seam {
-            style = style.add_modifier(Modifier::DIM);
-        }
-        Line::from(Span::styled(row.text, style))
-    })
-    .collect();
+    );
+    let gutter_style = Style::new()
+        .fg(theme::accent_bg())
+        .add_modifier(Modifier::DIM);
+    let lines: Vec<Line> = rows
+        .into_iter()
+        .map(|row| {
+            let mut style = Style::new();
+            if let Some(color) = detail_tone_color(row.tone, scheme) {
+                style = style.fg(color);
+            }
+            if row.tone == DetailTone::Identity || row.is_seam {
+                style = style.add_modifier(Modifier::DIM);
+            }
+            let mut spans = vec![Span::raw(" ".repeat(usize::from(pad)))];
+            if gutter_width > 0 {
+                spans.push(Span::styled(DETAIL_GUTTER, gutter_style));
+            }
+            spans.push(Span::styled(row.text, style));
+            Line::from(spans)
+        })
+        .collect();
     frame.render_widget(
         Paragraph::new(lines).style(theme::last_prompt_style(scheme)),
         detail_area,
@@ -151,24 +170,21 @@ fn render_several(frame: &mut Frame, area: Rect, monitors: &[&PaneProgress], sch
     let hidden = monitors.len() - gauges;
     for (row, progress) in monitors.iter().take(gauges).enumerate() {
         let row_area = Rect::new(area.x, area.y + row as u16, area.width, 1);
-        let suffix = if has_more_row && area.height == 1 {
-            format!(" · +{hidden} more")
-        } else {
-            String::new()
+        let more = (has_more_row && area.height == 1).then_some(hidden);
+        let identity = match more {
+            Some(hidden) => format!("{} \u{b7} +{hidden} more", progress.report.job_id),
+            None => progress.report.job_id.clone(),
         };
-        render_gauge(
-            frame,
-            row_area,
-            progress,
-            &format!(" · {}{suffix}", progress.report.job_id),
-            scheme,
-        );
+        render_gauge(frame, row_area, progress, Some(&identity), scheme);
     }
     if has_more_row && area.height > 1 {
         let row_area = Rect::new(area.x, area.y + gauges as u16, area.width, 1);
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(
-                format!("+{hidden} more monitors · `ilium progress status` lists them"),
+                format!(
+                    "{}+{hidden} more monitors \u{b7} `ilium progress status` lists them",
+                    " ".repeat(usize::from(side_padding(area.width)))
+                ),
                 Style::new().add_modifier(Modifier::DIM),
             )))
             .style(theme::last_prompt_style(scheme)),
@@ -192,10 +208,10 @@ fn render_several(frame: &mut Frame, area: Rect, monitors: &[&PaneProgress], sch
                 .as_deref()
                 .filter(|error| !error.is_empty())
                 .unwrap_or(&progress.report.message);
-            Line::from(Span::styled(
-                format!("{}: {}", progress.report.job_id, text),
-                style,
-            ))
+            Line::from(vec![
+                Span::raw(" ".repeat(usize::from(side_padding(area.width)))),
+                Span::styled(format!("{}: {}", progress.report.job_id, text), style),
+            ])
         })
         .collect();
     let message_area = Rect::new(
@@ -210,15 +226,55 @@ fn render_several(frame: &mut Frame, area: Rect, monitors: &[&PaneProgress], sch
     );
 }
 
-/// One status gauge row: icon, status, percent, unread marker, then
-/// `label_suffix`.
+/// Side padding for the footer rows; panes too narrow to spare it use none.
+fn side_padding(width: u16) -> u16 {
+    if width >= 24 {
+        2
+    } else {
+        0
+    }
+}
+
+/// Dotted vertical gutter that ties the detail rows to the gauge above.
+const DETAIL_GUTTER: &str = "\u{2506} ";
+const DETAIL_GUTTER_WIDTH: u16 = 2;
+/// Partial blocks, one eighth of a cell wider each, for the gauge's edge.
+const EIGHTH_BLOCKS: [&str; 7] = ["\u{258f}", "\u{258e}", "\u{258d}", "\u{258c}", "\u{258b}", "\u{258a}", "\u{2589}"];
+const LONGEST_IDENTITY_WIDTH: usize = 22;
+
+/// The gauge bar as `(symbol, is_partial)` cells: whole blocks, at most one
+/// eighth-block edge cell, then empty track. `bar_width * 8` steps give the
+/// bar eight times the resolution of a whole-cell fill.
+fn gauge_cells(ratio: f64, bar_width: usize) -> Vec<(&'static str, bool)> {
+    let steps = (ratio.clamp(0.0, 1.0) * (bar_width * 8) as f64).round() as usize;
+    let (whole, remainder) = (steps / 8, steps % 8);
+    (0..bar_width)
+        .map(|index| {
+            if index < whole {
+                ("\u{2588}", false)
+            } else if index == whole && remainder > 0 {
+                (EIGHTH_BLOCKS[remainder - 1], true)
+            } else {
+                (" ", false)
+            }
+        })
+        .collect()
+}
+
+/// One status gauge row: `icon label`, an eighth-block bar on a darker
+/// track, then the right-aligned percent and an unread marker. `identity`
+/// (several monitors share the footer) replaces the status label with the
+/// job id, so every row stays attributable.
 fn render_gauge(
     frame: &mut Frame,
     area: Rect,
     progress: &PaneProgress,
-    label_suffix: &str,
+    identity: Option<&str>,
     scheme: ColorScheme,
 ) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
     // Domain validation rejects non-finite/out-of-range reports, but the
     // renderer remains defensive because one bad restored value must never
     // crash the entire TUI.
@@ -226,25 +282,87 @@ fn render_gauge(
     let ratio = (f64::from(percent) / 100.0).clamp(0.0, 1.0);
     let (icon, status_label, status_tone) = status_presentation(progress);
     let status_color = tone_color(status_tone, scheme);
+    let label_text = match identity {
+        Some(identity) => truncate_to_width(identity, LONGEST_IDENTITY_WIDTH),
+        None => status_label.to_string(),
+    };
+    let left = format!("{icon} {label_text}");
+    let percent_text = format!("{percent:>3.0}%");
     // Mirrors the sidebar's bold/dim result glyph: an outcome nobody has
     // looked at yet says so until the pane is focused or typed into.
     let unread = if progress.has_unread_outcome() {
-        "  · unread"
+        if identity.is_some() {
+            "  \u{25cf}"
+        } else {
+            "  \u{25cf} unread"
+        }
     } else {
         ""
     };
-    let label = format!("{icon} {status_label}  {percent:.0}%{unread}{label_suffix}");
-    let gauge = LineGauge::default()
-        .ratio(ratio)
-        .label(Line::from(Span::styled(
-            label,
-            Style::new().fg(status_color).add_modifier(Modifier::BOLD),
-        )))
-        .filled_symbol(symbols::shade::FULL)
-        .unfilled_symbol(symbols::shade::LIGHT)
-        .filled_style(Style::new().fg(status_color).add_modifier(Modifier::BOLD))
-        .unfilled_style(Style::new().fg(theme::muted_accent_bg(scheme)));
-    frame.render_widget(gauge, area);
+
+    let pad = side_padding(area.width);
+    let inner_width = usize::from(area.width.saturating_sub(2 * pad));
+    let left_width = UnicodeWidthStr::width(left.as_str());
+    let percent_width = UnicodeWidthStr::width(percent_text.as_str());
+    let unread_width = UnicodeWidthStr::width(unread);
+    // Left label, gap, bar, gap, percent, unread marker.
+    let fixed = left_width + 2 + 2 + percent_width + unread_width;
+    let without_unread = left_width + 2 + 2 + percent_width;
+    let (bar_width, unread) = if inner_width >= fixed + 6 {
+        (inner_width - fixed, unread)
+    } else if inner_width >= without_unread + 6 {
+        (inner_width - without_unread, "")
+    } else {
+        (0, "")
+    };
+
+    let base = Style::new().bg(theme::muted_accent_bg(scheme));
+    let strong = base.fg(status_color).add_modifier(Modifier::BOLD);
+    let mut spans = vec![
+        Span::styled(" ".repeat(usize::from(pad)), base),
+        Span::styled(left, strong),
+    ];
+    if bar_width > 0 {
+        spans.push(Span::styled("  ", base));
+        let track = theme::gauge_track_bg(scheme);
+        for (symbol, is_partial) in gauge_cells(ratio, bar_width) {
+            // Whole blocks and the partial edge are drawn in the status
+            // colour; the partial cell's empty remainder shows the track.
+            let style = if symbol == " " || is_partial {
+                Style::new().fg(status_color).bg(track)
+            } else {
+                Style::new().fg(status_color).bg(status_color)
+            };
+            spans.push(Span::styled(symbol, style));
+        }
+        spans.push(Span::styled("  ", base));
+    } else {
+        spans.push(Span::styled("  ", base));
+    }
+    spans.push(Span::styled(percent_text, strong));
+    if !unread.is_empty() {
+        spans.push(Span::styled(unread, base.fg(status_color)));
+    }
+    frame.render_widget(Paragraph::new(Line::from(spans)).style(base), area);
+}
+
+/// `text` cut to at most `width` display columns, ending in `…` when cut.
+fn truncate_to_width(text: &str, width: usize) -> String {
+    if UnicodeWidthStr::width(text) <= width {
+        return text.to_string();
+    }
+    let mut result = String::new();
+    let mut used = 0;
+    for grapheme in text.graphemes(true) {
+        let grapheme_width = UnicodeWidthStr::width(grapheme);
+        if used + grapheme_width + 1 > width {
+            break;
+        }
+        result.push_str(grapheme);
+        used += grapheme_width;
+    }
+    result.push('\u{2026}');
+    result
 }
 
 /// Hover content for a report's long description: the compact message as the
@@ -677,7 +795,7 @@ mod tests {
     fn the_gauge_uses_distinct_filled_and_unfilled_glyphs() {
         let progress = progress(ProgressTaskStatus::Running, 50.0, "", None).unwrap();
         let rows = rendered_rows(&progress, 40, 2);
-        assert!(rows[0].contains(symbols::shade::FULL));
-        assert!(rows[0].contains(symbols::shade::LIGHT));
+        assert!(rows[0].contains('\u{2588}'));
+        assert!(rows[0].contains(" 50%"));
     }
 }

@@ -89,6 +89,8 @@ Every pane row has three icon slots before its title.
 | Objective | The agent's `/goal`, a monitored task, or a scheduled input |
 | Now | What the agent is doing this moment |
 
+With **Settings -> Agent Monitoring -> Model icons** on, the identity slot shows the session's selected model icon instead of the provider icon. The setting is off by default (`[ui].agent_tree_model_icons`), and models without an icon fall back to the provider icon.
+
 Identity renders as an icon by default. In **Settings -> User Interface** you can choose full name, one letter, the configured icon, or no identifier. Every glyph below is configurable in **Settings -> Icons** and under `[ui]` in `config.toml`.
 
 Hover any row to see a popover with the meaning and a grey "why" line giving the rule that selected the icon and the evidence observed.
@@ -266,6 +268,8 @@ Every row has an in-app help topic (open it from the row).
 ## Last prompt banner and agent toolbar
 
 Two optional per-pane displays sit above a detected agent's terminal.
+
+When **Section frames** (`[ui].section_frames_enabled`, default on) is on, rounded rules joined to the pane border separate the toolbar, the prompt banner (which sits behind a quote gutter with side padding) and the progress footer (an eighth-block gauge, right-aligned percentage and a dotted detail gutter). Each rule uses one extra row, shown only while its section has content. Turning frames off removes the rules and returns their rows to the terminal.
 
 - **Last prompt banner** (`[ui].last_prompt_enabled`, default on). Shows the last prompt Ilium could reconstruct exactly as submitted to the agent. If later input cannot be recognised, the banner keeps the last captured prompt rather than guessing. **Last prompt banner lines** (`[ui].last_prompt_max_lines`, 1 to 20, default 4) fixes how many rows are reserved; longer prompts wrap and keep their beginning and end.
 - **Agent toolbar** (`[ui].agent_toolbar_enabled`, default on). Action buttons above detected agents (for example compact, clear, model, effort, stop, copy screen, Smart Copy, copy last message; which appear depends on the agent). Hide or reopen it from the pane's icon or the right-click menu (**Hide agent toolbar** / **Show agent toolbar**). **Agent toolbar labels** adds text after the icons.

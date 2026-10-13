@@ -16,6 +16,7 @@ pub enum ConfigurationChange {
     Onboarding(crate::onboarding::progress::OnboardingProgress),
     Keyboard(crate::config::KeyboardSettings),
     Kanban(crate::config::KanbanBoardSettings),
+    Padding(crate::padding::PaddingSettings),
     Sound(ilium_sound::SoundSettings),
     Notifications(ilium_sound::NotificationSettings),
     Inference(Box<ilium_inference::InferenceSettings>),
@@ -104,6 +105,8 @@ impl Job for ConfigurationWrite {
             Keyboard(value) => crate::config::save_keyboard_settings(directory, &value)
                 .map(|()| ConfigurationSaved::Plain),
             Kanban(value) => crate::config::save_kanban_board_settings(directory, &value)
+                .map(|()| ConfigurationSaved::Plain),
+            Padding(value) => crate::config::save_padding_settings(directory, &value)
                 .map(|()| ConfigurationSaved::Plain),
             Sound(value) => crate::config::save_sound_settings(directory, &value)
                 .map(|()| ConfigurationSaved::Plain),
@@ -282,7 +285,7 @@ impl ConfigurationChange {
                 serialized_bound(value)?
                     + std::mem::size_of::<crate::background_animation::AnimationSettings>()
             }
-            Terminal(_) | Editor(_) | Session { .. } | Keyboard(_) | Kanban(_) | Separators(_) => 0,
+            Terminal(_) | Editor(_) | Session { .. } | Keyboard(_) | Kanban(_) | Padding(_) | Separators(_) => 0,
             ProjectName {
                 proposal: value, ..
             } => {
