@@ -233,7 +233,13 @@ mod tests {
 
     #[test]
     fn essentials_cover_read_create_control_and_arrange() {
-        for command in ["ilium ctl tree", "ilium ctl new-pane", "ilium ctl send", "ilium ctl move", "--worktree"] {
+        for command in [
+            "ilium ctl tree",
+            "ilium ctl new-pane",
+            "ilium ctl send",
+            "ilium ctl move",
+            "--worktree",
+        ] {
             assert!(ESSENTIALS.contains(command), "{command}");
         }
     }

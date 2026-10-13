@@ -3,7 +3,7 @@ use std::collections::HashSet;
 
 use ratatui_core::layout::{Position, Rect};
 
-use crate::flatten::{Flattened, flatten};
+use crate::flatten::{flatten, Flattened};
 use crate::tree_item::TreeItem;
 
 /// Keeps the state of what is currently selected and what was opened in a [`Tree`](crate::Tree).

@@ -117,7 +117,8 @@ pub fn pane_detail(tree: &Tree, id: NodeId) -> Option<Value> {
     );
     detail.insert(
         "project_id".into(),
-        tree.project_ancestor(id).map_or(Value::Null, |id| json!(id.0)),
+        tree.project_ancestor(id)
+            .map_or(Value::Null, |id| json!(id.0)),
     );
     detail.insert(
         "project_path".into(),

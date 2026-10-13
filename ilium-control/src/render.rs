@@ -146,7 +146,9 @@ fn yaml_block(value: &Value, indent: usize, out: &mut String) {
                     let mut nested = String::new();
                     yaml_block(item, indent + 2, &mut nested);
                     // First line of a nested block rides on the dash.
-                    let trimmed = nested.strip_prefix(&" ".repeat(indent + 2)).unwrap_or(&nested);
+                    let trimmed = nested
+                        .strip_prefix(&" ".repeat(indent + 2))
+                        .unwrap_or(&nested);
                     let _ = write!(out, "{pad}- {trimmed}");
                 } else {
                     let _ = writeln!(out, "{pad}- {}", scalar(item));
@@ -230,7 +232,8 @@ fn markdown_generic(value: &Value, level: usize, out: &mut String) {
     match value {
         Value::Object(map) => {
             for (key, child) in map {
-                if matches!(child, Value::Object(_) | Value::Array(_)) && !is_empty_collection(child)
+                if matches!(child, Value::Object(_) | Value::Array(_))
+                    && !is_empty_collection(child)
                 {
                     let _ = writeln!(out, "{pad}- **{key}**:");
                     markdown_generic(child, level + 1, out);

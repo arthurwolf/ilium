@@ -48,7 +48,8 @@ async fn resolve_socket(
     if let Some(socket_path) = &target.socket {
         let wanted = ilium_platform::paths::canonicalize(socket_path)
             .unwrap_or_else(|_| socket_path.clone());
-        let live = pane_scan::live_sockets().map_err(|error| CtlFailure::no_session(error.to_string()))?;
+        let live =
+            pane_scan::live_sockets().map_err(|error| CtlFailure::no_session(error.to_string()))?;
         return live
             .into_iter()
             .find(|socket| {
@@ -56,7 +57,9 @@ async fn resolve_socket(
                     .unwrap_or_else(|_| socket.socket_path.clone())
                     == wanted
             })
-            .ok_or_else(|| CtlFailure::no_session(format!("no live session at {}", socket_path.display())));
+            .ok_or_else(|| {
+                CtlFailure::no_session(format!("no live session at {}", socket_path.display()))
+            });
     }
     if target.session.is_none() {
         if let Ok(identity) = crate::pane_identity_from_env() {
@@ -66,7 +69,10 @@ async fn resolve_socket(
             });
         }
     }
-    let name = target.session.as_deref().unwrap_or(session::DEFAULT_SESSION_NAME);
+    let name = target
+        .session
+        .as_deref()
+        .unwrap_or(session::DEFAULT_SESSION_NAME);
     let project_session = session::resolve_project_session(cwd, name)
         .map_err(|error| CtlFailure::usage(error.to_string()))?;
     if !session::is_session_live(&project_session.socket_path) {
@@ -106,9 +112,9 @@ impl Link {
 
     /// Reads the session's tree over a fresh connection.
     pub(crate) async fn fresh_tree(&self) -> Result<Tree, CtlFailure> {
-        let attached = pane_scan::attach(&self.socket)
-            .await
-            .map_err(|message| CtlFailure::no_session(format!("cannot re-read the session: {message}")))?;
+        let attached = pane_scan::attach(&self.socket).await.map_err(|message| {
+            CtlFailure::no_session(format!("cannot re-read the session: {message}"))
+        })?;
         let tree = attached.tree.clone();
         attached.detach().await;
         Ok(tree)
@@ -153,7 +159,9 @@ impl Link {
                 Ok(Some(event)) => {
                     let (event, _retention) = event.into_parts();
                     match event {
-                        ServerEvent::Error { message } => return Err(CtlFailure::rejected(message)),
+                        ServerEvent::Error { message } => {
+                            return Err(CtlFailure::rejected(message))
+                        }
                         ServerEvent::TreeSnapshot(tree) => latest = tree,
                         _ => {}
                     }
@@ -177,7 +185,8 @@ impl Link {
             if now >= deadline {
                 return Ok(json!({}));
             }
-            match tokio::time::timeout(deadline - now, self.attached.connection.events.recv()).await {
+            match tokio::time::timeout(deadline - now, self.attached.connection.events.recv()).await
+            {
                 Ok(Some(event)) => {
                     let (event, _retention) = event.into_parts();
                     if let ServerEvent::Error { message } = event {

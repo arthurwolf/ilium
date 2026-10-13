@@ -239,7 +239,9 @@ fn side_padding(width: u16) -> u16 {
 const DETAIL_GUTTER: &str = "\u{2506} ";
 const DETAIL_GUTTER_WIDTH: u16 = 2;
 /// Partial blocks, one eighth of a cell wider each, for the gauge's edge.
-const EIGHTH_BLOCKS: [&str; 7] = ["\u{258f}", "\u{258e}", "\u{258d}", "\u{258c}", "\u{258b}", "\u{258a}", "\u{2589}"];
+const EIGHTH_BLOCKS: [&str; 7] = [
+    "\u{258f}", "\u{258e}", "\u{258d}", "\u{258c}", "\u{258b}", "\u{258a}", "\u{2589}",
+];
 const LONGEST_IDENTITY_WIDTH: usize = 22;
 
 /// The gauge bar as `(symbol, is_partial)` cells: whole blocks, at most one

@@ -111,7 +111,9 @@ fn build(inner: Rect, settings: &PaddingSettings, state: &DialogState) -> Layout
             } else {
                 "[ ] Same for terminal, editor and board"
             };
-            layout.buttons.push((row(*y), text.into(), DialogHit::Shared(!shared)));
+            layout
+                .buttons
+                .push((row(*y), text.into(), DialogHit::Shared(!shared)));
             *y += 1;
             if !shared {
                 let mut x = column.x;
@@ -140,7 +142,11 @@ fn build(inner: Rect, settings: &PaddingSettings, state: &DialogState) -> Layout
             .buttons
             .push((row(*y), linked_text.into(), DialogHit::Linked(panel)));
         *y += 1;
-        let mut value_row = |layout: &mut Layout, y: &mut u16, name: &str, side: Option<PaddingSide>, current: u8| {
+        let mut value_row = |layout: &mut Layout,
+                             y: &mut u16,
+                             name: &str,
+                             side: Option<PaddingSide>,
+                             current: u8| {
             layout.labels.push((
                 Rect::new(column.x, *y, 8.min(column.width), 1),
                 name.to_owned(),
@@ -152,7 +158,11 @@ fn build(inner: Rect, settings: &PaddingSettings, state: &DialogState) -> Layout
                     let label = format!(" {cells} ");
                     layout.buttons.push((
                         Rect::new(x, *y, BUTTON_WIDTH, 1),
-                        if cells == current { format!("[{cells}]") } else { label },
+                        if cells == current {
+                            format!("[{cells}]")
+                        } else {
+                            label
+                        },
                         DialogHit::Value { panel, side, cells },
                     ));
                 }
@@ -170,7 +180,12 @@ fn build(inner: Rect, settings: &PaddingSettings, state: &DialogState) -> Layout
     };
 
     section(&mut layout, &mut y, "Left panel (tree)", true);
-    section(&mut layout, &mut y, "Right panel (agents, terminals)", false);
+    section(
+        &mut layout,
+        &mut y,
+        "Right panel (agents, terminals)",
+        false,
+    );
 
     let close = " Done ";
     let width = close.chars().count() as u16;
@@ -183,8 +198,15 @@ fn build(inner: Rect, settings: &PaddingSettings, state: &DialogState) -> Layout
     layout
 }
 
-pub fn hit(screen: Rect, settings: &PaddingSettings, state: &DialogState, position: Position) -> Option<DialogHit> {
-    let inner = Block::default().borders(Borders::ALL).inner(dialog_area(screen));
+pub fn hit(
+    screen: Rect,
+    settings: &PaddingSettings,
+    state: &DialogState,
+    position: Position,
+) -> Option<DialogHit> {
+    let inner = Block::default()
+        .borders(Borders::ALL)
+        .inner(dialog_area(screen));
     build(inner, settings, state)
         .buttons
         .into_iter()
@@ -230,7 +252,10 @@ pub fn render(frame: &mut Frame, screen: Rect, app: &App, state: &DialogState) {
             theme::selected_style().add_modifier(Modifier::BOLD)
         } else if is_hovered {
             Style::new().add_modifier(Modifier::BOLD | Modifier::REVERSED)
-        } else if matches!(target, DialogHit::Value { .. } | DialogHit::RightType(_) | DialogHit::Close) {
+        } else if matches!(
+            target,
+            DialogHit::Value { .. } | DialogHit::RightType(_) | DialogHit::Close
+        ) {
             Style::new().add_modifier(Modifier::REVERSED | Modifier::DIM)
         } else {
             Style::new()
@@ -252,11 +277,20 @@ pub fn render(frame: &mut Frame, screen: Rect, app: &App, state: &DialogState) {
 
 /// Draws one dummy panel: border, dotted padding cells, neutral content
 /// inside the padding.
-fn dummy_panel(frame: &mut Frame, area: Rect, title: &str, padding: crate::padding::PaddingSides, lines: &[&str]) {
+fn dummy_panel(
+    frame: &mut Frame,
+    area: Rect,
+    title: &str,
+    padding: crate::padding::PaddingSides,
+    lines: &[&str],
+) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme::border_style(false))
-        .title(Span::styled(format!(" {title} "), Style::new().add_modifier(Modifier::DIM)));
+        .title(Span::styled(
+            format!(" {title} "),
+            Style::new().add_modifier(Modifier::DIM),
+        ));
     let inner = block.inner(area);
     frame.render_widget(block, area);
     if inner.width == 0 || inner.height == 0 {
@@ -280,10 +314,15 @@ fn render_preview(frame: &mut Frame, area: Rect, settings: &PaddingSettings, sta
     let frame_block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .title(Span::styled(" Preview (dots are padding) ", Style::new().add_modifier(Modifier::DIM)));
+        .title(Span::styled(
+            " Preview (dots are padding) ",
+            Style::new().add_modifier(Modifier::DIM),
+        ));
     let inner = frame_block.inner(area);
     frame.render_widget(frame_block, area);
-    let tree_width = (inner.width / 3).clamp(8, 30).min(inner.width.saturating_sub(4));
+    let tree_width = (inner.width / 3)
+        .clamp(8, 30)
+        .min(inner.width.saturating_sub(4));
     let tree_area = Rect::new(inner.x, inner.y, tree_width, inner.height);
     let agent_area = Rect::new(
         inner.x + tree_width,
@@ -300,7 +339,13 @@ fn render_preview(frame: &mut Frame, area: Rect, settings: &PaddingSettings, sta
         tree_area,
         "Tree",
         tree_padding,
-        &["▾ Project", "  ● Agent one", "  ○ Agent two", "  ○ Shell", "▸ Notes"],
+        &[
+            "▾ Project",
+            "  ● Agent one",
+            "  ○ Agent two",
+            "  ○ Shell",
+            "▸ Notes",
+        ],
     );
     dummy_panel(
         frame,
@@ -331,8 +376,16 @@ pub fn click(app: &mut App, state: &mut DialogState, target: DialogHit) -> bool 
         }
         DialogHit::Shared(shared) => app.padding_set_right_panels_shared(shared),
         DialogHit::RightType(kind) => state.right_type = kind,
-        DialogHit::Value { panel, side: None, cells } => app.padding_set_all(panel, cells),
-        DialogHit::Value { panel, side: Some(side), cells } => {
+        DialogHit::Value {
+            panel,
+            side: None,
+            cells,
+        } => app.padding_set_all(panel, cells),
+        DialogHit::Value {
+            panel,
+            side: Some(side),
+            cells,
+        } => {
             app.padding_set_side(panel, side, cells);
         }
     }
@@ -359,7 +412,9 @@ mod tests {
     }
 
     fn click_at(app: &mut App, state: &mut DialogState, wanted: DialogHit) {
-        let inner = Block::default().borders(Borders::ALL).inner(dialog_area(screen()));
+        let inner = Block::default()
+            .borders(Borders::ALL)
+            .inner(dialog_area(screen()));
         let layout = build(inner, &app.padding_settings, state);
         let (rect, _, _) = layout
             .buttons
@@ -375,12 +430,11 @@ mod tests {
     fn linking_hides_the_individual_sides() {
         let (mut app, _directory) = app();
         let state = DialogState::default();
-        let inner = Block::default().borders(Borders::ALL).inner(dialog_area(screen()));
+        let inner = Block::default()
+            .borders(Borders::ALL)
+            .inner(dialog_area(screen()));
         let linked = build(inner, &app.padding_settings, &state);
-        assert!(!linked
-            .labels
-            .iter()
-            .any(|(_, text, _)| text == "Top"));
+        assert!(!linked.labels.iter().any(|(_, text, _)| text == "Top"));
         app.padding_set_linked(PaddingPanel::Tree, false);
         let unlinked = build(inner, &app.padding_settings, &state);
         assert!(unlinked.labels.iter().any(|(_, text, _)| text == "Top"));
@@ -393,7 +447,11 @@ mod tests {
         click_at(
             &mut app,
             &mut state,
-            DialogHit::Value { panel: PaddingPanel::Tree, side: None, cells: 3 },
+            DialogHit::Value {
+                panel: PaddingPanel::Tree,
+                side: None,
+                cells: 3,
+            },
         );
         assert_eq!(app.padding_settings.tree.all, 3);
         click_at(&mut app, &mut state, DialogHit::Linked(PaddingPanel::Tree));
@@ -413,17 +471,27 @@ mod tests {
     fn per_type_settings_appear_only_when_not_shared() {
         let (mut app, _directory) = app();
         let mut state = DialogState::default();
-        let inner = Block::default().borders(Borders::ALL).inner(dialog_area(screen()));
+        let inner = Block::default()
+            .borders(Borders::ALL)
+            .inner(dialog_area(screen()));
         assert!(!build(inner, &app.padding_settings, &state)
             .buttons
             .iter()
             .any(|(_, _, target)| matches!(target, DialogHit::RightType(_))));
         click_at(&mut app, &mut state, DialogHit::Shared(false));
-        click_at(&mut app, &mut state, DialogHit::RightType(PaddingPanel::Editor));
         click_at(
             &mut app,
             &mut state,
-            DialogHit::Value { panel: PaddingPanel::Editor, side: None, cells: 2 },
+            DialogHit::RightType(PaddingPanel::Editor),
+        );
+        click_at(
+            &mut app,
+            &mut state,
+            DialogHit::Value {
+                panel: PaddingPanel::Editor,
+                side: None,
+                cells: 2,
+            },
         );
         assert_eq!(app.padding_settings.editor.all, 2);
         assert_ne!(app.padding_settings.terminal.all, 2);
@@ -435,13 +503,26 @@ mod tests {
         let (app, _directory) = app();
         let state = DialogState::default();
         let mut terminal = Terminal::new(TestBackend::new(140, 40)).unwrap();
-        terminal.draw(|frame| render(frame, frame.area(), &app, &state)).unwrap();
+        terminal
+            .draw(|frame| render(frame, frame.area(), &app, &state))
+            .unwrap();
         let buffer = terminal.backend().buffer();
         let text: String = (0..40)
-            .map(|y| (0..140).map(|x| buffer[(x, y)].symbol()).collect::<String>())
+            .map(|y| {
+                (0..140)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            })
             .collect::<Vec<_>>()
             .join("\n");
-        for needle in ["Padding fine-tuning", "Link all sides", "Preview", "Project", "Summarize", "Done"] {
+        for needle in [
+            "Padding fine-tuning",
+            "Link all sides",
+            "Preview",
+            "Project",
+            "Summarize",
+            "Done",
+        ] {
             assert!(text.contains(needle), "missing {needle}\n{text}");
         }
     }

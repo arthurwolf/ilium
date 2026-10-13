@@ -169,7 +169,12 @@ impl PaneViewport {
         let has_rule = frames && self.content_area.height - rows >= 2;
         let rule_rows = u16::from(has_rule);
         let progress_y = self.content_area.y + self.content_area.height - rows;
-        let progress_area = Rect::new(self.content_area.x, progress_y, self.content_area.width, rows);
+        let progress_area = Rect::new(
+            self.content_area.x,
+            progress_y,
+            self.content_area.width,
+            rows,
+        );
         let content_area = Rect::new(
             self.content_area.x,
             self.content_area.y,

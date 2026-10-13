@@ -1,6 +1,6 @@
 use core::hint::black_box;
 
-use criterion::{BatchSize, Criterion, Throughput, criterion_group, criterion_main};
+use criterion::{criterion_group, criterion_main, BatchSize, Criterion, Throughput};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::widgets::StatefulWidget as _;

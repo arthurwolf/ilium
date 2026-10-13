@@ -2982,7 +2982,8 @@ fn draw_toolbar(
             Style::new().fg(action.accent())
         };
         let glyph = if pending & action.pending_bit() != 0 {
-            let frame_index = (spinner_elapsed_ms / SPINNER_FRAME_MS) as usize % SPINNER_FRAMES.len();
+            let frame_index =
+                (spinner_elapsed_ms / SPINNER_FRAME_MS) as usize % SPINNER_FRAMES.len();
             SPINNER_FRAMES[frame_index].to_string()
         } else {
             action.glyph(icons).to_string()

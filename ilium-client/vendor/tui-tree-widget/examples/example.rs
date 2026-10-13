@@ -7,7 +7,7 @@ use ratatui::layout::{Position, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Span;
 use ratatui::widgets::{Block, Scrollbar, ScrollbarOrientation};
-use ratatui::{Frame, Terminal, crossterm};
+use ratatui::{crossterm, Frame, Terminal};
 use tui_tree_widget::{Tree, TreeItem, TreeState};
 
 #[must_use]

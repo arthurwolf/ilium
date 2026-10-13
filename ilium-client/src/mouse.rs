@@ -139,7 +139,10 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
         // Hover feedback reads only live layout, so it stays responsive.
         if matches!(mouse.kind, MouseEventKind::Moved)
             && matches!(app.mode, Mode::Normal)
-            && app.layout.tree_area.contains(Position::new(mouse.column, mouse.row))
+            && app
+                .layout
+                .tree_area
+                .contains(Position::new(mouse.column, mouse.row))
         {
             update_tree_hover(app, Position::new(mouse.column, mouse.row));
         }
@@ -2306,11 +2309,9 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                 crate::padding_ui::update_hover(layout.content_area, app, &mut state, position)
             }
             MouseEventKind::Down(MouseButton::Left) => {
-                if let Some(target) = crate::padding_ui::hit(
-                    layout.content_area,
-                    &app.padding_settings,
-                    position,
-                ) {
+                if let Some(target) =
+                    crate::padding_ui::hit(layout.content_area, &app.padding_settings, position)
+                {
                     crate::padding_ui::click(app, &mut state, target);
                 }
             }
@@ -6754,7 +6755,9 @@ mod frozen_agent_context_mouse_tests {
             claude.pending_bit() | TreeToolbarAction::Shell.pending_bit()
         );
         app.finish_pending_toolbar_action(claude);
-        assert_eq!(app.pending_toolbar_mask(), TreeToolbarAction::Shell.pending_bit());
+        assert_eq!(
+            app.pending_toolbar_mask(),
+            TreeToolbarAction::Shell.pending_bit()
+        );
     }
-
 }

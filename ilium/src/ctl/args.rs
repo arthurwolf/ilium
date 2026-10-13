@@ -42,7 +42,10 @@ impl CtlArgs {
     }
 
     pub(crate) fn target(&self) -> Target {
-        Target { session: self.session.clone(), socket: self.socket.clone() }
+        Target {
+            session: self.session.clone(),
+            socket: self.socket.clone(),
+        }
     }
 }
 
@@ -282,7 +285,9 @@ fn parse_worktree_action(value: &str) -> Result<WorktreeAction, String> {
         "keep" => Ok(WorktreeAction::Keep),
         "remove" => Ok(WorktreeAction::Remove),
         "remove-and-branch" => Ok(WorktreeAction::RemoveAndBranch),
-        other => Err(format!("{other:?} is not keep, remove or remove-and-branch")),
+        other => Err(format!(
+            "{other:?} is not keep, remove or remove-and-branch"
+        )),
     }
 }
 
@@ -310,9 +315,11 @@ pub(crate) fn offline(command: &CtlCommand, format: Format) -> Result<Option<Str
         CtlCommand::Guide { topic } => match topic.as_deref() {
             None => Ok(Some(guide::ESSENTIALS.to_owned())),
             Some("topics") => Ok(Some(guide::topic_list())),
-            Some(name) => guide::topic(name).map(|topic| Some(topic.body.to_owned())).ok_or_else(
-                || CtlFailure::usage(format!("no guide topic {name:?}\n{}", guide::topic_list())),
-            ),
+            Some(name) => guide::topic(name)
+                .map(|topic| Some(topic.body.to_owned()))
+                .ok_or_else(|| {
+                    CtlFailure::usage(format!("no guide topic {name:?}\n{}", guide::topic_list()))
+                }),
         },
         CtlCommand::Ops => {
             let documents: Vec<serde_json::Value> = ilium_control::operation_examples()
@@ -320,7 +327,11 @@ pub(crate) fn offline(command: &CtlCommand, format: Format) -> Result<Option<Str
                 .filter_map(|example| serde_json::to_value(example).ok())
                 .collect();
             let value = serde_json::json!({"operations": documents});
-            Ok(Some(ilium_control::render_document(&value, format, ilium_control::Shape::Generic)))
+            Ok(Some(ilium_control::render_document(
+                &value,
+                format,
+                ilium_control::Shape::Generic,
+            )))
         }
         _ => Ok(None),
     }

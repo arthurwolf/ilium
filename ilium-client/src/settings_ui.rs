@@ -5803,7 +5803,6 @@ fn left_panel_policy_summary(ui: &UiSettings) -> String {
     }
 }
 
-
 fn sizing_card_text(mode: LeftPanelSizingMode) -> (&'static str, &'static str) {
     match mode {
         LeftPanelSizingMode::Fixed => ("▣  Fixed", "Always one width"),
@@ -5830,7 +5829,10 @@ fn sizing_card_value(mode: LeftPanelSizingMode, ui: &UiSettings) -> String {
     match mode {
         LeftPanelSizingMode::Fixed => format!("{} columns", sizing.fixed_width),
         LeftPanelSizingMode::FocusDependent => {
-            format!("{} ↔ {} columns", sizing.unfocused_width, sizing.focused_width)
+            format!(
+                "{} ↔ {} columns",
+                sizing.unfocused_width, sizing.focused_width
+            )
         }
         LeftPanelSizingMode::TerminalWidthDependent => format!(
             "≥{} wide: {} columns",
@@ -5949,8 +5951,8 @@ fn push_sizing_cards(
     let count = LeftPanelSizingMode::ALL.len() as u16;
     let card_width = content_width.saturating_sub(SIZING_CARD_GAP * (count - 1)) / count;
     let start_line = view.lines.len() as u16;
-    let cards = LeftPanelSizingMode::ALL
-        .map(|mode| sizing_card_lines(mode, ui, card_width, selected_row));
+    let cards =
+        LeftPanelSizingMode::ALL.map(|mode| sizing_card_lines(mode, ui, card_width, selected_row));
     for line_index in 0..usize::from(SIZING_CARD_HEIGHT) {
         let mut spans = Vec::new();
         for (card_index, card) in cards.iter().enumerate() {
@@ -8443,7 +8445,13 @@ mod tests {
             .iter()
             .any(|(row, _)| *row == AppearanceRow::TreeOrder));
         let text = sizing_text(&wide);
-        for title in ["Fixed", "Focus-dependent", "Width-dependent", "focus", "away"] {
+        for title in [
+            "Fixed",
+            "Focus-dependent",
+            "Width-dependent",
+            "focus",
+            "away",
+        ] {
             assert!(text.contains(title), "missing {title}");
         }
     }
@@ -8467,8 +8475,7 @@ mod tests {
             let card_width = hits[0].end_x - hits[0].start_x;
             assert!(card_width >= SIZING_CARD_MINIMUM_WIDTH);
             assert!(hits.iter().all(|hit| hit.end_x - hit.start_x == card_width));
-            for line in &view.lines
-                [usize::from(hits[0].start_line)..usize::from(hits[0].end_line)]
+            for line in &view.lines[usize::from(hits[0].start_line)..usize::from(hits[0].end_line)]
             {
                 let rendered = line.to_string();
                 assert_eq!(
@@ -8511,10 +8518,7 @@ mod tests {
         );
         assert_eq!(appearance_content_hit(area, 0, gap, &ui), None);
         // Scrolling moves the hit zone with the content.
-        let scrolled = Position::new(
-            area.x + 5,
-            area.y + view.card_hits[0].start_line + 2 - 1,
-        );
+        let scrolled = Position::new(area.x + 5, area.y + view.card_hits[0].start_line + 2 - 1);
         assert_eq!(
             appearance_content_hit(area, 1, scrolled, &ui),
             Some(AppearanceContentHit::Mode(LeftPanelSizingMode::ALL[0]))
@@ -8534,7 +8538,10 @@ mod tests {
         assert_eq!(filled.chars().count(), 1);
         let (filled, empty) = sizing_card_bar(500, 10);
         assert_eq!(filled.chars().count() + empty.chars().count(), 10);
-        assert_eq!(sizing_card_widths(LeftPanelSizingMode::Fixed, &ui), (80, 80));
+        assert_eq!(
+            sizing_card_widths(LeftPanelSizingMode::Fixed, &ui),
+            (80, 80)
+        );
     }
 
     #[test]

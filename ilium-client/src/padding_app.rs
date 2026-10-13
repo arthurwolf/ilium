@@ -3,8 +3,8 @@
 //! persisting the `[padding]` table. Pure value logic lives in
 //! [`crate::padding`].
 
-use ilium_ipc::PaneResizeCause;
 use ilium_core::{NodeKind, PaneContentKind};
+use ilium_ipc::PaneResizeCause;
 
 use crate::app::App;
 use crate::filesystem::configuration::ConfigurationChange;
@@ -182,7 +182,10 @@ mod tests {
             crate::layout::UiLayout::from_screen_area(ratatui::layout::Rect::new(0, 0, 120, 40));
         assert_eq!(app.padding_for(PaddingPanel::Tree), PaddingSides::NONE);
         app.padding_settings.mode = PaddingMode::Enabled;
-        assert_eq!(app.padding_for(PaddingPanel::Tree), PaddingSides::uniform(1));
+        assert_eq!(
+            app.padding_for(PaddingPanel::Tree),
+            PaddingSides::uniform(1)
+        );
         app.padding_settings.mode = PaddingMode::WidthDependent;
         assert_eq!(app.padding_for(PaddingPanel::Terminal), PaddingSides::NONE);
         app.padding_settings.width_threshold = 120;
