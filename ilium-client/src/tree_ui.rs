@@ -2031,24 +2031,43 @@ fn agent_title(class: &AgentClass, title: &str, mode: AgentIdentifierMode) -> St
     }
 }
 
+/// Splits the tree panel's interior into the list, the frame rule above the
+/// toolbar (zero rows when frames are off or the panel is too short), and the
+/// toolbar. The single source for `list_area`, `toolbar_rule_area` and
+/// `toolbar_area`, so drawing and hit testing cannot disagree.
+fn vertical_sections(area: Rect) -> [Rect; 3] {
+    // Padding moves the list, rule and toolbar in from the border together.
+    let inner = crate::padding::tree_padding().inset(theme::block(false).inner(area));
+    let rule_rows = u16::from(
+        theme::section_frames_enabled() && inner.height >= TOOLBAR_HEIGHT.saturating_add(3),
+    );
+    let [list, rule, toolbar] = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(1),
+            Constraint::Length(rule_rows),
+            Constraint::Length(TOOLBAR_HEIGHT),
+        ])
+        .areas(inner);
+    [list, rule, toolbar]
+}
+
 /// Returns the interior list region, excluding the persistent two-row hover
 /// toolbar. Labels use this complete width; row actions temporarily overlay
 /// only the hovered row's trailing cells.
 pub fn list_area(area: Rect) -> Rect {
-    let inner = theme::block(false).inner(area);
-    Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(TOOLBAR_HEIGHT)])
-        .split(inner)[0]
+    vertical_sections(area)[0]
+}
+
+/// The full-outer-width row of the frame rule above the toolbar, if drawn.
+pub fn toolbar_rule_area(area: Rect) -> Option<Rect> {
+    let rule = vertical_sections(area)[1];
+    (rule.height > 0).then(|| Rect::new(area.x, rule.y, area.width, 1))
 }
 
 /// Returns the bottom two rows that reveal creation icons on hover.
 pub fn toolbar_area(area: Rect) -> Rect {
-    let inner = theme::block(false).inner(area);
-    Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(TOOLBAR_HEIGHT)])
-        .split(inner)[1]
+    vertical_sections(area)[2]
 }
 
 /// Returns the toolbar action at a terminal coordinate, if any.
@@ -2596,6 +2615,9 @@ pub(crate) fn render(
             options.icons,
             options.use_stable_glyphs,
         );
+    }
+    if let Some(rule) = toolbar_rule_area(area) {
+        crate::section_frame::render_rule(frame, rule, None, options.focused);
     }
     if is_toolbar_visible(options.focused, options.hover.toolbar_hovered) {
         draw_toolbar(

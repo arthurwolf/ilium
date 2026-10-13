@@ -14,9 +14,13 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 ## [Unreleased]
 
 ### Added
+- `ilium ctl` gives agents and scripts full remote control of a running session: read the tree, a project or a pane as JSON, JSONL, YAML or Markdown; create, rename, move, close and drive panes; manage worktrees. Start with `ilium ctl guide`. The flag-to-request translation and the check that the server applied each operation live in `ilium-control` (new `documents` module and operation examples).
+- Settings > User Interface shows the left-panel sizing policy as three side-by-side cards (Fixed, Focus-dependent, Width-dependent) again, redesigned: each card has a title, a one-line description, a proportional `focus`/`away` bar diagram of the panel widths it will use, its current values, and a `● selected` badge on the active card; the keyboard focus ring turns the active card's border heavy. Click a card, press Left/Right, or `+` for the full list. Below 82 columns of content width the compact selector row is used instead, so narrow terminals keep the layout that fits.
+- Section frames: rounded rules joined to the pane border now separate the agent toolbar, the last-prompt banner, the progress footer and the left panel's toolbar from the content around them. The new Settings row "Section frames" (`[ui].section_frames_enabled`, default on) turns them off and gives their rows back to the terminal.
 - `ilium recap` writes a short (at most 40 words) and a long (at most 250 words) factual recap of each selected agent or shell pane, using the same selection options as `ilium panes` and `ilium broadcast`. Agent recaps read only the transcript bound to the pane's own session and project; shell recaps read bounded screen text. Output is JSONL or Markdown, with explicit states (`summarized`, `idle`, `denied`, `unavailable`, `stale`, `failed`), evidence age, validated file pointers, and goal state read from the transcript rather than written by the model.
 
 ### Changed
+- The last-prompt banner and progress footer have a redesigned inside: the prompt sits behind a quote gutter with side padding, and each monitor shows an eighth-block gauge on a darker track with a right-aligned percentage, an unread dot, and details behind a dotted gutter.
 - Tree toolbar buttons (shell, agents) show a spinner while a click waits for the server to confirm the new pane or worktree, and time out after 120 seconds. A refused click now keeps its explanation instead of a success message, a refused Git check is reported in the worktree menu, popover and dialog, the disabled worktree popover answers hover and states why it is unavailable, and tree hover stays responsive while the screen redraws.
 - The progress-monitor instructions Ilium installs for agents (version 12) now also teach what to do with a monitor's result: a result is one attempt of a task, not the end of the request; verify `done`, inspect evidence once and retry on `error`, keep working while `running`, and check the task directly when the outcome is unknown. They also say to start tasks from the agent's own shell rather than `ilium new-pane` and to read progress from a structured source. The messages Ilium types into an agent when a monitor ends now close with the matching next step.
 - The progress-monitor instructions Ilium installs for agents (version 13) tell agents to make one wait without `--timeout-seconds`, using their tool's longest wait, instead of re-waiting every 590 seconds; the progress guard's refusal and the CLI reference say the same. They also teach recovery after a reboot or Ilium restart (find the restored monitor by job id, check the task once, wait again or restart it) and ask probes to report `error` when the task's process vanished without a result.
@@ -48,6 +52,10 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 - With parser pooling Off, terminal pane storage has no aggregate 4-GiB
   admission cap; enabling the pool bounds aggregate engine and snapshot memory,
   while per-pane operation limits remain in both modes.
+
+### Fixed
+- The animation settings paint-and-hit test no longer crosses every effective kind with the whole playback and colour matrix, which made it run for tens of minutes.
+- The Settings Padding tab is handled in the content-height and row-count matches.
 
 ### Added
 - Every animation's settings open with a two-sentence introduction of what the animation is and what it shows.

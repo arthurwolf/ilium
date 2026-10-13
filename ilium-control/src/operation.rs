@@ -11,8 +11,8 @@ use std::path::PathBuf;
 
 use ilium_core::AgentProvider as _;
 use ilium_core::{
-    BuiltinAgentProvider, ContainerKind, NodeId, NodeKind, PromptQueueDelivery, Tree,
-    TreeMoveDirection, ROOT_ID,
+    BuiltinAgentProvider, ContainerKind, NodeId, NodeKind, PromptQueueDelivery, RestructurePlan,
+    Tree, TreeMoveDirection, ROOT_ID,
 };
 use ilium_ipc::{
     ClientRequest, NewPaneKind, NewPaneWorkingDirectory, PromptSubmissionSource,
@@ -193,8 +193,17 @@ pub enum Operation {
     LockClosed { node: u64, locked: bool },
     /// Stop the process in a pane without closing the pane.
     Terminate { pane: u64 },
+    /// Replace the tree (or one project's contents) with a restructure plan.
+    /// The plan must mention every existing pane and folder exactly once.
+    ApplyRestructure {
+        plan: RestructurePlan,
+        #[serde(default)]
+        project: Option<u64>,
+    },
     /// Undo the most recent session-wide restructure.
     RevertRestructure,
+    /// Undo the latest restructure of one project.
+    RevertProjectRestructure { project: u64 },
     /// End the session: every pane process stops.
     KillSession,
 }
@@ -331,7 +340,9 @@ impl Operation {
             Self::Expand { .. } => "expand",
             Self::LockClosed { .. } => "lock_closed",
             Self::Terminate { .. } => "terminate",
+            Self::ApplyRestructure { .. } => "apply_restructure",
             Self::RevertRestructure => "revert_restructure",
+            Self::RevertProjectRestructure { .. } => "revert_project_restructure",
             Self::KillSession => "kill_session",
         }
     }
@@ -544,7 +555,22 @@ impl Operation {
             Self::Terminate { pane } => ClientRequest::TerminatePaneProcess {
                 pane_id: require_pane(tree, *pane)?,
             },
+            Self::ApplyRestructure { plan, project } => match project {
+                None => ClientRequest::ApplyRestructurePlan {
+                    plan: plan.clone(),
+                    title_observations: Vec::new(),
+                },
+                Some(project) => ClientRequest::ApplyProjectRestructurePlan {
+                    project_id: require_project(tree, *project)?,
+                    plan: plan.clone(),
+                    inference_activity_revisions: Vec::new(),
+                    title_observations: Vec::new(),
+                },
+            },
             Self::RevertRestructure => ClientRequest::RevertLastRestructure,
+            Self::RevertProjectRestructure { project } => ClientRequest::RevertProjectRestructure {
+                project_id: require_project(tree, *project)?,
+            },
             Self::KillSession => ClientRequest::KillSession,
         };
         Ok(vec![request])
@@ -635,7 +661,10 @@ impl Operation {
                 };
                 (current == *locked).then(|| json!({"node": node, "locked_closed": locked}))
             }
-            Self::RevertRestructure => (before != after).then(|| json!({"reverted": true})),
+            Self::ApplyRestructure { .. } => (before != after).then(|| json!({"applied": true})),
+            Self::RevertRestructure | Self::RevertProjectRestructure { .. } => {
+                (before != after).then(|| json!({"reverted": true}))
+            }
             Self::SendText { .. }
             | Self::SendKeys { .. }
             | Self::Schedule { .. }
@@ -645,6 +674,40 @@ impl Operation {
             | Self::KillSession => None,
         }
     }
+}
+
+/// One example of every operation, for `ilium ctl ops` and the HTTP guide.
+/// `RestructurePlan` is shown with an empty plan; real plans come from files.
+pub fn examples() -> Vec<Operation> {
+    vec![
+        Operation::Rename { node: 12, title: "Login fix".into() },
+        Operation::Close { pane: 12, worktree: WorktreeAction::Keep },
+        Operation::MoveStep { node: 12, direction: StepDirection::Up },
+        Operation::Reparent { node: 12, parent: 5, index: Some(0) },
+        Operation::NewProject { path: PathBuf::from("/abs/path/to/repo") },
+        Operation::NewGroup { parent: 5, name: "Experiments".into() },
+        Operation::NewFolder { parent: 5, path: PathBuf::from("/abs/path/to/folder") },
+        Operation::ChangeProjectFolder { project: 5, path: PathBuf::from("/abs/path") },
+        Operation::NewPane {
+            parent: Some(5),
+            launch: PaneLaunch::Agent { provider: AgentProvider::Claude, prompt: Some("Fix the failing test".into()) },
+            cwd: Some(PathBuf::from("/abs/path/subdir")),
+            keep_open: false,
+        },
+        Operation::SendText { pane: 12, text: "run the tests".into(), enter: true },
+        Operation::SendKeys { pane: 12, keys: vec!["ctrl-c".into(), "enter".into()] },
+        Operation::Schedule { pane: 12, delay_seconds: 600, text: "status?".into(), enter: true },
+        Operation::Enqueue { pane: 12, text: "next step".into(), delivery: QueueDelivery::Once },
+        Operation::ClearQueue { pane: 12 },
+        Operation::Bookmark { node: 12, on: true },
+        Operation::Expand { node: 5, expanded: false },
+        Operation::LockClosed { node: 5, locked: true },
+        Operation::Terminate { pane: 12 },
+        Operation::ApplyRestructure { plan: RestructurePlan { children: Vec::new() }, project: Some(5) },
+        Operation::RevertRestructure,
+        Operation::RevertProjectRestructure { project: 5 },
+        Operation::KillSession,
+    ]
 }
 
 #[cfg(test)]
@@ -660,6 +723,16 @@ mod tests {
             .add_pane(group, "shell".to_owned(), PaneContentKind::Terminal)
             .unwrap();
         (tree, project, group, pane)
+    }
+
+    #[test]
+    fn every_example_round_trips_and_names_are_unique() {
+        let mut names = std::collections::HashSet::new();
+        for example in examples() {
+            let text = serde_json::to_string(&example).unwrap();
+            assert_eq!(serde_json::from_str::<Operation>(&text).unwrap(), example);
+            assert!(names.insert(example.name()), "{}", example.name());
+        }
     }
 
     #[test]

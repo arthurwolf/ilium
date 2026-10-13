@@ -285,7 +285,7 @@ mod tests {
         let value = json!({"a": 1, "list": [{"x": "y", "n": null}, 2], "empty": [], "q k": "yes"});
         let text = yaml(&value);
         assert!(text.contains("a: 1\n"));
-        assert!(text.contains("list:\n  - x: \"y\"\n    n: null\n  - 2\n"));
+        assert!(text.contains("list:\n  - n: null\n    x: \"y\"\n  - 2\n"));
         assert!(text.contains("empty: []\n"));
         assert!(text.contains("\"q k\": \"yes\"\n"));
     }

@@ -20,6 +20,21 @@ use ratatui::symbols::merge::MergeStrategy;
 use ratatui::text::Line;
 use ratatui::widgets::{Block, BorderType};
 
+/// Whether the section frame rules are drawn (the `section_frames_enabled`
+/// UI setting). Pure geometry helpers such as the tree panel's list/toolbar
+/// split read it, because they are called from many places that have no
+/// `App`; the app updates it whenever its UI settings change.
+static SECTION_FRAMES_ENABLED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(true);
+
+pub fn section_frames_enabled() -> bool {
+    SECTION_FRAMES_ENABLED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+pub fn set_section_frames_enabled(enabled: bool) {
+    SECTION_FRAMES_ENABLED.store(enabled, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// Border corners/edges use rounded glyphs everywhere.
 const BORDER_TYPE: BorderType = BorderType::Rounded;
 
@@ -298,6 +313,17 @@ pub fn muted_accent_bg(scheme: ColorScheme) -> Color {
         ColorScheme::Light => Color::Rgb(0xff, 0xff, 0xff),
     };
     mix(current().accent_bg, blend_target, 0.72)
+}
+
+/// The unfilled part of a progress gauge: a half-strength blend of the accent
+/// toward the scheme's dark/light extreme, so it sits visibly between the
+/// banner fill (`muted_accent_bg`) and the saturated filled part.
+pub fn gauge_track_bg(scheme: ColorScheme) -> Color {
+    let blend_target = match scheme {
+        ColorScheme::Dark => Color::Rgb(0, 0, 0),
+        ColorScheme::Light => Color::Rgb(0xff, 0xff, 0xff),
+    };
+    mix(current().accent_bg, blend_target, 0.5)
 }
 
 /// Background fill for the last-prompt banner. No explicit `fg`: the

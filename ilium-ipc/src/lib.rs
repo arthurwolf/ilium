@@ -1338,15 +1338,17 @@ mod tests {
         assert_eq!(&cleared_bytes[4..], former_tail.as_slice());
     }
 
+    /// bincode's fixed-width encoding puts the enum variant index in the
+    /// first four bytes. Shared by every test that compares variant order.
+    fn variant_index<T: serde::Serialize>(value: &T) -> u32 {
+        let bytes = bincode::serialize(value).expect("serializable");
+        u32::from_le_bytes(bytes[..4].try_into().expect("four-byte variant index"))
+    }
+
     /// The voice-text messages form one contiguous block of variants at the
-    /// end of each enum. bincode's fixed-width encoding puts the variant
-    /// index in the first four bytes.
+    /// end of each enum.
     #[test]
     fn voice_text_variants_are_contiguous() {
-        fn variant_index<T: serde::Serialize>(value: &T) -> u32 {
-            let bytes = bincode::serialize(value).expect("serializable");
-            u32::from_le_bytes(bytes[..4].try_into().expect("four-byte variant index"))
-        }
         let register = variant_index(&ClientRequest::RegisterVoiceTextReceiver);
         let submit = variant_index(&ClientRequest::SubmitVoiceText {
             request_id: 1,

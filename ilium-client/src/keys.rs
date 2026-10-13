@@ -2514,6 +2514,19 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
     state.animation_slider_drag = None;
     app.clear_animation_hover();
 
+    // The fine-tuning dialog owns every key while open.
+    if state.padding.dialog.is_some() {
+        if matches!(key.code, KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q')) {
+            state.padding.dialog = None;
+        }
+        app.mode = Mode::Settings(state);
+        return;
+    }
+    if state.tab == SettingsTab::Padding && crate::padding_ui::handle_key(app, &mut state, *key) {
+        app.mode = Mode::Settings(state);
+        return;
+    }
+
     // The Optimization tab owns its keys (scroll, sub-tabs, scan/apply/revert)
     // and, while its Apply confirmation is open, every key.
     if state.tab == SettingsTab::Optimization && app.optimization_key(&mut state, *key) {

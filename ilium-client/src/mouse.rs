@@ -2280,6 +2280,45 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
     let position = Position::new(mouse.column, mouse.row);
     let mut layout =
         crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, app, &state);
+    if let Some(mut dialog) = state.padding.dialog {
+        let screen = app.layout.screen_area;
+        let target = crate::padding_dialog::hit(screen, &app.padding_settings, &dialog, position);
+        match mouse.kind {
+            MouseEventKind::Moved => dialog.hover = target,
+            MouseEventKind::Down(MouseButton::Left) => {
+                if let Some(target) = target {
+                    if !crate::padding_dialog::click(app, &mut dialog, target) {
+                        state.padding.dialog = None;
+                        app.mode = Mode::Settings(state);
+                        return;
+                    }
+                }
+            }
+            _ => {}
+        }
+        state.padding.dialog = Some(dialog);
+        app.mode = Mode::Settings(state);
+        return;
+    }
+    if state.tab == crate::app::SettingsTab::Padding && layout.content_area.contains(position) {
+        match mouse.kind {
+            MouseEventKind::Moved => {
+                crate::padding_ui::update_hover(layout.content_area, app, &mut state, position)
+            }
+            MouseEventKind::Down(MouseButton::Left) => {
+                if let Some(target) = crate::padding_ui::hit(
+                    layout.content_area,
+                    &app.padding_settings,
+                    position,
+                ) {
+                    crate::padding_ui::click(app, &mut state, target);
+                }
+            }
+            _ => {}
+        }
+        app.mode = Mode::Settings(state);
+        return;
+    }
     // Invalidate before header/sidebar/editor early returns: the issue-row
     // handler below only sees pointer events inside the content area.
     if mouse.kind != MouseEventKind::Moved
@@ -3388,6 +3427,10 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                     &app.ui_settings,
                 ) {
                     match hit {
+                        crate::settings_ui::AppearanceContentHit::Mode(mode) => {
+                            state.selected_row = 0;
+                            app.settings_set_left_panel_sizing_mode(mode);
+                        }
                         crate::settings_ui::AppearanceContentHit::Row { row, direction } => {
                             let rows = crate::app::AppearanceRow::visible(
                                 app.ui_settings.left_panel_sizing.mode,

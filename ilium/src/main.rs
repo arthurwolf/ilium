@@ -23,6 +23,7 @@
 use ilium::session;
 
 mod broadcast;
+mod ctl;
 mod pane_filter;
 mod pane_scan;
 mod panes;
@@ -185,6 +186,10 @@ enum Command {
     /// "Send message to all" does. The pane running this command is skipped
     /// unless --include-self is given. Output is JSONL.
     Broadcast(broadcast::BroadcastArgs),
+    /// Full remote control of a running session for agents and scripts: read
+    /// the tree, project or pane as JSON/YAML/Markdown; create, rename, move,
+    /// close and drive panes; manage worktrees. Start with `ilium ctl guide`.
+    Ctl(ctl::CtlArgs),
 }
 
 /// Local chatroom operations intentionally avoid the detached server: agents
@@ -557,6 +562,7 @@ async fn dispatch(cli: Cli) -> Result<(), CliError> {
         Some(Command::Panes(args)) => panes::panes(args, &cli.cwd).await,
         Some(Command::Recap(args)) => recap::recap(args, &cli.cwd).await,
         Some(Command::Broadcast(args)) => broadcast::broadcast(args, &cli.cwd).await,
+        Some(Command::Ctl(args)) => ctl::ctl(args, &cli.cwd).await,
     }
 }
 

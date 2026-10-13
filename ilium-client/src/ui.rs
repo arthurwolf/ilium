@@ -2729,6 +2729,10 @@ fn draw_pane_runtime(
         }
     }
 
+    if matches!(runtime, PaneRuntime::Terminal(_)) {
+        draw_section_rules(frame, app, viewport, pane_focused);
+    }
+
     if let Some(last_prompt_area) = viewport.last_prompt_area {
         if matches!(runtime, PaneRuntime::Terminal(_))
             && app.shows_last_prompt_banner(viewport.pane_id)
@@ -2759,6 +2763,41 @@ fn draw_pane_runtime(
 
     if let Some(action) = completed_agent_close_action {
         draw_completed_agent_close_action(frame, action.button_area);
+    }
+}
+
+/// Frame rules around the toolbar, prompt banner and progress footer. Each
+/// rule is drawn only when its section has something to show; an empty
+/// reserved slot stays blank, exactly as it did before frames existed.
+fn draw_section_rules(
+    frame: &mut Frame,
+    app: &App,
+    viewport: crate::split_layout::PaneViewport,
+    focused: bool,
+) {
+    let pane_id = viewport.pane_id;
+    let prompt_shown = app.shows_last_prompt_banner(pane_id);
+    if let Some(rule) = viewport.toolbar_rule {
+        if app.shows_agent_toolbar(pane_id) {
+            let title = prompt_shown.then_some("\u{276f} last prompt");
+            crate::section_frame::render_rule(frame, rule, title, focused);
+        }
+    }
+    if let Some(rule) = viewport.last_prompt_bottom_rule {
+        if prompt_shown {
+            crate::section_frame::render_rule(frame, rule, None, focused);
+        }
+    }
+    if let Some(rule) = viewport.progress_rule {
+        let monitors = app.visible_progress_monitors(pane_id).len();
+        if monitors > 0 {
+            let title = if monitors == 1 {
+                "progress".to_string()
+            } else {
+                format!("progress \u{b7} {monitors} tasks")
+            };
+            crate::section_frame::render_rule(frame, rule, Some(&title), focused);
+        }
     }
 }
 
