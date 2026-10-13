@@ -2982,7 +2982,8 @@ fn draw_toolbar(
             Style::new().fg(action.accent())
         };
         let glyph = if pending & action.pending_bit() != 0 {
-            let frame_index = (spinner_elapsed_ms / SPINNER_FRAME_MS) as usize % SPINNER_FRAMES.len();
+            let frame_index =
+                (spinner_elapsed_ms / SPINNER_FRAME_MS) as usize % SPINNER_FRAMES.len();
             SPINNER_FRAMES[frame_index].to_string()
         } else {
             action.glyph(icons).to_string()
@@ -3035,6 +3036,52 @@ mod tests {
         TERMINAL_ACTIVITY_FAST_FRAME_MS, TERMINAL_ACTIVITY_SLOW_FRAME_MS,
     };
     use ilium_core::GoalState;
+
+    #[test]
+    fn pending_toolbar_button_renders_a_braille_frame_instead_of_its_icon() {
+        let area = Rect::new(0, 0, 60, 8);
+        let (action, button) = toolbar_button_rects(area)
+            .into_iter()
+            .find(|(action, _)| matches!(action, TreeToolbarAction::Agent(_)))
+            .expect("agent button exists");
+        let render_cell = |pending: u16, elapsed_ms: u128| {
+            let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
+            terminal
+                .draw(|frame| {
+                    draw_toolbar(
+                        frame,
+                        area,
+                        None,
+                        pending,
+                        elapsed_ms,
+                        &IconSettings::default(),
+                    )
+                })
+                .unwrap();
+            let buffer = terminal.backend().buffer().clone();
+            let mut text = String::new();
+            for x in button.x..button.x + button.width {
+                text.push_str(buffer[(x, button.y)].symbol());
+            }
+            text
+        };
+        let idle = render_cell(0, 0);
+        assert!(
+            !idle.chars().any(|c| SPINNER_FRAMES.contains(&c)),
+            "{idle:?}"
+        );
+        let first = render_cell(action.pending_bit(), 0);
+        let later = render_cell(action.pending_bit(), SPINNER_FRAME_MS * 3);
+        assert!(
+            first.chars().any(|c| SPINNER_FRAMES.contains(&c)),
+            "{first:?}"
+        );
+        assert!(
+            later.chars().any(|c| SPINNER_FRAMES.contains(&c)),
+            "{later:?}"
+        );
+        assert_ne!(first, later, "the spinner animates between frames");
+    }
 
     #[test]
     fn painted_row_targets_remain_bound_to_original_rows_and_action_strip() {
@@ -4877,7 +4924,7 @@ mod tests {
         let last_project = tree
             .add_project(PathBuf::from("/tmp/last-project"))
             .unwrap();
-        let area = Rect::new(0, 0, 40, 9);
+        let area = Rect::new(0, 0, 40, 9 + u16::from(theme::section_frames_enabled()));
         let list = list_area(area);
         let mut state = TreeState::default();
         state.open(vec![first_project]);
@@ -5133,7 +5180,7 @@ mod tests {
         // consuming the flag; the next renderer must paint the same rows.
         state.set_item_offset(0);
         state.select(vec![projects[2], panes[2]]);
-        let short_area = Rect::new(0, 0, 48, 7);
+        let short_area = Rect::new(0, 0, 48, 7 + u16::from(theme::section_frames_enabled()));
         let short_list = list_area(short_area);
         assert_eq!(short_list.height, 3);
         assert_eq!(
@@ -5185,7 +5232,7 @@ mod tests {
         let items = cache.get_or_build(&tree, 1, TreeOrder::Manual, state.opened());
         // Project B fits; the two-line agent and its bar do not fit after it.
         state.set_item_offset(2);
-        let area = Rect::new(0, 0, 48, 7);
+        let area = Rect::new(0, 0, 48, 7 + u16::from(theme::section_frames_enabled()));
         let list = list_area(area);
         let buffer = render_tree_buffer_in_area(
             &tree,

@@ -2339,7 +2339,10 @@ pub struct App {
     /// Toolbar buttons whose click was accepted but whose server-side work
     /// (spawning a pane, creating a worktree) has not been confirmed yet.
     /// The button shows a spinner meanwhile so a slow creation is visible.
-    pending_toolbar_actions: Vec<(TreeToolbarAction, Instant)>,
+    pending_toolbar_actions: Vec<(TreeToolbarAction, Instant, Option<usize>)>,
+    /// Menu actions (close, move, rename, ...) waiting for the server: label,
+    /// start, and the `tree_version` seen when the request was admitted.
+    pending_menu_actions: Vec<(&'static str, Instant, u64, Duration)>,
     /// The footer agent icon's hover or pinned worktree actions.
     pub agent_popover: Option<AgentPopover>,
     agent_popover_last_visible: bool,
@@ -2943,6 +2946,7 @@ impl App {
             tree_toolbar_hovered: false,
             hovered_tree_toolbar_action: None,
             pending_toolbar_actions: Vec::new(),
+            pending_menu_actions: Vec::new(),
             agent_popover: None,
             agent_popover_last_visible: false,
             animation_hover: None,
@@ -3915,11 +3919,86 @@ impl App {
     }
 
     pub(crate) fn queue_request(&mut self, request: ClientRequest) -> bool {
+        let menu_label = Self::slow_menu_request_label(&request);
         if self.try_queue_terminal_request(request).is_err() {
             self.show_request_admission_error();
             return false;
         }
+        if let Some((label, cap)) = menu_label {
+            self.begin_pending_menu_action(label, cap);
+        }
         true
+    }
+
+    /// Requests behind menu entries that wait on the server and have no
+    /// toolbar button to spin; creation requests use the toolbar spinners.
+    pub(crate) fn slow_menu_request_label(
+        request: &ClientRequest,
+    ) -> Option<(&'static str, Duration)> {
+        // Tree-changing requests end on the next tree change; the others
+        // change no tree node, so a short cap ends them instead.
+        let tree_change = Self::PENDING_TOOLBAR_TIMEOUT;
+        let quick = Duration::from_secs(10);
+        Some(match request {
+            ClientRequest::ClosePane { .. }
+            | ClientRequest::ClosePaneWithWorkspaceDisposition { .. } => ("Closing", tree_change),
+            ClientRequest::MoveNode { .. } | ClientRequest::ReparentNode { .. } => {
+                ("Moving", tree_change)
+            }
+            ClientRequest::ReplacePaneWithCommand { .. } => ("Restarting pane", tree_change),
+            ClientRequest::ApplyRestructurePlan { .. }
+            | ClientRequest::ApplyProjectRestructurePlan { .. }
+            | ClientRequest::ApplyRecommendedProjectRestructurePlan { .. } => {
+                ("Applying restructure", tree_change)
+            }
+            ClientRequest::RevertLastRestructure
+            | ClientRequest::RevertProjectRestructure { .. } => {
+                ("Reverting restructure", tree_change)
+            }
+            ClientRequest::RenameNode { .. } => ("Renaming", tree_change),
+            ClientRequest::RemoveWorkspace { .. } => ("Removing worktree", tree_change),
+            ClientRequest::ChangeProjectFolder { .. } => ("Changing project folder", tree_change),
+            ClientRequest::PruneWorkspace { .. } => ("Cleaning worktree", quick),
+            ClientRequest::QueryWorkspaceInventory { .. } => ("Checking worktrees", quick),
+            ClientRequest::QueryWorkspaceCloseOffer { .. } => ("Checking worktree", quick),
+            ClientRequest::TerminatePaneProcess { .. } => ("Stopping process", quick),
+            ClientRequest::FreezePane { .. } => ("Freezing pane", quick),
+            ClientRequest::UnfreezePane { .. } => ("Resuming pane", quick),
+            _ => return None,
+        })
+    }
+
+    pub(crate) fn begin_pending_menu_action(&mut self, label: &'static str, cap: Duration) {
+        if self.pending_menu_actions.len() >= 16 {
+            self.pending_menu_actions.remove(0);
+        }
+        self.pending_menu_actions
+            .push((label, Instant::now(), self.tree_version, cap));
+    }
+
+    /// Status-line text for the oldest menu action still waiting after
+    /// 0.5 s; quicker actions never flash a spinner.
+    pub(crate) fn pending_menu_activity_text(&self, now: Instant) -> Option<String> {
+        let (label, started, _, _) = self.pending_menu_actions.first()?;
+        let elapsed = now.saturating_duration_since(*started);
+        if elapsed < Duration::from_millis(500) {
+            return None;
+        }
+        let frames = crate::tree_ui::SPINNER_FRAMES;
+        let frame =
+            (elapsed.as_millis() / crate::tree_ui::SPINNER_FRAME_MS) as usize % frames.len();
+        Some(format!("{} {label}…", frames[frame]))
+    }
+
+    /// Drops menu spinners once the tree changed or the wait timed out.
+    pub fn tick_pending_menu_actions(&mut self, now: Instant) -> bool {
+        let before = self.pending_menu_actions.len();
+        let version = self.tree_version;
+        self.pending_menu_actions
+            .retain(|(_, started, baseline, cap)| {
+                now.saturating_duration_since(*started) < *cap && *baseline == version
+            });
+        before != self.pending_menu_actions.len()
     }
 
     fn show_request_admission_error(&mut self) {
@@ -11175,7 +11254,10 @@ impl App {
             }
         }
 
-        if !self.pending_toolbar_actions.is_empty() {
+        if !self.pending_toolbar_actions.is_empty()
+            || !self.pending_menu_actions.is_empty()
+            || self.restructure_in_progress()
+        {
             requirements.is_active = true;
             retain_minimum_delay(
                 &mut requirements.next_semantic_delay,
@@ -12755,15 +12837,29 @@ impl App {
         if self.pending_toolbar_actions.len() >= 16 {
             self.pending_toolbar_actions.remove(0);
         }
-        self.pending_toolbar_actions.push((action, Instant::now()));
+        // Group/project/folder creation has no pane to match a confirmation
+        // to, so the spinner ends when the mirrored tree gains a node.
+        let baseline = matches!(
+            action,
+            TreeToolbarAction::Group
+                | TreeToolbarAction::Project
+                | TreeToolbarAction::Folder
+                | TreeToolbarAction::Board
+                | TreeToolbarAction::Editor
+                | TreeToolbarAction::Split
+        )
+        .then(|| self.tree.all_ids().count());
+        self.pending_toolbar_actions
+            .push((action, Instant::now(), baseline));
     }
 
     /// Ends the oldest pending spinner for `action` (one click, one spinner).
+    #[cfg(test)]
     pub(crate) fn finish_pending_toolbar_action(&mut self, action: TreeToolbarAction) {
         if let Some(index) = self
             .pending_toolbar_actions
             .iter()
-            .position(|(pending, _)| *pending == action)
+            .position(|(pending, _, _)| *pending == action)
         {
             self.pending_toolbar_actions.remove(index);
         }
@@ -12772,12 +12868,16 @@ impl App {
     /// Ends the oldest pending shell or agent spinner: a confirmed new
     /// terminal pane cannot be attributed to one button more precisely.
     fn finish_oldest_pending_terminal_toolbar_action(&mut self) {
-        if let Some(index) = self.pending_toolbar_actions.iter().position(|(pending, _)| {
-            matches!(
-                pending,
-                TreeToolbarAction::Shell | TreeToolbarAction::Agent(_)
-            )
-        }) {
+        if let Some(index) = self
+            .pending_toolbar_actions
+            .iter()
+            .position(|(pending, _, _)| {
+                matches!(
+                    pending,
+                    TreeToolbarAction::Shell | TreeToolbarAction::Agent(_)
+                )
+            })
+        {
             self.pending_toolbar_actions.remove(index);
         }
     }
@@ -12786,24 +12886,46 @@ impl App {
         if let Some(index) = self
             .pending_toolbar_actions
             .iter()
-            .position(|(pending, _)| matches!(pending, TreeToolbarAction::Agent(_)))
+            .position(|(pending, _, _)| matches!(pending, TreeToolbarAction::Agent(_)))
         {
             self.pending_toolbar_actions.remove(index);
         }
     }
 
     pub(crate) fn pending_toolbar_mask(&self) -> u16 {
+        let restructure_bit = if self.restructure_in_progress() {
+            TreeToolbarAction::Restructure.pending_bit()
+        } else {
+            0
+        };
         self.pending_toolbar_actions
             .iter()
-            .fold(0, |mask, (action, _)| mask | action.pending_bit())
+            .fold(restructure_bit, |mask, (action, _, _)| {
+                mask | action.pending_bit()
+            })
+    }
+
+    /// True while any project restructure LLM job is queued, running or applying.
+    pub(crate) fn restructure_in_progress(&self) -> bool {
+        self.project_restructure_jobs.values().any(|job| {
+            matches!(
+                job.state,
+                ProjectRestructureState::Queued
+                    | ProjectRestructureState::Running
+                    | ProjectRestructureState::Applying
+            )
+        })
     }
 
     /// Drops spinners whose confirmation never arrived.
     pub fn tick_pending_toolbar_actions(&mut self, now: Instant) -> bool {
         let before = self.pending_toolbar_actions.len();
-        self.pending_toolbar_actions.retain(|(_, started)| {
-            now.saturating_duration_since(*started) < Self::PENDING_TOOLBAR_TIMEOUT
-        });
+        let node_count = self.tree.all_ids().count();
+        self.pending_toolbar_actions
+            .retain(|(_, started, baseline)| {
+                now.saturating_duration_since(*started) < Self::PENDING_TOOLBAR_TIMEOUT
+                    && baseline.is_none_or(|baseline| node_count <= baseline)
+            });
         before != self.pending_toolbar_actions.len()
     }
 
@@ -12912,6 +13034,7 @@ impl App {
             column,
         });
         self.record_pending_pane_focus(parent_group, PaneContentKind::Editor, basename);
+        self.begin_pending_toolbar_action(TreeToolbarAction::Editor);
         true
     }
 
@@ -13136,15 +13259,27 @@ impl App {
         } else {
             name
         };
-        self.queue_request(ClientRequest::NewGroup { parent_group, name })
+        let admitted = self.queue_request(ClientRequest::NewGroup { parent_group, name });
+        if admitted {
+            self.begin_pending_toolbar_action(TreeToolbarAction::Group);
+        }
+        admitted
     }
 
     pub fn request_new_folder(&mut self, parent_group: NodeId, path: PathBuf) -> bool {
-        self.queue_request(ClientRequest::NewFolder { parent_group, path })
+        let admitted = self.queue_request(ClientRequest::NewFolder { parent_group, path });
+        if admitted {
+            self.begin_pending_toolbar_action(TreeToolbarAction::Folder);
+        }
+        admitted
     }
 
     pub fn request_new_project(&mut self, path: PathBuf) -> bool {
-        self.queue_request(ClientRequest::NewProject { path })
+        let admitted = self.queue_request(ClientRequest::NewProject { path });
+        if admitted {
+            self.begin_pending_toolbar_action(TreeToolbarAction::Project);
+        }
+        admitted
     }
 
     pub fn request_change_project_folder(&mut self, project_id: NodeId, path: PathBuf) -> bool {
@@ -13742,6 +13877,7 @@ impl App {
         });
         if admitted {
             self.mode = Mode::Normal;
+            self.begin_pending_toolbar_action(TreeToolbarAction::Split);
         }
         admitted
     }
@@ -24999,10 +25135,18 @@ mod tests {
                 _ => None,
             })
             .collect::<Vec<_>>();
+        // The toolbar, prompt and footer sections each add a rule row.
+        let expected_rows = 27 - 3 * u16::from(crate::theme::section_frames_enabled());
         assert_eq!(resize_requests.len(), 2);
+        assert!(
+            resize_requests
+                .iter()
+                .all(|(_, rows, _, _)| *rows == expected_rows),
+            "unexpected rows: {resize_requests:?}"
+        );
         assert!(resize_requests
             .iter()
-            .all(|(_, rows, cols, cause)| *rows == 27
+            .all(|(_, rows, cols, cause)| *rows == expected_rows
                 && *cols == (120 - crate::layout::DEFAULT_UNFOCUSED_TREE_WIDTH - 4) / 2
                 && *cause == PaneResizeCause::HostTerminal));
         assert!(!resize_requests
@@ -26845,7 +26989,11 @@ mod tests {
         assert!(!app.shows_agent_toolbar(pane_id));
         let restored = app.pane_viewport(pane_id).unwrap();
         assert_eq!(restored.toolbar_area, None);
-        assert_eq!(restored.content_area.height, shrunk_height + 1);
+        // The toolbar row and its rule row are both released.
+        assert_eq!(
+            restored.content_area.height,
+            shrunk_height + 1 + u16::from(crate::theme::section_frames_enabled())
+        );
         let resize = app
             .take_outbound_requests()
             .into_iter()
@@ -27683,7 +27831,8 @@ mod tests {
 
     #[test]
     fn settings_tabs_cycle_through_inference_and_every_existing_tab() {
-        assert_eq!(SettingsTab::Appearance.next(), SettingsTab::Icons);
+        assert_eq!(SettingsTab::Appearance.next(), SettingsTab::Padding);
+        assert_eq!(SettingsTab::Padding.next(), SettingsTab::Icons);
         assert_eq!(SettingsTab::Animations.next(), SettingsTab::Sound);
         assert_eq!(SettingsTab::Icons.next(), SettingsTab::AgentMonitoring);
         assert_eq!(SettingsTab::AgentMonitoring.next(), SettingsTab::Cost);

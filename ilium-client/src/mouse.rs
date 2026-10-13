@@ -139,7 +139,10 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
         // Hover feedback reads only live layout, so it stays responsive.
         if matches!(mouse.kind, MouseEventKind::Moved)
             && matches!(app.mode, Mode::Normal)
-            && app.layout.tree_area.contains(Position::new(mouse.column, mouse.row))
+            && app
+                .layout
+                .tree_area
+                .contains(Position::new(mouse.column, mouse.row))
         {
             update_tree_hover(app, Position::new(mouse.column, mouse.row));
         }
@@ -2306,11 +2309,9 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                 crate::padding_ui::update_hover(layout.content_area, app, &mut state, position)
             }
             MouseEventKind::Down(MouseButton::Left) => {
-                if let Some(target) = crate::padding_ui::hit(
-                    layout.content_area,
-                    &app.padding_settings,
-                    position,
-                ) {
+                if let Some(target) =
+                    crate::padding_ui::hit(layout.content_area, &app.padding_settings, position)
+                {
                     crate::padding_ui::click(app, &mut state, target);
                 }
             }
@@ -6754,7 +6755,156 @@ mod frozen_agent_context_mouse_tests {
             claude.pending_bit() | TreeToolbarAction::Shell.pending_bit()
         );
         app.finish_pending_toolbar_action(claude);
-        assert_eq!(app.pending_toolbar_mask(), TreeToolbarAction::Shell.pending_bit());
+        assert_eq!(
+            app.pending_toolbar_mask(),
+            TreeToolbarAction::Shell.pending_bit()
+        );
     }
 
+    #[test]
+    fn node_creating_toolbar_spinners_end_when_the_tree_gains_a_node() {
+        for action in [
+            TreeToolbarAction::Project,
+            TreeToolbarAction::Folder,
+            TreeToolbarAction::Board,
+            TreeToolbarAction::Editor,
+            TreeToolbarAction::Split,
+        ] {
+            let mut app = App::new("toolbar-pending-nodes".into(), std::env::temp_dir());
+            app.begin_pending_toolbar_action(action);
+            let now = std::time::Instant::now();
+            assert_eq!(app.pending_toolbar_mask(), action.pending_bit());
+            app.tree
+                .add_group(ilium_core::ROOT_ID, "confirmed".to_string())
+                .expect("group added");
+            assert!(app.tick_pending_toolbar_actions(now));
+            assert_eq!(app.pending_toolbar_mask(), 0);
+        }
+    }
+
+    #[test]
+    fn menu_action_spinner_waits_half_a_second_and_ends_on_a_tree_change() {
+        let mut app = App::new("menu-pending".into(), std::env::temp_dir());
+        app.begin_pending_menu_action("Closing", std::time::Duration::from_secs(120));
+        let start = std::time::Instant::now();
+        assert!(app.pending_menu_activity_text(start).is_none());
+        let later = start + std::time::Duration::from_millis(600);
+        assert!(app
+            .pending_menu_activity_text(later)
+            .is_some_and(|text| text.ends_with("Closing…")));
+        app.bump_tree_version();
+        assert!(app.tick_pending_menu_actions(later));
+        assert!(app.pending_menu_activity_text(later).is_none());
+    }
+
+    #[test]
+    fn real_request_sites_start_their_spinner_once_the_request_is_admitted() {
+        let mut app = App::new("request-sites".into(), std::env::temp_dir());
+        app.outbound_admission = Some(crate::execution::test_document_client());
+        let root = ilium_core::ROOT_ID;
+        assert!(app.request_new_group(root, "spin".into()));
+        assert!(app.request_new_folder(root, std::env::temp_dir()));
+        assert!(app.request_new_project(std::env::temp_dir()));
+        let mask = app.pending_toolbar_mask();
+        for action in [
+            TreeToolbarAction::Group,
+            TreeToolbarAction::Folder,
+            TreeToolbarAction::Project,
+        ] {
+            assert_ne!(mask & action.pending_bit(), 0, "{action:?} must spin");
+        }
+        assert_eq!(app.take_outbound_requests().len(), 3);
+
+        assert!(app.queue_request(ilium_ipc::ClientRequest::RenameNode {
+            node_id: root,
+            title: "renamed".into(),
+            short_title: None,
+            inferred_icon: None,
+        }));
+        let started = std::time::Instant::now();
+        assert!(app.pending_menu_activity_text(started).is_none());
+        let text = app
+            .pending_menu_activity_text(started + std::time::Duration::from_millis(600))
+            .expect("rename spins after half a second");
+        assert!(text.ends_with("Renaming…"), "{text:?}");
+    }
+
+    #[test]
+    fn every_slow_menu_request_spins_once_admitted() {
+        use ilium_ipc::ClientRequest;
+        let root = ilium_core::ROOT_ID;
+        let requests = vec![
+            ClientRequest::ClosePane { pane_id: root },
+            ClientRequest::ReparentNode {
+                node_id: root,
+                new_parent: root,
+                index: None,
+            },
+            ClientRequest::ChangeProjectFolder {
+                project_id: root,
+                path: std::env::temp_dir(),
+            },
+            ClientRequest::ReplacePaneWithCommand {
+                pane_id: root,
+                command_line: "true".into(),
+            },
+            ClientRequest::TerminatePaneProcess { pane_id: root },
+            ClientRequest::UnfreezePane { pane_id: root },
+        ];
+        for request in requests {
+            let mut app = App::new("menu-sites".into(), std::env::temp_dir());
+            app.outbound_admission = Some(crate::execution::test_document_client());
+            assert!(app.queue_request(request.clone()), "{request:?} admitted");
+            let started = std::time::Instant::now();
+            assert!(app.pending_menu_activity_text(started).is_none());
+            assert!(
+                app.pending_menu_activity_text(started + std::time::Duration::from_millis(600))
+                    .is_some(),
+                "{request:?} must show a spinner after half a second"
+            );
+        }
+    }
+
+    #[test]
+    fn untracked_menu_actions_spin_until_their_short_cap() {
+        let pane_id = ilium_core::ROOT_ID;
+        let (label, cap) = App::slow_menu_request_label(&ilium_ipc::ClientRequest::FreezePane {
+            pane_id,
+            resume_command: String::new(),
+        })
+        .expect("freeze is a slow menu action");
+        assert_eq!(label, "Freezing pane");
+        assert!(
+            App::slow_menu_request_label(&ilium_ipc::ClientRequest::QueryWorkspaceInventory {
+                request_id: 1,
+                project: pane_id,
+            })
+            .is_some()
+        );
+        let mut app = App::new("menu-capped".into(), std::env::temp_dir());
+        app.begin_pending_menu_action(label, cap);
+        let start = std::time::Instant::now();
+        let spinning = start + std::time::Duration::from_secs(5);
+        assert!(!app.tick_pending_menu_actions(spinning));
+        assert!(app.pending_menu_activity_text(spinning).is_some());
+        assert!(app.tick_pending_menu_actions(start + cap));
+        assert!(app.pending_menu_activity_text(start + cap).is_none());
+    }
+
+    #[test]
+    fn pending_group_spinner_ends_when_the_tree_gains_a_node() {
+        let mut app = App::new("toolbar-pending-group".into(), std::env::temp_dir());
+        app.begin_pending_toolbar_action(TreeToolbarAction::Group);
+        let now = std::time::Instant::now();
+        assert!(!app.tick_pending_toolbar_actions(now));
+        assert_eq!(
+            app.pending_toolbar_mask(),
+            TreeToolbarAction::Group.pending_bit()
+        );
+        app.tree
+            .add_group(ilium_core::ROOT_ID, "confirmed".to_string())
+            .expect("group added");
+        assert!(app.tick_pending_toolbar_actions(now));
+        assert_eq!(app.pending_toolbar_mask(), 0);
+    }
 }

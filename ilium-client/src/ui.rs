@@ -3314,6 +3314,13 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         spans.push(Span::raw("  —  "));
         spans.push(Span::raw(status));
     }
+    if let Some(activity) = app.pending_menu_activity_text(std::time::Instant::now()) {
+        spans.push(Span::raw("  —  "));
+        spans.push(Span::styled(
+            activity,
+            bar_style.add_modifier(Modifier::BOLD),
+        ));
+    }
     if let Some(message) = &app.status_message {
         spans.push(Span::raw("  —  "));
         // Borrow rather than `message.clone()` -- `app` outlives this
