@@ -1,0 +1,22 @@
+package ilium:host@0.1.0;
+
+interface http {
+  use ilium:types/ids@0.1.0.{request-id, stream-id};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  use ilium:types/net@0.1.0.{header};
+  record http-request { method: string, url: string, headers: list<header>, body: option<list<u8>>, timeout-millis: u32 }
+  record http-response { status: u16, headers: list<header>, body: list<u8> }
+  enum stream-framing { raw, lines, server-sent-events, ndjson }
+  /// max-chunk-bytes at most 1 MiB.
+  record stream-request { request: http-request, framing: stream-framing, max-chunk-bytes: u32 }
+  /// Async, take-response. Body at most 8 MiB by default. Errors: network, timed-out.
+  fetch: func(request: http-request) -> result<request-id, plugin-error>;
+  take-response: func(request: request-id) -> option<http-response>;
+  /// Delivers http-stream-data and http-stream-closed events. At most 4 streams per plugin by default, 64 per session.
+  open-stream: func(request: stream-request) -> result<stream-id, plugin-error>;
+  close-stream: func(stream: stream-id);
+  // @unstable(feature = websocket)
+  open-websocket: func(url: string, protocols: list<string>) -> result<stream-id, plugin-error>;
+  // @unstable(feature = websocket)
+  send-websocket: func(stream: stream-id, text: string) -> result<_, plugin-error>;
+}

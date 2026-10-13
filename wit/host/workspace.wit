@@ -1,0 +1,12 @@
+package ilium:host@0.1.0;
+
+interface workspace {
+  use ilium:types/ids@0.1.0.{node-id};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  use ilium:types/paths@0.1.0.{fs-path};
+  record workspace-spec { repository: fs-path, path: fs-path, branch: string, base: option<string>, owner: option<node-id> }
+  record workspace-info { id: u64, path: fs-path, branch: string, owner: option<node-id>, in-use: bool }
+  register: func(spec: workspace-spec) -> result<u64, plugin-error>;
+  release: func(workspace: u64) -> result<_, plugin-error>;
+  %list: func() -> list<workspace-info>;
+}

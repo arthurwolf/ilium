@@ -1,0 +1,50 @@
+package ilium:primitives@0.1.0;
+
+interface terminal {
+  use ilium:types/ids@0.1.0.{node-id, request-id};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  use ilium:types/text@0.1.0.{style, color, modifiers};
+  use ilium:types/ui@0.1.0.{pointer-modifiers};
+
+  record screen { columns: u16, rows: list<string>, cursor-row: u16, cursor-column: u16, title: option<string>, revision: u64 }
+  enum screen-part { visible, scrollback }
+  record selection { first-row: u32, first-column: u16, last-row: u32, last-column: u16, text: string }
+  record output-filter { id: string, regex: string, rate-per-second: u16 }
+  record cell-region { first-row: u32, first-column: u16, last-row: u32, last-column: u16, style: style, label: option<string> }
+  record cell { text: string, fg: option<color>, bg: option<color>, add: modifiers, wide: bool }
+  record cell-rows { first-row: u32, columns: u16, rows: list<list<cell>>, revision: u64 }
+  flags terminal-mode { alternate-screen, mouse-reporting, bracketed-paste, application-cursor, focus-reporting, synchronized-output }
+  record foreground-process { name: string, command-line: list<string>, cwd: option<string> }
+  record history-match { row: u32, column: u16, length: u16 }
+
+  /// terminal.read-screen. Sync. max-rows at most 1,000.
+  read-screen: func(pane: node-id, part: screen-part, max-rows: u32) -> option<screen>;
+  selection: func(pane: node-id) -> option<selection>;
+  /// terminal.output-filter. regex is a bounded RE2-style expression. At most 8 filters per pane per plugin.
+  add-output-filter: func(pane: node-id, filter: output-filter) -> result<_, plugin-error>;
+  remove-output-filter: func(pane: node-id, filter-id: string);
+  /// terminal.pointer. Errors: conflict when another plugin holds the claim.
+  claim-pointer: func(pane: node-id) -> result<_, plugin-error>;
+  /// Claims only the gestures that carry these modifiers. Errors: invalid-argument for an empty set.
+  claim-pointer-gesture: func(pane: node-id, modifiers: pointer-modifiers) -> result<_, plugin-error>;
+  release-pointer: func(pane: node-id);
+  set-highlights: func(pane: node-id, layer: string, regions: list<cell-region>) -> result<_, plugin-error>;
+  clear-highlights: func(pane: node-id, layer: string);
+  /// terminal.read-cells. count at most 1,000.
+  read-cells: func(pane: node-id, part: screen-part, first-row: u32, count: u32) -> option<cell-rows>;
+  modes: func(pane: node-id) -> option<terminal-mode>;
+  foreground-process: func(pane: node-id) -> option<foreground-process>;
+  /// A stable copy of screen and scrollback. At most 4 snapshots per plugin.
+  freeze-snapshot: func(pane: node-id) -> result<u64, plugin-error>;
+  read-snapshot-cells: func(snapshot: u64, first-row: u32, count: u32) -> option<cell-rows>;
+  drop-snapshot: func(snapshot: u64);
+  /// terminal.history. Async, take-history. max-bytes at most 4 MiB, the newest text is kept.
+  history-text: func(pane: node-id, max-bytes: u32) -> result<request-id, plugin-error>;
+  take-history: func(request: request-id) -> option<string>;
+  /// Async, take-matches. max-matches at most 1,000.
+  search-history: func(pane: node-id, regex: string, max-matches: u16) -> result<request-id, plugin-error>;
+  take-matches: func(request: request-id) -> option<list<history-match>>;
+  /// terminal.input-lock. millis at most 2,000. User keys are queued, not lost.
+  lock-input: func(pane: node-id, millis: u16) -> result<_, plugin-error>;
+  unlock-input: func(pane: node-id);
+}

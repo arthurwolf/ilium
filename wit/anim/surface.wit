@@ -1,0 +1,37 @@
+package ilium:anim@0.1.0;
+
+interface surface {
+  use ilium:types/ids@0.1.0.{epoch-ms};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  use ilium:types/text@0.1.0.{modifiers};
+  use ilium:types/ui@0.1.0.{pixel-format};
+
+  /// An occupancy value per cell, set by the host from the pane text: true where text is drawn.
+  record occupancy-grid { columns: u16, rows: u16, cells: list<bool> }
+  record scene-pointer { column: u16, row: u16, sub-x: u8, sub-y: u8, pressed: bool }
+  record glyph-cell { column: u16, row: u16, text: string, fg: option<u32>, bg: option<u32>, add: modifiers }
+  /// pointer-owner is the owner id under the pointer at the presented frame.
+  record frame-receipt { frame: u64, presented-at-millis: u64, dropped-before: u32, pointer-owner: option<u16> }
+
+  resource frame-surface {
+    /// Width and height in pixels.
+    size: func() -> tuple<u32, u32>;
+    /// Rows are top to bottom. first-row plus the rows written must be within the height.
+    /// Errors: invalid-argument for a bad length or a format the scene did not declare.
+    write-rows: func(first-row: u32, format: pixel-format, data: list<u8>) -> result<_, plugin-error>;
+    /// Needs uses-cell-colors. One 0xRRGGBB value per cell, row by row.
+    write-cell-colors: func(first-row: u32, colors: list<u32>) -> result<_, plugin-error>;
+    /// Needs wants-occupancy.
+    occupancy: func() -> option<occupancy-grid>;
+    /// Needs wants-pointer.
+    pointer: func() -> option<scene-pointer>;
+    /// Ends the frame. A render call that returns without present drops the frame.
+    present: func();
+    /// Needs glyph_plane true. At most 131,072 cells per frame.
+    write-glyphs: func(cells: list<glyph-cell>) -> result<_, plugin-error>;
+    clear-glyphs: func();
+    /// One id per pixel, 0 means none.
+    set-owner-ids: func(first-row: u32, ids: list<u16>) -> result<_, plugin-error>;
+    last-receipt: func() -> option<frame-receipt>;
+  }
+}
