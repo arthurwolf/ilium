@@ -2033,6 +2033,8 @@ pub(crate) struct FrozenDialogLayout {
 }
 
 pub(crate) const FROZEN_DIALOG_BUTTON_LABEL: &str = "      [ Unfreeze agent ]      ";
+/// Shown while an unfreeze replacement is in flight; cleared once the replacement pane takes its tree slot.
+pub(crate) const UNFREEZING_AGENT_STATUS: &str = "Unfreezing agent…";
 
 pub struct App {
     /// The session this client is attached to (used to resolve the UDS
@@ -16000,7 +16002,7 @@ impl App {
         self.queue_terminal_request_after_barrier(unfreeze_request);
         // Carry focus across the server's new pane ID at the same tree slot.
         self.remember_replacement_focus(pane_id);
-        self.status_message = Some("Unfreezing agent…".to_string());
+        self.status_message = Some(UNFREEZING_AGENT_STATUS.to_string());
     }
 
     pub(crate) fn tick_auto_freeze(&mut self, now: Instant) -> bool {
@@ -23762,7 +23764,7 @@ mod tests {
         );
 
         assert!(!app.agent_session_ids.contains_key(&pane_id));
-        assert_eq!(app.status_message.as_deref(), Some("Unfreezing agent…"));
+        assert_eq!(app.status_message.as_deref(), Some(UNFREEZING_AGENT_STATUS));
         assert!(app
             .pending_replacement_focus
             .is_some_and(|pending| { pending.old_pane_id == pane_id && pending.was_focused }));
