@@ -225,6 +225,25 @@ mod tests {
     use super::*;
 
     #[test]
+    fn wide_banner_draws_a_quote_gutter_and_indents_the_text() {
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(40, 3)).unwrap();
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                render(frame, area, Some("hello world"), 3, ColorScheme::Dark);
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let row: String = (0..40).map(|x| buffer[(x, 0)].symbol()).collect();
+        let gutter_x = row.chars().position(|c| c == '\u{258e}');
+        let text_x = row.find("hello").map(|byte| row[..byte].chars().count());
+        let (gutter_x, text_x) = (gutter_x.expect("gutter"), text_x.expect("text"));
+        assert!(gutter_x < text_x);
+        assert!(text_x >= usize::from(TEXT_INSET_LEFT));
+    }
+
+    #[test]
     fn small_prompt_slot_retains_the_end_of_the_prompt() {
         let mut terminal =
             ratatui::Terminal::new(ratatui::backend::TestBackend::new(40, 2)).unwrap();

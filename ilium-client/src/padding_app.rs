@@ -3,8 +3,8 @@
 //! persisting the `[padding]` table. Pure value logic lives in
 //! [`crate::padding`].
 
-use ilium_ipc::PaneResizeCause;
 use ilium_core::{NodeKind, PaneContentKind};
+use ilium_ipc::PaneResizeCause;
 
 use crate::app::App;
 use crate::filesystem::configuration::ConfigurationChange;
@@ -162,11 +162,15 @@ mod tests {
         // Width-dependent with the default 80-column test screen stays
         // inactive, so these edits never publish nonzero tree padding.
         app.padding_set_mode(PaddingMode::WidthDependent);
+        app.settle_filesystem_for_test();
         assert_eq!(app.padding_set_threshold(150), Ok(()));
+        app.settle_filesystem_for_test();
         assert!(app.padding_set_threshold(10).is_err());
         assert_eq!(app.padding_settings.width_threshold, 150);
         app.padding_set_linked(PaddingPanel::Tree, false);
+        app.settle_filesystem_for_test();
         app.padding_set_side(PaddingPanel::Tree, PaddingSide::Top, 3);
+        app.settle_filesystem_for_test();
         app.padding_step_threshold(-1000);
         assert_eq!(app.padding_settings.width_threshold, MIN_WIDTH_THRESHOLD);
         app.settle_filesystem_for_test();
@@ -182,7 +186,10 @@ mod tests {
             crate::layout::UiLayout::from_screen_area(ratatui::layout::Rect::new(0, 0, 120, 40));
         assert_eq!(app.padding_for(PaddingPanel::Tree), PaddingSides::NONE);
         app.padding_settings.mode = PaddingMode::Enabled;
-        assert_eq!(app.padding_for(PaddingPanel::Tree), PaddingSides::uniform(1));
+        assert_eq!(
+            app.padding_for(PaddingPanel::Tree),
+            PaddingSides::uniform(1)
+        );
         app.padding_settings.mode = PaddingMode::WidthDependent;
         assert_eq!(app.padding_for(PaddingPanel::Terminal), PaddingSides::NONE);
         app.padding_settings.width_threshold = 120;

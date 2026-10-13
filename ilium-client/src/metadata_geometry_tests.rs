@@ -165,7 +165,10 @@ fn an_explicit_slot_setting_change_still_resizes_the_child() {
     let after = app.pane_viewport(pane_id).unwrap();
     assert_eq!(
         after.content_area.height,
-        before + u16::from(app.ui_settings.last_prompt_max_lines)
+        // The banner's bottom rule row is released together with the banner.
+        before
+            + u16::from(app.ui_settings.last_prompt_max_lines)
+            + u16::from(crate::theme::section_frames_enabled())
     );
     assert!(app.take_outbound_requests().iter().any(|r| matches!(r,
         ClientRequest::ResizePane { pane_id: id, rows, .. } if *id == pane_id && *rows == after.content_area.height
@@ -290,7 +293,11 @@ fn a_server_confirmed_feature_setting_changes_geometry_once() {
     let after = app.pane_viewport(pane_id).unwrap();
     assert_eq!(
         after.content_area.height,
-        before + 1 + u16::from(app.ui_settings.progress_max_lines)
+        // The footer's rule row is released with the footer.
+        before
+            + 1
+            + u16::from(app.ui_settings.progress_max_lines)
+            + u16::from(crate::theme::section_frames_enabled())
     );
     assert!(app.take_outbound_requests().iter().any(
         |request| matches!(request, ClientRequest::ResizePane { pane_id: id, .. } if *id == pane_id)

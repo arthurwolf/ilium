@@ -135,9 +135,7 @@ impl ValueControl {
         let geometry = &mut prepared.geometry;
         geometry.label = Rect::new(row.x, row.y, label_width, 1);
         prepared.label_text = clip_cells(spec.label, label_width);
-        let number_needs_compact_layout =
-            spec.kind == ControlKind::Number && control_width < 2 * step_width + 4;
-        if control_width < 2 * step_width + 2 || number_needs_compact_layout {
+        if control_width < 2 * step_width + 2 {
             geometry.open = Rect::new(control_x + control_width - 1, row.y, 1, 1);
             geometry.value_slot = Rect::new(control_x, row.y, control_width - 1, 1);
         } else {

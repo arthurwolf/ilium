@@ -21,6 +21,13 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 
 ### Changed
 
+- Four-cell numeric settings retain their separate step and edit controls; Padding help is reachable, Growth has its own help topic, and board creation preserves dangling symlinks. Shutdown errors display the original client failure alongside retained-request custody.
+- Terminal integration checks locate prompt headers, rounded card borders and context-menu actions from the rendered surface, exercise scrolled voice settings, and retain owned-server startup diagnostics.
+- Animation-settings pointer lookup resolves one visible row before preparing controls, avoiding repeated layout work while retaining the complete control interaction matrix.
+- Remote-compaction settings share paint and hit geometry and keep every control reachable below wrapped labels on narrow screens.
+- Location entry selectors now wrap in either direction and retain keyboard focus; coordinate controls remain visible instead of being cleared after painting. Focus-order coverage includes the entry selector.
+- Remote test captures no longer require Cargo’s cache target path: complete synthetic captures are retained in verified logs even with default passing-test output capture. Naming acceptance uses the Cargo candidate by default and cleans up its isolated runtime.
+
 - Server test fixtures initialize execution admission and event journals, verify subscriber lag recovery, and retain process-inspection refusal checks.
 
 - Saved-world catalogs report zero payload bytes for directories consistently across platforms. Provider-crash fixtures retry only transient executable-write conflicts, with bounded attempts; worktree-removal tests retain refusal checks when the host denies process-directory inspection.

@@ -1198,13 +1198,16 @@ async fn completed_progress_footer_expires_during_continuous_pty_output() {
     let counter = |screen: String| {
         screen
             .split("busy-expiry-output-")
-            .nth(1)
-            .unwrap()
-            .chars()
-            .take_while(char::is_ascii_digit)
-            .collect::<String>()
-            .parse::<u64>()
-            .unwrap()
+            .skip(1)
+            .filter_map(|tail| {
+                tail.chars()
+                    .take_while(char::is_ascii_digit)
+                    .collect::<String>()
+                    .parse::<u64>()
+                    .ok()
+            })
+            .max()
+            .expect("visible busy output counter")
     };
     let busy_before = counter(tui.screen_text());
     let footer_expired = wait_until(
@@ -1215,6 +1218,7 @@ async fn completed_progress_footer_expires_during_continuous_pty_output() {
                 let text = screen.contents();
                 text.contains("busy-expiry-output-")
                     && !text.contains("unique completed footer evidence")
+                    && counter(text) > busy_before
             })
             .unwrap_or(false)
         },
@@ -1495,8 +1499,6 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
                 && screen.contains("OpenAI API key")
                 && screen.contains("Reasoning effort")
                 && screen.contains("VAD eagerness")
-                && screen.contains("Confirm terminal submissions")
-                && screen.contains("Custom prompt")
         },
         WAIT_TIMEOUT,
     )
@@ -1516,6 +1518,27 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         tui.with_screen(|screen| rows_containing(screen, "VOICE")),
         tui.with_screen(|screen| bottom_rows(screen, 3)),
     );
+
+    // Wrapped explanations can put later controls below the viewport. Walk
+    // the actual selectable rows and require both later controls, then return
+    // to row zero so the API-key child-dialog interaction remains unchanged.
+    tui.write(b"jjjjjjjjjjjj")
+        .expect("navigate to the lower Voice control settings");
+    assert!(
+        wait_until(
+            || {
+                let screen = tui.screen_text();
+                screen.contains("Confirm terminal submissions") && screen.contains("Custom prompt")
+            },
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected lower Voice control settings to remain reachable, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"kkkkkkkkkkkk")
+        .expect("return to the first Voice control setting");
+    assert!(wait_until(|| tui.screen_text().contains("OpenAI API key"), WAIT_TIMEOUT).await);
 
     // Open the API-key child dialog from the real Settings screen. Both the
     // parent header/tab and the child hint must remain in the same captured
@@ -3964,7 +3987,7 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
             .find(|column| {
                 screen
                     .cell(border_row, *column)
-                    .is_some_and(|cell| cell.contents() == "┌")
+                    .is_some_and(|cell| cell.contents() == "╭")
             })
             .expect("find Context task card border");
         (border_start..border_start.saturating_add(20).min(columns))
@@ -4687,6 +4710,15 @@ async fn clicking_up_on_a_boundary_pane_exits_its_nested_group() {
     // Hover reveals the action overlay and expands the tree horizontally.
     // Read the Up icon's actual terminal cell rather than duplicating the
     // renderer's animated width or fixed-slot geometry in this PTY test.
+    let shell_row_before = wait_for_stable_value(
+        || tui.with_screen(|screen| {
+            rows_containing_in_order(screen, &[TERMINAL_ICON, "shell"]).first().copied()
+        }),
+        SETTLED_LAYOUT_DURATION,
+        WAIT_TIMEOUT,
+    )
+    .await
+    .expect("nested shell row must settle before its hover action");
     tui.write(&sgr_mouse_move(8, shell_row_before))
         .expect("hover boundary pane row");
     // The icon is only as settled as the widening tree it sits in: sampled
@@ -5024,7 +5056,17 @@ async fn agent_debug_log_filters_panel_resizes_and_saves_the_active_view() {
         "expected detected-agent context action, got: {:?}",
         tui.screen_text()
     );
-    tui.write(&sgr_mouse_click(0, menu_column + 1, menu_row + 1))
+    let (debug_action_column, debug_action_row) = tui
+        .with_screen(|screen| {
+            let row = *rows_containing(screen, "Show debug log").first()?;
+            (0..screen.size().1).find_map(|column| {
+                screen.cell(row, column)
+                    .filter(|cell| cell.contents() == "S")
+                    .map(|_| (column, row))
+            })
+        })
+        .expect("locate the rendered Show debug log action");
+    tui.write(&sgr_mouse_click(0, debug_action_column, debug_action_row))
         .expect("open agent debug log");
     tui.write(b"\x1b[H")
         .expect("jump to the oldest retained debug events");
@@ -5413,8 +5455,8 @@ async fn last_prompt_banner_splits_a_bracketed_paste_on_lone_carriage_returns() 
     // middle-truncation assertion to the banner's own four rows so echoed
     // content in the pane body below can't produce a false pass or fail.
     let (banner_rows_ok, screen_for_diagnostics) = tui.with_screen(|screen| {
-        let toolbar_rows = rows_containing(screen, "⏹ Stop");
-        let Some(&toolbar_row) = toolbar_rows.first() else {
+        let prompt_header_rows = rows_containing(screen, "last prompt");
+        let Some(&prompt_header_row) = prompt_header_rows.first() else {
             return (false, String::new());
         };
         let cols = screen.size().1;
@@ -5422,7 +5464,7 @@ async fn last_prompt_banner_splits_a_bracketed_paste_on_lone_carriage_returns() 
             .map(|offset| {
                 screen
                     .rows(0, cols)
-                    .nth((toolbar_row + offset) as usize)
+                    .nth((prompt_header_row + offset) as usize)
                     .unwrap_or_default()
                     .trim_end()
                     .to_string()
@@ -5553,13 +5595,13 @@ async fn last_prompt_banner_updates_from_ordinary_typed_keystrokes_with_a_correc
         wait_until(
             || {
                 tui.with_screen(|screen| {
-                    let Some(&toolbar_row) = rows_containing(screen, "⏹ Stop").first() else {
+                    let Some(&prompt_header_row) = rows_containing(screen, "last prompt").first() else {
                         return false;
                     };
                     let cols = screen.size().1;
                     screen
                         .rows(0, cols)
-                        .nth((toolbar_row + 5) as usize)
+                        .nth((prompt_header_row + 6) as usize)
                         .unwrap_or_default()
                         .contains("Pursuing goal")
                 })
@@ -5713,17 +5755,17 @@ async fn last_prompt_banner_keeps_fixed_slot_for_a_short_prompt() {
         wait_until(
             || {
                 tui.with_screen(|screen| {
-                    let Some(&toolbar_row) = rows_containing(screen, "⏹ Stop").first() else {
+                    let Some(&prompt_header_row) = rows_containing(screen, "last prompt").first() else {
                         return false;
                     };
                     let cols = screen.size().1;
                     let banner_row = screen
                         .rows(0, cols)
-                        .nth((toolbar_row + 1) as usize)
+                        .nth((prompt_header_row + 1) as usize)
                         .unwrap_or_default();
                     let next_row = screen
                         .rows(0, cols)
-                        .nth((toolbar_row + 5) as usize)
+                        .nth((prompt_header_row + 6) as usize)
                         .unwrap_or_default();
                     banner_row.contains("hi") && next_row.contains("Pursuing goal")
                 })

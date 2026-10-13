@@ -113,8 +113,8 @@ pub fn tab_layout(area: Rect, settings: &PaddingSettings) -> TabLayout {
 
     TabLayout {
         cards,
-        big_decrement: big_decrement.map(|rect| rect),
-        decrement: decrement.clone(),
+        big_decrement,
+        decrement,
         field,
         increment,
         big_increment,
@@ -233,10 +233,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
             ui.hover,
             Some(PaddingHit::Mode(hovered)) if hovered == mode
         ) || (mode == PaddingMode::WidthDependent
-            && matches!(
-                ui.hover,
-                Some(PaddingHit::Step(_) | PaddingHit::Field)
-            ));
+            && matches!(ui.hover, Some(PaddingHit::Step(_) | PaddingHit::Field)));
         let is_focused = state.selected_row == ROW_MODE && is_selected;
         let marker = if is_selected { "●" } else { "○" };
         let title_style = if is_selected {
@@ -277,8 +274,11 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
         );
         if is_focused && index < 3 {
             frame.render_widget(
-                Paragraph::new(Span::styled("◂ ▸ arrows", Style::new().add_modifier(Modifier::DIM)))
-                    .alignment(Alignment::Right),
+                Paragraph::new(Span::styled(
+                    "◂ ▸ arrows",
+                    Style::new().add_modifier(Modifier::DIM),
+                ))
+                .alignment(Alignment::Right),
                 Rect::new(inside.x, inside.y, inside.width, 1),
             );
         }
@@ -288,21 +288,24 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
     }
 
     if let Some(button) = layout.fine_tune {
-        let is_hovered = ui.hover == Some(PaddingHit::FineTune)
-            || state.selected_row == ROW_FINE_TUNE;
+        let is_hovered =
+            ui.hover == Some(PaddingHit::FineTune) || state.selected_row == ROW_FINE_TUNE;
         let style = if is_hovered {
             theme::selected_style().add_modifier(Modifier::BOLD)
         } else {
             Style::new().add_modifier(Modifier::REVERSED)
         };
-        frame.render_widget(
-            Paragraph::new(Span::styled(FINE_TUNE_LABEL, style)),
-            button,
-        );
+        frame.render_widget(Paragraph::new(Span::styled(FINE_TUNE_LABEL, style)), button);
     }
 }
 
-fn render_threshold(frame: &mut Frame, inside: Rect, layout: &TabLayout, app: &App, state: &SettingsState) {
+fn render_threshold(
+    frame: &mut Frame,
+    inside: Rect,
+    layout: &TabLayout,
+    app: &App,
+    state: &SettingsState,
+) {
     let settings = &app.padding_settings;
     let ui = &state.padding;
     let is_active = settings.mode == PaddingMode::WidthDependent;
@@ -313,12 +316,7 @@ fn render_threshold(frame: &mut Frame, inside: Rect, layout: &TabLayout, app: &A
     };
     frame.render_widget(
         Paragraph::new(Span::styled("Terminal columns:", label_style)),
-        Rect::new(
-            inside.x,
-            layout.field.y.saturating_sub(1),
-            inside.width,
-            1,
-        ),
+        Rect::new(inside.x, layout.field.y.saturating_sub(1), inside.width, 1),
     );
     let hovered_step = |delta: i32| ui.hover == Some(PaddingHit::Step(delta));
     if let Some(rect) = layout.big_decrement {
@@ -483,7 +481,11 @@ mod tests {
             .unwrap();
         let buffer = terminal.backend().buffer();
         (0..height)
-            .map(|y| (0..width).map(|x| buffer[(x, y)].symbol()).collect::<String>())
+            .map(|y| {
+                (0..width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            })
             .collect::<Vec<_>>()
             .join("\n")
     }
@@ -529,7 +531,11 @@ mod tests {
         assert_eq!(app.padding_settings.mode, PaddingMode::Enabled);
 
         let layout = tab_layout(area, &app.padding_settings);
-        let button = hit(area, &app.padding_settings, layout.fine_tune.unwrap().as_position());
+        let button = hit(
+            area,
+            &app.padding_settings,
+            layout.fine_tune.unwrap().as_position(),
+        );
         assert_eq!(button, Some(PaddingHit::FineTune));
         click(&mut app, &mut state, PaddingHit::FineTune);
         assert!(state.padding.dialog.is_some());
@@ -540,7 +546,11 @@ mod tests {
         click(&mut app, &mut state, step);
         assert_eq!(app.padding_settings.mode, PaddingMode::WidthDependent);
         assert_eq!(app.padding_settings.width_threshold, 201);
-        let big = hit(area, &app.padding_settings, layout.big_decrement.unwrap().as_position());
+        let big = hit(
+            area,
+            &app.padding_settings,
+            layout.big_decrement.unwrap().as_position(),
+        );
         click(&mut app, &mut state, big.unwrap());
         assert_eq!(app.padding_settings.width_threshold, 191);
     }
@@ -561,7 +571,11 @@ mod tests {
             );
         }
         assert_eq!(app.padding_settings.width_threshold, 150);
-        handle_key(&mut app, &mut state, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        handle_key(
+            &mut app,
+            &mut state,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+        );
         assert!(state.padding.editing.is_none());
 
         click(&mut app, &mut state, PaddingHit::Field);
@@ -572,8 +586,15 @@ mod tests {
                 KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE),
             );
         }
-        assert_eq!(app.padding_settings.width_threshold, 150, "10 is not above 10");
-        handle_key(&mut app, &mut state, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(
+            app.padding_settings.width_threshold, 150,
+            "10 is not above 10"
+        );
+        handle_key(
+            &mut app,
+            &mut state,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+        );
         assert!(app.status_message.is_some());
     }
 
