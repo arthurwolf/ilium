@@ -113,6 +113,29 @@ async fn acknowledged_authored_enter_authorizes_title_before_request_history_flu
         };
         before = tree;
     }
+    // Detection classifies the pane asynchronously. An Enter written before
+    // the pane carries its agent state is (correctly) not an authored agent
+    // submission, so no revision fence precedes the prompt trigger; process
+    // inspection is slow enough on Windows for that window to be observable.
+    let classified = tokio::time::Instant::now() + WAIT;
+    while !before.get(pane_id).is_some_and(|node| {
+        matches!(&node.kind, ilium_core::NodeKind::Pane { status, .. } if status.agent_state().is_some())
+    }) {
+        assert!(
+            tokio::time::Instant::now() < classified,
+            "detection never classified the fixture pane as an agent"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        write_frame(
+            &mut client,
+            &ClientRequest::Attach {
+                session: SESSION.into(),
+            },
+        )
+        .await
+        .unwrap();
+        before = read_initial_state(&mut client, WAIT).await.0;
+    }
     let original = before.get(pane_id).unwrap().clone();
     let title_request = |revision, title: &str| ClientRequest::SetSessionPaneTitle {
         pane_id,

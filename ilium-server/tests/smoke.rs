@@ -500,7 +500,16 @@ async fn command_with_initial_input_waits_for_agent_composer_then_submits_enter(
     // `read_frame` on the same stream -- exactly what continuing to read
     // from `client` afterward would have needed to still work.
     let composer_reveal_deadline = tokio::time::Instant::now() + Duration::from_millis(600);
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    // Delivery first waits for the detection loop to establish process
+    // ownership. Windows process-tree inspection on a hosted runner takes
+    // several seconds (the live detection suite's tests run 4-15 s there), so
+    // the upper bound is generous there; the lower bound above is unchanged.
+    let deadline = tokio::time::Instant::now()
+        + if cfg!(windows) {
+            Duration::from_secs(30)
+        } else {
+            Duration::from_secs(5)
+        };
     let mut saw_prompt_event = false;
     let mut saw_submitted_output = false;
     // `ScreenUpdate.bytes` is "one or more consecutive raw PTY output
