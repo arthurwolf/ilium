@@ -163,6 +163,8 @@ impl ProjectionRetention {
             | AntigravityStatuslineCompleted { .. }
             | Error { .. }
             | PaneResizeRejected { .. }
+            | BlockingErrorsSnapshot { .. }
+            | PaneCreateFinished { .. }
             | WorkspaceRemovalBlocked { .. } => return update,
             AgentDetectionSettingsChanged { result, .. } => match result {
                 Ok(_) => {

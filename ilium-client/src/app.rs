@@ -22967,7 +22967,7 @@ mod tests {
             .iter()
             .any(|request| matches!(request,
             ClientRequest::NewPane { parent_group, kind: ilium_ipc::NewPaneKind::PlainShell,
-                working_directory: ilium_ipc::NewPaneWorkingDirectory::WorkspacePane(source) }
+                working_directory: ilium_ipc::NewPaneWorkingDirectory::WorkspacePane(source), .. }
                 if *parent_group == group && *source == pane)));
     }
 
