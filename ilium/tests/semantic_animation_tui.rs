@@ -62,6 +62,15 @@ impl Fixture {
             .agent_setup
             .never_ask_projects
             .push(project.clone());
+        // The launcher canonicalizes the project root (macOS reaches its temp
+        // dir through `/var` -> `/private/var`, Windows may hand out 8.3 short
+        // names), so the suppression list needs the canonical spelling too.
+        if let Ok(canonical_project) = ilium_platform::paths::canonicalize(&project) {
+            settings
+                .agent_setup
+                .never_ask_projects
+                .push(canonical_project);
+        }
         settings.onboarding.finish();
         settings.onboarding.ai_enabled = false;
         settings.triggers.startup_complete.clear();

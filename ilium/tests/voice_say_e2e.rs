@@ -157,6 +157,12 @@ impl IsolatedDirs {
         agent_setup
             .never_ask_projects
             .push(project_dir.to_path_buf());
+        // The launcher canonicalizes the project root (macOS reaches its temp
+        // dir through `/var` -> `/private/var`), so list that spelling too.
+        std::fs::create_dir_all(project_dir).expect("create project directory");
+        if let Ok(canonical_project) = ilium_platform::paths::canonicalize(project_dir) {
+            agent_setup.never_ask_projects.push(canonical_project);
+        }
         ilium_client::config::save_agent_setup_settings(&self.ilium_config_dir, &agent_setup)
             .expect("save agent setup policy");
 

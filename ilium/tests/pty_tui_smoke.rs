@@ -733,6 +733,15 @@ fn seed_project_config(xdg: &IsolatedXdgDirs, cwd: &Path) {
         .agent_setup;
     agent_setup.never_ask_global = true;
     agent_setup.never_ask_projects.push(cwd.to_path_buf());
+    // The launcher canonicalizes the project root before the client compares
+    // it with this list. macOS temporary directories reach `/private/var`
+    // through the `/var` symlink, so the spelling the test created is not the
+    // one the client sees; list the canonical spelling as well.
+    if let Ok(canonical_cwd) = ilium_platform::paths::canonicalize(cwd) {
+        if canonical_cwd != cwd {
+            agent_setup.never_ask_projects.push(canonical_cwd);
+        }
+    }
     ilium_client::config::save_agent_setup_settings(&xdg.ilium_config_dir, &agent_setup)
         .expect("suppress setup offers in unrelated smoke scenarios");
 }
@@ -3152,11 +3161,18 @@ fn rows_containing_in_order(screen: &vt100::Screen, needles: &[&str]) -> Vec<u16
 /// The shared View control renders only its currently selected value.
 fn selected_catalogue_view(screen: &vt100::Screen) -> Option<&'static str> {
     let columns = screen.size().1;
-    let row = screen.rows(0, columns).find(|text| text.contains("View"))?;
-    let value = row.split_once("View")?.1;
-    ["Multi-column", "Single column"]
-        .into_iter()
-        .find(|label| value.contains(label))
+    let labels = ["Multi-column", "Single column"];
+    if let Some(row) = screen.rows(0, columns).find(|text| text.contains("View")) {
+        let value = row.split_once("View")?.1;
+        return labels.into_iter().find(|label| value.contains(label));
+    }
+    // ConPTY's incremental repaint of a row holding wide emoji can overwrite
+    // the small "View" caption while the control's value stays intact, so on
+    // the catalogue's own header row accept the value without its caption.
+    let header = screen
+        .rows(0, columns)
+        .find(|text| text.contains("Choose an icon for"))?;
+    labels.into_iter().find(|label| header.contains(label))
 }
 
 #[test]
@@ -6708,18 +6724,29 @@ async fn image_query_keeps_first_real_pty_keys_with_silent_and_answering_termina
                     .expect("answer keyboard flags and primary device attributes");
             }
         }
-        assert!(
-            wait_until(
-                || tui
-                    .output_replay()
-                    .bytes
-                    .windows(b"\x1b[5n".len())
-                    .any(|bytes| bytes == b"\x1b[5n"),
-                WAIT_TIMEOUT,
-            )
-            .await,
-            "the admitted input owner did not issue the expected terminal query"
-        );
+        if cfg!(unix) {
+            assert!(
+                wait_until(
+                    || tui
+                        .output_replay()
+                        .bytes
+                        .windows(b"\x1b[5n".len())
+                        .any(|bytes| bytes == b"\x1b[5n"),
+                    WAIT_TIMEOUT,
+                )
+                .await,
+                "the admitted input owner did not issue the expected terminal query"
+            );
+        } else {
+            // ConPTY's console host answers the `CSI 5 n` status report itself
+            // and never forwards it to the pseudo-console output, so the query
+            // is unobservable here. Wait for the client's first output instead
+            // (it has started and taken ownership of the console input).
+            assert!(
+                wait_until(|| !tui.output_replay().bytes.is_empty(), WAIT_TIMEOUT).await,
+                "the client produced no output on the Windows pseudo-console"
+            );
+        }
 
         // Windows has no keyboard-support query; its first keys arrive during
         // the same owned image query. Unix already queued them above.
