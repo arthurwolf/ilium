@@ -1808,6 +1808,7 @@ async fn retained_worktree_with_an_open_editor_cannot_be_pruned() {
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: ilium_ipc::NewPaneKind::Editor(path.join(".local.env")),
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,

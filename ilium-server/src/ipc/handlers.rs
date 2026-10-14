@@ -105,7 +105,83 @@ struct SessionTransitionObservation {
 /// connection this request arrived on should close afterward (`Detach`,
 /// `KillSession`) -- the caller (`crate::ipc::connection`) is what
 /// actually stops reading further frames.
+/// Attribution follows the request contract, never text parsing.
+fn request_error_node(request: &ClientRequest) -> Option<NodeId> {
+    match request {
+        ClientRequest::NewPane { parent_group, .. } => Some(*parent_group),
+        ClientRequest::ClosePane { pane_id, .. } => Some(*pane_id),
+        ClientRequest::MoveNode { node_id, .. } => Some(*node_id),
+        ClientRequest::RenameNode { node_id, .. } => Some(*node_id),
+        ClientRequest::ResizePane { pane_id, .. } => Some(*pane_id),
+        ClientRequest::KeyInput { pane_id, .. } => Some(*pane_id),
+        ClientRequest::MouseInput { pane_id, .. } => Some(*pane_id),
+        ClientRequest::NewGroup { parent_group, .. } => Some(*parent_group),
+        ClientRequest::ReparentNode { node_id, .. } => Some(*node_id),
+        ClientRequest::SetAutomaticPaneTitle { pane_id, .. } => Some(*pane_id),
+        ClientRequest::SetPaneFocus { pane_id, .. } => Some(*pane_id),
+        ClientRequest::NewFolder { parent_group, .. } => Some(*parent_group),
+        ClientRequest::ChangeProjectFolder { project_id, .. } => Some(*project_id),
+        ClientRequest::NewBoard { parent_group, .. } => Some(*parent_group),
+        ClientRequest::CreateSplitView { parent_group, .. } => Some(*parent_group),
+        ClientRequest::SchedulePaneInput { pane_id, .. } => Some(*pane_id),
+        ClientRequest::EnqueuePrompt { pane_id, .. } => Some(*pane_id),
+        ClientRequest::ClearPromptQueue { pane_id, .. } => Some(*pane_id),
+        ClientRequest::SetSessionPaneTitle { pane_id, .. } => Some(*pane_id),
+        ClientRequest::ApplyProjectRestructurePlan { project_id, .. } => Some(*project_id),
+        ClientRequest::RevertProjectRestructure { project_id, .. } => Some(*project_id),
+        ClientRequest::GetPaneDebugLog { pane_id, .. } => Some(*pane_id),
+        ClientRequest::RecordAgentDebugEvent { pane_id, .. } => Some(*pane_id),
+        ClientRequest::SetNodeBookmarked { node_id, .. } => Some(*node_id),
+        ClientRequest::RecordNodeActivity { node_id, .. } => Some(*node_id),
+        ClientRequest::SetNodeExpanded { node_id, .. } => Some(*node_id),
+        ClientRequest::SetNodeLockedClosed { node_id, .. } => Some(*node_id),
+        ClientRequest::ReportLastPromptFromTranscript { pane_id, .. } => Some(*pane_id),
+        ClientRequest::CheckPaneProgressMonitor { pane_id, .. } => Some(*pane_id),
+        ClientRequest::SetPaneProgressMonitor { pane_id, .. } => Some(*pane_id),
+        ClientRequest::GetPaneProgressMonitorStatus { pane_id, .. } => Some(*pane_id),
+        ClientRequest::ClearPaneProgressMonitor { pane_id, .. } => Some(*pane_id),
+        ClientRequest::SubmitTerminalText { pane_id, .. } => Some(*pane_id),
+        ClientRequest::QueryRepoFacts { project, .. } => Some(*project),
+        ClientRequest::CreateAgentInWorkspace { parent_group, .. } => Some(*parent_group),
+        ClientRequest::RefreshPaneGitStatus { pane_id, .. } => Some(*pane_id),
+        ClientRequest::RemoveWorkspace { pane_id, .. } => Some(*pane_id),
+        ClientRequest::ClosePaneWithWorkspaceDisposition { pane_id, .. } => Some(*pane_id),
+        ClientRequest::QueryWorkspaceInventory { project, .. } => Some(*project),
+        ClientRequest::PruneWorkspace { project, .. } => Some(*project),
+        ClientRequest::QueryWorkspaceCloseOffer { pane_id, .. } => Some(*pane_id),
+        ClientRequest::TerminatePaneProcess { pane_id, .. } => Some(*pane_id),
+        ClientRequest::ReplacePaneWithCommand { pane_id, .. } => Some(*pane_id),
+        ClientRequest::FreezePane { pane_id, .. } => Some(*pane_id),
+        ClientRequest::ApplyRecommendedProjectRestructurePlan { project_id, .. } => Some(*project_id),
+        ClientRequest::UserKeyInput { pane_id, .. } => Some(*pane_id),
+        ClientRequest::ReportAgentPromptFromTranscript { pane_id, .. } => Some(*pane_id),
+        ClientRequest::UnfreezePane { pane_id, .. } => Some(*pane_id),
+        ClientRequest::WaitPaneProgressMonitor { pane_id, .. } => Some(*pane_id),
+        ClientRequest::PasteTerminalText { pane_id, .. } => Some(*pane_id),
+        ClientRequest::GetPaneRecapScreen { pane_id, .. } => Some(*pane_id),
+        _ => None,
+    }
+}
+
 pub async fn handle_request(
+    state: &Arc<ServerState>,
+    request: ClientRequest,
+    direct_tx: &DirectEventSender,
+) -> bool {
+    let operation = request.diagnostic_name();
+    let target = {
+        let tree = state.tree.read().await;
+        request_error_node(&request).filter(|node_id| tree.get(*node_id).is_some())
+    };
+    let scoped_tx = direct_tx.with_error_scope(state, target, operation);
+    let should_close = handle_scoped_request(state, request, &scoped_tx).await;
+    if matches!(operation, "rename_node" | "move_node" | "reparent_node" | "new_group" | "new_project" | "new_folder" | "change_project_folder" | "create_split_view" | "set_node_bookmarked" | "set_node_expanded" | "set_node_locked_closed") {
+        scoped_tx.finish_synchronous_mutation();
+    }
+    should_close
+}
+
+async fn handle_scoped_request(
     state: &Arc<ServerState>,
     request: ClientRequest,
     direct_tx: &DirectEventSender,
@@ -203,11 +279,12 @@ pub async fn handle_request(
             false
         }
         ClientRequest::NewPane {
+            request_id,
             parent_group,
             kind,
             working_directory,
         } => {
-            handle_new_pane(state, parent_group, kind, working_directory, direct_tx).await;
+            handle_new_pane(state, request_id, parent_group, kind, working_directory, direct_tx).await;
             false
         }
         ClientRequest::QueryWorkspaceInventory {
@@ -1126,6 +1203,7 @@ pub(crate) async fn broadcast_and_persist(state: &ServerState) {
     // see `ServerState::prune_stale_restructure_undo`'s doc comment for why
     // that snapshot, taken moments earlier, is not safe to reuse here.
     state.prune_stale_restructure_undo().await;
+    state.prune_blocking_errors(&snapshot);
     state.broadcast(ServerEvent::TreeSnapshot(snapshot));
     state.request_snapshot_save();
 }
@@ -2006,6 +2084,7 @@ async fn admitted_state_synchronization_events(
                     drop(statuses);
                     let settings = state.text_trigger_settings.read().await.settings.clone();
                     events.push(ServerEvent::TextTriggersChanged { settings });
+    events.push(ServerEvent::BlockingErrorsSnapshot { errors: state.blocking_errors_snapshot() });
                     if include_initial_sync_complete {
                         let (detection, custom_signatures) =
                             state.agent_detection_settings_snapshot().await;
@@ -4438,11 +4517,25 @@ fn new_pane_plan(kind: NewPaneKind) -> NewPanePlan {
 
 async fn handle_new_pane(
     state: &Arc<ServerState>,
+    request_id: u64,
     parent_group: NodeId,
     kind: NewPaneKind,
     working_directory: NewPaneWorkingDirectory,
     direct_tx: &DirectEventSender,
 ) {
+    let result = create_pane(state, parent_group, kind, working_directory).await;
+    if let Err(message) = &result {
+        send_direct_error(direct_tx, message.clone()).await;
+    }
+    send_direct(direct_tx, ServerEvent::PaneCreateFinished { request_id, result }).await;
+}
+
+async fn create_pane(
+    state: &Arc<ServerState>,
+    parent_group: NodeId,
+    kind: NewPaneKind,
+    working_directory: NewPaneWorkingDirectory,
+) -> Result<NodeId, String> {
     let plan = new_pane_plan(kind);
     let spawn_description = format!("{:?}", plan.spawn_kind);
 
@@ -4462,8 +4555,7 @@ async fn handle_new_pane(
             ),
             _ => "worktree pane or its launch directory is unavailable".to_string(),
         };
-        send_direct_error(direct_tx, message).await;
-        return;
+        return Err(message);
     }
 
     // Pruning holds this fence while it proves that no pane uses a checkout.
@@ -4485,8 +4577,7 @@ async fn handle_new_pane(
         Err(error) => {
             drop(tree);
             drop(publish_guard);
-            send_direct_error(direct_tx, format!("failed to create pane: {error}")).await;
-            return;
+            return Err(format!("failed to create pane: {error}"));
         }
     };
     let project_cwd = tree
@@ -4499,12 +4590,7 @@ async fn handle_new_pane(
             let _ = tree.remove_node(pane_id);
             drop(tree);
             drop(publish_guard);
-            send_direct_error(
-                direct_tx,
-                format!("failed to record pane directory: {error}"),
-            )
-            .await;
-            return;
+            return Err(format!("failed to record pane directory: {error}"));
         }
     }
     // Drop the write guard before spawning (a pty spawn + registering it
@@ -4515,16 +4601,11 @@ async fn handle_new_pane(
 
     match spawn_and_register_pane_in_directory(state, pane_id, plan.spawn_kind, &cwd).await {
         Ok(()) => {}
-        Err(RegisterPaneError::NodeRemoved(_)) | Err(RegisterPaneError::Admission(_)) => {
-            // Admission refusals already published their error and tree state.
-            // A concurrent request (`ClosePane` on an ancestor group,
-            // `RevertLastRestructure`, a session-recovery restore) removed
-            // `pane_id` from the tree while the spawn above was in flight.
-            // That request already removed the node and broadcast the tree
-            // without it, and `spawn_and_register_pane_in_directory` has
-            // already torn the now-orphaned resource back down -- there is
-            // nothing left for this call to remove or report.
-            return;
+        Err(RegisterPaneError::NodeRemoved(_)) => {
+            return Err("pane was removed while its launch was in progress".to_string());
+        }
+        Err(RegisterPaneError::Admission(reason)) => {
+            return Err(reason);
         }
         Err(RegisterPaneError::Spawn(error)) => {
             // The tree node exists (created just above) but has no resource
@@ -4539,8 +4620,7 @@ async fn handle_new_pane(
             let _ = tree.remove_node(pane_id);
             drop(tree);
             broadcast_and_persist(state).await;
-            send_direct_error(direct_tx, format!("failed to spawn pane: {error}")).await;
-            return;
+            return Err(format!("failed to spawn pane: {error}"));
         }
     }
 
@@ -4569,6 +4649,7 @@ async fn handle_new_pane(
     if plan.close_on_exit {
         start_close_on_exit_watcher(state, pane_id).await;
     }
+    Ok(pane_id)
 }
 
 /// A closing pane must live at least this long, so the creating CLI can
@@ -5425,7 +5506,9 @@ pub(crate) async fn spawn_and_register_pane_with_deferred_workspace(
             .unwrap_or_else(|| {
                 "launch directory disappeared, changed identity, or is unsafe".into()
             });
-        state.broadcast(ServerEvent::Error {
+        // Restore retains the failure on its placeholder; a fresh creation
+        // retains it on the surviving parent in handle_new_pane.
+        state.events.publish(ServerEvent::Error {
             message: format!("pane {} was not started: {reason}", pane_id.0),
         });
         broadcast_and_persist(state).await;
@@ -8111,6 +8194,32 @@ mod tests {
             agent_debug_menu_enabled: false,
             progress_monitor_enabled: true,
         }))
+    }
+
+    #[tokio::test]
+    async fn create_failure_is_correlated_scoped_and_replayed_on_attach() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = snapshot_io_handler_state(&directory);
+        let group = state.tree.write().await.add_group(ilium_core::ROOT_ID, "project").unwrap();
+        let (sender, mut replies) = DirectEventSender::channel(16);
+        handle_request(&state, ClientRequest::NewPane {
+            request_id: 742,
+            parent_group: group,
+            kind: NewPaneKind::PlainShell,
+            working_directory: NewPaneWorkingDirectory::Directory(directory.path().join("missing")),
+        }, &sender).await;
+        assert!(matches!(replies.recv().await, Some(ServerEvent::Error { .. })));
+        let Some(ServerEvent::PaneCreateFinished { request_id, result }) = replies.recv().await else {
+            panic!("creation must have a terminal typed outcome");
+        };
+        assert_eq!(request_id, 742);
+        assert!(result.unwrap_err().contains("not an existing directory"));
+        let events = initial_state_events(&state, false, false).await;
+        assert!(events.iter().any(|event| matches!(event, ServerEvent::BlockingErrorsSnapshot { errors }
+            if errors.iter().any(|error| error.node_id == Some(group) && error.operation == "new_pane"))));
+        state.clear_blocking_error(Some(group), "new_pane");
+        let events = initial_state_events(&state, false, false).await;
+        assert!(events.iter().any(|event| matches!(event, ServerEvent::BlockingErrorsSnapshot { errors } if errors.is_empty())));
     }
 
     #[cfg(unix)]

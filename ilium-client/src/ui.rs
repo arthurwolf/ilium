@@ -484,6 +484,11 @@ fn status_tooltip_content(
         identity_explanation, now_explanation, objective_explanation, StatusSlot,
     };
 
+    if slot == StatusSlot::Now {
+        if let Some(error) = app.blocking_error_tooltip(node_id) {
+            return Some(error);
+        }
+    }
     let node = app.tree.get(node_id)?;
     if slot == StatusSlot::Identity {
         let structural = match &node.kind {
@@ -833,6 +838,11 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) -> Option<Posit
         })
         .collect();
     painted_rows.retain_values(values);
+    let blocked = painted_rows
+        .node_ids()
+        .filter(|node_id| app.blocking_error_tooltip(*node_id).is_some())
+        .collect();
+    painted_rows.paint_blocking_errors(frame, &blocked);
     app.record_composed_tree_rows(painted_rows);
     draw_cost_card(frame, app);
     draw_status_bar(frame, layout.status_area, app);
@@ -2479,6 +2489,26 @@ fn draw_screen_transfer_controls(frame: &mut Frame, app: &App) {
     }
 }
 
+fn blocking_terminal_error(error: &crate::status_icons::TooltipContent) -> String {
+    match error.reason.as_deref() {
+        Some(reason) => format!("{}\n{reason}", error.body),
+        None => error.body.clone(),
+    }
+}
+
+fn initial_terminal_error(
+    term: &terminal_view::TerminalView,
+    blocking_error: Option<&crate::status_icons::TooltipContent>,
+) -> Option<String> {
+    if let Some(error) = blocking_error {
+        return Some(blocking_terminal_error(error));
+    }
+    term.admission_error.clone().or_else(|| {
+        (term.frontend.is_some() && !term.has_initial_display())
+            .then(|| "waiting for initial terminal state".to_string())
+    })
+}
+
 fn draw_pane_runtime(
     frame: &mut Frame,
     app: &App,
@@ -2490,10 +2520,16 @@ fn draw_pane_runtime(
     let pane_title = pane_title(app, viewport.pane_id);
     let completed_agent_close_action = app.completed_agent_close_action(viewport);
     let Some(runtime) = app.panes.get(&viewport.pane_id) else {
+        let blocking_error = app
+            .blocking_error_tooltip(viewport.pane_id)
+            .map(|error| blocking_terminal_error(&error));
         let placeholder = Paragraph::new(
-            app.editor_load_error(viewport.pane_id)
+            blocking_error
+                .as_deref()
+                .or_else(|| app.editor_load_error(viewport.pane_id))
                 .unwrap_or("pane is loading"),
         )
+        .wrap(ratatui::widgets::Wrap { trim: true })
         .block(theme::block(pane_focused).title(theme::chrome_title(&pane_title)));
         frame.render_widget(placeholder, viewport.outer_area);
         if let Some(action) = completed_agent_close_action {
@@ -2556,11 +2592,11 @@ fn draw_pane_runtime(
                 });
             } else {
                 term.render_screen(terminal_area, frame.buffer_mut());
-                let display_error = term.admission_error.as_deref().or_else(|| {
-                    (term.frontend.is_some() && !term.has_initial_display())
-                        .then_some("waiting for initial terminal state")
-                });
-                if let Some(error) = display_error {
+                let blocking_error = (!term.has_initial_display())
+                    .then(|| app.blocking_error_tooltip(viewport.pane_id))
+                    .flatten();
+                let display_error = initial_terminal_error(term, blocking_error.as_ref());
+                if let Some(error) = display_error.as_deref() {
                     use crate::terminal_parsing::ParserPressure;
 
                     let message = match term.parser_pressure() {
@@ -3611,6 +3647,25 @@ mod tests {
     use ratatui::Terminal;
     use ratatui_textarea::TextArea;
     use std::path::PathBuf;
+
+    #[test]
+    fn terminal_placeholder_prioritizes_concrete_blocking_failure() {
+        let mut term = TerminalView::new(24, 80);
+        term.admission_error = Some("parser allocation unavailable".into());
+        let error = crate::status_icons::TooltipContent {
+            title: "Cannot start terminal".into(),
+            body: "villainess-study: start agent: git exited 128".into(),
+            reason: Some("fatal: malformed gitfile\nFix the repository metadata".into()),
+        };
+        let placeholder = initial_terminal_error(&term, Some(&error)).unwrap();
+        assert!(placeholder.contains("git exited 128"));
+        assert!(placeholder.contains("fatal: malformed gitfile"));
+        assert!(!placeholder.contains("waiting for initial terminal state"));
+        assert_eq!(
+            initial_terminal_error(&term, None).as_deref(),
+            Some("parser allocation unavailable")
+        );
+    }
 
     #[test]
     fn status_tooltip_values_advance_only_after_the_original_row_is_emitted() {

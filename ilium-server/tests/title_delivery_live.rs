@@ -71,6 +71,7 @@ async fn acknowledged_authored_enter_authorizes_title_before_request_history_flu
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: NewPaneKind::Command(format!("{} {}", agent.path.display(), history.display())),
             working_directory: NewPaneWorkingDirectory::ProjectRoot,
@@ -332,6 +333,7 @@ async fn exited_agent_titles_require_verified_own_history_and_preserve_manual_na
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: NewPaneKind::Command(agent.path.display().to_string()),
             working_directory: NewPaneWorkingDirectory::ProjectRoot,

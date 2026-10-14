@@ -504,6 +504,45 @@ impl PaintedTreeRows {
     pub(crate) fn retain_values(&mut self, values: Vec<PaintedRowValues>) {
         self.values = values;
     }
+    /// Paint into the same status cells whose tooltip ownership was retained
+    /// for this frame. Identity icons and row widths remain unchanged.
+    pub(crate) fn paint_blocking_errors(&self, frame: &mut Frame, blocked: &HashSet<NodeId>) {
+        use crate::status_icons::{NOW_COLUMN_WIDTH, OBJECTIVE_COLUMN_WIDTH};
+        for (hit, label) in &self.rows {
+            if hit.line != 0 || !blocked.contains(&hit.id) {
+                continue;
+            }
+            let attention =
+                self.monitoring_mode == crate::agent_monitoring::AgentMonitoringMode::Attention;
+            let has_objective = self
+                .values
+                .iter()
+                .any(|value| value.node_id == hit.id && value.status[1].is_some());
+            let column = if attention {
+                label
+                    .saturating_add(OBJECTIVE_SLOT_OFFSET)
+                    .saturating_add(if has_objective {
+                        OBJECTIVE_COLUMN_WIDTH as u16
+                    } else {
+                        0
+                    })
+            } else {
+                label.saturating_add(NOW_SLOT_OFFSET)
+            };
+            let width = if attention && !has_objective {
+                OBJECTIVE_COLUMN_WIDTH
+            } else {
+                NOW_COLUMN_WIDTH
+            } as u16;
+            if column >= self.list.right() || hit.row >= self.list.bottom() {
+                continue;
+            }
+            frame.render_widget(
+                Paragraph::new(Span::styled("⚠", Style::new().fg(Color::Yellow))),
+                Rect::new(column, hit.row, width.min(self.list.right() - column), 1),
+            );
+        }
+    }
     pub(crate) fn cost_card_target(
         &self,
         hovered: Option<TreeNodeHit>,
@@ -3005,6 +3044,68 @@ fn draw_toolbar(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn blocking_caution_preserves_identity_and_owns_the_hovered_status_cell() {
+        use crate::agent_monitoring::AgentMonitoringMode;
+        use crate::status_icons::{StatusSlot, TooltipContent};
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        for mode in [AgentMonitoringMode::Normal, AgentMonitoringMode::Attention] {
+            for has_objective in [false, true] {
+                let area = Rect::new(0, 0, 40, 4);
+                let error = TooltipContent {
+                    title: "Cannot start agent".into(),
+                    body: "Repository admission failed".into(),
+                    reason: None,
+                };
+                let rows = PaintedTreeRows {
+                    list: area,
+                    area,
+                    toolbar: false,
+                    rows: vec![(
+                        TreeNodeHit {
+                            id: ROOT_ID,
+                            row: 1,
+                            line: 0,
+                        },
+                        2,
+                    )],
+                    monitoring_mode: mode,
+                    values: vec![PaintedRowValues {
+                        node_id: ROOT_ID,
+                        status: [
+                            None,
+                            has_objective.then(|| error.clone()),
+                            Some(error.clone()),
+                        ],
+                        worktree: None,
+                        cost_title: String::new(),
+                        cost_card: None,
+                    }],
+                    cost_option: Default::default(),
+                    selected_node: None,
+                    action: None,
+                    _metadata: None,
+                };
+                let mut terminal = Terminal::new(TestBackend::new(40, 4)).unwrap();
+                let frame = terminal
+                    .draw(|frame| {
+                        frame.buffer_mut()[(2, 1)].set_symbol("◆");
+                        rows.paint_blocking_errors(frame, &HashSet::from([ROOT_ID]));
+                    })
+                    .unwrap();
+                assert_eq!(frame.buffer[(2, 1)].symbol(), "◆");
+                let column = (0..40)
+                    .find(|column| frame.buffer[(*column, 1)].symbol() == "⚠")
+                    .expect("blocking failure must have a visible caution");
+                let (node_id, slot, anchor) = rows.status_at(Position::new(column, 1)).unwrap();
+                assert_eq!((node_id, slot), (ROOT_ID, StatusSlot::Now));
+                assert_eq!(anchor, Position::new(column, 1));
+                assert_eq!(rows.status_tooltip(ROOT_ID, slot), Some(&error));
+            }
+        }
+    }
     use ratatui::backend::TestBackend;
     use ratatui::buffer::Buffer;
     use ratatui::Terminal;

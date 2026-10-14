@@ -43,6 +43,7 @@ The tabs appear in this order:
 | Tab | What it controls | Main config table |
 | --- | --- | --- |
 | User Interface | Left panel sizing, tree order, identifiers, colour scheme, motion, density, toolbars, banners, progress footer, selection and tree behaviours | `[ui]`, `[theme]` |
+| Padding | Blank cells between the panel borders and the tree or pane content | `[padding]` |
 | Icons | Every configurable sidebar, toolbar and menu glyph | `[ui.icons]` |
 | Agent Monitoring | Display mode, polling, custom agent signatures, status icons, progress footer | `[ui]`, `[detection]` |
 | Agent Cost | Spend indicators and what counts as expensive | `[cost]` |
@@ -114,11 +115,21 @@ The agent debug menu, progress monitor enablement and a few other options are mi
 
 The progress-monitor options (Progress monitor, Progress footer lines, Progress fill style) live on the Agent Monitoring tab in the current build; see [Agent monitoring](agent-monitoring.md).
 
+### Padding
+
+Pads the content of the left tree panel and the right panels (terminals and agents, editors, boards) inside their borders. Padding never touches borders, the agent toolbar, the last-prompt banner or the progress footer; it only moves the terminal, tree list, editor or board content inward.
+
+Three cards choose the mode: **Disabled** (the default, no padding), **Size dependent** (padding applies while the terminal is at least a threshold wide; the threshold defaults to 200 columns and accepts 11 to 1000, edited with the steppers or by typing), and **Enabled** (always). Hover and click behave like the other card pickers.
+
+Unless the mode is Disabled, a **Padding fine-tuning** button opens a near-fullscreen dialog. The left column holds the settings and the right column a live preview with a neutral dummy tree and dummy agent. Each panel (tree, right panels) has a **Link all sides** option and four side groups (Left, Right, Top, Bottom), each set to 0 to 3 cells with clickable buttons; linking hides the individual sides. **Share right panels** makes terminals, editors and boards use one setting; turn it off to pick a type and give it its own. The default is one cell on every side.
+
 ### Icons
 
 Choose the glyph for each configurable role: group, top-level destination, project, vertical and horizontal split, folder, worktree branch, terminal, editor, board, each agent family, bookmark and locked-closed markers, tree toolbar buttons (Search, Restructure, Settings), hover-row controls (Rename, Move up, Move down, Close, Retitle), project restructure, Ask for update, screen-transfer arrows, Open in OS, and the agent toolbar actions (Compact, Clear, Configure, Stop, Copy screen, Smart Copy, Copy last message, Change effort, Change model, model choices, Exit, Fast mode, Text selection). Up and Down select a role, Left and Right cycle its glyph, and `Enter`, `Space` or `+` opens the icon picker. `R` toggles between the preview and the real rendering. Custom assignments are stored under `[ui.icons]`.
 
 ### Agent Monitoring
+
+Blocking project and agent failures display a yellow triangular caution icon in the tree. Hover the icon to read the error messages; parent projects include failures in their children. A terminal that cannot start also shows its concrete failure. Failed creation stops its toolbar spinner, and an unconfirmed request reports that its outcome is unknown rather than silently retrying. Warnings clear when the affected operation recovers.
 
 | Option | Notes |
 | --- | --- |
@@ -334,6 +345,7 @@ The file is a set of tables. Only the tables and keys you want to change need to
 | Table | Contents |
 | --- | --- |
 | `[keyboard]`, `[keybindings]` | Prefix keys; action-to-key remapping |
+| `[padding]` | `mode` (`disabled`, `enabled`, `width_dependent`), `width_threshold`, per-panel sides |
 | `[theme]` | Four colour overrides: `accent_bg`, `accent_fg`, `border_focused`, `border_unfocused` (hex such as `#1f6feb`) |
 | `[ui]`, `[ui.icons]` | Interface options and icon assignments (keys below) |
 | `[sound]`, `[notifications]` | Sound source, file and events; desktop notification flags |

@@ -506,6 +506,7 @@ impl Operation {
                     }
                 };
                 ClientRequest::NewPane {
+                    request_id: workspace_request_id,
                     parent_group,
                     kind,
                     working_directory: cwd
@@ -956,6 +957,7 @@ mod tests {
             parent_group,
             kind,
             working_directory,
+            ..
         } = request
         else {
             panic!("expected NewPane");
