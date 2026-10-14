@@ -80,12 +80,6 @@ pub mod pane_env {
 
 #[cfg(test)]
 mod tests {
-    /// Reads the bincode variant index (the first four bytes) of a wire value.
-    fn variant_index<T: serde::Serialize>(value: &T) -> u32 {
-        let bytes = bincode::serialize(value).expect("serializable");
-        u32::from_le_bytes(bytes[..4].try_into().expect("four-byte variant index"))
-    }
-
     use std::io::Cursor;
     use std::path::PathBuf;
 
