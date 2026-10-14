@@ -30,7 +30,18 @@ const MAX_SERVICES: usize = 4;
 const MAX_SETTINGS_BYTES: usize = 64 * 1024;
 const MAX_SETTINGS_RETAINED_BYTES: usize = 256 * 1024;
 const ANIMATION_STACK_BYTES: usize = 2 * 1024 * 1024;
-static SERVICES: AtomicUsize = AtomicUsize::new(0);
+fn service_count() -> Arc<AtomicUsize> {
+    #[cfg(test)]
+    {
+        thread_local! { static SERVICES: Arc<AtomicUsize> = Arc::new(AtomicUsize::new(0)); }
+        SERVICES.with(Arc::clone)
+    }
+    #[cfg(not(test))]
+    {
+        static SERVICES: OnceLock<Arc<AtomicUsize>> = OnceLock::new();
+        Arc::clone(SERVICES.get_or_init(|| Arc::new(AtomicUsize::new(0))))
+    }
+}
 static ADMISSION_READY: OnceLock<Arc<tokio::sync::Notify>> = OnceLock::new();
 
 #[derive(Clone, Debug)]
@@ -585,6 +596,7 @@ struct Mailbox {
 }
 struct Shared {
     quota: QuotaGroup,
+    cadence_owner: Arc<crate::execution::NativeSourceCadenceOwner>,
     configurations: AtomicUsize,
     ready: Arc<tokio::sync::Notify>,
     presentations: AtomicUsize,
@@ -617,12 +629,14 @@ impl Drop for AdmissionGuard<'_> {
     }
 }
 struct ServicePermit {
+    // Retain the admitting scope through physical retirement on another thread.
+    services: Arc<AtomicUsize>,
     // The platform wake owner retains this through actual OS join/TLS exit.
     _physical: WorkerAdmission,
 }
 impl Drop for ServicePermit {
     fn drop(&mut self) {
-        SERVICES.fetch_sub(1, Ordering::AcqRel);
+        self.services.fetch_sub(1, Ordering::AcqRel);
         let notification = admission_notification();
         notification.notify_waiters();
         notification.notify_one();
@@ -635,6 +649,7 @@ pub(super) fn admission_notification() -> Arc<tokio::sync::Notify> {
 
 pub(super) struct AnimationAdmission {
     quota: QuotaGroup,
+    cadence_owner: Arc<crate::execution::NativeSourceCadenceOwner>,
     worker: WorkerReservation<ServicePermit>,
 }
 
@@ -693,7 +708,8 @@ impl AnimationService {
                 };
                 io::Error::new(kind, format!("animation worker admission: {reason:?}"))
             })?;
-        SERVICES
+        let services = service_count();
+        services
             .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
                 (count < MAX_SERVICES).then_some(count + 1)
             })
@@ -701,11 +717,20 @@ impl AnimationService {
         let worker = reserve_owned_worker(
             Some(ANIMATION_STACK_BYTES),
             ServicePermit {
+                services,
                 _physical: physical,
             },
         )
         .map_err(io::Error::other)?;
-        Ok(AnimationAdmission { quota, worker })
+        // Capture the initiating root's identity before the worker thread
+        // exists; native source storage is still admitted only on activation.
+        let cadence_owner =
+            crate::execution::native_source_cadence_owner(&quota).map_err(io::Error::other)?;
+        Ok(AnimationAdmission {
+            quota,
+            cadence_owner,
+            worker,
+        })
     }
 
     pub(super) fn start_admitted(
@@ -716,6 +741,7 @@ impl AnimationService {
     ) -> io::Result<Self> {
         let shared = Arc::new(Shared {
             quota: admission.quota.clone(),
+            cadence_owner: Arc::clone(&admission.cadence_owner),
             ready,
             configurations: AtomicUsize::new(0),
             presentations: AtomicUsize::new(0),
@@ -1118,9 +1144,9 @@ pub(super) fn settings_fit(settings: &AnimationSettings) -> bool {
 // Quota Busy means a short shared-ledger collision, not capacity exhaustion.
 // Retry only on the scene's existing native thread; cancellation bounds its
 // lifetime and the sleep avoids a hot spin. Genuine admission failures remain
-// explicit startup errors. The operation closure permits deterministic forcing
+// explicit admission errors. The operation closure permits deterministic forcing
 // of contention without exposing the quota ledger's private lock.
-fn reserve_wake_storage(
+fn reserve_worker_storage(
     stop: &StopToken,
     mut reserve: impl FnMut() -> Result<StorageAdmission, ilium_execution::RejectReason>,
 ) -> Result<Option<StorageAdmission>, ilium_execution::RejectReason> {
@@ -1138,6 +1164,24 @@ fn reserve_wake_storage(
     }
 }
 
+// The caller already owns one bounded frame slot. Failure or cancellation
+// must retire only that slot before returning; successful packing transfers
+// the slot to FramePermit with the storage lease.
+fn reserve_frame_storage(
+    stop: &StopToken,
+    frames: &AtomicUsize,
+    slots: &AtomicU8,
+    slot: u8,
+    reserve: impl FnMut() -> Result<StorageAdmission, ilium_execution::RejectReason>,
+) -> Result<Option<StorageAdmission>, ilium_execution::RejectReason> {
+    let result = reserve_worker_storage(stop, reserve);
+    if !result.as_ref().is_ok_and(|storage| storage.is_some()) {
+        slots.fetch_and(!(1 << slot), Ordering::AcqRel);
+        frames.fetch_sub(1, Ordering::AcqRel);
+    }
+    result
+}
+
 fn run(
     shared: &Arc<Shared>,
     mut frame: AnimationFrame,
@@ -1149,7 +1193,7 @@ fn run(
     // One bounded wake slot shares the original root. The callback retains
     // its original charge if the finite job outlives this scene worker.
     let native_wake_storage =
-        match reserve_wake_storage(&stop, || shared.quota.reserve_external_storage(4096)) {
+        match reserve_worker_storage(&stop, || shared.quota.reserve_external_storage(4096)) {
             Ok(Some(storage)) => Arc::new(storage),
             Ok(None) => return,
             Err(error) => {
@@ -1202,6 +1246,7 @@ fn run(
     };
     let mut plugin = PluginBackend::new(
         shared.quota.clone(),
+        Arc::clone(&shared.cadence_owner),
         plugin_resources.clone(),
         Arc::clone(&review_bridge),
         actor_wake,
@@ -1544,11 +1589,12 @@ fn render_request(
     };
     // Reserve the bounded packing allocation before constructing any cells.
     // A refused replaceable frame keeps the UI's last presented snapshot.
-    let storage = match shared.quota.reserve_external_storage(MAX_FRAME_BYTES) {
-        Ok(storage) => storage,
+    let storage = match reserve_frame_storage(stop, &shared.frames, &shared.slots, slot, || {
+        shared.quota.reserve_external_storage(MAX_FRAME_BYTES)
+    }) {
+        Ok(Some(storage)) => storage,
+        Ok(None) => return,
         Err(reason) => {
-            shared.slots.fetch_and(!(1 << slot), Ordering::AcqRel);
-            shared.frames.fetch_sub(1, Ordering::AcqRel);
             let mut mailbox = shared.mailbox.lock().unwrap_or_else(|e| e.into_inner());
             mailbox.status.limited_frames += 1;
             // Busy is momentary lock contention. Every other refusal, WorkerBytes
@@ -1659,11 +1705,12 @@ fn render_plugin_request(
             .limited_frames += 1;
         return;
     };
-    let storage = match shared.quota.reserve_external_storage(MAX_FRAME_BYTES) {
-        Ok(storage) => storage,
+    let storage = match reserve_frame_storage(stop, &shared.frames, &shared.slots, slot, || {
+        shared.quota.reserve_external_storage(MAX_FRAME_BYTES)
+    }) {
+        Ok(Some(storage)) => storage,
+        Ok(None) => return,
         Err(reason) => {
-            shared.slots.fetch_and(!(1 << slot), Ordering::AcqRel);
-            shared.frames.fetch_sub(1, Ordering::AcqRel);
             let mut mailbox = shared
                 .mailbox
                 .lock()
@@ -1903,11 +1950,33 @@ mod tests {
     static TEST_OWNER: Mutex<()> = Mutex::new(());
 
     #[test]
+    fn parallel_fixture_services_keep_the_original_four_owner_limit() {
+        let admissions: Vec<_> = (0..MAX_SERVICES)
+            .map(|_| AnimationService::reserve().unwrap())
+            .collect();
+        assert!(AnimationService::reserve().is_err());
+        std::thread::spawn(|| {
+            let admissions: Vec<_> = (0..MAX_SERVICES)
+                .map(|_| AnimationService::reserve().unwrap())
+                .collect();
+            assert!(AnimationService::reserve().is_err());
+            drop(admissions);
+            assert_eq!(service_count().load(Ordering::Acquire), 0);
+        })
+        .join()
+        .unwrap();
+        assert_eq!(service_count().load(Ordering::Acquire), MAX_SERVICES);
+        drop(admissions);
+        assert_eq!(service_count().load(Ordering::Acquire), 0);
+        assert!(AnimationService::reserve().is_ok());
+    }
+
+    #[test]
     fn wake_admission_recovers_from_transient_contention() {
         let quota = isolated_quota();
         let stop = StopToken::default();
         let mut calls = 0;
-        let storage = reserve_wake_storage(&stop, || {
+        let storage = reserve_worker_storage(&stop, || {
             calls += 1;
             if calls == 1 {
                 Err(ilium_execution::RejectReason::Busy)
@@ -1924,10 +1993,74 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_admission_retries_busy_without_losing_accepted_frame_storage() {
+        let quota = isolated_quota();
+        let stop = StopToken::default();
+        let frames = AtomicUsize::new(1);
+        let slots = AtomicU8::new(0b10);
+        let mut calls = 0;
+        let storage = reserve_frame_storage(&stop, &frames, &slots, 1, || {
+            calls += 1;
+            if calls <= 2 {
+                Err(ilium_execution::RejectReason::Busy)
+            } else {
+                quota.reserve_external_storage(MAX_FRAME_BYTES)
+            }
+        })
+        .unwrap()
+        .unwrap();
+        assert_eq!(calls, 3);
+        assert_eq!(frames.load(Ordering::Acquire), 1);
+        assert_eq!(slots.load(Ordering::Acquire), 0b10);
+        assert_eq!(quota.snapshot().worker_bytes, MAX_FRAME_BYTES);
+        drop(storage);
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+    }
+
+    #[test]
+    fn snapshot_admission_cancellation_releases_only_its_reserved_slot_and_count() {
+        let stop = StopToken::default();
+        let frames = AtomicUsize::new(2);
+        let slots = AtomicU8::new(0b1010);
+        let mut calls = 0;
+        let result = reserve_frame_storage(&stop, &frames, &slots, 1, || {
+            calls += 1;
+            assert_eq!(frames.load(Ordering::Acquire), 2);
+            assert_eq!(slots.load(Ordering::Acquire), 0b1010);
+            stop.stop();
+            Err(ilium_execution::RejectReason::Busy)
+        })
+        .unwrap();
+        assert!(result.is_none());
+        assert_eq!(calls, 1);
+        assert_eq!(frames.load(Ordering::Acquire), 1);
+        assert_eq!(slots.load(Ordering::Acquire), 0b1000);
+    }
+
+    #[test]
+    fn snapshot_admission_capacity_failure_releases_only_its_reserved_slot_and_count() {
+        let stop = StopToken::default();
+        let frames = AtomicUsize::new(2);
+        let slots = AtomicU8::new(0b1010);
+        let mut calls = 0;
+        let result = reserve_frame_storage(&stop, &frames, &slots, 1, || {
+            calls += 1;
+            Err(ilium_execution::RejectReason::WorkerBytes)
+        });
+        assert!(matches!(
+            result,
+            Err(ilium_execution::RejectReason::WorkerBytes)
+        ));
+        assert_eq!(calls, 1);
+        assert_eq!(frames.load(Ordering::Acquire), 1);
+        assert_eq!(slots.load(Ordering::Acquire), 0b1000);
+    }
+
+    #[test]
     fn wake_admission_cancels_after_contention_without_retrying() {
         let stop = StopToken::default();
         let mut calls = 0;
-        let storage = reserve_wake_storage(&stop, || {
+        let storage = reserve_worker_storage(&stop, || {
             calls += 1;
             stop.stop();
             Err(ilium_execution::RejectReason::Busy)
@@ -1941,7 +2074,7 @@ mod tests {
     fn wake_admission_preserves_genuine_capacity_failure() {
         let stop = StopToken::default();
         let mut calls = 0;
-        let result = reserve_wake_storage(&stop, || {
+        let result = reserve_worker_storage(&stop, || {
             calls += 1;
             Err(ilium_execution::RejectReason::WorkerBytes)
         });
@@ -2351,6 +2484,23 @@ mod tests {
         }
     }
 
+    fn presentation(frame: &Arc<FrameSnapshot>) -> PresentationLease {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            match frame.begin_presentation() {
+                Ok(lease) => return lease,
+                Err(AdmissionError::Busy) => {
+                    assert!(
+                        Instant::now() < deadline,
+                        "presentation mailbox remained busy"
+                    );
+                    std::thread::yield_now();
+                }
+                Err(reason) => panic!("presentation refused: {reason:?}"),
+            }
+        }
+    }
+
     fn isolated_quota() -> QuotaGroup {
         QuotaGroup::new(ilium_execution::QuotaLimits {
             worker_threads: 1,
@@ -2542,11 +2692,7 @@ mod tests {
             "Generation alone must not credit painted history"
         );
         let surviving = vec![frame.cell(0, 0).unwrap().packed_bits, 0, 0];
-        let mut receipt = frame
-            .begin_presentation()
-            .unwrap()
-            .receipt(surviving)
-            .unwrap();
+        let mut receipt = presentation(&frame).receipt(surviving).unwrap();
         loop {
             match service.try_receipt(receipt) {
                 Ok(()) => break,
@@ -2623,11 +2769,7 @@ mod tests {
 
         for snapshot in [&first, &second] {
             let surviving = vec![snapshot.cell(0, 0).unwrap().packed_bits, 0];
-            let mut receipt = snapshot
-                .begin_presentation()
-                .unwrap()
-                .receipt(surviving)
-                .unwrap();
+            let mut receipt = presentation(snapshot).receipt(surviving).unwrap();
             loop {
                 match service.try_receipt(receipt) {
                     Ok(()) => break,
@@ -2783,7 +2925,7 @@ mod tests {
         entered.recv_timeout(Duration::from_secs(3)).unwrap();
         release.send(()).unwrap();
         let old = snapshot(&service);
-        let lease = old.begin_presentation().unwrap();
+        let lease = presentation(&old);
         let mut next = request(2, 1);
         next.settings.kind = AnimationKind::Shoreline;
         assert_eq!(

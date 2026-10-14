@@ -88,6 +88,7 @@ fn prepared_live_source_sequence() -> (
         &mut instance,
         &fixture.request,
         &fixture.quota,
+        &fixture.cadence_owner,
         fixture.resources.clone(),
         Arc::clone(&fixture.state_root),
         None,
@@ -443,6 +444,7 @@ fn presentation_settles_two_pure_create_yields_before_procedural_replay() {
         &mut instance,
         &fixture.request,
         &fixture.quota,
+        &fixture.cadence_owner,
         fixture.resources.clone(),
         Arc::clone(&fixture.state_root),
         None,
@@ -509,6 +511,7 @@ fn live_replay_freeze_acknowledges_an_explicit_empty_source_set() {
         &mut instance,
         &fixture.request,
         &fixture.quota,
+        &fixture.cadence_owner,
         fixture.resources.clone(),
         Arc::clone(&fixture.state_root),
         None,
@@ -630,6 +633,7 @@ struct Fixture {
     state_root: Arc<PinnedDirectory>,
     clip_root: Arc<PinnedDirectory>,
     quota: QuotaGroup,
+    cadence_owner: Arc<crate::execution::NativeSourceCadenceOwner>,
     execution: Execution,
     client: Client,
     resources: ilium_ambient::resources::AmbientResources,
@@ -657,6 +661,8 @@ impl Fixture {
         // Presentation's process-wide SourceCadence is bound to this exact
         // original quota root even when this fixture requests no sources.
         let quota = crate::execution::process_quota();
+        let cadence_owner = crate::execution::native_source_cadence_owner(&quota)
+            .expect("fixture captures its original source cadence identity");
         let lane = LaneConfig {
             threads: 1,
             queue_slots: 8,
@@ -715,6 +721,7 @@ impl Fixture {
             state_root,
             clip_root,
             quota,
+            cadence_owner,
             execution,
             client,
             resources,
@@ -821,6 +828,7 @@ impl Fixture {
             instance,
             &self.request,
             &self.quota,
+            &self.cadence_owner,
             self.resources.clone(),
             Arc::clone(&self.state_root),
             None, // These image/cache fixtures declare no audio demand.
@@ -993,6 +1001,7 @@ fn backend_with_accepted_workflow(fixture: &Fixture) -> PluginBackend {
     let retention = setup_retention(fixture);
     let mut backend = PluginBackend::new(
         fixture.quota.clone(),
+        Arc::clone(&fixture.cadence_owner),
         fixture.resources.clone(),
         Arc::clone(&fixture.review),
         Arc::new(|| {}),

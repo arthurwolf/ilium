@@ -3,7 +3,7 @@ use std::fmt;
 use std::io;
 use std::mem::size_of;
 use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
 use crossbeam_channel::{Receiver, RecvTimeoutError, Sender, TrySendError};
@@ -22,6 +22,7 @@ use crate::job::{
 use crate::retirement::{
     RetirementFailure, RetirementReservation, RetirementState, RETIREMENT_SLOTS,
 };
+use crate::serial::{SerialCustody, SerialRecoveryTicket, SerialRegistry};
 
 const OPEN: u8 = 0;
 const DRAIN: u8 = 1;
@@ -258,7 +259,10 @@ pub struct JoinReport {
     pub health: Health,
     /// Physical workers have joined and no admitted work or retained original
     /// remains. A deadline or exceptional recovery custody keeps this false.
-    /// This reports lifecycle completion, not successful business results.
+    /// This reports bank worker retirement, not successful business results.
+    /// External reservations/retentions can outlive the joined bank and keep
+    /// their request debits until their last holder is dropped. Bank metadata
+    /// remains while a Client still owns the bank; external debits alone do not.
     pub shutdown_complete: bool,
 }
 
@@ -294,6 +298,12 @@ pub struct LaneHealth {
     /// Count of primary handoff refusals, including unsuccessful retries. A
     /// failed original remains in finite recovery custody until resolved.
     pub retirement_handoff_failed: usize,
+    /// I/O-only: charged serial groups, including live adapters holding an
+    /// unobserved receipt. Keeps workers alive until reconciliation or Drop.
+    pub serial_active: usize,
+    /// I/O-only: exact original writes retained after a failed sequence.
+    pub serial_recovery_pending: usize,
+    pub serial_completed: usize,
 }
 #[derive(Debug, Clone, Copy)]
 pub struct Health {
@@ -347,7 +357,11 @@ impl Bank {
             metrics: Arc::new(Metrics::default()),
         }
     }
-    fn health(&self, retirement: Option<&RetirementState>) -> LaneHealth {
+    fn health(
+        &self,
+        retirement: Option<&RetirementState>,
+        serial: Option<&SerialRegistry>,
+    ) -> LaneHealth {
         let m = &self.metrics;
         let load = |value: &AtomicUsize| value.load(Ordering::Acquire);
         LaneHealth {
@@ -374,6 +388,9 @@ impl Bank {
             retirement_completed: retirement.map_or(0, RetirementState::completed),
             retirement_panicked: retirement.map_or(0, RetirementState::panicked),
             retirement_handoff_failed: retirement.map_or(0, RetirementState::handoff_failed),
+            serial_active: serial.map_or(0, SerialRegistry::active),
+            serial_recovery_pending: serial.map_or(0, SerialRegistry::recovery_pending),
+            serial_completed: serial.map_or(0, SerialRegistry::completed),
         }
     }
 }
@@ -382,6 +399,7 @@ pub(crate) struct Shared {
     quota: QuotaGroup,
     banks: [Bank; 3],
     retirement: RetirementState,
+    serial: Weak<SerialRegistry>,
     phase: AtomicU8,
     stop: StopToken,
     // Last field: all bank/channel storage is destroyed before this charge.
@@ -412,11 +430,17 @@ impl Shared {
         // caller still owns an unsubmitted reservation.
     }
     fn health(&self) -> Health {
+        let serial = self.serial.upgrade();
         Health {
             phase: self.phase(),
             quota: self.quota.snapshot(),
             lanes: std::array::from_fn(|i| {
-                self.banks[i].health((i == Lane::Cpu.index()).then_some(&self.retirement))
+                self.banks[i].health(
+                    (i == Lane::Cpu.index()).then_some(&self.retirement),
+                    (i == Lane::Io.index())
+                        .then_some(serial.as_deref())
+                        .flatten(),
+                )
             }),
         }
     }
@@ -459,6 +483,8 @@ fn bank_metadata_bytes(
 ) -> Result<usize, StartError> {
     let overflow = || StartError::InvalidConfig("bank metadata byte declaration overflow");
     let mut bytes = size_of::<Shared>()
+        .checked_add(size_of::<SerialRegistry>() + size_of::<usize>() * 2)
+        .ok_or_else(overflow)?
         .checked_add(size_of::<usize>() * 2) // Shared Arc header.
         .and_then(|value| value.checked_add(total_threads.checked_mul(size_of::<WorkerRecord>())?))
         .ok_or_else(overflow)?;
@@ -491,6 +517,7 @@ fn bank_metadata_bytes(
 pub struct Execution {
     shared: Arc<Shared>,
     workers: Vec<WorkerRecord>,
+    serial: Arc<SerialRegistry>,
 }
 impl Execution {
     /// Background/bootstrap ONLY: platform spawning can lock and start threads.
@@ -508,10 +535,42 @@ impl Execution {
     ) -> Result<Self, StartFailure> {
         Self::start_with_spawn_probe(quota, config, |_, _| Ok(()))
     }
+    /// Own bounded admission for externally supervised actors without creating
+    /// finite worker threads. Every finite lane stays disabled; external
+    /// reservations retain the same job/input/result accounting and close phase.
+    pub fn admission_only(quota: QuotaGroup) -> Result<Self, StartError> {
+        let disabled = LaneConfig {
+            threads: 0,
+            queue_slots: 0,
+            priority: None,
+            resident_bytes_per_thread: 0,
+        };
+        Self::start_with_spawn_probe_mode(
+            quota,
+            ExecutionConfig {
+                cpu: disabled,
+                io: disabled,
+                service: disabled,
+            },
+            |_, _| Ok(()),
+            true,
+        )
+        .map_err(StartFailure::into_legacy_error)
+    }
+
     fn start_with_spawn_probe(
         quota: QuotaGroup,
         config: ExecutionConfig,
+        before_spawn: impl FnMut(Lane, usize) -> io::Result<()>,
+    ) -> Result<Self, StartFailure> {
+        Self::start_with_spawn_probe_mode(quota, config, before_spawn, false)
+    }
+
+    fn start_with_spawn_probe_mode(
+        quota: QuotaGroup,
+        config: ExecutionConfig,
         mut before_spawn: impl FnMut(Lane, usize) -> io::Result<()>,
+        admission_only: bool,
     ) -> Result<Self, StartFailure> {
         if ON_BANK_THREAD.with(Cell::get) {
             return Err(
@@ -538,7 +597,7 @@ impl Execution {
         if total > MAX_OWNED_WORKERS {
             return Err(StartError::InvalidConfig("banks exceed platform worker capacity").into());
         }
-        if total == 0 {
+        if total == 0 && !admission_only {
             return Err(StartError::InvalidConfig("at least one bank thread is required").into());
         }
         // Reserve retained bank storage and all thread resources BEFORE
@@ -562,6 +621,7 @@ impl Execution {
                 ));
             }
         }
+        let serial = SerialRegistry::new();
         let shared = Arc::new(Shared {
             quota,
             banks: [
@@ -570,6 +630,7 @@ impl Execution {
                 Bank::new(config.service),
             ],
             retirement: RetirementState::new(),
+            serial: Arc::downgrade(&serial),
             phase: AtomicU8::new(OPEN),
             stop: StopToken::default(),
             _metadata_charge: metadata_charge,
@@ -578,9 +639,14 @@ impl Execution {
         workers
             .try_reserve_exact(total)
             .map_err(|_| StartError::Allocation)?;
-        let mut execution = Self { shared, workers };
+        let mut execution = Self {
+            shared,
+            workers,
+            serial,
+        };
         for (lane, index, debit) in reservations {
             let body_shared = Arc::clone(&execution.shared);
+            let body_serial = Arc::clone(&execution.serial);
             let stop = execution.shared.stop.child();
             let name = format!("ilium-exec-{}-{index}", lane.name());
             let owner = before_spawn(lane, index).and_then(|()| {
@@ -594,7 +660,7 @@ impl Execution {
                         // Remaining private ticket references may extend it further.
                         let _keep_debit_alive = &debit;
                     },
-                    move |stop| run_bank(body_shared, lane, stop),
+                    move |stop| run_bank(body_shared, body_serial, lane, stop),
                 )
             });
             let owner = match owner {
@@ -638,6 +704,7 @@ impl Execution {
             shared: Arc::clone(&self.shared),
             tenant,
             wake: None,
+            serial: Arc::clone(&self.serial),
         })
     }
 
@@ -656,11 +723,18 @@ impl Execution {
             shared: Arc::clone(&self.shared),
             tenant,
             wake: None,
+            serial: Arc::clone(&self.serial),
         })
     }
 
     pub fn request_shutdown(&self, mode: ShutdownMode) {
         self.shared.close(mode);
+    }
+
+    /// Retrieve one failed detached serial group of the exact job type.
+    /// Dropping the returned ticket without take puts it back in bank custody.
+    pub fn try_take_serial_recovery<J: Job>(&self) -> Option<SerialRecoveryTicket<J>> {
+        self.serial.try_take_recovery()
     }
 
     /// Background ONLY. A deadline is an observation, NOT cancellation, success
@@ -718,7 +792,9 @@ impl Execution {
                     && lane.retained_service_claims == 0
                     && lane.running == 0
             })
-            && health.lanes[Lane::Cpu.index()].retirement_live == 0;
+            && health.lanes[Lane::Cpu.index()].retirement_live == 0
+            && health.lanes[Lane::Io.index()].serial_active == 0
+            && health.lanes[Lane::Io.index()].serial_recovery_pending == 0;
         Ok(JoinReport {
             observations,
             remaining_workers: self.workers.len(),
@@ -739,6 +815,7 @@ pub struct Client {
     shared: Arc<Shared>,
     tenant: Arc<Tenant>,
     wake: Option<Wake>,
+    serial: Arc<SerialRegistry>,
 }
 
 #[derive(Clone)]
@@ -767,6 +844,16 @@ impl RetirementHandle {
 }
 
 impl Client {
+    /// Reserve charged serial metadata before the adapter accepts its first
+    /// write; the lease transfers to bank custody if that adapter drops.
+    pub fn try_reserve_serial_custody<J: Job>(
+        &self,
+        max_writes: usize,
+    ) -> Result<SerialCustody<J>, RejectReason> {
+        let bytes = SerialCustody::<J>::metadata_bytes(max_writes)?;
+        let storage = self.shared.quota.reserve_external_storage(bytes)?;
+        Ok(SerialCustody::new(Arc::clone(&self.serial), storage))
+    }
     pub fn retirement(&self) -> RetirementHandle {
         RetirementHandle {
             shared: Arc::clone(&self.shared),
@@ -842,6 +929,7 @@ impl Client {
             shared: Arc::clone(&self.shared),
             tenant,
             wake: self.wake.clone(),
+            serial: Arc::clone(&self.serial),
         })
     }
 
@@ -1079,7 +1167,7 @@ impl Drop for ThreadBodyExit {
     }
 }
 
-fn run_bank(shared: Arc<Shared>, lane: Lane, stop: StopToken) {
+fn run_bank(shared: Arc<Shared>, serial: Arc<SerialRegistry>, lane: Lane, stop: StopToken) {
     ON_BANK_THREAD.with(|flag| flag.set(true));
     ON_CPU_BANK_THREAD.with(|flag| flag.set(lane == Lane::Cpu));
     let _body_exit = ThreadBodyExit {
@@ -1094,6 +1182,11 @@ fn run_bank(shared: Arc<Shared>, lane: Lane, stop: StopToken) {
     loop {
         if stop.is_stopped() {
             shared.close(ShutdownMode::Cancel);
+        }
+        if lane == Lane::Io {
+            // The same finite workers that execute ordinary I/O also advance
+            // detached serial groups. No worker waits on a peer or a producer.
+            serial.advance(shared.cancelling());
         }
         if lane == Lane::Cpu {
             if let Ok(failed) = shared.retirement.recovery_receiver().try_recv() {
@@ -1173,8 +1266,15 @@ fn run_bank(shared: Arc<Shared>, lane: Lane, stop: StopToken) {
                 }
             }
         }
+        let pending = bank.signal.pending.load(Ordering::Acquire);
+        let recovery_reserved = if lane == Lane::Io {
+            serial.recovery_reserved()
+        } else {
+            0
+        };
         if shared.phase.load(Ordering::Acquire) != OPEN
-            && bank.signal.pending.load(Ordering::Acquire) == 0
+            && pending == recovery_reserved
+            && (lane != Lane::Io || serial.active() == 0)
             && (lane != Lane::Cpu || shared.retirement.live() == 0)
         {
             return;
@@ -1186,6 +1286,74 @@ fn run_bank(shared: Arc<Shared>, lane: Lane, stop: StopToken) {
 mod retirement_failure_tests {
     use super::*;
     use crate::budget::{JobCost, QuotaLimits};
+
+    #[test]
+    fn admission_only_keeps_bank_and_external_debits_for_their_actual_owners() {
+        let quota = QuotaGroup::new(QuotaLimits {
+            clients: 1,
+            jobs: 1,
+            service_jobs: 0,
+            input_bytes: 4096,
+            result_bytes: 4096,
+            worker_threads: 0,
+            worker_bytes: 1024 * 1024,
+        });
+        let baseline = quota.snapshot();
+        let disabled = LaneConfig {
+            threads: 0,
+            queue_slots: 0,
+            priority: None,
+            resident_bytes_per_thread: 0,
+        };
+        assert!(matches!(
+            Execution::start(
+                quota.clone(),
+                ExecutionConfig {
+                    cpu: disabled,
+                    io: disabled,
+                    service: disabled
+                }
+            ),
+            Err(StartError::InvalidConfig(_))
+        ));
+        assert_eq!(quota.snapshot().worker_bytes, baseline.worker_bytes);
+        let mut bank = Execution::admission_only(quota.clone()).unwrap();
+        let metadata_bytes = quota.snapshot().worker_bytes;
+        assert!(metadata_bytes > baseline.worker_bytes);
+        let client = bank
+            .client(ClientLimits {
+                jobs: 1,
+                service_jobs: 0,
+                input_bytes: 4096,
+                result_bytes: 4096,
+            })
+            .unwrap();
+        let held = client
+            .try_reserve_external(JobCost {
+                input_bytes: 4096,
+                result_bytes: 4096,
+            })
+            .unwrap()
+            .retain(42u8)
+            .map_err(|error| error.reason)
+            .unwrap();
+        bank.request_shutdown(ShutdownMode::Cancel);
+        assert!(
+            bank.join_until_background(Instant::now() + Duration::from_secs(5))
+                .unwrap()
+                .shutdown_complete
+        );
+        drop(bank);
+        assert_eq!(quota.snapshot().worker_bytes, metadata_bytes);
+        drop(client);
+        assert_eq!(quota.snapshot().worker_bytes, baseline.worker_bytes);
+        assert_eq!(quota.snapshot().jobs, 1);
+        assert_eq!(quota.snapshot().input_bytes, 4096);
+        assert_eq!(quota.snapshot().result_bytes, 4096);
+        drop(held);
+        assert_eq!(quota.snapshot().worker_bytes, baseline.worker_bytes);
+        assert_eq!(quota.snapshot().jobs, baseline.jobs);
+    }
 
     #[test]
     fn disabled_lane_is_a_permanent_capability_refusal_not_queue_pressure() {

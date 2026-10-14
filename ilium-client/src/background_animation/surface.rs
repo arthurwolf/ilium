@@ -864,8 +864,13 @@ impl AnimationSurface {
             }
             assert!(
                 Instant::now() < deadline,
-                "Animation transition did not settle: {:?}",
-                self.status()
+                "Animation transition did not settle: status={:?}, requested={:?}, display={:?}, configurations={}, receipts={}, service_counts={:?}",
+                self.status(),
+                self.last_request,
+                self.display.as_ref().map(|frame| (frame.revision, frame.elapsed)),
+                self.configurations.len(),
+                self.receipts.len(),
+                self.service.as_ref().map(|service| (service.configuration_count(), service.presentation_count()))
             );
             std::thread::sleep(Duration::from_millis(1));
         }
