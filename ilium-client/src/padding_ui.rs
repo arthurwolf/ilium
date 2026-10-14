@@ -113,8 +113,8 @@ pub fn tab_layout(area: Rect, settings: &PaddingSettings) -> TabLayout {
 
     TabLayout {
         cards,
-        big_decrement: big_decrement.map(|rect| rect),
-        decrement: decrement.clone(),
+        big_decrement,
+        decrement,
         field,
         increment,
         big_increment,

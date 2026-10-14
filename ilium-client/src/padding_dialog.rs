@@ -98,9 +98,9 @@ fn build(inner: Rect, settings: &PaddingSettings, state: &DialogState) -> Layout
     };
     let mut y = column.y;
     let right = column.right();
-    let mut row = |y: u16| Rect::new(column.x, y, column.width, 1);
+    let row = |y: u16| Rect::new(column.x, y, column.width, 1);
 
-    let mut section = |layout: &mut Layout, y: &mut u16, title: &str, is_tree: bool| {
+    let section = |layout: &mut Layout, y: &mut u16, title: &str, is_tree: bool| {
         let panel = section_panel(state, settings, is_tree);
         layout.labels.push((row(*y), title.to_owned(), true));
         *y += 1;
@@ -142,11 +142,11 @@ fn build(inner: Rect, settings: &PaddingSettings, state: &DialogState) -> Layout
             .buttons
             .push((row(*y), linked_text.into(), DialogHit::Linked(panel)));
         *y += 1;
-        let mut value_row = |layout: &mut Layout,
-                             y: &mut u16,
-                             name: &str,
-                             side: Option<PaddingSide>,
-                             current: u8| {
+        let value_row = |layout: &mut Layout,
+                         y: &mut u16,
+                         name: &str,
+                         side: Option<PaddingSide>,
+                         current: u8| {
             layout.labels.push((
                 Rect::new(column.x, *y, 8.min(column.width), 1),
                 name.to_owned(),

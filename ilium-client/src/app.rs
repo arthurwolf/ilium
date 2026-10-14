@@ -12760,6 +12760,7 @@ impl App {
     }
 
     /// Ends the oldest pending spinner for `action` (one click, one spinner).
+    #[cfg(test)]
     pub(crate) fn finish_pending_toolbar_action(&mut self, action: TreeToolbarAction) {
         if let Some(index) = self
             .pending_toolbar_actions

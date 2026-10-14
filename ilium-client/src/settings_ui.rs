@@ -936,10 +936,7 @@ pub fn settings_help_anchors(
                 layout.content_area.width,
             );
             // With cards there is no sizing row line, so anchor on the cards.
-            let sizing_anchor_line = view
-                .card_hits
-                .first()
-                .map_or(4, |card| card.start_line.into());
+            let sizing_anchor_line = view.card_hits.first().map_or(4, |card| card.start_line);
             push_help_anchor(
                 &mut anchors,
                 layout,
