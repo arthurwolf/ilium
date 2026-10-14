@@ -646,15 +646,21 @@ mod render_tests {
             state.rendered_rows().next().map(|(_, _, height)| height),
             Some(1)
         );
-        assert!(state
-            .item_at_position(&items, short_area, Position::new(4, 8), true)
-            .is_none());
-        assert!(state
-            .item_at_position(&items, Rect::ZERO, Position::new(0, 0), true)
-            .is_none());
-        assert!(state
-            .item_at_position(&[], area, Position::new(4, 7), true)
-            .is_none());
+        assert!(
+            state
+                .item_at_position(&items, short_area, Position::new(4, 8), true)
+                .is_none()
+        );
+        assert!(
+            state
+                .item_at_position(&items, Rect::ZERO, Position::new(0, 0), true)
+                .is_none()
+        );
+        assert!(
+            state
+                .item_at_position(&[], area, Position::new(4, 7), true)
+                .is_none()
+        );
     }
 
     fn assert_fresh_query_matches_render(
