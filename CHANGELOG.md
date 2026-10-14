@@ -56,6 +56,7 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 ### Fixed
 - The animation settings paint-and-hit test no longer crosses every effective kind with the whole playback and colour matrix, which made it run for tens of minutes.
 - The Settings Padding tab is handled in the content-height and row-count matches.
+- On Windows the `ilium` and `ilium-server` binaries now reserve a 16 MiB main-thread stack, so the client no longer overflows the default 1 MiB stack at startup.
 
 ### Added
 - Every animation's settings open with a two-sentence introduction of what the animation is and what it shows.
