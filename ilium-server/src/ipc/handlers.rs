@@ -152,7 +152,9 @@ fn request_error_node(request: &ClientRequest) -> Option<NodeId> {
         ClientRequest::TerminatePaneProcess { pane_id, .. } => Some(*pane_id),
         ClientRequest::ReplacePaneWithCommand { pane_id, .. } => Some(*pane_id),
         ClientRequest::FreezePane { pane_id, .. } => Some(*pane_id),
-        ClientRequest::ApplyRecommendedProjectRestructurePlan { project_id, .. } => Some(*project_id),
+        ClientRequest::ApplyRecommendedProjectRestructurePlan { project_id, .. } => {
+            Some(*project_id)
+        }
         ClientRequest::UserKeyInput { pane_id, .. } => Some(*pane_id),
         ClientRequest::ReportAgentPromptFromTranscript { pane_id, .. } => Some(*pane_id),
         ClientRequest::UnfreezePane { pane_id, .. } => Some(*pane_id),
@@ -175,7 +177,20 @@ pub async fn handle_request(
     };
     let scoped_tx = direct_tx.with_error_scope(state, target, operation);
     let should_close = handle_scoped_request(state, request, &scoped_tx).await;
-    if matches!(operation, "rename_node" | "move_node" | "reparent_node" | "new_group" | "new_project" | "new_folder" | "change_project_folder" | "create_split_view" | "set_node_bookmarked" | "set_node_expanded" | "set_node_locked_closed") {
+    if matches!(
+        operation,
+        "rename_node"
+            | "move_node"
+            | "reparent_node"
+            | "new_group"
+            | "new_project"
+            | "new_folder"
+            | "change_project_folder"
+            | "create_split_view"
+            | "set_node_bookmarked"
+            | "set_node_expanded"
+            | "set_node_locked_closed"
+    ) {
         scoped_tx.finish_synchronous_mutation();
     }
     should_close
@@ -284,7 +299,15 @@ async fn handle_scoped_request(
             kind,
             working_directory,
         } => {
-            handle_new_pane(state, request_id, parent_group, kind, working_directory, direct_tx).await;
+            handle_new_pane(
+                state,
+                request_id,
+                parent_group,
+                kind,
+                working_directory,
+                direct_tx,
+            )
+            .await;
             false
         }
         ClientRequest::QueryWorkspaceInventory {
@@ -2084,7 +2107,9 @@ async fn admitted_state_synchronization_events(
                     drop(statuses);
                     let settings = state.text_trigger_settings.read().await.settings.clone();
                     events.push(ServerEvent::TextTriggersChanged { settings });
-    events.push(ServerEvent::BlockingErrorsSnapshot { errors: state.blocking_errors_snapshot() });
+                    events.push(ServerEvent::BlockingErrorsSnapshot {
+                        errors: state.blocking_errors_snapshot(),
+                    });
                     if include_initial_sync_complete {
                         let (detection, custom_signatures) =
                             state.agent_detection_settings_snapshot().await;
@@ -4527,7 +4552,11 @@ async fn handle_new_pane(
     if let Err(message) = &result {
         send_direct_error(direct_tx, message.clone()).await;
     }
-    send_direct(direct_tx, ServerEvent::PaneCreateFinished { request_id, result }).await;
+    send_direct(
+        direct_tx,
+        ServerEvent::PaneCreateFinished { request_id, result },
+    )
+    .await;
 }
 
 async fn create_pane(
@@ -8203,16 +8232,32 @@ mod tests {
     async fn create_failure_is_correlated_scoped_and_replayed_on_attach() {
         let directory = tempfile::tempdir().unwrap();
         let state = snapshot_io_handler_state(&directory);
-        let group = state.tree.write().await.add_group(ilium_core::ROOT_ID, "project").unwrap();
+        let group = state
+            .tree
+            .write()
+            .await
+            .add_group(ilium_core::ROOT_ID, "project")
+            .unwrap();
         let (sender, mut replies) = DirectEventSender::channel(16);
-        handle_request(&state, ClientRequest::NewPane {
-            request_id: 742,
-            parent_group: group,
-            kind: NewPaneKind::PlainShell,
-            working_directory: NewPaneWorkingDirectory::Directory(directory.path().join("missing")),
-        }, &sender).await;
-        assert!(matches!(replies.recv().await, Some(ServerEvent::Error { .. })));
-        let Some(ServerEvent::PaneCreateFinished { request_id, result }) = replies.recv().await else {
+        handle_request(
+            &state,
+            ClientRequest::NewPane {
+                request_id: 742,
+                parent_group: group,
+                kind: NewPaneKind::PlainShell,
+                working_directory: NewPaneWorkingDirectory::Directory(
+                    directory.path().join("missing"),
+                ),
+            },
+            &sender,
+        )
+        .await;
+        assert!(matches!(
+            replies.recv().await,
+            Some(ServerEvent::Error { .. })
+        ));
+        let Some(ServerEvent::PaneCreateFinished { request_id, result }) = replies.recv().await
+        else {
             panic!("creation must have a terminal typed outcome");
         };
         assert_eq!(request_id, 742);

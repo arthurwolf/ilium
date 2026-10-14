@@ -61,7 +61,14 @@ async fn deliver_when_ready(
     let result =
         crate::agent_delivery::deliver_initial_prompt_when_ready(&state, pane_id, &bytes).await;
     if let Err(message) = &result {
-        state.record_blocking_error(Some(pane_id), "initial_prompt", &format!("Pane {} was created, but its initial prompt was not delivered: {message}", pane_id.0));
+        state.record_blocking_error(
+            Some(pane_id),
+            "initial_prompt",
+            &format!(
+                "Pane {} was created, but its initial prompt was not delivered: {message}",
+                pane_id.0
+            ),
+        );
         tracing::warn!(
             pane_id = pane_id.0,
             "initial agent prompt was not delivered after readiness: {message}"

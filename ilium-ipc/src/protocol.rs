@@ -1547,5 +1547,8 @@ pub enum ServerEvent {
     /// Authoritative unresolved errors, replayed on attachment and recovery.
     BlockingErrorsSnapshot { errors: Vec<BlockingError> },
     /// Exactly one terminal outcome for an admitted pane creation request.
-    PaneCreateFinished { request_id: u64, result: Result<NodeId, String> },
+    PaneCreateFinished {
+        request_id: u64,
+        result: Result<NodeId, String>,
+    },
 }

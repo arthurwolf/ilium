@@ -1058,6 +1058,8 @@ mod tests {
 
 impl HeapBytes for BlockingError {
     fn heap_bytes(&self) -> usize {
-        self.operation.heap_bytes().saturating_add(self.message.heap_bytes())
+        self.operation
+            .heap_bytes()
+            .saturating_add(self.message.heap_bytes())
     }
 }

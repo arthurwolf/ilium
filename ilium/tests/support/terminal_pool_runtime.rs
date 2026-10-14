@@ -271,7 +271,7 @@ async fn no_pool_release_renders_128_panes_and_measures_click_latency() {
         connection
             .requests
             .send(ClientRequest::NewPane {
-            request_id: 1,
+                request_id: 1,
                 parent_group: ilium_core::ROOT_ID,
                 kind: ilium_ipc::NewPaneKind::Command(command),
                 working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,

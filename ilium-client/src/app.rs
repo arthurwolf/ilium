@@ -3965,7 +3965,11 @@ impl App {
         if self.try_queue_terminal_request(request).is_err() {
             self.show_request_admission_error();
             if let Some((_, pending)) = creation {
-                self.record_local_blocking_error(pending.parent_group, "Create pane", "Request queue refused creation; retry when pending work completes");
+                self.record_local_blocking_error(
+                    pending.parent_group,
+                    "Create pane",
+                    "Request queue refused creation; retry when pending work completes",
+                );
             }
             return false;
         }
@@ -12934,7 +12938,11 @@ impl App {
     const PENDING_TOOLBAR_TIMEOUT: Duration = Duration::from_secs(120);
 
     pub(crate) fn begin_pending_toolbar_action(&mut self, action: TreeToolbarAction) {
-        if self.pending_pane_creations.values().any(|pending| pending.action == action) {
+        if self
+            .pending_pane_creations
+            .values()
+            .any(|pending| pending.action == action)
+        {
             return;
         }
         if self.pending_toolbar_actions.len() >= 16 {
@@ -13001,7 +13009,13 @@ impl App {
         } else {
             0
         };
-        let creation_mask = self.pending_pane_creations.values().filter(|pending| !pending.uncertainty_reported).fold(restructure_bit, |mask, pending| mask | pending.action.pending_bit());
+        let creation_mask = self
+            .pending_pane_creations
+            .values()
+            .filter(|pending| !pending.uncertainty_reported)
+            .fold(restructure_bit, |mask, pending| {
+                mask | pending.action.pending_bit()
+            });
         self.pending_toolbar_actions
             .iter()
             .fold(creation_mask, |mask, (action, _, _)| {
@@ -14217,8 +14231,22 @@ impl App {
         event: &ilium_ipc::ServerEvent,
     ) -> Option<usize> {
         match event {
-            ilium_ipc::ServerEvent::BlockingErrorsSnapshot { errors } => Some(errors.iter().fold(0usize, |bytes, error| bytes.saturating_add(error.operation.len()).saturating_add(error.message.len()).saturating_add(128)).saturating_mul(2)),
-            ilium_ipc::ServerEvent::PaneCreateFinished { result, .. } => Some(result.as_ref().err().map_or(64, |message| message.len().saturating_add(64).saturating_mul(2))),
+            ilium_ipc::ServerEvent::BlockingErrorsSnapshot { errors } => Some(
+                errors
+                    .iter()
+                    .fold(0usize, |bytes, error| {
+                        bytes
+                            .saturating_add(error.operation.len())
+                            .saturating_add(error.message.len())
+                            .saturating_add(128)
+                    })
+                    .saturating_mul(2),
+            ),
+            ilium_ipc::ServerEvent::PaneCreateFinished { result, .. } => {
+                Some(result.as_ref().err().map_or(64, |message| {
+                    message.len().saturating_add(64).saturating_mul(2)
+                }))
+            }
             ilium_ipc::ServerEvent::RepoFactsReported {
                 request_id,
                 project,
@@ -15966,7 +15994,11 @@ impl App {
             return Err("Agent destination is no longer available; draft remains editable".into());
         }
         if self.pending_pane_creations.len() >= 16 {
-            self.record_local_blocking_error(state.parent_group, "Create pane", "Too many unconfirmed creation requests; check the project before retrying.");
+            self.record_local_blocking_error(
+                state.parent_group,
+                "Create pane",
+                "Too many unconfirmed creation requests; check the project before retrying.",
+            );
             return Err("Too many unconfirmed creation requests; draft remains editable".into());
         }
         let command = state.agent_type.command_line();
@@ -16017,7 +16049,15 @@ impl App {
             )
         })?;
         self.queue_terminal_request_after_barrier(admitted);
-        self.pending_pane_creations.insert(request_id, crate::blocking_errors::PendingPaneCreation { parent_group: state.parent_group, action: Self::toolbar_action_for_command(command), started: Instant::now(), uncertainty_reported: false });
+        self.pending_pane_creations.insert(
+            request_id,
+            crate::blocking_errors::PendingPaneCreation {
+                parent_group: state.parent_group,
+                action: Self::toolbar_action_for_command(command),
+                started: Instant::now(),
+                uncertainty_reported: false,
+            },
+        );
         self.record_pending_pane_focus(
             state.parent_group,
             PaneContentKind::Terminal,

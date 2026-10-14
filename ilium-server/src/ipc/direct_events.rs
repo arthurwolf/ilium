@@ -46,10 +46,17 @@ impl DirectEventReceiver {
 }
 
 impl DirectEventSender {
-    pub(crate) fn with_error_scope(&self, state: &Arc<crate::state::ServerState>, node_id: Option<ilium_core::NodeId>, operation: &'static str) -> Self {
+    pub(crate) fn with_error_scope(
+        &self,
+        state: &Arc<crate::state::ServerState>,
+        node_id: Option<ilium_core::NodeId>,
+        operation: &'static str,
+    ) -> Self {
         let mut sender = self.clone();
         sender.error_scope = Some(RequestErrorScope {
-            state: Arc::downgrade(state), node_id, operation,
+            state: Arc::downgrade(state),
+            node_id,
+            operation,
             generation: state.begin_error_operation(node_id, operation),
             has_failed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         });
@@ -59,36 +66,77 @@ impl DirectEventSender {
     /// Called only after a synchronous mutation has completed; queued work
     /// and read-only probes must wait for their own typed terminal outcome.
     pub(crate) fn finish_synchronous_mutation(&self) {
-        let Some(scope) = &self.error_scope else { return; };
+        let Some(scope) = &self.error_scope else {
+            return;
+        };
         if !scope.has_failed.load(std::sync::atomic::Ordering::Relaxed) {
             if let Some(state) = scope.state.upgrade() {
-                state.clear_current_blocking_error(scope.node_id, scope.operation, scope.generation);
+                state.clear_current_blocking_error(
+                    scope.node_id,
+                    scope.operation,
+                    scope.generation,
+                );
             }
         }
     }
 
     fn retain_blocking_error(&self, event: &ServerEvent) {
-        let Some(RequestErrorScope { state, node_id, operation, generation, has_failed }) = &self.error_scope else { return; };
-        let Some(state) = state.upgrade() else { return; };
+        let Some(RequestErrorScope {
+            state,
+            node_id,
+            operation,
+            generation,
+            has_failed,
+        }) = &self.error_scope
+        else {
+            return;
+        };
+        let Some(state) = state.upgrade() else {
+            return;
+        };
         let message = match event {
             ServerEvent::Error { message }
             | ServerEvent::ProjectRestructureRejected { message, .. }
             | ServerEvent::PaneResizeRejected { message, .. }
             | ServerEvent::WorkspaceCreateFailed { error: message, .. } => Some(message.as_str()),
-            ServerEvent::RepoFactsReported { result, .. } => result.as_ref().err().map(String::as_str),
-            ServerEvent::WorkspaceInventoryReported { result, .. } => result.as_ref().err().map(String::as_str),
+            ServerEvent::RepoFactsReported { result, .. } => {
+                result.as_ref().err().map(String::as_str)
+            }
+            ServerEvent::WorkspaceInventoryReported { result, .. } => {
+                result.as_ref().err().map(String::as_str)
+            }
             ServerEvent::PaneProcessTerminated { result, .. }
             | ServerEvent::PaneFrozen { result, .. }
-            | ServerEvent::AntigravityStatuslineCompleted { result, .. } => result.as_ref().err().map(String::as_str),
-            ServerEvent::PaneCreateFinished { result, .. } => result.as_ref().err().map(String::as_str),
-            ServerEvent::PaneRecapScreen { result, .. } => result.as_ref().err().map(String::as_str),
-            ServerEvent::ProgressMonitorCheckCompleted { result, .. } => result.as_ref().err().map(|error| error.message.as_str()),
-            ServerEvent::ProgressMonitorSetCompleted { result, .. } => result.as_ref().err().map(|error| error.message.as_str()),
-            ServerEvent::ProgressMonitorStatusReported { result, .. } => result.as_ref().err().map(|error| error.message.as_str()),
-            ServerEvent::ProgressMonitorCleared { result, .. } => result.as_ref().err().map(|error| error.message.as_str()),
-            ServerEvent::ProgressWaitCompleted { result, .. } => result.as_ref().err().map(|error| error.message.as_str()),
-            ServerEvent::AgentDetectionSettingsChanged { result, .. } => result.as_ref().err().map(|error| error.message.as_str()),
-            ServerEvent::VoiceTextResult { result, .. } => result.as_ref().err().map(|error| error.message.as_str()),
+            | ServerEvent::AntigravityStatuslineCompleted { result, .. } => {
+                result.as_ref().err().map(String::as_str)
+            }
+            ServerEvent::PaneCreateFinished { result, .. } => {
+                result.as_ref().err().map(String::as_str)
+            }
+            ServerEvent::PaneRecapScreen { result, .. } => {
+                result.as_ref().err().map(String::as_str)
+            }
+            ServerEvent::ProgressMonitorCheckCompleted { result, .. } => {
+                result.as_ref().err().map(|error| error.message.as_str())
+            }
+            ServerEvent::ProgressMonitorSetCompleted { result, .. } => {
+                result.as_ref().err().map(|error| error.message.as_str())
+            }
+            ServerEvent::ProgressMonitorStatusReported { result, .. } => {
+                result.as_ref().err().map(|error| error.message.as_str())
+            }
+            ServerEvent::ProgressMonitorCleared { result, .. } => {
+                result.as_ref().err().map(|error| error.message.as_str())
+            }
+            ServerEvent::ProgressWaitCompleted { result, .. } => {
+                result.as_ref().err().map(|error| error.message.as_str())
+            }
+            ServerEvent::AgentDetectionSettingsChanged { result, .. } => {
+                result.as_ref().err().map(|error| error.message.as_str())
+            }
+            ServerEvent::VoiceTextResult { result, .. } => {
+                result.as_ref().err().map(|error| error.message.as_str())
+            }
             _ => None,
         };
         if let Some(message) = message {
@@ -97,25 +145,40 @@ impl DirectEventSender {
         }
         // Clear only acknowledged successful mutations, never an unrelated
         // read, broadcast or a merely accepted background job.
-        let recovered = matches!(event,
+        let recovered = matches!(
+            event,
             ServerEvent::PaneCreateFinished { result: Ok(_), .. }
-            | ServerEvent::PaneProcessTerminated { result: Ok(_), .. }
-            | ServerEvent::PaneFrozen { result: Ok(_), .. }
-            | ServerEvent::WorkspaceCreated { .. }
-            | ServerEvent::WorkspaceRemoved { .. }
-            | ServerEvent::AgentDetectionSettingsChanged { request_id: Some(_), result: Ok(_), .. }
+                | ServerEvent::PaneProcessTerminated { result: Ok(_), .. }
+                | ServerEvent::PaneFrozen { result: Ok(_), .. }
+                | ServerEvent::WorkspaceCreated { .. }
+                | ServerEvent::WorkspaceRemoved { .. }
+                | ServerEvent::AgentDetectionSettingsChanged {
+                    request_id: Some(_),
+                    result: Ok(_),
+                    ..
+                }
         );
         if recovered {
             state.clear_current_blocking_error(*node_id, operation, *generation);
         }
         if let ServerEvent::WorkspaceRemovalBlocked { reasons, .. } = event {
-            state.record_current_blocking_error(*node_id, operation, *generation, &reasons.join("\n"));
+            state.record_current_blocking_error(
+                *node_id,
+                operation,
+                *generation,
+                &reasons.join("\n"),
+            );
         }
         if let ServerEvent::WorkspacePruneCompleted { result, .. } = event {
             if result.outcome == ilium_ipc::WorkspacePruneOutcome::Removed {
                 state.clear_current_blocking_error(*node_id, operation, *generation);
             } else {
-                state.record_current_blocking_error(*node_id, operation, *generation, &result.reasons.join("\n"));
+                state.record_current_blocking_error(
+                    *node_id,
+                    operation,
+                    *generation,
+                    &result.reasons.join("\n"),
+                );
             }
         }
     }

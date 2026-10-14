@@ -2014,7 +2014,10 @@ async fn new_pane(
                         _event_retention,
                     )));
                 }
-                ilium_ipc::ServerEvent::PaneCreateFinished { request_id: 1, result } => {
+                ilium_ipc::ServerEvent::PaneCreateFinished {
+                    request_id: 1,
+                    result,
+                } => {
                     return Some(result.map(|_| ()).map_err(CliError::ServerReportedError));
                 }
                 _ => {}
