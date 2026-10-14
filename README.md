@@ -153,3 +153,5 @@ Open Settings with `Ctrl+B :` and the key map with `Ctrl+B ?`. Global settings l
 Report problems in [issues](https://github.com/arthurwolf/ilium/issues) with your version, OS, terminal, command and observed behaviour; remove private content from logs. Design: [ARCHITECTURE.md](ARCHITECTURE.md). Contribution rules: [AGENTS.md](AGENTS.md) and [Contributing](src/docs/contributing.md).
 
 Ilium is [MIT licensed](LICENSE). The vendored `vt100` patch and `tui-tree-widget` fork retain their MIT licences. Cascadia Code uses SIL Open Font License 1.1; see the [font notice](ilium-client/assets/fonts/NOTICE.md).
+
+Blocking failures appear as caution triangles beside affected agents and projects. Hover the triangle to read the cause; unavailable terminals also show their failure reason.

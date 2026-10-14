@@ -77,6 +77,7 @@ async fn create_detected_claude_pane(client: &mut SessionStream) -> NodeId {
     write_frame(
         client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: NewPaneKind::Command(format!("claude --resume {SESSION_ID}")),
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,

@@ -2049,6 +2049,7 @@ mod tests {
             !handlers::handle_request(
                 &state,
                 ClientRequest::NewPane {
+                    request_id: 0,
                     parent_group: group_id,
                     kind: ilium_ipc::NewPaneKind::Command(
                         "printf 'writer-prefix\\n'; read phase; printf 'writer-tail\\n'; read hold"

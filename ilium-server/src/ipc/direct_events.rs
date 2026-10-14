@@ -15,6 +15,16 @@ pub(crate) struct QueuedServerEvent {
 pub(crate) struct DirectEventSender {
     sender: mpsc::Sender<QueuedServerEvent>,
     execution: Option<crate::execution::ExecutionClient>,
+    error_scope: Option<RequestErrorScope>,
+}
+
+#[derive(Clone)]
+struct RequestErrorScope {
+    state: std::sync::Weak<crate::state::ServerState>,
+    node_id: Option<ilium_core::NodeId>,
+    operation: &'static str,
+    generation: u64,
+    has_failed: Arc<std::sync::atomic::AtomicBool>,
 }
 
 pub(crate) struct DirectEventReceiver(mpsc::Receiver<QueuedServerEvent>);
@@ -36,6 +46,80 @@ impl DirectEventReceiver {
 }
 
 impl DirectEventSender {
+    pub(crate) fn with_error_scope(&self, state: &Arc<crate::state::ServerState>, node_id: Option<ilium_core::NodeId>, operation: &'static str) -> Self {
+        let mut sender = self.clone();
+        sender.error_scope = Some(RequestErrorScope {
+            state: Arc::downgrade(state), node_id, operation,
+            generation: state.begin_error_operation(node_id, operation),
+            has_failed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        });
+        sender
+    }
+
+    /// Called only after a synchronous mutation has completed; queued work
+    /// and read-only probes must wait for their own typed terminal outcome.
+    pub(crate) fn finish_synchronous_mutation(&self) {
+        let Some(scope) = &self.error_scope else { return; };
+        if !scope.has_failed.load(std::sync::atomic::Ordering::Relaxed) {
+            if let Some(state) = scope.state.upgrade() {
+                state.clear_current_blocking_error(scope.node_id, scope.operation, scope.generation);
+            }
+        }
+    }
+
+    fn retain_blocking_error(&self, event: &ServerEvent) {
+        let Some(RequestErrorScope { state, node_id, operation, generation, has_failed }) = &self.error_scope else { return; };
+        let Some(state) = state.upgrade() else { return; };
+        let message = match event {
+            ServerEvent::Error { message }
+            | ServerEvent::ProjectRestructureRejected { message, .. }
+            | ServerEvent::PaneResizeRejected { message, .. }
+            | ServerEvent::WorkspaceCreateFailed { error: message, .. } => Some(message.as_str()),
+            ServerEvent::RepoFactsReported { result, .. } => result.as_ref().err().map(String::as_str),
+            ServerEvent::WorkspaceInventoryReported { result, .. } => result.as_ref().err().map(String::as_str),
+            ServerEvent::PaneProcessTerminated { result, .. }
+            | ServerEvent::PaneFrozen { result, .. }
+            | ServerEvent::AntigravityStatuslineCompleted { result, .. } => result.as_ref().err().map(String::as_str),
+            ServerEvent::PaneCreateFinished { result, .. } => result.as_ref().err().map(String::as_str),
+            ServerEvent::PaneRecapScreen { result, .. } => result.as_ref().err().map(String::as_str),
+            ServerEvent::ProgressMonitorCheckCompleted { result, .. } => result.as_ref().err().map(|error| error.message.as_str()),
+            ServerEvent::ProgressMonitorSetCompleted { result, .. } => result.as_ref().err().map(|error| error.message.as_str()),
+            ServerEvent::ProgressMonitorStatusReported { result, .. } => result.as_ref().err().map(|error| error.message.as_str()),
+            ServerEvent::ProgressMonitorCleared { result, .. } => result.as_ref().err().map(|error| error.message.as_str()),
+            ServerEvent::ProgressWaitCompleted { result, .. } => result.as_ref().err().map(|error| error.message.as_str()),
+            ServerEvent::AgentDetectionSettingsChanged { result, .. } => result.as_ref().err().map(|error| error.message.as_str()),
+            ServerEvent::VoiceTextResult { result, .. } => result.as_ref().err().map(|error| error.message.as_str()),
+            _ => None,
+        };
+        if let Some(message) = message {
+            has_failed.store(true, std::sync::atomic::Ordering::Relaxed);
+            state.record_current_blocking_error(*node_id, operation, *generation, message);
+        }
+        // Clear only acknowledged successful mutations, never an unrelated
+        // read, broadcast or a merely accepted background job.
+        let recovered = matches!(event,
+            ServerEvent::PaneCreateFinished { result: Ok(_), .. }
+            | ServerEvent::PaneProcessTerminated { result: Ok(_), .. }
+            | ServerEvent::PaneFrozen { result: Ok(_), .. }
+            | ServerEvent::WorkspaceCreated { .. }
+            | ServerEvent::WorkspaceRemoved { .. }
+            | ServerEvent::AgentDetectionSettingsChanged { request_id: Some(_), result: Ok(_), .. }
+        );
+        if recovered {
+            state.clear_current_blocking_error(*node_id, operation, *generation);
+        }
+        if let ServerEvent::WorkspaceRemovalBlocked { reasons, .. } = event {
+            state.record_current_blocking_error(*node_id, operation, *generation, &reasons.join("\n"));
+        }
+        if let ServerEvent::WorkspacePruneCompleted { result, .. } = event {
+            if result.outcome == ilium_ipc::WorkspacePruneOutcome::Removed {
+                state.clear_current_blocking_error(*node_id, operation, *generation);
+            } else {
+                state.record_current_blocking_error(*node_id, operation, *generation, &result.reasons.join("\n"));
+            }
+        }
+    }
+
     #[cfg(test)]
     pub(crate) fn channel(capacity: usize) -> (Self, DirectEventReceiver) {
         let (sender, receiver) = mpsc::channel(capacity);
@@ -43,6 +127,7 @@ impl DirectEventSender {
             Self {
                 sender,
                 execution: None,
+                error_scope: None,
             },
             DirectEventReceiver(receiver),
         )
@@ -57,6 +142,7 @@ impl DirectEventSender {
             Self {
                 sender,
                 execution: Some(execution),
+                error_scope: None,
             },
             DirectEventReceiver(receiver),
         )
@@ -71,6 +157,7 @@ impl DirectEventSender {
         event: ServerEvent,
         mut producer_storage: Option<Arc<StorageAdmission>>,
     ) -> Result<(), ServerEvent> {
+        self.retain_blocking_error(&event);
         let Some(storage_bytes) = direct_event_storage_bytes(&event) else {
             return Err(event);
         };
@@ -106,6 +193,7 @@ impl DirectEventSender {
     /// capacity. `false` means queue or byte admission failed, or the receiver
     /// closed; the caller must have a fallback because this consumes the event.
     pub(crate) fn try_send(&self, event: ServerEvent) -> bool {
+        self.retain_blocking_error(&event);
         let producer_storage = match &self.execution {
             Some(execution) => {
                 let Some(bytes) = direct_event_storage_bytes(&event) else {

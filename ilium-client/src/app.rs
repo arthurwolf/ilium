@@ -2347,6 +2347,9 @@ pub struct App {
     /// (spawning a pane, creating a worktree) has not been confirmed yet.
     /// The button shows a spinner meanwhile so a slow creation is visible.
     pending_toolbar_actions: Vec<(TreeToolbarAction, Instant, Option<usize>)>,
+    pub(crate) pending_pane_creations: HashMap<u64, crate::blocking_errors::PendingPaneCreation>,
+    pub blocking_errors: HashMap<NodeId, Vec<ilium_ipc::BlockingError>>,
+    pub(crate) local_blocking_errors: HashMap<NodeId, Vec<ilium_ipc::BlockingError>>,
     /// Menu actions (close, move, rename, ...) waiting for the server: label,
     /// start, and the `tree_version` seen when the request was admitted.
     pending_menu_actions: Vec<(&'static str, Instant, u64, Duration)>,
@@ -2966,6 +2969,9 @@ impl App {
             tree_toolbar_hovered: false,
             hovered_tree_toolbar_action: None,
             pending_toolbar_actions: Vec::new(),
+            pending_pane_creations: HashMap::new(),
+            blocking_errors: HashMap::new(),
+            local_blocking_errors: HashMap::new(),
             pending_menu_actions: Vec::new(),
             request_refusal_at: None,
             agent_popover: None,
@@ -3940,11 +3946,25 @@ impl App {
         )
     }
 
-    pub(crate) fn queue_request(&mut self, request: ClientRequest) -> bool {
+    pub(crate) fn queue_request(&mut self, mut request: ClientRequest) -> bool {
+        let creation = self.prepare_pane_creation(&mut request);
+        if let Some((_, pending)) = &creation {
+            if self.pending_pane_creations.len() >= 16 {
+                self.record_local_blocking_error(pending.parent_group, "Create pane", "Too many creations await confirmation; wait for their outcomes before retrying");
+                self.show_request_admission_error();
+                return false;
+            }
+        }
         let menu_label = Self::slow_menu_request_label(&request);
         if self.try_queue_terminal_request(request).is_err() {
             self.show_request_admission_error();
+            if let Some((_, pending)) = creation {
+                self.record_local_blocking_error(pending.parent_group, "Create pane", "Request queue refused creation; retry when pending work completes");
+            }
             return false;
+        }
+        if let Some((request_id, pending)) = creation {
+            self.pending_pane_creations.insert(request_id, pending);
         }
         if let Some((label, cap)) = menu_label {
             self.begin_pending_menu_action(label, cap);
@@ -4572,10 +4592,6 @@ impl App {
         viewports
             .into_iter()
             .map(|mut viewport| {
-                // Padding moves every pane kind's content inside its border;
-                // the rules and borders keep the full outer width.
-                let panel = self.padding_panel_for_pane(viewport.pane_id);
-                viewport.content_area = self.padding_for(panel).inset(viewport.content_area);
                 let is_terminal = self.tree.get(viewport.pane_id).is_some_and(|node| {
                     matches!(
                         &node.kind,
@@ -4634,6 +4650,14 @@ impl App {
                 } else {
                     viewport
                 }
+            })
+            .map(|mut viewport| {
+                // Padding applies last and only to the content itself: the
+                // toolbar, prompt banner, progress slots and frame rules were
+                // already carved out above and keep their full width.
+                let panel = self.padding_panel_for_pane(viewport.pane_id);
+                viewport.content_area = self.padding_for(panel).inset(viewport.content_area);
+                viewport
             })
             .collect()
     }
@@ -12907,6 +12931,9 @@ impl App {
     const PENDING_TOOLBAR_TIMEOUT: Duration = Duration::from_secs(120);
 
     pub(crate) fn begin_pending_toolbar_action(&mut self, action: TreeToolbarAction) {
+        if self.pending_pane_creations.values().any(|pending| pending.action == action) {
+            return;
+        }
         if self.pending_toolbar_actions.len() >= 16 {
             self.pending_toolbar_actions.remove(0);
         }
@@ -12971,9 +12998,10 @@ impl App {
         } else {
             0
         };
+        let creation_mask = self.pending_pane_creations.values().filter(|pending| !pending.uncertainty_reported).fold(restructure_bit, |mask, pending| mask | pending.action.pending_bit());
         self.pending_toolbar_actions
             .iter()
-            .fold(restructure_bit, |mask, (action, _, _)| {
+            .fold(creation_mask, |mask, (action, _, _)| {
                 mask | action.pending_bit()
             })
     }
@@ -12992,6 +13020,7 @@ impl App {
 
     /// Drops spinners whose confirmation never arrived.
     pub fn tick_pending_toolbar_actions(&mut self, now: Instant) -> bool {
+        let expired_creations = self.expire_pending_pane_creations(now);
         let before = self.pending_toolbar_actions.len();
         let node_count = self.tree.all_ids().count();
         self.pending_toolbar_actions
@@ -12999,11 +13028,11 @@ impl App {
                 now.saturating_duration_since(*started) < Self::PENDING_TOOLBAR_TIMEOUT
                     && baseline.is_none_or(|baseline| node_count <= baseline)
             });
-        before != self.pending_toolbar_actions.len()
+        expired_creations || before != self.pending_toolbar_actions.len()
     }
 
     /// The toolbar button a `NewPane` command line belongs to.
-    fn toolbar_action_for_command(command_line: &str) -> TreeToolbarAction {
+    pub(crate) fn toolbar_action_for_command(command_line: &str) -> TreeToolbarAction {
         BuiltinAgentProvider::ALL
             .into_iter()
             .find(|provider| provider.command_line() == command_line)
@@ -13014,6 +13043,7 @@ impl App {
     /// (the caller resolves that group -- see `group_for_new_node`).
     pub fn request_new_terminal(&mut self, parent_group: NodeId) -> bool {
         let admitted = self.queue_request(ClientRequest::NewPane {
+            request_id: 0,
             parent_group,
             kind: ilium_ipc::NewPaneKind::PlainShell,
             working_directory: self.new_pane_working_directory(),
@@ -13031,6 +13061,7 @@ impl App {
         let pending_title = command_line.clone();
         let toolbar_action = Self::toolbar_action_for_command(&command_line);
         let admitted = self.queue_request(ClientRequest::NewPane {
+            request_id: 0,
             parent_group,
             kind: ilium_ipc::NewPaneKind::Command(command_line),
             working_directory: self.new_pane_working_directory(),
@@ -13054,6 +13085,7 @@ impl App {
         let pending_title = command_line.clone();
         let toolbar_action = Self::toolbar_action_for_command(&command_line);
         let admitted = self.queue_request(ClientRequest::NewPane {
+            request_id: 0,
             parent_group,
             kind: ilium_ipc::NewPaneKind::CommandWithInitialInput {
                 command_line,
@@ -13087,6 +13119,7 @@ impl App {
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| path.to_string_lossy().into_owned());
         if !self.queue_request(ClientRequest::NewPane {
+            request_id: 0,
             parent_group,
             kind: ilium_ipc::NewPaneKind::Editor(path.clone()),
             working_directory: self.new_pane_working_directory(),
@@ -14181,6 +14214,8 @@ impl App {
         event: &ilium_ipc::ServerEvent,
     ) -> Option<usize> {
         match event {
+            ilium_ipc::ServerEvent::BlockingErrorsSnapshot { errors } => Some(errors.iter().fold(0usize, |bytes, error| bytes.saturating_add(error.operation.len()).saturating_add(error.message.len()).saturating_add(128)).saturating_mul(2)),
+            ilium_ipc::ServerEvent::PaneCreateFinished { result, .. } => Some(result.as_ref().err().map_or(64, |message| message.len().saturating_add(64).saturating_mul(2))),
             ilium_ipc::ServerEvent::RepoFactsReported {
                 request_id,
                 project,
@@ -15927,6 +15962,10 @@ impl App {
         {
             return Err("Agent destination is no longer available; draft remains editable".into());
         }
+        if self.pending_pane_creations.len() >= 16 {
+            self.record_local_blocking_error(state.parent_group, "Create pane", "Too many unconfirmed creation requests; check the project before retrying.");
+            return Err("Too many unconfirmed creation requests; draft remains editable".into());
+        }
         let command = state.agent_type.command_line();
         let prompt_bytes = state
             .prompt
@@ -15951,7 +15990,9 @@ impl App {
                 format!("Agent request not admitted: {reason:?}; draft remains editable")
             })?;
         // All owned prompt/command copies start after the finite reservation.
+        let request_id = self.next_workspace_request_id();
         let request = ClientRequest::NewPane {
+            request_id,
             parent_group: state.parent_group,
             kind: ilium_ipc::NewPaneKind::CommandWithInitialInput {
                 command_line: command.to_owned(),
@@ -15973,6 +16014,7 @@ impl App {
             )
         })?;
         self.queue_terminal_request_after_barrier(admitted);
+        self.pending_pane_creations.insert(request_id, crate::blocking_errors::PendingPaneCreation { parent_group: state.parent_group, action: Self::toolbar_action_for_command(command), started: Instant::now(), uncertainty_reported: false });
         self.record_pending_pane_focus(
             state.parent_group,
             PaneContentKind::Terminal,
@@ -16664,6 +16706,7 @@ impl App {
         let parent_group = self.tree.parent_of(pane_id).unwrap_or(ROOT_ID);
         self.record_pending_pane_focus(parent_group, PaneContentKind::Terminal, "shell".into());
         self.queue_request(ClientRequest::NewPane {
+            request_id: 0,
             parent_group,
             kind: ilium_ipc::NewPaneKind::PlainShell,
             working_directory: ilium_ipc::NewPaneWorkingDirectory::WorkspacePane(pane_id),
@@ -20150,6 +20193,7 @@ mod tests {
             assert_eq!(
                 app.take_outbound_requests(),
                 vec![ClientRequest::NewPane {
+                    request_id: 1,
                     parent_group: parent,
                     kind: ilium_ipc::NewPaneKind::CommandWithInitialInput {
                         command_line: "codex".into(),
@@ -28086,6 +28130,7 @@ mod tests {
         assert_eq!(
             app.take_outbound_requests(),
             vec![ClientRequest::NewPane {
+                request_id: 1,
                 parent_group: group,
                 kind: ilium_ipc::NewPaneKind::Editor(target_path.clone()),
                 working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
@@ -28186,6 +28231,7 @@ mod tests {
         assert_eq!(
             app.take_outbound_requests(),
             vec![ClientRequest::NewPane {
+                request_id: 1,
                 parent_group: group,
                 kind: ilium_ipc::NewPaneKind::CommandWithInitialInput {
                     command_line: "codex".to_string(),

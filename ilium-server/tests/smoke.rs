@@ -177,6 +177,7 @@ async fn new_pane_creates_a_shell_and_broadcasts_a_tree_snapshot_containing_it()
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: NewPaneKind::PlainShell,
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
@@ -226,6 +227,7 @@ async fn keyboard_submission_is_broadcast_only_after_the_pty_accepts_enter() {
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: NewPaneKind::PlainShell,
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
@@ -301,6 +303,7 @@ async fn voice_submission_unblocks_a_real_pty_reader_with_enter() {
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             // A blocking read cannot finish on typed text alone. Its marker
             // therefore proves the carriage return reached the child as a real
@@ -382,6 +385,7 @@ async fn named_chatroom_reference_submits_each_forwarded_line_to_the_named_pane(
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: NewPaneKind::Command(echo_path.to_string_lossy().into_owned()),
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
@@ -474,6 +478,7 @@ async fn command_with_initial_input_waits_for_agent_composer_then_submits_enter(
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             // This process exposes no ready composer until after its startup
             // delay, then emits its marker only after the final Enter.
@@ -568,6 +573,7 @@ async fn manual_input_cancels_an_initial_agent_prompt_while_it_is_still_waiting(
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: NewPaneKind::CommandWithInitialInput {
                 command_line: fake_codex_path.to_string_lossy().to_string(),
@@ -653,6 +659,7 @@ async fn scheduled_input_executes_after_client_detaches_and_clears_its_countdown
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: NewPaneKind::Command(echo_path.to_string_lossy().into_owned()),
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
@@ -743,6 +750,7 @@ async fn create_split_view_atomically_moves_panes_and_persists_orientation() {
         write_frame(
             &mut client,
             &ClientRequest::NewPane {
+                request_id: 0,
                 parent_group: ROOT_ID,
                 kind: NewPaneKind::PlainShell,
                 working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
@@ -922,6 +930,7 @@ async fn reattached_client_receives_terminal_output_produced_before_it_connected
     write_frame(
         &mut first_client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: NewPaneKind::Command(emitter_path.to_string_lossy().into_owned()),
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
@@ -1064,6 +1073,7 @@ async fn successful_resize_records_its_typed_client_cause_in_the_debug_journal()
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: NewPaneKind::PlainShell,
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
@@ -1178,6 +1188,7 @@ async fn reparent_node_moves_a_pane_into_a_different_group_at_an_index() {
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: source_group,
             kind: NewPaneKind::PlainShell,
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
@@ -1197,6 +1208,7 @@ async fn reparent_node_moves_a_pane_into_a_different_group_at_an_index() {
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: dest_group,
             kind: NewPaneKind::PlainShell,
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
@@ -1258,6 +1270,7 @@ async fn create_command_pane(
     write_frame(
         client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind,
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
@@ -1364,6 +1377,7 @@ async fn close_pane_removes_it_and_a_second_client_sees_the_update() {
     write_frame(
         &mut creator,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: NewPaneKind::PlainShell,
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,

@@ -13,6 +13,10 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 
 ## [Unreleased]
 
+### Added
+- Blocking failures now leave a caution triangle on affected agents and projects, with concrete messages on hover and in unavailable terminal placeholders. Creation results identify their request, so failed launches stop the matching spinner; unresolved confirmations show an explicit uncertain outcome.
+- Padding settings tab with Disabled, Size dependent (default threshold 200 columns, minimum 11) and Enabled cards, plus a Padding fine-tuning dialog with a live preview. Tree and right panels (terminals and agents, editors, boards) get independent 0 to 3 cell padding per side, optionally linked, saved under `[padding]`. Padding moves only the content inward; toolbars, banners and the progress footer stay full width.
+
 ### Changed
 - Hovering a footer agent icon reuses a successful repository check for 30 seconds instead of queuing another Git snapshot, so the worktree buttons are enabled at once and fewer slow queries pile up under load; creating a worktree still revalidates.
 - A request refused because the UI is busy now leaves a bold notice in the status bar for 8 seconds, so hover messages can no longer hide it.

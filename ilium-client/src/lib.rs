@@ -137,6 +137,7 @@ pub mod remote_compaction_settings;
 pub mod remote_compaction_settings_ui;
 pub mod remote_compaction_worker;
 pub mod render_cache;
+mod blocking_errors;
 pub mod reset_planning;
 pub mod restructure;
 pub mod scheduled_input;
