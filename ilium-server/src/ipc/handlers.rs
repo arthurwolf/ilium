@@ -7287,9 +7287,6 @@ where
     .await
 }
 
-// The eight parameters are the four request fields plus the two injected test
-// seams (probe and admission hook); bundling them would hide the seams.
-#[allow(clippy::too_many_arguments)]
 async fn write_key_input_unlocked_with_probe_and_admission_hook<
     Probe,
     ProbeFuture,

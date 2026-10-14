@@ -29,10 +29,6 @@ pub(crate) struct AnimationPickerSave {
     pub project_path: PathBuf,
     pub candidate: ilium_ambient::GeoLocation,
     // Last: the admitted candidate allocation is destroyed before its lease.
-    #[expect(
-        dead_code,
-        reason = "RAII storage lease: held so the admission outlives the candidate; never read"
-    )]
     pub location_storage: Option<Arc<ilium_execution::StorageAdmission>>,
 }
 pub(crate) enum ConfigurationIntent {

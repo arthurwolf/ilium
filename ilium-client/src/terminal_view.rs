@@ -1190,7 +1190,7 @@ pub(crate) struct PreparationSnapshot {
 /// Exact terminal source retained with one composed frame and installed only
 /// after actual output acknowledgement. Clones share its existing allocation.
 #[derive(Clone)]
-pub struct PaintedTerminal {
+pub(crate) struct PaintedTerminal {
     pub identity: Arc<()>,
     pub ordinal: u64,
     snapshot: Arc<TerminalSnapshot>,

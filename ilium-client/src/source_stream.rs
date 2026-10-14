@@ -129,10 +129,6 @@ pub(crate) struct Stream {
     window_allocation: Arc<ilium_execution::StorageAdmission>,
 }
 impl Stream {
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "window geometry and the two storage admissions arrive from separate planner fields; a geometry bundle would be churn for three callers"
-    )]
     pub fn new(
         identity: Arc<()>,
         physical_count: usize,

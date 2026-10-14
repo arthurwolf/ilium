@@ -35,10 +35,7 @@ pub fn open_regular_file(path: &Path) -> io::Result<std::fs::File> {
     }
     let file = options.open(path)?;
     if !file.metadata()?.is_file() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "read source is not a regular file",
-        ));
+        return Err(io::Error::other("read source is not a regular file"));
     }
     Ok(file)
 }

@@ -441,26 +441,19 @@ fn draw_worktree_tooltip(frame: &mut Frame, app: &App) {
         return;
     };
     let anchor = Position::new(app.layout.tree_area.x.saturating_add(2), hit.row);
-    #[cfg(test)]
-    if app.emitted_geometry.is_none() {
-        if let Some(workspace) = app.tree.pane_workspace(hit.id) {
-            let explanation = crate::status_icons::workspace_explanation(
-                workspace,
-                app.workspace_git_statuses.get(&hit.id),
-            );
-            crate::status_icons::render_tooltip(
-                frame,
-                app.layout.screen_area,
-                anchor,
-                &explanation,
-            );
-        }
-        return;
-    }
     if app.emitted_geometry.is_some() {
         if let Some(explanation) = app.emitted_worktree_tooltip(hit.id) {
             crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, explanation);
         }
+        return;
+    }
+    #[cfg(test)]
+    if let Some(workspace) = app.tree.pane_workspace(hit.id) {
+        let explanation = crate::status_icons::workspace_explanation(
+            workspace,
+            app.workspace_git_statuses.get(&hit.id),
+        );
+        crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, &explanation);
     }
 }
 
@@ -471,17 +464,15 @@ fn draw_status_tooltip(frame: &mut Frame, app: &App) {
     let Some((node_id, slot, anchor)) = app.hovered_status_slot else {
         return;
     };
-    #[cfg(test)]
-    if app.emitted_geometry.is_none() {
-        if let Some(tooltip) = status_tooltip_content(app, node_id, slot) {
-            crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, &tooltip);
-        }
-        return;
-    }
     if app.emitted_geometry.is_some() {
         if let Some(tooltip) = app.emitted_status_tooltip(node_id, slot) {
             crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, tooltip);
         }
+        return;
+    }
+    #[cfg(test)]
+    if let Some(tooltip) = status_tooltip_content(app, node_id, slot) {
+        crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, &tooltip);
     }
 }
 fn status_tooltip_content(

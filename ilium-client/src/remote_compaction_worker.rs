@@ -200,15 +200,12 @@ impl RemoteCompactionWorkers {
         }
     }
 
-    pub fn spawn(
-        &mut self,
-        job: RemoteCompactionJob,
-    ) -> Result<(), Box<RemoteCompactionWorkerEvent>> {
+    pub fn spawn(&mut self, job: RemoteCompactionJob) -> Result<(), RemoteCompactionWorkerEvent> {
         if self.active.is_some() {
-            return Err(Box::new(failure_event(
+            return Err(failure_event(
                 &job,
                 "A previous remote compaction is still stopping",
-            )));
+            ));
         }
         let pane_id = job.pane_id();
         let kind = job.kind();

@@ -327,7 +327,7 @@ async fn recap_pane(
                 RecapPaneState::Failed,
                 ready.facts,
                 Some(error.to_string()),
-            );
+            )
         }
     };
     let timeout = if context.options.lengths.contains(&RecapLength::Long) {

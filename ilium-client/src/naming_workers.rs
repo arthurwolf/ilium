@@ -63,7 +63,7 @@ impl AutomaticAiDecision {
 /// admitted it. The shared word is updated by the event loop when policy or
 /// onboarding changes.
 #[derive(Clone)]
-pub struct AutomaticAiDecisionFence {
+pub(crate) struct AutomaticAiDecisionFence {
     expected: u64,
     current: Arc<AtomicU64>,
 }

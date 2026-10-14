@@ -824,9 +824,6 @@ pub fn apply_control_value(
     validate_settings(schema, &Value::Object(values)).map_err(|error| error.to_string())
 }
 
-/// Test-only: resolves a choice option to its authored value; the unit tests
-/// assert the reorder and unknown-option contract through it.
-#[cfg(test)]
 pub fn apply_choice(
     schema: &Value,
     authored: &Value,
@@ -852,20 +849,8 @@ pub fn apply_choice(
 pub enum PluginControlEdit {
     Values(Value),
     TextPrompt {
-        #[expect(
-            dead_code,
-            reason = "text-prompt edit contract; app.rs does not open a text prompt for it yet"
-        )]
         id: String,
-        #[expect(
-            dead_code,
-            reason = "text-prompt edit contract; app.rs does not open a text prompt for it yet"
-        )]
         label: String,
-        #[expect(
-            dead_code,
-            reason = "text-prompt edit contract; app.rs does not open a text prompt for it yet"
-        )]
         current: String,
     },
 }
@@ -987,7 +972,6 @@ pub struct PluginPanelModel {
 }
 
 impl PluginPanelModel {
-    #[cfg(test)]
     pub fn new(catalogue: &PluginCatalogue, preferences: &PluginPreferences) -> Self {
         Self::with_active(catalogue, preferences, None)
     }

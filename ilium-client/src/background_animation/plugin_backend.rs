@@ -158,9 +158,7 @@ struct Presentation {
 }
 enum SourceTerminal {
     Complete {
-        // Boxed: the completion carries the whole source request, which would
-        // otherwise make every SourceTerminal as large as its Complete arm.
-        owner: Box<SourceCompletion>,
+        owner: SourceCompletion,
         state: SourcePublishState,
         feed_id: Option<String>,
         feed_descriptor: Option<ProjectedFeedDescriptor>,
@@ -1329,7 +1327,7 @@ impl NativeSourceOwner {
                     self.terminal.insert(
                         id,
                         SourceTerminal::Complete {
-                            owner: Box::new(completion),
+                            owner: completion,
                             state: SourcePublishState::Pending,
                             feed_id,
                             feed_descriptor: None,
@@ -1755,7 +1753,7 @@ impl NativeSourceOwner {
                     self.terminal.insert(
                         id,
                         SourceTerminal::Complete {
-                            owner: Box::new(value),
+                            owner: value,
                             state: SourcePublishState::Uncertain,
                             feed_id: None,
                             feed_descriptor: None,
@@ -3998,10 +3996,6 @@ fn apply_before_creation(invalidation: &Invalidation) -> Result<(), String> {
     Ok(())
 }
 impl Presentation {
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the constructor receives independently owned resources that each call site builds separately; a bundle would only relabel them"
-    )]
     fn new(
         instance: &mut PackageInstance,
         request: &RenderRequest,
@@ -4931,10 +4925,6 @@ impl Presentation {
             world_provenance,
         }))
     }
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "each argument is a distinct borrow or handle from the frame loop; bundling them would only relabel the same borrows"
-    )]
     fn render_prepared(
         &mut self,
         instance: &mut PackageInstance,

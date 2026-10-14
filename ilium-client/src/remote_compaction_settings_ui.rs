@@ -614,7 +614,10 @@ pub fn view(app: &App, selected_row: usize, width: u16) -> RemoteCompactionView 
         "Up/Down select · Left/Right step · + opens lists/increments · - decreases · * edits numbers · Enter opens/edits · x closes privacy · ? help",
         body_width,
     ) {
-        lines.push(Line::from(Span::styled(format!("  {text}"), dim())));
+        lines.push(Line::from(Span::styled(
+            format!("  {text}"),
+            dim(),
+        )));
     }
     RemoteCompactionView {
         lines,

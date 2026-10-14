@@ -192,7 +192,7 @@ impl InputEvent {
     }
     /// Existing hover-motion coalescing is an explicit disposition. Other
     /// original input cannot pass through this method or be discarded by it.
-    pub(crate) fn coalesce_motion(self) -> Result<(), Box<Self>> {
+    pub(crate) fn coalesce_motion(self) -> Result<(), Self> {
         if !matches!(
             self.view(),
             Event::Mouse(crossterm::event::MouseEvent {
@@ -200,7 +200,7 @@ impl InputEvent {
                 ..
             })
         ) {
-            return Err(Box::new(self));
+            return Err(self);
         }
         drop(self);
         Ok(())
@@ -234,9 +234,7 @@ impl fmt::Debug for InputEvent {
 }
 
 pub struct InputFailure {
-    // Boxed so a Result carrying an InputFailure stays pointer-sized; the
-    // variants hold whole original input events and would bloat every Err.
-    kind: Box<InputFailureKind>,
+    kind: InputFailureKind,
 }
 enum InputFailureKind {
     TerminalKey {
@@ -297,16 +295,16 @@ impl InputFailure {
     pub(crate) fn combine(first: Option<Self>, next: Self) -> Self {
         match first {
             Some(first) => Self {
-                kind: Box::new(InputFailureKind::Combined {
+                kind: InputFailureKind::Combined {
                     first: Box::new(first),
                     next: Box::new(next),
-                }),
+                },
             },
             None => next,
         }
     }
     pub fn additional_failure(&self) -> Option<&Self> {
-        match self.kind.as_ref() {
+        match &self.kind {
             InputFailureKind::Combined { next, .. } => Some(next),
             InputFailureKind::Undispatched { previous, .. }
             | InputFailureKind::TerminalKey { previous, .. } => previous.as_deref(),
@@ -315,11 +313,11 @@ impl InputFailure {
     }
     pub(crate) fn undispatched(original: InputEvent, previous: Option<Self>) -> Self {
         Self {
-            kind: Box::new(InputFailureKind::Undispatched {
+            kind: InputFailureKind::Undispatched {
                 original,
                 consumed_paste_bytes: None,
                 previous: previous.map(Box::new),
-            }),
+            },
         }
     }
     pub(crate) fn undispatched_after_paste(
@@ -333,20 +331,20 @@ impl InputFailure {
         assert!(consumed_paste_bytes <= text.len());
         assert!(text.is_char_boundary(consumed_paste_bytes));
         Self {
-            kind: Box::new(InputFailureKind::Undispatched {
+            kind: InputFailureKind::Undispatched {
                 original,
                 consumed_paste_bytes: Some(consumed_paste_bytes),
                 previous: previous.map(Box::new),
-            }),
+            },
         }
     }
     pub(crate) fn refused(reason: RejectReason, original: InputEvent) -> Self {
         Self {
-            kind: Box::new(InputFailureKind::Refused { reason, original }),
+            kind: InputFailureKind::Refused { reason, original },
         }
     }
     pub fn rejection_reason(&self) -> Option<RejectReason> {
-        match self.kind.as_ref() {
+        match &self.kind {
             InputFailureKind::Refused { reason, .. } => Some(*reason),
             InputFailureKind::TerminalKey { reason, .. } => *reason,
             InputFailureKind::NativeRead {
@@ -358,7 +356,7 @@ impl InputFailure {
         }
     }
     pub fn native_custody(&self) -> Option<&NativeInputCustody> {
-        match self.kind.as_ref() {
+        match &self.kind {
             InputFailureKind::NativeRead { custody, .. } => Some(custody),
             InputFailureKind::Combined { first, next } => {
                 first.native_custody().or_else(|| next.native_custody())
@@ -372,7 +370,7 @@ impl InputFailure {
         }
     }
     pub fn original(&self) -> Option<&InputEvent> {
-        match self.kind.as_ref() {
+        match &self.kind {
             InputFailureKind::Refused { original, .. }
             | InputFailureKind::Undispatched { original, .. } => Some(original),
             InputFailureKind::Combined { first, .. } => first.original(),
@@ -382,7 +380,7 @@ impl InputFailure {
     /// UTF-8 byte prefix whose derived key events were already dispatched
     /// before shutdown; the complete original Paste remains in custody.
     pub fn consumed_paste_bytes(&self) -> Option<usize> {
-        match self.kind.as_ref() {
+        match &self.kind {
             InputFailureKind::Undispatched {
                 consumed_paste_bytes,
                 ..
@@ -397,7 +395,7 @@ impl InputFailure {
         }
     }
     pub fn shutdown_report(&self) -> Option<&InputShutdownReport> {
-        match self.kind.as_ref() {
+        match &self.kind {
             InputFailureKind::Shutdown(report) => Some(report),
             InputFailureKind::Combined { first, .. } => first.shutdown_report(),
             _ => None,
@@ -465,7 +463,7 @@ impl fmt::Debug for InputFailure {
 }
 impl std::error::Error for InputFailure {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self.kind.as_ref() {
+        match &self.kind {
             InputFailureKind::Read { source, .. } => Some(source),
             InputFailureKind::NativeRead { source, .. } => Some(source),
             InputFailureKind::Combined { first, .. } => Some(first.as_ref()),
@@ -701,10 +699,10 @@ impl InputReservation {
                                 )));
                             }
                             body.fail(InputFailure {
-                                kind: Box::new(InputFailureKind::Read {
+                                kind: InputFailureKind::Read {
                                     source,
                                     _storage: Arc::clone(&body.storage),
-                                }),
+                                },
                             });
                             return;
                         }
@@ -1000,14 +998,14 @@ impl InputDriver {
                 }
                 Err(source) => {
                     let failure = match &mut self.reader {
-                        InputReader::Native(custody) => InputFailure { kind: Box::new(InputFailureKind::NativeRead {
+                        InputReader::Native(custody) => InputFailure { kind: InputFailureKind::NativeRead {
                             source, custody: custody.take().expect("the native source is moved exactly once on its terminal failure"),
-                        }) },
+                        } },
                         #[cfg(test)]
-                        InputReader::Injected(_) => InputFailure { kind: Box::new(InputFailureKind::Read {
+                        InputReader::Injected(_) => InputFailure { kind: InputFailureKind::Read {
                             source: match source { NativeReadError::Io(error) => error, NativeReadError::Admission(error) => io::Error::other(error) },
                             _storage: Arc::clone(&self.shared.storage),
-                        }) },
+                        } },
                     };
                     self.shared.fail(failure);
                     return Err(io::Error::other(
@@ -1344,7 +1342,7 @@ fn enqueue_leased_original(
                 }
                 Err(reason) => {
                     shared.fail(InputFailure {
-                        kind: Box::new(InputFailureKind::Refused { reason, original }),
+                        kind: InputFailureKind::Refused { reason, original },
                     });
                     return false;
                 }
@@ -1567,7 +1565,7 @@ impl InputShutdownReport {
             return Ok(());
         }
         Err(InputFailure {
-            kind: Box::new(InputFailureKind::Shutdown(Box::new(self))),
+            kind: InputFailureKind::Shutdown(Box::new(self)),
         })
     }
 }
@@ -1994,10 +1992,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    #[expect(
-        clippy::await_holding_lock,
-        reason = "current_thread test: the serial guard only orders global input quota use and no other task on this runtime takes it"
-    )]
     async fn full_queue_preserves_every_paste_and_its_original_allocation() {
         let _serial = INPUT_TEST_LOCK
             .lock()
@@ -2188,10 +2182,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    #[expect(
-        clippy::await_holding_lock,
-        reason = "current_thread test: the serial guard only orders global input quota use and no other task on this runtime takes it"
-    )]
     async fn read_failure_is_delivered_once_and_does_not_become_normal_end_of_stream() {
         let _serial = INPUT_TEST_LOCK
             .lock()

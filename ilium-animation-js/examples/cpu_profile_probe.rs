@@ -241,7 +241,7 @@ fn run() -> ilium_animation_js::error::Result<()> {
     );
     Ok(())
 }
-#[cfg(feature = "diagnostic-profiler")]
+#[cfg(feature = "v8-runtime")]
 const PROBE_BOOTSTRAP: &str = r#"
 'use strict';
 globalThis.__ilium_host=Object.freeze({permissions:Object.freeze({has:()=>false,get:()=>undefined}),status:Object.freeze({log(){},progress(){}})});

@@ -11,7 +11,6 @@ use ratatui::{
     Frame,
 };
 use serde::{Deserialize, Serialize};
-#[cfg(test)]
 use serde_json::Value;
 use std::collections::BTreeSet;
 
@@ -82,7 +81,6 @@ pub enum PackageOrigin {
     Unverified,
 }
 
-#[cfg(test)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RememberedDecision {
@@ -93,7 +91,6 @@ pub struct RememberedDecision {
     pub allowed: bool,
 }
 
-#[cfg(test)]
 impl RememberedDecision {
     pub fn matches(&self, identity: &ReviewIdentity, request: &PermissionRequest) -> bool {
         self.package_digest == identity.package_digest
@@ -105,7 +102,6 @@ impl RememberedDecision {
 #[derive(Debug, Clone)]
 pub struct PermissionDecision {
     pub request_id: String,
-    #[expect(dead_code, reason = "decision audit context; no reader wired yet")]
     pub capability: Capability,
     pub choice: PermissionChoice,
 }
@@ -197,7 +193,6 @@ impl PermissionReview {
         self.reviewed.iter().all(|reviewed| *reviewed)
     }
 
-    #[cfg(test)]
     pub fn required_denied(&self) -> bool {
         self.requests
             .iter()

@@ -214,13 +214,6 @@ pub(crate) enum ReviewAction {
         answers: BTreeMap<String, UserChoice>,
     },
     Cancel {
-        #[cfg_attr(
-            not(test),
-            expect(
-                dead_code,
-                reason = "carried on Cancel like Resolve and Pick; the cancel path has no reader yet"
-            )
-        )]
         selection_revision: u64,
     },
     Pick {
@@ -344,10 +337,6 @@ impl ReviewBridge {
     }
     /// Call for every original broker epoch/plan transition BEFORE publishing
     /// new acquisition/frames. Root resolve checks its own broker again.
-    #[expect(
-        dead_code,
-        reason = "documented as required at every broker transition, but no caller is wired yet"
-    )]
     pub(crate) fn authority_changed(
         &self,
         selection: u64,
