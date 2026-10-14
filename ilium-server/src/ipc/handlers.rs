@@ -2241,6 +2241,11 @@ async fn state_synchronization_events(
     // needs them even when no client has changed the list during this stream.
     let settings = state.text_trigger_settings.read().await.settings.clone();
     events.push(ServerEvent::TextTriggersChanged { settings });
+    // Mirrors the production builder: blocking errors follow the rules and
+    // precede the attach-only completion events.
+    events.push(ServerEvent::BlockingErrorsSnapshot {
+        errors: state.blocking_errors_snapshot(),
+    });
     if include_initial_sync_complete {
         let (detection, custom_signatures) = state.agent_detection_settings_snapshot().await;
         events.push(ServerEvent::AgentDetectionSettingsChanged {
@@ -9004,7 +9009,11 @@ mod tests {
         let current =
             candidate_new_pane_working_directory(&state, &NewPaneWorkingDirectory::FocusedTerminal)
                 .await;
-        assert_eq!(current.as_deref(), Some(directory.path()));
+        // The accepted directory is canonical; macOS temporary directories
+        // are reached through the /var -> /private/var symlink.
+        let canonical_directory = ilium_platform::paths::canonicalize(directory.path())
+            .expect("canonical isolated directory");
+        assert_eq!(current.as_deref(), Some(canonical_directory.as_path()));
         if let Some(PaneResource::Terminal(mut runtime)) =
             state.panes.write().await.remove(&pane_id)
         {
@@ -10565,8 +10574,9 @@ mod tests {
         assert!(direct_rx.try_recv().is_err());
 
         // A stale client that doesn't know about the lock still can't
-        // expand it -- the server rejects the mutation and sends only a
-        // direct error, no broadcast.
+        // expand it -- the server rejects the mutation and sends a direct
+        // error plus the retained blocking-error snapshot for that folder,
+        // but never a tree broadcast.
         assert!(
             !handle_request(
                 &state,
@@ -10578,6 +10588,14 @@ mod tests {
             )
             .await
         );
+        let ServerEvent::BlockingErrorsSnapshot { errors } =
+            events.recv().await.expect("blocking error broadcast")
+        else {
+            panic!("a rejected expand must broadcast only its blocking error");
+        };
+        assert!(errors.iter().any(
+            |error| error.node_id == Some(folder_id) && error.operation == "set_node_expanded"
+        ));
         assert!(events.try_recv().is_err());
         assert!(direct_rx.try_recv().is_ok());
 

@@ -1645,7 +1645,13 @@ mod restore_tests {
         .await
         .expect("write Attach request");
 
-        let event = expect_event(&mut client, Duration::from_secs(5), |_| true).await;
+        // Live broadcasts (for example detection evidence of a freshly
+        // restored pane) may legitimately reach the connection before its
+        // Attach reply, so wait for the snapshot rather than the next frame.
+        let event = expect_event(&mut client, Duration::from_secs(5), |event| {
+            matches!(event, ServerEvent::PaneStateSnapshot { .. })
+        })
+        .await;
         let ServerEvent::PaneStateSnapshot {
             tree: restored_tree,
             ..

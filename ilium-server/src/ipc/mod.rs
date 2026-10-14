@@ -306,22 +306,42 @@ mod tests {
             write_frame(&mut admitted, &ClientRequest::Detach)
                 .await
                 .expect("detach admitted connection");
-            let admitted_end =
-                tokio::time::timeout(TEST_DEADLINE, read_frame::<ServerEvent, _>(&mut admitted))
-                    .await
-                    .expect("admitted connection did not close");
+            // A broadcast `BlockingErrorsSnapshot` (published whenever a
+            // request error is retained) may legitimately interleave with
+            // the stream; only the ordering of the request-bound events
+            // matters here.
+            let admitted_end = tokio::time::timeout(TEST_DEADLINE, async {
+                loop {
+                    match read_frame::<ServerEvent, _>(&mut admitted).await {
+                        Ok(ServerEvent::BlockingErrorsSnapshot { .. }) => {}
+                        other => return other,
+                    }
+                }
+            })
+            .await
+            .expect("admitted connection did not close");
             assert!(admitted_end.is_err(), "Detach must end the prior stream");
 
-            let first_reply: ServerEvent =
-                tokio::time::timeout(TEST_DEADLINE, read_frame(&mut queued))
-                    .await
-                    .expect("queued request was not admitted")
-                    .expect("read queued error reply");
+            let first_reply: ServerEvent = tokio::time::timeout(TEST_DEADLINE, async {
+                loop {
+                    match read_frame(&mut queued).await {
+                        Ok(ServerEvent::BlockingErrorsSnapshot { .. }) => {}
+                        other => return other,
+                    }
+                }
+            })
+            .await
+            .expect("queued request was not admitted")
+            .expect("read queued error reply");
             assert!(
                 matches!(first_reply, ServerEvent::Error { message } if message.contains(wrong_session.as_str())),
                 "cycle {cycle} lost or reordered its first request"
             );
-            let remaining = read_attach_events(&mut queued).await;
+            let remaining: Vec<ServerEvent> = read_attach_events(&mut queued)
+                .await
+                .into_iter()
+                .filter(|event| !matches!(event, ServerEvent::BlockingErrorsSnapshot { .. }))
+                .collect();
             assert!(matches!(
                 remaining.first(),
                 Some(ServerEvent::PaneStateSnapshot { .. })

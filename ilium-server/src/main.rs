@@ -7,7 +7,18 @@ use std::time::Duration;
 
 const RUNTIME_WORKER_THREADS: usize = 2;
 const RUNTIME_MAX_BLOCKING_THREADS: usize = 4;
-const RUNTIME_THREAD_STACK_BYTES: usize = 2 * 1024 * 1024;
+/// Release builds keep the small, admitted stack. Unoptimized builds give every
+/// async frame its own unshared stack slots, so the connection task's nested
+/// request handler (one very large `match`) plus a worktree inventory poll
+/// overflowed 2 MiB and aborted the whole server (`fatal runtime error: stack
+/// overflow`, seen by the hosted debug-build integration tests). The stack is
+/// virtual address space only; the declared admission total stays far below
+/// the process worker budget.
+const RUNTIME_THREAD_STACK_BYTES: usize = if cfg!(debug_assertions) {
+    16 * 1024 * 1024
+} else {
+    2 * 1024 * 1024
+};
 const RUNTIME_BLOCKING_THREAD_KEEP_ALIVE: Duration = Duration::from_secs(5);
 /// Bound on how long process exit may be blocked by still-running
 /// `spawn_blocking` work (e.g. a sound-player subprocess or a slow config

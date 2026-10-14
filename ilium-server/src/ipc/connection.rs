@@ -2014,6 +2014,9 @@ mod tests {
         sound_task.abort();
     }
 
+    // The pane command is a POSIX shell script (`printf`, `read`, `;`), which
+    // the Windows `cmd.exe` pane shell cannot run.
+    #[cfg(unix)]
     #[tokio::test]
     async fn live_pane_broadcast_replay_sends_only_missing_bytes_and_attach_stays_full() {
         let directory = tempfile::tempdir().expect("private directory");
@@ -2023,7 +2026,10 @@ mod tests {
         );
         let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
             session_name: "live-replay-normalization".to_string(),
-            session_cwd: directory.path().to_path_buf(),
+            // Pane launch admission only accepts a canonical directory, and
+            // macOS temporary directories live behind /var -> /private/var.
+            session_cwd: ilium_platform::paths::canonicalize(directory.path())
+                .expect("canonical test launch directory"),
             home_dir: directory.path().to_path_buf(),
             snapshot_path: directory.path().join("snapshot.json"),
             socket_path: directory.path().join("test.sock"),
