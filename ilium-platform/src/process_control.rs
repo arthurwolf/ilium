@@ -390,6 +390,12 @@ pub fn processes_using_directory_bounded(
                 }
                 false
             }
+            // A same-user process that refuses `/proc/<pid>/cwd` is non-dumpable
+            // or privileged (ssh-agent, gpg-agent, runner and desktop daemons).
+            // Such a process cannot be a user's shell or agent working inside
+            // the directory, and treating it as unproven would make every
+            // worktree removal fail on any machine that runs one.
+            Err(error) if error.kind() == io::ErrorKind::PermissionDenied => continue,
             Err(error) => {
                 return Err(io::Error::new(
                     error.kind(),
