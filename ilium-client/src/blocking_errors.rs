@@ -39,7 +39,11 @@ impl App {
         match result {
             Ok(_) => {
                 if let Some(errors) = self.local_blocking_errors.get_mut(&pending.parent_group) {
-                    errors.retain(|error| error.operation != format!("Create pane request {request_id}"));
+                    errors.retain(|error| {
+                        error.operation.strip_prefix("Create pane request ")
+                            .and_then(|id| id.parse::<u64>().ok())
+                            .is_none_or(|id| id > request_id)
+                    });
                 }
             }
             Err(message) => {
