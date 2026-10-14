@@ -5206,13 +5206,16 @@ mod shared_dialog_mouse_tests {
         click(&mut app, layout.actions.confirm_button);
         app.settle_filesystem_for_test();
         assert!(board_path.is_file());
+        // The queued request carries the created file's canonical identity
+        // (macOS `/var` -> `/private/var`, Windows 8.3 short names).
+        let canonical_board_path = ilium_platform::paths::canonicalize(&board_path).unwrap();
         assert!(matches!(
             app.take_outbound_requests().as_slice(),
             [ClientRequest::NewBoard {
                 parent_group,
                 name,
                 storage: ilium_core::BoardStorage::MarkdownFile { path },
-            }] if *parent_group == group_id && name == "Planning" && path == &board_path
+            }] if *parent_group == group_id && name == "Planning" && path == &canonical_board_path
         ));
         std::fs::remove_dir_all(project_path).unwrap();
     }

@@ -511,15 +511,17 @@ mod tests {
     #[test]
     fn scope_is_recursive_and_filesystem_membership_is_component_safe_and_project_local() {
         use ilium_core::{AgentActivity, AgentClass};
+        // Roots in the platform's own absolute shape: `/work/app` is relative
+        // on Windows and could not anchor a project or a folder there.
+        let root = std::env::temp_dir().join("ilium-agent-scope");
+        let at = |relative: &str| root.join(relative);
         let mut tree = Tree::new();
-        let project = tree.add_project(PathBuf::from("/work/app")).unwrap();
+        let project = tree.add_project(at("work/app")).unwrap();
         let group = tree.add_group(project, "nested").unwrap();
         let nested = tree.add_group(group, "deeper").unwrap();
-        let folder = tree
-            .add_folder(group, PathBuf::from("/work/app/src/./"))
-            .unwrap();
-        let other_project = tree.add_project(PathBuf::from("/work/other")).unwrap();
-        let agent = |tree: &mut Tree, parent, cwd: &str| {
+        let folder = tree.add_folder(group, at("work/app/src/./")).unwrap();
+        let other_project = tree.add_project(at("work/other")).unwrap();
+        let agent = |tree: &mut Tree, parent, cwd: PathBuf| {
             let id = tree
                 .add_pane(parent, "agent", PaneContentKind::Terminal)
                 .unwrap();
@@ -528,13 +530,13 @@ mod tests {
                 PaneStatus::from_activity(AgentClass::Claude, AgentActivity::Working, None),
             )
             .unwrap();
-            tree.set_pane_launch_cwd(id, PathBuf::from(cwd)).unwrap();
+            tree.set_pane_launch_cwd(id, cwd).unwrap();
             id
         };
-        let exact = agent(&mut tree, project, "/work/app/src");
-        let descendant = agent(&mut tree, nested, "src/../src/deep");
-        let prefix = agent(&mut tree, nested, "/work/app/src-extra");
-        let outside = agent(&mut tree, other_project, "/work/app/src");
+        let exact = agent(&mut tree, project, at("work/app/src"));
+        let descendant = agent(&mut tree, nested, PathBuf::from("src/../src/deep"));
+        let prefix = agent(&mut tree, nested, at("work/app/src-extra"));
+        let outside = agent(&mut tree, other_project, at("work/app/src"));
         tree.add_pane(nested, "shell", PaneContentKind::Terminal)
             .unwrap();
         tree.add_pane(nested, "editor", PaneContentKind::Editor)

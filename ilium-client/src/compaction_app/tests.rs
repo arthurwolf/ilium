@@ -242,9 +242,9 @@ fn opening_the_tab_reads_the_current_settings_and_never_starts_a_scan() {
     assert_eq!(
         codex.config_path.as_deref(),
         Some(
-            fixture
-                .config_path(AgentKind::Codex)
-                .canonicalize()
+            // The platform form: Windows' own canonical form carries a
+            // `\\?\` prefix that the product deliberately strips.
+            ilium_platform::paths::canonicalize(&fixture.config_path(AgentKind::Codex))
                 .unwrap()
                 .as_path()
         )
@@ -660,7 +660,10 @@ fn a_stale_file_is_reported_in_the_tab_and_nothing_is_written() {
         .panel(AgentKind::Codex)
         .record
         .is_none());
-    assert!(draw(&fixture).contains("changed since it was read"));
+    // The note embeds the configuration file's full path, so a long temporary
+    // directory (macOS) wraps the sentence mid-phrase; its opening words are
+    // never split.
+    assert!(draw(&fixture).contains("Nothing was written"));
 }
 
 #[test]

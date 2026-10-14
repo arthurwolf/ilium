@@ -220,9 +220,14 @@ impl AnimationControlTarget {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// An absolute project directory in the platform's own shape: `/project`
+    /// is relative on Windows and would be refused as a target identity.
+    fn project_dir() -> PathBuf {
+        std::env::temp_dir().join("project")
+    }
     fn target(control: Control) -> AnimationControlTarget {
         AnimationControlTarget::new(
-            "/project".into(),
+            project_dir(),
             "rain".into(),
             AnimationControlScope::Scene,
             control,
@@ -246,7 +251,7 @@ mod tests {
 
     fn voxel_target(value: u32) -> AnimationControlTarget {
         AnimationControlTarget::new_for_animation(
-            "/project".into(),
+            project_dir(),
             "VoxelLandscape/Some(VoxelLandscape)".into(),
             AnimationControlScope::Scene,
             AnimationKind::VoxelLandscape,
@@ -266,7 +271,7 @@ mod tests {
             let text = value.to_string();
             assert_eq!(
                 target.number(
-                    Path::new("/project"),
+                    project_dir().as_path(),
                     "VoxelLandscape/Some(VoxelLandscape)",
                     AnimationControlScope::Scene,
                     &voxel_seed(71_839),
@@ -293,7 +298,7 @@ mod tests {
             assert!(
                 target
                     .number(
-                        Path::new("/project"),
+                        project_dir().as_path(),
                         "VoxelLandscape/Some(VoxelLandscape)",
                         AnimationControlScope::Scene,
                         &current,
@@ -336,25 +341,29 @@ mod tests {
         let current = voxel_seed(71_839);
         for (project, scene, scope) in [
             (
-                "/other",
+                PathBuf::from("/other"),
                 "VoxelLandscape/Some(VoxelLandscape)",
                 AnimationControlScope::Scene,
             ),
-            ("/project", "Rain/Some(Rain)", AnimationControlScope::Scene),
             (
-                "/project",
+                project_dir(),
+                "Rain/Some(Rain)",
+                AnimationControlScope::Scene,
+            ),
+            (
+                project_dir(),
                 "VoxelLandscape/Some(VoxelLandscape)",
                 AnimationControlScope::Common,
             ),
         ] {
             assert!(target
-                .number(Path::new(project), scene, scope, &current, "4294967295")
+                .number(project.as_path(), scene, scope, &current, "4294967295")
                 .is_err());
         }
         let changed = Control::slider("seed", "World seed", 10, (0, 100, 1), "", "");
         assert!(target
             .number(
-                Path::new("/project"),
+                project_dir().as_path(),
                 "VoxelLandscape/Some(VoxelLandscape)",
                 AnimationControlScope::Scene,
                 &changed,
@@ -378,12 +387,12 @@ mod tests {
     fn stale_destinations_and_reordered_or_disabled_choices_are_rejected() {
         let opened = choice();
         let target = target(opened.clone());
-        let validate = |project, scene, scope, current: &Control, id| {
-            target.choice(Path::new(project), scene, scope, current, id)
+        let validate = |project: &Path, scene, scope, current: &Control, id| {
+            target.choice(project, scene, scope, current, id)
         };
         assert_eq!(
             validate(
-                "/project",
+                project_dir().as_path(),
                 "rain",
                 AnimationControlScope::Scene,
                 &opened,
@@ -391,9 +400,16 @@ mod tests {
             ),
             Ok(ControlValue::Index(2))
         );
-        assert!(validate("/other", "rain", AnimationControlScope::Scene, &opened, "2").is_err());
         assert!(validate(
-            "/project",
+            Path::new("/other"),
+            "rain",
+            AnimationControlScope::Scene,
+            &opened,
+            "2"
+        )
+        .is_err());
+        assert!(validate(
+            project_dir().as_path(),
             "snow",
             AnimationControlScope::Scene,
             &opened,
@@ -401,7 +417,7 @@ mod tests {
         )
         .is_err());
         assert!(validate(
-            "/project",
+            project_dir().as_path(),
             "rain",
             AnimationControlScope::Common,
             &opened,
@@ -410,7 +426,7 @@ mod tests {
         .is_err());
         for id in ["1", "02", "-1", "99"] {
             assert!(validate(
-                "/project",
+                project_dir().as_path(),
                 "rain",
                 AnimationControlScope::Scene,
                 &opened,
@@ -420,7 +436,7 @@ mod tests {
         }
         let changed = Control::choice("palette", "Palette", 0, &["A", "C", "B"], "");
         assert!(validate(
-            "/project",
+            project_dir().as_path(),
             "rain",
             AnimationControlScope::Scene,
             &changed,
@@ -438,7 +454,7 @@ mod tests {
         assert_eq!(dialog.draft.buf, "10");
         assert_eq!(
             target.number(
-                Path::new("/project"),
+                project_dir().as_path(),
                 "rain",
                 AnimationControlScope::Scene,
                 &opened,
@@ -450,7 +466,7 @@ mod tests {
         for text in ["17", "NaN", "1.5", "", "-1"] {
             assert!(target
                 .number(
-                    Path::new("/project"),
+                    project_dir().as_path(),
                     "rain",
                     AnimationControlScope::Scene,
                     &changed,

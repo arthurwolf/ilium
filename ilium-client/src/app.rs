@@ -21147,6 +21147,9 @@ mod tests {
                 terminal
                     .draw(|frame| crate::ui::draw(frame, &mut app))
                     .unwrap();
+                // The release is queued to the animation service thread; wait
+                // for it to be applied before observing the hosted scene.
+                app.animation_frame.settle_for_test();
                 assert_eq!(probe.alive(), 0, "help releases the source host");
                 assert_eq!(app.animation_frame.status(), None);
                 let mut tail_visible = false;
@@ -23713,7 +23716,8 @@ mod tests {
     #[test]
     fn agent_message_filesystem_folder_status_update_reaches_agents_within_folder_path() {
         let mut app = app();
-        let project_path = PathBuf::from("/tmp/ask-for-update-folder-scope");
+        // Absolute on every platform (`/tmp/...` is relative on Windows).
+        let project_path = std::env::temp_dir().join("ask-for-update-folder-scope");
         let project = app.tree.add_project(project_path.clone()).unwrap();
         let group = app.tree.add_group(project, "agents").unwrap();
         let folder_path = project_path.join("src");
@@ -24105,12 +24109,16 @@ mod tests {
         app.settle_filesystem_for_test();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
 
+        // The board adapter stores the file's canonical identity (macOS
+        // temp directories are `/var` -> `/private/var` symlinks; Windows
+        // may expand 8.3 short names), so compare against that form.
+        let canonical = ilium_platform::paths::canonicalize(&path).unwrap();
         assert_eq!(
             app.take_outbound_requests(),
             vec![ClientRequest::NewBoard {
                 parent_group: group,
                 name: "release-plan".to_string(),
-                storage: ilium_core::BoardStorage::MarkdownFile { path },
+                storage: ilium_core::BoardStorage::MarkdownFile { path: canonical },
             }]
         );
     }
@@ -24175,13 +24183,15 @@ mod tests {
         assert!(std::fs::read_to_string(&board_path)
             .unwrap()
             .contains("## To do"));
+        // The queued request carries the created file's canonical identity.
+        let canonical_board_path = ilium_platform::paths::canonicalize(&board_path).unwrap();
         assert!(matches!(
             app.take_outbound_requests().as_slice(),
             [ClientRequest::NewBoard {
                 name,
                 storage: ilium_core::BoardStorage::MarkdownFile { path },
                 ..
-            }] if name == "Sprint" && path == &board_path
+            }] if name == "Sprint" && path == &canonical_board_path
         ));
         let _ = std::fs::remove_dir_all(project_path);
     }
@@ -29884,8 +29894,11 @@ mod board_handoff_tests {
         assert_eq!(app.board_files.as_ref().unwrap().pending(), 0);
         assert_eq!(app.pending_pane_focuses.len(), 1);
         assert_eq!(app.outbox.len(), 1);
+        // The board source reports the file's canonical identity (macOS
+        // `/var` -> `/private/var`, Windows 8.3 short names).
+        let canonical_path = ilium_platform::paths::canonicalize(&path).unwrap();
         assert!(
-            matches!(app.outbox[0].view(), ilium_ipc::ClientRequest::NewBoard { parent_group: actual, name, storage } if *actual == parent_group && name == "retained-board" && storage.path() == path)
+            matches!(app.outbox[0].view(), ilium_ipc::ClientRequest::NewBoard { parent_group: actual, name, storage } if *actual == parent_group && name == "retained-board" && storage.path() == canonical_path)
         );
         app.collect_board_files();
         assert_eq!(

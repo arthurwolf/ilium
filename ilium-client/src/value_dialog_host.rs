@@ -915,7 +915,8 @@ mod tests {
     #[test]
     fn only_matching_receipt_releases_pending_exact_draft_for_retry() {
         let target = crate::value_animation::AnimationControlTarget::new(
-            "/project".into(),
+            // Absolute on every platform (`/project` is relative on Windows).
+            std::env::temp_dir().join("project"),
             "rain".into(),
             crate::value_animation::AnimationControlScope::Scene,
             ilium_ambient::Control::slider("speed", "Speed", 10, (0, 100, 10), "%", ""),

@@ -1292,6 +1292,11 @@ pub(crate) mod tests {
     ) -> ExactAgentPromptTranscriptRequest {
         let project_path = home.join("synthetic-exact-worker-project");
         std::fs::create_dir_all(&project_path).unwrap();
+        // The transcript locator derives the provider's directory name from
+        // the project's canonical path (macOS `/var` -> `/private/var`,
+        // Windows 8.3 short names), so the fixture must use that same form.
+        let project_path =
+            ilium_platform::paths::canonicalize(&project_path).unwrap_or(project_path);
         let session_id = "77777777-7777-4777-8777-777777777777";
         let directory = home
             .join(".claude/projects")

@@ -870,7 +870,16 @@ mod tests {
         (owner, store)
     }
 
+    /// Providers name their transcript directory after the project's canonical
+    /// path (macOS `/var` -> `/private/var`, Windows 8.3 short names), which is
+    /// also the form the transcript locator searches for.
+    fn canonical_project(project: &std::path::Path) -> std::path::PathBuf {
+        ilium_platform::paths::canonicalize(project).unwrap_or_else(|_| project.to_path_buf())
+    }
+
     fn write_claude_transcript(home: &std::path::Path, project: &std::path::Path, id: &str) {
+        let project = canonical_project(project);
+        let project = project.as_path();
         let slug: String = project
             .to_string_lossy()
             .chars()
@@ -897,6 +906,7 @@ mod tests {
     }
 
     fn write_codex_transcript(home: &std::path::Path, project: &std::path::Path, id: &str) {
+        let project = canonical_project(project);
         let directory = home.join(".codex").join("sessions").join("2026/10/07");
         std::fs::create_dir_all(&directory).unwrap();
         let metadata = serde_json::json!({
