@@ -40,14 +40,21 @@ pub struct LogRelayEndpoint {
 impl LogRelayEndpoint {
     /// Derives an endpoint from the shared log directory, not its rotating
     /// timestamped filename.
+    ///
+    /// The endpoint is a Unix domain socket, so its path must fit
+    /// `sockaddr_un`. When the log directory is too deep for that (a long
+    /// `DEBUG_LOG_DIR_ENV` plus the project slug, which macOS's per-session
+    /// temporary directory reaches easily), the endpoint moves to the short
+    /// private session socket directory under a name derived from the log
+    /// directory, so every process that knows the log path still agrees on it.
     pub fn for_log_path(log_path: &Path) -> Self {
         let directory = log_path
             .parent()
             .filter(|directory| !directory.as_os_str().is_empty())
             .unwrap_or_else(|| Path::new("."));
-        Self {
-            path: directory.join(".log-relay"),
-        }
+        let beside_log = directory.join(".log-relay");
+        let path = short_relay_path(&beside_log).unwrap_or(beside_log);
+        Self { path }
     }
 
     /// The identity passed to the platform transport.
@@ -58,6 +65,39 @@ impl LogRelayEndpoint {
     fn transport_endpoint(&self) -> SessionEndpoint {
         SessionEndpoint::from_path(self.path.clone())
     }
+}
+
+/// A relay socket path that fits `sockaddr_un`, or `None` when `preferred`
+/// already fits (or no short private directory is available, in which case the
+/// bind reports the real error for `preferred`).
+#[cfg(unix)]
+fn short_relay_path(preferred: &Path) -> Option<PathBuf> {
+    use std::os::unix::ffi::OsStrExt;
+
+    use ilium_platform::runtime_dir::{session_socket_directory, MAX_SOCKET_PATH_BYTES};
+
+    let preferred_bytes = preferred.as_os_str().as_bytes();
+    if preferred_bytes.len() < MAX_SOCKET_PATH_BYTES {
+        return None;
+    }
+    // FNV-1a: stable across processes and releases (unlike `DefaultHasher`),
+    // which matters because the server and each client derive this name
+    // independently from the same log directory.
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in preferred_bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    let fallback = session_socket_directory()
+        .ok()?
+        .join(format!("log-relay-{hash:016x}.relay"));
+    (fallback.as_os_str().len() < MAX_SOCKET_PATH_BYTES).then_some(fallback)
+}
+
+/// Windows named pipes have no path-length limit of this kind.
+#[cfg(not(unix))]
+fn short_relay_path(_preferred: &Path) -> Option<PathBuf> {
+    None
 }
 
 /// Async listener owned by the detached server. Every client event enters the
@@ -528,6 +568,27 @@ fn transport_error(error: impl std::fmt::Display) -> io::Error {
 mod tests {
     use super::*;
     use tokio::io::duplex;
+
+    #[cfg(unix)]
+    #[test]
+    fn a_deep_log_directory_gets_a_short_stable_relay_endpoint() {
+        use ilium_platform::runtime_dir::MAX_SOCKET_PATH_BYTES;
+
+        let deep = format!(
+            "/tmp/{}/session/log-2026-10-08_04-00-00.000.txt",
+            "d".repeat(120)
+        );
+        let first = LogRelayEndpoint::for_log_path(Path::new(&deep));
+        let rotated = LogRelayEndpoint::for_log_path(Path::new(&deep.replace("04-00", "05-00")));
+
+        assert!(first.as_path().as_os_str().len() < MAX_SOCKET_PATH_BYTES);
+        assert_eq!(first, rotated);
+        let other = format!(
+            "/tmp/{}/other/log-2026-10-08_04-00-00.000.txt",
+            "d".repeat(120)
+        );
+        assert_ne!(first, LogRelayEndpoint::for_log_path(Path::new(&other)));
+    }
 
     #[test]
     fn relay_endpoint_is_stable_across_rotating_log_file_names() {

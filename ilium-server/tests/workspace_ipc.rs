@@ -1506,10 +1506,14 @@ async fn isolated_server_creates_attaches_and_removes_only_owned_worktree() {
     if let ServerEvent::WorkspaceRemovalBlocked { reasons, .. } = &removed {
         // Some hosts restrict procfs cwd reads even for a same-user service
         // manager. Force must fail closed when process custody is unknown.
+        // Process inspection is implemented on Linux procfs only, so every
+        // other platform reports it unavailable and must stay fail-closed.
         assert!(
-            reasons
-                .iter()
-                .any(|reason| reason.contains("process directory probe is unavailable")),
+            reasons.iter().any(|reason| {
+                reason.contains("process directory probe is unavailable")
+                    || (cfg!(not(target_os = "linux"))
+                        && reason.contains("worktree process inspection requires Linux procfs"))
+            }),
             "{removed:?}"
         );
         assert!(linked.exists());

@@ -1727,8 +1727,13 @@ pub fn identify_agent_with_extra_excluding(
                 .into_iter()
                 .enumerate()
                 .find_map(|(index, candidate)| {
-                    match_process_name_with_extra(&candidate, extra_signatures)
-                        .map(|process_match| (index > 0, candidate, process_match))
+                    match_process_name_with_extra(&candidate, extra_signatures).map(
+                        |process_match| {
+                            let is_interpreted =
+                                index > 0 && !is_stale_name_native_invocation(process, &candidate);
+                            (is_interpreted, candidate, process_match)
+                        },
+                    )
                 });
             if let Some((is_interpreted, matched_name, process_match)) = matched {
                 let process_key = AgentProcessKey {
@@ -1770,6 +1775,22 @@ pub fn identify_agent_with_extra_excluding(
             process_tree_depth: depth,
         },
     )
+}
+
+/// macOS only: whether `candidate` is the basename of a non-interpreter
+/// `argv[0]`, i.e. a natively executed program rather than one handed to an
+/// interpreter.
+///
+/// sysinfo keeps the kernel name it first read for the life of a macOS
+/// process, so an agent first observed between `fork` and `exec` keeps the
+/// parent's name (`bash`) and is recognised only through `argv[0]`. That match
+/// is native evidence, not an interpreter-inferred one; ranking it as
+/// interpreted would let a sibling launcher shim at a shallower depth win over
+/// the real native process it spawned.
+fn is_stale_name_native_invocation(process: &sysinfo::Process, candidate: &str) -> bool {
+    cfg!(target_os = "macos")
+        && argument_file_name(process.cmd(), 0)
+            .is_some_and(|invoked| invoked == candidate && !is_interpreter_name(&invoked))
 }
 
 /// Whether this match is only a program handed to an interpreter, rather

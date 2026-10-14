@@ -323,7 +323,11 @@ async fn unfreeze_preserves_worktree_ownership() {
     run_git(&server.project_cwd, &["commit", "-m", "test repository"]);
 
     let worktree_parent = tempfile::tempdir().expect("worktree parent");
-    let worktree_root = worktree_parent.path().join("linked");
+    // The server refuses a worktree path whose parent is not spelled
+    // canonically; macOS temporary directories live behind the /var symlink.
+    let worktree_root = std::fs::canonicalize(worktree_parent.path())
+        .expect("canonical worktree parent")
+        .join("linked");
 
     let mut client = attach(&server, session_name).await;
     write_frame(

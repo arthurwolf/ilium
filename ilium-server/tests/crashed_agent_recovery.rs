@@ -245,7 +245,13 @@ async fn recovery_after_unflushed_crash(
         let parent = system
             .process(parent_id)
             .expect("actual interpreted shim parent");
-        assert_eq!(parent.name().to_string_lossy(), "sh");
+        // macOS dispatches /bin/sh to bash, and sysinfo reports the dispatched
+        // binary's name; the launcher is still the `sh` script interpreter.
+        let parent_name = parent.name().to_string_lossy();
+        assert!(
+            parent_name == "sh" || (cfg!(target_os = "macos") && parent_name == "bash"),
+            "unexpected interpreted shim parent name {parent_name:?}"
+        );
         assert!(parent
             .cmd()
             .iter()

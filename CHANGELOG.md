@@ -54,6 +54,7 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
   while per-pane operation limits remain in both modes.
 
 ### Fixed
+- The session server now starts on macOS when the debug-log directory path is long: the log-relay socket falls back to the short private session socket directory instead of exceeding the 104-byte Unix socket path limit.
 - The animation settings paint-and-hit test no longer crosses every effective kind with the whole playback and colour matrix, which made it run for tens of minutes.
 - The Settings Padding tab is handled in the content-height and row-count matches.
 - On Windows the `ilium` and `ilium-server` binaries now reserve a 16 MiB main-thread stack, so the client no longer overflows the default 1 MiB stack at startup.
