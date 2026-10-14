@@ -225,7 +225,6 @@ impl IsolatedXdgDirs {
         // the same directory and a seeded `config.toml` is found either way.
         let ilium_config_dir = config_home.join("ilium");
         let debug_log_dir = root.join("debug-logs");
-        let mouse_trace_file = root.join("mouse-events.log");
         let agent_setup_home = root.join("agent-home");
         for dir in [
             &data_home,
@@ -261,6 +260,7 @@ impl IsolatedXdgDirs {
         #[cfg(windows)]
         let runtime_root = tempfile::Builder::new().prefix("il").tempdir()?;
         let runtime_dir = runtime_root.path().to_path_buf();
+        let mouse_trace_file = runtime_dir.join("mouse-events.log");
         // Under the same short root, for the same `sockaddr_un` reason, and
         // named `ilium` to match what `XDG_RUNTIME_DIR` would have produced.
         let socket_dir = runtime_dir.join("ilium");
@@ -315,6 +315,27 @@ impl IsolatedXdgDirs {
             // `~/.codex/AGENTS.md`.
             (ilium_client::AGENT_SETUP_HOME_ENV, &self.agent_setup_home),
         ]
+    }
+}
+
+impl Drop for IsolatedXdgDirs {
+    fn drop(&mut self) {
+        if !std::thread::panicking() {
+            return;
+        }
+        if let Ok(trace) = std::fs::read(&self.mouse_trace_file) {
+            let tail = &trace[trace.len().saturating_sub(65_536)..];
+            eprintln!(
+                "{}",
+                serde_json::json!({
+                    "type": "artifact",
+                    "kind": "owned_mouse_trace",
+                    "path": self.mouse_trace_file,
+                    "bytes": trace.len(),
+                    "tail": String::from_utf8_lossy(tail),
+                })
+            );
+        }
     }
 }
 
@@ -1198,13 +1219,16 @@ async fn completed_progress_footer_expires_during_continuous_pty_output() {
     let counter = |screen: String| {
         screen
             .split("busy-expiry-output-")
-            .nth(1)
-            .unwrap()
-            .chars()
-            .take_while(char::is_ascii_digit)
-            .collect::<String>()
-            .parse::<u64>()
-            .unwrap()
+            .skip(1)
+            .filter_map(|tail| {
+                tail.chars()
+                    .take_while(char::is_ascii_digit)
+                    .collect::<String>()
+                    .parse::<u64>()
+                    .ok()
+            })
+            .max()
+            .expect("visible busy output counter")
     };
     let busy_before = counter(tui.screen_text());
     let footer_expired = wait_until(
@@ -1215,6 +1239,7 @@ async fn completed_progress_footer_expires_during_continuous_pty_output() {
                 let text = screen.contents();
                 text.contains("busy-expiry-output-")
                     && !text.contains("unique completed footer evidence")
+                    && counter(text) > busy_before
             })
             .unwrap_or(false)
         },
@@ -2605,12 +2630,25 @@ async fn right_click_restart_reloads_only_the_client_and_preserves_the_server() 
     );
     let restart_rows = tui.with_screen(|screen| rows_containing(screen, "Restart"));
     assert_eq!(restart_rows.len(), 1, "expected one rendered Restart row");
-    tui.write(&sgr_mouse_click(0, menu_column + 1, restart_rows[0]))
+    // Restart owns exactly one press/release gesture. The general helper also
+    // sends a second legacy release, which is unrelated input after exit and
+    // must correctly remain in custody rather than silently disappearing.
+    let mut restart_click = sgr_mouse_down(0, menu_column + 1, restart_rows[0]);
+    restart_click.extend_from_slice(
+        format!("\x1b[<0;{};{}m", menu_column + 2, restart_rows[0] + 1).as_bytes(),
+    );
+    tui.write(&restart_click)
         .expect("click Restart context action");
 
     assert!(
         wait_until(|| restart_marker.is_file(), WAIT_TIMEOUT).await,
-        "replacement executable path was not loaded after Restart"
+        "replacement executable path was not loaded after Restart; exit={:?}; screen={:?}; output_tail={:?}",
+        tui.child_exit(),
+        tui.screen_text(),
+        {
+            let replay = tui.output_replay();
+            String::from_utf8_lossy(&replay.bytes[replay.bytes.len().saturating_sub(16384)..]).into_owned()
+        }
     );
     // Unix-only, and genuinely so: replacing a process's own image is what
     // `exec` does, and Windows has no equivalent. There the replacement runs
@@ -4451,8 +4489,35 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
         external_source,
         "stale board mutation must not overwrite the external edit"
     );
-    tui.write(b"r\x1b[CnReloaded task\r")
-        .expect("reload external revision and commit a new card");
+    // A rejected write retains its authored draft. Cancel that draft explicitly
+    // before issuing the normal-mode reload command.
+    assert!(
+        tui.screen_text().contains("Stale task"),
+        "rejected stale publication must retain the authored card draft, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"\x1b")
+        .expect("cancel the refused stale card draft");
+    assert!(
+        wait_until(|| !tui.screen_text().contains("NEW CARD"), WAIT_TIMEOUT).await,
+        "cancelled stale draft should leave card entry, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"r").expect("reload the external board revision");
+    assert!(
+        wait_until(
+            || {
+                let screen = tui.screen_text();
+                screen.contains("External task") && !screen.contains("press r to reload")
+            },
+            WAIT_TIMEOUT,
+        ).await,
+        "the external card must render before editing its reloaded revision, source: {:?}; screen: {:?}",
+        std::fs::read_to_string(&dialog_path),
+        tui.screen_text()
+    );
+    tui.write(b"\x1b[CnReloaded task\r")
+        .expect("commit a new card after the external revision is loaded");
     assert!(
         wait_until(
             || std::fs::read_to_string(&dialog_path)

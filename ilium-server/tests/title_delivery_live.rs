@@ -71,6 +71,7 @@ async fn acknowledged_authored_enter_authorizes_title_before_request_history_flu
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: NewPaneKind::Command(format!("{} {}", agent.path.display(), history.display())),
             working_directory: NewPaneWorkingDirectory::ProjectRoot,
@@ -199,6 +200,10 @@ async fn acknowledged_authored_enter_authorizes_title_before_request_history_flu
                         node.presentation_revision > original.presentation_revision
                     });
                 }
+                ServerEvent::PaneNodeChanged(node) if node.id == pane_id => {
+                    observed_revision_fence |=
+                        node.presentation_revision > original.presentation_revision;
+                }
                 ServerEvent::PanePromptSubmitted {
                     pane_id: submitted,
                     source,
@@ -246,11 +251,13 @@ async fn acknowledged_authored_enter_authorizes_title_before_request_history_flu
     .unwrap();
     let accepted = expect_event(&mut client, WAIT, |event| {
         matches!(event, ServerEvent::TreeSnapshot(tree) if tree.get(pane_id).is_some_and(|node| node.name == "Authentication validation"))
+            || matches!(event, ServerEvent::PaneNodeChanged(node) if node.id == pane_id && node.name == "Authentication validation")
     }).await;
-    let ServerEvent::TreeSnapshot(accepted) = accepted else {
-        unreachable!()
+    let named = match accepted {
+        ServerEvent::TreeSnapshot(tree) => tree.get(pane_id).unwrap().clone(),
+        ServerEvent::PaneNodeChanged(node) => *node,
+        _ => unreachable!(),
     };
-    let named = accepted.get(pane_id).unwrap();
     assert!(!named.is_name_fixed);
     assert!(matches!(
         named.kind,
@@ -277,7 +284,7 @@ async fn acknowledged_authored_enter_authorizes_title_before_request_history_flu
     .await
     .unwrap();
     let (final_tree, _) = read_initial_state(&mut client, WAIT).await;
-    assert_title_bundle(named, final_tree.get(pane_id).unwrap());
+    assert_title_bundle(&named, final_tree.get(pane_id).unwrap());
     assert_eq!(
         final_tree.last_prompt(pane_id),
         submitted.last_prompt(pane_id)
@@ -349,6 +356,7 @@ async fn exited_agent_titles_require_verified_own_history_and_preserve_manual_na
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: NewPaneKind::Command(agent.path.display().to_string()),
             working_directory: NewPaneWorkingDirectory::ProjectRoot,

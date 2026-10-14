@@ -1199,6 +1199,11 @@ pub struct PaintedTerminal {
 }
 impl PaintedTerminal {
     pub(crate) fn from_frozen_bytes(bytes: &[u8]) -> Result<Self, String> {
+        // Bound parsing work before feeding potentially hostile stored bytes
+        // into vt100, even when the declared viewport itself is small.
+        if bytes.len() > crate::terminal_parsing::MAX_STATE_BYTES {
+            return Err("frozen terminal snapshot exceeds its byte limit".to_string());
+        }
         if bytes.len() < 4 {
             return Err("frozen terminal snapshot is truncated".to_string());
         }

@@ -415,14 +415,18 @@ fn source_clock() -> Result<SourceClock, String> {
     })
 }
 impl NativeSourceOwner {
-    fn new(client: ilium_execution::Client, quota: QuotaGroup) -> Result<Self, String> {
+    fn new(
+        client: ilium_execution::Client,
+        quota: QuotaGroup,
+        cadence_owner: &crate::execution::NativeSourceCadenceOwner,
+    ) -> Result<Self, String> {
         if !client.quota_group().shares_root(&quota) {
             return Err("Foreign native source client".into());
         }
         let metadata = quota
             .reserve_external_storage(128 * 1024)
             .map_err(|error| format!("Native source owner admission: {error:?}"))?;
-        let cadence = crate::execution::native_source_cadence()?;
+        let cadence = crate::execution::native_source_cadence(cadence_owner, &quota)?;
         if !cadence.shares_root(&quota) {
             return Err("Foreign native source cadence".into());
         }
@@ -2509,6 +2513,7 @@ pub(super) struct PluginBackend {
     workflow: Option<Workflow>,
     failure: Option<(u64, String)>,
     quota: QuotaGroup,
+    cadence_owner: Arc<crate::execution::NativeSourceCadenceOwner>,
     resources: ilium_ambient::resources::AmbientResources,
     review: Arc<ReviewBridge>,
     actor_wake: Arc<dyn Fn() + Send + Sync>,
@@ -2580,6 +2585,7 @@ impl PluginBackend {
     }
     pub(super) fn new(
         quota: QuotaGroup,
+        cadence_owner: Arc<crate::execution::NativeSourceCadenceOwner>,
         resources: ilium_ambient::resources::AmbientResources,
         review: Arc<ReviewBridge>,
         actor_wake: Arc<dyn Fn() + Send + Sync>,
@@ -2591,6 +2597,7 @@ impl PluginBackend {
             workflow: None,
             failure: None,
             quota,
+            cadence_owner,
             resources,
             review,
             actor_wake,
@@ -3045,6 +3052,7 @@ impl PluginBackend {
                     instance,
                     &workflow.request,
                     &self.quota,
+                    &self.cadence_owner,
                     self.resources.clone(),
                     Arc::clone(&workflow.state_root),
                     workflow.qualified_audio.take(),
@@ -3998,6 +4006,7 @@ impl Presentation {
         instance: &mut PackageInstance,
         request: &RenderRequest,
         quota: &QuotaGroup,
+        cadence_owner: &crate::execution::NativeSourceCadenceOwner,
         resources: ilium_ambient::resources::AmbientResources,
         state_root: Arc<PinnedDirectory>,
         selected_audio: Option<QualifiedCaptureBinding>,
@@ -4030,7 +4039,7 @@ impl Presentation {
         )
         .map_err(|error| error.to_string())?;
         let gpu = NativeGpuHost::new(quota.clone()).map_err(|error| error.to_string())?;
-        let sources = NativeSourceOwner::new(source_client, quota.clone())?;
+        let sources = NativeSourceOwner::new(source_client, quota.clone(), cadence_owner)?;
 
         let shape = shape(instance.plan(), request.width, request.height)?;
         let layout = shape.layout().map_err(|error| error.to_string())?;
@@ -5622,6 +5631,70 @@ mod tests {
     use ilium_animation_js::surface::{ColourSpace, Update};
     use std::io::Cursor;
 
+    #[test]
+    fn admitted_plugin_native_source_keeps_origin_cadence_on_worker_thread() {
+        let finite = crate::execution::test_client();
+        let quota = finite.quota_group();
+        let cadence_owner = crate::execution::native_source_cadence_owner(&quota)
+            .expect("capture the original source cadence identity");
+        let ready = Arc::new(tokio::sync::Notify::new());
+        let review = ReviewBridge::new(quota.clone(), Arc::clone(&ready), Box::new(|| {}))
+            .expect("actual review mailbox admission");
+        let backend = PluginBackend::new(
+            quota.clone(),
+            Arc::clone(&cadence_owner),
+            AmbientResources::new(finite),
+            review,
+            Arc::new(|| {}),
+            ready,
+        );
+        let worker_threads_before = quota.snapshot().worker_threads;
+        let physical = quota
+            .reserve_external_worker(1, 2 * 1024 * 1024)
+            .expect("native plugin worker admission");
+        let reservation =
+            ilium_platform::owned_worker::reserve_owned_worker(Some(2 * 1024 * 1024), physical)
+                .expect("original worker reservation");
+        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+        let worker = reservation
+            .spawn(
+                "ilium-native-source-test",
+                ilium_platform::owned_worker::WorkerKind::Cooperative,
+                StopToken::default(),
+                || {},
+                move |_| {
+                    let source = NativeSourceOwner::new(
+                        backend.resources.finite().clone(),
+                        backend.quota.clone(),
+                        &backend.cadence_owner,
+                    );
+                    let _ = sender.send(source.map(|source| Arc::clone(&source.cadence)));
+                },
+            )
+            .expect("actual admitted native worker starts");
+        let cadence = receiver
+            .recv_timeout(Duration::from_secs(5))
+            .expect("native source owner completes")
+            .expect("native source admission uses the original root");
+        let ticket = worker.ticket();
+        drop(worker);
+        ticket
+            .join_until(Instant::now() + Duration::from_secs(5))
+            .expect("native worker physically retires");
+        assert_eq!(quota.snapshot().worker_threads, worker_threads_before);
+        assert!(cadence.shares_root(&quota));
+        let retained = crate::execution::native_source_cadence(&cadence_owner, &quota)
+            .expect("sequential native owners share cadence identity");
+        assert!(Arc::ptr_eq(&cadence, &retained));
+        let foreign = QuotaGroup::new(quota.snapshot().limits);
+        assert_eq!(
+            crate::execution::native_source_cadence(&cadence_owner, &foreign)
+                .err()
+                .as_deref(),
+            Some("Foreign native source cadence")
+        );
+    }
+
     fn archive_test_quota(worker_bytes: usize) -> QuotaGroup {
         QuotaGroup::new(ilium_execution::QuotaLimits {
             clients: 0,
@@ -5768,7 +5841,9 @@ mod tests {
             {"id":"source-feed-1", "kind":"sources.chess"}
         ]);
         let mut too_many_frames = valid.clone();
-        too_many_frames["max_frames"] = json!(12);
+        // Samples include time zero and exclude the duration endpoint:
+        // twelve seconds at 1 Hz needs exactly twelve frames.
+        too_many_frames["max_frames"] = json!(11);
         let mut unknown_kind = valid.clone();
         unknown_kind["sources"][0]["kind"] = json!("worlds.frame");
         let mut malformed_id = valid.clone();
@@ -5789,6 +5864,12 @@ mod tests {
         ] {
             assert!(ReplaySequenceCaptureOptions::parse(&invalid).is_err());
         }
+        let exact_capacity = json!({
+            "sources": [{"id":"source-feed-1", "kind":"sources.chess"}],
+            "duration_ms": 12_000, "sample_hz": 1,
+            "max_frames": 12, "max_bytes": 8_000_000
+        });
+        assert!(ReplaySequenceCaptureOptions::parse(&exact_capacity).is_ok());
     }
 
     #[test]

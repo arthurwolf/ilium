@@ -40,6 +40,8 @@ pub(crate) struct PasteReplay {
     cursor: PasteCursor,
     replay_end_bytes: usize,
     policy: ReplayPolicy,
+    path_validation: Option<PathValidation>,
+    path_rejected: bool,
     retirement: Option<RetirementReservation<RetiredPasteInput>>,
     #[cfg(test)]
     drop_probe: Option<std::sync::mpsc::Sender<std::thread::ThreadId>>,
@@ -59,6 +61,11 @@ impl Drop for RetiredPasteInput {
             let _ = probe.send(std::thread::current().id());
         }
     }
+}
+
+struct PathValidation {
+    checked_bytes: usize,
+    trimming: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -86,12 +93,31 @@ impl PasteReplay {
         Self::with_policy(original, replay_end_bytes, ReplayPolicy::TextCharacters)
     }
 
+    /// Validate the whole original path before inserting any character.
+    /// Trailing terminal line endings and validation both advance in bounded
+    /// turns; embedded controls refuse the original atomically.
+    pub(crate) fn new_setup_path_prompt(original: InputEvent) -> Self {
+        let mut replay = Self::new(original);
+        replay.policy = ReplayPolicy::TextCharacters;
+        replay.path_validation = Some(PathValidation {
+            checked_bytes: 0,
+            trimming: true,
+        });
+        replay
+    }
+
+    pub(crate) fn path_rejected(&self) -> bool {
+        self.path_rejected
+    }
+
     fn with_policy(original: InputEvent, replay_end_bytes: usize, policy: ReplayPolicy) -> Self {
         Self {
             original,
             cursor: PasteCursor::default(),
             replay_end_bytes,
             policy,
+            path_validation: None,
+            path_rejected: false,
             retirement: None,
             #[cfg(test)]
             drop_probe: None,
@@ -114,6 +140,36 @@ impl PasteReplay {
         let crossterm::event::Event::Paste(text) = self.original.view() else {
             unreachable!("PasteReplay retains its original Paste event")
         };
+        if let Some(validation) = &mut self.path_validation {
+            for _ in 0..maximum {
+                if validation.trimming {
+                    match text[..self.replay_end_bytes].chars().next_back() {
+                        Some(character @ ('\r' | '\n')) => {
+                            self.replay_end_bytes -= character.len_utf8();
+                            continue;
+                        }
+                        _ => validation.trimming = false,
+                    }
+                }
+                let Some(character) = text[validation.checked_bytes..self.replay_end_bytes]
+                    .chars()
+                    .next()
+                else {
+                    self.path_validation = None;
+                    // Start insertion on the next turn, keeping validation
+                    // and insertion within one shared per-turn work bound.
+                    return Vec::new();
+                };
+                if character.is_control() {
+                    self.path_rejected = true;
+                    self.replay_end_bytes = 0;
+                    self.path_validation = None;
+                    return Vec::new();
+                }
+                validation.checked_bytes += character.len_utf8();
+            }
+            return Vec::new();
+        }
         let mut keys = Vec::with_capacity(maximum);
         for _ in 0..maximum {
             if self.cursor.consumed_bytes >= self.replay_end_bytes {
@@ -147,7 +203,7 @@ impl PasteReplay {
         let crossterm::event::Event::Paste(_) = self.original.view() else {
             unreachable!("PasteReplay retains its original Paste event")
         };
-        self.cursor.consumed_bytes == self.replay_end_bytes
+        self.path_validation.is_none() && self.cursor.consumed_bytes == self.replay_end_bytes
     }
 
     pub(crate) fn into_parts(self) -> (InputEvent, usize) {
@@ -214,6 +270,48 @@ mod tests {
         );
         drop(original);
         assert_eq!(quota.snapshot().worker_bytes, 0);
+    }
+
+    #[test]
+    fn path_validation_is_bounded_and_rejects_controls_before_any_insertion() {
+        let (original, quota) = crate::terminal_input_owner::paste_fixture("café\nlate".into());
+        let mut replay = PasteReplay::new_setup_path_prompt(original);
+        assert!(replay.next_keys(2).is_empty());
+        assert!(replay.next_keys(2).is_empty());
+        assert!(!replay.is_complete());
+        assert!(replay.next_keys(2).is_empty());
+        assert!(replay.path_rejected());
+        assert!(replay.is_complete());
+        let (original, consumed) = replay.into_parts();
+        assert_eq!(consumed, 0, "no prefix of an invalid path may be inserted");
+        assert!(
+            matches!(original.view(), crossterm::event::Event::Paste(text) if text == "café\nlate")
+        );
+        assert!(quota.snapshot().worker_bytes > 0);
+        drop(original);
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+    }
+
+    #[test]
+    fn path_validation_trims_line_endings_then_inserts_unicode_without_enter() {
+        let (original, _quota) = crate::terminal_input_owner::paste_fixture("é🦀\r\n".into());
+        let mut replay = PasteReplay::new_setup_path_prompt(original);
+        // Two trimming turns and two validation turns, all without insertion.
+        for _ in 0..4 {
+            assert!(replay.next_keys(1).is_empty());
+            assert!(!replay.is_complete());
+        }
+        assert!(replay.next_keys(1).is_empty());
+        assert_eq!(
+            replay.next_keys(1),
+            [KeyEvent::new(KeyCode::Char('é'), KeyModifiers::NONE)]
+        );
+        assert_eq!(
+            replay.next_keys(1),
+            [KeyEvent::new(KeyCode::Char('🦀'), KeyModifiers::NONE)]
+        );
+        assert!(replay.is_complete());
+        assert!(!replay.path_rejected());
     }
 
     #[test]

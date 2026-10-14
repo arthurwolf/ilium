@@ -3530,7 +3530,7 @@ Goal achieved (3m)
             .arg(&readiness_path)
             .stdin(Stdio::piped());
         prepare_process_tree(&mut command);
-        let child = command.spawn().expect("spawn wrapper");
+        let child = ilium_test_fixtures::spawn_fixture(&mut command).expect("spawn wrapper");
         let mut wrapper = OwnedWrapper {
             child,
             process_tree: None,

@@ -23,6 +23,15 @@ use super::direct_events::{DirectEventReceiver, DirectEventSender, QueuedServerE
 use crate::ipc::handlers;
 use crate::state::ServerState;
 
+#[cfg(test)]
+fn initialize_fixture_execution(state: &ServerState) {
+    let execution =
+        crate::execution::ServerExecution::start().expect("isolated connection execution bank");
+    let journal_quota = execution.quota_group();
+    assert!(state.execution.set(execution).is_ok());
+    assert!(state.events.initialize_journal(journal_quota));
+}
+
 /// Bound on this connection's own direct-reply queue (`Attach` snapshots,
 /// per-request errors, resize/key/mouse acks). A slow or stalled client
 /// still gets backpressured -- `handlers::send_direct` awaits capacity --
@@ -1871,6 +1880,7 @@ mod tests {
             agent_debug_menu_enabled: false,
             progress_monitor_enabled: true,
         }));
+        initialize_fixture_execution(&state);
         let (server_stream, mut client_stream) = duplex(4096);
         let (broadcast_tx, broadcast_rx) = broadcast::channel(1);
         let (direct_tx, direct_rx) = DirectEventSender::channel(8);
@@ -1990,7 +2000,9 @@ mod tests {
         assert!(
             normalize_broadcast_terminal_replay(replay.clone(), &delivered, Some(&state))
                 .await
-                .is_err()
+                .expect("a closed pane needs no recovery")
+                .is_none(),
+            "a stale broadcast replay must not reach a parser after pane closure"
         );
         let normalized = normalize_broadcast_terminal_replay(replay.clone(), &delivered, None)
             .await
@@ -2023,6 +2035,7 @@ mod tests {
             agent_debug_menu_enabled: false,
             progress_monitor_enabled: true,
         }));
+        initialize_fixture_execution(&state);
         let group_id = state
             .tree
             .write()
@@ -2037,6 +2050,7 @@ mod tests {
             !handlers::handle_request(
                 &state,
                 ClientRequest::NewPane {
+                    request_id: 0,
                     parent_group: group_id,
                     kind: ilium_ipc::NewPaneKind::Command(
                         "printf 'writer-prefix\\n'; read phase; printf 'writer-tail\\n'; read hold"
@@ -2360,6 +2374,7 @@ mod text_trigger_writer_tests {
             agent_debug_menu_enabled: false,
             progress_monitor_enabled: false,
         }));
+        initialize_fixture_execution(&state);
         (state, Task(sound_task))
     }
     async fn accept(state: &ServerState, message: &str, revision: u64) {
@@ -2634,6 +2649,7 @@ mod text_trigger_ordering_regressions {
             agent_debug_menu_enabled: false,
             progress_monitor_enabled: true,
         }));
+        initialize_fixture_execution(&state);
         let newer = TextTriggerSettings {
             triggers: vec![TextTrigger {
                 id: "retained-newer-rule".to_owned(),

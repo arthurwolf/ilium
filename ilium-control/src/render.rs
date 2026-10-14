@@ -288,7 +288,13 @@ mod tests {
         let value = json!({"a": 1, "list": [{"x": "y", "n": null}, 2], "empty": [], "q k": "yes"});
         let text = yaml(&value);
         assert!(text.contains("a: 1\n"));
-        assert!(text.contains("list:\n  - n: null\n    x: \"y\"\n  - 2\n"));
+        // Key order depends on whether another crate enables serde_json's
+        // `preserve_order`, so accept either order of the item's two keys.
+        assert!(
+            text.contains("list:\n  - n: null\n    x: \"y\"\n  - 2\n")
+                || text.contains("list:\n  - x: \"y\"\n    n: null\n  - 2\n"),
+            "{text}"
+        );
         assert!(text.contains("empty: []\n"));
         assert!(text.contains("\"q k\": \"yes\"\n"));
     }

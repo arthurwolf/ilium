@@ -329,6 +329,57 @@ mod tests {
     use super::*;
 
     #[test]
+    fn frames_reserve_a_rule_row_under_the_toolbar_only_when_enabled() {
+        let viewport =
+            allocate_viewports(Rect::new(0, 0, 40, 20), SplitOrientation::Vertical, &ids(1))[0];
+        let plain = viewport.with_agent_toolbar_reserved(false);
+        let framed = viewport.with_agent_toolbar_reserved(true);
+        assert_eq!(plain.toolbar_rule, None);
+        let rule = framed.toolbar_rule.expect("framed toolbar has a rule");
+        assert_eq!(rule.y, framed.toolbar_area.unwrap().y + 1);
+        assert_eq!(rule.x, viewport.outer_area.x);
+        assert_eq!(rule.width, viewport.outer_area.width);
+        assert_eq!(framed.content_area.height + 1, plain.content_area.height);
+        assert_eq!(framed.content_area.y, rule.y + 1);
+    }
+
+    #[test]
+    fn frames_drop_the_toolbar_rule_before_the_terminal_row() {
+        let viewport =
+            allocate_viewports(Rect::new(0, 0, 40, 4), SplitOrientation::Vertical, &ids(1))[0];
+        let tiny = PaneViewport {
+            content_area: Rect::new(
+                viewport.content_area.x,
+                viewport.content_area.y,
+                viewport.content_area.width,
+                2,
+            ),
+            ..viewport
+        };
+        let framed = tiny.with_agent_toolbar_reserved(true);
+        assert_eq!(framed.toolbar_rule, None);
+        assert_eq!(framed.content_area.height, 1);
+    }
+
+    #[test]
+    fn frames_reserve_prompt_and_progress_rules_below_their_sections() {
+        let viewport =
+            allocate_viewports(Rect::new(0, 0, 40, 24), SplitOrientation::Vertical, &ids(1))[0];
+        let plain = viewport.with_last_prompt_reserved(3, 0, false);
+        let framed = viewport.with_last_prompt_reserved(3, 0, true);
+        assert_eq!(plain.last_prompt_bottom_rule, None);
+        assert!(framed.last_prompt_bottom_rule.is_some());
+        assert_eq!(framed.content_area.height + 1, plain.content_area.height);
+
+        let plain = viewport.with_progress_reserved(2, false);
+        let framed = viewport.with_progress_reserved(2, true);
+        assert_eq!(plain.progress_rule, None);
+        let rule = framed.progress_rule.expect("framed footer has a rule");
+        assert_eq!(framed.content_area.height + 1, plain.content_area.height);
+        assert!(rule.y >= framed.content_area.bottom());
+    }
+
+    #[test]
     fn agent_toolbar_reservation_shrinks_content_from_the_top() {
         let viewports =
             allocate_viewports(Rect::new(0, 0, 40, 20), SplitOrientation::Vertical, &ids(1));

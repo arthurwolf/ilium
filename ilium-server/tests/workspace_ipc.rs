@@ -1513,6 +1513,8 @@ async fn isolated_server_creates_attaches_and_removes_only_owned_worktree() {
                 reason.contains("process directory probe is unavailable")
                     || (cfg!(not(target_os = "linux"))
                         && reason.contains("worktree process inspection requires Linux procfs"))
+                    || (reason.contains("cannot inspect cwd of process")
+                        && reason.contains("Permission denied"))
             }),
             "{removed:?}"
         );
@@ -1810,6 +1812,7 @@ async fn retained_worktree_with_an_open_editor_cannot_be_pruned() {
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: ilium_ipc::NewPaneKind::Editor(path.join(".local.env")),
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,

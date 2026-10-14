@@ -45,6 +45,7 @@ pub(crate) async fn record_start_failure(state: &Arc<ServerState>, pane_id: Node
             _ => return,
         }
     };
+    state.record_blocking_error(Some(pane_id), "launch", reason);
     let mut draft = AgentDebugEventDraft::information(
         AgentDebugEventKind::Error,
         "Pane could not start from the session snapshot; kept for retry",
@@ -143,6 +144,7 @@ pub(crate) async fn retry_unrestored_panes(state: &Arc<ServerState>) -> bool {
     for (pane_id, kind, progress_monitors, size) in pending {
         match crate::start_snapshot_pane(state, pane_id, kind).await {
             SnapshotPaneStart::Started { missing_workspace } => {
+                state.clear_blocking_error(Some(pane_id), "launch");
                 started.push(pane_id);
                 apply_requested_size(state, pane_id, size).await;
                 restore_progress_monitors(state, pane_id, progress_monitors, missing_workspace)
@@ -176,7 +178,7 @@ pub(crate) async fn retry_unrestored_panes(state: &Arc<ServerState>) -> bool {
             .map(|pane_id| pane_id.0.to_string())
             .collect::<Vec<_>>()
             .join(", ");
-        state.broadcast(ilium_ipc::ServerEvent::Error {
+        state.events.publish(ilium_ipc::ServerEvent::Error {
             message: format!("Restored previously failed panes {names}."),
         });
         crate::ipc::handlers::broadcast_and_persist(state).await;

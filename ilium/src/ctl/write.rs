@@ -222,7 +222,7 @@ async fn new_pane_on(
     let operation = Operation::NewPane {
         parent,
         launch,
-        cwd: args.cwd.clone(),
+        cwd: args.workdir.clone(),
         keep_open: args.keep_open,
     };
     let details = link.apply(&operation).await?;

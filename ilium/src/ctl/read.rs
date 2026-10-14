@@ -160,8 +160,11 @@ async fn wait(
                 shape: Shape::Generic,
             });
         };
-        let state = detail["status"]["state"]
+        // Agents report a turn state; other panes only have a kind.
+        let status = &detail["status"];
+        let state = status["state"]
             .as_str()
+            .or_else(|| status["kind"].as_str())
             .unwrap_or_default()
             .to_owned();
         if wanted.contains(&state) {

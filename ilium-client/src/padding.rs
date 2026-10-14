@@ -45,7 +45,7 @@ pub enum PaddingMode {
 }
 
 impl PaddingMode {
-    pub const ALL: [Self; 3] = [Self::Disabled, Self::Enabled, Self::WidthDependent];
+    pub const ALL: [Self; 3] = [Self::Disabled, Self::WidthDependent, Self::Enabled];
 
     pub const fn label(self) -> &'static str {
         match self {

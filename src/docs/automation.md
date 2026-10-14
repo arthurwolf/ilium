@@ -544,6 +544,10 @@ The request waits until the agent's prompt is ready, then submits the prompt, so
 
 ---
 
+### Remote control routes
+
+Beyond `/create_agent`, the API serves `/v1/*`: read the tree, a project or a pane, and apply any operation `ilium ctl` offers. See [`ilium ctl`](cli-reference.md#ilium-ctl) for the commands; the routes mirror them one to one (`GET /v1/tree`, `GET /v1/panes/{id}`, `POST /v1/ops`, `POST /v1/panes/{id}/input`, ...). `GET /v1/guide` returns the essentials.
+
 ## Reset forecasts
 
 The status bar can show when the providers' public, discretionary usage resets are announced. These come from public announcement feeds, not from your account.

@@ -254,7 +254,7 @@ pub(crate) struct NewPaneArgs {
     pub(crate) parent: Option<u64>,
     /// Start the process in this absolute directory.
     #[arg(long)]
-    pub(crate) cwd: Option<PathBuf>,
+    pub(crate) workdir: Option<PathBuf>,
     /// Start a built-in agent: claude, codex or agy.
     #[arg(long)]
     pub(crate) agent: Option<String>,
@@ -334,5 +334,121 @@ pub(crate) fn offline(command: &CtlCommand, format: Format) -> Result<Option<Str
             )))
         }
         _ => Ok(None),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::*;
+
+    /// Parses `ilium <args>` through the real top-level command.
+    fn parse(arguments: &[&str]) -> Result<crate::Cli, clap::Error> {
+        let mut full = vec!["ilium"];
+        full.extend_from_slice(arguments);
+        crate::Cli::try_parse_from(full)
+    }
+
+    fn ctl_command(arguments: &[&str]) -> CtlCommand {
+        match parse(arguments).expect("arguments parse").command {
+            Some(crate::Command::Ctl(args)) => args.command,
+            _ => panic!("not a ctl command"),
+        }
+    }
+
+    #[test]
+    fn new_pane_workdir_does_not_collide_with_the_global_cwd() {
+        let command = ctl_command(&[
+            "--cwd",
+            "/tmp/project",
+            "ctl",
+            "new-pane",
+            "--parent",
+            "3",
+            "--workdir",
+            "/tmp/project/sub",
+        ]);
+        let CtlCommand::NewPane(args) = command else {
+            panic!("expected new-pane");
+        };
+        assert_eq!(args.parent, Some(3));
+        assert_eq!(args.workdir, Some(PathBuf::from("/tmp/project/sub")));
+    }
+
+    #[test]
+    fn new_pane_command_follows_the_double_dash() {
+        let CtlCommand::NewPane(args) = ctl_command(&[
+            "ctl",
+            "new-pane",
+            "--keep-open",
+            "--",
+            "sh",
+            "-c",
+            "echo hi",
+        ]) else {
+            panic!("expected new-pane");
+        };
+        assert!(args.keep_open);
+        assert_eq!(args.command, ["sh", "-c", "echo hi"]);
+    }
+
+    #[test]
+    fn worktree_needs_a_branch_and_an_agent() {
+        assert!(parse(&["ctl", "new-pane", "--worktree"]).is_err());
+        assert!(parse(&["ctl", "new-pane", "--worktree", "--branch", "b"]).is_err());
+        assert!(parse(&[
+            "ctl",
+            "new-pane",
+            "--agent",
+            "claude",
+            "--worktree",
+            "--branch",
+            "b"
+        ])
+        .is_ok());
+    }
+
+    #[test]
+    fn move_flags_conflict_and_format_validates() {
+        assert!(parse(&["ctl", "move", "4", "--up", "--down"]).is_err());
+        assert!(parse(&["ctl", "move", "4", "--index", "1"]).is_err());
+        assert!(parse(&["ctl", "move", "4", "--to", "2", "--index", "1"]).is_ok());
+        let Some(crate::Command::Ctl(args)) = parse(&["ctl", "--format", "toml", "tree"])
+            .expect("parses")
+            .command
+        else {
+            panic!("not ctl");
+        };
+        assert!(args.format().is_err());
+    }
+
+    #[test]
+    fn offline_commands_need_no_session() {
+        let output = offline(&CtlCommand::Guide { topic: None }, Format::Json)
+            .expect("guide renders")
+            .expect("guide is offline");
+        assert!(output.contains("ilium ctl"));
+        assert!(offline(
+            &CtlCommand::Guide {
+                topic: Some("nope".into())
+            },
+            Format::Json
+        )
+        .is_err());
+        let ops = offline(&CtlCommand::Ops, Format::Json)
+            .expect("ops")
+            .expect("offline");
+        assert!(ops.contains("\"op\": \"rename\""));
+        assert!(offline(
+            &CtlCommand::Tree {
+                depth: None,
+                project: None,
+                no_details: false
+            },
+            Format::Json
+        )
+        .expect("ok")
+        .is_none());
     }
 }

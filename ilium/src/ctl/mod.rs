@@ -22,6 +22,7 @@ pub(crate) use args::CtlArgs;
 use crate::CliError;
 
 /// A failure already shaped for JSONL output.
+#[derive(Debug)]
 pub(crate) struct CtlFailure {
     pub(crate) code: &'static str,
     pub(crate) message: String,

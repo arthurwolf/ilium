@@ -729,6 +729,7 @@ impl StatsAccumulator {
         mut on_progress: impl FnMut(&Self, u64, u64),
     ) -> std::io::Result<()> {
         const PROGRESS_INTERVAL_BYTES: u64 = 24 * 1024 * 1024;
+        const PASS_BYTES: u64 = 16 * 1024 * 1024;
 
         let file = ilium_platform::secure_fs::open_regular_file(path)?;
         let length = file.metadata()?.len();
@@ -737,6 +738,7 @@ impl StatsAccumulator {
             *self = Self::new(self.class.clone());
             self.attach_retention(retention);
         }
+        let pass_start = self.offset;
         let mut reader = BufReader::with_capacity(1 << 20, file);
         reader.seek(SeekFrom::Start(self.offset))?;
         let mut line = Vec::new();
@@ -754,6 +756,10 @@ impl StatsAccumulator {
             // A last line without its newline may still be mid-write. Leaving
             // it unconsumed makes the next refresh re-read it whole.
             if line.last() != Some(&b'\n') {
+                break;
+            }
+            // Resume from the last complete record, never a partial line.
+            if self.offset.saturating_sub(pass_start) + read as u64 > PASS_BYTES {
                 break;
             }
             self.offset += read as u64;
@@ -787,9 +793,14 @@ impl StatsAccumulator {
         let mut reader = BufReader::with_capacity(1 << 20, file);
         reader.seek(SeekFrom::Start(offset))?;
         let mut line = Vec::new();
+        let pass_start = offset;
+        const PASS_BYTES: u64 = 16 * 1024 * 1024;
         loop {
             let read = Self::read_bounded_line(&mut reader, &mut line)?;
             if read == 0 || line.last() != Some(&b'\n') {
+                break;
+            }
+            if offset.saturating_sub(pass_start) + read as u64 > PASS_BYTES {
                 break;
             }
             offset += read as u64;
@@ -2181,10 +2192,10 @@ mod tests {
 
         let mut accumulator = StatsAccumulator::new(AgentClass::Codex);
         accumulator.ingest_file(&path, |_, _, _| {}).unwrap();
-        assert_eq!(accumulator.offset(), PASS_BYTES);
+        assert_eq!(accumulator.offset(), PASS_BYTES / 3 * 3);
 
         accumulator.ingest_file(&path, |_, _, _| {}).unwrap();
-        let expected_offset = 2 * PASS_BYTES;
+        let expected_offset = std::fs::metadata(&path).unwrap().len();
         assert_eq!(accumulator.offset(), expected_offset);
     }
 
@@ -2206,10 +2217,13 @@ mod tests {
 
         let mut accumulator = StatsAccumulator::new(AgentClass::Claude);
         accumulator.ingest_extra_file(&path).unwrap();
-        assert_eq!(accumulator.extra_offsets.get(&path), Some(&PASS_BYTES));
+        assert_eq!(
+            accumulator.extra_offsets.get(&path),
+            Some(&(PASS_BYTES / 3 * 3))
+        );
 
         accumulator.ingest_extra_file(&path).unwrap();
-        let expected_offset = 2 * PASS_BYTES;
+        let expected_offset = std::fs::metadata(&path).unwrap().len();
         assert_eq!(accumulator.extra_offsets.get(&path), Some(&expected_offset));
     }
 

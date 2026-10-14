@@ -162,11 +162,15 @@ mod tests {
         // Width-dependent with the default 80-column test screen stays
         // inactive, so these edits never publish nonzero tree padding.
         app.padding_set_mode(PaddingMode::WidthDependent);
+        app.settle_filesystem_for_test();
         assert_eq!(app.padding_set_threshold(150), Ok(()));
+        app.settle_filesystem_for_test();
         assert!(app.padding_set_threshold(10).is_err());
         assert_eq!(app.padding_settings.width_threshold, 150);
         app.padding_set_linked(PaddingPanel::Tree, false);
+        app.settle_filesystem_for_test();
         app.padding_set_side(PaddingPanel::Tree, PaddingSide::Top, 3);
+        app.settle_filesystem_for_test();
         app.padding_step_threshold(-1000);
         assert_eq!(app.padding_settings.width_threshold, MIN_WIDTH_THRESHOLD);
         app.settle_filesystem_for_test();

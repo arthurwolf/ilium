@@ -395,13 +395,40 @@ impl Operation {
                     },
                 }
             }
-            Self::MoveStep { node, direction } => ClientRequest::MoveNode {
-                node_id: require_existing(tree, *node)?,
-                direction: match direction {
-                    StepDirection::Up => TreeMoveDirection::Up,
-                    StepDirection::Down => TreeMoveDirection::Down,
-                },
-            },
+            Self::MoveStep { node, direction } => {
+                let node_id = require_existing(tree, *node)?;
+                // A step past either end changes nothing and could never be
+                // confirmed, so refuse it up front.
+                let siblings = tree
+                    .parent_of(node_id)
+                    .and_then(|parent| tree.children_of(parent).ok());
+                if let Some(siblings) = siblings {
+                    let index = siblings.iter().position(|id| *id == node_id);
+                    let at_edge = match direction {
+                        StepDirection::Up => index == Some(0),
+                        StepDirection::Down => {
+                            index.is_some_and(|index| index + 1 == siblings.len())
+                        }
+                    };
+                    if at_edge {
+                        return Err(OperationError::Invalid(format!(
+                            "node {node} is already the {} among its siblings",
+                            if matches!(direction, StepDirection::Up) {
+                                "first"
+                            } else {
+                                "last"
+                            }
+                        )));
+                    }
+                }
+                ClientRequest::MoveNode {
+                    node_id,
+                    direction: match direction {
+                        StepDirection::Up => TreeMoveDirection::Up,
+                        StepDirection::Down => TreeMoveDirection::Down,
+                    },
+                }
+            }
             Self::Reparent {
                 node,
                 parent,
@@ -479,6 +506,7 @@ impl Operation {
                     }
                 };
                 ClientRequest::NewPane {
+                    request_id: workspace_request_id,
                     parent_group,
                     kind,
                     working_directory: cwd
@@ -929,6 +957,7 @@ mod tests {
             parent_group,
             kind,
             working_directory,
+            ..
         } = request
         else {
             panic!("expected NewPane");
@@ -1028,6 +1057,29 @@ mod tests {
             operation.outcome(&before, &grown),
             Some(json!({"created": new_pane.0}))
         );
+    }
+
+    #[test]
+    fn move_step_past_either_end_is_refused() {
+        let (tree, _, first, second) = {
+            let mut tree = Tree::new();
+            let project = tree.add_project(PathBuf::from("/tmp/p")).unwrap();
+            let first = tree.add_group(project, "a").unwrap();
+            let second = tree.add_group(project, "b").unwrap();
+            (tree, project, first, second)
+        };
+        let up = |node: NodeId| Operation::MoveStep {
+            node: node.0,
+            direction: StepDirection::Up,
+        };
+        let down = |node: NodeId| Operation::MoveStep {
+            node: node.0,
+            direction: StepDirection::Down,
+        };
+        assert!(up(first).requests(&tree, 1).is_err());
+        assert!(down(second).requests(&tree, 1).is_err());
+        assert!(up(second).requests(&tree, 1).is_ok());
+        assert!(down(first).requests(&tree, 1).is_ok());
     }
 
     #[test]

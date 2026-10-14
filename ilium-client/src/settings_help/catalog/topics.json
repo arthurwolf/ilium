@@ -2904,6 +2904,42 @@
     ]
   },
   {
+    "id": "PAD-01",
+    "title": "Padding mode",
+    "explanation": "“Choose whether side panels keep empty cells between their border and their content: never, always, or only on wide terminals.”",
+    "specimen": "three bordered boxes side by side, Disabled, Enabled and Size dependent, with the chosen one marked ●.",
+    "states": "hover highlights a box; the chosen box is marked and bold.",
+    "motion": "static.",
+    "caveat": "padding sits inside the borders; the default is Disabled.",
+    "frames": [
+      "three bordered boxes side by side, Disabled, Enabled and Size dependent, with the chosen one marked ●."
+    ]
+  },
+  {
+    "id": "PAD-02",
+    "title": "Width threshold",
+    "explanation": "“Set the terminal width, in columns, from which Size dependent padding applies.”",
+    "specimen": "the threshold field inside the Size dependent box with « ‹ › » steppers.",
+    "states": "padding applies when the terminal is at least this wide; values from 11 up.",
+    "motion": "static.",
+    "caveat": "typed values of 10 or less are rejected and nothing changes.",
+    "frames": [
+      "the threshold field inside the Size dependent box with « ‹ › » steppers."
+    ]
+  },
+  {
+    "id": "PAD-03",
+    "title": "Padding fine-tuning",
+    "explanation": "“Open a dialog to set 0 to 3 cells of padding per side, separately for the tree and the agent, terminal, editor and board panels, with a live preview.”",
+    "specimen": "the Padding fine-tuning button under the boxes, hidden while padding is Disabled.",
+    "states": "opens a dialog with value buttons 0 to 3 and a dummy tree and agent preview.",
+    "motion": "static.",
+    "caveat": "link-all-sides hides the per-side buttons; panels can share one setting or have their own.",
+    "frames": [
+      "the Padding fine-tuning button under the boxes, hidden while padding is Disabled."
+    ]
+  },
+  {
     "id": "RCOMP-01",
     "title": "Privacy box",
     "explanation": "“Read what remote compaction sends away before you turn it on.”",
@@ -4483,6 +4519,19 @@
     "frames": [
       "Scene ‹ Hidden wheel ›\nEarly phase",
       "Scene ‹ Hidden wheel ›\nLater phase"
+    ]
+  },
+  {
+    "id": "AN-84",
+    "title": "Growth",
+    "explanation": "A fungal colony branches across the background from seeded points. Pointer movement and foreground text clear the colony locally while growth continues elsewhere.",
+    "specimen": "Scene ‹ Growth ›\nSeeded branches spread around foreground text.",
+    "states": "Scene controls adjust the colony. Shared color, dithering, speed and frame-rate controls still apply.",
+    "motion": "Branches extend over time; pointer movement clears a local region.",
+    "caveat": "The colony is decorative and never changes terminal contents, input or copy sources.",
+    "frames": [
+      "Scene ‹ Growth ›\nYoung branching colony",
+      "Scene ‹ Growth ›\nPointer clears a region beside the branches"
     ]
   },
   {

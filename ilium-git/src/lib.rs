@@ -143,17 +143,66 @@ pub async fn git_version() -> Result<GitVersion, GitError> {
     Ok(*version)
 }
 
+/// Discover a repository, requiring one to exist at the selected directory.
 pub async fn discover(directory: &Path) -> Result<Repository, GitError> {
     let version = git_version().await?;
     let directory = ilium_platform::paths::canonicalize(directory).map_err(GitError::Path)?;
-    let common_dir = single_line(
-        runner::run(
-            &directory,
-            &runner::args(&["rev-parse", "--git-common-dir"]),
-            true,
-        )
-        .await?,
-    )?;
+    let output = runner::run(
+        &directory,
+        &runner::args(&["rev-parse", "--git-common-dir"]),
+        true,
+    )
+    .await?;
+    finish_discovery(directory, version, output).await
+}
+
+/// Use Git's discovery rules, allowing an ordinary directory without a
+/// repository. Only the initial discovery query may establish absence; later
+/// failures still indicate an incomplete or concurrently changed repository.
+pub async fn discover_optional(directory: &Path) -> Result<Option<Repository>, GitError> {
+    let version = git_version().await?;
+    let directory = ilium_platform::paths::canonicalize(directory).map_err(GitError::Path)?;
+    let output = match runner::run(
+        &directory,
+        &runner::args(&["rev-parse", "--git-common-dir"]),
+        true,
+    )
+    .await
+    {
+        Ok(output) => output,
+        Err(error) if initial_repository_absent(&error) => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    finish_discovery(directory, version, output).await.map(Some)
+}
+
+fn initial_repository_absent(error: &GitError) -> bool {
+    let GitError::Command {
+        exit: Some(128),
+        stderr,
+    } = error
+    else {
+        return false;
+    };
+    if stderr == "fatal: not a git repository (or any of the parent directories): .git" {
+        return true;
+    }
+    let Some((location, boundary)) = stderr.split_once('\n') else {
+        return false;
+    };
+    boundary == "Stopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set)."
+        && location
+            .strip_prefix("fatal: not a git repository (or any parent up to mount point ")
+            .and_then(|path| path.strip_suffix(')'))
+            .is_some_and(|path| !path.is_empty() && !path.contains(['\r', '\n']))
+}
+
+async fn finish_discovery(
+    directory: PathBuf,
+    version: GitVersion,
+    output: Vec<u8>,
+) -> Result<Repository, GitError> {
+    let common_dir = single_line(output)?;
     let is_bare = single_line(
         runner::run(
             &directory,
@@ -867,4 +916,49 @@ fn parse_count(value: Option<&str>, name: &str) -> Result<u32, GitError> {
 
 fn is_full_object_id(value: &str) -> bool {
     matches!(value.len(), 40 | 64) && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+#[cfg(test)]
+mod optional_discovery_tests {
+    use super::*;
+
+    #[test]
+    fn only_exact_initial_absence_diagnostics_allow_ordinary_directories() {
+        let ordinary = "fatal: not a git repository (or any of the parent directories): .git";
+        let mount = "fatal: not a git repository (or any parent up to mount point /)\nStopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).";
+        for stderr in [ordinary, mount] {
+            assert!(initial_repository_absent(&GitError::Command {
+                exit: Some(128),
+                stderr: stderr.into()
+            }));
+            assert!(!initial_repository_absent(&GitError::Command {
+                exit: Some(1),
+                stderr: stderr.into()
+            }));
+            assert!(!initial_repository_absent(&GitError::Command {
+                exit: None,
+                stderr: stderr.into()
+            }));
+        }
+        for stderr in [
+            "fatal: invalid gitfile format: /project/.git".to_string(),
+            "fatal: not a git repository: /project/.git".to_string(),
+            "fatal: detected dubious ownership in repository at '/project'".to_string(),
+            "fatal: cannot open /project/.git: Permission denied".to_string(),
+            format!("warning: inaccessible parent\n{ordinary}"),
+            format!("{mount}\nfatal: another failure"),
+            mount.replace("mount point /)", "mount point )"),
+        ] {
+            assert!(!initial_repository_absent(&GitError::Command {
+                exit: Some(128),
+                stderr
+            }));
+        }
+        assert!(!initial_repository_absent(&GitError::Timeout(
+            Duration::from_secs(1)
+        )));
+        assert!(!initial_repository_absent(&GitError::Path(
+            std::io::Error::from(std::io::ErrorKind::PermissionDenied)
+        )));
+    }
 }

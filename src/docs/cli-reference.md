@@ -93,6 +93,7 @@ ilium --reset-session new-session review
 | `ilium voice say <sentence>...` | Type sentences into the live voice session. | JSONL |
 | `ilium panes [selection]` | List panes across every running session. | JSONL |
 | `ilium broadcast [selection] <message>...` | Send a message to every selected agent. | JSONL |
+| `ilium ctl <command>` | Full remote control: read the tree, create, move, rename, close and drive panes. | JSON, YAML, Markdown or JSONL |
 | `ilium recap [selection]` | Short and long factual recaps of selected agent and shell panes. | JSONL or Markdown |
 
 ## ilium (attach)
@@ -609,6 +610,32 @@ JSONL, one object per line:
 `pane_id` is a string here. A `long` value is `null` when `--length short` was given. Markdown output prints one section per pane with the same facts.
 
 Exit status is `0` when the run finished, including with failed or stale panes; read the `summary` and `warning` records for per-pane outcomes. Exit `2` means an invalid selection, and exit `1` means the configuration could not be read.
+
+## ilium ctl
+
+`ilium ctl` is the full remote-control surface for agents and scripts. It reads the live tree and changes it: anything the interface does to panes, projects and groups has a command. Start with `ilium ctl guide`, which prints the essentials as example commands; `ilium ctl guide topics` lists deeper topics (reading, creating, controlling, arranging, http) and `ilium ctl ops` prints one JSON example of every operation.
+
+Global options: `--session NAME` (session of the `--cwd` project), `--socket PATH` (one live session, see `ilium ctl sessions`), `--format json|jsonl|yaml|markdown` for reads. Inside an Ilium pane the pane's own session is the default. Nodes are addressed by numeric id; projects also by absolute path, directory name or display name when unambiguous.
+
+| Command | What it does |
+| --- | --- |
+| `ctl tree [--depth N] [--project P] [--no-details]` | The whole session. |
+| `ctl project P` / `ctl node ID` | One project or node and its subtree. |
+| `ctl pane ID [--screen] [--lines N]` | Everything known about one pane, optionally with its screen text. |
+| `ctl find [--agent A] [--state S] [--kind K] [--project P] [--name-contains T]` | Flat list of matching panes. |
+| `ctl screen ID [--lines N]` | Current screen text of a terminal pane. |
+| `ctl wait ID [--state idle,done] [--timeout S]` | Block until an agent reaches a state or the pane closes. |
+| `ctl whoami`, `ctl sessions` | The calling pane; live sessions. |
+| `ctl new-pane [--project P \| --parent ID] [--workdir DIR] [--agent claude\|codex\|agy [--prompt T]] [--worktree --branch B [--base REF]] [--editor FILE] [--keep-open] [-- CMD]` | Create a shell, command, editor or agent pane; a worktree pane creates the Git worktree first. |
+| `ctl new-project DIR`, `new-group NAME`, `new-folder DIR`, `change-folder P DIR` | Create and re-point containers. |
+| `ctl rename ID TITLE`, `close ID [--worktree keep\|remove\|remove-and-branch]`, `move ID (--up \| --down \| --to PARENT [--index N])` | Rename, close and arrange. |
+| `ctl send ID TEXT [--no-enter]`, `keys ID KEY...`, `schedule ID --in S TEXT`, `queue ID TEXT [--times N \| --forever]`, `queue-clear ID`, `terminate ID` | Drive a pane. |
+| `ctl bookmark ID [--off]`, `expand ID`, `collapse ID`, `lock-closed ID [--off]` | Sidebar state. |
+| `ctl restructure PLAN.json [--project P]`, `ctl revert-restructure [--project P]` | Apply or undo a restructure plan (planning stays in the interface). |
+| `ctl kill-session` | End the session. |
+| `ctl op JSON` (or `-` for standard input) | Any operation as JSON, same body as `POST /v1/ops`. |
+
+Reads print one document in the chosen format. Mutations print one JSONL record: `{"type":"result","ok":true,"op":...}` with the ids involved, or `{"type":"error","code":...,"message":...}`. A mutation succeeds only after the server's tree shows the change. Exit status: 0 success, 2 bad arguments or selector, 3 rejected or not confirmed, 4 no reachable session. Reads never start a server; `new-pane` starts the project's session when none runs.
 
 ## Environment variables
 
