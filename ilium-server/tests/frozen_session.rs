@@ -131,12 +131,12 @@ async fn create_detected_claude_pane(client: &mut SessionStream) -> NodeId {
     .expect("Claude fixture is detected with its requested session ID")
 }
 
-/// Writes the transcript Claude would keep for a session started in `project_cwd`.
+/// Writes the transcript Claude would keep for a session started in `cwd`.
 /// Detection only accepts a session whose transcript names the pane's project,
 /// so a worktree pane needs its own transcript under the worktree's slug.
-fn write_verified_claude_transcript(server: &TestServer, project_cwd: &Path, session_id: &str) {
-    let resolved_cwd = ilium_platform::paths::canonicalize(project_cwd)
-        .unwrap_or_else(|_| project_cwd.to_path_buf());
+fn write_verified_claude_transcript(server: &TestServer, session_id: &str, cwd: &Path) {
+    let resolved_cwd = ilium_platform::paths::canonicalize(cwd)
+        .unwrap_or_else(|_| cwd.to_path_buf());
     let slug: String = resolved_cwd
         .to_string_lossy()
         .chars()
@@ -155,7 +155,7 @@ fn write_verified_claude_transcript(server: &TestServer, project_cwd: &Path, ses
         serde_json::json!({
             "type": "user",
             "sessionId": session_id,
-            "cwd": project_cwd,
+            "cwd": cwd,
             "message": {"content": "integration test prompt"}
         })
         .to_string()
@@ -248,7 +248,7 @@ async fn unfreeze_restarts_the_saved_provider_session_and_recovers_its_identity(
         auto_answer_interstitial_prompts: true,
     };
     let mut server = TestServer::start_with_detection_config(session_name, detection_config).await;
-    write_verified_claude_transcript(&server, &server.project_cwd, SESSION_ID);
+    write_verified_claude_transcript(&server, SESSION_ID, &server.project_cwd);
     let mut client = attach(&server, session_name).await;
     let frozen_pane_id = create_detected_claude_pane(&mut client).await;
 
@@ -383,8 +383,11 @@ async fn unfreeze_preserves_worktree_ownership() {
         }
         _ => unreachable!("event predicate accepts only workspace results"),
     };
+    // Resumed identity is independently verified against the provider's
+    // transcript in this worktree; argv alone is not proof of session custody.
+    write_verified_claude_transcript(&server, SESSION_ID, &worktree_root);
 
-    write_verified_claude_transcript(&server, &worktree_root, SESSION_ID);
+    write_verified_claude_transcript(&server, SESSION_ID, &worktree_root);
     write_frame(
         &mut client,
         &ClientRequest::ReplacePaneWithCommand {

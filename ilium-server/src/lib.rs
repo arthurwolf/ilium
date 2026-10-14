@@ -28,6 +28,7 @@ mod execution;
 mod foreground_observation;
 mod git_status;
 mod http_api;
+mod http_control;
 mod initial_prompt;
 mod ipc;
 mod lifecycle_log;

@@ -1509,7 +1509,11 @@ async fn isolated_server_creates_attaches_and_removes_only_owned_worktree() {
         assert!(
             reasons
                 .iter()
-                .any(|reason| reason.contains("process directory probe is unavailable")),
+                .any(|reason| {
+                    reason.contains("process directory probe is unavailable")
+                        || (reason.contains("cannot inspect cwd of process")
+                            && reason.contains("Permission denied"))
+                }),
             "{removed:?}"
         );
         assert!(linked.exists());

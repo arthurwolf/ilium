@@ -747,6 +747,7 @@ impl AnimationRow {
             Self::Scene(AnimationKind::DelayedReflection) => "AN-81".to_owned(),
             Self::Scene(AnimationKind::AlmostTouching) => "AN-82".to_owned(),
             Self::Scene(AnimationKind::HiddenWheel) => "AN-83".to_owned(),
+            Self::Scene(AnimationKind::Growth) => "AN-84".to_owned(),
             Self::Scene(kind) => {
                 let index = AnimationKind::ALL
                     .iter()

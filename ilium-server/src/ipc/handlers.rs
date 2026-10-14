@@ -111,6 +111,34 @@ pub async fn handle_request(
     direct_tx: &DirectEventSender,
 ) -> bool {
     match request {
+        ClientRequest::GetPaneRecapScreen { pane_id } => {
+            let captured = {
+                let panes = state.panes.read().await;
+                match panes.get(&pane_id) {
+                    Some(PaneResource::Terminal(runtime)) => Some((
+                        runtime.session.input_handle(),
+                        runtime.session.current_screen_reader(),
+                    )),
+                    _ => None,
+                }
+            };
+            let result = match captured {
+                None => Err("terminal pane unavailable".to_owned()),
+                Some((input, reader)) => {
+                    let result = reader
+                        .try_text_with_limit(64 * 1024)
+                        .unwrap_or(Err("current terminal screen busy"))
+                        .map_err(str::to_owned);
+                    if pane::terminal_reader_is_current(state, pane_id, &input).await {
+                        result
+                    } else {
+                        Err("terminal pane replaced during evidence capture".to_owned())
+                    }
+                }
+            };
+            send_direct(direct_tx, ServerEvent::PaneRecapScreen { pane_id, result }).await;
+            false
+        }
         ClientRequest::Attach { session } => {
             handle_attach(state, &session, direct_tx, true).await;
             false
@@ -4421,15 +4449,20 @@ async fn handle_new_pane(
     // Resolve the live-terminal policy before creating the tree node. The
     // eventual node and its actual launch cwd must appear in one tree write,
     // even if another request snapshots the session while spawning awaits.
-    let cwd_candidate = candidate_new_pane_working_directory(state, working_directory).await;
-    if matches!(working_directory, NewPaneWorkingDirectory::WorkspacePane(_))
-        && cwd_candidate.is_none()
+    let cwd_candidate = candidate_new_pane_working_directory(state, &working_directory).await;
+    if matches!(
+        working_directory,
+        NewPaneWorkingDirectory::WorkspacePane(_) | NewPaneWorkingDirectory::Directory(_)
+    ) && cwd_candidate.is_none()
     {
-        send_direct_error(
-            direct_tx,
-            "worktree pane or its launch directory is unavailable".to_string(),
-        )
-        .await;
+        let message = match &working_directory {
+            NewPaneWorkingDirectory::Directory(path) => format!(
+                "working directory {} is not an existing directory",
+                path.display()
+            ),
+            _ => "worktree pane or its launch directory is unavailable".to_string(),
+        };
+        send_direct_error(direct_tx, message).await;
         return;
     }
 
@@ -5185,7 +5218,7 @@ pub(crate) async fn create_agent_with_prompt(
 /// tree write that inserts the pane, so its persisted cwd is never stale.
 async fn candidate_new_pane_working_directory(
     state: &ServerState,
-    working_directory: NewPaneWorkingDirectory,
+    working_directory: &NewPaneWorkingDirectory,
 ) -> Option<std::path::PathBuf> {
     match working_directory {
         NewPaneWorkingDirectory::ProjectRoot => None,
@@ -5198,7 +5231,16 @@ async fn candidate_new_pane_working_directory(
         NewPaneWorkingDirectory::LastUsed => {
             state.last_terminal_working_directory.lock().await.clone()
         }
+        NewPaneWorkingDirectory::Directory(path) => {
+            let path = path.clone();
+            tokio::task::spawn_blocking(move || std::fs::canonicalize(path))
+                .await
+                .ok()?
+                .ok()
+                .filter(|resolved| resolved.is_dir())
+        }
         NewPaneWorkingDirectory::WorkspacePane(pane_id) => {
+            let pane_id = *pane_id;
             let tree = state.tree.read().await;
             tree.pane_workspace(pane_id)
                 .and_then(|workspace| {
@@ -8788,7 +8830,7 @@ mod tests {
             runtime.detection_schedule.client_focused = true;
         }
         let current =
-            candidate_new_pane_working_directory(&state, NewPaneWorkingDirectory::FocusedTerminal)
+            candidate_new_pane_working_directory(&state, &NewPaneWorkingDirectory::FocusedTerminal)
                 .await;
         assert_eq!(current.as_deref(), Some(directory.path()));
         if let Some(PaneResource::Terminal(mut runtime)) =
@@ -8805,6 +8847,11 @@ mod tests {
     {
         let directory = tempfile::tempdir().expect("isolated title directory");
         let state = snapshot_io_handler_state(&directory);
+        let execution =
+            crate::execution::ServerExecution::start().expect("title evidence I/O bank");
+        let journal_quota = execution.quota_group();
+        assert!(state.execution.set(execution).is_ok());
+        assert!(state.events.initialize_journal(journal_quota));
         let pane_id = shell_title_fixture(&state, &directory).await;
         let input = {
             let mut tree = state.tree.write().await;

@@ -190,6 +190,9 @@ async fn closed_writer_preserves_original_head_tail_and_guards() {
         "cleanup wrapping released an unpublished original's admission"
     );
     assert!(typed.to_string().contains("4 original requests retained"));
+    assert!(typed
+        .to_string()
+        .contains("original terminal cleanup failure"));
     assert!(std::error::Error::source(typed)
         .expect("previous cleanup error remains observable")
         .to_string()

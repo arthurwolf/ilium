@@ -41,7 +41,7 @@ fn pty_quota_limits() -> QuotaLimits {
 // for backpressured PTY/direct replies. These are declared allocation limits,
 // not an RSS estimate. They are shared across connections, never per client.
 const ADMISSION_WAIT_REPORT: std::time::Duration = std::time::Duration::from_secs(2);
-const GENERAL_INPUT_BYTES: usize = 512 * MIB;
+pub(crate) const GENERAL_INPUT_BYTES: usize = 512 * MIB;
 pub(crate) const GENERAL_RESULT_BYTES: usize = 128 * MIB;
 const PROCESS_INPUT_BYTES: usize = GENERAL_INPUT_BYTES + 4 * 128 * MIB + 2 * 128 * MIB;
 const PROCESS_RESULT_BYTES: usize = GENERAL_RESULT_BYTES + 4 * 192 * MIB + 2 * 192 * MIB;

@@ -350,6 +350,7 @@ impl App {
             }
         };
         self.record_pending_pane_focus(parent_group, PaneContentKind::Board, name);
+        self.begin_pending_toolbar_action(crate::tree_ui::TreeToolbarAction::Board);
         self.publish_terminal_request_after_baseline(request);
         true
     }

@@ -2453,9 +2453,9 @@ mod tests {
         ticket
             .join_until(Instant::now() + Duration::from_secs(3))
             .unwrap();
-        // The join observer owns platform wake state conservatively. Release
-        // that completed observer before expecting its physical debit back.
-        assert_eq!(quota.snapshot().worker_threads, 1);
+        // A successful join observes physical retirement and releases thread
+        // admission even while this lightweight ticket remains alive.
+        assert_eq!(quota.snapshot().worker_threads, 0);
         drop(ticket);
         assert_eq!(quota.snapshot().worker_threads, 0);
         assert_eq!(quota.snapshot().worker_bytes, 0);
@@ -2484,9 +2484,8 @@ mod tests {
         ticket
             .join_until(Instant::now() + Duration::from_secs(3))
             .unwrap();
-        // The join observer owns platform wake state conservatively. Release
-        // that completed observer before expecting its physical debit back.
-        assert_eq!(quota.snapshot().worker_threads, 1);
+        // Frame storage outlives engine retirement; thread admission does not.
+        assert_eq!(quota.snapshot().worker_threads, 0);
         drop(ticket);
         assert_eq!(quota.snapshot().worker_threads, 0);
         assert_eq!(quota.snapshot().worker_bytes, MAX_FRAME_BYTES);
@@ -2701,8 +2700,11 @@ mod tests {
         release.send(()).unwrap();
         let deadline = Instant::now() + Duration::from_secs(3);
         loop {
-            let status = service.try_status().expect("worker status");
-            if status.stale > 0 && service.shared.configurations.load(Ordering::Acquire) == 0 {
+            // Status collection is deliberately nonblocking. The actor may
+            // hold its mailbox while consuming the newly released pauses.
+            if service.try_status().is_some_and(|status| {
+                status.stale > 0 && service.shared.configurations.load(Ordering::Acquire) == 0
+            }) {
                 break;
             }
             assert!(Instant::now() < deadline, "pause receipts did not drain");

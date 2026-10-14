@@ -467,6 +467,8 @@ pub enum SettingsTab {
     TextTriggers,
     Icons,
     Appearance,
+    /// Panel padding modes and fine-tuning.
+    Padding,
     Animations,
     Terminal,
     Editor,
@@ -647,8 +649,9 @@ impl InferenceTestState {
 
 impl SettingsTab {
     /// Every tab, in the order the tab list renders them.
-    pub const ALL: [SettingsTab; 25] = [
+    pub const ALL: [SettingsTab; 26] = [
         Self::Appearance,
+        Self::Padding,
         Self::Icons,
         Self::AgentMonitoring,
         Self::Cost,
@@ -685,6 +688,7 @@ impl SettingsTab {
             Self::TextTriggers => "Text Triggers",
             Self::Icons => "Icons",
             Self::Appearance => "User Interface",
+            Self::Padding => "Padding",
             Self::Animations => "Animations",
             Self::Terminal => "Terminal",
             Self::Editor => "Editor",
@@ -748,6 +752,7 @@ pub enum AppearanceRow {
     ContextMenuIcons,
     AgentToolbar,
     ShowToolbarLabels,
+    SectionFrames,
     LastPrompt,
     LastPromptMaxLines,
     ProgressMonitor,
@@ -765,7 +770,7 @@ pub enum AppearanceRow {
 }
 
 impl AppearanceRow {
-    const GENERAL: [AppearanceRow; 24] = [
+    const GENERAL: [AppearanceRow; 25] = [
         Self::TreeOrder,
         Self::ProjectSeparators,
         Self::TreeRowManagementControls,
@@ -779,6 +784,7 @@ impl AppearanceRow {
         Self::ContextMenuIcons,
         Self::AgentToolbar,
         Self::ShowToolbarLabels,
+        Self::SectionFrames,
         Self::LastPrompt,
         Self::LastPromptMaxLines,
         Self::TerminalTextSelection,
@@ -1120,6 +1126,8 @@ pub struct SettingsState {
     /// keyboard. It is separate from `selected_row`: a picker may be opened
     /// from a scrolled table row without changing table navigation.
     pub keyboard_picker: Option<Action>,
+    /// Hover, threshold editing and the fine-tuning dialog of the Padding tab.
+    pub padding: crate::padding_ui::PaddingUiState,
     /// Horizontal chip cursor in the selected Triggers event. Zero is None;
     /// later positions follow that event's available action registry.
     pub trigger_action_cursor: usize,
@@ -1246,6 +1254,7 @@ impl SettingsState {
             icons_preview_real: false,
             icon_picker: None,
             keyboard_picker: None,
+            padding: crate::padding_ui::PaddingUiState::default(),
             trigger_action_cursor: 0,
         }
     }
@@ -2173,6 +2182,8 @@ pub struct App {
     pub keybindings: Vec<KeyBinding>,
     /// Live card-preview settings shared by every board pane in this client.
     pub kanban_board_settings: KanbanBoardSettings,
+    /// Panel padding (see [`crate::padding`]).
+    pub padding_settings: crate::padding::PaddingSettings,
     /// Live user-global sound choices and the catalogue discovered once on
     /// the shared I/O bank before the interactive loop starts.
     pub sound_settings: ilium_sound::SoundSettings,
@@ -2327,6 +2338,13 @@ pub struct App {
     pub(crate) statistics_diagnostic: Option<String>,
     pub tree_toolbar_hovered: bool,
     pub hovered_tree_toolbar_action: Option<TreeToolbarAction>,
+    /// Toolbar buttons whose click was accepted but whose server-side work
+    /// (spawning a pane, creating a worktree) has not been confirmed yet.
+    /// The button shows a spinner meanwhile so a slow creation is visible.
+    pending_toolbar_actions: Vec<(TreeToolbarAction, Instant, Option<usize>)>,
+    /// Menu actions (close, move, rename, ...) waiting for the server: label,
+    /// start, and the `tree_version` seen when the request was admitted.
+    pending_menu_actions: Vec<(&'static str, Instant, u64, Duration)>,
     /// The footer agent icon's hover or pinned worktree actions.
     pub agent_popover: Option<AgentPopover>,
     agent_popover_last_visible: bool,
@@ -2835,6 +2853,7 @@ impl App {
             keyboard_settings: KeyboardSettings::default(),
             keybindings: keymap::LEADER_BINDINGS.to_vec(),
             kanban_board_settings: KanbanBoardSettings::default(),
+            padding_settings: crate::padding::PaddingSettings::default(),
             sound_settings: ilium_sound::SoundSettings::default(),
             notification_settings: ilium_sound::NotificationSettings::default(),
             sound_discovery: ilium_sound::SoundDiscovery::default(),
@@ -2928,6 +2947,8 @@ impl App {
             statistics_diagnostic: None,
             tree_toolbar_hovered: false,
             hovered_tree_toolbar_action: None,
+            pending_toolbar_actions: Vec::new(),
+            pending_menu_actions: Vec::new(),
             agent_popover: None,
             agent_popover_last_visible: false,
             animation_hover: None,
@@ -3900,11 +3921,86 @@ impl App {
     }
 
     pub(crate) fn queue_request(&mut self, request: ClientRequest) -> bool {
+        let menu_label = Self::slow_menu_request_label(&request);
         if self.try_queue_terminal_request(request).is_err() {
             self.show_request_admission_error();
             return false;
         }
+        if let Some((label, cap)) = menu_label {
+            self.begin_pending_menu_action(label, cap);
+        }
         true
+    }
+
+    /// Requests behind menu entries that wait on the server and have no
+    /// toolbar button to spin; creation requests use the toolbar spinners.
+    pub(crate) fn slow_menu_request_label(
+        request: &ClientRequest,
+    ) -> Option<(&'static str, Duration)> {
+        // Tree-changing requests end on the next tree change; the others
+        // change no tree node, so a short cap ends them instead.
+        let tree_change = Self::PENDING_TOOLBAR_TIMEOUT;
+        let quick = Duration::from_secs(10);
+        Some(match request {
+            ClientRequest::ClosePane { .. }
+            | ClientRequest::ClosePaneWithWorkspaceDisposition { .. } => ("Closing", tree_change),
+            ClientRequest::MoveNode { .. } | ClientRequest::ReparentNode { .. } => {
+                ("Moving", tree_change)
+            }
+            ClientRequest::ReplacePaneWithCommand { .. } => ("Restarting pane", tree_change),
+            ClientRequest::ApplyRestructurePlan { .. }
+            | ClientRequest::ApplyProjectRestructurePlan { .. }
+            | ClientRequest::ApplyRecommendedProjectRestructurePlan { .. } => {
+                ("Applying restructure", tree_change)
+            }
+            ClientRequest::RevertLastRestructure
+            | ClientRequest::RevertProjectRestructure { .. } => {
+                ("Reverting restructure", tree_change)
+            }
+            ClientRequest::RenameNode { .. } => ("Renaming", tree_change),
+            ClientRequest::RemoveWorkspace { .. } => ("Removing worktree", tree_change),
+            ClientRequest::ChangeProjectFolder { .. } => ("Changing project folder", tree_change),
+            ClientRequest::PruneWorkspace { .. } => ("Cleaning worktree", quick),
+            ClientRequest::QueryWorkspaceInventory { .. } => ("Checking worktrees", quick),
+            ClientRequest::QueryWorkspaceCloseOffer { .. } => ("Checking worktree", quick),
+            ClientRequest::TerminatePaneProcess { .. } => ("Stopping process", quick),
+            ClientRequest::FreezePane { .. } => ("Freezing pane", quick),
+            ClientRequest::UnfreezePane { .. } => ("Resuming pane", quick),
+            _ => return None,
+        })
+    }
+
+    pub(crate) fn begin_pending_menu_action(&mut self, label: &'static str, cap: Duration) {
+        if self.pending_menu_actions.len() >= 16 {
+            self.pending_menu_actions.remove(0);
+        }
+        self.pending_menu_actions
+            .push((label, Instant::now(), self.tree_version, cap));
+    }
+
+    /// Status-line text for the oldest menu action still waiting after
+    /// 0.5 s; quicker actions never flash a spinner.
+    pub(crate) fn pending_menu_activity_text(&self, now: Instant) -> Option<String> {
+        let (label, started, _, _) = self.pending_menu_actions.first()?;
+        let elapsed = now.saturating_duration_since(*started);
+        if elapsed < Duration::from_millis(500) {
+            return None;
+        }
+        let frames = crate::tree_ui::SPINNER_FRAMES;
+        let frame =
+            (elapsed.as_millis() / crate::tree_ui::SPINNER_FRAME_MS) as usize % frames.len();
+        Some(format!("{} {label}…", frames[frame]))
+    }
+
+    /// Drops menu spinners once the tree changed or the wait timed out.
+    pub fn tick_pending_menu_actions(&mut self, now: Instant) -> bool {
+        let before = self.pending_menu_actions.len();
+        let version = self.tree_version;
+        self.pending_menu_actions
+            .retain(|(_, started, baseline, cap)| {
+                now.saturating_duration_since(*started) < *cap && *baseline == version
+            });
+        before != self.pending_menu_actions.len()
     }
 
     fn show_request_admission_error(&mut self) {
@@ -4447,7 +4543,11 @@ impl App {
         };
         viewports
             .into_iter()
-            .map(|viewport| {
+            .map(|mut viewport| {
+                // Padding moves every pane kind's content inside its border;
+                // the rules and borders keep the full outer width.
+                let panel = self.padding_panel_for_pane(viewport.pane_id);
+                viewport.content_area = self.padding_for(panel).inset(viewport.content_area);
                 let is_terminal = self.tree.get(viewport.pane_id).is_some_and(|node| {
                     matches!(
                         &node.kind,
@@ -4462,7 +4562,7 @@ impl App {
                 }
                 // Reserve before interaction: metadata changes only redraw these slots.
                 let viewport = if self.ui_settings.agent_toolbar_enabled {
-                    viewport.with_agent_toolbar_reserved()
+                    viewport.with_agent_toolbar_reserved(self.ui_settings.section_frames_enabled)
                 } else {
                     viewport
                 };
@@ -4483,14 +4583,26 @@ impl App {
                             .height
                             .saturating_sub(1 + minimum_progress_rows),
                     );
-                    viewport.with_last_prompt_reserved(prompt_rows)
+                    viewport.with_last_prompt_reserved(
+                        prompt_rows,
+                        // Footer rows plus its frame rule stay available.
+                        if minimum_progress_rows > 0 {
+                            minimum_progress_rows + 1
+                        } else {
+                            0
+                        },
+                        self.ui_settings.section_frames_enabled,
+                    )
                 } else {
                     viewport
                 };
                 if self.ui_settings.progress_monitor_enabled {
-                    viewport.with_progress_reserved(crate::progress_bar::reserved_height(
-                        self.ui_settings.progress_max_lines.into(),
-                    ))
+                    viewport.with_progress_reserved(
+                        crate::progress_bar::reserved_height(
+                            self.ui_settings.progress_max_lines.into(),
+                        ),
+                        self.ui_settings.section_frames_enabled,
+                    )
                 } else {
                     viewport
                 }
@@ -5454,6 +5566,7 @@ impl App {
             return;
         }
         self.layout = layout;
+        self.sync_padding();
         self.resize_displayed_panes(resize_cause);
 
         // Markdown parsing and rasterization can be materially more
@@ -5492,6 +5605,7 @@ impl App {
     /// `crate::config::load`) and again by every settings-screen control
     /// that changes a value (see `apply_and_persist_ui_settings`).
     pub fn apply_ui_settings(&mut self, ui: UiSettings) {
+        crate::theme::set_section_frames_enabled(ui.section_frames_enabled);
         let model_icons_enabled = ui.agent_tree_model_icons;
         let model_icons_were_enabled = self.ui_settings.agent_tree_model_icons;
         if model_icons_enabled != model_icons_were_enabled {
@@ -9795,6 +9909,15 @@ impl App {
         self.apply_and_persist_ui_settings(ui);
     }
 
+    /// Switches the frame rules around the toolbar, prompt banner and progress
+    /// footer. The rules occupy reserved rows, so the PTYs must be resized.
+    pub fn settings_toggle_section_frames(&mut self) {
+        let mut ui = self.ui_settings.clone();
+        ui.section_frames_enabled = !ui.section_frames_enabled;
+        self.apply_and_persist_ui_settings(ui);
+        self.resize_displayed_panes(PaneResizeCause::UserInterfaceSettings);
+    }
+
     /// Switches the last-prompt banner on or off. Toggling it on or off
     /// changes `content_area` (see `PaneViewport::with_last_prompt_reserved`)
     /// just like the toolbar's own toggle, and therefore needs an explicit
@@ -10853,6 +10976,7 @@ impl App {
             AppearanceRow::ContextMenuIcons => self.settings_toggle_context_menu_icons(),
             AppearanceRow::AgentToolbar => self.settings_toggle_agent_toolbar(),
             AppearanceRow::ShowToolbarLabels => self.settings_toggle_toolbar_labels(),
+            AppearanceRow::SectionFrames => self.settings_toggle_section_frames(),
             AppearanceRow::LastPrompt => self.settings_toggle_last_prompt(),
             AppearanceRow::LastPromptMaxLines => {
                 self.settings_adjust_last_prompt_max_lines(direction)
@@ -11130,6 +11254,17 @@ impl App {
                     Duration::from_millis(100),
                 );
             }
+        }
+
+        if !self.pending_toolbar_actions.is_empty()
+            || !self.pending_menu_actions.is_empty()
+            || self.restructure_in_progress()
+        {
+            requirements.is_active = true;
+            retain_minimum_delay(
+                &mut requirements.next_semantic_delay,
+                Duration::from_millis(90),
+            );
         }
 
         if self.smart_copy_preview.is_some() {
@@ -12697,6 +12832,113 @@ impl App {
         }
     }
 
+    /// Longest a toolbar spinner may show without a server confirmation.
+    const PENDING_TOOLBAR_TIMEOUT: Duration = Duration::from_secs(120);
+
+    pub(crate) fn begin_pending_toolbar_action(&mut self, action: TreeToolbarAction) {
+        if self.pending_toolbar_actions.len() >= 16 {
+            self.pending_toolbar_actions.remove(0);
+        }
+        // Group/project/folder creation has no pane to match a confirmation
+        // to, so the spinner ends when the mirrored tree gains a node.
+        let baseline = matches!(
+            action,
+            TreeToolbarAction::Group
+                | TreeToolbarAction::Project
+                | TreeToolbarAction::Folder
+                | TreeToolbarAction::Board
+                | TreeToolbarAction::Editor
+                | TreeToolbarAction::Split
+        )
+        .then(|| self.tree.all_ids().count());
+        self.pending_toolbar_actions
+            .push((action, Instant::now(), baseline));
+    }
+
+    /// Ends the oldest pending spinner for `action` (one click, one spinner).
+    #[cfg(test)]
+    pub(crate) fn finish_pending_toolbar_action(&mut self, action: TreeToolbarAction) {
+        if let Some(index) = self
+            .pending_toolbar_actions
+            .iter()
+            .position(|(pending, _, _)| *pending == action)
+        {
+            self.pending_toolbar_actions.remove(index);
+        }
+    }
+
+    /// Ends the oldest pending shell or agent spinner: a confirmed new
+    /// terminal pane cannot be attributed to one button more precisely.
+    fn finish_oldest_pending_terminal_toolbar_action(&mut self) {
+        if let Some(index) = self
+            .pending_toolbar_actions
+            .iter()
+            .position(|(pending, _, _)| {
+                matches!(
+                    pending,
+                    TreeToolbarAction::Shell | TreeToolbarAction::Agent(_)
+                )
+            })
+        {
+            self.pending_toolbar_actions.remove(index);
+        }
+    }
+
+    fn clear_pending_workspace_toolbar_actions(&mut self) {
+        if let Some(index) = self
+            .pending_toolbar_actions
+            .iter()
+            .position(|(pending, _, _)| matches!(pending, TreeToolbarAction::Agent(_)))
+        {
+            self.pending_toolbar_actions.remove(index);
+        }
+    }
+
+    pub(crate) fn pending_toolbar_mask(&self) -> u16 {
+        let restructure_bit = if self.restructure_in_progress() {
+            TreeToolbarAction::Restructure.pending_bit()
+        } else {
+            0
+        };
+        self.pending_toolbar_actions
+            .iter()
+            .fold(restructure_bit, |mask, (action, _, _)| {
+                mask | action.pending_bit()
+            })
+    }
+
+    /// True while any project restructure LLM job is queued, running or applying.
+    pub(crate) fn restructure_in_progress(&self) -> bool {
+        self.project_restructure_jobs.values().any(|job| {
+            matches!(
+                job.state,
+                ProjectRestructureState::Queued
+                    | ProjectRestructureState::Running
+                    | ProjectRestructureState::Applying
+            )
+        })
+    }
+
+    /// Drops spinners whose confirmation never arrived.
+    pub fn tick_pending_toolbar_actions(&mut self, now: Instant) -> bool {
+        let before = self.pending_toolbar_actions.len();
+        let node_count = self.tree.all_ids().count();
+        self.pending_toolbar_actions
+            .retain(|(_, started, baseline)| {
+                now.saturating_duration_since(*started) < Self::PENDING_TOOLBAR_TIMEOUT
+                    && baseline.is_none_or(|baseline| node_count <= baseline)
+            });
+        before != self.pending_toolbar_actions.len()
+    }
+
+    /// The toolbar button a `NewPane` command line belongs to.
+    fn toolbar_action_for_command(command_line: &str) -> TreeToolbarAction {
+        BuiltinAgentProvider::ALL
+            .into_iter()
+            .find(|provider| provider.command_line() == command_line)
+            .map_or(TreeToolbarAction::Shell, TreeToolbarAction::Agent)
+    }
+
     /// Queues a `NewPane` request for a plain shell under `parent_group`
     /// (the caller resolves that group -- see `group_for_new_node`).
     pub fn request_new_terminal(&mut self, parent_group: NodeId) -> bool {
@@ -12707,6 +12949,7 @@ impl App {
         });
         if admitted {
             self.record_pending_pane_focus(parent_group, PaneContentKind::Terminal, "shell".into());
+            self.begin_pending_toolbar_action(TreeToolbarAction::Shell);
         }
         admitted
     }
@@ -12715,6 +12958,7 @@ impl App {
     /// `claude`, `codex`, `agy`) under `parent_group`.
     pub fn request_new_command_pane(&mut self, parent_group: NodeId, command_line: String) -> bool {
         let pending_title = command_line.clone();
+        let toolbar_action = Self::toolbar_action_for_command(&command_line);
         let admitted = self.queue_request(ClientRequest::NewPane {
             parent_group,
             kind: ilium_ipc::NewPaneKind::Command(command_line),
@@ -12722,6 +12966,7 @@ impl App {
         });
         if admitted {
             self.record_pending_pane_focus(parent_group, PaneContentKind::Terminal, pending_title);
+            self.begin_pending_toolbar_action(toolbar_action);
         }
         admitted
     }
@@ -12736,6 +12981,7 @@ impl App {
         initial_input: String,
     ) -> bool {
         let pending_title = command_line.clone();
+        let toolbar_action = Self::toolbar_action_for_command(&command_line);
         let admitted = self.queue_request(ClientRequest::NewPane {
             parent_group,
             kind: ilium_ipc::NewPaneKind::CommandWithInitialInput {
@@ -12746,6 +12992,7 @@ impl App {
         });
         if admitted {
             self.record_pending_pane_focus(parent_group, PaneContentKind::Terminal, pending_title);
+            self.begin_pending_toolbar_action(toolbar_action);
         }
         admitted
     }
@@ -12789,6 +13036,7 @@ impl App {
             column,
         });
         self.record_pending_pane_focus(parent_group, PaneContentKind::Editor, basename);
+        self.begin_pending_toolbar_action(TreeToolbarAction::Editor);
         true
     }
 
@@ -13013,15 +13261,27 @@ impl App {
         } else {
             name
         };
-        self.queue_request(ClientRequest::NewGroup { parent_group, name })
+        let admitted = self.queue_request(ClientRequest::NewGroup { parent_group, name });
+        if admitted {
+            self.begin_pending_toolbar_action(TreeToolbarAction::Group);
+        }
+        admitted
     }
 
     pub fn request_new_folder(&mut self, parent_group: NodeId, path: PathBuf) -> bool {
-        self.queue_request(ClientRequest::NewFolder { parent_group, path })
+        let admitted = self.queue_request(ClientRequest::NewFolder { parent_group, path });
+        if admitted {
+            self.begin_pending_toolbar_action(TreeToolbarAction::Folder);
+        }
+        admitted
     }
 
     pub fn request_new_project(&mut self, path: PathBuf) -> bool {
-        self.queue_request(ClientRequest::NewProject { path })
+        let admitted = self.queue_request(ClientRequest::NewProject { path });
+        if admitted {
+            self.begin_pending_toolbar_action(TreeToolbarAction::Project);
+        }
+        admitted
     }
 
     pub fn request_change_project_folder(&mut self, project_id: NodeId, path: PathBuf) -> bool {
@@ -13619,6 +13879,7 @@ impl App {
         });
         if admitted {
             self.mode = Mode::Normal;
+            self.begin_pending_toolbar_action(TreeToolbarAction::Split);
         }
         admitted
     }
@@ -13662,8 +13923,14 @@ impl App {
             hover_candidate: None,
         });
         let project = self.tree.project_ancestor(target).unwrap_or(ROOT_ID);
-        let request_id = self.request_workspace_repo_facts(project);
+        let (request_id, admitted) = self.request_workspace_repo_facts(project);
         self.active_workspace_menu_query = Some((request_id, project));
+        if !admitted {
+            if let Mode::ContextMenu(menu) = &mut self.mode {
+                menu.worktree_unavailable_reason =
+                    Some("Git check was rejected because the UI is busy; reopen the menu".into());
+            }
+        }
     }
 
     pub(crate) fn next_workspace_request_id(&mut self) -> u64 {
@@ -13672,13 +13939,15 @@ impl App {
         request_id
     }
 
-    fn request_workspace_repo_facts(&mut self, project: NodeId) -> u64 {
+    /// Returns the request id and whether the request was admitted; a refused
+    /// query will never be answered, so callers must surface that.
+    fn request_workspace_repo_facts(&mut self, project: NodeId) -> (u64, bool) {
         let request_id = self.next_workspace_request_id();
-        self.queue_request(ClientRequest::QueryRepoFacts {
+        let admitted = self.queue_request(ClientRequest::QueryRepoFacts {
             request_id,
             project,
         });
-        request_id
+        (request_id, admitted)
     }
 
     /// Opens the same prompt-first form from a tree menu, footer icon, or
@@ -13710,8 +13979,15 @@ impl App {
                 mode,
                 self.git_settings.clone(),
             )));
-        let request_id = self.request_workspace_repo_facts(project);
+        let (request_id, admitted) = self.request_workspace_repo_facts(project);
         self.active_workspace_dialog_query = Some((request_id, project));
+        if !admitted {
+            if let Mode::CreateAgentWorkspace(state) = &mut self.mode {
+                state.set_create_error(
+                    "Git check was rejected because the UI is busy; close and reopen this dialog",
+                );
+            }
+        }
     }
 
     pub fn submit_create_agent_workspace(&mut self, mut state: Box<WorktreeDialogState>) {
@@ -13773,6 +14049,7 @@ impl App {
             return;
         }
         self.active_workspace_create_request_id = Some(request_id);
+        self.begin_pending_toolbar_action(TreeToolbarAction::Agent(provider));
         state.set_stage(ilium_ipc::WorkspaceCreateStage::CreatingWorktree);
         self.mode = Mode::CreateAgentWorkspace(state);
     }
@@ -13978,6 +14255,7 @@ impl App {
             return;
         }
         self.active_workspace_create_request_id = None;
+        self.clear_pending_workspace_toolbar_actions();
         self.mode = Mode::Normal;
         self.status_message = Some(format!("Agent started in worktree (pane {})", pane_id.0));
         if self.tree.get(pane_id).is_some() {
@@ -13990,6 +14268,7 @@ impl App {
             return;
         }
         self.active_workspace_create_request_id = None;
+        self.clear_pending_workspace_toolbar_actions();
         if let Mode::CreateAgentWorkspace(state) = &mut self.mode {
             state.set_create_error(error);
             state.status_retention = self.processing_event_retention.clone();
@@ -14125,8 +14404,14 @@ impl App {
         self.agent_popover_last_visible = pin;
         let parent_group = self.group_for_new_node();
         let project = self.tree.project_ancestor(parent_group).unwrap_or(ROOT_ID);
-        let request_id = self.request_workspace_repo_facts(project);
+        let (request_id, admitted) = self.request_workspace_repo_facts(project);
         self.active_workspace_popover_query = Some((request_id, project));
+        if !admitted {
+            if let Some(popover) = &mut self.agent_popover {
+                popover.unavailable_reason =
+                    Some("Git check rejected: UI is busy; move away and hover again".into());
+            }
+        }
     }
 
     pub fn update_agent_popover_pointer(&mut self, position: Position, now: Instant) {
@@ -15832,7 +16117,9 @@ impl App {
             ContextMenuAction::ToggleGroup => {
                 self.toggle_selected_tree_node();
             }
-            ContextMenuAction::NewTerminal => self.action_new_terminal(),
+            ContextMenuAction::NewTerminal => {
+                self.action_new_terminal();
+            }
             ContextMenuAction::NewAgent(provider) => {
                 self.action_new_command_pane(provider.command_line());
             }
@@ -16293,9 +16580,9 @@ impl App {
 
     /// Creates a plain shell pane under the currently targeted group and
     /// focuses the create-group/normal dialog back to `Normal`.
-    pub fn action_new_terminal(&mut self) {
+    pub fn action_new_terminal(&mut self) -> bool {
         let parent = self.group_for_new_node();
-        self.request_new_terminal(parent);
+        self.request_new_terminal(parent)
     }
 
     fn request_new_terminal_in_worktree(&mut self, pane_id: NodeId) {
@@ -16857,6 +17144,7 @@ impl App {
             return false;
         };
         self.pending_pane_focuses.remove(index);
+        self.finish_oldest_pending_terminal_toolbar_action();
         true
     }
 
@@ -24849,10 +25137,18 @@ mod tests {
                 _ => None,
             })
             .collect::<Vec<_>>();
+        // The toolbar, prompt and footer sections each add a rule row.
+        let expected_rows = 27 - 3 * u16::from(crate::theme::section_frames_enabled());
         assert_eq!(resize_requests.len(), 2);
+        assert!(
+            resize_requests
+                .iter()
+                .all(|(_, rows, _, _)| *rows == expected_rows),
+            "unexpected rows: {resize_requests:?}"
+        );
         assert!(resize_requests
             .iter()
-            .all(|(_, rows, cols, cause)| *rows == 27
+            .all(|(_, rows, cols, cause)| *rows == expected_rows
                 && *cols == (120 - crate::layout::DEFAULT_UNFOCUSED_TREE_WIDTH - 4) / 2
                 && *cause == PaneResizeCause::HostTerminal));
         assert!(!resize_requests
@@ -26695,7 +26991,11 @@ mod tests {
         assert!(!app.shows_agent_toolbar(pane_id));
         let restored = app.pane_viewport(pane_id).unwrap();
         assert_eq!(restored.toolbar_area, None);
-        assert_eq!(restored.content_area.height, shrunk_height + 1);
+        // The toolbar row and its rule row are both released.
+        assert_eq!(
+            restored.content_area.height,
+            shrunk_height + 1 + u16::from(crate::theme::section_frames_enabled())
+        );
         let resize = app
             .take_outbound_requests()
             .into_iter()
@@ -27533,7 +27833,8 @@ mod tests {
 
     #[test]
     fn settings_tabs_cycle_through_inference_and_every_existing_tab() {
-        assert_eq!(SettingsTab::Appearance.next(), SettingsTab::Icons);
+        assert_eq!(SettingsTab::Appearance.next(), SettingsTab::Padding);
+        assert_eq!(SettingsTab::Padding.next(), SettingsTab::Icons);
         assert_eq!(SettingsTab::Animations.next(), SettingsTab::Sound);
         assert_eq!(SettingsTab::Icons.next(), SettingsTab::AgentMonitoring);
         assert_eq!(SettingsTab::AgentMonitoring.next(), SettingsTab::Cost);

@@ -12,6 +12,7 @@ use ilium_core::{AgentClass, Node, NodeId, NodeKind, RestructureNode, Restructur
 use ilium_ipc::{ClientRequest, PaneTitleObservation, ServerEvent};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -27,6 +28,7 @@ struct Fixture {
     tmux_socket: String,
     session_started: bool,
     tmux_started: bool,
+    runtime_cleaned: bool,
 }
 
 fn shell_quote(value: &str) -> String {
@@ -35,10 +37,24 @@ fn shell_quote(value: &str) -> String {
 
 impl Fixture {
     fn new() -> Self {
-        let evidence = PathBuf::from(
-            std::env::var_os("ILIUM_NAMING_EVIDENCE_DIR")
-                .expect("set absolute ILIUM_NAMING_EVIDENCE_DIR"),
-        );
+        let evidence = if let Some(directory) = std::env::var_os("ILIUM_NAMING_EVIDENCE_DIR") {
+            PathBuf::from(directory)
+        } else if let Some(job) = std::env::var_os("NI_BUILD_REMOTE_JOB") {
+            let job = job
+                .into_string()
+                .expect("ni-build job identity must be UTF-8");
+            assert!(
+                job.len() == 32 && job.bytes().all(|byte| byte.is_ascii_hexdigit()),
+                "invalid ni-build naming evidence job identity"
+            );
+            // The default is private to this remote job. File contents are
+            // also emitted below so the returned stdout log retains evidence.
+            PathBuf::from(format!(
+                "/data/ni-build-service/jobs/{job}/target/naming-title-tmux"
+            ))
+        } else {
+            panic!("set absolute ILIUM_NAMING_EVIDENCE_DIR or run through ni-build")
+        };
         assert!(evidence.is_absolute());
         std::fs::create_dir_all(&evidence).unwrap();
         let root = tempfile::Builder::new()
@@ -104,10 +120,11 @@ impl Fixture {
         )
         .unwrap();
         artifact(&port_receipt, "task-local HTTP port configuration");
-        let binary = ilium_platform::paths::canonicalize(&PathBuf::from(
-            std::env::var_os("ILIUM_PTY_SMOKE_BINARY")
-                .expect("set matching candidate ILIUM_PTY_SMOKE_BINARY"),
-        ))
+        let binary = ilium_platform::paths::canonicalize(
+            &std::env::var_os("ILIUM_PTY_SMOKE_BINARY")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from(env!("CARGO_BIN_EXE_ilium"))),
+        )
         .unwrap();
         assert!(binary.parent().unwrap().join("ilium-server").is_file());
         let environment = vec![
@@ -133,11 +150,8 @@ impl Fixture {
                 .unwrap()
                 .as_nanos()
         );
-        artifact(&root, "retained task-owned state");
-        artifact(
-            &runtime,
-            "retained task-owned runtime; enqueue after consumers released",
-        );
+        artifact(&root, "isolated task-owned state");
+        artifact(&runtime, "isolated task-owned runtime");
         Self {
             root,
             runtime,
@@ -147,6 +161,7 @@ impl Fixture {
             tmux_socket,
             session_started: false,
             tmux_started: false,
+            runtime_cleaned: false,
         }
     }
 
@@ -177,9 +192,37 @@ impl Fixture {
                 marker_path: self.root.join("never-submitted-task"),
             },
         );
-        let output = self.cli(&["new-pane", "--", agent.path.to_str().unwrap()]);
-        assert!(output.status.success(), "owned agent creation: {output:?}");
+        // new-pane can start the owned server before returning an error.
+        // Mark the attempt first so Drop always tries scoped cleanup.
         self.session_started = true;
+        let output = self.cli(&["new-pane", "--", agent.path.to_str().unwrap()]);
+        if !output.status.success() {
+            // A startup failure happens before the normal capture path. Keep
+            // the owned server's actual diagnostic logs in returned evidence.
+            let mut directories = vec![self.root.join("logs"), self.project.join(".ilium/logs")];
+            let mut visited = 0;
+            while let Some(directory) = directories.pop() {
+                visited += 1;
+                if visited > 128 { break; }
+                let Ok(entries) = std::fs::read_dir(directory) else { continue; };
+                for entry in entries.flatten() {
+                    let Ok(kind) = entry.file_type() else { continue; };
+                    if kind.is_dir() { directories.push(entry.path()); }
+                    else if kind.is_file() {
+                        let Ok(bytes) = std::fs::read(entry.path()) else { continue; };
+                        let tail = &bytes[bytes.len().saturating_sub(65536)..];
+                        println!("{}", serde_json::json!({
+                            "type":"artifact", "evidence":"owned server startup failure log",
+                            "path":entry.path(), "bytes":bytes.len(),
+                            "sha256":format!("{:x}", Sha256::digest(&bytes)),
+                            "tail_utf8":String::from_utf8_lossy(tail),
+                            "tail_truncated":tail.len()!=bytes.len()
+                        }));
+                    }
+                }
+            }
+        }
+        assert!(output.status.success(), "owned agent creation: {output:?}");
         let output = self.cli(&["new-pane", "--", "cat"]);
         assert!(
             output.status.success(),
@@ -201,6 +244,8 @@ impl Fixture {
             shell_quote(self.project.to_str().unwrap()),
             shell_quote(client_stderr.to_str().unwrap())
         );
+        // A failed tmux command may still have created this unique server.
+        self.tmux_started = true;
         let output = self.tmux(&[
             "new-session",
             "-d",
@@ -213,7 +258,6 @@ impl Fixture {
             &command,
         ]);
         assert!(output.status.success(), "owned tmux launch: {output:?}");
-        self.tmux_started = true;
     }
 
     async fn control(&self) -> Connection {
@@ -254,44 +298,92 @@ impl Fixture {
     }
 
     fn stop(&mut self) {
-        if self.session_started {
-            let output = self.cli(&["kill-session", "default"]);
-            assert!(output.status.success(), "owned session stop: {output:?}");
-            self.session_started = false;
-        }
+        // End the client first; tmux may exit on its own once its last pane
+        // goes away, so kill-server must precede the owned Ilium session stop.
         if self.tmux_started {
             let output = self.tmux(&["kill-server"]);
             assert!(output.status.success(), "owned tmux stop: {output:?}");
             self.tmux_started = false;
         }
+        if self.session_started {
+            let output = self.cli(&["kill-session", "default"]);
+            assert!(output.status.success(), "owned session stop: {output:?}");
+            self.session_started = false;
+        }
+        artifact(
+            &self.root.join("client-stderr.txt"),
+            "completed owned client startup and runtime stderr",
+        );
+        std::fs::remove_dir_all(&self.runtime).expect("remove stopped fixture runtime");
+        self.runtime_cleaned = true;
     }
 }
 
 impl Drop for Fixture {
     fn drop(&mut self) {
-        // Failure cleanup is scoped by the retained fixture environment and unique tmux socket.
+        // Failure cleanup is limited to this fixture's unique tmux socket and
+        // isolated runtime; keep the runtime if a process could still own it.
+        if self.tmux_started {
+            let output = self.tmux(&["kill-server"]);
+            self.tmux_started = !output.status.success();
+            println!(
+                "{}",
+                serde_json::json!({"type":"result","cleanup":"owned tmux server","success":output.status.success(),"socket":self.tmux_socket})
+            );
+        }
         if self.session_started {
             let output = self.cli(&["kill-session", "default"]);
+            self.session_started = !output.status.success();
             println!(
                 "{}",
                 serde_json::json!({"type":"result","cleanup":"owned ilium session","success":output.status.success(),"state":self.root})
             );
         }
-        if self.tmux_started {
-            let output = self.tmux(&["kill-server"]);
+        if !self.runtime_cleaned && !self.tmux_started && !self.session_started {
+            // Cleanup may run during a panic. Retain diagnostics without risking
+            // a second panic if reading or writing evidence also fails.
+            if let Ok(bytes) = std::fs::read(self.root.join("client-stderr.txt")) {
+                let _ = writeln!(
+                    std::io::stdout().lock(),
+                    "{}",
+                    serde_json::json!({"type":"artifact","evidence":"owned client stderr after failure cleanup",
+                        "sha256":format!("{:x}", Sha256::digest(&bytes)),"bytes":bytes.len(),
+                        "content_utf8":String::from_utf8_lossy(&bytes)})
+                );
+            }
+            let cleanup = std::fs::remove_dir_all(&self.runtime);
             println!(
                 "{}",
-                serde_json::json!({"type":"result","cleanup":"owned tmux server","success":output.status.success(),"socket":self.tmux_socket})
+                serde_json::json!({"type":"result","cleanup":"owned runtime","success":cleanup.is_ok(),"path":self.runtime,"error":cleanup.err().map(|error|error.to_string())})
             );
         }
     }
 }
 
 fn artifact(path: &Path, evidence: &str) {
-    println!(
-        "{}",
-        serde_json::json!({"type":"artifact","path":path,"evidence":evidence})
-    );
+    let remote_default = std::env::var_os("NI_BUILD_REMOTE_JOB").is_some()
+        && std::env::var_os("ILIUM_NAMING_EVIDENCE_DIR").is_none();
+    if remote_default && path.is_file() {
+        let bytes = std::fs::read(path).expect("read task-owned text evidence");
+        let content = String::from_utf8(bytes.clone()).expect("task-owned evidence must be UTF-8");
+        // Bypass libtest's passing-test output capture so default Cargo runs
+        // retain the complete evidence in the hash-verified remote log.
+        writeln!(
+            std::io::stdout().lock(),
+            "{}",
+            serde_json::json!({"type":"artifact","path":path,"evidence":evidence,
+                "retention":"verified ni-build stdout.log; remote file is transient",
+                "sha256":format!("{:x}", Sha256::digest(&bytes)),
+                "bytes":bytes.len(),"content_utf8":content})
+        )
+        .expect("retain naming evidence in verified log");
+    } else {
+        println!(
+            "{}",
+            serde_json::json!({"type":"artifact","path":path,"evidence":evidence,
+                "retention":if remote_default {"transient remote path"} else {"explicit evidence directory"}})
+        );
+    }
 }
 
 fn verify_loaded_process(process_id: u32, expected: &Path, evidence_root: &Path) {

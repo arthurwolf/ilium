@@ -604,12 +604,19 @@ mod tests {
         let (_execution, resources) = crate::resources::isolated_test_resources();
         let quota = resources.finite().quota_group();
         let before = quota.snapshot();
-        let admission = resources
-            .reserve_worker(WorkerCost {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let admission = loop {
+            match resources.reserve_worker(WorkerCost {
                 threads: 1,
                 resident_bytes: MARKER_WORKER_RESIDENT_BYTES,
-            })
-            .unwrap();
+            }) {
+                Ok(admission) => break admission,
+                Err(ilium_execution::RejectReason::Busy) if Instant::now() < deadline => {
+                    std::thread::yield_now();
+                }
+                Err(error) => panic!("marker fixture admission: {error:?}"),
+            }
+        };
         let worker = MarkerWorker::start_admitted(
             prepare_positions,
             MarkerPermit::acquire().unwrap(),

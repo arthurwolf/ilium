@@ -248,6 +248,32 @@ pub fn install(directory: &Path, name: &str, behavior: &FixtureBehavior) -> Inst
     InstalledFixture { path }
 }
 
+/// Spawn a freshly copied fixture, tolerating only the kernel's transient
+/// executable-write conflict. A concurrent fork can inherit the copy's write
+/// descriptor until it execs. A failed exec starts no child, so retry is safe.
+pub fn spawn_fixture(command: &mut std::process::Command) -> std::io::Result<std::process::Child> {
+    retry_executable_write_conflict(|| command.spawn(), || {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    })
+}
+
+fn retry_executable_write_conflict<T>(
+    mut spawn: impl FnMut() -> std::io::Result<T>,
+    mut wait: impl FnMut(),
+) -> std::io::Result<T> {
+    for attempt in 0..=100 {
+        match spawn() {
+            Err(error)
+                if error.kind() == std::io::ErrorKind::ExecutableFileBusy && attempt < 100 =>
+            {
+                wait();
+            }
+            result => return result,
+        }
+    }
+    unreachable!("the last attempt always returns its result")
+}
+
 /// The sidecar path holding an installed fixture's behaviour. Shared by
 /// [`install`] and the binary so the two can never disagree about it.
 pub fn behavior_file_for(executable: &Path) -> PathBuf {
@@ -364,6 +390,44 @@ fn make_executable(path: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fixture_spawn_retries_only_transient_exec_conflicts_and_is_bounded() {
+        let mut attempts = 0;
+        let value = retry_executable_write_conflict(
+            || {
+                attempts += 1;
+                if attempts == 3 {
+                    Ok(42)
+                } else {
+                    Err(std::io::Error::from(std::io::ErrorKind::ExecutableFileBusy))
+                }
+            },
+            || {},
+        );
+        assert_eq!(value.unwrap(), 42);
+        assert_eq!(attempts, 3);
+        attempts = 0;
+        let failure = retry_executable_write_conflict::<()>(
+            || {
+                attempts += 1;
+                Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+            },
+            || panic!("other failures must not retry"),
+        );
+        assert_eq!(failure.unwrap_err().kind(), std::io::ErrorKind::PermissionDenied);
+        assert_eq!(attempts, 1);
+        attempts = 0;
+        let failure = retry_executable_write_conflict::<()>(
+            || {
+                attempts += 1;
+                Err(std::io::Error::from(std::io::ErrorKind::ExecutableFileBusy))
+            },
+            || {},
+        );
+        assert_eq!(failure.unwrap_err().kind(), std::io::ErrorKind::ExecutableFileBusy);
+        assert_eq!(attempts, 101);
+    }
 
     #[test]
     fn behavior_file_sits_beside_the_executable_including_its_extension() {

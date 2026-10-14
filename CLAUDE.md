@@ -8,11 +8,17 @@ Documentation lives at the repository root: `README.md` (short user overview), `
 
 All compilation goes through the ni-build service on ni-vm, as defined in `~/.claude/CLAUDE.md` ("Distributed compilation through ni-build"); that global section is the only copy. The chatroom, progress-monitor and goal/waiting rules also live only in the global file.
 
+**Where compile and test runs happen.** Any compile, test, Clippy or fmt run made to check that work functions goes in a separate build folder, never in the main checkout or on the current branch:
+
+- Create `/media/arthur/build/ilium-<task>/` (touch `.scratch-reaper` and `findmnt` the disk first, per the global Scratch Disks rule), copy the current source into it (for example `git archive` of the working tree, or an rsync that excludes `target/`), and run `cargo` there with `CARGO_TARGET_DIR` inside that folder. Dispatch still goes through ni-build.
+- Do not run Cargo in `/home/arthur/dev/ai/ilium`, do not create a `target/` there, and do not switch or create branches to compile. Do not use `git worktree` (global rule).
+- Remove the build folder when the verification is done and the results are recorded, unless it holds the only copy of a retained result.
+
 ## Ilium process custody
 
 Never run commands, jobs, builds, tests, probes or launchers through `ilium new-pane`. Run them from your own pane (background process in your own shell) and register `ilium progress` from that same pane. Use `new-pane` only when the user explicitly asks for a new pane. Spawned panes accumulate in the user's tree.
 
-Never restart Ilium or its running server, session, or panes. Do not use `--restart-server`, stop or replace the live server, or restart it indirectly through a service. The user alone restarts Ilium. After a code change, build and deploy the binaries, verify the installed artifact, and report clearly when an already-running server still has the old executable loaded.
+Never restart Ilium or its running server, session, or panes. Do not use `--restart-server`, stop or replace the live server, or restart it indirectly through a service. The user alone restarts Ilium. Code changes do not install binaries: see "Deploy policy" below. When the user asks for a deploy and the running server still has the old executable loaded, report that clearly.
 
 ## Workspace layout
 
@@ -79,10 +85,38 @@ generic over any async byte stream and must not learn about sockets or pipes.
 - Run `cargo clippy --workspace --all-targets` and `cargo fmt --check` before considering any change done. Treat new clippy warnings as things to fix, not suppress with `#[allow]`, unless there's a specific documented reason.
 - **Remote build output is cleaned immediately.** The ni-build service retrieves hash-verified artifacts and receipts, then removes only its exact `/data/ni-build-service/jobs/<uuid>/` directory. Preserve failed recovery evidence and other owners' jobs. Local returned artifacts are verified build outputs, not locally compiled outputs.
 
-## Capacity gates and deploys
+## Capacity gates
 
 - Never lower a capacity gate (pane counts in scale tests such as `terminal_pool_runtime.rs`, quota limits, worker caps) to make a test or restore pass. A failing capacity gate is a real regression: fix the budget or the consumer.
-- Install binaries only with `make install RECEIPT=<ni-build job id>` (`tools/install-from-receipt.py`). It verifies the receipt and artifact hashes and writes `<bin>.build.json`. Never copy a `target/release` binary into place by hand.
+
+## Deploy policy
+
+"Deploy" means replacing the mainstream `ilium` binaries the user runs, that is `make install RECEIPT=<ni-build job id>` (`tools/install-from-receipt.py`) with the server and client it installs. It verifies the receipt and artifact hashes and writes `<bin>.build.json`. Never copy a `target/release` binary into place by hand.
+
+- **Deploy is opt-in, per request.** Compile and install only when the user explicitly asks in that request (for example "deploy", "install", "compile and deploy", "replace the mainstream ilium"). Approval in an earlier request, a plan, or a `/goal` does not carry over.
+- **Finishing work does not deploy.** When a feature, a `/goal`, or any other task is done, a compile+deploy cycle does not follow automatically. Verify in the separate build folder, report the source state, commit if asked, and state that the installed binaries are unchanged.
+- **Verification builds are never installed.** A binary compiled to test behaviour is not copied, linked or installed over the mainstream one, even when it passes.
+- **Restart stays with the user.** Installing binaries does not restart the running server (see "Ilium process custody").
+
+## Feature implementation: build and test, never install
+
+This section applies whenever the user asks for a new feature or change (a `/goal`, a plain request, in a worktree or on the main checkout). It overrides any rule in this file or in `~/.claude/CLAUDE.md` that could be read as requiring or implying a deploy, install, or "bring it live" step at the end of feature work.
+
+A feature session is exactly these five steps, and then it stops:
+
+1. **Research**: read the code, `ARCHITECTURE.md` and docs; inspect analogous implementations.
+2. **Implementation**: make the change, with tests, docs and a `CHANGELOG.md` entry.
+3. **Compilation**: compile through ni-build in a separate build folder (see "Where compile and test runs happen").
+4. **Testing**: run the relevant tests, Clippy and `cargo fmt --check`, and exercise the feature in an isolated environment (separate build folder, isolated tmux session, random port) as far as needed to trust it.
+5. **Report**: say what was built, what was verified, and what was not. If the work was done in a worktree, leave the branch committed and ready to merge into `master` (merge-back itself still follows the Git rules in the global file). Then stop.
+
+Not part of a feature session, unless the user asks for it in that request:
+
+- `make install`, copying or linking any binary into place, or any other deploy.
+- Restarting, replacing or re-attaching the running Ilium server or panes.
+- Treating a passing verification build as a release candidate.
+
+The user installs manually, when they decide to bring recent changes in. Never mark a feature task as incomplete because it is not installed, and never add "deploy" or "install" as a TODO item or acceptance criterion of your own. The final report states that the installed binaries are unchanged. The "Deploy policy" below still governs the case where the user does ask for a deploy.
 
 ## No code freezes
 
@@ -155,21 +189,25 @@ Every background animation (built-in, hosted `ilium-ambient` scene, Wikipedia, a
 - Every form row whose label and control can sit far apart (settings rows, dialogs, any full-width input) connects them with grey dotted leaders made of `…` (U+2026, one cell). Use `value_control::leader_span` for text-built rows and `ValueControl` for shared controls; never pad the gap with plain spaces. Leaders are inert: they are never part of a hit target.
 - Shared rule: one blank cell on each side of the dots; a gap shorter than five cells stays blank. Leaders never overwrite label text, glyphs or values.
 
-<!-- ilium-agent-feature: chatroom -->
-If `CHATROOM.md` exists in the project root, read recent coordination with `ilium chat context --limit 40` when beginning work and before changing shared areas. Use `ilium chat send --message "..."` only for a task claim or release, blocker, dependency, material discovery or decision, or a handoff; do not post routine progress narration. Never rewrite `CHATROOM.md` directly.
-<!-- /ilium-agent-feature: chatroom -->
+<!-- ilium-agent-feature: progress version=13 -->
+For every task expected to take at least three minutes inside an Ilium pane (the `ILIUM_PANE_ID` environment variable is set), you MUST use an Ilium progress monitor; never run it as one long foreground command, even with a long tool timeout, because nobody can then see its progress. Start the task in the background from your own shell (never through `ilium new-pane`, which leaves extra panes in the user's tree), detached so it outlives the shell command that started it (e.g. `setsid -f`; some agent shells kill `&` children when the command returns), and verify that its process is alive. Write a cheap probe that prints one JSON object with only these fields (no `type` field; the JSONL rule for agent scripts does not apply to probes): stable non-empty `job_id`, `status` (`not-started-yet`, `running`, `error` or `done`), finite `percent` 0 to 100, one-line `message`, optional multi-line `details`, and `error` only when status is `error`. Read `percent` from a structured source the task writes (a counter file or a JSONL line), not by parsing free-form logs. Make the probe notice a vanished task: when the task starts, record its process ID and the machine's boot identity (on Linux `/proc/sys/kernel/random/boot_id`); if the boot identity changed, or the process is gone and the task left no result, report `error` with a message such as `task process gone without a result (reboot or kill)`, never `running`. The Ilium server runs it from the project root without your shell's directory, variables or aliases: use absolute paths.
 
-<!-- ilium-agent-feature: progress version=9 -->
-For every task expected to take at least three minutes inside an Ilium pane (the `ILIUM_PANE_ID` environment variable is set), you MUST use an Ilium progress monitor; never run it as one long foreground command, even with a long tool timeout, because nobody can then see its progress. Start the task in the background, detached so it outlives the shell command that started it (e.g. `setsid -f`; some agent shells kill `&` children when the command returns), and verify that its process is alive. Write a cheap probe that prints one JSON object with only these fields (no `type` field; the JSONL rule for agent scripts does not apply to probes): stable non-empty `job_id`, `status` (`not-started-yet`, `running`, `error` or `done`), finite `percent` 0 to 100, one-line `message`, optional multi-line `details`, and `error` only when status is `error`. The Ilium server runs it from the project root without your shell's directory, variables or aliases: use absolute paths.
+The reader of the progress bar has NOT read your session. `message` (at most about 110 characters) MUST stand alone: WHAT is being done to WHICH thing, then the current step with a count, e.g. `Running the focused unit tests of the ilium-client crate - test 14 of 22`; when finished, the outcome. `details` has 3 to 8 short lines labelled `What:`, `Why:`, `Now:` (with what `percent` measures), `Next:`, `Watch:`. Never rely on session context: no unexplained internal names, abbreviations or pronouns. Update both on every probe run.
 
-The reader of the progress bar has NOT read your session. `message` (at most about 110 characters) MUST stand alone: WHAT is being done to WHICH thing, then the current step with a count, e.g. `Building the release binaries of the ilium terminal app - compiling crate 14 of 22`; when finished, the outcome. `details` has 3 to 8 short lines labelled `What:`, `Why:`, `Now:` (with what `percent` measures), `Next:`, `Watch:`. Never rely on session context: no unexplained internal names, abbreviations or pronouns. Update both on every probe run.
+Run `ilium progress check --command '<probe>'`, then register and wait with one command: `ilium progress set --command '<probe>' --interval-seconds <n> --wait`. Its first line is the positive JSONL registration acknowledgement with the monitor ID; it then blocks until the task ends and prints a `progress_wait` line. Exit status: 0 done, 3 task error, 4 monitor failed (outcome unknown: check the task directly), 5 monitor replaced or cleared, 6 `--timeout-seconds` elapsed. Do not pass `--timeout-seconds`: the wait should end only when the task ends. Give the command the longest wait your tool allows (Claude Code: run it in the background, which has no time limit; Codex: `yield_time_ms` equal to `background_terminal_max_timeout`). If the tool hands back a still-running command, keep waiting on that same command with that longest wait; never start a second one. This wait takes precedence over any general rule about sleep loops or wait lengths. If `ilium` rejects `--wait` or `progress wait` as unknown (an older Ilium build), register without `--wait` and handle the typed message instead.
 
-Run `ilium progress check --command '<probe>'`, then register and wait with one command: `ilium progress set --command '<probe>' --interval-seconds <n> --wait`. Its first line is the positive JSONL registration acknowledgement with the monitor ID; it then blocks until the task ends and prints a `progress_wait` line. Exit status: 0 done, 3 task error, 4 monitor failed (outcome unknown: check the task directly), 5 monitor replaced or cleared, 6 `--timeout-seconds` elapsed (run `ilium progress wait <monitor_id>` to keep waiting). If your shell tool limits command run time, pass `--timeout-seconds` below the limit (Claude Code: Bash `timeout` 600000 with `--timeout-seconds 590`), or run the command in the background if your tool reports when it exits. If the tool hands back a still-running command, keep waiting on that same command with the longest wait the tool allows (Codex: `yield_time_ms` 300000 on every `write_stdin` or cell wait); never start a second one. This wait takes precedence over any general rule about sleep loops or wait lengths. If `ilium` rejects `--wait` or `progress wait` as unknown (an older Ilium build), register without `--wait` and handle the typed message instead.
-
-With other useful work to do, you may register without `--wait` and do that work first: Ilium's server will send you a message when the task reaches `done` or `error`. When that work runs out, or when there is none, you MUST block with `ilium progress wait <monitor_id>` instead of stopping to wait for the message. A subagent, or anything else that cannot receive typed messages, MUST use `--wait`.
+With other useful work to do, you may register without `--wait` and do that work first: Ilium's server will send you a message when the task reaches `done` or `error`. When that work runs out, or when there is none, you MUST block with `ilium progress wait <monitor_id>` instead of stopping to wait for the message. A subagent, or anything else that cannot receive typed messages, MUST use `--wait`. If a typed message or a pasted report arrives while the task you depend on is still running and nothing else changed, go straight back to `ilium progress wait <monitor_id>` without a status message.
 
 You MUST NOT poll in any form: no sleep loops, repeated `ilium progress status`, or repeated log reads. Ilium's server is the sole recurring poller.
 
-A pane has one monitor. `set` refuses with `monitor-active` while it is still running: cover a multi-step pipeline with one probe, or wait for your own task directly. `--replace` discards the running monitor; use it only on purpose. If `progress_wait` says `composer_notice` `may-also-arrive`, a typed message about that monitor is a duplicate. After handling a result, `ilium progress clear --monitor-id <id>` removes it.
+A monitor result describes one attempt of one task, never the outcome of the user's request, so act on it and continue that request: on `done`, verify the result, then move to the next step; on `error`, inspect that attempt's retained evidence once, fix the cause or choose another route, and retry; while `running`, do every step that does not need its result, without polling, restarting, clearing or duplicating the task; when the outcome is unknown (exit 4, or a missing or unreadable monitor), keep the task's identity, do not guess its result, and check the task directly before retrying. A pasted monitor report is an event inside the current request, not a new request: continue that request in the same reply. A status explanation, an apology or a promise to continue later is not progress while a useful step remains.
+
+A machine reboot, an Ilium restart or a restarted agent session ends every earlier wait, and a reboot also ends every task; their messages never arrive. Signs: a message mentions a restart, reboot or crash; a wait ended with "the ilium server closed the connection"; `ilium progress wait <monitor_id>` reports `no-monitor` for your monitor. Then, once: run `ilium progress status` and find your monitor by `job_id` (restored monitors get new IDs); check the task once; if it finished, verify the result; if it still runs, make one wait on the restored monitor (register the probe again if none exists); if it died without a result, clear the stale monitor, restart the task from its last checkpoint, register it and wait. These one-time checks are not polling.
+
+A pane can run up to 8 monitors at once, one per task: `set` adds a monitor without disturbing the others, and registering the same probe command again returns the existing monitor. Still cover one multi-step pipeline with one probe. When the pane may have several monitors, always pass the monitor ID: `wait` and `clear` without an ID refuse with `monitor-ambiguous` (exit 2) and list the IDs. `--replace` clears every monitor of the pane first; use it only on purpose. If `progress_wait` says `composer_notice` `may-also-arrive`, a typed message about that monitor is a duplicate. After handling a result, `ilium progress clear --monitor-id <id>` removes it.
 
 <!-- /ilium-agent-feature: progress -->
+
+<!-- ilium-agent-feature: chatroom -->
+If `CHATROOM.md` exists in the project root, read recent coordination with `ilium chat context --limit 40` when beginning work and before changing shared areas. Use `ilium chat send --message "..."` only for a task claim or release, blocker, dependency, material discovery or decision, or a handoff; do not post routine progress narration. Never rewrite `CHATROOM.md` directly.
+<!-- /ilium-agent-feature: chatroom -->

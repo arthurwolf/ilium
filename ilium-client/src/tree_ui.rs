@@ -133,6 +133,25 @@ pub enum TreeToolbarAction {
 }
 
 impl TreeToolbarAction {
+    /// One distinct bit per button, for the compact pending-spinner set.
+    pub(crate) fn pending_bit(self) -> u16 {
+        1 << match self {
+            Self::Search => 0,
+            Self::Shell => 1,
+            Self::Agent(BuiltinAgentProvider::Claude) => 2,
+            Self::Agent(BuiltinAgentProvider::Codex) => 3,
+            Self::Agent(BuiltinAgentProvider::Antigravity) => 4,
+            Self::Editor => 5,
+            Self::Board => 6,
+            Self::Group => 7,
+            Self::Project => 8,
+            Self::Split => 9,
+            Self::Folder => 10,
+            Self::Restructure => 11,
+            Self::Settings => 12,
+        }
+    }
+
     /// Ordered left-aligned creation actions. Settings is intentionally not
     /// part of this list because its geometry is anchored independently.
     const LEFT_ALIGNED: [Self; 11] = [
@@ -642,6 +661,9 @@ pub struct TreeHoverState {
     /// `toolbar_hovered` because the pointer can sit in the toolbar strip's
     /// dead space (past the last button) without targeting one.
     pub toolbar_action: Option<TreeToolbarAction>,
+    /// Bit set (see `TreeToolbarAction::pending_bit`) of buttons whose accepted
+    /// click is still waiting for the server; they draw a spinner.
+    pub pending_toolbar: u16,
 }
 
 /// All transient presentation state for one tree render. Grouping it keeps
@@ -2009,24 +2031,43 @@ fn agent_title(class: &AgentClass, title: &str, mode: AgentIdentifierMode) -> St
     }
 }
 
+/// Splits the tree panel's interior into the list, the frame rule above the
+/// toolbar (zero rows when frames are off or the panel is too short), and the
+/// toolbar. The single source for `list_area`, `toolbar_rule_area` and
+/// `toolbar_area`, so drawing and hit testing cannot disagree.
+fn vertical_sections(area: Rect) -> [Rect; 3] {
+    // Padding moves the list, rule and toolbar in from the border together.
+    let inner = crate::padding::tree_padding().inset(theme::block(false).inner(area));
+    let rule_rows = u16::from(
+        theme::section_frames_enabled() && inner.height >= TOOLBAR_HEIGHT.saturating_add(3),
+    );
+    let [list, rule, toolbar] = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(1),
+            Constraint::Length(rule_rows),
+            Constraint::Length(TOOLBAR_HEIGHT),
+        ])
+        .areas(inner);
+    [list, rule, toolbar]
+}
+
 /// Returns the interior list region, excluding the persistent two-row hover
 /// toolbar. Labels use this complete width; row actions temporarily overlay
 /// only the hovered row's trailing cells.
 pub fn list_area(area: Rect) -> Rect {
-    let inner = theme::block(false).inner(area);
-    Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(TOOLBAR_HEIGHT)])
-        .split(inner)[0]
+    vertical_sections(area)[0]
+}
+
+/// The full-outer-width row of the frame rule above the toolbar, if drawn.
+pub fn toolbar_rule_area(area: Rect) -> Option<Rect> {
+    let rule = vertical_sections(area)[1];
+    (rule.height > 0).then(|| Rect::new(area.x, rule.y, area.width, 1))
 }
 
 /// Returns the bottom two rows that reveal creation icons on hover.
 pub fn toolbar_area(area: Rect) -> Rect {
-    let inner = theme::block(false).inner(area);
-    Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(TOOLBAR_HEIGHT)])
-        .split(inner)[1]
+    vertical_sections(area)[2]
 }
 
 /// Returns the toolbar action at a terminal coordinate, if any.
@@ -2575,8 +2616,18 @@ pub(crate) fn render(
             options.use_stable_glyphs,
         );
     }
+    if let Some(rule) = toolbar_rule_area(area) {
+        crate::section_frame::render_rule(frame, rule, None, options.focused);
+    }
     if is_toolbar_visible(options.focused, options.hover.toolbar_hovered) {
-        draw_toolbar(frame, area, options.hover.toolbar_action, options.icons);
+        draw_toolbar(
+            frame,
+            area,
+            options.hover.toolbar_action,
+            options.hover.pending_toolbar,
+            options.terminal_activity_elapsed_ms,
+            options.icons,
+        );
     }
     painted
 }
@@ -2913,6 +2964,8 @@ fn draw_toolbar(
     frame: &mut Frame,
     area: Rect,
     hovered: Option<TreeToolbarAction>,
+    pending: u16,
+    spinner_elapsed_ms: u128,
     icons: &IconSettings,
 ) {
     let toolbar = toolbar_area(area);
@@ -2928,10 +2981,14 @@ fn draw_toolbar(
         } else {
             Style::new().fg(action.accent())
         };
-        let button = Paragraph::new(Line::from(Span::styled(
-            format!(" {} ", action.glyph(icons)),
-            style,
-        )));
+        let glyph = if pending & action.pending_bit() != 0 {
+            let frame_index =
+                (spinner_elapsed_ms / SPINNER_FRAME_MS) as usize % SPINNER_FRAMES.len();
+            SPINNER_FRAMES[frame_index].to_string()
+        } else {
+            action.glyph(icons).to_string()
+        };
+        let button = Paragraph::new(Line::from(Span::styled(format!(" {glyph} "), style)));
         frame.render_widget(button, button_area);
     }
 
@@ -2979,6 +3036,52 @@ mod tests {
         TERMINAL_ACTIVITY_FAST_FRAME_MS, TERMINAL_ACTIVITY_SLOW_FRAME_MS,
     };
     use ilium_core::GoalState;
+
+    #[test]
+    fn pending_toolbar_button_renders_a_braille_frame_instead_of_its_icon() {
+        let area = Rect::new(0, 0, 60, 8);
+        let (action, button) = toolbar_button_rects(area)
+            .into_iter()
+            .find(|(action, _)| matches!(action, TreeToolbarAction::Agent(_)))
+            .expect("agent button exists");
+        let render_cell = |pending: u16, elapsed_ms: u128| {
+            let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
+            terminal
+                .draw(|frame| {
+                    draw_toolbar(
+                        frame,
+                        area,
+                        None,
+                        pending,
+                        elapsed_ms,
+                        &IconSettings::default(),
+                    )
+                })
+                .unwrap();
+            let buffer = terminal.backend().buffer().clone();
+            let mut text = String::new();
+            for x in button.x..button.x + button.width {
+                text.push_str(buffer[(x, button.y)].symbol());
+            }
+            text
+        };
+        let idle = render_cell(0, 0);
+        assert!(
+            !idle.chars().any(|c| SPINNER_FRAMES.contains(&c)),
+            "{idle:?}"
+        );
+        let first = render_cell(action.pending_bit(), 0);
+        let later = render_cell(action.pending_bit(), SPINNER_FRAME_MS * 3);
+        assert!(
+            first.chars().any(|c| SPINNER_FRAMES.contains(&c)),
+            "{first:?}"
+        );
+        assert!(
+            later.chars().any(|c| SPINNER_FRAMES.contains(&c)),
+            "{later:?}"
+        );
+        assert_ne!(first, later, "the spinner animates between frames");
+    }
 
     #[test]
     fn painted_row_targets_remain_bound_to_original_rows_and_action_strip() {
@@ -4821,7 +4924,7 @@ mod tests {
         let last_project = tree
             .add_project(PathBuf::from("/tmp/last-project"))
             .unwrap();
-        let area = Rect::new(0, 0, 40, 9);
+        let area = Rect::new(0, 0, 40, 9 + u16::from(theme::section_frames_enabled()));
         let list = list_area(area);
         let mut state = TreeState::default();
         state.open(vec![first_project]);
@@ -5077,7 +5180,7 @@ mod tests {
         // consuming the flag; the next renderer must paint the same rows.
         state.set_item_offset(0);
         state.select(vec![projects[2], panes[2]]);
-        let short_area = Rect::new(0, 0, 48, 7);
+        let short_area = Rect::new(0, 0, 48, 7 + u16::from(theme::section_frames_enabled()));
         let short_list = list_area(short_area);
         assert_eq!(short_list.height, 3);
         assert_eq!(
@@ -5129,7 +5232,7 @@ mod tests {
         let items = cache.get_or_build(&tree, 1, TreeOrder::Manual, state.opened());
         // Project B fits; the two-line agent and its bar do not fit after it.
         state.set_item_offset(2);
-        let area = Rect::new(0, 0, 48, 7);
+        let area = Rect::new(0, 0, 48, 7 + u16::from(theme::section_frames_enabled()));
         let list = list_area(area);
         let buffer = render_tree_buffer_in_area(
             &tree,

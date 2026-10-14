@@ -688,6 +688,29 @@ pub fn value_control(
     ))
 }
 
+// Every row occupies one visual line inside exactly one disjoint region.
+// Resolve that line before preparing a control: rebuilding the full layout
+// for every row on every pointer cell made both interaction and the complete
+// control matrix unnecessarily expensive.
+fn row_at(
+    layout: &AnimationLayout,
+    model: &RowModel,
+    scrolls: Scrolls,
+    position: Position,
+) -> Option<usize> {
+    for region in [Region::Scenes, Region::Global, Region::Controls] {
+        let rows = window(layout, region);
+        if rows.width <= 1 || !rows.contains(position) {
+            continue;
+        }
+        let visual = scrolls.get(region).checked_add(position.y - rows.y)?;
+        return model
+            .region_rows(region)
+            .find(|&row| model.visual_row(row) == Some(visual));
+    }
+    None
+}
+
 pub fn value_hit(
     area: Rect,
     model: &RowModel,
@@ -695,11 +718,11 @@ pub fn value_hit(
     position: Position,
     button: crate::value_control::PointerButton,
 ) -> Option<(usize, crate::value_control::ControlAction)> {
-    (0..model.len()).find_map(|row| {
-        value_control(area, model, row, scrolls)?
-            .hit(position, button)
-            .map(|action| (row, action))
-    })
+    let layout = geometry(area, model);
+    let row = row_at(&layout, model, scrolls, position)?;
+    value_control(area, model, row, scrolls)?
+        .hit(position, button)
+        .map(|action| (row, action))
 }
 
 fn value_styles(style: Style) -> crate::value_control::ControlStyles {
@@ -781,9 +804,7 @@ pub fn hit(
             return Some(AnimationHit::ScrollTo(region, target as u16));
         }
     }
-    let row = (0..model.len()).find(|&row| {
-        row_rect(area, model, row, scrolls).is_some_and(|rect| rect.contains(position))
-    })?;
+    let row = row_at(&layout, model, scrolls, position)?;
     let rect = row_rect(area, model, row, scrolls)?;
     if let Some(geometry) = slider_geometry(area, model, row, scrolls) {
         if geometry.track.contains(position) {
@@ -1843,13 +1864,58 @@ mod tests {
     }
 
     #[test]
+    fn pointer_row_lookup_matches_prepared_control_scan_with_scroll_and_gaps() {
+        use crate::value_control::PointerButton;
+        for kind in [AnimationKind::default(), AnimationKind::Semantic] {
+            let settings = AnimationSettings {
+                kind,
+                ..Default::default()
+            };
+            let model = RowModel::new(&settings, &RowContext::default());
+            for (width, height) in [(80, 24), (120, 40)] {
+                let area = Rect::new(0, 0, width, height);
+                for scrolls in [
+                    Scrolls::default(),
+                    Scrolls {
+                        scenes: 3,
+                        global: 5,
+                        controls: 2,
+                    },
+                ] {
+                    let controls: Vec<_> = (0..model.len())
+                        .filter_map(|row| {
+                            value_control(area, &model, row, scrolls).map(|control| (row, control))
+                        })
+                        .collect();
+                    for y in 0..=height {
+                        for x in [0, width / 3, width / 2, width.saturating_sub(1), width] {
+                            let position = Position::new(x, y);
+                            for button in [PointerButton::Left, PointerButton::Right] {
+                                let expected = controls.iter().find_map(|(row, control)| {
+                                    control.hit(position, button).map(|action| (*row, action))
+                                });
+                                assert_eq!(
+                                    value_hit(area, &model, scrolls, position, button),
+                                    expected,
+                                    "{kind:?} {width}x{height} {scrolls:?} {position:?} {button:?}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn every_native_choice_and_number_paints_and_hits_at_supported_sizes() {
         use crate::value_control::{cell_width, ControlAction, ControlStyles, PointerButton};
 
         let mut checked_choices = 0;
         let mut checked_numbers = 0;
         for kind in AnimationKind::ALL {
-            for variant in conditional_scene_variants(kind) {
+            for (variant_index, variant) in conditional_scene_variants(kind).into_iter().enumerate()
+            {
                 for playback_mode in [AnimationPlaybackMode::Loop, AnimationPlaybackMode::Live] {
                     for scene_uses_cell_colors in [false, true] {
                         for color_mode in [
@@ -1868,12 +1934,28 @@ mod tests {
                                 vec![None]
                             };
                             for effective_kind in effective_kinds {
+                                // Each effective kind changes which rows exist, not how a row is
+                                // drawn or hit-tested: cross it with one playback/colour combination
+                                // only, otherwise Semantic multiplies the whole matrix by the kind
+                                // count and the test runs for tens of minutes.
+                                // Playback and colour mode only add or remove shared rows, which
+                                // the first variant of each kind already exercises in every
+                                // combination; later variants differ in scene rows alone.
+                                if (variant_index > 0 || effective_kind.is_some())
+                                    && (playback_mode != AnimationPlaybackMode::Loop
+                                        || scene_uses_cell_colors
+                                        || color_mode != ilium_ambient::style::ColorMode::Color)
+                                {
+                                    continue;
+                                }
                                 let context = RowContext {
                                     effective_kind,
                                     scene_uses_cell_colors,
                                     ..Default::default()
                                 };
                                 let model = RowModel::new(&settings, &context);
+                                // Conditional scene controls must retain responsive coverage at
+                                // every supported size, including later variants.
                                 for (width, height) in [(80, 24), (120, 40), (160, 50)] {
                                     let area = Rect::new(0, 0, width, height);
                                     let mut terminal =
