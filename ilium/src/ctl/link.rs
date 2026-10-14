@@ -136,7 +136,7 @@ impl Link {
         let before = self.attached.tree.clone();
         if let Operation::Close { pane, worktree } = operation {
             if !matches!(worktree, WorktreeAction::Keep) {
-                refuse_removal_from_inside_worktree(&before, *pane)?;
+                Self::refuse_removal_from_inside_worktree(&before, *pane)?;
             }
         }
         let requests = operation.requests(&before, crate::next_progress_request_id())?;
@@ -169,7 +169,7 @@ impl Link {
                             return Err(CtlFailure::rejected(message))
                         }
                         ServerEvent::WorkspaceRemovalBlocked { reasons, .. } => {
-                            return Err(CtlFailure::rejected(removal_refusal(&reasons)))
+                            return Err(CtlFailure::rejected(Self::removal_refusal(&reasons)))
                         }
                         ServerEvent::TreeSnapshot(tree) => latest = tree,
                         _ => {}
@@ -238,7 +238,7 @@ impl Link {
                             return Err(CtlFailure::rejected(message));
                         }
                         ServerEvent::WorkspaceRemovalBlocked { reasons, .. } => {
-                            return Err(CtlFailure::rejected(removal_refusal(&reasons)));
+                            return Err(CtlFailure::rejected(Self::removal_refusal(&reasons)));
                         }
                         _ => {}
                     }

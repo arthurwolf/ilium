@@ -27527,16 +27527,17 @@ mod tests {
             },
             menu,
         );
-        assert_eq!(
+        assert!(matches!(
             app.take_outbound_requests()
                 .into_iter()
                 .find(|request| matches!(request, ClientRequest::NewPane { .. })),
             Some(ClientRequest::NewPane {
-                parent_group: group,
-                kind: ilium_ipc::NewPaneKind::Editor(resolved_path.clone()),
+                parent_group,
+                kind: ilium_ipc::NewPaneKind::Editor(ref path),
                 working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
-            })
-        );
+                ..
+            }) if parent_group == group && *path == resolved_path
+        ));
         assert_eq!(
             app.status_message.as_deref(),
             Some(format!("Opening {} in editor", resolved_path.display()).as_str())

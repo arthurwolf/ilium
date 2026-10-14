@@ -64,7 +64,7 @@ jobs:
             # that a warning inside a third-party dependency cannot fail the
             # build; only this workspace's own code is held to the bar.
             - name: cargo clippy
-              run: cargo clippy --workspace --all-targets -- -D warnings
+              run: cargo clippy --workspace --all-targets --keep-going -- -D warnings
 
     test-linux:
         name: Test (Linux)
