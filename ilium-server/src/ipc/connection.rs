@@ -449,6 +449,7 @@ async fn read_requests<R>(
 /// Forwards direct replies and session events from the ordered journal and
 /// legacy broadcast to this client. A journal cursor advances only after its
 /// event is flushed or intentionally filtered.
+#[cfg(test)]
 async fn write_replies<W, E>(
     write_half: W,
     broadcast_rx: tokio::sync::broadcast::Receiver<E>,
@@ -499,7 +500,7 @@ async fn write_replies_ordered<W, E>(
 async fn write_replies_inner<W, E>(
     write_half: W,
     mut broadcast_rx: tokio::sync::broadcast::Receiver<E>,
-    mut ordered_rx: Option<crate::state::OrderedEventSubscription>,
+    ordered_rx: Option<crate::state::OrderedEventSubscription>,
     mut direct_rx: DirectEventReceiver,
     mut attach_phase_rx: watch::Receiver<AttachPhase>,
     mut stream_control_rx: mpsc::Receiver<StreamControlCommand>,

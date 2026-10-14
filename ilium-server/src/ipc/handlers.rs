@@ -7287,6 +7287,9 @@ where
     .await
 }
 
+// Each argument is an independent input of the key-write path; the probe and
+// admission hook are injected so tests can interleave concurrent writers.
+#[allow(clippy::too_many_arguments)]
 async fn write_key_input_unlocked_with_probe_and_admission_hook<
     Probe,
     ProbeFuture,
