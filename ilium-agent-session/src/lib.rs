@@ -1997,7 +1997,12 @@ mod tests {
         let directory = home
             .join(".claude")
             .join("projects")
-            .join(slugify_claude_project_path(directory_cwd));
+            // The locator derives the directory name from the canonical project
+            // path (macOS /var -> /private/var, Windows 8.3 temp names), so the
+            // fixture must too.
+            .join(slugify_claude_project_path(&canonical_or_original(
+                directory_cwd,
+            )));
         std::fs::create_dir_all(&directory).unwrap();
         let path = directory.join(format!("{session_id}.jsonl"));
         let entry = serde_json::json!({

@@ -471,8 +471,13 @@ async fn unfreeze_preserves_worktree_ownership() {
         assert!(!reasons.is_empty());
         assert!(
             reasons.iter().all(|reason| {
-                reason.contains("cannot inspect cwd of process")
-                    && reason.contains("Permission denied")
+                // Process inspection exists on Linux procfs only; every other
+                // platform reports it unavailable and removal stays fail-closed.
+                let is_non_linux_inspection_refusal = cfg!(not(target_os = "linux"))
+                    && reason.contains("worktree process inspection requires Linux procfs");
+                (is_non_linux_inspection_refusal
+                    || (reason.contains("cannot inspect cwd of process")
+                        && reason.contains("Permission denied")))
                     && !reason.contains("REMOVAL OUTCOME UNCERTAIN")
             }),
             "unexpected worktree removal refusal after unfreeze: {removal:?}"

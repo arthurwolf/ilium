@@ -943,13 +943,16 @@ mod tests {
     #[test]
     fn new_pane_maps_launch_and_directory() {
         let (tree, project, ..) = sample();
+        // `/tmp/...` is not absolute on Windows (no drive), so build the
+        // expected directory from the platform temporary directory.
+        let expected_directory = std::env::temp_dir().join("alpha").join("sub");
         let operation = Operation::NewPane {
             parent: Some(project.0),
             launch: PaneLaunch::Agent {
                 provider: AgentProvider::Codex,
                 prompt: Some("go".into()),
             },
-            cwd: Some(PathBuf::from("/tmp/alpha/sub")),
+            cwd: Some(expected_directory.clone()),
             keep_open: false,
         };
         let request = operation.requests(&tree, 1).unwrap().remove(0);
@@ -968,7 +971,7 @@ mod tests {
         );
         assert_eq!(
             working_directory,
-            NewPaneWorkingDirectory::Directory(PathBuf::from("/tmp/alpha/sub"))
+            NewPaneWorkingDirectory::Directory(expected_directory)
         );
         let relative = Operation::NewPane {
             parent: None,

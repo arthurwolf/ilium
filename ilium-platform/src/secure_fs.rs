@@ -868,7 +868,10 @@ mod tests {
         let source = directory.path().join("pending");
         std::fs::write(&destination, b"previous").expect("previous file");
         std::fs::write(&source, b"replacement").expect("pending file");
-        std::fs::File::open(&source)
+        // Write access: Windows FlushFileBuffers rejects a read-only handle.
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&source)
             .expect("pending handle")
             .sync_all()
             .expect("flush contents");

@@ -152,12 +152,28 @@ impl PinnedFile {
         if identity(&self.file)? != self.identity {
             return Err(io::Error::other("selected file changed before use mark"));
         }
-        self.file
-            .set_times(std::fs::FileTimes::new().set_modified(std::time::SystemTime::now()))?;
-        if identity(&self.file)? != self.identity {
-            return Err(io::Error::other("selected file changed after use mark"));
+        let times = std::fs::FileTimes::new().set_modified(std::time::SystemTime::now());
+        // A Windows pinned file is a read-only handle, which cannot change
+        // timestamps or flush; a reopen with attribute-write rights is
+        // identity-checked and stamps the same inode. The recency mark is
+        // advisory, so no flush is needed there.
+        #[cfg(windows)]
+        {
+            let stamp = crate::nofollow_windows::reopen_regular_for_attribute_write(&self.file)?;
+            stamp.set_times(times)?;
+            if identity(&self.file)? != self.identity {
+                return Err(io::Error::other("selected file changed after use mark"));
+            }
+            Ok(())
         }
-        self.file.sync_all()
+        #[cfg(not(windows))]
+        {
+            self.file.set_times(times)?;
+            if identity(&self.file)? != self.identity {
+                return Err(io::Error::other("selected file changed after use mark"));
+            }
+            self.file.sync_all()
+        }
     }
 
     /// Reads from a specific offset without changing the selected handle's file offset.
@@ -480,7 +496,11 @@ impl PinnedDirectory {
             }
             Ok(DirectoryMutationLease { _file: file })
         }
-        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        #[cfg(windows)]
+        {
+            windows_lease::acquire(self.identity, true)
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
         {
             Err(unsupported())
         }
@@ -509,7 +529,11 @@ impl PinnedDirectory {
             }
             Ok(DirectoryMutationLease { _file: file })
         }
-        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        #[cfg(windows)]
+        {
+            windows_lease::acquire(self.identity, false)
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
         {
             Err(unsupported())
         }
@@ -560,7 +584,13 @@ impl PinnedDirectory {
             }
             self.sync()
         }
-        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        #[cfg(windows)]
+        {
+            self.root
+                .remove_empty_directory(OsStr::new(leaf), (expected.device, expected.inode))?;
+            self.sync()
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
         {
             let _ = expected;
             Err(unsupported())
@@ -619,9 +649,91 @@ impl PinnedDirectory {
         }
     }
 }
-/// Closing the retained file releases the actual OS flock lease.
+/// Closing the retained file releases the actual OS flock lease. On Windows
+/// the lease is a registration in a process-wide table, released on drop.
 pub struct DirectoryMutationLease {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     _file: File,
+    #[cfg(windows)]
+    _registration: windows_lease::Registration,
+}
+/// Windows has no advisory lock that can be taken on a directory handle, and
+/// a lock file would show up as a foreign entry in the clip inventory. The
+/// lease is therefore a process-local reader/writer table keyed by the
+/// directory's identity. Every user of the clip cache lives in one process
+/// (the owner of the pinned root), so it excludes the same actors the Unix
+/// `flock` does; it does not coordinate separate processes.
+#[cfg(windows)]
+mod windows_lease {
+    use super::{DirectoryMutationLease, FileIdentity};
+    use std::{collections::HashMap, io, sync::Mutex};
+
+    #[derive(Default)]
+    struct LeaseState {
+        exclusive: bool,
+        shared: usize,
+    }
+    static LEASES: Mutex<Option<HashMap<(u64, u64), LeaseState>>> = Mutex::new(None);
+
+    pub(super) struct Registration {
+        key: (u64, u64),
+        exclusive: bool,
+    }
+    impl Drop for Registration {
+        fn drop(&mut self) {
+            // Recover from poison: the table holds plain counters, and a
+            // leaked lease would block the directory for the whole process.
+            let mut table = LEASES
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let Some(map) = table.as_mut() else {
+                return;
+            };
+            if let Some(state) = map.get_mut(&self.key) {
+                if self.exclusive {
+                    state.exclusive = false;
+                } else {
+                    state.shared = state.shared.saturating_sub(1);
+                }
+                if !state.exclusive && state.shared == 0 {
+                    map.remove(&self.key);
+                }
+            }
+        }
+    }
+
+    pub(super) fn acquire(
+        identity: FileIdentity,
+        exclusive: bool,
+    ) -> io::Result<DirectoryMutationLease> {
+        let key = (identity.device, identity.inode);
+        let mut table = LEASES
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let state = table
+            .get_or_insert_with(HashMap::new)
+            .entry(key)
+            .or_default();
+        let is_blocked = if exclusive {
+            state.exclusive || state.shared > 0
+        } else {
+            state.exclusive
+        };
+        if is_blocked {
+            return Err(io::Error::new(
+                io::ErrorKind::WouldBlock,
+                "directory mutation lease is held",
+            ));
+        }
+        if exclusive {
+            state.exclusive = true;
+        } else {
+            state.shared += 1;
+        }
+        Ok(DirectoryMutationLease {
+            _registration: Registration { key, exclusive },
+        })
+    }
 }
 #[derive(Debug, Clone, Copy)]
 pub enum WriteMode {

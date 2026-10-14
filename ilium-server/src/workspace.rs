@@ -1674,7 +1674,10 @@ mod tests {
             .expect("both I/O workers started");
 
         let temporary = TempDir::new().expect("temporary worktree parent");
-        let parent = temporary.path().join("new-parent");
+        // The path under test must already be canonical (macOS /var is a
+        // symlink to /private/var; Windows temp dirs use 8.3 short names).
+        let fixture_root = paths::canonicalize(temporary.path()).expect("canonical fixture root");
+        let parent = fixture_root.join("new-parent");
         let requested = parent.join("worktree");
         let expected_path = requested.clone();
         let preparation_client = client.clone();

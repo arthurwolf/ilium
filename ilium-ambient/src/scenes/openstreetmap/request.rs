@@ -191,7 +191,12 @@ mod tests {
             ..Default::default()
         };
         assert!(MapRequest::from_settings(&settings, 0).is_err());
-        settings.local_path = "/maps/osm.json".into();
+        // Windows only treats a drive-qualified path as absolute.
+        settings.local_path = if cfg!(windows) {
+            "C:\\maps\\osm.json".into()
+        } else {
+            "/maps/osm.json".into()
+        };
         let original = MapRequest::from_settings(&settings, 0).unwrap();
         settings.brightness_percent = 1;
         settings.roads = false;

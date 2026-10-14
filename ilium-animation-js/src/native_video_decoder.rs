@@ -426,7 +426,13 @@ mod tests {
     };
     fn limits() -> FfmpegLimits {
         FfmpegLimits {
-            executable: PathBuf::from("/usr/bin/ffmpeg"),
+            // Limits validation requires an absolute path, and only a
+            // drive-qualified path is absolute on Windows. Never executed.
+            executable: PathBuf::from(if cfg!(windows) {
+                "C:\\ffmpeg\\ffmpeg.exe"
+            } else {
+                "/usr/bin/ffmpeg"
+            }),
             sandbox: SandboxLimits {
                 memory_bytes: 128 * 1024 * 1024,
                 maximum_tasks: FFMPEG_PROFILE_TASK_RESERVATION,

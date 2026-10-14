@@ -125,13 +125,22 @@ fn a_real_pty_retains_mouse_negotiation_after_the_fake_agent_crashes() {
     );
     session.with_screen(|screen| {
         assert!(screen.bracketed_paste());
-        assert_eq!(
-            screen.mouse_protocol_mode(),
-            vt100::MouseProtocolMode::AnyMotion
-        );
-        assert_eq!(
-            screen.mouse_protocol_encoding(),
-            vt100::MouseProtocolEncoding::Sgr
-        );
+        // Windows ConPTY consumes the DECSET 1000/1002/1003/1006 mouse
+        // negotiation instead of forwarding it to the terminal stream (hosted
+        // CI observed bracketed paste forwarded but the mouse mode left at
+        // None), so the retained mouse state is unobservable there. The raw
+        // byte stream is still asserted for every OS by the pipe-based test
+        // above.
+        #[cfg(not(windows))]
+        {
+            assert_eq!(
+                screen.mouse_protocol_mode(),
+                vt100::MouseProtocolMode::AnyMotion
+            );
+            assert_eq!(
+                screen.mouse_protocol_encoding(),
+                vt100::MouseProtocolEncoding::Sgr
+            );
+        }
     });
 }

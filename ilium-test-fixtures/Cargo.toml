@@ -26,7 +26,13 @@ vt100 = "0.16.2"
 # and by default that build runs libtest's `main`, which rejects the fake CLI's
 # own argv (`--resume`) and exits before any pane detection can see it. Without
 # the harness the fixture's own `main` runs, as the tests expect.
+#
+# `test = false`: the fixture is a spawned helper, not a test. As a test target
+# `cargo test --lib --bins` would run it directly with no behaviour sidecar and
+# it would panic on purpose. The normal (non-test) build still lands in the
+# profile root, where the integration tests and other crates' tests find it.
 [[bin]]
 name = "ilium-fixture-agent"
 path = "src/bin/ilium_fixture_agent.rs"
 harness = false
+test = false

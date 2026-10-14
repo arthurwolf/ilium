@@ -149,13 +149,24 @@ pub fn resolve_registered(
     Ok(resolved)
 }
 
+/// Test paths are written Unix-style; Windows only treats a drive-qualified
+/// path as absolute, which is what the registry validation requires.
+#[cfg(test)]
+fn absolute_test_path(path: &str) -> String {
+    if cfg!(windows) && path.starts_with('/') {
+        format!("C:{}", path.replace('/', "\\"))
+    } else {
+        path.to_owned()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn entry(id: &str, path: &str) -> InstalledPack {
         let mut source = VoxelLandscapeSettings::default().source_settings();
-        source.path = path.into();
+        source.path = absolute_test_path(path);
         InstalledPack {
             id: id.into(),
             source,
@@ -173,7 +184,7 @@ mod tests {
         assert_eq!(registry.selected("goodvibes").unwrap().mount, 1);
         assert_eq!(
             registry.selected("faithful32").unwrap().path,
-            "/private/32.zip"
+            absolute_test_path("/private/32.zip")
         );
         assert!(registry.selected("faithful64").is_err());
     }
@@ -210,7 +221,7 @@ mod migration_tests {
 
     fn entry(id: &str) -> InstalledPack {
         let mut source = VoxelLandscapeSettings::default().source_settings();
-        source.path = format!("/packs/{id}.zip");
+        source.path = absolute_test_path(&format!("/packs/{id}.zip"));
         InstalledPack {
             id: id.into(),
             source,
@@ -238,7 +249,7 @@ mod migration_tests {
         for profile in pack_profiles::FULL_PACKS {
             assert_eq!(
                 registry.selected(profile.id).unwrap().path,
-                format!("/packs/{}.zip", profile.id)
+                absolute_test_path(&format!("/packs/{}.zip", profile.id))
             );
         }
         for retired in pack_profiles::RETIRED_PACK_IDS {
@@ -308,26 +319,32 @@ mod migration_tests {
         let legacy = VoxelLandscapeSettings {
             pack_profile_version: 0,
             pack_profile: 0,
-            pack_path: "/packs/private.zip".into(),
+            pack_path: absolute_test_path("/packs/private.zip"),
             ..Default::default()
         };
         let resolved = resolve_registered(&legacy, root.path(), cancel).unwrap();
         assert_eq!(resolved.pack_profile, 0);
         assert_eq!(resolved.pack_profile_version, 1);
-        assert_eq!(resolved.pack_path, "/packs/goodvibes.zip");
+        assert_eq!(
+            resolved.pack_path,
+            absolute_test_path("/packs/goodvibes.zip")
+        );
         assert_eq!(
             resolved.pack_custom_sources["jicklus"].path,
-            "/packs/private.zip"
+            absolute_test_path("/packs/private.zip")
         );
         assert_eq!(std::fs::read(path).unwrap(), registry);
         let legacy = VoxelLandscapeSettings {
             pack_profile_version: 0,
             pack_profile: 8,
-            pack_path: "/packs/custom-faithful32.zip".into(),
+            pack_path: absolute_test_path("/packs/custom-faithful32.zip"),
             ..Default::default()
         };
         let resolved = resolve_registered(&legacy, root.path(), cancel).unwrap();
         assert_eq!(resolved.pack_profile, 5);
-        assert_eq!(resolved.pack_path, "/packs/custom-faithful32.zip");
+        assert_eq!(
+            resolved.pack_path,
+            absolute_test_path("/packs/custom-faithful32.zip")
+        );
     }
 }
