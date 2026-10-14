@@ -103,7 +103,14 @@ fn a_real_pty_retains_mouse_negotiation_after_the_fake_agent_crashes() {
         assert!(Instant::now() < deadline, "fixture never negotiated paste");
         std::thread::sleep(Duration::from_millis(10));
     }
-    let prompt = prompt();
+    // Windows ConPTY strips the bracketed-paste markers, drops LF and turns a
+    // pasted CR into Enter, so a multi-line paste cannot reach the fixture
+    // intact there; use the single-line form of the same prompt.
+    let prompt = if cfg!(windows) {
+        prompt().replace(['\r', '\n'], "")
+    } else {
+        prompt()
+    };
     session
         .write(&submission(&prompt))
         .expect("submit to real composer");
