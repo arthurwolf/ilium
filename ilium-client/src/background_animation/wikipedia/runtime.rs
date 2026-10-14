@@ -89,6 +89,9 @@ impl WikipediaRuntime {
         elapsed: Duration,
         resources: Option<&AmbientResources>,
     ) {
+        // Tests never start the HTTP loader, so the admission resources go unused there.
+        #[cfg(test)]
+        let _ = resources;
         #[cfg(not(test))]
         if self.loader.is_none() && elapsed >= self.retry_after {
             let Some(resources) = resources else {

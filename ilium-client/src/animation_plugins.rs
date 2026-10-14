@@ -824,6 +824,7 @@ pub fn apply_control_value(
     validate_settings(schema, &Value::Object(values)).map_err(|error| error.to_string())
 }
 
+#[cfg(test)]
 pub fn apply_choice(
     schema: &Value,
     authored: &Value,
@@ -848,6 +849,8 @@ pub fn apply_choice(
 #[derive(Debug, Clone)]
 pub enum PluginControlEdit {
     Values(Value),
+    // The text-prompt editor for plugin controls is unfinished: callers only match the variant for now.
+    #[allow(dead_code)]
     TextPrompt {
         id: String,
         label: String,
@@ -972,6 +975,7 @@ pub struct PluginPanelModel {
 }
 
 impl PluginPanelModel {
+    #[cfg(test)]
     pub fn new(catalogue: &PluginCatalogue, preferences: &PluginPreferences) -> Self {
         Self::with_active(catalogue, preferences, None)
     }

@@ -214,6 +214,8 @@ pub(crate) enum ReviewAction {
         answers: BTreeMap<String, UserChoice>,
     },
     Cancel {
+        // Carried for the worker's stale-selection check, which is not wired in yet (feature in progress).
+        #[allow(dead_code)]
         selection_revision: u64,
     },
     Pick {
@@ -337,6 +339,8 @@ impl ReviewBridge {
     }
     /// Call for every original broker epoch/plan transition BEFORE publishing
     /// new acquisition/frames. Root resolve checks its own broker again.
+    // Called by the plugin permission workflow, which is not wired in yet (feature in progress).
+    #[allow(dead_code)]
     pub(crate) fn authority_changed(
         &self,
         selection: u64,

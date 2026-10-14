@@ -135,6 +135,8 @@ impl BaselineFiles {
             .insert(context.prompt_epoch.clone(), Arc::new(context));
         Ok(())
     }
+    // Epoch cleanup is not wired to the prompt lifecycle yet.
+    #[allow(dead_code)]
     pub(crate) fn forget(&mut self, epoch: &str) {
         self.captured.remove(epoch);
     }

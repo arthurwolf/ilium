@@ -299,6 +299,31 @@ fn direct_event_storage_bytes(event: &ServerEvent) -> Option<usize> {
         .checked_add(2 * std::mem::size_of::<usize>())
 }
 
+pub(crate) enum EventReply<'a> {
+    Direct(&'a DirectEventSender),
+    Legacy(&'a mpsc::Sender<ServerEvent>),
+}
+
+impl EventReply<'_> {
+    pub(crate) fn is_closed(&self) -> bool {
+        match self {
+            Self::Direct(sender) => sender.is_closed(),
+            Self::Legacy(sender) => sender.is_closed(),
+        }
+    }
+
+    pub(crate) async fn send(&self, event: ServerEvent) {
+        match self {
+            Self::Direct(sender) => {
+                let _ = sender.send(event).await;
+            }
+            Self::Legacy(sender) => {
+                let _ = sender.send(event).await;
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -390,30 +415,5 @@ mod tests {
         .unwrap()
         .unwrap();
         assert!(report.shutdown_complete, "{report:?}");
-    }
-}
-
-pub(crate) enum EventReply<'a> {
-    Direct(&'a DirectEventSender),
-    Legacy(&'a mpsc::Sender<ServerEvent>),
-}
-
-impl EventReply<'_> {
-    pub(crate) fn is_closed(&self) -> bool {
-        match self {
-            Self::Direct(sender) => sender.is_closed(),
-            Self::Legacy(sender) => sender.is_closed(),
-        }
-    }
-
-    pub(crate) async fn send(&self, event: ServerEvent) {
-        match self {
-            Self::Direct(sender) => {
-                let _ = sender.send(event).await;
-            }
-            Self::Legacy(sender) => {
-                let _ = sender.send(event).await;
-            }
-        }
     }
 }
