@@ -88,6 +88,15 @@ jobs:
             #
             # `--no-fail-fast` for the same reason the Windows job uses it: one
             # run should report every crate, not stop at the first failure.
+            - name: time the animation settings matrix test
+              if: always()
+              timeout-minutes: 40
+              continue-on-error: true
+              run: |
+                  start=$(date +%s)
+                  cargo test -p ilium-client --lib every_native_choice_and_number_paints -- --nocapture || true
+                  echo "matrix test seconds: $(( $(date +%s) - start ))"
+
             - name: cargo test (unit tests, parallel)
               if: always()
               run: |
