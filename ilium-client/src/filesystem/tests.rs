@@ -254,8 +254,12 @@ fn board_read_retains_exact_target_under_overload_and_deduplicates() {
     loop {
         if let Some(loaded) = files.poll_read() {
             let source = loaded.result.unwrap();
-            assert_eq!(source.storage.path(), path);
+            // Temp dirs may sit behind symlinks (macOS /var -> /private/var): compare real paths.
             assert!(path.exists());
+            assert_eq!(
+                source.storage.path().canonicalize().unwrap(),
+                path.canonicalize().unwrap()
+            );
             break;
         }
         assert!(

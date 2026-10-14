@@ -853,18 +853,20 @@ mod tests {
         ] {
             let home = tempfile::tempdir().unwrap();
             let session = "11111111-1111-4111-8111-111111111111";
-            let directory = match class {
-                ilium_core::AgentClass::Codex => home.path().join(".codex/sessions/2026/10/03"),
-                _ => home.path().join(".claude/projects/-"),
+            // Claude derives its project directory name from the canonical cwd, which is
+            // not "-" for "/" on every OS (Windows resolves it to a drive root).
+            let path = match class {
+                ilium_core::AgentClass::Codex => home
+                    .path()
+                    .join(".codex/sessions/2026/10/03")
+                    .join(format!("rollout-2026-10-03T12-00-00-{session}.jsonl")),
+                _ => ilium_agent_session::claude_transcript_path(
+                    home.path(),
+                    std::path::Path::new("/"),
+                    session,
+                ),
             };
-            std::fs::create_dir_all(&directory).unwrap();
-            let filename = match class {
-                ilium_core::AgentClass::Codex => {
-                    format!("rollout-2026-10-03T12-00-00-{session}.jsonl")
-                }
-                _ => format!("{session}.jsonl"),
-            };
-            let path = directory.join(filename);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             let metadata = match class {
                 ilium_core::AgentClass::Codex => serde_json::json!({
                     "type": "session_meta", "payload": {"id": session, "cwd": "/"},
