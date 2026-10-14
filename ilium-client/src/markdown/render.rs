@@ -335,6 +335,8 @@ fn safe_geometry(width: u16, cell: (u16, u16)) -> bool {
 }
 
 /// No filesystem access here: encoding and rasterization are CPU work.
+// Each argument is a distinct owned input or admission lease of the worker job.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn render_prepared(
     document: &Document,
     images: &std::collections::HashMap<std::path::PathBuf, Vec<u8>>,

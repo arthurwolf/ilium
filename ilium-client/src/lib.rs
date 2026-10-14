@@ -1332,7 +1332,7 @@ async fn run_inner(
         }
         app.begin_editor_capture_turn();
         if let Err(failure) = app.retry_native_terminal_paste() {
-            input_failure = Some(failure);
+            input_failure = Some(*failure);
             break;
         }
         if advance_pending_key_paste(
@@ -1846,7 +1846,7 @@ async fn run_inner(
                 .expect("remote compaction owner is initialized before the event loop")
                 .spawn(job)
             {
-                app.apply_remote_compaction_worker_event(event);
+                app.apply_remote_compaction_worker_event(*event);
                 needs_redraw = true;
                 needs_immediate_redraw = true;
             }
@@ -2672,7 +2672,7 @@ async fn finish_input_retirement(
             report.complete_exit_click_release(exit_click_release);
             return report
                 .into_result()
-                .map_err(crate::error::InputRetirementError::Failed);
+                .map_err(|failure| crate::error::InputRetirementError::Failed(*failure));
         }
         if tokio::time::Instant::now() >= deadline {
             return Err(crate::error::InputRetirementError::Deadline(
@@ -4313,6 +4313,8 @@ fn native_input_geometry_ready(
 /// Consecutive mouse-motion reports are coalesced to their newest position:
 /// only that position can determine the current hover state, while keeping
 /// every non-motion event in order preserves click, drag, and scroll input.
+// The arguments are the distinct worker/backlog owners the event loop lends for one batch.
+#[allow(clippy::too_many_arguments)]
 fn dispatch_ready_input_events<S>(
     app: &mut App,
     input_rx: &mut S,
@@ -4415,7 +4417,7 @@ where
                     if let Some(pane_id) = destination {
                         if !crate::keys::intercept_event(app, event.view()) {
                             if let Err(error) = app.capture_native_terminal_paste(pane_id, event) {
-                                failure = Some(error);
+                                failure = Some(*error);
                             }
                         }
                         // Preserve App::handle_event's post-key layout sampling,
@@ -4585,7 +4587,9 @@ impl InputBatchItem
 
     fn coalesce_motion(self) -> Result<(), Self> {
         match self {
-            Ok(event) => event.coalesce_motion().map_err(Ok),
+            Ok(event) => event
+                .coalesce_motion()
+                .map_or(Ok(()), |original| Err(Ok(original))),
             Err(error) => Err(Err(error)),
         }
     }

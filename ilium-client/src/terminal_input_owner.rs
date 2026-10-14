@@ -190,9 +190,10 @@ impl InputEvent {
             0
         }
     }
-    /// Existing hover-motion coalescing is an explicit disposition. Other
-    /// original input cannot pass through this method or be discarded by it.
-    pub(crate) fn coalesce_motion(self) -> Result<(), Self> {
+    /// Existing hover-motion coalescing is an explicit disposition: `None`
+    /// means the hover motion was discarded. Other original input is handed
+    /// back as `Some` and cannot be discarded by this method.
+    pub(crate) fn coalesce_motion(self) -> Option<Self> {
         if !matches!(
             self.view(),
             Event::Mouse(crossterm::event::MouseEvent {
@@ -200,10 +201,10 @@ impl InputEvent {
                 ..
             })
         ) {
-            return Err(self);
+            return Some(self);
         }
         drop(self);
-        Ok(())
+        None
     }
     /// Move the original Paste allocation while retaining its native lease
     /// through construction/publication of the separately admitted request.
@@ -1553,7 +1554,7 @@ impl InputShutdownReport {
     pub fn failure(&self) -> Option<&InputFailure> {
         self.failure.as_deref()
     }
-    pub fn into_result(self) -> Result<(), InputFailure> {
+    pub fn into_result(self) -> Result<(), Box<InputFailure>> {
         if self.exit == WorkerExit::Joined
             && self.pending.is_empty()
             && self.failure.is_none()
@@ -1564,9 +1565,9 @@ impl InputShutdownReport {
         {
             return Ok(());
         }
-        Err(InputFailure {
+        Err(Box::new(InputFailure {
             kind: InputFailureKind::Shutdown(Box::new(self)),
-        })
+        }))
     }
 }
 impl fmt::Debug for InputShutdownReport {
@@ -1991,6 +1992,9 @@ mod tests {
         assert_eq!(allowed.snapshot().worker_bytes, 0);
     }
 
+    // The std mutex serialises tests that share the process-wide input quota; the
+    // single-threaded runtime never contends it across the awaits.
+    #[allow(clippy::await_holding_lock)]
     #[tokio::test(flavor = "current_thread")]
     async fn full_queue_preserves_every_paste_and_its_original_allocation() {
         let _serial = INPUT_TEST_LOCK
@@ -2181,6 +2185,9 @@ mod tests {
         );
     }
 
+    // The std mutex serialises tests that share the process-wide input quota; the
+    // single-threaded runtime never contends it across the awaits.
+    #[allow(clippy::await_holding_lock)]
     #[tokio::test(flavor = "current_thread")]
     async fn read_failure_is_delivered_once_and_does_not_become_normal_end_of_stream() {
         let _serial = INPUT_TEST_LOCK

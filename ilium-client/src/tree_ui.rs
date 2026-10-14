@@ -3526,6 +3526,8 @@ mod tests {
         )
     }
 
+    // Test render helper: the arguments mirror the production tree-render inputs.
+    #[allow(clippy::too_many_arguments)]
     fn render_tree_buffer_with_models(
         tree: &Tree,
         state: &mut TreeState<NodeId>,

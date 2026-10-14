@@ -89,6 +89,9 @@ impl EditorInputBacklog {
             .is_some_and(|total| total <= self.max_bytes)
     }
 
+    // Overflow hands the original input back unboxed: it happens exactly when the
+    // backlog's byte/slot budget is exhausted, so boxing would need a new allocation.
+    #[allow(clippy::result_large_err)]
     pub(crate) fn push(
         &mut self,
         event: Result<InputEvent, InputFailure>,

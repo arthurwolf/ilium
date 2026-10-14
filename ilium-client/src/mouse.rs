@@ -2351,7 +2351,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
         return;
     }
     let instruction_height =
-        crate::settings_ui::instructions_panel_height(&app, state.tab, layout.content_area);
+        crate::settings_ui::instructions_panel_height(app, state.tab, layout.content_area);
     if instruction_height > 0 {
         let panel = Rect {
             height: instruction_height,

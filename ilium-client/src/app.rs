@@ -271,6 +271,9 @@ pub struct ChatroomViewState {
 
 /// The input-handling mode. Most keys are dispatched differently
 /// depending on this; see `crate::keys`.
+// `Mode::Settings(SettingsState)` is matched by value in hundreds of call sites across
+// many modules; boxing it is deferred, the enum is held once per app.
+#[allow(clippy::large_enum_variant)]
 pub enum Mode {
     Normal,
     LeaderPending,
@@ -4597,7 +4600,7 @@ impl App {
         };
         viewports
             .into_iter()
-            .map(|mut viewport| {
+            .map(|viewport| {
                 let is_terminal = self.tree.get(viewport.pane_id).is_some_and(|node| {
                     matches!(
                         &node.kind,
@@ -6254,16 +6257,15 @@ impl App {
                 }
             }
         }
-        if self.pending_voice_interaction_requests.capacity() < 64 {
-            if self
+        if self.pending_voice_interaction_requests.capacity() < 64
+            && self
                 .pending_voice_interaction_requests
                 .try_reserve_exact(64 - self.pending_voice_interaction_requests.len())
                 .is_err()
-            {
-                self.status_message =
-                    Some("Voice push-to-talk allocation refused; edge not admitted".into());
-                return;
-            }
+        {
+            self.status_message =
+                Some("Voice push-to-talk allocation refused; edge not admitted".into());
+            return;
         }
         self.pending_voice_interaction_requests.push(request);
     }
@@ -9141,9 +9143,7 @@ impl App {
                 issue_details,
             }
         };
-        if !model.issue_details.is_empty()
-            && !model.rows.iter().any(|row| *row == PluginPanelRow::Issues)
-        {
+        if !model.issue_details.is_empty() && !model.rows.contains(&PluginPanelRow::Issues) {
             model.rows.push(PluginPanelRow::Issues);
             model.labels.push(format!(
                 "{} package/runtime issue(s)",
@@ -10289,6 +10289,7 @@ impl App {
         }
         true
     }
+    #[cfg(test)]
     fn complete_smart_copy_capture(
         &mut self,
         pane_id: NodeId,
@@ -10568,10 +10569,10 @@ impl App {
         if self.smart_copy_light.is_none() && !retry {
             return;
         }
-        if !self
+        if self
             .smart_copy_session
             .as_ref()
-            .is_some_and(|session| session.selected_count() > 0)
+            .is_none_or(|session| session.selected_count() == 0)
         {
             self.exit_smart_copy();
             return;
@@ -10657,16 +10658,15 @@ impl App {
         }
         // Restoration is also CPU-owned; failed originals stay in order when
         // admission is refused, never clone plaintext or become inaccessible.
-        if !self.light_copy_shutdown {
-            if self
+        if !self.light_copy_shutdown
+            && self
                 .light_copy_recovery
                 .front()
                 .is_some_and(|original| original.original().is_some())
-            {
-                if let Some(original) = self.light_copy_recovery.pop_front() {
-                    if let Err(original) = owner.recover(original) {
-                        self.light_copy_recovery.push_front(original);
-                    }
+        {
+            if let Some(original) = self.light_copy_recovery.pop_front() {
+                if let Err(original) = owner.recover(original) {
+                    self.light_copy_recovery.push_front(original);
                 }
             }
         }
@@ -17731,17 +17731,21 @@ impl App {
         &mut self,
         pane_id: NodeId,
         event: crate::terminal_input_owner::InputEvent,
-    ) -> Result<(), crate::terminal_input_owner::InputFailure> {
+    ) -> Result<(), Box<crate::terminal_input_owner::InputFailure>> {
         if self.pending_native_paste.is_some() {
-            return Err(crate::terminal_input_owner::InputFailure::refused(
-                ilium_execution::RejectReason::QueueFull,
-                event,
+            return Err(Box::new(
+                crate::terminal_input_owner::InputFailure::refused(
+                    ilium_execution::RejectReason::QueueFull,
+                    event,
+                ),
             ));
         }
         let Some(PaneRuntime::Terminal(view)) = self.panes.get(&pane_id) else {
-            return Err(crate::terminal_input_owner::InputFailure::refused(
-                ilium_execution::RejectReason::Closed,
-                event,
+            return Err(Box::new(
+                crate::terminal_input_owner::InputFailure::refused(
+                    ilium_execution::RejectReason::Closed,
+                    event,
+                ),
             ));
         };
         self.last_tree_click = None;
@@ -17757,9 +17761,9 @@ impl App {
     /// while it is waiting; parser/IPC/presentation collectors remain active.
     pub(crate) fn retry_native_terminal_paste(
         &mut self,
-    ) -> Result<(), crate::terminal_input_owner::InputFailure> {
+    ) -> Result<(), Box<crate::terminal_input_owner::InputFailure>> {
         if let Some(failure) = self.native_paste_failure.take() {
-            return Err(failure);
+            return Err(Box::new(failure));
         }
         let Some(pending) = self.pending_native_paste.take() else {
             return Ok(());
@@ -17791,16 +17795,20 @@ impl App {
         if bytes > crate::terminal_input::MAX_BYTES
             || wire_bytes > ilium_ipc::MAX_FRAME_LEN as usize
         {
-            return Err(crate::terminal_input_owner::InputFailure::refused(
-                ilium_execution::RejectReason::InputBytes,
-                pending.event,
+            return Err(Box::new(
+                crate::terminal_input_owner::InputFailure::refused(
+                    ilium_execution::RejectReason::InputBytes,
+                    pending.event,
+                ),
             ));
         }
         if self.terminal_parsing.is_none() {
             let Some(client) = &self.outbound_admission else {
-                return Err(crate::terminal_input_owner::InputFailure::refused(
-                    ilium_execution::RejectReason::Closed,
-                    pending.event,
+                return Err(Box::new(
+                    crate::terminal_input_owner::InputFailure::refused(
+                        ilium_execution::RejectReason::Closed,
+                        pending.event,
+                    ),
                 ));
             };
             let reservation = match crate::ipc_preparation::reserve_request(
@@ -17815,9 +17823,11 @@ impl App {
                             | ilium_execution::RejectReason::InvalidCost
                             | ilium_execution::RejectReason::AccountingPoisoned
                     ) {
-                        return Err(crate::terminal_input_owner::InputFailure::refused(
-                            reason,
-                            pending.event,
+                        return Err(Box::new(
+                            crate::terminal_input_owner::InputFailure::refused(
+                                reason,
+                                pending.event,
+                            ),
                         ));
                     }
                     self.pending_native_paste = Some(pending);
@@ -17827,9 +17837,11 @@ impl App {
             let placeholder = match reservation.retain(()) {
                 Ok(placeholder) => placeholder,
                 Err(_) => {
-                    return Err(crate::terminal_input_owner::InputFailure::refused(
-                        ilium_execution::RejectReason::InvalidCost,
-                        pending.event,
+                    return Err(Box::new(
+                        crate::terminal_input_owner::InputFailure::refused(
+                            ilium_execution::RejectReason::InvalidCost,
+                            pending.event,
+                        ),
                     ));
                 }
             };
@@ -19165,10 +19177,10 @@ impl App {
     /// that is refused for budget can retry after this. Returns whether a pin
     /// was actually released.
     fn release_foreign_selection_pin(&mut self, pane_id: NodeId) -> bool {
-        if !self
+        if self
             .terminal_selection_source
             .as_ref()
-            .is_some_and(|(owner, _)| *owner != pane_id)
+            .is_none_or(|(owner, _)| *owner == pane_id)
         {
             return false;
         }
@@ -19742,7 +19754,10 @@ impl App {
 /// on a line long enough to have scrolled horizontally (rare for a short
 /// "- [ ] ..." item) simply won't be found rather than risk mutating the
 /// wrong character.
+// Markdown checkbox click toggling was moved out of the app click path; this lookup has
+// no remaining caller but documents the column mapping, so it is kept for that work.
 #[cfg(test)]
+#[allow(dead_code)]
 fn checkbox_at(
     editor: &EditorPane,
     content_area: Rect,

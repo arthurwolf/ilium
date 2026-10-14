@@ -129,6 +129,8 @@ pub(crate) struct Stream {
     window_allocation: Arc<ilium_execution::StorageAdmission>,
 }
 impl Stream {
+    // Each argument is a distinct admission lease or geometry input of one stream.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         identity: Arc<()>,
         physical_count: usize,

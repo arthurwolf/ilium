@@ -436,6 +436,8 @@ fn draw_goal_resume_tooltip(frame: &mut Frame, app: &App) {
     crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, &content);
 }
 
+// The `return` is only redundant when the `cfg(test)` fallback below is compiled out.
+#[cfg_attr(not(test), allow(clippy::needless_return))]
 fn draw_worktree_tooltip(frame: &mut Frame, app: &App) {
     let Some(hit) = app.hovered_tree_node.filter(|hit| hit.line == 1) else {
         return;
@@ -460,6 +462,8 @@ fn draw_worktree_tooltip(frame: &mut Frame, app: &App) {
 /// Explains the tree-row state glyph under the pointer. The slot's signal is
 /// retained with the actually emitted row; newer server evidence cannot
 /// change its explanation until that row's next frame is acknowledged.
+// The `return` is only redundant when the `cfg(test)` fallback below is compiled out.
+#[cfg_attr(not(test), allow(clippy::needless_return))]
 fn draw_status_tooltip(frame: &mut Frame, app: &App) {
     let Some((node_id, slot, anchor)) = app.hovered_status_slot else {
         return;
