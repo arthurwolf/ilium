@@ -141,7 +141,11 @@ async fn select_and_measure(
         // Incremental JSONL so an interrupted run still leaves evidence.
         let mut jsonl = path;
         jsonl.push(".jsonl");
-        if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(jsonl) {
+        if let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(jsonl)
+        {
             let _ = std::io::Write::write_all(&mut file, format!("{result}\n").as_bytes());
         }
     }
