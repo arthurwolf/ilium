@@ -1,5 +1,5 @@
-//! The Padding settings tab: three selectable boxes (Disabled, Enabled, Size
-//! dependent) side by side, a threshold input inside the size-dependent box
+//! The Padding settings tab: three selectable boxes (Disabled, Size
+//! dependent, Enabled) side by side, a threshold input inside the size-dependent box
 //! and, once padding can apply, the "Padding fine-tuning" button.
 //!
 //! [`tab_layout`] is the single source of geometry: [`render`] paints from it
@@ -81,7 +81,7 @@ pub fn tab_layout(area: Rect, settings: &PaddingSettings) -> TabLayout {
     };
     let cards = [card(0), card(1), card(2)];
 
-    let inside = Block::default().borders(Borders::ALL).inner(cards[2]);
+    let inside = Block::default().borders(Borders::ALL).inner(cards[1]);
     let input_row = inside.bottom().saturating_sub(1);
     let has_big_steps = inside.width >= BUTTON_WIDTH * 4 + FIELD_WIDTH + 4;
     let total = if has_big_steps {
@@ -499,7 +499,7 @@ mod tests {
             assert_eq!(pair[0].width, pair[1].width);
         }
         assert!(layout.fine_tune.is_none(), "hidden while disabled");
-        assert!(layout.cards[2].contains(layout.field.as_position()));
+        assert!(layout.cards[1].contains(layout.field.as_position()));
     }
 
     #[test]
@@ -525,7 +525,7 @@ mod tests {
         let area = Rect::new(0, 0, 90, 20);
         let layout = tab_layout(area, &app.padding_settings);
 
-        let target = hit(area, &app.padding_settings, layout.cards[1].as_position()).unwrap();
+        let target = hit(area, &app.padding_settings, layout.cards[2].as_position()).unwrap();
         assert_eq!(target, PaddingHit::Mode(PaddingMode::Enabled));
         click(&mut app, &mut state, target);
         assert_eq!(app.padding_settings.mode, PaddingMode::Enabled);

@@ -446,3 +446,22 @@ fn an_unrelated_server_error_does_not_cause_terminal_resize_churn() {
     app.resize_displayed_panes(PaneResizeCause::UserInterfaceSettings);
     assert!(app.take_outbound_requests().is_empty());
 }
+
+#[test]
+fn padding_insets_only_the_terminal_content_not_the_metadata_bars() {
+    let (mut app, pane_id) = terminal_app();
+    let plain = app.pane_viewport(pane_id).unwrap();
+    app.padding_settings.mode = crate::padding::PaddingMode::Enabled;
+    let padded = app.pane_viewport(pane_id).unwrap();
+    // Every bar keeps its unpadded geometry, edge to edge.
+    assert_eq!(padded.toolbar_area, plain.toolbar_area);
+    assert_eq!(padded.last_prompt_area, plain.last_prompt_area);
+    assert_eq!(padded.progress_area, plain.progress_area);
+    assert_eq!(padded.toolbar_rule, plain.toolbar_rule);
+    assert_eq!(padded.progress_rule, plain.progress_rule);
+    // Only the terminal itself moves in by the default one cell per side.
+    assert_eq!(padded.content_area.x, plain.content_area.x + 1);
+    assert_eq!(padded.content_area.y, plain.content_area.y + 1);
+    assert_eq!(padded.content_area.width, plain.content_area.width - 2);
+    assert_eq!(padded.content_area.height, plain.content_area.height - 2);
+}
