@@ -341,6 +341,20 @@ fn compute_layout_with_attribution(area: Rect, shows_osm: bool) -> SettingsLayou
 /// short so it reads as a button, not a sentence.
 const CLOSE_LABEL: &str = "\u{2715} Close";
 
+/// Share the exact content inset between rendering, pointer dispatch and
+/// geometry checks. Compact Kilo settings reserve space for the privacy notice.
+pub(crate) fn instructions_panel_height(app: &App, tab: SettingsTab, area: Rect) -> u16 {
+    if tab == SettingsTab::Inference
+        && app.inference_settings.selected_provider
+            == ilium_inference::InferenceProviderKind::KiloGateway
+        && area.height <= 8
+    {
+        0
+    } else {
+        crate::instruction_settings::panel_height(tab, area)
+    }
+}
+
 /// Draws the full-screen settings view. Callers must skip drawing anything
 /// else this frame (see `crate::ui::draw`'s `Mode::Settings` branch) -- this
 /// replaces the entire screen, it isn't a popup layered on top. Two ways to
@@ -398,15 +412,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
         theme::block(true).title(theme::chrome_title(state.tab.label())),
         layout.content_frame_area,
     );
-    let compact_kilo_privacy = state.tab == SettingsTab::Inference
-        && app.inference_settings.selected_provider
-            == ilium_inference::InferenceProviderKind::KiloGateway
-        && layout.content_area.height <= 8;
-    let instructions_height = if compact_kilo_privacy {
-        0
-    } else {
-        crate::instruction_settings::panel_height(state.tab, layout.content_area)
-    };
+    let instructions_height = instructions_panel_height(app, state.tab, layout.content_area);
     if instructions_height > 0 {
         let panel = Rect {
             height: instructions_height,
@@ -6507,8 +6513,7 @@ mod number_control_tests {
                 };
                 let mut terminal = Terminal::new(TestBackend::new(140, 180)).unwrap();
                 let mut layout = compute_layout_for_mode(Rect::new(0, 0, 140, 180), &app, &state);
-                let instructions =
-                    crate::instruction_settings::panel_height(state.tab, layout.content_area);
+                let instructions = instructions_panel_height(&app, state.tab, layout.content_area);
                 layout.content_area.y += instructions;
                 layout.content_area.height =
                     layout.content_area.height.saturating_sub(instructions);
@@ -6622,8 +6627,7 @@ mod number_control_tests {
                 let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
                 let mut layout =
                     compute_layout_for_mode(Rect::new(0, 0, width, height), &app, &state);
-                let instructions =
-                    crate::instruction_settings::panel_height(state.tab, layout.content_area);
+                let instructions = instructions_panel_height(&app, state.tab, layout.content_area);
                 layout.content_area.y += instructions;
                 layout.content_area.height =
                     layout.content_area.height.saturating_sub(instructions);
@@ -6642,7 +6646,7 @@ mod number_control_tests {
                     state.scroll = scroll;
                     layout = compute_layout_for_mode(Rect::new(0, 0, width, height), &app, &state);
                     let instructions =
-                        crate::instruction_settings::panel_height(state.tab, layout.content_area);
+                        instructions_panel_height(&app, state.tab, layout.content_area);
                     layout.content_area.y += instructions;
                     layout.content_area.height =
                         layout.content_area.height.saturating_sub(instructions);
@@ -6697,7 +6701,7 @@ mod number_control_tests {
             .unwrap();
         let layout = compute_layout_for_mode(Rect::new(0, 0, 160, 80), &app, &state);
         let mut area = layout.content_area;
-        let instructions = crate::instruction_settings::panel_height(state.tab, area);
+        let instructions = instructions_panel_height(&app, state.tab, area);
         area.y += instructions;
         area.height = area.height.saturating_sub(instructions);
 
@@ -6821,10 +6825,9 @@ mod number_control_tests {
                 tab,
                 ..SettingsState::default()
             };
-            let mut terminal = Terminal::new(TestBackend::new(140, 180)).unwrap();
-            let mut layout = compute_layout_for_mode(Rect::new(0, 0, 140, 180), &app, &state);
-            let instructions =
-                crate::instruction_settings::panel_height(state.tab, layout.content_area);
+            let mut terminal = Terminal::new(TestBackend::new(80, 180)).unwrap();
+            let mut layout = compute_layout_for_mode(Rect::new(0, 0, 80, 180), &app, &state);
+            let instructions = instructions_panel_height(&app, state.tab, layout.content_area);
             layout.content_area.y += instructions;
             layout.content_area.height = layout.content_area.height.saturating_sub(instructions);
             terminal
@@ -6931,8 +6934,7 @@ mod number_control_tests {
                 let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
                 let mut layout =
                     compute_layout_for_mode(Rect::new(0, 0, width, height), &app, &state);
-                let instructions =
-                    crate::instruction_settings::panel_height(tab, layout.content_area);
+                let instructions = instructions_panel_height(&app, tab, layout.content_area);
                 layout.content_area.y += instructions;
                 layout.content_area.height =
                     layout.content_area.height.saturating_sub(instructions);
@@ -6950,8 +6952,7 @@ mod number_control_tests {
                     };
                     state.scroll = scroll;
                     layout = compute_layout_for_mode(Rect::new(0, 0, width, height), &app, &state);
-                    let instructions =
-                        crate::instruction_settings::panel_height(tab, layout.content_area);
+                    let instructions = instructions_panel_height(&app, tab, layout.content_area);
                     layout.content_area.y += instructions;
                     layout.content_area.height =
                         layout.content_area.height.saturating_sub(instructions);
@@ -7052,8 +7053,8 @@ mod tests {
     #[test]
     fn settings_navigation_has_semantic_icons_for_every_tab() {
         let expected_icons = [
-            "◐", "▢", "▦", "◉", "¤", "↗", "⇥", "⌨", "❯", "✎", "▣", "⑂", "▥", "▷", "♪", "🎙", "↻", "⚡",
-            "≡", "≔", "⚑", "¶", "⌕", "⇄", "ⓘ", "⚙",
+            "◐", "▢", "▦", "◉", "¤", "↗", "⇥", "⌨", "❯", "✎", "▣", "⑂", "▥", "▷", "♪", "🎙", "↻",
+            "⚡", "≡", "≔", "⚑", "¶", "⌕", "⇄", "ⓘ", "⚙",
         ];
         assert_eq!(SettingsTab::ALL.len(), expected_icons.len());
         for (tab, expected_icon) in SettingsTab::ALL.into_iter().zip(expected_icons) {
@@ -7303,8 +7304,7 @@ mod tests {
                     ..SettingsState::default()
                 };
                 let mut layout = compute_layout_for_mode(screen, &app, &state);
-                let instructions_height =
-                    crate::instruction_settings::panel_height(tab, layout.content_area);
+                let instructions_height = instructions_panel_height(&app, tab, layout.content_area);
                 if instructions_height > 0 && tab != SettingsTab::LlmInstructions {
                     layout.content_area.y += instructions_height;
                     layout.content_area.height = layout

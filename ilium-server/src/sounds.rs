@@ -613,6 +613,31 @@ mod tests {
 
     type PlaybackCall = (SoundSettings, Option<SoundEvent>);
 
+    async fn submit_preview_after_transient_busy(
+        sender: &PlaybackSender,
+        mut request: PlaybackRequest,
+        reply: crate::ipc::DirectEventSender,
+    ) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            match sender.try_send_with_preview_reply(request, Some(reply.clone())) {
+                Ok(()) => return,
+                Err(PlaybackSendError::Admission {
+                    reason: ilium_execution::RejectReason::Busy,
+                    _request: returned,
+                }) => {
+                    assert!(
+                        std::time::Instant::now() < deadline,
+                        "preview fixture storage admission stayed busy"
+                    );
+                    request = returned;
+                    tokio::time::sleep(Duration::from_millis(1)).await;
+                }
+                Err(error) => panic!("preview fixture admission failed: {error}"),
+            }
+        }
+    }
+
     struct RecordingPlayer {
         calls: Arc<Mutex<Vec<PlaybackCall>>>,
     }
@@ -678,16 +703,16 @@ mod tests {
         });
         let (sender, task) = spawn(player, crate::execution::test_general_client());
         let (reply, mut events) = crate::ipc::DirectEventSender::channel(2);
-        sender
-            .try_send_with_preview_reply(
-                PlaybackRequest {
-                    settings: test_settings(SoundSettings::default()),
-                    event: None,
-                    pane_name: None,
-                },
-                Some(reply),
-            )
-            .unwrap();
+        submit_preview_after_transient_busy(
+            &sender,
+            PlaybackRequest {
+                settings: test_settings(SoundSettings::default()),
+                event: None,
+                pane_name: None,
+            },
+            reply,
+        )
+        .await;
 
         assert_eq!(
             events.recv().await,
@@ -719,16 +744,16 @@ mod tests {
             crate::execution::test_general_client(),
         );
         let (reply, mut events) = crate::ipc::DirectEventSender::channel(2);
-        sender
-            .try_send_with_preview_reply(
-                PlaybackRequest {
-                    settings: test_settings(SoundSettings::default()),
-                    event: None,
-                    pane_name: None,
-                },
-                Some(reply),
-            )
-            .unwrap();
+        submit_preview_after_transient_busy(
+            &sender,
+            PlaybackRequest {
+                settings: test_settings(SoundSettings::default()),
+                event: None,
+                pane_name: None,
+            },
+            reply,
+        )
+        .await;
 
         assert_eq!(
             events.recv().await,

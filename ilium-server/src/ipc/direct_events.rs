@@ -180,12 +180,20 @@ mod tests {
         let event = ServerEvent::Error {
             message: "must remain available to retry".to_owned(),
         };
-        let insufficient = Arc::new(
-            execution
-                .quota_group()
-                .reserve_external_storage(1)
-                .expect("small fixture lease"),
-        );
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let insufficient = loop {
+            match execution.try_reserve_storage(1) {
+                Ok(storage) => break storage,
+                Err(ilium_execution::RejectReason::Busy) => {
+                    assert!(
+                        std::time::Instant::now() < deadline,
+                        "small fixture lease admission stayed busy"
+                    );
+                    tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+                }
+                Err(reason) => panic!("small fixture lease admission failed: {reason:?}"),
+            }
+        };
 
         let returned = sender
             .send_with_storage(event.clone(), Some(insufficient))
@@ -224,13 +232,13 @@ mod tests {
         owner.request_shutdown();
         let report = tokio::task::spawn_blocking(move || {
             owner.test_join_until_background(
-                std::time::Instant::now() + std::time::Duration::from_secs(5),
+                std::time::Instant::now() + crate::execution::PHYSICAL_JOIN_TEST_WAIT,
             )
         })
         .await
         .unwrap()
         .unwrap();
-        assert!(report.shutdown_complete);
+        assert!(report.shutdown_complete, "{report:?}");
     }
 }
 

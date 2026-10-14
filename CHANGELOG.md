@@ -13,6 +13,20 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 
 ## [Unreleased]
 
+### Changed
+- Hovering a footer agent icon reuses a successful repository check for 30 seconds instead of queuing another Git snapshot, so the worktree buttons are enabled at once and fewer slow queries pile up under load; creating a worktree still revalidates.
+- A request refused because the UI is busy now leaves a bold notice in the status bar for 8 seconds, so hover messages can no longer hide it.
+- Accepted animation frames retain their packing operation across transient quota-lock contention, while cancellation and genuine storage-capacity failures remain explicit.
+- Native-child detector fixtures use the bounded executable-write-conflict retry shared by other freshly written test executables.
+- Icon worker join observers no longer retain unpublished-to-UI mailbox result storage after the native worker and UI owner retire.
+- Terminal parsing retries temporary storage-bookkeeping contention with its original command and cursor, while retaining pressure accounting and errors for actual capacity limits.
+- Parallel marker and animation-cache lifecycle regressions retain the production worker limits while measuring their exact admitted owner and physical retirement.
+- Restart completes only the matching release of its accepted menu click before shutdown; unrelated native input remains in explicit recovery custody.
+- Parallel client and ambient unit fixtures own separate process-equivalent admission resources, while preserving all per-fixture capacity limits and native retirement accounting.
+- Asynchronous client startup and native animation workers retain their originating codec and source-cadence quota identities across thread boundaries; the two-connection aggregate limit regression runs by default.
+- Local background launch instructions and scheduling use the workstation CPU-affinity policy to preserve desktop responsiveness.
+
+
 ### Added
 - `ilium ctl` gives agents and scripts full remote control of a running session: read the tree, a project or a pane as JSON, JSONL, YAML or Markdown; create, rename, move, close and drive panes; manage worktrees. Start with `ilium ctl guide`. The flag-to-request translation and the check that the server applied each operation live in `ilium-control` (new `documents` module and operation examples).
 - Settings > User Interface shows the left-panel sizing policy as three side-by-side cards (Fixed, Focus-dependent, Width-dependent) again, redesigned: each card has a title, a one-line description, a proportional `focus`/`away` bar diagram of the panel widths it will use, its current values, and a `● selected` badge on the active card; the keyboard focus ring turns the active card's border heavy. Click a card, press Left/Right, or `+` for the full list. Below 82 columns of content width the compact selector row is used instead, so narrow terminals keep the layout that fits.
@@ -21,6 +35,9 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 
 ### Changed
 
+- Client startup retries transient accounting contention without enlarging capacity limits. Terminal keys wait in the bounded per-pane queue, bulk paste remains atomic, board detail edits retain native input while snapshots are saved, and typed voice offers wait for asynchronous startup before reporting failure. Icon arrows traverse the complete picker catalogue. Joined icon-search observation tickets no longer retain the retired native worker's memory charge. Successful board reloads replace stale reload guidance with confirmation. Wind declares its pointer-sensitive rendering contract so mouse force invalidates cached frames.
+- Pointer input consumes ready terminal emission acknowledgements before hit testing and retains complete mouse gestures while matching geometry is pending, while horizontally entering live tree rows retain their exact emitted semantic targets. Shutdown retains accepted filesystem writes beyond its warning deadline, and retained-key error messages keep typed characters private. Accepted terminal submissions prepare never-displayed targets without changing focus, and emitted virtual folder/chatroom rows remain actionable only while their current owners resolve. Path pastes validate in bounded turns before inserting any text; narrow copy previews keep their identifying title visible.
+
 - Updated the README tagline to address organizing 100+ CLI agents across dozens of projects.
 
 - The loopback HTTP API exposes shared remote-control routes under `/v1`; CLI controls validate edge moves and confirm mutation outcomes consistently.
@@ -28,8 +45,8 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 - Tree toolbar buttons show a braille spinner while a click waits on something slow: the server confirming a new shell, agent or worktree pane, a new group, project or folder (until the tree gains the node), and the Restructure button for as long as its project LLM jobs run. Spinners time out after 120 seconds. A refused click now keeps its explanation instead of a success message, a refused Git check is reported in the worktree menu, popover and dialog, the disabled worktree popover answers hover and states why it is unavailable, and tree hover stays responsive while the screen redraws.
 - Menu actions that wait on the server (close, move, rename, remove worktree, change project folder, restart pane, restructure apply and revert) show a labelled braille spinner in the status line after 0.5 seconds; freeze, unfreeze, stop process, prune worktree and the worktree checks that precede a dialog show it for at most 10 seconds. New Board, Editor and Split buttons spin until the tree gains the node.
 
-- Four-cell numeric settings retain their separate step and edit controls; Padding help is reachable, Growth has its own help topic, and board creation preserves dangling symlinks. Shutdown errors display the original client failure alongside retained-request custody.
-- Terminal integration checks locate prompt headers, rounded card borders and context-menu actions from the rendered surface, exercise scrolled voice settings, and retain owned-server startup diagnostics.
+- Four-cell numeric settings retain their separate step and edit controls; Padding help is reachable, Growth has its own help topic, and board creation preserves dangling symlinks. Shutdown errors display the original client failure alongside retained-request custody. Late presentation acknowledgements preserve the newest pointer geometry, frozen terminal restores enforce their byte limit before parsing, and transcript statistics resume at complete records within bounded read passes. Compact animation settings keep the selected control visible when scrolling upward through a one-row window.
+- Terminal integration checks locate prompt headers, folder entries, rounded card borders and context-menu actions from actual terminal cells, exercise scrolled voice settings and shared icon/keyboard controls, and retain owned-server startup diagnostics with a short isolated log-socket path. Terminal capability-query fixtures can explicitly supply their own replies while ordinary PTYs retain automatic replies by default. Bracketed-paste banner checks wait for the reserved banner rows rather than earlier terminal echo.
 - Animation-settings pointer lookup resolves one visible row before preparing controls, avoiding repeated layout work while retaining the complete control interaction matrix.
 - Remote-compaction settings share paint and hit geometry and keep every control reachable below wrapped labels on narrow screens.
 - Location entry selectors now wrap in either direction and retain keyboard focus; coordinate controls remain visible instead of being cleared after painting. Focus-order coverage includes the entry selector.
@@ -76,6 +93,12 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
   while per-pane operation limits remain in both modes.
 
 ### Fixed
+- Restored terminal panes now use Git-native discovery, so an empty ancestor `.git` directory cannot prevent ordinary project panes from starting. Restore diagnostics retain the actual admission refusal reason.
+
+- Accepted queued filesystem writes survive writer teardown in charged execution-bank custody. Successors preserve FIFO order; failed or cancelled groups retain typed recovery originals, and shutdown diagnostics expose unresolved serial custody.
+- The blocked clipboard regression retries unaccepted operations during brief queue-lock contention while preserving its 100 ms admission bound, FIFO checks and actual child-exit verification.
+- Mouse regression fixtures click rendered text-trigger labels and settings controls below their instruction panels; icon checks cover forward, reverse and wraparound selection across the complete catalog.
+- Retained terminal frame buffers now hold distinct presentation storage slots after acknowledgement, so later frames cannot exceed the declared three-buffer budget.
 - The animation settings paint-and-hit test no longer crosses every effective kind with the whole playback and colour matrix, which made it run for tens of minutes.
 - The Settings Padding tab is handled in the content-height and row-count matches.
 

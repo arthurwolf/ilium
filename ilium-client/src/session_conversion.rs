@@ -784,7 +784,9 @@ mod tests {
             input_bytes: CONVERSION_WORKING_BYTES,
             result_bytes: CONVERSION_RESULT_BYTES,
             worker_threads: 1,
-            worker_bytes: 4 * 1024 * 1024,
+            // Four MiB worker plus retained bank bookkeeping; job/thread caps
+            // and the conversion's input/result allowances stay unchanged.
+            worker_bytes: 5 * 1024 * 1024,
         });
         let disabled = LaneConfig {
             threads: 0,

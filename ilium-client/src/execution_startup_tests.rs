@@ -108,6 +108,58 @@ fn cancelled_async_bootstrap_physically_disposes_its_successful_original_bank() 
 }
 
 #[test]
+fn async_bootstrap_keeps_originating_codec_groups_after_thread_transfer() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let quota = process_quota();
+    let decoder = codec_admission_group(CodecDirection::Decoder).unwrap();
+    let encoder = codec_admission_group(CodecDirection::Encoder).unwrap();
+    let bank = runtime
+        .block_on(ClientExecution::start_async())
+        .expect("async bank starts with its caller's quota identity");
+    assert!(bank.general.quota_group().shares_root(&quota));
+
+    std::thread::spawn(move || {
+        let outbound = bank
+            .client(ClientLimits {
+                jobs: 2,
+                service_jobs: 0,
+                input_bytes: 64 * 1024,
+                result_bytes: 64 * 1024,
+            })
+            .expect("outbound remains on the original general root");
+        let preparation = bank
+            .ipc_preparation(outbound.clone())
+            .expect("off-thread codecs retain the original directional groups");
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let decoder_credit = runtime
+            .block_on(preparation.reserve_decoder())
+            .expect("original decoder group admits the off-thread codec");
+        let encoder_credit = runtime
+            .block_on(preparation.reserve_encoder())
+            .expect("original encoder group admits the off-thread codec");
+        assert_eq!(decoder.usage().jobs, 1);
+        assert_eq!(encoder.usage().jobs, 1);
+        drop((decoder_credit, encoder_credit));
+        assert_eq!(decoder.usage().jobs, 0);
+        assert_eq!(encoder.usage().jobs, 0);
+        drop(preparation);
+        drop(outbound);
+        runtime
+            .block_on(bank.shutdown())
+            .expect("actual bank joins");
+    })
+    .join()
+    .unwrap();
+    assert_eq!(quota.snapshot().worker_threads, 0);
+}
+
+#[test]
 fn startup_failure_is_send_sync_for_typed_root_io_error_custody() {
     fn assert_send_sync<T: Send + Sync + std::error::Error>() {}
     assert_send_sync::<ClientExecutionStartError>();

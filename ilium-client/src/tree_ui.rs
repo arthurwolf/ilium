@@ -448,7 +448,7 @@ impl PaintedTreeRows {
             SidebarDensity::Comfortable => 2,
         };
         let mut rows = Vec::with_capacity(usize::from(list.height));
-        // Moving/removed presentation rows have no stable semantic target.
+        // A removal presentation uses an old tree with different row identities.
         if options
             .transitions
             .presentation_tree(options.elapsed_ms)
@@ -458,13 +458,10 @@ impl PaintedTreeRows {
                 let Some(id) = path.last().copied() else {
                     continue;
                 };
-                if options
-                    .transitions
-                    .row_motion(id, options.elapsed_ms)
-                    .is_some()
-                {
-                    continue;
-                }
+                // Entry motion translates live rows horizontally; their Y
+                // coordinate and full-row semantic identity already match the
+                // emitted frame. Only the old removal presentation above has
+                // different row identities and must withhold semantic targets.
                 let depth = u16::try_from(path.len().saturating_sub(1)).unwrap_or(u16::MAX);
                 let label = list
                     .x
@@ -494,6 +491,9 @@ impl PaintedTreeRows {
             selected_node: state.selected().last().copied(),
             action: None,
         }
+    }
+    pub(crate) fn rows_for_trace(&self) -> (Rect, Vec<TreeNodeHit>) {
+        (self.list, self.rows.iter().map(|(hit, _)| *hit).collect())
     }
     pub(crate) fn node_ids(&self) -> impl Iterator<Item = NodeId> + '_ {
         self.rows

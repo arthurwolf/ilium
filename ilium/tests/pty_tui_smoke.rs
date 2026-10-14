@@ -225,7 +225,6 @@ impl IsolatedXdgDirs {
         // the same directory and a seeded `config.toml` is found either way.
         let ilium_config_dir = config_home.join("ilium");
         let debug_log_dir = root.join("debug-logs");
-        let mouse_trace_file = root.join("mouse-events.log");
         let agent_setup_home = root.join("agent-home");
         for dir in [
             &data_home,
@@ -261,6 +260,7 @@ impl IsolatedXdgDirs {
         #[cfg(windows)]
         let runtime_root = tempfile::Builder::new().prefix("il").tempdir()?;
         let runtime_dir = runtime_root.path().to_path_buf();
+        let mouse_trace_file = runtime_dir.join("mouse-events.log");
         // Under the same short root, for the same `sockaddr_un` reason, and
         // named `ilium` to match what `XDG_RUNTIME_DIR` would have produced.
         let socket_dir = runtime_dir.join("ilium");
@@ -315,6 +315,27 @@ impl IsolatedXdgDirs {
             // `~/.codex/AGENTS.md`.
             (ilium_client::AGENT_SETUP_HOME_ENV, &self.agent_setup_home),
         ]
+    }
+}
+
+impl Drop for IsolatedXdgDirs {
+    fn drop(&mut self) {
+        if !std::thread::panicking() {
+            return;
+        }
+        if let Ok(trace) = std::fs::read(&self.mouse_trace_file) {
+            let tail = &trace[trace.len().saturating_sub(65_536)..];
+            eprintln!(
+                "{}",
+                serde_json::json!({
+                    "type": "artifact",
+                    "kind": "owned_mouse_trace",
+                    "path": self.mouse_trace_file,
+                    "bytes": trace.len(),
+                    "tail": String::from_utf8_lossy(tail),
+                })
+            );
+        }
     }
 }
 
@@ -1538,7 +1559,13 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     );
     tui.write(b"kkkkkkkkkkkk")
         .expect("return to the first Voice control setting");
-    assert!(wait_until(|| tui.screen_text().contains("OpenAI API key"), WAIT_TIMEOUT).await);
+    assert!(
+        wait_until(
+            || tui.screen_text().contains("OpenAI API key"),
+            WAIT_TIMEOUT
+        )
+        .await
+    );
 
     // Open the API-key child dialog from the real Settings screen. Both the
     // parent header/tab and the child hint must remain in the same captured
@@ -1726,9 +1753,18 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     // hosts disagree about that for icons carrying a variation selector -- the
     // menu's own right border lands on two different columns on Windows for
     // exactly that reason.
-    let order_label_column = tui
-        .with_screen(|screen| column_of_text_in_row(screen, order_rows[0], "Order by"))
-        .expect("the Order by label should have a rendered column");
+    let (order_label_column, order_rows) = tui
+        .with_screen(|screen| {
+            let rows = rows_containing(screen, "Order by");
+            let row = *rows.first()?;
+            column_of_text_in_row(screen, row, "Order by").map(|column| (column, rows))
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "the Order by label should have a rendered coordinate: {:?}",
+                tui.screen_text()
+            )
+        });
     // A complete click, press and release. Sending only a press is what a
     // terminal that reports button transitions makes look sufficient; a
     // Windows console reports button *state* per event, so the two halves are
@@ -1747,11 +1783,11 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
                 // the adjacent pair would break on any icon change.
                 screen.contains('✓')
                     && screen.contains("Manual")
-                    && screen.contains("Type")
-                    && screen.contains("Age up (newest first)")
-                    && screen.contains("Age down (oldest first)")
-                    && screen.contains("Name A-Z")
-                    && screen.contains("Name Z-A")
+                    && screen.contains("Item type")
+                    && screen.contains("Newest first")
+                    && screen.contains("Oldest first")
+                    && screen.contains("Name (A–Z)")
+                    && screen.contains("Name (Z–A)")
             },
             WAIT_TIMEOUT,
         )
@@ -1952,7 +1988,9 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         || {
             let screen = tui.screen_text();
             screen.contains("Icon assignments")
-                && screen.contains("Sidebar preview")
+                && screen.contains("Sidebar prev")
+                && screen.contains("Workspace")
+                && screen.contains("Notes")
                 && screen.contains("Terminal")
                 && screen.contains("[+]")
         },
@@ -1984,7 +2022,7 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
                 screen.contains("Icon catalogue")
                     && screen.contains("Quick picks")
                     && screen.contains("Official UTF-8 chapters first")
-                    && screen.contains("12372 total")
+                    && screen.contains("12372 icons")
                     && screen.contains("Multi-column")
             },
             WAIT_TIMEOUT,
@@ -2025,9 +2063,9 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     let keyboard_tab_shown = wait_until(
         || {
             let screen = tui.screen_text();
-            screen.contains("Shortcut base")
+            screen.contains("General prefix")
+                && screen.contains("Tree prefix")
                 && screen.contains("Ctrl+B")
-                && screen.contains("Recommended")
         },
         WAIT_TIMEOUT,
     )
@@ -2038,13 +2076,32 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         tui.screen_text()
     );
 
-    tui.write(b"2").expect("restoring the Ctrl+B preset");
-    let preset_restored = wait_until(
-        || tui.screen_text().contains("Recommended: Ctrl+B"),
-        WAIT_TIMEOUT,
-    )
-    .await;
-    assert!(preset_restored, "expected Ctrl+B preset to restore");
+    tui.write(b"l")
+        .expect("changing the general prefix to Ctrl+C");
+    assert!(
+        wait_until(
+            || std::fs::read_to_string(xdg.config_home.join("ilium").join("config.toml"))
+                .is_ok_and(|config| config
+                    .lines()
+                    .any(|line| line.trim() == "shortcut_base = \"c\"")),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected the general prefix change to persist"
+    );
+    tui.write(b"h")
+        .expect("restoring the Ctrl+B general prefix");
+    assert!(
+        wait_until(
+            || std::fs::read_to_string(xdg.config_home.join("ilium").join("config.toml"))
+                .is_ok_and(|config| config
+                    .lines()
+                    .any(|line| line.trim() == "shortcut_base = \"b\"")),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "expected the Ctrl+B general prefix to restore and persist"
+    );
     let persisted_config =
         std::fs::read_to_string(xdg.config_home.join("ilium").join("config.toml"))
             .expect("read settings-persisted keyboard config");
@@ -2170,7 +2227,7 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     );
 
     // Titles follows Voice control and Inference. Exercise both its keyboard
-    // and mouse radio paths through the real rendered Settings screen.
+    // and mouse selector paths through the real rendered Settings screen.
     tui.write(&settings_tab_keys(
         ilium_client::app::SettingsTab::Sound,
         ilium_client::app::SettingsTab::Titles,
@@ -2190,8 +2247,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         "expected the Titles comparison, got: {:?}",
         tui.screen_text()
     );
-    tui.write(b"k\r")
-        .expect("selecting Labeling with the keyboard");
+    tui.write(b"\x1b[D")
+        .expect("selecting Labeling with the keyboard selector");
     assert!(
         wait_until(
             || std::fs::read_to_string(xdg.config_home.join("ilium").join("config.toml"))
@@ -2203,11 +2260,13 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     );
     let (summary_column, summary_row) = tui
         .with_screen(|screen| {
-            let row = rows_containing(screen, "Summarization").first().copied()?;
-            let column = column_of_text_in_row(screen, row, "Summarization")?;
+            let row = rows_containing(screen, "Title style")
+                .into_iter()
+                .find(|row| column_of_text_in_row(screen, *row, "→").is_some())?;
+            let column = column_of_text_in_row(screen, row, "→")?;
             Some((column, row))
         })
-        .expect("Summarization radio row should be visible");
+        .expect("Title style next control should be visible");
     tui.write(&sgr_mouse_down(0, summary_column, summary_row))
         .expect("clicking Summarization");
     tui.write(&sgr_mouse_up(summary_column, summary_row))
@@ -2287,7 +2346,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
                 screen.contains("Debug")
                     && screen.contains("File logging")
                     && screen.contains("‹ Off ›")
-                    && screen.contains("LLM requests/responses")
+                    && screen.contains("full text LLM")
+                    && screen.contains("requests/responses")
             },
             WAIT_TIMEOUT,
         )
@@ -2320,9 +2380,9 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
                 let log = std::fs::read_to_string(&active_log_path).unwrap_or_default();
                 config.contains("[debug]")
                     && config.contains("file_logging_enabled = true")
-                    && log.contains("client file logging enabled from Debug settings")
                     && log.contains("server file logging enabled from Debug settings")
-                    && log.contains("client file logging synchronized from server")
+                    && log
+                        .contains("INFO ilium_client: client file logging transition acknowledged")
             },
             WAIT_TIMEOUT,
         )
@@ -2570,12 +2630,25 @@ async fn right_click_restart_reloads_only_the_client_and_preserves_the_server() 
     );
     let restart_rows = tui.with_screen(|screen| rows_containing(screen, "Restart"));
     assert_eq!(restart_rows.len(), 1, "expected one rendered Restart row");
-    tui.write(&sgr_mouse_click(0, menu_column + 1, restart_rows[0]))
+    // Restart owns exactly one press/release gesture. The general helper also
+    // sends a second legacy release, which is unrelated input after exit and
+    // must correctly remain in custody rather than silently disappearing.
+    let mut restart_click = sgr_mouse_down(0, menu_column + 1, restart_rows[0]);
+    restart_click.extend_from_slice(
+        format!("\x1b[<0;{};{}m", menu_column + 2, restart_rows[0] + 1).as_bytes(),
+    );
+    tui.write(&restart_click)
         .expect("click Restart context action");
 
     assert!(
         wait_until(|| restart_marker.is_file(), WAIT_TIMEOUT).await,
-        "replacement executable path was not loaded after Restart"
+        "replacement executable path was not loaded after Restart; exit={:?}; screen={:?}; output_tail={:?}",
+        tui.child_exit(),
+        tui.screen_text(),
+        {
+            let replay = tui.output_replay();
+            String::from_utf8_lossy(&replay.bytes[replay.bytes.len().saturating_sub(16384)..]).into_owned()
+        }
     );
     // Unix-only, and genuinely so: replacing a process's own image is what
     // `exec` does, and Windows has no equivalent. There the replacement runs
@@ -3076,29 +3149,26 @@ fn rows_containing_in_order(screen: &vt100::Screen, needles: &[&str]) -> Vec<u16
         .collect()
 }
 
-/// Which of the icon catalogue's two view entries carries the selection dot.
-///
-/// The entries render as `[● Multi-column]  [ Single column ]` and its mirror,
-/// but matching that text whole asserts the host's cell-width model as much as
-/// the client's state: `\u{25cf}` is East Asian Ambiguous, and a host that
-/// gives it two cells shifts the rest of the row, so the brackets no longer sit
-/// where the string says. The order of the dot and the two labels survives
-/// that, and is what the selection actually means.
+/// The shared View control renders only its currently selected value.
 fn selected_catalogue_view(screen: &vt100::Screen) -> Option<&'static str> {
     let columns = screen.size().1;
-    let row = screen
-        .rows(0, columns)
-        .find(|text| text.contains("Multi-column") && text.contains("Single column"))?;
-    let dot = row.find('\u{25cf}')?;
-    let multi = row.find("Multi-column")?;
-    let single = row.find("Single column")?;
-    if dot < multi {
-        Some("Multi-column")
-    } else if dot < single {
-        Some("Single column")
-    } else {
-        None
+    let row = screen.rows(0, columns).find(|text| text.contains("View"))?;
+    let value = row.split_once("View")?.1;
+    ["Multi-column", "Single column"]
+        .into_iter()
+        .find(|label| value.contains(label))
+}
+
+#[test]
+fn rendered_catalogue_view_reads_the_current_shared_control_value() {
+    for label in ["Multi-column", "Single column"] {
+        let mut terminal = vt100::Parser::new(2, 80, 0);
+        terminal.process(format!("View  ← {label} …………… + →").as_bytes());
+        assert_eq!(selected_catalogue_view(terminal.screen()), Some(label));
     }
+    let mut terminal = vt100::Parser::new(2, 80, 0);
+    terminal.process("Single column outside a control".as_bytes());
+    assert_eq!(selected_catalogue_view(terminal.screen()), None);
 }
 
 /// The column where `needle`'s first character is rendered on `row`.
@@ -3108,25 +3178,52 @@ fn selected_catalogue_view(screen: &vt100::Screen) -> Option<&'static str> {
 /// an offset silently depends on how wide the host rendered the icon before
 /// it, which the hosts do not agree on.
 fn column_of_text_in_row(screen: &vt100::Screen, row: u16, needle: &str) -> Option<u16> {
-    let columns = screen.size().1;
-    let rendered: String = screen.rows(0, columns).nth(usize::from(row))?;
-    let byte_offset = rendered.find(needle)?;
-    let prefix_columns = rendered[..byte_offset]
-        .chars()
-        .map(|character| u16::try_from(unicode_width_of(character)).unwrap_or(1))
-        .sum::<u16>();
-    Some(prefix_columns)
+    let mut rendered = String::new();
+    let mut columns_by_byte = Vec::new();
+    for column in 0..screen.size().1 {
+        let cell = screen.cell(row, column)?;
+        if cell.is_wide_continuation() {
+            continue;
+        }
+        let contents = if cell.contents().is_empty() {
+            " "
+        } else {
+            cell.contents()
+        };
+        rendered.push_str(contents);
+        columns_by_byte.extend(std::iter::repeat_n(column, contents.len()));
+    }
+    columns_by_byte.get(rendered.find(needle)?).copied()
 }
 
-/// The cell width the renderer assigns one character. Zero-width joiners and
-/// variation selectors take no cell of their own, which is exactly where the
-/// hosts disagree, so they are counted as zero here to match what `vt100`
-/// reports back.
-fn unicode_width_of(character: char) -> usize {
-    match character {
-        '\u{fe0f}' | '\u{fe0e}' | '\u{200d}' => 0,
-        _ => unicode_width::UnicodeWidthChar::width(character).unwrap_or(0),
-    }
+#[test]
+fn rendered_text_coordinates_use_terminal_cells_after_wide_icons() {
+    let mut parser = vt100::Parser::new(2, 60, 0);
+    parser.process("🗂️   Order by → 📂 tail".as_bytes());
+    let screen = parser.screen();
+    let actual_order_column = (0..60)
+        .find(|&column| {
+            screen
+                .cell(0, column)
+                .is_some_and(|cell| cell.contents() == "O")
+        })
+        .expect("terminal stores the first label character");
+    assert_eq!(
+        column_of_text_in_row(screen, 0, "Order by"),
+        Some(actual_order_column)
+    );
+    assert_eq!(column_of_text_in_row(screen, 0, "not present"), None);
+    let folder_column = (0..60)
+        .find(|&column| {
+            screen
+                .cell(0, column)
+                .is_some_and(|cell| cell.contents() == "📂")
+        })
+        .expect("terminal stores the wide folder icon");
+    assert_eq!(
+        column_of_text_in_row(screen, 0, "📂 tail"),
+        Some(folder_column)
+    );
 }
 
 /// Finds the first terminal cell whose grapheme payload contains `needle`.
@@ -3748,7 +3845,6 @@ async fn editor_line_context_menu_creates_selected_agent_and_submits_the_prompt(
                 let screen = tui.screen_text();
                 screen.contains("Create agent from line")
                     && screen.contains("Claude")
-                    && screen.contains("Codex")
                     && screen.contains("Task prompt")
             },
             WAIT_TIMEOUT,
@@ -3759,14 +3855,27 @@ async fn editor_line_context_menu_creates_selected_agent_and_submits_the_prompt(
     );
 
     let dialog = ilium_client::agent_from_line::dialog_layout_for_size(120, 40);
-    tui.write(&sgr_mouse_click(
-        0,
-        dialog.agent_row.x + 24,
-        dialog.agent_row.y,
-    ))
-    .expect("select Codex in the modal");
+    // The shared provider control cycles through the registry with its
+    // right-hand arrow; options are no longer simultaneous radio buttons.
+    let (provider_next_column, provider_row) = tui
+        .with_screen(|screen| {
+            let row = *rows_containing(screen, "Agent    ").first()?;
+            (0..screen.size().1).rev().find_map(|column| {
+                screen
+                    .cell(row, column)
+                    .filter(|cell| cell.contents() == "→")
+                    .map(|_| (column, row))
+            })
+        })
+        .expect("rendered create-agent provider next button");
+    tui.write(&sgr_mouse_click(0, provider_next_column, provider_row))
+        .expect("select Codex with the provider selector");
     assert!(
-        wait_until(|| tui.screen_text().contains("(●) Codex"), WAIT_TIMEOUT).await,
+        wait_until(
+            || tui.screen_text().contains("Agent") && tui.screen_text().contains("Codex"),
+            WAIT_TIMEOUT
+        )
+        .await,
         "expected Codex selection, got: {:?}",
         tui.screen_text()
     );
@@ -4102,7 +4211,9 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
             WAIT_TIMEOUT,
         )
         .await,
-        "body keystrokes should save immediately"
+        "body keystrokes should save immediately; document={:?}, screen={:?}",
+        std::fs::read_to_string(&context_path),
+        tui.screen_text()
     );
     tui.write(b"\x1b").expect("close card details with Escape");
     assert!(
@@ -4378,8 +4489,35 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
         external_source,
         "stale board mutation must not overwrite the external edit"
     );
-    tui.write(b"r\x1b[CnReloaded task\r")
-        .expect("reload external revision and commit a new card");
+    // A rejected write retains its authored draft. Cancel that draft explicitly
+    // before issuing the normal-mode reload command.
+    assert!(
+        tui.screen_text().contains("Stale task"),
+        "rejected stale publication must retain the authored card draft, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"\x1b")
+        .expect("cancel the refused stale card draft");
+    assert!(
+        wait_until(|| !tui.screen_text().contains("NEW CARD"), WAIT_TIMEOUT).await,
+        "cancelled stale draft should leave card entry, got: {:?}",
+        tui.screen_text()
+    );
+    tui.write(b"r").expect("reload the external board revision");
+    assert!(
+        wait_until(
+            || {
+                let screen = tui.screen_text();
+                screen.contains("External task") && !screen.contains("press r to reload")
+            },
+            WAIT_TIMEOUT,
+        ).await,
+        "the external card must render before editing its reloaded revision, source: {:?}; screen: {:?}",
+        std::fs::read_to_string(&dialog_path),
+        tui.screen_text()
+    );
+    tui.write(b"\x1b[CnReloaded task\r")
+        .expect("commit a new card after the external revision is loaded");
     assert!(
         wait_until(
             || std::fs::read_to_string(&dialog_path)
@@ -4501,9 +4639,7 @@ async fn terminal_context_menu_schedules_countdown_and_delivers_input() {
         wait_until(
             || {
                 let screen = tui.screen_text();
-                screen.contains("Chatroom")
-                    && screen.contains(TERMINAL_ICON)
-                    && screen.contains(IDLE_PANE_LABEL)
+                screen.contains(TERMINAL_ICON) && screen.contains(IDLE_PANE_LABEL)
             },
             WAIT_TIMEOUT
         )
@@ -4531,14 +4667,20 @@ async fn terminal_context_menu_schedules_countdown_and_delivers_input() {
         .expect("right-click terminal row");
     assert!(
         wait_until(
-            || tui.screen_text().contains("Hit key(s) X time from now"),
+            || tui.screen_text().contains("Schedule keystrokes…"),
             WAIT_TIMEOUT
         )
         .await,
         "expected scheduled-input context action, got: {:?}",
         tui.screen_text()
     );
-    tui.write(&sgr_mouse_click(0, menu_column + 1, terminal_row + 2))
+    let (schedule_column, schedule_row) = tui
+        .with_screen(|screen| {
+            let row = *rows_containing(screen, "Schedule keystrokes…").first()?;
+            column_of_text_in_row(screen, row, "Schedule keystrokes…").map(|column| (column, row))
+        })
+        .expect("rendered scheduled-input context action");
+    tui.write(&sgr_mouse_click(0, schedule_column, schedule_row))
         .expect("click scheduled-input context action");
     assert!(
         wait_until(
@@ -4711,9 +4853,13 @@ async fn clicking_up_on_a_boundary_pane_exits_its_nested_group() {
     // Read the Up icon's actual terminal cell rather than duplicating the
     // renderer's animated width or fixed-slot geometry in this PTY test.
     let shell_row_before = wait_for_stable_value(
-        || tui.with_screen(|screen| {
-            rows_containing_in_order(screen, &[TERMINAL_ICON, "shell"]).first().copied()
-        }),
+        || {
+            tui.with_screen(|screen| {
+                rows_containing_in_order(screen, &[TERMINAL_ICON, "shell"])
+                    .first()
+                    .copied()
+            })
+        },
         SETTLED_LAYOUT_DURATION,
         WAIT_TIMEOUT,
     )
@@ -4855,7 +5001,11 @@ async fn folder_browser_expands_nested_directories_and_opens_a_deep_file() {
     // project's persisted expanded state when that snapshot arrives.
     assert!(
         wait_until(
-            || tui.with_screen(|screen| rows_containing(screen, "folder-project").len() >= 2),
+            || tui.with_screen(|screen| {
+                rows_containing(screen, "folder-project")
+                    .into_iter()
+                    .any(|row| column_of_text_in_row(screen, row, "📂").is_some())
+            }),
             WAIT_TIMEOUT,
         )
         .await,
@@ -4866,13 +5016,22 @@ async fn folder_browser_expands_nested_directories_and_opens_a_deep_file() {
     // Locate rows after each render so indentation never becomes a guessed
     // coordinate; each click follows the same hit-test and expansion path a
     // real user uses.
-    let root_rows = tui.with_screen(|screen| rows_containing(screen, "folder-project"));
-    let folder_row = *root_rows
-        .last()
-        .expect("expected persisted folder-root row");
-    tui.write(&sgr_mouse_down(0, 8, folder_row))
-        .expect("expand folder root");
-    tui.write(&sgr_mouse_up(8, folder_row))
+    let (folder_column, folder_row) = tui.with_screen(|screen| {
+        let folder_row = *rows_containing(screen, "folder-project")
+            .last()
+            .expect("expected persisted folder-root row");
+        let folder_column = column_of_text_in_row(screen, folder_row, "folder-project")
+            .expect("rendered folder-root label");
+        eprintln!("{}", serde_json::json!({
+            "type": "artifact", "kind": "mouse_target", "target": "folder_root",
+            "unix_millis": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).expect("fixture clock").as_millis(),
+            "column": folder_column, "row": folder_row, "screen": screen.contents(),
+        }));
+        (folder_column, folder_row)
+    });
+    tui.write(&sgr_mouse_down(0, folder_column, folder_row))
+        .expect("expand folder root through its label");
+    tui.write(&sgr_mouse_up(folder_column, folder_row))
         .expect("release folder-root click");
     assert!(
         wait_until(|| tui.screen_text().contains("alpha"), WAIT_TIMEOUT).await,
@@ -4880,11 +5039,16 @@ async fn folder_browser_expands_nested_directories_and_opens_a_deep_file() {
         tui.screen_text()
     );
     for (directory, next_entry) in [("alpha", "beta"), ("beta", "gamma"), ("gamma", "deep.rs")] {
-        let rows = tui.with_screen(|screen| rows_containing(screen, directory));
-        assert_eq!(rows.len(), 1, "expected one {directory:?} row");
-        tui.write(&sgr_mouse_down(0, 8, rows[0]))
+        let (column, row) = tui.with_screen(|screen| {
+            let rows = rows_containing(screen, directory);
+            assert_eq!(rows.len(), 1, "expected one {directory:?} row");
+            let column = column_of_text_in_row(screen, rows[0], directory)
+                .expect("rendered nested-directory label");
+            (column, rows[0])
+        });
+        tui.write(&sgr_mouse_down(0, column, row))
             .unwrap_or_else(|error| panic!("expand {directory}: {error}"));
-        tui.write(&sgr_mouse_up(8, rows[0]))
+        tui.write(&sgr_mouse_up(column, row))
             .unwrap_or_else(|error| panic!("release {directory} click: {error}"));
         assert!(
             wait_until(|| tui.screen_text().contains(next_entry), WAIT_TIMEOUT).await,
@@ -4898,11 +5062,16 @@ async fn folder_browser_expands_nested_directories_and_opens_a_deep_file() {
         tui.screen_text()
     );
 
-    let file_rows = tui.with_screen(|screen| rows_containing(screen, "deep.rs"));
-    assert_eq!(file_rows.len(), 1, "expected one deep file row");
-    tui.write(&sgr_mouse_down(0, 8, file_rows[0]))
+    let (file_column, file_row) = tui.with_screen(|screen| {
+        let rows = rows_containing(screen, "deep.rs");
+        assert_eq!(rows.len(), 1, "expected one deep file row");
+        let column =
+            column_of_text_in_row(screen, rows[0], "deep.rs").expect("rendered deep-file label");
+        (column, rows[0])
+    });
+    tui.write(&sgr_mouse_down(0, file_column, file_row))
         .expect("open deep file in editor");
-    tui.write(&sgr_mouse_up(8, file_rows[0]))
+    tui.write(&sgr_mouse_up(file_column, file_row))
         .expect("release deep-file click");
     assert!(
         wait_until(
@@ -5060,7 +5229,8 @@ async fn agent_debug_log_filters_panel_resizes_and_saves_the_active_view() {
         .with_screen(|screen| {
             let row = *rows_containing(screen, "Show debug log").first()?;
             (0..screen.size().1).find_map(|column| {
-                screen.cell(row, column)
+                screen
+                    .cell(row, column)
                     .filter(|cell| cell.contents() == "S")
                     .map(|_| (column, row))
             })
@@ -5432,21 +5602,6 @@ async fn last_prompt_banner_splits_a_bracketed_paste_on_lone_carriage_returns() 
         .expect("deliver bracketed paste to the fake Codex PTY");
     tui.write(b"\r").expect("submit the pasted prompt");
 
-    assert!(
-        wait_until(
-            || {
-                let screen = tui.screen_text();
-                screen.contains("first line")
-                    && screen.contains("second line")
-                    && screen.contains("fifth line")
-                    && screen.contains("sixth line")
-            },
-            WAIT_TIMEOUT,
-        )
-        .await,
-        "expected the last-prompt banner to show all four kept rows: {:?}",
-        tui.screen_text()
-    );
     // The banner sits in its own reserved rows directly below the toolbar --
     // distinct from the pane's own terminal content further down, which the
     // pty's normal input echo (now legitimately reproducing the whole raw
@@ -5454,29 +5609,46 @@ async fn last_prompt_banner_splits_a_bracketed_paste_on_lone_carriage_returns() 
     // "third line"/"fourth line" without that being the banner. Scope the
     // middle-truncation assertion to the banner's own four rows so echoed
     // content in the pane body below can't produce a false pass or fail.
-    let (banner_rows_ok, screen_for_diagnostics) = tui.with_screen(|screen| {
-        let prompt_header_rows = rows_containing(screen, "last prompt");
-        let Some(&prompt_header_row) = prompt_header_rows.first() else {
-            return (false, String::new());
-        };
-        let cols = screen.size().1;
-        let banner_texts: Vec<String> = (1..=4)
-            .map(|offset| {
-                screen
-                    .rows(0, cols)
-                    .nth((prompt_header_row + offset) as usize)
-                    .unwrap_or_default()
-                    .trim_end()
-                    .to_string()
-            })
-            .collect();
-        let matches = banner_texts.len() == 4
-            && banner_texts[0].contains("first line")
-            && banner_texts[1].contains("second line")
-            && banner_texts[2].contains("fifth line")
-            && banner_texts[3].contains("sixth line");
-        (matches, format!("{banner_texts:?}"))
-    });
+    // Wait for these exact reserved rows, not the same words echoed earlier
+    // by the terminal body before the server's prompt update is rendered.
+    let mut screen_for_diagnostics = String::new();
+    let banner_rows_ok = wait_until(
+        || {
+            let (matches, diagnostics) = tui.with_screen(|screen| {
+                let prompt_header_rows = rows_containing(screen, "last prompt");
+                let Some(&prompt_header_row) = prompt_header_rows.first() else {
+                    return (
+                        false,
+                        format!(
+                            "last-prompt header not yet rendered: {:?}",
+                            screen.contents()
+                        ),
+                    );
+                };
+                let cols = screen.size().1;
+                let banner_texts: Vec<String> = (1..=4)
+                    .map(|offset| {
+                        screen
+                            .rows(0, cols)
+                            .nth((prompt_header_row + offset) as usize)
+                            .unwrap_or_default()
+                            .trim_end()
+                            .to_string()
+                    })
+                    .collect();
+                let matches = banner_texts.len() == 4
+                    && banner_texts[0].contains("first line")
+                    && banner_texts[1].contains("second line")
+                    && banner_texts[2].contains("fifth line")
+                    && banner_texts[3].contains("sixth line");
+                (matches, format!("{banner_texts:?}"))
+            });
+            screen_for_diagnostics = diagnostics;
+            matches
+        },
+        WAIT_TIMEOUT,
+    )
+    .await;
     assert!(
         banner_rows_ok,
         "expected the banner's four reserved rows to read exactly \
@@ -5595,13 +5767,13 @@ async fn last_prompt_banner_updates_from_ordinary_typed_keystrokes_with_a_correc
         wait_until(
             || {
                 tui.with_screen(|screen| {
-                    let Some(&prompt_header_row) = rows_containing(screen, "last prompt").first() else {
+                    let Some(&toolbar_row) = rows_containing(screen, "⏹ Stop").first() else {
                         return false;
                     };
                     let cols = screen.size().1;
                     screen
                         .rows(0, cols)
-                        .nth((prompt_header_row + 6) as usize)
+                        .nth((toolbar_row + 7) as usize)
                         .unwrap_or_default()
                         .contains("Pursuing goal")
                 })
@@ -5638,9 +5810,22 @@ async fn last_prompt_banner_updates_from_ordinary_typed_keystrokes_with_a_correc
     let (socket_path, _) = isolated_server_identity(&xdg, &project_dir).await;
     let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
     let observed_last_prompt = loop {
-        let mut connection = Connection::connect(&socket_path, SESSION_NAME.to_string())
-            .await
-            .expect("attach typed-prompt control connection");
+        let mut connection = match Connection::connect(&socket_path, SESSION_NAME.to_string()).await
+        {
+            Ok(connection) => connection,
+            Err(ilium_client::connection::ConnectionError::CodecBootstrap(
+                ilium_ipc::IpcError::Io(error),
+            )) if error.to_string() == "codec admission: Busy"
+                && tokio::time::Instant::now() < deadline =>
+            {
+                // A previous control connection's asynchronous codec retirement
+                // may briefly hold admission. Retry only that transient refusal;
+                // the original observation deadline and all real failures remain.
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                continue;
+            }
+            Err(error) => panic!("attach typed-prompt control connection: {error:?}"),
+        };
         let tree = receive_initial_tree(&mut connection, "typed-prompt verification").await;
         let pane_ids = tree.pane_ids_in_tree_order();
         assert_eq!(pane_ids.len(), 1, "expected the one fake Codex pane");
@@ -5755,7 +5940,8 @@ async fn last_prompt_banner_keeps_fixed_slot_for_a_short_prompt() {
         wait_until(
             || {
                 tui.with_screen(|screen| {
-                    let Some(&prompt_header_row) = rows_containing(screen, "last prompt").first() else {
+                    let Some(&prompt_header_row) = rows_containing(screen, "last prompt").first()
+                    else {
                         return false;
                     };
                     let cols = screen.size().1;
@@ -6067,7 +6253,13 @@ async fn worktree_launcher_dialog_menu_and_footer_popover_render_and_accept_inpu
     let fake_bin = temp_root.path().join("fake-bin");
     std::fs::create_dir_all(&fake_bin).expect("create fake provider directory");
     let fake_codex = fake_bin.join("codex");
-    std::fs::write(&fake_codex, "#!/bin/sh\nsleep 30\n").expect("write fake codex");
+    // Keep the isolated provider alive until session cleanup; wall-clock expiry
+    // can remove its workspace owner while this real TUI scenario is still running.
+    std::fs::write(
+        &fake_codex,
+        "#!/bin/sh\nwhile IFS= read -r line; do :; done\n",
+    )
+    .expect("write fake codex");
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(&fake_codex, std::fs::Permissions::from_mode(0o755))
         .expect("make fake codex executable");
@@ -6267,20 +6459,36 @@ async fn worktree_launcher_dialog_menu_and_footer_popover_render_and_accept_inpu
         "repository facts missing from popover dialog: {:?}",
         tui.screen_text()
     );
-    let codex_row = tui.with_screen(|screen| rows_containing(screen, "Codex"))[0];
-    let codex_column = tui
-        .with_screen(|screen| column_of_text_in_row(screen, codex_row, "Codex"))
-        .expect("Codex selector column");
-    tui.write(&sgr_mouse_down(0, codex_column, codex_row))
+    // The worktree dialog uses the shared provider selector. Cycle its
+    // rendered next arrow rather than looking for an unselected radio label.
+    let (provider_next_column, provider_row) = tui
+        .with_screen(|screen| {
+            let row = *rows_containing(screen, "Agent").first()?;
+            (0..screen.size().1).rev().find_map(|column| {
+                screen
+                    .cell(row, column)
+                    .filter(|cell| cell.contents() == "→")
+                    .map(|_| (column, row))
+            })
+        })
+        .expect("worktree provider next button");
+    tui.write(&sgr_mouse_click(0, provider_next_column, provider_row))
         .expect("select fake Codex provider");
-    tui.write(&sgr_mouse_up(codex_column, codex_row))
-        .expect("release provider selector");
     assert!(
-        wait_until(|| tui.screen_text().contains("[Codex]"), WAIT_TIMEOUT).await,
+        wait_until(|| tui.screen_text().contains("Codex"), WAIT_TIMEOUT).await,
         "Codex provider was not selected: {:?}",
         tui.screen_text()
     );
-    tui.write(b"\r").expect("submit worktree agent dialog");
+    // Enter on the provider row opens its choices. Submit through the drawn
+    // Create action rather than accidentally dismissing a choice picker.
+    let (create_column, create_row) = tui
+        .with_screen(|screen| {
+            let row = *rows_containing(screen, "[ Create agent ]").first()?;
+            column_of_text_in_row(screen, row, "[ Create agent ]").map(|column| (column, row))
+        })
+        .expect("rendered worktree Create action");
+    tui.write(&sgr_mouse_click(0, create_column + 2, create_row))
+        .expect("submit worktree agent dialog");
     assert!(
         wait_until(
             || !tui.screen_text().contains("New agent in a worktree"),
@@ -6303,13 +6511,43 @@ async fn worktree_launcher_dialog_menu_and_footer_popover_render_and_accept_inpu
         "worktree branch line did not render: {:?}",
         tui.screen_text()
     );
-    let branch_row = tui.with_screen(|screen| rows_containing(screen, "agent/task"))[0];
-    tui.write(&sgr_mouse_down(2, 8, branch_row))
+    assert!(
+        wait_until(
+            || tui.with_screen(
+                |screen| !rows_containing_before_column(screen, "Codex:", 60).is_empty()
+            ),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "created worktree agent did not reach detected tree row: {:?}",
+        tui.screen_text()
+    );
+    // The branch label is a metadata line below the pane, not a tree node.
+    // Open the worktree actions on the detected agent's actual tree row.
+    let (branch_column, branch_row) = tui.with_screen(|screen| {
+        let row = rows_containing_before_column(screen, "Codex:", 60)[0];
+        let column = column_of_text_in_row(screen, row, "Codex:")
+            .expect("rendered worktree agent label");
+        eprintln!("{}", serde_json::json!({
+            "type": "artifact", "kind": "mouse_target", "target": "worktree_agent",
+            "unix_millis": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).expect("fixture clock").as_millis(),
+            "column": column, "row": row, "screen": screen.contents(),
+        }));
+        (column, row)
+    });
+    tui.write(&sgr_mouse_down(2, branch_column, branch_row))
         .expect("open worktree pane context menu");
-    tui.write(&sgr_mouse_release(2, 8, branch_row))
+    tui.write(&sgr_mouse_release(2, branch_column, branch_row))
         .expect("release worktree pane context click");
     assert!(
-        wait_until(|| tui.screen_text().contains("Worktree  ▸"), WAIT_TIMEOUT).await,
+        wait_until(
+            || tui
+                .screen_text()
+                .lines()
+                .any(|row| row.contains("Worktree") && row.contains("▸")),
+            WAIT_TIMEOUT,
+        )
+        .await,
         "worktree context entry missing: {:?}",
         tui.screen_text()
     );
@@ -6341,10 +6579,16 @@ async fn worktree_launcher_dialog_menu_and_footer_popover_render_and_accept_inpu
         "worktree manager did not close: {:?}",
         tui.screen_text()
     );
-    let branch_row = tui.with_screen(|screen| rows_containing(screen, "agent/task"))[0];
-    tui.write(&sgr_mouse_down(2, 8, branch_row))
+    // The branch label is a metadata line below the pane, not a tree node.
+    // Open the worktree actions on the detected agent's actual tree row.
+    let branch_row =
+        tui.with_screen(|screen| rows_containing_before_column(screen, "Codex:", 60))[0];
+    let branch_column = tui
+        .with_screen(|screen| column_of_text_in_row(screen, branch_row, "Codex:"))
+        .expect("rendered worktree agent label");
+    tui.write(&sgr_mouse_down(2, branch_column, branch_row))
         .expect("reopen worktree pane context menu");
-    tui.write(&sgr_mouse_release(2, 8, branch_row))
+    tui.write(&sgr_mouse_release(2, branch_column, branch_row))
         .expect("release reopened worktree pane context click");
     assert!(
         wait_until(|| tui.screen_text().contains("Settings…"), WAIT_TIMEOUT).await,
@@ -6432,6 +6676,7 @@ async fn image_query_keeps_first_real_pty_keys_with_silent_and_answering_termina
         assert!(pane.status.success(), "create isolated pane: {pane:?}");
 
         let attach = PtyCommand::new(ilium_binary(), &project_dir, 44, 120)
+            .automatic_terminal_query_replies(false)
             .arg("--restart-server")
             .arg("--cwd")
             .arg(project_dir.to_string_lossy().to_string())

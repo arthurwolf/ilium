@@ -4,7 +4,7 @@ use crate::icon_settings::IconPickerSearchResults;
 use ilium_execution::{QuotaGroup, StorageAdmission};
 use ilium_platform::{
     file_lock::ExclusiveFileLock,
-    owned_worker::{spawn_owned, OwnedWorker, StopToken, WorkerExit, WorkerKind},
+    owned_worker::{reserve_owned_worker, OwnedWorker, StopToken, WorkerExit, WorkerKind},
 };
 use std::{
     borrow::Cow,
@@ -193,18 +193,26 @@ impl IconSearchWorkers {
                 return Err(request);
             };
             let shared = Arc::clone(&self.shared);
-            let wake = Arc::clone(&shared);
+            // Join observers retain their wake callback after native retirement.
+            // That callback must not own a published result's storage lease.
+            let wake = Arc::downgrade(&shared);
             let factory = Arc::clone(&self.factory);
-            let owner = spawn_owned(
-                "ilium-icon-search",
-                WorkerKind::Cooperative,
-                StopToken::default(),
-                move || {
-                    let _admission = &admission;
-                    wake.close();
-                },
-                move |stop| run_worker(shared, factory, stop),
-            );
+            // Physical admission ends at native retirement, independently of
+            // the observation tickets callers may retain after Joined.
+            let owner = reserve_owned_worker(None, admission).and_then(|reservation| {
+                reservation.spawn_with_completion(
+                    "ilium-icon-search",
+                    WorkerKind::Cooperative,
+                    StopToken::default(),
+                    move || {
+                        if let Some(shared) = wake.upgrade() {
+                            shared.close();
+                        }
+                    },
+                    move |stop| run_worker(shared, factory, stop),
+                    None,
+                )
+            });
             match owner {
                 Ok(owner) => self.worker = Some(owner),
                 Err(error) => {
@@ -500,7 +508,7 @@ mod tests {
         );
     }
     #[test]
-    fn shared_quota_prevents_duplicate_icon_owner_threads_with_remaining_capacity() {
+    fn shared_quota_accounts_for_independent_icon_owners_until_native_join() {
         let quota = QuotaGroup::new(ilium_execution::QuotaLimits {
             worker_threads: 2,
             worker_bytes: 2 * OWNER_BYTES + 4 * REQUEST_RESULT_BYTES,
@@ -515,11 +523,14 @@ mod tests {
         admit(&mut first, request(1, "first owner"));
         entered.recv_timeout(WAIT).unwrap();
         let original = request(2, "second owner");
-        let original_query = original.query.as_ptr();
         let second_result = second.try_request(original);
-        if second_result.is_ok() {
-            second_entered.recv_timeout(WAIT).unwrap();
-        }
+        assert!(
+            second_result.is_ok(),
+            "independent mock engines use separately available quota slots"
+        );
+        second_entered.recv_timeout(WAIT).unwrap();
+        assert_eq!(quota.snapshot().worker_threads, 2);
+        assert!(quota.snapshot().worker_bytes >= 2 * OWNER_BYTES);
         let first_ticket = first.worker.as_ref().unwrap().ticket();
         let second_ticket = second.worker.as_ref().map(|owner| owner.ticket());
         release.send(()).unwrap();
@@ -530,21 +541,84 @@ mod tests {
             first_ticket.join_until(Instant::now() + WAIT),
             Ok(WorkerExit::Joined)
         );
-        if let Some(ticket) = second_ticket {
+        if let Some(ticket) = &second_ticket {
             assert_eq!(
                 ticket.join_until(Instant::now() + WAIT),
                 Ok(WorkerExit::Joined)
             );
         }
         assert_eq!(quota.snapshot().worker_threads, 0);
-        assert!(
-            second_result.is_err(),
-            "one execution quota must admit only one icon-search owner even when thread capacity remains"
+        assert_eq!(
+            quota.snapshot().worker_bytes,
+            0,
+            "joined tickets retain no physical worker debit"
         );
-        let returned = second_result.unwrap_err();
-        assert_eq!(returned.query, "second owner");
-        assert_eq!(returned.query.as_ptr(), original_query);
+        drop(first_ticket);
+        drop(second_ticket);
+        assert_eq!(quota.snapshot().worker_threads, 0);
+        assert_eq!(quota.snapshot().worker_bytes, 0);
     }
+    #[test]
+    fn joined_observers_do_not_retain_published_mailbox_storage() {
+        for _ in 0..32 {
+            let (mut worker, quota, entered, release) = controlled();
+            admit(&mut worker, request(1, "published result"));
+            entered.recv_timeout(WAIT).unwrap();
+            release.send(()).unwrap();
+            let deadline = Instant::now() + WAIT;
+            loop {
+                // Retain the result inside the mailbox, unlike poll(), so the
+                // observation callback's ownership is exercised deterministically.
+                if worker.shared.mailbox.lock().unwrap().result.is_some() {
+                    break;
+                }
+                assert!(Instant::now() < deadline, "result was not published");
+                std::thread::yield_now();
+            }
+            assert_eq!(
+                quota.snapshot().worker_bytes,
+                OWNER_BYTES + REQUEST_RESULT_BYTES
+            );
+            let ticket = worker.worker.as_ref().unwrap().ticket();
+            let second_observer = ticket.clone();
+            drop(worker);
+            assert_eq!(
+                ticket.join_until(Instant::now() + WAIT),
+                Ok(WorkerExit::Joined)
+            );
+            assert_eq!(second_observer.exit(), Some(WorkerExit::Joined));
+            assert_eq!(quota.snapshot().worker_threads, 0);
+            assert_eq!(
+                quota.snapshot().worker_bytes,
+                0,
+                "published storage retires with its last real owner, not its join observers"
+            );
+            // A surviving observer's cancellation callback must remain safe.
+            second_observer.cancel();
+            assert_eq!(quota.snapshot().worker_bytes, 0);
+        }
+    }
+
+    #[test]
+    fn published_result_keeps_its_storage_after_native_join_until_consumer_drop() {
+        let (mut worker, quota, entered, release) = controlled();
+        admit(&mut worker, request(1, "consumer-owned result"));
+        entered.recv_timeout(WAIT).unwrap();
+        release.send(()).unwrap();
+        let event = result(&worker);
+        let ticket = worker.worker.as_ref().unwrap().ticket();
+        drop(worker);
+        assert_eq!(
+            ticket.join_until(Instant::now() + WAIT),
+            Ok(WorkerExit::Joined)
+        );
+        assert_eq!(quota.snapshot().worker_threads, 0);
+        assert_eq!(quota.snapshot().worker_bytes, REQUEST_RESULT_BYTES);
+        drop(event);
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+        assert_eq!(ticket.exit(), Some(WorkerExit::Joined));
+    }
+
     #[test]
     fn old_completion_cannot_overwrite_a_newer_query_failure() {
         let (mut worker, _, entered, release) = controlled();

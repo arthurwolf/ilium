@@ -2,7 +2,7 @@
 //! only one running write; no pool callback waits for another callback.
 use ilium_execution::{
     AdmissionFailure, Client, Job, JobCost, JobOutcome, JobPoll, Lane, Receipt, RejectReason,
-    Rejected, Reservation, Retained,
+    Rejected, Reservation, Retained, SerialCustody, SerialQueued, SerialRunning,
 };
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -35,6 +35,7 @@ pub enum WriterAdmissionFailure {
     Closed,
     IdentifierExhausted,
     Execution(AdmissionFailure),
+    SerialMetadata(RejectReason),
 }
 impl WriterAdmissionFailure {
     /// Compatibility for reason-only consumers; detailed callers retain provenance.
@@ -44,6 +45,7 @@ impl WriterAdmissionFailure {
             Self::Writes { .. } | Self::IdentifierExhausted => RejectReason::JobLimit,
             Self::Closed => RejectReason::Closed,
             Self::Execution(failure) => failure.reason,
+            Self::SerialMetadata(reason) => reason,
         }
     }
 }
@@ -67,10 +69,11 @@ enum IdentifierCheck {
     BeforeExecution,
     AfterExecution,
 }
-struct WriteAdmission {
+struct WriteAdmission<J: Job> {
     bytes: usize,
     id: WriteId,
     reservation: Reservation,
+    serial: Option<SerialCustody<J>>,
 }
 
 pub enum WriteCompletion<J: Job> {
@@ -85,17 +88,10 @@ pub enum WriteCompletion<J: Job> {
     Lost { id: WriteId },
 }
 
-struct Queued<J> {
-    id: WriteId,
-    job: J,
-    cost: JobCost,
-    reservation: Option<Reservation>,
-}
-
 pub struct OrderedWriter<J: Job> {
     client: Client,
     ready: Arc<tokio::sync::Notify>,
-    queued: VecDeque<Queued<J>>,
+    queued: VecDeque<SerialQueued<J>>,
     running: Option<(WriteId, JobCost, Receipt<J>)>,
     next_id: u64,
     bytes: usize,
@@ -103,6 +99,7 @@ pub struct OrderedWriter<J: Job> {
     job_ready: fn(&J) -> bool,
     max_writes: usize,
     max_retained_bytes: usize,
+    serial: Option<SerialCustody<J>>,
 }
 
 impl<J: Job> OrderedWriter<J> {
@@ -167,6 +164,7 @@ impl<J: Job> OrderedWriter<J> {
             job_ready: |_| true,
             max_writes: MAX_WRITES,
             max_retained_bytes: MAX_RETAINED_BYTES,
+            serial: None,
         }
     }
     pub fn notification(&self) -> Arc<tokio::sync::Notify> {
@@ -226,7 +224,7 @@ impl<J: Job> OrderedWriter<J> {
         &self,
         cost: JobCost,
         identifier_check: IdentifierCheck,
-    ) -> Result<WriteAdmission, WriterAdmissionFailure> {
+    ) -> Result<WriteAdmission<J>, WriterAdmissionFailure> {
         let overflow = || WriterAdmissionFailure::ByteOverflow {
             input_bytes: cost.input_bytes,
             result_bytes: cost.result_bytes,
@@ -259,6 +257,15 @@ impl<J: Job> OrderedWriter<J> {
         if matches!(identifier_check, IdentifierCheck::BeforeExecution) && next_id.is_none() {
             return Err(WriterAdmissionFailure::IdentifierExhausted);
         }
+        let serial = if self.serial.is_none() {
+            Some(
+                self.client
+                    .try_reserve_serial_custody::<J>(self.max_writes)
+                    .map_err(WriterAdmissionFailure::SerialMetadata)?,
+            )
+        } else {
+            None
+        };
         let reservation = self
             .client
             .try_reserve_detailed(Lane::Io, cost)
@@ -268,16 +275,20 @@ impl<J: Job> OrderedWriter<J> {
             bytes,
             id: WriteId(next_id),
             reservation,
+            serial,
         })
     }
-    fn commit(&mut self, cost: JobCost, job: J, admission: WriteAdmission) -> WriteId {
+    fn commit(&mut self, cost: JobCost, job: J, admission: WriteAdmission<J>) -> WriteId {
+        if let Some(serial) = admission.serial {
+            self.serial = Some(serial);
+        }
         self.next_id = admission.id.0;
         self.bytes = admission.bytes;
-        self.queued.push_back(Queued {
-            id: admission.id,
+        self.queued.push_back(SerialQueued {
+            id: admission.id.0,
             job,
             cost,
-            reservation: Some(admission.reservation),
+            reservation: admission.reservation,
         });
         self.ready.notify_one();
         admission.id
@@ -296,6 +307,9 @@ impl<J: Job> OrderedWriter<J> {
                     let cost = *cost;
                     self.running = None;
                     self.release_cost(cost);
+                    if self.queued.is_empty() {
+                        self.serial.take();
+                    }
                     return Some(WriteCompletion::Outcome { id, outcome });
                 }
                 JobPoll::Lost | JobPoll::Taken => {
@@ -303,6 +317,9 @@ impl<J: Job> OrderedWriter<J> {
                     let cost = *cost;
                     self.running = None;
                     self.release_cost(cost);
+                    if self.queued.is_empty() {
+                        self.serial.take();
+                    }
                     return Some(WriteCompletion::Lost { id });
                 }
             }
@@ -310,53 +327,26 @@ impl<J: Job> OrderedWriter<J> {
         // An accepted source capture cannot be overtaken by younger saves.
         // No I/O lane is occupied waiting for its CPU loan. The source owner
         // signals this same notification on readiness or explicit cancellation.
-        if !(self.job_ready)(&self.queued.front()?.job) {
+        let Some(head) = self.queued.front() else {
+            self.serial.take();
+            return None;
+        };
+        if !(self.job_ready)(&head.job) {
             return None;
         }
-        let mut queued = self.queued.pop_front()?;
-        let reservation = match queued.reservation.take() {
-            Some(reservation) => reservation,
-            None => match self.client.try_reserve(Lane::Io, queued.cost) {
-                Ok(reservation) => reservation,
-                Err(
-                    RejectReason::Busy
-                    | RejectReason::QueueFull
-                    | RejectReason::JobLimit
-                    | RejectReason::InputBytes
-                    | RejectReason::ResultBytes,
-                ) => {
-                    self.queued.push_front(queued);
-                    // The process admission wake (or normal UI tick) retries
-                    // after resource release; never self-wake a busy loop.
-                    return None;
-                }
-                Err(reason) => {
-                    self.release_cost(queued.cost);
-                    return Some(WriteCompletion::Rejected {
-                        id: queued.id,
-                        rejection: Rejected {
-                            reason,
-                            value: queued.job,
-                        },
-                    });
-                }
-            },
-        };
-        match reservation.submit(queued.job) {
+        let queued = self.queued.pop_front()?;
+        match queued.reservation.submit(queued.job) {
             Ok(receipt) => {
-                self.running = Some((queued.id, queued.cost, receipt));
-                None
-            }
-            Err(rejection) if rejection.reason == RejectReason::Busy => {
-                queued.job = rejection.value;
-                self.queued.push_front(queued);
-                self.ready.notify_one();
+                self.running = Some((WriteId(queued.id), queued.cost, receipt));
                 None
             }
             Err(rejection) => {
                 self.release_cost(queued.cost);
+                if self.queued.is_empty() {
+                    self.serial.take();
+                }
                 Some(WriteCompletion::Rejected {
-                    id: queued.id,
+                    id: WriteId(queued.id),
                     rejection,
                 })
             }
@@ -366,6 +356,24 @@ impl<J: Job> OrderedWriter<J> {
     /// cancel running durable jobs or close the shared bank before draining.
     pub fn close_admission(&mut self) {
         self.closing = true;
+    }
+}
+
+impl<J: Job> Drop for OrderedWriter<J> {
+    fn drop(&mut self) {
+        let Some(serial) = self.serial.take() else {
+            return;
+        };
+        let queued = std::mem::take(&mut self.queued);
+        let running = self
+            .running
+            .take()
+            .map(|(id, cost, receipt)| SerialRunning {
+                id: id.0,
+                cost,
+                receipt,
+            });
+        serial.detach(queued, running, self.job_ready);
     }
 }
 
@@ -539,6 +547,11 @@ mod tests {
         drop(outcome);
         assert_eq!(writer.pending(), 0);
         assert_eq!(writer.retained_bytes(), 0);
+        assert_eq!(
+            execution.monitor().health().lanes[1].serial_active,
+            0,
+            "a fully reconciled live writer releases its registry custody"
+        );
         drop(writer);
         execution.request_shutdown(ShutdownMode::Drain);
         assert_eq!(
@@ -965,6 +978,11 @@ mod tests {
         assert_eq!(writer.retained_bytes(), 0);
         assert_eq!(quota.snapshot().input_bytes, before.input_bytes);
         assert_eq!(quota.snapshot().jobs, before.jobs);
+        assert_eq!(
+            quota.snapshot().worker_bytes,
+            before.worker_bytes,
+            "failed first admission releases its pre-registered serial group"
+        );
         let called = std::cell::Cell::new(false);
         assert_eq!(
             writer
@@ -1146,5 +1164,525 @@ mod tests {
                 .remaining_workers,
             0
         );
+    }
+
+    #[test]
+    fn dropped_writer_keeps_second_write_behind_gated_first_on_two_io_workers() {
+        let mut owner = execution();
+        let client = owner
+            .client(ClientLimits {
+                jobs: 8,
+                service_jobs: 0,
+                input_bytes: 1024 * 1024,
+                result_bytes: 1024 * 1024,
+            })
+            .unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("two-workers.txt");
+        let (entered, observed) = mpsc::sync_channel(2);
+        let (release, gate) = mpsc::sync_channel(1);
+        let mut writer = OrderedWriter::new(client, Arc::new(tokio::sync::Notify::new()));
+        writer
+            .enqueue(
+                small_cost(),
+                Write {
+                    path: path.clone(),
+                    text: "FIRST",
+                    entered: entered.clone(),
+                    gate: Some(gate),
+                },
+            )
+            .unwrap();
+        writer
+            .enqueue(
+                small_cost(),
+                Write {
+                    path: path.clone(),
+                    text: "SECOND",
+                    entered,
+                    gate: None,
+                },
+            )
+            .unwrap();
+        assert!(writer.poll().is_none());
+        assert_eq!(
+            observed.recv_timeout(Duration::from_secs(3)).unwrap(),
+            "FIRST"
+        );
+        drop(writer);
+        assert!(matches!(
+            observed.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+        release.send(()).unwrap();
+        assert_eq!(
+            observed.recv_timeout(Duration::from_secs(3)).unwrap(),
+            "SECOND"
+        );
+        owner.request_shutdown(ShutdownMode::Drain);
+        let report = owner
+            .join_until_background(Instant::now() + Duration::from_secs(5))
+            .unwrap();
+        assert!(report.shutdown_complete);
+        assert_eq!(std::fs::read_to_string(path).unwrap(), "SECOND");
+    }
+
+    #[test]
+    fn dropped_writer_advances_when_first_result_precedes_drop() {
+        let mut owner = execution();
+        let client = owner
+            .client(ClientLimits {
+                jobs: 8,
+                service_jobs: 0,
+                input_bytes: 1024 * 1024,
+                result_bytes: 1024 * 1024,
+            })
+            .unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("complete-before-drop.txt");
+        let (entered, observed) = mpsc::sync_channel(2);
+        let mut writer = OrderedWriter::new(client, Arc::new(tokio::sync::Notify::new()));
+        for text in ["FIRST", "SECOND"] {
+            writer
+                .enqueue(
+                    small_cost(),
+                    Write {
+                        path: path.clone(),
+                        text,
+                        entered: entered.clone(),
+                        gate: None,
+                    },
+                )
+                .unwrap();
+        }
+        assert!(writer.poll().is_none());
+        assert_eq!(
+            observed.recv_timeout(Duration::from_secs(3)).unwrap(),
+            "FIRST"
+        );
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while std::fs::read_to_string(&path).ok().as_deref() != Some("FIRST") {
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        drop(writer);
+        assert_eq!(
+            observed.recv_timeout(Duration::from_secs(3)).unwrap(),
+            "SECOND"
+        );
+        owner.request_shutdown(ShutdownMode::Drain);
+        assert!(
+            owner
+                .join_until_background(Instant::now() + Duration::from_secs(5))
+                .unwrap()
+                .shutdown_complete
+        );
+        assert_eq!(std::fs::read_to_string(path).unwrap(), "SECOND");
+    }
+
+    #[test]
+    fn dropped_not_ready_head_leaves_io_free_then_runs_in_fifo_order() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let mut owner = execution();
+        let client = owner
+            .client(ClientLimits {
+                jobs: 8,
+                service_jobs: 0,
+                input_bytes: 1024 * 1024,
+                result_bytes: 1024 * 1024,
+            })
+            .unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("prepared-after-drop.txt");
+        let (entered, observed) = mpsc::sync_channel(2);
+        let prepared = Arc::new(AtomicBool::new(false));
+        let mut writer = OrderedWriter::new_with_readiness(
+            client.clone(),
+            Arc::new(tokio::sync::Notify::new()),
+            |job: &PreparedWriteFixture| job.source_ready.load(Ordering::Acquire),
+        );
+        for (text, source_ready) in [
+            ("FIRST", prepared.clone()),
+            ("SECOND", Arc::new(AtomicBool::new(true))),
+        ] {
+            writer
+                .enqueue(
+                    small_cost(),
+                    PreparedWriteFixture {
+                        original: Write {
+                            path: path.clone(),
+                            text,
+                            entered: entered.clone(),
+                            gate: None,
+                        },
+                        source_ready,
+                    },
+                )
+                .unwrap();
+        }
+        drop(writer);
+        let (unrelated_entered, unrelated_seen) = mpsc::sync_channel(1);
+        let mut unrelated = client
+            .try_submit(Lane::Io, small_cost(), move |_| {
+                unrelated_entered.send(()).unwrap();
+                Ok::<_, String>(())
+            })
+            .unwrap();
+        unrelated_seen.recv_timeout(Duration::from_secs(3)).unwrap();
+        assert!(matches!(
+            observed.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+        prepared.store(true, Ordering::Release);
+        assert_eq!(
+            observed.recv_timeout(Duration::from_secs(3)).unwrap(),
+            "FIRST"
+        );
+        assert_eq!(
+            observed.recv_timeout(Duration::from_secs(3)).unwrap(),
+            "SECOND"
+        );
+        assert!(matches!(unrelated.try_take(), JobPoll::Ready(_)));
+        owner.request_shutdown(ShutdownMode::Drain);
+        assert!(
+            owner
+                .join_until_background(Instant::now() + Duration::from_secs(5))
+                .unwrap()
+                .shutdown_complete
+        );
+        assert_eq!(std::fs::read_to_string(path).unwrap(), "SECOND");
+    }
+
+    #[test]
+    fn dropped_failed_head_keeps_younger_original_in_typed_bank_recovery() {
+        let mut owner = execution();
+        let client = owner
+            .client(ClientLimits {
+                jobs: 8,
+                service_jobs: 0,
+                input_bytes: 1024 * 1024,
+                result_bytes: 1024 * 1024,
+            })
+            .unwrap();
+        let quota = client.quota_group();
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("missing-parent").join("failed.txt");
+        let (entered, observed) = mpsc::sync_channel(2);
+        let mut writer = OrderedWriter::new(client, Arc::new(tokio::sync::Notify::new()));
+        for text in ["FIRST", "SECOND"] {
+            writer
+                .enqueue(
+                    small_cost(),
+                    Write {
+                        path: path.clone(),
+                        text,
+                        entered: entered.clone(),
+                        gate: None,
+                    },
+                )
+                .unwrap();
+        }
+        assert!(writer.poll().is_none());
+        drop(writer);
+        assert_eq!(
+            observed.recv_timeout(Duration::from_secs(3)).unwrap(),
+            "FIRST"
+        );
+        owner.request_shutdown(ShutdownMode::Drain);
+        let report = owner
+            .join_until_background(Instant::now() + Duration::from_secs(5))
+            .unwrap();
+        assert!(!report.shutdown_complete);
+        assert_eq!(report.health.lanes[1].serial_recovery_pending, 1);
+        let ticket = owner.try_take_serial_recovery::<Write>().unwrap();
+        drop(ticket);
+        let returned = owner
+            .join_until_background(Instant::now() + Duration::from_secs(5))
+            .unwrap();
+        assert!(
+            !returned.shutdown_complete,
+            "an unclaimed ticket restores bank custody"
+        );
+        assert_eq!(returned.health.lanes[1].serial_recovery_pending, 1);
+        assert_eq!(
+            quota.snapshot().jobs,
+            2,
+            "the returned originals remain charged"
+        );
+        let recovered = owner.try_take_serial_recovery::<Write>().unwrap().take();
+        assert!(matches!(
+            &recovered.failure,
+            ilium_execution::SerialFailure::Outcome { .. }
+        ));
+        assert_eq!(recovered.queued.len(), 1);
+        assert_eq!(recovered.queued.front().unwrap().job.text, "SECOND");
+        assert!(matches!(
+            observed.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+        assert_eq!(
+            quota.snapshot().jobs,
+            2,
+            "failed head and younger original remain charged"
+        );
+        drop(recovered);
+        assert!(
+            owner
+                .join_until_background(Instant::now() + Duration::from_secs(5))
+                .unwrap()
+                .shutdown_complete
+        );
+        assert_eq!(quota.snapshot().jobs, 0);
+    }
+
+    #[test]
+    fn shutdown_waits_for_live_unobserved_receipt_before_writer_drop() {
+        let mut owner = execution();
+        let client = owner
+            .client(ClientLimits {
+                jobs: 8,
+                service_jobs: 0,
+                input_bytes: 1024 * 1024,
+                result_bytes: 1024 * 1024,
+            })
+            .unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("missing-parent").join("failed.txt");
+        let (entered, observed) = mpsc::sync_channel(1);
+        let mut writer = OrderedWriter::new(client, Arc::new(tokio::sync::Notify::new()));
+        writer
+            .enqueue(
+                small_cost(),
+                Write {
+                    path,
+                    text: "FIRST",
+                    entered,
+                    gate: None,
+                },
+            )
+            .unwrap();
+        assert!(writer.poll().is_none());
+        assert_eq!(
+            observed.recv_timeout(Duration::from_secs(3)).unwrap(),
+            "FIRST"
+        );
+        owner.request_shutdown(ShutdownMode::Drain);
+        let live = owner
+            .join_until_background(Instant::now() + Duration::from_millis(100))
+            .unwrap();
+        assert!(!live.shutdown_complete);
+        assert_eq!(live.health.lanes[1].serial_active, 1);
+        drop(writer);
+        let detached = owner
+            .join_until_background(Instant::now() + Duration::from_secs(5))
+            .unwrap();
+        assert!(!detached.shutdown_complete);
+        assert_eq!(detached.health.lanes[1].serial_recovery_pending, 1);
+        let recovered = owner.try_take_serial_recovery::<Write>().unwrap().take();
+        assert!(matches!(
+            &recovered.failure,
+            ilium_execution::SerialFailure::Outcome { .. }
+        ));
+        assert!(recovered.queued.is_empty());
+        drop(recovered);
+        assert!(
+            owner
+                .join_until_background(Instant::now() + Duration::from_secs(5))
+                .unwrap()
+                .shutdown_complete
+        );
+    }
+
+    #[test]
+    fn detached_readiness_panic_retains_both_accepted_originals() {
+        let mut owner = execution();
+        let client = owner
+            .client(ClientLimits {
+                jobs: 8,
+                service_jobs: 0,
+                input_bytes: 1024 * 1024,
+                result_bytes: 1024 * 1024,
+            })
+            .unwrap();
+        let quota = client.quota_group();
+        let mut writer = OrderedWriter::new_with_readiness(
+            client,
+            Arc::new(tokio::sync::Notify::new()),
+            |_job: &OriginalJob| panic!("deliberate readiness panic"),
+        );
+        writer
+            .enqueue(small_cost(), OriginalJob("FIRST".into()))
+            .unwrap();
+        writer
+            .enqueue(small_cost(), OriginalJob("SECOND".into()))
+            .unwrap();
+        drop(writer);
+        owner.request_shutdown(ShutdownMode::Drain);
+        let report = owner
+            .join_until_background(Instant::now() + Duration::from_secs(5))
+            .unwrap();
+        assert!(!report.shutdown_complete);
+        let recovered = owner
+            .try_take_serial_recovery::<OriginalJob>()
+            .unwrap()
+            .take();
+        assert!(matches!(
+            &recovered.failure,
+            ilium_execution::SerialFailure::ReadinessPanicked { id: 1 }
+        ));
+        let queued: Vec<_> = recovered
+            .queued
+            .iter()
+            .map(|entry| entry.job.0.as_str())
+            .collect();
+        assert_eq!(queued, ["FIRST", "SECOND"]);
+        assert_eq!(quota.snapshot().jobs, 2);
+        drop(recovered);
+        assert!(
+            owner
+                .join_until_background(Instant::now() + Duration::from_secs(5))
+                .unwrap()
+                .shutdown_complete
+        );
+        assert_eq!(quota.snapshot().jobs, 0);
+    }
+
+    #[test]
+    fn cancelled_detached_not_ready_original_remains_recoverable() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let mut owner = execution();
+        let client = owner
+            .client(ClientLimits {
+                jobs: 8,
+                service_jobs: 0,
+                input_bytes: 1024 * 1024,
+                result_bytes: 1024 * 1024,
+            })
+            .unwrap();
+        let quota = client.quota_group();
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("cancelled.txt");
+        let (entered, observed) = mpsc::sync_channel(1);
+        let prepared = Arc::new(AtomicBool::new(false));
+        let mut writer = OrderedWriter::new_with_readiness(
+            client,
+            Arc::new(tokio::sync::Notify::new()),
+            |job: &PreparedWriteFixture| job.source_ready.load(Ordering::Acquire),
+        );
+        writer
+            .enqueue(
+                small_cost(),
+                PreparedWriteFixture {
+                    original: Write {
+                        path: path.clone(),
+                        text: "FIRST",
+                        entered,
+                        gate: None,
+                    },
+                    source_ready: prepared,
+                },
+            )
+            .unwrap();
+        drop(writer);
+        owner.request_shutdown(ShutdownMode::Cancel);
+        let report = owner
+            .join_until_background(Instant::now() + Duration::from_secs(5))
+            .unwrap();
+        assert!(!report.shutdown_complete);
+        let recovered = owner
+            .try_take_serial_recovery::<PreparedWriteFixture>()
+            .unwrap()
+            .take();
+        assert!(matches!(
+            &recovered.failure,
+            ilium_execution::SerialFailure::Cancelled
+        ));
+        assert_eq!(recovered.queued.len(), 1);
+        assert!(matches!(
+            observed.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+        assert!(!path.exists());
+        assert_eq!(quota.snapshot().jobs, 1);
+        drop(recovered);
+        assert!(
+            owner
+                .join_until_background(Instant::now() + Duration::from_secs(5))
+                .unwrap()
+                .shutdown_complete
+        );
+        assert_eq!(quota.snapshot().jobs, 0);
+    }
+
+    #[test]
+    fn detached_publication_refusal_keeps_exact_original_and_younger_reservation() {
+        let mut owner = execution();
+        let client = owner
+            .client(ClientLimits {
+                jobs: 8,
+                service_jobs: 0,
+                input_bytes: 1024 * 1024,
+                result_bytes: 1024 * 1024,
+            })
+            .unwrap();
+        let quota = client.quota_group();
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("refused.txt");
+        let (entered, observed) = mpsc::sync_channel(2);
+        let mut writer = OrderedWriter::new(client, Arc::new(tokio::sync::Notify::new()));
+        writer
+            .enqueue(
+                JobCost {
+                    input_bytes: 1,
+                    result_bytes: 1,
+                },
+                Write {
+                    path: path.clone(),
+                    text: "FIRST",
+                    entered: entered.clone(),
+                    gate: None,
+                },
+            )
+            .unwrap();
+        writer
+            .enqueue(
+                small_cost(),
+                Write {
+                    path: path.clone(),
+                    text: "SECOND",
+                    entered,
+                    gate: None,
+                },
+            )
+            .unwrap();
+        drop(writer);
+        owner.request_shutdown(ShutdownMode::Drain);
+        let report = owner
+            .join_until_background(Instant::now() + Duration::from_secs(5))
+            .unwrap();
+        assert!(!report.shutdown_complete);
+        let recovered = owner.try_take_serial_recovery::<Write>().unwrap().take();
+        match &recovered.failure {
+            ilium_execution::SerialFailure::Publication { reason, job, .. } => {
+                assert_eq!(*reason, RejectReason::InvalidCost);
+                assert_eq!(job.view().text, "FIRST");
+            }
+            _ => panic!("failed publication must retain its exact original"),
+        }
+        assert_eq!(recovered.queued.front().unwrap().job.text, "SECOND");
+        assert_eq!(quota.snapshot().jobs, 2);
+        assert!(matches!(
+            observed.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+        assert!(!path.exists());
+        drop(recovered);
+        assert!(
+            owner
+                .join_until_background(Instant::now() + Duration::from_secs(5))
+                .unwrap()
+                .shutdown_complete
+        );
+        assert_eq!(quota.snapshot().jobs, 0);
     }
 }

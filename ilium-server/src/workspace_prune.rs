@@ -98,6 +98,9 @@ pub(crate) async fn spawn_repository_admission(
     if canonical_cwd != cwd {
         return Err("launch directory is not canonical".into());
     }
+    // Keep plain directories usable without a Git installation. Entry
+    // presence is only a hint: Git may ignore empty metadata or stop discovery
+    // before the candidate, so it must not itself demand a repository.
     let mut git_boundary_present = false;
     for ancestor in canonical_cwd.ancestors() {
         match std::fs::symlink_metadata(ancestor.join(".git")) {
@@ -109,16 +112,19 @@ pub(crate) async fn spawn_repository_admission(
             Err(error) => {
                 return Err(format!(
                     "cannot inspect launch repository boundary: {error}"
-                ));
+                ))
             }
         }
     }
     if !git_boundary_present {
         return Ok(None);
     }
-    let repository = ilium_git::discover(&canonical_cwd)
+    let repository = ilium_git::discover_optional(&canonical_cwd)
         .await
         .map_err(|error| format!("launch repository cannot be verified: {error}"))?;
+    let Some(repository) = repository else {
+        return Ok(None);
+    };
     let repository_guard = state
         .workspace_repository_lock(&repository.common_dir)
         .await

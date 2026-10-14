@@ -232,7 +232,18 @@ fn draw_smart_copy_preview(frame: &mut Frame, area: Rect, app: &App) {
         height,
     );
     frame.render_widget(Clear, dialog);
-    let block = theme::block(true).title(theme::chrome_title("Preview"));
+    let chrome = theme::chrome_title("Preview");
+    // At the supported twelve-cell minimum, the title and decorative chrome
+    // cannot both fit. Keep the identifying label first; retain the ordinary
+    // UTF-8 chrome after it, where the border renderer can clip decoration.
+    let title = if chrome.width() > usize::from(dialog.width.saturating_sub(2)) {
+        let mut title = Line::from(" Preview ");
+        title.spans.extend(theme::chrome_title("").spans);
+        title
+    } else {
+        chrome
+    };
+    let block = theme::block(true).title(title);
     let inner = block.inner(dialog);
     frame.render_widget(block, dialog);
     if inner.height < 2 {
@@ -3320,6 +3331,10 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
             activity,
             bar_style.add_modifier(Modifier::BOLD),
         ));
+    }
+    if let Some(notice) = app.request_refusal_notice(std::time::Instant::now()) {
+        spans.push(Span::raw("  —  "));
+        spans.push(Span::styled(notice, bar_style.add_modifier(Modifier::BOLD)));
     }
     if let Some(message) = &app.status_message {
         spans.push(Span::raw("  —  "));

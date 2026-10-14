@@ -36,11 +36,13 @@ fn both_provider_names_crash_after_preserving_one_exact_unflushed_submission() {
             },
         );
         assert!(fixture.path.is_absolute());
-        let mut child = spawn_fixture(Command::new(&fixture.path)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped()))
-            .expect("spawn absolute fake provider");
+        let mut child = spawn_fixture(
+            Command::new(&fixture.path)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped()),
+        )
+        .expect("spawn absolute fake provider");
         let prompt = prompt();
         assert!(prompt.len() > 4096);
         child

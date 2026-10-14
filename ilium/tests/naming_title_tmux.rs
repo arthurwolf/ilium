@@ -89,6 +89,8 @@ impl Fixture {
         settings.onboarding.finish();
         settings.onboarding.ai_enabled = false;
         settings.triggers.startup_complete.clear();
+        settings.debug.file_logging_enabled = true;
+        ilium_client::config::save_debug_settings(&config, &settings.debug).unwrap();
         settings.ui.motion_level = ilium_client::config::MotionLevel::Off;
         ilium_client::config::save_agent_setup_settings(&config, &settings.agent_setup).unwrap();
         ilium_client::config::save_onboarding_progress(&config, &settings.onboarding).unwrap();
@@ -138,7 +140,7 @@ impl Fixture {
             (ilium_platform::paths::CONFIG_DIR_ENV, config),
             (
                 ilium_platform::runtime_dir::DEBUG_LOG_DIR_ENV,
-                root.join("logs"),
+                runtime.join("logs"),
             ),
             (ilium_client::AGENT_SETUP_HOME_ENV, root.join("agent-home")),
         ];
@@ -199,25 +201,39 @@ impl Fixture {
         if !output.status.success() {
             // A startup failure happens before the normal capture path. Keep
             // the owned server's actual diagnostic logs in returned evidence.
-            let mut directories = vec![self.root.join("logs"), self.project.join(".ilium/logs")];
+            // The log relay binds a Unix socket below this root; keep it
+            // in the same short, owned runtime used for IPC sockets.
+            let mut directories = vec![self.runtime.join("logs"), self.project.join(".ilium/logs")];
             let mut visited = 0;
             while let Some(directory) = directories.pop() {
                 visited += 1;
-                if visited > 128 { break; }
-                let Ok(entries) = std::fs::read_dir(directory) else { continue; };
+                if visited > 128 {
+                    break;
+                }
+                let Ok(entries) = std::fs::read_dir(directory) else {
+                    continue;
+                };
                 for entry in entries.flatten() {
-                    let Ok(kind) = entry.file_type() else { continue; };
-                    if kind.is_dir() { directories.push(entry.path()); }
-                    else if kind.is_file() {
-                        let Ok(bytes) = std::fs::read(entry.path()) else { continue; };
+                    let Ok(kind) = entry.file_type() else {
+                        continue;
+                    };
+                    if kind.is_dir() {
+                        directories.push(entry.path());
+                    } else if kind.is_file() {
+                        let Ok(bytes) = std::fs::read(entry.path()) else {
+                            continue;
+                        };
                         let tail = &bytes[bytes.len().saturating_sub(65536)..];
-                        println!("{}", serde_json::json!({
-                            "type":"artifact", "evidence":"owned server startup failure log",
-                            "path":entry.path(), "bytes":bytes.len(),
-                            "sha256":format!("{:x}", Sha256::digest(&bytes)),
-                            "tail_utf8":String::from_utf8_lossy(tail),
-                            "tail_truncated":tail.len()!=bytes.len()
-                        }));
+                        println!(
+                            "{}",
+                            serde_json::json!({
+                                "type":"artifact", "evidence":"owned server startup failure log",
+                                "path":entry.path(), "bytes":bytes.len(),
+                                "sha256":format!("{:x}", Sha256::digest(&bytes)),
+                                "tail_utf8":String::from_utf8_lossy(tail),
+                                "tail_truncated":tail.len()!=bytes.len()
+                            })
+                        );
                     }
                 }
             }

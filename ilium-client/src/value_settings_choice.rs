@@ -1338,10 +1338,8 @@ mod tests {
                         &app,
                         state,
                     );
-                    let instructions = crate::instruction_settings::panel_height(
-                        state.tab,
-                        layout.content_area,
-                    );
+                    let instructions =
+                        crate::instruction_settings::panel_height(state.tab, layout.content_area);
                     layout.content_area.y += instructions;
                     layout.content_area.height =
                         layout.content_area.height.saturating_sub(instructions);
@@ -1368,10 +1366,8 @@ mod tests {
                         &app,
                         state,
                     );
-                    let instructions = crate::instruction_settings::panel_height(
-                        state.tab,
-                        layout.content_area,
-                    );
+                    let instructions =
+                        crate::instruction_settings::panel_height(state.tab, layout.content_area);
                     layout.content_area.y += instructions;
                     layout.content_area.height =
                         layout.content_area.height.saturating_sub(instructions);
@@ -1405,10 +1401,8 @@ mod tests {
                     &app,
                     state,
                 );
-                let instructions = crate::instruction_settings::panel_height(
-                    state.tab,
-                    layout.content_area,
-                );
+                let instructions =
+                    crate::instruction_settings::panel_height(state.tab, layout.content_area);
                 layout.content_area.y += instructions;
                 layout.content_area.height =
                     layout.content_area.height.saturating_sub(instructions);

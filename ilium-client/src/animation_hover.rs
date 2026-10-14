@@ -503,9 +503,12 @@ mod tests {
         let (mut app, _project) = backend_app(80, 24);
         let y = select_backend_row(&mut app);
         let content = content_area(&app);
-        // Preview composition initializes its visibility warning after painting.
-        // Establish that independent footer before comparing hover frames.
+        // Preview preparation is asynchronous even with a fixed scene clock.
+        // Complete the submitted frame before establishing its independent
+        // visibility footer; hover timing is the only changing state below.
         let _ = draw(&mut app, 80, 24);
+        app.animation_frame
+            .wait_for_frame_for_test(std::time::Duration::ZERO);
         let before = draw(&mut app, 80, 24);
         pointer(
             &mut app,

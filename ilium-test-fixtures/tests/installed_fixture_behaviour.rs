@@ -15,7 +15,9 @@
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
 
-use ilium_test_fixtures::{behavior_file_for, install, spawn_fixture, FixtureBehavior, FIXTURE_BINARY_NAME};
+use ilium_test_fixtures::{
+    behavior_file_for, install, spawn_fixture, FixtureBehavior, FIXTURE_BINARY_NAME,
+};
 
 #[test]
 fn installing_a_fixture_writes_an_executable_and_its_behaviour_sidecar() {
@@ -53,10 +55,12 @@ fn an_installed_echo_fixture_reads_a_line_and_answers_with_its_prefix() {
     // behaviour dispatched, which is the contract every other crate depends
     // on. Pty-specific behaviour is covered where it matters, in the server's
     // own end-to-end tests.
-    let mut child = spawn_fixture(Command::new(&installed.path)
+    let mut child = spawn_fixture(
+        Command::new(&installed.path)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped()))
+            .stderr(Stdio::piped()),
+    )
     .unwrap_or_else(|error| {
         panic!(
             "spawn the installed fixture at {}: {error}",
@@ -92,10 +96,15 @@ fn a_fixture_without_its_sidecar_fails_loudly_instead_of_doing_nothing() {
     let installed = install(directory.path(), "codex", &FixtureBehavior::Idle);
     std::fs::remove_file(behavior_file_for(&installed.path)).expect("remove the sidecar");
 
-    let output = Command::new(&installed.path)
-        .stdin(Stdio::null())
-        .output()
-        .expect("run the fixture without its sidecar");
+    let output = spawn_fixture(
+        Command::new(&installed.path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped()),
+    )
+    .expect("spawn the fixture without its sidecar")
+    .wait_with_output()
+    .expect("collect the fixture without its sidecar");
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);

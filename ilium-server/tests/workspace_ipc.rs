@@ -1507,13 +1507,11 @@ async fn isolated_server_creates_attaches_and_removes_only_owned_worktree() {
         // Some hosts restrict procfs cwd reads even for a same-user service
         // manager. Force must fail closed when process custody is unknown.
         assert!(
-            reasons
-                .iter()
-                .any(|reason| {
-                    reason.contains("process directory probe is unavailable")
-                        || (reason.contains("cannot inspect cwd of process")
-                            && reason.contains("Permission denied"))
-                }),
+            reasons.iter().any(|reason| {
+                reason.contains("process directory probe is unavailable")
+                    || (reason.contains("cannot inspect cwd of process")
+                        && reason.contains("Permission denied"))
+            }),
             "{removed:?}"
         );
         assert!(linked.exists());
