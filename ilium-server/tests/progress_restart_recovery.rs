@@ -215,10 +215,7 @@ async fn monitor_survives_server_restart_and_keeps_observing() {
     .expect("write probe report");
     let probe = write_probe_script(fixtures.path(), &probe_report);
 
-    let socket_dir = tempfile::Builder::new()
-        .prefix("ir")
-        .tempdir_in("/tmp")
-        .expect("create short socket directory");
+    let socket_dir = common::short_socket_dir();
     let socket_path = socket_dir.path().join("restart.sock");
     let snapshot_path = fixtures.path().join("restart.snapshot.json");
     let session_name = "restart-recovery";

@@ -293,7 +293,7 @@ impl Drop for TestServer {
 ///
 /// Windows endpoints are named pipes with no filesystem presence, so the
 /// directory is merely unused there rather than wrong.
-fn short_socket_dir() -> tempfile::TempDir {
+pub fn short_socket_dir() -> tempfile::TempDir {
     let parent = if cfg!(windows) {
         std::env::temp_dir()
     } else {
