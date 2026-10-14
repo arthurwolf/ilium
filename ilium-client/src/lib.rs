@@ -4587,9 +4587,10 @@ impl InputBatchItem
 
     fn coalesce_motion(self) -> Result<(), Self> {
         match self {
-            Ok(event) => event
-                .coalesce_motion()
-                .map_or(Ok(()), |original| Err(Ok(original))),
+            Ok(event) => match event.coalesce_motion() {
+                Some(original) => Err(Ok(original)),
+                None => Ok(()),
+            },
             Err(error) => Err(Err(error)),
         }
     }
