@@ -536,7 +536,8 @@ fn persistent_cache_ttl_reload_remove_and_principal_isolation_are_real() {
     assert!(reopened.get("short", 16, &cancel).unwrap().is_none());
 }
 
-#[cfg(not(target_os = "linux"))]
+// Linux, macOS and Windows have qualified pinned-directory backends; only other targets report Unsupported.
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 #[test]
 fn native_atomic_storage_reports_unsupported_on_non_linux_platforms() {
     let temporary_directory = tempfile::tempdir().unwrap();

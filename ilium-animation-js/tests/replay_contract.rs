@@ -1,6 +1,7 @@
 //! Public replay boundary checks. The detailed cache/player algorithms live
 //! in replay's private test module; no public test constructs a certificate or
 //! a terminal-flush proof from arbitrary fields.
+#[cfg(target_os = "linux")]
 mod common;
 
 use ilium_animation_js::replay::{FrozenInputs, InputFamily, ReplayCache, ReplayLimits};
@@ -71,6 +72,9 @@ fn public_replay_cache_retains_original_frame_ceiling() {
     assert_eq!(quota.snapshot().worker_bytes, 0);
 }
 
+// The animation helper sandbox (bubblewrap/cgroup/seccomp) is qualified only on Linux; elsewhere
+// `spawn_helper` deliberately returns Unsupported, so tests that spawn the real helper run on Linux only.
+#[cfg(target_os = "linux")]
 #[test]
 fn actual_prepared_helper_issues_opaque_source_free_replay_certificate() {
     use ilium_animation_js::{
