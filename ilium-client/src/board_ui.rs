@@ -840,7 +840,7 @@ mod tests {
         }
         let wide = board_hint_lines(false, 120).join(" ");
         for expected in [
-            "column", "card", "details", "new", "rename", "delete", "move", "drag",
+            "column", "card", "details", "n card", "c column", "rename", "delete", "move", "drag",
         ] {
             assert!(
                 wide.contains(expected),

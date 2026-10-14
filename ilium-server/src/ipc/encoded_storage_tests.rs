@@ -538,14 +538,16 @@ impl Fixture {
         let mut owner = self.take_owner();
         owner.request_shutdown();
         let report = tokio::task::spawn_blocking(move || {
-            owner.test_join_until_background(std::time::Instant::now() + WAIT)
+            owner.test_join_until_background(
+                std::time::Instant::now() + crate::execution::PHYSICAL_JOIN_TEST_WAIT,
+            )
         })
         .await
         .unwrap()
         .unwrap();
         assert!(
             report.shutdown_complete,
-            "physical shutdown retains an original"
+            "physical shutdown retains an original: {report:?}"
         );
         assert_eq!(report.remaining_workers, 0);
         assert_eq!(report.health.lanes[0].retirement_live, 0);
@@ -897,12 +899,14 @@ async fn physical_shutdown_cannot_finish_before_cancelled_socket_originals_retir
     drop(blockers);
     assert_original_destroyed(destroyed, &probe, &threads, charged, 0).await;
     let final_report = tokio::task::spawn_blocking(move || {
-        owner.test_join_until_background(std::time::Instant::now() + WAIT)
+        owner.test_join_until_background(
+            std::time::Instant::now() + crate::execution::PHYSICAL_JOIN_TEST_WAIT,
+        )
     })
     .await
     .unwrap()
     .unwrap();
-    assert!(final_report.shutdown_complete);
+    assert!(final_report.shutdown_complete, "{final_report:?}");
     assert_eq!(final_report.remaining_workers, 0);
     assert_eq!(final_report.health.lanes[0].retirement_live, 0);
     assert_eq!(fixture.quota.snapshot().worker_threads, 0);

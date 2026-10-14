@@ -1269,7 +1269,14 @@ mod tests {
             .map(|cell| cell.symbol())
             .collect::<String>();
         assert!(text.contains("needle"));
-        assert_eq!(terminal.get_cursor_position().expect("native cursor").y, 2);
+        // Outer border, live-search heading and input border precede the
+        // editable row. Keep the real cursor on the painted query, not chrome.
+        let cursor = terminal.get_cursor_position().expect("native cursor");
+        assert_eq!(cursor.y, 3);
+        assert_eq!(
+            terminal.backend().buffer()[(cursor.x, cursor.y)].symbol(),
+            "d"
+        );
     }
 
     #[test]

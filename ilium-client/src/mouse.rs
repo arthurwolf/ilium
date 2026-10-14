@@ -120,13 +120,18 @@ fn trace_mouse_event(app: &App, mouse: &MouseEvent) {
     };
     let _ = writeln!(
         file,
-        "{:?} at column {} row {} in mode {mode}",
-        mouse.kind, mouse.column, mouse.row
+        "{:?} at column {} row {} in mode {mode}; emitted_revision={:?} geometry_current={} raw_tree_hit={:?} painted_rows={:?} transition_active={} layout={:?}",
+        mouse.kind, mouse.column, mouse.row, app.emitted_layout_revision(),
+        app.pointer_geometry_is_current(),
+        app.emitted_tree_hit_for_trace(Position::new(mouse.column, mouse.row)),
+        app.emitted_tree_rows_for_trace(),
+        app.tree_transitions.is_active(app.started_at.elapsed().as_millis()), app.layout
     );
 }
 
 /// Top-level mouse dispatch, called for every `Event::Mouse`.
 pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
+    trace_mouse_event(app, &mouse);
     if !app.pointer_geometry_is_current() {
         // A completed menu action changes mode before its matching release.
         // Discard that stale release without replacing the action's result.
@@ -159,7 +164,6 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
     if app.handle_plugin_permission_mouse(mouse) {
         return;
     }
-    trace_mouse_event(app, &mouse);
     let position = Position::new(mouse.column, mouse.row);
     app.set_terminal_focused(true);
     app.set_pointer_position(Some(position));
@@ -2347,7 +2351,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
         return;
     }
     let instruction_height =
-        crate::instruction_settings::panel_height(state.tab, layout.content_area);
+        crate::settings_ui::instructions_panel_height(&app, state.tab, layout.content_area);
     if instruction_height > 0 {
         let panel = Rect {
             height: instruction_height,
@@ -5724,8 +5728,12 @@ mod settings_title_choice_mouse_tests {
             let Mode::Settings(state) = &app.mode else {
                 panic!("settings expected");
             };
-            let layout =
+            let mut layout =
                 crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, &app, state);
+            let height =
+                crate::settings_ui::instructions_panel_height(&app, state.tab, layout.content_area);
+            layout.content_area.y += height;
+            layout.content_area.height = layout.content_area.height.saturating_sub(height);
             let (_, control) =
                 crate::settings_ui::settings_choice_control(layout.content_area, &app, state, 0)
                     .expect("Title style uses the shared choice control");
@@ -5755,8 +5763,12 @@ mod settings_title_choice_mouse_tests {
         let Mode::Settings(state) = &app.mode else {
             panic!("settings expected");
         };
-        let layout =
+        let mut layout =
             crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, &app, state);
+        let height =
+            crate::settings_ui::instructions_panel_height(&app, state.tab, layout.content_area);
+        layout.content_area.y += height;
+        layout.content_area.height = layout.content_area.height.saturating_sub(height);
         let (_, control) =
             crate::settings_ui::settings_choice_control(layout.content_area, &app, state, 0)
                 .expect("Title style uses the shared choice control");
@@ -5796,8 +5808,12 @@ mod text_trigger_mouse_tests {
         let Mode::Settings(state) = &app.mode else {
             panic!("settings expected")
         };
-        let area = crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, app, state)
-            .content_area;
+        let mut area =
+            crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, app, state)
+                .content_area;
+        let height = crate::settings_ui::instructions_panel_height(app, state.tab, area);
+        area.y += height;
+        area.height = area.height.saturating_sub(height);
         let click_row = area.y + line - state.scroll;
         handle_mouse_event(
             app,
@@ -5806,6 +5822,40 @@ mod text_trigger_mouse_tests {
                 column: area.x + 8,
                 row: click_row,
                 modifiers: crossterm::event::KeyModifiers::empty(),
+            },
+        );
+    }
+
+    fn click_rendered_trigger_text(app: &mut App, text: &str) {
+        let Mode::Settings(state) = &app.mode else {
+            panic!("settings expected")
+        };
+        let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(
+            app.layout.screen_area.width,
+            app.layout.screen_area.height,
+        ))
+        .unwrap();
+        terminal
+            .draw(|frame| crate::settings_ui::render(frame, frame.area(), app, state))
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let row = (0..buffer.area.height)
+            .find(|y| {
+                let rendered: String = (0..buffer.area.width)
+                    .map(|x| buffer[(x, *y)].symbol())
+                    .collect();
+                rendered.contains(text)
+            })
+            .expect("requested trigger text is visibly rendered");
+        let area = crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, app, state)
+            .content_area;
+        handle_mouse_event(
+            app,
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: area.x + 8,
+                row,
+                modifiers: KeyModifiers::NONE,
             },
         );
     }
@@ -6089,7 +6139,7 @@ mod text_trigger_mouse_tests {
     #[test]
     fn clicking_add_opens_editor_and_escape_returns_to_settings() {
         let mut app = settings_app(0);
-        click_trigger_line(&mut app, 4);
+        click_rendered_trigger_text(&mut app, "[ Add text trigger ]");
         assert!(
             matches!(&app.mode, Mode::TextTriggerDialog(state) if state.editing_index.is_none())
         );
@@ -6133,15 +6183,15 @@ mod text_trigger_mouse_tests {
             panic!("settings expected")
         };
         assert!(state.scroll > 0);
-        click_trigger_line(&mut app, 10);
+        click_rendered_trigger_text(&mut app, "Match: pattern-1");
         assert!(
-            matches!(&app.mode, Mode::TextTriggerDialog(state) if state.editing_index == Some(7) && state.regexp.buf == "pattern-7")
+            matches!(&app.mode, Mode::TextTriggerDialog(state) if state.editing_index == Some(1) && state.regexp.buf == "pattern-1")
         );
     }
 
     #[test]
     fn clicking_headers_spacers_and_hint_does_not_open_an_editor() {
-        for line in [0, 1, 2, 3, 5] {
+        for line in [0, 1, 2, 4, 5] {
             let mut app = settings_app(0);
             click_trigger_line(&mut app, line);
             assert!(
@@ -6275,19 +6325,26 @@ mod icon_assignment_control_tests {
         let screen = Rect::new(0, 0, 40, 24);
         app.set_screen_area(screen);
         let target = crate::agent_monitoring::general_icon_targets()[0];
-        let suggestions = target.suggestions();
-        app.ui_settings.icons.set(target, suggestions[0].into());
+        let catalog = crate::icon_settings::all_picker_search_results();
+        app.ui_settings
+            .icons
+            .set(target, catalog.entry(0).unwrap().glyph.into());
         let mut state = crate::app::SettingsState {
             tab: crate::app::SettingsTab::Icons,
             ..Default::default()
         };
         let mut area =
             crate::settings_ui::compute_layout_for_mode(screen, &app, &state).content_area;
-        let instructions = crate::instruction_settings::panel_height(state.tab, area);
+        let instructions = crate::settings_ui::instructions_panel_height(&app, state.tab, area);
         area.y += instructions;
         area.height = area.height.saturating_sub(instructions);
         for (part, button, expected, opens) in [
-            ("previous", MouseButton::Left, suggestions.len() - 1, false),
+            (
+                "previous",
+                MouseButton::Left,
+                catalog.entry_count - 1,
+                false,
+            ),
             ("next", MouseButton::Left, 0, false),
             ("value", MouseButton::Left, 1, false),
             ("value", MouseButton::Right, 0, false),
@@ -6318,7 +6375,10 @@ mod icon_assignment_control_tests {
                 },
             );
             app.settle_filesystem_for_test();
-            assert_eq!(app.ui_settings.icons.glyph(target), suggestions[expected]);
+            assert_eq!(
+                app.ui_settings.icons.glyph(target),
+                catalog.entry(expected).unwrap().glyph
+            );
             let Mode::Settings(next) = std::mem::replace(&mut app.mode, Mode::Normal) else {
                 panic!("Settings remains open after compact selector interaction")
             };
@@ -6336,15 +6396,17 @@ mod icon_assignment_control_tests {
         let screen = Rect::new(0, 0, 140, 45);
         app.set_screen_area(screen);
         let target = crate::agent_monitoring::general_icon_targets()[0];
-        let suggestions = target.suggestions();
-        app.ui_settings.icons.set(target, suggestions[0].into());
+        let catalog = crate::icon_settings::all_picker_search_results();
+        app.ui_settings
+            .icons
+            .set(target, catalog.entry(0).unwrap().glyph.into());
         let mut state = crate::app::SettingsState {
             tab: crate::app::SettingsTab::Icons,
             ..Default::default()
         };
         let mut area =
             crate::settings_ui::compute_layout_for_mode(screen, &app, &state).content_area;
-        let height = crate::instruction_settings::panel_height(state.tab, area);
+        let height = crate::settings_ui::instructions_panel_height(&app, state.tab, area);
         area.y += height;
         area.height = area.height.saturating_sub(height);
         for (button, part, expected, opens) in [
@@ -6376,7 +6438,10 @@ mod icon_assignment_control_tests {
                     modifiers: crossterm::event::KeyModifiers::NONE,
                 },
             );
-            assert_eq!(app.ui_settings.icons.glyph(target), suggestions[expected]);
+            assert_eq!(
+                app.ui_settings.icons.glyph(target),
+                catalog.entry(expected).unwrap().glyph
+            );
             let Mode::Settings(next) = std::mem::replace(&mut app.mode, Mode::Normal) else {
                 panic!("settings retained")
             };
@@ -6394,7 +6459,10 @@ mod icon_assignment_control_tests {
         let screen = Rect::new(0, 0, 140, 45);
         app.set_screen_area(screen);
         let target = crate::icon_settings::IconTarget::FrozenAgent;
-        let suggestions = target.suggestions();
+        let catalog = crate::icon_settings::all_picker_search_results();
+        app.ui_settings
+            .icons
+            .set(target, catalog.entry(0).unwrap().glyph.into());
         let row = crate::agent_monitoring::general_icon_targets()
             .iter()
             .position(|candidate| *candidate == target)
@@ -6405,7 +6473,7 @@ mod icon_assignment_control_tests {
         };
         let mut area =
             crate::settings_ui::compute_layout_for_mode(screen, &app, &state).content_area;
-        let height = crate::instruction_settings::panel_height(state.tab, area);
+        let height = crate::settings_ui::instructions_panel_height(&app, state.tab, area);
         area.y += height;
         area.height = area.height.saturating_sub(height);
 
@@ -6427,7 +6495,10 @@ mod icon_assignment_control_tests {
                 modifiers: crossterm::event::KeyModifiers::NONE,
             },
         );
-        assert_eq!(app.ui_settings.icons.glyph(target), suggestions[1]);
+        assert_eq!(
+            app.ui_settings.icons.glyph(target),
+            catalog.entry(1).unwrap().glyph
+        );
         app.settle_filesystem_for_test();
         assert_eq!(
             crate::config::load(directory.path())
@@ -6435,7 +6506,7 @@ mod icon_assignment_control_tests {
                 .ui
                 .icons
                 .frozen_agent,
-            suggestions[1]
+            catalog.entry(1).unwrap().glyph
         );
 
         let Mode::Settings(next) = std::mem::replace(&mut app.mode, Mode::Normal) else {
@@ -6485,15 +6556,17 @@ mod agent_monitoring_icon_control_tests {
         let screen = Rect::new(0, 0, 160, 80);
         app.set_screen_area(screen);
         let target = crate::agent_monitoring::STATUS_ICON_TARGETS[0];
-        let suggestions = target.suggestions();
-        app.ui_settings.icons.set(target, suggestions[0].into());
+        let catalog = crate::icon_settings::all_picker_search_results();
+        app.ui_settings
+            .icons
+            .set(target, catalog.entry(0).unwrap().glyph.into());
         let mut state = SettingsState {
             tab: SettingsTab::AgentMonitoring,
             ..SettingsState::default()
         };
         let mut layout = crate::settings_ui::compute_layout_for_mode(screen, &app, &state);
         let instructions =
-            crate::instruction_settings::panel_height(state.tab, layout.content_area);
+            crate::settings_ui::instructions_panel_height(&app, state.tab, layout.content_area);
         layout.content_area.y += instructions;
         layout.content_area.height = layout.content_area.height.saturating_sub(instructions);
         let row = crate::settings_ui::agent_monitoring_rows(&app)
@@ -6504,7 +6577,12 @@ mod agent_monitoring_icon_control_tests {
         for (part, button, expected, opens) in [
             ("value", MouseButton::Left, 1, false),
             ("value", MouseButton::Right, 0, false),
-            ("previous", MouseButton::Left, suggestions.len() - 1, false),
+            (
+                "previous",
+                MouseButton::Left,
+                catalog.entry_count - 1,
+                false,
+            ),
             ("next", MouseButton::Left, 0, false),
             ("open", MouseButton::Left, 0, true),
         ] {
@@ -6532,7 +6610,10 @@ mod agent_monitoring_icon_control_tests {
                     modifiers: KeyModifiers::NONE,
                 },
             );
-            assert_eq!(app.ui_settings.icons.glyph(target), suggestions[expected]);
+            assert_eq!(
+                app.ui_settings.icons.glyph(target),
+                catalog.entry(expected).unwrap().glyph
+            );
             let Mode::Settings(next) = std::mem::replace(&mut app.mode, Mode::Normal) else {
                 panic!("settings retained");
             };
@@ -6559,7 +6640,7 @@ mod agent_monitoring_icon_control_tests {
         };
         let mut layout = crate::settings_ui::compute_layout_for_mode(screen, &app, &state);
         let instructions =
-            crate::instruction_settings::panel_height(state.tab, layout.content_area);
+            crate::settings_ui::instructions_panel_height(&app, state.tab, layout.content_area);
         layout.content_area.y += instructions;
         layout.content_area.height = layout.content_area.height.saturating_sub(instructions);
         let content_area = layout.content_area;
@@ -6745,6 +6826,20 @@ mod frozen_agent_context_mouse_tests {
     }
 
     #[test]
+    fn admitted_agent_and_shell_clicks_queue_a_request_and_start_their_spinner() {
+        for action in [
+            TreeToolbarAction::Agent(ilium_core::BuiltinAgentProvider::Claude),
+            TreeToolbarAction::Shell,
+        ] {
+            let mut app = App::new("toolbar-admitted".into(), std::env::temp_dir());
+            app.outbound_admission = Some(crate::execution::test_document_client());
+            execute_tree_toolbar_action(&mut app, action);
+            assert_eq!(app.pending_toolbar_mask(), action.pending_bit());
+            assert!(!app.take_outbound_requests().is_empty());
+        }
+    }
+
+    #[test]
     fn pending_toolbar_buttons_have_distinct_bits_and_finish_once() {
         let mut app = App::new("toolbar-pending".into(), std::env::temp_dir());
         let claude = TreeToolbarAction::Agent(ilium_core::BuiltinAgentProvider::Claude);
@@ -6850,6 +6945,28 @@ mod frozen_agent_context_mouse_tests {
             },
             ClientRequest::TerminatePaneProcess { pane_id: root },
             ClientRequest::UnfreezePane { pane_id: root },
+            ClientRequest::MoveNode {
+                node_id: root,
+                direction: ilium_core::TreeMoveDirection::Up,
+            },
+            ClientRequest::RemoveWorkspace {
+                request_id: 1,
+                pane_id: root,
+                force_path: None,
+                remove_branch: false,
+            },
+            ClientRequest::RevertLastRestructure,
+            ClientRequest::RevertProjectRestructure { project_id: root },
+            ClientRequest::ApplyRestructurePlan {
+                plan: ilium_core::RestructurePlan { children: vec![] },
+                title_observations: vec![],
+            },
+            ClientRequest::ApplyProjectRestructurePlan {
+                project_id: root,
+                plan: ilium_core::RestructurePlan { children: vec![] },
+                inference_activity_revisions: vec![],
+                title_observations: vec![],
+            },
         ];
         for request in requests {
             let mut app = App::new("menu-sites".into(), std::env::temp_dir());

@@ -4515,7 +4515,8 @@ async fn handle_new_pane(
 
     match spawn_and_register_pane_in_directory(state, pane_id, plan.spawn_kind, &cwd).await {
         Ok(()) => {}
-        Err(RegisterPaneError::NodeRemoved(_)) => {
+        Err(RegisterPaneError::NodeRemoved(_)) | Err(RegisterPaneError::Admission(_)) => {
+            // Admission refusals already published their error and tree state.
             // A concurrent request (`ClosePane` on an ancestor group,
             // `RevertLastRestructure`, a session-recovery restore) removed
             // `pane_id` from the tree while the spawn above was in flight.
@@ -5059,7 +5060,7 @@ async fn handle_replace_pane_with_command(
     .await
     {
         Ok(()) => {}
-        Err(RegisterPaneError::NodeRemoved(_)) => {
+        Err(RegisterPaneError::NodeRemoved(_)) | Err(RegisterPaneError::Admission(_)) => {
             state
                 .workspace_close_preferences
                 .write()
@@ -5167,6 +5168,9 @@ pub(crate) async fn create_agent_with_prompt(
     .await
     {
         Ok(()) => {}
+        Err(RegisterPaneError::Admission(reason)) => {
+            return Err(format!("the {command_line} pane was not started: {reason}"));
+        }
         Err(RegisterPaneError::NodeRemoved(_)) => {
             // A concurrent request removed the node while the spawn was in
             // flight; it already broadcast the tree without it and the
@@ -5318,12 +5322,15 @@ where
 /// without it, so callers must not try to remove the (already gone) tree
 /// node again or report a spurious spawn error. See this function's doc
 /// comment for how `NodeRemoved` is made unreachable-without-cleanup.
+/// `Admission` preserves a pre-spawn refusal whose error and tree state have
+/// already been published; restored callers retain its concrete retry reason.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum RegisterPaneError {
     #[error(transparent)]
     Spawn(#[from] PtyError),
-    #[error("pane node {0:?} was removed or refused admission before registration")]
-    // Covers pre-spawn directory-generation rejection.
+    #[error("pane admission refused: {0}")]
+    Admission(String),
+    #[error("pane node {0:?} was removed before registration")]
     NodeRemoved(NodeId),
 }
 
@@ -5422,7 +5429,7 @@ pub(crate) async fn spawn_and_register_pane_with_deferred_workspace(
             message: format!("pane {} was not started: {reason}", pane_id.0),
         });
         broadcast_and_persist(state).await;
-        return Err(RegisterPaneError::NodeRemoved(pane_id));
+        return Err(RegisterPaneError::Admission(reason));
     }
     // A node removed while this caller waited must never cause even a transient PTY spawn.
     if state.tree.read().await.get(pane_id).is_none() {
@@ -5456,7 +5463,7 @@ pub(crate) async fn spawn_and_register_pane_with_deferred_workspace(
                 message: format!("pane {} was not started: {reason}", pane_id.0),
             });
             broadcast_and_persist(state).await;
-            return Err(RegisterPaneError::NodeRemoved(pane_id));
+            return Err(RegisterPaneError::Admission(reason));
         }
     };
     let (resource, output_receiver) = match kind {
@@ -5805,9 +5812,17 @@ async fn collect_output_burst(
     first_chunk: ilium_pty::PtyOutputChunk,
     receiver: &mut tokio::sync::broadcast::Receiver<ilium_pty::PtyOutputChunk>,
 ) -> OutputBurst {
+    collect_output_burst_with_window(first_chunk, receiver, std::time::Duration::from_micros(750))
+        .await
+}
+
+async fn collect_output_burst_with_window(
+    first_chunk: ilium_pty::PtyOutputChunk,
+    receiver: &mut tokio::sync::broadcast::Receiver<ilium_pty::PtyOutputChunk>,
+    followup_window: std::time::Duration,
+) -> OutputBurst {
     const MAX_MERGED_CHUNKS: usize = 32;
     const MAX_MERGED_BYTES: usize = 16 * 1024;
-    const FOLLOWUP_WINDOW: std::time::Duration = std::time::Duration::from_micros(750);
 
     let first_sequence = first_chunk.sequence;
     let mut sequence = first_sequence;
@@ -5819,7 +5834,7 @@ async fn collect_output_burst(
             Ok(chunk) => Some(Ok(chunk)),
             Err(tokio::sync::broadcast::error::TryRecvError::Empty) if !waited_for_followup => {
                 waited_for_followup = true;
-                tokio::time::timeout(FOLLOWUP_WINDOW, receiver.recv())
+                tokio::time::timeout(followup_window, receiver.recv())
                     .await
                     .ok()
             }
@@ -9061,7 +9076,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn output_burst_collects_an_immediately_following_reader_chunk() {
+    async fn output_burst_collects_a_reader_chunk_during_the_followup_wait() {
         let (sender, mut receiver) = tokio::sync::broadcast::channel(8);
         sender
             .send(ilium_pty::PtyOutputChunk {
@@ -9084,11 +9099,35 @@ mod tests {
             first_sequence,
             sequence,
             bytes,
-        } = collect_output_burst(first, &mut receiver).await
+        } = collect_output_burst_with_window(first, &mut receiver, Duration::from_secs(1)).await
         else {
             panic!("contiguous output must not require replay");
         };
         producer.await.unwrap();
+        assert_eq!((first_sequence, sequence), (1, 2));
+        assert_eq!(bytes, b"firstsecond");
+    }
+
+    #[tokio::test]
+    async fn output_burst_merges_buffered_chunks_with_the_production_window() {
+        let (sender, mut receiver) = tokio::sync::broadcast::channel(8);
+        for (sequence, bytes) in [(1, b"first".as_slice()), (2, b"second".as_slice())] {
+            sender
+                .send(ilium_pty::PtyOutputChunk {
+                    sequence,
+                    bytes: bytes.to_vec().into(),
+                })
+                .unwrap();
+        }
+        let first = receiver.recv().await.unwrap();
+        let OutputBurst::Merged {
+            first_sequence,
+            sequence,
+            bytes,
+        } = collect_output_burst(first, &mut receiver).await
+        else {
+            panic!("buffered contiguous output must not require replay");
+        };
         assert_eq!((first_sequence, sequence), (1, 2));
         assert_eq!(bytes, b"firstsecond");
     }

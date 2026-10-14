@@ -392,4 +392,38 @@ mod tests {
         state.pointer_moved(Position::new(80, 10), Rect::new(0, 0, 80, 24), start);
         assert!(!state.should_close(start + Duration::from_secs(2)));
     }
+
+    #[test]
+    fn disabled_popover_explains_itself_and_underlines_the_hovered_choice() {
+        use ratatui::{backend::TestBackend, Terminal};
+        let bounds = Rect::new(0, 0, 80, 24);
+        let mut state = AgentPopover::hover(
+            BuiltinAgentProvider::Claude,
+            Rect::new(14, 22, 3, 2),
+            Instant::now(),
+            false,
+            Some("Checking Git repository…".into()),
+        );
+        let geometry = layout(bounds, &state).expect("popover fits");
+        let (choice, area) = geometry.choices[0];
+        state.hovered = Some(PopoverHit::Choice(choice));
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("backend");
+        terminal
+            .draw(|frame| render(frame, &geometry, &state, ColorScheme::Dark))
+            .expect("draw");
+        let buffer = terminal.backend().buffer();
+        let header: String = (0..geometry.header.width)
+            .map(|dx| {
+                buffer[(geometry.header.x + dx, geometry.header.y)]
+                    .symbol()
+                    .to_string()
+            })
+            .collect();
+        assert!(header.contains("Checking Git repository"), "{header:?}");
+        let hovered = &buffer[(area.x, area.y)];
+        assert!(hovered.modifier.contains(Modifier::UNDERLINED));
+        let (_, other_area) = geometry.choices[1];
+        let other = &buffer[(other_area.x, other_area.y)];
+        assert!(!other.modifier.contains(Modifier::UNDERLINED));
+    }
 }

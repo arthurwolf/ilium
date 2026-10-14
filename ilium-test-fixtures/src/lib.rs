@@ -252,9 +252,12 @@ pub fn install(directory: &Path, name: &str, behavior: &FixtureBehavior) -> Inst
 /// executable-write conflict. A concurrent fork can inherit the copy's write
 /// descriptor until it execs. A failed exec starts no child, so retry is safe.
 pub fn spawn_fixture(command: &mut std::process::Command) -> std::io::Result<std::process::Child> {
-    retry_executable_write_conflict(|| command.spawn(), || {
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    })
+    retry_executable_write_conflict(
+        || command.spawn(),
+        || {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        },
+    )
 }
 
 fn retry_executable_write_conflict<T>(
@@ -415,7 +418,10 @@ mod tests {
             },
             || panic!("other failures must not retry"),
         );
-        assert_eq!(failure.unwrap_err().kind(), std::io::ErrorKind::PermissionDenied);
+        assert_eq!(
+            failure.unwrap_err().kind(),
+            std::io::ErrorKind::PermissionDenied
+        );
         assert_eq!(attempts, 1);
         attempts = 0;
         let failure = retry_executable_write_conflict::<()>(
@@ -425,7 +431,10 @@ mod tests {
             },
             || {},
         );
-        assert_eq!(failure.unwrap_err().kind(), std::io::ErrorKind::ExecutableFileBusy);
+        assert_eq!(
+            failure.unwrap_err().kind(),
+            std::io::ErrorKind::ExecutableFileBusy
+        );
         assert_eq!(attempts, 101);
     }
 

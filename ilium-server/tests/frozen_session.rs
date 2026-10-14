@@ -119,8 +119,8 @@ async fn create_detected_claude_pane(client: &mut SessionStream) -> NodeId {
 }
 
 fn write_verified_claude_transcript(server: &TestServer, session_id: &str, cwd: &Path) {
-    let resolved_cwd = ilium_platform::paths::canonicalize(cwd)
-        .unwrap_or_else(|_| cwd.to_path_buf());
+    let resolved_cwd =
+        ilium_platform::paths::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf());
     let slug: String = resolved_cwd
         .to_string_lossy()
         .chars()
@@ -373,7 +373,17 @@ async fn unfreeze_preserves_worktree_ownership() {
     let (agent_pane_id, replacement_tree) =
         wait_for_detected_replacement(&mut client, workspace_pane_id).await;
     assert_ne!(agent_pane_id, workspace_pane_id);
-    assert!(replacement_tree.pane_workspace(agent_pane_id).is_some());
+    let original_workspace = replacement_tree
+        .pane_workspace(agent_pane_id)
+        .expect("replacement retains workspace identity")
+        .clone();
+    assert_eq!(
+        original_workspace.worktree_root,
+        std::fs::canonicalize(&worktree_root).unwrap()
+    );
+    assert_eq!(original_workspace.branch, "agent/frozen-session-test");
+    assert!(original_workspace.created_by_ilium);
+    assert!(original_workspace.workspace_id.is_some());
 
     write_frame(
         &mut client,
@@ -399,7 +409,10 @@ async fn unfreeze_preserves_worktree_ownership() {
     let (resumed_pane_id, resumed_tree) =
         wait_for_detected_replacement_after_unfreeze(&mut client, agent_pane_id).await;
     assert_ne!(resumed_pane_id, agent_pane_id);
-    assert!(resumed_tree.pane_workspace(resumed_pane_id).is_some());
+    assert_eq!(
+        resumed_tree.pane_workspace(resumed_pane_id),
+        Some(&original_workspace)
+    );
 
     write_frame(
         &mut client,
@@ -414,18 +427,53 @@ async fn unfreeze_preserves_worktree_ownership() {
     let removal = common::expect_event(&mut client, Duration::from_secs(20), |event| {
         matches!(
             event,
-            ServerEvent::WorkspaceRemoved { request_id: 72, .. }
-                | ServerEvent::WorkspaceRemovalBlocked { request_id: 72, .. }
+            ServerEvent::WorkspaceRemoved { request_id: 72, pane_id }
+                | ServerEvent::WorkspaceRemovalBlocked { request_id: 72, pane_id, .. }
+                if *pane_id == resumed_pane_id
         )
     })
     .await;
-    assert!(
-        matches!(
-            removal,
-            ServerEvent::WorkspaceRemoved { request_id: 72, .. }
-        ),
-        "worktree custody remained unresolved after unfreeze: {removal:?}"
-    );
+    if let ServerEvent::WorkspaceRemovalBlocked { reasons, .. } = &removal {
+        // Restricted procfs cannot establish process custody. Unfreezing must
+        // preserve ownership without bypassing this independent safety gate.
+        assert!(!reasons.is_empty());
+        assert!(
+            reasons.iter().all(|reason| {
+                reason.contains("cannot inspect cwd of process")
+                    && reason.contains("Permission denied")
+                    && !reason.contains("REMOVAL OUTCOME UNCERTAIN")
+            }),
+            "unexpected worktree removal refusal after unfreeze: {removal:?}"
+        );
+        assert!(worktree_root.is_dir());
+        run_git(
+            &server.project_cwd,
+            &[
+                "show-ref",
+                "--verify",
+                "refs/heads/agent/frozen-session-test",
+            ],
+        );
+    } else {
+        assert!(
+            matches!(
+                removal,
+                ServerEvent::WorkspaceRemoved { request_id: 72, .. }
+            ),
+            "worktree custody remained unresolved after unfreeze: {removal:?}"
+        );
+        assert!(!worktree_root.exists());
+        let branch = Command::new("git")
+            .current_dir(&server.project_cwd)
+            .args(["branch", "--list", "agent/frozen-session-test"])
+            .output()
+            .expect("inspect removed fixture branch");
+        assert!(branch.status.success());
+        assert!(
+            branch.stdout.is_empty(),
+            "successful removal must remove the owned branch"
+        );
+    }
 
     write_frame(&mut client, &ClientRequest::KillSession)
         .await

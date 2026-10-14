@@ -463,7 +463,7 @@ pub fn follow_selection(area: Rect, model: &RowModel, row: usize, scrolls: Scrol
         let position = model.visual_row(row).unwrap_or(0);
         let current = scrolls.get(region);
         // Include the section heading above the row when scrolling up to it.
-        let top = if region == Region::Scenes {
+        let top = if region == Region::Scenes || visible == 1 {
             position
         } else {
             position.saturating_sub(1)
@@ -2403,7 +2403,9 @@ mod tests {
             )
         };
         assert!(expected_labels.len() > 10);
-        assert!(expected_labels.iter().any(|label| label == "Chicago"));
+        assert!(expected_labels
+            .iter()
+            .any(|label| label == "Chicago street grid"));
 
         let _ = draw(&mut app, 140, 120);
         pointer(
@@ -2413,10 +2415,10 @@ mod tests {
             open.y,
         );
         let screen = app.layout.screen_area;
-        let Mode::ValueDialog(host) = &app.mode else {
+        let Mode::ValueDialog(host) = &mut app.mode else {
             panic!("the OSM destination + control should open its catalogue")
         };
-        let crate::value_dialog::ValueDialogState::Choice(dialog) = &host.dialog else {
+        let crate::value_dialog::ValueDialogState::Choice(dialog) = &mut host.dialog else {
             panic!("the OSM destination catalogue should be a choice dialog")
         };
         let dialog_labels = dialog
@@ -2427,13 +2429,20 @@ mod tests {
         assert_eq!(dialog_labels, expected_labels);
         let chicago_index = dialog_labels
             .iter()
-            .position(|label| label == "Chicago")
+            .position(|label| label == "Chicago street grid")
             .expect("Chicago remains individually listed");
         let layout = crate::value_dialog::dialog_layout(screen);
-        let selection = Position::new(
-            layout.document.x + 1,
-            layout.document.y + chicago_index as u16,
-        );
+        let chicago_id = dialog.options()[chicago_index].id.clone();
+        dialog.highlighted_id = Some(chicago_id.clone());
+        dialog.reveal_highlight(screen);
+        let prepared = crate::value_dialog::PreparedValueDialog::new(screen, &host.dialog);
+        let selection = (layout.document.top()..layout.document.bottom())
+            .map(|y| Position::new(layout.document.x + 1, y))
+            .find(|position| {
+                matches!(prepared.hit(*position),
+                crate::value_dialog::DialogHit::Choice(id) if id == chicago_id)
+            })
+            .expect("Chicago has a visible catalogue row, including wrapped descriptions");
         pointer(
             &mut app,
             MouseEventKind::Down(MouseButton::Left),
@@ -2705,8 +2714,8 @@ mod tests {
         let control_rect = row_rect(area, &model, control, none).unwrap();
         assert_eq!(
             control_rect.y,
-            area.y + 2,
-            "right column starts under its heading and section"
+            columns.controls_rows.y + 1,
+            "right column starts after its introduction and section heading"
         );
         assert!(
             control_rect.x >= columns.scenes.right(),
@@ -4682,6 +4691,26 @@ mod tests {
             screen_text(&terminal)[usize::from(row)].contains("Atlantic dusk"),
             "the selected scene must be rendered in the list, not only in the heading"
         );
+    }
+
+    #[test]
+    fn one_row_control_window_keeps_selected_row_visible_when_walking_up() {
+        let model = RowModel::new(&AnimationSettings::default(), &RowContext::default());
+        let (area, row) = (3..40)
+            .find_map(|height| {
+                let area = Rect::new(0, 0, 80, height);
+                (visible_rows(area, &model, Region::Controls) == 1)
+                    .then(|| (area, model.first_control_index()))
+            })
+            .expect("compact layout has a one-row control window");
+        let position = model.visual_row(row).unwrap();
+        let scrolls = Scrolls {
+            controls: position + 1,
+            ..Scrolls::default()
+        };
+        let followed = follow_selection(area, &model, row, scrolls);
+        assert_eq!(followed.controls, position);
+        assert!(row_rect(area, &model, row, followed).is_some());
     }
 
     #[test]

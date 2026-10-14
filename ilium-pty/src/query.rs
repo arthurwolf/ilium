@@ -50,12 +50,21 @@ pub(crate) struct TerminalQueryResponder {
     // order the queries arrived. Drained (and thereby reset) by
     // `take_pending_replies` once per chunk.
     pending_replies: Vec<u8>,
+    automatic_replies_disabled: bool,
     replies_queued_in_current_chunk: u32,
 }
 
 impl TerminalQueryResponder {
+    #[cfg(test)]
     pub(crate) fn new() -> Self {
         Self::default()
+    }
+
+    pub(crate) fn with_automatic_replies(enabled: bool) -> Self {
+        Self {
+            automatic_replies_disabled: !enabled,
+            ..Self::default()
+        }
     }
 
     /// Hands the caller every reply queued while parsing the chunk that just
@@ -73,7 +82,9 @@ impl TerminalQueryResponder {
     }
 
     fn queue_reply(&mut self, bytes: &[u8]) {
-        if self.replies_queued_in_current_chunk >= MAX_REPLIES_PER_READ_CHUNK {
+        if self.automatic_replies_disabled
+            || self.replies_queued_in_current_chunk >= MAX_REPLIES_PER_READ_CHUNK
+        {
             return;
         }
         self.replies_queued_in_current_chunk += 1;
@@ -171,6 +182,32 @@ mod tests {
         let mut parser = parser_with_responder();
         parser.process(chunk);
         parser.callbacks_mut().take_pending_replies()
+    }
+
+    #[test]
+    fn manual_query_mode_suppresses_replies_and_preserves_parsed_output() {
+        let mut parser = vt100::Parser::new_with_callbacks(
+            24,
+            80,
+            0,
+            TerminalQueryResponder::with_automatic_replies(false),
+        );
+        parser.process(b"before\x1b[?u\x1b[c\x1b[5n\x1b[6nafter");
+        assert!(parser.callbacks_mut().take_pending_replies().is_empty());
+        assert_eq!(parser.screen().contents(), "beforeafter");
+        parser.process(b"\x1b[c");
+        assert!(parser.callbacks_mut().take_pending_replies().is_empty());
+        let mut automatic = vt100::Parser::new_with_callbacks(
+            24,
+            80,
+            0,
+            TerminalQueryResponder::with_automatic_replies(true),
+        );
+        automatic.process(b"\x1b[c\x1b[5n");
+        assert_eq!(
+            automatic.callbacks_mut().take_pending_replies(),
+            b"\x1b[?1;2c\x1b[0n"
+        );
     }
 
     #[test]

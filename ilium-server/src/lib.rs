@@ -991,6 +991,9 @@ pub(crate) async fn start_snapshot_pane(
         Err(ipc::handlers::RegisterPaneError::Spawn(error)) => {
             SnapshotPaneStart::Failed(error.to_string())
         }
+        Err(ipc::handlers::RegisterPaneError::Admission(reason)) => {
+            SnapshotPaneStart::Failed(reason)
+        }
         Err(ipc::handlers::RegisterPaneError::NodeRemoved(_)) => {
             // Admission refuses without removing a node that still has a
             // registered (unrestored) resource; only a real removal is final.
@@ -1215,6 +1218,87 @@ mod restore_tests {
         ));
 
         let resource = state.panes.write().await.remove(&pane_id).unwrap();
+        crate::ipc::handlers::teardown_pane_resource(pane_id, resource);
+    }
+
+    #[tokio::test]
+    async fn restore_retains_the_actual_repository_admission_error() {
+        let directory = tempfile::tempdir().expect("create tempdir");
+        let (sound_requests, _playback_task) = crate::sounds::spawn(
+            Arc::new(NoopSoundPlayer),
+            crate::execution::test_general_client(),
+        );
+        let state = Arc::new(ServerState::new(crate::state::ServerStateOptions {
+            session_name: "admission-reason-test".to_string(),
+            session_cwd: ilium_platform::paths::canonicalize(directory.path())
+                .expect("canonical test launch directory"),
+            home_dir: directory.path().to_path_buf(),
+            snapshot_path: directory.path().join("snapshot.json"),
+            socket_path: directory.path().join("session.sock"),
+            detection_config: DetectionConfig::default(),
+            notifications_config: crate::config::NotificationsConfig::default(),
+            sound_settings: crate::sounds::test_settings(ilium_sound::SoundSettings::default()),
+            sound_requests,
+            custom_signatures: Vec::new(),
+            agent_debug_menu_enabled: false,
+            progress_monitor_enabled: true,
+        }));
+        // Pane admission runs repository probes on the execution service, so a
+        // fixture without one would have every spawn rejected and its node removed.
+        assert!(state
+            .execution
+            .set(crate::execution::ServerExecution::start().expect("finite server bank"))
+            .is_ok());
+        std::fs::write(directory.path().join(".git"), "invalid gitfile\n").unwrap();
+        let pane_id = {
+            let mut tree = state.tree.write().await;
+            let group = tree.add_group(ROOT_ID, "work").unwrap();
+            tree.add_pane(group, "Saved", PaneContentKind::Terminal)
+                .unwrap()
+        };
+        let result = start_snapshot_pane(
+            &state,
+            pane_id,
+            PaneSnapshotKind::Terminal(TerminalOrigin::Command(long_running_pane_command())),
+        )
+        .await;
+        let SnapshotPaneStart::Failed(reason) = result else {
+            panic!("corrupt repository must refuse terminal admission");
+        };
+        assert!(
+            reason.contains("launch repository cannot be verified"),
+            "{reason}"
+        );
+        assert!(reason.contains("invalid gitfile"), "{reason}");
+        assert!(!state.panes.read().await.contains_key(&pane_id));
+        // An empty ancestor .git directory is not a repository to Git. It
+        // must not prevent an ordinary saved terminal from acquiring a PTY.
+        std::fs::remove_file(directory.path().join(".git")).unwrap();
+        std::fs::create_dir(directory.path().join(".git")).unwrap();
+        let launch = directory.path().join("project");
+        std::fs::create_dir(&launch).unwrap();
+        let pane_id = {
+            let mut tree = state.tree.write().await;
+            let group = tree.add_group(ROOT_ID, "ordinary project").unwrap();
+            let pane_id = tree
+                .add_pane(group, "Saved", PaneContentKind::Terminal)
+                .unwrap();
+            tree.set_pane_launch_cwd(
+                pane_id,
+                ilium_platform::paths::canonicalize(&launch).unwrap(),
+            )
+            .unwrap();
+            pane_id
+        };
+        let result = start_snapshot_pane(
+            &state,
+            pane_id,
+            PaneSnapshotKind::Terminal(TerminalOrigin::Command(long_running_pane_command())),
+        )
+        .await;
+        assert!(matches!(result, SnapshotPaneStart::Started { .. }));
+        let resource = state.panes.write().await.remove(&pane_id).unwrap();
+        assert!(matches!(&resource, crate::pane::PaneResource::Terminal(_)));
         crate::ipc::handlers::teardown_pane_resource(pane_id, resource);
     }
 
@@ -1516,6 +1600,29 @@ mod restore_tests {
         .await;
         assert!(bound, "server did not bind its socket in time");
 
+        let mut client = SessionEndpoint::from_path(&socket_path)
+            .connect()
+            .await
+            .expect("connect to the session socket");
+        write_frame(
+            &mut client,
+            &ClientRequest::Attach {
+                session: "restore-test".to_string(),
+            },
+        )
+        .await
+        .expect("write Attach request");
+
+        let event = expect_event(&mut client, Duration::from_secs(5), |_| true).await;
+        let ServerEvent::PaneStateSnapshot {
+            tree: restored_tree,
+            ..
+        } = event
+        else {
+            panic!("expected PaneStateSnapshot on attach, got {event:?}");
+        };
+        // Binding the endpoint precedes startup backup capture; a completed
+        // Attach proves capture and restoration have finished.
         let backup_directory = snapshot_path
             .parent()
             .and_then(|path| path.parent())
@@ -1538,28 +1645,6 @@ mod restore_tests {
             json,
             "startup backup must preserve the exact pre-normalization JSON"
         );
-
-        let mut client = SessionEndpoint::from_path(&socket_path)
-            .connect()
-            .await
-            .expect("connect to the session socket");
-        write_frame(
-            &mut client,
-            &ClientRequest::Attach {
-                session: "restore-test".to_string(),
-            },
-        )
-        .await
-        .expect("write Attach request");
-
-        let event = expect_event(&mut client, Duration::from_secs(5), |_| true).await;
-        let ServerEvent::PaneStateSnapshot {
-            tree: restored_tree,
-            ..
-        } = event
-        else {
-            panic!("expected PaneStateSnapshot on attach, got {event:?}");
-        };
         // Structure, not runtime counters. Restoring a pane starts a real
         // process, and any byte it emits advances that node's activity
         // revision -- on Windows a console app cannot avoid it, because ConPTY
@@ -1886,6 +1971,12 @@ mod restore_tests {
             agent_debug_menu_enabled: false,
             progress_monitor_enabled: true,
         }));
+        // Repository admission uses the finite execution bank before the
+        // node-generation fence, as it does for every production spawn.
+        assert!(state
+            .execution
+            .set(crate::execution::ServerExecution::start().expect("finite server bank"))
+            .is_ok());
 
         let pane_id = {
             let mut tree = state.tree.write().await;
@@ -1908,7 +1999,7 @@ mod restore_tests {
             .remove_node(pane_id)
             .expect("remove the pane's node, simulating a concurrent close");
 
-        let cwd = dir.path().to_path_buf();
+        let cwd = state.session_cwd.clone();
         let result = crate::ipc::handlers::spawn_and_register_pane_in_directory(
             &state,
             pane_id,

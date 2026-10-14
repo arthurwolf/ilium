@@ -376,27 +376,18 @@ mod tests {
             "the aborted owner remains tracked until admission reaps its handle"
         );
 
-        // The old listener is gone, so bind a replacement endpoint with the
-        // same state. The old aborted JoinHandle must be reaped before a new
-        // stream gets the only slot; no test-side registry clearing helps it.
+        // Shutdown closes the ordered journal, so this state cannot serve a
+        // replacement Attach. Reap the aborted original without clearing the
+        // registry by hand. The separate Detach test covers live reacceptance.
         drop(admitted);
         drop(queued);
-        let replacement = listener.endpoint.bind().await.expect("rebind endpoint");
-        let replacement_state = Arc::clone(&listener.state);
-        listener.accept_task = tokio::spawn(async move {
-            accept_loop_with_limit(replacement_state, replacement, 1).await;
-        });
-        let mut fresh = listener.connect().await;
-        let fresh_attach = attach(&mut fresh).await;
-        assert!(matches!(
-            fresh_attach.first(),
-            Some(ServerEvent::PaneStateSnapshot { .. })
-        ));
+        tokio::time::timeout(TEST_DEADLINE, wait_for_connection_slot(&listener.state, 1))
+            .await
+            .expect("aborted connection did not retire");
         assert_eq!(
             listener.tracked_count(),
-            1,
-            "aborted handle was not reaped before replacement admission"
+            0,
+            "aborted connection handle was not reaped"
         );
-        assert!(listener.state.has_terminal_subscribers(NodeId(999)));
     }
 }
