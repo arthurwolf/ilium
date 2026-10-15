@@ -405,8 +405,28 @@ async fn apply_recommendations(
 }
 
 async fn open_animation_settings(tui: &PtySession) {
-    tui.write(b"\x02").unwrap();
-    screen_contains(tui, "LEADER (press a letter").await;
+    // The prefix key is a toggle, so it is re-sent only while the status bar
+    // still reports plain NORMAL mode after a full grace period. A key that
+    // reaches the client while it is still re-laying out after the resize is
+    // not guaranteed to be the one that opens the leader on a slow runner.
+    let leader_deadline = tokio::time::Instant::now() + TIMEOUT;
+    loop {
+        tui.write(b"\x02").unwrap();
+        let grace = tokio::time::Instant::now() + Duration::from_secs(4);
+        while !tui.screen_text().contains("LEADER (press a letter")
+            && tokio::time::Instant::now() < grace
+        {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        if tui.screen_text().contains("LEADER (press a letter") {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < leader_deadline,
+            "leader never opened in real PTY:\n{}",
+            tui.screen_text()
+        );
+    }
     retain_screen(tui, "settings-leader");
     tui.write(b":").unwrap();
     screen_contains(tui, "⚙ Settings").await;

@@ -644,6 +644,10 @@ fn time_lapse_frames_cycle_with_time_and_label_the_frame_shown() {
             50
         }
     })));
+    // The first render may already have applied a "Downloading frame" progress
+    // update from the worker before it was detached; it would otherwise
+    // replace the frame label for the whole test.
+    scene.apply(Update::Progress(None));
     let first = render_frame(&mut scene, 100, 25, Duration::ZERO);
     assert_eq!(
         scene.status().as_deref(),
@@ -693,6 +697,7 @@ fn smoothing_cross_fades_between_frames() {
             220
         }
     })));
+    scene.apply(Update::Progress(None));
     let start = mean(&render_frame(&mut scene, 60, 15, Duration::from_millis(10)));
     let middle = mean(&render_frame(
         &mut scene,
@@ -732,6 +737,7 @@ fn inverted_picture_is_the_complement_and_underlay_and_marker_draw() {
         render_frame(&mut scene, 80, 20, Duration::ZERO);
         detach(&mut scene);
         scene.apply(Update::Frames(Arc::clone(&set)));
+        scene.apply(Update::Progress(None));
         let rendered = render_frame(&mut scene, 80, 20, Duration::from_millis(time_ms));
         (scene, rendered)
     };

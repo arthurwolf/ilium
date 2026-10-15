@@ -168,7 +168,14 @@ impl Queue {
             while let Some(entry) = state.entries.pop_front() {
                 if entry.command.is_some() && (entry.stop.is_stopped() || now >= entry.deadline) {
                     Self::uncharge(&mut state.load, true, entry.charge);
-                    expired.push(entry);
+                    // Classified under the queue lock: a later cancellation
+                    // must not relabel an entry that already timed out.
+                    let failure = if entry.stop.is_stopped() {
+                        DeliveryFailure::Cancelled
+                    } else {
+                        DeliveryFailure::Timeout
+                    };
+                    expired.push((entry, failure));
                 } else {
                     retained.push_back(entry);
                 }
@@ -178,13 +185,8 @@ impl Queue {
                 Self::notify_changed(&self.changed, &mut state);
             }
             drop(state);
-            for entry in expired {
+            for (entry, failure) in expired {
                 if let Some(completion) = entry.completion {
-                    let failure = if entry.stop.is_stopped() {
-                        DeliveryFailure::Cancelled
-                    } else {
-                        DeliveryFailure::Timeout
-                    };
                     completion.finish(Err(DeliveryError::new(Some(entry.id), failure)));
                 }
             }
@@ -429,7 +431,6 @@ impl Queue {
     }
 
     pub(crate) fn close(&self, reason: ShutdownReason) {
-        self.stop.stop();
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         let reason = *state.closed.get_or_insert(reason);
         while let Some(entry) = state.entries.pop_front() {
@@ -441,6 +442,14 @@ impl Queue {
                 )));
             }
         }
+        Self::notify_changed(&self.changed, &mut state);
+        drop(state);
+        // Cancel only after every queued receipt holds its shutdown verdict:
+        // the per-entry stop tokens are children of this one, so stopping
+        // first lets the expiry worker observe a stopped entry and settle it
+        // as `Cancelled` before this drain reaches it.
+        self.stop.stop();
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         Self::notify_changed(&self.changed, &mut state);
     }
 
