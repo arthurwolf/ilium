@@ -108,7 +108,17 @@ impl Fixture {
                 ilium_client::AGENT_SETUP_HOME_ENV,
                 root.path().join("agent-home"),
             ),
+            // The animation preference is one global file below the
+            // `directories` configuration directory, which on macOS is
+            // `$HOME/Library/Application Support/ilium` and ignores both
+            // `XDG_CONFIG_HOME` and `ILIUM_CONFIG_DIR`. Without a private
+            // home, the second scope of a test run adopted the first scope's
+            // global animation (and a developer's real one) instead of its
+            // own project file. Appended last: `environment[3]` is the
+            // socket directory.
+            ("HOME", root.path().join("home")),
         ];
+        std::fs::create_dir_all(root.path().join("home")).unwrap();
         Self {
             _root: root,
             _runtime: runtime,

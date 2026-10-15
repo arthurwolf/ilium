@@ -3836,17 +3836,31 @@ async fn editor_line_context_menu_creates_selected_agent_and_submits_the_prompt(
     );
     let target_row = target_rows[0];
     let context_column = 70;
-    tui.write(&sgr_mouse_click(2, context_column, target_row))
-        .expect("right-click target source line");
-    assert!(
-        wait_until(
+    // The editor refuses a line selection until the frame it just painted has
+    // been acknowledged as the emitted geometry ("Editor source changed; wait
+    // for the replacement frame before selecting a line"). The text can be on
+    // screen before that acknowledgement (ConPTY is the slow case), and a
+    // refused right-click has no other effect, so repeat it until the menu
+    // opens instead of assuming the first click found a settled frame.
+    let mut line_menu_open = false;
+    for _ in 0..10 {
+        tui.write(&sgr_mouse_click(2, context_column, target_row))
+            .expect("right-click target source line");
+        if wait_until(
             || {
                 let screen = tui.screen_text();
                 screen.contains("Line actions") && screen.contains("Create agent from line")
             },
-            WAIT_TIMEOUT,
+            Duration::from_secs(3),
         )
-        .await,
+        .await
+        {
+            line_menu_open = true;
+            break;
+        }
+    }
+    assert!(
+        line_menu_open,
         "expected editor line context menu, got: {:?}",
         tui.screen_text()
     );
@@ -4218,19 +4232,30 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
         .await,
         "title keystroke should save immediately"
     );
-    tui.write(b"\tLive note")
-        .expect("switch to Notes and type a body");
-    assert!(
-        wait_until(
-            || std::fs::read_to_string(&context_path)
-                .is_ok_and(|source| source.contains("  Live note")),
-            WAIT_TIMEOUT,
-        )
-        .await,
-        "body keystrokes should save immediately; document={:?}, screen={:?}",
-        std::fs::read_to_string(&context_path),
-        tui.screen_text()
-    );
+    tui.write(b"\t").expect("switch to the Notes field");
+    // Each keystroke is an authored edit queued on the board's bounded write
+    // admission. The client deliberately refuses (and rolls back) an edit that
+    // arrives while that queue is saturated, so a burst typed faster than a
+    // loaded CI disk can publish drops characters by design. Send one
+    // character at a time and wait for it to reach disk before the next.
+    let mut typed_body = String::new();
+    for character in "Live note".chars() {
+        typed_body.push(character);
+        tui.write(character.to_string().as_bytes())
+            .expect("type one body character");
+        let expected_line = format!("\n  {typed_body}\n");
+        assert!(
+            wait_until(
+                || std::fs::read_to_string(&context_path)
+                    .is_ok_and(|source| source.contains(&expected_line)),
+                WAIT_TIMEOUT,
+            )
+            .await,
+            "body keystrokes should save immediately; typed={typed_body:?}, document={:?}, screen={:?}",
+            std::fs::read_to_string(&context_path),
+            tui.screen_text()
+        );
+    }
     tui.write(b"\x1b").expect("close card details with Escape");
     assert!(
         wait_until(|| !tui.screen_text().contains("Card details"), WAIT_TIMEOUT).await,
@@ -5159,23 +5184,30 @@ async fn agent_debug_log_filters_panel_resizes_and_saves_the_active_view() {
         });
     let mut tui = PtySession::spawn(attach_command).expect("spawn agent-debug TUI");
 
-    assert!(
-        wait_until(
-            || {
-                tui.with_screen(|screen| {
-                    !rows_containing_before_column(screen, "Codex:", 60).is_empty()
-                })
-            },
-            DETECTION_TIMEOUT,
+    // The detected-agent row is read off a live tree: sampling it once to
+    // decide that it exists and again to locate it can straddle a redraw
+    // (observed on macOS, where the second sample found no row). Take the
+    // coordinate only from a frame that holds exactly one such row for a
+    // sustained interval, then click that settled position.
+    let settled_agent_row = wait_for_stable_value(
+        || {
+            tui.with_screen(|screen| {
+                let rows = rows_containing_before_column(screen, "Codex:", 60);
+                (rows.len() == 1).then(|| rows[0])
+            })
+        },
+        SETTLED_LAYOUT_DURATION,
+        DETECTION_TIMEOUT,
+    )
+    .await;
+    let agent_row = settled_agent_row.unwrap_or_else(|| {
+        panic!(
+            "expected exactly one settled detected Codex tree row.\n{}\nrows: {:?}\nscreen: {:?}",
+            detection_diagnostics(&xdg.debug_log_dir, &project_dir),
+            tui.with_screen(|screen| rows_containing_before_column(screen, "Codex:", 60)),
+            tui.screen_text()
         )
-        .await,
-        "expected a detected working Codex row.\n{}\nscreen: {:?}",
-        detection_diagnostics(&xdg.debug_log_dir, &project_dir),
-        tui.screen_text()
-    );
-    let agent_rows = tui.with_screen(|screen| rows_containing_before_column(screen, "Codex:", 60));
-    assert_eq!(agent_rows.len(), 1, "expected one detected Codex tree row");
-    let agent_row = agent_rows[0];
+    });
 
     tui.write(&sgr_mouse_down(0, 8, agent_row))
         .expect("focus detected Codex row");
@@ -6704,6 +6736,29 @@ async fn image_query_keeps_first_real_pty_keys_with_silent_and_answering_termina
                 command.env(key, value.to_string_lossy().to_string())
             });
         let mut tui = PtySession::spawn(attach).expect("attach actual client under PTY");
+        if !cfg!(unix) {
+            // This test models a terminal that is silent about the *client's*
+            // capability queries, but ConPTY's own console host (opened with
+            // the inherit-cursor flag) asks the hosting terminal for a cursor
+            // position at start-up and forwards nothing else until it is
+            // answered. With the automatic replies off nothing answers it, so
+            // the screen would stay empty for the whole test. Answer only that
+            // host-level report, and only when it was actually requested.
+            if wait_until(
+                || {
+                    tui.output_replay()
+                        .bytes
+                        .windows(b"\x1b[6n".len())
+                        .any(|bytes| bytes == b"\x1b[6n")
+                },
+                Duration::from_secs(10),
+            )
+            .await
+            {
+                tui.write(b"\x1b[1;1R")
+                    .expect("answer the console host's cursor position request");
+            }
+        }
         if cfg!(unix) {
             assert!(
                 wait_until(
@@ -6765,8 +6820,9 @@ async fn image_query_keeps_first_real_pty_keys_with_silent_and_answering_termina
                 WAIT_TIMEOUT,
             )
             .await,
-            "first keys vanished with terminal_answers={terminal_answers}; screen={:?}",
-            tui.screen_text()
+            "first keys vanished with terminal_answers={terminal_answers}; screen={:?}; output={:?}",
+            tui.screen_text(),
+            String::from_utf8_lossy(&tui.output_replay().bytes)
         );
         if cfg!(unix) {
             assert_eq!(
