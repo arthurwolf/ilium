@@ -106,7 +106,6 @@ mod model_catalog_preparation;
 pub mod mouse;
 pub mod naming;
 pub mod naming_workers;
-pub mod recap;
 mod normal_voice;
 pub mod onboarding;
 pub mod open_target;
@@ -123,6 +122,7 @@ pub mod project_naming;
 pub mod prompt_queue;
 mod provider_admission; // Bounded IO preflight retains original request ownership.
 mod proxy_database;
+pub mod recap;
 pub mod release_animation;
 pub mod release_embedding;
 pub mod remote_compaction_app;
