@@ -217,6 +217,31 @@ jobs:
                   # selected Xcode, so cache entries from another Xcode are stale.
                   key: xcode-selected
 
+            # Intel macOS only (matrix.runner == macos-15-intel). Microsoft ships no
+            # x86_64 ONNX Runtime newer than 1.23.2 and pyke's ort-sys has no prebuilt
+            # for x86_64-apple-darwin, so the build script errors out. Link against the
+            # official 1.23.2 x86_64 dylib so the workspace compiles and the test
+            # binaries start. fastembed asks for ORT API 24 (runtime >= 1.24), so any
+            # code path that really creates an ORT session still needs the source-built
+            # 1.24.2 runtime that the release workflow builds (build_intel_ort.py);
+            # no unit/integration test creates one (they need the network model).
+            - name: Provision ONNX Runtime link library (Intel only)
+              if: matrix.runner == 'macos-15-intel'
+              run: |
+                  set -euo pipefail
+                  dir="$RUNNER_TEMP/ort-x86_64"
+                  mkdir -p "$dir"
+                  curl -fsSL -o "$dir/ort.tgz" https://github.com/microsoft/onnxruntime/releases/download/v1.23.2/onnxruntime-osx-x86_64-1.23.2.tgz
+                  echo "d10359e16347b57d9959f7e80a225a5b4a66ed7d7e007274a15cae86836485a6  $dir/ort.tgz" | shasum -a 256 -c -
+                  tar -xzf "$dir/ort.tgz" -C "$dir"
+                  lib="$dir/onnxruntime-osx-x86_64-1.23.2/lib"
+                  {
+                      echo "ORT_LIB_LOCATION=$lib"
+                      echo "ORT_LIB_PATH=$lib"
+                      echo "ORT_PREFER_DYNAMIC_LINK=1"
+                      echo "DYLD_LIBRARY_PATH=$lib"
+                  } >> "$GITHUB_ENV"
+
             - name: cargo build
               run: cargo build --workspace --all-targets
 
