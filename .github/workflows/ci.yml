@@ -204,6 +204,7 @@ jobs:
                       if ls "$xcode"/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/clang/*/lib/darwin/libclang_rt.osx.a >/dev/null 2>&1; then
                           echo "Selecting $xcode"
                           sudo xcode-select -s "$xcode/Contents/Developer"
+                          echo "DEVELOPER_DIR=$xcode/Contents/Developer" >> "$GITHUB_ENV"
                           break
                       fi
                   done
@@ -211,6 +212,10 @@ jobs:
                   ls /Applications | grep -i xcode || true
 
             - uses: Swatinem/rust-cache@v2
+              with:
+                  # Build-script output (V8's linker search path) embeds the
+                  # selected Xcode, so cache entries from another Xcode are stale.
+                  key: xcode-selected
 
             - name: cargo build
               run: cargo build --workspace --all-targets
