@@ -29,6 +29,13 @@ const LINGER: Duration = Duration::from_secs(60);
 const MARKER_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 fn main() {
+    if is_cargo_test_artifact() {
+        eprintln!(
+            "ilium-fixture-agent: launched as a cargo test artifact (no behaviour file); \
+             this helper is only run by tests that install a copy, so there is nothing to do"
+        );
+        return;
+    }
     let behavior = load_behavior();
     match behavior {
         FixtureBehavior::Idle => linger(),
@@ -221,6 +228,25 @@ fn run_record_submitted_prompt(transcript_path: &std::path::Path) {
             .unwrap_or_else(|error| panic!("fixture recording the submitted prompt: {error}"));
     }
     linger();
+}
+
+/// True when `cargo test --bins` executes this helper directly.
+///
+/// Cargo builds the bin into `<profile>/deps/` and, when a command selects
+/// bins explicitly, runs it like a test even though `test = false` is set. That
+/// run has no behaviour sidecar and must not fail the suite. Real launches
+/// always run an installed copy from a test's own directory (never `deps`)
+/// whose sidecar exists, so they keep `load_behavior`'s panic on a missing
+/// file.
+fn is_cargo_test_artifact() -> bool {
+    let Ok(executable) = std::env::current_exe() else {
+        return false;
+    };
+    let in_deps_directory = executable
+        .parent()
+        .and_then(|directory| directory.file_name())
+        .is_some_and(|name| name == "deps");
+    in_deps_directory && !behavior_file_for(&executable).exists()
 }
 
 /// Reads the sidecar written by `ilium_test_fixtures::install`.

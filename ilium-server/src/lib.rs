@@ -1341,7 +1341,13 @@ mod restore_tests {
         let failing_pane = tree
             .add_pane(group, "Saved agent", PaneContentKind::Terminal)
             .unwrap();
-        tree.set_pane_launch_cwd(failing_pane, directory.path().join("deleted-directory"))
+        // Pane admission refuses a launch directory that is not its own
+        // canonical spelling (macOS /var -> /private/var, Windows verbatim
+        // prefix), so the directory that is created later must be canonical.
+        let deleted_directory = ilium_platform::paths::canonicalize(directory.path())
+            .expect("canonical test launch directory")
+            .join("deleted-directory");
+        tree.set_pane_launch_cwd(failing_pane, deleted_directory.clone())
             .unwrap();
         let healthy_pane = tree
             .add_pane(group, "Healthy", PaneContentKind::Terminal)
@@ -1434,7 +1440,7 @@ mod restore_tests {
         assert!(saved.tree.get(failing_pane).is_some());
 
         state.stop_unrestored_retry_task();
-        std::fs::create_dir(directory.path().join("deleted-directory")).unwrap();
+        std::fs::create_dir(&deleted_directory).unwrap();
         let recovered = start_snapshot_pane(
             &state,
             failing_pane,

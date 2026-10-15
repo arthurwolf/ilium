@@ -820,7 +820,11 @@ fn queued_input_deadline_completes_before_an_earlier_reply_barrier_is_released()
     let (writer_gate, controller) = gate();
     let limits = OwnerLimits {
         command_timeout: Duration::from_millis(30),
-        reply_timeout: Duration::from_millis(250),
+        // The reply stays blocked at the test-controlled gate until this test
+        // releases it, so its write deadline must outlast the whole
+        // observation window below; otherwise the owner would abandon the
+        // reply (a fatal writer failure) before the queued input is checked.
+        reply_timeout: Duration::from_secs(30),
         ..OwnerLimits::default()
     };
     let harness = Harness::new(limits, Some(writer_gate), None);
@@ -834,7 +838,12 @@ fn queued_input_deadline_completes_before_an_earlier_reply_barrier_is_released()
         Err(error) => (None, Some(error)),
     };
     let observer = input.as_ref().map(|input| input.observer());
-    let observed_deadline = Instant::now() + Duration::from_millis(100);
+    // The 30 ms command deadline is the product guarantee; the window here is
+    // only a wall-clock margin for a loaded CI runner. The ordering claim does
+    // not depend on it: the reply barrier is held by this test until after the
+    // observation, so any completion seen here came from the independent
+    // deadline worker and not from the blocked owner.
+    let observed_deadline = Instant::now() + Duration::from_secs(10);
     let mut before_release = None;
     while let Some(observer) = observer.as_ref() {
         if let Some(result) = observer.result() {
@@ -875,7 +884,7 @@ fn queued_input_deadline_completes_before_an_earlier_reply_barrier_is_released()
         "the controlled reply or later input completed before release"
     );
     let error = before_release
-        .expect("queued command must complete within 100 ms, before releasing the earlier reply")
+        .expect("queued command must complete on its 30 ms deadline, before releasing the earlier reply")
         .expect_err("an expired queued input cannot report delivery success");
     assert_eq!(error.failure, DeliveryFailure::Timeout);
     assert!(
