@@ -265,7 +265,7 @@ class WorkflowTests(unittest.TestCase):
         for job_name, binary in expected_binaries.items():
             with self.subTest(job=job_name):
                 steps = ci['jobs'][job_name]['steps']
-                test_step = next(step for step in steps if step.get('name') == 'cargo test')
+                test_step = next(step for step in steps if step.get('name') == 'cargo test (integration tests, serialized)')
                 environment = test_step['env']
                 self.assertEqual(environment.get('RUST_TEST_THREADS'), '1')
                 self.assertEqual(environment.get('ILIUM_PTY_SMOKE_BINARY'), binary)
@@ -279,7 +279,7 @@ class WorkflowTests(unittest.TestCase):
     def test_linux_workspace_tests_run_in_an_owned_delegated_cgroup_unit(self):
         ci = yaml.load((ROOT / '.github/workflows/ci.yml').read_text(), Loader=yaml.BaseLoader)
         steps = ci['jobs']['test-linux']['steps']
-        test_step = next(step for step in steps if step.get('name') == 'cargo test')
+        test_step = next(step for step in steps if step.get('name') == 'cargo test (integration tests, serialized)')
         command = test_step['run']
 
         self.assertIn('systemd-run --user --wait --pipe --collect', command)
