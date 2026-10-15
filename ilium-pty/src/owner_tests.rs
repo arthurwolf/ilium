@@ -680,16 +680,30 @@ fn shutdown_rejects_queued_work_cancels_active_io_and_joins_owned_worker() {
 fn parser_reader_cannot_make_owner_cancellation_wait_forever() {
     let limits = OwnerLimits {
         parser_lock_timeout: Duration::from_millis(40),
+        // The guarantee under test is that the 40 ms parser-lock deadline of the
+        // pending output retires the owner and thereby settles the queued resize
+        // with `Shutdown(ParserUnavailable)`. The resize carries its own command
+        // deadline (2 s by default); on a loaded Windows runner the owner thread
+        // can reach the resize later than that, and the resize then settles as a
+        // plain timeout, which says nothing about the guarantee. Keep the command
+        // deadline far beyond any scheduling stall so only the parser-lock
+        // deadline can settle it; a regression that waited forever would still
+        // surface as a `Timeout` here instead of the asserted shutdown.
+        command_timeout: Duration::from_secs(30),
         ..OwnerLimits::default()
     };
     let harness = Harness::new(limits, None, None);
     let read_guard = harness.parser.read().unwrap();
     harness.output(b"pending-output");
     let resize = harness.input.resize(10, 20).unwrap();
-    assert!(matches!(
-        resize.wait_blocking().unwrap_err().failure,
-        DeliveryFailure::Shutdown(ShutdownReason::ParserUnavailable)
-    ));
+    let failure = resize.wait_blocking().unwrap_err().failure;
+    assert!(
+        matches!(
+            failure,
+            DeliveryFailure::Shutdown(ShutdownReason::ParserUnavailable)
+        ),
+        "the queued resize must settle through the parser-lock shutdown, got {failure:?}"
+    );
     drop(read_guard);
     assert!(harness.resizes().is_empty());
 }
