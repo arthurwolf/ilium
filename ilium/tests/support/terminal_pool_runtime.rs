@@ -12,6 +12,13 @@ const PANE_COUNT: usize = 200;
 const BURST_LINES: usize = 16384;
 const BURST_LINE_WIDTH: usize = 256;
 const BURST_BYTES_PER_PANE: usize = BURST_LINES * (BURST_LINE_WIDTH + 1);
+// The first HEAVY_PANE_COUNT panes retain 128000 lines of 257 bytes, about
+// 32 MiB, which is the per-pane retained window of the PTY journal
+// (`MAX_RETAINED_BYTES` in ilium-pty/src/session.rs). Only a finite pool
+// evicts hidden panes, so these panes are what a re-selection must replay.
+const HEAVY_PANE_COUNT: usize = 8;
+const HEAVY_BURST_LINES: usize = 128_000;
+const HEAVY_BURST_BYTES_PER_PANE: usize = HEAVY_BURST_LINES * (BURST_LINE_WIDTH + 1);
 // The noise ends with a complete CSI (ESC [ 0 m) so the last ESC cannot swallow
 // the first byte of the marker that follows.
 const LARGE_FIRST_PANE_NOISE_BYTES: usize = 24 * 1024 * 1024;
@@ -323,6 +330,13 @@ async fn run_click_latency_gate(engine_memory_budget_mib: u32) {
     let first_pane_output_complete = temp_root.path().join("first-pane-output-complete");
     for number in 0..PANE_COUNT {
         let marker = format!("INNER-PANE-{number:03}");
+        // Heavy panes retain the full per-pane window, so a later selection
+        // must replay that much history through the serial parser.
+        let burst_lines = if number < HEAVY_PANE_COUNT {
+            HEAVY_BURST_LINES
+        } else {
+            BURST_LINES
+        };
         let script = if number == 0 {
             format!(
                 "while [ ! -e \"$1\" ]; do /bin/sleep 0.02; done; printf '\\n\\n\\n\\n\\n\\n\\n\\nFIRST-CONTENT-000\\n'; /usr/bin/head -c {} /dev/zero | /usr/bin/tr '\\000' '\\033'; printf '\\033[0m\\n\\n%s\\n' \"$2\"; /bin/sleep 0.1; : > \"$3\"; exec /bin/cat",
@@ -330,7 +344,7 @@ async fn run_click_latency_gate(engine_memory_budget_mib: u32) {
             )
         } else {
             format!(
-                "while [ ! -e \"$1\" ]; do /bin/sleep 0.02; done; /usr/bin/yes \"$4 $(printf '%{BURST_LINE_WIDTH}s' '')\" | /usr/bin/head -n {BURST_LINES}; printf \"\\n\\n\\n%s\\n\" \"$2\"; exec /bin/cat"
+                "while [ ! -e \"$1\" ]; do /bin/sleep 0.02; done; /usr/bin/yes \"$4 $(printf '%{BURST_LINE_WIDTH}s' '')\" | /usr/bin/head -n {burst_lines}; printf \"\\n\\n\\n%s\\n\" \"$2\"; exec /bin/cat"
             )
         };
         let command = format!(
@@ -445,7 +459,10 @@ async fn run_click_latency_gate(engine_memory_budget_mib: u32) {
         "binary": ilium_binary(), "server_pid": server_pid,
         "isolated_http_port": port, "pane_count": PANE_COUNT,
         "burst_bytes_per_pane": BURST_BYTES_PER_PANE,
-        "burst_bytes_total": BURST_BYTES_PER_PANE * PANE_COUNT,
+        "heavy_pane_count": HEAVY_PANE_COUNT,
+        "heavy_burst_bytes_per_pane": HEAVY_BURST_BYTES_PER_PANE,
+        "burst_bytes_total": HEAVY_PANE_COUNT * HEAVY_BURST_BYTES_PER_PANE
+            + (PANE_COUNT - HEAVY_PANE_COUNT) * BURST_BYTES_PER_PANE,
         "engine_memory_budget_mib": engine_memory_budget_mib,
         "measurements": measurements,
         "latency_summaries": summaries, "selection_limit_ms": 5000,
