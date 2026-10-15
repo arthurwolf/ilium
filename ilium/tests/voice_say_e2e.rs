@@ -34,6 +34,10 @@ use tokio::net::TcpListener;
 use tokio_tungstenite::tungstenite::Message;
 
 const WAIT_TIMEOUT: Duration = Duration::from_secs(20);
+/// The first provider session also covers the client's asynchronous voice
+/// startup preparation and the WebSocket upgrade, which a loaded hosted runner
+/// can stretch well past the 20 s every later (already-connected) step needs.
+const SESSION_START_TIMEOUT: Duration = Duration::from_secs(60);
 const SESSION_NAME: &str = "default";
 const PROJECT_NAME: &str = "Voicetest";
 
@@ -208,6 +212,46 @@ impl Drop for KillSessionOnDrop<'_> {
     }
 }
 
+/// Everything needed to see why the client never reached the mock provider:
+/// how many connections arrived, what the footer shows, and the tail of every
+/// debug log the client and server wrote.
+fn failure_diagnostics(dirs: &IsolatedDirs, mock: &MockRealtime, tui: &PtySession) -> String {
+    const LOG_TAIL_BYTES: usize = 6000;
+    let mut report = format!(
+        "mock connections: {}; mock events: {}; screen: {:?}",
+        mock.connection_count(),
+        mock.received.lock().unwrap().len(),
+        tui.screen_text()
+    );
+    let mut pending = vec![dirs.debug_log_dir.clone()];
+    while let Some(directory) = pending.pop() {
+        let Ok(entries) = std::fs::read_dir(&directory) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                pending.push(path);
+                continue;
+            }
+            let Ok(bytes) = std::fs::read(&path) else {
+                continue;
+            };
+            let text = String::from_utf8_lossy(&bytes);
+            let tail_start = text.len().saturating_sub(LOG_TAIL_BYTES);
+            let tail_start = (tail_start..text.len())
+                .find(|index| text.is_char_boundary(*index))
+                .unwrap_or(text.len());
+            report.push_str(&format!(
+                "\n--- {} (tail) ---\n{}",
+                path.display(),
+                &text[tail_start..]
+            ));
+        }
+    }
+    report
+}
+
 struct CommandOutput {
     success: bool,
     stdout: String,
@@ -301,8 +345,11 @@ impl MockRealtime {
         };
         let serving = mock.clone();
         let task = tokio::spawn(async move {
+            // Each connection gets its own task: one stalled handshake (a
+            // probe that never upgrades) must not block the real session.
             while let Ok((stream, _)) = listener.accept().await {
-                serving.serve(stream).await;
+                let connection = serving.clone();
+                tokio::spawn(async move { connection.serve(stream).await });
             }
         });
         (mock, task)
@@ -562,7 +609,11 @@ async fn voice_say_reaches_a_terminal_through_the_real_voice_pipeline() {
     assert_eq!(result["ok"], true);
     assert_eq!(result["started_voice"], true);
     assert_eq!(result["accepted_sentences"], 1);
-    assert!(wait_until(|| mock.session_update_count() >= 1, WAIT_TIMEOUT).await);
+    assert!(
+        wait_until(|| mock.session_update_count() >= 1, SESSION_START_TIMEOUT).await,
+        "the client never configured a provider session; {}",
+        failure_diagnostics(&dirs, &mock, &tui)
+    );
     assert!(
         wait_until(
             || mock.user_texts() == ["first typed sentence"],
