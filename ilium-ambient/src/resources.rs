@@ -39,14 +39,39 @@ impl AmbientResources {
         if cost.threads == 0 || cost.resident_bytes == 0 {
             return Err(RejectReason::InvalidCost);
         }
-        self.quota
-            .reserve_external_worker(cost.threads, cost.resident_bytes)
-            .map(|physical| WorkerReservation { physical })
+        retry_while_busy(|| {
+            self.quota
+                .reserve_external_worker(cost.threads, cost.resident_bytes)
+        })
+        .map(|physical| WorkerReservation { physical })
     }
     /// Reserve before allocating independently retained immutable storage.
     /// A cloned guard covers only the same allocation, never a heap copy.
     pub fn reserve_storage(&self, bytes: usize) -> Result<Arc<StorageAdmission>, RejectReason> {
-        self.quota.reserve_external_storage(bytes).map(Arc::new)
+        retry_while_busy(|| self.quota.reserve_external_storage(bytes)).map(Arc::new)
+    }
+}
+
+/// How long an admission waits for another admission to leave the quota's
+/// accounting gate before reporting `Busy`.
+const BUSY_RETRY_BUDGET: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// `RejectReason::Busy` means the quota's accounting gate was held by another
+/// admission or release at that instant (the gate is only ever held for a few
+/// counter updates). It is contention, not exhaustion, so a short bounded
+/// retry absorbs it; every real capacity refusal is returned unchanged and no
+/// limit is relaxed.
+fn retry_while_busy<T>(
+    mut attempt: impl FnMut() -> Result<T, RejectReason>,
+) -> Result<T, RejectReason> {
+    let deadline = std::time::Instant::now() + BUSY_RETRY_BUDGET;
+    loop {
+        match attempt() {
+            Err(RejectReason::Busy) if std::time::Instant::now() < deadline => {
+                std::thread::yield_now();
+            }
+            outcome => return outcome,
+        }
     }
 }
 
