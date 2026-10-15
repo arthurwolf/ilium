@@ -1,4 +1,6 @@
-use ilium_animation_js::native_storage::{MemoryNamespace, NamespaceKey};
+use ilium_animation_js::native_storage::MemoryNamespace;
+#[cfg(target_os = "linux")]
+use ilium_animation_js::native_storage::NamespaceKey;
 use ilium_animation_js::permissions::PackageIdentity;
 #[cfg(target_os = "linux")]
 use ilium_animation_js::{

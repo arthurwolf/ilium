@@ -832,6 +832,8 @@ impl TerminalPaneRuntime {
     }
 
     #[cfg(test)]
+    // Its callers are Unix-only tests.
+    #[cfg_attr(not(unix), allow(dead_code))]
     pub fn cancel_progress_delivery_task(&mut self, monitor_id: u64) {
         if let Some(task) = self
             .progress_slot_mut(monitor_id)

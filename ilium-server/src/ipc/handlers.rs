@@ -6015,6 +6015,8 @@ async fn broadcast_terminal_recovery_after(
 /// previously hidden pane visible. Hidden output remains in the PTY-owned
 /// journal; no session-global parser or subscription state is duplicated.
 #[cfg(test)]
+// Its callers are Unix-only tests.
+#[cfg_attr(not(unix), allow(dead_code))]
 pub(crate) async fn terminal_recovery_event(
     state: &ServerState,
     pane_id: NodeId,

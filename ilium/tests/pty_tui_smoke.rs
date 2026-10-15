@@ -59,6 +59,8 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+// The 128-pane qualification test inside is Unix-only.
+#[cfg(unix)]
 #[path = "support/terminal_pool_runtime.rs"]
 mod terminal_pool_runtime;
 
