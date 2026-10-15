@@ -37,8 +37,9 @@ use std::path::Path;
 
 use windows_sys::Wdk::Foundation::OBJECT_ATTRIBUTES;
 use windows_sys::Wdk::Storage::FileSystem::{
-    FileRenameInformation, NtCreateFile, NtSetInformationFile, FILE_CREATE, FILE_DIRECTORY_FILE,
-    FILE_NON_DIRECTORY_FILE, FILE_OPEN, FILE_OPEN_REPARSE_POINT, FILE_SYNCHRONOUS_IO_NONALERT,
+    FileRenameInformation, FileRenameInformationEx, NtCreateFile, NtSetInformationFile,
+    FILE_CREATE, FILE_DIRECTORY_FILE, FILE_NON_DIRECTORY_FILE, FILE_OPEN, FILE_OPEN_REPARSE_POINT,
+    FILE_SYNCHRONOUS_IO_NONALERT,
 };
 use windows_sys::Win32::Foundation::{
     RtlNtStatusToDosError, ERROR_INVALID_FUNCTION, ERROR_INVALID_PARAMETER, ERROR_NOT_SUPPORTED,
@@ -229,9 +230,20 @@ impl NoFollowDirectory {
         mark_for_deletion(&child)
     }
 
-    /// Atomically renames a plain file to one child name relative to this
-    /// pinned directory. `replace_existing = false` preserves create-new
-    /// semantics; the kernel rejects an occupied destination.
+    /// Atomically renames a plain file to one child name of this pinned
+    /// directory. `replace_existing = false` preserves create-new semantics;
+    /// the kernel rejects an occupied destination with `AlreadyExists`.
+    ///
+    /// The rename is first issued relative to the pinned handle, so no path
+    /// is resolved again. Which handle rights the kernel wants on that
+    /// `RootDirectory` has differed between Windows builds, so a refusal
+    /// retries once through a handle reopened with explicit mutation rights.
+    /// If both relative forms are refused, the last resort names the
+    /// directory by its current final path. That form is the one `std::fs::rename`
+    /// uses and is the only part that re-resolves a path; `publish_entry`
+    /// proves afterwards, through the pinned handle, that the published
+    /// entry is the staged file, and a substitution surfaces as an error.
+    /// A name collision is final and never retried.
     pub(crate) fn rename_regular(
         &self,
         source: &File,
@@ -239,63 +251,46 @@ impl NoFollowDirectory {
         replace_existing: bool,
     ) -> io::Result<()> {
         require_plain_entry(source, false)?;
-        let destination_directory = self.reopen_child_mutation_handle()?;
         let name = checked_entry_name(name)?;
-        let name_bytes = name
-            .len()
-            .checked_mul(std::mem::size_of::<u16>())
-            .and_then(|length| u32::try_from(length).ok())
-            .ok_or_else(invalid_name)?;
-        let mut nul_terminated_name = name;
-        nul_terminated_name.push(0);
-        let name_offset = std::mem::offset_of!(FILE_RENAME_INFO, FileName);
-        let required_bytes = name_offset
-            .checked_add(nul_terminated_name.len() * std::mem::size_of::<u16>())
-            .ok_or_else(invalid_name)?;
-        let allocation_bytes = required_bytes.max(std::mem::size_of::<FILE_RENAME_INFO>());
-        let mut buffer = vec![0_u64; allocation_bytes.div_ceil(std::mem::size_of::<u64>())];
-        let information = buffer.as_mut_ptr().cast::<FILE_RENAME_INFO>();
-        // SAFETY: the u64-backed allocation has FILE_RENAME_INFO alignment and
-        // enough bytes for the fixed record plus the complete NUL-terminated
-        // UTF-16 leaf. All fields remain live through NtSetInformationFile.
-        unsafe {
-            std::ptr::write(
-                information,
-                FILE_RENAME_INFO {
-                    Anonymous: windows_sys::Win32::Storage::FileSystem::FILE_RENAME_INFO_0 {
-                        ReplaceIfExists: replace_existing,
-                    },
-                    RootDirectory: destination_directory.as_raw_handle() as HANDLE,
-                    FileNameLength: name_bytes,
-                    FileName: [0],
-                },
-            );
-            std::ptr::copy_nonoverlapping(
-                nul_terminated_name.as_ptr(),
-                information.cast::<u8>().add(name_offset).cast::<u16>(),
-                nul_terminated_name.len(),
-            );
-        }
-        // The native call, not `SetFileInformationByHandle`: the Win32 wrapper
-        // rewrites `FileName` into a full DOS-derived NT path, which a
-        // non-null `RootDirectory` cannot resolve. `FILE_RENAME_INFO` and the
-        // native `FILE_RENAME_INFORMATION` share one layout.
-        let mut status_block = IO_STATUS_BLOCK::default();
-        // SAFETY: the handle is a pinned plain file and the buffer matches
-        // FILE_RENAME_INFORMATION with a directory-relative, validated leaf.
-        let status = unsafe {
-            NtSetInformationFile(
-                source.as_raw_handle() as HANDLE,
-                &mut status_block,
-                information.cast::<c_void>(),
-                allocation_bytes as u32,
-                FileRenameInformation,
-            )
+
+        let pinned = rename_by_information(
+            source,
+            self.file.as_raw_handle() as HANDLE,
+            &name,
+            replace_existing,
+        );
+        let Err(pinned_error) = pinned else {
+            return Ok(());
         };
-        if status < 0 {
-            return Err(nt_status_error(status));
+        if pinned_error.kind() == io::ErrorKind::AlreadyExists {
+            return Err(pinned_error);
         }
-        Ok(())
+
+        let reopened = self.reopen_child_mutation_handle().and_then(|directory| {
+            rename_by_information(
+                source,
+                directory.as_raw_handle() as HANDLE,
+                &name,
+                replace_existing,
+            )
+        });
+        let Err(reopened_error) = reopened else {
+            return Ok(());
+        };
+        if reopened_error.kind() == io::ErrorKind::AlreadyExists {
+            return Err(reopened_error);
+        }
+
+        let mut target: Vec<u16> = final_path(&self.file)?.as_os_str().encode_wide().collect();
+        // `\\?\C:\dir` (Win32 extended-length) is `\??\C:\dir` in the NT namespace.
+        if target.starts_with(&[92, 92, 63, 92]) {
+            target[1] = 63;
+        }
+        if target.last() != Some(&92) {
+            target.push(92);
+        }
+        target.extend_from_slice(&name);
+        rename_by_information(source, std::ptr::null_mut(), &target, replace_existing)
     }
 
     fn reopen_child_mutation_handle(&self) -> io::Result<File> {
@@ -406,6 +401,97 @@ fn nt_status_error(status: NTSTATUS) -> io::Error {
     // SAFETY: `RtlNtStatusToDosError` only maps the integer it is given.
     let dos_error = unsafe { RtlNtStatusToDosError(status) };
     io::Error::from_raw_os_error(dos_error as i32)
+}
+
+/// Issues one native rename of `source` to `name`, which is a leaf relative to
+/// `root_directory`, or a full NT path when `root_directory` is null.
+///
+/// Prefers `FileRenameInformationEx` with POSIX semantics: the legacy rename
+/// refuses with `ERROR_ACCESS_DENIED` to replace a file that any handle still
+/// has open, even one opened with `FILE_SHARE_DELETE`. The caller's staged
+/// and published entries are routinely held open by pinned readers, so the
+/// replace must unlink the old name immediately instead. Filesystems that
+/// lack the extended class fall back to the classic record.
+fn rename_by_information(
+    source: &File,
+    root_directory: HANDLE,
+    name: &[u16],
+    replace_existing: bool,
+) -> io::Result<()> {
+    const RENAME_FLAG_REPLACE_IF_EXISTS: u32 = 0x1;
+    const RENAME_FLAG_POSIX_SEMANTICS: u32 = 0x2;
+
+    let name_bytes = name
+        .len()
+        .checked_mul(std::mem::size_of::<u16>())
+        .and_then(|length| u32::try_from(length).ok())
+        .ok_or_else(invalid_name)?;
+    let name_offset = std::mem::offset_of!(FILE_RENAME_INFO, FileName);
+    let required_bytes = name_offset
+        .checked_add(name.len() * std::mem::size_of::<u16>())
+        .and_then(|length| length.checked_add(std::mem::size_of::<u16>()))
+        .ok_or_else(invalid_name)?;
+    let allocation_bytes = required_bytes.max(std::mem::size_of::<FILE_RENAME_INFO>());
+    let allocation_length = u32::try_from(allocation_bytes).map_err(|_| invalid_name())?;
+    let mut buffer = vec![0_u64; allocation_bytes.div_ceil(std::mem::size_of::<u64>())];
+    let information = buffer.as_mut_ptr().cast::<FILE_RENAME_INFO>();
+    // SAFETY: the zeroed u64-backed allocation has FILE_RENAME_INFO alignment
+    // and room for the fixed record, the UTF-16 name and a trailing NUL (left
+    // zero). `FILE_RENAME_INFO` and the native `FILE_RENAME_INFORMATION(_EX)`
+    // share one layout: a leading 32-bit flags word (whose low byte is
+    // `ReplaceIfExists` for the classic record), the root handle, the byte
+    // length, then the name.
+    unsafe {
+        std::ptr::addr_of_mut!((*information).RootDirectory).write(root_directory);
+        std::ptr::addr_of_mut!((*information).FileNameLength).write(name_bytes);
+        std::ptr::copy_nonoverlapping(
+            name.as_ptr(),
+            information.cast::<u8>().add(name_offset).cast::<u16>(),
+            name.len(),
+        );
+    }
+    let issue = |class, flags: u32| -> io::Result<()> {
+        // SAFETY: the first four bytes of the allocation are the flags word.
+        unsafe { information.cast::<u32>().write(flags) };
+        let mut status_block = IO_STATUS_BLOCK::default();
+        // SAFETY: `source` is a live handle with DELETE access and the buffer
+        // holds a complete record of `allocation_length` bytes that outlives
+        // the call. The native call is used, not `SetFileInformationByHandle`,
+        // so the name is passed through unrewritten.
+        let status = unsafe {
+            NtSetInformationFile(
+                source.as_raw_handle() as HANDLE,
+                &mut status_block,
+                information.cast::<c_void>(),
+                allocation_length,
+                class,
+            )
+        };
+        if status < 0 {
+            return Err(nt_status_error(status));
+        }
+        Ok(())
+    };
+
+    let extended_flags = if replace_existing {
+        RENAME_FLAG_REPLACE_IF_EXISTS | RENAME_FLAG_POSIX_SEMANTICS
+    } else {
+        0
+    };
+    let error = match issue(FileRenameInformationEx, extended_flags) {
+        Ok(()) => return Ok(()),
+        Err(error) => error,
+    };
+    let is_unsupported = error.raw_os_error().is_some_and(|code| {
+        matches!(
+            code as u32,
+            ERROR_INVALID_PARAMETER | ERROR_INVALID_FUNCTION | ERROR_NOT_SUPPORTED
+        )
+    });
+    if !is_unsupported {
+        return Err(error);
+    }
+    issue(FileRenameInformation, u32::from(replace_existing))
 }
 
 /// Fails unless the open handle is a plain directory (or plain file) and not
