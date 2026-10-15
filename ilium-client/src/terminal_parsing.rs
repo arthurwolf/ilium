@@ -257,10 +257,15 @@ impl Drop for ProgressPreview {
         }
     }
 }
-struct EngineClaim(Arc<AtomicUsize>, ParserStorageLease); // The engine envelope remains owned through retirement and retained targets.
+struct EngineClaim(Arc<AtomicUsize>, Option<ParserStorageLease>); // The engine envelope remains owned through retirement and retained targets.
 impl Drop for EngineClaim {
     fn drop(&mut self) {
-        let _storage_bytes = self.1.resident_bytes(); // Keep the declared envelope visible until this claim actually retires.
+        // Release the storage lease before the claim count falls, so an observer
+        // that sees zero claims can rely on the envelope being returned. Field
+        // drop order would otherwise decrement the count first, leaving a window
+        // (visible on slower schedulers) where a new admission still sees the
+        // retired engine's debit.
+        drop(self.1.take());
         self.0.fetch_sub(1, Ordering::AcqRel);
     }
 }
@@ -909,7 +914,10 @@ impl TerminalParsing {
         view.admission_pressure = None;
         view.admission_error = None;
         self.shared.engine_claims.fetch_add(1, Ordering::AcqRel);
-        let claim = Arc::new(EngineClaim(self.shared.engine_claims.clone(), storage)); // Keep its envelope through the last retiring target owner.
+        let claim = Arc::new(EngineClaim(
+            self.shared.engine_claims.clone(),
+            Some(storage),
+        )); // Keep its envelope through the last retiring target owner.
         let target = PaneTarget {
             pane_id,
             identity: view.identity.clone(),
@@ -1964,6 +1972,16 @@ mod tests {
             "retired engine must release its storage lease"
         );
         parsing.attach(NodeId(2), &mut waiting).unwrap();
+        // Attach clears the admission verdict, but the owner reports pressure on
+        // the new generation while its registration is still being published
+        // and clears it when that command completes. A slower scheduler can
+        // observe the owner between those two stores, so wait for the owner's
+        // verdict to settle instead of sampling it once.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while waiting.parser_pressure().is_some() && Instant::now() < deadline {
+            drop(parsing.collect());
+            std::thread::sleep(Duration::from_millis(5));
+        }
         assert_eq!(waiting.parser_pressure(), None);
     }
 

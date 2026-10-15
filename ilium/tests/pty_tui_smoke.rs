@@ -6736,29 +6736,11 @@ async fn image_query_keeps_first_real_pty_keys_with_silent_and_answering_termina
                 command.env(key, value.to_string_lossy().to_string())
             });
         let mut tui = PtySession::spawn(attach).expect("attach actual client under PTY");
-        if !cfg!(unix) {
-            // This test models a terminal that is silent about the *client's*
-            // capability queries, but ConPTY's own console host (opened with
-            // the inherit-cursor flag) asks the hosting terminal for a cursor
-            // position at start-up and forwards nothing else until it is
-            // answered. With the automatic replies off nothing answers it, so
-            // the screen would stay empty for the whole test. Answer only that
-            // host-level report, and only when it was actually requested.
-            if wait_until(
-                || {
-                    tui.output_replay()
-                        .bytes
-                        .windows(b"\x1b[6n".len())
-                        .any(|bytes| bytes == b"\x1b[6n")
-                },
-                Duration::from_secs(10),
-            )
-            .await
-            {
-                tui.write(b"\x1b[1;1R")
-                    .expect("answer the console host's cursor position request");
-            }
-        }
+        // Windows: do not answer the console host's own start-up cursor-position
+        // request (`CSI 6n`) here. Hosted CI showed the unanswered form passes with
+        // exit code 0, while the run that injected `CSI 1;1 R` into the client's console
+        // input ended with the client exiting with code 1. The client's first
+        // output is awaited below instead.
         if cfg!(unix) {
             assert!(
                 wait_until(
