@@ -1388,8 +1388,13 @@ mod tests {
                             modifiers: KeyModifiers::NONE,
                         },
                     );
+                    app.settle_filesystem_for_test();
                     let (options, selected) = field.options(&app);
-                    assert_eq!(selected, expected, "{tab:?} {width}");
+                    assert_eq!(
+                        selected, expected,
+                        "{tab:?} {width} {button:?}: {:?}",
+                        app.status_message
+                    );
                     assert_eq!(options.len(), expected_options, "{tab:?} {width}");
                 }
 

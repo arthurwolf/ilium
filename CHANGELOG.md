@@ -18,12 +18,14 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 - Padding settings tab with Disabled, Size dependent (default threshold 200 columns, minimum 11) and Enabled cards, plus a Padding fine-tuning dialog with a live preview. Tree and right panels (terminals and agents, editors, boards) get independent 0 to 3 cell padding per side, optionally linked, saved under `[padding]`. Padding moves only the content inward; toolbars, banners and the progress footer stay full width.
 
 ### Fixed
+- Blocking-error snapshots and pane-creation results are routed as global events in the client's incoming projection instead of being treated as unclassified.
 - `ilium ctl close --worktree remove` now says why a worktree removal was refused (for example, a process still running inside it) instead of timing out after 30 seconds, and refuses up front when it runs from inside the worktree it would remove.
 
 ### Changed
 - Hovering a footer agent icon reuses a successful repository check for 30 seconds instead of queuing another Git snapshot, so the worktree buttons are enabled at once and fewer slow queries pile up under load; creating a worktree still revalidates.
 - A request refused because the UI is busy now leaves a bold notice in the status bar for 8 seconds, so hover messages can no longer hide it.
 - Accepted animation frames retain their packing operation across transient quota-lock contention, while cancellation and genuine storage-capacity failures remain explicit.
+- Live agent detection tests pin `$SHELL` to `/bin/sh` for their command panes and include the pane's decoded output in timeout reports, so a host whose login shell is another program no longer fails them for unrelated reasons.
 - Native-child detector fixtures use the bounded executable-write-conflict retry shared by other freshly written test executables.
 - Icon worker join observers no longer retain unpublished-to-UI mailbox result storage after the native worker and UI owner retire.
 - Terminal parsing retries temporary storage-bookkeeping contention with its original command and cursor, while retaining pressure accounting and errors for actual capacity limits.
