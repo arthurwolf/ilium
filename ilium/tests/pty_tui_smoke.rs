@@ -1632,7 +1632,14 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
     tui.write(b"\x1b")
         .expect("closing mouse-opened Settings with Esc");
     assert!(
-        wait_until(|| !tui.screen_text().contains("⚙ Settings"), WAIT_TIMEOUT).await,
+        wait_until(
+            || {
+                let text = tui.screen_text();
+                !text.contains("⚙ Settings") && text.contains("VOICE OFF") && text.contains("F8")
+            },
+            WAIT_TIMEOUT
+        )
+        .await,
         "expected mouse-opened Settings to close before continuing"
     );
     assert!(
@@ -6122,6 +6129,17 @@ async fn agent_stats_popover_previews_on_hover_pins_on_click_and_closes() {
         detection_diagnostics(&xdg.debug_log_dir, &project_dir),
         tui.screen_text()
     );
+    assert!(
+        wait_until(
+            || tui.with_screen(|screen| {
+                !rows_containing_before_column(screen, "Codex:", 60).is_empty()
+            }),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "row "Codex:" did not render: {:?}",
+        tui.screen_text()
+    );
     let agent_row =
         tui.with_screen(|screen| rows_containing_before_column(screen, "Codex:", 60))[0];
     tui.write(&sgr_mouse_down(0, 8, agent_row))
@@ -6419,6 +6437,18 @@ async fn worktree_launcher_dialog_menu_and_footer_popover_render_and_accept_inpu
         tui.screen_text()
     );
 
+    assert!(
+        wait_until(
+            || tui.with_screen(|screen| {
+                !rows_containing_before_column(screen, "default", TREE_TEXT_COLUMNS).is_empty()
+            }),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "row "default" did not render: {:?}",
+        tui.screen_text()
+    );
+
     let default_row = tui
         .with_screen(|screen| rows_containing_before_column(screen, "default", TREE_TEXT_COLUMNS))
         [0];
@@ -6669,6 +6699,17 @@ async fn worktree_launcher_dialog_menu_and_footer_popover_render_and_accept_inpu
     );
     // The branch label is a metadata line below the pane, not a tree node.
     // Open the worktree actions on the detected agent's actual tree row.
+    assert!(
+        wait_until(
+            || tui.with_screen(|screen| {
+                !rows_containing_before_column(screen, "Codex:", 60).is_empty()
+            }),
+            WAIT_TIMEOUT
+        )
+        .await,
+        "row "Codex:" did not render: {:?}",
+        tui.screen_text()
+    );
     let branch_row =
         tui.with_screen(|screen| rows_containing_before_column(screen, "Codex:", 60))[0];
     let branch_column = tui

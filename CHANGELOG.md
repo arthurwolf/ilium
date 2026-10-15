@@ -18,6 +18,7 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 - Padding settings tab with Disabled, Size dependent (default threshold 200 columns, minimum 11) and Enabled cards, plus a Padding fine-tuning dialog with a live preview. Tree and right panels (terminals and agents, editors, boards) get independent 0 to 3 cell padding per side, optionally linked, saved under `[padding]`. Padding moves only the content inward; toolbars, banners and the progress footer stay full width.
 
 ### Fixed
+- A slow or failed agent identity check no longer drops a typed keystroke from the last-prompt banner and prompt tracking.
 - `ilium ctl close --worktree remove` now says why a worktree removal was refused (for example, a process still running inside it) instead of timing out after 30 seconds, and refuses up front when it runs from inside the worktree it would remove.
 
 ### Changed

@@ -156,6 +156,11 @@ impl IsolatedDirs {
             .expect("save voice settings");
         ilium_client::config::save_trigger_settings(&self.ilium_config_dir, &config.triggers)
             .expect("save trigger settings");
+        // File logging is the only place the voice failure reason survives.
+        let mut debug = config.debug.clone();
+        debug.file_logging_enabled = true;
+        ilium_client::config::save_debug_settings(&self.ilium_config_dir, &debug)
+            .expect("save debug settings");
         let mut agent_setup = config.agent_setup.clone();
         agent_setup.never_ask_global = true;
         agent_setup

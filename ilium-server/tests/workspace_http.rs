@@ -279,7 +279,8 @@ impl IsolatedHttpServer {
 }
 
 async fn wait_for_file(path: &Path) {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    // Hosted macOS runners can take well over 10 s to reach a git hook.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(45);
     while !path.exists() {
         assert!(
             tokio::time::Instant::now() < deadline,

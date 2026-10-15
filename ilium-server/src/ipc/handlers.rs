@@ -7479,7 +7479,12 @@ where
         } else {
             runtime.automated_agent_input_rejection(status, probe_observation.as_ref())
         };
-        let active_agent = runtime.agent_process_key.is_some() && rejection.is_none();
+        // User typing is attributed to the agent whenever one owns the pane: a
+        // failed or late identity probe only gates automated input. Skipping
+        // the tracker for a probe failure silently dropped single keystrokes
+        // from the observed prompt.
+        let active_agent = runtime.agent_process_key.is_some()
+            && (rejection.is_none() || (is_user_directed && !cancelled_during_preflight));
         if !is_user_directed {
             if let Some(reason) = rejection {
                 return Err(format!(
