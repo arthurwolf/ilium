@@ -134,7 +134,7 @@ pub fn set_animation(
 /// module's atomic, lock-protected `.ilium/config.yaml` format under a
 /// dedicated directory beside the client's main configuration.
 pub fn global_animation_home() -> Option<PathBuf> {
-    directories::ProjectDirs::from("", "", "ilium").map(|dirs| dirs.config_dir().join("animation"))
+    ilium_platform::paths::config_dir().map(|dir| dir.join("animation"))
 }
 
 /// Adopts the launch project's animation as the global one, once. Before the
