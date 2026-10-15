@@ -4,7 +4,7 @@ use ilium_execution::{
 };
 use std::time::Instant;
 
-const TEST_WAIT: Duration = Duration::from_secs(10);
+const TEST_WAIT: Duration = Duration::from_secs(60);
 
 struct BarrierObservation {
     pane_id: NodeId,

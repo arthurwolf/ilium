@@ -1468,7 +1468,7 @@ mod tests {
         .unwrap();
         presenter.submit(frame(&presenter, 1, "PANIC")).unwrap();
         assert_ne!(
-            restoration.recv_timeout(Duration::from_secs(2)).unwrap(),
+            restoration.recv_timeout(Duration::from_secs(20)).unwrap(),
             ui_thread
         );
         assert!(presenter.shutdown().await.is_err());

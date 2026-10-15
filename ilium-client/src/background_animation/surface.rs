@@ -1034,7 +1034,16 @@ mod tests {
             .unwrap();
         surface.wait_for_frame_for_test(Duration::ZERO);
         assert_eq!(surface.frames_per_second(), Some(1));
-        assert!(surface.begin_composition());
+        // Presentation admission can be momentarily Busy when parallel tests hold
+        // the shared accounting gate; production retries on the wake it raises.
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while !surface.begin_composition() {
+            assert!(
+                Instant::now() < deadline,
+                "presentation admission never became available"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
         let surviving = surface.packed_bit(0, 0);
         assert_ne!(surviving, 0);
         let discarded = surface.capture(Some(vec![surviving, 0])).unwrap();

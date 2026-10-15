@@ -223,8 +223,12 @@ def logged(command, root, log, environment=None, timeout=10_800):
             raise release_tool.ReleaseError('command exceeded %d seconds; inspect owned log %s' % (timeout, log))
     if result.returncode != 0:
         # Diagnostic artifacts can fail to upload; keep the decisive lines in the job log.
+        text = log.read_bytes().decode('utf-8', 'replace')
+        # The tail alone misses failures from early test binaries; also keep every failure marker.
+        markers = [line for line in text.splitlines()
+                   if re.search(r'FAILED|panicked at|^error(\[|:)|^failures:|^---- ', line)]
         emit('warning', operation=Path(str(command[0])).name, log=str(log), exit_code=result.returncode,
-             log_tail=log.read_bytes()[-6000:].decode('utf-8', 'replace'))
+             failure_lines=markers[:200], log_tail=text[-6000:])
     require(result.returncode == 0, 'command failed; inspect owned log ' + str(log))
     emit('result', operation=Path(str(command[0])).name, state='passed', log=str(log), log_sha256=sha(log))
 
