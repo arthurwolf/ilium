@@ -267,6 +267,8 @@ pub struct PtySession {
     // The actor owns all parser writes, geometry control, and transport writes.
     // This handle only exposes admission and cancellation to other threads.
     #[cfg(test)]
+    // Only Unix tests read the parser through this handle.
+    #[cfg_attr(not(unix), allow(dead_code))]
     parser: Arc<RwLock<vt100::Parser<TerminalQueryResponder>>>,
     screen_generation: Arc<AtomicU64>,
     screen_reader: ScreenReader,

@@ -374,7 +374,22 @@ def native(arguments):
         logged(['cargo', 'build', '--locked', '--release', '--target', arguments.target, '--bin', 'ilium', '--bin', 'ilium-server', '--bin', 'ilium-animation-helper'], root, work / 'release-build.log', environment)
     logged(['cargo', 'fmt', '--all', '--check'], root, work / 'fmt.log', environment)
     logged(['cargo', 'clippy', '--locked', '--workspace', '--all-targets', '--keep-going', '--target', arguments.target, '--', '-D', 'warnings'], root, work / 'clippy.log', environment)
-    logged(['cargo', 'test', '--locked', '--workspace', '--no-fail-fast', '--target', arguments.target], root, work / 'workspace-tests.log', environment, timeout=3600)
+    # Mirror the hosted CI split: unit tests run in parallel, integration tests are
+    # serialized because PTY-heavy tests contend for the runner. On Linux the animation
+    # sandbox needs a delegated cgroup-v2 ancestor, which a transient user scope provides.
+    parallel_environment = {key: value for key, value in environment.items() if key != 'RUST_TEST_THREADS'}
+
+    def test_command(cargo_arguments, test_environment):
+        command = ['cargo', 'test', '--locked', '--workspace', '--no-fail-fast', '--target', arguments.target] + cargo_arguments
+        if target['os'] != 'linux':
+            return command
+        scope = ['systemd-run', '--user', '--wait', '--pipe', '--collect', '--property=Delegate=yes', '--working-directory=' + str(root)]
+        scope += ['--setenv=%s=%s' % (key, value) for key, value in sorted(test_environment.items()) if '\n' not in str(value)]
+        return scope + ['/usr/bin/env', 'cargo'] + command[1:]
+
+    logged(test_command(['--lib', '--bins'], parallel_environment), root, work / 'workspace-unit-tests.log', parallel_environment, timeout=7200)
+    logged(test_command(['--doc'], parallel_environment), root, work / 'workspace-doc-tests.log', parallel_environment, timeout=3600)
+    logged(test_command(['--test', '*'], environment), root, work / 'workspace-tests.log', environment, timeout=7200)
     # Product tests above run in full on every native OS. POSIX fixture tests
     # require GNU/Linux tools; their Linux lanes run the complete fixture suite.
     # Portable archive/manifest/source/evidence contracts run on every lane.

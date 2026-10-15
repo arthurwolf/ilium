@@ -133,6 +133,9 @@ impl Drop for LoadedSnapshot {
         // production constructor supplies the existing bank's retirement owner.
     }
 }
+// `Read` is the rare restore command and is only large on some targets (Windows
+// primitives are bigger); boxing it would also change queued-byte admission.
+#[allow(clippy::large_enum_variant)]
 enum Command {
     CaptureWrite {
         sources: persistence::SnapshotSources,
