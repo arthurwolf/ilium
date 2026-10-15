@@ -388,10 +388,9 @@ fn credit_footer_rows(area: Rect, model: &RowModel) -> u16 {
         .max()
         .unwrap_or(0);
     if area.height < 16
+        || urls.is_empty()
         || area.width.saturating_sub(layout(area).panel.width) as usize >= longest.max(16)
     {
-        0
-    } else if urls.is_empty() {
         0
     } else {
         urls.len() as u16 + 1

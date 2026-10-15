@@ -986,6 +986,14 @@ impl HeapBytes for PaneResizeCause {
     }
 }
 
+impl HeapBytes for BlockingError {
+    fn heap_bytes(&self) -> usize {
+        self.operation
+            .heap_bytes()
+            .saturating_add(self.message.heap_bytes())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1053,11 +1061,5 @@ mod tests {
         };
 
         assert_eq!(event.retained_bytes(), size_of::<ServerEvent>() + 8192);
-    }
-}
-
-impl HeapBytes for BlockingError {
-    fn heap_bytes(&self) -> usize {
-        self.operation.heap_bytes().saturating_add(self.message.heap_bytes())
     }
 }

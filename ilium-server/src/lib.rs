@@ -990,7 +990,7 @@ pub(crate) async fn start_snapshot_pane(
         Ok(()) => {
             state.clear_blocking_error(Some(node_id), "launch");
             SnapshotPaneStart::Started { missing_workspace }
-        },
+        }
         Err(ipc::handlers::RegisterPaneError::Spawn(error)) => {
             SnapshotPaneStart::Failed(error.to_string())
         }
@@ -1400,11 +1400,14 @@ mod restore_tests {
             ));
         }
         let attached = crate::ipc::handlers::initial_state_events(&state, false, false).await;
-        assert!(attached.iter().any(|event| matches!(event,
-            ilium_ipc::ServerEvent::BlockingErrorsSnapshot { errors }
-                if errors.iter().any(|error| error.node_id == Some(failing_pane)
-                    && error.operation == "launch" && error.message.contains("does not exist"))
-        )), "reattaching must retain a failed saved pane's real reason");
+        assert!(
+            attached.iter().any(|event| matches!(event,
+                ilium_ipc::ServerEvent::BlockingErrorsSnapshot { errors }
+                    if errors.iter().any(|error| error.node_id == Some(failing_pane)
+                        && error.operation == "launch" && error.message.contains("does not exist"))
+            )),
+            "reattaching must retain a failed saved pane's real reason"
+        );
         let input = crate::ipc::handlers::submit_terminal_text(
             &state,
             failing_pane,
@@ -1436,14 +1439,20 @@ mod restore_tests {
             &state,
             failing_pane,
             PaneSnapshotKind::Terminal(TerminalOrigin::Command(long_running_pane_command())),
-        ).await;
+        )
+        .await;
         assert!(matches!(recovered, SnapshotPaneStart::Started { .. }));
-        assert!(!state.blocking_errors_snapshot().iter().any(|error|
-            error.node_id == Some(failing_pane) && error.operation == "launch"));
+        assert!(!state
+            .blocking_errors_snapshot()
+            .iter()
+            .any(|error| error.node_id == Some(failing_pane) && error.operation == "launch"));
         let attached = crate::ipc::handlers::initial_state_events(&state, false, false).await;
-        assert!(attached.iter().any(|event| matches!(event,
-            ilium_ipc::ServerEvent::BlockingErrorsSnapshot { errors } if errors.is_empty()
-        )), "recovered panes must replay an empty authoritative error snapshot");
+        assert!(
+            attached.iter().any(|event| matches!(event,
+                ilium_ipc::ServerEvent::BlockingErrorsSnapshot { errors } if errors.is_empty()
+            )),
+            "recovered panes must replay an empty authoritative error snapshot"
+        );
 
         let mut panes = state.panes.write().await;
         for pane_id in [failing_pane, healthy_pane] {

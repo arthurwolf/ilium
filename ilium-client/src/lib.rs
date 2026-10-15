@@ -51,6 +51,7 @@ pub mod ascii_chart;
 mod background_acceptance;
 pub mod background_animation;
 pub mod background_composition;
+mod blocking_errors;
 pub mod board;
 pub mod board_ui;
 pub mod chatroom;
@@ -137,7 +138,6 @@ pub mod remote_compaction_settings;
 pub mod remote_compaction_settings_ui;
 pub mod remote_compaction_worker;
 pub mod render_cache;
-mod blocking_errors;
 pub mod reset_planning;
 pub mod restructure;
 pub mod scheduled_input;
@@ -4313,6 +4313,7 @@ fn native_input_geometry_ready(
 /// Consecutive mouse-motion reports are coalesced to their newest position:
 /// only that position can determine the current hover state, while keeping
 /// every non-motion event in order preserves click, drag, and scroll input.
+#[allow(clippy::too_many_arguments)] // Keep the event-loop owners explicit at this dispatch boundary.
 fn dispatch_ready_input_events<S>(
     app: &mut App,
     input_rx: &mut S,

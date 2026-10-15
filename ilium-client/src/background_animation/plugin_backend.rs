@@ -156,6 +156,7 @@ struct Presentation {
     _surface_storage: StorageAdmission,
     _request_storage: StorageAdmission,
 }
+#[allow(clippy::large_enum_variant)] // Short-lived completion value moved once; boxing would allocate on every source completion.
 enum SourceTerminal {
     Complete {
         owner: SourceCompletion,
@@ -3996,6 +3997,7 @@ fn apply_before_creation(invalidation: &Invalidation) -> Result<(), String> {
     Ok(())
 }
 impl Presentation {
+    #[allow(clippy::too_many_arguments)] // Each package, surface and storage authority stays an explicit input.
     fn new(
         instance: &mut PackageInstance,
         request: &RenderRequest,
@@ -4925,6 +4927,7 @@ impl Presentation {
             world_provenance,
         }))
     }
+    #[allow(clippy::too_many_arguments)] // Each frame authority and fence stays an explicit input.
     fn render_prepared(
         &mut self,
         instance: &mut PackageInstance,

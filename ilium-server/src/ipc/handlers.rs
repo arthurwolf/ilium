@@ -152,7 +152,9 @@ fn request_error_node(request: &ClientRequest) -> Option<NodeId> {
         ClientRequest::TerminatePaneProcess { pane_id, .. } => Some(*pane_id),
         ClientRequest::ReplacePaneWithCommand { pane_id, .. } => Some(*pane_id),
         ClientRequest::FreezePane { pane_id, .. } => Some(*pane_id),
-        ClientRequest::ApplyRecommendedProjectRestructurePlan { project_id, .. } => Some(*project_id),
+        ClientRequest::ApplyRecommendedProjectRestructurePlan { project_id, .. } => {
+            Some(*project_id)
+        }
         ClientRequest::UserKeyInput { pane_id, .. } => Some(*pane_id),
         ClientRequest::ReportAgentPromptFromTranscript { pane_id, .. } => Some(*pane_id),
         ClientRequest::UnfreezePane { pane_id, .. } => Some(*pane_id),
@@ -175,7 +177,20 @@ pub async fn handle_request(
     };
     let scoped_tx = direct_tx.with_error_scope(state, target, operation);
     let should_close = handle_scoped_request(state, request, &scoped_tx).await;
-    if matches!(operation, "rename_node" | "move_node" | "reparent_node" | "new_group" | "new_project" | "new_folder" | "change_project_folder" | "create_split_view" | "set_node_bookmarked" | "set_node_expanded" | "set_node_locked_closed") {
+    if matches!(
+        operation,
+        "rename_node"
+            | "move_node"
+            | "reparent_node"
+            | "new_group"
+            | "new_project"
+            | "new_folder"
+            | "change_project_folder"
+            | "create_split_view"
+            | "set_node_bookmarked"
+            | "set_node_expanded"
+            | "set_node_locked_closed"
+    ) {
         scoped_tx.finish_synchronous_mutation();
     }
     should_close
@@ -284,21 +299,40 @@ async fn handle_scoped_request(
             kind,
             working_directory,
         } => {
-            handle_new_pane(state, request_id, parent_group, kind, working_directory, direct_tx).await;
+            handle_new_pane(
+                state,
+                request_id,
+                parent_group,
+                kind,
+                working_directory,
+                direct_tx,
+            )
+            .await;
             false
         }
         ClientRequest::QueryWorkspaceInventory {
             request_id,
             project,
         } => {
-            let result = tokio::time::timeout(
-                std::time::Duration::from_secs(30),
-                crate::workspace_prune::inventory(state, project),
-            )
+            // Its own task, so the Git inventory chain starts on a fresh
+            // worker stack instead of below this whole request dispatcher:
+            // nested here, unoptimized builds overflowed the 2 MiB runtime
+            // stack. The guard aborts the read-only task if this request is
+            // cancelled.
+            let inventory_state = Arc::clone(state);
+            let result = crate::task_guard::AbortOnDropHandle::new(tokio::spawn(async move {
+                tokio::time::timeout(
+                    std::time::Duration::from_secs(30),
+                    crate::workspace_prune::inventory(&inventory_state, project),
+                )
+                .await
+                .unwrap_or_else(|_| {
+                    Err("worktree inventory exceeded its read-only time budget".into())
+                })
+            }))
+            .join()
             .await
-            .unwrap_or_else(|_| {
-                Err("worktree inventory exceeded its read-only time budget".into())
-            });
+            .unwrap_or_else(|error| Err(format!("worktree inventory task failed: {error}")));
             let event = ServerEvent::WorkspaceInventoryReported {
                 request_id,
                 project,
@@ -312,10 +346,17 @@ async fn handle_scoped_request(
             request_id,
             pane_id,
         } => {
-            let can_offer = tokio::time::timeout(
-                std::time::Duration::from_secs(30),
-                crate::workspace_prune::can_offer_close(state, pane_id),
-            )
+            // Same fresh-stack task as the worktree inventory above.
+            let offer_state = Arc::clone(state);
+            let can_offer = crate::task_guard::AbortOnDropHandle::new(tokio::spawn(async move {
+                tokio::time::timeout(
+                    std::time::Duration::from_secs(30),
+                    crate::workspace_prune::can_offer_close(&offer_state, pane_id),
+                )
+                .await
+                .unwrap_or(false)
+            }))
+            .join()
             .await
             .unwrap_or(false);
             let event = ServerEvent::WorkspaceCloseOfferReported {
@@ -2084,7 +2125,9 @@ async fn admitted_state_synchronization_events(
                     drop(statuses);
                     let settings = state.text_trigger_settings.read().await.settings.clone();
                     events.push(ServerEvent::TextTriggersChanged { settings });
-    events.push(ServerEvent::BlockingErrorsSnapshot { errors: state.blocking_errors_snapshot() });
+                    events.push(ServerEvent::BlockingErrorsSnapshot {
+                        errors: state.blocking_errors_snapshot(),
+                    });
                     if include_initial_sync_complete {
                         let (detection, custom_signatures) =
                             state.agent_detection_settings_snapshot().await;
@@ -2216,6 +2259,9 @@ async fn state_synchronization_events(
     // needs them even when no client has changed the list during this stream.
     let settings = state.text_trigger_settings.read().await.settings.clone();
     events.push(ServerEvent::TextTriggersChanged { settings });
+    events.push(ServerEvent::BlockingErrorsSnapshot {
+        errors: state.blocking_errors_snapshot(),
+    });
     if include_initial_sync_complete {
         let (detection, custom_signatures) = state.agent_detection_settings_snapshot().await;
         events.push(ServerEvent::AgentDetectionSettingsChanged {
@@ -4527,7 +4573,11 @@ async fn handle_new_pane(
     if let Err(message) = &result {
         send_direct_error(direct_tx, message.clone()).await;
     }
-    send_direct(direct_tx, ServerEvent::PaneCreateFinished { request_id, result }).await;
+    send_direct(
+        direct_tx,
+        ServerEvent::PaneCreateFinished { request_id, result },
+    )
+    .await;
 }
 
 async fn create_pane(
@@ -7258,6 +7308,7 @@ where
     .await
 }
 
+#[allow(clippy::too_many_arguments)] // Same explicit authorities as `write_key_input_unlocked_with_marker`, plus the admission hook.
 async fn write_key_input_unlocked_with_probe_and_admission_hook<
     Probe,
     ProbeFuture,
@@ -8200,16 +8251,32 @@ mod tests {
     async fn create_failure_is_correlated_scoped_and_replayed_on_attach() {
         let directory = tempfile::tempdir().unwrap();
         let state = snapshot_io_handler_state(&directory);
-        let group = state.tree.write().await.add_group(ilium_core::ROOT_ID, "project").unwrap();
+        let group = state
+            .tree
+            .write()
+            .await
+            .add_group(ilium_core::ROOT_ID, "project")
+            .unwrap();
         let (sender, mut replies) = DirectEventSender::channel(16);
-        handle_request(&state, ClientRequest::NewPane {
-            request_id: 742,
-            parent_group: group,
-            kind: NewPaneKind::PlainShell,
-            working_directory: NewPaneWorkingDirectory::Directory(directory.path().join("missing")),
-        }, &sender).await;
-        assert!(matches!(replies.recv().await, Some(ServerEvent::Error { .. })));
-        let Some(ServerEvent::PaneCreateFinished { request_id, result }) = replies.recv().await else {
+        handle_request(
+            &state,
+            ClientRequest::NewPane {
+                request_id: 742,
+                parent_group: group,
+                kind: NewPaneKind::PlainShell,
+                working_directory: NewPaneWorkingDirectory::Directory(
+                    directory.path().join("missing"),
+                ),
+            },
+            &sender,
+        )
+        .await;
+        assert!(matches!(
+            replies.recv().await,
+            Some(ServerEvent::Error { .. })
+        ));
+        let Some(ServerEvent::PaneCreateFinished { request_id, result }) = replies.recv().await
+        else {
             panic!("creation must have a terminal typed outcome");
         };
         assert_eq!(request_id, 742);
@@ -10517,8 +10584,8 @@ mod tests {
         assert!(direct_rx.try_recv().is_err());
 
         // A stale client that doesn't know about the lock still can't
-        // expand it -- the server rejects the mutation and sends only a
-        // direct error, no broadcast.
+        // expand it -- the server rejects the mutation, retains a visible
+        // scoped error, and never broadcasts an expanded tree.
         assert!(
             !handle_request(
                 &state,
@@ -10530,8 +10597,22 @@ mod tests {
             )
             .await
         );
-        assert!(events.try_recv().is_err());
-        assert!(direct_rx.try_recv().is_ok());
+        let ServerEvent::BlockingErrorsSnapshot { errors } =
+            events.try_recv().expect("visible refusal")
+        else {
+            panic!("a refused expansion must publish its retained error");
+        };
+        assert!(errors.iter().any(|error| error.node_id == Some(folder_id)
+            && error.operation == "set_node_expanded"
+            && !error.message.is_empty()));
+        assert!(
+            events.try_recv().is_err(),
+            "refusal must not mutate or broadcast the tree"
+        );
+        assert!(matches!(
+            direct_rx.try_recv(),
+            Ok(ServerEvent::Error { .. })
+        ));
 
         assert!(
             !handle_request(

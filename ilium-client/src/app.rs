@@ -271,6 +271,7 @@ pub struct ChatroomViewState {
 
 /// The input-handling mode. Most keys are dispatched differently
 /// depending on this; see `crate::keys`.
+#[allow(clippy::large_enum_variant)] // One long-lived Mode lives on App; boxing Settings adds a heap hop to every key dispatch.
 pub enum Mode {
     Normal,
     LeaderPending,
@@ -3950,9 +3951,9 @@ impl App {
 
     pub(crate) fn queue_request(&mut self, mut request: ClientRequest) -> bool {
         let creation = self.prepare_pane_creation(&mut request);
-        if let Some((_, pending)) = &creation {
+        if let Some((request_id, pending)) = &creation {
             if self.pending_pane_creations.len() >= 16 {
-                self.record_local_blocking_error(pending.parent_group, "Create pane", "Too many creations await confirmation; wait for their outcomes before retrying");
+                self.record_local_blocking_error(pending.parent_group, &format!("Create pane request {request_id}"), "Too many creations await confirmation; wait for their outcomes before retrying");
                 self.show_request_admission_error();
                 return false;
             }
@@ -3960,8 +3961,12 @@ impl App {
         let menu_label = Self::slow_menu_request_label(&request);
         if self.try_queue_terminal_request(request).is_err() {
             self.show_request_admission_error();
-            if let Some((_, pending)) = creation {
-                self.record_local_blocking_error(pending.parent_group, "Create pane", "Request queue refused creation; retry when pending work completes");
+            if let Some((request_id, pending)) = creation {
+                self.record_local_blocking_error(
+                    pending.parent_group,
+                    &format!("Create pane request {request_id}"),
+                    "Request queue refused creation; retry when pending work completes",
+                );
             }
             return false;
         }
@@ -4593,7 +4598,7 @@ impl App {
         };
         viewports
             .into_iter()
-            .map(|mut viewport| {
+            .map(|viewport| {
                 let is_terminal = self.tree.get(viewport.pane_id).is_some_and(|node| {
                     matches!(
                         &node.kind,
@@ -6250,16 +6255,15 @@ impl App {
                 }
             }
         }
-        if self.pending_voice_interaction_requests.capacity() < 64 {
-            if self
+        if self.pending_voice_interaction_requests.capacity() < 64
+            && self
                 .pending_voice_interaction_requests
                 .try_reserve_exact(64 - self.pending_voice_interaction_requests.len())
                 .is_err()
-            {
-                self.status_message =
-                    Some("Voice push-to-talk allocation refused; edge not admitted".into());
-                return;
-            }
+        {
+            self.status_message =
+                Some("Voice push-to-talk allocation refused; edge not admitted".into());
+            return;
         }
         self.pending_voice_interaction_requests.push(request);
     }
@@ -9137,9 +9141,7 @@ impl App {
                 issue_details,
             }
         };
-        if !model.issue_details.is_empty()
-            && !model.rows.iter().any(|row| *row == PluginPanelRow::Issues)
-        {
+        if !model.issue_details.is_empty() && !model.rows.contains(&PluginPanelRow::Issues) {
             model.rows.push(PluginPanelRow::Issues);
             model.labels.push(format!(
                 "{} package/runtime issue(s)",
@@ -10285,6 +10287,7 @@ impl App {
         }
         true
     }
+    #[cfg(test)] // Production completes through collect_emitted_smart_copy_capture.
     fn complete_smart_copy_capture(
         &mut self,
         pane_id: NodeId,
@@ -10564,10 +10567,10 @@ impl App {
         if self.smart_copy_light.is_none() && !retry {
             return;
         }
-        if !self
+        if self
             .smart_copy_session
             .as_ref()
-            .is_some_and(|session| session.selected_count() > 0)
+            .is_none_or(|session| session.selected_count() == 0)
         {
             self.exit_smart_copy();
             return;
@@ -10653,16 +10656,15 @@ impl App {
         }
         // Restoration is also CPU-owned; failed originals stay in order when
         // admission is refused, never clone plaintext or become inaccessible.
-        if !self.light_copy_shutdown {
-            if self
+        if !self.light_copy_shutdown
+            && self
                 .light_copy_recovery
                 .front()
                 .is_some_and(|original| original.original().is_some())
-            {
-                if let Some(original) = self.light_copy_recovery.pop_front() {
-                    if let Err(original) = owner.recover(original) {
-                        self.light_copy_recovery.push_front(original);
-                    }
+        {
+            if let Some(original) = self.light_copy_recovery.pop_front() {
+                if let Err(original) = owner.recover(original) {
+                    self.light_copy_recovery.push_front(original);
                 }
             }
         }
@@ -12933,7 +12935,11 @@ impl App {
     const PENDING_TOOLBAR_TIMEOUT: Duration = Duration::from_secs(120);
 
     pub(crate) fn begin_pending_toolbar_action(&mut self, action: TreeToolbarAction) {
-        if self.pending_pane_creations.values().any(|pending| pending.action == action) {
+        if self
+            .pending_pane_creations
+            .values()
+            .any(|pending| pending.action == action)
+        {
             return;
         }
         if self.pending_toolbar_actions.len() >= 16 {
@@ -13000,7 +13006,13 @@ impl App {
         } else {
             0
         };
-        let creation_mask = self.pending_pane_creations.values().filter(|pending| !pending.uncertainty_reported).fold(restructure_bit, |mask, pending| mask | pending.action.pending_bit());
+        let creation_mask = self
+            .pending_pane_creations
+            .values()
+            .filter(|pending| !pending.uncertainty_reported)
+            .fold(restructure_bit, |mask, pending| {
+                mask | pending.action.pending_bit()
+            });
         self.pending_toolbar_actions
             .iter()
             .fold(creation_mask, |mask, (action, _, _)| {
@@ -14216,8 +14228,22 @@ impl App {
         event: &ilium_ipc::ServerEvent,
     ) -> Option<usize> {
         match event {
-            ilium_ipc::ServerEvent::BlockingErrorsSnapshot { errors } => Some(errors.iter().fold(0usize, |bytes, error| bytes.saturating_add(error.operation.len()).saturating_add(error.message.len()).saturating_add(128)).saturating_mul(2)),
-            ilium_ipc::ServerEvent::PaneCreateFinished { result, .. } => Some(result.as_ref().err().map_or(64, |message| message.len().saturating_add(64).saturating_mul(2))),
+            ilium_ipc::ServerEvent::BlockingErrorsSnapshot { errors } => Some(
+                errors
+                    .iter()
+                    .fold(0usize, |bytes, error| {
+                        bytes
+                            .saturating_add(error.operation.len())
+                            .saturating_add(error.message.len())
+                            .saturating_add(128)
+                    })
+                    .saturating_mul(2),
+            ),
+            ilium_ipc::ServerEvent::PaneCreateFinished { result, .. } => {
+                Some(result.as_ref().err().map_or(64, |message| {
+                    message.len().saturating_add(64).saturating_mul(2)
+                }))
+            }
             ilium_ipc::ServerEvent::RepoFactsReported {
                 request_id,
                 project,
@@ -15965,7 +15991,11 @@ impl App {
             return Err("Agent destination is no longer available; draft remains editable".into());
         }
         if self.pending_pane_creations.len() >= 16 {
-            self.record_local_blocking_error(state.parent_group, "Create pane", "Too many unconfirmed creation requests; check the project before retrying.");
+            self.record_local_blocking_error(
+                state.parent_group,
+                "Create pane",
+                "Too many unconfirmed creation requests; check the project before retrying.",
+            );
             return Err("Too many unconfirmed creation requests; draft remains editable".into());
         }
         let command = state.agent_type.command_line();
@@ -16016,7 +16046,15 @@ impl App {
             )
         })?;
         self.queue_terminal_request_after_barrier(admitted);
-        self.pending_pane_creations.insert(request_id, crate::blocking_errors::PendingPaneCreation { parent_group: state.parent_group, action: Self::toolbar_action_for_command(command), started: Instant::now(), uncertainty_reported: false });
+        self.pending_pane_creations.insert(
+            request_id,
+            crate::blocking_errors::PendingPaneCreation {
+                parent_group: state.parent_group,
+                action: Self::toolbar_action_for_command(command),
+                started: Instant::now(),
+                uncertainty_reported: false,
+            },
+        );
         self.record_pending_pane_focus(
             state.parent_group,
             PaneContentKind::Terminal,
@@ -17687,6 +17725,7 @@ impl App {
             .filter(|pane_id| matches!(self.panes.get(pane_id), Some(PaneRuntime::Terminal(_))))
     }
 
+    #[allow(clippy::result_large_err)] // The refusal hands the original value back unchanged; boxing would allocate on that path.
     pub(crate) fn capture_native_terminal_paste(
         &mut self,
         pane_id: NodeId,
@@ -17715,6 +17754,7 @@ impl App {
 
     /// Retry only this captured original. No later native event is dispatched
     /// while it is waiting; parser/IPC/presentation collectors remain active.
+    #[allow(clippy::result_large_err)] // The refusal hands the original value back unchanged; boxing would allocate on that path.
     pub(crate) fn retry_native_terminal_paste(
         &mut self,
     ) -> Result<(), crate::terminal_input_owner::InputFailure> {
@@ -19125,10 +19165,10 @@ impl App {
     /// that is refused for budget can retry after this. Returns whether a pin
     /// was actually released.
     fn release_foreign_selection_pin(&mut self, pane_id: NodeId) -> bool {
-        if !self
+        if self
             .terminal_selection_source
             .as_ref()
-            .is_some_and(|(owner, _)| *owner != pane_id)
+            .is_none_or(|(owner, _)| *owner == pane_id)
         {
             return false;
         }
@@ -19688,57 +19728,6 @@ impl App {
             ToolbarAction::SaveAs => self.action_start_save_as(id),
         }
     }
-}
-
-/// If `position` lands on a markdown task-list checkbox glyph in `editor`'s
-/// Source-mode content, returns the buffer row, the checkbox's `[` char
-/// column, and its current checked state -- ready for
-/// `EditorPane::toggle_checkbox`. `content_area` must be the exact rect the
-/// `TextArea` widget itself was rendered into (`editor_chrome::compute`'s
-/// `content_area`), since column/row math is anchored to it.
-///
-/// Column mapping assumes no horizontal scroll (`ratatui_textarea` exposes
-/// no public way to read its actual horizontal scroll offset). A checkbox
-/// on a line long enough to have scrolled horizontally (rare for a short
-/// "- [ ] ..." item) simply won't be found rather than risk mutating the
-/// wrong character.
-#[cfg(test)]
-fn checkbox_at(
-    editor: &EditorPane,
-    content_area: Rect,
-    position: Position,
-) -> Option<(usize, usize, bool)> {
-    if !editor.is_markdown() || !content_area.contains(position) {
-        return None;
-    }
-
-    let clicked_row_on_screen = position.y - content_area.y;
-    let visual_row = editor.source_visual_row_at(
-        content_area.width,
-        editor.source_scroll_row() as usize + clicked_row_on_screen as usize,
-    )?;
-    let row = visual_row.source_row;
-    let line = editor.textarea.lines().get(row)?;
-    let (bracket_col, checked) = crate::markdown::checkbox::find_checkbox(line)?;
-    let bracket_byte = line.char_indices().nth(bracket_col)?.0;
-    if !(visual_row.start_byte..visual_row.end_byte).contains(&bracket_byte) {
-        return None;
-    }
-
-    let gutter_width = if editor.show_line_numbers {
-        usize::from(crate::editor_highlight::line_number_gutter_width(
-            editor.textarea.lines().len(),
-        ))
-    } else {
-        0
-    };
-    let clicked_col_on_screen = (position.x - content_area.x) as usize;
-    let expected_col = gutter_width
-        + unicode_width::UnicodeWidthStr::width(&line[visual_row.start_byte..bracket_byte]);
-    let checkbox_span = expected_col..expected_col + 3; // "[ ]" / "[x]"
-    checkbox_span
-        .contains(&clicked_col_on_screen)
-        .then_some((row, bracket_col, checked))
 }
 
 fn is_press(key: &crossterm::event::KeyEvent) -> bool {
@@ -22927,7 +22916,7 @@ mod tests {
             .iter()
             .any(|request| matches!(request,
             ClientRequest::NewPane { parent_group, kind: ilium_ipc::NewPaneKind::PlainShell,
-                working_directory: ilium_ipc::NewPaneWorkingDirectory::WorkspacePane(source) }
+                working_directory: ilium_ipc::NewPaneWorkingDirectory::WorkspacePane(source), .. }
                 if *parent_group == group && *source == pane)));
     }
 
@@ -27492,6 +27481,7 @@ mod tests {
                 .into_iter()
                 .find(|request| matches!(request, ClientRequest::NewPane { .. })),
             Some(ClientRequest::NewPane {
+                request_id: 1,
                 parent_group: group,
                 kind: ilium_ipc::NewPaneKind::Editor(resolved_path.clone()),
                 working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,

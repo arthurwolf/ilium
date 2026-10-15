@@ -322,10 +322,26 @@ mod tests {
                 "cycle {cycle} lost or reordered its first request"
             );
             let remaining = read_attach_events(&mut queued).await;
-            assert!(matches!(
-                remaining.first(),
-                Some(ServerEvent::PaneStateSnapshot { .. })
-            ));
+            // The rejected first request also broadcasts retained session
+            // feedback. It may precede the subsequent valid attach snapshot.
+            let snapshot_index = remaining
+                .iter()
+                .position(|event| matches!(event, ServerEvent::PaneStateSnapshot { .. }))
+                .expect("valid attach must establish its authoritative tree");
+            assert!(
+                remaining[..snapshot_index].iter().all(
+                    |event| matches!(event, ServerEvent::BlockingErrorsSnapshot { errors }
+                    if errors.iter().any(|error| error.message.contains(wrong_session.as_str())))
+                ),
+                "only visible feedback for the refused request may precede attachment"
+            );
+            assert!(
+                remaining[snapshot_index..].iter().any(
+                    |event| matches!(event, ServerEvent::BlockingErrorsSnapshot { errors }
+                    if errors.iter().any(|error| error.message.contains(wrong_session.as_str())))
+                ),
+                "attachment must replay the retained request failure"
+            );
             assert_eq!(
                 listener.tracked_count(),
                 1,

@@ -3526,6 +3526,7 @@ mod tests {
         )
     }
 
+    #[allow(clippy::too_many_arguments)] // Test renderer takes every tree model input explicitly.
     fn render_tree_buffer_with_models(
         tree: &Tree,
         state: &mut TreeState<NodeId>,

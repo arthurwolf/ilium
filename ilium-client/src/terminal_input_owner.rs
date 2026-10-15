@@ -192,6 +192,7 @@ impl InputEvent {
     }
     /// Existing hover-motion coalescing is an explicit disposition. Other
     /// original input cannot pass through this method or be discarded by it.
+    #[allow(clippy::result_large_err)] // The refusal hands the original value back unchanged; boxing would allocate on that path.
     pub(crate) fn coalesce_motion(self) -> Result<(), Self> {
         if !matches!(
             self.view(),
@@ -1553,6 +1554,7 @@ impl InputShutdownReport {
     pub fn failure(&self) -> Option<&InputFailure> {
         self.failure.as_deref()
     }
+    #[allow(clippy::result_large_err)] // The refusal hands the original value back unchanged; boxing would allocate on that path.
     pub fn into_result(self) -> Result<(), InputFailure> {
         if self.exit == WorkerExit::Joined
             && self.pending.is_empty()
@@ -1992,6 +1994,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    #[allow(clippy::await_holding_lock)] // Serial test guard only; the current-thread runtime never contends it.
     async fn full_queue_preserves_every_paste_and_its_original_allocation() {
         let _serial = INPUT_TEST_LOCK
             .lock()
@@ -2182,6 +2185,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    #[allow(clippy::await_holding_lock)] // Serial test guard only; the current-thread runtime never contends it.
     async fn read_failure_is_delivered_once_and_does_not_become_normal_end_of_stream() {
         let _serial = INPUT_TEST_LOCK
             .lock()

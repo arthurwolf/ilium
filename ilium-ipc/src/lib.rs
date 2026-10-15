@@ -34,8 +34,8 @@ pub use ilium_agent_debug::{
 };
 pub use protocol::{
     AgentDetectionSettings, AgentDetectionSettingsError, AntigravityStatuslineAction,
-    BlockingError, ClientRequest, CustomAgentSignature, DetectionReason, MouseButton, MouseEventKind,
-    MouseModifiers, NewPaneKind, NewPaneWorkingDirectory, PaneDetectionEvidence,
+    BlockingError, ClientRequest, CustomAgentSignature, DetectionReason, MouseButton,
+    MouseEventKind, MouseModifiers, NewPaneKind, NewPaneWorkingDirectory, PaneDetectionEvidence,
     PaneTitleObservation, ProgressMonitorAccepted, ProgressMonitorPreflight,
     ProgressMonitorRejection, ProgressMonitorRejectionCode, ProgressMonitorStatus, ProgressWaitEnd,
     ProgressWaitOutcome, PromptSubmissionSource, RepoFacts, ServerEvent, WorkspaceClosePolicy,
@@ -722,10 +722,22 @@ mod tests {
     fn sample_server_events() -> Vec<ServerEvent> {
         vec![
             ServerEvent::TreeSnapshot(sample_tree()),
-            ServerEvent::BlockingErrorsSnapshot { errors: vec![BlockingError { node_id: Some(NodeId(2)), operation: "launch".into(), message: "directory unavailable".into() }] },
+            ServerEvent::BlockingErrorsSnapshot {
+                errors: vec![BlockingError {
+                    node_id: Some(NodeId(2)),
+                    operation: "launch".into(),
+                    message: "directory unavailable".into(),
+                }],
+            },
             ServerEvent::BlockingErrorsSnapshot { errors: vec![] },
-            ServerEvent::PaneCreateFinished { request_id: 7, result: Ok(NodeId(2)) },
-            ServerEvent::PaneCreateFinished { request_id: 8, result: Err("launch refused".into()) },
+            ServerEvent::PaneCreateFinished {
+                request_id: 7,
+                result: Ok(NodeId(2)),
+            },
+            ServerEvent::PaneCreateFinished {
+                request_id: 8,
+                result: Err("launch refused".into()),
+            },
             ServerEvent::PaneStateSnapshot {
                 tree: sample_tree(),
                 detection_evidence: vec![(

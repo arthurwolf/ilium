@@ -559,8 +559,10 @@ mod tests {
     fn typed_threshold_applies_when_valid_and_rejects_values_of_ten_or_less() {
         use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
         let (mut app, _directory) = app();
-        let mut state = SettingsState::default();
-        state.selected_row = ROW_THRESHOLD;
+        let mut state = SettingsState {
+            selected_row: ROW_THRESHOLD,
+            ..SettingsState::default()
+        };
         click(&mut app, &mut state, PaddingHit::Field);
         assert_eq!(state.padding.editing.as_deref(), Some(""));
         for character in ['1', '5', '0'] {

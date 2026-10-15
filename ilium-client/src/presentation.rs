@@ -397,6 +397,7 @@ impl Presenter {
     pub fn outstanding_frames(&self) -> usize {
         self.slots.used.load(Ordering::Acquire)
     }
+    #[allow(clippy::result_large_err)] // The refusal hands the original value back unchanged; boxing would allocate on that path.
     pub fn submit(&self, frame: PreparedFrame) -> Result<(), SubmissionError> {
         if !Arc::ptr_eq(&frame._reservation.slots, &self.slots) {
             return Err(SubmissionError {
