@@ -64,6 +64,7 @@ pub(crate) fn routes() -> Router<Arc<ServerState>> {
         .route("/v1/panes", get(find_panes).post(create_pane))
         .route("/v1/panes/{id}", get(pane))
         .route("/v1/panes/{id}/input", post(pane_input))
+        .route("/v1/voice", post(voice_text))
 }
 
 fn format_of(parameters: &HashMap<String, String>) -> Result<Format, (StatusCode, Json<Value>)> {
@@ -373,6 +374,75 @@ async fn pane_input(
     run_operation(&state, operation).await
 }
 
+#[derive(Deserialize)]
+struct VoiceBody {
+    sentences: Vec<String>,
+    #[serde(default)]
+    start_voice: bool,
+}
+
+/// How long `POST /v1/voice` waits for the voice-hosting client to answer.
+const VOICE_REPLY_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// `POST /v1/voice`: `{"sentences": ["..."], "start_voice": false}` types the
+/// sentences into the live voice session, like `ilium voice say`.
+async fn voice_text(
+    State(state): State<Arc<ServerState>>,
+    Json(body): Json<VoiceBody>,
+) -> ApiResult {
+    let (sender, mut receiver) = reply_channel(&state)?;
+    let request = ClientRequest::SubmitVoiceText {
+        request_id: next_request_id(),
+        sentences: body.sentences,
+        start_voice: body.start_voice,
+    };
+    handle_request(&state, request, &sender).await;
+    let deadline = Instant::now() + VOICE_REPLY_TIMEOUT;
+    // `sender` stays alive so the relay can still deliver the answer.
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        let queued = tokio::time::timeout(remaining, receiver.recv_queued())
+            .await
+            .map_err(|_| {
+                failure(
+                    StatusCode::GATEWAY_TIMEOUT,
+                    "unconfirmed",
+                    "no voice-hosting client answered in time",
+                )
+            })?
+            .ok_or_else(|| {
+                failure(
+                    StatusCode::CONFLICT,
+                    "unconfirmed",
+                    "the reply channel closed before the voice session answered",
+                )
+            })?;
+        match queued.event {
+            ServerEvent::VoiceTextResult {
+                result: Ok(accepted),
+                ..
+            } => {
+                return Ok(Json(json!({
+                    "type": "result",
+                    "ok": true,
+                    "op": "voice_text",
+                    "sentence_count": accepted.sentence_count,
+                    "started_voice": accepted.started_voice,
+                }))
+                .into_response())
+            }
+            ServerEvent::VoiceTextResult {
+                result: Err(rejection),
+                ..
+            } => return Err(failure(StatusCode::CONFLICT, "rejected", rejection.message)),
+            ServerEvent::Error { message } => {
+                return Err(failure(StatusCode::CONFLICT, "rejected", message))
+            }
+            _ => {}
+        }
+    }
+}
+
 async fn run_operation(state: &Arc<ServerState>, operation: Operation) -> ApiResult {
     let before = state.tree.read().await.clone();
     let requests = operation
@@ -391,8 +461,13 @@ async fn run_operation(state: &Arc<ServerState>, operation: Operation) -> ApiRes
     drop(sender);
     let mut rejection = None;
     while let Some(queued) = receiver.recv_queued().await {
-        if let ServerEvent::Error { message } = queued.event {
-            rejection = Some(message);
+        match queued.event {
+            ServerEvent::Error { message } => rejection = Some(message),
+            ServerEvent::PaneFrozen {
+                result: Err(message),
+                ..
+            } => rejection = Some(message),
+            _ => {}
         }
     }
     if let Some(message) = rejection {

@@ -171,6 +171,10 @@ impl Link {
                         ServerEvent::WorkspaceRemovalBlocked { reasons, .. } => {
                             return Err(CtlFailure::rejected(removal_refusal(&reasons)))
                         }
+                        ServerEvent::PaneFrozen {
+                            result: Err(message),
+                            ..
+                        } => return Err(CtlFailure::rejected(message)),
                         ServerEvent::TreeSnapshot(tree) => latest = tree,
                         _ => {}
                     }
@@ -205,6 +209,10 @@ impl Link {
                         ServerEvent::WorkspaceRemovalBlocked { reasons, .. } => {
                             return Err(CtlFailure::rejected(removal_refusal(&reasons)));
                         }
+                        ServerEvent::PaneFrozen {
+                            result: Err(message),
+                            ..
+                        } => return Err(CtlFailure::rejected(message)),
                         _ => {}
                     }
                 }
@@ -254,5 +262,8 @@ fn removal_refusal(reasons: &[String]) -> String {
     if reasons.is_empty() {
         return "the server refused the worktree removal without giving a reason".into();
     }
-    format!("the server refused the worktree removal: {}", reasons.join("; "))
+    format!(
+        "the server refused the worktree removal: {}",
+        reasons.join("; ")
+    )
 }

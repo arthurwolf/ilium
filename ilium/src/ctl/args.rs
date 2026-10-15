@@ -162,6 +162,38 @@ pub(crate) enum CtlCommand {
         #[arg(long)]
         parent: Option<u64>,
     },
+    /// Show two or more panes side by side as a split view.
+    NewSplitView {
+        name: String,
+        /// Pane ids, in display order.
+        #[arg(required = true, num_args = 2..)]
+        panes: Vec<u64>,
+        #[arg(long, conflicts_with = "parent")]
+        project: Option<String>,
+        #[arg(long)]
+        parent: Option<u64>,
+        /// Stack the panes top to bottom instead of left to right.
+        #[arg(long)]
+        horizontal: bool,
+    },
+    /// Replace the process of a pane with a shell command line.
+    ReplaceCommand { id: u64, command: String },
+    /// Open a kanban board pane backed by a folder or a Markdown file.
+    NewBoard {
+        name: String,
+        path: PathBuf,
+        /// The path is one Markdown file instead of a folder of columns.
+        #[arg(long)]
+        markdown: bool,
+        #[arg(long, conflicts_with = "parent")]
+        project: Option<String>,
+        #[arg(long)]
+        parent: Option<u64>,
+    },
+    /// Stop a pane's agent, keeping a frozen placeholder that RESUME restarts.
+    Freeze { id: u64, resume_command: String },
+    /// Restart a frozen pane with its resume command.
+    Unfreeze { id: u64 },
     /// Add a file-browser folder root under a project or group.
     NewFolder {
         path: PathBuf,

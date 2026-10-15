@@ -627,7 +627,9 @@ Global options: `--session NAME` (session of the `--cwd` project), `--socket PAT
 | `ctl wait ID [--state idle,done] [--timeout S]` | Block until an agent reaches a state or the pane closes. |
 | `ctl whoami`, `ctl sessions` | The calling pane; live sessions. |
 | `ctl new-pane [--project P \| --parent ID] [--workdir DIR] [--agent claude\|codex\|agy [--prompt T]] [--worktree --branch B [--base REF]] [--editor FILE] [--keep-open] [-- CMD]` | Create a shell, command, editor or agent pane; a worktree pane creates the Git worktree first. |
-| `ctl new-project DIR`, `new-group NAME`, `new-folder DIR`, `change-folder P DIR` | Create and re-point containers. |
+| `ctl new-project DIR`, `new-group NAME`, `new-folder DIR`, `new-split-view NAME ID ID...`, `change-folder P DIR` | Create and re-point containers and split views. |
+| `ctl replace-command ID COMMAND` | Replace the process of a pane with a shell command line. |
+| `ctl new-board NAME PATH [--markdown]`, `freeze ID RESUME`, `unfreeze ID` | Open a kanban board pane; park a pane as a frozen placeholder and restart it. |
 | `ctl rename ID TITLE`, `close ID [--worktree keep\|remove\|remove-and-branch]`, `move ID (--up \| --down \| --to PARENT [--index N])` | Rename, close and arrange. |
 | `ctl send ID TEXT [--no-enter]`, `keys ID KEY...`, `schedule ID --in S TEXT`, `queue ID TEXT [--times N \| --forever]`, `queue-clear ID`, `terminate ID` | Drive a pane. |
 | `ctl bookmark ID [--off]`, `expand ID`, `collapse ID`, `lock-closed ID [--off]` | Sidebar state. |
