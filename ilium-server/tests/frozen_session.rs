@@ -9,10 +9,12 @@ use std::time::Duration;
 #[cfg(unix)]
 use std::process::Command;
 
-use ilium_core::{BuiltinAgentProvider, NodeId, ROOT_ID};
-use ilium_ipc::{
-    read_frame, write_frame, ClientRequest, NewPaneKind, ServerEvent, WorkspaceCreateSpec,
-};
+#[cfg(unix)]
+use ilium_core::BuiltinAgentProvider;
+use ilium_core::{NodeId, ROOT_ID};
+#[cfg(unix)]
+use ilium_ipc::WorkspaceCreateSpec;
+use ilium_ipc::{read_frame, write_frame, ClientRequest, NewPaneKind, ServerEvent};
 use ilium_server::config::DetectionConfig;
 
 mod common;
@@ -518,6 +520,7 @@ async fn unfreeze_preserves_worktree_ownership() {
     let _ = tokio::time::timeout(Duration::from_secs(5), &mut server.server_task).await;
 }
 
+#[cfg(unix)]
 async fn wait_for_detected_replacement_after_unfreeze(
     client: &mut SessionStream,
     frozen_pane_id: NodeId,

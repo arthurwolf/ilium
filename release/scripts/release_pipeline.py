@@ -228,7 +228,8 @@ def logged(command, root, log, environment=None, timeout=10_800):
         lines = text.splitlines()
         markers = []
         for index, line in enumerate(lines):
-            if re.search(r'FAILED|panicked at|^error(\[|:)|^failures:|^---- ', line):
+            line = re.sub(r'\x1b\[[0-9;]*m', '', line)
+            if re.search(r'FAILED|panicked at|^\s*error(\[|:)|^failures:|^---- |^\s*--> ', line):
                 markers.append(line)
                 if 'panicked at' in line and index + 1 < len(lines):
                     markers.append(lines[index + 1])  # the panic message itself
@@ -383,8 +384,14 @@ def native(arguments):
         command = ['cargo', 'test', '--locked', '--workspace', '--no-fail-fast', '--target', arguments.target] + cargo_arguments
         if target['os'] != 'linux':
             return command
-        scope = ['systemd-run', '--user', '--wait', '--pipe', '--collect', '--property=Delegate=yes', '--working-directory=' + str(root)]
-        scope += ['--setenv=%s=%s' % (key, value) for key, value in sorted(test_environment.items()) if '\n' not in str(value)]
+        # The system manager (not --user) owns full controller delegation: the
+        # animation sandbox needs memory, pids and cpu in an owned cgroup, which
+        # the user manager of older runner images does not delegate.
+        scope = ['sudo', '-n', 'systemd-run', '--uid=%d' % os.getuid(), '--gid=%d' % os.getgid(), '--wait', '--pipe', '--collect', '--property=Delegate=yes', '--working-directory=' + str(root)]
+        scoped_environment = dict(test_environment)
+        scoped_environment.setdefault('HOME', os.environ.get('HOME', ''))
+        scoped_environment.setdefault('PATH', os.environ.get('PATH', ''))
+        scope += ['--setenv=%s=%s' % (key, value) for key, value in sorted(scoped_environment.items()) if '\n' not in str(value) and value != '']
         return scope + ['/usr/bin/env', 'cargo'] + command[1:]
 
     logged(test_command(['--lib', '--bins'], parallel_environment), root, work / 'workspace-unit-tests.log', parallel_environment, timeout=7200)
