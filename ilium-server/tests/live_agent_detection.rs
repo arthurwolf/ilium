@@ -200,6 +200,7 @@ async fn focusing_a_finished_agent_clears_its_bell_through_live_ipc() {
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: NewPaneKind::Command(fake_codex_path.to_string_lossy().to_string()),
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
@@ -387,6 +388,7 @@ async fn a_real_process_named_codex_preserves_its_pursuing_goal_status_through_t
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: NewPaneKind::Command(fake_codex_path.to_string_lossy().to_string()),
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
@@ -884,6 +886,27 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
     let fake_claude_path =
         write_resumed_transcript_holding_fake_agent_binary(fake_bin_dir.path(), "claude");
     let resumed_session_id = "95fd0645-3331-408b-a7e5-36e6007bfb78";
+    // Diagnostic: what the pane will actually execute. Printed to the test's
+    // captured stdout, which cargo shows for a failing test.
+    {
+        let magic = std::fs::read(&fake_claude_path)
+            .map(|bytes| bytes.iter().take(4).copied().collect::<Vec<u8>>())
+            .unwrap_or_default();
+        eprintln!(
+            "diagnostic: fake agent {} len={:?} magic={:?}",
+            fake_claude_path.display(),
+            std::fs::metadata(&fake_claude_path)
+                .map(|meta| meta.len())
+                .ok(),
+            magic
+        );
+        eprintln!(
+            "diagnostic: SHELL={:?} PATH={:?} /bin/sh -> {:?}",
+            std::env::var("SHELL").ok(),
+            std::env::var("PATH").ok(),
+            std::fs::read_link("/bin/sh").ok()
+        );
+    }
 
     let detection_config = DetectionConfig {
         working_poll_interval: Duration::from_millis(200),
@@ -928,6 +951,7 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: NewPaneKind::Command(command_line.clone()),
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
@@ -1221,6 +1245,7 @@ async fn a_resumed_codex_processs_session_id_is_discovered_and_broadcast() {
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: NewPaneKind::Command(command_line),
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
@@ -1323,6 +1348,7 @@ async fn progress_completion_notifies_a_codex_agent_without_touching_its_goal() 
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: NewPaneKind::Command(format!("{} resume {session_id}", fake_codex.display())),
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
@@ -1517,6 +1543,7 @@ async fn a_codex_processs_open_transcript_is_discovered_and_broadcast() {
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: NewPaneKind::Command(format!(
                 "{} {}",
@@ -1598,6 +1625,7 @@ async fn codex_clear_rebinds_the_same_process_to_its_new_open_transcript() {
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: NewPaneKind::Command(format!(
                 "{} {} {}",
@@ -2012,6 +2040,7 @@ async fn claude_resume_full_session_prompt_is_auto_answered() {
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: NewPaneKind::Command(fake_claude_path.to_string_lossy().to_string()),
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,

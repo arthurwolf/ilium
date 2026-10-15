@@ -106,6 +106,7 @@ pub struct PtyCommand {
     rows: u16,
     cols: u16,
     env: Vec<(String, String)>,
+    automatic_terminal_query_replies: bool,
 }
 
 impl PtyCommand {
@@ -119,7 +120,17 @@ impl PtyCommand {
             rows,
             cols,
             env: Vec::new(),
+            automatic_terminal_query_replies: true,
         }
+    }
+
+    /// Selects whether the emulator answers terminal capability queries.
+    /// Defaults to true. Disable only when the caller owns manual replies or
+    /// intentionally models a silent terminal; parsing and input ordering stay unchanged.
+    #[must_use]
+    pub fn automatic_terminal_query_replies(mut self, enabled: bool) -> Self {
+        self.automatic_terminal_query_replies = enabled;
+        self
     }
 
     /// Appends one argument (builder-style).
@@ -901,7 +912,9 @@ impl PtySession {
             rows,
             cols,
             0,
-            TerminalQueryResponder::new(),
+            TerminalQueryResponder::with_automatic_replies(
+                command.automatic_terminal_query_replies,
+            ),
         )));
         let screen_generation = Arc::new(AtomicU64::new(0));
         let screen_reader = ScreenReader::new(Arc::clone(&parser), Arc::clone(&screen_generation));

@@ -335,6 +335,7 @@ fn safe_geometry(width: u16, cell: (u16, u16)) -> bool {
 }
 
 /// No filesystem access here: encoding and rasterization are CPU work.
+#[allow(clippy::too_many_arguments)] // Layout, theme and raster limits vary independently.
 pub(crate) fn render_prepared(
     document: &Document,
     images: &std::collections::HashMap<std::path::PathBuf, Vec<u8>>,

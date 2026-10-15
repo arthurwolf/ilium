@@ -29,7 +29,10 @@ pub(super) async fn run(
     let outcome = dispatch(command, &mut link).await;
     link.detach().await;
     let document = outcome?;
-    print!("{}", render_document(&document.value, format, document.shape));
+    print!(
+        "{}",
+        render_document(&document.value, format, document.shape)
+    );
     Ok(())
 }
 
@@ -37,15 +40,21 @@ async fn dispatch(command: CtlCommand, link: &mut Link) -> Result<Document, CtlF
     let tree = &link.tree().clone();
     let session = &link.session_name().to_owned();
     Ok(match command {
-        CtlCommand::Tree { depth, project, no_details } => {
-            documents::tree_document(tree, session, project.as_deref(), depth, !no_details)?
-        }
-        CtlCommand::Project { selector, depth, no_details } => {
-            documents::project_document(tree, &selector, depth, !no_details)?
-        }
-        CtlCommand::Node { id, depth, no_details } => {
-            documents::node_document(tree, &id, depth, !no_details)?
-        }
+        CtlCommand::Tree {
+            depth,
+            project,
+            no_details,
+        } => documents::tree_document(tree, session, project.as_deref(), depth, !no_details)?,
+        CtlCommand::Project {
+            selector,
+            depth,
+            no_details,
+        } => documents::project_document(tree, &selector, depth, !no_details)?,
+        CtlCommand::Node {
+            id,
+            depth,
+            no_details,
+        } => documents::node_document(tree, &id, depth, !no_details)?,
         CtlCommand::Pane { id, screen, lines } => {
             let mut document = documents::pane_document(tree, &id)?;
             if screen {
@@ -57,9 +66,21 @@ async fn dispatch(command: CtlCommand, link: &mut Link) -> Result<Document, CtlF
             }
             document
         }
-        CtlCommand::Find { agent, state, kind, project, name_contains } => documents::find_panes(
+        CtlCommand::Find {
+            agent,
+            state,
+            kind,
+            project,
+            name_contains,
+        } => documents::find_panes(
             tree,
-            &PaneFilter { agent, state, kind, project, name_contains },
+            &PaneFilter {
+                agent,
+                state,
+                kind,
+                project,
+                name_contains,
+            },
         )?,
         CtlCommand::Screen { id, lines } => {
             let pane_id = resolve_pane(tree, &id)?;
@@ -81,7 +102,9 @@ async fn screen_text(
     lines: Option<usize>,
 ) -> Result<String, CtlFailure> {
     let mut evidence = PaneEvidence::default();
-    link.attached.collect_shell_screens(&[pane_id], &mut evidence).await;
+    link.attached
+        .collect_shell_screens(&[pane_id], &mut evidence)
+        .await;
     if let Some(message) = evidence.screen_errors.remove(&pane_id) {
         return Err(CtlFailure::rejected(format!(
             "cannot read the screen of pane {}: {message}",
@@ -97,9 +120,8 @@ async fn screen_text(
 }
 
 fn whoami(link: &Link) -> Result<Document, CtlFailure> {
-    let identity = crate::pane_identity_from_env().map_err(|_| {
-        CtlFailure::usage("not inside an Ilium pane (ILIUM_PANE_ID is not set)")
-    })?;
+    let identity = crate::pane_identity_from_env()
+        .map_err(|_| CtlFailure::usage("not inside an Ilium pane (ILIUM_PANE_ID is not set)"))?;
     let mut value = json!({
         "pane": identity.pane_id.0,
         "session": identity.session_name,
@@ -108,7 +130,10 @@ fn whoami(link: &Link) -> Result<Document, CtlFailure> {
     if let Ok(document) = documents::pane_document(link.tree(), &identity.pane_id.0.to_string()) {
         value["node"] = document.value;
     }
-    Ok(Document { value, shape: Shape::Generic })
+    Ok(Document {
+        value,
+        shape: Shape::Generic,
+    })
 }
 
 async fn wait(
@@ -135,7 +160,13 @@ async fn wait(
                 shape: Shape::Generic,
             });
         };
-        let state = detail["status"]["state"].as_str().unwrap_or_default().to_owned();
+        // Agents report a turn state; other panes only have a kind.
+        let status = &detail["status"];
+        let state = status["state"]
+            .as_str()
+            .or_else(|| status["kind"].as_str())
+            .unwrap_or_default()
+            .to_owned();
         if wanted.contains(&state) {
             return Ok(Document {
                 value: json!({"pane": pane_id.0, "state": state, "closed": false}),
@@ -155,7 +186,8 @@ async fn wait(
 }
 
 async fn sessions(format: Format) -> Result<(), CtlFailure> {
-    let sockets = pane_scan::live_sockets().map_err(|error| CtlFailure::no_session(error.to_string()))?;
+    let sockets =
+        pane_scan::live_sockets().map_err(|error| CtlFailure::no_session(error.to_string()))?;
     let mut listed = Vec::new();
     for socket in &sockets {
         match pane_scan::attach(socket).await {

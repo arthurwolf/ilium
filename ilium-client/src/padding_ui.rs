@@ -1,5 +1,5 @@
-//! The Padding settings tab: three selectable boxes (Disabled, Enabled, Size
-//! dependent) side by side, a threshold input inside the size-dependent box
+//! The Padding settings tab: three selectable boxes (Disabled, Size
+//! dependent, Enabled) side by side, a threshold input inside the size-dependent box
 //! and, once padding can apply, the "Padding fine-tuning" button.
 //!
 //! [`tab_layout`] is the single source of geometry: [`render`] paints from it
@@ -81,7 +81,7 @@ pub fn tab_layout(area: Rect, settings: &PaddingSettings) -> TabLayout {
     };
     let cards = [card(0), card(1), card(2)];
 
-    let inside = Block::default().borders(Borders::ALL).inner(cards[2]);
+    let inside = Block::default().borders(Borders::ALL).inner(cards[1]);
     let input_row = inside.bottom().saturating_sub(1);
     let has_big_steps = inside.width >= BUTTON_WIDTH * 4 + FIELD_WIDTH + 4;
     let total = if has_big_steps {
@@ -113,8 +113,8 @@ pub fn tab_layout(area: Rect, settings: &PaddingSettings) -> TabLayout {
 
     TabLayout {
         cards,
-        big_decrement: big_decrement.map(|rect| rect),
-        decrement: decrement.clone(),
+        big_decrement,
+        decrement,
         field,
         increment,
         big_increment,
@@ -233,10 +233,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
             ui.hover,
             Some(PaddingHit::Mode(hovered)) if hovered == mode
         ) || (mode == PaddingMode::WidthDependent
-            && matches!(
-                ui.hover,
-                Some(PaddingHit::Step(_) | PaddingHit::Field)
-            ));
+            && matches!(ui.hover, Some(PaddingHit::Step(_) | PaddingHit::Field)));
         let is_focused = state.selected_row == ROW_MODE && is_selected;
         let marker = if is_selected { "●" } else { "○" };
         let title_style = if is_selected {
@@ -277,8 +274,11 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
         );
         if is_focused && index < 3 {
             frame.render_widget(
-                Paragraph::new(Span::styled("◂ ▸ arrows", Style::new().add_modifier(Modifier::DIM)))
-                    .alignment(Alignment::Right),
+                Paragraph::new(Span::styled(
+                    "◂ ▸ arrows",
+                    Style::new().add_modifier(Modifier::DIM),
+                ))
+                .alignment(Alignment::Right),
                 Rect::new(inside.x, inside.y, inside.width, 1),
             );
         }
@@ -288,21 +288,24 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
     }
 
     if let Some(button) = layout.fine_tune {
-        let is_hovered = ui.hover == Some(PaddingHit::FineTune)
-            || state.selected_row == ROW_FINE_TUNE;
+        let is_hovered =
+            ui.hover == Some(PaddingHit::FineTune) || state.selected_row == ROW_FINE_TUNE;
         let style = if is_hovered {
             theme::selected_style().add_modifier(Modifier::BOLD)
         } else {
             Style::new().add_modifier(Modifier::REVERSED)
         };
-        frame.render_widget(
-            Paragraph::new(Span::styled(FINE_TUNE_LABEL, style)),
-            button,
-        );
+        frame.render_widget(Paragraph::new(Span::styled(FINE_TUNE_LABEL, style)), button);
     }
 }
 
-fn render_threshold(frame: &mut Frame, inside: Rect, layout: &TabLayout, app: &App, state: &SettingsState) {
+fn render_threshold(
+    frame: &mut Frame,
+    inside: Rect,
+    layout: &TabLayout,
+    app: &App,
+    state: &SettingsState,
+) {
     let settings = &app.padding_settings;
     let ui = &state.padding;
     let is_active = settings.mode == PaddingMode::WidthDependent;
@@ -313,12 +316,7 @@ fn render_threshold(frame: &mut Frame, inside: Rect, layout: &TabLayout, app: &A
     };
     frame.render_widget(
         Paragraph::new(Span::styled("Terminal columns:", label_style)),
-        Rect::new(
-            inside.x,
-            layout.field.y.saturating_sub(1),
-            inside.width,
-            1,
-        ),
+        Rect::new(inside.x, layout.field.y.saturating_sub(1), inside.width, 1),
     );
     let hovered_step = |delta: i32| ui.hover == Some(PaddingHit::Step(delta));
     if let Some(rect) = layout.big_decrement {
@@ -483,7 +481,11 @@ mod tests {
             .unwrap();
         let buffer = terminal.backend().buffer();
         (0..height)
-            .map(|y| (0..width).map(|x| buffer[(x, y)].symbol()).collect::<String>())
+            .map(|y| {
+                (0..width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            })
             .collect::<Vec<_>>()
             .join("\n")
     }
@@ -497,7 +499,7 @@ mod tests {
             assert_eq!(pair[0].width, pair[1].width);
         }
         assert!(layout.fine_tune.is_none(), "hidden while disabled");
-        assert!(layout.cards[2].contains(layout.field.as_position()));
+        assert!(layout.cards[1].contains(layout.field.as_position()));
     }
 
     #[test]
@@ -523,13 +525,17 @@ mod tests {
         let area = Rect::new(0, 0, 90, 20);
         let layout = tab_layout(area, &app.padding_settings);
 
-        let target = hit(area, &app.padding_settings, layout.cards[1].as_position()).unwrap();
+        let target = hit(area, &app.padding_settings, layout.cards[2].as_position()).unwrap();
         assert_eq!(target, PaddingHit::Mode(PaddingMode::Enabled));
         click(&mut app, &mut state, target);
         assert_eq!(app.padding_settings.mode, PaddingMode::Enabled);
 
         let layout = tab_layout(area, &app.padding_settings);
-        let button = hit(area, &app.padding_settings, layout.fine_tune.unwrap().as_position());
+        let button = hit(
+            area,
+            &app.padding_settings,
+            layout.fine_tune.unwrap().as_position(),
+        );
         assert_eq!(button, Some(PaddingHit::FineTune));
         click(&mut app, &mut state, PaddingHit::FineTune);
         assert!(state.padding.dialog.is_some());
@@ -540,7 +546,11 @@ mod tests {
         click(&mut app, &mut state, step);
         assert_eq!(app.padding_settings.mode, PaddingMode::WidthDependent);
         assert_eq!(app.padding_settings.width_threshold, 201);
-        let big = hit(area, &app.padding_settings, layout.big_decrement.unwrap().as_position());
+        let big = hit(
+            area,
+            &app.padding_settings,
+            layout.big_decrement.unwrap().as_position(),
+        );
         click(&mut app, &mut state, big.unwrap());
         assert_eq!(app.padding_settings.width_threshold, 191);
     }
@@ -549,8 +559,10 @@ mod tests {
     fn typed_threshold_applies_when_valid_and_rejects_values_of_ten_or_less() {
         use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
         let (mut app, _directory) = app();
-        let mut state = SettingsState::default();
-        state.selected_row = ROW_THRESHOLD;
+        let mut state = SettingsState {
+            selected_row: ROW_THRESHOLD,
+            ..SettingsState::default()
+        };
         click(&mut app, &mut state, PaddingHit::Field);
         assert_eq!(state.padding.editing.as_deref(), Some(""));
         for character in ['1', '5', '0'] {
@@ -561,7 +573,11 @@ mod tests {
             );
         }
         assert_eq!(app.padding_settings.width_threshold, 150);
-        handle_key(&mut app, &mut state, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        handle_key(
+            &mut app,
+            &mut state,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+        );
         assert!(state.padding.editing.is_none());
 
         click(&mut app, &mut state, PaddingHit::Field);
@@ -572,8 +588,15 @@ mod tests {
                 KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE),
             );
         }
-        assert_eq!(app.padding_settings.width_threshold, 150, "10 is not above 10");
-        handle_key(&mut app, &mut state, KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(
+            app.padding_settings.width_threshold, 150,
+            "10 is not above 10"
+        );
+        handle_key(
+            &mut app,
+            &mut state,
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+        );
         assert!(app.status_message.is_some());
     }
 

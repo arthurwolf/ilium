@@ -4,6 +4,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use crate::session::{self, LiveSessionSocket};
+use ilium_control::operation::WorktreeAction;
 use ilium_control::Operation;
 use ilium_core::{NodeId, Tree, ROOT_ID};
 use ilium_ipc::{ClientRequest, ServerEvent};
@@ -48,7 +49,8 @@ async fn resolve_socket(
     if let Some(socket_path) = &target.socket {
         let wanted = ilium_platform::paths::canonicalize(socket_path)
             .unwrap_or_else(|_| socket_path.clone());
-        let live = pane_scan::live_sockets().map_err(|error| CtlFailure::no_session(error.to_string()))?;
+        let live =
+            pane_scan::live_sockets().map_err(|error| CtlFailure::no_session(error.to_string()))?;
         return live
             .into_iter()
             .find(|socket| {
@@ -56,7 +58,9 @@ async fn resolve_socket(
                     .unwrap_or_else(|_| socket.socket_path.clone())
                     == wanted
             })
-            .ok_or_else(|| CtlFailure::no_session(format!("no live session at {}", socket_path.display())));
+            .ok_or_else(|| {
+                CtlFailure::no_session(format!("no live session at {}", socket_path.display()))
+            });
     }
     if target.session.is_none() {
         if let Ok(identity) = crate::pane_identity_from_env() {
@@ -66,7 +70,10 @@ async fn resolve_socket(
             });
         }
     }
-    let name = target.session.as_deref().unwrap_or(session::DEFAULT_SESSION_NAME);
+    let name = target
+        .session
+        .as_deref()
+        .unwrap_or(session::DEFAULT_SESSION_NAME);
     let project_session = session::resolve_project_session(cwd, name)
         .map_err(|error| CtlFailure::usage(error.to_string()))?;
     if !session::is_session_live(&project_session.socket_path) {
@@ -106,9 +113,9 @@ impl Link {
 
     /// Reads the session's tree over a fresh connection.
     pub(crate) async fn fresh_tree(&self) -> Result<Tree, CtlFailure> {
-        let attached = pane_scan::attach(&self.socket)
-            .await
-            .map_err(|message| CtlFailure::no_session(format!("cannot re-read the session: {message}")))?;
+        let attached = pane_scan::attach(&self.socket).await.map_err(|message| {
+            CtlFailure::no_session(format!("cannot re-read the session: {message}"))
+        })?;
         let tree = attached.tree.clone();
         attached.detach().await;
         Ok(tree)
@@ -127,6 +134,11 @@ impl Link {
     /// Carries out `operation` and returns the confirmed result details.
     pub(crate) async fn apply(&mut self, operation: &Operation) -> Result<Value, CtlFailure> {
         let before = self.attached.tree.clone();
+        if let Operation::Close { pane, worktree } = operation {
+            if !matches!(worktree, WorktreeAction::Keep) {
+                refuse_removal_from_inside_worktree(&before, *pane)?;
+            }
+        }
         let requests = operation.requests(&before, crate::next_progress_request_id())?;
         for request in requests {
             self.send(request).await?;
@@ -153,7 +165,16 @@ impl Link {
                 Ok(Some(event)) => {
                     let (event, _retention) = event.into_parts();
                     match event {
-                        ServerEvent::Error { message } => return Err(CtlFailure::rejected(message)),
+                        ServerEvent::Error { message } => {
+                            return Err(CtlFailure::rejected(message))
+                        }
+                        ServerEvent::WorkspaceRemovalBlocked { reasons, .. } => {
+                            return Err(CtlFailure::rejected(removal_refusal(&reasons)))
+                        }
+                        ServerEvent::PaneFrozen {
+                            result: Err(message),
+                            ..
+                        } => return Err(CtlFailure::rejected(message)),
                         ServerEvent::TreeSnapshot(tree) => latest = tree,
                         _ => {}
                     }
@@ -177,11 +198,22 @@ impl Link {
             if now >= deadline {
                 return Ok(json!({}));
             }
-            match tokio::time::timeout(deadline - now, self.attached.connection.events.recv()).await {
+            match tokio::time::timeout(deadline - now, self.attached.connection.events.recv()).await
+            {
                 Ok(Some(event)) => {
                     let (event, _retention) = event.into_parts();
-                    if let ServerEvent::Error { message } = event {
-                        return Err(CtlFailure::rejected(message));
+                    match event {
+                        ServerEvent::Error { message } => {
+                            return Err(CtlFailure::rejected(message));
+                        }
+                        ServerEvent::WorkspaceRemovalBlocked { reasons, .. } => {
+                            return Err(CtlFailure::rejected(removal_refusal(&reasons)));
+                        }
+                        ServerEvent::PaneFrozen {
+                            result: Err(message),
+                            ..
+                        } => return Err(CtlFailure::rejected(message)),
+                        _ => {}
                     }
                 }
                 Ok(None) | Err(_) => return Ok(json!({})),
@@ -200,4 +232,38 @@ pub(crate) fn owning_project(tree: &Tree, node: NodeId) -> Option<NodeId> {
         }
         current = parent;
     }
+}
+
+/// The server refuses a worktree removal while any same-user process has its
+/// working directory inside the worktree, and the command asking for the
+/// removal is such a process when it runs there. Refuse here with the reason
+/// instead of sending a request that can only time out.
+fn refuse_removal_from_inside_worktree(tree: &Tree, pane: u64) -> Result<(), CtlFailure> {
+    let Some(workspace) = tree.pane_workspace(NodeId(pane)) else {
+        return Ok(());
+    };
+    let Ok(current_directory) = std::env::current_dir() else {
+        return Ok(());
+    };
+    let current_directory = std::fs::canonicalize(&current_directory).unwrap_or(current_directory);
+    let worktree_root = std::fs::canonicalize(&workspace.worktree_root)
+        .unwrap_or_else(|_| workspace.worktree_root.clone());
+    if current_directory.starts_with(&worktree_root) {
+        return Err(CtlFailure::rejected(format!(
+            "this command runs inside the worktree {} that it would remove; run it from another directory",
+            worktree_root.display()
+        )));
+    }
+    Ok(())
+}
+
+/// Turns the server's refusal reasons into the one message the user reads.
+fn removal_refusal(reasons: &[String]) -> String {
+    if reasons.is_empty() {
+        return "the server refused the worktree removal without giving a reason".into();
+    }
+    format!(
+        "the server refused the worktree removal: {}",
+        reasons.join("; ")
+    )
 }

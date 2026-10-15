@@ -33,6 +33,14 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             app.pane_detection_evidence = detection_evidence.into_iter().collect();
             None
         }
+        ServerEvent::BlockingErrorsSnapshot { errors } => {
+            app.replace_blocking_errors(errors);
+            None
+        }
+        ServerEvent::PaneCreateFinished { request_id, result } => {
+            app.receive_pane_create_finished(request_id, result);
+            None
+        }
         ServerEvent::AgentDetectionSettingsChanged { request_id, result } => {
             if let Some(request_id) = request_id {
                 app.receive_detection_number_reply(request_id, result);

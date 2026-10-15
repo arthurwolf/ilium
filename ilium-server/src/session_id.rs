@@ -580,10 +580,6 @@ pub fn discover_with_trace_bounded(
 /// agent debug view. Startup arguments are ignored after an in-process session
 /// transition because they still describe the identity used at launch.
 #[cfg(test)]
-#[expect(
-    dead_code,
-    reason = "retained as an internal test entry point for structured session discovery evidence"
-)]
 pub fn discover_with_trace(
     system: &System,
     pid: Pid,
@@ -794,10 +790,6 @@ fn from_arguments(class: &AgentClass, arguments: &[String]) -> Option<String> {
 /// has no session. `ilium_platform::process_info` documents which platforms
 /// can answer.
 #[cfg(test)]
-#[expect(
-    dead_code,
-    reason = "retained for test-only open-transcript evidence inspection"
-)]
 fn from_open_files(
     pid: u32,
     class: &AgentClass,

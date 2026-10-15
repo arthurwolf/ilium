@@ -314,7 +314,9 @@ enum ProgressCommand {
     /// `.claude/settings.local.json`). Reads the hook payload on stdin and,
     /// inside an Ilium pane, refuses a foreground Bash call with a tool
     /// timeout above three minutes that is not an `ilium progress` command:
-    /// exit 0 with a deny decision on stdout. Otherwise exits 0. Listed in
+    /// exit 0 with a deny decision on stdout. A background Bash call in a
+    /// pane passes with a reminder (`additionalContext`) to register a monitor
+    /// for long tasks. Otherwise exits 0. Listed in
     /// help on purpose: the project hook runs it only when `ilium progress
     /// --help` names `guard`.
     Guard,
@@ -1976,7 +1978,7 @@ async fn new_pane(
         Ok(None)
     })
     .await;
-    let baseline_pane_count = match baseline_wait {
+    let _baseline_pane_count = match baseline_wait {
         Ok(Ok(count)) => count,
         Ok(Err(message)) => return Err(message),
         Err(_elapsed) => None,
@@ -1991,6 +1993,7 @@ async fn new_pane(
     connection
         .requests
         .send(ilium_ipc::ClientRequest::NewPane {
+            request_id: 1,
             parent_group: ilium_core::ROOT_ID,
             kind,
             // The non-interactive CLI has no focused client-side terminal
@@ -2013,15 +2016,11 @@ async fn new_pane(
                         _event_retention,
                     )));
                 }
-                ilium_ipc::ServerEvent::TreeSnapshot(tree) => {
-                    let grew =
-                        baseline_pane_count.is_none_or(|baseline| tree.panes().count() > baseline);
-                    if grew {
-                        return Some(Ok(()));
-                    }
-                    // A `TreeSnapshot` that didn't grow the pane count is
-                    // some other client's unrelated mutation racing on the
-                    // same session -- keep waiting for our own.
+                ilium_ipc::ServerEvent::PaneCreateFinished {
+                    request_id: 1,
+                    result,
+                } => {
+                    return Some(result.map(|_| ()).map_err(CliError::ServerReportedError));
                 }
                 _ => {}
             }
