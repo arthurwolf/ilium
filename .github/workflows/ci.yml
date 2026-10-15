@@ -178,11 +178,19 @@ jobs:
                 ILIUM_ANIMATION_HELPER: ${{ github.workspace }}\target\debug\ilium-animation-helper.exe
 
     test-macos:
-        name: Test (macOS)
+        name: Test (macOS ${{ matrix.arch }})
         # Skipped on pull requests purely for cost. Push to master or dispatch
         # this workflow by hand when a macOS answer is actually needed.
         if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-        runs-on: macos-latest
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                    - runner: macos-15
+                      arch: Apple Silicon
+                    - runner: macos-15-intel
+                      arch: Intel
+        runs-on: ${{ matrix.runner }}
         timeout-minutes: 90
         steps:
             - uses: actions/checkout@v4
