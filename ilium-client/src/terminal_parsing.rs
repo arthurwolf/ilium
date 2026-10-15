@@ -111,7 +111,7 @@ impl ParserMemoryGovernor {
             }
         };
         Ok(ParserStorageLease {
-            root,
+            _root: root,
             bytes,
             normal_bytes: normal.then(|| self.normal_bytes.clone()),
         })
@@ -130,19 +130,21 @@ impl ParserMemoryGovernor {
 
 #[derive(Debug)]
 pub(crate) struct ParserStorageLease {
-    root: StorageAdmission,
+    /// Held only for its drop effect: releasing the admission returns the bytes to the app-wide ledger.
+    _root: StorageAdmission,
     bytes: usize,
     normal_bytes: Option<Arc<AtomicUsize>>,
 }
 
 impl ParserStorageLease {
+    #[cfg(test)]
     pub(crate) fn resident_bytes(&self) -> usize {
-        self.root.resident_bytes()
+        self._root.resident_bytes()
     }
 
     #[cfg(test)]
     pub(crate) fn shares_root(&self, governor: &ParserMemoryGovernor) -> bool {
-        self.root.shares_root(&governor.quota)
+        self._root.shares_root(&governor.quota)
     }
 }
 
@@ -1972,11 +1974,18 @@ mod tests {
             "retired engine must release its storage lease"
         );
         parsing.attach(NodeId(2), &mut waiting).unwrap();
-        // Attach clears the admission verdict, but the owner reports pressure on
-        // the new generation while its registration is still being published
-        // and clears it when that command completes. A slower scheduler can
-        // observe the owner between those two stores, so wait for the owner's
-        // verdict to settle instead of sampling it once.
+        // The recovered engine's envelope occupies the whole ordinary budget of
+        // this two-engine ceiling, so a hidden pane cannot publish its first
+        // snapshot: only displayed panes may draw on the replacement headroom.
+        // The owner therefore reports ProcessStorage for a non-displayed pane
+        // for as long as it waits, by design. Display the pane, as the app does
+        // for a visible one, and require the owner's verdict to clear once the
+        // registration snapshot is admitted.
+        waiting
+            .frontend
+            .as_ref()
+            .expect("recovered pane parser is attached")
+            .set_displayed(true);
         let deadline = Instant::now() + Duration::from_secs(5);
         while waiting.parser_pressure().is_some() && Instant::now() < deadline {
             drop(parsing.collect());
