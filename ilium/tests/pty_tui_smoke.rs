@@ -2630,6 +2630,17 @@ async fn right_click_restart_reloads_only_the_client_and_preserves_the_server() 
     // weakened the Unix assertion to buy a Windows one.
     let staged_replacement = binary_directory.join("ilium-client-replacement-stage");
     let staged_replacement = write_restart_shim(&staged_replacement, &restartable_binary);
+    // Windows refuses to replace or delete the file backing a running image
+    // (`Access is denied`), but it does allow renaming that file. A real
+    // Windows upgrade therefore moves the running executable aside first and
+    // installs the new one under the original name, which is also the path
+    // Restart reloads from. Unix keeps the single atomic rename.
+    #[cfg(windows)]
+    let running_image_aside = {
+        let aside = binary_directory.join("ilium-client-running-image-aside");
+        std::fs::rename(&restartable_binary, &aside).expect("move the running client image aside");
+        aside
+    };
     std::fs::rename(&staged_replacement, &restartable_binary)
         .expect("atomically replace running client path");
 
@@ -2728,6 +2739,10 @@ async fn right_click_restart_reloads_only_the_client_and_preserves_the_server() 
         tui.kill().expect("force-kill restarted client");
     }
     assert!(exited, "restarted client should exit after session cleanup");
+    // Best effort: the moved-aside image is only removable once no process
+    // maps it, and it is a hard link inside the build output directory.
+    #[cfg(windows)]
+    let _ = std::fs::remove_file(&running_image_aside);
 }
 
 /// Drives split creation, multi-pane rendering, and focus-specific input
@@ -5087,19 +5102,35 @@ async fn folder_browser_expands_nested_directories_and_opens_a_deep_file() {
         tui.screen_text()
     );
     for (directory, next_entry) in [("alpha", "beta"), ("beta", "gamma"), ("gamma", "deep.rs")] {
-        let (column, row) = tui.with_screen(|screen| {
-            let rows = rows_containing(screen, directory);
-            assert_eq!(rows.len(), 1, "expected one {directory:?} row");
-            let column = column_of_text_in_row(screen, rows[0], directory)
-                .expect("rendered nested-directory label");
-            (column, rows[0])
-        });
-        tui.write(&sgr_mouse_down(0, column, row))
-            .unwrap_or_else(|error| panic!("expand {directory}: {error}"));
-        tui.write(&sgr_mouse_up(column, row))
-            .unwrap_or_else(|error| panic!("release {directory} click: {error}"));
+        // The nested listing is prepared by a background worker that is
+        // cancelled and resubmitted whenever the expanded set changes, so on a
+        // loaded runner a click can land on a row whose children never arrive
+        // (a leaf row renders without a chevron) or be absorbed by a repaint.
+        // Re-locate the row and click again, a bounded number of times. The
+        // click toggles, so a second attempt may first collapse a row that did
+        // open late; the third attempt then reopens it. The final assertion
+        // stays strict: the child row must be on screen.
+        let mut is_next_entry_visible = false;
+        for _attempt in 0..3 {
+            let (column, row) = tui.with_screen(|screen| {
+                let rows = rows_containing(screen, directory);
+                assert_eq!(rows.len(), 1, "expected one {directory:?} row");
+                let column = column_of_text_in_row(screen, rows[0], directory)
+                    .expect("rendered nested-directory label");
+                (column, rows[0])
+            });
+            tui.write(&sgr_mouse_down(0, column, row))
+                .unwrap_or_else(|error| panic!("expand {directory}: {error}"));
+            tui.write(&sgr_mouse_up(column, row))
+                .unwrap_or_else(|error| panic!("release {directory} click: {error}"));
+            is_next_entry_visible =
+                wait_until(|| tui.screen_text().contains(next_entry), WAIT_TIMEOUT / 3).await;
+            if is_next_entry_visible {
+                break;
+            }
+        }
         assert!(
-            wait_until(|| tui.screen_text().contains(next_entry), WAIT_TIMEOUT).await,
+            is_next_entry_visible,
             "expected {next_entry:?} after expanding {directory:?}, got: {:?}",
             tui.screen_text()
         );
