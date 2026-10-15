@@ -886,6 +886,27 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
     let fake_claude_path =
         write_resumed_transcript_holding_fake_agent_binary(fake_bin_dir.path(), "claude");
     let resumed_session_id = "95fd0645-3331-408b-a7e5-36e6007bfb78";
+    // Diagnostic: what the pane will actually execute. Printed to the test's
+    // captured stdout, which cargo shows for a failing test.
+    {
+        let magic = std::fs::read(&fake_claude_path)
+            .map(|bytes| bytes.iter().take(4).copied().collect::<Vec<u8>>())
+            .unwrap_or_default();
+        eprintln!(
+            "diagnostic: fake agent {} len={:?} magic={:?}",
+            fake_claude_path.display(),
+            std::fs::metadata(&fake_claude_path)
+                .map(|meta| meta.len())
+                .ok(),
+            magic
+        );
+        eprintln!(
+            "diagnostic: SHELL={:?} PATH={:?} /bin/sh -> {:?}",
+            std::env::var("SHELL").ok(),
+            std::env::var("PATH").ok(),
+            std::fs::read_link("/bin/sh").ok()
+        );
+    }
 
     let detection_config = DetectionConfig {
         working_poll_interval: Duration::from_millis(200),
