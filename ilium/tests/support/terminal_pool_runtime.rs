@@ -161,6 +161,22 @@ async fn select_and_measure(
 #[tokio::test]
 #[ignore = "explicit 200-pane release runtime qualification"]
 async fn no_pool_release_renders_200_panes_and_measures_click_latency() {
+    run_click_latency_gate(0).await;
+}
+
+// Finite pool: hidden panes lose their parser engines under pressure, so a
+// selection after the 200-pane load must rebuild from retained history. This
+// is the path a user with a finite `engine_memory_budget_mib` takes; the
+// minimum valid budget (256 MiB) forces eviction across the 200 panes.
+#[cfg(unix)]
+#[tokio::test]
+#[ignore = "explicit 200-pane release runtime qualification with a finite 256 MiB parser pool"]
+async fn finite_pool_256_mib_renders_200_panes_and_measures_click_latency() {
+    run_click_latency_gate(256).await;
+}
+
+#[cfg(unix)]
+async fn run_click_latency_gate(engine_memory_budget_mib: u32) {
     if cfg!(debug_assertions) {
         panic!("release qualification must launch the optimized client binary");
     }
@@ -212,20 +228,45 @@ async fn no_pool_release_renders_200_panes_and_measures_click_latency() {
     let project_dir = temp_root.path().join("no-pool-runtime");
     std::fs::create_dir_all(&project_dir).unwrap();
     seed_project_config(&xdg, &project_dir);
-    assert_eq!(
-        ilium_client::config::load(&xdg.ilium_config_dir)
-            .unwrap()
-            .terminal
-            .engine_memory_budget_mib,
-        0,
-        "qualification must exercise the omitted-setting no-pool default"
-    );
+    let config_path = xdg.ilium_config_dir.join("config.toml");
+    let config = std::fs::read_to_string(&config_path).unwrap();
+    if engine_memory_budget_mib == 0 {
+        assert_eq!(
+            ilium_client::config::load(&xdg.ilium_config_dir)
+                .unwrap()
+                .terminal
+                .engine_memory_budget_mib,
+            0,
+            "qualification must exercise the omitted-setting no-pool default"
+        );
+    }
+    let config = if engine_memory_budget_mib == 0 {
+        config
+    } else {
+        // Insert into an existing [terminal] table when one was saved, so the
+        // TOML never gains a duplicate table; the load check below proves it.
+        let budget_line = format!("engine_memory_budget_mib = {engine_memory_budget_mib}");
+        if config.contains("[terminal]\n") {
+            config.replacen("[terminal]\n", &format!("[terminal]\n{budget_line}\n"), 1)
+        } else {
+            format!("{config}\n[terminal]\n{budget_line}\n")
+        }
+    };
+    if engine_memory_budget_mib != 0 {
+        std::fs::write(&config_path, &config).unwrap();
+        assert_eq!(
+            ilium_client::config::load(&xdg.ilium_config_dir)
+                .unwrap()
+                .terminal
+                .engine_memory_budget_mib,
+            engine_memory_budget_mib,
+            "finite pool budget must load before the client starts"
+        );
+    }
     let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let port = listener.local_addr().unwrap().port();
     assert_ne!(port, 8872);
     drop(listener);
-    let config_path = xdg.ilium_config_dir.join("config.toml");
-    let config = std::fs::read_to_string(&config_path).unwrap();
     assert!(!config.contains("[api]"));
     std::fs::write(&config_path, format!("{config}\n[api]\nport = {port}\n")).unwrap();
     let mut cleanup = KillSessionOnDrop {
@@ -405,7 +446,8 @@ async fn no_pool_release_renders_200_panes_and_measures_click_latency() {
         "isolated_http_port": port, "pane_count": PANE_COUNT,
         "burst_bytes_per_pane": BURST_BYTES_PER_PANE,
         "burst_bytes_total": BURST_BYTES_PER_PANE * PANE_COUNT,
-        "pool_default_mib": 0, "measurements": measurements,
+        "engine_memory_budget_mib": engine_memory_budget_mib,
+        "measurements": measurements,
         "latency_summaries": summaries, "selection_limit_ms": 5000,
         "latency_accepted": latency_accepted,
         "user_incident_attribution_proven": false,

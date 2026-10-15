@@ -1166,6 +1166,10 @@ mod tests {
 
     #[tokio::test]
     async fn recap_screen_frames_round_trip_with_owned_allocation_accounting() {
+        fn variant_index<T: serde::Serialize>(value: &T) -> u32 {
+            let bytes = bincode::serialize(value).expect("serializable");
+            u32::from_le_bytes(bytes[..4].try_into().expect("four-byte variant index"))
+        }
         let request = ClientRequest::GetPaneRecapScreen {
             pane_id: NodeId(42),
         };
