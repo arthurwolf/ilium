@@ -2018,13 +2018,8 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         "expected the two-sided Icons settings tab, got: {:?}",
         tui.screen_text()
     );
-    // Let the freshly rendered tab take input before sending keys; on a loaded
-    // runner the first key can otherwise arrive ahead of the tab's key handling.
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    tui.write(b"l").expect("changing the group icon");
-    tokio::time::sleep(Duration::from_millis(300)).await;
-    tui.write(b"r")
-        .expect("switching the preview to the real tree");
+    tui.write(b"lr")
+        .expect("changing the group icon and switching the preview to the real tree");
     assert!(
         wait_until(
             || std::fs::read_to_string(xdg.config_home.join("ilium").join("config.toml"))

@@ -12,9 +12,11 @@ use ilium_animation_js::{
     },
 };
 use ilium_execution::{QuotaGroup, QuotaLimits};
+#[cfg(any(target_os = "linux", not(any(target_os = "macos", windows))))]
 use ilium_platform::animation_files::PinnedDirectory;
 #[cfg(target_os = "linux")]
 use ilium_platform::animation_files::WriteMode;
+#[cfg(any(target_os = "linux", not(any(target_os = "macos", windows))))]
 use ilium_platform::secure_fs::NoFollowDirectory;
 #[cfg(target_os = "linux")]
 use sha2::Digest;

@@ -428,7 +428,7 @@ fn rename_by_information(
         .ok_or_else(invalid_name)?;
     let name_offset = std::mem::offset_of!(FILE_RENAME_INFO, FileName);
     let required_bytes = name_offset
-        .checked_add(name.len() * std::mem::size_of::<u16>())
+        .checked_add(std::mem::size_of_val(name))
         .and_then(|length| length.checked_add(std::mem::size_of::<u16>()))
         .ok_or_else(invalid_name)?;
     let allocation_bytes = required_bytes.max(std::mem::size_of::<FILE_RENAME_INFO>());

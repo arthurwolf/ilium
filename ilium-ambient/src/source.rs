@@ -881,6 +881,8 @@ mod tests {
         let url = "https://lease-expiry.invalid/data";
         let directory = tempfile::tempdir().unwrap();
         let spacing = Duration::from_millis(35);
+        // Spacing runs from the first lease, so measure from before it is taken.
+        let started = Instant::now();
         let first = provider_host_lease(
             url,
             directory.path(),
@@ -890,7 +892,6 @@ mod tests {
         )
         .unwrap();
         drop(first);
-        let started = Instant::now();
         let second = provider_host_lease(
             url,
             directory.path(),
@@ -899,7 +900,7 @@ mod tests {
             None,
         )
         .unwrap();
-        assert!(started.elapsed() >= Duration::from_millis(25));
+        assert!(started.elapsed() >= Duration::from_millis(30));
         drop(second);
     }
 

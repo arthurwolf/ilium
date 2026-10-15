@@ -10,7 +10,7 @@ use std::{
         Arc, Mutex,
     },
 };
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 fn unsupported() -> io::Error {
     io::Error::new(
         io::ErrorKind::Unsupported,

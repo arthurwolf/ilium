@@ -5543,6 +5543,8 @@ fn overlay_native_text<'a>(
     Ok(())
 }
 #[cfg(test)]
+// Its only caller is in a Linux-only custody test.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn cells_from_packed(
     shape: Shape,
     packed: &ilium_animation_js::surface::PackedSurface,

@@ -225,8 +225,13 @@ def logged(command, root, log, environment=None, timeout=10_800):
         # Diagnostic artifacts can fail to upload; keep the decisive lines in the job log.
         text = log.read_bytes().decode('utf-8', 'replace')
         # The tail alone misses failures from early test binaries; also keep every failure marker.
-        markers = [line for line in text.splitlines()
-                   if re.search(r'FAILED|panicked at|^error(\[|:)|^failures:|^---- ', line)]
+        lines = text.splitlines()
+        markers = []
+        for index, line in enumerate(lines):
+            if re.search(r'FAILED|panicked at|^error(\[|:)|^failures:|^---- ', line):
+                markers.append(line)
+                if 'panicked at' in line and index + 1 < len(lines):
+                    markers.append(lines[index + 1])  # the panic message itself
         emit('warning', operation=Path(str(command[0])).name, log=str(log), exit_code=result.returncode,
              failure_lines=markers[:200], log_tail=text[-6000:])
     require(result.returncode == 0, 'command failed; inspect owned log ' + str(log))
@@ -368,7 +373,7 @@ def native(arguments):
                 environment['PATH'] = str(ort_library_directory) + os.pathsep + environment['PATH']
         logged(['cargo', 'build', '--locked', '--release', '--target', arguments.target, '--bin', 'ilium', '--bin', 'ilium-server', '--bin', 'ilium-animation-helper'], root, work / 'release-build.log', environment)
     logged(['cargo', 'fmt', '--all', '--check'], root, work / 'fmt.log', environment)
-    logged(['cargo', 'clippy', '--locked', '--workspace', '--all-targets', '--target', arguments.target, '--', '-D', 'warnings'], root, work / 'clippy.log', environment)
+    logged(['cargo', 'clippy', '--locked', '--workspace', '--all-targets', '--keep-going', '--target', arguments.target, '--', '-D', 'warnings'], root, work / 'clippy.log', environment)
     logged(['cargo', 'test', '--locked', '--workspace', '--no-fail-fast', '--target', arguments.target], root, work / 'workspace-tests.log', environment, timeout=3600)
     # Product tests above run in full on every native OS. POSIX fixture tests
     # require GNU/Linux tools; their Linux lanes run the complete fixture suite.
