@@ -195,6 +195,21 @@ jobs:
         steps:
             - uses: actions/checkout@v4
 
+            # The macos-15 image selects an Xcode whose clang runtime directory
+            # is missing, so linking fails with "library 'clang_rt.osx' not
+            # found". Select the newest installed Xcode that has the runtime.
+            - name: Select an Xcode with the clang runtime
+              run: |
+                  for xcode in $(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -rV); do
+                      if ls "$xcode"/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/clang/*/lib/darwin/libclang_rt.osx.a >/dev/null 2>&1; then
+                          echo "Selecting $xcode"
+                          sudo xcode-select -s "$xcode/Contents/Developer"
+                          break
+                      fi
+                  done
+                  xcode-select -p
+                  ls /Applications | grep -i xcode || true
+
             - uses: Swatinem/rust-cache@v2
 
             - name: cargo build
