@@ -117,6 +117,19 @@ const PROJECT_NAME: &str = "Smoketest";
 /// starting up, a real render loop drawing a frame) is not deterministic
 /// under test-runner load. Mirrors `ilium-pty`'s and
 /// `ilium-server`'s own integration test helper of the same name.
+/// Sends `keys`, and re-sends them when `condition` stays false for 10 s,
+/// because a loaded Windows/macOS runner can refuse input during a repaint.
+/// Only for keys whose repeat is harmless once the first send was missed.
+async fn write_until(tui: &PtySession, keys: &[u8], mut condition: impl FnMut() -> bool) -> bool {
+    for _ in 0..4 {
+        tui.write(keys).expect("send keys");
+        if wait_until(&mut condition, Duration::from_secs(10)).await {
+            return true;
+        }
+    }
+    false
+}
+
 async fn wait_until(condition: impl FnMut() -> bool, timeout: Duration) -> bool {
     wait_until_polling(condition, timeout, Duration::from_millis(20)).await
 }
@@ -2199,14 +2212,11 @@ async fn attaching_tui_renders_the_pane_created_by_new_pane_and_responds_to_the_
         .await,
         "expected the exact numeric entry to persist"
     );
-    tui.write(b"jl")
-        .expect("select and increase the minimum board column width");
     assert!(
-        wait_until(
-            || std::fs::read_to_string(xdg.config_home.join("ilium").join("config.toml"))
-                .is_ok_and(|config| config.contains("minimum_column_width = 21")),
-            WAIT_TIMEOUT,
+        write_until(&tui, b"jl", || std::fs::read_to_string(
+            xdg.config_home.join("ilium").join("config.toml")
         )
+        .is_ok_and(|config| config.contains("minimum_column_width = 21")))
         .await,
         "expected minimum board column width to persist"
     );
@@ -4527,16 +4537,14 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
         "expected empty Done column, got: {:?}",
         tui.screen_text()
     );
-    tui.write(b"\x1b[D\x1b[B\x1b[1;2C")
-        .expect("select first card and move it to Done");
     assert!(
-        wait_until(
-            || std::fs::read_to_string(&dialog_path).is_ok_and(|source| {
-                source.contains("## Dialog column\n- [ ] Dialog task")
-                    && source.contains("## Done\n- Second task")
-            }),
-            WAIT_TIMEOUT,
+        write_until(&tui, b"\x1b[D\x1b[B\x1b[1;2C", || std::fs::read_to_string(
+            &dialog_path
         )
+        .is_ok_and(|source| {
+            source.contains("## Dialog column\n- [ ] Dialog task")
+                && source.contains("## Done\n- Second task")
+        }))
         .await,
         "Shift+Right should move the card across columns"
     );
@@ -4764,12 +4772,19 @@ async fn terminal_context_menu_schedules_countdown_and_delivers_input() {
         "expected scheduled-input context action, got: {:?}",
         tui.screen_text()
     );
-    let (schedule_column, schedule_row) = tui
-        .with_screen(|screen| {
+    let locate_schedule = || {
+        tui.with_screen(|screen| {
             let row = *rows_containing(screen, "Schedule keystrokes…").first()?;
             column_of_text_in_row(screen, row, "Schedule keystrokes…").map(|column| (column, row))
         })
-        .expect("rendered scheduled-input context action");
+    };
+    assert!(
+        wait_until(|| locate_schedule().is_some(), WAIT_TIMEOUT).await,
+        "rendered scheduled-input context action, got: {:?}",
+        tui.screen_text()
+    );
+    let (schedule_column, schedule_row) =
+        locate_schedule().expect("rendered scheduled-input context action");
     tui.write(&sgr_mouse_click(0, schedule_column, schedule_row))
         .expect("click scheduled-input context action");
     assert!(

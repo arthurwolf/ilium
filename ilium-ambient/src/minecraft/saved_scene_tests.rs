@@ -51,9 +51,20 @@ fn saved_scene_status_exposes_phase_elapsed_time_and_unknown_eta_while_preparing
             .display()
             .to_string(),
     };
-    let scene = SavedScene::new(&saved, &VoxelLandscapeSettings::default(), &env);
-
-    let status = scene.status().expect("preparing scene has a status report");
+    // Worker admission shares a process-wide quota with parallel tests, so a
+    // loaded runner can reject this scene before it ever prepares; retry then.
+    let mut attempt = 0;
+    let (scene, status) = loop {
+        let scene = SavedScene::new(&saved, &VoxelLandscapeSettings::default(), &env);
+        let status = scene.status().expect("preparing scene has a status report");
+        attempt += 1;
+        if status.lines().next().is_some_and(|line| line.contains('[')) || attempt >= 40 {
+            break (scene, status);
+        }
+        drop(scene);
+        std::thread::sleep(Duration::from_millis(250));
+    };
+    let _scene = scene;
     let summary = status.lines().next().unwrap_or_default();
     assert!(
         summary.contains('['),
