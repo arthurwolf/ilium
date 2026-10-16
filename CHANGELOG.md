@@ -50,6 +50,7 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 - `ilium progress guard` is a Claude Code `PreToolUse` hook that Ilium installs into each chatroom project's `.claude/settings.local.json`. Inside an Ilium pane it refuses a foreground Bash call with a timeout over three minutes unless the call is an `ilium progress` or `ilium wait` command or runs in the background. Outside a pane, and for malformed hook input, it allows the call.
 
 ### Fixed
+- Saved-world landscape errors now name the block textures that the selected pack and Java jar lack, instead of only reporting "required native model textures missing".
 - Overworld landscapes using the installed Java 1.19.3 textures no longer fail the texture coverage check on blocks that version lacks (cactus flower, cherry wood, pink petals, torchflower, pitcher plant, leaf litter, dry grasses). Each such block shows a labelled 1.19.3 stand-in texture instead of stopping the frame.
 - `ilium new-pane --worktree` now places new worktrees at the Settings -> Git "Worktree location" template, as the TUI dialog already did, instead of always using a sibling `<repo>.worktrees` directory.
 - Pane progress monitors survive a server restart: the restored server keeps the same monitor ID and keeps observing the task instead of reporting it as lost.
