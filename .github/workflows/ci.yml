@@ -271,8 +271,6 @@ jobs:
         steps:
             - name: probe
               run: |
-                  mover='S=/sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup); echo "S=$S"; cat $S/cgroup.controllers; echo "type: $(cat $S/cgroup.type)"; mkdir $S/leaf; echo "mkdir=$?"; echo $$ > $S/leaf/cgroup.procs; echo "move=$?"; for c in memory pids cpu; do echo "+$c" > $S/cgroup.subtree_control; echo "enable $c=$? now: $(cat $S/cgroup.subtree_control)"; done'
-                  echo "== A: system scope as runner uid"
+                  mover='S=/sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup); mkdir $S/leaf; echo 0 > $S/leaf/cgroup.procs; echo "move=$?"; echo "+cpu +memory +pids" > $S/cgroup.subtree_control; echo "enable=$? now: $(cat $S/cgroup.subtree_control)"; cat /proc/self/cgroup; id -u'
+                  echo "== D: system scope as runner uid"
                   sudo -n systemd-run --uid=$(id -u) --gid=$(id -g) --wait --pipe --collect --property=Delegate=yes bash -c "$mover" 2>&1
-                  echo "== C: system scope as root"
-                  sudo -n systemd-run --wait --pipe --collect --property=Delegate=yes bash -c "$mover" 2>&1
