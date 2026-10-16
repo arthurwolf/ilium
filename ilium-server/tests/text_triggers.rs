@@ -86,6 +86,7 @@ async fn matched_output_round_trip(session: &str, delay_seconds: u32) -> Duratio
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: NewPaneKind::Command(fixture.path.to_string_lossy().into_owned()),
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
@@ -178,6 +179,7 @@ async fn client_semantic_submission_reaches_the_pty_after_a_separate_enter() {
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: NewPaneKind::Command(fixture.path.to_string_lossy().into_owned()),
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
@@ -287,6 +289,7 @@ async fn repainting_one_matching_screen_line_submits_only_once() {
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: NewPaneKind::Command(fixture.path.to_string_lossy().into_owned()),
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
@@ -384,6 +387,7 @@ async fn a_match_reappearing_after_the_row_clears_submits_again() {
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: NewPaneKind::Command(fixture.path.to_string_lossy().into_owned()),
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,

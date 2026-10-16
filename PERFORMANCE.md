@@ -1,3 +1,5 @@
+For local background commands on aquarelle, apply the scheduling policy in `~/.claude/CLAUDE.md` using `background-run`; existing nice/ionice examples below also require that policy. Remote worker allocation remains separate.
+
 # Ilium performance audit
 
 This document is the reproducible performance ledger for the client/server

@@ -285,7 +285,13 @@ impl ConfigurationChange {
                 serialized_bound(value)?
                     + std::mem::size_of::<crate::background_animation::AnimationSettings>()
             }
-            Terminal(_) | Editor(_) | Session { .. } | Keyboard(_) | Kanban(_) | Padding(_) | Separators(_) => 0,
+            Terminal(_)
+            | Editor(_)
+            | Session { .. }
+            | Keyboard(_)
+            | Kanban(_)
+            | Padding(_)
+            | Separators(_) => 0,
             ProjectName {
                 proposal: value, ..
             } => {

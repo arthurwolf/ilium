@@ -170,6 +170,8 @@ impl App {
                         {
                             continue;
                         }
+                        let is_reload =
+                            matches!(self.panes.get(&pane_id), Some(PaneRuntime::Board(_)));
                         let old_revision = match self.panes.get(&pane_id) {
                             Some(PaneRuntime::Board(board)) => board.content_revision(),
                             _ => 0,
@@ -186,6 +188,11 @@ impl App {
                                 if source_changed {
                                     self.record_client_node_activity(pane_id);
                                 }
+                                self.status_message = Some(if is_reload {
+                                    "Board reloaded from disk".into()
+                                } else {
+                                    "Board loaded from disk".into()
+                                });
                             }
                             Err(error) => self.status_message = Some(error),
                         }
@@ -350,6 +357,7 @@ impl App {
             }
         };
         self.record_pending_pane_focus(parent_group, PaneContentKind::Board, name);
+        self.begin_pending_toolbar_action(crate::tree_ui::TreeToolbarAction::Board);
         self.publish_terminal_request_after_baseline(request);
         true
     }

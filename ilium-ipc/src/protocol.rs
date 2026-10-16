@@ -485,6 +485,7 @@ pub enum ClientRequest {
     },
     /// Create a new pane as a child of `parent_group`.
     NewPane {
+        request_id: u64,
         parent_group: NodeId,
         kind: NewPaneKind,
         working_directory: NewPaneWorkingDirectory,
@@ -1169,6 +1170,14 @@ pub struct PaneDetectionEvidence {
     pub goal: Option<DetectionReason>,
 }
 
+/// An unresolved blocking failure, attributed to a tree node or the session.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BlockingError {
+    pub node_id: Option<NodeId>,
+    pub operation: String,
+    pub message: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ServerEvent {
     /// The full current tree. Sent on attach and after any structural
@@ -1534,5 +1543,12 @@ pub enum ServerEvent {
     PaneRecapScreen {
         pane_id: NodeId,
         result: Result<String, String>,
+    },
+    /// Authoritative unresolved errors, replayed on attachment and recovery.
+    BlockingErrorsSnapshot { errors: Vec<BlockingError> },
+    /// Exactly one terminal outcome for an admitted pane creation request.
+    PaneCreateFinished {
+        request_id: u64,
+        result: Result<NodeId, String>,
     },
 }

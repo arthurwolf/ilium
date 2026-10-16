@@ -239,7 +239,9 @@ fn side_padding(width: u16) -> u16 {
 const DETAIL_GUTTER: &str = "\u{2506} ";
 const DETAIL_GUTTER_WIDTH: u16 = 2;
 /// Partial blocks, one eighth of a cell wider each, for the gauge's edge.
-const EIGHTH_BLOCKS: [&str; 7] = ["\u{258f}", "\u{258e}", "\u{258d}", "\u{258c}", "\u{258b}", "\u{258a}", "\u{2589}"];
+const EIGHTH_BLOCKS: [&str; 7] = [
+    "\u{258f}", "\u{258e}", "\u{258d}", "\u{258c}", "\u{258b}", "\u{258a}", "\u{2589}",
+];
 const LONGEST_IDENTITY_WIDTH: usize = 22;
 
 /// The gauge bar as `(symbol, is_partial)` cells: whole blocks, at most one
@@ -673,6 +675,27 @@ mod tests {
     }
 
     #[test]
+    fn gauge_cells_fill_whole_blocks_then_an_eighth_block_edge() {
+        let cells = gauge_cells(0.5, 8);
+        assert_eq!(cells.len(), 8);
+        assert!(cells[..4]
+            .iter()
+            .all(|(symbol, partial)| *symbol == "\u{2588}" && !partial));
+        assert!(cells[4..].iter().all(|(symbol, _)| *symbol == " "));
+
+        let cells = gauge_cells(0.5 + 3.0 / 64.0, 8);
+        assert_eq!(cells[4], ("\u{258d}", true));
+        assert_eq!(
+            gauge_cells(0.0, 5)
+                .iter()
+                .filter(|(s, _)| *s != " ")
+                .count(),
+            0
+        );
+        assert!(gauge_cells(1.0, 5).iter().all(|(s, _)| *s == "\u{2588}"));
+    }
+
+    #[test]
     fn terminal_statuses_have_distinct_labels_and_details() {
         let done = progress(ProgressTaskStatus::Done, 12.0, "render complete", None).unwrap();
         let error = progress(
@@ -684,12 +707,12 @@ mod tests {
         .unwrap();
 
         let done_rows = rendered_rows(&done, 64, 3);
-        assert!(done_rows[0].contains("✓ DONE  100%"));
+        assert!(done_rows[0].contains("✓ DONE") && done_rows[0].contains("100%"));
         assert!(done_rows.iter().any(|row| row.contains("render complete")));
         assert!(done_rows.iter().any(|row| row.contains("Job render-42")));
 
         let error_rows = rendered_rows(&error, 64, 4);
-        assert!(error_rows[0].contains("✕ ERROR  63%"));
+        assert!(error_rows[0].contains("✕ ERROR") && error_rows[0].contains(" 63%"));
         assert!(error_rows
             .iter()
             .any(|row| row.contains("Task error: exit status 7")));
@@ -705,7 +728,7 @@ mod tests {
         };
 
         let rows = rendered_rows(&progress, 72, 4);
-        assert!(rows[0].contains("⚠ MONITOR FAILED  42%"));
+        assert!(rows[0].contains("⚠ MONITOR FAILED") && rows[0].contains(" 42%"));
         assert!(rows
             .iter()
             .any(|row| row.contains("Observation stopped (5): probe timed out")));

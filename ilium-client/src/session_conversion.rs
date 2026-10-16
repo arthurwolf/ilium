@@ -28,7 +28,7 @@ use ratatui::Frame;
 use tokio::sync::mpsc;
 use tokio::sync::Notify;
 
-use crate::app::{App, Mode};
+use crate::app::{App, Mode, UNFREEZING_AGENT_STATUS};
 use crate::modal;
 use crate::theme;
 
@@ -705,6 +705,9 @@ impl App {
             return;
         }
         self.pending_replacement_focus = None;
+        if self.status_message.as_deref() == Some(UNFREEZING_AGENT_STATUS) {
+            self.status_message = None;
+        }
         if !pending.was_focused {
             return;
         }
@@ -781,7 +784,9 @@ mod tests {
             input_bytes: CONVERSION_WORKING_BYTES,
             result_bytes: CONVERSION_RESULT_BYTES,
             worker_threads: 1,
-            worker_bytes: 4 * 1024 * 1024,
+            // Four MiB worker plus retained bank bookkeeping; job/thread caps
+            // and the conversion's input/result allowances stay unchanged.
+            worker_bytes: 5 * 1024 * 1024,
         });
         let disabled = LaneConfig {
             threads: 0,
@@ -1155,6 +1160,31 @@ mod tests {
             app.apply_pending_replacement_focus();
             assert!(app.pending_replacement_focus.is_none());
             assert_eq!(app.active_pane_id(), Some(replacement));
+        }
+
+        #[test]
+        fn the_unfreezing_status_clears_once_the_replacement_lands() {
+            let (mut app, pane) = app_with_agent(AgentClass::Claude);
+            let parent = app.tree.parent_of(pane).unwrap();
+            app.status_message = Some(UNFREEZING_AGENT_STATUS.to_string());
+            app.pending_replacement_focus = Some(ReplacementFocus {
+                old_pane_id: pane,
+                parent,
+                index: 0,
+                was_focused: false,
+            });
+            app.apply_pending_replacement_focus();
+            assert_eq!(
+                app.status_message.as_deref(),
+                Some(UNFREEZING_AGENT_STATUS),
+                "the old pane still exists, so the status must stay"
+            );
+            app.tree
+                .add_pane(parent, "new", PaneContentKind::Terminal)
+                .unwrap();
+            app.tree.remove_node(pane).unwrap();
+            app.apply_pending_replacement_focus();
+            assert!(app.status_message.is_none());
         }
     }
 }

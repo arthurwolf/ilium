@@ -10,6 +10,12 @@
 //! background commands (dev servers legitimately run that way) and every call
 //! outside an Ilium pane. Malformed hook input never blocks a tool call.
 //!
+//! A background Bash call in a pane passes with a one-sentence reminder in
+//! `additionalContext`: Haiku was observed running a three-minute task with
+//! `run_in_background` and waiting for Claude Code's completion notice, which
+//! shows the user no progress bar. The reminder never changes the permission
+//! decision, so servers and short background commands run as before.
+//!
 //! The refusal is a JSON `permissionDecision` on stdout with exit status 0,
 //! never exit status 2. The project hook command is `ilium progress guard ||
 //! true`, so an `ilium` binary that predates this subcommand (whose argument
@@ -27,9 +33,13 @@ const MAX_INPUT_BYTES: u64 = 1024 * 1024;
 
 pub const REFUSAL: &str = "Ilium: this pane requires a progress monitor for commands that may run 3 minutes or more; do not run them in the foreground. Start the command detached (setsid -f, output to a log), write a probe, run 'ilium progress check --command <probe>', then 'ilium progress set --command <probe> --interval-seconds <n> --wait' as a background Bash command, without --timeout-seconds. If this command is short, rerun it with a Bash timeout of at most 180000.";
 
+pub const BACKGROUND_REMINDER: &str = "Ilium: if this background command may run 3 minutes or more, Claude Code's completion notice is not enough; also write a probe and run 'ilium progress set --command <probe> --interval-seconds <n> --wait' as a background Bash command so the user sees its progress. Servers and short commands need nothing.";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GuardDecision {
     Allow,
+    /// Allow without touching the permission decision, adding a reminder.
+    Remind,
     Refuse,
 }
 
@@ -48,19 +58,19 @@ pub fn evaluate(input: &serde_json::Value, inside_ilium_pane: bool) -> GuardDeci
     let Some(tool_input) = input.get("tool_input") else {
         return GuardDecision::Allow;
     };
-    if tool_input
-        .get("run_in_background")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false)
-    {
-        return GuardDecision::Allow;
-    }
     let command = tool_input
         .get("command")
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default();
     if command.contains("ilium progress") || command.contains("ilium wait") {
         return GuardDecision::Allow;
+    }
+    if tool_input
+        .get("run_in_background")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+    {
+        return GuardDecision::Remind;
     }
     let timeout = tool_input
         .get("timeout")
@@ -81,6 +91,17 @@ pub fn refusal_output() -> serde_json::Value {
             "hookEventName": "PreToolUse",
             "permissionDecision": "deny",
             "permissionDecisionReason": REFUSAL,
+        }
+    })
+}
+
+/// Claude Code `PreToolUse` output that adds the reminder to the model's
+/// context. It sets no `permissionDecision`, so normal permissions apply.
+pub fn reminder_output() -> serde_json::Value {
+    serde_json::json!({
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "additionalContext": BACKGROUND_REMINDER,
         }
     })
 }
@@ -208,6 +229,10 @@ pub fn run() -> u8 {
     };
     match evaluate(&input, inside_ilium_pane) {
         GuardDecision::Allow => 0,
+        GuardDecision::Remind => {
+            println!("{}", reminder_output());
+            0
+        }
         GuardDecision::Refuse => {
             println!("{}", refusal_output());
             0
@@ -218,8 +243,8 @@ pub fn run() -> u8 {
 #[cfg(test)]
 mod tests {
     use super::{
-        ensure_installed, evaluate, project_settings_path, refusal_output, GuardDecision,
-        HOOK_COMMAND,
+        ensure_installed, evaluate, project_settings_path, refusal_output, reminder_output,
+        GuardDecision, BACKGROUND_REMINDER, HOOK_COMMAND,
     };
     use serde_json::json;
 
@@ -246,7 +271,9 @@ mod tests {
                 json!({"command": "ilium progress set --command /p --interval-seconds 5 --wait", "timeout": 600000}),
             ),
             bash(json!({"command": "ilium wait 3", "timeout": 600000})),
-            bash(json!({"command": "npm run dev", "timeout": 600000, "run_in_background": true})),
+            bash(
+                json!({"command": "ilium progress set --command /p --wait", "run_in_background": true}),
+            ),
             bash(json!({"command": "cargo test", "timeout": 180000})),
             bash(json!({"command": "ls"})),
             json!({"tool_name": "Edit", "tool_input": {"timeout": 600000}}),
@@ -254,6 +281,20 @@ mod tests {
         ] {
             assert_eq!(evaluate(&input, true), GuardDecision::Allow, "{input}");
         }
+    }
+
+    #[test]
+    fn background_command_in_a_pane_is_allowed_with_a_reminder() {
+        let input =
+            bash(json!({"command": "npm run dev", "timeout": 600000, "run_in_background": true}));
+        assert_eq!(evaluate(&input, true), GuardDecision::Remind);
+        assert_eq!(evaluate(&input, false), GuardDecision::Allow);
+        let output = reminder_output();
+        let specific = &output["hookSpecificOutput"];
+        assert_eq!(specific["hookEventName"], "PreToolUse");
+        assert_eq!(specific["additionalContext"], BACKGROUND_REMINDER);
+        assert!(specific.get("permissionDecision").is_none());
+        assert!(BACKGROUND_REMINDER.contains("ilium progress set --command <probe>"));
     }
 
     fn settings(directory: &std::path::Path) -> serde_json::Value {

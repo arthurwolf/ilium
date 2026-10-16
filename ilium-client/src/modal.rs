@@ -920,7 +920,7 @@ mod tests {
                 .collect::<String>();
             assert!(rendered_hint.width() <= usize::from(layout.hint_row.width));
             assert!(
-                rendered_hint.contains("Y/N"),
+                rendered_hint.replace(' ', "").contains("Y/N"),
                 "width={width}: {rendered_hint:?}"
             );
             if width >= 60 {

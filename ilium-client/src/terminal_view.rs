@@ -1190,7 +1190,7 @@ pub(crate) struct PreparationSnapshot {
 /// Exact terminal source retained with one composed frame and installed only
 /// after actual output acknowledgement. Clones share its existing allocation.
 #[derive(Clone)]
-pub(crate) struct PaintedTerminal {
+pub struct PaintedTerminal {
     pub identity: Arc<()>,
     pub ordinal: u64,
     snapshot: Arc<TerminalSnapshot>,
@@ -1199,6 +1199,11 @@ pub(crate) struct PaintedTerminal {
 }
 impl PaintedTerminal {
     pub(crate) fn from_frozen_bytes(bytes: &[u8]) -> Result<Self, String> {
+        // Bound parsing work before feeding potentially hostile stored bytes
+        // into vt100, even when the declared viewport itself is small.
+        if bytes.len() > crate::terminal_parsing::MAX_STATE_BYTES {
+            return Err("frozen terminal snapshot exceeds its byte limit".to_string());
+        }
         if bytes.len() < 4 {
             return Err("frozen terminal snapshot is truncated".to_string());
         }

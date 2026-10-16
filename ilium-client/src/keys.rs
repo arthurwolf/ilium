@@ -135,6 +135,10 @@ pub(crate) fn handle_event_after_intercept(app: &mut App, event: Event) {
     // replayed through its existing key contract so enabling the host mode
     // cannot silently disable paste in names, paths, searches, or editors.
     if let Event::Paste(pasted) = &event {
+        if app.native_terminal_paste_destination().is_some() {
+            app.handle_terminal_paste(pasted);
+            return;
+        }
         if requires_key_paste_replay(app) {
             replay_pasted_text_as_keys(app, pasted);
             return;
@@ -335,7 +339,11 @@ pub(crate) fn requires_key_paste_replay(app: &App) -> bool {
 /// The event loop also owns modes whose atomic-paste semantics need a
 /// specialized replay policy instead of the synchronous fallback above.
 pub(crate) fn requires_bounded_key_paste_replay(app: &App) -> bool {
-    requires_key_paste_replay(app) || matches!(&app.mode, Mode::AnimationTextPrompt(..))
+    requires_key_paste_replay(app)
+        || matches!(
+            &app.mode,
+            Mode::AnimationTextPrompt(..) | Mode::AgentSetupPathPrompt(..)
+        )
 }
 
 #[cfg(test)]

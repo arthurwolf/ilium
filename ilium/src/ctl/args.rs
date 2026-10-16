@@ -42,7 +42,10 @@ impl CtlArgs {
     }
 
     pub(crate) fn target(&self) -> Target {
-        Target { session: self.session.clone(), socket: self.socket.clone() }
+        Target {
+            session: self.session.clone(),
+            socket: self.socket.clone(),
+        }
     }
 }
 
@@ -159,6 +162,38 @@ pub(crate) enum CtlCommand {
         #[arg(long)]
         parent: Option<u64>,
     },
+    /// Show two or more panes side by side as a split view.
+    NewSplitView {
+        name: String,
+        /// Pane ids, in display order.
+        #[arg(required = true, num_args = 2..)]
+        panes: Vec<u64>,
+        #[arg(long, conflicts_with = "parent")]
+        project: Option<String>,
+        #[arg(long)]
+        parent: Option<u64>,
+        /// Stack the panes top to bottom instead of left to right.
+        #[arg(long)]
+        horizontal: bool,
+    },
+    /// Replace the process of a pane with a shell command line.
+    ReplaceCommand { id: u64, command: String },
+    /// Open a kanban board pane backed by a folder or a Markdown file.
+    NewBoard {
+        name: String,
+        path: PathBuf,
+        /// The path is one Markdown file instead of a folder of columns.
+        #[arg(long)]
+        markdown: bool,
+        #[arg(long, conflicts_with = "parent")]
+        project: Option<String>,
+        #[arg(long)]
+        parent: Option<u64>,
+    },
+    /// Stop a pane's agent, keeping a frozen placeholder that RESUME restarts.
+    Freeze { id: u64, resume_command: String },
+    /// Restart a frozen pane with its resume command.
+    Unfreeze { id: u64 },
     /// Add a file-browser folder root under a project or group.
     NewFolder {
         path: PathBuf,
@@ -251,7 +286,7 @@ pub(crate) struct NewPaneArgs {
     pub(crate) parent: Option<u64>,
     /// Start the process in this absolute directory.
     #[arg(long)]
-    pub(crate) cwd: Option<PathBuf>,
+    pub(crate) workdir: Option<PathBuf>,
     /// Start a built-in agent: claude, codex or agy.
     #[arg(long)]
     pub(crate) agent: Option<String>,
@@ -282,7 +317,9 @@ fn parse_worktree_action(value: &str) -> Result<WorktreeAction, String> {
         "keep" => Ok(WorktreeAction::Keep),
         "remove" => Ok(WorktreeAction::Remove),
         "remove-and-branch" => Ok(WorktreeAction::RemoveAndBranch),
-        other => Err(format!("{other:?} is not keep, remove or remove-and-branch")),
+        other => Err(format!(
+            "{other:?} is not keep, remove or remove-and-branch"
+        )),
     }
 }
 
@@ -310,9 +347,11 @@ pub(crate) fn offline(command: &CtlCommand, format: Format) -> Result<Option<Str
         CtlCommand::Guide { topic } => match topic.as_deref() {
             None => Ok(Some(guide::ESSENTIALS.to_owned())),
             Some("topics") => Ok(Some(guide::topic_list())),
-            Some(name) => guide::topic(name).map(|topic| Some(topic.body.to_owned())).ok_or_else(
-                || CtlFailure::usage(format!("no guide topic {name:?}\n{}", guide::topic_list())),
-            ),
+            Some(name) => guide::topic(name)
+                .map(|topic| Some(topic.body.to_owned()))
+                .ok_or_else(|| {
+                    CtlFailure::usage(format!("no guide topic {name:?}\n{}", guide::topic_list()))
+                }),
         },
         CtlCommand::Ops => {
             let documents: Vec<serde_json::Value> = ilium_control::operation_examples()
@@ -320,8 +359,128 @@ pub(crate) fn offline(command: &CtlCommand, format: Format) -> Result<Option<Str
                 .filter_map(|example| serde_json::to_value(example).ok())
                 .collect();
             let value = serde_json::json!({"operations": documents});
-            Ok(Some(ilium_control::render_document(&value, format, ilium_control::Shape::Generic)))
+            Ok(Some(ilium_control::render_document(
+                &value,
+                format,
+                ilium_control::Shape::Generic,
+            )))
         }
         _ => Ok(None),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::*;
+
+    /// Parses `ilium <args>` through the real top-level command.
+    fn parse(arguments: &[&str]) -> Result<crate::Cli, clap::Error> {
+        let mut full = vec!["ilium"];
+        full.extend_from_slice(arguments);
+        crate::Cli::try_parse_from(full)
+    }
+
+    fn ctl_command(arguments: &[&str]) -> CtlCommand {
+        match parse(arguments).expect("arguments parse").command {
+            Some(crate::Command::Ctl(args)) => args.command,
+            _ => panic!("not a ctl command"),
+        }
+    }
+
+    #[test]
+    fn new_pane_workdir_does_not_collide_with_the_global_cwd() {
+        let command = ctl_command(&[
+            "--cwd",
+            "/tmp/project",
+            "ctl",
+            "new-pane",
+            "--parent",
+            "3",
+            "--workdir",
+            "/tmp/project/sub",
+        ]);
+        let CtlCommand::NewPane(args) = command else {
+            panic!("expected new-pane");
+        };
+        assert_eq!(args.parent, Some(3));
+        assert_eq!(args.workdir, Some(PathBuf::from("/tmp/project/sub")));
+    }
+
+    #[test]
+    fn new_pane_command_follows_the_double_dash() {
+        let CtlCommand::NewPane(args) = ctl_command(&[
+            "ctl",
+            "new-pane",
+            "--keep-open",
+            "--",
+            "sh",
+            "-c",
+            "echo hi",
+        ]) else {
+            panic!("expected new-pane");
+        };
+        assert!(args.keep_open);
+        assert_eq!(args.command, ["sh", "-c", "echo hi"]);
+    }
+
+    #[test]
+    fn worktree_needs_a_branch_and_an_agent() {
+        assert!(parse(&["ctl", "new-pane", "--worktree"]).is_err());
+        assert!(parse(&["ctl", "new-pane", "--worktree", "--branch", "b"]).is_err());
+        assert!(parse(&[
+            "ctl",
+            "new-pane",
+            "--agent",
+            "claude",
+            "--worktree",
+            "--branch",
+            "b"
+        ])
+        .is_ok());
+    }
+
+    #[test]
+    fn move_flags_conflict_and_format_validates() {
+        assert!(parse(&["ctl", "move", "4", "--up", "--down"]).is_err());
+        assert!(parse(&["ctl", "move", "4", "--index", "1"]).is_err());
+        assert!(parse(&["ctl", "move", "4", "--to", "2", "--index", "1"]).is_ok());
+        let Some(crate::Command::Ctl(args)) = parse(&["ctl", "--format", "toml", "tree"])
+            .expect("parses")
+            .command
+        else {
+            panic!("not ctl");
+        };
+        assert!(args.format().is_err());
+    }
+
+    #[test]
+    fn offline_commands_need_no_session() {
+        let output = offline(&CtlCommand::Guide { topic: None }, Format::Json)
+            .expect("guide renders")
+            .expect("guide is offline");
+        assert!(output.contains("ilium ctl"));
+        assert!(offline(
+            &CtlCommand::Guide {
+                topic: Some("nope".into())
+            },
+            Format::Json
+        )
+        .is_err());
+        let ops = offline(&CtlCommand::Ops, Format::Json)
+            .expect("ops")
+            .expect("offline");
+        assert!(ops.contains("\"op\": \"rename\""));
+        assert!(offline(
+            &CtlCommand::Tree {
+                depth: None,
+                project: None,
+                no_details: false
+            },
+            Format::Json
+        )
+        .expect("ok")
+        .is_none());
     }
 }
