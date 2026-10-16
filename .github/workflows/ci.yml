@@ -265,12 +265,3 @@ jobs:
                 ILIUM_PTY_SMOKE_BINARY: ${{ github.workspace }}/target/debug/ilium
                 ILIUM_ANIMATION_HELPER: ${{ github.workspace }}/target/debug/ilium-animation-helper
                 ILIUM_NAMING_EVIDENCE_DIR: ${{ runner.temp }}/ilium-naming-evidence
-
-    cgroup-probe:
-        runs-on: ubuntu-22.04
-        steps:
-            - name: probe
-              run: |
-                  mover='S=/sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup); mkdir $S/leaf; echo 0 > $S/leaf/cgroup.procs; echo "move=$?"; echo "+cpu +memory +pids" > $S/cgroup.subtree_control; echo "enable=$? now: $(cat $S/cgroup.subtree_control)"; cat /proc/self/cgroup; id -u'
-                  echo "== D: system scope as runner uid"
-                  sudo -n systemd-run --uid=$(id -u) --gid=$(id -g) --wait --pipe --collect --property=Delegate=yes bash -c "$mover" 2>&1

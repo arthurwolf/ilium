@@ -389,14 +389,23 @@ def native(arguments):
         command = ['cargo', 'test', '--locked', '--workspace', '--no-fail-fast', '--target', arguments.target] + cargo_arguments
         if target['os'] != 'linux':
             return command
-        # Same transient user scope as the hosted CI workflow, where the
-        # animation sandbox finds its delegated cgroup-v2 ancestor.
-        scope = ['systemd-run', '--user', '--wait', '--pipe', '--collect', '--property=Delegate=yes', '--working-directory=' + str(root)]
+        # The animation sandbox needs an owned cgroup-v2 ancestor with the cpu,
+        # memory and pids controllers enabled. The user manager on the hosted
+        # Ubuntu 22.04 image lacks cpu, so use a system-manager scope owned by
+        # the runner and enable the controllers there: first move this shell
+        # into a child cgroup (a cgroup with processes cannot delegate), then
+        # enable the controllers on the scope itself and exec cargo from the leaf.
+        enable_controllers = (
+            'scope=/sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup) && mkdir "$scope/leaf" '
+            '&& echo 0 > "$scope/leaf/cgroup.procs" && echo "+cpu +memory +pids" > "$scope/cgroup.subtree_control" '
+            '&& exec "$@"'
+        )
+        scope = ['sudo', '-n', 'systemd-run', '--uid=%d' % os.getuid(), '--gid=%d' % os.getgid(), '--wait', '--pipe', '--collect', '--property=Delegate=yes', '--working-directory=' + str(root)]
         scoped_environment = dict(test_environment)
         scoped_environment.setdefault('HOME', os.environ.get('HOME', ''))
         scoped_environment.setdefault('PATH', os.environ.get('PATH', ''))
         scope += ['--setenv=%s=%s' % (key, value) for key, value in sorted(scoped_environment.items()) if '\n' not in str(value) and value != '']
-        return scope + ['/usr/bin/env', 'cargo'] + command[1:]
+        return scope + ['/bin/bash', '-c', enable_controllers, 'bash', '/usr/bin/env', 'cargo'] + command[1:]
 
     logged(test_command(['--lib', '--bins'], parallel_environment), root, work / 'workspace-unit-tests.log', parallel_environment, timeout=7200)
     logged(test_command(['--doc'], parallel_environment), root, work / 'workspace-doc-tests.log', parallel_environment, timeout=3600)
