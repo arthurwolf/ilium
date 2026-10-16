@@ -120,7 +120,18 @@ fn external_revision_conflict_requires_reload_before_successor_admission() {
             .unwrap(),
         )
         .unwrap();
-    assert!(runtime.submit(history(2)).is_ok());
+    // Admission is try-lock based and reports Busy while the new writer's
+    // worker is still starting, so wait for the successor to be admitted.
+    let successor_deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        match runtime.submit(history(2)) {
+            Ok(_) => break,
+            Err(Error::Busy | Error::Writer(history_writer::Error::Busy)) => (),
+            result => panic!("successor admission failed: {result:?}"),
+        }
+        assert!(Instant::now() < successor_deadline);
+        std::thread::yield_now();
+    }
     runtime.retire().unwrap();
     loop {
         match runtime.gate() {

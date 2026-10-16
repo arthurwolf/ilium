@@ -504,7 +504,7 @@ mod tests {
     // Endpoint fixtures share the real process-wide two-body admission limit.
     // Concurrent tests must wait for a slot rather than assume one is free.
     fn acquire_fixture_admission() -> BodyAdmission {
-        let deadline = Instant::now() + Duration::from_secs(3);
+        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             if let Ok(admission) = BodyAdmission::acquire() {
                 return admission;

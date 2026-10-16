@@ -29724,7 +29724,18 @@ impl App {
             }
         };
         // Admission precedes actual composition, matching production ownership.
-        let reservation = presenter.try_reserve().unwrap();
+        // try_reserve is non-blocking and returns None while the presenter's
+        // worker briefly holds its queue lock, so retry within the deadline.
+        let reservation = loop {
+            if let Some(reservation) = presenter.try_reserve() {
+                break reservation;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "real fixture presenter never granted a frame reservation"
+            );
+            std::thread::yield_now();
+        };
         let screen = self.layout.screen_area;
         let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(
             screen.width,

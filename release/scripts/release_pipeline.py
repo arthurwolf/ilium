@@ -242,7 +242,9 @@ def logged(command, root, log, environment=None, timeout=10_800):
 def configure_workspace_test_environment(environment, target, work, cargo_target):
     # Cargo owns the parallel job budget; nested native builders must not
     # multiply it or inherit a runner's unbounded host defaults.
-    environment.update(CARGO_BUILD_JOBS='16', CMAKE_BUILD_PARALLEL_LEVEL='1',
+    # Hosted runners have 2 to 4 cores; 16 parallel MSVC link steps exhaust
+    # memory there (LNK1102), so never exceed the host's CPU count.
+    environment.update(CARGO_BUILD_JOBS=str(min(16, os.cpu_count() or 2)), CMAKE_BUILD_PARALLEL_LEVEL='1',
                        NUM_JOBS='1', MAKEFLAGS='-j1', OMP_NUM_THREADS='1',
                        RAYON_NUM_THREADS='1', RUST_TEST_THREADS='1')
     executable = 'ilium.exe' if target['os'] == 'windows' else 'ilium'
@@ -378,7 +380,10 @@ def native(arguments):
     # Mirror the hosted CI split: unit tests run in parallel, integration tests are
     # serialized because PTY-heavy tests contend for the runner. On Linux the animation
     # sandbox needs a delegated cgroup-v2 ancestor, which a transient user scope provides.
+    # Two test threads: timing-sensitive unit tests (RAM body probe, animation
+    # settling) are starved by one-thread-per-core debug builds on 3-4 core runners.
     parallel_environment = {key: value for key, value in environment.items() if key != 'RUST_TEST_THREADS'}
+    parallel_environment['RUST_TEST_THREADS'] = '2'
 
     def test_command(cargo_arguments, test_environment):
         command = ['cargo', 'test', '--locked', '--workspace', '--no-fail-fast', '--target', arguments.target] + cargo_arguments

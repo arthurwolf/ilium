@@ -686,8 +686,9 @@ async fn voice_say_reaches_a_terminal_through_the_real_voice_pipeline() {
             WAIT_TIMEOUT
         )
         .await,
-        "typed turns must arrive in order, got {:?}",
-        mock.user_texts()
+        "typed turns must arrive in order, got {:?}; {}",
+        mock.user_texts(),
+        failure_diagnostics(&dirs, &mock, &tui)
     );
     assert!(
         wait_until(

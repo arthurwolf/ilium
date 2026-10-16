@@ -387,6 +387,24 @@ impl Presenter {
             _worker: worker,
         })
     }
+    /// Test helper: `try_reserve` also returns `None` while the worker briefly
+    /// holds the queue lock, so tests wait for a reservation instead of
+    /// unwrapping a transient refusal.
+    #[cfg(test)]
+    pub(crate) fn reserve_within_test_deadline(&self) -> FrameReservation {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            if let Some(reservation) = self.try_reserve() {
+                return reservation;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "presenter never granted a frame reservation"
+            );
+            std::thread::yield_now();
+        }
+    }
+
     /// Never wait for terminal throughput on the UI thread.
     pub fn try_reserve(&self) -> Option<FrameReservation> {
         if self.shared.queue.try_lock().ok()?.closing {

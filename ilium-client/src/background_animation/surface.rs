@@ -1099,7 +1099,7 @@ mod tests {
         let mut buffer = ratatui::buffer::Buffer::empty(Rect::new(0, 0, 2, 1));
         buffer[(0, 0)].set_symbol(&glyph.to_string());
         let mut frame = crate::presentation::PreparedFrame::new(
-            presenter.try_reserve().unwrap(),
+            presenter.reserve_within_test_deadline(),
             buffer,
             None,
             42,
@@ -1142,7 +1142,7 @@ mod tests {
         let mut same = ratatui::buffer::Buffer::empty(Rect::new(0, 0, 2, 1));
         same[(0, 0)].set_symbol(&glyph.to_string());
         let mut frame = crate::presentation::PreparedFrame::new(
-            presenter.try_reserve().unwrap(),
+            presenter.reserve_within_test_deadline(),
             same,
             None,
             43,
