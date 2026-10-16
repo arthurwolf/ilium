@@ -2407,11 +2407,22 @@ mod tests {
             unreachable!()
         };
         assert!(!second.is_confirmed_removed());
-        let audit = result(
-            &parsing,
-            |result| matches!(result, ParseResult::Error { target, message } if target.pane_id == first_id && message.contains("ordinal") && message.contains("bytes")),
-        );
-        assert!(matches!(audit, ParseResult::Error { .. }));
+        // Confirming the removal also cancels the pane's queued commands, which
+        // reports a "cancelled" error ahead of the ordinal audit error; the
+        // order of the two is not part of the contract under test.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut audited = false;
+        while !audited {
+            for result in parsing.collect() {
+                if let ParseResult::Error { target, message } = result {
+                    audited |= target.pane_id == first_id
+                        && message.contains("ordinal")
+                        && message.contains("bytes");
+                }
+            }
+            assert!(Instant::now() < deadline, "ordinal audit did not arrive");
+            std::thread::sleep(Duration::from_millis(1));
+        }
     }
     #[test]
     fn search_navigation_checks_history_origin_after_previously_admitted_replay() {
