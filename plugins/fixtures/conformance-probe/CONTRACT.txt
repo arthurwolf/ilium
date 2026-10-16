@@ -1,0 +1,25 @@
+Contract the conformance tests expect from the probe component conformance-probe.wasm.
+Built to target/plugin-fixtures/conformance-probe.wasm (reference-conformance-suite.md DEV-607).
+
+The tests start it with a JSON object as the activation settings. All keys are optional.
+
+  burn_ms.<export>   fuel-burn milliseconds inside that export: activate, deactivate, on-events,
+                     render. The probe calls the host import conformance_hooks::fuel_burn.
+  restore            base64 bytes returned from deactivate as restore bytes.
+  alloc_mib          mebibytes of linear memory allocated in on-events (CONF-MEM-01).
+  call.<import>      one import call made in on-events with the given arguments, for example
+                     {"fs.read": {"scope": "project", "path": "a.txt"}}. The result code is
+                     logged as "<import> -> <code>", for example "fs.read -> not-permitted".
+  store.put          [key, value] stored in on-events; store.get is logged as
+                     "store.get <key> = <value>" after a restart (CONF-STORE-01).
+  trap_after         export name after which the probe traps with trap.deadline.
+  render_tree        a UiTree returned from render (CONF-VIEW-03).
+  render_action_key  action key set on a button in render; a UiAction event with that key is
+                     logged as "ui-action received" (CONF-VIEW-04).
+
+Other fixture components the suite expects next to it in target/plugin-fixtures/:
+  conformance-subject.wasm   well-behaved plugin for the plugin-subject runs
+  conformance-slow.wasm      spins in on-events past 10,000 ms (DEV-606)
+  conformance-inert.wasm     no event or probe path (DEV-643)
+  conformance-verbose.wasm   long expected and actual strings (DEV-640)
+  conformance-debug.wasm     built without optimisation (DEV-630)
