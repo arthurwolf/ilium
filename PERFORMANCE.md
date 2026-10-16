@@ -531,11 +531,12 @@ re-measured in this run.
 - Verified on the branch source (identical to `c54621f`) through ni-build: strict
   `cargo clippy --workspace --all-targets` exited 0; `rustfmt --check` on the three
   changed Rust files exited 0; `ilium-pty` library and integration tests passed
-  (79 tests, 0 failed; doc-tests excluded); `ilium-detect` unit tests passed (74).
+  (79 tests, 0 failed; doc-tests excluded); `ilium-detect` tests passed (74 unit
+  tests, plus the integration tests, including the one that spawns the fixture
+  agent binary; all passed when the fixture package was built in the same run).
 - Not verified: the `ilium-server` suite still has 14 failing tests on the branch
   and 13 on master. The same 13 fail on both, and the one extra branch failure
-  passes when run alone. The `ilium-detect` integration test that spawns a fixture
-  binary failed under the combined test run, so it is not counted as verified.
+  passes when run alone.
 - The `ilium-server` IPC changes that the earlier pass flagged as breaking `new-pane`
   have not been re-checked against this build.
 - The earlier 200-pane baseline problem (`new-pane` timing out at 5 s) was not
