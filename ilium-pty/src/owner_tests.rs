@@ -314,7 +314,17 @@ fn eventually(mut predicate: impl FnMut() -> bool) {
 #[test]
 fn reply_completion_precedes_resize_and_later_output_uses_new_geometry() {
     let (writer_gate, release) = gate();
-    let harness = Harness::new(OwnerLimits::default(), Some(writer_gate), None);
+    let harness = Harness::new(
+        OwnerLimits {
+            // A starved CI runner can stall this test for longer than the
+            // product's 2 s delivery deadlines while the writer gate is held.
+            command_timeout: Duration::from_secs(60),
+            reply_timeout: Duration::from_secs(60),
+            ..OwnerLimits::default()
+        },
+        Some(writer_gate),
+        None,
+    );
     harness.output(b"\x1b[61;1H\x1b[6n");
     release
         .started

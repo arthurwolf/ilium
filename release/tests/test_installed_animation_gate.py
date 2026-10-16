@@ -1,4 +1,5 @@
 """Portable negative tests for native animation receipt and launcher binding."""
+import os
 import argparse
 import json
 from pathlib import Path
@@ -143,6 +144,7 @@ class InstalledAnimationGateTests(unittest.TestCase):
         with self.assertRaisesRegex(release_tool.ReleaseError, 'real installed launcher'):
             gate.smoke(self.arguments)
 
+    @unittest.skipIf(os.name == 'nt', 'Flatpak sandbox paths are POSIX; Flatpak is only built and run on Linux')
     def test_managed_launcher_binds_host_payload_to_sandbox_executable_path(self):
         self.arguments.format = 'flatpak'
         self.arguments.executable_root = Path('/app/lib/ilium')
