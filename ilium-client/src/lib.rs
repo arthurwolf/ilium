@@ -2670,6 +2670,7 @@ async fn finish_input_retirement(
     loop {
         if let Some(mut report) = retirement.try_complete() {
             report.complete_exit_click_release(exit_click_release);
+            report.complete_exit_resizes();
             return report
                 .into_result()
                 .map_err(|failure| crate::error::InputRetirementError::Failed(*failure));

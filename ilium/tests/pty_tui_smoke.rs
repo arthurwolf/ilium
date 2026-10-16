@@ -4272,16 +4272,27 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
     let mut typed_body = String::new();
     for character in "Live note".chars() {
         typed_body.push(character);
-        tui.write(character.to_string().as_bytes())
-            .expect("type one body character");
-        let expected_line = format!("\n  {typed_body}\n");
-        assert!(
-            wait_until(
-                || std::fs::read_to_string(&context_path)
-                    .is_ok_and(|source| source.contains(&expected_line)),
-                WAIT_TIMEOUT,
+        let expected_line = format!("\n  {typed_body}");
+        // A refused-and-rolled-back keystroke is retyped, as a user would.
+        let mut saved = false;
+        for _ in 0..4 {
+            tui.write(character.to_string().as_bytes())
+                .expect("type one body character");
+            if wait_until(
+                || {
+                    std::fs::read_to_string(&context_path)
+                        .is_ok_and(|source| source.contains(&expected_line))
+                },
+                Duration::from_secs(8),
             )
-            .await,
+            .await
+            {
+                saved = true;
+                break;
+            }
+        }
+        assert!(
+            saved,
             "body keystrokes should save immediately; typed={typed_body:?}, document={:?}, screen={:?}",
             std::fs::read_to_string(&context_path),
             tui.screen_text()

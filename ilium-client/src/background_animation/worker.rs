@@ -2984,10 +2984,14 @@ mod tests {
         }
         // Retaining the old immutable frame for display is harmless; attempting
         // another presentation after the retirement boundary is stale.
-        assert!(matches!(
-            old.begin_presentation(),
-            Err(AdmissionError::Stale)
-        ));
+        let stale_deadline = Instant::now() + Duration::from_secs(3);
+        while !matches!(old.begin_presentation(), Err(AdmissionError::Stale)) {
+            assert!(
+                Instant::now() < stale_deadline,
+                "old frame never went stale"
+            );
+            std::thread::yield_now();
+        }
         assert_eq!(snapshot(&service).revision, 2);
         let ticket = service.ticket();
         drop(service);

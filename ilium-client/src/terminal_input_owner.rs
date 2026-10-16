@@ -1542,6 +1542,20 @@ impl InputShutdownReport {
             }
         }
     }
+    /// A terminal resize that arrives while the client is already exiting has
+    /// no screen left to lay out. Consume it through its normal dispatch path
+    /// so only real user input (keys, gestures, pastes) remains an error.
+    pub(crate) fn complete_exit_resizes(&mut self) {
+        let mut kept = VecDeque::with_capacity(self.pending.len());
+        while let Some(event) = self.pending.pop_front() {
+            if matches!(event.view(), Event::Resize(..)) {
+                event.dispatch(|_| ());
+            } else {
+                kept.push_back(event);
+            }
+        }
+        self.pending = kept;
+    }
     pub fn native_custody(&self) -> Option<&NativeInputCustody> {
         self.native.as_ref().or_else(|| {
             self.failure

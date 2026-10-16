@@ -392,17 +392,12 @@ def native(arguments):
         # The system manager (not --user) owns full controller delegation: the
         # animation sandbox needs memory, pids and cpu in an owned cgroup, which
         # the user manager of older runner images does not delegate.
-        scope = ['sudo', '-n', 'systemd-run', '--uid=%d' % os.getuid(), '--gid=%d' % os.getgid(), '--wait', '--pipe', '--collect', '--property=Delegate=yes', '--property=CPUAccounting=yes', '--property=MemoryAccounting=yes', '--property=TasksAccounting=yes', '--working-directory=' + str(root)]
+        scope = ['sudo', '-n', 'systemd-run', '--uid=%d' % os.getuid(), '--gid=%d' % os.getgid(), '--wait', '--pipe', '--collect', '--property=Delegate=cpu memory pids', '--property=CPUAccounting=yes', '--property=MemoryAccounting=yes', '--property=TasksAccounting=yes', '--working-directory=' + str(root)]
         scoped_environment = dict(test_environment)
         scoped_environment.setdefault('HOME', os.environ.get('HOME', ''))
         scoped_environment.setdefault('PATH', os.environ.get('PATH', ''))
         scope += ['--setenv=%s=%s' % (key, value) for key, value in sorted(scoped_environment.items()) if '\n' not in str(value) and value != '']
-        # A delegated unit cgroup cannot enable child controllers while it still
-        # holds a process (no-internal-process rule), so the wrapper first moves
-        # itself into a leaf child, then enables the controllers the sandbox
-        # requires on the unit cgroup before exec-ing cargo.
-        delegate_script = 'set -e; group=/sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup); mkdir "$group/leaf"; echo $$ > "$group/leaf/cgroup.procs"; echo "+cpu +memory +pids" > "$group/cgroup.subtree_control" || cat "$group/cgroup.controllers" "$group/cgroup.subtree_control" >&2; exec "$@"'
-        return scope + ['/bin/bash', '-c', delegate_script, 'delegate', '/usr/bin/env', 'cargo'] + command[1:]
+        return scope + ['/usr/bin/env', 'cargo'] + command[1:]
 
     logged(test_command(['--lib', '--bins'], parallel_environment), root, work / 'workspace-unit-tests.log', parallel_environment, timeout=7200)
     logged(test_command(['--doc'], parallel_environment), root, work / 'workspace-doc-tests.log', parallel_environment, timeout=3600)
