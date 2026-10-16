@@ -4346,13 +4346,20 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
         dialog_below_context,
         "board path picker should list dialog.md directly below context.md, rows were: {picker_rows:#?}"
     );
-    let (path_column, path_row) = tui.with_screen(|screen| {
-        let row = rows_containing_in_order(screen, &["\u{1f4c4} dialog.md"])[0];
-        (
-            column_of_text_in_row(screen, row, "dialog.md").unwrap(),
-            row,
-        )
-    });
+    // The picker can repaint between the wait above and this read (slower
+    // ConPTY delivery), so locate the row under a wait instead of indexing once.
+    let locate_dialog_row = || {
+        tui.with_screen(|screen| {
+            let row = *rows_containing_in_order(screen, &["\u{1f4c4} dialog.md"]).first()?;
+            Some((column_of_text_in_row(screen, row, "dialog.md")?, row))
+        })
+    };
+    assert!(
+        wait_until(|| locate_dialog_row().is_some(), WAIT_TIMEOUT).await,
+        "dialog.md row vanished from the board path picker, got: {:?}",
+        tui.screen_text()
+    );
+    let (path_column, path_row) = locate_dialog_row().expect("dialog.md row located");
     for _ in 0..2 {
         tui.write(&sgr_mouse_down(0, path_column, path_row))
             .expect("select then choose dialog.md");
