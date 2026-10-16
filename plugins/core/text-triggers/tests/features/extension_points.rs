@@ -82,7 +82,7 @@ fn feature_056_a_refusing_before_fire_contributor_stops_the_send_input() {
     let mut host = server_host();
     let pane = add_agent_pane(&mut host, "claude");
     set_rules(&mut host, &["\\(y/n\\)\\s*$"], &["y"]);
-    host.set_hook_contributor("before-fire", HookReply::Refuse("outside working hours".to_string()));
+    host.set_hook_reply("before-fire", HookReply::Refuse("outside working hours".to_string()));
     let submissions = host.deliver_one(matched(pane, &rule_id(0), "Continue? (y/n)", 1));
     host.settle();
     assert!(send_inputs(&submissions).is_empty(), "{submissions:?}");
@@ -94,7 +94,7 @@ fn feature_056_a_passing_before_fire_contributor_keeps_the_send_input() {
     let mut host = server_host();
     let pane = add_agent_pane(&mut host, "claude");
     set_rules(&mut host, &["\\(y/n\\)\\s*$"], &["y"]);
-    host.set_hook_contributor("before-fire", HookReply::Pass);
+    host.set_hook_reply("before-fire", HookReply::Pass);
     let submissions = host.deliver_one(matched(pane, &rule_id(0), "Continue? (y/n)", 1));
     assert_eq!(send_inputs(&submissions), [expected_spec(pane, "y")]);
 }
@@ -106,7 +106,7 @@ fn feature_056_a_refusal_with_a_reply_the_veto_mode_does_not_allow_counts_as_pas
     let mut host = server_host();
     let pane = add_agent_pane(&mut host, "claude");
     set_rules(&mut host, &["go"], &["y"]);
-    host.set_hook_contributor("before-fire", HookReply::Replace("n".to_string()));
+    host.set_hook_reply("before-fire", HookReply::Replace("n".to_string()));
     let submissions = host.deliver_one(matched(pane, &rule_id(0), "go", 1));
     assert_eq!(send_inputs(&submissions), [expected_spec(pane, "y")]);
 }
@@ -117,7 +117,7 @@ fn feature_056_the_before_fire_payload_carries_rule_pane_match_and_reply_length(
     let mut host = server_host();
     let pane = add_agent_pane(&mut host, "claude");
     set_rules(&mut host, &["go"], &["yes please"]);
-    host.set_hook_contributor("before-fire", HookReply::Pass);
+    host.set_hook_reply("before-fire", HookReply::Pass);
     host.deliver_one(matched(pane, &rule_id(0), "go", 1));
     let calls = host.hook_calls("before-fire");
     assert_eq!(calls.len(), 1, "{calls:?}");
@@ -134,10 +134,10 @@ fn feature_056_a_refused_rule_still_leaves_other_rules_free_to_fire() {
     let mut host = server_host();
     let pane = add_agent_pane(&mut host, "claude");
     set_rules(&mut host, &["one", "two"], &["1", "2"]);
-    host.set_hook_contributor("before-fire", HookReply::Refuse("no".to_string()));
+    host.set_hook_reply("before-fire", HookReply::Refuse("no".to_string()));
     let refused = host.deliver_one(matched(pane, &rule_id(0), "one", 1));
     assert!(send_inputs(&refused).is_empty());
-    host.set_hook_contributor("before-fire", HookReply::Pass);
+    host.set_hook_reply("before-fire", HookReply::Pass);
     let allowed = host.deliver_one(matched(pane, &rule_id(1), "two", 2));
     assert_eq!(send_inputs(&allowed), [expected_spec(pane, "2")]);
 }
@@ -192,7 +192,7 @@ fn feature_056_a_fired_rule_publishes_the_fired_topic_with_rule_and_pane() {
     set_rules(&mut host, &["go"], &["y"]);
     host.deliver_one(matched(pane, &rule_id(0), "go", 1));
     host.settle();
-    let published = host.published_topics("ilium.core.text-triggers/fired");
+    let published = host.published("ilium.core.text-triggers/fired");
     assert_eq!(published, [json!({ "rule": rule_id(0), "pane": pane }).to_string()]);
 }
 
@@ -202,8 +202,8 @@ fn feature_056_a_refused_rule_does_not_publish_the_fired_topic() {
     let mut host = server_host();
     let pane = add_agent_pane(&mut host, "claude");
     set_rules(&mut host, &["go"], &["y"]);
-    host.set_hook_contributor("before-fire", HookReply::Refuse("no".to_string()));
+    host.set_hook_reply("before-fire", HookReply::Refuse("no".to_string()));
     host.deliver_one(matched(pane, &rule_id(0), "go", 1));
     host.settle();
-    assert!(host.published_topics("ilium.core.text-triggers/fired").is_empty());
+    assert!(host.published("ilium.core.text-triggers/fired").is_empty());
 }

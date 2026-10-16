@@ -1,5 +1,6 @@
 //! Shared helpers of the port twins: hosts, the Optimization panel target, screen text.
 
+pub use crate::host_ext::*;
 use std::path::PathBuf;
 
 use ilium_plugin_core_compaction::{CompactionClient, CompactionServer};

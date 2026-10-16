@@ -135,7 +135,7 @@ fn port_internal_an_unknown_menu_has_no_selectable_rows() {
 #[test]
 fn port_internal_a_zero_height_view_renders_no_rows() {
     let mut host = open_picker(&["abc"]);
-    let text = host.render_view(picker_target(), 20, 0);
+    let text = host.render(picker_target(), 20, 0).text();
     assert!(text.trim().is_empty(), "{text:?}");
 }
 

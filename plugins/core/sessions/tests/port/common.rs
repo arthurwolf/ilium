@@ -128,10 +128,10 @@ pub fn session_ref(session_id: &str) -> SessionRef {
 // ---------------------------------------------------------------------------------------------
 
 pub fn verify_agent(host: &mut FakeHost, pane: u64, signature_spec: SignatureSpec, session_id: &str) {
-    host.agent().add_signature(signature_spec);
-    host.agent().set_session(pane, session_ref(session_id));
+    host.agents().add_signature(signature_spec);
+    host.agents().set_session(pane, session_ref(session_id));
 }
 
 pub fn register_signature(host: &mut FakeHost, signature_spec: SignatureSpec) {
-    host.agent().add_signature(signature_spec);
+    host.agents().add_signature(signature_spec);
 }

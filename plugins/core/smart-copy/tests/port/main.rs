@@ -4,6 +4,8 @@
 //! the same observable behaviour on the plugin channels: candidate lines, picker keys, clipboard
 //! text, status lines, menu entries and pointer claims.
 
+#[path = "../host_ext.rs"]
+mod host_ext;
 mod common;
 mod clipboard_ports;
 mod menu_ports;

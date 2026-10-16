@@ -2,6 +2,7 @@
 //! the step renders eleven rows and a connection state label; the test button runs a demonstration whose only
 //! capability is a lightbulb (1024 calls, 1024 argument bytes, see API_GAPS.md).
 
+use crate::host_ext::*;
 use ilium_plugin_sdk::testing::FakeHost;
 use ilium_plugin_sdk::types::ViewTarget;
 use serde_json::json;

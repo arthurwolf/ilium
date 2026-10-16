@@ -95,7 +95,7 @@ fn points_050_the_transcript_hook_is_called_with_text_confidence_and_language() 
     let mut host = enabled_client("push_to_talk");
     host.set_hook_reply("ilium.core.voice/transcript", HookReply::Pass);
     hear(&mut host, "hello there");
-    let calls = host.hook_calls("ilium.core.voice/transcript");
+    let calls = host.hook_payloads("ilium.core.voice/transcript");
     assert_eq!(calls.len(), 1);
     let payload: serde_json::Value = serde_json::from_str(&calls[0]).expect("payload JSON");
     assert_eq!(payload["text"], "hello there");
@@ -116,7 +116,7 @@ fn points_050_heard_topic_publishes_text_and_command_for_a_matched_phrase() {
     let mut host = enabled_client("push_to_talk");
     crate::common::contribute_phrase(&mut host, "open-board", "open the board", "open-board", false);
     hear(&mut host, "open the board");
-    let topics = host.topics();
+    let topics = host.published_topics();
     let heard: Vec<_> = topics.iter().filter(|(name, _)| name == "ilium.core.voice/heard").collect();
     assert_eq!(heard.len(), 1);
     let payload: serde_json::Value = serde_json::from_str(&heard[0].1).expect("payload JSON");
@@ -128,7 +128,7 @@ fn points_050_heard_topic_publishes_text_and_command_for_a_matched_phrase() {
 fn points_050_heard_topic_carries_a_null_command_for_an_unmatched_phrase() {
     let mut host = enabled_client("push_to_talk");
     hear(&mut host, "nothing matches this");
-    let topics = host.topics();
+    let topics = host.published_topics();
     let heard: Vec<_> = topics.iter().filter(|(name, _)| name == "ilium.core.voice/heard").collect();
     assert_eq!(heard.len(), 1);
     let payload: serde_json::Value = serde_json::from_str(&heard[0].1).expect("payload JSON");

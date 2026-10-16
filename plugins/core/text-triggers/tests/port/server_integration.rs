@@ -32,7 +32,7 @@ fn port_003_a_running_server_reconciles_durable_trigger_edits_without_client_rep
     let mut host = server_host();
     let pane = add_agent_pane(&mut host, "claude");
     set_rules(&mut host, &["old"], &["r"]);
-    host.seed_config_table("text_triggers", json!({"patterns": ["new"], "replies": ["r"]}));
+    host.kernel_settings().set_tab("text_triggers", json!({"patterns": ["new"], "replies": ["r"]}));
     host.settle();
     assert_eq!(filter_regexes(&host, pane), ["new"]);
 }
@@ -43,7 +43,7 @@ fn port_004_a_second_attach_receives_accepted_text_triggers_without_replacing_th
     let mut host = server_host();
     set_rules(&mut host, &["go"], &["yes"]);
     let mut second = client_host();
-    second.seed_config_table("text_triggers", host.config_table("text_triggers").expect("table"));
+    second.kernel_settings().set_tab("text_triggers", host.kernel_settings().tab("text_triggers").expect("table"));
     second.settle();
     assert_eq!(second.settings().get("patterns"), Some(json!(["go"])));
     assert_eq!(host.settings().get("patterns"), Some(json!(["go"])));

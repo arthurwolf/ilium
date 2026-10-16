@@ -4,7 +4,7 @@ use crate::common::*;
 
 fn view_text(lines: &[&str], width: u16, height: u16) -> String {
     let mut host = open_picker(lines);
-    host.render_view(picker_target(), width, height)
+    host.render(picker_target(), width, height).text()
 }
 
 /// REQ: PORT:ilium-client/src/smart_copy_light.rs::short_text_is_shown_whole

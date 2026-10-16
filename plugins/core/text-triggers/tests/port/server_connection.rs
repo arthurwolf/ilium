@@ -17,7 +17,7 @@ fn port_001_text_trigger_attach_and_live_broadcast_use_current_authority() {
     set_rules(&mut host, &["a", "b"], &["r", "s"]);
     assert_eq!(filter_regexes(&host, pane), ["a", "b"]);
     let mut client = client_host();
-    client.seed_config_table("text_triggers", host.config_table("text_triggers").expect("table"));
+    client.kernel_settings().set_tab("text_triggers", host.kernel_settings().tab("text_triggers").expect("table"));
     client.settle();
     assert_eq!(client.settings().get("patterns"), Some(json!(["a", "b"])));
 }

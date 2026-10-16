@@ -12,6 +12,13 @@ pub struct LogLine {
     pub message: String,
 }
 
+impl LogLine {
+    /// Whether the message contains `needle` (reference-cli.md, `ilium plugin logs` filtering).
+    pub fn contains(&self, needle: &str) -> bool {
+        self.message.contains(needle)
+    }
+}
+
 /// The ring buffer of recent log lines.
 #[derive(Debug)]
 pub struct LogRing {

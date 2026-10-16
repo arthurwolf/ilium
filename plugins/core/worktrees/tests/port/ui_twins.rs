@@ -68,10 +68,10 @@ fn port_069_a_panel_too_short_for_all_lines_paints_no_more_rows_than_it_has() {
 #[test]
 fn port_072_reading_the_git_tab_submits_nothing_and_changes_no_setting() {
     let mut host = client_host();
-    let before = host.kernel_settings("git").get("default_where");
+    let before = host.kernel_settings().get("git", "default_where");
     let submitted = host.submitted().len();
     let _ = host.render(ViewTarget::SettingsTab("git".to_string()), 48, 8);
-    assert_eq!(host.kernel_settings("git").get("default_where"), before);
+    assert_eq!(host.kernel_settings().get("git", "default_where"), before);
     assert_eq!(host.submitted().len(), submitted);
     assert!(host.process().calls().is_empty());
 }
@@ -82,8 +82,8 @@ fn port_072_choosing_a_default_where_keeps_the_authored_branch_prefix() {
     let mut host = client_host();
     set_git(&mut host, "branch_prefix", json!("team/")).expect("valid");
     set_git(&mut host, "default_where", json!("new_worktree")).expect("valid");
-    assert_eq!(host.kernel_settings("git").get("branch_prefix"), Some(json!("team/")));
-    assert_eq!(host.kernel_settings("git").get("default_where"), Some(json!("new_worktree")));
+    assert_eq!(host.kernel_settings().get("git", "branch_prefix"), Some(json!("team/")));
+    assert_eq!(host.kernel_settings().get("git", "default_where"), Some(json!("new_worktree")));
 }
 
 /// REQ: F-072, PORT:ilium-client/src/value_worktree.rs::catalogs_preserve_authored_fields_and_reject_reopened_drafts
@@ -92,7 +92,7 @@ fn port_072_an_unknown_default_where_is_refused_and_the_old_value_stays() {
     let mut host = client_host();
     set_git(&mut host, "default_where", json!("existing_worktree")).expect("valid");
     assert!(set_git(&mut host, "default_where", json!("elsewhere")).is_err());
-    assert_eq!(host.kernel_settings("git").get("default_where"), Some(json!("existing_worktree")));
+    assert_eq!(host.kernel_settings().get("git", "default_where"), Some(json!("existing_worktree")));
 }
 
 /// REQ: F-072, PORT:ilium-client/src/value_worktree.rs::choice_buttons_paint_and_hit_on_responsive_rows

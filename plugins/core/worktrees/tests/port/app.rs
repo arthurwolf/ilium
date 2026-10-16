@@ -56,9 +56,9 @@ fn port_067_the_agent_pane_starts_in_the_server_resolved_worktree_folder() {
 #[test]
 fn port_072_the_default_where_starts_with_here_and_the_three_values_are_accepted() {
     let mut host = client_host();
-    assert_eq!(host.kernel_settings("git").get("default_where"), Some(json!("here")));
+    assert_eq!(host.kernel_settings().get("git", "default_where"), Some(json!("here")));
     for value in ["new_worktree", "existing_worktree", "here"] {
         set_git(&mut host, "default_where", json!(value)).expect("valid");
-        assert_eq!(host.kernel_settings("git").get("default_where"), Some(json!(value)));
+        assert_eq!(host.kernel_settings().get("git", "default_where"), Some(json!(value)));
     }
 }

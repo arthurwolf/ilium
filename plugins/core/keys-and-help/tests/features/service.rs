@@ -108,7 +108,7 @@ fn topic_010_a_remap_publishes_changed_with_a_reason() {
     let published = session.plugin(PLUGIN_ID).published_topics();
     assert_eq!(published.len(), 1);
     assert_eq!(published[0].0, TOPIC);
-    assert!(published[0].1.get("reason").is_some(), "{:?}", published[0].1);
+    assert!(serde_json::from_str::<serde_json::Value>(&published[0].1).expect("json").get("reason").is_some(), "{:?}", published[0].1);
 }
 
 /// REQ: F-010
@@ -117,7 +117,7 @@ fn topic_010_the_reason_of_a_keymap_change_is_remap() {
     let mut session = session();
     session.plugin(PLUGIN_ID).deliver_one(Event::KeymapChanged);
     session.pump().expect("pump");
-    assert_eq!(session.plugin(PLUGIN_ID).published_topics()[0].1["reason"], "remap");
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&session.plugin(PLUGIN_ID).published_topics()[0].1).expect("json")["reason"], "remap");
 }
 
 /// REQ: F-010

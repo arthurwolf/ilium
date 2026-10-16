@@ -45,9 +45,9 @@ fn port_070_a_path_with_extra_text_after_the_worktree_is_never_removed() {
 fn port_072_changing_the_close_policy_changes_no_other_git_key() {
     let mut host = server_host_at("/projects/acme");
     let keys = ["default_where", "branch_prefix", "worktree_location_template", "default_base", "branch_line", "setup_command"];
-    let before: Vec<_> = keys.iter().map(|key| host.kernel_settings("git").get(key)).collect();
+    let before: Vec<_> = keys.iter().map(|key| host.kernel_settings().get("git", key)).collect();
     set_git(&mut host, "default_close_policy", json!("offer_removal_when_safe")).expect("valid");
-    let after: Vec<_> = keys.iter().map(|key| host.kernel_settings("git").get(key)).collect();
+    let after: Vec<_> = keys.iter().map(|key| host.kernel_settings().get("git", key)).collect();
     assert_eq!(before, after);
 }
 

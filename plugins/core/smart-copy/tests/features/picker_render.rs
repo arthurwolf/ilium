@@ -8,7 +8,7 @@ const CANDIDATES: [&str; 3] = ["src/server/routes.rs", "cargo test -p ilium-serv
 fn render(width: u16, height: u16) -> Vec<String> {
     let mut host = client_host();
     host.deliver_one(candidates_message(&CANDIDATES));
-    host.render_view(&picker_target(), width, height)
+    host.render(picker_target(), width, height).lines()
         .into_iter()
         .map(|row| row.trim_end().to_string())
         .collect()
@@ -57,7 +57,7 @@ fn feature_065_picker_never_exceeds_the_screen_width() {
 fn feature_065_picker_keeps_numbers_visible_when_a_candidate_is_wider_than_the_screen() {
     let mut host = client_host();
     host.deliver_one(candidates_message(&["a/very/long/path/that/keeps/going/and/going/and/going/forever.rs"]));
-    let rows = host.render_view(&picker_target(), 40, 8);
+    let rows = host.render(picker_target(), 40, 8).lines();
     let text = rows.join("\n");
     assert!(text.contains("1 a/very"), "{text}");
     assert!(rows.iter().all(|row| row.trim_end().chars().count() <= 40));
@@ -67,7 +67,7 @@ fn feature_065_picker_keeps_numbers_visible_when_a_candidate_is_wider_than_the_s
 #[test]
 fn feature_065_picker_is_empty_before_any_candidates_arrive() {
     let mut host = client_host();
-    let rows = host.render_view(&picker_target(), 80, 8);
+    let rows = host.render(picker_target(), 80, 8).lines();
     assert!(rows.iter().all(|row| row.trim().is_empty()));
 }
 
@@ -76,7 +76,7 @@ fn feature_065_picker_is_empty_before_any_candidates_arrive() {
 fn feature_066_picker_shows_at_most_three_regions() {
     let mut host = client_host();
     host.deliver_one(candidates_message(&["one/a.rs", "two/b.rs", "three/c.rs", "four/d.rs"]));
-    let text = host.render_view(&picker_target(), 80, 12).join("\n");
+    let text = host.render(picker_target(), 80, 12).lines().join("\n");
     assert!(text.contains("3 three/c.rs"), "{text}");
     assert!(!text.contains("four/d.rs"), "{text}");
 }

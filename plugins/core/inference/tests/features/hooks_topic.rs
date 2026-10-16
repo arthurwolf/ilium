@@ -204,7 +204,7 @@ fn topic_084_request_finished_is_published_once_per_finished_request() {
     let mut host = server_host();
     answer_ok(&mut host);
     run_call(&mut host, 1, "title", "hello");
-    let published: Vec<_> = host.topics().published().into_iter().filter(|(topic, _)| topic == TOPIC).collect();
+    let published: Vec<_> = host.published_topics().into_iter().filter(|(topic, _)| topic == TOPIC).collect();
     assert_eq!(published.len(), 1);
 }
 
@@ -214,7 +214,7 @@ fn topic_084_request_finished_payload_is_purpose_provider_and_millis() {
     let mut host = server_host();
     answer_ok(&mut host);
     run_call(&mut host, 1, "title", "hello");
-    let (_, payload) = host.topics().published().into_iter().find(|(topic, _)| topic == TOPIC).expect("published");
+    let (_, payload) = host.published_topics().into_iter().find(|(topic, _)| topic == TOPIC).expect("published");
     let payload: Value = serde_json::from_str(&payload).expect("JSON");
     let mut keys: Vec<&str> = payload.as_object().expect("object").keys().map(String::as_str).collect();
     keys.sort();
@@ -229,7 +229,7 @@ fn topic_084_request_finished_payload_is_purpose_provider_and_millis() {
 fn topic_084_nothing_is_published_before_a_request_runs() {
     let mut host = server_host();
     host.settle();
-    assert!(host.topics().published().is_empty());
+    assert!(host.published_topics().is_empty());
 }
 
 /// REQ: F-084

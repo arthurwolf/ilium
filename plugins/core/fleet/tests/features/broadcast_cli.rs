@@ -400,7 +400,7 @@ fn broadcast_110_the_service_name_is_provided_for_other_plugins() {
 #[test]
 fn broadcast_110_a_before_broadcast_replace_changes_the_text_that_is_sent() {
     let (mut host, _, _, _) = fleet();
-    host.hook_reply(
+    host.set_hook_reply(
         "ilium.core.fleet/before-broadcast",
         ilium_plugin_sdk::exports::HookReply::Replace(
             serde_json::json!({"message": "rewritten", "targets": [], "source": "cli"}).to_string(),
@@ -415,9 +415,9 @@ fn broadcast_110_a_before_broadcast_replace_changes_the_text_that_is_sent() {
 #[test]
 fn broadcast_110_the_before_broadcast_payload_has_message_targets_and_source() {
     let (mut host, _, _, _) = fleet();
-    host.hook_reply("ilium.core.fleet/before-broadcast", ilium_plugin_sdk::exports::HookReply::Pass);
+    host.set_hook_reply("ilium.core.fleet/before-broadcast", ilium_plugin_sdk::exports::HookReply::Pass);
     run_cli(&mut host, &["broadcast", "original"], b"");
-    let calls = host.hook_calls("ilium.core.fleet/before-broadcast");
+    let calls = host.hook_payloads("ilium.core.fleet/before-broadcast");
     assert_eq!(calls.len(), 1);
     let payload: Value = serde_json::from_str(&calls[0]).expect("payload is JSON");
     assert_eq!(payload["message"], "original");
@@ -429,7 +429,7 @@ fn broadcast_110_the_before_broadcast_payload_has_message_targets_and_source() {
 #[test]
 fn broadcast_110_a_pass_leaves_the_text_unchanged() {
     let (mut host, _, _, _) = fleet();
-    host.hook_reply("ilium.core.fleet/before-broadcast", ilium_plugin_sdk::exports::HookReply::Pass);
+    host.set_hook_reply("ilium.core.fleet/before-broadcast", ilium_plugin_sdk::exports::HookReply::Pass);
     run_cli(&mut host, &["broadcast", "original"], b"");
     assert!(sent_inputs(&host).iter().all(|spec| spec.text == "original"));
 }
@@ -438,7 +438,7 @@ fn broadcast_110_a_pass_leaves_the_text_unchanged() {
 #[test]
 fn broadcast_110_a_before_broadcast_replace_with_an_empty_message_ends_the_broadcast() {
     let (mut host, _, _, _) = fleet();
-    host.hook_reply(
+    host.set_hook_reply(
         "ilium.core.fleet/before-broadcast",
         ilium_plugin_sdk::exports::HookReply::Replace(serde_json::json!({"message": "", "targets": [], "source": "cli"}).to_string()),
     );

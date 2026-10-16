@@ -222,7 +222,7 @@ fn status_037_project_rows_name_the_files_in_the_project_root() {
 #[test]
 fn status_063_a_malformed_marker_makes_the_status_fail_with_invalid_argument() {
     let mut host = host_with("<!-- ilium-agent-feature: progress version=abc -->\nx\n<!-- /ilium-agent-feature: progress -->\n");
-    let error = host.call_own_service_method(SERVICE, "status", "{}").expect_err("status fails");
+    let error = host.call_service(SERVICE, "status", "{}").expect_err("status fails");
     assert_eq!(error.code, ErrorCode::InvalidArgument);
 }
 

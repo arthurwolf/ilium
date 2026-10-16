@@ -14,7 +14,7 @@ fn pane_showing(host: &mut FakeHost, signature: &str, screen_name: &str) -> Node
         content_kind: Some("ilium.terminal".to_string()),
         agent: None,
     });
-    host.tree().set_screen(id, &fixture(screen_name));
+    host.tree().set_screen(id, fixture(screen_name).lines().map(str::to_string).collect());
     host.deliver_one(Event::AgentIdentified(AgentIdentifiedEvent { node: NodeId(id), signature: signature.to_string() }));
     NodeId(id)
 }

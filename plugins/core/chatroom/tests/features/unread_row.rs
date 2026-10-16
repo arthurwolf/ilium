@@ -91,7 +91,7 @@ fn unread_b16_without_a_room_file_no_row_is_published() {
 fn unread_f062_list_virtual_children_answers_one_file_child() {
     let mut host = server_host();
     seed_room(&mut host, &[]);
-    let plugin = host.plugin::<ilium_plugin_core_chatroom::ChatroomServer>();
+    let plugin = host.instance_mut::<ilium_plugin_core_chatroom::ChatroomServer>();
     let (children, cursor) = plugin.list_virtual_children("chatroom", "chatroom", None).expect("children");
     assert_eq!(children.len(), 1);
     assert_eq!(children[0].id, "file");
@@ -103,7 +103,7 @@ fn unread_f062_list_virtual_children_answers_one_file_child() {
 #[test]
 fn unread_f062_list_virtual_children_for_an_unknown_row_kind_is_not_found() {
     let mut host = server_host();
-    let plugin = host.plugin::<ilium_plugin_core_chatroom::ChatroomServer>();
+    let plugin = host.instance_mut::<ilium_plugin_core_chatroom::ChatroomServer>();
     let error = plugin.list_virtual_children("other", "x", None).expect_err("unknown kind");
     assert_eq!(error.code, ilium_plugin_sdk::types::ErrorCode::NotFound);
 }
@@ -112,10 +112,10 @@ fn unread_f062_list_virtual_children_for_an_unknown_row_kind_is_not_found() {
 #[test]
 fn unread_f062_list_virtual_children_answers_within_20_ms_of_fake_time() {
     let mut host = host_with_records(2000);
-    let before = host.clock().now_ms();
-    let plugin = host.plugin::<ilium_plugin_core_chatroom::ChatroomServer>();
+    let before = host.clock().now();
+    let plugin = host.instance_mut::<ilium_plugin_core_chatroom::ChatroomServer>();
     plugin.list_virtual_children("chatroom", "chatroom", None).expect("children");
-    assert!(host.clock().now_ms() - before <= 20);
+    assert!(host.clock().now() - before <= 20);
 }
 
 /// REQ: F-062

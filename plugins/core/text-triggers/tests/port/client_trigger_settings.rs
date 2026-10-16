@@ -46,7 +46,7 @@ fn port_003_normalization_removes_duplicates_and_impossible_startup_actions() {
 #[test]
 fn port_004_partially_specified_toml_keeps_defaults_for_missing_events() {
     let mut host = FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("client").build();
-    host.seed_config_table("triggers", json!({"agent_approval_required": ["retitle_element"]}));
+    host.kernel_settings().set_tab("triggers", json!({"agent_approval_required": ["retitle_element"]}));
     host.activate::<ilium_plugin_core_text_triggers::TextTriggersClient>();
     host.settle();
     assert_eq!(host.settings().get("agent_approval_required"), Some(json!(["retitle_element"])));

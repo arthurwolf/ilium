@@ -1,5 +1,6 @@
 //! Shared helpers: hosts for both sides, event builders and submission readers.
 
+pub use crate::host_ext::*;
 use std::path::PathBuf;
 
 use ilium_plugin_core_compaction::{CompactionClient, CompactionServer};

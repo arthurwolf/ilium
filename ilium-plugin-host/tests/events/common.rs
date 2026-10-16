@@ -189,7 +189,7 @@ impl Setup {
             .limits(self.limits.clone())
             .kernel(self.kernel.clone());
         harness = match &self.component {
-            Some(bytes) => harness.with_component(bytes),
+            Some(bytes) => harness.with_wasm_bytes(bytes),
             None => harness.with_native_guest(Box::new(ScriptedGuest(self.probe.clone()))),
         };
         (harness.build(), self.probe, self.kernel)

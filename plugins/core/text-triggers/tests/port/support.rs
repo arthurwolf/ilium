@@ -87,7 +87,7 @@ pub fn filter_regexes(host: &FakeHost, pane: u64) -> Vec<String> {
 /// A server host built from a seeded `[text_triggers]` table before the plugin activates.
 pub fn host_with_table(table: Value) -> FakeHost {
     let mut host = FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("server").build();
-    host.seed_config_table("text_triggers", table);
+    host.kernel_settings().set_tab("text_triggers", table);
     host.activate::<TextTriggersServer>();
     host
 }
@@ -128,7 +128,7 @@ pub fn preview_result(
     sample: &str,
 ) -> Result<Value, ilium_plugin_sdk::types::PluginError> {
     let request = json!({ "pattern": pattern, "reply": reply, "sample": sample }).to_string();
-    host.call_service("ilium.core.text-triggers/test-rule", &request)
+    host.call_own_service("ilium.core.text-triggers/test-rule", &request)
         .map(|text| serde_json::from_str(&text).expect("the service answers JSON"))
 }
 

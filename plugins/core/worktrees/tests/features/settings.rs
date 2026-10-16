@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 use crate::common::{client_host, set_git};
 
 fn read(host: &mut ilium_plugin_sdk::testing::FakeHost, key: &str) -> Option<Value> {
-    host.kernel_settings("git").get(key)
+    host.kernel_settings().get("git", key)
 }
 
 fn rejected(key: &str, value: Value) -> ilium_plugin_sdk::types::PluginError {

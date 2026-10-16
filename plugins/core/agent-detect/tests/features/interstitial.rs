@@ -17,7 +17,7 @@ fn pane_showing(host: &mut FakeHost, signature: &str, screen_name: &str) -> Node
         content_kind: Some("ilium.terminal".to_string()),
         agent: None,
     });
-    host.tree().set_screen(id, &fixture(screen_name));
+    host.tree().set_screen(id, fixture(screen_name).lines().map(str::to_string).collect());
     host.deliver_one(Event::AgentIdentified(AgentIdentifiedEvent { node: NodeId(id), signature: signature.to_string() }));
     NodeId(id)
 }
@@ -146,6 +146,6 @@ fn core_011_a_screen_change_before_the_agent_is_identified_is_not_answered() {
         content_kind: Some("ilium.terminal".to_string()),
         agent: None,
     });
-    host.tree().set_screen(id, &fixture("claude_code_resume_full_session_prompt.txt"));
+    host.tree().set_screen(id, fixture("claude_code_resume_full_session_prompt.txt").lines().map(str::to_string).collect());
     assert!(keystrokes(&host.deliver_one(screen_changed(NodeId(id)))).is_empty());
 }

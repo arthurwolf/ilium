@@ -86,7 +86,7 @@ fn port_068_concurrent_existing_worktree_requests_admit_one_agent() {
 fn port_070_the_close_policy_persists_and_a_dirty_checkout_is_kept() {
     let mut host = server_host();
     set_git(&mut host, "default_close_policy", json!("offer_removal_when_safe")).expect("valid");
-    assert_eq!(host.kernel_settings("git").get("default_close_policy"), Some(json!("offer_removal_when_safe")));
+    assert_eq!(host.kernel_settings().get("git", "default_close_policy"), Some(json!("offer_removal_when_safe")));
     host.process().on_args(&["status", "--porcelain"], ilium_plugin_sdk::host::process::ProcessExit { status: Some(0), signal: None, stdout: b" M a\n".to_vec(), stderr: Vec::new() });
     host.deliver_one(channel_message("remove", json!({"path": "/w/a", "branch": "a"}).to_string().into_bytes()));
     host.settle();

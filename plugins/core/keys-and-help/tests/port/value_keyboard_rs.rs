@@ -43,10 +43,10 @@ fn value_keyboard_port_prefix_catalog_retains_selection_after_save_failure_then_
     assert!(text.contains("Ctrl+B"), "the saved prefix is unchanged: {text}");
     assert!(text.contains("Prefix is Ctrl+B."), "the panel still states the saved prefix: {text}");
     assert!(!text.contains("Ctrl+Z"), "the rejected choice is not painted as saved: {text}");
-    assert!(host.kernel_settings().tab("keyboard").to_string().contains("ctrl+b"));
+    assert!(host.kernel_settings().tab("keyboard").expect("tab").to_string().contains("ctrl+b"));
     change(&mut host, "shortcut_base", "ctrl+z");
     assert!(host.kernel_settings().writes().iter().any(|(_, k, v)| k == "shortcut_base" && v == "\"ctrl+z\""));
-    assert!(host.kernel_settings().tab("keyboard").to_string().contains("navigation_shortcut_base"));
+    assert!(host.kernel_settings().tab("keyboard").expect("tab").to_string().contains("navigation_shortcut_base"));
     assert!(render_text(&mut host, keyboard_page(), 100, 30).contains("Navigation prefix"));
 }
 

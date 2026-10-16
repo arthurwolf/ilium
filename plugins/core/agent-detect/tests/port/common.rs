@@ -1,5 +1,6 @@
 //! Shared helpers of the port twins: hosts for both sides, screens, process lists, readers.
 
+pub use crate::host_ext::*;
 use std::path::PathBuf;
 
 use ilium_plugin_core_agent_detect::{AgentDetectClient, AgentDetectServer};

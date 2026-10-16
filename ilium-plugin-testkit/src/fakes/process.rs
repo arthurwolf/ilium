@@ -21,6 +21,21 @@ impl ProcessExpectation {
     }
 }
 
+/// A long-running child the plugin spawned with `process.spawn` (lane hook, see manual_gaps_fakes.md; DEV-464).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChildRecord {
+    /// Child id as the plugin received it.
+    pub id: u64,
+    /// Program name.
+    pub program: String,
+    /// Arguments after the program.
+    pub arguments: Vec<String>,
+    /// Lines the plugin wrote to the child's stdin, in order.
+    pub stdin_lines: Vec<String>,
+    /// Signals the plugin sent, by name (`"terminate"`, `"kill"`), in order.
+    pub signals: Vec<String>,
+}
+
 /// Handle on the fake process service of a host.
 #[derive(Debug)]
 pub struct FakeProcess {
@@ -41,5 +56,35 @@ impl FakeProcess {
     /// Unmatched runs return exit status 0 instead of failing the test.
     pub fn allow_unexpected(&mut self) {
         unimplemented!("DEV-460")
+    }
+
+    /// Every child spawned, in order, with what the plugin wrote and signalled (lane hook, see manual_gaps_fakes.md).
+    pub fn children(&self) -> Vec<ChildRecord> {
+        unimplemented!("DEV-464")
+    }
+
+    /// The exit of every run no other rule matches (lane hook, see manual_gaps_fakes.md; DEV-464).
+    pub fn default_exit(&mut self, _exit: ProcessExit) {
+        unimplemented!("DEV-464")
+    }
+
+    /// The exit of every run whose arguments equal `arguments`, whatever the program (lane hook, see manual_gaps_fakes.md).
+    pub fn on_args(&mut self, _arguments: &[&str], _exit: ProcessExit) {
+        unimplemented!("DEV-464")
+    }
+
+    /// The exit of every run of `program`, whatever the arguments (lane hook, see manual_gaps_fakes.md; DEV-464).
+    pub fn on_program(&mut self, _program: &str, _exit: ProcessExit) {
+        unimplemented!("DEV-464")
+    }
+
+    /// Every run of `program` completes as `failed(timed-out)` (lane hook, see manual_gaps_fakes.md; DEV-464).
+    pub fn on_program_timeout(&mut self, _program: &str) {
+        unimplemented!("DEV-464")
+    }
+
+    /// The largest number of runs that were in flight at the same time (lane hook, see manual_gaps_fakes.md).
+    pub fn max_concurrent(&self) -> usize {
+        unimplemented!("DEV-464")
     }
 }

@@ -4,6 +4,7 @@
 //! provider, topics, contributors) is made from here or from the test bodies through the names
 //! listed in API_GAPS.md, so the implementation phase adds them in one pass.
 
+pub use crate::host_ext::*;
 use std::path::PathBuf;
 
 use ilium_plugin_core_smart_copy::{SmartCopyClient, SmartCopyServer};

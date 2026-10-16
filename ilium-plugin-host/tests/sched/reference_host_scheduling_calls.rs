@@ -368,7 +368,7 @@ fn hst_191_deactivate_breach_logs_deactivate_deadline_at_warn() {
 fn hst_191_deactivate_breach_is_not_counted_as_a_failure() {
     let (_shared, handle) = slow_deactivating_handle();
     handle.deactivate(DeactivationReason::Disabled);
-    assert_eq!(handle.counted_failures(), 0);
+    assert_eq!(handle.failure_count(), 0);
 }
 
 /// REQ: HST-191

@@ -210,7 +210,7 @@ fn points_063_at_most_sixteen_targets_are_listed() {
 fn points_063_the_veto_hook_runs_once_before_a_write_with_target_block_and_path() {
     let mut host = server_host();
     install(&mut host, "progress", CLAUDE_GLOBAL).expect("install");
-    let calls = host.hook_calls(BEFORE_INSTALL);
+    let calls = host.hook_payloads(BEFORE_INSTALL);
     assert_eq!(calls.len(), 1);
     let payload: Value = serde_json::from_str(&calls[0]).expect("payload is JSON");
     assert_eq!(payload, json!({ "target": CLAUDE_GLOBAL, "block": "progress", "path": "~/.claude/CLAUDE.md" }));
@@ -222,7 +222,7 @@ fn points_063_the_veto_hook_also_runs_before_a_removal() {
     let mut host = server_host();
     install(&mut host, "progress", CLAUDE_GLOBAL).expect("install");
     call(&mut host, "remove", "progress", CLAUDE_GLOBAL).expect("remove");
-    assert_eq!(host.hook_calls(BEFORE_INSTALL).len(), 2);
+    assert_eq!(host.hook_payloads(BEFORE_INSTALL).len(), 2);
 }
 
 /// REQ: F-063
@@ -230,7 +230,7 @@ fn points_063_the_veto_hook_also_runs_before_a_removal() {
 fn points_063_the_veto_hook_does_not_run_for_a_status_call() {
     let mut host = server_host();
     status_rows(&mut host);
-    assert!(host.hook_calls(BEFORE_INSTALL).is_empty());
+    assert!(host.hook_payloads(BEFORE_INSTALL).is_empty());
 }
 
 /// REQ: F-063

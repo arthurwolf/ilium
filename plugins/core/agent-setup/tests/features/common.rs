@@ -1,5 +1,6 @@
 //! Shared helpers: hosts for both sides, file access on the fake file system, the service calls, block text.
 
+pub use crate::host_ext::*;
 use std::path::PathBuf;
 
 use ilium_plugin_core_agent_setup::{AgentSetupClient, AgentSetupServer};
@@ -112,7 +113,7 @@ pub fn get(host: &mut FakeHost, path: FsPath) -> Option<String> {
 /// Calls one method of the install service.
 pub fn call(host: &mut FakeHost, method: &str, block: &str, target: &str) -> Result<Value, PluginError> {
     let payload = json!({ "block": block, "target": target }).to_string();
-    host.call_own_service_method(SERVICE, method, &payload)
+    host.call_service(SERVICE, method, &payload)
         .map(|text| serde_json::from_str(&text).expect("the reply is JSON"))
 }
 
@@ -123,7 +124,7 @@ pub fn install(host: &mut FakeHost, block: &str, target: &str) -> Result<Value, 
 
 /// All status rows the service lists.
 pub fn status_rows(host: &mut FakeHost) -> Vec<Value> {
-    let text = host.call_own_service_method(SERVICE, "status", "{}").expect("status answers");
+    let text = host.call_service(SERVICE, "status", "{}").expect("status answers");
     let reply: Value = serde_json::from_str(&text).expect("the reply is JSON");
     reply["targets"].as_array().expect("targets array").clone()
 }

@@ -250,7 +250,7 @@ fn port_084_the_last_test_row_keeps_failed_until_the_next_run_starts() {
 #[test]
 fn port_084_the_plugin_tabs_sit_between_reset_planning_and_titles_in_the_rail() {
     let mut session = FakeSession::new();
-    session.install_package_dir(manifest_path().parent().expect("package dir")).expect("install");
+    session.try_install(manifest_path().parent().expect("package dir")).expect("install");
     let order = session.settings_tab_order();
     let position = |id: &str| order.iter().position(|tab| tab == id).unwrap_or_else(|| panic!("{id} in {order:?}"));
     assert_eq!(position("inference"), position("reset-planning") + 1);

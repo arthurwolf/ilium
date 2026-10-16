@@ -107,6 +107,81 @@ impl FakeSession {
     pub fn pump(&mut self) -> Result<(), HarnessError> {
         unimplemented!("DEV-484")
     }
+
+    /// Deactivates an installed plugin as the plugin manager does (lane hook, see manual_gaps_fakes.md; DEV-480).
+    pub fn disable(&mut self, _id: impl IntoPluginId) -> &mut FakeSession {
+        unimplemented!("DEV-480")
+    }
+
+    /// Grants `services.use:<service>` to an ad-hoc caller id (lane hook, see manual_gaps_fakes.md; DEV-488).
+    pub fn grant_service(&mut self, _caller_id: impl IntoPluginId, _service: &str) {
+        unimplemented!("DEV-488")
+    }
+
+    /// Names of every service an active plugin provides (lane hook, see manual_gaps_fakes.md; DEV-488).
+    pub fn services(&self) -> Vec<String> {
+        unimplemented!("DEV-488")
+    }
+
+    /// A service of a stub plugin that answers `reply` (lane hook, see manual_gaps_fakes.md; DEV-483).
+    pub fn stub_service(&mut self, _plugin: &str, _service: &str, _method: &str, _reply: Result<String, PluginError>) {
+        unimplemented!("DEV-483")
+    }
+
+    /// A service of a stub plugin that never answers (lane hook, see manual_gaps_fakes.md; DEV-483).
+    pub fn stall_service(&mut self, _plugin: &str, _service: &str, _method: &str) {
+        unimplemented!("DEV-483")
+    }
+
+    /// Adds an extension contribution of `plugin` to a point (lane hook, see manual_gaps_fakes.md; DEV-487).
+    pub fn contribute(&mut self, _plugin: &str, _point: &str, _id: &str, _priority: i32, _entry: serde_json::Value) {
+        unimplemented!("DEV-487")
+    }
+
+    /// The `entry` payloads of a collect point in the documented order (lane hook, see manual_gaps_fakes.md; DEV-487).
+    pub fn collected(&mut self, _point: &str) -> Vec<serde_json::Value> {
+        unimplemented!("DEV-487")
+    }
+
+    /// Runs a hook or collect point of the owner with this payload; the replies as JSON text (lane hook, see manual_gaps_fakes.md).
+    pub fn call_extension(&mut self, _point: &str, _payload_json: &str) -> Result<Vec<String>, HarnessError> {
+        unimplemented!("DEV-487")
+    }
+
+    /// Registers a recording observer of `plugin` on a hook point (lane hook, see manual_gaps_fakes.md; DEV-487).
+    pub fn observe_hook(&mut self, _plugin: &str, _point: &str, _priority: i32) {
+        unimplemented!("DEV-487")
+    }
+
+    /// Makes the observer of `plugin` on `point` fail during its call (lane hook, see manual_gaps_fakes.md; DEV-487).
+    pub fn observer_fails(&mut self, _plugin: &str, _point: &str) {
+        unimplemented!("DEV-487")
+    }
+
+    /// Makes the observer of `plugin` on `point` write a log record during its call (lane hook, see manual_gaps_fakes.md).
+    pub fn observer_logs(&mut self, _plugin: &str, _point: &str, _level: &str, _message: &str) {
+        unimplemented!("DEV-487")
+    }
+
+    /// The chains the observer of `plugin` received, one list of payloads per chain (lane hook, see manual_gaps_fakes.md).
+    pub fn hook_chains(&mut self, _plugin: &str, _point: &str) -> Vec<Vec<serde_json::Value>> {
+        unimplemented!("DEV-487")
+    }
+
+    /// Tab ids of the Settings rail in order, plugin tabs included (lane hook, see manual_gaps_fakes.md).
+    pub fn settings_tab_order(&self) -> Vec<String> {
+        unimplemented!("DEV-480")
+    }
+
+    /// The kernel's stored settings value of a plugin tab (lane hook, see manual_gaps_fakes.md).
+    pub fn kernel_settings_value(&self, _tab: &str) -> Option<serde_json::Value> {
+        unimplemented!("DEV-480")
+    }
+
+    /// The notice the Settings rail shows on the tab of a disabled plugin (lane hook, see manual_gaps_fakes.md).
+    pub fn disabled_notice(&self, _tab: &str) -> String {
+        unimplemented!("DEV-480")
+    }
 }
 
 impl Default for FakeSession {

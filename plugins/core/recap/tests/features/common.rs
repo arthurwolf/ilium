@@ -1,6 +1,7 @@
 //! Shared helpers of the recap feature tests.
 #![allow(dead_code)]
 
+pub use crate::host_ext::*;
 use std::path::PathBuf;
 
 use ilium_plugin_core_recap::{RecapClient, RecapServer};
@@ -162,11 +163,11 @@ pub fn summary(all: &[Value]) -> Value {
 
 /// Closes the consent gate: automatic AI is off in the kernel `inference` tab.
 pub fn close_gate(host: &mut FakeHost) {
-    host.set_kernel_settings("inference", serde_json::json!({"automatic_ai": false}));
+    host.kernel_settings().set_tab("inference", serde_json::json!({"automatic_ai": false}));
 }
 
 /// Opens the consent gate: automatic AI is on and the client answers `onboarding-state` finished.
 pub fn open_gate(host: &mut FakeHost) {
-    host.set_kernel_settings("inference", serde_json::json!({"automatic_ai": true}));
+    host.kernel_settings().set_tab("inference", serde_json::json!({"automatic_ai": true}));
     host.set_onboarding_finished(true);
 }

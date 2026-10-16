@@ -1,5 +1,6 @@
 //! Shared helpers of the port twins: hosts, file access on the fake file system, service calls.
 
+pub use crate::host_ext::*;
 use std::path::PathBuf;
 
 use ilium_plugin_core_agent_setup::{AgentSetupClient, AgentSetupServer};
@@ -75,7 +76,7 @@ pub fn get(host: &mut FakeHost, path: FsPath) -> Option<String> {
 }
 
 fn service_call(host: &mut FakeHost, method: &str, payload: Value) -> Result<Value, PluginError> {
-    host.call_own_service_method(SERVICE, method, &payload.to_string())
+    host.call_service(SERVICE, method, &payload.to_string())
         .map(|text| serde_json::from_str(&text).expect("the reply is JSON"))
 }
 

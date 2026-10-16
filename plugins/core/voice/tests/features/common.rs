@@ -1,5 +1,6 @@
 //! Shared helpers: hosts for both sides, event builders, readers for the page and for JSONL output.
 
+pub use crate::host_ext::*;
 use std::path::PathBuf;
 
 use ilium_plugin_core_voice::{VoiceClient, VoiceServer};
@@ -58,7 +59,7 @@ pub fn client_host() -> FakeHost {
 
 /// Writes one key of the `voice-control` kernel tab and tells the plugin it changed.
 pub fn configure(host: &mut FakeHost, key: &str, value: Value) {
-    host.kernel_settings("voice-control").set(key, value).expect("kernel setting accepted");
+    host.kernel_settings().set("voice-control", key, value).expect("kernel setting accepted");
     host.deliver_one(Event::KernelSettingsChanged(KernelSettingsEvent {
         tab: "voice-control".to_string(),
         keys: vec![key.to_string()],

@@ -20,7 +20,7 @@ fn append_quiet(host: &mut FakeHost, line: &str) {
     let mut text = room_text(host);
     text.push_str(line);
     text.push('\n');
-    host.fs().write_quiet(ROOM, text.as_bytes());
+    host.fs().seed(ROOM, text.as_bytes());
 }
 
 /// REQ: PORT:ilium-client/src/app.rs::chatroom_reconciliation_uses_an_independent_one_second_deadline

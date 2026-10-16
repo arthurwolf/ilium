@@ -141,7 +141,7 @@ fn settings_033_the_rules_persist_in_the_text_triggers_table_under_the_same_keys
     let mut host = client_host();
     host.settings().set("patterns", json!(["a"])).expect("valid");
     host.settings().set("replies", json!(["b"])).expect("valid");
-    let table = host.config_table("text_triggers").expect("the [text_triggers] table exists");
+    let table = host.kernel_settings().tab("text_triggers").expect("the [text_triggers] table exists");
     assert_eq!(table["patterns"], json!(["a"]));
     assert_eq!(table["replies"], json!(["b"]));
 }
@@ -150,9 +150,9 @@ fn settings_033_the_rules_persist_in_the_text_triggers_table_under_the_same_keys
 #[test]
 fn settings_033_an_unknown_key_of_the_table_survives_a_rule_change() {
     let mut host = client_host();
-    host.seed_config_table("text_triggers", json!({ "future_key": 7, "patterns": [], "replies": [] }));
+    host.kernel_settings().set_tab("text_triggers", json!({ "future_key": 7, "patterns": [], "replies": [] }));
     host.settings().set("patterns", json!(["a"])).expect("valid");
-    let table = host.config_table("text_triggers").expect("table");
+    let table = host.kernel_settings().tab("text_triggers").expect("table");
     assert_eq!(table["future_key"], json!(7));
     assert_eq!(table["patterns"], json!(["a"]));
 }

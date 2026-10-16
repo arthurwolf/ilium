@@ -233,7 +233,7 @@ pub fn done_json(reply: ServiceReply) -> Value {
 /// Gives the pane a model and a transcript with `tokens` in one assistant turn, then lets the
 /// plugin see the model change and the pane going idle (it requests the transcript then).
 pub fn feed_pane(host: &mut FakeHost, pane: u64, model: &str, tokens: u32) {
-    host.agent().set_model(
+    host.agents().set_model(
         pane,
         AgentModel {
             model: model.to_string(),
@@ -242,7 +242,7 @@ pub fn feed_pane(host: &mut FakeHost, pane: u64, model: &str, tokens: u32) {
             source: "transcript".to_string(),
         },
     );
-    host.agent().set_transcript(pane, vec![assistant_turn(tokens)]);
+    host.agents().set_transcript(pane, vec![assistant_turn(tokens)]);
     host.deliver(vec![model_event(pane, model), idle_event(pane)]);
     host.settle();
 }

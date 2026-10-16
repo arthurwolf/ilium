@@ -22,7 +22,7 @@ fn port_002_accepting_identical_settings_does_not_publish_or_advance_revision() 
     let pane = add_agent_pane(&mut host, "claude");
     set_rules(&mut host, &["a"], &["r"]);
     let before = host.output_filters();
-    host.seed_config_table("text_triggers", json!({"patterns": ["a"], "replies": ["r"]}));
+    host.kernel_settings().set_tab("text_triggers", json!({"patterns": ["a"], "replies": ["r"]}));
     host.settle();
     assert_eq!(host.output_filters(), before);
     assert_eq!(filter_ids(&host, pane), [rule_id(0)]);
@@ -35,7 +35,7 @@ fn port_003_oversized_durable_read_retains_the_last_accepted_rules_and_revision(
     let pane = add_agent_pane(&mut host, "claude");
     set_rules(&mut host, &["a"], &["r"]);
     let huge = "x".repeat(600 * 1024);
-    host.seed_config_table("text_triggers", json!({"patterns": [huge], "replies": ["r"]}));
+    host.kernel_settings().set_tab("text_triggers", json!({"patterns": [huge], "replies": ["r"]}));
     host.settle();
     assert_eq!(filter_regexes(&host, pane), ["a"]);
     assert!(host.logs().iter().any(|line| line.level == "error" || line.level == "warn"));
@@ -58,8 +58,8 @@ fn port_005_text_trigger_cancelled_reload_cannot_install_and_releases_owner() {
     let mut host = server_host();
     let pane = add_agent_pane(&mut host, "claude");
     set_rules(&mut host, &["first"], &["r"]);
-    host.seed_config_table("text_triggers", json!({"patterns": ["second"], "replies": ["r"]}));
-    host.seed_config_table("text_triggers", json!({"patterns": ["third"], "replies": ["r"]}));
+    host.kernel_settings().set_tab("text_triggers", json!({"patterns": ["second"], "replies": ["r"]}));
+    host.kernel_settings().set_tab("text_triggers", json!({"patterns": ["third"], "replies": ["r"]}));
     host.settle();
     assert_eq!(filter_regexes(&host, pane), ["third"]);
 }
@@ -71,7 +71,7 @@ fn port_006_text_trigger_event_admission_refusal_keeps_the_accepted_rules() {
     let pane = add_agent_pane(&mut host, "claude");
     set_rules(&mut host, &["keep"], &["r"]);
     host.revoke("terminal.output-filter");
-    host.seed_config_table("text_triggers", json!({"patterns": ["other"], "replies": ["r"]}));
+    host.kernel_settings().set_tab("text_triggers", json!({"patterns": ["other"], "replies": ["r"]}));
     host.settle();
     assert_eq!(host.settings().get("patterns"), Some(json!(["keep"])));
     assert!(host.output_filters().iter().all(|(node, _)| *node != pane));
@@ -84,8 +84,8 @@ fn port_007_text_trigger_explicit_empty_survives_fresh_state_and_noop_preserves_
     let pane = add_agent_pane(&mut host, "claude");
     host.settle();
     assert!(filter_ids(&host, pane).is_empty());
-    assert_eq!(host.config_table("text_triggers").expect("table")["patterns"], json!([]));
-    host.seed_config_table("text_triggers", json!({"patterns": [], "replies": []}));
+    assert_eq!(host.kernel_settings().tab("text_triggers").expect("table")["patterns"], json!([]));
+    host.kernel_settings().set_tab("text_triggers", json!({"patterns": [], "replies": []}));
     host.settle();
     assert!(filter_ids(&host, pane).is_empty());
 }
@@ -106,10 +106,10 @@ fn port_008_text_trigger_invalid_partial_and_absent_sources_retain_last_valid_wi
         let mut host = server_host();
         let pane = add_agent_pane(&mut host, "claude");
         set_rules(&mut host, &["good"], &["r"]);
-        host.seed_config_table("text_triggers", bad.clone());
+        host.kernel_settings().set_tab("text_triggers", bad.clone());
         host.settle();
         assert_eq!(filter_regexes(&host, pane), ["good"], "{bad}");
-        assert_eq!(host.config_table("text_triggers"), Some(bad), "an invalid source is not rewritten");
+        assert_eq!(host.kernel_settings().tab("text_triggers"), Some(bad), "an invalid source is not rewritten");
     }
 }
 

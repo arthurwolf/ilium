@@ -1,6 +1,7 @@
 //! Twins of the voice tool executor and policy tests (`ilium-client/src/control/*`, `tests/voice_control_live.rs`).
 //! The rules come from src/docs/voice.md (What you can ask for; Confirmations and safety).
 
+use crate::host_ext::*;
 use ilium_plugin_sdk::testing::FakeHost;
 use serde_json::{Value, json};
 
@@ -82,7 +83,7 @@ fn tools_050_the_stop_tool_disables_voice_after_returning_its_result() {
     let result = host.realtime().call_tool("ilium_stop_voice", "{}");
     assert!(result.is_ok());
     host.settle();
-    assert_eq!(host.kernel_settings("voice-control").get("enabled"), Some(json!(false)));
+    assert_eq!(host.kernel_settings().get("voice-control", "enabled"), Some(json!(false)));
 }
 
 /// REQ: PORT:ilium-client/src/control/mod.rs::stop_tool_rejects_unknown_arguments_without_disabling_voice
@@ -91,7 +92,7 @@ fn tools_050_the_stop_tool_with_an_unknown_argument_leaves_voice_on() {
     let mut host = enabled_client("semantic_vad");
     assert!(host.realtime().call_tool("ilium_stop_voice", &json!({ "force": true }).to_string()).is_err());
     host.settle();
-    assert_eq!(host.kernel_settings("voice-control").get("enabled"), Some(json!(true)));
+    assert_eq!(host.kernel_settings().get("voice-control", "enabled"), Some(json!(true)));
 }
 
 /// REQ: PORT:ilium-client/src/control/mod.rs::duplicate_call_ids_return_the_original_output_without_reexecution
@@ -196,7 +197,7 @@ fn live_050_text_goes_to_the_active_pane_unless_another_is_named() {
 fn policy_051_confirm_terminal_submissions_is_off_and_text_is_sent_with_enter() {
     guide_has(&["By default an explicit request such as \"send this to the agent\" forwards the text and presses Enter immediately."]);
     let mut host = enabled_client("semantic_vad");
-    assert_eq!(host.kernel_settings("voice-control").get("confirm_terminal_submissions"), Some(json!(false)));
+    assert_eq!(host.kernel_settings().get("voice-control", "confirm_terminal_submissions"), Some(json!(false)));
     let keys = host.realtime().call_tool("ilium_send_text", &json!({ "text": "hello", "enter": false }).to_string());
     assert!(keys.is_ok());
     assert_eq!(host.realtime().last_submit_enter(), Some(true));
@@ -346,9 +347,9 @@ fn search_050_the_search_tools_query_step_and_open_a_result() {
 #[test]
 fn settings_050_values_are_normalized_and_unknown_keys_refused() {
     let mut host = enabled_client("semantic_vad");
-    assert!(host.kernel_settings("voice-control").set("no_such_key", json!(1)).is_err());
-    assert!(host.kernel_settings("voice-control").set("input_mode", json!("shouting")).is_err());
-    assert_eq!(host.kernel_settings("voice-control").get("input_mode"), Some(json!("semantic_vad")));
+    assert!(host.kernel_settings().set("voice-control", "no_such_key", json!(1)).is_err());
+    assert!(host.kernel_settings().set("voice-control", "input_mode", json!("shouting")).is_err());
+    assert_eq!(host.kernel_settings().get("voice-control", "input_mode"), Some(json!("semantic_vad")));
 }
 
 /// REQ: PORT:ilium/tests/voice_say_e2e.rs::voice_say_reaches_a_terminal_through_the_real_voice_pipeline

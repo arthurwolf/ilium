@@ -140,7 +140,7 @@ fn sec_327_the_user_can_uninstall_a_blocked_plugin() {
 #[test]
 fn sec_327_the_user_cannot_re_enable_a_blocked_plugin() {
     let rig = blocked_rig("id", "test.plugin");
-    assert!(rig.host.enable("test.plugin").is_err());
+    assert!(rig.host.enable_plugin("test.plugin").is_err());
     assert!(rig.host.plugin_disabled("test.plugin"));
 }
 

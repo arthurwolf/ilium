@@ -78,7 +78,7 @@ fn settings_030_the_tab_fits_the_documented_widths() {
 fn settings_022_a_disabled_fleet_shows_the_notice_and_keeps_the_values() {
     let mut host = client_host();
     host.settings().set("api.port", json!(9000)).expect("set");
-    host.disable_plugin("ilium.core.fleet");
+    host.disable_plugin();
     let text = host.render(tab(), 80, 24).text();
     assert!(text.contains("Fleet is disabled. Values are kept."), "{text}");
     assert_eq!(host.settings().get("api.port"), Some(json!(9000)));

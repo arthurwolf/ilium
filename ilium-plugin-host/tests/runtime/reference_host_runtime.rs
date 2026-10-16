@@ -650,7 +650,7 @@ fn hst_069_grant_changes_increment_the_instance_pre_generation() {
         .build()
         .expect("host");
     let first = host.instance_pre_generation();
-    host.grant("tree.write");
+    host.grant_now("tree.write");
     let second = host.instance_pre_generation();
     host.revoke("tree.write");
     let third = host.instance_pre_generation();
@@ -661,7 +661,7 @@ fn hst_069_grant_changes_increment_the_instance_pre_generation() {
 #[test]
 fn hst_069_existing_instance_keeps_running_after_a_grant_change() {
     let mut host = host_with(QuietGuest);
-    host.grant("tree.read");
+    host.grant_now("tree.read");
     assert_eq!(host.state(), InstanceState::Active);
 }
 
@@ -726,7 +726,7 @@ fn hst_071_declined_capability_returns_not_permitted_without_kernel_code() {
         .build()
         .expect("host");
     host.decline("tree.write");
-    let reply = host.call_import("ilium:host/tree", "set-name", "{\"node\":1,\"name\":\"x\"}");
+    let reply = host.call_import_json("ilium:host/tree", "set-name", "{\"node\":1,\"name\":\"x\"}");
     assert_eq!(reply.error_code(), Some("not-permitted"));
     assert!(kernel.applied_intents().is_empty());
 }
@@ -736,7 +736,7 @@ fn hst_071_declined_capability_returns_not_permitted_without_kernel_code() {
 fn hst_071_revoked_capability_returns_not_permitted_not_a_trap() {
     let mut host = HostHarness::new().grants(&["tree.write"]).with_native_guest(Box::new(QuietGuest)).build().expect("host");
     host.revoke("tree.write");
-    let reply = host.call_import("ilium:host/tree", "set-name", "{\"node\":1,\"name\":\"x\"}");
+    let reply = host.call_import_json("ilium:host/tree", "set-name", "{\"node\":1,\"name\":\"x\"}");
     assert_eq!(reply.error_code(), Some("not-permitted"));
     assert!(host.failures().is_empty());
 }
@@ -792,7 +792,7 @@ fn hst_072_refused_component_is_never_instantiated() {
 #[test]
 fn hst_073_unrequested_function_in_a_linked_interface_traps() {
     let mut host = HostHarness::new().grants(&["fs.read:project"]).with_native_guest(Box::new(QuietGuest)).build().expect("host");
-    let reply = host.call_import("ilium:host/fs", "write", "{}");
+    let reply = host.call_import_json("ilium:host/fs", "write", "{}");
     assert_eq!(reply.trap_code(), Some("host.capability-not-requested".to_owned()));
     let _ = &mut host;
 }
@@ -801,7 +801,7 @@ fn hst_073_unrequested_function_in_a_linked_interface_traps() {
 #[test]
 fn hst_073_the_trap_counts_as_a_failure() {
     let mut host = HostHarness::new().grants(&["fs.read:project"]).with_native_guest(Box::new(QuietGuest)).build().expect("host");
-    let _ = host.call_import("ilium:host/fs", "write", "{}");
+    let _ = host.call_import_json("ilium:host/fs", "write", "{}");
     assert_eq!(host.failure_count(), 1);
     assert_eq!(host.state(), InstanceState::RestartScheduled);
 }
@@ -810,7 +810,7 @@ fn hst_073_the_trap_counts_as_a_failure() {
 #[test]
 fn hst_073_requested_function_does_not_trap() {
     let host = HostHarness::new().grants(&["fs.read:project"]).with_native_guest(Box::new(QuietGuest)).build().expect("host");
-    let reply = host.call_import("ilium:host/fs", "read", "{\"path\":\"a.txt\",\"offset\":0,\"max-bytes\":1}");
+    let reply = host.call_import_json("ilium:host/fs", "read", "{\"path\":\"a.txt\",\"offset\":0,\"max-bytes\":1}");
     assert_eq!(reply.trap_code(), None);
 }
 
@@ -867,7 +867,7 @@ fn hst_074_job_instance_uses_job_memory_mib() {
 fn hst_075_import_after_revoke_returns_revoked() {
     let mut host = HostHarness::new().grants(&["fs.read:project"]).with_native_guest(Box::new(QuietGuest)).build().expect("host");
     host.revoke_without_reactivation("fs.read:project");
-    let reply = host.call_import("ilium:host/fs", "read", "{\"path\":\"a.txt\",\"offset\":0,\"max-bytes\":1}");
+    let reply = host.call_import_json("ilium:host/fs", "read", "{\"path\":\"a.txt\",\"offset\":0,\"max-bytes\":1}");
     assert_eq!(reply.error_code(), Some("revoked"));
 }
 
@@ -875,7 +875,7 @@ fn hst_075_import_after_revoke_returns_revoked() {
 #[test]
 fn hst_075_import_with_current_epoch_does_not_return_revoked() {
     let host = HostHarness::new().grants(&["fs.read:project"]).with_native_guest(Box::new(QuietGuest)).build().expect("host");
-    let reply = host.call_import("ilium:host/fs", "read", "{\"path\":\"a.txt\",\"offset\":0,\"max-bytes\":1}");
+    let reply = host.call_import_json("ilium:host/fs", "read", "{\"path\":\"a.txt\",\"offset\":0,\"max-bytes\":1}");
     assert_ne!(reply.error_code(), Some("revoked"));
 }
 
@@ -887,7 +887,7 @@ fn hst_075_store_carries_plugin_side_instance_and_epoch() {
     assert_eq!(data.plugin, plugin_id());
     assert_eq!(data.side, Side::Server);
     assert_eq!(data.instance, 1);
-    assert_eq!(data.authorization_epoch, host.grant_generation());
+    assert_eq!(data.authorization_epoch, host.authorization_epoch());
 }
 
 /// REQ: HST-075

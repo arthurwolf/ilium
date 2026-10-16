@@ -3,6 +3,8 @@
 //! Features F-016 (text selection and the terminal right-click menu), F-065 (Smart Copy light) and
 //! F-066 (Smart Copy AI), the page samples, the manifest, the extension points and the topic.
 
+#[path = "../host_ext.rs"]
+mod host_ext;
 mod common;
 mod command_freeze;
 mod doc_page;

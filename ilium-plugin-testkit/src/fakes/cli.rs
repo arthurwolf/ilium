@@ -37,4 +37,29 @@ impl FakeCli {
     pub fn invoke(&mut self, _args: &[&str], _stdin: &[u8]) -> Invocation {
         unimplemented!("DEV-473")
     }
+
+    /// The current output and exit code of an earlier invocation (lane hook, see manual_gaps_fakes.md; DEV-473).
+    pub fn refresh(&self, _invocation: &Invocation) -> Invocation {
+        unimplemented!("DEV-473")
+    }
+
+    /// Delivers the cancel of a running invocation, as Ctrl-C would (lane hook, see manual_gaps_fakes.md; DEV-473).
+    pub fn cancel(&mut self, _invocation: &Invocation) {
+        unimplemented!("DEV-473")
+    }
+
+    /// Sets an environment variable seen by later invocations (lane hook, see manual_gaps_fakes.md; DEV-473).
+    pub fn set_env(&mut self, _key: &str, _value: &str) {
+        unimplemented!("DEV-473")
+    }
+
+    /// Removes an environment variable for later invocations (lane hook, see manual_gaps_fakes.md; DEV-473).
+    pub fn unset_env(&mut self, _key: &str) {
+        unimplemented!("DEV-473")
+    }
+
+    /// Sets the working directory of later invocations, in `"scope:path"` shorthand (lane hook, see manual_gaps_fakes.md).
+    pub fn set_cwd(&mut self, _path: &str) {
+        unimplemented!("DEV-473")
+    }
 }

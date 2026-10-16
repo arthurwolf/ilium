@@ -15,7 +15,7 @@ const ALL_CODES: [&str; 15] = [
 
 fn bad_argument_reply() -> ilium_plugin_host::testing::ImportReply {
     let mut host = host_with(QuietGuest);
-    host.call_import("ilium:host/timers", "set", "{\"delay-ms\":1,\"repeat\":false}")
+    host.call_import_json("ilium:host/timers", "set", "{\"delay-ms\":1,\"repeat\":false}")
 }
 
 /// REQ: API-001
@@ -32,7 +32,7 @@ fn api_001_fallible_function_returns_err_with_code_message_and_optional_retry_af
 #[test]
 fn api_001_a_successful_call_carries_no_error_record() {
     let mut host = host_with(QuietGuest);
-    let reply = host.call_import("ilium:host/timers", "set", "{\"delay-ms\":50,\"repeat\":false}");
+    let reply = host.call_import_json("ilium:host/timers", "set", "{\"delay-ms\":50,\"repeat\":false}");
     assert!(reply.error().is_none());
 }
 
@@ -41,9 +41,9 @@ fn api_001_a_successful_call_carries_no_error_record() {
 fn api_001_rate_limited_error_carries_the_retry_after_field() {
     let mut host = host_with(QuietGuest);
     for _ in 0..5 {
-        host.call_import("ilium:host/sounds", "play", "{\"name\":\"bell\"}");
+        host.call_import_json("ilium:host/sounds", "play", "{\"name\":\"bell\"}");
     }
-    let error = host.call_import("ilium:host/sounds", "play", "{\"name\":\"bell\"}").error().expect("err");
+    let error = host.call_import_json("ilium:host/sounds", "play", "{\"name\":\"bell\"}").error().expect("err");
     assert!(error.retry_after_ms.is_some());
 }
 
@@ -58,7 +58,7 @@ fn api_002_every_provoked_failure_uses_a_code_from_the_list_of_15() {
         ("ilium:host/tree", "set-name", "{\"node\":999999,\"name\":\"x\"}"),
     ];
     for (interface, function, args) in calls {
-        let reply = host.call_import(interface, function, args);
+        let reply = host.call_import_json(interface, function, args);
         if let Some(code) = reply.error_code() {
             assert!(ALL_CODES.contains(&code), "{interface}.{function} gave {code}");
         }
@@ -85,9 +85,9 @@ fn api_002_the_manual_lists_the_same_15_codes() {
 fn api_003_toast_over_the_rate_is_rate_limited_with_positive_retry_after() {
     let mut host = host_with(QuietGuest);
     for _ in 0..3 {
-        host.call_import("ilium:host/toasts", "show", "{\"text\":\"a\"}");
+        host.call_import_json("ilium:host/toasts", "show", "{\"text\":\"a\"}");
     }
-    let error = host.call_import("ilium:host/toasts", "show", "{\"text\":\"a\"}").error().expect("err");
+    let error = host.call_import_json("ilium:host/toasts", "show", "{\"text\":\"a\"}").error().expect("err");
     assert_eq!(error.code, ErrorCode::RateLimited);
     assert!(error.retry_after_ms.unwrap() > 0);
 }
@@ -97,7 +97,7 @@ fn api_003_toast_over_the_rate_is_rate_limited_with_positive_retry_after() {
 fn api_003_cpu_budget_quota_exceeded_carries_retry_after() {
     let mut host = host_with(QuietGuest);
     host.charge_cpu_ms(2_500);
-    let error = host.call_import("ilium:host/sounds", "play", "{\"name\":\"bell\"}").error().expect("err");
+    let error = host.call_import_json("ilium:host/sounds", "play", "{\"name\":\"bell\"}").error().expect("err");
     assert_eq!(error.code, ErrorCode::QuotaExceeded);
     assert!(error.retry_after_ms.is_some());
 }
@@ -106,7 +106,7 @@ fn api_003_cpu_budget_quota_exceeded_carries_retry_after() {
 #[test]
 fn api_003_other_quota_exceeded_and_invalid_argument_have_no_retry_after() {
     let mut host = host_with(QuietGuest);
-    let error = host.call_import("ilium:host/panes", "read-cells", "{\"pane\":1,\"rows\":1001}").error().expect("err");
+    let error = host.call_import_json("ilium:host/panes", "read-cells", "{\"pane\":1,\"rows\":1001}").error().expect("err");
     assert_eq!(error.code, ErrorCode::QuotaExceeded);
     assert_eq!(error.retry_after_ms, None);
 }
@@ -124,10 +124,10 @@ fn api_003_message_text_is_not_a_contract_two_runs_may_differ_but_the_code_is_st
 fn api_004_not_permitted_revoked_and_internal_are_allowed_from_any_result_function() {
     let mut host = HostHarness::new().grants(&["tree.write"]).with_native_guest(Box::new(QuietGuest)).build().expect("host");
     host.decline("tree.write");
-    let declined = host.call_import("ilium:host/tree", "set-name", "{\"node\":1,\"name\":\"x\"}");
+    let declined = host.call_import_json("ilium:host/tree", "set-name", "{\"node\":1,\"name\":\"x\"}");
     assert_eq!(declined.error_code(), Some("not-permitted"));
     host.revoke_without_reactivation("tree.write");
-    let revoked = host.call_import("ilium:host/tree", "set-name", "{\"node\":1,\"name\":\"x\"}");
+    let revoked = host.call_import_json("ilium:host/tree", "set-name", "{\"node\":1,\"name\":\"x\"}");
     assert!(matches!(revoked.error_code(), Some("revoked") | Some("not-permitted")));
 }
 
@@ -143,7 +143,7 @@ fn api_004_request_id_function_with_4097_pending_in_the_session_returns_busy() {
 #[test]
 fn api_004_a_function_without_a_request_id_may_omit_busy_or_return_it() {
     let mut host = host_with(QuietGuest);
-    let reply = host.call_import("ilium:host/timers", "set", "{\"delay-ms\":50,\"repeat\":false}");
+    let reply = host.call_import_json("ilium:host/timers", "set", "{\"delay-ms\":50,\"repeat\":false}");
     // Both allowed behaviours: success, or err busy under load; never another surprise code.
     assert!(matches!(reply.error_code(), None | Some("busy")));
 }
@@ -152,7 +152,7 @@ fn api_004_a_function_without_a_request_id_may_omit_busy_or_return_it() {
 #[test]
 fn api_005_path_outside_the_scope_fails_in_the_call_not_in_the_completion() {
     let mut host = HostHarness::new().grants(&["fs.read:project"]).with_native_guest(Box::new(QuietGuest)).build().expect("host");
-    let reply = host.call_import("ilium:host/fs", "read-async", "{\"path\":\"/etc/passwd\"}");
+    let reply = host.call_import_json("ilium:host/fs", "read-async", "{\"path\":\"/etc/passwd\"}");
     assert!(reply.error().is_some());
     assert!(reply.request_id().is_none());
 }
@@ -161,7 +161,7 @@ fn api_005_path_outside_the_scope_fails_in_the_call_not_in_the_completion() {
 #[test]
 fn api_005_a_file_that_vanished_arrives_as_failed_not_found_in_the_completion() {
     let mut host = HostHarness::new().grants(&["fs.read:project"]).with_native_guest(Box::new(QuietGuest)).build().expect("host");
-    let reply = host.call_import("ilium:host/fs", "read-async", "{\"path\":\"gone.txt\"}");
+    let reply = host.call_import_json("ilium:host/fs", "read-async", "{\"path\":\"gone.txt\"}");
     let id = reply.request_id().expect("accepted: syntax and scope are fine");
     host.pump(8);
     let completion = host.completion_of(id).expect("a completion was enqueued");
@@ -172,7 +172,7 @@ fn api_005_a_file_that_vanished_arrives_as_failed_not_found_in_the_completion() 
 #[test]
 fn api_005_a_per_call_cap_breach_fails_in_the_call() {
     let mut host = HostHarness::new().grants(&["http:example.com"]).with_native_guest(Box::new(QuietGuest)).build().expect("host");
-    let reply = host.call_import("ilium:host/http", "request", &format!("{{\"url\":\"https://example.com/{}\"}}", "a".repeat(8 * 1024)));
+    let reply = host.call_import_json("ilium:host/http", "request", &format!("{{\"url\":\"https://example.com/{}\"}}", "a".repeat(8 * 1024)));
     assert_eq!(reply.error_code(), Some("invalid-argument"));
     assert!(reply.request_id().is_none());
 }

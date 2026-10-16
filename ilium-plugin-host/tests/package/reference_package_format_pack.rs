@@ -804,7 +804,7 @@ fn pkg_150_99_errors_are_all_reported() {
 fn pkg_151_a_full_check_instantiates_no_component() {
     let (_dir, installer) = installer();
     let _ = installer.check(&vector_signed(), ilium_plugin_api::manifest::CheckMode::Install);
-    assert_eq!(installer.instantiations(), 0);
+    assert_eq!(installer.instantiated_count(), 0);
 }
 
 /// REQ: PKG-151
@@ -812,7 +812,7 @@ fn pkg_151_a_full_check_instantiates_no_component() {
 fn pkg_151_a_refused_package_instantiates_no_component() {
     let (_dir, installer) = installer();
     let _ = installer.check(&package_with_component(&component_with(&[])), ilium_plugin_api::manifest::CheckMode::Install);
-    assert_eq!(installer.instantiations(), 0);
+    assert_eq!(installer.instantiated_count(), 0);
 }
 
 /// REQ: PKG-152

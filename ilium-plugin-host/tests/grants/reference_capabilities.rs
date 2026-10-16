@@ -313,10 +313,10 @@ fn cap_015_in_flight_intent_that_needed_the_grant_completes_failed_revoked() {
 #[test]
 fn cap_015_a_revoke_is_not_a_plugin_failure_and_bumps_the_epoch() {
     let rig = rig(Tier::T2, Side::Server, &["tree.read", "fs.read:project"]);
-    let before = rig.host.epoch();
+    let before = rig.host.authorization_epoch();
     rig.host.revoke("tree.read");
     rig.host.pump(8);
-    assert!(rig.host.epoch() > before);
+    assert!(rig.host.authorization_epoch() > before);
     assert!(rig.host.failures().is_empty());
     assert_eq!(rig.host.state(), InstanceState::Active);
 }
@@ -325,10 +325,10 @@ fn cap_015_a_revoke_is_not_a_plugin_failure_and_bumps_the_epoch() {
 #[test]
 fn cap_015_revoking_a_grant_the_plugin_does_not_hold_changes_nothing() {
     let rig = rig(Tier::T2, Side::Server, &["tree.read"]);
-    let before = rig.host.epoch();
+    let before = rig.host.authorization_epoch();
     rig.host.revoke("fs.read:project");
     rig.host.pump(8);
-    assert_eq!(rig.host.epoch(), before);
+    assert_eq!(rig.host.authorization_epoch(), before);
     assert_eq!(rig.seen.activation_count(), 1);
 }
 

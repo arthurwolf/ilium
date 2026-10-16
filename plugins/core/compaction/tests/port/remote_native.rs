@@ -72,9 +72,9 @@ fn native_detect_prefers_environment_then_user_file() {
     assert_eq!(from_file["limit"], json!({"Setting": 250_000}));
     assert!(from_file["source"].get("UserFile").is_some());
     assert_eq!(host.native_trigger_detect(CODEX)["limit"], json!({"Setting": 200_000}));
-    host.set_agent_env("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE", "40");
+    host.set_env("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE", "40");
     assert_eq!(host.native_trigger_detect(CLAUDE)["limit"], json!({"PercentOfWindow": 40}));
-    host.set_agent_env("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE", "");
-    host.set_agent_env("DISABLE_AUTO_COMPACT", "1");
+    host.set_env("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE", "");
+    host.set_env("DISABLE_AUTO_COMPACT", "1");
     assert_eq!(host.native_trigger_detect(CLAUDE)["limit"], json!("Disabled"));
 }

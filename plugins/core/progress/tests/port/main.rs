@@ -2,6 +2,8 @@
 //! core-automation, part ports. Each twin asserts the observable behaviour of the original through
 //! the plugin API; helpers shared with the features tests are read from ../features/common.rs.
 
+#[path = "../host_ext.rs"]
+mod host_ext;
 #[path = "../features/common.rs"]
 mod common;
 mod support;

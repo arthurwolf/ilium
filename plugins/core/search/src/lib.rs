@@ -4,7 +4,9 @@
 //! implementing the lifecycle, the handler and the exports its manifest lists. Every body is
 //! `unimplemented!` until the implementation phase moves the feature here.
 
-use ilium_plugin_sdk::{Handler, JobRunner, Lifecycle, Views, ilium_plugin};
+use ilium_plugin_sdk::{Handler, JobRunner, Lifecycle, ServiceProvider, Views, ilium_plugin};
+use ilium_plugin_sdk::generated::exports::service_provider::ServiceCall;
+use ilium_plugin_sdk::generated::exports::service_provider::ServiceReply;
 use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::generated::types::intents::Submission;
 use ilium_plugin_sdk::generated::types::layout::Area;
@@ -14,7 +16,7 @@ use ilium_plugin_sdk::types::Activation;
 use ilium_plugin_sdk::types::PluginError;
 
 /// The server side of `ilium.core.search` (core-plugin-search.md, world `ilium:server/base@0.1.0`).
-#[ilium_plugin(side = "server", exports = ["job-runner"])]
+#[ilium_plugin(side = "server", exports = ["job-runner", "service-provider"])]
 #[derive(Default)]
 pub struct SearchServer;
 
@@ -33,6 +35,14 @@ impl Handler for SearchServer {
 impl JobRunner for SearchServer {
     fn run(&mut self, _kind: String, _input: Vec<u8>) -> Result<Vec<u8>, PluginError> {
         unimplemented!("ilium.core.search: server job-runner.run")
+    }
+}
+
+/// Service `ilium.core.search/query` (core-plugin-search.md "Services"): `query` answers with
+/// `Done` JSON `{ "hits": [...] }`.
+impl ServiceProvider for SearchServer {
+    fn handle(&mut self, _call: ServiceCall) -> ServiceReply {
+        unimplemented!("ilium.core.search: server service-provider.handle")
     }
 }
 

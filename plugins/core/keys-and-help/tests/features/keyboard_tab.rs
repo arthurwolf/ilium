@@ -324,7 +324,7 @@ fn keyboard_022_when_the_plugin_is_disabled_the_tab_shows_the_values_read_only_w
     session.install_core("keys-and-help").start();
     session.pump().expect("pump");
     session.plugin(PLUGIN_ID).kernel_settings().set_tab("keyboard", json!({"shortcut_base": "ctrl+b"}));
-    session.set_enabled(PLUGIN_ID, false);
+    session.disable(PLUGIN_ID);
     session.pump().expect("pump");
     let screen = session.plugin(PLUGIN_ID).render(keyboard_page(), 80, 20);
     assert!(screen.text().contains("Keys and help is disabled. Values are kept."), "{}", screen.text());

@@ -268,7 +268,7 @@ pub fn add_terminal(host: &mut FakeHost, name: &str, screen_text: &str) -> u64 {
         content_kind: Some("ilium.terminal".to_string()),
         agent: None,
     });
-    host.tree().set_screen(id, screen_text);
+    host.tree().set_screen(id, screen_text.lines().map(str::to_string).collect());
     id
 }
 

@@ -282,13 +282,13 @@ pub fn restore_panes(host: &mut FakeHost, panes: &[u64]) -> Vec<Submission> {
 
 /// Registers the signature with its resume template and gives the pane a verified session id.
 pub fn verify_agent(host: &mut FakeHost, pane: u64, signature_spec: SignatureSpec, session_id: &str) {
-    host.agent().add_signature(signature_spec);
-    host.agent().set_session(pane, session_ref(session_id));
+    host.agents().add_signature(signature_spec);
+    host.agents().set_session(pane, session_ref(session_id));
 }
 
 /// Registers the signature (with or without a resume template) and leaves the session unverified.
 pub fn register_signature(host: &mut FakeHost, signature_spec: SignatureSpec) {
-    host.agent().add_signature(signature_spec);
+    host.agents().add_signature(signature_spec);
 }
 
 /// The timers the plugin holds and has not cancelled: (first delay ms, repeat ms), oldest first.

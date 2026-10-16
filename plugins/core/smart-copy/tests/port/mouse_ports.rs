@@ -28,7 +28,7 @@ fn port_mouse_closing_the_picker_closes_the_view() {
 fn port_ui_the_picker_view_renders_at_narrow_widths() {
     for width in [12u16, 16, 20, 27, 28, 40] {
         let mut host = open_picker(&["first", "second"]);
-        let text = host.render_view(picker_target(), width, 9);
+        let text = host.render(picker_target(), width, 9).text();
         assert!(text.lines().count() <= 9, "{width}");
         assert!(text.lines().all(|line| line.chars().count() <= width as usize), "{width}");
     }

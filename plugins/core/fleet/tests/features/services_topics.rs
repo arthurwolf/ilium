@@ -12,7 +12,7 @@ fn svc_011_the_broadcast_service_sends_text_to_the_agents() {
     let mut host = server_host();
     add_agent(&mut host, "a", "claude", AgentActivity::Idle);
     add_session(&mut host, "default", true, &[]);
-    host.call_own_service("broadcast", "send", r#"{"message":"hello"}"#);
+    host.call_service("broadcast", "send", r#"{"message":"hello"}"#);
     host.settle();
     assert!(sent_inputs(&host).iter().all(|s| s.text == "hello"));
     assert!(!sent_inputs(&host).is_empty());
@@ -24,7 +24,7 @@ fn svc_011_the_panes_service_lists_the_panes() {
     let mut host = server_host();
     add_agent(&mut host, "a", "claude", AgentActivity::Idle);
     add_session(&mut host, "default", true, &[]);
-    let reply = host.call_own_service("panes", "list", "{}");
+    let reply = host.call_service("panes", "list", "{}").expect("reply");
     let value: Value = serde_json::from_str(&reply).expect("JSON");
     assert!(value.is_array() || value["panes"].is_array(), "{value}");
 }
@@ -35,7 +35,7 @@ fn svc_011_the_broadcast_service_refuses_an_empty_message() {
     let mut host = server_host();
     add_agent(&mut host, "a", "claude", AgentActivity::Idle);
     add_session(&mut host, "default", true, &[]);
-    host.call_own_service("broadcast", "send", r#"{"message":""}"#);
+    host.call_service("broadcast", "send", r#"{"message":""}"#);
     host.settle();
     assert!(sent_inputs(&host).is_empty());
 }

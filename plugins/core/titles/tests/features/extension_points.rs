@@ -92,9 +92,9 @@ fn doc_f_041_ticket_first_example_is_a_valid_style_entry_with_title_and_instruct
 #[test]
 fn f_041_before_apply_title_hook_is_asked_with_node_proposed_source_previous() {
     let mut host = activated_server();
-    host.script_hook_reply("before-apply-title", HookReply::Pass);
+    host.set_hook_reply("before-apply-title", HookReply::Pass);
     title_for_prompt(&mut host, 7, "Fix the login bug", "Login fix");
-    let calls = host.hook_calls();
+    let calls = host.all_hook_calls();
     let call = calls.iter().find(|call| call.point.ends_with("before-apply-title")).expect("hook asked");
     let payload: Value = serde_json::from_str(&call.payload_json).expect("payload is JSON");
     assert_eq!(payload["node"], 7);
@@ -107,7 +107,7 @@ fn f_041_before_apply_title_hook_is_asked_with_node_proposed_source_previous() {
 #[test]
 fn f_041_before_apply_title_replace_changes_the_applied_title() {
     let mut host = activated_server();
-    host.script_hook_reply("before-apply-title", HookReply::Replace(json!({"proposed": "PROJ-12 Login fix"}).to_string()));
+    host.set_hook_reply("before-apply-title", HookReply::Replace(json!({"proposed": "PROJ-12 Login fix"}).to_string()));
     title_for_prompt(&mut host, 7, "Fix the login bug PROJ-12", "Login fix");
     let renames = renames(&host.submitted());
     assert_eq!(renames.len(), 1);
@@ -118,7 +118,7 @@ fn f_041_before_apply_title_replace_changes_the_applied_title() {
 #[test]
 fn f_041_before_apply_title_pass_keeps_the_generated_title() {
     let mut host = activated_server();
-    host.script_hook_reply("before-apply-title", HookReply::Pass);
+    host.set_hook_reply("before-apply-title", HookReply::Pass);
     title_for_prompt(&mut host, 7, "Fix the login bug", "Login fix");
     let renames = renames(&host.submitted());
     assert_eq!(renames.len(), 1);

@@ -31,7 +31,7 @@ fn offer_052_start_switches_voice_on_only_when_it_is_off() {
     let line = answer(&mut off, 1, json!({ "sentences": ["hello"], "start": true }));
     let record: Value = serde_json::from_str(&line).expect("record");
     assert_eq!(record["started_voice"], true);
-    assert_eq!(off.kernel_settings("voice-control").get("enabled"), Some(json!(true)));
+    assert_eq!(off.kernel_settings().get("voice-control", "enabled"), Some(json!(true)));
 
     let mut running = enabled_client("semantic_vad");
     let line = answer(&mut running, 2, json!({ "sentences": ["hello"], "start": true }));
@@ -45,5 +45,5 @@ fn offer_052_without_start_a_switched_off_client_answers_voice_off() {
     let mut host = client_host();
     let line = answer(&mut host, 1, json!({ "sentences": ["hello"], "start": false }));
     assert!(line.contains("voice-off"), "{line}");
-    assert_eq!(host.kernel_settings("voice-control").get("enabled"), Some(json!(false)));
+    assert_eq!(host.kernel_settings().get("voice-control", "enabled"), Some(json!(false)));
 }

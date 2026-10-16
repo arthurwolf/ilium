@@ -6,7 +6,7 @@ use ilium_plugin_sdk::types::ErrorCode;
 use crate::common::*;
 
 fn raw(host: &mut ilium_plugin_sdk::testing::FakeHost, method: &str, payload: &str) -> Result<String, ilium_plugin_sdk::types::PluginError> {
-    host.call_own_service_method(SERVICE, method, payload)
+    host.call_service(SERVICE, method, payload)
 }
 
 /// REQ: F-063

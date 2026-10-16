@@ -390,7 +390,7 @@ fn say_052_voice_off_with_start_switches_voice_on_and_saves_the_setting() {
     let record: Value = serde_json::from_str(&line).expect("one JSON object");
     assert_eq!(record["ok"], true);
     assert_eq!(record["started_voice"], true);
-    assert_eq!(host.kernel_settings("voice-control").get("enabled"), Some(json!(true)));
+    assert_eq!(host.kernel_settings().get("voice-control", "enabled"), Some(json!(true)));
 }
 
 /// REQ: F-052

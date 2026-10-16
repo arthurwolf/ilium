@@ -222,7 +222,7 @@ fn session_050_toggle_command_turns_voice_on_and_saves_enabled() {
     let mut host = client_host();
     host.deliver_one(command_invoked("voice.toggle"));
     host.settle();
-    assert_eq!(host.kernel_settings("voice-control").get("enabled"), Some(json!(true)));
+    assert_eq!(host.kernel_settings().get("voice-control", "enabled"), Some(json!(true)));
 }
 
 /// REQ: F-050
@@ -232,7 +232,7 @@ fn session_050_toggle_command_twice_turns_voice_off_again() {
     host.deliver_one(command_invoked("voice.toggle"));
     host.deliver_one(command_invoked("voice.toggle"));
     host.settle();
-    assert_eq!(host.kernel_settings("voice-control").get("enabled"), Some(json!(false)));
+    assert_eq!(host.kernel_settings().get("voice-control", "enabled"), Some(json!(false)));
 }
 
 /// REQ: F-050
@@ -242,10 +242,10 @@ fn session_050_semantic_vad_f8_press_toggles_voice_and_release_does_nothing() {
     let grab = f8_grab(&mut host);
     host.deliver_one(key_pressed(grab, false));
     host.settle();
-    assert_eq!(host.kernel_settings("voice-control").get("enabled"), Some(json!(false)));
+    assert_eq!(host.kernel_settings().get("voice-control", "enabled"), Some(json!(false)));
     host.deliver_one(key_released(grab));
     host.settle();
-    assert_eq!(host.kernel_settings("voice-control").get("enabled"), Some(json!(false)));
+    assert_eq!(host.kernel_settings().get("voice-control", "enabled"), Some(json!(false)));
     assert!(host.jobs().list().is_empty());
 }
 
@@ -256,7 +256,7 @@ fn session_050_push_to_talk_toggle_from_off_turns_voice_on_and_a_press_then_reco
     configure(&mut host, "input_mode", json!("push_to_talk"));
     host.deliver_one(command_invoked("voice.toggle"));
     host.settle();
-    assert_eq!(host.kernel_settings("voice-control").get("enabled"), Some(json!(true)));
+    assert_eq!(host.kernel_settings().get("voice-control", "enabled"), Some(json!(true)));
     let grab = f8_grab(&mut host);
     host.deliver_one(key_pressed(grab, false));
     host.settle();
@@ -269,7 +269,7 @@ fn session_050_push_to_talk_f8_press_does_not_toggle_voice_off() {
     let (mut host, grab, _capture) = recording();
     host.deliver_one(key_pressed(grab, false));
     host.settle();
-    assert_eq!(host.kernel_settings("voice-control").get("enabled"), Some(json!(true)));
+    assert_eq!(host.kernel_settings().get("voice-control", "enabled"), Some(json!(true)));
     assert_eq!(host.audio().captures().len(), 1);
     assert!(host.audio().captures()[0].open);
 }

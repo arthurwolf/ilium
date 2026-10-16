@@ -82,7 +82,7 @@ fn f_112_closed_gate_reads_nothing_and_starts_no_job() {
 #[test]
 fn f_112_unreadable_kernel_setting_means_closed() {
     let mut host = activated_server();
-    host.set_kernel_settings_unreadable("inference");
+    host.kernel_settings().set_unreadable("inference");
     host.set_onboarding_finished(true);
     host.tree().add(shell_pane("s"));
     let (stdout, _, code) = run_cli(&mut host, &["recap"]);
@@ -95,7 +95,7 @@ fn f_112_unreadable_kernel_setting_means_closed() {
 fn f_112_automatic_ai_that_is_not_a_boolean_means_closed() {
     for value in [json!("true"), json!(1), json!(null)] {
         let mut host = activated_server();
-        host.set_kernel_settings("inference", json!({"automatic_ai": value}));
+        host.kernel_settings().set_tab("inference", json!({"automatic_ai": value}));
         host.set_onboarding_finished(true);
         host.tree().add(shell_pane("s"));
         let (stdout, _, _) = run_cli(&mut host, &["recap"]);
@@ -107,7 +107,7 @@ fn f_112_automatic_ai_that_is_not_a_boolean_means_closed() {
 #[test]
 fn f_112_open_ai_with_unfinished_onboarding_gives_denied_records() {
     let mut host = activated_server();
-    host.set_kernel_settings("inference", json!({"automatic_ai": true}));
+    host.kernel_settings().set_tab("inference", json!({"automatic_ai": true}));
     host.set_onboarding_finished(false);
     host.tree().add(shell_pane("s"));
     let (stdout, _, _) = run_cli(&mut host, &["recap"]);
@@ -119,10 +119,10 @@ fn f_112_open_ai_with_unfinished_onboarding_gives_denied_records() {
 #[test]
 fn f_112_server_asks_the_client_the_onboarding_state_request_with_empty_object_payload() {
     let mut host = activated_server();
-    host.set_kernel_settings("inference", json!({"automatic_ai": true}));
+    host.kernel_settings().set_tab("inference", json!({"automatic_ai": true}));
     host.tree().add(shell_pane("s"));
     run_cli(&mut host, &["recap"]);
-    let requests = host.client_requests();
+    let requests = host.client_requests().sent();
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].kind, "onboarding-state");
     assert_eq!(requests[0].payload_json, "{}");
@@ -145,7 +145,7 @@ fn f_112_client_answers_onboarding_state_with_the_finished_flag() {
 #[test]
 fn f_112_unanswered_onboarding_request_within_two_seconds_means_closed() {
     let mut host = activated_server();
-    host.set_kernel_settings("inference", json!({"automatic_ai": true}));
+    host.kernel_settings().set_tab("inference", json!({"automatic_ai": true}));
     host.leave_client_requests_unanswered();
     host.tree().add(shell_pane("s"));
     let invocation = host.cli().invoke(&["recap"], b"");

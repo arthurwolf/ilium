@@ -154,7 +154,7 @@ fn points_062_the_harness_page_lists_the_same_two_points_for_the_core_stub() {
 fn points_062_a_before_post_handler_that_replaces_the_text_changes_the_written_record() {
     let mut host = crate::common::server_host();
     crate::common::seed_room(&mut host, &[]);
-    host.contribute_hook("ilium.core.chatroom/before-post", |call: HookCall| {
+    host.set_hook_handler("ilium.core.chatroom/before-post", |call: HookCall| {
         let mut payload: Value = serde_json::from_str(&call.payload_json).expect("payload");
         payload["text"] = Value::String("[filtered]".to_string());
         HookReply::Replace(payload.to_string())
@@ -169,7 +169,7 @@ fn points_062_a_before_post_handler_that_replaces_the_text_changes_the_written_r
 fn points_062_a_before_post_handler_that_traps_leaves_the_text_unchanged() {
     let mut host = crate::common::server_host();
     crate::common::seed_room(&mut host, &[]);
-    host.contribute_hook_trap("ilium.core.chatroom/before-post");
+    host.set_hook_trap("ilium.core.chatroom/before-post");
     crate::common::send(&mut host, "plain");
     assert_eq!(crate::common::split_record(&crate::common::room_records(&mut host)[0]).2, "plain");
 }
@@ -179,7 +179,7 @@ fn points_062_a_before_post_handler_that_traps_leaves_the_text_unchanged() {
 fn points_062_a_before_post_handler_that_empties_the_text_makes_the_send_fail_as_empty() {
     let mut host = crate::common::server_host();
     crate::common::seed_room(&mut host, &[]);
-    host.contribute_hook("ilium.core.chatroom/before-post", |call: HookCall| {
+    host.set_hook_handler("ilium.core.chatroom/before-post", |call: HookCall| {
         let mut payload: Value = serde_json::from_str(&call.payload_json).expect("payload");
         payload["text"] = Value::String(String::new());
         HookReply::Replace(payload.to_string())

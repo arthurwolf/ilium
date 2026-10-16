@@ -2,6 +2,8 @@
 //! target plugins/core/compaction). Each twin asserts the observable behaviour of its original through
 //! FakeHost, in native mode, and is tagged `REQ: PORT:<file>::<test>`.
 
+#[path = "../host_ext.rs"]
+mod host_ext;
 mod common;
 mod fixtures;
 

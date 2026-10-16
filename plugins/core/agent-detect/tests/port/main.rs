@@ -4,6 +4,8 @@
 //! `detector` export `identify`/`classify`, decorations, settings). Originals whose subject is the kernel-native
 //! detection loop, IPC, persistence or client-core rendering are listed in API_GAPS.md as having no plugin surface.
 
+#[path = "../host_ext.rs"]
+mod host_ext;
 mod common;
 mod detect_activity;
 mod detect_chronology_more;

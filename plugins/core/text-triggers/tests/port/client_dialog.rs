@@ -93,7 +93,7 @@ fn port_007_editing_text_trigger_preserves_its_id_persists_and_queues_live_updat
     host.settings().set("patterns", json!(["edited"])).expect("edit");
     host.settle();
     assert_eq!(host.settings().get("ids"), Some(json!(["authored-rule"])));
-    assert_eq!(host.config_table("text_triggers").expect("table")["patterns"], json!(["edited"]));
+    assert_eq!(host.kernel_settings().tab("text_triggers").expect("table")["patterns"], json!(["edited"]));
 }
 
 /// REQ: PORT:ilium-client/src/filesystem/tests.rs::text_trigger_modal_waits_for_real_durable_writer_and_server_request
@@ -104,7 +104,7 @@ fn port_008_text_trigger_modal_waits_for_real_durable_writer_and_server_request(
     host.send_action(tab(), "rule-0", ActionKind::Toggled, ActionValue::Flag(false));
     host.settle();
     assert!(host.outcomes().iter().any(|o| matches!(o, Outcome::Refused(e) if e.code == ErrorCode::NotPermitted)));
-    assert_eq!(host.config_table("text_triggers"), None);
+    assert_eq!(host.kernel_settings().tab("text_triggers"), None);
 }
 
 /// REQ: PORT:ilium-client/src/ui.rs::text_trigger_dialog_visually_marks_matches_and_loop_risk

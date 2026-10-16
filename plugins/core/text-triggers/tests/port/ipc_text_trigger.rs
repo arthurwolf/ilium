@@ -16,7 +16,7 @@ fn port_001_explicit_delay_round_trips_through_toml_including_zero() {
         host.settings().set("delays", json!([delay])).expect("delay accepted");
         host.settle();
         assert_eq!(host.settings().get("delays"), Some(json!([delay])));
-        assert_eq!(host.config_table("text_triggers").expect("table")["delays"], json!([delay]));
+        assert_eq!(host.kernel_settings().tab("text_triggers").expect("table")["delays"], json!([delay]));
     }
 }
 

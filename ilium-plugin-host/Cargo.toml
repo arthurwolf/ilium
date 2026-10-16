@@ -27,6 +27,8 @@ loom = { version = "0.7", optional = true }
 [dev-dependencies]
 # Test lanes of the plugin platform (test-plan.md sections 2.4 and 2.13).
 proptest = "1"
+# Signatures with other keys, prefixes and malformed scalars in the package lane (PKG-203, PKG-250..252).
+ed25519-dalek = "2"
 tempfile = "3.27.0"
 toml = "0.8.23"
 

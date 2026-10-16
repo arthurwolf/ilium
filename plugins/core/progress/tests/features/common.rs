@@ -4,6 +4,7 @@
 //! end of this file (see ../API_GAPS.md), so a missing item breaks this file only.
 #![allow(dead_code)]
 
+pub use crate::host_ext::*;
 use std::path::PathBuf;
 
 use ilium_plugin_core_progress::{ProgressClient, ProgressServer};

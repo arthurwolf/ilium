@@ -42,7 +42,7 @@ fn device_054_choosing_a_discovered_microphone_saves_its_name() {
     host.audio().set_input_devices(vec!["Built-in Microphone".to_string(), "USB Microphone".to_string()]);
     host.send_action(page(), "input_device_name", ActionKind::Selected, ActionValue::Index(2));
     host.settle();
-    assert_eq!(host.kernel_settings("voice-control").get("input_device_name"), Some(json!("USB Microphone")));
+    assert_eq!(host.kernel_settings().get("voice-control", "input_device_name"), Some(json!("USB Microphone")));
 }
 
 /// REQ: F-054
@@ -53,7 +53,7 @@ fn device_054_index_zero_is_the_system_default_and_removes_the_saved_name() {
     host.send_action(page(), "input_device_name", ActionKind::Selected, ActionValue::Index(1));
     host.send_action(page(), "input_device_name", ActionKind::Selected, ActionValue::Index(0));
     host.settle();
-    assert_eq!(host.kernel_settings("voice-control").get("input_device_name"), None);
+    assert_eq!(host.kernel_settings().get("voice-control", "input_device_name"), None);
 }
 
 /// REQ: F-054
@@ -63,7 +63,7 @@ fn device_054_choosing_a_discovered_speaker_saves_its_name() {
     host.audio().set_output_devices(vec!["Headset".to_string()]);
     host.send_action(page(), "output_device_name", ActionKind::Selected, ActionValue::Index(1));
     host.settle();
-    assert_eq!(host.kernel_settings("voice-control").get("output_device_name"), Some(json!("Headset")));
+    assert_eq!(host.kernel_settings().get("voice-control", "output_device_name"), Some(json!("Headset")));
 }
 
 /// REQ: F-054

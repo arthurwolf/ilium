@@ -101,7 +101,7 @@ fn hst_202_stuck_side_counts_as_a_failure() {
     let kernel = kernel_with_nodes(1);
     let handle = build_with(HostHarness::new().kernel(kernel), ScriptedGuest::new(Shared::new()));
     handle.deliver((0..1_025).map(|_| message()).collect());
-    assert!(handle.counted_failures() >= 1);
+    assert!(handle.failure_count() >= 1);
 }
 
 proptest! {

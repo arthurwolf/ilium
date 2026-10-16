@@ -247,10 +247,10 @@ pub fn create_worktree(host: &mut FakeHost, payload: &Value) -> Vec<Submission> 
 
 /// Sets a key of the `[git]` kernel settings tab (the values stay in the same config.toml table).
 pub fn set_git(host: &mut FakeHost, key: &str, value: Value) -> Result<(), ilium_plugin_sdk::types::PluginError> {
-    host.kernel_settings("git").set(key, value)
+    host.kernel_settings().set("git", key, value)
 }
 
 /// A server-side host whose project root is `root`, not yet activated.
 pub fn server_host_unactivated_at(root: &str) -> FakeHost {
-    FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("server").project_root(PathBuf::from(root)).build()
+    FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("server").with_project_root(PathBuf::from(root)).build()
 }

@@ -72,7 +72,7 @@ fn safety_063_remove_is_also_refused_over_512_kib() {
 fn safety_063_the_status_of_a_file_over_512_kib_is_an_invalid_argument_error() {
     let mut host = server_host();
     put(&mut host, claude_file(), &file_of_size(LIMIT + 1));
-    let error = host.call_own_service_method(SERVICE, "status", "{}").expect_err("status fails");
+    let error = host.call_service(SERVICE, "status", "{}").expect_err("status fails");
     assert_eq!(error.code, ErrorCode::InvalidArgument);
 }
 
@@ -218,7 +218,7 @@ fn safety_063_without_the_read_grant_the_status_cannot_read_the_file() {
     let mut host = server_host();
     put(&mut host, claude_file(), "# Mine\n");
     host.revoke("fs.read:agent-config:claude");
-    let error = host.call_own_service_method(SERVICE, "status", "{}").expect_err("no grant");
+    let error = host.call_service(SERVICE, "status", "{}").expect_err("no grant");
     assert_eq!(error.code, ErrorCode::NotPermitted);
 }
 

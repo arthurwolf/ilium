@@ -46,7 +46,7 @@ fn port_layout_asking_twice_returns_the_same_entries() {
 #[test]
 fn port_ui_picker_view_shows_candidates_without_scene_attribution() {
     let mut host = open_picker(&["alpha", "beta"]);
-    let text = host.render_view(picker_target(), 40, 9);
+    let text = host.render(picker_target(), 40, 9).text();
     assert!(text.contains("alpha"));
     assert!(text.contains("beta"));
     assert!(!text.to_lowercase().contains("scene"));

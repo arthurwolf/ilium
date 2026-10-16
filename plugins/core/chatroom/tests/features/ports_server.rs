@@ -260,7 +260,7 @@ fn router_f062_a_start_with_a_room_asks_agent_setup_to_repair_the_hook_in_place(
 #[test]
 fn router_f062_the_room_is_reconciled_on_a_one_second_deadline() {
     let mut host = host_with_room();
-    host.fs().write_quiet(ROOM, format!("{}{}\n", room_text(&mut host), numbered_line(1)).as_bytes());
+    host.fs().seed(ROOM, format!("{}{}\n", room_text(&mut host), numbered_line(1)).as_bytes());
     host.advance_clock(999);
     assert!(published_texts(&host).is_empty(), "no reconcile before one second");
     host.advance_clock(1);

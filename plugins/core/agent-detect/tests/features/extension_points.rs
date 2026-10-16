@@ -1,6 +1,7 @@
 //! The extension points, service and topic the page declares: `activity-rules` (collect) and `classify`
 //! (hook, transform), the `state` service (get, list) and the `state-changed` topic.
 
+use crate::host_ext::*;
 use ilium_plugin_sdk::exports::{HookCall, HookReply};
 use ilium_plugin_sdk::types::{AgentActivity, AgentActivityEvent, AgentIdentifiedEvent, Event, NodeId};
 use serde_json::{Value, json};

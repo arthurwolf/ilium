@@ -34,4 +34,19 @@ impl FakeJobs {
     pub fn progress(&mut self, _request: u64, _percent: f32, _message: &str) {
         unimplemented!("DEV-472")
     }
+
+    /// Request numbers of the jobs the plugin cancelled, in order (lane hook, see manual_gaps_fakes.md; DEV-472).
+    pub fn cancelled(&self) -> Vec<u64> {
+        unimplemented!("DEV-472")
+    }
+
+    /// Percent values the plugin reported through `jobs.progress`, in order (lane hook, see manual_gaps_fakes.md).
+    pub fn reported_progress(&self) -> Vec<f32> {
+        unimplemented!("DEV-472")
+    }
+
+    /// Makes the next job run see a cancel request (lane hook, see manual_gaps_fakes.md; DEV-472).
+    pub fn request_cancel(&mut self) {
+        unimplemented!("DEV-472")
+    }
 }

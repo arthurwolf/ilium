@@ -81,7 +81,7 @@ fn port_072_prefix_template_and_default_base_decide_branch_path_and_base_of_a_de
 fn port_072_the_close_policy_default_is_stored_and_read_back() {
     let mut host: FakeHost = server_host_at(PROJECT);
     set_git(&mut host, "default_close_policy", json!("offer_removal_when_safe")).expect("valid");
-    assert_eq!(host.kernel_settings("git").get("default_close_policy"), Some(json!("offer_removal_when_safe")));
+    assert_eq!(host.kernel_settings().get("git", "default_close_policy"), Some(json!("offer_removal_when_safe")));
 }
 
 /// REQ: F-067, PORT:ilium-client/src/worktree_dialog.rs::git_defaults_set_branch_base_path_and_close_policy_without_overwriting_manual_branch

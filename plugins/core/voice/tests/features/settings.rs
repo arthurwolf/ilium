@@ -36,7 +36,7 @@ fn act(host: &mut FakeHost, key: &str, kind: ActionKind, value: ActionValue) {
 }
 
 fn saved(host: &mut FakeHost, key: &str) -> Option<Value> {
-    host.kernel_settings("voice-control").get(key)
+    host.kernel_settings().get("voice-control", key)
 }
 
 /// REQ: F-050, COR-030

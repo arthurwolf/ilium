@@ -16,7 +16,7 @@ pub fn stdout_exit(text: &str) -> ProcessExit {
 
 /// A server host whose project (main checkout) is `root`; every git run succeeds with empty output.
 pub fn server_host_at(root: &str) -> FakeHost {
-    let mut host = FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("server").project_root(PathBuf::from(root)).build();
+    let mut host = FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("server").with_project_root(PathBuf::from(root)).build();
     host.process().default_exit(ok_exit());
     host.activate::<WorktreesServer>();
     host

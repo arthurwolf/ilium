@@ -3,6 +3,8 @@
 //! same observable behaviour as the original through FakeHost, the install service, the config-writer
 //! facade and the Setup tab. Items the skeleton lacks are listed in tests/API_GAPS_port.md.
 
+#[path = "../host_ext.rs"]
+mod host_ext;
 mod app;
 mod common;
 mod config_fs;

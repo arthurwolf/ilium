@@ -59,7 +59,7 @@ fn port_cw_20_read_current_distinguishes_missing_not_regular_too_large_and_unpar
     let mut host = server_host();
     let missing = read_current(&mut host, CLAUDE_SETTING).expect_err("missing");
     assert_eq!(missing.code, ErrorCode::NotFound);
-    host.fs().create_dir(claude_settings_file());
+    host.fs().mkdir(claude_settings_file());
     let not_regular = read_current(&mut host, CLAUDE_SETTING).expect_err("directory");
     assert_eq!(not_regular.code, ErrorCode::InvalidArgument);
     assert!(not_regular.message.contains("not a regular file"), "{}", not_regular.message);
@@ -425,7 +425,7 @@ fn port_cw_45_lock_contention_is_reported_as_busy_without_touching_the_file() {
     let original = "{\"autoCompactWindow\": 567000}";
     let mut host = host_with(&[(CLAUDE_SETTING, original)]);
     let planned = plan(&mut host, CLAUDE_SETTING, 250_000).expect("plan");
-    let held = host.fs().hold_lock(claude_settings_file());
+    let held = host.fs().hold_lock(claude_settings_file(), true);
     assert_eq!(code_of(apply_plan(&mut host, &planned)), ErrorCode::Busy);
     assert_eq!(read(&mut host, CLAUDE_SETTING), original);
     held.release();
@@ -438,7 +438,7 @@ fn port_cw_45_lock_contention_is_reported_as_busy_without_touching_the_file() {
 fn port_cw_46_revert_also_waits_for_the_lock_and_then_gives_up_as_busy() {
     let mut host = host_with(&[(CLAUDE_SETTING, "{}")]);
     let receipt = apply_value(&mut host, CLAUDE_SETTING, 250_000);
-    let held = host.fs().hold_lock(claude_settings_file());
+    let held = host.fs().hold_lock(claude_settings_file(), true);
     assert_eq!(code_of(revert_record(&mut host, &receipt["record"])), ErrorCode::Busy);
     held.release();
     revert_record(&mut host, &receipt["record"]).expect("revert after the lock is free");
@@ -471,7 +471,7 @@ fn port_cw_49_the_distinct_refusals_have_distinct_messages() {
     let mut host = host_with(&[(CODEX_SETTING, "a = 1\n")]);
     let mut messages: Vec<String> = Vec::new();
     messages.push(read_current(&mut host, CLAUDE_SETTING).expect_err("missing").message);
-    host.fs().create_dir(claude_settings_file());
+    host.fs().mkdir(claude_settings_file());
     messages.push(read_current(&mut host, CLAUDE_SETTING).expect_err("not regular").message);
     host.fs().write(codex_config_file(), &vec![b' '; MAX_CONFIG_BYTES + 1]);
     messages.push(read_current(&mut host, CODEX_SETTING).expect_err("too large").message);

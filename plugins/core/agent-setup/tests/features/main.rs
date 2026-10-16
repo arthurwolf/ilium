@@ -5,6 +5,8 @@
 //! COR-030 / COR-033 / COR-022 (kernel tab `setup`), the service `install`, the three extension points,
 //! the block markers and the five statuses, the safety rules, the refresh timing, the Setup tab renders.
 
+#[path = "../host_ext.rs"]
+mod host_ext;
 mod commands;
 mod common;
 mod doc_page;

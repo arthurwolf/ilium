@@ -434,7 +434,7 @@ fn hst_406_all_five_session_keys_have_the_documented_defaults() {
 #[test]
 fn hst_410_unrequested_capability_traps_and_the_log_names_interface_and_function() {
     let mut host = HostHarness::new().grants(&["fs.read:project"]).with_native_guest(Box::new(QuietGuest)).build().expect("host");
-    let reply = host.call_import("ilium:host/fs", "write", "{}");
+    let reply = host.call_import_json("ilium:host/fs", "write", "{}");
     assert_eq!(reply.trap_code(), Some("host.capability-not-requested".to_owned()));
     let text = log_text(&host);
     assert!(text.contains("test.plugin") && text.contains("ilium:host/fs") && text.contains("write"));
@@ -445,7 +445,7 @@ fn hst_410_unrequested_capability_traps_and_the_log_names_interface_and_function
 fn hst_410_declined_grant_returns_not_permitted_and_logs_one_line_with_three_fields() {
     let mut host = HostHarness::new().grants(&[]).with_native_guest(Box::new(QuietGuest)).build().expect("host");
     host.decline("tree.write");
-    let reply = host.call_import("ilium:host/tree", "set-name", "{}");
+    let reply = host.call_import_json("ilium:host/tree", "set-name", "{}");
     assert_eq!(reply.error_code(), Some("not-permitted"));
     assert_eq!(log_count(&host, "not-permitted"), 1);
     assert!(log_text(&host).contains("ilium:host/tree"));
@@ -455,7 +455,7 @@ fn hst_410_declined_grant_returns_not_permitted_and_logs_one_line_with_three_fie
 #[test]
 fn api_010_import_whose_capability_was_never_requested_traps_and_restarts() {
     let mut host = HostHarness::new().grants(&[]).with_native_guest(Box::new(QuietGuest)).build().expect("host");
-    let reply = host.call_import("ilium:host/fs", "read", "{}");
+    let reply = host.call_import_json("ilium:host/fs", "read", "{}");
     assert!(reply.trap_code().is_some());
     assert_eq!(host.state(), InstanceState::RestartScheduled);
 }
@@ -554,7 +554,7 @@ fn api_081_a_trap_with_an_unknown_code_is_recorded_as_trap_abi_never_invented() 
 #[test]
 fn api_060_65_kib_raw_input_is_refused_invalid_argument_and_sends_no_bytes() {
     let mut host = host_with(QuietGuest);
-    let reply = host.call_import("ilium:host/panes", "send-raw", &format!("{{\"pane\":1,\"bytes\":{}}}", 65 * 1024));
+    let reply = host.call_import_json("ilium:host/panes", "send-raw", &format!("{{\"pane\":1,\"bytes\":{}}}", 65 * 1024));
     assert_eq!(reply.error_code(), Some("invalid-argument"));
     assert_eq!(host.kernel().raw_bytes_sent(), 0);
 }
@@ -563,7 +563,7 @@ fn api_060_65_kib_raw_input_is_refused_invalid_argument_and_sends_no_bytes() {
 #[test]
 fn api_060_64_kib_raw_input_is_accepted() {
     let mut host = host_with(QuietGuest);
-    let reply = host.call_import("ilium:host/panes", "send-raw", &format!("{{\"pane\":1,\"bytes\":{}}}", 64 * 1024));
+    let reply = host.call_import_json("ilium:host/panes", "send-raw", &format!("{{\"pane\":1,\"bytes\":{}}}", 64 * 1024));
     assert_ne!(reply.error_code(), Some("invalid-argument"));
 }
 
@@ -571,9 +571,9 @@ fn api_060_64_kib_raw_input_is_accepted() {
 #[test]
 fn api_061_state_dependent_cap_returns_quota_exceeded_and_precheckable_cap_invalid_argument() {
     let mut host = host_with(QuietGuest);
-    let rows = host.call_import("ilium:host/panes", "read-cells", "{\"pane\":1,\"rows\":1001}");
+    let rows = host.call_import_json("ilium:host/panes", "read-cells", "{\"pane\":1,\"rows\":1001}");
     assert_eq!(rows.error_code(), Some("quota-exceeded"));
-    let stages = host.call_import("ilium:host/panes", "send-input", "{\"pane\":1,\"stages\":17}");
+    let stages = host.call_import_json("ilium:host/panes", "send-input", "{\"pane\":1,\"stages\":17}");
     assert_eq!(stages.error_code(), Some("invalid-argument"));
 }
 
@@ -581,9 +581,9 @@ fn api_061_state_dependent_cap_returns_quota_exceeded_and_precheckable_cap_inval
 #[test]
 fn api_061_the_boundary_values_1000_rows_and_16_stages_pass_the_cap_check() {
     let mut host = host_with(QuietGuest);
-    let rows = host.call_import("ilium:host/panes", "read-cells", "{\"pane\":1,\"rows\":1000}");
+    let rows = host.call_import_json("ilium:host/panes", "read-cells", "{\"pane\":1,\"rows\":1000}");
     assert_ne!(rows.error_code(), Some("quota-exceeded"));
-    let stages = host.call_import("ilium:host/panes", "send-input", "{\"pane\":1,\"stages\":16}");
+    let stages = host.call_import_json("ilium:host/panes", "send-input", "{\"pane\":1,\"stages\":16}");
     assert_ne!(stages.error_code(), Some("invalid-argument"));
 }
 
@@ -591,17 +591,17 @@ fn api_061_the_boundary_values_1000_rows_and_16_stages_pass_the_cap_check() {
 #[test]
 fn api_062_timer_of_10_ms_is_invalid_argument_and_50_ms_is_accepted() {
     let mut host = host_with(QuietGuest);
-    assert_eq!(host.call_import("ilium:host/timers", "set", "{\"delay-ms\":10,\"repeat\":true}").error_code(), Some("invalid-argument"));
-    assert_eq!(host.call_import("ilium:host/timers", "set", "{\"delay-ms\":49,\"repeat\":true}").error_code(), Some("invalid-argument"));
-    assert_eq!(host.call_import("ilium:host/timers", "set", "{\"delay-ms\":50,\"repeat\":true}").error_code(), None);
+    assert_eq!(host.call_import_json("ilium:host/timers", "set", "{\"delay-ms\":10,\"repeat\":true}").error_code(), Some("invalid-argument"));
+    assert_eq!(host.call_import_json("ilium:host/timers", "set", "{\"delay-ms\":49,\"repeat\":true}").error_code(), Some("invalid-argument"));
+    assert_eq!(host.call_import_json("ilium:host/timers", "set", "{\"delay-ms\":50,\"repeat\":true}").error_code(), None);
 }
 
 /// REQ: API-062
 #[test]
 fn api_062_sync_fs_read_over_1_mib_is_invalid_argument_and_1_mib_is_accepted() {
     let mut host = HostHarness::new().grants(&["fs.read:project"]).with_native_guest(Box::new(QuietGuest)).build().expect("host");
-    let over = host.call_import("ilium:host/fs", "read", &format!("{{\"path\":\"a\",\"offset\":0,\"max-bytes\":{}}}", 1_048_577));
-    let at = host.call_import("ilium:host/fs", "read", &format!("{{\"path\":\"a\",\"offset\":0,\"max-bytes\":{}}}", 1_048_576));
+    let over = host.call_import_json("ilium:host/fs", "read", &format!("{{\"path\":\"a\",\"offset\":0,\"max-bytes\":{}}}", 1_048_577));
+    let at = host.call_import_json("ilium:host/fs", "read", &format!("{{\"path\":\"a\",\"offset\":0,\"max-bytes\":{}}}", 1_048_576));
     assert_eq!(over.error_code(), Some("invalid-argument"));
     assert_ne!(at.error_code(), Some("invalid-argument"));
 }
@@ -638,9 +638,9 @@ fn sound_host() -> ilium_plugin_host::testing::HarnessHandle {
 fn api_071_play_sound_allows_4_per_second_and_refuses_the_fifth() {
     let mut host = sound_host();
     for _ in 0..4 {
-        assert!(host.call_import("ilium:host/sounds", "play", "{\"name\":\"bell\"}").error_code().is_none());
+        assert!(host.call_import_json("ilium:host/sounds", "play", "{\"name\":\"bell\"}").error_code().is_none());
     }
-    let fifth = host.call_import("ilium:host/sounds", "play", "{\"name\":\"bell\"}");
+    let fifth = host.call_import_json("ilium:host/sounds", "play", "{\"name\":\"bell\"}");
     assert_eq!(fifth.error_code(), Some("rate-limited"));
     assert!(fifth.retry_after_ms().unwrap() > 0);
 }
@@ -650,12 +650,12 @@ fn api_071_play_sound_allows_4_per_second_and_refuses_the_fifth() {
 fn api_071_window_slides_the_fifth_call_passes_exactly_1000_ms_after_the_first() {
     let mut host = sound_host();
     for _ in 0..4 {
-        host.call_import("ilium:host/sounds", "play", "{\"name\":\"bell\"}");
+        host.call_import_json("ilium:host/sounds", "play", "{\"name\":\"bell\"}");
     }
     advance_ms(&mut host, 999);
-    assert_eq!(host.call_import("ilium:host/sounds", "play", "{\"name\":\"bell\"}").error_code(), Some("rate-limited"));
+    assert_eq!(host.call_import_json("ilium:host/sounds", "play", "{\"name\":\"bell\"}").error_code(), Some("rate-limited"));
     advance_ms(&mut host, 1);
-    assert!(host.call_import("ilium:host/sounds", "play", "{\"name\":\"bell\"}").error_code().is_none());
+    assert!(host.call_import_json("ilium:host/sounds", "play", "{\"name\":\"bell\"}").error_code().is_none());
 }
 
 /// REQ: API-071
@@ -663,10 +663,10 @@ fn api_071_window_slides_the_fifth_call_passes_exactly_1000_ms_after_the_first()
 fn api_071_retry_after_equals_the_time_until_the_oldest_counted_call_leaves() {
     let mut host = sound_host();
     for _ in 0..4 {
-        host.call_import("ilium:host/sounds", "play", "{\"name\":\"bell\"}");
+        host.call_import_json("ilium:host/sounds", "play", "{\"name\":\"bell\"}");
     }
     advance_ms(&mut host, 300);
-    let refused = host.call_import("ilium:host/sounds", "play", "{\"name\":\"bell\"}");
+    let refused = host.call_import_json("ilium:host/sounds", "play", "{\"name\":\"bell\"}");
     assert_eq!(refused.retry_after_ms(), Some(700));
 }
 
@@ -675,14 +675,14 @@ fn api_071_retry_after_equals_the_time_until_the_oldest_counted_call_leaves() {
 fn api_071_refused_calls_do_not_enter_the_window() {
     let mut host = sound_host();
     for _ in 0..4 {
-        host.call_import("ilium:host/sounds", "play", "{\"name\":\"bell\"}");
+        host.call_import_json("ilium:host/sounds", "play", "{\"name\":\"bell\"}");
     }
     for _ in 0..10 {
-        host.call_import("ilium:host/sounds", "play", "{\"name\":\"bell\"}");
+        host.call_import_json("ilium:host/sounds", "play", "{\"name\":\"bell\"}");
     }
     advance_ms(&mut host, 1_000);
     for _ in 0..4 {
-        assert!(host.call_import("ilium:host/sounds", "play", "{\"name\":\"bell\"}").error_code().is_none());
+        assert!(host.call_import_json("ilium:host/sounds", "play", "{\"name\":\"bell\"}").error_code().is_none());
     }
 }
 
@@ -691,12 +691,12 @@ fn api_071_refused_calls_do_not_enter_the_window() {
 fn api_071_window_survives_a_restart_of_the_plugin_side() {
     let mut host = sound_host();
     for _ in 0..4 {
-        host.call_import("ilium:host/sounds", "play", "{\"name\":\"bell\"}");
+        host.call_import_json("ilium:host/sounds", "play", "{\"name\":\"bell\"}");
     }
     host.set_guest(Box::new(TrapGuest("trap.panic")));
     fail_once(&mut host);
     advance_ms(&mut host, 100);
-    assert_eq!(host.call_import("ilium:host/sounds", "play", "{\"name\":\"bell\"}").error_code(), Some("rate-limited"));
+    assert_eq!(host.call_import_json("ilium:host/sounds", "play", "{\"name\":\"bell\"}").error_code(), Some("rate-limited"));
 }
 
 /// REQ: API-071
@@ -704,9 +704,9 @@ fn api_071_window_survives_a_restart_of_the_plugin_side() {
 fn api_071_topics_publish_allows_100_per_second_and_refuses_the_101st() {
     let mut host = HostHarness::new().grants(&["topics.publish:demo"]).with_native_guest(Box::new(QuietGuest)).build().expect("host");
     for index in 0..100 {
-        assert!(host.call_import("ilium:host/topics", "publish", "{\"topic\":\"demo\",\"payload\":\"x\"}").error_code().is_none(), "call {index}");
+        assert!(host.call_import_json("ilium:host/topics", "publish", "{\"topic\":\"demo\",\"payload\":\"x\"}").error_code().is_none(), "call {index}");
     }
-    assert_eq!(host.call_import("ilium:host/topics", "publish", "{\"topic\":\"demo\",\"payload\":\"x\"}").error_code(), Some("rate-limited"));
+    assert_eq!(host.call_import_json("ilium:host/topics", "publish", "{\"topic\":\"demo\",\"payload\":\"x\"}").error_code(), Some("rate-limited"));
 }
 
 /// REQ: API-071
@@ -714,19 +714,19 @@ fn api_071_topics_publish_allows_100_per_second_and_refuses_the_101st() {
 fn api_071_journal_log_event_allows_20_per_second_and_refuses_the_21st() {
     let mut host = host_with(QuietGuest);
     for _ in 0..20 {
-        assert!(host.call_import("ilium:host/journal", "log-event", "{\"kind\":\"k\",\"detail\":\"d\"}").error_code().is_none());
+        assert!(host.call_import_json("ilium:host/journal", "log-event", "{\"kind\":\"k\",\"detail\":\"d\"}").error_code().is_none());
     }
-    assert_eq!(host.call_import("ilium:host/journal", "log-event", "{\"kind\":\"k\",\"detail\":\"d\"}").error_code(), Some("rate-limited"));
+    assert_eq!(host.call_import_json("ilium:host/journal", "log-event", "{\"kind\":\"k\",\"detail\":\"d\"}").error_code(), Some("rate-limited"));
 }
 
 /// REQ: API-071
 #[test]
 fn api_071_geocode_allows_one_per_second() {
     let mut host = HostHarness::new().grants(&["geocode"]).with_native_guest(Box::new(QuietGuest)).build().expect("host");
-    assert!(host.call_import("ilium:host/geocode", "search", "{\"query\":\"Oslo\"}").error_code().is_none());
-    assert_eq!(host.call_import("ilium:host/geocode", "search", "{\"query\":\"Oslo\"}").error_code(), Some("rate-limited"));
+    assert!(host.call_import_json("ilium:host/geocode", "search", "{\"query\":\"Oslo\"}").error_code().is_none());
+    assert_eq!(host.call_import_json("ilium:host/geocode", "search", "{\"query\":\"Oslo\"}").error_code(), Some("rate-limited"));
     advance_ms(&mut host, 1_000);
-    assert!(host.call_import("ilium:host/geocode", "search", "{\"query\":\"Oslo\"}").error_code().is_none());
+    assert!(host.call_import_json("ilium:host/geocode", "search", "{\"query\":\"Oslo\"}").error_code().is_none());
 }
 
 /// REQ: API-071
@@ -765,8 +765,8 @@ fn api_072_balance_never_refills_above_2000_ms() {
 fn api_072_empty_bucket_refuses_with_quota_exceeded_and_the_documented_retry_after() {
     let mut host = host_with(QuietGuest);
     host.charge_cpu_ms(2_000);
-    assert_eq!(host.call_import("ilium:host/sounds", "play", "{\"name\":\"bell\"}").error_code(), Some("quota-exceeded"));
-    let reply = host.call_import("ilium:host/sounds", "play", "{\"name\":\"bell\"}");
+    assert_eq!(host.call_import_json("ilium:host/sounds", "play", "{\"name\":\"bell\"}").error_code(), Some("quota-exceeded"));
+    let reply = host.call_import_json("ilium:host/sounds", "play", "{\"name\":\"bell\"}");
     assert_eq!(reply.retry_after_ms(), Some(100));
 }
 
@@ -776,7 +776,7 @@ fn api_072_negative_balance_retry_after_is_max_100_ceil10_of_double_the_deficit(
     for (charge, expected) in [(2_000 + 1, 100), (2_000 + 50, 100), (2_000 + 51, 110), (2_000 + 500, 1_000)] {
         let mut host = host_with(QuietGuest);
         host.charge_cpu_ms(charge);
-        let reply = host.call_import("ilium:host/sounds", "play", "{\"name\":\"bell\"}");
+        let reply = host.call_import_json("ilium:host/sounds", "play", "{\"name\":\"bell\"}");
         assert_eq!(reply.retry_after_ms(), Some(expected), "charge {charge}");
     }
 }
@@ -786,7 +786,7 @@ fn api_072_negative_balance_retry_after_is_max_100_ceil10_of_double_the_deficit(
 fn api_072_a_balance_of_exactly_one_ms_is_not_empty() {
     let mut host = host_with(QuietGuest);
     host.charge_cpu_ms(1_999);
-    assert!(host.call_import("ilium:host/sounds", "play", "{\"name\":\"bell\"}").error_code().is_none());
+    assert!(host.call_import_json("ilium:host/sounds", "play", "{\"name\":\"bell\"}").error_code().is_none());
 }
 
 // ---------------------------------------------------------------- pending requests and timers
@@ -817,7 +817,7 @@ fn api_073_a_completed_request_frees_its_slot_when_the_completion_is_enqueued() 
 fn api_073_refused_submissions_and_sync_calls_do_not_count() {
     let mut host = host_with(QuietGuest);
     for _ in 0..70 {
-        host.call_import("ilium:host/sounds", "play", "{\"name\":\"\"}");
+        host.call_import_json("ilium:host/sounds", "play", "{\"name\":\"\"}");
     }
     assert_eq!(host.pending_requests(), 0);
 }
@@ -832,7 +832,7 @@ fn api_073_default_is_64_and_limit_key_is_pending_requests() {
 #[test]
 fn api_074_timer_never_fires_inside_the_call_that_set_it() {
     let mut host = host_with(QuietGuest);
-    host.call_import("ilium:host/timers", "set", "{\"delay-ms\":50,\"repeat\":false}");
+    host.call_import_json("ilium:host/timers", "set", "{\"delay-ms\":50,\"repeat\":false}");
     assert!(host.queued_events().is_empty());
 }
 
@@ -840,7 +840,7 @@ fn api_074_timer_never_fires_inside_the_call_that_set_it() {
 #[test]
 fn api_074_first_tick_is_queued_after_the_delay_counted_from_the_return_of_set() {
     let mut host = host_with(QuietGuest);
-    host.call_import("ilium:host/timers", "set", "{\"delay-ms\":50,\"repeat\":false}");
+    host.call_import_json("ilium:host/timers", "set", "{\"delay-ms\":50,\"repeat\":false}");
     advance_ms(&mut host, 49);
     assert!(host.queued_timer_ticks().is_empty());
     advance_ms(&mut host, 1);
@@ -851,10 +851,10 @@ fn api_074_first_tick_is_queued_after_the_delay_counted_from_the_return_of_set()
 #[test]
 fn api_074_cancel_removes_a_queued_undelivered_tick() {
     let mut host = host_with(QuietGuest);
-    let id = host.call_import("ilium:host/timers", "set", "{\"delay-ms\":50,\"repeat\":false}").timer_id();
+    let id = host.call_import_json("ilium:host/timers", "set", "{\"delay-ms\":50,\"repeat\":false}").timer_id();
     advance_ms(&mut host, 40);
     host.queue_timer_tick(id);
-    host.call_import("ilium:host/timers", "cancel", &format!("{{\"id\":{id}}}"));
+    host.call_import_json("ilium:host/timers", "cancel", &format!("{{\"id\":{id}}}"));
     assert!(host.queued_timer_ticks().is_empty());
     advance_ms(&mut host, 100);
     assert!(host.queued_timer_ticks().is_empty());
@@ -864,7 +864,7 @@ fn api_074_cancel_removes_a_queued_undelivered_tick() {
 #[test]
 fn api_074_cancelling_an_unknown_id_is_a_silent_no_op() {
     let mut host = host_with(QuietGuest);
-    let reply = host.call_import("ilium:host/timers", "cancel", "{\"id\":987654}");
+    let reply = host.call_import_json("ilium:host/timers", "cancel", "{\"id\":987654}");
     assert!(reply.error_code().is_none());
     assert!(reply.trap_code().is_none());
     assert!(host.failures().is_empty());

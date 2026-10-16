@@ -3,6 +3,8 @@
 
 #![allow(dead_code)]
 
+#[path = "../host_ext.rs"]
+mod host_ext;
 #[path = "../features/common.rs"]
 mod common;
 

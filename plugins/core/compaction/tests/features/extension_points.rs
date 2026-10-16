@@ -59,9 +59,9 @@ fn extension_080_the_manifest_lists_no_topic_subscription_because_it_only_publis
 #[test]
 fn extension_080_before_compact_is_asked_once_before_the_job_with_pane_technique_and_tokens() {
     let (mut host, pane) = server_with_transcript(&transcript_of(500));
-    host.script_hook_reply(BEFORE_COMPACT, HookReply::Pass);
+    host.set_hook_reply(BEFORE_COMPACT, HookReply::Pass);
     start(&mut host, pane);
-    let calls = host.hook_calls();
+    let calls = host.all_hook_calls();
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].point, BEFORE_COMPACT);
     let payload: Value = serde_json::from_str(&calls[0].payload_json).expect("payload is JSON");
@@ -75,7 +75,7 @@ fn extension_080_before_compact_is_asked_once_before_the_job_with_pane_technique
 #[test]
 fn extension_080_a_refusing_contributor_stops_the_compaction() {
     let (mut host, pane) = server_with_transcript(&transcript_of(500));
-    host.script_hook_reply(BEFORE_COMPACT, HookReply::Refuse("a test run is active".to_string()));
+    host.set_hook_reply(BEFORE_COMPACT, HookReply::Refuse("a test run is active".to_string()));
     start(&mut host, pane);
     assert!(host.jobs().list().is_empty());
 }
@@ -84,7 +84,7 @@ fn extension_080_a_refusing_contributor_stops_the_compaction() {
 #[test]
 fn extension_080_a_refusal_leaves_the_agent_running_and_the_pane_unfrozen() {
     let (mut host, pane) = server_with_transcript(&transcript_of(500));
-    host.script_hook_reply(BEFORE_COMPACT, HookReply::Refuse("a test run is active".to_string()));
+    host.set_hook_reply(BEFORE_COMPACT, HookReply::Refuse("a test run is active".to_string()));
     start(&mut host, pane);
     let frozen = intents(&host.submitted()).iter().any(|intent| matches!(intent, ilium_plugin_sdk::types::Intent::FreezePane(_)));
     assert!(!frozen);
@@ -94,7 +94,7 @@ fn extension_080_a_refusal_leaves_the_agent_running_and_the_pane_unfrozen() {
 #[test]
 fn extension_080_a_pass_reply_lets_the_compaction_start() {
     let (mut host, pane) = server_with_transcript(&transcript_of(500));
-    host.script_hook_reply(BEFORE_COMPACT, HookReply::Pass);
+    host.set_hook_reply(BEFORE_COMPACT, HookReply::Pass);
     start(&mut host, pane);
     assert_eq!(host.jobs().list().len(), 1);
 }
@@ -103,7 +103,7 @@ fn extension_080_a_pass_reply_lets_the_compaction_start() {
 #[test]
 fn extension_080_a_reply_the_mode_does_not_allow_counts_as_pass() {
     let (mut host, pane) = server_with_transcript(&transcript_of(500));
-    host.script_hook_reply(BEFORE_COMPACT, HookReply::Replace("{}".to_string()));
+    host.set_hook_reply(BEFORE_COMPACT, HookReply::Replace("{}".to_string()));
     start(&mut host, pane);
     assert_eq!(host.jobs().list().len(), 1);
 }
@@ -112,7 +112,7 @@ fn extension_080_a_reply_the_mode_does_not_allow_counts_as_pass() {
 #[test]
 fn extension_080_a_late_or_trapping_handler_counts_as_pass() {
     let (mut host, pane) = server_with_transcript(&transcript_of(500));
-    host.script_hook_trap(BEFORE_COMPACT);
+    host.set_hook_trap(BEFORE_COMPACT);
     start(&mut host, pane);
     assert_eq!(host.jobs().list().len(), 1);
 }
@@ -121,11 +121,11 @@ fn extension_080_a_late_or_trapping_handler_counts_as_pass() {
 #[test]
 fn extension_080_the_first_refusal_wins_and_later_handlers_do_not_run() {
     let (mut host, pane) = server_with_transcript(&transcript_of(500));
-    host.script_hook_reply(BEFORE_COMPACT, HookReply::Refuse("first".to_string()));
-    host.script_hook_reply(BEFORE_COMPACT, HookReply::Pass);
+    host.set_hook_reply(BEFORE_COMPACT, HookReply::Refuse("first".to_string()));
+    host.set_hook_reply(BEFORE_COMPACT, HookReply::Pass);
     start(&mut host, pane);
     assert!(host.jobs().list().is_empty());
-    assert_eq!(host.hook_calls().len(), 1);
+    assert_eq!(host.all_hook_calls().len(), 1);
 }
 
 /// REQ: F-080
@@ -193,7 +193,7 @@ fn extension_080_the_compact_service_refuses_a_request_without_a_pane_with_inval
 #[test]
 fn extension_080_a_contributed_technique_appears_in_the_technique_rows_of_the_settings_tab() {
     let mut host = client_host();
-    host.set_collected(
+    host.set_extension_entries(
         "ilium.core.compaction/techniques",
         vec![json!({ "id": "acme.terse", "title": "Terse", "service": "acme.terse/summarise" })],
     );

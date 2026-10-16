@@ -280,7 +280,7 @@ fn app_claude_apply_targets_settings_json_and_reports_environment_overrides() {
         CLAUDE_FILE,
         &format!("{{\n  \"theme\": \"dark\",\n  \"autoCompactWindow\": {CLAUDE_CURRENT}\n}}\n"),
     );
-    host.set_agent_env("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "300000");
+    host.set_env("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "300000");
     keys(&mut host, &["Right"]);
     write_claude_corpus(&mut host, 8);
     keys(&mut host, &["s"]);
