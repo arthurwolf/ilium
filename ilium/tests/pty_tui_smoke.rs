@@ -6137,7 +6137,7 @@ async fn agent_stats_popover_previews_on_hover_pins_on_click_and_closes() {
             WAIT_TIMEOUT
         )
         .await,
-        "row "Codex:" did not render: {:?}",
+        "tree row Codex: did not render: {:?}",
         tui.screen_text()
     );
     let agent_row =
@@ -6445,7 +6445,7 @@ async fn worktree_launcher_dialog_menu_and_footer_popover_render_and_accept_inpu
             WAIT_TIMEOUT
         )
         .await,
-        "row "default" did not render: {:?}",
+        "tree row default did not render: {:?}",
         tui.screen_text()
     );
 
@@ -6707,7 +6707,7 @@ async fn worktree_launcher_dialog_menu_and_footer_popover_render_and_accept_inpu
             WAIT_TIMEOUT
         )
         .await,
-        "row "Codex:" did not render: {:?}",
+        "tree row Codex: did not render: {:?}",
         tui.screen_text()
     );
     let branch_row =
