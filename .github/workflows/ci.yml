@@ -271,11 +271,8 @@ jobs:
         steps:
             - name: probe
               run: |
-                  show() { cat /proc/self/cgroup; p=/sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup); while [ "$p" != /sys/fs/cgroup ]; do echo "$p: $(cat $p/cgroup.subtree_control 2>&1) procs-writable=$([ -w $p/cgroup.procs ] && echo y || echo n)"; p=$(dirname $p); done; }
-                  mover='S=/sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup); mkdir $S/leaf && echo $$ > $S/leaf/cgroup.procs && echo "+cpu +memory +pids" > $S/cgroup.subtree_control && echo enabled-ok; echo "scope: $(cat $S/cgroup.subtree_control)"; ls -ld $S'
-                  echo "== A: system scope as runner uid, move then enable"
-                  sudo -n systemd-run --uid=$(id -u) --gid=$(id -g) --wait --pipe --collect --property=Delegate=yes bash -c "$mover; $(declare -f show); show" 2>&1
-                  echo "== A2: same with Delegate=cpu memory pids"
-                  sudo -n systemd-run --uid=$(id -u) --gid=$(id -g) --wait --pipe --collect --property="Delegate=cpu memory pids" bash -c "$mover; $(declare -f show); show" 2>&1
-                  echo "== B: user scope move then enable"
-                  systemd-run --user --wait --pipe --collect --property=Delegate=yes bash -c "$mover" 2>&1
+                  mover='S=/sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup); echo "S=$S"; cat $S/cgroup.controllers; echo "type: $(cat $S/cgroup.type)"; mkdir $S/leaf; echo "mkdir=$?"; echo $$ > $S/leaf/cgroup.procs; echo "move=$?"; for c in memory pids cpu; do echo "+$c" > $S/cgroup.subtree_control; echo "enable $c=$? now: $(cat $S/cgroup.subtree_control)"; done'
+                  echo "== A: system scope as runner uid"
+                  sudo -n systemd-run --uid=$(id -u) --gid=$(id -g) --wait --pipe --collect --property=Delegate=yes bash -c "$mover" 2>&1
+                  echo "== C: system scope as root"
+                  sudo -n systemd-run --wait --pipe --collect --property=Delegate=yes bash -c "$mover" 2>&1
