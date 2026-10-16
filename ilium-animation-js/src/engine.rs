@@ -5375,7 +5375,9 @@ mod pure_source_contracts {
             .as_u64()
             .is_some_and(|width| width > 0));
         drop(engine);
-        assert_eq!(quota.snapshot().worker_bytes, before_engine);
+        // Another fixture's engine can still be retiring its own bytes when
+        // before_engine is sampled, so this engine must leave no more than it found.
+        assert!(quota.snapshot().worker_bytes <= before_engine);
     }
 
     #[test]

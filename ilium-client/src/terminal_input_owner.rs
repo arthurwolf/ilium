@@ -446,9 +446,10 @@ impl fmt::Display for InputFailure {
             ),
             InputFailureKind::Shutdown(report) => write!(
                 formatter,
-                "terminal input {:?}; {} undispatched originals, reader failure={}, retained native input={} remain in custody",
+                "terminal input {:?}; {} undispatched originals (first: {:?}), reader failure={}, retained native input={} remain in custody",
                 report.exit,
                 report.pending.len(),
+                report.pending.front().map(InputEvent::view),
                 report.failure.is_some(),
                 report
                     .native_custody()
