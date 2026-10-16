@@ -534,9 +534,12 @@ re-measured in this run.
   (79 tests, 0 failed; doc-tests excluded); `ilium-detect` tests passed (74 unit
   tests, plus the integration tests, including the one that spawns the fixture
   agent binary; all passed when the fixture package was built in the same run).
-- Not verified: the `ilium-server` suite still has 14 failing tests on the branch
-  and 13 on master. The same 13 fail on both, and the one extra branch failure
-  passes when run alone.
+- `ilium-server` library and integration tests, run through ni-build on the branch
+  and on master (`f8e59c6`): both show 583 passed and 12 failed. The 12 failing
+  tests are the same on both builds, so the branch adds no failures. These are
+  pre-existing master failures in the chatroom router, IPC connection and
+  registry, direct-event, notification and state-subscriber tests; they are not
+  fixed in this pass.
 - The `ilium-server` IPC changes that the earlier pass flagged as breaking `new-pane`
   have not been re-checked against this build.
 - The earlier 200-pane baseline problem (`new-pane` timing out at 5 s) was not
