@@ -18,6 +18,7 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 - Padding settings tab with Disabled, Size dependent (default threshold 200 columns, minimum 11) and Enabled cards, plus a Padding fine-tuning dialog with a live preview. Tree and right panels (terminals and agents, editors, boards) get independent 0 to 3 cell padding per side, optionally linked, saved under `[padding]`. Padding moves only the content inward; toolbars, banners and the progress footer stay full width.
 
 ### Fixed
+- Closing a pane whose worktree is being inspected no longer fails when a process exits during the scan; the scan treats a vanished process as gone, as it already did for missing `/proc` entries.
 - The server no longer crashes with a stack overflow when the worktree manager lists retained worktrees or checks whether a closing pane can offer worktree removal: both Git checks now run in their own task instead of nested under the request dispatcher.
 - Background animation no longer flashes a black frame when the worker cannot hand out a frame lease for one tick (busy lock, queued configuration or receipt, revision in flight); the last shown frame of the same size is repainted without receipt credit.
 - Background animation retries a lost worker-lock race once (receipt flush and frame lease) before falling back to repeating the last frame.
