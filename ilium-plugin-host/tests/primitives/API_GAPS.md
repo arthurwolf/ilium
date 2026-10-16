@@ -1,0 +1,15 @@
+# API gaps: ilium-plugin-host/tests/primitives
+
+Format: crate, signature, requirement id, why.
+
+- ilium-plugin-host: `HarnessHandle::terminal(&self) -> impl HostTerminal`, `agent()`, `editor()`, `basic()` (context-bound imports; skeleton `TerminalImport` etc. carry no context) - PRI-001..031, all WIT primitives ids - tests need imports bound to the plugin, grants and kernel.
+- ilium-plugin-host: `HarnessHandle::peer(&self, plugin_id: &str, grants: &[&str]) -> HarnessHandle` sharing kernel, claim and lock tables - PRI-004, PRI-005, PRI-007 - two plugins must contend.
+- ilium-plugin-host: `HarnessHandle::render(&self, ViewTarget, Area) -> Result<UiTree, Trap>` - PRI-030 - render through `views.render` of a native guest.
+- ilium-plugin-host: `HostHarness::with_wasm_bytes(self, &[u8]) -> Self` - PRI-023, HST-450 - fixtures from built wasm.
+- ilium-plugin-host: `HarnessHandle::last_completion_failure(&self, RequestId) -> Option<ErrorCode>` - editor load-file/save-buffer - async completions are not observable.
+- ilium-plugin-host: `HarnessHandle::{read_cells, read_snapshot_cells}` return `Option`, error code not observable - PRI-001 - only None plus log line.
+- ilium-plugin-host: `FakeKernel` setters `emit_lines`, `change_screen`, `set_selection`, `set_modes`, `set_foreground`, `set_user_signature`, `contribute_signature_in_manifest`, `identify_process_name`, `contribute_toolbar_button(_for)`, `toolbar_state`, `remove_node`, `set_agent_session(_format)`, `set_last_prompt`, `set_prompt_epoch`, `set_agent_model`, `set_agent_transcript` - PRI-001..015 - scripted pane and agent state.
+- ilium-plugin-host: `FakeKernel` editor side: `attach_buffer(pane, &str) -> BufferId`, `set_selections`, `set_editor_viewport(pane, first, last, columns, rows)`, `edit_buffer(buffer, line)`, `annotator_calls(buffer) -> u32`, `put_file(scope, path, &[u8])`, `file(scope, path) -> Option<Vec<u8>>` - PRI-020..024 - editor state and annotator observation.
+- ilium-plugin-host: `FakeKernel` basic side: `pane_is_dirty`, `pending_confirmation`, `node_exists`, `pane_title`, `set_manual_title`, `pane_status_text`, `focused_pane`, `set_pane_size`, `pane_activity`, `initial_activity` - PRI-030, PRI-031 - observe basic pane state. `Intent::CloseNode(NodeId)` is assumed to exist.
+- ilium-plugin-host: `HostHarness::with_detector_plugin(id, Tier)`, `HarnessHandle::{load_detector_wasm, detect_cycle(&[NodeId]) -> DetectReport{served, spent_ms, tick_ms}, detector_thread_names, detection_loop_thread_name, detector_call_count, detector_ask_order, set_detector_cost_ms, set_detector_identity, set_detector_classification, identified_signature, pane_activity, activity_events_emitted, detector_breaches, detector_deadline_ms(plugin, Option<u64>)}` - HST-450..457, detector WIT ids - detection loop is not reachable from the harness.
+- ilium-plugin-host: `ExportCall` has no Annotate variant - PRI-023 - annotator rate needs a fixture or a variant.
