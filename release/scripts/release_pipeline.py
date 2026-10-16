@@ -389,10 +389,9 @@ def native(arguments):
         command = ['cargo', 'test', '--locked', '--workspace', '--no-fail-fast', '--target', arguments.target] + cargo_arguments
         if target['os'] != 'linux':
             return command
-        # The system manager (not --user) owns full controller delegation: the
-        # animation sandbox needs memory, pids and cpu in an owned cgroup, which
-        # the user manager of older runner images does not delegate.
-        scope = ['sudo', '-n', 'systemd-run', '--uid=%d' % os.getuid(), '--gid=%d' % os.getgid(), '--wait', '--pipe', '--collect', '--property=Delegate=cpu memory pids', '--property=CPUAccounting=yes', '--property=MemoryAccounting=yes', '--property=TasksAccounting=yes', '--working-directory=' + str(root)]
+        # Same transient user scope as the hosted CI workflow, where the
+        # animation sandbox finds its delegated cgroup-v2 ancestor.
+        scope = ['systemd-run', '--user', '--wait', '--pipe', '--collect', '--property=Delegate=yes', '--working-directory=' + str(root)]
         scoped_environment = dict(test_environment)
         scoped_environment.setdefault('HOME', os.environ.get('HOME', ''))
         scoped_environment.setdefault('PATH', os.environ.get('PATH', ''))

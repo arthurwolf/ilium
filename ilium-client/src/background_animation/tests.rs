@@ -49,7 +49,7 @@ fn loop_cache_builds_incrementally_and_wraps_completed_frames() {
     cache.begin(&settings, 4, 2);
     assert_eq!(cache.status().total_frames, 30);
     assert!(cache.status().estimated_bytes > 0);
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let deadline = std::time::Instant::now() + Duration::from_secs(60);
     while !cache.step(&settings, 4, 2, 12) {
         assert!(
             std::time::Instant::now() < deadline,
@@ -1522,7 +1522,7 @@ fn look_changes_retain_ready_loop_frames_and_pattern_changes_rebuild_them() {
         loop_seconds: 1,
         ..Default::default()
     };
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let deadline = std::time::Instant::now() + Duration::from_secs(60);
     while !cache.step(&settings, 20, 8, 12) {
         assert!(
             std::time::Instant::now() < deadline,

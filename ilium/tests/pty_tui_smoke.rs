@@ -6925,11 +6925,18 @@ async fn image_query_keeps_first_real_pty_keys_with_silent_and_answering_termina
             String::from_utf8_lossy(&tui.output_replay().bytes)
         );
         if cfg!(unix) {
-            assert_eq!(
+            let pushed = || {
                 tui.output_replay()
                     .bytes
                     .windows(b"\x1b[>1u".len())
-                    .any(|bytes| bytes == b"\x1b[>1u"),
+                    .any(|bytes| bytes == b"\x1b[>1u")
+            };
+            if terminal_answers {
+                // The Push follows the reply on a loaded runner, so wait for it.
+                wait_until(pushed, WAIT_TIMEOUT).await;
+            }
+            assert_eq!(
+                pushed(),
                 terminal_answers,
                 "keyboard Push must occur only for an actual supported response"
             );
