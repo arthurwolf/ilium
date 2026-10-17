@@ -362,6 +362,11 @@ pub struct UserRig {
 }
 
 impl UserRig {
+    /// Replacements the install recorded, as `(replaced id, replacing id)` (USR-043).
+    pub fn replacements(&self) -> Vec<(String, String)> {
+        unimplemented!("host::testing::user_rig::UserRig::replacements")
+    }
+
     /// A rig on Linux.
     pub fn new() -> UserRig {
         unimplemented!("host::testing::user_rig::UserRig::new")

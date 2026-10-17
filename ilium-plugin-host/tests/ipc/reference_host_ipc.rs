@@ -156,7 +156,8 @@ proptest! {
             let seq = if position >= skip_at { position + 1 } else { position };
             let result = receiver.on_envelope(seq, 1);
             if position >= skip_at {
-                prop_assert_eq!(result.expect_err("skip").code(), "ipc.sequence-gap");
+                let error = result.expect_err("skip");
+                prop_assert_eq!(error.code(), "ipc.sequence-gap");
                 closed = true;
                 break;
             }

@@ -44,7 +44,7 @@ fn wid_007_fixed_10_and_fill_in_40_columns() {
 /// REQ: WID-007
 #[test]
 fn wid_007_ratio_and_percentage_share_the_row() {
-    let widths = solve_row(40, &[Constraint::Percentage(50), Constraint::Ratio(1, 4), Constraint::Fill(1)]);
+    let widths = solve_row(40, &[Constraint::Percentage(50), Constraint::Ratio((1, 4)), Constraint::Fill(1)]);
     assert_eq!(widths, vec![20, 10, 10]);
 }
 
