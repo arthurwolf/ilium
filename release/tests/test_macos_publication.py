@@ -2,6 +2,7 @@
 from copy import deepcopy
 import hashlib
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
@@ -108,6 +109,7 @@ def qualified_fixture(f, build, binding):
 
 
 class MacosPublicationTests(unittest.TestCase):
+    @unittest.skipIf(os.name == 'nt', 'macOS receipt paths are POSIX; the macOS lanes cover this')
     def test_complete_native_receipt_schema_on_both_architectures(self):
         for arch in ('x86_64', 'aarch64'):
             with self.subTest(arch=arch), tempfile.TemporaryDirectory() as directory:

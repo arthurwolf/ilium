@@ -363,7 +363,11 @@ fn reply_completion_precedes_resize_and_later_output_uses_new_geometry() {
 #[test]
 fn failed_reply_never_allows_a_queued_resize_or_later_input() {
     let (writer_gate, release) = gate();
-    let harness = Harness::new(OwnerLimits::default(), Some(writer_gate), Some(2));
+    let harness = Harness::new(OwnerLimits {
+            command_timeout: Duration::from_secs(60),
+            reply_timeout: Duration::from_secs(60),
+            ..OwnerLimits::default()
+        }, Some(writer_gate), Some(2));
     harness.output(b"\x1b[61;1H\x1b[6n");
     release
         .started
