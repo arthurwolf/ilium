@@ -111,6 +111,11 @@ pub async fn handle_request(
     direct_tx: &DirectEventSender,
 ) -> bool {
     match request {
+        // Plugin envelopes are routed by the plugin kernel once it exists (skeleton: ignored).
+        ClientRequest::Plugin(_) => {
+            tracing::debug!("plugin envelope ignored: plugin kernel not implemented");
+            false
+        }
         ClientRequest::GetPaneRecapScreen { pane_id } => {
             let captured = {
                 let panes = state.panes.read().await;
