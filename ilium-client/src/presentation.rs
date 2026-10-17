@@ -19,10 +19,11 @@ use ratatui::layout::Position;
 use tokio::sync::{mpsc, oneshot};
 
 const FRAME_SLOTS: usize = 2;
+const BUFFER_SLOTS: usize = FRAME_SLOTS + 1;
 pub const MAX_FRAME_BYTES: usize = 32 * 1024 * 1024;
-// Two admitted frames (including ACKs), last emitted diff base, and1MiB
+// Two admitted frames (including ACKs), last emitted diff base, and 1 MiB
 // owner/channel/error metadata which may outlive actual output-thread join.
-const FRAME_STORAGE_BYTES: usize = (FRAME_SLOTS + 1) * MAX_FRAME_BYTES + 1024 * 1024;
+const FRAME_STORAGE_BYTES: usize = BUFFER_SLOTS * MAX_FRAME_BYTES + 1024 * 1024;
 // Encoder retained capacity64MiB, one resize blank32MiB, and the emitted-cell
 // mask (one byte per cell). Diff streams directly; no whole-frame diff Vec.
 // These are cooperative declarations, not allocator/native RSS guarantees.
@@ -74,7 +75,31 @@ impl<W: Write> Write for TerminalOutput<W> {
 
 struct FrameSlots {
     used: AtomicUsize,
+    buffers_used: AtomicUsize,
     allocation: Arc<StorageAdmission>,
+}
+impl FrameSlots {
+    fn try_reserve(self: &Arc<Self>) -> Option<FrameReservation> {
+        self.used
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |slots| {
+                (slots < FRAME_SLOTS).then_some(slots + 1)
+            })
+            .ok()?;
+        if self
+            .buffers_used
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |slots| {
+                (slots < BUFFER_SLOTS).then_some(slots + 1)
+            })
+            .is_err()
+        {
+            self.used.fetch_sub(1, Ordering::AcqRel);
+            return None;
+        }
+        Some(FrameReservation {
+            slots: self.clone(),
+            buffer_slot: Some(BufferSlot(self.clone())),
+        })
+    }
 }
 // Both terminal failure receipts share the original error allocation. The last
 // receipt owns its storage declaration independently of actual worker retirement.
@@ -103,13 +128,26 @@ fn guarded_failure(error: io::Error, allocation: Arc<StorageAdmission>) -> io::E
         }),
     )
 }
-pub struct FrameReservation(Arc<FrameSlots>);
+pub struct FrameReservation {
+    slots: Arc<FrameSlots>,
+    buffer_slot: Option<BufferSlot>,
+}
+
+// The buffer slot transfers from pre-composition reservation to the final
+// Arc<GuardedBuffer>, so retained ACKs and diff bases stay inside the budget.
+struct BufferSlot(Arc<FrameSlots>);
+impl Drop for BufferSlot {
+    fn drop(&mut self) {
+        self.0.buffers_used.fetch_sub(1, Ordering::AcqRel);
+    }
+}
 
 /// A buffer clone carries its original allocation even after the output owner
 /// has joined. Public Arc clones cannot accidentally detach bytes from custody.
 pub struct GuardedBuffer {
     buffer: Buffer,
     _allocation: Arc<StorageAdmission>,
+    _buffer_slot: BufferSlot,
 }
 impl std::ops::Deref for GuardedBuffer {
     type Target = Buffer;
@@ -119,7 +157,7 @@ impl std::ops::Deref for GuardedBuffer {
 }
 impl Drop for FrameReservation {
     fn drop(&mut self) {
-        self.0.used.fetch_sub(1, Ordering::AcqRel);
+        self.slots.used.fetch_sub(1, Ordering::AcqRel);
     }
 }
 
@@ -156,7 +194,7 @@ impl PreparedFrame {
     }
 
     pub fn new(
-        reservation: FrameReservation,
+        mut reservation: FrameReservation,
         buffer: Buffer,
         cursor: Option<Position>,
         frame_id: u64,
@@ -180,13 +218,23 @@ impl PreparedFrame {
                     io::ErrorKind::InvalidData,
                     "terminal frame exceeds presentation byte limit",
                 ),
-                reservation.0.allocation.clone(),
+                reservation.slots.allocation.clone(),
             ));
         }
+        let buffer_slot = reservation.buffer_slot.take().ok_or_else(|| {
+            guarded_failure(
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "frame reservation has no buffer admission",
+                ),
+                reservation.slots.allocation.clone(),
+            )
+        })?;
         Ok(Self {
             buffer: Arc::new(GuardedBuffer {
                 buffer,
-                _allocation: reservation.0.allocation.clone(),
+                _allocation: reservation.slots.allocation.clone(),
+                _buffer_slot: buffer_slot,
             }),
             cursor,
             frame_id,
@@ -278,6 +326,7 @@ impl Presenter {
         });
         let slots = Arc::new(FrameSlots {
             used: AtomicUsize::new(0),
+            buffers_used: AtomicUsize::new(0),
             allocation,
         });
         // The extra error slot ensures a backend error cannot wait behind both
@@ -343,26 +392,21 @@ impl Presenter {
         if self.shared.queue.try_lock().ok()?.closing {
             return None;
         }
-        self.slots
-            .used
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |slots| {
-                (slots < FRAME_SLOTS).then_some(slots + 1)
-            })
-            .ok()?;
-        Some(FrameReservation(self.slots.clone()))
+        self.slots.try_reserve()
     }
     pub fn outstanding_frames(&self) -> usize {
         self.slots.used.load(Ordering::Acquire)
     }
+    #[allow(clippy::result_large_err)] // The refusal hands the original value back unchanged; boxing would allocate on that path.
     pub fn submit(&self, frame: PreparedFrame) -> Result<(), SubmissionError> {
-        if !Arc::ptr_eq(&frame._reservation.0, &self.slots) {
+        if !Arc::ptr_eq(&frame._reservation.slots, &self.slots) {
             return Err(SubmissionError {
                 error: guarded_failure(
                     io::Error::new(
                         io::ErrorKind::InvalidInput,
                         "frame reservation belongs to another presenter",
                     ),
-                    frame._reservation.0.allocation.clone(),
+                    frame._reservation.slots.allocation.clone(),
                 ),
                 frame,
             });
@@ -375,7 +419,7 @@ impl Presenter {
                         io::ErrorKind::BrokenPipe,
                         "presentation owner closed or capacity violated",
                     ),
-                    frame._reservation.0.allocation.clone(),
+                    frame._reservation.slots.allocation.clone(),
                 ),
                 frame,
             });
@@ -862,9 +906,9 @@ mod tests {
             Some(ilium_platform::owned_worker::WorkerExit::Joined)
         );
         presenter.shutdown().await.unwrap();
-        // Joined proves physical exit. The original ticket and presenter
-        // still retain their wake's admission until their last owner drops.
-        assert_eq!(quota.snapshot().worker_threads, 1);
+        // Joined proves physical exit and supervisor custody release. The
+        // observer and presenter remain usable without keeping a worker charge.
+        assert_eq!(quota.snapshot().worker_threads, 0);
         drop(ticket);
         drop(presenter);
         assert_eq!(quota.snapshot().worker_threads, 0);
@@ -1247,7 +1291,8 @@ mod tests {
     #[test]
     fn diff_cursor_and_resize_follow_the_actual_emitted_base() {
         let slots = Arc::new(FrameSlots {
-            used: AtomicUsize::new(1),
+            used: AtomicUsize::new(0),
+            buffers_used: AtomicUsize::new(0),
             allocation: Arc::new(
                 test_quota()
                     .reserve_external_storage(FRAME_STORAGE_BYTES)
@@ -1257,7 +1302,7 @@ mod tests {
         let mut buffer = Buffer::empty(Rect::new(0, 0, 4, 2));
         buffer[(0, 0)].set_symbol("A");
         let first = PreparedFrame::new(
-            FrameReservation(slots.clone()),
+            slots.try_reserve().unwrap(),
             buffer,
             Some(Position::new(2, 1)),
             1,
@@ -1290,11 +1335,10 @@ mod tests {
             "unchanged cells are not emitted"
         );
         bytes.lock().unwrap().clear();
-        slots.used.fetch_add(1, Ordering::Relaxed);
         let mut resized_buffer = Buffer::empty(Rect::new(0, 0, 6, 3));
         resized_buffer[(0, 0)].set_symbol("A");
         let resized =
-            PreparedFrame::new(FrameReservation(slots), resized_buffer, None, 2, 1).unwrap();
+            PreparedFrame::new(slots.try_reserve().unwrap(), resized_buffer, None, 2, 1).unwrap();
         emit_one(&mut backend, Some(&first.buffer), &resized).unwrap();
         let resized_bytes = String::from_utf8_lossy(&bytes.lock().unwrap()).into_owned();
         assert!(
@@ -1434,7 +1478,8 @@ mod tests {
     #[test]
     fn prepared_frame_retains_existing_cell_vector_capacity() {
         let slots = Arc::new(FrameSlots {
-            used: AtomicUsize::new(1),
+            used: AtomicUsize::new(0),
+            buffers_used: AtomicUsize::new(0),
             allocation: Arc::new(
                 test_quota()
                     .reserve_external_storage(FRAME_STORAGE_BYTES)
@@ -1446,7 +1491,7 @@ mod tests {
         let capacity = buffer.content.capacity();
         assert!(capacity > buffer.content.len());
 
-        let frame = PreparedFrame::new(FrameReservation(slots), buffer, None, 1, 1).unwrap();
+        let frame = PreparedFrame::new(slots.try_reserve().unwrap(), buffer, None, 1, 1).unwrap();
 
         assert_eq!(frame.buffer.content.capacity(), capacity);
     }
@@ -1454,7 +1499,8 @@ mod tests {
     #[test]
     fn oversized_graphics_symbol_releases_reserved_capacity() {
         let slots = Arc::new(FrameSlots {
-            used: AtomicUsize::new(1),
+            used: AtomicUsize::new(0),
+            buffers_used: AtomicUsize::new(0),
             allocation: Arc::new(
                 test_quota()
                     .reserve_external_storage(FRAME_STORAGE_BYTES)
@@ -1463,8 +1509,9 @@ mod tests {
         });
         let mut buffer = Buffer::empty(Rect::new(0, 0, 1, 1));
         buffer[(0, 0)].set_symbol(&"x".repeat(MAX_FRAME_BYTES / 2 + 1));
-        let result = PreparedFrame::new(FrameReservation(slots.clone()), buffer, None, 1, 1);
+        let result = PreparedFrame::new(slots.try_reserve().unwrap(), buffer, None, 1, 1);
         assert!(result.is_err());
         assert_eq!(slots.used.load(Ordering::Acquire), 0);
+        assert_eq!(slots.buffers_used.load(Ordering::Acquire), 0);
     }
 }

@@ -178,6 +178,8 @@ impl ProjectionRetention {
             TextTriggersChanged { .. }
             | PaneProcessTerminated { .. }
             | PaneFrozen { .. }
+            | BlockingErrorsSnapshot { .. }
+            | PaneCreateFinished { .. }
             | SoundPreviewCompleted { .. } => (global, None),
         };
         update.keys.push(Key { slot, scope });

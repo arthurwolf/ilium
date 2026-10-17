@@ -92,3 +92,13 @@ fn several_monitors_and_replacing_are_explained() {
         assert!(text.contains(required), "missing {required}");
     }
 }
+
+#[test]
+fn harness_background_mode_is_not_a_substitute_for_a_monitor() {
+    let text = instructions();
+    assert!(
+        text.contains("is not a substitute either: still register a monitor for the task"),
+        "missing background-mode rule"
+    );
+    assert!(text.contains("`run_in_background`"));
+}

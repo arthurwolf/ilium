@@ -161,6 +161,18 @@ fn first_launch_project_pane(tree: &ilium_core::Tree) -> NodeId {
         .expect("default group is a container")[0]
 }
 
+/// Returns the pane's node as carried by a tree-changing event. A change
+/// confined to one pane (a title, a title reset) is published as
+/// `PaneNodeChanged`; a structural change is published as a full
+/// `TreeSnapshot`. Assertions about the pane must accept either form.
+fn pane_node_in_event(event: &ServerEvent, pane_id: NodeId) -> Option<&ilium_core::Node> {
+    match event {
+        ServerEvent::TreeSnapshot(tree) => tree.get(pane_id),
+        ServerEvent::PaneNodeChanged(node) if node.id == pane_id => Some(node.as_ref()),
+        _ => None,
+    }
+}
+
 #[tokio::test]
 async fn focusing_a_finished_agent_clears_its_bell_through_live_ipc() {
     let fake_bin_dir = tempfile::tempdir().expect("create tempdir for the finished fake codex");
@@ -189,6 +201,7 @@ async fn focusing_a_finished_agent_clears_its_bell_through_live_ipc() {
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: NewPaneKind::Command(fake_codex_path.to_string_lossy().to_string()),
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
@@ -378,6 +391,7 @@ async fn a_real_process_named_codex_preserves_its_pursuing_goal_status_through_t
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: NewPaneKind::Command(fake_codex_path.to_string_lossy().to_string()),
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
@@ -875,6 +889,27 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
     let fake_claude_path =
         write_resumed_transcript_holding_fake_agent_binary(fake_bin_dir.path(), "claude");
     let resumed_session_id = "95fd0645-3331-408b-a7e5-36e6007bfb78";
+    // Diagnostic: what the pane will actually execute. Printed to the test's
+    // captured stdout, which cargo shows for a failing test.
+    {
+        let magic = std::fs::read(&fake_claude_path)
+            .map(|bytes| bytes.iter().take(4).copied().collect::<Vec<u8>>())
+            .unwrap_or_default();
+        eprintln!(
+            "diagnostic: fake agent {} len={:?} magic={:?}",
+            fake_claude_path.display(),
+            std::fs::metadata(&fake_claude_path)
+                .map(|meta| meta.len())
+                .ok(),
+            magic
+        );
+        eprintln!(
+            "diagnostic: SHELL={:?} PATH={:?} /bin/sh -> {:?}",
+            std::env::var("SHELL").ok(),
+            std::env::var("PATH").ok(),
+            std::fs::read_link("/bin/sh").ok()
+        );
+    }
 
     let detection_config = DetectionConfig {
         working_poll_interval: Duration::from_millis(200),
@@ -920,6 +955,7 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: NewPaneKind::Command(command_line.clone()),
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
@@ -997,11 +1033,8 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
     .await
     .expect("set an inferred title for the old session");
     let _ = expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(
-            event,
-            ServerEvent::TreeSnapshot(tree)
-                if tree.get(pane_id).is_some_and(|node| node.name == "Title From The Old Session")
-        )
+        pane_node_in_event(event, pane_id)
+            .is_some_and(|node| node.name == "Title From The Old Session")
     })
     .await;
 
@@ -1040,27 +1073,22 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
     })
     .await
     .expect("timed out waiting for both Claude /clear transitions");
-    let reset_after_clear = expect_event(&mut client, Duration::from_secs(5), |event| {
-        matches!(
-            event,
-            ServerEvent::TreeSnapshot(tree)
-                if tree.get(pane_id).is_some_and(|node| {
-                    node.name == "<new>"
-                        && node.short_name.is_none()
-                        && node.inferred_icon.is_none()
-                        && node.parent == Some(project_id)
-                        && matches!(
-                            &node.kind,
-                            ilium_core::NodeKind::Pane {
-                                title_source: ilium_core::PaneTitleSource::Automatic,
-                                ..
-                            }
-                        )
-                })
-        )
+    let _ = expect_event(&mut client, Duration::from_secs(5), |event| {
+        pane_node_in_event(event, pane_id).is_some_and(|node| {
+            node.name == "<new>"
+                && node.short_name.is_none()
+                && node.inferred_icon.is_none()
+                && node.parent == Some(project_id)
+                && matches!(
+                    &node.kind,
+                    ilium_core::NodeKind::Pane {
+                        title_source: ilium_core::PaneTitleSource::Automatic,
+                        ..
+                    }
+                )
+        })
     })
     .await;
-    assert!(matches!(reset_after_clear, ServerEvent::TreeSnapshot(_)));
 
     write_frame(
         &mut client,
@@ -1224,6 +1252,7 @@ async fn a_resumed_codex_processs_session_id_is_discovered_and_broadcast() {
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: NewPaneKind::Command(command_line),
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
@@ -1327,6 +1356,7 @@ async fn progress_completion_notifies_a_codex_agent_without_touching_its_goal() 
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: NewPaneKind::Command(format!("{} resume {session_id}", fake_codex.display())),
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
@@ -1522,6 +1552,7 @@ async fn a_codex_processs_open_transcript_is_discovered_and_broadcast() {
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: NewPaneKind::Command(format!(
                 "{} {}",
@@ -1604,6 +1635,7 @@ async fn codex_clear_rebinds_the_same_process_to_its_new_open_transcript() {
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: NewPaneKind::Command(format!(
                 "{} {} {}",
@@ -2020,6 +2052,7 @@ async fn claude_resume_full_session_prompt_is_auto_answered() {
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: NewPaneKind::Command(fake_claude_path.to_string_lossy().to_string()),
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,

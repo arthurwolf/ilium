@@ -19,6 +19,7 @@ directories = "6.0.0"
 ilium-agent-debug = { version = "0.1.1", path = "../ilium-agent-debug" }
 ilium-agent-session = { version = "0.1.1", path = "../ilium-agent-session" }
 ilium-core = { version = "0.1.1", path = "../ilium-core" }
+ilium-control = { version = "0.1.1", path = "../ilium-control" }
 ilium-detect = { version = "0.1.1", path = "../ilium-detect" }
 ilium-execution = { version = "0.1.1", path = "../ilium-execution" }
 ilium-git = { version = "0.1.1", path = "../ilium-git" }

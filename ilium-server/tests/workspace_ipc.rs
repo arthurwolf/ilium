@@ -1516,9 +1516,11 @@ async fn isolated_server_creates_attaches_and_removes_only_owned_worktree() {
         // Some hosts restrict procfs cwd reads even for a same-user service
         // manager. Force must fail closed when process custody is unknown.
         assert!(
-            reasons
-                .iter()
-                .any(|reason| reason.contains("process directory probe is unavailable")),
+            reasons.iter().any(|reason| {
+                reason.contains("process directory probe is unavailable")
+                    || (reason.contains("cannot inspect cwd of process")
+                        && reason.contains("Permission denied"))
+            }),
             "{removed:?}"
         );
         assert!(linked.exists());
@@ -1815,6 +1817,7 @@ async fn retained_worktree_with_an_open_editor_cannot_be_pruned() {
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: ilium_ipc::NewPaneKind::Editor(path.join(".local.env")),
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,

@@ -377,11 +377,14 @@ impl Connection {
         execution: &crate::execution::ClientExecution,
         admission: ilium_execution::Client,
     ) -> Result<Self, ConnectionError> {
-        let preparation = execution.ipc_preparation(admission).map_err(|reason| {
-            ConnectionError::CodecBootstrap(IpcError::Io(std::io::Error::other(format!(
-                "codec admission: {reason:?}"
-            ))))
-        })?;
+        let preparation =
+            crate::execution::retry_startup_busy(|| execution.ipc_preparation(admission.clone()))
+                .await
+                .map_err(|reason| {
+                    ConnectionError::CodecBootstrap(IpcError::Io(std::io::Error::other(format!(
+                        "codec admission: {reason:?}"
+                    ))))
+                })?;
         Self::connect_prepared(socket_path, session, preparation, None, None).await
     }
 

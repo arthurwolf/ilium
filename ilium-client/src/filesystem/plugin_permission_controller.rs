@@ -22,7 +22,6 @@ use std::{
     collections::BTreeMap,
     sync::{Arc, Mutex},
 };
-use tokio::sync::Notify;
 
 type Result<T> = std::result::Result<T, String>;
 type LoadedOutcome = Retained<std::result::Result<LedgerSnapshot, PersistenceError>>;
@@ -167,9 +166,6 @@ impl PluginPermissionController {
     pub(crate) fn pending_invalidation(&self) -> Option<&Invalidation> {
         self.pending.as_ref().map(PendingResolution::invalidation)
     }
-    pub(crate) fn notification(&self) -> Arc<Notify> {
-        self.files.notification()
-    }
     pub(crate) fn is_pending_io(&self) -> bool {
         self.files.is_pending()
     }
@@ -264,6 +260,13 @@ impl PluginPermissionController {
             .with_permission_review_state(instance_id, inspect)
             .map_err(|error| error.to_string())
     }
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "Read-only twin of package_instance_mut; only tests read it"
+        )
+    )]
     pub(crate) fn package_instance(&self) -> Option<&PackageInstance> {
         if self.finished && self.blocked.is_none() {
             self.instance.as_ref()

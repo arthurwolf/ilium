@@ -604,26 +604,52 @@ mod tests {
         let (_execution, resources) = crate::resources::isolated_test_resources();
         let quota = resources.finite().quota_group();
         let before = quota.snapshot();
-        let admission = resources
-            .reserve_worker(WorkerCost {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let admission = loop {
+            match resources.reserve_worker(WorkerCost {
                 threads: 1,
                 resident_bytes: MARKER_WORKER_RESIDENT_BYTES,
-            })
-            .unwrap();
-        let worker = MarkerWorker::start_admitted(
-            prepare_positions,
-            MarkerPermit::acquire().unwrap(),
-            admission,
-            resources.clone(),
-        )
-        .unwrap();
+            }) {
+                Ok(admission) => break admission,
+                Err(ilium_execution::RejectReason::Busy) if Instant::now() < deadline => {
+                    std::thread::yield_now();
+                }
+                Err(error) => panic!("marker fixture admission: {error:?}"),
+            }
+        };
+        // Other tests exercise the production process-wide churn cap too.
+        // Wait only for its retryable refusal within the original bound.
+        let permit = loop {
+            match MarkerPermit::acquire() {
+                Ok(permit) => break permit,
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                    assert!(Instant::now() < deadline, "marker admission stayed busy");
+                    std::thread::yield_now();
+                }
+                Err(error) => panic!("marker fixture permit: {error}"),
+            }
+        };
+        let worker =
+            MarkerWorker::start_admitted(prepare_positions, permit, admission, resources.clone())
+                .unwrap();
         let input = request(1);
         let storage_bytes = prepared_storage_bytes(input.key).unwrap();
-        worker.try_submit_latest(&input).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            match worker.try_submit_latest(&input) {
+                Ok(SubmitState::Accepted) => break,
+                Ok(SubmitState::Busy) if Instant::now() < deadline => {
+                    std::thread::yield_now();
+                }
+                outcome => panic!("marker fixture submission: {outcome:?}"),
+            }
+        }
         let deadline = Instant::now() + Duration::from_secs(2);
         let prepared = loop {
-            if let Some(prepared) = worker.try_latest(input.key).unwrap() {
-                break prepared;
+            match worker.try_latest(input.key) {
+                Ok(Some(prepared)) => break prepared,
+                Ok(None) | Err(MarkerError::Busy) => {}
+                Err(error) => panic!("marker fixture collection: {error:?}"),
             }
             assert!(Instant::now() < deadline, "marker preparation timed out");
             std::thread::yield_now();

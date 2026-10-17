@@ -51,6 +51,7 @@ async fn create_plain_shell(
     write_frame(
         client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: NewPaneKind::PlainShell,
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
@@ -210,6 +211,7 @@ async fn foreground_non_shell_commands_do_not_receive_automatic_titles() {
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: NewPaneKind::Command(NON_SHELL_PROBE_COMMAND.to_string()),
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,

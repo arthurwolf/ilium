@@ -876,6 +876,13 @@ mod tests {
         dialog.fail("Synthetic provider failure: the session can be resumed safely".to_string());
         for (width, height) in [(40, 12), (60, 20), (80, 24), (120, 40)] {
             let text = screen_text_at(&dialog, Some(PRIVACY_NOTICE), width, height);
+            // Match prose across terminal wrapping while retaining every
+            // disclosure and action assertion, including the original screen.
+            let prose = text
+                .replace('│', " ")
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ");
             for expected in [
                 "Privacy decision",
                 "[x]",
@@ -892,7 +899,7 @@ mod tests {
                 "x hide",
             ] {
                 assert!(
-                    text.contains(expected),
+                    prose.contains(expected),
                     "{width}x{height}: missing {expected:?} in\n{text}"
                 );
             }

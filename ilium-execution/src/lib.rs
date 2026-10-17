@@ -27,6 +27,7 @@ mod budget;
 mod job;
 mod pool;
 mod retirement;
+mod serial;
 mod startup; // Admit startup owners without creating a bank or changing fixture semantics.
 
 pub use budget::{
@@ -46,6 +47,10 @@ pub use pool::{
 };
 pub use retirement::{
     RetirementFailure, RetirementReservation, Retiring, RetiringArc, RETIREMENT_SLOTS,
+};
+pub use serial::{
+    SerialCustody, SerialFailure, SerialQueued, SerialRecovered, SerialRecoveryTicket,
+    SerialRunning,
 };
 //
 pub use startup::{

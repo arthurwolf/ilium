@@ -353,6 +353,58 @@ pub(crate) fn prepared_for_test(
     }
 }
 
+impl crate::app::App {
+    pub(crate) fn collect_sidebar_files(&mut self) -> bool {
+        let mut roots = Vec::new();
+        if self.tree_state.opened().len() > 1024
+            || self.tree_state.opened().capacity() > 4096
+            || self
+                .tree_state
+                .opened()
+                .iter()
+                .any(|path| path.capacity() > 64)
+        {
+            self.status_message =
+                Some("Sidebar expanded-path capacity reached; previous listing retained".into());
+            return false;
+        }
+        for id in self.tree.all_ids() {
+            let Some(node) = self.tree.get(id) else {
+                continue;
+            };
+            if let ilium_core::NodeKind::Folder { path, .. } = &node.kind {
+                if roots.len() >= 64 || path.capacity() > 64 * 1024 {
+                    self.status_message =
+                        Some("Sidebar folder capacity reached; previous listing retained".into());
+                    return false;
+                }
+                roots.push((id, path.clone(), crate::tree_ui::tree_path(&self.tree, id)));
+            }
+        }
+        let request = SidebarRead {
+            roots: roots.into_boxed_slice().into_vec(),
+            opened: self.tree_state.opened().clone(),
+        };
+        let Some(files) = &mut self.sidebar_files else {
+            return false;
+        };
+        match files.poll(request) {
+            Ok(Some(snapshot)) => {
+                self.sidebar_snapshot = snapshot;
+                self.bump_tree_version();
+                true
+            }
+            Ok(None) => false,
+            Err(error) => {
+                self.status_message = Some(format!(
+                    "Sidebar preparation failed; previous listing retained: {error}"
+                ));
+                true
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod capacity_tests {
     use super::*;
@@ -405,57 +457,5 @@ mod capacity_tests {
             1,
             "fixture proves iteration reached a later error"
         );
-    }
-}
-
-impl crate::app::App {
-    pub(crate) fn collect_sidebar_files(&mut self) -> bool {
-        let mut roots = Vec::new();
-        if self.tree_state.opened().len() > 1024
-            || self.tree_state.opened().capacity() > 4096
-            || self
-                .tree_state
-                .opened()
-                .iter()
-                .any(|path| path.capacity() > 64)
-        {
-            self.status_message =
-                Some("Sidebar expanded-path capacity reached; previous listing retained".into());
-            return false;
-        }
-        for id in self.tree.all_ids() {
-            let Some(node) = self.tree.get(id) else {
-                continue;
-            };
-            if let ilium_core::NodeKind::Folder { path, .. } = &node.kind {
-                if roots.len() >= 64 || path.capacity() > 64 * 1024 {
-                    self.status_message =
-                        Some("Sidebar folder capacity reached; previous listing retained".into());
-                    return false;
-                }
-                roots.push((id, path.clone(), crate::tree_ui::tree_path(&self.tree, id)));
-            }
-        }
-        let request = SidebarRead {
-            roots: roots.into_boxed_slice().into_vec(),
-            opened: self.tree_state.opened().clone(),
-        };
-        let Some(files) = &mut self.sidebar_files else {
-            return false;
-        };
-        match files.poll(request) {
-            Ok(Some(snapshot)) => {
-                self.sidebar_snapshot = snapshot;
-                self.bump_tree_version();
-                true
-            }
-            Ok(None) => false,
-            Err(error) => {
-                self.status_message = Some(format!(
-                    "Sidebar preparation failed; previous listing retained: {error}"
-                ));
-                true
-            }
-        }
     }
 }

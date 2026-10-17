@@ -105,7 +105,98 @@ struct SessionTransitionObservation {
 /// connection this request arrived on should close afterward (`Detach`,
 /// `KillSession`) -- the caller (`crate::ipc::connection`) is what
 /// actually stops reading further frames.
+/// Attribution follows the request contract, never text parsing.
+fn request_error_node(request: &ClientRequest) -> Option<NodeId> {
+    match request {
+        ClientRequest::NewPane { parent_group, .. } => Some(*parent_group),
+        ClientRequest::ClosePane { pane_id, .. } => Some(*pane_id),
+        ClientRequest::MoveNode { node_id, .. } => Some(*node_id),
+        ClientRequest::RenameNode { node_id, .. } => Some(*node_id),
+        ClientRequest::ResizePane { pane_id, .. } => Some(*pane_id),
+        ClientRequest::KeyInput { pane_id, .. } => Some(*pane_id),
+        ClientRequest::MouseInput { pane_id, .. } => Some(*pane_id),
+        ClientRequest::NewGroup { parent_group, .. } => Some(*parent_group),
+        ClientRequest::ReparentNode { node_id, .. } => Some(*node_id),
+        ClientRequest::SetAutomaticPaneTitle { pane_id, .. } => Some(*pane_id),
+        ClientRequest::SetPaneFocus { pane_id, .. } => Some(*pane_id),
+        ClientRequest::NewFolder { parent_group, .. } => Some(*parent_group),
+        ClientRequest::ChangeProjectFolder { project_id, .. } => Some(*project_id),
+        ClientRequest::NewBoard { parent_group, .. } => Some(*parent_group),
+        ClientRequest::CreateSplitView { parent_group, .. } => Some(*parent_group),
+        ClientRequest::SchedulePaneInput { pane_id, .. } => Some(*pane_id),
+        ClientRequest::EnqueuePrompt { pane_id, .. } => Some(*pane_id),
+        ClientRequest::ClearPromptQueue { pane_id, .. } => Some(*pane_id),
+        ClientRequest::SetSessionPaneTitle { pane_id, .. } => Some(*pane_id),
+        ClientRequest::ApplyProjectRestructurePlan { project_id, .. } => Some(*project_id),
+        ClientRequest::RevertProjectRestructure { project_id, .. } => Some(*project_id),
+        ClientRequest::GetPaneDebugLog { pane_id, .. } => Some(*pane_id),
+        ClientRequest::RecordAgentDebugEvent { pane_id, .. } => Some(*pane_id),
+        ClientRequest::SetNodeBookmarked { node_id, .. } => Some(*node_id),
+        ClientRequest::RecordNodeActivity { node_id, .. } => Some(*node_id),
+        ClientRequest::SetNodeExpanded { node_id, .. } => Some(*node_id),
+        ClientRequest::SetNodeLockedClosed { node_id, .. } => Some(*node_id),
+        ClientRequest::ReportLastPromptFromTranscript { pane_id, .. } => Some(*pane_id),
+        ClientRequest::CheckPaneProgressMonitor { pane_id, .. } => Some(*pane_id),
+        ClientRequest::SetPaneProgressMonitor { pane_id, .. } => Some(*pane_id),
+        ClientRequest::GetPaneProgressMonitorStatus { pane_id, .. } => Some(*pane_id),
+        ClientRequest::ClearPaneProgressMonitor { pane_id, .. } => Some(*pane_id),
+        ClientRequest::SubmitTerminalText { pane_id, .. } => Some(*pane_id),
+        ClientRequest::QueryRepoFacts { project, .. } => Some(*project),
+        ClientRequest::CreateAgentInWorkspace { parent_group, .. } => Some(*parent_group),
+        ClientRequest::RefreshPaneGitStatus { pane_id, .. } => Some(*pane_id),
+        ClientRequest::RemoveWorkspace { pane_id, .. } => Some(*pane_id),
+        ClientRequest::ClosePaneWithWorkspaceDisposition { pane_id, .. } => Some(*pane_id),
+        ClientRequest::QueryWorkspaceInventory { project, .. } => Some(*project),
+        ClientRequest::PruneWorkspace { project, .. } => Some(*project),
+        ClientRequest::QueryWorkspaceCloseOffer { pane_id, .. } => Some(*pane_id),
+        ClientRequest::TerminatePaneProcess { pane_id, .. } => Some(*pane_id),
+        ClientRequest::ReplacePaneWithCommand { pane_id, .. } => Some(*pane_id),
+        ClientRequest::FreezePane { pane_id, .. } => Some(*pane_id),
+        ClientRequest::ApplyRecommendedProjectRestructurePlan { project_id, .. } => {
+            Some(*project_id)
+        }
+        ClientRequest::UserKeyInput { pane_id, .. } => Some(*pane_id),
+        ClientRequest::ReportAgentPromptFromTranscript { pane_id, .. } => Some(*pane_id),
+        ClientRequest::UnfreezePane { pane_id, .. } => Some(*pane_id),
+        ClientRequest::WaitPaneProgressMonitor { pane_id, .. } => Some(*pane_id),
+        ClientRequest::PasteTerminalText { pane_id, .. } => Some(*pane_id),
+        ClientRequest::GetPaneRecapScreen { pane_id, .. } => Some(*pane_id),
+        _ => None,
+    }
+}
+
 pub async fn handle_request(
+    state: &Arc<ServerState>,
+    request: ClientRequest,
+    direct_tx: &DirectEventSender,
+) -> bool {
+    let operation = request.diagnostic_name();
+    let target = {
+        let tree = state.tree.read().await;
+        request_error_node(&request).filter(|node_id| tree.get(*node_id).is_some())
+    };
+    let scoped_tx = direct_tx.with_error_scope(state, target, operation);
+    let should_close = handle_scoped_request(state, request, &scoped_tx).await;
+    if matches!(
+        operation,
+        "rename_node"
+            | "move_node"
+            | "reparent_node"
+            | "new_group"
+            | "new_project"
+            | "new_folder"
+            | "change_project_folder"
+            | "create_split_view"
+            | "set_node_bookmarked"
+            | "set_node_expanded"
+            | "set_node_locked_closed"
+    ) {
+        scoped_tx.finish_synchronous_mutation();
+    }
+    should_close
+}
+
+async fn handle_scoped_request(
     state: &Arc<ServerState>,
     request: ClientRequest,
     direct_tx: &DirectEventSender,
@@ -208,25 +299,45 @@ pub async fn handle_request(
             false
         }
         ClientRequest::NewPane {
+            request_id,
             parent_group,
             kind,
             working_directory,
         } => {
-            handle_new_pane(state, parent_group, kind, working_directory, direct_tx).await;
+            handle_new_pane(
+                state,
+                request_id,
+                parent_group,
+                kind,
+                working_directory,
+                direct_tx,
+            )
+            .await;
             false
         }
         ClientRequest::QueryWorkspaceInventory {
             request_id,
             project,
         } => {
-            let result = tokio::time::timeout(
-                std::time::Duration::from_secs(30),
-                crate::workspace_prune::inventory(state, project),
-            )
+            // Its own task, so the Git inventory chain starts on a fresh
+            // worker stack instead of below this whole request dispatcher:
+            // nested here, unoptimized builds overflowed the 2 MiB runtime
+            // stack. The guard aborts the read-only task if this request is
+            // cancelled.
+            let inventory_state = Arc::clone(state);
+            let result = crate::task_guard::AbortOnDropHandle::new(tokio::spawn(async move {
+                tokio::time::timeout(
+                    std::time::Duration::from_secs(30),
+                    crate::workspace_prune::inventory(&inventory_state, project),
+                )
+                .await
+                .unwrap_or_else(|_| {
+                    Err("worktree inventory exceeded its read-only time budget".into())
+                })
+            }))
+            .join()
             .await
-            .unwrap_or_else(|_| {
-                Err("worktree inventory exceeded its read-only time budget".into())
-            });
+            .unwrap_or_else(|error| Err(format!("worktree inventory task failed: {error}")));
             let event = ServerEvent::WorkspaceInventoryReported {
                 request_id,
                 project,
@@ -240,10 +351,17 @@ pub async fn handle_request(
             request_id,
             pane_id,
         } => {
-            let can_offer = tokio::time::timeout(
-                std::time::Duration::from_secs(30),
-                crate::workspace_prune::can_offer_close(state, pane_id),
-            )
+            // Same fresh-stack task as the worktree inventory above.
+            let offer_state = Arc::clone(state);
+            let can_offer = crate::task_guard::AbortOnDropHandle::new(tokio::spawn(async move {
+                tokio::time::timeout(
+                    std::time::Duration::from_secs(30),
+                    crate::workspace_prune::can_offer_close(&offer_state, pane_id),
+                )
+                .await
+                .unwrap_or(false)
+            }))
+            .join()
             .await
             .unwrap_or(false);
             let event = ServerEvent::WorkspaceCloseOfferReported {
@@ -1131,6 +1249,7 @@ pub(crate) async fn broadcast_and_persist(state: &ServerState) {
     // see `ServerState::prune_stale_restructure_undo`'s doc comment for why
     // that snapshot, taken moments earlier, is not safe to reuse here.
     state.prune_stale_restructure_undo().await;
+    state.prune_blocking_errors(&snapshot);
     state.broadcast(ServerEvent::TreeSnapshot(snapshot));
     state.request_snapshot_save();
 }
@@ -2011,6 +2130,9 @@ async fn admitted_state_synchronization_events(
                     drop(statuses);
                     let settings = state.text_trigger_settings.read().await.settings.clone();
                     events.push(ServerEvent::TextTriggersChanged { settings });
+                    events.push(ServerEvent::BlockingErrorsSnapshot {
+                        errors: state.blocking_errors_snapshot(),
+                    });
                     if include_initial_sync_complete {
                         let (detection, custom_signatures) =
                             state.agent_detection_settings_snapshot().await;
@@ -2142,6 +2264,9 @@ async fn state_synchronization_events(
     // needs them even when no client has changed the list during this stream.
     let settings = state.text_trigger_settings.read().await.settings.clone();
     events.push(ServerEvent::TextTriggersChanged { settings });
+    events.push(ServerEvent::BlockingErrorsSnapshot {
+        errors: state.blocking_errors_snapshot(),
+    });
     if include_initial_sync_complete {
         let (detection, custom_signatures) = state.agent_detection_settings_snapshot().await;
         events.push(ServerEvent::AgentDetectionSettingsChanged {
@@ -4443,27 +4568,49 @@ fn new_pane_plan(kind: NewPaneKind) -> NewPanePlan {
 
 async fn handle_new_pane(
     state: &Arc<ServerState>,
+    request_id: u64,
     parent_group: NodeId,
     kind: NewPaneKind,
     working_directory: NewPaneWorkingDirectory,
     direct_tx: &DirectEventSender,
 ) {
+    let result = create_pane(state, parent_group, kind, working_directory).await;
+    if let Err(message) = &result {
+        send_direct_error(direct_tx, message.clone()).await;
+    }
+    send_direct(
+        direct_tx,
+        ServerEvent::PaneCreateFinished { request_id, result },
+    )
+    .await;
+}
+
+async fn create_pane(
+    state: &Arc<ServerState>,
+    parent_group: NodeId,
+    kind: NewPaneKind,
+    working_directory: NewPaneWorkingDirectory,
+) -> Result<NodeId, String> {
     let plan = new_pane_plan(kind);
     let spawn_description = format!("{:?}", plan.spawn_kind);
 
     // Resolve the live-terminal policy before creating the tree node. The
     // eventual node and its actual launch cwd must appear in one tree write,
     // even if another request snapshots the session while spawning awaits.
-    let cwd_candidate = candidate_new_pane_working_directory(state, working_directory).await;
-    if matches!(working_directory, NewPaneWorkingDirectory::WorkspacePane(_))
-        && cwd_candidate.is_none()
+    let cwd_candidate = candidate_new_pane_working_directory(state, &working_directory).await;
+    if matches!(
+        working_directory,
+        NewPaneWorkingDirectory::WorkspacePane(_) | NewPaneWorkingDirectory::Directory(_)
+    ) && cwd_candidate.is_none()
     {
-        send_direct_error(
-            direct_tx,
-            "worktree pane or its launch directory is unavailable".to_string(),
-        )
-        .await;
-        return;
+        let message = match &working_directory {
+            NewPaneWorkingDirectory::Directory(path) => format!(
+                "working directory {} is not an existing directory",
+                path.display()
+            ),
+            _ => "worktree pane or its launch directory is unavailable".to_string(),
+        };
+        return Err(message);
     }
 
     // Pruning holds this fence while it proves that no pane uses a checkout.
@@ -4485,8 +4632,7 @@ async fn handle_new_pane(
         Err(error) => {
             drop(tree);
             drop(publish_guard);
-            send_direct_error(direct_tx, format!("failed to create pane: {error}")).await;
-            return;
+            return Err(format!("failed to create pane: {error}"));
         }
     };
     let project_cwd = tree
@@ -4499,12 +4645,7 @@ async fn handle_new_pane(
             let _ = tree.remove_node(pane_id);
             drop(tree);
             drop(publish_guard);
-            send_direct_error(
-                direct_tx,
-                format!("failed to record pane directory: {error}"),
-            )
-            .await;
-            return;
+            return Err(format!("failed to record pane directory: {error}"));
         }
     }
     // Drop the write guard before spawning (a pty spawn + registering it
@@ -4516,14 +4657,10 @@ async fn handle_new_pane(
     match spawn_and_register_pane_in_directory(state, pane_id, plan.spawn_kind, &cwd).await {
         Ok(()) => {}
         Err(RegisterPaneError::NodeRemoved(_)) => {
-            // A concurrent request (`ClosePane` on an ancestor group,
-            // `RevertLastRestructure`, a session-recovery restore) removed
-            // `pane_id` from the tree while the spawn above was in flight.
-            // That request already removed the node and broadcast the tree
-            // without it, and `spawn_and_register_pane_in_directory` has
-            // already torn the now-orphaned resource back down -- there is
-            // nothing left for this call to remove or report.
-            return;
+            return Err("pane was removed while its launch was in progress".to_string());
+        }
+        Err(RegisterPaneError::Admission(reason)) => {
+            return Err(reason);
         }
         Err(RegisterPaneError::Spawn(error)) => {
             // The tree node exists (created just above) but has no resource
@@ -4538,8 +4675,7 @@ async fn handle_new_pane(
             let _ = tree.remove_node(pane_id);
             drop(tree);
             broadcast_and_persist(state).await;
-            send_direct_error(direct_tx, format!("failed to spawn pane: {error}")).await;
-            return;
+            return Err(format!("failed to spawn pane: {error}"));
         }
     }
 
@@ -4568,6 +4704,7 @@ async fn handle_new_pane(
     if plan.close_on_exit {
         start_close_on_exit_watcher(state, pane_id).await;
     }
+    Ok(pane_id)
 }
 
 /// A closing pane must live at least this long, so the creating CLI can
@@ -5059,7 +5196,7 @@ async fn handle_replace_pane_with_command(
     .await
     {
         Ok(()) => {}
-        Err(RegisterPaneError::NodeRemoved(_)) => {
+        Err(RegisterPaneError::NodeRemoved(_)) | Err(RegisterPaneError::Admission(_)) => {
             state
                 .workspace_close_preferences
                 .write()
@@ -5167,6 +5304,9 @@ pub(crate) async fn create_agent_with_prompt(
     .await
     {
         Ok(()) => {}
+        Err(RegisterPaneError::Admission(reason)) => {
+            return Err(format!("the {command_line} pane was not started: {reason}"));
+        }
         Err(RegisterPaneError::NodeRemoved(_)) => {
             // A concurrent request removed the node while the spawn was in
             // flight; it already broadcast the tree without it and the
@@ -5218,7 +5358,7 @@ pub(crate) async fn create_agent_with_prompt(
 /// tree write that inserts the pane, so its persisted cwd is never stale.
 async fn candidate_new_pane_working_directory(
     state: &ServerState,
-    working_directory: NewPaneWorkingDirectory,
+    working_directory: &NewPaneWorkingDirectory,
 ) -> Option<std::path::PathBuf> {
     match working_directory {
         NewPaneWorkingDirectory::ProjectRoot => None,
@@ -5231,7 +5371,16 @@ async fn candidate_new_pane_working_directory(
         NewPaneWorkingDirectory::LastUsed => {
             state.last_terminal_working_directory.lock().await.clone()
         }
+        NewPaneWorkingDirectory::Directory(path) => {
+            let path = path.clone();
+            tokio::task::spawn_blocking(move || std::fs::canonicalize(path))
+                .await
+                .ok()?
+                .ok()
+                .filter(|resolved| resolved.is_dir())
+        }
         NewPaneWorkingDirectory::WorkspacePane(pane_id) => {
+            let pane_id = *pane_id;
             let tree = state.tree.read().await;
             tree.pane_workspace(pane_id)
                 .and_then(|workspace| {
@@ -5309,12 +5458,15 @@ where
 /// without it, so callers must not try to remove the (already gone) tree
 /// node again or report a spurious spawn error. See this function's doc
 /// comment for how `NodeRemoved` is made unreachable-without-cleanup.
+/// `Admission` preserves a pre-spawn refusal whose error and tree state have
+/// already been published; restored callers retain its concrete retry reason.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum RegisterPaneError {
     #[error(transparent)]
     Spawn(#[from] PtyError),
-    #[error("pane node {0:?} was removed or refused admission before registration")]
-    // Covers pre-spawn directory-generation rejection.
+    #[error("pane admission refused: {0}")]
+    Admission(String),
+    #[error("pane node {0:?} was removed before registration")]
     NodeRemoved(NodeId),
 }
 
@@ -5409,11 +5561,13 @@ pub(crate) async fn spawn_and_register_pane_with_deferred_workspace(
             .unwrap_or_else(|| {
                 "launch directory disappeared, changed identity, or is unsafe".into()
             });
-        state.broadcast(ServerEvent::Error {
+        // Restore retains the failure on its placeholder; a fresh creation
+        // retains it on the surviving parent in handle_new_pane.
+        state.events.publish(ServerEvent::Error {
             message: format!("pane {} was not started: {reason}", pane_id.0),
         });
         broadcast_and_persist(state).await;
-        return Err(RegisterPaneError::NodeRemoved(pane_id));
+        return Err(RegisterPaneError::Admission(reason));
     }
     // A node removed while this caller waited must never cause even a transient PTY spawn.
     if state.tree.read().await.get(pane_id).is_none() {
@@ -5447,7 +5601,7 @@ pub(crate) async fn spawn_and_register_pane_with_deferred_workspace(
                 message: format!("pane {} was not started: {reason}", pane_id.0),
             });
             broadcast_and_persist(state).await;
-            return Err(RegisterPaneError::NodeRemoved(pane_id));
+            return Err(RegisterPaneError::Admission(reason));
         }
     };
     let (resource, output_receiver) = match kind {
@@ -5796,9 +5950,17 @@ async fn collect_output_burst(
     first_chunk: ilium_pty::PtyOutputChunk,
     receiver: &mut tokio::sync::broadcast::Receiver<ilium_pty::PtyOutputChunk>,
 ) -> OutputBurst {
+    collect_output_burst_with_window(first_chunk, receiver, std::time::Duration::from_micros(750))
+        .await
+}
+
+async fn collect_output_burst_with_window(
+    first_chunk: ilium_pty::PtyOutputChunk,
+    receiver: &mut tokio::sync::broadcast::Receiver<ilium_pty::PtyOutputChunk>,
+    followup_window: std::time::Duration,
+) -> OutputBurst {
     const MAX_MERGED_CHUNKS: usize = 32;
     const MAX_MERGED_BYTES: usize = 16 * 1024;
-    const FOLLOWUP_WINDOW: std::time::Duration = std::time::Duration::from_micros(750);
 
     let first_sequence = first_chunk.sequence;
     let mut sequence = first_sequence;
@@ -5810,7 +5972,7 @@ async fn collect_output_burst(
             Ok(chunk) => Some(Ok(chunk)),
             Err(tokio::sync::broadcast::error::TryRecvError::Empty) if !waited_for_followup => {
                 waited_for_followup = true;
-                tokio::time::timeout(FOLLOWUP_WINDOW, receiver.recv())
+                tokio::time::timeout(followup_window, receiver.recv())
                     .await
                     .ok()
             }
@@ -7151,6 +7313,9 @@ where
     .await
 }
 
+// Eight arguments: `after_admission` is the test seam for the admission path.
+// The production wrapper above passes a no-op for it.
+#[allow(clippy::too_many_arguments)]
 async fn write_key_input_unlocked_with_probe_and_admission_hook<
     Probe,
     ProbeFuture,
@@ -8089,6 +8254,48 @@ mod tests {
         }))
     }
 
+    #[tokio::test]
+    async fn create_failure_is_correlated_scoped_and_replayed_on_attach() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = snapshot_io_handler_state(&directory);
+        let group = state
+            .tree
+            .write()
+            .await
+            .add_group(ilium_core::ROOT_ID, "project")
+            .unwrap();
+        let (sender, mut replies) = DirectEventSender::channel(16);
+        handle_request(
+            &state,
+            ClientRequest::NewPane {
+                request_id: 742,
+                parent_group: group,
+                kind: NewPaneKind::PlainShell,
+                working_directory: NewPaneWorkingDirectory::Directory(
+                    directory.path().join("missing"),
+                ),
+            },
+            &sender,
+        )
+        .await;
+        assert!(matches!(
+            replies.recv().await,
+            Some(ServerEvent::Error { .. })
+        ));
+        let Some(ServerEvent::PaneCreateFinished { request_id, result }) = replies.recv().await
+        else {
+            panic!("creation must have a terminal typed outcome");
+        };
+        assert_eq!(request_id, 742);
+        assert!(result.unwrap_err().contains("not an existing directory"));
+        let events = initial_state_events(&state, false, false).await;
+        assert!(events.iter().any(|event| matches!(event, ServerEvent::BlockingErrorsSnapshot { errors }
+            if errors.iter().any(|error| error.node_id == Some(group) && error.operation == "new_pane"))));
+        state.clear_blocking_error(Some(group), "new_pane");
+        let events = initial_state_events(&state, false, false).await;
+        assert!(events.iter().any(|event| matches!(event, ServerEvent::BlockingErrorsSnapshot { errors } if errors.is_empty())));
+    }
+
     #[cfg(unix)]
     async fn shell_title_fixture(
         state: &Arc<ServerState>,
@@ -8821,7 +9028,7 @@ mod tests {
             runtime.detection_schedule.client_focused = true;
         }
         let current =
-            candidate_new_pane_working_directory(&state, NewPaneWorkingDirectory::FocusedTerminal)
+            candidate_new_pane_working_directory(&state, &NewPaneWorkingDirectory::FocusedTerminal)
                 .await;
         assert_eq!(current.as_deref(), Some(directory.path()));
         if let Some(PaneResource::Terminal(mut runtime)) =
@@ -8838,6 +9045,11 @@ mod tests {
     {
         let directory = tempfile::tempdir().expect("isolated title directory");
         let state = snapshot_io_handler_state(&directory);
+        let execution =
+            crate::execution::ServerExecution::start().expect("title evidence I/O bank");
+        let journal_quota = execution.quota_group();
+        assert!(state.execution.set(execution).is_ok());
+        assert!(state.events.initialize_journal(journal_quota));
         let pane_id = shell_title_fixture(&state, &directory).await;
         let input = {
             let mut tree = state.tree.write().await;
@@ -9047,7 +9259,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn output_burst_collects_an_immediately_following_reader_chunk() {
+    async fn output_burst_collects_a_reader_chunk_during_the_followup_wait() {
         let (sender, mut receiver) = tokio::sync::broadcast::channel(8);
         sender
             .send(ilium_pty::PtyOutputChunk {
@@ -9070,11 +9282,35 @@ mod tests {
             first_sequence,
             sequence,
             bytes,
-        } = collect_output_burst(first, &mut receiver).await
+        } = collect_output_burst_with_window(first, &mut receiver, Duration::from_secs(1)).await
         else {
             panic!("contiguous output must not require replay");
         };
         producer.await.unwrap();
+        assert_eq!((first_sequence, sequence), (1, 2));
+        assert_eq!(bytes, b"firstsecond");
+    }
+
+    #[tokio::test]
+    async fn output_burst_merges_buffered_chunks_with_the_production_window() {
+        let (sender, mut receiver) = tokio::sync::broadcast::channel(8);
+        for (sequence, bytes) in [(1, b"first".as_slice()), (2, b"second".as_slice())] {
+            sender
+                .send(ilium_pty::PtyOutputChunk {
+                    sequence,
+                    bytes: bytes.to_vec().into(),
+                })
+                .unwrap();
+        }
+        let first = receiver.recv().await.unwrap();
+        let OutputBurst::Merged {
+            first_sequence,
+            sequence,
+            bytes,
+        } = collect_output_burst(first, &mut receiver).await
+        else {
+            panic!("buffered contiguous output must not require replay");
+        };
         assert_eq!((first_sequence, sequence), (1, 2));
         assert_eq!(bytes, b"firstsecond");
     }
@@ -10355,8 +10591,8 @@ mod tests {
         assert!(direct_rx.try_recv().is_err());
 
         // A stale client that doesn't know about the lock still can't
-        // expand it -- the server rejects the mutation and sends only a
-        // direct error, no broadcast.
+        // expand it -- the server rejects the mutation, retains a visible
+        // scoped error, and never broadcasts an expanded tree.
         assert!(
             !handle_request(
                 &state,
@@ -10368,8 +10604,22 @@ mod tests {
             )
             .await
         );
-        assert!(events.try_recv().is_err());
-        assert!(direct_rx.try_recv().is_ok());
+        let ServerEvent::BlockingErrorsSnapshot { errors } =
+            events.try_recv().expect("visible refusal")
+        else {
+            panic!("a refused expansion must publish its retained error");
+        };
+        assert!(errors.iter().any(|error| error.node_id == Some(folder_id)
+            && error.operation == "set_node_expanded"
+            && !error.message.is_empty()));
+        assert!(
+            events.try_recv().is_err(),
+            "refusal must not mutate or broadcast the tree"
+        );
+        assert!(matches!(
+            direct_rx.try_recv(),
+            Ok(ServerEvent::Error { .. })
+        ));
 
         assert!(
             !handle_request(

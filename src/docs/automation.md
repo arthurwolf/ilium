@@ -230,7 +230,7 @@ Every command prints **one JSONL record** to stdout on success (one JSON object 
 | `ilium progress set --command '<probe>' [--interval-seconds N] [--wait [--timeout-seconds S]] [--replace]` | Validate, then atomically add a monitor to this pane. Waits for a server acknowledgement that contains the monitor id and the accepted first report. With `--wait`, then blocks exactly like `ilium progress wait` and prints a second line. Other monitors of the pane keep running; `--replace` clears all of them first. | `progress_set` (then `progress_wait`) |
 | `ilium progress wait [MONITOR_ID] [--timeout-seconds S]` | Block until the monitor reports `done` or `error`, fails or is cleared. Without an id it picks the pane's only unsettled monitor (else its only monitor) and refuses with `monitor-ambiguous` (exit 2) when there are several. `ilium wait` is the same command. | `progress_wait` |
 | `ilium progress status` | Every monitor of this pane: registration, latest report and monitor health (`monitor_count`, `running`, `monitors`). | `progress_status` |
-| `ilium progress clear [--monitor-id ID \| --all]` | Stop a monitor and clear its retained progress. With `--monitor-id`, only that exact monitor. Without it, the pane's only monitor; with several, it refuses with `monitor-ambiguous` unless `--all` is given. | (clear result) |
+| `ilium progress clear [--monitor-id ID \| --all]` | Stop a monitor and clear its retained progress. With `--monitor-id`, only that exact monitor, refused with `monitor-running` while its task still runs unless `--running` is given. Without it, the pane's only monitor; with several, it refuses with `monitor-ambiguous` unless `--all` is given. | (clear result) |
 
 
 ### Waiting for a monitor
@@ -543,6 +543,10 @@ Success response:
 The request waits until the agent's prompt is ready, then submits the prompt, so a slow-starting agent delays the response. Errors return a JSON body `{"error": "..."}`: status 400 for an empty prompt, an unresolved or ambiguous project, or an invalid worktree request; 500 for a failure creating the pane or worktree; 503 if the session is shutting down. If the HTTP client disconnects while a worktree is being created, creation continues under server control and is rolled back at safe points. See [Worktrees](worktrees.md) for what the worktree option does.
 
 ---
+
+### Remote control routes
+
+Beyond `/create_agent`, the API serves `/v1/*`: read the tree, a project or a pane, and apply any operation `ilium ctl` offers. See [`ilium ctl`](cli-reference.md#ilium-ctl) for the commands; the routes mirror them one to one (`GET /v1/tree`, `GET /v1/panes/{id}`, `POST /v1/ops`, `POST /v1/panes/{id}/input`, `POST /v1/voice`, ...). `GET /v1/guide` returns the essentials.
 
 ## Reset forecasts
 

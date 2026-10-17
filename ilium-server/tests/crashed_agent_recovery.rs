@@ -154,6 +154,7 @@ async fn recovery_after_unflushed_crash(
     write_frame(
         &mut client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: if nested_shell {
                 NewPaneKind::PlainShell
@@ -669,6 +670,7 @@ async fn add_owned_command(
     write_frame(
         client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ROOT_ID,
             kind: NewPaneKind::Command(command),
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,

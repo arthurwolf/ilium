@@ -43,6 +43,7 @@ The tabs appear in this order:
 | Tab | What it controls | Main config table |
 | --- | --- | --- |
 | User Interface | Left panel sizing, tree order, identifiers, colour scheme, motion, density, toolbars, banners, progress footer, selection and tree behaviours | `[ui]`, `[theme]` |
+| Padding | Blank cells between the panel borders and the tree or pane content | `[padding]` |
 | Icons | Every configurable sidebar, toolbar and menu glyph | `[ui.icons]` |
 | Agent Monitoring | Display mode, polling, custom agent signatures, status icons, progress footer | `[ui]`, `[detection]` |
 | Agent Cost | Spend indicators and what counts as expensive | `[cost]` |
@@ -82,7 +83,9 @@ Left panel sizing:
 | Focused panel width | 16 to 80 cells (Focus-dependent and Width-dependent) | 44 |
 | Minimum terminal width | 40 to 500 cells (Width-dependent only) | 120 |
 
-Fixed keeps one width. Focus-dependent shrinks the panel to the unfocused width when neither pointer nor keyboard focus is in the tree. Width-dependent does the same only on terminals narrower than the minimum terminal width; on roomy terminals the panel stays at its focused width. Hidden values stay saved when you switch cards, so comparing modes never loses your tuning.
+On roomy Settings screens (82 or more columns of content) the mode is chosen from three cards. Each card shows what the mode does, two proportional bars (`focus` is the panel width while you use the tree, `away` is the width otherwise) and its current values; the active card carries a `● selected` badge. Click a card, or press Left/Right (`+` or Enter lists all three). On narrower screens the same choice is one selector row: left-click advances, right-click goes back, `+` opens the list.
+
+Fixed keeps one width. Focus-dependent shrinks the panel to the unfocused width when neither pointer nor keyboard focus is in the tree. Width-dependent does the same only on terminals narrower than the minimum terminal width; on roomy terminals the panel stays at its focused width. Hidden values stay saved when you switch modes, so comparing modes never loses your tuning.
 
 General options:
 
@@ -101,6 +104,7 @@ General options:
 | Context-menu icons | On / Off | On |
 | Agent toolbar | On / Off. Toolbar above detected-agent panes | On |
 | Agent toolbar labels | On / Off | On |
+| Section frames | On / Off. Draws rounded rules joined to the pane border around the agent toolbar, last-prompt banner, progress footer and the left panel's toolbar; Off gives their rows back to the terminal | On |
 | Last prompt banner | On / Off. Shows the last exactly reconstructed prompt submitted to a detected agent | On |
 | Last prompt banner lines | 1 to 20 | 4 |
 | Terminal text selection | On / Off. Left-drag selects locally instead of forwarding to the foreground app | On |
@@ -111,11 +115,21 @@ The agent debug menu, progress monitor enablement and a few other options are mi
 
 The progress-monitor options (Progress monitor, Progress footer lines, Progress fill style) live on the Agent Monitoring tab in the current build; see [Agent monitoring](agent-monitoring.md).
 
+### Padding
+
+Pads the content of the left tree panel and the right panels (terminals and agents, editors, boards) inside their borders. Padding never touches borders, the agent toolbar, the last-prompt banner or the progress footer; it only moves the terminal, tree list, editor or board content inward.
+
+Three cards choose the mode: **Disabled** (the default, no padding), **Size dependent** (padding applies while the terminal is at least a threshold wide; the threshold defaults to 200 columns and accepts 11 to 1000, edited with the steppers or by typing), and **Enabled** (always). Hover and click behave like the other card pickers.
+
+Unless the mode is Disabled, a **Padding fine-tuning** button opens a near-fullscreen dialog. The left column holds the settings and the right column a live preview with a neutral dummy tree and dummy agent. Each panel (tree, right panels) has a **Link all sides** option and four side groups (Left, Right, Top, Bottom), each set to 0 to 3 cells with clickable buttons; linking hides the individual sides. **Share right panels** makes terminals, editors and boards use one setting; turn it off to pick a type and give it its own. The default is one cell on every side.
+
 ### Icons
 
 Choose the glyph for each configurable role: group, top-level destination, project, vertical and horizontal split, folder, worktree branch, terminal, editor, board, each agent family, bookmark and locked-closed markers, tree toolbar buttons (Search, Restructure, Settings), hover-row controls (Rename, Move up, Move down, Close, Retitle), project restructure, Ask for update, screen-transfer arrows, Open in OS, and the agent toolbar actions (Compact, Clear, Configure, Stop, Copy screen, Smart Copy, Copy last message, Change effort, Change model, model choices, Exit, Fast mode, Text selection). Up and Down select a role, Left and Right cycle its glyph, and `Enter`, `Space` or `+` opens the icon picker. `R` toggles between the preview and the real rendering. Custom assignments are stored under `[ui.icons]`.
 
 ### Agent Monitoring
+
+Blocking project and agent failures display a yellow triangular caution icon in the tree. Hover the icon to read the error messages; parent projects include failures in their children. A terminal that cannot start also shows its concrete failure. Failed creation stops its toolbar spinner, and an unconfirmed request reports that its outcome is unknown rather than silently retrying. Warnings clear when the affected operation recovers.
 
 | Option | Notes |
 | --- | --- |
@@ -124,6 +138,7 @@ Choose the glyph for each configurable role: group, top-level destination, proje
 | Progress monitor | Turns supervision of registered long-running tasks on or off (default on) |
 | Progress footer lines | 1 to 20 detail rows below the status line (default 4) |
 | Hide completed progress after | Seconds a finished task footer stays; 0 or Never keeps it (default 60, steps of 30) |
+| Model icons | Off by default. When on, the identity slot shows the session's selected model icon (the same icon as the agent toolbar); models without an icon fall back to the provider icon |
 | Progress fill style | Character family for progress frames |
 | Working poll interval | Seconds between detection checks for working agents (default 10) |
 | Idle poll interval | Seconds between checks for idle agents (default 45) |
@@ -330,6 +345,7 @@ The file is a set of tables. Only the tables and keys you want to change need to
 | Table | Contents |
 | --- | --- |
 | `[keyboard]`, `[keybindings]` | Prefix keys; action-to-key remapping |
+| `[padding]` | `mode` (`disabled`, `enabled`, `width_dependent`), `width_threshold`, per-panel sides |
 | `[theme]` | Four colour overrides: `accent_bg`, `accent_fg`, `border_focused`, `border_unfocused` (hex such as `#1f6feb`) |
 | `[ui]`, `[ui.icons]` | Interface options and icon assignments (keys below) |
 | `[sound]`, `[notifications]` | Sound source, file and events; desktop notification flags |
@@ -365,7 +381,7 @@ Accepted spellings for common enumerated values:
 | `editor.line_display` | `clip`, `wrap` |
 | `session.recovery_policy` | `restore_automatically`, `ask_before_restore`, `start_fresh` |
 
-Other `[ui]` keys: `left_panel_fixed_width`, `left_panel_unfocused_width`, `left_panel_focused_width`, `left_panel_minimum_terminal_width`, `claude_agent_icon`, `codex_agent_icon`, `antigravity_agent_icon`, `use_stable_glyphs`, `show_inferred_title_icons`, `show_tree_row_management_controls`, `agent_debug_menu_enabled`, `show_context_menu_icons`, `agent_toolbar_enabled`, `show_toolbar_labels`, `last_prompt_enabled`, `last_prompt_max_lines`, `agent_monitoring_mode`, `attention_running_indicator`, `progress_monitor_enabled`, `progress_max_lines`, `completed_progress_hide_after_seconds`, `terminal_text_selection_enabled`, `lock_closed_enabled`, `auto_remove_empty_groups`, `task_progress_frames`.
+Other `[ui]` keys: `left_panel_fixed_width`, `left_panel_unfocused_width`, `left_panel_focused_width`, `left_panel_minimum_terminal_width`, `claude_agent_icon`, `codex_agent_icon`, `antigravity_agent_icon`, `use_stable_glyphs`, `show_inferred_title_icons`, `show_tree_row_management_controls`, `agent_debug_menu_enabled`, `show_context_menu_icons`, `agent_toolbar_enabled`, `show_toolbar_labels`, `section_frames_enabled`, `last_prompt_enabled`, `last_prompt_max_lines`, `agent_monitoring_mode`, `attention_running_indicator`, `progress_monitor_enabled`, `progress_max_lines`, `completed_progress_hide_after_seconds`, `terminal_text_selection_enabled`, `lock_closed_enabled`, `auto_remove_empty_groups`, `task_progress_frames`.
 
 An invalid value (for example a tree width outside 16 to 80, or an unknown enumerated string) makes that table fail validation with a message naming the key; fix or remove the key.
 
