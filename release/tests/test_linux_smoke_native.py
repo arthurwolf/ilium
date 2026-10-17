@@ -576,6 +576,7 @@ class container_fixture_tests(unittest.TestCase):  # Exercise production orchest
                 pidfd.assert_called_once_with(1701, 0)  # Pin only the process discovered inside the owned tree.
                 close.assert_called_once_with(90)  # Both success and rejection release the retained handle.
 
+    @unittest.skipUnless(os.name == 'posix', 'the Linux container guest uses O_NOFOLLOW; real Linux acceptance lanes remain mandatory')
     def test_guest_missing_manager_and_partial_start_keep_failure_and_cleanup(self):  # Exercise the actual guest main flow before package execution.
         for mode in ('absent-bus', 'partial-start', 'retained-group', 'cleanup-error'):  # Isolate startup and retirement outcomes.
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as temporary, ExitStack() as stack:  # Own every redirected guest file.

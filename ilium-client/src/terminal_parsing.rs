@@ -2412,9 +2412,11 @@ mod tests {
         // order of the two is not part of the contract under test.
         let deadline = Instant::now() + Duration::from_secs(60);
         let mut audited = false;
+        let mut seen_errors = Vec::new();
         while !audited {
             for result in parsing.collect() {
                 if let ParseResult::Error { target, message } = result {
+                    seen_errors.push(format!("{:?}: {message}", target.pane_id));
                     // Whether the worker still holds the command in its queue (the
                     // ordinal audit) or is already publishing it (the cancelled
                     // publication) depends on thread timing; both release it.
@@ -2423,7 +2425,10 @@ mod tests {
                             || message.contains("cancelled before acknowledgement"));
                 }
             }
-            assert!(Instant::now() < deadline, "ordinal audit did not arrive");
+            assert!(
+                Instant::now() < deadline,
+                "ordinal audit did not arrive; errors seen: {seen_errors:?}"
+            );
             std::thread::sleep(Duration::from_millis(1));
         }
     }
