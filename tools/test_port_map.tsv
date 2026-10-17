@@ -4495,10 +4495,10 @@ ilium-client/src/filesystem/tests.rs	loaded_board_source_credit_survives_reader_
 ilium-client/src/filesystem/tests.rs	loaded_editor_source_credit_survives_receipt_and_real_worker_join_until_pane_drop	plain		editor	adapt-to-plugin-api	plugins/core/editor	F-019,F-020,F-021,F-022,F-023,F-114	pending
 ilium-client/src/filesystem/tests.rs	refused_editor_bank_admission_keeps_original_source_guard_for_retry	plain		editor	adapt-to-plugin-api	plugins/core/editor	F-019,F-020,F-021,F-022,F-023,F-114	pending
 ilium-client/src/filesystem/tests.rs	sidebar_worker_prepares_only_expanded_rows_and_fences_removed_roots	plain		kernel	kernel-stays		F-001,F-002,F-003,F-004,F-007,F-008,F-011,F-012,F-013,F-014,F-019,F-024,F-058,F-073,F-074,F-075,F-078,F-079,F-085,F-086,F-087,F-091,F-092,F-093,F-094,F-104,F-105,F-106,F-111	pending
-ilium-client/src/filesystem/tests.rs	stale_frozen_screen_restore_cannot_replace_the_new_pane_generation	tokio		fleet	adapt-to-plugin-api	plugins/core/fleet	F-023,F-036,F-058,F-107,F-109,F-110,F-113	pending
+ilium-client/src/filesystem/tests.rs	stale_frozen_screen_restore_cannot_replace_the_new_pane_generation	tokio		fleet	obsolete	plugins/core/fleet	F-023,F-036,F-058,F-107,F-109,F-110,F-113	pending
 ilium-client/src/filesystem/tests.rs	text_trigger_modal_waits_for_real_durable_writer_and_server_request	plain		text-triggers	adapt-to-plugin-api	plugins/core/text-triggers	F-056	pending
 ilium-client/src/filesystem/transcript_baseline.rs	baseline_admission_is_nonblocking_and_later_bytes_remain_ordered	plain		tree	kernel-stays		F-001,F-004,F-005,F-006	pending
-ilium-client/src/filesystem/transcript_baseline.rs	replaced_identity_cancels_exact_accepted_input_without_crediting_a_new_pane	plain		fleet	adapt-to-plugin-api	plugins/core/fleet	F-023,F-036,F-058,F-107,F-109,F-110,F-113	pending
+ilium-client/src/filesystem/transcript_baseline.rs	replaced_identity_cancels_exact_accepted_input_without_crediting_a_new_pane	plain		fleet	obsolete	plugins/core/fleet	F-023,F-036,F-058,F-107,F-109,F-110,F-113	pending
 ilium-client/src/goal_resume_link.rs	finds_command_in_footer_with_exact_columns	plain		agent-toolbar	adapt-to-plugin-api	plugins/core/agent-toolbar	F-033,F-035,F-081	pending
 ilium-client/src/goal_resume_link.rs	ignores_transcript_text_above_the_footer	plain		agent-toolbar	adapt-to-plugin-api	plugins/core/agent-toolbar	F-033,F-035,F-081	pending
 ilium-client/src/goal_resume_link.rs	paints_blue_underline_and_hover_variant	plain		agent-toolbar	adapt-to-plugin-api	plugins/core/agent-toolbar	F-033,F-035,F-081	pending
@@ -6072,7 +6072,7 @@ ilium-client/src/ui.rs	context_menu_joined_emoji_label_preserves_row_width	plain
 ilium-client/src/ui.rs	context_menu_visual_target_matrix_uses_production_actions	plain		kernel	kernel-stays		F-001,F-002,F-003,F-004,F-007,F-008,F-011,F-012,F-013,F-014,F-019,F-024,F-058,F-073,F-074,F-075,F-078,F-079,F-085,F-086,F-087,F-091,F-092,F-093,F-094,F-104,F-105,F-106,F-111	pending
 ilium-client/src/ui.rs	context_menu_visual_terminal_uses_the_same_groups_and_selection	plain		tree	kernel-stays		F-001,F-004,F-005,F-006	pending
 ilium-client/src/ui.rs	context_menu_visual_tree_groups_padding_and_short_screen_reachability	plain		tree	kernel-stays		F-001,F-004,F-005,F-006	pending
-ilium-client/src/ui.rs	create_agent_dialog_renders_selector_editable_prompt_and_button	plain		fleet	adapt-to-plugin-api	plugins/core/fleet	F-023,F-036,F-058,F-107,F-109,F-110,F-113	pending
+ilium-client/src/ui.rs	create_agent_dialog_renders_selector_editable_prompt_and_button	plain		fleet	obsolete	plugins/core/fleet	F-023,F-036,F-058,F-107,F-109,F-110,F-113	pending
 ilium-client/src/ui.rs	delay_renders_centered_number_with_decrement_increment_and_entry	plain		kernel	kernel-stays		F-001,F-002,F-003,F-004,F-007,F-008,F-011,F-012,F-013,F-014,F-019,F-024,F-058,F-073,F-074,F-075,F-078,F-079,F-085,F-086,F-087,F-091,F-092,F-093,F-094,F-104,F-105,F-106,F-111	pending
 ilium-client/src/ui.rs	editor_identity_why_reports_the_authoritative_dirty_flag	plain		editor	adapt-to-plugin-api	plugins/core/editor	F-019,F-020,F-021,F-022,F-023,F-114	pending
 ilium-client/src/ui.rs	export_populated_editor_visual_matrix	plain		editor	adapt-to-plugin-api	plugins/core/editor	F-019,F-020,F-021,F-022,F-023,F-114	pending
@@ -7336,19 +7336,19 @@ ilium-server/src/initial_prompt.rs	crlf_line_endings_are_normalized_before_brack
 ilium-server/src/initial_prompt.rs	multiline_initial_prompt_is_one_bracketed_paste_body	plain		fleet	adapt-to-plugin-api	plugins/core/fleet	F-023,F-036,F-058,F-107,F-109,F-110,F-113	pending
 ilium-server/src/initial_prompt.rs	single_line_initial_prompt_is_written_verbatim	plain		fleet	adapt-to-plugin-api	plugins/core/fleet	F-023,F-036,F-058,F-107,F-109,F-110,F-113	pending
 ilium-server/src/ipc/connection.rs	broadcast_before_attach_is_forwarded	tokio		fleet	adapt-to-plugin-api	plugins/core/fleet	F-023,F-036,F-058,F-107,F-109,F-110,F-113	pending
-ilium-server/src/ipc/connection.rs	broadcast_lag_rebuilds_state_without_retriggering_startup	tokio		fleet	adapt-to-plugin-api	plugins/core/fleet	F-023,F-036,F-058,F-107,F-109,F-110,F-113	pending
-ilium-server/src/ipc/connection.rs	broadcast_replay_for_closed_pane_is_not_sent_to_a_new_parser	tokio		fleet	adapt-to-plugin-api	plugins/core/fleet	F-023,F-036,F-058,F-107,F-109,F-110,F-113	pending
+ilium-server/src/ipc/connection.rs	broadcast_lag_rebuilds_state_without_retriggering_startup	tokio		fleet	kernel-stays	plugins/core/fleet	F-023,F-036,F-058,F-107,F-109,F-110,F-113	pending
+ilium-server/src/ipc/connection.rs	broadcast_replay_for_closed_pane_is_not_sent_to_a_new_parser	tokio		fleet	kernel-stays	plugins/core/fleet	F-023,F-036,F-058,F-107,F-109,F-110,F-113	pending
 ilium-server/src/ipc/connection.rs	delivered_replay_suppresses_only_covered_terminal_events	plain		terminal	kernel-stays		F-013,F-014,F-015,F-017,F-018	pending
-ilium-server/src/ipc/connection.rs	live_broadcast_waits_for_complete_attach_replay	tokio		fleet	adapt-to-plugin-api	plugins/core/fleet	F-023,F-036,F-058,F-107,F-109,F-110,F-113	pending
-ilium-server/src/ipc/connection.rs	live_pane_broadcast_replay_sends_only_missing_bytes_and_attach_stays_full	tokio		fleet	adapt-to-plugin-api	plugins/core/fleet	F-023,F-036,F-058,F-107,F-109,F-110,F-113	pending
+ilium-server/src/ipc/connection.rs	live_broadcast_waits_for_complete_attach_replay	tokio		fleet	kernel-stays	plugins/core/fleet	F-023,F-036,F-058,F-107,F-109,F-110,F-113	pending
+ilium-server/src/ipc/connection.rs	live_pane_broadcast_replay_sends_only_missing_bytes_and_attach_stays_full	tokio		fleet	kernel-stays	plugins/core/fleet	F-023,F-036,F-058,F-107,F-109,F-110,F-113	pending
 ilium-server/src/ipc/connection.rs	newer_attach_snapshot_survives_final_old_trigger_drain	tokio		sessions	kernel-stays		F-075,F-076	pending
-ilium-server/src/ipc/connection.rs	newer_attach_snapshot_survives_queued_old_trigger_broadcast	tokio		fleet	adapt-to-plugin-api	plugins/core/fleet	F-023,F-036,F-058,F-107,F-109,F-110,F-113	pending
-ilium-server/src/ipc/connection.rs	newer_lag_snapshot_survives_retained_old_trigger_broadcast	tokio		fleet	adapt-to-plugin-api	plugins/core/fleet	F-023,F-036,F-058,F-107,F-109,F-110,F-113	pending
+ilium-server/src/ipc/connection.rs	newer_attach_snapshot_survives_queued_old_trigger_broadcast	tokio		fleet	kernel-stays	plugins/core/fleet	F-023,F-036,F-058,F-107,F-109,F-110,F-113	pending
+ilium-server/src/ipc/connection.rs	newer_lag_snapshot_survives_retained_old_trigger_broadcast	tokio		fleet	kernel-stays	plugins/core/fleet	F-023,F-036,F-058,F-107,F-109,F-110,F-113	pending
 ilium-server/src/ipc/connection.rs	newer_visible_selection_cancels_waiting_recovery_admission	tokio		sessions	kernel-stays		F-075,F-076	pending
 ilium-server/src/ipc/connection.rs	non_visible_stream_control_stays_queued_until_recovery_finishes	tokio		sessions	kernel-stays		F-075,F-076	pending
 ilium-server/src/ipc/connection.rs	ordered_journal_event_reaches_the_connection_writer	tokio		tree	kernel-stays		F-001,F-004,F-005,F-006	pending
 ilium-server/src/ipc/connection.rs	partial_overlap_and_gaps_require_journal_recovery	plain		sessions	kernel-stays		F-075,F-076	pending
-ilium-server/src/ipc/connection.rs	terminal_broadcast_before_subscription_is_not_forwarded	tokio		fleet	adapt-to-plugin-api	plugins/core/fleet	F-023,F-036,F-058,F-107,F-109,F-110,F-113	pending
+ilium-server/src/ipc/connection.rs	terminal_broadcast_before_subscription_is_not_forwarded	tokio		fleet	kernel-stays	plugins/core/fleet	F-023,F-036,F-058,F-107,F-109,F-110,F-113	pending
 ilium-server/src/ipc/connection.rs	text_trigger_attach_and_live_broadcast_use_current_authority	tokio		text-triggers	adapt-to-plugin-api	plugins/core/text-triggers	F-056	pending
 ilium-server/src/ipc/connection.rs	text_trigger_lag_repair_then_old_event_cannot_regress_settings	tokio		text-triggers	adapt-to-plugin-api	plugins/core/text-triggers	F-056	pending
 ilium-server/src/ipc/connection.rs	text_trigger_reader_exit_drain_cannot_restore_a_stale_payload	tokio		text-triggers	adapt-to-plugin-api	plugins/core/text-triggers	F-056	pending
