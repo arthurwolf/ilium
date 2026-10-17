@@ -1255,7 +1255,16 @@ mod tests {
         );
         drop(first);
         drop(second);
-        assert!(presenter.try_reserve().is_some());
+        // Dropping the receipts releases their charge on the worker's schedule;
+        // a loaded runner can take longer than the drop itself.
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        while presenter.try_reserve().is_none() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "receipt charge was never released"
+            );
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
         presenter.shutdown().await.unwrap();
         let bytes = bytes.lock().unwrap();
         let text = String::from_utf8_lossy(&bytes);

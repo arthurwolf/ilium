@@ -2415,9 +2415,12 @@ mod tests {
         while !audited {
             for result in parsing.collect() {
                 if let ParseResult::Error { target, message } = result {
+                    // Whether the worker still holds the command in its queue (the
+                    // ordinal audit) or is already publishing it (the cancelled
+                    // publication) depends on thread timing; both release it.
                     audited |= target.pane_id == first_id
-                        && message.contains("ordinal")
-                        && message.contains("bytes");
+                        && ((message.contains("ordinal") && message.contains("bytes"))
+                            || message.contains("cancelled before acknowledgement"));
                 }
             }
             assert!(Instant::now() < deadline, "ordinal audit did not arrive");

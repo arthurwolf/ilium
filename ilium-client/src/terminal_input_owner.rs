@@ -907,6 +907,32 @@ struct InputDriver {
     shared: Arc<Shared>,
     reader: InputReader,
 }
+/// Opens the platform input source. Its first storage reservation can be
+/// refused as `Busy` while another client worker briefly holds the shared
+/// byte budget; that is transient, so retry for a bounded time instead of
+/// failing client startup.
+fn open_native_reader(
+    storage: &Arc<RootNativeStorage>,
+    stop: &StopToken,
+) -> io::Result<NativeInputReader> {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        match NativeInputReader::new(storage.clone()) {
+            Err(error)
+                if Instant::now() < deadline
+                    && !stop.is_stopped()
+                    && error
+                        .get_ref()
+                        .and_then(|inner| inner.downcast_ref::<NativeStorageRefusal>())
+                        .is_some_and(|refusal| refusal.kind == NativeRefusalKind::Busy) =>
+            {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            result => return result,
+        }
+    }
+}
+
 impl InputDriver {
     fn new(shared: Arc<Shared>, factory: InputReaderFactory) -> io::Result<Self> {
         let reader = match factory {
@@ -931,7 +957,7 @@ impl InputDriver {
                     stop: shared.stop.clone(),
                 });
                 InputReader::Native(Some(NativeInputCustody {
-                    reader: NativeInputReader::new(storage.clone())?,
+                    reader: open_native_reader(&storage, &shared.stop)?,
                     admission: storage,
                     _storage: Arc::clone(&shared.storage),
                     _claim: claim,
