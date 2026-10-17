@@ -21,28 +21,40 @@ RESULT = re.compile(r"^test (.+?) \.\.\. (ok|FAILED|ignored)(?:, .*)?$")
 BUILD_FAILURE = re.compile(r"^error(\[E\d+\])?: could not compile `([^`]+)`")
 
 
+RUNNING_BLOCK = re.compile(r"^running \d+ tests?$")
+
+
 def parse_log(path):
-    tests, build_failures = [], []
-    target = crate = None
+    """Collect (crate, target) pairs from `Running`/`Doc-tests` lines and tests grouped by `running N tests`
+    blocks, then pair them in order: ni-build prints test stdout and cargo's stderr as two separate blocks."""
+    targets, blocks, build_failures = [], [], []
     with open(path, errors="replace") as handle:
         for line in handle:
             line = line.rstrip("\n")
             running = RUNNING.match(line)
             if running:
-                target, crate = running.group(1), (running.group(2) or running.group(1))
+                targets.append((running.group(2) or running.group(1), running.group(1)))
                 continue
             doc = DOC_TESTS.match(line)
             if doc:
-                target, crate = "doc-tests", doc.group(1)
+                targets.append((doc.group(1), "doc-tests"))
                 continue
             failure = BUILD_FAILURE.match(line)
             if failure:
                 build_failures.append(failure.group(2))
                 continue
+            if RUNNING_BLOCK.match(line):
+                blocks.append([])
+                continue
             result = RESULT.match(line)
-            if result and target is not None:
+            if result and blocks:
                 status = {"ok": "passed", "FAILED": "failed", "ignored": "ignored"}[result.group(2)]
-                tests.append({"type": "test", "crate": crate, "target": target, "name": result.group(1), "status": status})
+                blocks[-1].append((result.group(1), status))
+    tests = []
+    for index, block in enumerate(blocks):
+        crate, target = targets[index] if index < len(targets) else ("unknown", "unknown")
+        for name, status in block:
+            tests.append({"type": "test", "crate": crate, "target": target, "name": name, "status": status})
     return tests, sorted(set(build_failures))
 
 
