@@ -3352,7 +3352,7 @@ async fn install_progress_monitor(
         .await
         .map_err(|error| error.rejection())?;
     let monitor_id = state.allocate_progress_monitor_id();
-    let progress = ilium_core::PaneProgress::new(
+    let mut progress = ilium_core::PaneProgress::new(
         monitor_id,
         preflight.report,
         preflight.checked_at_unix_millis,
@@ -3363,6 +3363,7 @@ async fn install_progress_monitor(
             error.to_string(),
         )
     })?;
+    progress.timing.probe_interval_millis = Some(duration_millis(interval));
     let registration = crate::progress_monitor::ProgressMonitorRegistration {
         monitor_id,
         pane_id,
@@ -4009,12 +4010,16 @@ pub(crate) async fn restore_persisted_progress_monitor(
         .restored_registration(monitor_id)
         .map_err(|error| error.to_string())?;
     if let Some(preflight) = fresh_preflight {
-        registration.initial_progress = ilium_core::PaneProgress::new(
+        let mut restored = ilium_core::PaneProgress::new(
             monitor_id,
             preflight.report,
             preflight.checked_at_unix_millis,
         )
         .map_err(|error| error.to_string())?;
+        // Keep the start time and rate history across the restore.
+        restored.carry_timing_from(&registration.initial_progress);
+        restored.timing.probe_interval_millis = Some(duration_millis(registration.interval));
+        registration.initial_progress = restored;
     } else if let Some(restoration_failure) = restoration_failure.as_deref() {
         let mut failed_progress = registration.initial_progress.clone();
         failed_progress.monitor_health = ilium_core::ProgressMonitorHealth::Failed {
@@ -4102,6 +4107,10 @@ pub(crate) async fn restore_persisted_progress_monitor(
     });
     state.request_snapshot_save();
     Ok(())
+}
+
+fn duration_millis(duration: std::time::Duration) -> u64 {
+    u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
 }
 
 fn bounded_restoration_failure(message: &str) -> String {
@@ -6924,6 +6933,37 @@ pub(crate) async fn submit_terminal_text_locked(
     source: PromptSubmissionSource,
     input_gate: &std::sync::Arc<tokio::sync::Mutex<()>>,
 ) -> Result<(), String> {
+    submit_terminal_text_with_completion_locked(state, pane_id, text, source, input_gate, None)
+        .await
+}
+
+pub(crate) async fn submit_detection_completion_text_locked(
+    state: &ServerState,
+    pane_id: NodeId,
+    text: &str,
+    input_gate: &std::sync::Arc<tokio::sync::Mutex<()>>,
+    generation: u64,
+    epoch: u64,
+) -> Result<(), String> {
+    submit_terminal_text_with_completion_locked(
+        state,
+        pane_id,
+        text,
+        PromptSubmissionSource::QueuedPrompt,
+        input_gate,
+        Some((generation, epoch)),
+    )
+    .await
+}
+
+async fn submit_terminal_text_with_completion_locked(
+    state: &ServerState,
+    pane_id: NodeId,
+    text: &str,
+    source: PromptSubmissionSource,
+    input_gate: &std::sync::Arc<tokio::sync::Mutex<()>>,
+    completion: Option<(u64, u64)>,
+) -> Result<(), String> {
     {
         let panes = state.panes.read().await;
         let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
@@ -6934,7 +6974,10 @@ pub(crate) async fn submit_terminal_text_locked(
         }
     }
     let body = terminal_text_body(state, pane_id, text).await?;
-    submit_terminal_body_locked(state, pane_id, &body, source, input_gate).await
+    submit_terminal_body_with_completion_locked(
+        state, pane_id, &body, source, input_gate, completion,
+    )
+    .await
 }
 
 /// Frames `text` for the pane's current terminal modes, read from the
@@ -6987,6 +7030,18 @@ pub(crate) async fn submit_terminal_body_locked(
     source: PromptSubmissionSource,
     input_gate: &std::sync::Arc<tokio::sync::Mutex<()>>,
 ) -> Result<(), String> {
+    submit_terminal_body_with_completion_locked(state, pane_id, body, source, input_gate, None)
+        .await
+}
+
+async fn submit_terminal_body_with_completion_locked(
+    state: &ServerState,
+    pane_id: NodeId,
+    body: &[u8],
+    source: PromptSubmissionSource,
+    input_gate: &std::sync::Arc<tokio::sync::Mutex<()>>,
+    completion: Option<(u64, u64)>,
+) -> Result<(), String> {
     let expected_invocation = {
         let panes = state.panes.read().await;
         let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
@@ -7009,10 +7064,19 @@ pub(crate) async fn submit_terminal_body_locked(
             ));
         }
         let input_cancel_generation = *runtime.agent_input_cancel.borrow();
+        if completion.is_some_and(|(generation, epoch)| {
+            runtime.agent_generation != generation
+                || !runtime.detection_completion.is_claimed_current(epoch)
+        }) {
+            return Err(format!(
+                "queued completion changed before input for pane {pane_id:?}"
+            ));
+        }
         AgentInputInvocation {
             generation: runtime.agent_generation,
             process: runtime.agent_process_key.clone(),
             input_cancel_generation,
+            completion_epoch: completion.map(|(_, epoch)| epoch),
         }
     };
     let is_initial_prompt = source == PromptSubmissionSource::InitialAgentPrompt;
@@ -7247,6 +7311,7 @@ pub(crate) struct AgentInputInvocation {
     pub(crate) generation: u64,
     pub(crate) process: Option<AgentProcessKey>,
     pub(crate) input_cancel_generation: u64,
+    pub(crate) completion_epoch: Option<u64>,
 }
 
 /// Provenance retained across admission and the ordered delivery receipt.
@@ -7467,6 +7532,19 @@ where
         else {
             return Err(format!("pane {pane_id:?} has no terminal state"));
         };
+        if expected_invocation
+            .and_then(|expected| expected.completion_epoch)
+            .is_some_and(|epoch| {
+                !runtime.detection_completion.is_claimed_current(epoch)
+                    || !status
+                        .agent_state()
+                        .is_some_and(|agent| agent.turn == ilium_core::AgentTurn::Idle)
+            })
+        {
+            return Err(format!(
+                "queued completion changed before input admission for pane {pane_id:?}"
+            ));
+        }
         let is_automatic_plain_shell =
             matches!(status, PaneStatus::PlainShell) && *title_source == PaneTitleSource::Automatic;
         if let (Some(agent_class), Some(statusline_generation)) = (
@@ -7512,22 +7590,28 @@ where
                 .as_ref()
                 .filter(|observed| observed.same_runtime(runtime))
                 .is_some_and(|observed| observed.shell_owns_terminal() == Some(true));
-        let statusline_receipt = if required_statusline_generation.is_some() {
-            if let Some(screen_changed) = screen_changed {
-                screen_changed.borrow_and_update();
-            }
-            Some(
-                runtime
+        let completion_epoch = expected_invocation.and_then(|expected| expected.completion_epoch);
+        let statusline_receipt =
+            if required_statusline_generation.is_some() || completion_epoch.is_some() {
+                if let Some(screen_changed) = screen_changed {
+                    screen_changed.borrow_and_update();
+                }
+                let receipt = runtime
                     .session
                     .input_handle()
                     .write(bytes)
                     .map_err(|error| {
                         format!("failed to admit status-line input for pane {pane_id:?}: {error}")
-                    })?,
-            )
-        } else {
-            None
-        };
+                    })?;
+                // Input admission and completion validation share the same short
+                // registry guard. No detector transition can slip between them.
+                if completion_epoch.is_some() && submission.is_some() {
+                    runtime.retire_detection_completion();
+                }
+                Some(receipt)
+            } else {
+                None
+            };
         (
             runtime.session.input_handle(),
             shell_foreground,
@@ -10227,6 +10311,7 @@ mod tests {
                     generation: runtime.agent_generation,
                     process: None,
                     input_cancel_generation,
+                    completion_epoch: None,
                 },
             )
         };

@@ -13,11 +13,20 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 
 ## [Unreleased]
 
+### Changed
+- Scanner readers accept the expanded versioned 20-text/10-image benchmark; large-context selection requires five completed questions with measured inputs of at least 200,000 tokens. Previous scanner publications remain readable during rollout.
+
+### Changed
+- Kilo Gateway completions and streams reload the hourly model-scanner base recommendation and its output limit immediately before each HTTP attempt. Missing or unqualified recommendations fail explicitly; local/custom endpoint fixtures retain their supplied model.
+
 ### Added
+- Progress monitors show a timing box right of the gauge: when the task started and an estimated ETA in human time (`13 minutes ago`, `in 3 days, 12 hours`), plus a `stalled` warning after ten probe intervals (at least ten minutes) without progress. Probes may add an optional `eta_seconds` that replaces the pace-based ETA (managed progress instructions version 15). The hover popover adds the start time, last progress time, elapsed or total time, current rate, ETA range, probe health and the owning agent.
 - Blocking failures now leave a caution triangle on affected agents and projects, with concrete messages on hover and in unavailable terminal placeholders. Creation results identify their request, so failed launches stop the matching spinner; unresolved confirmations show an explicit uncertain outcome.
 - Padding settings tab with Disabled, Size dependent (default threshold 200 columns, minimum 11) and Enabled cards, plus a Padding fine-tuning dialog with a live preview. Tree and right panels (terminals and agents, editors, boards) get independent 0 to 3 cell padding per side, optionally linked, saved under `[padding]`. Padding moves only the content inward; toolbars, banners and the progress footer stay full width.
 
 ### Fixed
+- Idle Claude panes no longer appear busy because a truncated custom footer contains an elapsed time and ellipsis. Agent activity indicators now warn when successful background observations are stale; busy or oversized terminal evidence cannot refresh the warning or block checks of other panes.
+- The client no longer freezes after hours of use (create agent, typing and pane contents dead while spinners keep rotating): a terminal pane whose retained state exceeded its 128 MiB cap was deferred forever and blocked the client's event queue; such a pane now compacts its history buffer and drops its oldest history until it fits.
 - The server no longer crashes with a stack overflow when the worktree manager lists retained worktrees or checks whether a closing pane can offer worktree removal: both Git checks now run in their own task instead of nested under the request dispatcher.
 - Background animation no longer flashes a black frame when the worker cannot hand out a frame lease for one tick (busy lock, queued configuration or receipt, revision in flight); the last shown frame of the same size is repainted without receipt credit.
 - Background animation retries a lost worker-lock race once (receipt flush and frame lease) before falling back to repeating the last frame.

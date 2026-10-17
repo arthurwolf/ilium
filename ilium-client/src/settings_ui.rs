@@ -2070,6 +2070,7 @@ fn render_icons_tab(frame: &mut Frame, area: Rect, app: &App, state: &SettingsSt
                 titles_loading: &app.titles_loading,
                 recently_created: &app.recently_created,
                 terminal_activity: &app.terminal_activity,
+                detection_evidence: Some(&app.pane_detection_evidence),
                 focused_pane_id: app.focused_pane_id(),
                 transitions: &app.tree_transitions,
                 agent_identifiers: &app.ui_settings.agent_identifiers,

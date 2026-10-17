@@ -214,6 +214,12 @@ The progress monitor lets a long-running job report percentage and status to the
 
 How it works in one paragraph: the job (or an agent on its behalf) registers a **probe**, a shell command that prints one JSON object describing the job. The **server** runs the probe on an interval, validates the output and updates a footer in that pane. When the job reaches `done` or `error`, the result goes to whoever is waiting for it: an `ilium progress wait` command that is still running gets it as its output and exit status; otherwise Ilium types a short result message into the pane when its composer is ready. After registration nobody needs to poll.
 
+### Timing box and popover
+
+To the right of each gauge, after a dim `│` divider, a box shows how long ago the task **started** and an **ETA** (`started 13 minutes ago · ETA in 8 minutes`). Times use at most two units (`3 days, 12 hours`). The ETA blends the whole-run pace with the pace of the last ten minutes; it reads `ETA —` until progress has been measured. When a running task makes no progress (the percent does not rise and the one-line message does not change) for ten probe intervals, and at least ten minutes, the ETA is replaced by a `⚠ stalled 25 minutes` marker. On narrow panes the box drops the ETA first, then disappears; the bar never shrinks below ten cells for it.
+
+Hovering the footer opens a popover that adds the exact start time, the time of the last progress, elapsed time (total time once the task has finished), the current rate in percent per minute, the ETA range when the recent and whole-run paces disagree, probe health (interval, last check, consecutive failures) and the owning agent and pane.
+
 ### Requirements
 
 - The `ilium progress` commands must be run **from inside an Ilium terminal pane**. Ilium sets `ILIUM_PANE_ID`, `ILIUM_SESSION_NAME` and `ILIUM_SESSION_SOCKET` in each pane's environment and the command uses them to find the right pane and server. Outside a pane the command fails with a message naming the missing variable.
@@ -291,6 +297,7 @@ The probe is any command line. On Linux and macOS Ilium runs it as `$SHELL -c "<
 | `percent` | number | Required, finite, 0 to 100. For `done` Ilium forces exactly 100. |
 | `message` | string | Optional, may be empty, at most 2048 bytes, no control characters. The compact line always shown in the pane footer. |
 | `details` | string | Optional, at most 8192 bytes. Multi-line; newline, carriage return and tab are allowed, other control characters are not. Shown when you hover the footer. |
+| `eta_seconds` | integer | Optional, whole seconds the task still needs, at most 315360000 (ten years). Measured from this report; the footer ETA counts down from it, and the measured pace only supplies the confidence range in the hover popover. Omit it when the task cannot know; Ilium then estimates from the measured pace. |
 | `error` | string | **Required when `status` is `error`** (at most 4096 bytes); **forbidden otherwise**. An empty string counts as absent. |
 
 Unknown fields are rejected, so a typo cannot be silently ignored.

@@ -15,6 +15,8 @@ pub use allocation::AllocationSize;
 pub mod agent_recovery;
 pub mod animation_recommendation;
 pub mod option_compatible_list;
+pub mod progress_timing;
+pub use progress_timing::{EtaEstimate, ProgressRate, ProgressSample, ProgressTiming};
 
 pub use agent_recovery::{AgentAvailability, AgentExitOutcome, AgentProcessKey, AgentRecovery};
 
@@ -120,9 +122,28 @@ pub struct ProgressTaskReport {
     #[serde(default)]
     pub details: String,
     pub error: Option<String>,
+    /// Optional seconds the probe expects the task still needs, measured
+    /// from this report. When present it replaces the pace-based estimate
+    /// of the footer's ETA; the pace still provides the confidence range.
+    #[serde(default)]
+    pub eta_seconds: Option<u64>,
 }
 
+/// Longest ETA a probe may report: ten years, far beyond any real task but
+/// small enough that millisecond arithmetic cannot overflow.
+pub const MAXIMUM_PROGRESS_ETA_SECONDS: u64 = 315_360_000;
+
 impl ProgressTaskReport {
+    /// Attaches the probe's own estimate of the seconds still needed.
+    pub fn with_eta_seconds(
+        mut self,
+        eta_seconds: Option<u64>,
+    ) -> Result<Self, ProgressValidationError> {
+        self.eta_seconds = eta_seconds;
+        self.validate()?;
+        Ok(self)
+    }
+
     /// Constructs the canonical report. `done` is normalized to exactly 100%;
     /// every other invalid value is rejected instead of silently clamped.
     pub fn new(
@@ -144,6 +165,7 @@ impl ProgressTaskReport {
             message,
             details,
             error,
+            eta_seconds: None,
         };
         if report.error.as_deref() == Some("") {
             report.error = None;
@@ -167,6 +189,14 @@ impl ProgressTaskReport {
             true,
         )?;
         validate_details(&self.details)?;
+        if self
+            .eta_seconds
+            .is_some_and(|seconds| seconds > MAXIMUM_PROGRESS_ETA_SECONDS)
+        {
+            return Err(ProgressValidationError::InvalidTiming(format!(
+                "eta_seconds must be at most {MAXIMUM_PROGRESS_ETA_SECONDS}"
+            )));
+        }
         match (&self.status, &self.error) {
             (ProgressTaskStatus::Error, Some(error)) => {
                 validate_bounded_text("error", error, MAXIMUM_PROGRESS_ERROR_BYTES, false)
@@ -187,6 +217,10 @@ pub struct PaneProgress {
     pub report: ProgressTaskReport,
     pub monitor_health: ProgressMonitorHealth,
     pub last_observed_unix_millis: u64,
+    /// Start, last-progress and rate facts; unknown on monitors restored from
+    /// snapshots that predate them.
+    #[serde(default)]
+    pub timing: ProgressTiming,
     /// Whether a human has seen this monitor's outcome. Meaningful only once
     /// the task is terminal or observation has failed; it is the task-result
     /// counterpart of an agent's unread `Done` and is cleared by the same
@@ -210,15 +244,32 @@ impl PaneProgress {
         report: ProgressTaskReport,
         last_observed_unix_millis: u64,
     ) -> Result<Self, ProgressValidationError> {
+        let mut timing = ProgressTiming::started(last_observed_unix_millis, report.percent);
+        timing.set_reported_eta(last_observed_unix_millis, report.eta_seconds);
         let progress = Self {
             monitor_id,
             report,
             monitor_health: ProgressMonitorHealth::Healthy,
             last_observed_unix_millis,
+            timing,
             attention: ProgressAttention::Unread,
         };
         progress.validate()?;
         Ok(progress)
+    }
+
+    /// Continues `previous`'s timing history with this newer observation of
+    /// the same task, so start time and rate samples survive each probe.
+    pub fn carry_timing_from(&mut self, previous: &PaneProgress) {
+        let message_changed = previous.report.message != self.report.message;
+        let mut timing = previous.timing.clone();
+        timing.observe(
+            self.last_observed_unix_millis,
+            self.report.percent,
+            message_changed,
+        );
+        timing.set_reported_eta(self.last_observed_unix_millis, self.report.eta_seconds);
+        self.timing = timing;
     }
 
     /// A monitor that still observes a task which has not finished: the
@@ -238,6 +289,9 @@ impl PaneProgress {
             return Err(ProgressValidationError::InvalidMonitorId);
         }
         self.report.validate()?;
+        self.timing
+            .validate()
+            .map_err(ProgressValidationError::InvalidTiming)?;
         self.monitor_health.validate()
     }
 
@@ -258,6 +312,8 @@ pub enum ProgressValidationError {
     MissingTaskError,
     #[error("only error status may include task error detail")]
     UnexpectedTaskError,
+    #[error("progress timing is invalid: {0}")]
+    InvalidTiming(String),
     #[error("monitor failure count must be positive")]
     InvalidMonitorFailureCount,
     #[error("{field} must not be empty")]

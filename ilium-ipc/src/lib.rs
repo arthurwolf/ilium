@@ -743,6 +743,8 @@ mod tests {
                 detection_evidence: vec![(
                     NodeId(2),
                     PaneDetectionEvidence {
+                        observed_at_unix_millis: 1_700_000_000_000,
+                        stale_after_millis: 30_000,
                         applied_status: PaneStatus::PlainShell,
                         identity: Some(DetectionReason {
                             rule: "no registered agent process".into(),
@@ -1042,6 +1044,8 @@ mod tests {
             ServerEvent::PaneDetectionEvidenceChanged {
                 pane_id: NodeId(2),
                 evidence: PaneDetectionEvidence {
+                    observed_at_unix_millis: 1_700_000_000_000,
+                    stale_after_millis: 30_000,
                     applied_status: PaneStatus::from_activity(
                         AgentClass::Codex,
                         AgentActivity::Idle,
@@ -1064,6 +1068,8 @@ mod tests {
                 pane_id: NodeId(2),
                 status: PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Working, None),
                 evidence: PaneDetectionEvidence {
+                    observed_at_unix_millis: 1_700_000_000_000,
+                    stale_after_millis: 30_000,
                     applied_status: PaneStatus::from_activity(
                         AgentClass::Codex,
                         AgentActivity::Working,

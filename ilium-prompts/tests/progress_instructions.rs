@@ -102,3 +102,11 @@ fn harness_background_mode_is_not_a_substitute_for_a_monitor() {
     );
     assert!(text.contains("`run_in_background`"));
 }
+
+#[test]
+fn probe_contract_offers_an_optional_whole_second_eta() {
+    let text = instructions();
+    for required in ["`eta_seconds`", "whole-second", "omit it rather than guess"] {
+        assert!(text.contains(required), "missing {required}");
+    }
+}

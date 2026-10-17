@@ -1181,7 +1181,7 @@ impl Job for ParserJob {
             let result: Result<(), String> = (|| {
                 if command.publication_pending {
                     // A completed mutation must only retry immutable publication.
-                    return publish_command(&shared, &engines, &mut command, &context);
+                    return publish_command(&shared, &mut engines, &mut command, &context);
                     // Preserve its exact ordinal, cursor, and saved semantic evidence.
                 }
                 if let PaneCommand::Register { rows, cols, budget } = &command.body {
@@ -1406,7 +1406,7 @@ impl Job for ParserJob {
                 }
                 command.evidence = evidence; // Keep the completed operation's bounded semantic samples while its snapshot waits.
                 command.publication_pending = true; // Every retry after this point must skip all mutable terminal operations.
-                publish_command(&shared, &engines, &mut command, &context) // Attempt publication once and return control to the owner on pressure.
+                publish_command(&shared, &mut engines, &mut command, &context) // Attempt publication once and return control to the owner on pressure.
             })();
             if voluntarily_yielded {
                 // A consumed byte quantum retains its original command without reporting memory pressure.
@@ -1558,7 +1558,7 @@ fn publish_progress_preview(shared: &Shared, engine: &Engine, target: &PaneTarge
 }
 fn publish_command(
     shared: &Shared,
-    engines: &HashMap<NodeId, Engine>,
+    engines: &mut HashMap<NodeId, Engine>,
     command: &mut Command,
     context: &JobContext,
 ) -> Result<(), String> {
@@ -1567,8 +1567,10 @@ fn publish_command(
         return Err("terminal publication cancelled before acknowledgement".into());
     }
     let engine = engines
-        .get(&command.target.pane_id)
+        .get_mut(&command.target.pane_id)
         .ok_or("terminal state disappeared")?; // The deferred command fences later mutations of this engine.
+    engine.state.fit_to_allocation_limit(MAX_STATE_BYTES); // Shed oldest history now: a deferral is never retried and would stall every pane.
+    let engine = &*engine;
     let bytes = engine.state.retained_allocation_bytes(); // Charge the conservative immutable allocation before cloning it.
     if bytes > MAX_STATE_BYTES {
         // Preserve the independent per-generation bound in both parser modes.

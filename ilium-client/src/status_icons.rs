@@ -38,6 +38,48 @@ pub const TASK_PROGRESS_FRAMES: [&str; TASK_PROGRESS_BUCKETS as usize + 1] = [
     "⣀⣀", "⣄⣀", "⣆⣀", "⣇⣀", "⣧⣀", "⣷⣀", "⣿⣀", "⣿⣄", "⣿⣆", "⣿⣇", "⣿⣧", "⣿⣷", "⣿⣿",
 ];
 
+/// Presentation freshness is separate from the server's semantic agent state.
+/// A wall clock is explicit so attach replay and expiry can be tested without sleeping.
+pub(crate) fn detection_freshness_warning(
+    status: &PaneStatus,
+    evidence: Option<&ilium_ipc::PaneDetectionEvidence>,
+    current_unix_millis: u64,
+) -> Option<String> {
+    status.agent_state()?;
+    let Some(evidence) = evidence.filter(|evidence| &evidence.applied_status == status) else {
+        return Some("Activity has not been checked for this agent state yet. The displayed state is unconfirmed; Ilium is waiting for a successful server check.".to_string());
+    };
+    let Some(age) = current_unix_millis.checked_sub(evidence.observed_at_unix_millis) else {
+        return Some("The last activity check has a future timestamp. Activity freshness is unknown until the server clock catches up or a valid check arrives.".to_string());
+    };
+    if evidence.stale_after_millis == 0 || age >= evidence.stale_after_millis {
+        return Some(format!(
+            "Activity check is stale: last successful check {} seconds ago; freshness limit {} seconds. The last known activity is retained, but may have changed. Reconnecting does not refresh this check.",
+            age / 1000,
+            evidence.stale_after_millis / 1000,
+        ));
+    }
+    None
+}
+
+/// Redraw only when an observation crosses its expiry, including on a silent
+/// maintenance tick. Receipt time never participates in the decision.
+pub(crate) fn detection_freshness_expired_since(
+    evidence: &std::collections::HashMap<ilium_core::NodeId, ilium_ipc::PaneDetectionEvidence>,
+    previous_unix_millis: u64,
+    current_unix_millis: u64,
+) -> bool {
+    current_unix_millis < previous_unix_millis
+        || evidence.values().any(|evidence| {
+            let expiry = evidence
+                .observed_at_unix_millis
+                .saturating_add(evidence.stale_after_millis);
+            (previous_unix_millis < expiry && expiry <= current_unix_millis)
+                || (previous_unix_millis < evidence.observed_at_unix_millis
+                    && evidence.observed_at_unix_millis <= current_unix_millis)
+        })
+}
+
 /// A hover explanation: a bold one-line header and a longer description.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StatusExplanation {
@@ -1302,5 +1344,49 @@ mod tests {
         assert!(text.contains("Goal paused�[31m because of quota"));
         assert!(text.contains("retained for the same PID"));
         assert!(!text.contains('\u{1b}'));
+    }
+}
+
+#[cfg(test)]
+mod detection_freshness_tests {
+    use super::*;
+
+    #[test]
+    fn detection_freshness_explains_age_unknown_and_clock_errors_without_changing_state() {
+        let status = PaneStatus::from_activity(
+            ilium_core::AgentClass::Codex,
+            ilium_core::AgentActivity::Working,
+            None,
+        );
+        let mut evidence = ilium_ipc::PaneDetectionEvidence {
+            applied_status: status.clone(),
+            observed_at_unix_millis: 1_000_000,
+            stale_after_millis: 30_000,
+            identity: None,
+            activity: None,
+            goal: None,
+        };
+        assert!(detection_freshness_warning(&status, Some(&evidence), 1_029_999).is_none());
+        let stale = detection_freshness_warning(&status, Some(&evidence), 1_030_000).unwrap();
+        assert!(stale.contains("30 seconds ago") && stale.contains("limit 30 seconds"));
+        assert!(detection_freshness_warning(&status, None, 1_000_000)
+            .unwrap()
+            .contains("not been checked"));
+        assert!(
+            detection_freshness_warning(&status, Some(&evidence), 999_999)
+                .unwrap()
+                .contains("future timestamp")
+        );
+        evidence.applied_status = PaneStatus::PlainShell;
+        assert!(
+            detection_freshness_warning(&status, Some(&evidence), 1_000_000)
+                .unwrap()
+                .contains("not been checked")
+        );
+        assert!(detection_freshness_warning(&PaneStatus::PlainShell, None, 1_000_000).is_none());
+        assert!(
+            detection_freshness_warning(&PaneStatus::Editor { dirty: false }, None, 1_000_000)
+                .is_none()
+        );
     }
 }

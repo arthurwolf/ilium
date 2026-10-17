@@ -144,6 +144,8 @@ pub(crate) struct Ledger {
     used: [AtomicUsize; DIMENSIONS],
     admission: Mutex<()>,
     released: Option<Arc<dyn Fn() + Send + Sync>>,
+    // Lives with every debit, including retained results and native workers.
+    _parent_capacity: Option<WorkerAdmission>,
 }
 
 impl Ledger {
@@ -153,6 +155,7 @@ impl Ledger {
             used: std::array::from_fn(|_| AtomicUsize::new(0)),
             admission: Mutex::new(()),
             released: None,
+            _parent_capacity: None,
         }
     }
 
@@ -275,6 +278,29 @@ impl QuotaGroup {
         Self {
             ledger: Arc::new(ledger),
         }
+    }
+
+    /// Bootstrap an isolated bank with guaranteed capacity carved from this
+    /// root's existing worker storage. The child ledger owns the parent lease:
+    /// shutdown cannot release it while any child debit or native worker lives.
+    /// Input/result bytes are subaccounts of the reserved storage, not extra
+    /// process allowances. Child worker slots are also reserved on the parent.
+    pub fn reserved_partition(&self, limits: QuotaLimits) -> Result<Self, RejectReason> {
+        let bytes = limits
+            .input_bytes
+            .checked_add(limits.result_bytes)
+            .and_then(|bytes| bytes.checked_add(limits.worker_bytes))
+            .ok_or(RejectReason::InvalidCost)?;
+        if bytes == 0 || limits.worker_threads == 0 {
+            return Err(RejectReason::InvalidCost);
+        }
+        let capacity = self.reserve_external_worker(limits.worker_threads, bytes)?;
+        let mut ledger = Ledger::new(limits);
+        ledger.released = self.ledger.released.clone();
+        ledger._parent_capacity = Some(capacity);
+        Ok(Self {
+            ledger: Arc::new(ledger),
+        })
     }
 
     /// Charge an existing worker and its native library threads. Keep this
@@ -601,6 +627,46 @@ mod storage_root_tests {
             worker_bytes: 4096,
         })
     }
+    #[test]
+    fn reserved_partition_capacity_follows_last_child_debit() {
+        let parent = quota();
+        let child = parent
+            .reserved_partition(QuotaLimits {
+                clients: 1,
+                jobs: 1,
+                service_jobs: 0,
+                input_bytes: 256,
+                result_bytes: 128,
+                worker_threads: 1,
+                worker_bytes: 512,
+            })
+            .unwrap();
+        assert_eq!(parent.snapshot().worker_bytes, 896);
+        assert_eq!(parent.snapshot().worker_threads, 1);
+        let retained = child.reserve_external_storage(512).unwrap();
+        drop(child);
+        assert_eq!(parent.snapshot().worker_bytes, 896);
+        assert!(matches!(
+            parent.reserve_external_worker(1, 1),
+            Err(RejectReason::WorkerLimit)
+        ));
+        drop(retained);
+        assert_eq!(parent.snapshot().worker_bytes, 0);
+        assert_eq!(parent.snapshot().worker_threads, 0);
+    }
+
+    #[test]
+    fn reserved_partition_rejects_overflow_without_debit() {
+        let parent = quota();
+        let mut limits = parent.snapshot().limits;
+        limits.input_bytes = usize::MAX;
+        assert!(matches!(
+            parent.reserved_partition(limits),
+            Err(RejectReason::InvalidCost)
+        ));
+        assert_eq!(parent.snapshot().worker_bytes, 0);
+    }
+
     #[test]
     fn original_storage_admission_recognizes_cloned_root() {
         let original = quota();

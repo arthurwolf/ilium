@@ -417,7 +417,12 @@ fn draw_progress_tooltip(frame: &mut Frame, app: &App) {
     let Some(progress) = app.progress_monitor_at(pane_id, progress_area, anchor) else {
         return;
     };
-    let content = crate::progress_bar::details_tooltip(progress);
+    let owner = app.progress_owner_label(pane_id);
+    let content = crate::progress_bar::details_tooltip(
+        progress,
+        app.progress_display_now_unix_millis(),
+        owner.as_deref(),
+    );
     crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, &content);
 }
 
@@ -545,6 +550,23 @@ fn status_tooltip_content(
     // The tree row shows one glyph for all of the pane's monitors; explain
     // the monitor that glyph represents.
     let progress = ilium_core::representative_progress(progress_monitors);
+    if slot == StatusSlot::Now {
+        if let Some(warning) = crate::status_icons::detection_freshness_warning(
+            status,
+            app.pane_detection_evidence.get(&node_id),
+            crate::scheduled_input::unix_millis_now(),
+        ) {
+            let last_activity = now_explanation(signals.now).map_or(
+                "Not shown by the current monitoring preference",
+                |explanation| explanation.title,
+            );
+            return Some(crate::status_icons::TooltipContent {
+                title: "Agent activity needs a fresh check".to_string(),
+                body: format!("{warning} Last known activity: {last_activity}."),
+                reason: Some("Why: observation freshness affects only this display; the server's activity, goal and unread completion are retained.".to_string()),
+            });
+        }
+    }
     let explanation = match slot {
         StatusSlot::Identity => Some(identity_explanation(status)),
         StatusSlot::Objective => objective_explanation(signals.objective),
@@ -771,6 +793,7 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) -> Option<Posit
             },
             terminal_activity_elapsed_ms: app.started_at.elapsed().as_millis(),
             current_unix_millis: crate::scheduled_input::unix_millis_now(),
+            detection_evidence: Some(&app.pane_detection_evidence),
             project_name: app.project_name.as_deref(),
             project_icon: app.project_icon.as_deref(),
             is_project_name_loading: app.is_project_name_loading,
@@ -2806,6 +2829,7 @@ fn draw_pane_runtime(
                 &app.visible_progress_monitors(viewport.pane_id),
                 app.ui_settings.progress_max_lines.into(),
                 app.ui_settings.color_scheme,
+                app.progress_display_now_unix_millis(),
             );
         }
     }
@@ -3734,16 +3758,37 @@ mod tests {
             .tree
             .add_pane(group, "waiting agent", PaneContentKind::Terminal)
             .unwrap();
-        app.tree
-            .set_pane_status(
-                pane_id,
-                PaneStatus::from_activity(
-                    AgentClass::Codex,
-                    AgentActivity::WaitingApproval,
-                    Some(GoalState::Blocked),
-                ),
-            )
-            .unwrap();
+        let status = PaneStatus::from_activity(
+            AgentClass::Codex,
+            AgentActivity::WaitingApproval,
+            Some(GoalState::Blocked),
+        );
+        app.tree.set_pane_status(pane_id, status.clone()).unwrap();
+        // This test exercises the fresh approval projection; unchecked agents
+        // intentionally display a freshness warning instead of live approval.
+        app.pane_detection_evidence.insert(
+            pane_id,
+            ilium_ipc::PaneDetectionEvidence {
+                applied_status: status,
+                observed_at_unix_millis: crate::scheduled_input::unix_millis_now(),
+                stale_after_millis: 30_000,
+                identity: None,
+                activity: Some(ilium_ipc::DetectionReason {
+                    rule: "approval prompt".to_string(),
+                    observed: Some(
+                        include_str!(
+                            "../../ilium-detect/tests/fixtures/codex_awaiting_approval.txt"
+                        )
+                        .lines()
+                        .next()
+                        .unwrap()
+                        .to_string(),
+                    ),
+                    context: "Captured Codex approval fixture".to_string(),
+                }),
+                goal: None,
+            },
+        );
         app.ui_settings.agent_monitoring_mode =
             crate::agent_monitoring::AgentMonitoringMode::Attention;
         app.set_screen_area(Rect::new(0, 0, 100, 24));
@@ -3788,7 +3833,12 @@ mod tests {
         let rendered = rendered.split_whitespace().collect::<Vec<_>>().join(" ");
         assert!(rendered.contains("Needs your approval"));
         assert!(rendered.contains("Attention selection rule:"));
-        assert!(rendered.contains("Attention priority 1:"));
+        // Terminal wrapping can split a word inside the provenance text.
+        let unwrapped: String = rendered
+            .chars()
+            .filter(|ch| !ch.is_whitespace() && *ch != '│')
+            .collect();
+        assert!(unwrapped.contains("Attentionpriority1:"), "{rendered}");
     }
 
     #[test]
