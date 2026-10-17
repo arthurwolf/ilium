@@ -70,7 +70,20 @@ fn feature_069_the_leader_gap_is_at_least_five_cells_or_blank() {
     for columns in [24u16, 40, 80, 120] {
         let row = branch_rows(&mut host, columns).remove(0);
         let dots = row.chars().filter(|character| *character == '…').count();
-        assert!(dots == 0 || dots >= 3, "{columns}: {row}");
+        let gap = row
+            .strip_prefix("🌿 fix-auth")
+            .and_then(|rest| rest.strip_suffix("clean"))
+            .unwrap_or_else(|| panic!("{columns}: {row}"));
+        if dots == 0 {
+            assert!(gap.chars().all(|c| c == ' '), "{columns}: {row}");
+        } else {
+            // one blank, the dots, one blank; a gap under five cells stays blank
+            assert_eq!(gap, format!(" {} ", "…".repeat(dots)), "{columns}: {row}");
+            assert!(gap.chars().count() >= 5, "{columns}: {row}");
+        }
+        if columns >= 80 {
+            assert!(dots > 0, "{columns}: {row}");
+        }
     }
 }
 
@@ -173,9 +186,11 @@ fn port_069_a_long_branch_is_elided_in_the_middle_keeping_prefix_and_suffix_with
     }));
     host.settle();
     let row = branch_rows(&mut host, 40).remove(0);
-    assert!(row.contains("🌿 agent/"), "{row}");
-    assert!(row.contains('…'));
-    assert!(row.contains("suffix"), "{row}");
+    let prefix = row.find("🌿 agent/").unwrap_or_else(|| panic!("{row}"));
+    let ellipsis = row.find('…').unwrap_or_else(|| panic!("{row}"));
+    let suffix = row.find("suffix").unwrap_or_else(|| panic!("{row}"));
+    assert!(prefix < ellipsis && ellipsis < suffix, "{row}");
+    assert!(row.ends_with("clean"), "{row}");
     assert!(row.chars().count() <= 40, "{row}");
 }
 
@@ -196,8 +211,12 @@ fn port_069_the_live_checkout_branch_wins_over_the_recorded_one_and_detached_hea
         host.settle();
         branch_rows(host, 80).remove(0)
     };
-    assert!(send(&mut host, json!({"branch": "agent/switched"})).contains("agent/switched"));
-    assert!(send(&mut host, json!({"branch": null, "detached": true})).contains("detached HEAD"));
+    let switched = send(&mut host, json!({"branch": "agent/switched"}));
+    assert!(switched.contains("🌿 agent/switched"), "{switched}");
+    assert!(!switched.contains("agent/original"), "{switched}");
+    let detached = send(&mut host, json!({"branch": null, "detached": true}));
+    assert!(detached.contains("🌿 detached HEAD"), "{detached}");
+    assert!(!detached.contains("agent/original"), "{detached}");
     assert!(send(
         &mut host,
         json!({"branch": null, "detached": true, "missing": true})
@@ -234,10 +253,14 @@ fn feature_069_the_probe_runs_git_and_not_a_shell() {
     let mut host = server_host();
     create_worktree(&mut host, &json!({"branch": "fix-auth"}));
     host.deliver_one(pane_created(14, "fix-auth"));
+    host.settle();
+    let before = host.process().calls().len();
     host.advance_clock(10_000);
     host.settle();
     let calls = host.process().calls();
-    assert!(calls.iter().skip(1).all(|call| call.program == "git"));
+    let probes = &calls[before..];
+    assert!(!probes.is_empty(), "a probe ran");
+    assert!(probes.iter().all(|call| call.program == "git"));
 }
 
 /// REQ: F-069
@@ -249,9 +272,14 @@ fn feature_069_at_most_two_probes_run_at_the_same_time() {
         host.deliver_one(pane_created(100 + index, &format!("b{index}")));
     }
     host.settle();
+    let before = host.process().calls().len();
     host.advance_clock(10_000);
     host.settle();
-    assert!(host.process().max_concurrent() <= 2);
+    assert!(
+        host.process().calls().len() - before >= 5,
+        "a probe per worktree"
+    );
+    assert_eq!(host.process().max_concurrent(), 2);
 }
 
 /// REQ: F-069
@@ -272,7 +300,7 @@ fn feature_069_a_probe_publishes_the_changed_topic_with_the_state_of_the_worktre
     );
     let last: Value = serde_json::from_str(published.last().expect("a publication")).expect("JSON");
     assert!(last["path"].as_str().expect("path").ends_with("fix-auth"));
-    assert!(last["state"].is_string());
+    assert_eq!(last["state"], "clean");
 }
 
 proptest! {

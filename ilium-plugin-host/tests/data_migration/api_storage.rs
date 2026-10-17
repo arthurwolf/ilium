@@ -223,14 +223,9 @@ fn lif_118_crash_in_the_middle_of_a_batch_leaves_the_previous_values() {
     let restarted = rig.restart_server(&server);
     restarted.activate(NOTES);
     let data = dump(&restarted, Bucket::Global);
-    assert!(
-        data.len() == 1 || data.len() == 50,
-        "all or none, found {}",
-        data.len()
-    );
-    if data.len() == 1 {
-        assert_eq!(data.get("k0000"), Some(&bytes("old")));
-    }
+    // LIF-118: a crash before the return leaves the previous value, none of the batch
+    assert_eq!(data.len(), 1, "found {:?}", data.keys().collect::<Vec<_>>());
+    assert_eq!(data.get("k0000"), Some(&bytes("old")));
 }
 
 /// REQ: LIF-119

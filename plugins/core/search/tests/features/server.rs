@@ -266,13 +266,12 @@ fn search_009_job_progress_does_not_produce_an_answer_before_the_job_completes()
     let request = host.jobs().list()[0].request;
     host.jobs().progress(request, 50.0, "half");
     host.settle();
-    assert!(file_hits(
-        &result_messages(&host.submitted())
-            .into_iter()
-            .flat_map(|(_, payload)| payload["hits"].as_array().cloned().unwrap_or_default())
-            .collect::<Vec<_>>()
-    )
-    .is_empty());
+    // Progress alone sends no result message at all, not even an empty answer.
+    assert!(result_messages(&host.submitted()).is_empty());
+    drive_jobs(&mut host);
+    let answers = result_messages(&host.submitted());
+    assert_eq!(answers.len(), 1, "{answers:?}");
+    assert_eq!(answers[0].1["revision"], 1);
 }
 
 /// REQ: F-009
@@ -307,7 +306,7 @@ fn port_search_workers_a_second_query_while_a_scan_runs_returns_at_once_and_leav
         .into_iter()
         .filter(|job| job.kind == "scan-files")
         .collect();
-    assert!(live.len() <= 2, "{live:?}");
+    assert_eq!(live.len(), 1, "{live:?}");
     drive_jobs(&mut host);
     let answers: Vec<_> = result_messages(&host.submitted());
     let revisions_with_hits: Vec<u64> = answers
@@ -345,10 +344,9 @@ fn port_search_workers_a_cancelled_scan_gives_exactly_one_answer_without_hits() 
     }
     host.settle();
     let answers = result_messages(&host.submitted());
-    assert!(answers.len() <= 1, "{answers:?}");
-    assert!(answers
-        .iter()
-        .all(|(_, payload)| payload["hits"] == serde_json::json!([])));
+    assert_eq!(answers.len(), 1, "{answers:?}");
+    assert_eq!(answers[0].1["revision"], 1);
+    assert_eq!(answers[0].1["hits"], serde_json::json!([]));
 }
 
 /// REQ: F-009, PORT:ilium-client/src/search_workers.rs::oversize_capture_is_rejected_before_any_job_is_published

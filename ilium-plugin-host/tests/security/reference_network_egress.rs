@@ -242,19 +242,19 @@ fn sec_071_bare_star_http_grant_is_refused_with_manifest_grant_wildcard() {
 fn sec_071_ipv6_literal_grant_is_a_valid_argument() {
     let manifest = server_manifest(json!({ "grants": ["http:[2001:db8::1]"] }));
     let codes = manifest_error_codes(&manifest);
-    assert!(
-        !codes
-            .iter()
-            .any(|code| code == "manifest.grant-wildcard" || code == "manifest.grant-invalid"),
-        "{codes:?}"
-    );
+    assert!(codes.is_empty(), "{codes:?}");
 }
 
 /// REQ: SEC-074
 #[test]
 fn sec_074_localhost_without_a_port_is_refused_at_validation() {
     let manifest = server_manifest(json!({ "grants": ["http:localhost"] }));
-    assert!(!manifest_error_codes(&manifest).is_empty());
+    // manual does not pin the code for a port-less localhost grant; it is a grant-syntax error.
+    let codes = manifest_error_codes(&manifest);
+    assert!(
+        codes.iter().any(|code| code == "manifest.grant-invalid"),
+        "{codes:?}"
+    );
 }
 
 /// REQ: SEC-074
@@ -488,10 +488,8 @@ fn sec_077_a_plugin_has_no_way_to_disable_verification() {
     request["insecure"] = json!(true);
     request["ca"] = json!("-----BEGIN CERTIFICATE-----");
     let result = rig.fetch(request);
-    assert!(
-        result.is_err(),
-        "unknown fields must not switch verification off"
-    );
+    // verification stays on, so the failing certificate still ends in network/tls.
+    assert_refused(&result, ErrorCode::Network, "tls");
 }
 
 /// REQ: SEC-078
@@ -558,7 +556,13 @@ fn sec_078_plugin_cannot_set_or_read_proxy_settings() {
         "ilium:host/settings.set-json",
         json!({ "patch": "{\"proxy\":\"http://evil:1\"}" }),
     );
-    assert!(set.is_err() || rig.net.seen().is_empty());
+    // manual does not pin the error code for a proxy write; it only requires a refusal.
+    assert!(set.is_err(), "a plugin must not be able to set a proxy");
+    rig.net.dns("example.com", &[PUBLIC_ADDRESS]);
+    rig.net
+        .serve("https://example.com/", FakeResponse::ok(b"p".to_vec()));
+    rig.get("https://example.com/", &[]).expect("fetch");
+    assert_eq!(rig.net.seen().last().expect("seen").via_proxy, None);
     let read = rig
         .value("ilium:host/settings.get-json", json!({}))
         .expect("own settings");
@@ -620,6 +624,7 @@ fn sec_079_the_host_never_adds_a_cookie() {
     );
     rig.get("https://example.com/", &[]).expect("first");
     rig.get("https://example.com/", &[]).expect("second");
+    assert_eq!(rig.net.seen().len(), 2);
     assert!(rig.net.seen().iter().all(|seen| !seen
         .headers
         .iter()

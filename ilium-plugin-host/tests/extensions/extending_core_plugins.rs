@@ -345,6 +345,7 @@ fn sec_300_replacement_inherits_no_grants_of_the_replaced_plugin() {
     );
     let replaced = world.granted(SEARCH);
     let granted = world.granted(REPLACEMENT);
+    assert!(!replaced.is_empty(), "the replaced plugin holds grants");
     assert!(
         replaced
             .iter()
@@ -358,6 +359,7 @@ fn sec_300_replacement_inherits_no_grants_of_the_replaced_plugin() {
 fn sec_300_replaced_plugins_contributions_to_other_points_do_not_move() {
     let mut world = ExtWorld::with_core_plugins();
     let before = world.contributions_of(SEARCH);
+    assert!(!before.is_empty(), "the replaced plugin has contributions");
     assert_eq!(
         diag_code(&install_replacement(
             &mut world,
@@ -463,7 +465,7 @@ fn sec_303_replacement_keeps_its_own_plugin_id_and_serves_the_core_surface_ids()
 fn sec_303_replacement_may_not_use_the_ilium_prefix_unless_bundled() {
     let mut world = ExtWorld::with_core_plugins();
     let result = install_replacement(&mut world, "ilium.fake.search", SEARCH, Tier::T2, shape());
-    assert!(result.is_err());
+    assert_eq!(diag_code(&result), "manifest.id-reserved");
 }
 
 /// REQ: SEC-303
@@ -483,6 +485,7 @@ fn sec_303_replacement_commands_carry_a_t2_badge_in_the_palette() {
     world.set_enabled(REPLACEMENT, true);
     world.answer_prompt(true);
     let labels = world.palette_labels_of(REPLACEMENT);
+    assert!(!labels.is_empty(), "the replacement has palette commands");
     assert!(
         labels.iter().all(|label| label.contains("T2")),
         "{labels:?}"
@@ -557,22 +560,37 @@ fn sec_304_high_risk_contributions_are_suspended_until_the_user_confirms_for_the
 #[test]
 fn sec_304_plugins_screen_lists_contributors_as_now_sending_to_the_replacement() {
     let mut world = ExtWorld::with_core_plugins();
+    let contributor = json!({
+        "id": "com.example.guard", "exports": ["hook-handler"],
+        "capabilities": {"server": ["extensions.contribute:ilium.core.terminal/before-send-input", "terminal.read-screen"]},
+        "contributes": {"extensions": [ext_handler("ilium.core.terminal/before-send-input", "g", 50, "h")]}
+    });
+    assert_eq!(
+        diag_code(&world.install(Tier::T2, contributor, vec![("h".to_owned(), pass(1))])),
+        "ok"
+    );
     assert_eq!(
         diag_code(&install_replacement(
             &mut world,
-            REPLACEMENT,
-            SEARCH,
+            "com.example.term",
+            "ilium.core.terminal",
             Tier::T1,
             shape()
         )),
         "ok"
     );
-    world.set_enabled(REPLACEMENT, true);
+    world.set_enabled("com.example.term", true);
     world.answer_prompt(true);
-    assert!(world
-        .plugins_screen_lines()
+    let lines = world.plugins_screen_lines();
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains("Now sending to") && line.contains("com.example.term")),
+        "{lines:?}"
+    );
+    assert!(lines
         .iter()
-        .all(|line| !line.contains("Now sending to") || line.contains(REPLACEMENT)));
+        .all(|line| !line.contains("Now sending to") || line.contains("com.example.term")));
 }
 
 /// REQ: SEC-305
@@ -694,6 +712,7 @@ fn ext_054_records_written_by_a_log_sinks_handler_start_no_new_chain() {
     world.advance_ms(300);
     world.settle();
     let after_first = world.chains_started(LOG_SINKS);
+    assert_eq!(after_first, 1, "the first warn record ran one chain");
     world.advance_ms(600);
     world.settle();
     assert_eq!(
@@ -720,6 +739,10 @@ fn ext_054_extension_records_about_log_sinks_handlers_are_not_delivered_to_log_s
     world.advance_ms(300);
     world.settle();
     let delivered = world.log_records_delivered_to(LOG_SINKS);
+    assert!(
+        delivered.iter().any(|record| record.contains("first")),
+        "the ordinary record is delivered: {delivered:?}"
+    );
     assert!(
         delivered
             .iter()
@@ -845,6 +868,10 @@ fn ext_056_restore_is_called_after_before_restore_completes_and_before_panes_res
         .position(|name| name == "before-restore-completed");
     let restore = order.iter().position(|name| name == "section-restore");
     let respawn = order.iter().position(|name| name == "panes-respawn");
+    assert!(
+        before.is_some() && restore.is_some() && respawn.is_some(),
+        "{order:?}"
+    );
     assert!(before < restore && restore < respawn, "{order:?}");
 }
 
@@ -863,5 +890,6 @@ fn ext_056_restore_call_has_a_2_s_limit() {
             .contains(&"panes-respawn".to_owned()),
         "a slow section does not block the respawn"
     );
+    // manual does not pin the log name of a restore timeout
     assert!(has_log(&world, "sessions.section-restore-timeout") || has_log(&world, "timed-out"));
 }

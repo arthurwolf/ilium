@@ -35,6 +35,9 @@ fn wit_commands_set_state_on_own_command_returns_ok() {
     assert!(world
         .set_command_state(OWNER_PLUGIN, "example.notes/save", false, Some(true))
         .is_ok());
+    // no state readback in the skeleton: the disabled state shows through invoke
+    let error = err_of(world.invoke_command(CALLER, "example.notes/save", "{}"));
+    assert_eq!(code_of(&error), ErrorCode::Conflict);
 }
 
 /// REQ: WIT:ilium:host/commands.set-state
@@ -70,9 +73,13 @@ fn wit_commands_set_state_from_a_server_instance_fails_unsupported() {
 #[test]
 fn wit_commands_invoke_with_grant_returns_a_request_id() {
     let mut world = commands_world();
-    assert!(world
+    let first = world
         .invoke_command(CALLER, "example.notes/save", "{}")
-        .is_ok());
+        .expect("granted invoke");
+    let second = world
+        .invoke_command(CALLER, "example.notes/save", "{}")
+        .expect("granted invoke");
+    assert_ne!(first, second, "each invoke gets its own request id");
 }
 
 /// REQ: WIT:ilium:host/commands.invoke

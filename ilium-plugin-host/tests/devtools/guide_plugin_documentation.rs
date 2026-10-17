@@ -335,11 +335,13 @@ fn dev_788_fresh_topic_names_each_command_the_plugin_adds() {
     let manifest: serde_json::Value =
         serde_json::from_str(&read_text(&dir, "ilium-plugin.json")).unwrap();
     let topic = read_text(&dir, "help/overview.md");
-    for command in manifest["contributes"]["commands"]
+    let commands = manifest["contributes"]["commands"]
         .as_array()
         .cloned()
-        .unwrap_or_default()
-    {
+        .unwrap_or_default();
+    // manual does not pin the template's command ids; the loop must not be vacuous
+    assert!(!commands.is_empty(), "the server template adds no command");
+    for command in commands {
         assert!(
             topic.contains(command["title"].as_str().unwrap()),
             "{command}"
@@ -385,6 +387,7 @@ fn sentence_case(title: &str) -> bool {
 /// REQ: DEV-791
 #[test]
 fn dev_791_every_template_command_title_is_sentence_case_without_a_final_period() {
+    let mut checked = 0;
     for template in [
         "server",
         "client",
@@ -402,10 +405,15 @@ fn dev_791_every_template_command_title_is_sentence_case_without_a_final_period(
             .cloned()
             .unwrap_or_default()
         {
+            checked += 1;
             let title = command["title"].as_str().unwrap();
             assert!(sentence_case(title), "{template}: {title:?}");
         }
     }
+    assert!(
+        checked > 0,
+        "no template adds a command, so nothing was checked"
+    );
 }
 
 /// REQ: DEV-791
@@ -479,7 +487,13 @@ fn dev_795_a_fresh_core_style_project_documents_its_point_in_extending_md() {
 #[test]
 fn dev_796_fresh_changelog_dates_use_the_iso_form() {
     let (_root, _env, dir) = fresh("server");
-    for line in read_text(&dir, "CHANGELOG.md")
+    let changelog = read_text(&dir, "CHANGELOG.md");
+    // manual does not require a dated release in a fresh changelog (Unreleased is allowed)
+    assert!(
+        changelog.lines().any(|l| l.starts_with("## [")),
+        "{changelog}"
+    );
+    for line in changelog
         .lines()
         .filter(|l| l.starts_with("## [") && l.contains(" - "))
     {

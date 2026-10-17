@@ -57,6 +57,9 @@ proptest! {
         env.run((1..=count).map(|n| sub(n, rename(2, "t"))).collect());
         let results = env.outcomes();
         prop_assert_eq!(results.len() as u64, count);
+        for n in 1..=count {
+            prop_assert_eq!(count_for(&results, n), 1, "correlation {}", n);
+        }
     }
 }
 
@@ -101,8 +104,22 @@ fn rqo_002_two_calls_give_two_distinct_ids_and_two_results() {
 #[test]
 fn rqo_002_an_unknown_request_id_is_never_completed() {
     let env = writer().tree(flat_tree(1)).build();
+    let request = env
+        .host
+        .submit_directly(sub(1, rename(2, "a")))
+        .expect("submit returns a request id");
     env.settle();
-    assert_eq!(env.probe.count_of("request-completed"), 0);
+    let unknown = ilium_plugin_api::generated::types::RequestId(request.0 + 987_654);
+    assert_eq!(env.host.take_result(unknown), Err(ErrorCode::NotFound));
+    let completed = env.probe.events_of("request-completed");
+    assert_eq!(completed.len(), 1, "only the issued id completes");
+    match &completed[0] {
+        Event::RequestCompleted(result) => assert_eq!(
+            result.request,
+            ilium_plugin_api::generated::types::RequestRef::Call(request)
+        ),
+        other => panic!("unexpected {other:?}"),
+    }
 }
 
 /// REQ: RQO-003

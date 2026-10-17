@@ -46,11 +46,17 @@ fn wid_027_ui_action_has_five_fields_and_action_id_copies_key() {
 #[test]
 fn wid_027_action_id_equals_key_for_every_widget() {
     let mut rig = WidgetRig::new(40, 5);
-    for key in ["a", "b-c", "long_key_1"] {
-        rig.show_button(key, "Go");
-        rig.click_text("Go");
-    }
-    for action in rig.actions() {
+    rig.show_button("a", "Go");
+    rig.click_text("Go");
+    rig.show_toggle("b-c", "Go", false);
+    rig.click_text("Go");
+    rig.show_confirm("long_key_1", "Go");
+    rig.click_text("Go");
+    let actions = rig.actions();
+    assert_eq!(actions.len(), 3);
+    let keys: Vec<&str> = actions.iter().map(|action| action.key.as_str()).collect();
+    assert_eq!(keys, vec!["a", "b-c", "long_key_1"]);
+    for action in &actions {
         assert_eq!(action.key, action.action_id);
     }
 }
@@ -146,10 +152,18 @@ fn wid_029_close_popup_on_unopened_id_is_noop_ok() {
 fn wid_029_popup_id_unique_across_open_views() {
     let mut rig = WidgetRig::new(40, 10);
     rig.open_popup_in_view(0, "same").unwrap();
+    // Two matches in the committed trees of open views: invalid-argument (ui-model, popups).
     assert_eq!(
         rig.open_popup_in_view(1, "same").unwrap_err(),
-        "already-exists"
+        "invalid-argument"
     );
+}
+
+/// REQ: WID-029
+#[test]
+fn wid_029_open_popup_with_no_match_is_not_found() {
+    let mut rig = WidgetRig::new(40, 10);
+    assert_eq!(rig.open_popup("nobody-has-this").unwrap_err(), "not-found");
 }
 
 /// REQ: WID-013
@@ -173,7 +187,10 @@ fn wid_013_terminal_view_without_read_screen_shows_not_permitted() {
 fn wid_013_with_grant_widget_draws_content() {
     let mut rig = WidgetRig::new(40, 5).grant("terminal.read-screen");
     rig.show_terminal_view_pane(1);
-    assert!(!rig.screen_text().contains("not permitted"));
+    let screen = rig.screen_text();
+    assert!(!screen.contains("not permitted"), "{screen}");
+    // manual does not pin the terminal content, so only a non-blank draw is required.
+    assert!(screen.chars().any(|c| !c.is_whitespace()), "blank frame");
 }
 
 /// REQ: WID-028
@@ -232,8 +249,26 @@ fn wid_022_calendar_with_unstable_listing_installs() {
 fn wid_022_calendar_shows_one_month_monday_first() {
     let mut rig = WidgetRig::new(30, 10);
     rig.show_calendar(2026, 10);
-    let text = rig.screen_text();
-    assert!(text.contains("Mo Tu We Th Fr Sa Su"));
+    let rows = rig.screen_rows();
+    let header_at = rows
+        .iter()
+        .position(|row| row.contains("Mo Tu We Th Fr Sa Su"))
+        .expect("weekday header");
+    let thursday_column = rows[header_at].find("Th").expect("Th column");
+    // 2026-10-01 is a Thursday: the first week row starts under Th with 1, 2, 3, 4.
+    let first_week = &rows[header_at + 1];
+    let first_day_column = first_week.find('1').expect("day 1 on the first week row");
+    assert!(
+        first_day_column.abs_diff(thursday_column) <= 1,
+        "1 sits under Th: {rows:?}"
+    );
+    // Exactly the 31 days of October appear below the header, no 32 and no November days.
+    let days: Vec<u32> = rows[header_at + 1..]
+        .iter()
+        .flat_map(|row| row.split_whitespace())
+        .filter_map(|token| token.parse::<u32>().ok())
+        .collect();
+    assert_eq!(days, (1..=31).collect::<Vec<u32>>());
 }
 
 /// REQ: WID-023
@@ -289,7 +324,13 @@ fn wid_024_chart_falls_back_to_text_line() {
         .screen_text()
         .chars()
         .any(|c| ('\u{2800}'..='\u{28ff}').contains(&c)));
-    assert!(rig.screen_text().chars().any(|c| !c.is_whitespace()));
+    // manual does not pin the text-line glyphs: require a drawn line of at least one cell per value.
+    let drawn = rig
+        .screen_text()
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .count();
+    assert!(drawn >= 4, "text-line fallback drew {drawn} cells");
 }
 
 /// REQ: WID-025
@@ -408,6 +449,28 @@ fn wid_018_tab_key_visits_in_the_documented_order_on_screen() {
     assert_eq!(visited, vec!["b", "a", "c"]);
 }
 
+/// REQ: WID-018
+#[test]
+fn wid_018_negative_tab_index_is_skipped_and_zero_follows_tree_order() {
+    let mut rig = WidgetRig::new(40, 5);
+    rig.show_focus_order_tree(&[
+        ("a", Some(2)),
+        ("skipped", Some(-1)),
+        ("b", Some(1)),
+        ("zero", Some(0)),
+        ("c", None),
+    ]);
+    let mut visited = Vec::new();
+    for _ in 0..4 {
+        rig.press_tab();
+        visited.push(rig.focused_key().unwrap());
+    }
+    assert_eq!(visited, vec!["b", "a", "zero", "c"]);
+    // manual does not pin the wrap-around target, only that the negative node is never focused.
+    rig.press_tab();
+    assert_ne!(rig.focused_key().as_deref(), Some("skipped"));
+}
+
 /// REQ: WID-019
 #[test]
 fn wid_019_three_wide_glyph_label_fits_six_cells() {
@@ -416,13 +479,36 @@ fn wid_019_three_wide_glyph_label_fits_six_cells() {
     assert!(rig.screen_text().contains("\u{4e2d}\u{6587}\u{5b57}"));
 }
 
+/// REQ: WID-019
+#[test]
+fn wid_019_wide_glyphs_count_two_cells_so_five_cells_cut_the_third() {
+    let mut rig = WidgetRig::new(5, 1);
+    rig.show_button_row("k", "\u{4e2d}\u{6587}\u{5b57}");
+    let screen = rig.screen_text();
+    assert!(screen.contains("\u{4e2d}\u{6587}"), "{screen}");
+    assert!(
+        !screen.contains("\u{5b57}"),
+        "third glyph needs cells 4 and 5: {screen}"
+    );
+}
+
+/// REQ: WID-019
+#[test]
+fn wid_019_combining_mark_counts_zero_cells() {
+    let mut rig = WidgetRig::new(2, 1);
+    rig.show_button_row("k", "ae\u{301}");
+    assert!(rig.screen_text().contains("ae\u{301}"));
+}
+
 /// REQ: WID-009
 #[test]
 fn wid_009_scroll_offset_stays_across_rerender_on_screen() {
     let mut rig = WidgetRig::new(20, 3);
     rig.show_list_of("list", 50);
+    let at_offset_zero = rig.screen_rows();
     rig.scroll_list("list", 10);
     let before = rig.screen_rows();
+    assert_ne!(before, at_offset_zero, "the scroll must move the list");
     rig.show_list_of("list", 50);
     assert_eq!(rig.screen_rows(), before);
 }
@@ -455,6 +541,14 @@ fn hst_271_focus_request_for_unfocused_view_denied_on_screen() {
     rig.show_text_input("in");
     rig.unfocus_view();
     assert!(!rig.plugin_requests_focus("in"));
+}
+
+/// REQ: HST-271
+#[test]
+fn hst_271_focus_request_for_a_focused_view_is_granted() {
+    let mut rig = WidgetRig::new(40, 5);
+    rig.show_text_input("in");
+    assert!(rig.plugin_requests_focus("in"));
 }
 
 /// REQ: HST-257

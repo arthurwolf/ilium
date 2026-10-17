@@ -39,6 +39,11 @@ fn wit_audio_devices_without_the_grant_is_empty() {
     let mut rig = declined_rig(&["audio.devices"]);
     rig.kernel.set_audio_devices(vec![device("mic", true)]);
     assert!(rig.host.audio().devices().is_empty());
+    // Positive control: the same scripted device is listed once the grant is held.
+    let mut granted = crate::common::rig(GRANTS);
+    granted.kernel.set_audio_devices(vec![device("mic", true)]);
+    assert_eq!(granted.host.audio().devices().len(), 1);
+    // manual does not pin an error code for the declined listing (it returns an empty list).
 }
 
 /// REQ: WIT:ilium:host/audio.open-capture
@@ -239,7 +244,8 @@ fn wit_audio_play_queues_the_samples() {
         .play(vec![0i16; 1_600], 16_000, 1)
         .expect("accepted");
     assert!(rig.host.request_completed(request));
-    assert_eq!(rig.kernel.played_audio().len(), 1);
+    assert_eq!(rig.kernel.played_audio(), vec![vec![0i16; 1_600]]);
+    // rate and channel count are not exposed by the fake kernel's played_audio.
 }
 
 /// REQ: WIT:ilium:host/audio.play

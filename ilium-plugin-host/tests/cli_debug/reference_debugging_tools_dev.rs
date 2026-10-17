@@ -198,7 +198,15 @@ fn dev_716_stripped_component_has_no_name_section() {
 fn dev_740_conformance_flag_is_accepted_by_test() {
     let scratch = scratch();
     let output = run(&env(scratch.path()), &["test", "--conformance"]);
+    // manual does not pin the exit code of a conformance run in an empty directory: the flag
+    // must be known (not a usage error) and the run must end with a result record
     assert_ne!(output.exit_code, 2, "--conformance is a known flag");
+    assert!(!error_code(&output)
+        .unwrap_or_default()
+        .starts_with("usage."));
+    let result = records_of(&output, "result");
+    assert_eq!(result.len(), 1, "{:?}", output.stdout_jsonl);
+    assert_eq!(result[0]["exit_code"], output.exit_code);
 }
 
 /// REQ: DEV-741

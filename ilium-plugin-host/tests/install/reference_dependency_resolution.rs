@@ -246,16 +246,22 @@ fn pkg_315_or_operator_is_refused() {
 /// REQ: PKG-315
 #[test]
 fn pkg_315_comparators_need_single_space_separation() {
-    assert!(VersionRange::parse(">=1.2.0  <1.5.0").is_err());
-    assert!(VersionRange::parse(" >=1.2.0").is_err());
-    assert!(VersionRange::parse(">=1.2.0 ").is_err());
+    for text in [">=1.2.0  <1.5.0", " >=1.2.0", ">=1.2.0 "] {
+        assert_eq!(
+            code_of_range_error(text),
+            "manifest.requires-invalid",
+            "{text:?}"
+        );
+    }
 }
 
 /// REQ: PKG-316
 #[test]
 fn pkg_316_each_comparator_form() {
     assert!(matches("=1.2.3", "1.2.3") && !matches("=1.2.3", "1.2.4"));
-    assert!(matches("1.2.3", "1.2.9") || !matches("1.2.3", "2.0.0"));
+    // A bare version is a caret range (PKG-317).
+    assert!(matches("1.2.3", "1.2.3") && matches("1.2.3", "1.2.9"));
+    assert!(!matches("1.2.3", "2.0.0") && !matches("1.2.3", "1.2.2"));
     assert!(matches(">1.2.3", "1.2.4") && !matches(">1.2.3", "1.2.3"));
     assert!(matches(">=1.2.3", "1.2.3") && !matches(">=1.2.3", "1.2.2"));
     assert!(matches("<1.2.3", "1.2.2") && !matches("<1.2.3", "1.2.3"));
@@ -490,11 +496,10 @@ fn pkg_325_a_later_load_keeps_the_plugin_disabled_with_a_reason() {
     env.host_release = "0.0.9".to_owned();
     let owned = vec!["list".to_owned(), "--json".to_owned()];
     let out = ilium_plugin_host::cli::run(&owned, &env);
-    assert!(
-        out.all_text().contains("dependency.host-version") || out.all_text().contains("disabled"),
-        "{}",
-        out.all_text()
-    );
+    let text = out.all_text();
+    assert!(text.contains("example.a"), "{text}");
+    assert!(text.contains("disabled"), "{text}");
+    assert!(text.contains("dependency.host-version"), "{text}");
 }
 
 /// REQ: PKG-326
@@ -508,12 +513,9 @@ fn pkg_326_wait_ms_5000_ok_5001_refused() {
     );
     let out = fx.install(&Spec::new("example.bad", "1.0.0").wait_ms(5001));
     assert_eq!(out.exit_code, 1);
-    assert!(
-        out.error_codes()
-            .iter()
-            .any(|code| code.starts_with("manifest.")),
-        "{:?}",
-        out.error_codes()
+    assert_eq!(
+        out.error_codes(),
+        vec!["manifest.requires-invalid".to_owned()]
     );
     assert!(fx.record("example.bad").is_none());
 }
@@ -833,7 +835,7 @@ fn pkg_334_every_missing_id_is_listed_with_its_range() {
         false,
     )];
     let result = resolve_plan(&input(incoming, Vec::new(), Vec::new()));
-    assert!(codes(&result).iter().all(|c| c == "dependency.unresolved"));
+    assert_eq!(codes(&result), vec!["dependency.unresolved".to_owned(); 2]);
     let text: String = result
         .err()
         .expect("err")
@@ -1050,10 +1052,10 @@ fn pkg_345_missing_service_provider_installs_and_waits() {
     let out = fx.install(&Spec::new("example.a", "1.0.0").service("example:svc/s@0.1.0"));
     assert_eq!(out.exit_code, 0, "{:?}", out.stdout_jsonl);
     let record = fx.record("example.a").expect("record");
-    assert_ne!(record["state"], "failed");
+    assert_eq!(record["state"], "waiting-dependency");
     let listed = fx.run(&["list", "--json"]);
     assert!(
-        listed.all_text().contains("waiting-dependency") || listed.all_text().contains("example.a"),
+        listed.all_text().contains("example.a") && listed.all_text().contains("waiting-dependency"),
         "{}",
         listed.all_text()
     );

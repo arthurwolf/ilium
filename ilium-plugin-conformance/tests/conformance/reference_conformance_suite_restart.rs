@@ -243,7 +243,9 @@ fn conf_restart_05_second_failure_exactly_at_the_window_edge_is_a_documented_bou
     let outside = after.on_failure(FAILURE_WINDOW_MS + 1);
     assert_eq!(inside, RestartDecision::RestartAfterMs(5_000));
     assert_eq!(outside, RestartDecision::RestartAfterMs(1_000));
-    assert!(edge == inside || edge == outside);
+    // The manual says a restart "that follows a 10-minute quiet period" starts the count again:
+    // a gap of exactly 10 minutes is a full quiet period, so the edge counts as outside.
+    assert_eq!(edge, RestartDecision::RestartAfterMs(1_000));
 }
 
 // ---- DEV-611: fake time only ----

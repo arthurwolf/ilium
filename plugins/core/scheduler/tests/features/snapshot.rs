@@ -101,7 +101,10 @@ fn snapshot_b21_closing_the_pane_drops_its_queue() {
 #[test]
 fn snapshot_b21_a_queue_for_an_unknown_pane_is_refused() {
     let mut session = session();
-    assert!(enqueue(&mut session, NodeId(9999), "a", "once", 1).is_err());
+    // manual does not pin the error code for an unknown pane
+    let refused = enqueue(&mut session, NodeId(9999), "a", "once", 1).expect_err("refused");
+    assert!(!refused.message.is_empty(), "{refused:?}");
+    assert!(list_queue(&mut session, NodeId(9999)).is_empty());
 }
 
 /// REQ: scheduler-B21, F-055, F-057

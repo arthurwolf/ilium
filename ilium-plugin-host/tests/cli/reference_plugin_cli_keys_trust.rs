@@ -671,7 +671,11 @@ fn dev_135_publish_with_registry_does_not_fail_on_usage() {
             "https://registry.example.test/",
         ],
     );
-    assert_ne!(code(&output).as_deref(), Some("usage.missing-argument"));
+    // manual does not pin the registry outcome (decision D27, distribution page): only that the
+    // missing-argument usage error is absent and the result record mirrors the exit code
+    assert_ne!(output.exit_code, 2, "{:?}", output.stdout_jsonl);
+    assert!(!code(&output).unwrap_or_default().starts_with("usage."));
+    assert_eq!(recs(&output, "result")[0]["exit_code"], output.exit_code);
 }
 
 /// REQ: DEV-136
@@ -702,9 +706,18 @@ fn dev_136_a_higher_version_from_a_file_updates_the_installed_plugin() {
 fn dev_136_the_sha256_of_the_package_is_reproducible_for_sharing() {
     let root = scratch();
     let env = env(root.path());
-    let (_, package) = packed_project(&env, root.path());
+    let (dir, package) = packed_project(&env, root.path());
     let output = run(&env, &["inspect", s(&package), "--json"]);
     assert_eq!(output.exit_code, 0);
     let digest = hex(&Sha256::digest(std::fs::read(&package).expect("read")));
-    assert!(output.stdout_raw.contains(&digest) || is_sha256_hex(&digest));
+    assert!(is_sha256_hex(&digest));
+    // the digest shared out of band must be the one `pack` itself reports for the file
+    let repacked = run_in(&env, &dir, &["pack"]);
+    // manual does not pin the artifact kind name: any reported sha256 may be the package's
+    let all: Vec<&str> = recs(&repacked, "artifact")
+        .iter()
+        .filter_map(|r| r["sha256"].as_str())
+        .collect();
+    assert!(!all.is_empty(), "{:?}", repacked.stdout_jsonl);
+    assert!(all.contains(&digest.as_str()), "{all:?} vs {digest}");
 }

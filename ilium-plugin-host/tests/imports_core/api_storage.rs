@@ -483,8 +483,21 @@ fn storage_remove_frees_the_quota_it_used() {
 #[test]
 fn storage_remove_of_an_empty_or_over_long_key_does_nothing() {
     let mut fixture = storage_fixture();
+    expect_ok(
+        fixture
+            .storage()
+            .put(Bucket::Global, "keep".to_owned(), vec![1]),
+    );
     fixture.storage().remove(Bucket::Global, String::new());
     fixture.storage().remove(Bucket::Global, "k".repeat(300));
+    assert_eq!(
+        all_keys(&mut fixture, Bucket::Global),
+        vec!["keep".to_owned()]
+    );
+    assert_eq!(
+        fixture.storage().get(Bucket::Global, "keep".to_owned()),
+        Some(vec![1])
+    );
 }
 
 // ---- keys --------------------------------------------------------------------------------------

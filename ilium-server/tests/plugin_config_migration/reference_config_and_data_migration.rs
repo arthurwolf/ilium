@@ -185,7 +185,9 @@ fn cor_032_300_kib_section_is_dropped_and_old_value_stays() {
         .expect("first write");
     assert!(rig.write_section(&section, &body(300 * KIB, b'n')).is_err());
     assert_eq!(rig.snapshot().section("state"), Some(body(100, b'o')));
-    assert!(rig.log_codes().iter().any(|code| code.contains("snapshot")));
+    assert!(rig
+        .log_codes()
+        .contains(&"snapshot.section-too-large".to_owned()));
 }
 
 /// REQ: COR-032
@@ -204,7 +206,10 @@ fn cor_032_section_one_byte_under_max_bytes_is_stored() {
 fn cor_032_max_bytes_above_256_kib_is_refused_at_install() {
     let mut rig = ConfigRig::new();
     let spec = plugin("com.example.one", "T1", &[]).snapshot_section("state", 1, 256 * KIB + 1);
-    assert!(!rig.install(&spec).ok);
+    let result = rig.install(&spec);
+    assert!(!result.ok);
+    // manual does not pin the install-time manifest code for max_bytes over 256 KiB
+    assert!(!result.codes.is_empty(), "a refusal must name its code");
 }
 
 /// REQ: COR-032

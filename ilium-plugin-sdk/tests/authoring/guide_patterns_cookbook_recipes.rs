@@ -502,10 +502,9 @@ fn aut_015_key_from_id_and_revision_lets_each_revision_through() {
         .collect();
     assert_eq!(keys.len(), 3);
     assert!(keys[0] != keys[1] && keys[1] != keys[2] && keys[0] != keys[2]);
-    assert!(host
-        .outcomes()
-        .iter()
-        .all(|outcome| !matches!(outcome, Outcome::Duplicate(_))));
+    let outcomes = host.outcomes();
+    assert_eq!(outcomes.len(), 3, "one outcome per revision");
+    assert!(outcomes.iter().all(|outcome| outcome.is_ok()));
 }
 
 /// REQ: AUT-015

@@ -57,9 +57,9 @@ fn sec_001_a_grant_for_one_scope_does_not_open_a_sibling_asset() {
         "ilium:host/fs.read",
         json!({ "scope": "data", "path": "none.txt" }),
     );
-    assert!(
-        own.is_err() && own.as_ref().err().map(|error| error.code) != Some(ErrorCode::NotPermitted)
-    );
+    // The grant covers the scope, so the read gets past the permission check and fails on the
+    // missing file instead.
+    assert_code(&own, ErrorCode::NotFound);
     let other = rig.value(
         "ilium:host/fs.read",
         json!({ "scope": "home", "path": ".aws/credentials" }),
@@ -87,10 +87,14 @@ fn sec_002_malformed_input_at_the_plugin_boundary_is_invalid_argument() {
     let bad_methods = ["", "GE\nT", "get with space"];
     for method in bad_methods {
         let result = rig.fetch(request_json(method, "https://example.com/", &[], None));
-        assert!(result.is_err(), "{method:?}");
+        assert_code(&result, ErrorCode::InvalidArgument);
     }
     let bad_url = rig.fetch(request_json("GET", "not a url", &[], None));
-    assert!(bad_url.is_err());
+    assert_code(&bad_url, ErrorCode::InvalidArgument);
+    assert!(
+        rig.net.seen().is_empty(),
+        "no malformed request may reach the network"
+    );
 }
 
 /// REQ: SEC-002
@@ -101,13 +105,18 @@ fn sec_002_identity_comes_from_the_channel_not_from_the_message() {
         "ilium:host/messages.send-peer",
         json!({ "peer": "other.plugin", "from": "ilium.core.sessions", "payload": "aGk=" }),
     );
+    // manual does not pin whether the extra "from" field is rejected or ignored; either way the
+    // host must never record a forged sender.
+    let messages = rig.host.peer_messages();
     if result.is_ok() {
-        assert!(rig
-            .host
-            .peer_messages()
-            .iter()
-            .all(|message| message.sender == "test.plugin"));
+        assert_eq!(messages.len(), 1, "an accepted send is delivered once");
+    } else {
+        assert_code(&result, ErrorCode::InvalidArgument);
+        assert!(messages.is_empty());
     }
+    assert!(messages
+        .iter()
+        .all(|message| message.sender == "test.plugin"));
 }
 
 /// REQ: SEC-002
@@ -117,8 +126,17 @@ fn sec_002_a_helper_message_with_an_unknown_kind_is_not_acted_on() {
     let before = rig.audit_lines().len();
     rig.host
         .inject_helper_message(b"{\"kind\":\"definitely-unknown\"}");
-    assert!(rig.host.failures().len() <= 1);
-    assert!(rig.audit_lines().len() >= before);
+    // manual does not pin the protocol error code for an unknown helper message kind.
+    assert_eq!(
+        rig.host.failures().len(),
+        1,
+        "the message is counted as one failure"
+    );
+    assert_eq!(
+        rig.audit_lines().len(),
+        before,
+        "an unknown kind leaves no audit trace"
+    );
 }
 
 /// REQ: SEC-003
@@ -218,10 +236,23 @@ fn sec_004_the_pair_does_not_raise_the_risk_class() {
     let rows = rig
         .host
         .review_rows(&["terminal.read-screen", "http:example.com"]);
-    assert!(rows
-        .iter()
-        .filter(|row| !row.toxic)
-        .all(|row| row.risk != "high"));
+    let alone_screen = rig.host.review_rows(&["terminal.read-screen"]);
+    let alone_http = rig.host.review_rows(&["http:example.com"]);
+    let plain: Vec<_> = rows.iter().filter(|row| !row.toxic).collect();
+    assert!(!plain.is_empty());
+    for row in plain {
+        let alone = alone_screen
+            .iter()
+            .chain(alone_http.iter())
+            .find(|candidate| candidate.detail == row.detail && !candidate.toxic)
+            .expect("the same grant reviewed alone");
+        assert_eq!(
+            row.risk, alone.risk,
+            "pairing must not change {}",
+            row.detail
+        );
+        assert_ne!(row.risk, "high");
+    }
 }
 
 /// REQ: SEC-005 MAY
@@ -231,10 +262,14 @@ fn sec_005_deny_combinations_refuses_the_pair_and_its_absence_allows_it() {
     let with_policy = setup(&[])
         .system_policy("version = 1\n[grants]\ndeny_combinations = true\n", true)
         .start();
-    assert!(with_policy
+    // manual does not pin the policy refusal code, only that the install is refused.
+    let refused = with_policy
         .host
-        .install_check_with_grants("example.demo", Tier::T3, &pair)
-        .is_err());
+        .install_check_with_grants("example.demo", Tier::T3, &pair);
+    assert!(
+        refused.as_ref().is_err_and(|message| !message.is_empty()),
+        "{refused:?}"
+    );
     let without = setup(&[]).start();
     assert_eq!(
         without
@@ -388,6 +423,11 @@ fn sec_008_the_http_token_file_is_readable_by_the_same_user() {
         0o400,
         "the owner can read it, which is the accepted risk"
     );
+    assert_eq!(
+        mode & 0o077,
+        0,
+        "group and others get no access (owner-only store)"
+    );
 }
 
 /// REQ: SEC-009
@@ -458,9 +498,7 @@ fn sec_011_t1_loads_on_every_platform() {
 fn sec_012_guest_clock_is_coarsened_to_a_millisecond_for_third_parties() {
     let rig = t3(&[]);
     let readings: Vec<u64> = (0..50).map(|_| rig.host.guest_clock_nanos()).collect();
-    assert!(readings
-        .iter()
-        .all(|nanos| nanos % 1_000_000 == 0 || nanos % 1_000_000 < 1_000_000));
+    assert!(readings.iter().all(|nanos| nanos % 1_000_000 == 0));
     let distinct_sub_ms: std::collections::HashSet<u64> =
         readings.iter().map(|nanos| nanos % 1_000_000).collect();
     assert!(

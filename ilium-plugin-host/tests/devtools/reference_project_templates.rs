@@ -100,6 +100,7 @@ fn dev_260_template_and_side_naming_different_templates_are_refused() {
             "client",
         ],
     );
+    // manual does not pin the refusal code for mismatched --template/--side
     assert_eq!(output.exit_code, 2);
     assert!(!dir.exists() || tree_of(&dir).is_empty());
 }
@@ -764,10 +765,8 @@ fn dev_270_fresh_project_check_reports_nothing_beyond_the_unbuilt_component() {
     let (_root, env, dir) = make("server", "rust");
     let output = run(&env, &["check", dir.to_str().unwrap(), "--json"]);
     let rules = rules_of(&output, "check");
-    assert!(
-        rules.iter().all(|rule| rule == "component.missing"),
-        "{rules:?}"
-    );
+    // one declared side (server) -> one `component.missing` finding (DEV-201)
+    assert_eq!(rules, vec!["component.missing".to_owned()]);
 }
 
 /// REQ: DEV-270
@@ -858,7 +857,12 @@ fn dev_273_fresh_project_logs_nothing_at_warn_or_error_during_activation() {
     let (_root, env, dir) = make("server", "rust");
     run(&env, &["build", dir.to_str().unwrap(), "--json"]);
     let tested = run(&env, &["test", dir.to_str().unwrap(), "--json"]);
-    let loud: Vec<&Value> = records_of(&tested, "log")
+    let logs = records_of(&tested, "log");
+    assert!(
+        !logs.is_empty(),
+        "activation must be observable through log records"
+    );
+    let loud: Vec<&Value> = logs
         .into_iter()
         .filter(|r| matches!(r["level"].as_str(), Some("warn" | "error")))
         .collect();

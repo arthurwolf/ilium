@@ -243,7 +243,9 @@ fn hst_101_envelope_body_variant_indices_follow_manual_order() {
 fn hst_101_envelope_body_index_seven_is_refused_unknown_variant() {
     let mut bytes = 7u32.to_le_bytes().to_vec();
     bytes.extend_from_slice(&[0u8; 64]);
-    assert!(bincode::deserialize::<EnvelopeBody>(&bytes).is_err());
+    let error = bincode::deserialize::<EnvelopeBody>(&bytes).expect_err("index 7 is unknown");
+    // serde's derived enum decoder names the variant-index range; a short-input error would not.
+    assert!(error.to_string().contains("variant index"), "{error}");
 }
 
 /// REQ: HST-103

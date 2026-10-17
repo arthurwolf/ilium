@@ -274,6 +274,8 @@ fn hst_354_duration_bucket_bounds_are_the_listed_twelve() {
 /// REQ: HST-354
 #[test]
 fn hst_354_each_duration_lands_in_its_bucket() {
+    // manual does not pin whether a bucket bound itself is inclusive; only interior samples are
+    // asserted so the edge rule is not invented here.
     let samples_micros: [u64; 13] = [
         50, 150, 300, 700, 1_500, 3_000, 7_000, 15_000, 30_000, 70_000, 200_000, 700_000, 5_000_000,
     ];
@@ -435,7 +437,10 @@ fn hst_356_plugin_cannot_read_counters_of_another_plugin() {
         Side::Server,
         10,
     );
-    assert!(result.is_err(), "another plugin must not read the counters");
+    // manual does not pin the code; not-permitted is the host's refusal word for reads without
+    // authority.
+    let error = result.expect_err("another plugin must not read the counters");
+    assert_eq!(error.code, "not-permitted", "{error:?}");
 }
 
 /// REQ: HST-356
@@ -466,10 +471,9 @@ fn hst_356_plugin_can_read_its_own_counters_only_through_summary() {
         Side::Server,
         10,
     );
-    assert!(
-        own.is_err(),
-        "the raw counters are not a plugin surface; plugin-info is"
-    );
+    // manual does not pin the code; not-permitted is the host's refusal word.
+    let error = own.expect_err("the raw counters are not a plugin surface; plugin-info is");
+    assert_eq!(error.code, "not-permitted", "{error:?}");
 }
 
 /// REQ: HST-356
@@ -481,13 +485,11 @@ fn hst_356_sides_of_one_plugin_keep_separate_counters() {
         .record_call(CallClass::Event, ms(1), ms(20), 5);
     let client = registry
         .read(&Reader::Kernel, "example.one", Side::Client, 10)
-        .map(|buckets| {
-            buckets
-                .iter()
-                .map(|b| b.calls(CallClass::Event))
-                .sum::<u64>()
-        });
-    assert_eq!(client.unwrap_or(0), 0);
+        .expect("client read")
+        .iter()
+        .map(|b| b.calls(CallClass::Event))
+        .sum::<u64>();
+    assert_eq!(client, 0);
     let server = registry
         .read(&Reader::Kernel, "example.one", Side::Server, 10)
         .expect("server counters");
@@ -573,7 +575,16 @@ fn hst_357_summary_line_carries_the_call_count() {
         telemetry.record_call(CallClass::Event, us(100), ms(20), round);
     }
     let line = telemetry.end_instance(10).expect("summary line");
-    assert!(line.contains('3'), "summary {line:?} must show 3 calls");
+    // manual does not pin the summary format; require a standalone "3", not a digit inside an id.
+    assert!(
+        line.split(|c: char| !c.is_ascii_alphanumeric())
+            .any(|token| token == "3"),
+        "summary {line:?} must show 3 calls"
+    );
+    assert!(
+        line.contains("call"),
+        "summary {line:?} must name the calls"
+    );
 }
 
 // ---------------------------------------------------------------- HST-358
@@ -836,9 +847,11 @@ fn hst_362_plugin_cannot_read_another_summary_without_plugins_manage() {
     registry
         .side("example.other", Side::Server)
         .record_call(CallClass::Event, ms(1), ms(20), 5);
-    assert!(registry
+    // manual does not pin the code; not-permitted is the host's refusal word.
+    let error = registry
         .plugin_info("example.notes", "example.other", false, 10)
-        .is_err());
+        .expect_err("another summary needs plugins.manage");
+    assert_eq!(error.code, "not-permitted", "{error:?}");
 }
 
 /// REQ: HST-362
@@ -867,6 +880,12 @@ fn hst_363_near_miss_signal_shows_a_why_line_with_counter_values() {
     let lines = why_lines(&inputs);
     assert_eq!(lines.len(), 1);
     assert!(lines[0].starts_with("Why"), "line {:?}", lines[0]);
+    // manual does not pin the wording or the near-miss rate threshold.
+    assert!(
+        lines[0].to_lowercase().contains("near"),
+        "line {:?} must name the near-miss signal",
+        lines[0]
+    );
     assert!(
         lines[0].contains("30") && lines[0].contains("100"),
         "line {:?}",

@@ -202,10 +202,16 @@ fn ext_003_reentrant_message_starts_with_code_colon_space() {
     );
     let _ = run_chain(&mut world, r#"{"text":"a"}"#);
     let errors = world.hook_errors();
+    let reentrant: Vec<_> = errors
+        .iter()
+        .filter(|(_, error)| message_has_prefix(error, "extension.reentrant"))
+        .collect();
+    assert!(!reentrant.is_empty(), "{errors:?}");
+    // base code conflict, as EXT-022 states for a reentrant run
     assert!(
-        errors
+        reentrant
             .iter()
-            .any(|(_, error)| message_has_prefix(error, "extension.reentrant")),
+            .all(|(_, error)| code_of(error) == ErrorCode::Conflict),
         "{errors:?}"
     );
 }
@@ -827,15 +833,32 @@ fn ext_026_uninstall_disable_enable_and_unregister_each_send_a_topic() {
     world.advance_ms(200);
     world.settle();
     let mut seen = changed_topics(&world, OWNER).len();
+    world.set_enabled("com.example.reg", false);
+    world.advance_ms(200);
+    world.settle();
+    assert_eq!(changed_topics(&world, OWNER).len(), seen + 1, "disable");
+    seen += 1;
+    world.set_enabled("com.example.reg", true);
+    world.advance_ms(200);
+    world.settle();
+    assert_eq!(changed_topics(&world, OWNER).len(), seen + 1, "enable");
+    seen += 1;
     assert!(world.unregister("com.example.reg", COLLECT, "e0").is_ok());
     world.advance_ms(200);
     world.settle();
     assert_eq!(changed_topics(&world, OWNER).len(), seen + 1, "unregister");
     seen += 1;
-    world.set_enabled("com.example.reg", false);
+    assert!(world
+        .register("com.example.reg", COLLECT, "e1", 50, r#"{"id":"x"}"#)
+        .is_ok());
     world.advance_ms(200);
     world.settle();
-    assert!(changed_topics(&world, OWNER).len() >= seen, "disable");
+    seen += 1;
+    assert_eq!(changed_topics(&world, OWNER).len(), seen, "re-register");
+    world.uninstall("com.example.reg");
+    world.advance_ms(200);
+    world.settle();
+    assert_eq!(changed_topics(&world, OWNER).len(), seen + 1, "uninstall");
 }
 
 /// REQ: EXT-026

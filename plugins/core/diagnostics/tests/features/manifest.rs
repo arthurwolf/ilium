@@ -209,16 +209,29 @@ fn cor_050_every_key_of_the_fragment_block_agrees_with_the_complete_manifest() {
 /// REQ: COR-050
 #[test]
 fn cor_050_the_server_host_built_from_the_manifest_holds_the_server_grants() {
-    let host = FakeHost::for_manifest(manifest_path())
+    let mut host = FakeHost::for_manifest(manifest_path())
         .expect("manifest loads")
         .side("server")
         .build();
     assert_eq!(host.current_mode(), ilium_plugin_sdk::testing::Mode::Native);
+    // DEV-411: a grant outside the side's manifest list is refused, so the host holds only the
+    // server grants; a client-only grant and settings.write are both refused.
+    for undeclared in ["ui.panels", "settings.write"] {
+        let error = host.grant_now(undeclared).expect_err(undeclared);
+        assert_eq!(error.code, "harness.grant-not-declared", "{undeclared}");
+    }
+    host.grant_now("journal.read")
+        .expect("a declared server grant is accepted");
 }
 
 /// REQ: COR-050
 #[test]
 fn cor_050_a_missing_manifest_file_is_refused_by_the_host_builder() {
     let result = FakeHost::for_manifest(manifest_path().with_file_name("missing-manifest.json"));
-    assert!(result.is_err());
+    // manual does not pin the error code of a missing manifest file
+    let error = result.err().expect("a missing manifest file is refused");
+    assert!(
+        !error.code.is_empty() && !error.message.is_empty(),
+        "{error}"
+    );
 }

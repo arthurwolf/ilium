@@ -1,6 +1,6 @@
 //! AI triggers (F-044): which events start titling, from the Triggers tab.
 
-use ilium_plugin_sdk::types::{AgentActivity, AgentActivityEvent, Event, NodeId};
+use ilium_plugin_sdk::types::{AgentActivity, AgentActivityEvent, ErrorCode, Event, NodeId};
 use serde_json::json;
 
 use crate::common::*;
@@ -118,11 +118,19 @@ fn f_044_agent_finishes_work_retitles_and_restructures_the_project() {
         purposes.iter().any(|purpose| purpose == "pane-title"),
         "{purposes:?}"
     );
-    assert!(
+    // manual does not pin the exact restructure purpose string; exactly one request carries it.
+    assert_eq!(
         purposes
             .iter()
-            .any(|purpose| purpose.contains("restructure")),
+            .filter(|purpose| purpose.contains("restructure"))
+            .count(),
+        1,
         "{purposes:?}"
+    );
+    assert_eq!(
+        purposes.len(),
+        2,
+        "one retitle and one restructure: {purposes:?}"
     );
 }
 
@@ -163,18 +171,23 @@ fn f_044_a_trigger_set_to_retitle_only_does_not_restructure() {
     host.settle();
     host.deliver_one(finished(3));
     host.settle();
-    assert!(host
+    let purposes: Vec<String> = host
         .inference_requests()
-        .iter()
-        .all(|(_, request)| !request.purpose.contains("restructure")));
+        .into_iter()
+        .map(|(_, request)| request.purpose)
+        .collect();
+    assert_eq!(purposes, ["pane-title"]);
 }
 
 /// REQ: F-044
 #[test]
 fn f_044_an_unknown_action_name_is_rejected_by_the_setting() {
     let mut host = activated_server();
-    let result = host.settings().set(PROMPT_EVENT, json!(["Launch rockets"]));
-    assert!(result.is_err());
+    let error = host
+        .settings()
+        .set(PROMPT_EVENT, json!(["Launch rockets"]))
+        .expect_err("unknown action refused");
+    assert_eq!(error.code, ErrorCode::InvalidArgument);
 }
 
 /// REQ: F-044

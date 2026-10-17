@@ -125,6 +125,9 @@ fn f_035_an_unknown_channel_runs_no_action() {
     let mut host = server_host();
     let submissions = host.deliver_one(message_from(PluginSide::Client, "format-disk", b"1"));
     assert!(agent_actions(&submissions).is_empty());
+    host.settle();
+    // manual does not pin an error code for an unknown channel
+    assert!(host.outcomes().is_empty(), "{:?}", host.outcomes());
 }
 
 /// REQ: F-035
@@ -172,8 +175,17 @@ fn f_035_presses_on_different_panes_are_not_duplicates() {
         second.to_string().as_bytes(),
     ));
     host.settle();
+    assert_eq!(host.outcomes().len(), 2, "{:?}", host.outcomes());
     assert!(
         host.outcomes().iter().all(|outcome| outcome.is_ok()),
+        "{:?}",
+        host.outcomes()
+    );
+    assert!(
+        !host
+            .outcomes()
+            .iter()
+            .any(|outcome| matches!(outcome, Outcome::Duplicate(_))),
         "{:?}",
         host.outcomes()
     );
@@ -206,8 +218,14 @@ fn f_035_a_press_one_second_after_the_ten_minute_window_runs_again() {
     host.advance_clock(601_000);
     host.deliver_one(press);
     host.settle();
+    assert_eq!(host.outcomes().len(), 2, "{:?}", host.outcomes());
     assert!(
         host.outcomes().iter().all(|outcome| outcome.is_ok()),
+        "{:?}",
+        host.outcomes()
+    );
+    assert!(
+        !matches!(host.outcomes()[1], Outcome::Duplicate(_)),
         "{:?}",
         host.outcomes()
     );

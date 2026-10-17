@@ -643,7 +643,11 @@ fn hst_031_a_client_gives_up_after_five_seconds() {
         .build();
     run.begin_start_paused_before_accept();
     let attempt = run.client_connect_with_retry(Duration::from_secs(5), Duration::from_secs(6));
-    assert!(attempt.is_err());
+    assert_eq!(
+        attempt.expect_err("gave up").as_str(),
+        "server.starting",
+        "the client gives up with the last retriable refusal"
+    );
 }
 
 // HST-032
@@ -787,6 +791,7 @@ fn hst_041_a_plugin_cannot_remove_the_recovery_command() {
     let mut run = started(vec![startup("ilium.core.titles")]);
     let outcome =
         run.plugin_tries_to_unregister_command("ilium.core.titles", "kernel.open-recovery");
+    // manual does not pin the refusal code for unregistering a kernel command
     assert!(outcome.is_err());
     assert!(run.command_works("kernel.open-recovery"));
 }

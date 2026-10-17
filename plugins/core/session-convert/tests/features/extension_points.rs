@@ -111,15 +111,18 @@ fn ext_077_a_change_of_another_topic_is_ignored() {
 #[test]
 fn ext_077_a_contributed_format_with_a_bad_direction_is_rejected_by_the_point_schema() {
     let (mut host, _pane) = server_with_pane("claude", true);
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        host.extensions().contribute(
-            FORMATS,
-            "bad",
-            50,
-            r#"{"id":"bad","title":"Bad","direction":"sideways","service":"x"}"#,
-        );
-    }));
-    assert!(result.is_err() || !host.failures().is_empty());
+    host.extensions().contribute(
+        FORMATS,
+        "bad",
+        50,
+        r#"{"id":"bad","title":"Bad","direction":"sideways","service":"x"}"#,
+    );
+    // manual does not pin the rejection code; the entry must not reach the collected list.
+    let collected = host.extensions().collect(FORMATS);
+    assert!(
+        collected.iter().all(|entry| entry["id"] != "bad"),
+        "a format with direction sideways must be rejected by the point schema: {collected:?}"
+    );
 }
 
 /// REQ: F-077

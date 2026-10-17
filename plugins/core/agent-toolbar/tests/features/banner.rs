@@ -147,6 +147,7 @@ fn f_033_the_banner_submission_is_accepted_by_the_host() {
     let pane = add_agent_pane(&mut host, "claude", "claude", AgentActivity::Working);
     host.deliver_one(user_line(pane, "do it"));
     host.settle();
+    assert_eq!(host.outcomes().len(), 1, "{:?}", host.outcomes());
     assert!(
         host.outcomes().iter().all(|outcome| outcome.is_ok()),
         "{:?}",

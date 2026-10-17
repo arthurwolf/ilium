@@ -44,7 +44,10 @@ fn lif_280_a_failed_call_into_a_trapped_provider_is_an_error_result_not_a_consum
     let server = rig.start_server("s1");
     rig.advance(secs(5));
     server.fail(NOTES, Side::Server);
-    let result = server.call_service(OTHER, "svc.notes", "ping");
-    assert!(result.is_err());
+    let error = server
+        .call_service(OTHER, "svc.notes", "ping")
+        .expect_err("provider is trapped");
+    // services.md: requests in flight complete as `cancelled`.
+    assert_eq!(error.code, ilium_plugin_api::ErrorCode::Cancelled);
     assert_eq!(server.failure_count(OTHER, Side::Server), 0);
 }

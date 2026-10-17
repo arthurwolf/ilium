@@ -166,7 +166,10 @@ proptest! {
 /// REQ: LIF-005
 #[test]
 fn lif_005_pure_table_rejects_stopped_activate_ok_illegal_transition() {
-    assert!(next_instance_state(InstanceState::Stopped, &InstanceInput::ActivateOk).is_err());
+    let code = next_instance_state(InstanceState::Stopped, &InstanceInput::ActivateOk)
+        .expect_err("Stopped has no ActivateOk transition");
+    // manual does not pin the illegal-transition code text; it must be a non-empty code.
+    assert!(!code.as_str().is_empty());
 }
 
 /// REQ: LIF-006
@@ -323,6 +326,7 @@ fn lif_011_pool_refusal_logs_host_capacity_reason() {
 fn lif_012_trap_drops_instance_without_deactivate() {
     let mut host = one_plugin();
     trap(&mut host, A);
+    assert!(host.activations().iter().any(|a| a.plugin == A));
     assert!(host.deactivations(A).is_empty());
     assert_eq!(state(&host, A), InstanceState::RestartScheduled);
 }
@@ -412,6 +416,10 @@ fn lif_016_one_event_per_change_in_order() {
         .unwrap();
     trap(&mut host, A);
     let changes = host.state_changes();
+    assert!(
+        changes.len() >= 2,
+        "disable, enable and trap each change state"
+    );
     let mut chain = changes
         .iter()
         .filter(|c| c.plugin == A && c.side == Side::Server);
@@ -446,6 +454,7 @@ fn lif_016_reasons_come_from_the_documented_set() {
         "detach",
         "grant",
     ];
+    assert!(!host.state_changes().is_empty());
     assert!(host
         .state_changes()
         .iter()

@@ -133,9 +133,15 @@ fn dev_001_check_without_dir_uses_the_working_directory() {
     let implicit = run(&env, &["check", "--json"]);
     assert_eq!(types(&implicit), types(&explicit));
     assert_eq!(implicit.exit_code, explicit.exit_code);
-    assert!(
-        [0, 3].contains(&implicit.exit_code),
-        "check ran to the end: ok or findings"
+    // DEV-011: 3 exactly when a check finding of severity error exists, otherwise 0
+    let has_error_finding = recs(&implicit, "check")
+        .iter()
+        .any(|r| r["severity"] == "error" && r["suppressed"] != true);
+    assert_eq!(
+        implicit.exit_code,
+        if has_error_finding { 3 } else { 0 },
+        "{:?}",
+        implicit.stdout_jsonl
     );
     assert_eq!(
         recs(&implicit, "result")[0]["exit_code"],
@@ -410,7 +416,12 @@ fn dev_005_doctor_and_inspect_of_a_file_work_offline() {
         0
     );
     let doctor = run(&env, &["doctor", "--json"]);
-    assert!(doctor.exit_code == 0 || doctor.exit_code == 4);
+    // DEV-811: 4 exactly when an item failed, otherwise 0
+    let any_fail = recs(&doctor, "doctor-check")
+        .iter()
+        .any(|r| r["status"] == "fail");
+    assert!(!recs(&doctor, "doctor-check").is_empty());
+    assert_eq!(doctor.exit_code, if any_fail { 4 } else { 0 });
     assert_ne!(code(&doctor).as_deref(), Some("session.unreachable"));
 }
 
@@ -492,14 +503,13 @@ fn dev_007_result_exit_code_equals_process_exit_code_on_failure() {
 fn dev_007_exit_code_is_one_of_the_table() {
     let root = scratch();
     let env = env(root.path());
-    let allowed = [0, 1, 2, 3, 4, 5, 6, 7, 8, 130];
-    for args in [
-        &["nonsense"][..],
-        &["new"],
-        &["list"],
-        &["pack"],
-        &["trust", "list", "--json"],
-    ] {
+    // exact code per failure class: usage -> 2 (DEV-010), no session -> 6 (DEV-014)
+    for (args, expected) in [(&["nonsense"][..], 2), (&["new"], 2), (&["list"], 6)] {
+        assert_eq!(run(&env, args).exit_code, expected, "{args:?}");
+    }
+    // manual does not pin the exit code of these two in an empty environment: table membership
+    let allowed = [0, 1, 2, 3, 4, 5, 6, 130];
+    for args in [&["pack"][..], &["trust", "list", "--json"]] {
         assert!(allowed.contains(&run(&env, args).exit_code), "{args:?}");
     }
 }
@@ -656,7 +666,8 @@ fn dev_012_missing_toolchain_exits_four() {
     let env = env(root.path()).with_probe(Arc::new(FakeProbe::without("rustc")));
     let dir = server_project(&env, root.path());
     let output = run_in(&env, &dir, &["build"]);
-    assert!(code(&output).expect("code").starts_with("toolchain."));
+    // the probe lacks `rustc`: reference table row `toolchain.rustc-missing`
+    assert_eq!(code(&output).as_deref(), Some("toolchain.rustc-missing"));
     assert_eq!(output.exit_code, 4);
 }
 
@@ -733,8 +744,8 @@ fn dev_014_session_not_found_also_exits_six() {
     let session = MemorySession::new();
     let env = env_session(root.path(), &session);
     let output = run(&env, &["list", "--json", "--session", "ghost"]);
-    let found = code(&output).expect("error code");
-    assert!(found == "session.not-found" || found == "session.unreachable");
+    // reference table: `session.not-found` = the named session does not exist
+    assert_eq!(code(&output).as_deref(), Some("session.not-found"));
     assert_eq!(output.exit_code, 6);
 }
 
@@ -816,6 +827,9 @@ fn dev_016_error_text_goes_to_standard_error_not_standard_output() {
     let root = scratch();
     let env = env(root.path());
     let output = run(&env, &["trust", "remove", &"b".repeat(64)]);
+    assert_eq!(code(&output).as_deref(), Some("trust.not-found"));
+    // manual does not pin the human text; it only forbids non-JSON on stdout
+    assert!(!output.stdout_raw.is_empty());
     for line in output.stdout_raw.lines() {
         serde_json::from_str::<Value>(line).expect("stdout holds only JSON lines");
     }
@@ -1335,10 +1349,14 @@ fn dev_029_offline_flag_beats_the_offline_variable() {
     let env = env(root.path()).with_var("ILIUM_PLUGIN_OFFLINE", "0");
     let dir = server_project(&env, root.path());
     let output = run_in(&env, &dir, &["build", "--offline"]);
-    assert!(
-        code(&output).map_or(true, |c| c == "build.offline-missing"),
-        "--offline was honoured"
-    );
+    // manual does not pin that this project has an uncached dependency: when --offline fails the
+    // build, it must be with build.offline-missing, and result.ok must agree with the exit code
+    if let Some(found) = code(&output) {
+        assert_eq!(found, "build.offline-missing");
+        assert_eq!(output.exit_code, 1);
+    } else {
+        assert_eq!(output.exit_code, 0, "{:?}", output.stdout_jsonl);
+    }
 }
 
 /// REQ: DEV-030

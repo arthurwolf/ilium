@@ -3,7 +3,7 @@
 
 use serde_json::{json, Value};
 
-use crate::common::{json_fences, manifest_path, manifest_value, page, page_text, table_after};
+use crate::common::{json_fences, manifest_path, manifest_value, page, page_text};
 
 fn complete_manifest() -> Value {
     let text = page_text();
@@ -89,14 +89,17 @@ fn manifest_050_server_component_and_world() {
 #[test]
 fn manifest_050_every_side_with_grants_has_a_component_pkg_025_grant_side() {
     let manifest = manifest_value();
-    for side in ["server", "client", "scene"] {
-        if manifest["capabilities"].get(side).is_some() {
-            assert!(
-                manifest.get(side).is_some(),
-                "capabilities.{side} is listed but the manifest has no {side} component"
-            );
-        }
+    for side in ["server", "client"] {
+        assert!(
+            manifest["capabilities"].get(side).is_some(),
+            "capabilities.{side} missing"
+        );
+        assert!(
+            manifest.get(side).is_some(),
+            "capabilities.{side} is listed but the manifest has no {side} component"
+        );
     }
+    assert!(manifest["capabilities"].get("scene").is_none());
 }
 
 /// REQ: COR-050, F-067
@@ -250,5 +253,18 @@ fn manifest_050_the_ability_grant_table_lists_every_server_grant_on_the_workspac
             "{grant} missing on api-workspace"
         );
     }
-    let _ = table_after;
+    // manual does not pin which page owns panes.*, process.run:sh and fs.read:project, so those
+    // are only required to be declared in the manifest.
+    let declared = grants("server");
+    for grant in [
+        "workspace.manage",
+        "process.run:git",
+        "process.run:sh",
+        "panes.create",
+        "panes.read",
+        "fs.read:project",
+        "fs.write:worktrees",
+    ] {
+        assert!(declared.iter().any(|g| g == grant), "{grant} not declared");
+    }
 }

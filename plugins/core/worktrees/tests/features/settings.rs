@@ -282,20 +282,30 @@ fn feature_072_a_blank_setup_command_is_valid_and_means_no_command() {
 fn feature_072_a_refused_value_leaves_the_stored_value_unchanged() {
     let mut host = client_host();
     set_git(&mut host, "branch_prefix", json!("feature/")).expect("valid");
-    let _ = set_git(&mut host, "branch_prefix", json!("bad prefix/"));
+    let refused = set_git(&mut host, "branch_prefix", json!("bad prefix/"));
+    assert_eq!(
+        refused.expect_err("refused").code,
+        ErrorCode::InvalidArgument
+    );
     assert_eq!(read(&mut host, "branch_prefix"), Some(json!("feature/")));
 }
 
 /// REQ: F-072
 #[test]
 fn feature_072_an_unknown_key_is_refused() {
-    let _ = rejected("worktree_root", json!("/tmp"));
+    assert_eq!(
+        rejected("worktree_root", json!("/tmp")).code,
+        ErrorCode::InvalidArgument
+    );
 }
 
 /// REQ: F-072
 #[test]
 fn feature_072_a_wrong_value_type_is_refused() {
-    let _ = rejected("setup_command", json!(5));
+    assert_eq!(
+        rejected("setup_command", json!(5)).code,
+        ErrorCode::InvalidArgument
+    );
 }
 
 proptest! {

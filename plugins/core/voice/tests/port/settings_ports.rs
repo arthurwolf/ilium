@@ -1,5 +1,6 @@
 //! Twins of the settings and toggle rows (`app.rs`, `mouse.rs`, `value_voice.rs`) on the kernel tab.
 
+use ilium_plugin_sdk::types::ErrorCode;
 use serde_json::json;
 
 use crate::common::{client_host, command_invoked, configure, enabled_client};
@@ -45,7 +46,10 @@ fn settings_054_volume_above_100_is_refused_and_other_settings_stay() {
     let refused = host
         .kernel_settings()
         .set("voice-control", "output_volume_percent", json!(101));
-    assert!(refused.is_err());
+    assert_eq!(
+        refused.expect_err("refused").code,
+        ErrorCode::InvalidArgument
+    );
     assert_eq!(
         host.kernel_settings()
             .get("voice-control", "output_volume_percent"),

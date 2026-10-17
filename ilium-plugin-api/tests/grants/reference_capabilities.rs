@@ -170,11 +170,16 @@ fn cap_003_wildcards_are_refused_where_the_table_forbids_them() {
         "process.run:git*",
     ];
     for text in refused {
+        // PKG-056: a process.run argument must be a program name, so its wildcard is
+        // grant-program; every other forbidden wildcard is grant-wildcard.
+        let expected = if text.starts_with("process.run") {
+            "manifest.grant-program"
+        } else {
+            "manifest.grant-wildcard"
+        };
         let codes = codes_for(Tier::T2, Side::Server, &[text]);
         assert!(
-            codes
-                .iter()
-                .any(|code| code == "manifest.grant-wildcard" || code == "manifest.grant-program"),
+            codes.iter().any(|code| code == expected),
             "{text}: {codes:?}"
         );
     }

@@ -210,7 +210,10 @@ fn sec_281_unknown_data_class_fails_schema() {
     point["entry_schema"] =
         json!({"type":"object","properties":{"v":{"type":"string","x-ilium-data":"bogus"}}});
     let manifest = owner_manifest("com.example.odd", vec![point]);
-    assert!(world.install(Tier::T3, manifest, Vec::new()).is_err());
+    let result = world.install(Tier::T3, manifest, Vec::new());
+    assert!(result.is_err(), "{result:?}");
+    // manual does not pin the code for an unknown data class; it must be a manifest diagnostic
+    assert!(diag_code(&result).starts_with("manifest."), "{result:?}");
 }
 
 /// REQ: SEC-281
@@ -314,13 +317,16 @@ fn sec_283_owner_rejects_an_entry_outside_its_allowlist() {
         "capabilities": {"server": ["extensions.contribute:ilium.core.worktrees/post-create-steps", "process.run:git"]},
         "contributes": {"extensions": [ext_entry("ilium.core.worktrees/post-create-steps", "s", 50, json!({"id":"s","title":"S","program":"rm","args":["-rf","/"]}))]}
     });
-    let _ = world.install(Tier::T2, contributor, Vec::new());
-    world.settle();
-    assert!(world
+    let entries_before = world
         .entries_of("ilium.core.worktrees/post-create-steps")
-        .iter()
-        .all(|entry| entry.id != "s"));
-    assert!(has_log(&world, "extension.entry-rejected") || has_log(&world, "rejected"));
+        .len();
+    // The install itself may succeed; the owner rejects the entry afterwards (SEC-283).
+    let _install = world.install(Tier::T2, contributor, Vec::new());
+    world.settle();
+    let entries = world.entries_of("ilium.core.worktrees/post-create-steps");
+    assert!(entries.iter().all(|entry| entry.id != "s"));
+    assert_eq!(entries.len(), entries_before, "no entry was added");
+    assert!(has_log(&world, "extension.entry-rejected"));
 }
 
 /// REQ: SEC-284
@@ -599,7 +605,12 @@ fn sec_292_ui_text_is_prefixed_with_the_contributors_display_name() {
             script(1, HandlerAction::Refuse("blocked".to_owned())),
         )],
     );
-    assert!(outcome.ui_text().starts_with("com.example.c1") || outcome.ui_text().contains("c1"));
+    let text = outcome.ui_text();
+    // manual does not pin the display-name format or separator; the manifest declares no display
+    // name, so the prefix is the plugin id
+    assert!(text.starts_with("com.example.c1"), "{text}");
+    assert!(text.ends_with("blocked"), "{text}");
+    assert!(text.len() > "blocked".len(), "prefix is non-empty: {text}");
 }
 
 proptest! {
@@ -607,11 +618,15 @@ proptest! {
     #[test]
     fn sec_292_reason_text_never_exceeds_120_characters_or_contains_controls(raw in "\\PC{0,300}") {
         let mut world = hook_world(HookShape::veto());
+        let expected: String = raw.chars().filter(|c| !c.is_control()).take(120).collect();
         let outcome = run_chain(&mut world, 1, vec![Contrib::new("com.example.c1", 50, script(1, HandlerAction::Refuse(raw)))]);
-        if let Some(text) = outcome.reason() {
-            prop_assert!(text.chars().count() <= 120);
-            prop_assert!(text.chars().all(|c| !c.is_control()));
-        }
+        prop_assert!(outcome.refused());
+        let text = outcome.reason();
+        prop_assert!(text.is_some(), "a refusal always carries a reason");
+        let text = text.unwrap_or_default();
+        prop_assert!(text.chars().count() <= 120);
+        prop_assert!(text.chars().all(|c| !c.is_control()));
+        prop_assert_eq!(text, expected);
     }
 }
 

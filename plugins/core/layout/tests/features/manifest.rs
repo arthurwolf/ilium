@@ -131,7 +131,14 @@ fn f_003_client_host_holds_declared_client_grants_only() {
 fn f_003_server_activation_succeeds_with_the_manifest_grants() {
     let mut host = server_host();
     let result = host.try_activate::<ilium_plugin_core_layout::LayoutServer>();
-    assert!(result.is_ok());
+    assert!(result.is_ok(), "{:?}", result.err());
+    for grant in ["panes.read", "panes.lifecycle", "tree.restructure"] {
+        assert!(host.grant_now(grant).is_ok(), "{grant} is declared");
+    }
+    let refused = host
+        .grant_now("ui.panels")
+        .expect_err("ui.panels is a client grant");
+    assert_eq!(refused.code, "harness.grant-not-declared");
 }
 
 /// REQ: F-003
@@ -139,5 +146,12 @@ fn f_003_server_activation_succeeds_with_the_manifest_grants() {
 fn f_003_client_activation_succeeds_with_the_manifest_grants() {
     let mut host = client_host();
     let result = host.try_activate::<ilium_plugin_core_layout::LayoutClient>();
-    assert!(result.is_ok());
+    assert!(result.is_ok(), "{:?}", result.err());
+    for grant in ["panes.read", "ui.panels"] {
+        assert!(host.grant_now(grant).is_ok(), "{grant} is declared");
+    }
+    let refused = host
+        .grant_now("tree.restructure")
+        .expect_err("tree.restructure is a server grant");
+    assert_eq!(refused.code, "harness.grant-not-declared");
 }

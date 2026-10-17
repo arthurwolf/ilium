@@ -135,12 +135,19 @@ fn dev_762_progress_text_goes_to_standard_error() {
     let (_root, env, dir) = ci_project("none");
     let output = run(&env, &["build", dir.to_str().unwrap(), "--json"]);
     assert!(!output.stdout_text.contains("Building"));
+    // manual does not pin the progress wording, only that it is on stderr and not JSONL
+    assert!(!output.stdout_jsonl.is_empty());
     assert!(
-        output.stderr.is_empty()
-            || !output
-                .stderr
-                .lines()
-                .any(|l| serde_json::from_str::<serde_json::Value>(l).is_ok())
+        !output.stderr.trim().is_empty(),
+        "no progress text on stderr"
+    );
+    assert!(
+        output
+            .stderr
+            .lines()
+            .all(|l| serde_json::from_str::<serde_json::Value>(l).is_err()),
+        "{}",
+        output.stderr
     );
 }
 
@@ -179,38 +186,52 @@ fn dev_764_check_exits_3_for_findings_and_lint_deny_exits_3_for_warnings() {
     let manifest =
         read_text(&dir, "ilium-plugin.json").replace("\"description\":", "\"description_x\":");
     write_text(&dir, "ilium-plugin.json", &manifest);
-    assert!(matches!(
-        run(
-            &env,
-            &[
-                "lint",
-                dir.to_str().unwrap(),
-                "--deny",
-                "warnings",
-                "--json"
-            ]
-        )
-        .exit_code,
-        0 | 3
-    ));
+    let plain = run(&env, &["lint", dir.to_str().unwrap(), "--json"]);
+    assert!(
+        records_of(&plain, "lint")
+            .iter()
+            .any(|r| r["severity"] == "warn" && r["suppressed"] != true),
+        "input must yield a warn finding: {:?}",
+        plain.stdout_jsonl
+    );
+    assert_eq!(
+        plain.exit_code, 0,
+        "a warn finding is not denied without the flag"
+    );
+    let denied = run(
+        &env,
+        &[
+            "lint",
+            dir.to_str().unwrap(),
+            "--deny",
+            "warnings",
+            "--json",
+        ],
+    );
+    assert_eq!(denied.exit_code, 3, "{:?}", denied.stdout_jsonl);
 }
 
 /// REQ: DEV-764
 #[test]
 fn dev_764_exit_codes_are_only_from_the_documented_set() {
     let (_root, env, dir) = ci_project("none");
-    for args in [
-        vec!["check", dir.to_str().unwrap()],
-        vec!["lint", dir.to_str().unwrap()],
-        vec!["nonsense"],
-        vec!["check", "/no/such/dir"],
-    ] {
-        let code = run(&env, &args).exit_code;
-        assert!(
-            [0, 1, 2, 3, 4, 5, 6, 130].contains(&code),
-            "{args:?} -> {code}"
-        );
-    }
+    // manual does not pin the exit code of a missing directory, only membership in the table
+    let missing = run(&env, &["check", "/no/such/dir"]).exit_code;
+    assert!(
+        [1, 2, 3, 4, 5].contains(&missing),
+        "missing dir -> {missing}"
+    );
+    // DEV-010: a usage error before any work starts exits 2
+    assert_eq!(run(&env, &["nonsense"]).exit_code, 2);
+    // DEV-011: a fresh project has check findings of severity error
+    assert_eq!(run(&env, &["check", dir.to_str().unwrap()]).exit_code, 3);
+    // DEV-011: plain lint never fails on warnings
+    let lint = run(&env, &["lint", dir.to_str().unwrap()]);
+    assert!(
+        [0, 3].contains(&lint.exit_code),
+        "lint -> {}",
+        lint.exit_code
+    );
 }
 
 /// REQ: DEV-765
@@ -512,7 +533,12 @@ fn dev_777_inspect_verify_of_a_signed_package_prints_the_publisher_fingerprint()
     run(&env, &["sign", &file, "--key", &secret, "--json"]);
     let output = run(&env, &["inspect", &file, "--verify", "--json"]);
     assert_eq!(output.exit_code, 0, "{:?}", output.stdout_jsonl);
-    assert!(output.stdout_text.contains("fingerprint") || output.stdout_text.contains("key_id"));
+    // DEV-112: the fingerprint of a key is its `key_id`; manual does not pin the record shape
+    assert!(
+        output.stdout_text.contains("key_id"),
+        "{}",
+        output.stdout_text
+    );
 }
 
 /// REQ: DEV-777 WARN
@@ -526,9 +552,15 @@ fn dev_777_inspect_verify_of_a_tampered_package_exits_1() {
     let last = bytes.len() / 2;
     bytes[last] ^= 0xff;
     std::fs::write(&file, bytes).unwrap();
-    assert_ne!(
-        run(&env, &["inspect", &file, "--verify", "--json"]).exit_code,
-        0
+    let output = run(&env, &["inspect", &file, "--verify", "--json"]);
+    assert_eq!(output.exit_code, 1, "{:?}", output.stdout_jsonl);
+    // DEV-801: a differing hash is reported with inspect.hash-mismatch (flipped byte may also
+    // corrupt the archive; manual does not pin that case)
+    assert_eq!(
+        error_code(&output).as_deref(),
+        Some("inspect.hash-mismatch"),
+        "{:?}",
+        output.stdout_jsonl
     );
 }
 

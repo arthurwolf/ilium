@@ -68,7 +68,8 @@ fn usr_201_clean_profile_run_matches_every_file_against_the_table() {
         .data_dir()
         .join("plugins/store/com.example.files/1.0.0/manifest.json")
         .exists());
-    assert!(rig.state_dir().join("ilium/grants.json").exists() || rig.grants_path().exists());
+    assert_eq!(rig.grants_path(), rig.state_dir().join("ilium/grants.json"));
+    assert!(rig.grants_path().exists());
     assert!(rig.trust_store_path().exists());
     let _ = rig.cli(&["uninstall", "com.example.files", "--yes"]);
     assert!(!rig
@@ -127,9 +128,14 @@ fn usr_202_kill_during_a_grant_change_leaves_old_or_new_never_a_mix() {
         let parsed: Result<serde_json::Value, _> = serde_json::from_slice(&now);
         assert!(parsed.is_ok(), "{point:?}: the file always parses");
         let new_expected = rig.expected_grants_after("com.example.atomic", "panes.read");
-        assert!(
-            now == old || now == new_expected,
-            "{point:?}: neither old nor new content"
+        // manual does not pin leftover temp-file handling after a kill
+        let expected = match point {
+            KillPoint::AfterRename => new_expected,
+            _ => old,
+        };
+        assert_eq!(
+            now, expected,
+            "{point:?}: wrong content for this kill point"
         );
     }
 }
@@ -212,12 +218,23 @@ fn usr_203_a_project_grant_applies_in_a_second_project_and_nothing_is_in_ilium_f
         CallOutcome::Ok
     );
     for project in [project_a, project_b] {
-        let names: Vec<String> = tree_snapshot(&project.join(".ilium")).into_keys().collect();
+        let snapshot = tree_snapshot(&project.join(".ilium"));
+        assert!(
+            !snapshot.is_empty(),
+            "the project .ilium folder holds sessions"
+        );
+        let names: Vec<String> = snapshot.keys().cloned().collect();
         assert!(
             names
                 .iter()
                 .all(|name| !name.to_lowercase().contains("grant")),
             "{names:?}"
+        );
+        assert!(
+            snapshot
+                .values()
+                .all(|bytes| !String::from_utf8_lossy(bytes).contains("fs.read:project")),
+            "no grant content in {names:?}"
         );
     }
 }

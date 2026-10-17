@@ -496,7 +496,14 @@ fn sec_190_a_locked_setting_refuses_a_user_write_with_settings_locked() {
         "ilium:host/settings.set-plugin-json",
         json!({ "plugin": "ilium.core.terminal", "patch": "{\"terminal.scrollback\":100}" }),
     );
-    assert!(plugin.is_err());
+    assert_eq!(
+        plugin.map_err(|error| error.code.as_str().to_owned()),
+        Err("settings.locked".to_owned())
+    );
+    assert_eq!(
+        rig.host.effective_setting("terminal.scrollback"),
+        Some(json!(20000))
+    );
 }
 
 /// REQ: SEC-190

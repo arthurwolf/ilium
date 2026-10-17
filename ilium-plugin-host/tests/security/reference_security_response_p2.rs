@@ -161,7 +161,12 @@ fn sec_327_the_user_can_uninstall_a_blocked_plugin() {
 #[test]
 fn sec_327_the_user_cannot_re_enable_a_blocked_plugin() {
     let rig = blocked_rig("id", "test.plugin");
-    assert!(rig.host.enable_plugin("test.plugin").is_err());
+    // manual names no error code, so the check is the blocklist reason in the message.
+    let error = rig
+        .host
+        .enable_plugin("test.plugin")
+        .expect_err("a blocked plugin cannot be enabled");
+    assert!(error.contains("No answer to a serious report"), "{error}");
     assert!(rig.host.plugin_disabled("test.plugin"));
 }
 
@@ -286,7 +291,14 @@ fn sec_328_the_admin_policy_still_applies() {
         .system_policy("version = 1\n[plugins]\nblock = [\"test.plugin\"]\n", true)
         .safe_mode()
         .start();
-    assert!(!rig.policy_show().is_empty());
+    let shown = rig.policy_show();
+    assert!(!shown.is_empty());
+    let text = serde_json::to_string(&shown).expect("policy json");
+    assert!(
+        text.contains("block") && text.contains("test.plugin"),
+        "{text}"
+    );
+    assert!(rig.host.plugin_disabled("test.plugin"));
 }
 
 /// REQ: SEC-328
@@ -378,10 +390,13 @@ fn sec_330_a_normal_start_writes_no_safe_mode_record() {
 #[test]
 fn sec_330_a_project_with_plugin_values_is_untrusted_in_safe_mode() {
     let rig = setup(&[]).safe_mode().start();
+    let before = rig.host.effective_setting("mode");
     rig.host.trust_project("/work/project");
     rig.host
         .write_project_value("/work/project", "test.plugin", "mode", json!("project"));
-    assert_ne!(rig.host.effective_setting("mode"), Some(json!("project")));
+    // the project value is ignored: the effective value is unchanged from before the write.
+    assert_eq!(rig.host.effective_setting("mode"), before);
+    assert_ne!(before, Some(json!("project")));
 }
 
 /// REQ: SEC-330

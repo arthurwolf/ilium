@@ -116,7 +116,10 @@ fn hst_497_run_and_spawn_children_share_one_count() {
         quota.hold_run().expect("run child");
     }
     assert_eq!(quota.live(), 16);
-    assert!(quota.spawn().is_err());
+    assert_eq!(
+        quota.spawn().expect_err("seventeenth").code,
+        ErrorCode::QuotaExceeded
+    );
 }
 
 /// REQ: HST-497

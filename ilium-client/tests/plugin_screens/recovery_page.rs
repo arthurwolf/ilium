@@ -42,9 +42,15 @@ fn usr_032_a_plugin_cannot_replace_the_recovery_page() {
     rig.install_plugin_that_claims_recovery_page("com.example.fake");
     rig.press_prefix_then(':');
     let screen = rig.screen_text();
-    assert!(screen.contains("Recovery"));
+    assert!(screen.contains("Recovery"), "{screen}");
     assert!(!screen.contains("com.example.fake page"), "{screen}");
-    assert!(rig.last_install_error().is_some() || rig.recovery_page_owner() == "kernel");
+    // The kernel keeps the page whatever the install attempt did.
+    assert_eq!(rig.recovery_page_owner(), "kernel");
+    // manual does not pin the install-refusal code, so only its presence is checked here.
+    assert!(
+        rig.last_install_error().is_some(),
+        "install must be refused"
+    );
 }
 
 // ---- USR-160 ----
@@ -99,6 +105,27 @@ fn usr_160_each_key_runs_its_action_on_the_selected_plugin() {
         "Failed",
         "reset clears the count without activating (LIF-272)"
     );
+    // Forget settings (f): only the stored settings values go (USR-033).
+    rig.set_plugin_setting("com.example.target", "volume", "7");
+    assert_eq!(
+        rig.plugin_setting("com.example.target", "volume")
+            .as_deref(),
+        Some("7")
+    );
+    rig.press_key('f');
+    // manual does not say whether the key asks for confirmation; answer it when it does.
+    if rig.screen_text().contains("Forget") && rig.screen_text().contains("Yes") {
+        rig.confirm_yes();
+    }
+    assert_eq!(rig.plugin_setting("com.example.target", "volume"), None);
+    // Uninstall (u): the plugin disappears from the page.
+    let rows_before = rig.plugin_row_count();
+    rig.press_key('u');
+    if rig.screen_text().contains("Uninstall") && rig.screen_text().contains("Yes") {
+        rig.confirm_yes();
+    }
+    assert_eq!(rig.plugin_row_count(), rows_before - 1);
+    assert!(!has_row_with(&rig.screen_text(), "com.example.target"));
 }
 
 /// REQ: USR-160

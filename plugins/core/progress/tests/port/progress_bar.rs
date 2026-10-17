@@ -189,7 +189,8 @@ fn port_061_the_footer_is_limited_to_the_configured_line_budget() {
         .lines()
         .filter(|line| line.contains("job-"))
         .count();
-    assert!(default_rows <= 4, "{default_rows}");
+    // default ui.progress_max_lines is 4 (manual: Footer lines, 1 to 20)
+    assert_eq!(default_rows, 4, "{default_rows}");
     set_kernel_setting(&mut host, "ui.progress_max_lines", json!(2)).expect("accepted");
     show(
         &mut host,
@@ -199,7 +200,7 @@ fn port_061_the_footer_is_limited_to_the_configured_line_budget() {
         .lines()
         .filter(|line| line.contains("job-"))
         .count();
-    assert!(rows <= 2, "{rows}");
+    assert_eq!(rows, 2, "{rows}");
 }
 
 /// REQ: PORT:ilium-client/src/progress_bar.rs::the_gauge_uses_distinct_filled_and_unfilled_glyphs
@@ -230,6 +231,12 @@ fn port_061_a_line_budget_of_one_draws_one_row_and_a_budget_of_zero_is_rejected_
         .lines()
         .filter(|line| line.contains("job-"))
         .count();
-    assert!(rows <= 1, "{rows}");
-    assert!(set_kernel_setting(&mut host, "ui.progress_max_lines", json!(0)).is_err());
+    assert_eq!(rows, 1, "{rows}");
+    let refused = set_kernel_setting(&mut host, "ui.progress_max_lines", json!(0))
+        .expect_err("0 is out of range");
+    // manual pins the message, not an error code
+    assert_eq!(
+        refused.message,
+        "ui.progress_max_lines = 0 must be between 1 and 20"
+    );
 }

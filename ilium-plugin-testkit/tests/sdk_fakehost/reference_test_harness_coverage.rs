@@ -152,7 +152,12 @@ fn dev_532_the_command_exits_3_when_coverage_is_lower() {
     let dir = crate::cli_support::project("c532", &[("a.json", r#"{ "schema": 1 }"#)]);
     let run = run_with_env(&dir, &["--coverage", "--min-coverage", "101"], &[]);
     assert_eq!(run.code, 3, "stdout: {}", run.stdout);
-    assert!(run.stdout.contains("is below 101") || run.stderr.contains("is below 101"));
+    // manual does not pin which stream carries the message
+    let combined = format!("{}\n{}", run.stdout, run.stderr);
+    assert!(
+        combined.contains("coverage ") && combined.contains(" percent is below 101"),
+        "message must read `coverage <percent> percent is below 101`: {combined}"
+    );
 }
 
 proptest! {

@@ -135,7 +135,9 @@ fn hook_084_refuse_sends_nothing_and_fails_the_call() {
     assert!(host.http().calls().is_empty());
     let replies = host.inference().provider_replies();
     assert_eq!(replies.len(), 1);
-    assert!(replies[0].1.is_err());
+    let refusal = replies[0].1.clone().expect_err("refused");
+    // manual does not pin the error code of a refusing hook: pin the refusal text instead.
+    assert!(refusal.message.contains("private text"), "{refusal:?}");
 }
 
 /// REQ: F-084
@@ -340,14 +342,18 @@ fn profiles_084_an_entry_without_a_base_url_is_not_offered() {
     host.extensions().contribute_profile(
         &json!({"id": "broken", "title": "Broken Profile", "models_path": "/models", "key_name": "K"}).to_string(),
     );
+    host.extensions().contribute_profile(
+        &json!({"id": "valid", "title": "Valid Profile", "base_url": "http://127.0.0.1:1", "models_path": "/models", "key_name": "K"}).to_string(),
+    );
     let target = ilium_plugin_sdk::types::ViewTarget::SettingsPage("inference".to_string());
-    for _ in 0..8 {
+    let mut valid_shown = false;
+    for _ in 0..12 {
         host.key(target.clone(), "right");
-        assert!(!host
-            .render(target.clone(), 80, 12)
-            .text()
-            .contains("Broken Profile"));
+        let text = host.render(target.clone(), 80, 12).text();
+        assert!(!text.contains("Broken Profile"), "{text}");
+        valid_shown |= text.contains("Valid Profile");
     }
+    assert!(valid_shown, "the valid profile must be offered");
 }
 
 /// REQ: F-084, SEC-293

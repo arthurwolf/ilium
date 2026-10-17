@@ -158,12 +158,13 @@ fn feature_006_the_list_operation_returns_the_bookmarked_nodes_as_json() {
         .unwrap_or_else(|| {
             panic!("list answers an array of node ids (bare or under `bookmarks`): {value}")
         });
+    // manual does not pin the list shape (bare array or `bookmarks` key, bare id or `{node}`).
     let mut ids: Vec<u64> = items
         .iter()
         .map(|item| {
             item.as_u64()
                 .or_else(|| item.get("node").and_then(|node| node.as_u64()))
-                .unwrap_or(u64::MAX)
+                .unwrap_or_else(|| panic!("every listed item names a node id: {item}"))
         })
         .collect();
     ids.sort_unstable();

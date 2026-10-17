@@ -77,11 +77,20 @@ fn http_take_response_for_an_unknown_request_is_none() {
 /// REQ: WIT:ilium:host/http.take-response
 #[test]
 fn http_take_response_is_dropped_after_30_seconds_unclaimed() {
-    let (port, _heads, mut fixture) = served(http_response("200 OK", &[], b"x"));
-    let id = expect_ok(fixture.http().fetch(request("GET", &url(port, "/"))));
-    complete(&mut fixture, id);
-    fixture.advance(std::time::Duration::from_secs(31));
-    assert!(fixture.http().take_response(id).is_none());
+    // two connections: one response is claimed at 29 s, the other is left until 31 s
+    let (port, _heads) = loopback_server(http_response("200 OK", &[], b"x"), 2);
+    let mut fixture = granted(port);
+    let early = expect_ok(fixture.http().fetch(request("GET", &url(port, "/"))));
+    complete(&mut fixture, early);
+    let late = expect_ok(fixture.http().fetch(request("GET", &url(port, "/"))));
+    complete(&mut fixture, late);
+    fixture.advance(std::time::Duration::from_secs(29));
+    assert!(
+        fixture.http().take_response(early).is_some(),
+        "still available before 30 s"
+    );
+    fixture.advance(std::time::Duration::from_secs(2));
+    assert!(fixture.http().take_response(late).is_none());
 }
 
 /// REQ: WIT:ilium:host/http.fetch

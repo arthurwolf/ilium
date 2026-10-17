@@ -37,8 +37,10 @@ fn feature_070_before_remove_receives_path_branch_dirty_and_merged() {
         .hook_chain(BEFORE_REMOVE)
         .last_payload()
         .expect("payload");
-    for key in ["path", "branch", "dirty", "merged"] {
-        assert!(payload.get(key).is_some(), "{key}");
+    assert_eq!(payload["path"], "/w/docs-sweep");
+    assert_eq!(payload["branch"], "docs-sweep");
+    for key in ["dirty", "merged"] {
+        assert!(payload[key].is_boolean(), "{key}: {payload}");
     }
 }
 
@@ -64,7 +66,9 @@ fn feature_070_a_clean_merged_worktree_is_removed_with_git_worktree_remove() {
         &mut host,
         json!({"path": "/w/docs-sweep", "branch": "docs-sweep"}),
     );
-    assert_eq!(remove_calls(&mut host).len(), 1);
+    let calls = remove_calls(&mut host);
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0], ["worktree", "remove", "/w/docs-sweep"]);
 }
 
 /// REQ: F-070
@@ -100,6 +104,9 @@ fn feature_070_a_running_process_in_the_worktree_blocks_removal() {
         json!({"path": "/w/docs-sweep", "branch": "docs-sweep"}),
     );
     assert!(remove_calls(&mut host).is_empty());
+    // manual does not pin the running-process sentence, only the headline
+    let notice = host.last_notice().expect("notice");
+    assert!(notice.contains("docs-sweep cannot be removed"), "{notice}");
 }
 
 /// REQ: F-070
@@ -110,7 +117,9 @@ fn feature_070_removal_never_uses_force() {
         &mut host,
         json!({"path": "/w/docs-sweep", "branch": "docs-sweep"}),
     );
-    for args in remove_calls(&mut host) {
+    let calls = remove_calls(&mut host);
+    assert_eq!(calls.len(), 1, "a clean worktree is removed exactly once");
+    for args in calls {
         assert!(!args.iter().any(|a| a == "--force" || a == "-f"));
     }
 }

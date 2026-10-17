@@ -688,6 +688,7 @@ fn dev_720_records_carry_the_documented_fields() {
         .iter()
         .all(|r| has_keys(r, &["seq", "time_ms", "kind", "instance", "detail"])));
     let timing = records_of(&outputs[1], "timing");
+    assert!(!timing.is_empty(), "profile printed no timing record");
     assert!(timing.iter().all(|r| has_keys(
         r,
         &[
@@ -704,6 +705,10 @@ fn dev_720_records_carry_the_documented_fields() {
     assert_eq!(tree.len(), 1);
     assert!(has_keys(tree[0], &["target", "nodes", "depth", "root"]));
     let memory = records_of(&outputs[3], "memory");
+    assert!(
+        !memory.is_empty(),
+        "inspect --memory printed no memory record"
+    );
     assert!(memory.iter().all(|r| has_keys(
         r,
         &[
@@ -915,10 +920,21 @@ fn dev_683_json_prints_one_tree_record_with_nested_children() {
 #[test]
 fn dev_693_profiling_adds_less_than_5_percent_to_a_call() {
     let mut profiler = Profiler::new();
-    let plain = ms_f(10.0);
-    profiler.record("render", plain);
+    let calls = 100;
+    for _ in 0..calls {
+        profiler.record("render", ms_f(10.0));
+    }
+    // the profiler must have recorded every call, otherwise a zero overhead proves nothing
+    let timing = profiler.timing("render");
+    assert_eq!(timing.calls, calls);
+    assert!(
+        (timing.total_ms - 1000.0).abs() < 1e-6,
+        "{}",
+        timing.total_ms
+    );
     let overhead = profiler.overhead_fraction();
-    assert!(overhead <= 0.05, "overhead {overhead}");
+    assert!(overhead >= 0.0, "overhead {overhead}");
+    assert!(overhead < 0.05, "overhead {overhead}");
 }
 
 /// REQ: DEV-725
@@ -936,12 +952,12 @@ fn dev_725_replay_reproduces_the_recorded_deadline_trap() {
         &env,
         &["test", "--replay", file.to_str().expect("utf8"), "--json"],
     );
+    let trap = records_of(&output, "error");
     assert!(
-        output
-            .stdout_jsonl
-            .iter()
-            .any(|r| r.to_string().contains("trap.deadline")),
+        trap.iter().any(|r| r["code"] == "trap.deadline"),
         "{:?}",
         output.stdout_jsonl
     );
+    // manual does not pin the exit code of a replayed deadline trap (DEV-544 pins 0 and 3 only)
+    assert_ne!(output.exit_code, 0, "{:?}", output.stdout_jsonl);
 }

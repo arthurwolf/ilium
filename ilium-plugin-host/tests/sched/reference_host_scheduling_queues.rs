@@ -126,7 +126,8 @@ fn hst_202_stuck_side_counts_as_a_failure() {
         ScriptedGuest::new(Shared::new()),
     );
     handle.deliver((0..1_025).map(|_| message()).collect());
-    assert!(handle.failure_count() >= 1);
+    // manual does not pin a failure code for the stuck side, only that it is one failure.
+    assert_eq!(handle.failure_count(), 1);
 }
 
 proptest! {
@@ -442,7 +443,9 @@ fn hst_207_refused_submission_carries_the_retry_after_hint() {
     let mut bucket = ExecutionBucket::new();
     bucket.charge_cpu_ms(2_100);
     let refused = bucket.try_submit().expect_err("refused");
-    assert!(refused.message.contains("200"));
+    // 2,000 ms capacity - 2,100 ms charged = -100 ms, so retry-after = 200 ms.
+    assert_eq!(refused.code.as_str(), "quota-exceeded");
+    assert_eq!(refused.retry_after_ms, Some(200));
 }
 
 proptest! {

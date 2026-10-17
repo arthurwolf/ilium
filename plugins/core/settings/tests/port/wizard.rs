@@ -33,7 +33,9 @@ fn port_089_back_on_the_first_step_is_bounded_and_the_step_stays_drawn() {
     }
     host.settle();
     let after = render_checked(&mut host, first_run(), 80, 24).text();
-    assert!(after.contains("Welcome") || before.contains("Welcome"));
+    assert!(after.contains("Welcome"), "{after}");
+    assert!(after.contains("Step 1 of"), "{after}");
+    assert_eq!(after, before, "back on the first step changes nothing");
     assert!(host.failures().is_empty());
 }
 
@@ -57,10 +59,12 @@ fn port_089_the_setup_opens_for_fresh_and_partial_users_and_not_for_completed_on
 #[test]
 fn port_089_every_step_card_stays_reachable_at_the_acceptance_sizes() {
     let mut host = client_host();
-    let _ = host.settings().set(
-        "inference.openai_api_key",
-        json!("fixture-secret-do-not-render"),
-    );
+    host.settings()
+        .set(
+            "inference.openai_api_key",
+            json!("fixture-secret-do-not-render"),
+        )
+        .expect("secret fixture stored");
     for (columns, rows) in SIZES {
         let screen = render_checked(&mut host, first_run(), columns, rows);
         assert!(!screen.text().trim().is_empty(), "{columns}x{rows}");
@@ -71,7 +75,7 @@ fn port_089_every_step_card_stays_reachable_at_the_acceptance_sizes() {
                 hits += 1;
             }
         }
-        assert!(hits <= usize::from(rows) as u32);
+        assert!(hits >= 1, "{columns}x{rows}: no card is clickable");
     }
     assert!(host.failures().is_empty());
 }
@@ -139,6 +143,14 @@ fn port_089_lessons_fade_only_with_full_motion_and_never_leave_the_frame() {
             let second = render_checked(&mut host, first_run(), columns, rows).text();
             if level != "full" {
                 assert_eq!(first, second, "{level}: no animation at {columns}x{rows}");
+            } else {
+                assert_ne!(first, second, "full motion fades at {columns}x{rows}");
+            }
+            for line in first.lines().chain(second.lines()) {
+                assert!(
+                    line.chars().count() <= usize::from(columns),
+                    "{level}: line leaves the {columns}x{rows} frame: {line:?}"
+                );
             }
         }
     }
@@ -176,12 +188,8 @@ fn port_090_a_failed_save_in_a_step_stays_visible_and_is_never_reported_as_succe
     choose(&mut host, "user-interface", "ui.color_scheme", "light");
     assert_eq!(value_of(&mut host, "ui.color_scheme"), Some(json!("dark")));
     let text = tab_text(&mut host, "user-interface", 100, 40);
-    assert!(
-        !text.to_lowercase().contains("saved")
-            || text.contains("fixture failure")
-            || text.contains("Could not"),
-        "{text}"
-    );
+    assert!(text.contains("fixture failure"), "{text}");
+    assert!(!text.to_lowercase().contains("saved"), "{text}");
     choose(&mut host, "user-interface", "ui.color_scheme", "light");
     assert_eq!(value_of(&mut host, "ui.color_scheme"), Some(json!("light")));
 }

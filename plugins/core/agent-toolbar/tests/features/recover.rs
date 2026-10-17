@@ -158,6 +158,7 @@ fn f_033_clear_and_recover_submissions_are_accepted_by_the_host() {
     let (mut host, pane) = host_with_prompt("first");
     host.deliver_one(activity(pane, Working, Done));
     host.settle();
+    assert_eq!(host.outcomes().len(), 3, "{:?}", host.outcomes());
     assert!(
         host.outcomes().iter().all(|outcome| outcome.is_ok()),
         "{:?}",

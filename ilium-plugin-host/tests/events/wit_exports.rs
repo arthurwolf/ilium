@@ -31,6 +31,14 @@ fn wit_handler_on_events_more_than_256_returned_submissions_trap() {
     let env = Setup::new(&["tree.write"]).tree(flat_tree(1)).build();
     env.run((1..=257).map(|n| sub(n, rename(2, "t"))).collect());
     assert_eq!(env.host.failures().len(), 1);
+    // ABI-008: the host applies none and none completes
+    for correlation in 1..=257 {
+        assert!(
+            env.outcome(correlation).is_none(),
+            "submission {correlation}"
+        );
+    }
+    // manual does not pin the trap code for the 256-submission limit
 }
 
 /// REQ: WIT:ilium:exports/lifecycle.activate
@@ -53,6 +61,7 @@ fn wit_lifecycle_activate_error_fails_the_activation() {
         retry_after_ms: None,
     });
     let (built, _probe, _kernel) = setup.try_build();
+    // manual does not pin the host error variant for a failed activation
     assert!(built.is_err());
 }
 

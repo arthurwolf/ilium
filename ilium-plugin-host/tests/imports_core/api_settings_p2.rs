@@ -503,10 +503,11 @@ fn settings_set_row_state_is_accepted_again_after_the_window_passes() {
                 .set_row_state("label".to_owned(), state(RowStateKind::Pending, None)),
         );
     }
-    assert!(fixture
+    let error = fixture
         .settings()
         .set_row_state("label".to_owned(), state(RowStateKind::Pending, None))
-        .is_err());
+        .expect_err("the 11th call in the window is refused");
+    assert_eq!(error.code, ErrorCode::RateLimited);
     fixture.advance(Duration::from_millis(1100));
     expect_ok(
         fixture
@@ -560,6 +561,7 @@ fn settings_set_item_states_leaves_unnamed_items_unchanged() {
             .settings()
             .set_json(r#"{"queue": ["a", "b"]}"#.to_owned()),
     );
+    let before = fixture.item_state("queue", 1);
     expect_ok(fixture.settings().set_item_states(
         "queue".to_owned(),
         vec![ItemState {
@@ -567,10 +569,11 @@ fn settings_set_item_states_leaves_unnamed_items_unchanged() {
             state: state(RowStateKind::Loading, None),
         }],
     ));
-    assert_ne!(
-        fixture.item_state("queue", 1),
+    assert_eq!(
+        fixture.item_state("queue", 0),
         Some(state(RowStateKind::Loading, None))
     );
+    assert_eq!(fixture.item_state("queue", 1), before);
 }
 
 /// REQ: WIT:ilium:host/settings.set-item-states

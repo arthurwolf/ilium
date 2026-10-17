@@ -69,6 +69,7 @@ fn f_035_granting_agent_control_again_lets_the_action_through() {
         pane.to_string().as_bytes(),
     ));
     host.settle();
+    assert_eq!(host.outcomes().len(), 1, "{:?}", host.outcomes());
     assert!(
         host.outcomes().iter().all(|outcome| outcome.is_ok()),
         "{:?}",

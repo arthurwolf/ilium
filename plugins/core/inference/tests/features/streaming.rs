@@ -172,7 +172,10 @@ fn stream_084_a_cancelled_stream_answers_with_an_error() {
     host.deliver_one(closed(stream, StreamOutcome::Cancelled));
     let replies = replies(&mut host);
     assert_eq!(replies.len(), 1);
-    assert!(replies[0].1.is_err());
+    assert_eq!(
+        replies[0].1.clone().expect_err("err").code,
+        ErrorCode::Cancelled
+    );
 }
 
 /// REQ: F-084

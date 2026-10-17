@@ -4,7 +4,7 @@
 
 use crate::host_ext::*;
 use ilium_plugin_sdk::testing::FakeHost;
-use ilium_plugin_sdk::types::ViewTarget;
+use ilium_plugin_sdk::types::{ErrorCode, ViewTarget};
 use serde_json::json;
 
 use crate::common::{client_host, configure};
@@ -88,6 +88,8 @@ fn step_053_the_recording_control_follows_the_input_mode() {
     let push = step_text(&mut host, 100, 40);
     configure(&mut host, "input_mode", json!("semantic_vad"));
     let vad = step_text(&mut host, 100, 40);
+    // manual does not pin the control labels; the two modes must at least render differently.
+    assert!(!push.is_empty() && !vad.is_empty());
     assert_ne!(push, vad);
 }
 
@@ -101,6 +103,7 @@ fn step_053_the_settings_and_the_transcript_scroll_independently() {
     let target = ViewTarget::OnboardingStep("voice".to_string());
     let before = step_text(&mut host, 160, 12);
     // A click on the settings column must not move what the transcript column shows.
+    // The testkit has no scroll action yet, so independent scrolling itself stays unexercised.
     host.click(target, 10, 10);
     let after = step_text(&mut host, 160, 12);
     let transcript_column = |text: &str| {
@@ -119,10 +122,9 @@ fn step_053_a_test_with_an_invalid_configuration_never_opens_audio() {
     host.key(ViewTarget::OnboardingStep("voice".to_string()), "t");
     host.settle();
     assert!(host.audio().captures().is_empty());
-    assert!(
-        step_text(&mut host, 100, 40).contains("Ready to test")
-            || step_text(&mut host, 100, 40).contains("API key")
-    );
+    // manual does not pin the invalid-configuration message; the test action must stay offered.
+    let text = step_text(&mut host, 100, 40);
+    assert!(text.contains("Test"), "{text}");
 }
 
 /// REQ: PORT:ilium-client/src/onboarding/voice_runtime.rs::stop_is_nonblocking_and_preserves_original_queued_text
@@ -134,10 +136,20 @@ fn step_053_stop_or_a_settings_change_cancels_a_waiting_test_without_audio() {
     let mut host = client_host();
     let target = ViewTarget::OnboardingStep("voice".to_string());
     host.key(target.clone(), "t");
+    host.settle();
+    assert!(
+        host.audio().captures().iter().all(|capture| !capture.open),
+        "no audio may open while the test is waiting"
+    );
     host.key(target, "Esc");
     configure(&mut host, "model", json!("gpt-realtime-2.1-mini"));
     host.settle();
-    assert!(host.audio().captures().iter().all(|capture| !capture.open));
+    // A cancelled test never leaves a capture open.
+    let captures = host.audio().captures();
+    assert!(
+        captures.iter().all(|capture| !capture.open),
+        "a stopped test leaves no open capture: {captures:?}"
+    );
 }
 
 /// REQ: PORT:ilium-client/src/onboarding/voice_runtime.rs::advertised_capability_is_only_the_bulb
@@ -197,10 +209,12 @@ fn demo_053_the_demonstration_offers_only_the_bulb_and_runs_it_by_call_id() {
     );
     assert_eq!(replay, on);
     assert_eq!(host.onboarding_demo("voice").bulb(), Some(false));
-    assert!(host
+    let malformed = host
         .onboarding_demo("voice")
         .call("c3", "set_lightbulb", "{\"on\":\"yes\"}")
-        .is_err());
+        .expect_err("malformed arguments refused");
+    assert_eq!(malformed.code, ErrorCode::InvalidArgument);
+    // manual does not pin the code for a tool the demo does not advertise; it must be an error.
     assert!(host
         .onboarding_demo("voice")
         .call("c4", "ilium_close_pane", "{}")

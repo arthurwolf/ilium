@@ -283,6 +283,10 @@ fn abi_022_wit_markers_use_only_the_four_features() {
     for feature in &used {
         assert!(UNSTABLE_FEATURES.contains(feature), "{feature}");
     }
+    assert!(!generated::UNSTABLE_ITEMS.is_empty());
+    for feature in UNSTABLE_FEATURES {
+        assert!(used.contains(&feature), "no WIT item is marked {feature}");
+    }
 }
 
 /// REQ: ABI-022

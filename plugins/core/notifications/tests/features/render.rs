@@ -81,12 +81,17 @@ fn render_047_the_sounds_figure_lists_the_three_sound_rows_and_two_desktop_rows(
 /// REQ: F-047
 #[test]
 fn render_047_the_sounds_figure_connects_label_and_value_with_dotted_leaders() {
-    for line in golden("sounds_48.txt").lines().skip(1) {
+    let figure = golden("sounds_48.txt");
+    let mut leader_lines = 0;
+    for line in figure.lines().skip(1) {
         if line.contains('…') {
-            assert!(line.contains(" … ") || line.contains("… "), "{line}");
+            leader_lines += 1;
+            // one blank cell on each side of the dots
+            assert!(line.contains(" …") && line.contains("… "), "{line}");
             assert!(!line.contains("..."), "{line}");
         }
     }
+    assert!(leader_lines > 0, "no leader line in the figure");
 }
 
 /// REQ: F-047

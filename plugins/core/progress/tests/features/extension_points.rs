@@ -58,6 +58,11 @@ fn f_060_a_contributed_probe_kind_is_accepted_without_failures() {
         "title": "CI run", "command_template": "/usr/local/bin/ci-probe {run}", "interval_seconds": 30}),
     );
     assert!(host.failures().is_empty());
+    let entries = host.extension_entries("ilium.core.progress/probe-kinds");
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].id, "ci-run");
+    assert_eq!(entries[0].priority, 50);
+    assert_eq!(entries[0].entry["interval_seconds"], 30);
 }
 
 /// REQ: F-060

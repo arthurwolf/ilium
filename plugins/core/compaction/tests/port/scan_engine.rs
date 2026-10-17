@@ -204,6 +204,7 @@ fn scan_progress_is_reported_while_a_scan_runs() {
         .iter()
         .map(|r| r["bytes_done"].as_u64().unwrap())
         .collect();
+    assert!(done.len() >= 2, "a six-file scan reports more than once");
     assert!(
         done.windows(2).all(|p| p[0] <= p[1]),
         "progress never goes backwards"
@@ -369,7 +370,7 @@ fn scan_cancelling_keeps_the_previous_report() {
     write_claude_corpus(&mut host, 6);
     let first = scan(&mut host, "claude");
     let cancelled = host.scan_agent_homes("claude", Some(CACHE), None, Some(1));
-    assert!(cancelled.is_err());
+    assert_eq!(cancelled.expect_err("cancelled").code(), "cancelled");
     assert_eq!(host.last_report("claude"), first["report"]);
 }
 

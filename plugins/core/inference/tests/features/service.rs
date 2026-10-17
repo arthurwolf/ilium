@@ -34,7 +34,14 @@ fn service_084_a_caller_with_the_use_grant_gets_a_completion() {
         "^0.1",
         &json!({"purpose": "title", "messages": [{"role": "user", "content": "hi"}]}).to_string(),
     );
-    assert!(reply.is_ok());
+    let body = match reply.expect("completion") {
+        ilium_plugin_sdk::exports::ServiceReply::Done(body) => body,
+        other => panic!("expected an immediate completion, got {other:?}"),
+    };
+    // manual does not pin the reply fields beyond the completion shape: text and model.
+    let value: serde_json::Value = serde_json::from_str(&body).expect("JSON reply");
+    assert!(value["text"].as_str().is_some(), "{value}");
+    assert!(value["model"].as_str().is_some(), "{value}");
 }
 
 /// REQ: F-084, SEC-293

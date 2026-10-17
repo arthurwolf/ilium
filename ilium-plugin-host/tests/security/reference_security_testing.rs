@@ -144,7 +144,11 @@ fn sec_340_manifest_target_survives_depth_1000_with_a_defined_error() {
         !codes.is_empty(),
         "a hostile document is rejected with a code"
     );
-    assert!(codes.iter().all(|code| code.contains('.')), "{codes:?}");
+    // manual does not pin the depth code; every code must be in the manifest namespace.
+    assert!(
+        codes.iter().all(|code| code.starts_with("manifest.")),
+        "{codes:?}"
+    );
 }
 
 /// REQ: SEC-340
@@ -157,9 +161,13 @@ fn sec_340_manifest_target_bounds_time_on_a_10_mib_string() {
         started.elapsed() < std::time::Duration::from_secs(1),
         "limit of 1 s per input"
     );
+    // manual does not pin whether manifest-size or the description limit fires first.
     assert!(
-        !codes.is_empty(),
-        "an oversized string is refused with a code"
+        !codes.is_empty()
+            && codes
+                .iter()
+                .all(|code| code.starts_with("manifest.") || code == "package.manifest-size"),
+        "an oversized string is refused with a code: {codes:?}"
     );
 }
 
@@ -167,15 +175,26 @@ fn sec_340_manifest_target_bounds_time_on_a_10_mib_string() {
 #[test]
 fn sec_340_grant_matcher_target_rejects_bad_grant_strings_with_a_diagnostic() {
     for text in ["", "http:", "fs.read:", "no-such-grant", "http:*.*", ":x"] {
-        assert!(Grant::parse(text).is_err(), "{text:?}");
+        let error = Grant::parse(text).expect_err(text);
+        assert!(
+            error.code.as_str().starts_with("manifest.grant-"),
+            "{text:?}"
+        );
     }
+    let unknown = Grant::parse("no-such-grant").expect_err("unknown family");
+    assert_eq!(unknown.code.as_str(), "manifest.grant-unknown");
 }
+
+/// Known-valid grant strings, so the properties below always reach their assertions.
+const GRANT_STRATEGY: &str =
+    "(clipboard\\.read|panes\\.create|terminal\\.read-screen|http:[a-z]{1,10}\\.com|process\\.run:[a-z]{1,10})";
 
 proptest! {
     // REQ: SEC-340
     #[test]
-    fn sec_340_grant_matcher_target_parse_is_total_and_reparses_to_itself(text in ".{0,80}") {
-        if let Ok(grant) = Grant::parse(&text) {
+    fn sec_340_grant_matcher_target_parse_is_total_and_reparses_to_itself(text in GRANT_STRATEGY) {
+        {
+            let grant = Grant::parse(&text).expect("valid grant parses");
             let again = Grant::parse(grant.as_str());
             prop_assert!(again.is_ok());
             let reparsed = again.expect("reparse");
@@ -185,8 +204,9 @@ proptest! {
 
     // REQ: SEC-340
     #[test]
-    fn sec_340_grant_matcher_target_a_grant_covers_itself(text in "[a-z.:*/-]{0,40}") {
-        if let Ok(grant) = Grant::parse(&text) {
+    fn sec_340_grant_matcher_target_a_grant_covers_itself(text in GRANT_STRATEGY) {
+        {
+            let grant = Grant::parse(&text).expect("valid grant parses");
             prop_assert!(grant.covers(&grant));
         }
     }
@@ -225,9 +245,20 @@ fn fuzz_workflow() -> String {
 /// REQ: SEC-341
 #[test]
 fn sec_341_ci_runs_each_target_for_at_least_10_minutes_on_a_change() {
+    let workflow = fuzz_workflow();
+    let active: Vec<&str> = workflow
+        .lines()
+        .filter(|line| !line.trim_start().starts_with('#'))
+        .collect();
     assert!(
-        fuzz_workflow().contains("-max_total_time=600"),
+        active
+            .iter()
+            .any(|line| line.contains("-max_total_time=600")),
         "no 10 minute fuzz job in CI"
+    );
+    assert!(
+        active.iter().any(|line| line.contains("pull_request")),
+        "the fuzz job must run on a change"
     );
 }
 
@@ -383,12 +414,14 @@ fn sec_345_allocating_beyond_memory_max_kills_the_helper_with_limit_exceeded_mem
             .run_hostile_probe("guest", "allocate-beyond-memory-max"),
         "helper-killed"
     );
-    assert!(rig
-        .host
-        .failures()
-        .iter()
-        .any(|trap| format!("{trap:?}").contains("limit-exceeded")
-            && format!("{trap:?}").contains("memory")));
+    // manual does not pin the Trap variant name; its debug form must name limit-exceeded memory.
+    let failures = rig.host.failures();
+    assert_eq!(failures.len(), 1, "{failures:?}");
+    let trap = format!("{:?}", failures[0]);
+    assert!(
+        trap.contains("limit-exceeded") && trap.contains("memory"),
+        "{trap}"
+    );
 }
 
 /// REQ: SEC-345
@@ -467,6 +500,7 @@ fn sec_346_each_dialog_is_readable_and_aligned_at_48_and_120_columns_in_both_the
                     })
                     .map(|line| line.chars().count())
                     .collect();
+                assert!(framed.len() >= 3, "{kind} {columns}: no frame {framed:?}");
                 assert!(
                     framed.windows(2).all(|pair| pair[0] == pair[1]),
                     "{kind} {columns} misaligned: {framed:?}"

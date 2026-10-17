@@ -39,6 +39,14 @@ fn signature(id: &str) -> SignatureSpec {
     }
 }
 
+fn assert_identifies(rig: &Rig, process_name: &str, id: &str) {
+    let winner = rig
+        .kernel
+        .identify_process_name(process_name)
+        .unwrap_or_else(|| panic!("no signature identifies {process_name}"));
+    assert!(winner.ends_with(id), "winner {winner}, expected id {id}");
+}
+
 fn turns(count: usize) -> Vec<TranscriptTurn> {
     (0..count)
         .map(|index| TranscriptTurn {
@@ -141,6 +149,8 @@ fn pri_010_32_process_names_accepted() {
     let mut spec = signature("x");
     spec.process_names = (0..32).map(|index| format!("tool{index}")).collect();
     assert!(rig.host.agent().register_signature(spec).is_ok());
+    assert_identifies(&rig, "tool0", "x");
+    assert_identifies(&rig, "tool31", "x");
 }
 
 /// REQ: PRI-010
@@ -174,6 +184,7 @@ fn pri_010_process_name_of_255_bytes_accepted_256_invalid_argument() {
     let mut spec = signature("x");
     spec.process_names = vec!["n".repeat(255)];
     assert!(rig.host.agent().register_signature(spec).is_ok());
+    assert_identifies(&rig, &"n".repeat(255), "x");
     let mut spec = signature("y");
     spec.process_names = vec!["n".repeat(256)];
     assert_eq!(
@@ -210,6 +221,7 @@ fn pri_010_32_aliases_accepted_33_invalid_argument() {
     let mut spec = signature("x");
     spec.aliases = (0..32).map(|index| format!("a{index}")).collect();
     assert!(rig.host.agent().register_signature(spec).is_ok());
+    assert_identifies(&rig, "mytool", "x");
     let mut spec = signature("y");
     spec.aliases = (0..33).map(|index| format!("a{index}")).collect();
     assert_eq!(
@@ -245,6 +257,7 @@ fn pri_010_32_actions_accepted_33_invalid_argument() {
     let mut spec = signature("x");
     spec.actions = (0..32).map(|index| action(index, "k".into())).collect();
     assert!(rig.host.agent().register_signature(spec).is_ok());
+    assert_identifies(&rig, "mytool", "x");
     let mut spec = signature("y");
     spec.actions = (0..33).map(|index| action(index, "k".into())).collect();
     assert_eq!(
@@ -260,6 +273,7 @@ fn pri_010_action_keys_1_kib_accepted_over_invalid_argument() {
     let mut spec = signature("x");
     spec.actions = vec![action(0, "k".repeat(KIB))];
     assert!(rig.host.agent().register_signature(spec).is_ok());
+    assert_identifies(&rig, "mytool", "x");
     let mut spec = signature("y");
     spec.actions = vec![action(0, "k".repeat(KIB + 1))];
     assert_eq!(

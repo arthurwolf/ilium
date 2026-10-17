@@ -536,15 +536,29 @@ fn wit_ui_host_write_surface_past_the_surface_height_invalid_argument() {
 /// REQ: WIT:ilium:host/ui-host.write-surface
 #[test]
 fn wit_ui_host_write_surface_over_sixteen_mib_invalid_argument() {
-    let mut rig = seeded(&[]);
-    let result = rig.host.ui_host().write_surface(
+    // A 1-pixel-wide gray8 surface makes every byte count a whole number of in-bounds rows, so
+    // only the 16 MiB cap can reject the oversized write.
+    let rig = rig(GRANTS);
+    rig.kernel.declare_panel("notes");
+    rig.kernel
+        .commit_view_tree("notes", &[("surface:gray8:1x17000000", "canvas")], &[]);
+    let mut rig = rig;
+    let over = rig.host.ui_host().write_surface(
         panel_view(),
         "canvas".to_owned(),
         0,
-        PixelFormat::Rgb8,
-        vec![0; 16 * MIB + 3],
+        PixelFormat::Gray8,
+        vec![0; 16 * MIB + 1],
     );
-    assert_eq!(code_of(result), ErrorCode::InvalidArgument);
+    assert_eq!(code_of(over), ErrorCode::InvalidArgument);
+    let exact = rig.host.ui_host().write_surface(
+        panel_view(),
+        "canvas".to_owned(),
+        0,
+        PixelFormat::Gray8,
+        vec![0; 16 * MIB],
+    );
+    assert!(exact.is_ok());
 }
 
 /// REQ: WIT:ilium:host/ui-host.write-surface

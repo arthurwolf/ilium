@@ -391,8 +391,19 @@ fn panes_109_the_cost_of_a_pane_appears_in_its_record() {
         &json!({"panes": {"3": 1.42, "5": 0.31}}).to_string(),
     );
     let (stdout, _, _) = run_cli(&mut host, &["panes", "--session", "default"], b"");
-    assert!(stdout.contains("1.42"), "{stdout}");
-    assert!(stdout.contains("0.31"), "{stdout}");
+    let all = records(&stdout);
+    // manual does not pin the cost field name: tie each figure to its own pane record.
+    let record_text = |pane: u64| {
+        of_type(&all, "pane")
+            .into_iter()
+            .find(|record| record["pane_id"] == pane)
+            .unwrap_or_else(|| panic!("no record for pane {pane}: {stdout}"))
+            .to_string()
+    };
+    assert!(record_text(3).contains("1.42"), "{stdout}");
+    assert!(record_text(5).contains("0.31"), "{stdout}");
+    assert!(!record_text(3).contains("0.31"), "{stdout}");
+    assert!(!record_text(5).contains("1.42"), "{stdout}");
 }
 
 /// REQ: F-109
@@ -427,6 +438,7 @@ fn panes_040_the_output_is_json_lines_only_when_not_on_a_terminal() {
     let mut host = server_host();
     two_sessions(&mut host);
     let (stdout, stderr, _) = run_cli(&mut host, &["panes"], b"");
+    assert!(stdout.lines().count() >= 4, "{stdout}");
     assert!(
         stdout
             .lines()

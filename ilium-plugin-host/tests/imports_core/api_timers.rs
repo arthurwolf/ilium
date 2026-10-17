@@ -121,10 +121,13 @@ fn timers_set_repeat_of_49_milliseconds_invalid_argument() {
 fn timers_set_repeating_timer_fires_on_a_drift_free_schedule() {
     let mut fixture = timer_fixture();
     let id = expect_ok(fixture.timers().set(100, Some(100)));
-    for _ in 0..3 {
-        run_for(&mut fixture, 100);
-        assert_eq!(fired(&mut fixture), vec![id]);
-    }
+    // Pump late: a drifting schedule (now + repeat) would then fire at 230, not 200.
+    run_for(&mut fixture, 130);
+    assert_eq!(fired(&mut fixture), vec![id]);
+    run_for(&mut fixture, 70);
+    assert_eq!(fired(&mut fixture), vec![id]);
+    run_for(&mut fixture, 100);
+    assert_eq!(fired(&mut fixture), vec![id]);
 }
 
 /// REQ: WIT:ilium:host/timers.set
@@ -133,6 +136,9 @@ fn timers_set_repeating_timer_missed_ticks_coalesce_into_one_event() {
     let mut fixture = timer_fixture();
     let id = expect_ok(fixture.timers().set(100, Some(100)));
     run_for(&mut fixture, 550);
+    assert_eq!(fired(&mut fixture), vec![id]);
+    // The schedule stays first + n * repeat: the next tick is due at 600 ms.
+    run_for(&mut fixture, 50);
     assert_eq!(fired(&mut fixture), vec![id]);
 }
 
@@ -308,7 +314,7 @@ fn timers_at_reports_how_late_the_timer_fired() {
     run_for(&mut fixture, 1750);
     let events = durable_fired(&mut fixture);
     assert_eq!(events.len(), 1);
-    assert!(events[0].late_by_millis >= 750 || events[0].late_by_millis == 0);
+    assert_eq!(events[0].late_by_millis, 750);
 }
 
 /// REQ: WIT:ilium:host/timers.at

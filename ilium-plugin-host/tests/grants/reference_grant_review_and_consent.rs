@@ -40,9 +40,10 @@ fn sec_100_defective_inventory_is_reported_before_a_later_grant_fault() {
         .diagnostics
         .first()
         .expect("a defective package reports a diagnostic");
-    assert_ne!(
+    // SEC-100 step 3: a corrupted file hash is `manifest.file-hash`
+    assert_eq!(
         first.code.as_str(),
-        "manifest.grant-unknown",
+        "manifest.file-hash",
         "inventory fails first"
     );
 }
@@ -120,6 +121,8 @@ fn sec_103_key_repeat_within_80_ms_is_dropped() {
 fn sec_104_control_characters_are_removed_from_the_display_name() {
     let shown = display_name("Evil\u{1b}[31m\u{7}Plugin\n");
     assert!(shown.chars().all(|c| !c.is_control()), "{shown:?}");
+    // ESC, BEL and the newline go; the printable remainder of the escape sequence stays
+    assert_eq!(shown, "Evil[31mPlugin");
 }
 
 /// REQ: SEC-104
@@ -190,7 +193,11 @@ fn sec_106_each_requested_grant_is_one_row() {
 #[test]
 fn sec_106_a_high_risk_row_is_marked_and_listed_first() {
     let rows = review_rows(&[grant("tree.read"), grant("fs.read:home")]);
-    assert!(rows[0].is_toxic || rows[0].risk_rank >= rows[1].risk_rank);
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].grant, "fs.read:home");
+    assert!(rows[0].is_toxic, "the high-risk row is marked");
+    assert!(!rows[1].is_toxic, "the normal row is not marked");
+    assert!(rows[0].risk_rank > rows[1].risk_rank);
 }
 
 /// REQ: SEC-107
@@ -453,14 +460,33 @@ fn sec_119_uninstall_deletes_grants_and_consents() {
 fn sec_120_cli_consents_lists_stored_decisions_as_json() {
     let dir = scratch();
     let env = cli_env(dir.path());
+    // manual does not pin which directory holds the consent store; record into both
+    for root in [&env.data_dir, &env.state_dir] {
+        std::fs::create_dir_all(root).expect("creates the store directory");
+        ConsentStore::open(root)
+            .expect("opens")
+            .record("test.plugin", "net.http:example.com", true)
+            .expect("record");
+    }
     let outcome = run_cli(
         &env,
         &args(&["plugin", "consents", "test.plugin", "--json"]),
     );
     assert_eq!(outcome.exit_code, 0);
+    // SEC-120: consents print as JSONL, one JSON value per line
+    let records: Vec<serde_json::Value> = outcome
+        .stdout
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| serde_json::from_str(line).expect("each line is JSON"))
+        .collect();
+    assert!(!records.is_empty(), "{}", outcome.stdout);
     assert!(
-        outcome.stdout.trim_start().starts_with('{')
-            || outcome.stdout.trim_start().starts_with('[')
+        records
+            .iter()
+            .any(|record| record.to_string().contains("net.http:example.com")),
+        "{}",
+        outcome.stdout
     );
 }
 
@@ -480,7 +506,13 @@ fn sec_120_cli_grants_with_unknown_grant_fails_with_the_grant_code() {
             "--json",
         ]),
     );
+    // manual does not pin the exit code of a failed grants command; the error record is pinned
     assert_ne!(outcome.exit_code, 0);
+    assert!(
+        outcome.stdout.contains("manifest.grant-unknown"),
+        "{}",
+        outcome.stdout
+    );
 }
 
 // ---------------------------------------------------------------- SEC-121..123

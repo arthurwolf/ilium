@@ -157,7 +157,11 @@ fn port_090_every_value_in_a_range_is_accepted_and_one_outside_is_refused() {
         let mut host = client_host();
         prop_assert!(host.settings().set("ui.left_panel_fixed_width", json!(value)).is_ok());
         prop_assert_eq!(host.settings().get("ui.left_panel_fixed_width"), Some(json!(value)));
-        prop_assert!(host.settings().set("ui.left_panel_fixed_width", json!(outside)).is_err());
+        let refusal = host.settings().set("ui.left_panel_fixed_width", json!(outside));
+        prop_assert!(refusal.is_err());
+        let error = refusal.unwrap_err();
+        prop_assert_eq!(error.code, ErrorCode::InvalidArgument);
+        prop_assert!(error.message.contains("ui.left_panel_fixed_width"), "{}", error.message);
         prop_assert_eq!(host.settings().get("ui.left_panel_fixed_width"), Some(json!(value)));
     });
 }
@@ -175,10 +179,16 @@ fn port_090_an_invalid_panel_width_leaves_all_four_widths_untouched() {
     let mut host = client_host();
     let before: Vec<_> = keys.iter().map(|key| value_of(&mut host, key)).collect();
     for bad in [15i64, 81, 0, -1] {
-        assert!(host
+        let error = host
             .settings()
             .set("ui.left_panel_focused_width", json!(bad))
-            .is_err());
+            .expect_err("out-of-range width refused");
+        assert_eq!(error.code, ErrorCode::InvalidArgument, "{bad}");
+        assert!(
+            error.message.contains("ui.left_panel_focused_width"),
+            "{}",
+            error.message
+        );
         let after: Vec<_> = keys.iter().map(|key| value_of(&mut host, key)).collect();
         assert_eq!(before, after, "{bad}");
     }
@@ -369,7 +379,8 @@ fn port_090_catalogs_of_discovered_models_hold_every_option_once_with_the_curren
     }
     let before = value_of(&mut host, "ui.color_scheme");
     choose(&mut host, "user-interface", "ui.color_scheme", "light");
-    assert_ne!(value_of(&mut host, "ui.color_scheme"), before);
+    assert_ne!(before, Some(json!("light")), "the choice must be a change");
+    assert_eq!(value_of(&mut host, "ui.color_scheme"), Some(json!("light")));
     assert!(host.failures().is_empty());
 }
 
@@ -525,7 +536,11 @@ fn port_089_numeric_dialog_rejection_keeps_the_exact_draft_and_paste_is_atomic()
     );
     submit(&mut host, "user-interface", "ui.last_prompt_max_lines");
     let stored = value_of(&mut host, "ui.last_prompt_max_lines");
-    assert!(stored == before || stored == Some(json!(12)), "{stored:?}");
+    assert_eq!(
+        stored,
+        Some(json!(12)),
+        "leading zeros parse as the number 12"
+    );
 }
 
 /// REQ: PORT:ilium-client/src/value_dialog_host.rs::agent_from_line_catalog_preserves_authored_prompt_source_and_destination, PORT:ilium-client/src/value_dialog_host.rs::board_catalog_keeps_authored_fields_and_rejects_changed_destination, PORT:ilium-client/src/value_dialog_host.rs::changed_parent_and_unknown_choice_are_rejected_without_mutation, PORT:ilium-client/src/value_dialog_host.rs::full_delivery_list_keeps_current_and_updates_only_parent_choice, PORT:ilium-client/src/value_dialog_host.rs::trigger_scope_catalog_preserves_authored_rule_and_fences_reopened_editor, F-089, F-090

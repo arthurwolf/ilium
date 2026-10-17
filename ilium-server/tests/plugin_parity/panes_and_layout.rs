@@ -436,11 +436,19 @@ fn f_013_history_keeps_the_last_lines_scrolled_off_the_screen_in_order() {
         kernel.feed_output(pane, text.as_bytes());
         let history = kernel.panes().history(pane, 3).expect("history");
         assert_eq!(history.len(), 3);
-        assert!(history[0] < history[2] || history[0].len() <= history[2].len());
-        assert!(
-            history.iter().all(|line| line.starts_with("line")),
-            "{history:?}"
-        );
+        // The newest scrolled-off lines are the three just above the first visible row.
+        let screen = kernel.panes().screen_text(pane).expect("screen");
+        let first_visible: usize = screen
+            .lines()
+            .next()
+            .and_then(|row| row.trim().strip_prefix("line"))
+            .and_then(|n| n.parse().ok())
+            .unwrap_or_else(|| panic!("screen must start with a numbered line: {screen:?}"));
+        assert!(first_visible >= 3, "output must have scrolled: {screen:?}");
+        let expected: Vec<String> = (first_visible - 3..first_visible)
+            .map(|n| format!("line{n}"))
+            .collect();
+        assert_eq!(history, expected);
     });
 }
 

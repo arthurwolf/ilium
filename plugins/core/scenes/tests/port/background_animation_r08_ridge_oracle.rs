@@ -47,6 +47,17 @@ fn port_r08_ridge_oracle_rejects_noise_mutations() {
     }
     let lit = lit_cells(&fake_scene("waves", 40, 10).frame(braille_frame(40, 10, 1500)));
     assert!(!lit.is_empty(), "waves draws something at 1500 ms");
+    let clock = lit_cells(&fake_scene("clock", 40, 10).frame(braille_frame(40, 10, 1500)));
+    assert!(!clock.is_empty(), "clock draws something at 1500 ms");
+    // the animated waves scene moves between two instants, so a constant frame fails
+    let later = fake_scene("waves", 40, 10).frame(braille_frame(40, 10, 3000));
+    assert_ne!(
+        fake_scene("waves", 40, 10)
+            .frame(braille_frame(40, 10, 1500))
+            .text(),
+        later.text(),
+        "waves frames differ over time"
+    );
     assert!(
         scenes_page().to_lowercase().contains("ridge"),
         "the manual page covers this feature"
@@ -73,6 +84,22 @@ fn port_r08_ridge_public_frames_pack_and_normalize() {
             after.text(),
             "{id}: normalised settings keep the frame"
         );
+        if id != "stars-overhead" {
+            // manual does not pin what stars-overhead draws at 1500 ms
+            assert!(!lit_cells(&after).is_empty(), "{id}: frame is not blank");
+        }
+        if id == "waves" {
+            let has_braille = (0..after.rows).any(|row| {
+                (0..after.columns).any(|column| {
+                    after
+                        .cell(row, column)
+                        .symbol
+                        .chars()
+                        .any(|ch| ('\u{2800}'..='\u{28FF}').contains(&ch) && ch != '\u{2800}')
+                })
+            });
+            assert!(has_braille, "waves packs lit dots into Braille patterns");
+        }
         for row in 0..after.rows {
             for column in 0..after.columns {
                 let symbol = after.cell(row, column).symbol;

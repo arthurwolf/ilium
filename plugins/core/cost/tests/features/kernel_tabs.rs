@@ -92,8 +92,17 @@ fn doc_cor_022_kernel_and_boot_row_names_the_off_effect() {
 /// REQ: COR-011, F-040
 #[test]
 fn doc_cor_011_page_says_the_settings_keep_their_defaults_and_keys() {
+    // COR-011: defaults and keys are kept. The page's settings contributions carry them.
     let text = page_text();
-    assert!(text.contains("COR-011"));
+    assert!(text.contains("\"key\": \"unit\""), "unit key missing");
+    assert!(
+        text.contains("\"default\": \"dollars\""),
+        "unit default missing"
+    );
+    assert!(
+        text.contains("\"default\": [\"tree\", \"status\"]"),
+        "display default missing"
+    );
 }
 
 /// REQ: COR-030, F-040
@@ -117,9 +126,22 @@ fn cor_033_changing_unit_writes_only_keys_of_the_cost_table() {
         .set("unit", serde_json::json!("quota"))
         .expect("valid unit");
     host.settle();
-    for (tab, key, _) in kernel_writes(&mut host) {
+    let row = table_row(&page("reference-config-and-data-migration"), "`[cost]`");
+    let cost_keys: Vec<&str> = row[1]
+        .split(", ")
+        .map(|key| key.trim_matches('`'))
+        .collect();
+    let writes = kernel_writes(&mut host);
+    assert!(
+        !writes.is_empty(),
+        "changing the unit must write the kernel tab"
+    );
+    for (tab, key, _) in writes {
         assert_eq!(tab, "agent-cost");
-        assert!(["metric", "quota_window"].contains(&key.as_str()) || !key.is_empty());
+        assert!(
+            cost_keys.contains(&key.as_str()),
+            "{key} is not a [cost] key"
+        );
     }
 }
 
@@ -145,7 +167,10 @@ fn cor_033_unit_change_writes_the_metric_key_of_the_agent_cost_tab() {
 fn cor_030_client_never_writes_the_agent_cost_tab() {
     let mut host = activated_client();
     host.settle();
-    assert!(kernel_writes(&mut host)
-        .iter()
-        .all(|(tab, _, _)| tab != "agent-cost"));
+    // manual does not pin a client UI action that edits the tab; activation alone must not write
+    let writes = kernel_writes(&mut host);
+    assert!(
+        writes.iter().all(|(tab, _, _)| tab != "agent-cost"),
+        "{writes:?}"
+    );
 }

@@ -59,7 +59,23 @@ fn sec_020_one_helper_refuses_a_second_plugin() {
         EMPTY_COMPONENT,
         &[],
     ));
-    assert!(helper.recv_tag(tag::READY, 1_500).is_none());
+    // The refusal must be an explicit InstantiateFailed, never Ready and never just silence
+    // (a hang or crash would otherwise pass). manual does not pin the refusal message text.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(1_500);
+    let mut refused = false;
+    while !refused {
+        let left = deadline
+            .saturating_duration_since(std::time::Instant::now())
+            .as_millis() as u64;
+        match helper.recv(left.max(1)) {
+            Recv::Frame(frame) => {
+                assert_ne!(frame_tag(&frame), Some(tag::READY), "second plugin served");
+                refused = frame_tag(&frame) == Some(tag::INSTANTIATE_FAILED);
+            }
+            Recv::Timeout | Recv::Closed => break,
+        }
+    }
+    assert!(refused, "no InstantiateFailed for the second plugin");
 }
 
 /// REQ: SEC-020
@@ -91,11 +107,10 @@ fn sec_021_user_mount_ipc_uts_and_net_namespaces_differ_from_the_server() {
     let probe = applied("ns", &[]);
     let inner = probe.map("ns");
     for kind in ["user", "mnt", "ipc", "uts", "net"] {
-        assert_ne!(
-            inner.get(kind).cloned(),
-            Some(parent_ns(kind)),
-            "{kind} namespace is shared"
-        );
+        let inner_ns = inner
+            .get(kind)
+            .unwrap_or_else(|| panic!("{kind} namespace not reported by the probe"));
+        assert_ne!(inner_ns, &parent_ns(kind), "{kind} namespace is shared");
     }
 }
 
@@ -104,11 +119,11 @@ fn sec_021_user_mount_ipc_uts_and_net_namespaces_differ_from_the_server() {
 fn sec_021_pid_namespace_differs_from_the_server() {
     let probe = applied("ns", &[]);
     let inner = probe.map("ns");
-    let children = probe.one("ns_pid_for_children").unwrap_or_default();
-    assert!(
-        inner.get("pid").cloned() != Some(parent_ns("pid")) || children != parent_ns("pid"),
-        "pid namespace is shared"
-    );
+    // The plugin's own process must be in a new PID namespace (not only its children).
+    let own_pid_ns = inner
+        .get("pid")
+        .expect("pid namespace not reported by the probe");
+    assert_ne!(own_pid_ns, &parent_ns("pid"), "pid namespace is shared");
 }
 
 /// REQ: SEC-021
@@ -163,10 +178,7 @@ fn sec_022_creating_a_udp_socket_fails() {
 fn sec_022_only_loopback_interface_exists() {
     let probe = applied("net", &[]);
     let interfaces = probe.all("interface");
-    assert!(
-        interfaces.iter().all(|name| name == "lo"),
-        "interfaces: {interfaces:?}"
-    );
+    assert_eq!(interfaces, vec!["lo".to_string()]);
 }
 
 // ------------------------------------------------------------------ SEC-023
@@ -431,7 +443,7 @@ fn sec_028_only_stdio_and_one_channel_descriptor_remain() {
         .filter_map(|l| l.split_once('=').and_then(|(n, _)| n.parse().ok()))
         .collect();
     let extra: Vec<&u32> = numbers.iter().filter(|n| **n > 2).collect();
-    assert!(extra.len() <= 1, "descriptors above 2: {extra:?}");
+    assert_eq!(extra.len(), 1, "descriptors above 2: {extra:?}");
 }
 
 /// REQ: SEC-028
@@ -483,9 +495,14 @@ fn sec_029_allocating_past_the_memory_limit_kills_the_helper() {
     let mut helper = Helper::spawn();
     assert_eq!(helper.ready_with("hostile", &wasm), Ok(()));
     helper.send(&msg_call_export(1, "allocate-past-limit", b"", 10_000));
-    assert!(
-        helper.wait_exit(15_000).is_some(),
-        "helper must be killed at memory.max"
+    let status = helper
+        .wait_exit(15_000)
+        .expect("helper must be killed at memory.max");
+    // The cgroup OOM killer ends the helper with SIGKILL (a clean exit would not be the limit).
+    assert_eq!(
+        std::os::unix::process::ExitStatusExt::signal(&status),
+        Some(9),
+        "{status:?}"
     );
 }
 
@@ -524,6 +541,8 @@ fn sec_055_a_helper_that_serves_is_sandboxed_before_the_first_plugin_byte() {
             "served without a seccomp filter"
         );
     } else {
+        // manual does not pin how the helper process reports `sandbox.unavailable` (the code
+        // belongs to the host's load refusal); here it must end with a failure status.
         let exit = helper
             .wait_exit(3_000)
             .expect("an unavailable sandbox ends the helper, never serves unconfined");
@@ -563,8 +582,12 @@ fn sec_056_root_user_never_gets_a_served_helper() {
             !served,
             "running as root is not supported for third-party plugins"
         );
-    } else {
-        assert!(served || helper.wait_exit(3_000).is_some());
+        let exit = helper.wait_exit(3_000).expect("a refused helper ends");
+        assert!(!exit.success());
+    } else if !served {
+        // Without a served helper the sandbox is unavailable and the helper must have failed.
+        let exit = helper.wait_exit(3_000).expect("an unserved helper ends");
+        assert!(!exit.success());
     }
 }
 

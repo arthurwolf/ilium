@@ -92,7 +92,10 @@ fn rwrk_pause_wait_requests_one_interrupt_then_gives_up() {
         false,
     );
     assert_eq!(outcome.interrupts, 1);
-    assert!(outcome.result.is_err());
+    // manual does not pin the give-up message; it must at least be a real failure, not a cancel
+    let message = outcome.result.expect_err("the wait gives up");
+    assert!(!message.is_empty());
+    assert_ne!(message, "cancelled");
 }
 
 /// REQ: PORT:ilium-client/src/remote_compaction_worker.rs::pause_probe_admission_covers_tail_parsing_peak

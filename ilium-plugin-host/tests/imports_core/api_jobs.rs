@@ -117,9 +117,10 @@ fn jobs_start_a_full_queue_is_busy() {
     let mut fixture = echo_fixture();
     fixture.hold_async_completions(true);
     let mut refused = None;
+    let mut accepted = 0usize;
     for _ in 0..1000 {
         match fixture.jobs().start(KIND.to_owned(), Vec::new()) {
-            Ok(_) => {}
+            Ok(_) => accepted += 1,
             Err(error) => {
                 refused = Some(error.code);
                 break;
@@ -127,6 +128,12 @@ fn jobs_start_a_full_queue_is_busy() {
         }
     }
     assert_eq!(refused, Some(ErrorCode::Busy));
+    // Default queue is 16 jobs plus 2 running; manual does not say whether running jobs count
+    // against the queue, so accept 16 (queue only) through 18 (queue plus running).
+    assert!(
+        (16..=18).contains(&accepted),
+        "accepted {accepted} jobs before busy"
+    );
 }
 
 /// REQ: WIT:ilium:host/jobs.start
@@ -273,11 +280,10 @@ fn jobs_report_progress_values_reach_the_host_clamped_to_0_100() {
 fn jobs_report_progress_not_a_number_is_ignored() {
     let mut fixture = echo_fixture();
     let mut instance = fixture.job_instance(KIND, b"");
+    instance.jobs().report_progress(10.0);
     instance.jobs().report_progress(f32::NAN);
-    assert!(instance
-        .reported_progress()
-        .iter()
-        .all(|value| value.is_finite()));
+    instance.jobs().report_progress(20.0);
+    assert_eq!(instance.reported_progress(), vec![10.0, 20.0]);
 }
 
 // ---- wait-request ----------------------------------------------------------------------------

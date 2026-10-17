@@ -35,12 +35,15 @@ fn hst_400_first_failure_restarts_after_1_s_second_after_5_s_third_disables() {
 #[test]
 fn hst_400_no_30_s_step_exists_for_any_failure_count() {
     let mut policy = RestartPolicy::default();
-    for time in [0, 1, 2, 3, 4] {
-        match policy.on_failure(time) {
-            RestartDecision::RestartAfterMs(ms) => assert!(ms == 1_000 || ms == 5_000),
-            RestartDecision::Disable => {}
-        }
-    }
+    let decisions: Vec<RestartDecision> = [0, 120_000, 240_000, 360_000, 480_000]
+        .into_iter()
+        .map(|time| policy.on_failure(time))
+        .collect();
+    // The first three failures are pinned exactly; later ones inside the window stay disabled.
+    assert_eq!(decisions[0], after(1_000));
+    assert_eq!(decisions[1], after(5_000));
+    assert_eq!(decisions[2], RestartDecision::Disable);
+    assert!(!decisions.contains(&after(30_000)), "{decisions:?}");
 }
 
 /// REQ: HST-400, API-040
@@ -566,8 +569,12 @@ fn api_010_import_whose_capability_was_never_requested_traps_and_restarts() {
         .build()
         .expect("host");
     let reply = host.call_import_json("ilium:host/fs", "read", "{}");
-    assert!(reply.trap_code().is_some());
+    assert_eq!(
+        reply.trap_code().as_deref(),
+        Some("trap.import-not-requested")
+    );
     assert_eq!(host.state(), InstanceState::RestartScheduled);
+    assert!(log_text(&host).contains("ilium:host/fs"));
 }
 
 // ---------------------------------------------------------------- traps (API-011..014, 081)

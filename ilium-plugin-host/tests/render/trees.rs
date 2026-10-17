@@ -309,6 +309,10 @@ fn wid_020_list_editor_1024_items_for_first_party_tier() {
     assert!(rig
         .deliver_widget_with_items(view, "list-editor", 1025)
         .is_err());
+    assert!(rig
+        .log_lines()
+        .iter()
+        .any(|(_, m)| m.contains("invalid-argument")));
 }
 
 /// REQ: WID-021
@@ -333,6 +337,10 @@ fn wid_021_minimap_4096_marks_accepted_4097_traps() {
     assert!(rig
         .deliver_widget_with_items(view, "minimap", 4097)
         .is_err());
+    assert!(rig
+        .log_lines()
+        .iter()
+        .any(|(_, m)| m.contains("invalid-argument")));
 }
 
 /// REQ: WID-021
@@ -342,6 +350,10 @@ fn wid_021_spinner_16_custom_frames_accepted_17_traps() {
     let view = rig.open_view("main");
     assert!(rig.deliver_widget_with_items(view, "spinner", 16).is_ok());
     assert!(rig.deliver_widget_with_items(view, "spinner", 17).is_err());
+    assert!(rig
+        .log_lines()
+        .iter()
+        .any(|(_, m)| m.contains("invalid-argument")));
 }
 
 /// REQ: WID-001

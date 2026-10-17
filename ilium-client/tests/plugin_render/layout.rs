@@ -71,8 +71,8 @@ fn wid_007_min_and_max_respected_in_order() {
         40,
         &[Constraint::Min(30), Constraint::Max(5), Constraint::Fill(1)],
     );
-    assert!(widths[0] >= 30 && widths[1] <= 5);
-    assert_eq!(widths.iter().sum::<u16>(), 40);
+    // min(30) keeps 30, max(5) stops at 5, fill takes the 5 that remain.
+    assert_eq!(widths, vec![30, 5, 5]);
 }
 
 /// REQ: WID-007
@@ -122,4 +122,18 @@ fn wid_023_gauge_filled_cells_are_monotonic_in_ratio() {
         rig.show_gauge(hi);
         proptest::prop_assert!(low <= rig.gauge_filled_cells());
     });
+}
+
+/// REQ: WID-023
+#[test]
+fn wid_023_gauge_clamps_out_of_range_ratios_and_draws_half() {
+    let filled = |ratio: f64| {
+        let mut rig = WidgetRig::new(20, 1);
+        rig.show_gauge(ratio);
+        rig.gauge_filled_cells()
+    };
+    assert_eq!(filled(-2.0), 0);
+    assert_eq!(filled(f64::NAN), 0);
+    assert_eq!(filled(1.5), 20);
+    assert_eq!(filled(0.5), 10);
 }

@@ -129,8 +129,10 @@ fn hst_102_envelope_after_close_is_refused() {
     let mut receiver = ReceiverConnection::new();
     receiver.on_envelope(1, 10).expect("seq 1");
     receiver.on_envelope(3, 10).expect_err("gap");
+    // manual does not pin the code for an envelope after close; the close reason stays the gap.
     assert!(receiver.on_envelope(4, 10).is_err());
     assert!(!receiver.is_open());
+    assert_eq!(receiver.closed_with().as_deref(), Some("ipc.sequence-gap"));
 }
 
 /// REQ: HST-102
@@ -1332,4 +1334,6 @@ fn hst_125_nothing_is_accepted_after_an_oversized_envelope() {
         .on_envelope(1, 17 * MIB + 1)
         .expect_err("oversized first envelope");
     assert!(receiver.on_envelope(2, 10).is_err());
+    assert!(!receiver.is_open());
+    assert_eq!(receiver.closed_with().as_deref(), Some(SLASH_ERR));
 }

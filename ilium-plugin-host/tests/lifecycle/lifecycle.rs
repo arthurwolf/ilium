@@ -430,7 +430,8 @@ fn lif_038_failure_during_shutdown_is_logged_not_counted() {
     host.begin_shutdown();
     trap(&mut host, A);
     assert_eq!(failures(&host, A), 0);
-    assert!(!host.log().is_empty());
+    // manual does not pin the log message text; the line must belong to the failed plugin.
+    assert!(host.log().iter().any(|l| l.plugin == A));
 }
 
 /// REQ: LIF-039
@@ -890,6 +891,8 @@ fn lif_054_cli_disable_prints_a_warning_per_dependant_and_still_disables() {
 fn lif_054_no_dependants_means_no_warning() {
     let mut host = one_plugin();
     let out = host.cli(&["plugin", "disable", A]);
+    assert_eq!(out.exit_code, 0);
+    assert!(!out.stdout_jsonl.is_empty());
     assert!(out.stdout_jsonl.iter().all(|l| l["type"] != "warning"));
 }
 
@@ -1017,12 +1020,12 @@ fn lif_059_first_frame_when_essential_active_or_one_second() {
     host.start(StartMode::Normal);
     host.attach_client("c");
     assert!(host.first_frame_ms("c") <= 1100);
-    assert!(
-        host.first_frame_marks("c")
-            .iter()
-            .any(|m| m == "starting plugins")
-            || host.essential_active("c")
-    );
+    // The mark is present exactly while essential plugins are still starting.
+    let has_mark = host
+        .first_frame_marks("c")
+        .iter()
+        .any(|m| m == "starting plugins");
+    assert_eq!(has_mark, !host.essential_active("c"));
 }
 
 /// REQ: LIF-059 WARN

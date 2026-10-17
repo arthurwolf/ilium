@@ -1,7 +1,7 @@
 //! api-process-control.md: `run`, `take-exit`, `spawn` and the `child` handle calls.
 
 use ilium_plugin_api::generated::host::{ChildHandle, HostProcess, ProcessSpec, SpawnSpec};
-use ilium_plugin_api::generated::types::{ErrorCode, RequestId};
+use ilium_plugin_api::generated::types::{ErrorCode, Event, RequestId};
 use ilium_plugin_api::Tier;
 use ilium_plugin_host::testing::imports_fixture::ImportsFixture;
 use proptest::prelude::*;
@@ -119,10 +119,7 @@ fn process_run_program_not_in_the_grants_invalid_argument() {
 fn process_run_without_any_process_grant_not_permitted_or_invalid_argument() {
     let mut fixture = fixture(Tier::T1, &[]);
     let code = expect_code(fixture.process().run(spec("echo", &[])));
-    assert!(
-        matches!(code, ErrorCode::NotPermitted | ErrorCode::InvalidArgument),
-        "{code:?}"
-    );
+    assert_eq!(code, ErrorCode::InvalidArgument);
 }
 
 /// REQ: WIT:ilium:host/process.run
@@ -263,16 +260,16 @@ fn process_run_output_over_the_cap_completes_failed_quota_exceeded() {
 #[test]
 fn process_run_missing_program_completes_failed_not_found() {
     let mut fixture = runner(&["definitely-not-installed-xyz"]);
-    let result = fixture
-        .process()
-        .run(spec("definitely-not-installed-xyz", &[]));
-    match result {
-        Err(error) => assert_eq!(error.code, ErrorCode::NotFound),
-        Ok(request) => assert_eq!(
-            outcome_code(&complete(&mut fixture, request)),
-            Some(ErrorCode::NotFound)
-        ),
-    }
+    // Manual (completion table): the call is accepted, the completion is failed(not-found).
+    let request = expect_ok(
+        fixture
+            .process()
+            .run(spec("definitely-not-installed-xyz", &[])),
+    );
+    assert_eq!(
+        outcome_code(&complete(&mut fixture, request)),
+        Some(ErrorCode::NotFound)
+    );
 }
 
 /// REQ: WIT:ilium:host/process.run
@@ -304,14 +301,14 @@ fn process_run_65th_pending_request_busy() {
 fn process_run_17th_session_child_busy() {
     let mut fixture = runner(&["sleep"]);
     fixture.hold_async_completions(true);
-    let mut refused = None;
-    for _ in 0..40 {
-        if let Err(error) = fixture.process().run(spec("sleep", &["5"])) {
-            refused = Some(error.code);
-            break;
-        }
+    for index in 0..16 {
+        let result = fixture.process().run(spec("sleep", &["5"]));
+        assert!(result.is_ok(), "run {} must be accepted", index + 1);
     }
-    assert!(matches!(refused, Some(ErrorCode::Busy)), "{refused:?}");
+    assert_eq!(
+        expect_code(fixture.process().run(spec("sleep", &["5"]))),
+        ErrorCode::Busy
+    );
 }
 
 proptest! {
@@ -471,11 +468,25 @@ fn process_child_close_stdin_twice_is_harmless() {
 /// REQ: WIT:ilium:host/process.child.signal
 #[test]
 fn process_child_signal_each_known_signal_is_accepted() {
-    for signal in ["interrupt", "terminate", "kill", "hangup"] {
+    for (signal, name) in [
+        ("interrupt", "SIGINT"),
+        ("terminate", "SIGTERM"),
+        ("kill", "SIGKILL"),
+        ("hangup", "SIGHUP"),
+    ] {
         let mut fixture = spawner(&["sleep"]);
         let child = expect_ok(fixture.process().spawn(spawn_spec("sleep", &["30"])));
         expect_ok(fixture.process().child_signal(child, signal.to_owned()));
         assert!(fixture.wait_child_exit(child, WAIT), "{signal}");
+        let signals: Vec<Option<String>> = fixture
+            .events()
+            .into_iter()
+            .filter_map(|event| match event {
+                Event::ChildExited(exited) => Some(exited.signal),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(signals, vec![Some(name.to_owned())], "{signal}");
     }
 }
 
@@ -509,5 +520,6 @@ fn process_child_signal_unknown_handle_not_found() {
 fn process_take_exit_for_a_signalled_child_run_reports_the_signal() {
     let mut fixture = runner(&["sh"]);
     let exit = run_exit(&mut fixture, spec("sh", &["-c", "kill -TERM $$"]));
-    assert!(exit.signal.is_some() || exit.status.map_or(false, |status| status != 0));
+    assert_eq!(exit.status, None);
+    assert_eq!(exit.signal, Some("SIGTERM".to_owned()));
 }

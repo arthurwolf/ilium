@@ -452,8 +452,9 @@ fn pkg_231_invalid_signature_refused_whatever_the_flags() {
         let fixture = trusted_fixture();
         let out = install(&fixture, &bytes, flags);
         assert_ne!(out.exit_code, 0, "flags {flags:?}");
+        // manual does not pin the exit code of this refusal, only the code.
         assert!(
-            has(&out, "manifest.signature-invalid") || has(&out, "package.signature-format"),
+            has(&out, "manifest.signature-invalid"),
             "flags {flags:?}: {}",
             all_text(&out)
         );
@@ -569,7 +570,7 @@ fn pkg_235_installing_unsigned_never_yields_t1_or_t2() {
     let fixture = cli_fixture();
     install(&fixture, &vector_unsigned(), &["--allow-unsigned"]);
     let tier = tier_of_installed(&fixture);
-    assert!(!tier.contains("T1") && !tier.contains("T2"), "{tier}");
+    assert_eq!(tier, "\"T3\"", "unsigned installs are T3 (PKG-228)");
 }
 
 // ---- PKG-236..241: key changes and rotation ----
@@ -1133,9 +1134,15 @@ fn vector_install(bytes: &[u8]) -> ilium_plugin_host::cli::CliOutput {
 #[test]
 fn pkg_248_manifest_byte_changed_with_crc_repaired_is_signature_invalid() {
     let bytes = patch_data(&vector_signed(), "manifest.json", 20, b'Z', true);
+    let out = vector_install(&bytes);
     assert!(
-        has(&vector_install(&bytes), "manifest.signature-invalid")
-            || refusal(&bytes, &trust_of(0, "example")) == "manifest.signature-invalid"
+        has(&out, "manifest.signature-invalid"),
+        "cli: {}",
+        all_text(&out)
+    );
+    assert_eq!(
+        refusal(&bytes, &trust_of(0, "example")),
+        "manifest.signature-invalid"
     );
 }
 

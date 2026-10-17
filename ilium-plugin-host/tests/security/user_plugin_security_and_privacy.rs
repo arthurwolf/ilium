@@ -1,7 +1,7 @@
 //! user-plugin-security-and-privacy.md: no telemetry, files written, what leaves the machine,
 //! the inference privacy log, plugin telemetry opt-in, `data_use` and `security_contact`.
 
-use ilium_plugin_api::Tier;
+use ilium_plugin_api::{ErrorCode, Tier};
 use proptest::prelude::*;
 use serde_json::{json, Value};
 
@@ -99,7 +99,7 @@ fn sec_261_the_stores_named_in_the_table_exist_after_use_at_the_named_paths() {
 fn sec_263_only_inventory_features_send_data_and_a_plugin_without_grants_sends_nothing() {
     let rig = t3(&[]);
     let result = rig.get("https://example.com/", &[]);
-    assert!(result.is_err());
+    assert_code(&result, ErrorCode::NotPermitted);
     assert!(rig.net.seen().is_empty());
 }
 
@@ -195,7 +195,31 @@ fn sec_265_ts_is_utc_iso_8601() {
     ask(&rig, "summary");
     let lines = read_jsonl(&rig.state.path().join("privacy").join("inference.jsonl"));
     let ts = lines[0]["ts"].as_str().expect("ts");
-    assert!(ts.ends_with('Z') && ts.contains('T'), "{ts}");
+    // YYYY-MM-DDTHH:MM:SS[.fff]Z, UTC.
+    let (date_time, fraction_ok) = match ts.strip_suffix('Z') {
+        Some(body) => match body.split_once('.') {
+            Some((head, fraction)) => (
+                head,
+                !fraction.is_empty() && fraction.bytes().all(|byte| byte.is_ascii_digit()),
+            ),
+            None => (body, true),
+        },
+        None => ("", false),
+    };
+    let shape: Vec<char> = date_time
+        .chars()
+        .map(|character| {
+            if character.is_ascii_digit() {
+                '9'
+            } else {
+                character
+            }
+        })
+        .collect();
+    assert!(
+        fraction_ok && shape.iter().collect::<String>() == "9999-99-99T99:99:99",
+        "{ts}"
+    );
 }
 
 /// REQ: SEC-265
@@ -223,6 +247,11 @@ fn sec_265_retention_is_16_mib_boundary() {
         .expect("file")
         .len();
     assert!(size <= 16 * 1024 * 1024, "{size}");
+    let lines = read_jsonl(&rig.state.path().join("privacy").join("inference.jsonl"));
+    assert!(
+        lines.iter().any(|line| line["purpose"] == "after"),
+        "the newest record survives the size cap"
+    );
 }
 
 /// REQ: SEC-265
@@ -303,7 +332,13 @@ fn sec_267_entry_count_boundary_7_8_9() {
         let entries = (0..count)
             .map(|index| data_use_entry(&format!("w{index}"), "somewhere", "why", false))
             .collect();
-        assert_eq!(data_use_errors(entries).is_empty(), ok, "{count} entries");
+        let errors = data_use_errors(entries);
+        assert_eq!(errors.is_empty(), ok, "{count} entries");
+        // manual does not pin a data_use limit code; manifest.schema is the generic violation.
+        assert!(
+            ok || errors.contains(&"manifest.schema".to_owned()),
+            "{errors:?}"
+        );
     }
 }
 
@@ -314,10 +349,11 @@ fn sec_267_field_length_boundary_199_200_201() {
         for field in ["what", "where", "purpose"] {
             let mut entry = data_use_entry("a", "b", "c", false);
             entry[field] = json!("x".repeat(length));
-            assert_eq!(
-                data_use_errors(vec![entry]).is_empty(),
-                ok,
-                "{field} {length}"
+            let errors = data_use_errors(vec![entry]);
+            assert_eq!(errors.is_empty(), ok, "{field} {length}");
+            assert!(
+                ok || errors.contains(&"manifest.schema".to_owned()),
+                "{field} {length}: {errors:?}"
             );
         }
     }
@@ -327,11 +363,12 @@ fn sec_267_field_length_boundary_199_200_201() {
 #[test]
 fn sec_267_wrong_types_and_missing_fields_are_manifest_errors() {
     let missing = json!({ "what": "a", "where": "b", "purpose": "c" });
-    assert!(!data_use_errors(vec![missing]).is_empty());
+    assert!(data_use_errors(vec![missing]).contains(&"manifest.key-missing".to_owned()));
     let wrong = json!({ "what": 1, "where": "b", "purpose": "c", "opt_in": false });
-    assert!(!data_use_errors(vec![wrong]).is_empty());
+    // manual does not pin a data_use-specific code; manifest.schema is the generic violation.
+    assert!(data_use_errors(vec![wrong]).contains(&"manifest.schema".to_owned()));
     let extra = json!({ "what": "a", "where": "b", "purpose": "c", "opt_in": false, "other": 1 });
-    assert!(!data_use_errors(vec![extra]).is_empty());
+    assert!(data_use_errors(vec![extra]).contains(&"manifest.unknown-key".to_owned()));
 }
 
 /// REQ: SEC-267
@@ -408,8 +445,7 @@ fn sec_268_details_shows_the_contact() {
 /// REQ: SEC-268 WARN
 #[test]
 fn sec_268_a_plain_http_url_or_free_text_is_not_a_contact() {
-    assert!(
-        !contact_errors("http://example.com/security").is_empty()
-            || !contact_errors("call me maybe").is_empty()
-    );
+    // manual does not pin the warning code for an invalid security_contact.
+    assert!(!contact_errors("http://example.com/security").is_empty());
+    assert!(!contact_errors("call me maybe").is_empty());
 }

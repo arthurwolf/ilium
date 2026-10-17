@@ -264,8 +264,11 @@ fn hst_211_chain_cap_is_measured_from_the_first_handlers_start() {
         ],
         1_000,
     );
-    assert!(!hook.runs[2].skipped_by_chain_cap || hook.runs[2].started_ms.is_none());
-    assert!(hook.runs[1].started_ms.is_some());
+    // a runs 0..60, b runs 60..99, so c starts at 99 ms, inside the 100 ms cap.
+    assert_eq!(hook.runs[1].started_ms, Some(60));
+    assert!(!hook.runs[2].skipped_by_chain_cap);
+    assert_eq!(hook.runs[2].started_ms, Some(99));
+    assert!(!hook.log_ids.iter().any(|id| id == "extension.chain-cap"));
 }
 
 /// REQ: HST-211

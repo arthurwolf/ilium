@@ -850,7 +850,10 @@ fn pri_008_10_changes_in_a_second_all_delivered() {
 /// REQ: PRI-008
 #[test]
 fn pri_008_three_seconds_of_flood_deliver_at_most_30() {
-    assert!(screen_changes(100, 3) <= 30);
+    // manual does not pin an exact count (PRI-008 says "at most 10 per second"), only the bound;
+    // the lower bound keeps a limiter that delivers nothing from passing.
+    let delivered = screen_changes(100, 3);
+    assert!((1..=30).contains(&delivered), "delivered {delivered}");
 }
 
 // ---------------------------------------------------------------- other WIT functions

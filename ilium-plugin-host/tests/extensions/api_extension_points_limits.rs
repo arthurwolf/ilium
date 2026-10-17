@@ -152,7 +152,8 @@ fn ext_023_point_with_max_entries_257_fails_the_manifest() {
         owner_manifest(OWNER, vec![collect_point("c", 257, false)]),
         Vec::new(),
     );
-    assert!(result.is_err());
+    // manual lists extension-point-invalid for a bad point field; it does not pin the max_entries code
+    assert_eq!(diag_code(&result), "manifest.extension-point-invalid");
 }
 
 /// REQ: EXT-023
@@ -172,9 +173,9 @@ fn ext_023_point_with_max_entries_256_installs() {
 fn ext_023_point_with_max_handlers_9_fails_the_manifest() {
     let mut world = ExtWorld::new();
     let point = with(hook_point("p", "observe"), "max_handlers", json!(9));
-    assert!(world
-        .install(Tier::T3, owner_manifest(OWNER, vec![point]), Vec::new())
-        .is_err());
+    let result = world.install(Tier::T3, owner_manifest(OWNER, vec![point]), Vec::new());
+    // manual lists extension-point-invalid for a bad point field; it does not pin the max_handlers code
+    assert_eq!(diag_code(&result), "manifest.extension-point-invalid");
 }
 
 /// REQ: EXT-023
@@ -371,9 +372,9 @@ fn ext_047_manifest_priority_101_fails_the_install() {
         "com.example.hi",
         vec![json!({"point": POINT, "id": "x", "priority": 101, "handler": "h"})],
     );
-    assert!(world
-        .install(Tier::T3, manifest, vec![("h".to_owned(), pass(0))])
-        .is_err());
+    let result = world.install(Tier::T3, manifest, vec![("h".to_owned(), pass(0))]);
+    // manual does not pin the manifest code for priority 101
+    assert!(diag_code(&result).starts_with("manifest."), "{result:?}");
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -585,7 +586,9 @@ fn ext_049_same_plugin_repeating_one_extension_id_on_a_point_fails_the_install()
             ext_entry(COLLECT, "dup", 60, json!({"id": "b"}))
         ]}
     });
-    assert!(world.install(Tier::T3, manifest, Vec::new()).is_err());
+    let result = world.install(Tier::T3, manifest, Vec::new());
+    // manual does not pin the manifest code for a repeated contribution id
+    assert!(diag_code(&result).starts_with("manifest."), "{result:?}");
 }
 
 // ---------------------------------------------------------------------------------------------

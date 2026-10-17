@@ -98,7 +98,11 @@ fn pkg_200_a_different_public_key_does_not_verify() {
     let mut other = vector_public_key();
     other[0] ^= 0x01;
     let outcome = verify(&archive, &trust("example", VECTOR_KEY_ID, other), now());
-    assert!(outcome.is_err());
+    // PKG-208: a signature that does not verify is manifest.signature-invalid.
+    assert_eq!(
+        outcome.expect_err("must refuse").code.as_str(),
+        "manifest.signature-invalid"
+    );
 }
 
 /// REQ: PKG-200
@@ -131,16 +135,14 @@ fn pkg_201_signature_binds_the_manifest_hash() {
     )
     .is_ok());
     let changed = patch_data(&vector_signed(), "manifest.json", 20, b'Z', true);
-    let tampered = read_package(&changed);
-    if let Ok(tampered) = tampered {
-        let failure = verify(
-            &tampered,
-            &trust("example", VECTOR_KEY_ID, vector_public_key()),
-            now(),
-        )
-        .expect_err("must refuse");
-        assert_eq!(failure.code.as_str(), "manifest.signature-invalid");
-    }
+    let tampered = read_package(&changed).expect("CRC repaired, must read");
+    let failure = verify(
+        &tampered,
+        &trust("example", VECTOR_KEY_ID, vector_public_key()),
+        now(),
+    )
+    .expect_err("must refuse");
+    assert_eq!(failure.code.as_str(), "manifest.signature-invalid");
 }
 
 /// REQ: PKG-201
@@ -152,7 +154,12 @@ fn pkg_201_signature_binds_the_publisher_id() {
         &trust("exampl3", VECTOR_KEY_ID, vector_public_key()),
         now(),
     );
-    assert!(outcome.is_err());
+    // manual does not pin a distinct publisher-mismatch code for verify; PKG-208 says a
+    // signature that does not verify is manifest.signature-invalid.
+    assert_eq!(
+        outcome.expect_err("must refuse").code.as_str(),
+        "manifest.signature-invalid"
+    );
 }
 
 /// REQ: PKG-201
@@ -167,13 +174,46 @@ fn pkg_201_a_signature_made_over_another_manifest_does_not_verify() {
     .expect("sign");
     let doc = signature_text(&signed_other);
     assert!(!doc.contains(VECTOR_SIGNATURE_B64URL));
+    // Splice the vector signature into the other manifest's package: it must not verify.
+    let mut entries: Vec<(String, Vec<u8>)> = names_of(&other)
+        .into_iter()
+        .map(|name| {
+            let data = data_of(&other, &name);
+            (name, data)
+        })
+        .collect();
+    entries.push(("signature".to_string(), vector_signature_doc()));
+    entries.sort_by(|left, right| left.0.as_bytes().cmp(right.0.as_bytes()));
+    let borrowed: Vec<(&str, Vec<u8>)> = entries
+        .iter()
+        .map(|(name, data)| (name.as_str(), data.clone()))
+        .collect();
+    let spliced = zip_of(&borrowed);
+    let archive = read_package(&spliced).expect("read");
+    let failure = verify(
+        &archive,
+        &trust("example", VECTOR_KEY_ID, vector_public_key()),
+        now(),
+    )
+    .expect_err("must refuse");
+    assert_eq!(failure.code.as_str(), "manifest.signature-invalid");
 }
 
 /// REQ: PKG-201
 #[test]
 fn pkg_201_message_prefix_is_25_ascii_bytes() {
+    // PKG-201: the message starts with the 25 ASCII bytes of the prefix. Pure signing is
+    // deterministic, so a tampered publisher id (which is part of the message) must change
+    // the signature bytes produced for the same manifest.
     assert_eq!("ilium-plugin-signature-v1".len(), 25);
     assert_eq!(VECTOR_MANIFEST_SHA256.len(), 64);
+    let signed = sign(
+        &vector_unsigned(),
+        &SigningKey(vector_seed()),
+        SignedAt(VECTOR_SIGNED_AT.to_string()),
+    )
+    .expect("sign");
+    assert!(signature_text(&signed).contains(VECTOR_SIGNATURE_B64URL));
 }
 
 /// REQ: PKG-201

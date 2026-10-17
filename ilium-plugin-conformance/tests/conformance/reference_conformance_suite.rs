@@ -176,7 +176,8 @@ fn dev_602_fail_verdict_exits_three() {
 fn dev_602_only_pass_and_skip_exits_zero() {
     let output = run_in_project(&manifest_text("minimal.json"), &["--case", "CONF-LIFE-01"]);
     let verdict = verdict_of(&output, "CONF-LIFE-01").expect("record");
-    assert!(verdict == "pass" || verdict == "skip");
+    // CONF-LIFE-01 is a plugin-subject case needing no grant: it runs, so it must pass.
+    assert_eq!(verdict, "pass");
     assert_eq!(output.exit_code, 0);
 }
 
@@ -365,9 +366,21 @@ fn dev_612_limit_cases_check_the_value_under_and_over_the_limit() {
         "CONF-STORE-03",
     ] {
         let output = run_in_project(&manifest_text("minimal.json"), &["--case", id]);
-        let record = records_of(&output, "conformance")[0].clone();
-        let detail = format!("{}{}", record["expected"], record["actual"]);
-        assert!(record["verdict"] != "fail" || !detail.is_empty(), "{id}");
+        let records = records_of(&output, "conformance");
+        assert_eq!(records.len(), 1, "{id}");
+        let record = &records[0];
+        assert_eq!(record["case"], id);
+        // manual does not pin the verdict of each limit case per subject; a failing limit
+        // case must at least say what was expected and what happened.
+        let verdict = record["verdict"].as_str().expect("verdict");
+        assert!(
+            ["pass", "fail", "skip"].contains(&verdict),
+            "{id}: {verdict}"
+        );
+        if verdict == "fail" {
+            assert!(!record["expected"].is_null(), "{id}: {record}");
+            assert!(!record["actual"].is_null(), "{id}: {record}");
+        }
     }
 }
 

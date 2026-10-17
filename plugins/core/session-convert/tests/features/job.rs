@@ -98,8 +98,22 @@ fn f_077_job_carries_over_user_prompts_and_assistant_text() {
 fn f_077_job_carries_over_shell_calls_with_their_results() {
     let mut host = host_with_rollout(&standard_lines());
     let (jsonl, _, _) = output_of(&mut host);
-    assert!(jsonl.contains("ls"));
-    assert!(jsonl.contains("a.txt"));
+    // manual does not pin the Claude block shape; pin one separate JSON line per call and result.
+    let lines: Vec<Value> = jsonl
+        .split('\n')
+        .map(|line| serde_json::from_str(line).expect("each transcript line is JSON"))
+        .collect();
+    let call: Vec<&Value> = lines
+        .iter()
+        .filter(|line| line.to_string().contains("\"ls\""))
+        .collect();
+    let result: Vec<&Value> = lines
+        .iter()
+        .filter(|line| line.to_string().contains("a.txt"))
+        .collect();
+    assert_eq!(call.len(), 1, "{jsonl}");
+    assert_eq!(result.len(), 1, "{jsonl}");
+    assert_ne!(call[0], result[0], "call and result are separate lines");
 }
 
 /// REQ: F-077
@@ -187,6 +201,13 @@ fn f_077_job_progress_never_moves_backwards() {
         reported.windows(2).all(|pair| pair[0] <= pair[1]),
         "{reported:?}"
     );
+    let expected: Vec<f32> = (0..6)
+        .map(|step| 100.0 * (step * 50) as f32 / 260.0)
+        .collect();
+    assert_eq!(reported.len(), expected.len(), "{reported:?}");
+    for (got, want) in reported.iter().zip(expected) {
+        assert!((got - want).abs() < 0.01, "{got} vs {want}");
+    }
 }
 
 /// REQ: F-077

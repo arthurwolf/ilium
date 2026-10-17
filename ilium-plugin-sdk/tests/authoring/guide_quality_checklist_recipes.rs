@@ -18,16 +18,19 @@ fn aut_405_without_the_optional_grant_the_plugin_falls_back_and_keeps_working() 
         other => panic!("expected refused(not-permitted), got {other:?}"),
     }
     assert_eq!(first.len(), 1);
-    assert!(
-        host.submitted().len() >= 2,
-        "the fallback submission follows the refusal"
+    assert_eq!(
+        host.submitted().len(),
+        2,
+        "exactly the refused sound and the one fallback submission"
     );
     host.deliver(vec![tick()]);
     host.settle();
-    assert!(
-        host.submitted().len() >= 3,
-        "the plugin still handles events"
+    assert_eq!(
+        host.submitted().len(),
+        4,
+        "the second tick adds exactly one refused sound and one fallback"
     );
+    assert_eq!(host.outcomes().len(), 4, "every submission got an outcome");
 }
 
 /// REQ: AUT-405, AUT-404

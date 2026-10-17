@@ -66,7 +66,7 @@ fn svc_001_provider_without_services_provide_fails_the_install() {
         manifest,
         vec![(method_key(SERVICE, "echo"), done(1, r#""x""#))],
     );
-    assert!(result.is_err());
+    assert_eq!(diag_code(&result), "manifest.export-grant");
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -423,6 +423,7 @@ fn svc_008_every_pending_caller_is_cancelled() {
     let ids: Vec<RequestId> = (0..5)
         .filter_map(|_| call_echo(&mut world, OK_PAYLOAD).ok())
         .collect();
+    assert_eq!(ids.len(), 5, "all five calls were accepted");
     world.restart("com.example.prov");
     world.settle();
     for id in ids {

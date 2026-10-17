@@ -172,10 +172,8 @@ fn conf_life_04_activate_error_leaves_the_plugin_not_active() {
     let built = ilium_plugin_host::testing::HostHarness::new()
         .with_native_guest(Box::new(guest))
         .build();
-    match built {
-        Ok(handle) => assert!(!is_active(&handle)),
-        Err(_) => {}
-    }
+    let handle = built.expect("a failed activation still builds the harness");
+    assert!(!is_active(&handle));
 }
 
 /// REQ: CONF-LIFE-04
@@ -978,7 +976,10 @@ fn conf_store_01_a_value_survives_a_plugin_trap_and_restart() {
     .build()
     .expect("builds");
     deliver_and_pump(&handle, vec![Event::ThemeChanged]);
-    assert!(has_failure(&handle, "trap.deadline") || handle.state() != InstanceState::Inactive);
+    // The probe traps with trap.deadline (CONTRACT.txt); the first failure restarts, so the
+    // plugin must not end up stopped by failure.
+    assert!(has_failure(&handle, "trap.deadline"));
+    assert_ne!(handle.state(), InstanceState::StoppedByFailure);
     assert!(handle
         .logs()
         .iter()

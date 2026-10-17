@@ -144,13 +144,13 @@ fn rows_092_accent_null_resets_to_the_default() {
 
 /// REQ: F-090
 #[test]
-fn rows_090_an_unknown_key_of_the_appearance_section_is_refused_with_invalid_argument() {
+fn rows_090_an_unknown_key_of_the_appearance_section_is_refused_with_not_found() {
     let mut host = client_host();
     let error = host
         .settings()
         .set("no_such_row", json!(1))
         .expect_err("refused");
-    assert_eq!(error.code, ErrorCode::InvalidArgument);
+    assert_eq!(error.code, ErrorCode::NotFound);
 }
 
 proptest! {

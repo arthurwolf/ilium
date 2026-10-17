@@ -19,6 +19,7 @@ fn harness_with_popups(count: usize) -> ViewHarness {
 fn hst_495_a_unique_popup_id_opens() {
     let mut harness = harness_with_popups(1);
     assert!(harness.open_popup("pop0").is_ok());
+    assert!(harness.is_open("pop0"));
 }
 
 /// REQ: HST-495
@@ -52,6 +53,10 @@ fn hst_495_the_fourth_open_popup_is_accepted() {
             harness.open_popup(&format!("pop{index}")).is_ok(),
             "popup {index}"
         );
+        assert!(
+            harness.is_open(&format!("pop{index}")),
+            "popup {index} open"
+        );
     }
 }
 
@@ -76,6 +81,9 @@ fn hst_495_close_popup_on_an_unopened_id_is_ok() {
     let mut harness = harness_with_popups(1);
     assert!(harness.close_popup("pop0").is_ok());
     assert!(harness.close_popup("never-existed").is_ok());
+    assert!(!harness.is_open("pop0"));
+    assert!(!harness.is_open("never-existed"));
+    assert!(harness.closed_events().is_empty());
 }
 
 /// REQ: HST-495

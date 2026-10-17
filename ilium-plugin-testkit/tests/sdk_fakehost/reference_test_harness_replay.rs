@@ -322,5 +322,8 @@ fn dev_544_replay_conflicts_with_fixture() {
             "tests/fixtures/a.json",
         ],
     );
-    assert_ne!(run.code, 0);
+    assert_eq!(run.code, 2, "usage error, stdout: {}", run.stdout);
+    // manual does not pin which stream carries the code
+    let combined = format!("{}\n{}", run.stdout, run.stderr);
+    assert!(combined.contains("usage.conflict"), "{combined}");
 }

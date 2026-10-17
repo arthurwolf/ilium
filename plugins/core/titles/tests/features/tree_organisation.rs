@@ -409,10 +409,11 @@ fn f_043_default_restructure_token_budget_is_200000_and_must_be_positive() {
 #[test]
 fn f_043_a_zero_token_budget_is_rejected_by_the_setting() {
     let mut host = activated_server();
-    let result = host
+    let error = host
         .settings()
-        .set("restructure_prompt_token_limit", json!(0));
-    assert!(result.is_err());
+        .set("restructure_prompt_token_limit", json!(0))
+        .expect_err("zero budget refused");
+    assert_eq!(error.code, ErrorCode::InvalidArgument);
 }
 
 /// REQ: F-043
@@ -443,9 +444,18 @@ fn f_043_organising_never_renames_a_hand_named_pane() {
     ));
     host.settle();
     let spec = restructures(&host.submitted()).remove(0);
+    assert!(
+        !spec.operations.is_empty(),
+        "the restructure must carry operations"
+    );
+    assert!(
+        spec.operations
+            .iter()
+            .any(|operation| matches!(operation, RestructureOp::CreateGroup(_))),
+        "the restructure must contain a non-rename operation"
+    );
     assert!(spec.operations.iter().all(|operation| match operation {
         RestructureOp::Rename(rename) => rename.source == TitleSource::Inferred,
         _ => true,
     }));
-    let _ = Intent::PlaySound(String::new());
 }

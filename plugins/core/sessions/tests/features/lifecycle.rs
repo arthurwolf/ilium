@@ -40,6 +40,7 @@ fn lifecycle_076_client_try_activate_succeeds() {
 #[test]
 fn lifecycle_076_server_activation_records_no_failure() {
     let host = activated_server();
+    assert_eq!(host.lifecycle_state(), InstanceState::Active);
     assert!(host.failures().is_empty());
 }
 
@@ -47,6 +48,7 @@ fn lifecycle_076_server_activation_records_no_failure() {
 #[test]
 fn lifecycle_076_server_activation_submits_nothing_without_panes() {
     let host = activated_server();
+    assert_eq!(host.lifecycle_state(), InstanceState::Active);
     assert!(host.submitted().is_empty());
 }
 
@@ -55,6 +57,15 @@ fn lifecycle_076_server_activation_submits_nothing_without_panes() {
 fn lifecycle_076_server_deactivates_on_shutdown_without_failure() {
     let mut host = activated_server();
     host.deactivate(DeactivationReason::Shutdown);
+    // manual: deactivating ends in inactive or stopped; it does not pin which for shutdown.
+    assert!(
+        matches!(
+            host.lifecycle_state(),
+            InstanceState::Inactive | InstanceState::Stopped
+        ),
+        "{:?}",
+        host.lifecycle_state()
+    );
     assert!(host.failures().is_empty());
 }
 
@@ -64,4 +75,5 @@ fn lifecycle_076_server_survives_an_empty_batch() {
     let mut host = activated_server();
     assert!(host.deliver(Vec::new()).is_empty());
     assert!(host.failures().is_empty());
+    assert_eq!(host.lifecycle_state(), InstanceState::Active);
 }

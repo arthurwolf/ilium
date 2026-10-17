@@ -60,7 +60,10 @@ fn log_log_message_of_16385_bytes_is_cut_and_marked_within_the_cap() {
     fixture.log().log(Level::Info, ascii(CAP + 1));
     let message = lines_of(&fixture).remove(0).1;
     assert!(message.ends_with(MARKER), "marker missing");
-    assert!(message.len() <= CAP, "line is {} bytes", message.len());
+    // ASCII input: every byte is a whole character, so the cut fills the cap exactly.
+    assert_eq!(message.len(), CAP);
+    let kept = &ascii(CAP + 1)[..CAP - MARKER.len()];
+    assert!(message.starts_with(kept), "kept prefix differs");
 }
 
 /// REQ: WIT:ilium:host/log.log
@@ -141,7 +144,10 @@ fn log_log_t1_instance_may_exceed_200_lines_up_to_its_ceiling() {
     for index in 0..400 {
         fixture.log().log(Level::Info, format!("line {index}"));
     }
-    assert!(lines_of(&fixture).len() > 200);
+    let kept = lines_of(&fixture).len();
+    // manual does not pin the default T1 budget below the 1,000 ceiling; only the bounds.
+    assert!(kept > 200, "T1 kept {kept} lines");
+    assert!(kept <= 1000, "T1 kept {kept} lines");
 }
 
 /// REQ: WIT:ilium:host/log.log
@@ -152,7 +158,18 @@ fn log_log_never_reports_an_error_to_the_caller() {
         // The call has no result channel; the loop completing is the observable.
         fixture.log().log(Level::Error, format!("flood {index}"));
     }
-    assert!(lines_of(&fixture).len() <= 201);
+    let flood = lines_of(&fixture)
+        .iter()
+        .filter(|(_, m)| m.starts_with("flood "))
+        .count();
+    assert_eq!(flood, 200);
+    fixture.advance(std::time::Duration::from_secs(1));
+    fixture.pump();
+    let summaries: Vec<_> = lines_of(&fixture)
+        .into_iter()
+        .filter(|(level, message)| level == "warn" && message.contains("200"))
+        .collect();
+    assert_eq!(summaries.len(), 1, "one summary naming 200 dropped lines");
 }
 
 proptest! {

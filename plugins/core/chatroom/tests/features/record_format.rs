@@ -178,8 +178,10 @@ fn record_format_b02_multiline_message_with_pipe_reads_back_unchanged_through_ta
     let (_, author, content) =
         split_record(&format!("- {}", tail.out.lines().next().expect("one line")));
     assert_eq!(author, "agent:codex");
-    assert!(content.contains("claiming"), "{content}");
-    assert!(content.contains("work"), "{content}");
+    // manual does not pin the escape form of the line break, so check pieces in order
+    assert!(content.starts_with("claiming | work"), "{content}");
+    assert!(content.ends_with("then testing"), "{content}");
+    assert_eq!(content.lines().count(), 1, "one record stays on one line");
     let context = chat(&mut host, &["context", "--limit", "40"]);
     assert!(context.out.contains("claiming | work"));
     assert!(context.out.contains("Use the chatroom sparingly"));

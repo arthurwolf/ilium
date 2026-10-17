@@ -359,11 +359,9 @@ fn pkg_352_replacement_own_version_is_compared_with_the_range() {
     assert_eq!(fx.install(&replacement("2.0.0")).exit_code, 0);
     let out = fx.install(&Spec::new("example.a", "1.0.0").needs("example.old", "^1.0", false));
     assert_eq!(out.exit_code, 1);
-    assert!(
-        out.has_error("dependency.unresolved") || out.has_error("dependency.conflict"),
-        "{:?}",
-        out.error_codes()
-    );
+    // The replacement (2.0.0) is outside ^1.0 and no other provider exists, so nothing satisfies
+    // the range at all (manual does not pin a code for this case; unresolved is the no-provider code).
+    assert_eq!(out.error_codes(), vec!["dependency.unresolved".to_owned()]);
 }
 
 /// REQ: PKG-352
@@ -410,9 +408,16 @@ fn pkg_353_prerelease_version_belongs_to_beta() {
 #[test]
 fn pkg_353_prerelease_version_cannot_be_published_to_stable() {
     let mut registry = FakeRegistry::new(REGISTRY_URL);
-    assert!(registry
+    // manual does not pin the channel-mismatch error code.
+    let refusal = registry
         .try_publish(b("1.0.0-beta.1").build(), "stable")
-        .is_err());
+        .expect_err("a prerelease cannot go to stable");
+    assert!(!refusal.code.as_str().is_empty());
+    // The refused version left no document behind.
+    assert!(!registry
+        .documents()
+        .iter()
+        .any(|(_, body)| String::from_utf8_lossy(body).contains("1.0.0-beta.1")));
 }
 
 /// REQ: PKG-353

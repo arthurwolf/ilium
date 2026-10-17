@@ -249,9 +249,24 @@ fn svc_024_star_inside_a_word_fails_and_names_the_pattern() {
 /// REQ: SVC-024
 #[test]
 fn svc_024_star_in_the_middle_of_a_path_fails() {
-    assert!(install_subscriber("ilium.*/finished").is_err());
-    assert!(install_subscriber("*/finished").is_err());
-    assert!(install_subscriber("ilium.progress/f*").is_err());
+    // manual does not pin the manifest code, only "a manifest error naming the pattern"
+    for pattern in ["ilium.*/finished", "*/finished", "ilium.progress/f*"] {
+        match install_subscriber(pattern) {
+            Err(diagnostic) => {
+                assert!(
+                    diagnostic.code.as_str().starts_with("manifest."),
+                    "{pattern}: {}",
+                    diagnostic.code.as_str()
+                );
+                assert!(
+                    diagnostic.message.contains(pattern),
+                    "{}",
+                    diagnostic.message
+                );
+            }
+            Ok(()) => assert!(false, "{pattern} must be refused"),
+        }
+    }
 }
 
 proptest! {
@@ -364,15 +379,13 @@ fn svc_026_full_topic_queue_drops_the_oldest_and_counts_it() {
     }
     world.block_delivery(SUB, false);
     world.settle();
-    let first = received(&world, SUB)
-        .first()
-        .map(|(_, payload)| payload.clone())
-        .unwrap_or_default();
-    assert!(
-        !first.contains(r#""i":0"#),
-        "the oldest events were dropped: {first}"
+    let got = received(&world, SUB);
+    assert_eq!(got.len(), capacity, "the queue holds exactly its capacity");
+    assert_eq!(
+        got[0].1, r#"{"i":5}"#,
+        "the five oldest events were dropped"
     );
-    assert!(world.events_dropped(SUB).iter().sum::<u32>() >= 5);
+    assert_eq!(world.events_dropped(SUB).iter().sum::<u32>(), 5);
 }
 
 /// REQ: SVC-026
@@ -398,22 +411,31 @@ fn svc_026_next_batch_after_a_drop_starts_with_events_dropped() {
 fn svc_026_message_queue_never_drops_an_accepted_message() {
     let mut world = message_world(true);
     world.block_delivery(RECV, true);
-    let mut accepted = 0usize;
+    let mut accepted_payloads: Vec<Vec<u8>> = Vec::new();
     for index in 0..(world.queue_capacity(RECV) + 4) {
         let id = world.send_message(SENDER, RECV, "chan", format!("m{index}").as_bytes());
         world.settle();
         if let Ok(id) = id {
             if matches!(world.outcome(SENDER, id), Some(Outcome::Ok)) {
-                accepted += 1;
+                accepted_payloads.push(format!("m{index}").into_bytes());
             }
         }
     }
     world.block_delivery(RECV, false);
     world.settle();
+    assert!(
+        !accepted_payloads.is_empty(),
+        "at least one send is accepted"
+    );
+    // manual does not pin whether later sends are refused or restart the plugin
+    let delivered: Vec<Vec<u8>> = world
+        .messages_received(RECV)
+        .into_iter()
+        .map(|(_, _, bytes)| bytes)
+        .collect();
     assert_eq!(
-        world.messages_received(RECV).len(),
-        accepted,
-        "every accepted message arrives"
+        delivered, accepted_payloads,
+        "every accepted message arrives, in order"
     );
 }
 

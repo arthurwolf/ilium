@@ -271,6 +271,17 @@ fn view_b08_a_long_draft_keeps_its_tail_visible_and_drops_its_head() {
     assert!(!text.contains("long draft padding long draft"));
 }
 
+/// True when the text holds "record <n>" not followed by another digit.
+fn shows_record(text: &str, n: usize) -> bool {
+    let needle = format!("record {n}");
+    text.match_indices(&needle).any(|(at, _)| {
+        !text[at + needle.len()..]
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_digit())
+    })
+}
+
 /// REQ: chatroom-B07
 #[test]
 fn view_b07_the_view_shows_the_newest_200_messages() {
@@ -280,12 +291,10 @@ fn view_b07_the_view_shows_the_newest_200_messages() {
     }
     host.settle();
     let text = draw(&mut host, 120, 400);
-    assert!(text.contains("record 200"));
-    assert!(text.contains("record 1\n") || text.contains("record 1 "));
-    assert!(
-        !text.contains("record 0\n") && !text.contains("record 0 "),
-        "message 0 is the 201st newest"
-    );
+    for n in 1..=200usize {
+        assert!(shows_record(&text, n), "record {n} is among the newest 200");
+    }
+    assert!(!shows_record(&text, 0), "message 0 is the 201st newest");
 }
 
 /// REQ: chatroom-B07
@@ -297,12 +306,9 @@ fn view_b07_exactly_200_messages_are_all_shown() {
     }
     host.settle();
     let text = draw(&mut host, 120, 400);
-    assert!(
-        text.contains("record 0 ")
-            || text.contains("record 0\n")
-            || text.contains("record 0 \u{2502}")
-    );
-    assert!(text.contains("record 199"));
+    for n in 0..200usize {
+        assert!(shows_record(&text, n), "record {n} is shown");
+    }
 }
 
 /// REQ: chatroom-B07

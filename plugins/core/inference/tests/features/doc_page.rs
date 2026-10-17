@@ -100,9 +100,11 @@ fn doc_293_provider_profiles_risk_equals_the_corrected_security_table() {
 /// REQ: F-084, SEC-293
 #[test]
 fn doc_293_page_risk_marks_are_only_standard_or_high() {
-    for row in point_rows() {
-        assert!(row[4] == "standard" || row[4] == "high", "{row:?}");
-    }
+    let rows = point_rows();
+    assert_eq!(rows.len(), 3, "{rows:?}");
+    assert_eq!(row_of("before-request")[4], "high");
+    assert_eq!(row_of("after-response")[4], "standard");
+    assert_eq!(row_of("provider-profiles")[4], "standard");
 }
 
 /// REQ: F-084

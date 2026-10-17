@@ -152,7 +152,9 @@ fn provider_084_a_server_error_status_fails_the_call_with_an_err_reply() {
     host.settle();
     let replies = host.inference().provider_replies();
     assert_eq!(replies.len(), 1);
-    assert!(replies[0].1.is_err());
+    let failure = replies[0].1.clone().expect_err("HTTP 500 fails the call");
+    // manual does not pin the error code for a non-200 answer: pin the status in the message.
+    assert!(failure.message.contains("500"), "{failure:?}");
 }
 
 /// REQ: F-084

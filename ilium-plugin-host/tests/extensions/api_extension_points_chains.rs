@@ -605,7 +605,11 @@ fn install_with_deadline(deadline: u64) -> Result<(), Diagnostic> {
 /// REQ: EXT-020
 #[test]
 fn ext_020_deadline_4_ms_fails_the_manifest() {
-    assert!(install_with_deadline(4).is_err());
+    // manual lists extension-point-invalid for bad point fields; it does not pin a deadline code
+    assert_eq!(
+        diag_code(&install_with_deadline(4)),
+        "manifest.extension-point-invalid"
+    );
 }
 
 /// REQ: EXT-020
@@ -623,7 +627,11 @@ fn ext_020_deadline_50_ms_installs() {
 /// REQ: EXT-020
 #[test]
 fn ext_020_deadline_51_ms_fails_the_manifest() {
-    assert!(install_with_deadline(51).is_err());
+    // manual lists extension-point-invalid for bad point fields; it does not pin a deadline code
+    assert_eq!(
+        diag_code(&install_with_deadline(51)),
+        "manifest.extension-point-invalid"
+    );
 }
 
 /// REQ: EXT-020
@@ -709,12 +717,21 @@ fn ext_021_three_timeouts_stop_the_extension_and_log_disabled_on_the_next_run() 
     }
     let _ = run_chain(&mut world, PAYLOAD);
     assert!(has_log(&world, "extension.disabled"));
-    assert!(
-        !world.is_active("com.example.slow", POINT, "e-slow")
-            || world
-                .dormant_reason("com.example.slow", POINT, "e-slow")
-                .is_some()
-            || has_log(&world, "extension.disabled")
+    assert!(!world.is_active("com.example.slow", POINT, "e-slow"));
+    let slow_runs = |world: &ExtWorld| {
+        world
+            .handler_runs()
+            .iter()
+            .filter(|run| run.plugin == "com.example.slow")
+            .count()
+    };
+    let runs_before = slow_runs(&world);
+    assert_eq!(runs_before, 3, "the slow handler ran exactly three times");
+    let _ = run_chain(&mut world, PAYLOAD);
+    assert_eq!(
+        slow_runs(&world),
+        runs_before,
+        "a stopped extension never runs again"
     );
 }
 
@@ -1033,17 +1050,47 @@ fn ext_046_depth_exceeded_counts_as_pass_and_no_breach() {
 /// REQ: EXT-046, SEC-289, HST-475
 #[test]
 fn ext_046_inner_chain_runs_after_the_handler_returns_and_outside_its_deadline() {
-    let mut world = hook_world(
-        "observe",
-        vec![contrib("nest", 1, runs_hook(15, POINT_B, PAYLOAD))],
+    let mut world = ExtWorld::new();
+    let points = vec![
+        with(hook_point("p1", "observe"), "deadline_ms", json!(20)),
+        with(hook_point("p2", "observe"), "deadline_ms", json!(50)),
+    ];
+    assert_eq!(
+        diag_code(&world.install(Tier::T3, owner_manifest(OWNER, points), Vec::new())),
+        "ok"
     );
-    let _ = run_chain(&mut world, PAYLOAD);
+    let outer = "com.example.owner/p1";
+    let inner = "com.example.owner/p2";
+    let manifest = json!({
+        "id": "com.example.nest", "exports": ["hook-handler"],
+        "capabilities": {"server": [
+            format!("extensions.contribute:{outer}"),
+            format!("extensions.contribute:{inner}"),
+            format!("extensions.provide:{outer}"),
+        ]},
+        "contributes": {"extensions": [
+            ext_handler(outer, "x1", 50, "h1"),
+            ext_handler(inner, "x2", 50, "h2"),
+        ]}
+    });
+    let handlers = vec![
+        ("h1".to_owned(), runs_hook(15, inner, PAYLOAD)),
+        // The inner chain takes 30 ms: longer than the outer 20 ms deadline.
+        ("h2".to_owned(), pass(30)),
+    ];
+    assert_eq!(
+        diag_code(&world.install(Tier::T3, manifest, handlers)),
+        "ok"
+    );
+    let _ = run_chain_on(&mut world, OWNER, outer, PAYLOAD);
+    let depths: Vec<u8> = world.handler_runs().iter().map(|run| run.depth).collect();
+    assert_eq!(
+        depths,
+        vec![1, 2],
+        "the inner chain ran after the outer handler"
+    );
     assert!(!has_log(&world, "extension.handler-timeout"));
 }
-
-/// The second point of the nested-timing test, never declared: the inner call fails unknown-point
-/// at once, so the outer handler stays inside its deadline.
-const POINT_B: &str = "com.example.owner/missing";
 
 // ---------------------------------------------------------------------------------------------
 // EXT-029 owner action

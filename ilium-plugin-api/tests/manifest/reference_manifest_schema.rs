@@ -300,9 +300,17 @@ fn pkg_568_duplicate_ids_in_a_contribution_list_refused() {
         json!([{ "id": "p", "title": "A" }, { "id": "p", "title": "B" }]),
     );
     let found = errors(&value);
+    // manual does not pin the duplicate-id code ("the code of the contribution")
+    assert_eq!(found.len(), 1, "exactly one refusal, got {found:?}");
     assert!(
-        found.iter().any(|code| code.starts_with("manifest.")),
+        found[0].starts_with("manifest."),
         "a duplicate id gives a manifest.* code, got {found:?}"
+    );
+    let diagnostics = error_diagnostics(&value);
+    assert!(
+        diagnostics[0].pointer.starts_with("/contributes/panels"),
+        "pointer names the duplicate: {:?}",
+        diagnostics[0].pointer
     );
 }
 
@@ -326,9 +334,16 @@ fn pkg_568_topics_may_publish_only_under_the_plugin_prefix() {
         1,
         "exactly one refusal for the foreign prefix, got {found:?}"
     );
+    // manual does not pin the topic-prefix code
     assert!(
         found[0].starts_with("manifest."),
         "a manifest.* code, got {found:?}"
+    );
+    let diagnostics = error_diagnostics(&foreign);
+    assert!(
+        diagnostics[0].pointer.starts_with("/contributes/topics"),
+        "pointer names the topic: {:?}",
+        diagnostics[0].pointer
     );
 }
 
@@ -341,6 +356,15 @@ fn pkg_568_commands_global_id_uses_the_plugin_id_prefix() {
         json!([{ "id": "run", "title": "Run" }]),
     );
     assert_clean(&value);
+    let duplicated = set(
+        client(),
+        "/contributes/commands",
+        json!([{ "id": "run", "title": "Run" }, { "id": "run", "title": "Again" }]),
+    );
+    let found = errors(&duplicated);
+    // manual does not pin the duplicate command id code
+    assert_eq!(found.len(), 1, "exactly one refusal, got {found:?}");
+    assert!(found[0].starts_with("manifest."), "{found:?}");
 }
 
 /// REQ: PKG-569
@@ -444,12 +468,21 @@ fn pkg_572_a_message_has_no_unreplaced_placeholder() {
         set(client(), "/data_version", json!(0)),
     ];
     for sample in samples {
-        for diagnostic in error_diagnostics(&sample) {
-            assert!(
-                !diagnostic.message.contains('{') || diagnostic.message.contains("{\""),
-                "unreplaced placeholder in {:?}",
-                diagnostic.message
-            );
+        let diagnostics = error_diagnostics(&sample);
+        assert!(!diagnostics.is_empty(), "each sample is refused");
+        for diagnostic in diagnostics {
+            // a `{name}` template placeholder, not a brace inside a quoted value
+            let message = diagnostic.message.as_str();
+            let has_placeholder = message.match_indices('{').any(|(start, _)| {
+                let rest = &message[start + 1..];
+                rest.find('}').is_some_and(|end| {
+                    end > 0
+                        && rest[..end]
+                            .chars()
+                            .all(|c| c.is_ascii_lowercase() || c == '_')
+                })
+            });
+            assert!(!has_placeholder, "unreplaced placeholder in {message:?}");
         }
     }
 }
@@ -489,11 +522,12 @@ fn pkg_574_the_exit_code_of_the_first_printed_error_is_the_catalogue_exit_of_tha
     let rows = catalogue();
     let found = error_diagnostics(&set(client(), "/zzz", json!(1)));
     let first = &found[0];
+    assert_eq!(first.code.as_str(), "manifest.unknown-key");
     let row = rows
         .iter()
         .find(|row| row.code == first.code.as_str())
         .expect("code is in the catalogue");
-    assert!(row.exit.parse::<u8>().is_ok());
+    assert_eq!(row.exit.parse::<u8>().ok(), Some(1), "unknown-key exits 1");
 }
 
 /// REQ: PKG-575

@@ -91,7 +91,13 @@ fn ui_the_progress_page_shows_phase_bar_counts_elapsed_file_and_cancel_at_every_
             "{width}: {text}"
         );
         assert!(text.contains("Cancel"), "{width}");
-        assert!(text.contains("40"), "{width}: counts");
+        assert!(text.contains("Reading"), "{width}: phase");
+        assert!(
+            text.contains("40.0%"),
+            "{width}: percent of the byte fraction"
+        );
+        assert!(text.contains('█'), "{width}: bar glyph");
+        // manual does not pin the elapsed field format or the narrow-width file truncation
     }
 }
 
@@ -462,7 +468,11 @@ fn ui_every_help_topic_of_the_tab_exists_and_the_set_is_complete() {
         .into_iter()
         .map(|(topic, _)| topic)
         .collect();
+    for topic in ["OPT-01", "OPT-02"] {
+        assert!(anchors.contains(topic), "{topic} is anchored on the page");
+    }
     for topic in &declared {
+        // manual does not pin the exact dialog-only list
         assert!(
             anchors.contains(topic) || host.help_topic_is_dialog_only(topic),
             "{topic} is reachable"

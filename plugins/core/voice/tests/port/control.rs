@@ -3,6 +3,7 @@
 
 use crate::host_ext::*;
 use ilium_plugin_sdk::testing::FakeHost;
+use ilium_plugin_sdk::types::ErrorCode;
 use serde_json::{json, Value};
 
 use crate::common::{
@@ -112,10 +113,11 @@ fn tools_050_the_stop_tool_disables_voice_after_returning_its_result() {
 #[test]
 fn tools_050_the_stop_tool_with_an_unknown_argument_leaves_voice_on() {
     let mut host = enabled_client("semantic_vad");
-    assert!(host
+    let error = host
         .realtime()
         .call_tool("ilium_stop_voice", &json!({ "force": true }).to_string())
-        .is_err());
+        .expect_err("unknown argument refused");
+    assert_eq!(error.code, ErrorCode::InvalidArgument);
     host.settle();
     assert_eq!(
         host.kernel_settings().get("voice-control", "enabled"),
@@ -150,10 +152,12 @@ fn tools_050_the_api_key_never_appears_in_logs_or_tool_results() {
     let result = host
         .realtime()
         .call_tool("ilium_read_settings", "{}")
-        .unwrap_or_default();
+        .expect("the settings tool answers");
+    assert!(!result.is_empty(), "the settings tool lists settings");
     assert!(!result.contains("sk-secret-value-123"), "{result}");
-    assert!(host
-        .logs()
+    let logs = host.logs();
+    assert!(!logs.is_empty(), "the session logged something");
+    assert!(logs
         .iter()
         .all(|line| !line.message.contains("sk-secret-value-123")));
     guide_has(&["API keys are never exposed to the settings tool."]);
@@ -337,7 +341,9 @@ fn policy_051_creating_a_terminal_is_not_in_the_always_confirm_list() {
         .split("Detach and restarting")
         .next()
         .expect("end");
-    assert!(!list.contains("terminal") || list.contains("shell command pane"));
+    // Creating a plain terminal is not listed; only the shell-command pane variant may be.
+    let without_shell_command_pane = list.replace("shell command pane", "");
+    assert!(!without_shell_command_pane.contains("terminal"), "{list}");
     let mut host = enabled_client("semantic_vad");
     contribute_phrase(
         &mut host,
@@ -387,6 +393,7 @@ fn policy_051_a_board_card_delete_names_the_exact_card_and_refuses_a_missing_one
         "ilium_board_delete_card",
         &json!({ "board": "todo", "card": 99 }).to_string(),
     );
+    // manual does not pin the code for a missing card; it must be a refusal before any popup.
     assert!(missing.is_err());
     assert!(host.popups().is_empty());
 }
@@ -436,14 +443,16 @@ fn search_050_the_search_tools_query_step_and_open_a_result() {
 #[test]
 fn settings_050_values_are_normalized_and_unknown_keys_refused() {
     let mut host = enabled_client("semantic_vad");
-    assert!(host
+    let unknown = host
         .kernel_settings()
         .set("voice-control", "no_such_key", json!(1))
-        .is_err());
-    assert!(host
+        .expect_err("unknown key refused");
+    assert_eq!(unknown.code, ErrorCode::InvalidArgument);
+    let invalid = host
         .kernel_settings()
         .set("voice-control", "input_mode", json!("shouting"))
-        .is_err());
+        .expect_err("unknown mode refused");
+    assert_eq!(invalid.code, ErrorCode::InvalidArgument);
     assert_eq!(
         host.kernel_settings().get("voice-control", "input_mode"),
         Some(json!("semantic_vad"))

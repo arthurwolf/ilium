@@ -80,7 +80,8 @@ fn tree_get_of_a_terminal_pane_names_its_content_kind() {
 fn tree_get_of_a_group_is_not_a_pane() {
     let (mut fixture, nodes) = tree_fixture(READ);
     let view = fixture.tree().get(nodes.folder).expect("node exists");
-    assert_ne!(view.class, NodeClass::Pane);
+    // A group nested inside another group is a folder (api-tree.md: container | folder | pane).
+    assert_eq!(view.class, NodeClass::Folder);
     assert_eq!(view.content_kind, None);
 }
 
@@ -426,6 +427,17 @@ proptest! {
         let all = [nodes.group, nodes.folder, nodes.claude_pane, nodes.plain_pane, nodes.locked_folder, nodes.codex_pane];
         let found = fixture.tree().find(NodeQuery { under: Some(all[index]), ..NodeQuery::default() });
         prop_assert!(!found.contains(&all[index]));
+        // Expected result: every descendant, computed by walking `children`.
+        let mut expected = Vec::new();
+        let mut pending = fixture.tree().children(all[index]);
+        while let Some(next) = pending.pop() {
+            expected.push(next);
+            pending.extend(fixture.tree().children(next));
+        }
+        let mut sorted_found = found.clone();
+        sorted_found.sort_by_key(|id| format!("{id:?}"));
+        expected.sort_by_key(|id| format!("{id:?}"));
+        prop_assert_eq!(sorted_found, expected);
         for id in found {
             let mut cursor = fixture.tree().get(id).and_then(|view| view.parent);
             let mut inside = false;
@@ -600,6 +612,11 @@ fn tree_set_metadata_without_the_grant_not_permitted() {
 #[test]
 fn tree_set_metadata_changes_neither_the_revision_nor_the_events() {
     let (mut fixture, nodes) = tree_fixture(META);
+    // Positive control: a rename must produce at least one event in this fixture.
+    let _ = fixture.events();
+    fixture.rename_node(nodes.plain_pane, "renamed");
+    fixture.pump();
+    assert!(!fixture.events().is_empty());
     let _ = fixture.events();
     let before = fixture
         .tree()

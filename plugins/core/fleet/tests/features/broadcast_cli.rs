@@ -92,9 +92,11 @@ fn broadcast_110_message_words_are_joined_with_single_spaces() {
         &["broadcast", "re-read", "CLAUDE.md", "now"],
         b"",
     );
-    assert!(sent_inputs(&host)
-        .iter()
-        .all(|spec| spec.text == "re-read CLAUDE.md now"));
+    let texts: Vec<String> = sent_inputs(&host)
+        .into_iter()
+        .map(|spec| spec.text)
+        .collect();
+    assert_eq!(texts, vec![String::from("re-read CLAUDE.md now"); 2]);
 }
 
 /// REQ: F-110
@@ -103,9 +105,11 @@ fn broadcast_110_a_lone_dash_reads_the_message_from_standard_input() {
     let (mut host, _, _, _) = fleet();
     run_cli(&mut host, &["broadcast", "-"], b"from stdin");
     assert!(!sent_inputs(&host).is_empty());
-    assert!(sent_inputs(&host)
-        .iter()
-        .all(|spec| spec.text == "from stdin"));
+    let texts: Vec<String> = sent_inputs(&host)
+        .into_iter()
+        .map(|spec| spec.text)
+        .collect();
+    assert_eq!(texts, vec![String::from("from stdin"); 2]);
 }
 
 /// REQ: F-110
@@ -113,7 +117,11 @@ fn broadcast_110_a_lone_dash_reads_the_message_from_standard_input() {
 fn broadcast_110_a_trailing_newline_is_removed() {
     let (mut host, _, _, _) = fleet();
     run_cli(&mut host, &["broadcast", "-"], b"notice\n");
-    assert!(sent_inputs(&host).iter().all(|spec| spec.text == "notice"));
+    let texts: Vec<String> = sent_inputs(&host)
+        .into_iter()
+        .map(|spec| spec.text)
+        .collect();
+    assert_eq!(texts, vec![String::from("notice"); 2]);
 }
 
 /// REQ: F-110
@@ -121,9 +129,11 @@ fn broadcast_110_a_trailing_newline_is_removed() {
 fn broadcast_110_only_one_trailing_newline_is_removed() {
     let (mut host, _, _, _) = fleet();
     run_cli(&mut host, &["broadcast", "-"], b"notice\n\n");
-    assert!(sent_inputs(&host)
-        .iter()
-        .all(|spec| spec.text == "notice\n"));
+    let texts: Vec<String> = sent_inputs(&host)
+        .into_iter()
+        .map(|spec| spec.text)
+        .collect();
+    assert_eq!(texts, vec![String::from("notice\n"); 2]);
 }
 
 /// REQ: F-110
@@ -131,9 +141,11 @@ fn broadcast_110_only_one_trailing_newline_is_removed() {
 fn broadcast_110_crlf_line_endings_are_normalised_to_lf() {
     let (mut host, _, _, _) = fleet();
     run_cli(&mut host, &["broadcast", "-"], b"one\r\ntwo\r\n");
-    assert!(sent_inputs(&host)
-        .iter()
-        .all(|spec| spec.text == "one\ntwo"));
+    let texts: Vec<String> = sent_inputs(&host)
+        .into_iter()
+        .map(|spec| spec.text)
+        .collect();
+    assert_eq!(texts, vec![String::from("one\ntwo"); 2]);
 }
 
 /// REQ: F-110
@@ -154,9 +166,11 @@ fn broadcast_110_file_reads_the_message_from_a_file() {
     let (mut host, _, _, _) = fleet();
     host.fs().write("/work/notice.md", b"from a file\n");
     run_cli(&mut host, &["broadcast", "--file", "/work/notice.md"], b"");
-    assert!(sent_inputs(&host)
-        .iter()
-        .all(|spec| spec.text == "from a file"));
+    let texts: Vec<String> = sent_inputs(&host)
+        .into_iter()
+        .map(|spec| spec.text)
+        .collect();
+    assert_eq!(texts, vec![String::from("from a file"); 2]);
 }
 
 /// REQ: F-110
@@ -193,9 +207,11 @@ fn broadcast_110_a_message_starting_with_a_hyphen_follows_a_double_dash() {
         &["broadcast", "--", "-v", "is", "not", "a", "flag"],
         b"",
     );
-    assert!(sent_inputs(&host)
-        .iter()
-        .all(|spec| spec.text == "-v is not a flag"));
+    let texts: Vec<String> = sent_inputs(&host)
+        .into_iter()
+        .map(|spec| spec.text)
+        .collect();
+    assert_eq!(texts, vec![String::from("-v is not a flag"); 2]);
 }
 
 /// REQ: F-110
@@ -507,9 +523,11 @@ fn broadcast_110_a_before_broadcast_replace_changes_the_text_that_is_sent() {
     );
     run_cli(&mut host, &["broadcast", "original"], b"");
     assert!(!sent_inputs(&host).is_empty());
-    assert!(sent_inputs(&host)
-        .iter()
-        .all(|spec| spec.text == "rewritten"));
+    let texts: Vec<String> = sent_inputs(&host)
+        .into_iter()
+        .map(|spec| spec.text)
+        .collect();
+    assert_eq!(texts, vec![String::from("rewritten"); 2]);
 }
 
 /// REQ: F-110
@@ -525,8 +543,12 @@ fn broadcast_110_the_before_broadcast_payload_has_message_targets_and_source() {
     assert_eq!(calls.len(), 1);
     let payload: Value = serde_json::from_str(&calls[0]).expect("payload is JSON");
     assert_eq!(payload["message"], "original");
-    assert!(payload["targets"].is_array());
-    assert!(payload["source"].is_string());
+    // manual does not pin the targets encoding or the source value
+    assert_eq!(payload["targets"].as_array().map(Vec::len), Some(2));
+    assert!(!payload["source"]
+        .as_str()
+        .expect("source is a string")
+        .is_empty());
 }
 
 /// REQ: F-110
@@ -538,9 +560,11 @@ fn broadcast_110_a_pass_leaves_the_text_unchanged() {
         ilium_plugin_sdk::exports::HookReply::Pass,
     );
     run_cli(&mut host, &["broadcast", "original"], b"");
-    assert!(sent_inputs(&host)
-        .iter()
-        .all(|spec| spec.text == "original"));
+    let texts: Vec<String> = sent_inputs(&host)
+        .into_iter()
+        .map(|spec| spec.text)
+        .collect();
+    assert_eq!(texts, vec![String::from("original"); 2]);
 }
 
 /// REQ: F-110
@@ -570,7 +594,13 @@ fn broadcast_110_the_broadcast_sent_topic_carries_targets_and_length() {
     assert_eq!(sent.len(), 1);
     let payload: Value = serde_json::from_str(&sent[0].1).expect("payload is JSON");
     assert_eq!(payload["length"], 5);
-    assert!(payload["targets"].is_number() || payload["targets"].is_array());
+    // manual does not pin the targets encoding (count or list); it must cover both agents
+    let covered = match &payload["targets"] {
+        Value::Number(count) => count.as_u64(),
+        Value::Array(list) => Some(list.len() as u64),
+        _ => None,
+    };
+    assert_eq!(covered, Some(2), "{payload}");
 }
 
 /// REQ: F-110
@@ -591,10 +621,11 @@ proptest! {
         prop_assume!(!message.trim().is_empty() && !message.starts_with('-') && !message.ends_with(' '));
         let (mut host, _, _, _) = fleet();
         run_cli(&mut host, &["broadcast", "--", &message], b"");
-        let expected: Vec<&str> = message.split(' ').filter(|word| !word.is_empty()).collect();
         let inputs = sent_inputs(&host);
         prop_assert!(!inputs.is_empty());
-        prop_assert!(inputs.iter().all(|spec| spec.text == message || spec.text == expected.join(" ")));
+        // cli-reference: several words are joined with single spaces; one argument is verbatim
+        prop_assert_eq!(inputs.len(), 2);
+        prop_assert!(inputs.iter().all(|spec| spec.text == message));
     }
 }
 

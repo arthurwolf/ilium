@@ -937,11 +937,8 @@ fn lif_076_older_versions_stay_until_the_update_commits() {
     update(&rig, &pkg(NOTES, "1.2.0"));
     assert_eq!(
         store_versions(&rig, NOTES),
-        vec!["1.0.0".to_owned(), "1.1.0".to_owned(), "1.2.0".to_owned()]
-            .into_iter()
-            .filter(|version| version != "1.0.0"
-                || registry_entry(&rig, NOTES)["previous_version"] == "1.0.0")
-            .collect::<Vec<_>>()
+        // LIF-076: exactly one previous version is kept next to the current one.
+        vec!["1.1.0".to_owned(), "1.2.0".to_owned()]
     );
 }
 
@@ -1643,7 +1640,10 @@ fn commands_on_a_prepared_rig() -> Vec<(String, ilium_plugin_host::cli::CliOutpu
 /// REQ: LIF-087
 #[test]
 fn lif_087_every_command_prints_only_typed_json_lines_in_a_pipe() {
-    for (label, output) in commands_on_a_prepared_rig() {
+    let commands = commands_on_a_prepared_rig();
+    assert!(!commands.is_empty());
+    for (label, output) in commands {
+        assert!(!output.stdout_jsonl.is_empty(), "{label} printed nothing");
         for line in &output.stdout_jsonl {
             let line_type = line["type"].as_str().unwrap_or("");
             assert!(LINE_TYPES.contains(&line_type), "{label}: {line}");

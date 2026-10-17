@@ -196,7 +196,11 @@ fn points_010_a_help_source_without_a_service_is_refused_at_install() {
     let dir = package("help-sources-bad", &manifest);
     let mut session = FakeSession::new();
     session.install_core("keys-and-help");
-    assert!(session.try_install(&dir).is_err());
+    let error = session.try_install(&dir).expect_err("refused");
+    assert!(
+        error.to_string().contains("manifest.extension-entry"),
+        "{error}"
+    );
 }
 
 /// REQ: F-010

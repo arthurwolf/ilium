@@ -795,12 +795,8 @@ fn pkg_014_whole_id_of_129_characters_is_refused() {
     let id = segments.join(".");
     assert_eq!(id.len(), 129);
     let found = id_codes(&id);
-    assert!(
-        found
-            .iter()
-            .any(|code| code == "manifest.id-invalid" || code == "manifest.schema"),
-        "{found:?}"
-    );
+    assert_has(&found, "manifest.id-invalid");
+    assert_lacks(&found, "manifest.schema");
 }
 
 /// REQ: PKG-014
@@ -1331,8 +1327,12 @@ fn pkg_025_list_boundary_256_and_257_distinct_grants() {
 /// REQ: PKG-025
 #[test]
 fn pkg_025_duplicate_grants_in_one_list_are_refused() {
-    let value = server_with_grants(&["tree.read", "tree.read"]);
-    assert!(!errors(&value).is_empty());
+    // The single grant alone is clean, so the refusal below comes from the duplicate.
+    assert_clean(&server_with_grants(&["tree.read"]));
+    let found = errors(&server_with_grants(&["tree.read", "tree.read"]));
+    // manual does not pin the code for a duplicate grant
+    assert!(!found.is_empty(), "duplicate grants must be refused");
+    assert_lacks(&found, "manifest.key-missing");
 }
 
 /// REQ: PKG-026
@@ -1897,6 +1897,11 @@ fn pkg_034_more_than_eight_names_or_duplicates_refused_schema() {
         json!(["websocket", "websocket"]),
     ));
     assert_has(&duplicate, "manifest.schema");
+    // Nine entries exceed the cap of eight; manual does not pin whether overflow or an
+    // unknown name is reported first, only that the list is refused with manifest.schema.
+    let names: Vec<String> = (0..9).map(|index| format!("feature-{index}")).collect();
+    let nine = errors(&set(client(), "/unstable", json!(names)));
+    assert_has(&nine, "manifest.schema");
 }
 
 fn files_codes(files: Vec<Value>) -> Vec<String> {

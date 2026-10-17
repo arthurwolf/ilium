@@ -136,10 +136,20 @@ fn writer_env() -> Env {
 /// REQ: ABI-025
 #[test]
 fn abi_025_an_own_command_from_on_events_never_runs_inside_the_export() {
-    let (host, deepest, _batches) = depth_host(Some(invoke_own_command()));
+    let (host, deepest, batches) = depth_host(Some(invoke_own_command()));
     host.deliver(vec![trigger()]);
     host.pump(64);
     assert_eq!(deepest.load(Ordering::SeqCst), 1);
+    let seen = lock(&batches).clone();
+    let invoked: usize = seen
+        .iter()
+        .flatten()
+        .filter(|e| is_command_invoked(e))
+        .count();
+    assert_eq!(
+        invoked, 1,
+        "the command runs, but in a later batch: {seen:?}"
+    );
 }
 
 /// REQ: ABI-049
@@ -151,7 +161,15 @@ fn abi_049_no_export_is_entered_while_another_is_on_the_stack() {
     host.deliver(vec![trigger()]);
     host.pump(64);
     assert_eq!(deepest.load(Ordering::SeqCst), 1);
-    assert!(lock(&batches).len() >= 2);
+    let seen = lock(&batches).clone();
+    // manual does not pin the exact batch count; each trigger yields one own-command event
+    assert!(seen.len() >= 2, "{seen:?}");
+    let invoked: usize = seen
+        .iter()
+        .flatten()
+        .filter(|e| is_command_invoked(e))
+        .count();
+    assert_eq!(invoked, 2, "{seen:?}");
 }
 
 // ---------------------------------------------------------------- ABI-050
@@ -346,7 +364,8 @@ fn abi_041_a_refused_submission_after_64_slow_calls_leaves_the_count_at_64() {
         host.start_slow_request();
     }
     let refused = host.submit_directly(sub(1, send_input(99, "x")));
-    assert!(refused.is_err(), "{refused:?}");
+    // ABI-013: the call that exceeds the limit returns busy at once
+    assert_eq!(refused, Err(ErrorCode::Busy));
     assert_eq!(host.pending_requests(), 64);
 }
 

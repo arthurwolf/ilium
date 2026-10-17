@@ -1,8 +1,8 @@
 //! HST-300..HST-313 (reference-host-budgets.md).
 
 use ilium_plugin_bench::{
-    exit_code_for, judge, pooling_allowed, run_benchmark, run_with, PoolingEvidence, RunSpec,
-    Verdict, MIN_MEASURED_ITERATIONS, MIN_WARMUP_ITERATIONS, RELEASE_GATE_IDS,
+    exit_code_for, judge, pooling_allowed, run_benchmark, run_with, BenchError, PoolingEvidence,
+    RunSpec, Verdict, MIN_MEASURED_ITERATIONS, MIN_WARMUP_ITERATIONS, RELEASE_GATE_IDS,
 };
 use ilium_plugin_host::telemetry::NearMissTracker;
 use std::path::PathBuf;
@@ -60,13 +60,17 @@ fn hst_300_run_with_exact_minimums_records_the_counts() {
 /// REQ: HST-300
 #[test]
 fn hst_300_warmup_below_100_is_refused() {
-    assert!(run_with("B1", &quick_spec(99, 1000)).is_err());
+    // manual does not pin the refusal message text, only the BelowMinimum variant
+    let err = run_with("B1", &quick_spec(99, 1000)).expect_err("warm-up 99 refused");
+    assert!(matches!(err, BenchError::BelowMinimum(_)), "{err:?}");
 }
 
 /// REQ: HST-300
 #[test]
 fn hst_300_measured_below_1000_is_refused() {
-    assert!(run_with("B1", &quick_spec(100, 999)).is_err());
+    // manual does not pin the refusal message text, only the BelowMinimum variant
+    let err = run_with("B1", &quick_spec(100, 999)).expect_err("measured 999 refused");
+    assert!(matches!(err, BenchError::BelowMinimum(_)), "{err:?}");
 }
 
 /// REQ: HST-300
@@ -135,7 +139,10 @@ fn hst_301_json_output_schema_has_every_required_key() {
 #[test]
 fn hst_302_missed_budget_makes_the_run_exit_nonzero() {
     let verdicts = [Verdict::Pass, judge("B5", "p99_ms", 2.5)];
+    // manual does not pin the numeric exit code, only that it is non-zero
     assert_ne!(exit_code_for(&verdicts), 0);
+    assert_ne!(exit_code_for(&[judge("B5", "p99_ms", 2.5)]), 0);
+    assert_eq!(exit_code_for(&[Verdict::Pass]), 0);
 }
 
 /// REQ: HST-302
@@ -167,10 +174,13 @@ fn hst_303_release_build_flag_is_true_when_run_for_budgets() {
 /// REQ: HST-303
 #[test]
 fn hst_303_debug_build_run_is_refused() {
+    let outcome = run_benchmark("B1");
     if ilium_plugin_bench::is_release_build() {
-        return;
+        // A release build must never be refused for being a debug build.
+        assert!(!matches!(outcome, Err(BenchError::NotReleaseBuild)));
+    } else {
+        assert_eq!(outcome.unwrap_err(), BenchError::NotReleaseBuild);
     }
-    assert!(run_benchmark("B1").is_err());
 }
 
 /// REQ: HST-303

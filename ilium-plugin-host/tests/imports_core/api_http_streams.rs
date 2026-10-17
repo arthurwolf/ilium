@@ -32,6 +32,12 @@ fn listener() -> (std::net::TcpListener, u16) {
     (listener, port)
 }
 
+fn websocket_on(grants: &[&str]) -> ImportsFixture {
+    builder_in(std::path::Path::new("."), Tier::T2, grants)
+        .websocket_feature(true)
+        .build()
+}
+
 /// REQ: WIT:ilium:host/http.open-stream
 #[test]
 fn http_open_stream_returns_a_stream_id_and_delivers_chunks_to_events() {
@@ -182,60 +188,49 @@ fn http_open_websocket_is_unsupported_when_the_websocket_feature_is_off() {
 /// REQ: WIT:ilium:host/http.open-websocket
 #[test]
 fn http_open_websocket_without_a_grant_not_permitted() {
-    let mut fixture = fixture(Tier::T2, &[]);
+    let mut fixture = websocket_on(&[]);
     let result = fixture
         .http()
         .open_websocket("ws://127.0.0.1:9/".to_owned(), Vec::new());
-    let code = expect_code(result);
-    assert!(
-        matches!(code, ErrorCode::NotPermitted | ErrorCode::Unsupported),
-        "{code:?}"
-    );
+    assert_eq!(expect_code(result), ErrorCode::NotPermitted);
 }
 
 /// REQ: WIT:ilium:host/http.open-websocket
 #[test]
 fn http_open_websocket_malformed_url_invalid_argument() {
-    let mut fixture = fixture(Tier::T2, &["http:127.0.0.1"]);
+    let mut fixture = websocket_on(&["http:127.0.0.1"]);
     let code = expect_code(
         fixture
             .http()
             .open_websocket("not a url".to_owned(), Vec::new()),
     );
-    assert!(
-        matches!(code, ErrorCode::InvalidArgument | ErrorCode::Unsupported),
-        "{code:?}"
-    );
+    // manual does not pin the exact code for a malformed websocket url
+    assert_eq!(code, ErrorCode::InvalidArgument);
 }
 
 /// REQ: WIT:ilium:host/http.send-websocket
 #[test]
 fn http_send_websocket_on_an_unknown_stream_not_found() {
-    let mut fixture = fixture(Tier::T2, &[]);
+    let mut fixture = websocket_on(&[]);
     let code = expect_code(
         fixture
             .http()
             .send_websocket(StreamId(31_415), "hi".to_owned()),
     );
-    assert!(
-        matches!(code, ErrorCode::NotFound | ErrorCode::Unsupported),
-        "{code:?}"
-    );
+    assert_eq!(code, ErrorCode::NotFound);
 }
 
 /// REQ: WIT:ilium:host/http.send-websocket
 #[test]
 fn http_send_websocket_on_a_plain_http_stream_invalid_argument() {
     let (_listener, port) = listener();
-    let mut fixture = granted(Tier::T2, port);
+    let grant = format!("http:127.0.0.1:{port}");
+    let mut fixture = websocket_on(&[grant.as_str()]);
     let stream = expect_ok(fixture.http().open_stream(stream_request(
         port,
         StreamFraming::Raw,
         1024,
     )));
     let code = expect_code(fixture.http().send_websocket(stream, "hi".to_owned()));
-    assert!(
-        matches!(code, ErrorCode::InvalidArgument | ErrorCode::Unsupported),
-        "{code:?}"
-    );
+    assert_eq!(code, ErrorCode::InvalidArgument);
 }

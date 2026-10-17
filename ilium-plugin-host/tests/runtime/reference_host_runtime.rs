@@ -468,7 +468,14 @@ fn hst_060_out_of_bounds_guest_access_traps_and_the_process_survives() {
     let mut host = host_with_fixture("oob-access", Tier::T3);
     fail_once(&mut host);
     assert_eq!(host.failures().len(), 1);
-    assert!(host.state() != InstanceState::Active || !host.failures().is_empty());
+    assert_eq!(host.state(), InstanceState::RestartScheduled);
+    // manual does not pin the exact trap code of an out-of-bounds access; every trap is trap.*.
+    let failures = host.failures();
+    assert!(
+        failures[0].code.as_str().starts_with("trap."),
+        "code {}",
+        failures[0].code.as_str()
+    );
 }
 
 // ---------------------------------------------------------------- compile cache
@@ -1351,6 +1358,8 @@ fn hst_080_callback_is_installed_before_each_call_and_sees_the_call_state() {
     host.deliver(one_event());
     host.pump(8);
     let observed = host.tick_observations();
+    // manual does not pin how many ticks a call sees; at least one call ran, so one is observed.
+    assert!(!observed.is_empty(), "no tick was observed");
     assert!(observed.iter().all(|o| o.callback_installed));
 }
 

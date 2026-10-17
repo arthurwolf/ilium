@@ -27,9 +27,18 @@ fn decor_038_dollar_unit_uses_slot_cost_trailing() {
 fn decor_038_dollar_text_has_two_decimals() {
     let (host, pane, before) = fed(KNOWN_MODEL, 50_000);
     let text = decoration_text(&latest_cost_decoration(&host, before, pane).expect("decoration"));
-    let digits = text.trim_start_matches("~$");
-    let digits = digits.trim_start_matches('$');
-    assert_eq!(digits.split('.').nth(1).map(str::len), Some(2), "{text}");
+    // KNOWN_MODEL is priced, so no "~" lower-bound marker; shape is "$<int>.<2 digits>".
+    let amount = text.strip_prefix('$').unwrap_or_else(|| panic!("{text}"));
+    let (whole, fraction) = amount.split_once('.').unwrap_or_else(|| panic!("{text}"));
+    assert!(
+        !whole.is_empty() && whole.chars().all(|c| c.is_ascii_digit()),
+        "{text}"
+    );
+    assert!(
+        fraction.len() == 2 && fraction.chars().all(|c| c.is_ascii_digit()),
+        "{text}"
+    );
+    // manual does not pin the price of KNOWN_MODEL, so the exact amount is not asserted
 }
 
 /// REQ: F-039, F-005
@@ -37,7 +46,16 @@ fn decor_038_dollar_text_has_two_decimals() {
 fn decor_039_sort_key_is_negative_cents_so_highest_cost_sorts_first() {
     let (host, pane, before) = fed(KNOWN_MODEL, 5_000_000);
     let spec = latest_cost_decoration(&host, before, pane).expect("decoration");
-    assert!(spec.sort_key.expect("sort key") < 0);
+    let sort_key = spec.sort_key.expect("sort key");
+    // The manual: sort_key = -cents and the text is cents / 100 with two decimals.
+    let text = decoration_text(&spec);
+    let amount = text.trim_start_matches("~$").trim_start_matches('$');
+    let cents: i64 = amount
+        .replace('.', "")
+        .parse()
+        .unwrap_or_else(|_| panic!("{text}"));
+    assert!(cents > 0, "5_000_000 tokens must cost something: {text}");
+    assert_eq!(sort_key, -cents, "{text}");
 }
 
 /// REQ: F-039, F-005
@@ -77,7 +95,10 @@ fn decor_038_quota_unit_gives_claude_panes_no_indicator() {
     let before = host.submitted().len();
     feed_pane(&mut host, pane, KNOWN_MODEL, 100_000);
     let shown = latest_cost_decoration(&host, before, pane);
-    assert!(shown.is_none() || decoration_text(&shown.expect("some")).is_empty());
+    assert!(
+        shown.is_none(),
+        "Claude panes show no indicator under quota: {shown:?}"
+    );
 }
 
 /// REQ: F-038
@@ -112,10 +133,13 @@ fn decor_038_changing_the_unit_re_emits_the_decoration() {
 /// REQ: F-038
 #[test]
 fn decor_038_decoration_targets_the_fed_pane_only() {
-    let (mut host, pane, before) = fed(KNOWN_MODEL, 100_000);
+    let mut host = activated_server();
+    let pane = add_agent(&mut host, "agent", "claude");
     let other = add_agent(&mut host, "other", "claude");
+    let before = host.submitted().len();
+    feed_pane(&mut host, pane, KNOWN_MODEL, 100_000);
     let all = cost_decorations(&host.submitted()[before..]);
-    assert!(all
-        .iter()
-        .all(|spec| spec.node.0 == pane && spec.node.0 != other));
+    assert!(!all.is_empty(), "feeding a pane must decorate it");
+    assert!(all.iter().any(|spec| spec.node.0 == pane));
+    assert!(all.iter().all(|spec| spec.node.0 != other));
 }

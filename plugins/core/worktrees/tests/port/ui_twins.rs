@@ -79,6 +79,16 @@ fn port_069_a_panel_too_short_for_all_lines_paints_no_more_rows_than_it_has() {
         assert_eq!(painted.len(), rows as usize);
         assert!(branch_lines(&mut host, 48, rows).len() <= rows as usize);
     }
+    // manual does not pin the exact clipping beyond "first lines survive, later ones are cut"
+    let clipped = branch_lines(&mut host, 48, 2);
+    assert!(
+        clipped.iter().any(|row| row.contains("fix-auth")),
+        "the first branch line survives: {clipped:?}"
+    );
+    assert!(
+        clipped.iter().all(|row| !row.contains("docs-sweep")),
+        "the second branch line is clipped at two rows: {clipped:?}"
+    );
 }
 
 /// REQ: F-072, PORT:ilium-client/src/value_worktree.rs::actual_mouse_and_keyboard_open_catalog_without_submitting
@@ -114,7 +124,12 @@ fn port_072_choosing_a_default_where_keeps_the_authored_branch_prefix() {
 fn port_072_an_unknown_default_where_is_refused_and_the_old_value_stays() {
     let mut host = client_host();
     set_git(&mut host, "default_where", json!("existing_worktree")).expect("valid");
-    assert!(set_git(&mut host, "default_where", json!("elsewhere")).is_err());
+    let error = set_git(&mut host, "default_where", json!("elsewhere"))
+        .expect_err("an unknown default_where must be refused");
+    assert_eq!(
+        error.code,
+        ilium_plugin_sdk::types::ErrorCode::InvalidArgument
+    );
     assert_eq!(
         host.kernel_settings().get("git", "default_where"),
         Some(json!("existing_worktree"))
@@ -156,8 +171,8 @@ fn port_067_a_request_sent_while_settings_change_uses_the_value_valid_at_creatio
     host.settle();
     let arguments = add_arguments(&mut host);
     assert!(
-        arguments[3].starts_with("one/") || arguments[3].starts_with("two/"),
-        "{}",
+        arguments[3].starts_with("one/") && !arguments[3].starts_with("two/"),
+        "the request keeps the prefix valid at its creation: {}",
         arguments[3]
     );
     assert_eq!(worktree_add_calls(&host.process().calls()).len(), 1);
@@ -169,7 +184,9 @@ fn port_067_the_branch_line_of_a_narrow_panel_stays_inside_the_width() {
     let mut host = client_host();
     two(&mut host);
     for columns in [20u16, 24, 30] {
-        for row in branch_lines(&mut host, columns, 12) {
+        let rows = branch_lines(&mut host, columns, 12);
+        assert_eq!(rows.len(), 2, "{columns}: {rows:?}");
+        for row in rows {
             assert!(row.chars().count() <= columns as usize, "{columns}: {row}");
         }
     }
@@ -227,6 +244,7 @@ fn port_069_the_compact_tree_keeps_its_frame_rows_within_the_requested_size() {
     two(&mut host);
     let painted = lines(&mut host, 40, 8);
     assert_eq!(painted.len(), 8);
+    assert_eq!(branch_lines(&mut host, 40, 8).len(), 2);
     assert!(painted.iter().all(|row| row.chars().count() <= 40));
 }
 
@@ -241,7 +259,9 @@ fn port_070_a_long_inventory_selects_and_removes_nothing_by_itself() {
             "clean",
         );
     }
-    assert!(branch_lines(&mut host, 48, 8).len() <= 8);
+    let visible = branch_lines(&mut host, 48, 8);
+    assert!(!visible.is_empty(), "the inventory paints branch lines");
+    assert!(visible.len() <= 8);
     assert!(host.process().calls().is_empty());
     assert!(host.submitted().is_empty());
 }

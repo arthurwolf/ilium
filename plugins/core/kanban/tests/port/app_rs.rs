@@ -129,6 +129,9 @@ fn port_app_clicking_a_card_opens_and_escape_closes_its_detail_panel() {
     let (row, column) = draw(&mut host, node, 120, 30).find("Task").expect("card");
     assert!(host.click(ViewTarget::Pane(node), column, row));
     host.settle();
+    assert!(!draw(&mut host, node, 120, 30)
+        .find("complete body")
+        .is_some_and(|(_, c)| c >= 80));
     press(&mut host, node, "enter");
     assert!(draw(&mut host, node, 120, 30)
         .text()

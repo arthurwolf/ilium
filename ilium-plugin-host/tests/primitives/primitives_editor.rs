@@ -473,6 +473,8 @@ fn pri_024_session_total_of_65536_accepted_and_one_more_refused() {
         .host
         .editor()
         .set_decorations(buffer, "layer-7".into(), vec![decoration(0)]);
+    // manual does not pin the error code of the session-total refusal (PRI-024 pins only the
+    // per-layer invalid-argument), so the refusal itself is the strongest check.
     assert!(one_more.is_err(), "the 65,537th item must be refused");
 }
 

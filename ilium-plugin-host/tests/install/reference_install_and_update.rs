@@ -341,12 +341,8 @@ fn pkg_262_url_install_of_unsigned_package_needs_allow_unsigned() {
     );
     let out = fx.run(&["install", "https://example.test/a", "--yes"]);
     assert_eq!(out.exit_code, 1);
-    // reference-plugin-cli.md names `install.unsigned`, reference-signing-and-trust.md `trust.unsigned`.
-    assert!(
-        out.has_error("install.unsigned") || out.has_error("trust.unsigned"),
-        "{:?}",
-        out.error_codes()
-    );
+    // The `install` command reports `install.unsigned` (DEV-143, reference-plugin-cli.md).
+    assert_eq!(out.error_codes(), vec!["install.unsigned".to_owned()]);
     assert!(fx.record("example.a").is_none());
 }
 
@@ -924,16 +920,14 @@ fn pkg_269_crash_before_commit_leaves_installed_json_unchanged() {
 fn pkg_269_crash_at_stage_leaves_an_orphan_that_is_deleted_at_next_start() {
     let fx = Fx::new();
     crash_after(&fx, &Spec::new("example.a", "1.0.0"), InstallStep::Stage);
+    let orphans = std::fs::read_dir(fx.root().join("staging"))
+        .map(|d| d.count())
+        .unwrap_or(0);
+    assert!(orphans > 0, "the crash must leave an orphan in staging/");
     let report = installer(&fx, unsigned_ok())
         .recover_at_start()
         .expect("recover");
-    assert!(
-        !report.removed_staging.is_empty()
-            || !fx.root().join("staging").exists()
-            || std::fs::read_dir(fx.root().join("staging"))
-                .map(|mut d| d.next().is_none())
-                .unwrap_or(true)
-    );
+    assert_eq!(report.removed_staging.len(), orphans);
     let leftovers = std::fs::read_dir(fx.root().join("staging"))
         .map(|d| d.count())
         .unwrap_or(0);
@@ -1304,6 +1298,11 @@ fn pkg_275_dry_run_prints_the_plan() {
     assert_eq!(out.exit_code, 0);
     assert!(!out.stdout_jsonl.is_empty());
     assert!(out.all_text().contains("example.a"), "{}", out.all_text());
+    assert!(out.all_text().contains("1.0.0"), "{}", out.all_text());
+    assert!(
+        fx.record("example.a").is_none(),
+        "a dry run installs nothing"
+    );
     assert!(
         !out.steps()
             .iter()
@@ -1388,7 +1387,10 @@ fn pkg_277_plugins_changed_message_is_sent_to_every_server() {
         .collect();
     assert!(!notified.is_empty(), "{:?}", out.stdout_jsonl);
     assert!(
-        notified.iter().all(|line| line["status"].is_string()),
+        // manual does not pin the notify line's status values or the server count of this fixture.
+        notified.iter().all(|line| line["status"]
+            .as_str()
+            .is_some_and(|status| !status.is_empty())),
         "{notified:?}"
     );
 }
@@ -1675,7 +1677,7 @@ fn pkg_282_yes_does_not_confirm_a_new_high_risk_grant() {
     );
     assert_eq!(out.exit_code, 1, "{:?}", out.stdout_jsonl);
     assert!(
-        out.has_error("install.needs-input") || out.has_error("install.review-required"),
+        out.has_error("install.needs-input"),
         "{:?}",
         out.error_codes()
     );
@@ -2186,8 +2188,9 @@ fn pkg_291_rollback_twice_has_no_second_previous_version() {
     two_committed_versions(&fx);
     assert_eq!(fx.run(&["rollback", "example.a"]).exit_code, 0);
     let out = fx.run(&["rollback", "example.a"]);
+    assert_eq!(out.exit_code, 1);
     assert!(
-        out.has_error("install.no-previous") || out.exit_code == 0,
+        out.has_error("install.no-previous"),
         "{:?}",
         out.error_codes()
     );

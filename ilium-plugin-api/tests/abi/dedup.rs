@@ -49,13 +49,15 @@ fn abi_010_empty_key_is_invalid_argument() {
 /// REQ: ABI-010
 #[test]
 fn abi_010_space_is_refused() {
-    assert!(DedupKey::parse("a b").is_err());
+    let error = DedupKey::parse("a b").expect_err("space refused");
+    assert_eq!(error.code, ErrorCode::InvalidArgument);
 }
 
 /// REQ: ABI-010
 #[test]
 fn abi_010_non_ascii_letter_is_refused() {
-    assert!(DedupKey::parse("cle-é").is_err());
+    let error = DedupKey::parse("cle-é").expect_err("non-ascii refused");
+    assert_eq!(error.code, ErrorCode::InvalidArgument);
 }
 
 /// REQ: ABI-034
@@ -105,7 +107,8 @@ proptest! {
         suffix in "[A-Za-z0-9]{0,20}",
     ) {
         let key = format!("{prefix}{bad}{suffix}");
-        prop_assert!(DedupKey::parse(&key).is_err());
+        let error = DedupKey::parse(&key).expect_err("character outside the alphabet");
+        prop_assert_eq!(error.code, ErrorCode::InvalidArgument);
     }
 
     // REQ: ABI-034

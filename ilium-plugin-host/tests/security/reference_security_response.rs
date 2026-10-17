@@ -13,14 +13,11 @@ fn security_md() -> String {
 fn sec_320_security_md_at_the_repository_root_names_the_contact_and_a_pgp_key() {
     let text = security_md();
     assert!(
-        text.contains("security@ilium.example") || text.contains('@'),
-        "SECURITY.md needs a contact"
+        text.contains("security@ilium.example"),
+        "SECURITY.md needs the contact"
     );
     assert!(text.to_lowercase().contains("pgp"));
-    assert!(
-        text.to_lowercase().contains("not to public issues")
-            || text.to_lowercase().contains("public issue")
-    );
+    assert!(text.to_lowercase().contains("not to public issues"));
 }
 
 /// REQ: SEC-320
@@ -30,7 +27,8 @@ fn sec_320_version_verbose_prints_the_contact() {
     let output =
         ilium_plugin_host::cli::run(&args(&["--version", "--verbose"]), &cli_env(scratch.path()));
     let text = format!("{:?} {}", output.stdout_jsonl, output.stderr);
-    assert!(text.contains('@'), "{text}");
+    assert_eq!(output.exit_code, 0, "{text}");
+    assert!(text.contains("security@ilium.example"), "{text}");
 }
 
 /// REQ: SEC-321

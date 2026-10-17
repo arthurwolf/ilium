@@ -361,6 +361,7 @@ fn pkg_050_malformed_names_are_refused() {
         ":x",
     ] {
         let code = grant_code(text);
+        // manual does not pin which of the two codes each malformed string gets
         assert!(
             matches!(
                 code.as_deref(),
@@ -376,12 +377,14 @@ fn pkg_050_malformed_names_are_refused() {
 fn pkg_050_in_a_manifest_a_bad_grant_string_is_refused_with_a_grant_code() {
     let value = client_with_grants(&["Tree.Read"]);
     let found = errors(&value);
+    // manual does not pin grant-unknown versus grant-argument for a malformed name
     assert!(
-        found.iter().any(|code| code == "manifest.grant-unknown"
-            || code == "manifest.grant-argument"
-            || code == "manifest.schema"),
+        found
+            .iter()
+            .any(|code| code == "manifest.grant-unknown" || code == "manifest.grant-argument"),
         "{found:?}"
     );
+    assert_lacks(&found, "manifest.schema");
 }
 
 /// REQ: PKG-051
@@ -680,9 +683,11 @@ fn pkg_059_unknown_kind_or_a_name_with_spaces_is_refused() {
 /// REQ: PKG-059
 #[test]
 fn pkg_059_every_kind_of_the_table_is_accepted_with_a_name() {
+    assert!(!ilium_plugin_api::manifest::ACTIVATION_KINDS.is_empty());
     for kind in ilium_plugin_api::manifest::ACTIVATION_KINDS {
+        assert!(!kind.is_empty());
         let text = format!("{kind}:name");
-        assert!(parse_activation(&text).is_ok() || kind.is_empty(), "{text}");
+        assert!(parse_activation(&text).is_ok(), "{text}");
     }
 }
 
@@ -779,12 +784,9 @@ fn pkg_061_entry_id_grammar_and_uniqueness() {
         json!([{ "id": "a", "title": "T" }, { "id": "a", "title": "U" }]),
     );
     let found = errors(&duplicate);
-    assert!(
-        found
-            .iter()
-            .any(|code| code == "manifest.schema" || code == "manifest.contribution-limit"),
-        "{found:?}"
-    );
+    // Uniqueness belongs to the id rule (schema); contribution-limit is for entry counts.
+    assert_has(&found, "manifest.schema");
+    assert_lacks(&found, "manifest.contribution-limit");
 }
 
 /// REQ: PKG-062
@@ -846,7 +848,8 @@ fn pkg_062_virtual_row_parent_is_project_or_session() {
         "/contributes/virtual_rows",
         json!([{ "id": "r", "title": "R", "icon": "puzzle", "parent": "nowhere" }]),
     );
-    assert!(!errors(&bad).is_empty());
+    // manual does not pin the pointer of the refused parent
+    assert_has(&errors(&bad), "manifest.schema");
 }
 
 /// REQ: PKG-062
@@ -900,7 +903,7 @@ fn pkg_063_a_file_outside_help_or_sounds_directory_is_refused() {
         json!([{ "id": "ding", "file": "other/ding.ogg" }]),
     );
     let found = install_errors(&packed_with(value, &["other/ding.ogg"]), Tier::T3);
-    assert!(!found.is_empty());
+    assert_has(&found, "manifest.file-missing");
 }
 
 /// REQ: PKG-064
@@ -1110,8 +1113,12 @@ fn pkg_075_two_defects_in_one_stage_report_both_codes_in_key_order() {
     // Stage 3: an unknown key and a missing required key.
     let value = unset(set(client(), "/zzz", json!(1)), "/name");
     let found = errors(&value);
-    assert!(found.contains(&"manifest.key-missing".to_owned()));
-    assert!(found.contains(&"manifest.unknown-key".to_owned()));
+    assert_eq!(found.len(), 2, "{found:?}");
+    let missing = found.iter().position(|code| code == "manifest.key-missing");
+    let unknown = found.iter().position(|code| code == "manifest.unknown-key");
+    assert!(missing.is_some() && unknown.is_some(), "{found:?}");
+    // `name` precedes the appended `zzz` key in manifest key order.
+    assert!(missing < unknown, "{found:?}");
 }
 
 /// REQ: PKG-075
@@ -1215,8 +1222,11 @@ fn pkg_078_every_code_produced_for_a_set_of_defects_is_in_the_catalogue() {
         set(client(), "/version", json!("v1")),
         set(client(), "/api", json!("ilium:plugin@9.9.9")),
     ];
+    assert!(!known.is_empty());
     for sample in samples {
-        for code in errors(&sample) {
+        let produced = errors(&sample);
+        assert!(!produced.is_empty(), "sample produced no error");
+        for code in produced {
             assert!(known.contains(&code), "{code} is not in the catalogue");
         }
     }
@@ -1296,18 +1306,26 @@ proptest! {
     // REQ: PKG-050
     #[test]
     fn pkg_050_bare_lower_case_names_never_panic_and_never_split(name in "[a-z][a-z.-]{2,20}") {
-        let _ = Grant::parse(&name);
+        // manual does not pin the code of a bare name; it only forbids splitting it.
+        match Grant::parse(&name) {
+            Ok(grant) => {
+                prop_assert!(grant.argument().is_none());
+                prop_assert_eq!(grant.family(), name.as_str());
+            }
+            Err(diagnostic) => {
+                prop_assert_eq!(diagnostic.code.as_str(), "manifest.grant-unknown");
+            }
+        }
     }
 
     // REQ: PKG-052
     #[test]
     fn pkg_052_a_parsed_grant_round_trips_through_as_str(
-        argument in "[a-z0-9.-]{1,20}"
+        argument in "[a-z][a-z0-9]{0,19}"
     ) {
         let text = format!("topics.subscribe:{argument}");
-        if let Ok(grant) = Grant::parse(&text) {
-            prop_assert_eq!(grant.as_str(), text.as_str());
-            prop_assert_eq!(grant.argument(), Some(argument.as_str()));
-        }
+        let grant = Grant::parse(&text).expect("valid topics.subscribe argument");
+        prop_assert_eq!(grant.as_str(), text.as_str());
+        prop_assert_eq!(grant.argument(), Some(argument.as_str()));
     }
 }

@@ -2,7 +2,7 @@
 //! danger-confirm); the command is submitted only after the `ok` button, never after cancel or Esc.
 
 use ilium_plugin_sdk::exports::HookReply;
-use ilium_plugin_sdk::types::ViewTarget;
+use ilium_plugin_sdk::types::{Intent, ViewTarget};
 use serde_json::json;
 
 use crate::common::{
@@ -37,11 +37,28 @@ fn confirm_051_ok_runs_the_close_pane_command_once() {
 /// REQ: F-051
 #[test]
 fn confirm_051_the_close_command_names_the_resolved_pane() {
-    let mut host = host_with_docs_pane();
+    let mut host = enabled_client("push_to_talk");
+    let docs_id = add_pane(&mut host, "docs");
+    add_pane(&mut host, "logs");
     hear(&mut host, "close the pane called docs");
     let submissions = host.deliver_one(popup_button(CONFIRM_POPUP, "ok"));
-    let text = format!("{:?}", submissions[0].intent);
-    assert!(text.contains("docs") || text.contains('1'), "{text}");
+    let spec = match &submissions[0].intent {
+        Intent::InvokeCommand(spec) => spec,
+        other => panic!("expected an invoke-command intent, got {other:?}"),
+    };
+    assert_eq!(spec.command, "kernel.close_pane");
+    // manual does not pin the argument shape; the resolved pane id must appear as a number in it.
+    fn holds_id(value: &serde_json::Value, id: u64) -> bool {
+        match value {
+            serde_json::Value::Number(number) => number.as_u64() == Some(id),
+            serde_json::Value::Array(items) => items.iter().any(|item| holds_id(item, id)),
+            serde_json::Value::Object(map) => map.values().any(|item| holds_id(item, id)),
+            _ => false,
+        }
+    }
+    let arguments: serde_json::Value =
+        serde_json::from_str(&spec.arguments_json).expect("arguments are JSON");
+    assert!(holds_id(&arguments, docs_id), "{}", spec.arguments_json);
 }
 
 /// REQ: F-051

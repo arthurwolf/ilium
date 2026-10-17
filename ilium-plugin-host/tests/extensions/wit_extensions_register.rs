@@ -53,12 +53,22 @@ fn wit_extensions_register_same_extension_id_replaces_the_entry() {
     assert!(world
         .register(CONTRIBUTOR, COLLECT, "e1", 60, r#"{"id":"b"}"#)
         .is_ok());
+    let listed = world.list(OWNER, COLLECT).unwrap_or_default();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].extension, "e1");
     assert_eq!(
-        world
-            .list(OWNER, COLLECT)
-            .map(|list| list.len())
-            .unwrap_or(0),
-        1
+        listed[0].priority, 60,
+        "the second registration replaced the first"
+    );
+    assert!(
+        listed[0].entry_json.contains(r#""b""#),
+        "{}",
+        listed[0].entry_json
+    );
+    assert!(
+        !listed[0].entry_json.contains(r#""a""#),
+        "{}",
+        listed[0].entry_json
     );
 }
 
