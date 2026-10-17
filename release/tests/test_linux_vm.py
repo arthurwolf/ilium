@@ -2,6 +2,7 @@
 from pathlib import Path
 from contextlib import redirect_stderr, redirect_stdout  # Keep synthetic command diagnostics out of the test runner's output.
 import io  # Capture expected parser errors and synthetic guest output.
+import os  # Skip guest-path fixtures on Windows hosts.
 import json  # Read retained applicability evidence as structured data.
 import shlex  # Assert actual guest argv rather than command substrings.
 import subprocess
@@ -227,6 +228,7 @@ class vm_coverage_tests(unittest.TestCase):  # Exercise real orchestration with 
         package_upload = next(command for command in commands if command[0] == 'scp' and command[-1].endswith(':packages'))  # Inspect the real local argv.
         self.assertTrue(package_upload[-2].endswith('packages with spaces'))  # Whitespace stays within one SCP source argument.
 
+    @unittest.skipIf(os.name == 'nt', 'guest paths are POSIX; the Linux release lanes cover this')
     def test_guest_host_command_satisfies_the_real_package_smoke_parser(self):
         _result, guest, _commands, logs, _events = self.run_vm()
         host_command = next(argv for argv in guest if argv[2] == 'host')
@@ -305,6 +307,7 @@ class vm_coverage_tests(unittest.TestCase):  # Exercise real orchestration with 
                 else:
                     self.assertIn('old harness', logs['vm-inputs-verification.jsonl'])
 
+    @unittest.skipIf(os.name == 'nt', 'guest paths are POSIX; the Linux release lanes cover this')
     def test_exact_guest_verifier_executes_and_detects_changed_bytes(self):
         with tempfile.TemporaryDirectory() as temporary:
             source = Path(temporary) / 'source'; source.mkdir()

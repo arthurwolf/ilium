@@ -249,7 +249,11 @@ fn boundary_production_render_throw_detaches_all_private_working_and_sealed_buff
         )
         .is_err());
     assert!(engine.is_invalid()); // The submitted frame cannot be published after a package exception.
-    assert_eq!(records.borrow().len(), 6);
+    assert_eq!(
+        records.borrow().len(),
+        6,
+        "observed private buffer count differs from the six planes"
+    );
     assert_eq!(detached(&mut engine, &records), vec![true; 6]); // Force physical detachment of every distinct private working/sealed allocation before Engine destruction.
     assert_eq!(engine.bridge.borrow().phase, Phase::Idle); // Neither private inventory nor private finish capability survives the failure.
 } // Existing surface tests separately force no canonical/pixel/provenance commit.
