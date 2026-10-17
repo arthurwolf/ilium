@@ -7,6 +7,7 @@ import json
 import subprocess
 import sys
 import tempfile
+import os
 import unittest
 from unittest.mock import patch
 
@@ -15,6 +16,7 @@ sys.path.insert(0, str(ROOT / 'release/scripts'))
 import native_sandbox_runner as runner
 
 
+@unittest.skipIf(os.name == 'nt', 'native sandbox runner is POSIX-only; the Linux lanes cover this')
 class NativeSandboxRunnerTests(unittest.TestCase):
     def test_required_runner_cases_exist_in_the_native_rust_test_source(self):
         import re
