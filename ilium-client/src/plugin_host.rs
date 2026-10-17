@@ -5,6 +5,9 @@
 // Not wired into the client yet; the implementation phase calls it from the app.
 #![allow(dead_code, unused_variables)]
 
+pub mod screens_rig;
+pub mod widget_rig;
+
 use ilium_plugin_host::lifecycle::{ShutdownReport, StartMode, StartReport};
 
 /// Owns the client-side plugin instances.
