@@ -149,3 +149,19 @@ fn port_scheduled_input_numeric_fields_share_inner_row_and_preserve_empty_keyboa
     let row = form_row(&mut session, SCHEDULE_VIEW, "Hours");
     assert!(!row.chars().any(|c| c.is_ascii_digit()), "an empty draft is not rewritten to 0: {row}");
 }
+
+/// REQ: PORT:ilium-client/src/keys.rs::scheduled_input_keyboard_edits_toggles_and_submits_the_form
+#[test]
+fn port_002_scheduled_input_keyboard_edits_toggles_and_submits_the_form() {
+    let (mut session, pane) = schedule_dialog("shell");
+    set_text(&mut session, SCHEDULE_VIEW, "payload", "x");
+    press(&mut session, SCHEDULE_VIEW, "tab");
+    // The focused Send Enter checkbox is toggled off with Space.
+    press(&mut session, SCHEDULE_VIEW, "space");
+    commit_schedule(&mut session);
+    assert!(!schedule_dialog_open(&mut session), "Ctrl+Enter submits and closes the form");
+    server(&mut session).advance_clock(30_000);
+    let sent = sends(&server(&mut session).submitted());
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].0, plain_spec(pane, "x", Delivery::Typed));
+}

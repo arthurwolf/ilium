@@ -78,3 +78,21 @@ fn port_icon_settings_stable_glyph_preference_maps_status_defaults_and_preserves
         r####"{"WaitingApproval": "?", "Done": "!", "WaitingBackground": "◷", "BackgroundTaskStillRunning": "~", "Parked": "z", "GoalActive": "@", "GoalPaused": "||", "GoalBlocked": "#", "GoalUsageLimited": "%", "GoalReached": "=", "TaskDone": "ok", "TaskError": "x", "MonitorFailed": "!", "ScheduledInput": "t", "RowRename": "✎", "RowMoveUp": "↑", "RowMoveDown": "↓", "RowClose": "×", "RowRetitle": "↻", "RowProjectRestructure": "⟳", "AskForUpdate": "?", "normal_mode": "default_glyph", "custom_preserved": "😴"}"####,
     );
 }
+
+/// REQ: PORT:ilium-client/src/keys.rs::icon_picker_v_switches_between_dense_and_single_column_modes
+#[test]
+fn port_icon_settings_icon_picker_v_switches_between_dense_and_single_column_modes() {
+    // Assumed op `icons.picker-keys`: replays chords on an open picker and answers its column mode and openness.
+    check(
+        Place::Client,
+        "icons.picker-keys",
+        r####"{"chords": ["v"]}"####,
+        r####"{"columns": "single", "open": true}"####,
+    );
+    check(
+        Place::Client,
+        "icons.picker-keys",
+        r####"{"chords": ["v", "v"]}"####,
+        r####"{"columns": "dense", "open": true}"####,
+    );
+}

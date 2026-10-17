@@ -219,3 +219,65 @@ fn port_cost_settings_ui_shared_cost_chrome_renders_and_hits_every_numeric_and_c
         }
     }
 }
+
+/// REQ: PORT:ilium-client/src/keys.rs::cost_tab_keyboard_selects_toggles_steps_and_scrolls_the_selection_into_view
+#[test]
+fn port_cost_settings_ui_cost_tab_keyboard_selects_toggles_steps_and_scrolls_the_selection_into_view() {
+    // Assumed op `settings-ui.keyboard`: replays chords against the page and answers the settings and scroll.
+    let reply = client(
+        "settings-ui.keyboard",
+        json!({ "settings": {}, "width": 110, "height": 12, "select": "calibration", "chords": ["right"] }),
+    );
+    assert_eq!(reply["settings"]["calibration"], json!("budget"));
+    assert_eq!(reply["row_visible"]["budget"], json!(true));
+
+    let reply = client(
+        "settings-ui.keyboard",
+        json!({ "settings": {}, "width": 110, "height": 12, "select": "sparkline", "chords": ["space"] }),
+    );
+    assert_eq!(reply["settings"]["sparkline"], json!(true));
+
+    let reply = client(
+        "settings-ui.keyboard",
+        json!({ "settings": {}, "width": 110, "height": 12, "select": "visibility:sparkline", "chords": ["right"] }),
+    );
+    assert_eq!(reply["settings"]["visibility"]["sparkline"], json!("always"));
+
+    let window = |chords: Value| {
+        client("settings-ui.keyboard", json!({ "settings": {}, "width": 110, "height": 12, "select": "sparkline_window", "chords": chords }))
+    };
+    assert_eq!(window(json!(["right"]))["settings"]["sparkline_window_minutes"], json!(480));
+    assert_eq!(window(json!(["left", "left"]))["settings"]["sparkline_window_minutes"], json!(240));
+    let scrolled = window(json!([]));
+    assert!(scrolled["scroll"].as_u64().is_some_and(|scroll| scroll > 0), "the selected row is scrolled into view: {scrolled}");
+}
+
+/// REQ: PORT:ilium-client/src/keys.rs::cost_window_accepts_an_exact_typed_value_and_keeps_the_field_open_on_a_typo
+#[test]
+fn port_cost_settings_ui_cost_window_accepts_an_exact_typed_value_and_keeps_the_field_open_on_a_typo() {
+    let dialog = |draft_keys: &str, confirm: bool| {
+        client(
+            "settings-ui.number-dialog",
+            json!({ "settings": {}, "row": "sparkline_window", "click": "open", "draft_keys": draft_keys, "confirm": confirm }),
+        )
+    };
+    // Opening shows the current value as the draft.
+    let opened = dialog("", false);
+    assert_eq!(opened["draft"], json!("360"));
+    // A typo keeps the field open with the typed draft, an error and the stored value.
+    let typo = dialog("<bs><bs><bs>5x", true);
+    assert_eq!(typo["draft"], json!("5x"));
+    assert_eq!(typo["dialog_kind"], json!("number"));
+    assert!(typo["error"].as_str().is_some_and(|error| !error.is_empty()), "{typo}");
+    assert_eq!(typo["settings"]["sparkline_window_minutes"], json!(360));
+    // An exact value saves 10 hours as 600 minutes and keeps Settings open.
+    let saved = dialog("<bs><bs>10h", true);
+    assert_eq!(saved["settings"]["sparkline_window_minutes"], json!(600));
+    assert_eq!(saved["mode_after"], json!("settings"));
+    // Escape cancels and leaves the value.
+    let cancelled = client(
+        "settings-ui.number-dialog",
+        json!({ "settings": { "sparkline_window_minutes": 600 }, "row": "sparkline_window", "click": "open", "draft_keys": "9", "cancel": true }),
+    );
+    assert_eq!(cancelled["settings"]["sparkline_window_minutes"], json!(600));
+}

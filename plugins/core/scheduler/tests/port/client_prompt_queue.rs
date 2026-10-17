@@ -102,3 +102,15 @@ fn port_prompt_queue_compact_queue_keeps_draft_controls_and_warning_inside_popup
         assert!(line.chars().count() <= 40, "{line}");
     }
 }
+
+/// REQ: PORT:ilium-client/src/keys.rs::prompt_queue_paste_normalizes_crlf_to_single_newlines
+#[test]
+fn port_001_prompt_queue_paste_normalizes_crlf_to_single_newlines() {
+    let (mut session, pane) = queue_dialog("agent");
+    // A paste reaches the dialog as one text change; CRLF and lone CR collapse to single LF.
+    set_text(&mut session, QUEUE_VIEW, "prompt", "one\r\ntwo\rthree\nfour");
+    commit_queue(&mut session);
+    let entries = list_queue(&mut session, pane);
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0]["text"], "one\ntwo\nthree\nfour");
+}

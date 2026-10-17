@@ -3,6 +3,7 @@
 //! the observable behaviour of the original through the plugin API on `FakeHost`.
 #![allow(dead_code)]
 
+mod attention_tooltips;
 mod common;
 mod finished;
 mod sound_preview;

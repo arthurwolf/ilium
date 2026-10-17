@@ -159,3 +159,18 @@ fn port_067_on_linux_the_template_path_is_unchanged() {
     create_worktree(&mut host, &request("x"));
     assert_eq!(add_arguments(&mut host)[4], "/repos/app/.ilium/worktrees/x");
 }
+
+/// REQ: PORT:ilium-client/src/connection.rs::accepted_dialog_error_owner_survives_stale_same_kind_response
+#[test]
+fn port_067_a_refused_request_is_not_revived_by_a_repeat_and_does_not_block_the_next_one() {
+    let mut host = server_host_at(PROJECT);
+    with_repository_facts(&mut host);
+    let first = create_worktree(&mut host, &request("main"));
+    assert!(worktree_add_calls(&host.process().calls()).is_empty());
+    assert!(create_panes(&first).is_empty());
+    let repeat = create_worktree(&mut host, &request("main"));
+    assert!(worktree_add_calls(&host.process().calls()).is_empty(), "the repeated refusal adds nothing");
+    assert!(create_panes(&repeat).is_empty());
+    create_worktree(&mut host, &request("agent/fresh"));
+    assert_eq!(add_arguments(&mut host)[3], "agent/fresh");
+}

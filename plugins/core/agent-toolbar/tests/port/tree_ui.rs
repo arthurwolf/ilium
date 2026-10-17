@@ -45,3 +45,34 @@ fn port_tree_ui_toolbar_keeps_settings_right_aligned_without_overlapping_left_ac
         r####"{"toolbar_width": 14, "project_x": 4, "restructure_x": 8, "settings_x": [12, 13], "overlap": false}"####,
     );
 }
+
+/// REQ: PORT:ilium-client/src/tree_ui.rs::stopped_agent_tree_row_keeps_recovery_indicator_in_normal_and_attention_modes
+#[test]
+fn port_tree_ui_stopped_agent_row_keeps_its_recovery_indicator_in_normal_and_attention_modes() {
+    for agent in ["codex", "claude"] {
+        for mode in ["normal", "attention"] {
+            for stable_glyphs in [false, true] {
+                let request = serde_json::json!({
+                    "agent": agent, "display_mode": mode, "stable_glyphs": stable_glyphs,
+                    "row": {"kind": "agent-unavailable", "title": "Recover authored work"},
+                });
+                let reply = ask(Place::Client, "tree-row.render", request.clone());
+                assert_eq!(reply["indicator"], "agent-unavailable", "{request} -> {reply}");
+                assert_eq!(reply["text"], "Recover authored work [unavailable]", "{request} -> {reply}");
+                assert_eq!(reply["agent_state"], Value::Null, "{request} -> {reply}");
+            }
+        }
+    }
+}
+
+/// REQ: PORT:ilium-client/src/keys.rs::agent_context_menu_enter_enter_creates_here_without_worktree
+#[test]
+fn port_tree_ui_agent_context_menu_enter_enter_creates_here_without_worktree() {
+    // Assumed op `tree-toolbar.context-menu-keys`: replays chords on the tree context menu of a group.
+    check(
+        Place::Client,
+        "tree-toolbar.context-menu-keys",
+        r####"{"select": "new-agent:claude", "chords": ["enter", "enter"]}"####,
+        r####"{"submenu_after_first_enter": 0, "menu_open": false, "created": [{"kind": "command", "command": "claude", "worktree": false}]}"####,
+    );
+}

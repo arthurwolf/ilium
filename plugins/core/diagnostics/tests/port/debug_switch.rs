@@ -33,3 +33,16 @@ fn port_028_a_server_sync_of_the_switch_is_handled_without_echoing_a_change_back
     }
     assert_eq!(host.kernel_settings().get("debug", "file_logging_enabled"), Some(json!(true)));
 }
+
+/// REQ: PORT:ilium-client/src/debug_logging.rs::logging_transition_child
+#[test]
+fn port_028_nine_rapid_switch_changes_are_each_handled_and_the_last_one_wins_without_writes() {
+    let mut host = server_host();
+    for index in 0..9 {
+        let value = index % 2 == 0;
+        host.kernel_settings().set("debug", "file_logging_enabled", json!(value)).expect("seed");
+        let submitted = host.deliver_one(changed());
+        assert_eq!(submitted.len(), 0, "change {index}: {submitted:?}");
+    }
+    assert_eq!(host.kernel_settings().get("debug", "file_logging_enabled"), Some(json!(true)));
+}

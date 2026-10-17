@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use ilium_plugin_core_tree::TreeServer;
+use ilium_plugin_core_tree::{TreeClient, TreeServer};
 use ilium_plugin_sdk::testing::{FakeHost, TreeNode};
 use ilium_plugin_sdk::types::{Intent, NodeClass, NodeId, Submission};
 
@@ -11,6 +11,14 @@ pub fn server_host() -> FakeHost {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("manifest.json");
     let mut host = FakeHost::for_manifest(path).expect("manifest loads").side("server").build();
     host.activate::<TreeServer>();
+    host
+}
+
+/// A client-side host with the manifest grants and the plugin activated.
+pub fn client_host() -> FakeHost {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("manifest.json");
+    let mut host = FakeHost::for_manifest(path).expect("manifest loads").side("client").build();
+    host.activate::<TreeClient>();
     host
 }
 

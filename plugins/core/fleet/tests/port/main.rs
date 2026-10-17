@@ -13,3 +13,4 @@ mod http_api;
 mod initial_prompt;
 mod integration;
 mod pane_filter;
+mod scoped_ask;

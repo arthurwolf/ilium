@@ -11,6 +11,7 @@ mod common;
 mod cli_args;
 mod client_start;
 mod control;
+mod control_edges;
 mod control_settings;
 mod device_startup;
 mod onboarding_ports;

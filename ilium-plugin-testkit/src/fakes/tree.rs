@@ -51,6 +51,11 @@ impl FakeTree {
         unimplemented!("DEV-470")
     }
 
+    /// Moves a node under another parent and delivers `tree-changed` (lane hook, see manual_gaps_fakes.md; DEV-470).
+    pub fn move_node(&mut self, _id: u64, _new_parent: u64) {
+        unimplemented!("DEV-470")
+    }
+
     /// Adds a group node under the root and returns its id (lane hook, see manual_gaps_fakes.md; DEV-470).
     pub fn add_group(&mut self, _name: &str) -> u64 {
         unimplemented!("DEV-470")

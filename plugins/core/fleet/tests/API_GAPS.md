@@ -26,3 +26,5 @@
 - Port twins: manual does not specify the Ask-for-update recipient checklist, the press-Enter option, mouse hit-testing, unavailable recipients, or the custom-instructions setting, so those client tests have no twin; F-036.
 - Port twins: manual does not specify the create-agent-from-line dialog (selector, draft retention on refusal, retry); only the HTTP creation path has twins; F-058.
 - Port twins: initial-prompt paste framing, marker stripping and CRLF normalisation are kernel-owned; the manual does not say what `initial_input` looks like at the plugin boundary; F-058.
+- Port twins (scoped_ask.rs): the manual does not say how an Ask for update scope reaches the server side. The twins use channel `ask-for-update-scoped` with JSON `{"node": <id>, "text": <string, absent for the fixed status request>}`, a `row-action` command-invoked with `{"node": <id>}` (api-tree-chrome.md `row_actions`), and the fleet manifest declaring one `row_actions` entry for `ask-for-update` with `applies_to: ["project"]`; F-036.
+- ilium-plugin-testkit: `FakeTree::move_node(&mut self, id: u64, new_parent: u64)` - moving an agent out of the asked scope; F-036.

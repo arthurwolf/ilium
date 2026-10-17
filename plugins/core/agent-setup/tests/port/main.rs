@@ -10,4 +10,5 @@ mod common;
 mod config_fs;
 mod config_text;
 mod feature_setup;
+mod path_paste;
 mod setup_prompt;

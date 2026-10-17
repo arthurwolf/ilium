@@ -133,3 +133,17 @@ fn port_app_a_successful_board_edit_is_written_and_nothing_is_lost_on_deactivati
     host.deactivate(ilium_plugin_sdk::types::DeactivationReason::Shutdown);
     assert_eq!(board_file(&mut host), saved);
 }
+
+/// REQ: PORT:ilium-client/src/app.rs::cancelled_create_dialog_preserves_completed_file_without_delayed_open
+#[test]
+fn port_app_a_cancelled_creation_keeps_the_completed_file_and_opens_nothing_later() {
+    let mut host = client_host_with(Some(SAMPLE_BOARD));
+    let pane = open_editor(&mut host, "docs/plan.md", "markdown");
+    assert_eq!(boards(&invoke(&mut host, pane)), 1);
+    host.deliver_one(Event::NodeRemoved(NodeId(900)));
+    host.advance_clock(60_000);
+    host.settle();
+    assert_eq!(board_file(&mut host), SAMPLE_BOARD);
+    let later = host.deliver_one(Event::NodeRemoved(NodeId(901)));
+    assert_eq!(boards(&later), 0, "no delayed open appears after the cancellation");
+}

@@ -7,9 +7,11 @@ mod helpers;
 
 mod app;
 mod budget;
+mod budget_receipts;
 mod dialogs;
 mod layout;
 mod misc;
+mod modal_stack;
 mod output;
 mod text_prompt;
 mod theme;

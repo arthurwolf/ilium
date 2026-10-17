@@ -238,6 +238,20 @@ impl FakeKernel {
         unimplemented!("host::testing::FakeKernel::set_last_prompt")
     }
 
+    /// Bytes the user's keyboard writes to the pane, as one chunk of terminal input. The kernel
+    /// reconstructs the agent composer text from them; an Enter that follows exact text records
+    /// that text as the pane's last prompt, an Enter that follows text the kernel cannot vouch
+    /// for records the prompt as unavailable (`last-prompt` returns none).
+    pub fn user_types_into(&self, pane: NodeId, bytes: &[u8]) {
+        unimplemented!("host::testing::FakeKernel::user_types_into")
+    }
+
+    /// Bytes written to the pane by something other than the user (a plugin or an automation).
+    /// They edit the composer behind the user's back, so the prompt they belong to is unavailable.
+    pub fn automation_writes_into(&self, pane: NodeId, bytes: &[u8]) {
+        unimplemented!("host::testing::FakeKernel::automation_writes_into")
+    }
+
     /// The prompt epoch of a pane's agent.
     pub fn set_prompt_epoch(&self, pane: NodeId, epoch: u64) {
         unimplemented!("host::testing::FakeKernel::set_prompt_epoch")

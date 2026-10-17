@@ -88,3 +88,29 @@ fn port_links_multi_byte_glyph_before_the_path_is_not_matched() {
     assert_eq!(found("→ src/main.rs:42"), Some("src/main.rs:42".to_string()));
     assert_eq!(open("src/main.rs:42"), expect_open("src/main.rs", 41));
 }
+
+/// REQ: PORT:ilium-client/src/keys.rs::normal_tree_paste_uses_the_retained_bounded_replay
+#[test]
+fn port_normal_tree_paste_uses_the_retained_bounded_replay() {
+    let mut host = FakeHost::for_manifest(concat!(env!("CARGO_MANIFEST_DIR"), "/manifest.json")).expect("manifest loads").side("client").build();
+    host.activate::<TerminalClient>();
+    // Assumed command `terminal.paste` with the pasted text in its arguments: a paste into the focused pane is
+    // one bounded `send-input` with pasted delivery, never one input per key.
+    let text = "line one\nline two ".repeat(200);
+    let submissions = host.deliver_one(Event::CommandInvoked(ilium_plugin_sdk::types::CommandInvokedEvent {
+        command: "terminal.paste".to_string(),
+        arguments_json: serde_json::json!({ "text": text }).to_string(),
+        origin: ilium_plugin_sdk::types::CommandOrigin::Palette,
+        context: ilium_plugin_sdk::types::CommandContext { pane: Some(NodeId(1)), ..Default::default() },
+    }));
+    let sends: Vec<_> = submissions
+        .iter()
+        .filter_map(|s| match &s.intent {
+            Intent::SendInput(spec) => Some(spec.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(sends.len(), 1);
+    assert_eq!(sends[0].text, text);
+    assert_eq!(sends[0].delivery, ilium_plugin_sdk::types::Delivery::Pasted);
+}

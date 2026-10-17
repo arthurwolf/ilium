@@ -22,3 +22,4 @@ mod session_stats_ui;
 mod tree_ui;
 mod ui;
 mod value_cost;
+mod value_cost_durable;

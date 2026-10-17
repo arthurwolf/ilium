@@ -1,6 +1,7 @@
 //! Port twins of the Ambient look core plugin (lane core-ui, part ports).
 
 mod common;
+mod animation_help;
 mod animation_hover;
 mod animation_rows;
 mod animation_settings_ui;

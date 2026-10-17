@@ -6,5 +6,6 @@
 #[path = "../features/common.rs"]
 mod common;
 
+mod debug_log_keys;
 mod debug_switch;
 mod engine_budget;

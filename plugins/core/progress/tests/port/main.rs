@@ -8,6 +8,7 @@ mod host_ext;
 mod common;
 mod support;
 
+mod agent_delivery;
 mod app;
 mod gap_ports;
 mod handlers;

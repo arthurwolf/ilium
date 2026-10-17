@@ -11,6 +11,7 @@ mod common;
 mod support;
 
 mod client_dialog;
+mod client_save_failures;
 mod client_misc;
 mod client_preview;
 mod client_trigger_settings;

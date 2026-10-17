@@ -130,3 +130,20 @@ fn port_011_vs16_action_icons_never_share_a_physical_row() {
     }
 }
 
+
+/// REQ: PORT:ilium-client/src/keys.rs::triggers_keyboard_navigation_toggles_chips_and_none_clears_actions
+#[test]
+fn port_010_triggers_keyboard_navigation_toggles_chips_and_none_clears_actions() {
+    let mut host = client_host();
+    // Space on the focused chip of the finished-work row toggles it: the first chip is Retitle element.
+    host.key(triggers_tab(), "right");
+    host.key(triggers_tab(), "space");
+    host.settle();
+    let actions = host.settings().get("agent_finished_work").expect("actions");
+    assert_eq!(actions, json!(["restructure_project"]), "Retitle element is removed, Restructure project stays");
+    // Left, then Enter on the None chip clears every action.
+    host.key(triggers_tab(), "left");
+    host.key(triggers_tab(), "enter");
+    host.settle();
+    assert_eq!(host.settings().get("agent_finished_work"), Some(json!([])));
+}

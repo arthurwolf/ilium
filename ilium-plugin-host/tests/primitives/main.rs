@@ -7,4 +7,5 @@ mod common;
 mod primitives_agent;
 mod primitives_basic;
 mod primitives_editor;
+mod port_agent_prompt;
 mod primitives_terminal;

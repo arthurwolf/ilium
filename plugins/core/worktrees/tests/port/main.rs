@@ -5,6 +5,7 @@ mod common;
 mod support;
 mod app;
 mod git_status;
+mod git_text_setting;
 mod worktree_cli;
 mod worktree_dialog;
 mod worktree_manager;

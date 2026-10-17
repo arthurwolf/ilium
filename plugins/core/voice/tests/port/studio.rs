@@ -141,6 +141,85 @@ fn port_004_a_revision_counter_wrap_rotates_the_studio_identity() {
     assert_ne!(before["studio"], after["studio"]);
 }
 
+fn busy_start() -> ilium_plugin_sdk::types::PluginError {
+    ilium_plugin_sdk::types::PluginError {
+        code: ilium_plugin_sdk::types::ErrorCode::Busy,
+        message: "jobs full".to_string(),
+        retry_after_ms: Some(50),
+    }
+}
+
+/// REQ: PORT:ilium-client/src/app.rs::sound_preview_refusal_retry_reports_only_admitted_request
+#[test]
+fn port_005_a_refused_preview_start_reports_no_request_and_the_retry_starts_exactly_one() {
+    let mut host = client_host();
+    host.inject_failure("jobs.start", busy_start());
+    host.send_action(step(), "preview", ActionKind::Activated, ActionValue::None);
+    host.settle();
+    assert_eq!(preview_jobs(&mut host).len(), 0, "the refused start admitted nothing");
+    assert!(!studio_text(&mut host, 118, 33).contains("Preview ready"));
+    host.send_action(step(), "preview", ActionKind::Activated, ActionValue::None);
+    host.settle();
+    assert_eq!(preview_jobs(&mut host).len(), 1, "only the retry was admitted");
+}
+
+/// REQ: PORT:ilium-client/src/render_cache.rs::sound_preview_status_changes_only_after_server_completion
+#[test]
+fn port_006_the_preview_status_changes_only_when_the_job_completes() {
+    let mut host = client_host();
+    request_preview(&mut host);
+    assert!(!studio_text(&mut host, 118, 33).contains("Preview ready"), "requested is not ready");
+    let failed = preview_jobs(&mut host).pop().expect("job").request;
+    host.jobs().finish(failed, Err(busy_start()));
+    host.settle();
+    assert!(!studio_text(&mut host, 118, 33).contains("Preview ready"), "a failed job is not ready");
+    request_preview(&mut host);
+    let played = preview_jobs(&mut host).pop().expect("second job").request;
+    host.jobs().finish(played, Ok(vec![0u8; 64]));
+    host.settle();
+    assert!(studio_text(&mut host, 118, 33).contains("Preview ready"));
+}
+
+/// REQ: PORT:ilium-client/src/onboarding/sound_preview.rs::newer_design_cancels_running_preview_and_coalesces_to_latest_revision
+#[test]
+fn port_007_a_newer_design_cancels_the_running_preview_and_only_the_latest_revision_is_installed() {
+    let mut host = client_host();
+    let first = request_preview(&mut host);
+    let first_request = preview_jobs(&mut host).pop().expect("first job").request;
+    assert_eq!(first["revision"], 0);
+    adjust(&mut host, "pitch_hz", 801.0);
+    host.send_action(step(), "preview", ActionKind::Activated, ActionValue::None);
+    adjust(&mut host, "pitch_hz", 802.0);
+    host.send_action(step(), "preview", ActionKind::Activated, ActionValue::None);
+    host.settle();
+    assert!(host.jobs().cancelled().contains(&first_request), "the running preview is cancelled");
+    let revisions: Vec<Value> = preview_jobs(&mut host)
+        .iter()
+        .map(|job| serde_json::from_slice::<Value>(&job.input).expect("JSON input")["revision"].clone())
+        .collect();
+    assert!(!revisions.contains(&json!(1)), "the intermediate revision coalesces away: {revisions:?}");
+    assert_eq!(revisions.last(), Some(&json!(2)));
+    let latest = preview_jobs(&mut host).pop().expect("latest job").request;
+    host.jobs().finish(latest, Ok(vec![0u8; 64]));
+    host.settle();
+    assert!(studio_text(&mut host, 118, 33).contains("Preview ready"));
+}
+
+/// REQ: PORT:ilium-client/src/onboarding/sound_preview.rs::waveform_is_prepared_on_cpu_worker_and_remains_charged_until_replaced
+#[test]
+fn port_008_the_waveform_is_prepared_by_a_job_and_dropped_when_the_design_changes() {
+    let mut host = client_host();
+    request_preview(&mut host);
+    assert_eq!(preview_jobs(&mut host).len(), 1, "the waveform is prepared by a job, not inline");
+    assert!(!studio_text(&mut host, 118, 33).contains("Preview ready"), "nothing is ready before the job finishes");
+    let request = preview_jobs(&mut host).pop().expect("job").request;
+    host.jobs().finish(request, Ok(vec![0u8; 64]));
+    host.settle();
+    assert!(studio_text(&mut host, 118, 33).contains("Preview ready"));
+    adjust(&mut host, "pitch_hz", 801.0);
+    assert!(!studio_text(&mut host, 118, 33).contains("Preview ready"), "a changed design releases the retained waveform");
+}
+
 const SIZES: [(u16, u16); 4] = [(38, 9), (80, 16), (118, 33), (198, 53)];
 const LABELS: [&str; 5] = ["Waveform", "Pitch", "Sweep", "Pulse rate", "Save"];
 

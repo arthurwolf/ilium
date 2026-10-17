@@ -7,4 +7,5 @@ mod common;
 mod app_rs;
 mod board_rs;
 mod board_ui_rs;
+mod keys_rs;
 mod other_rs;
