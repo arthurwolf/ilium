@@ -47,6 +47,7 @@ def parse_log(path):
 
 
 def read_allowlist(path):
+    """Exact `name` / `target::name` entries, plus `re:<regex>` lines matched against the bare test name."""
     if path is None:
         return set()
     try:
@@ -54,6 +55,12 @@ def read_allowlist(path):
             return {entry.strip() for entry in handle if entry.strip() and not entry.startswith("#")}
     except OSError:
         return set()
+
+
+def is_allowed(entry, allow):
+    if entry["name"] in allow or f"{entry['target']}::{entry['name']}" in allow:
+        return True
+    return any(item.startswith("re:") and re.search(item[3:], entry["name"]) for item in allow)
 
 
 def attach_ids(tests, root):
@@ -88,8 +95,7 @@ def main():
     tests, build_failures = parse_log(args.test_log)
     attach_ids(tests, args.root)
     allow = read_allowlist(args.allowlist)
-    unexpected_pass = [t for t in tests if t["status"] == "passed" and t["name"] not in allow
-                       and f"{t['target']}::{t['name']}" not in allow]
+    unexpected_pass = [t for t in tests if t["status"] == "passed" and not is_allowed(t, allow)]
     counts = {}
     for entry in tests:
         counts[entry["status"]] = counts.get(entry["status"], 0) + 1
