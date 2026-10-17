@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use ilium_plugin_api::error::Diagnostic;
+use ilium_plugin_api::Diagnostic;
 use ilium_plugin_api::platform::Platform;
 use ilium_plugin_api::Tier;
 

@@ -11,7 +11,7 @@ use ilium_plugin_sdk_core::host::workspace::WorkspaceSpec;
 use ilium_plugin_sdk_core::primitives::terminal::{OutputFilter, Selection};
 use ilium_plugin_sdk_core::primitives::{SessionRef, SignatureSpec, TranscriptTurn};
 use ilium_plugin_sdk_core::types::{
-    ActionKind, ActionValue, AgentModel, Color, DeactivationReason, Event, Outcome, PluginError,
+    ActionKind, ActionValue, AgentModel, Color, ColorRole, DeactivationReason, Event, Outcome, PluginError,
     PointerModifiers, RequestId, RequestRef, Submission, UiTree, ViewTarget,
 };
 use ilium_plugin_sdk_core::NativeEntry;
@@ -64,6 +64,14 @@ pub struct ScreenCell {
     /// Underline.
     pub underline: bool,
 }
+
+impl Default for ScreenCell {
+    /// A blank cell in the default foreground role.
+    fn default() -> Self {
+        let color = Color::Role(ColorRole::Foreground);
+        ScreenCell { symbol: " ".to_string(), foreground: color.clone(), background: color, bold: false, italic: false, underline: false }
+    }
+}
 /// Harness-page name of [`ScreenCell`].
 pub use ScreenCell as Cell;
 
@@ -111,7 +119,7 @@ pub struct Restart {
     /// Fake time of the restart decision in milliseconds.
     pub at_ms: u64,
     /// Delay until the restart in milliseconds.
-    pub delay_ms: u32,
+    pub delay_ms: u64,
 }
 
 /// A diagnostic the host recorded.
@@ -979,6 +987,11 @@ impl FakeKernelSettings {
 pub struct FakeInference;
 
 impl FakeInference {
+    /// Answers one pending completion request (reference-test-harness.md "Fakes").
+    pub fn complete_inference(&mut self, _request: RequestId, _completion: Completion) {
+        unimplemented!("harness.fake-inference-complete")
+    }
+
     /// Requests the plugin sent, with their ids.
     pub fn requests(&self) -> Vec<(RequestId, CompletionRequest)> {
         unimplemented!("harness.inference-requests")
