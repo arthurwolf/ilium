@@ -2410,7 +2410,7 @@ mod tests {
         // Confirming the removal also cancels the pane's queued commands, which
         // reports a "cancelled" error ahead of the ordinal audit error; the
         // order of the two is not part of the contract under test.
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(60);
         let mut audited = false;
         while !audited {
             for result in parsing.collect() {

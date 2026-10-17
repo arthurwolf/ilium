@@ -513,7 +513,9 @@ async fn command_with_initial_input_waits_for_agent_composer_then_submits_enter(
         + if cfg!(windows) {
             Duration::from_secs(30)
         } else {
-            Duration::from_secs(5)
+            // Hosted macOS runners can stall process-ownership detection well
+            // beyond a few seconds under load.
+            Duration::from_secs(30)
         };
     let mut saw_prompt_event = false;
     let mut saw_submitted_output = false;

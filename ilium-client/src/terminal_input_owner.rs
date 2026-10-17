@@ -696,9 +696,9 @@ impl InputReservation {
                         Ok(input) => input,
                         Err(source) => {
                             if let Some((sender, _)) = probe_sender {
-                                let _ = sender.send(Err(io::Error::other(
-                                    "native input source construction failed",
-                                )));
+                                let _ = sender.send(Err(io::Error::other(format!(
+                                    "native input source construction failed: {source}"
+                                ))));
                             }
                             body.fail(InputFailure {
                                 kind: InputFailureKind::Read {
