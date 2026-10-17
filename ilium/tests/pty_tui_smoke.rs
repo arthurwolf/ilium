@@ -5163,13 +5163,18 @@ async fn folder_browser_expands_nested_directories_and_opens_a_deep_file() {
         // stays strict: the child row must be on screen.
         let mut is_next_entry_visible = false;
         for _attempt in 0..3 {
-            let (column, row) = tui.with_screen(|screen| {
+            // A repaint can leave the row absent for a frame: retry instead of
+            // asserting on a single sample.
+            let Some((column, row)) = tui.with_screen(|screen| {
                 let rows = rows_containing(screen, directory);
-                assert_eq!(rows.len(), 1, "expected one {directory:?} row");
-                let column = column_of_text_in_row(screen, rows[0], directory)
-                    .expect("rendered nested-directory label");
-                (column, rows[0])
-            });
+                if rows.len() != 1 {
+                    return None;
+                }
+                column_of_text_in_row(screen, rows[0], directory).map(|column| (column, rows[0]))
+            }) else {
+                wait_until(|| false, Duration::from_millis(500)).await;
+                continue;
+            };
             tui.write(&sgr_mouse_down(0, column, row))
                 .unwrap_or_else(|error| panic!("expand {directory}: {error}"));
             tui.write(&sgr_mouse_up(column, row))

@@ -363,6 +363,10 @@ impl Engine {
     fn run(mut self, stop: &StopToken, guard: &OwnerExitGuard) {
         loop {
             if self.active.is_some() {
+                // Snapshot the wake generation BEFORE polling: a completion
+                // wake that lands between the poll and the wait must make the
+                // wait return, not sleep until the write deadline.
+                let wake_generation = self.queue.wake_generation();
                 if let Some((reason, error)) = self.poll_active() {
                     guard.stop(reason, error);
                     break;
@@ -371,7 +375,6 @@ impl Engine {
                     // One partial input/reply owns the writer exclusively.
                     // Parse only output that precedes the next queued command;
                     // a resize ahead of output remains an absolute barrier.
-                    let wake_generation = self.queue.wake_generation();
                     if let Some(output) = self.queue.take_output_while_writing() {
                         if let Some((reason, error)) = self.execute(output) {
                             guard.stop(reason, error);
@@ -422,9 +425,9 @@ impl Engine {
         // poll observes either an exact completion or the bounded cancellation
         // grace's unconfirmed result. Keep the original terminal reason.
         while self.active.is_some() {
+            let wake_generation = self.queue.wake_generation();
             let _ = self.poll_active();
             if self.active.is_some() {
-                let wake_generation = self.queue.wake_generation();
                 self.queue.wait_during_write(
                     wake_generation,
                     self.writer.next_poll_delay().unwrap_or(Duration::ZERO),

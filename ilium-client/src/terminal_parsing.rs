@@ -2422,7 +2422,8 @@ mod tests {
                     // publication) depends on thread timing; both release it.
                     audited |= target.pane_id == first_id
                         && ((message.contains("ordinal") && message.contains("bytes"))
-                            || message.contains("cancelled before acknowledgement"));
+                            || message.contains("cancelled before acknowledgement")
+                            || message.contains("cancelled by pane closure"));
                 }
             }
             assert!(

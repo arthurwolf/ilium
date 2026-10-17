@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import posixpath
 import re
 import subprocess
 import uuid
@@ -68,14 +69,14 @@ def kernel_retirement(output, unit, manager_group, root=Path('/sys/fs/cgroup')):
 
 
 def test_command(binary, case, unit):
-    if case not in CASES or not Path(binary).is_absolute():
+    if case not in CASES or not posixpath.isabs(str(binary).replace('\\', '/')):
         raise ValueError('native sandbox test case or executable is invalid')
     if not re.fullmatch(r'ilium-native-test-[a-z0-9-]+', unit):
         raise ValueError('native sandbox service identity is invalid')
     return ['systemd-run', '--user', '--wait', '--pipe', '--collect',
             '--unit=' + unit, '--property=Delegate=no',
             '--property=RuntimeMaxSec=120', '/usr/bin/python3', '-c',
-            CGROUP_WRAPPER, str(binary), case,
+            CGROUP_WRAPPER, str(binary).replace('\\', '/'), case,
             '--exact', '--ignored', '--test-threads=1', '--nocapture']
 
 
