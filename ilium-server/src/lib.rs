@@ -1641,6 +1641,7 @@ mod restore_tests {
             &mut client,
             &ClientRequest::Attach {
                 session: "restore-test".to_string(),
+                hello: Default::default(),
             },
         )
         .await

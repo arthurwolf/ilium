@@ -36,6 +36,7 @@ async fn port_008_a_connection_that_never_attached_receives_the_tree_broadcast()
     write_frame(
         &mut owner,
         &ClientRequest::NewPane {
+            request_id: 1,
             parent_group: ROOT_ID,
             kind: NewPaneKind::Command("/bin/cat".to_owned()),
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
