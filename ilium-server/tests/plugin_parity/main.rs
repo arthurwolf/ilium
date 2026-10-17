@@ -6,9 +6,11 @@
 mod automation;
 mod common;
 mod editors_and_boards;
+mod fleet_kernel_ports;
 mod how_it_works;
 mod inference_and_privacy;
 mod panes_and_layout;
+mod port_handlers;
 mod reference_feature_traceability;
 mod session_recovery;
 mod settings;
