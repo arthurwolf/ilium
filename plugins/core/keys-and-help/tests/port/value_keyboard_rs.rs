@@ -63,3 +63,24 @@ fn value_keyboard_port_settings_renderer_paints_both_prefixes() {
         assert!(line.find(label) < line.find(value), "label left of value: {line:?}");
     }
 }
+
+/// REQ: PORT:ilium-client/src/value_keyboard.rs::onboarding_prefix_rejects_replacement_editor_and_unadmitted_steps_preserve_values
+#[test]
+fn port_001_unadmitted_prefix_changes_preserve_the_saved_values() {
+    let mut host = tmux_host();
+    // The kernel refuses the write (the original left the configuration directory unset).
+    host.inject_failure(
+        "kernel-settings.write",
+        PluginError { code: ErrorCode::NotPermitted, message: "no configuration directory".to_string(), retry_after_ms: None },
+    );
+    change(&mut host, "shortcut_base", "ctrl+z");
+    assert_eq!(host.kernel_settings().tab("keyboard"), Some(tmux_tab()));
+    assert!(!host.kernel_settings().writes().iter().any(|(_, key, value)| key == "shortcut_base" && value == "\"ctrl+z\""));
+    // A value that is not a chord letter is not an admitted step either.
+    host.send_action(keyboard_page(), "navigation_shortcut_base", ActionKind::Changed, ActionValue::Index(3));
+    host.settle();
+    assert_eq!(host.kernel_settings().tab("keyboard"), Some(tmux_tab()));
+    let text = render_text(&mut host, keyboard_page(), 100, 30);
+    assert!(text.contains("Prefix is Ctrl+B."), "{text}");
+    assert!(!text.contains("Ctrl+Z"), "{text}");
+}

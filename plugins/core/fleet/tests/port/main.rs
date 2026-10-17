@@ -8,6 +8,7 @@ mod common;
 mod agent_message_dialog;
 mod app;
 mod broadcast;
+mod gaps;
 mod http_api;
 mod initial_prompt;
 mod integration;

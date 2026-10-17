@@ -5,6 +5,9 @@
 
 mod common;
 mod finished;
+mod sound_preview;
 mod sounds;
 mod tasks;
 mod texts;
+mod svc_server;
+mod svc_sounds;
