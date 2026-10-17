@@ -4778,13 +4778,22 @@ async fn terminal_context_menu_schedules_countdown_and_delivers_input() {
             column_of_text_in_row(screen, row, "Schedule keystrokes…").map(|column| (column, row))
         })
     };
+    // Keep the position from the very sample that found it: a second look can
+    // land on a frame where the menu is momentarily not drawn.
+    let mut located = None;
     assert!(
-        wait_until(|| locate_schedule().is_some(), WAIT_TIMEOUT).await,
+        wait_until(
+            || {
+                located = locate_schedule();
+                located.is_some()
+            },
+            WAIT_TIMEOUT
+        )
+        .await,
         "rendered scheduled-input context action, got: {:?}",
         tui.screen_text()
     );
-    let (schedule_column, schedule_row) =
-        locate_schedule().expect("rendered scheduled-input context action");
+    let (schedule_column, schedule_row) = located.expect("rendered scheduled-input context action");
     tui.write(&sgr_mouse_click(0, schedule_column, schedule_row))
         .expect("click scheduled-input context action");
     assert!(
