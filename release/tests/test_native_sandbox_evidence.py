@@ -5,6 +5,7 @@ import json
 import tempfile
 from pathlib import Path
 import sys
+import os
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -14,6 +15,7 @@ import release_tool
 import validate_animation_smoke as smoke
 
 
+@unittest.skipIf(os.name == 'nt', 'native sandbox paths are POSIX; the Linux lanes cover this')
 class NativeSandboxEvidenceTests(unittest.TestCase):
     def fixture(self):
         target = 'x86_64-unknown-linux-gnu'

@@ -6556,15 +6556,25 @@ async fn worktree_launcher_dialog_menu_and_footer_popover_render_and_accept_inpu
 
     tui.write(b"\x02w")
         .expect("expand sidebar for footer icons");
+    // Keep the position from the sample that found the icon: a later frame
+    // can be momentarily without it.
+    let mut icon_position = None;
     assert!(
-        wait_until(|| tui.screen_text().contains("🦀"), WAIT_TIMEOUT).await,
+        wait_until(
+            || {
+                icon_position = tui.with_screen(|screen| {
+                    let row = *rows_containing(screen, "🦀").first()?;
+                    column_of_text_in_row(screen, row, "🦀").map(|column| (column, row))
+                });
+                icon_position.is_some()
+            },
+            WAIT_TIMEOUT
+        )
+        .await,
         "Claude footer icon missing: {:?}",
         tui.screen_text()
     );
-    let icon_row = tui.with_screen(|screen| rows_containing(screen, "🦀"))[0];
-    let icon_column = tui
-        .with_screen(|screen| column_of_text_in_row(screen, icon_row, "🦀"))
-        .expect("Claude icon column");
+    let (icon_column, icon_row) = icon_position.expect("Claude icon position");
     tui.write(&sgr_mouse_move(icon_column, icon_row))
         .expect("hover Claude footer icon");
     assert!(
