@@ -412,6 +412,15 @@ impl Fx {
             platform: self.platform,
             host_release: HOST_RELEASE.to_owned(),
             env,
+            system_dir: None,
+            policy_file: None,
+            probe: None,
+            builder: None,
+            runner: None,
+            session: None,
+            interrupt: None,
+            dev_script: Vec::new(),
+            build_duration_ms: 0,
         }
     }
 

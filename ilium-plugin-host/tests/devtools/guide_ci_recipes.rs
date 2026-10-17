@@ -85,7 +85,7 @@ fn dev_762_progress_text_goes_to_standard_error() {
     let (_root, env, dir) = ci_project("none");
     let output = run(&env, &["build", dir.to_str().unwrap(), "--json"]);
     assert!(!output.stdout_text.contains("Building"));
-    assert!(output.stderr_text.is_empty() || !output.stderr_text.lines().any(|l| serde_json::from_str::<serde_json::Value>(l).is_ok()));
+    assert!(output.stderr.is_empty() || !output.stderr.lines().any(|l| serde_json::from_str::<serde_json::Value>(l).is_ok()));
 }
 
 /// REQ: DEV-763
@@ -101,7 +101,7 @@ fn dev_763_output_to_a_non_terminal_has_no_escape_sequences() {
     let (_root, env, dir) = ci_project("none");
     for args in [vec!["lint", dir.to_str().unwrap()], vec!["check", dir.to_str().unwrap()], vec!["doctor"]] {
         let output = run(&env, &args);
-        assert!(!output.stdout_text.contains('\u{1b}') && !output.stderr_text.contains('\u{1b}'), "{args:?}");
+        assert!(!output.stdout_text.contains('\u{1b}') && !output.stderr.contains('\u{1b}'), "{args:?}");
     }
 }
 
@@ -266,7 +266,7 @@ fn dev_775_sign_reads_the_key_from_the_flag_and_prints_no_key_material() {
     assert_eq!(output.exit_code, 0, "{:?}", output.stdout_jsonl);
     let key_text = std::fs::read_to_string(&secret).unwrap();
     for line in key_text.lines().filter(|l| l.len() > 16) {
-        assert!(!output.stdout_text.contains(line) && !output.stderr_text.contains(line));
+        assert!(!output.stdout_text.contains(line) && !output.stderr.contains(line));
     }
 }
 
@@ -276,7 +276,7 @@ fn dev_775_sign_reads_the_key_path_from_the_environment_variable() {
     let root = scratch();
     let mut env = env(root.path());
     let (secret, file) = keyed(root.path(), &env);
-    env.vars.insert("ILIUM_PLUGIN_SIGNING_KEY".to_owned(), secret);
+    env.env.insert("ILIUM_PLUGIN_SIGNING_KEY".to_owned(), secret);
     assert_eq!(run(&env, &["sign", &file, "--json"]).exit_code, 0);
 }
 
@@ -316,7 +316,7 @@ fn dev_776_pack_with_a_signing_key_in_the_environment_still_does_not_sign() {
     let root = scratch();
     let mut env = env(root.path());
     let (secret, _) = keyed(root.path(), &env);
-    env.vars.insert("ILIUM_PLUGIN_SIGNING_KEY".to_owned(), secret);
+    env.env.insert("ILIUM_PLUGIN_SIGNING_KEY".to_owned(), secret);
     let dir = root.path().join("out");
     run(&env, &["new", dir.to_str().unwrap(), "--id", "example.agent-tools", "--lang", "rust", "--template", "server", "--json"]);
     write_dist(&dir, "server", &good_server_component());

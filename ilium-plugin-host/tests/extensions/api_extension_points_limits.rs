@@ -402,7 +402,7 @@ fn ext_049_extension_field_is_the_contribution_id_of_the_manifest() {
     assert_eq!(diag_code(&world.install(Tier::T3, manifest, Vec::new())), "ok");
     let listed = world.list(OWNER, COLLECT).unwrap_or_default();
     assert_eq!(listed[0].extension, "my-entry-id");
-    assert_eq!(listed[0].contributor, "com.example.one");
+    assert_eq!(listed[0].contributor.0, "com.example.one");
 }
 
 /// REQ: EXT-049

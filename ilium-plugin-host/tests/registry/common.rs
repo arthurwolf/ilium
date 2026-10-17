@@ -762,15 +762,15 @@ impl Sandbox {
         }
         let net = Arc::new(FakeNet::default());
         let fetcher: Arc<dyn Fetcher> = net.clone();
-        let env = CliEnv {
-            data_dir: dir.path().join("data"),
-            state_dir: dir.path().join("state"),
-            config_dir: dir.path().join("config"),
-            cwd: dir.path().join("project"),
-            now: now(),
-            is_ci: true,
+        let env = CliEnv::new(
+            dir.path().join("data"),
+            dir.path().join("state"),
+            dir.path().join("config"),
+            dir.path().join("project"),
+            now(),
+            true,
             fetcher,
-        };
+        );
         Sandbox { dir, net, env }
     }
 

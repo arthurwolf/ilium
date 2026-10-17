@@ -15,6 +15,7 @@ pub mod wat;
 pub mod ext_world;
 pub mod fake_registry;
 pub mod imports_fixture;
+pub mod ipc_harness;
 pub mod life;
 pub mod menu;
 pub mod migration;

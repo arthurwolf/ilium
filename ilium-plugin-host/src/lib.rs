@@ -31,6 +31,7 @@ pub mod helper_client;
 pub mod imports;
 pub mod install;
 pub mod instance;
+pub mod ipc;
 pub mod lifecycle;
 pub mod linker;
 pub mod package;

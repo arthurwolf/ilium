@@ -119,7 +119,7 @@ pub struct Restart {
     /// Fake time of the restart decision in milliseconds.
     pub at_ms: u64,
     /// Delay until the restart in milliseconds.
-    pub delay_ms: u64,
+    pub delay_ms: u32,
 }
 
 /// A diagnostic the host recorded.

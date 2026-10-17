@@ -401,15 +401,15 @@ impl Fetcher for NoNetwork {
 
 /// A CLI environment below a scratch root. Every directory is below `root`.
 pub fn cli_env(root: &Path) -> CliEnv {
-    CliEnv {
-        data_dir: root.join("data"),
-        state_dir: root.join("state"),
-        config_dir: root.join("config"),
-        cwd: root.join("cwd"),
-        now: std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_800_000_000),
-        is_ci: false,
-        fetcher: Arc::new(NoNetwork),
-    }
+    CliEnv::new(
+        root.join("data"),
+        root.join("state"),
+        root.join("config"),
+        root.join("cwd"),
+        std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_800_000_000),
+        false,
+        Arc::new(NoNetwork),
+    )
 }
 
 /// Root of the workspace.

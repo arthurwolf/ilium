@@ -275,8 +275,8 @@ impl MigrationRig {
         unimplemented!("host::testing::migration::MigrationRig::plugin_data_dir")
     }
 
-    /// The files of the data directory.
-    pub fn data_dir_files(&self, id: &str) -> Vec<String> {
+    /// The files of the data directory, by relative path.
+    pub fn data_dir_files(&self, id: &str) -> BTreeMap<String, Vec<u8>> {
         unimplemented!("host::testing::migration::MigrationRig::data_dir_files")
     }
 
@@ -310,8 +310,8 @@ impl MigrationRig {
         unimplemented!("host::testing::migration::MigrationRig::log_codes")
     }
 
-    /// The last log line with a code.
-    pub fn log_line(&self, code: &str) -> Option<String> {
+    /// The last log line with a code, as its JSON record (`level`, `code`, `message`).
+    pub fn log_line(&self, code: &str) -> Option<serde_json::Value> {
         unimplemented!("host::testing::migration::MigrationRig::log_line")
     }
 

@@ -133,7 +133,8 @@ fn lif_193_plugin_blocked_by_policy_shows_blocked_by_policy_with_the_code_and_ke
     rig.write_policy(&format!("[plugins]\ndeny_ids = [\"{NOTES}\"]\n"));
     let server = rig.start_server("s1");
     rig.advance(secs(3));
-    let row = server.render_plugins_screen().row_for(NOTES).expect("row");
+    let plugins_screen = server.render_plugins_screen();
+    let row = plugins_screen.row_for(NOTES).expect("row");
     assert!(row.text.contains("Blocked by policy"));
     assert!(row.text.contains("policy.denied"));
     assert!(rig.data_dir(NOTES).exists());

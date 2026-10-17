@@ -170,15 +170,15 @@ fn hst_050_runtime_constant_equals_the_pinned_version() {
 #[test]
 fn hst_050_doctor_output_shows_the_wasmtime_version() {
     let dir = tmp();
-    let env = CliEnv {
-        data_dir: dir.path().join("data"),
-        state_dir: dir.path().join("state"),
-        config_dir: dir.path().join("config"),
-        cwd: dir.path().to_path_buf(),
-        now: std::time::SystemTime::now(),
-        is_ci: false,
-        fetcher: Arc::new(NoFetch),
-    };
+    let env = CliEnv::new(
+        dir.path().join("data"),
+        dir.path().join("state"),
+        dir.path().join("config"),
+        dir.path().to_path_buf(),
+        std::time::SystemTime::now(),
+        false,
+        Arc::new(NoFetch),
+    );
     let output = run(&["plugin".to_owned(), "doctor".to_owned(), "--json".to_owned()], &env);
     let text = output.stdout_jsonl.iter().map(|v| v.to_string()).collect::<Vec<_>>().join("\n");
     assert!(text.contains("49.0.2"), "doctor records were {text}");

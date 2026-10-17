@@ -710,15 +710,15 @@ pub fn cli_fixture() -> CliFixture {
         std::fs::create_dir_all(root.path().join(name)).expect("create cli directory");
     }
     let net = Arc::new(CountingFetcher(AtomicUsize::new(0)));
-    let env = CliEnv {
-        data_dir: root.path().join("data"),
-        state_dir: root.path().join("state"),
-        config_dir: root.path().join("config"),
-        cwd: root.path().join("work"),
-        now: SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_791_800_000),
-        is_ci: true,
-        fetcher: net.clone(),
-    };
+    let env = CliEnv::new(
+        root.path().join("data"),
+        root.path().join("state"),
+        root.path().join("config"),
+        root.path().join("work"),
+        SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_791_800_000),
+        true,
+        net.clone(),
+    );
     CliFixture { root, env, net }
 }
 

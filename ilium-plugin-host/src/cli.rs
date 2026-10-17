@@ -423,8 +423,8 @@ impl MemorySession {
         unimplemented!("host::cli::MemorySession::activations")
     }
 
-    /// Deactivations of a plugin.
-    pub fn deactivations(&self, id: &str) -> usize {
+    /// The reason word of each deactivation of a plugin, in order (`upgrade`, `disabled`, ...).
+    pub fn deactivations(&self, id: &str) -> Vec<String> {
         unimplemented!("host::cli::MemorySession::deactivations")
     }
 

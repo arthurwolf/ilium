@@ -24,7 +24,7 @@ fn dev_563_plugin_handle_diagnostic_and_restart_have_their_fields() {
     let restart = Restart { at_ms: 5, delay_ms: 10 };
     assert_eq!(handle.instance, 1);
     assert_eq!(diagnostic.code, "x.y");
-    assert_eq!(restart.at_ms + restart.delay_ms, 15);
+    assert_eq!(restart.at_ms + u64::from(restart.delay_ms), 15);
 }
 
 /// REQ: DEV-563

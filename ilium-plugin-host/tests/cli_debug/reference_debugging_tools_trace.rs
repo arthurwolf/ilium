@@ -131,7 +131,8 @@ proptest! {
     fn dev_672_redaction_hides_every_payload_and_keeps_every_tag(payload in ".{0,40}", tag in "[a-z-]{1,12}") {
         let redacted = redact_detail(&json!({"tag": tag.clone(), "payload": payload.clone()}));
         prop_assert_eq!(redacted["tag"].as_str(), Some(tag.as_str()));
-        prop_assert_eq!(redacted["payload"].as_str(), Some(format!("<redacted {} bytes>", payload.len()).as_str()));
+        let expected_payload = format!("<redacted {} bytes>", payload.len());
+        prop_assert_eq!(redacted["payload"].as_str(), Some(expected_payload.as_str()));
     }
 }
 

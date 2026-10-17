@@ -190,15 +190,15 @@ impl Fetcher for NoNetwork {
 
 /// A CLI environment rooted in a throwaway folder.
 pub fn cli_env(root: &Path) -> CliEnv {
-    CliEnv {
-        data_dir: root.join("data"),
-        state_dir: root.join("state"),
-        config_dir: root.join("config"),
-        cwd: root.to_path_buf(),
-        now: SystemTime::UNIX_EPOCH + Duration::from_secs(1_893_499_200),
-        is_ci: true,
-        fetcher: Arc::new(NoNetwork),
-    }
+    CliEnv::new(
+        root.join("data"),
+        root.join("state"),
+        root.join("config"),
+        root.to_path_buf(),
+        SystemTime::UNIX_EPOCH + Duration::from_secs(1_893_499_200),
+        true,
+        Arc::new(NoNetwork),
+    )
 }
 
 /// Runs `ilium plugin <args...>` in `env`.

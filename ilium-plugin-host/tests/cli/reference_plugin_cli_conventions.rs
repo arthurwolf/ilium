@@ -322,10 +322,11 @@ fn dev_007_result_exit_code_equals_process_exit_code_on_success() {
 fn dev_007_result_exit_code_equals_process_exit_code_on_failure() {
     let root = scratch();
     let env = env(root.path());
+    let sixty_four_zeros = "0".repeat(64);
     let cases: Vec<(Vec<&str>, i32)> = vec![
         (vec!["new"], 2),
         (vec!["uninstall", "a.b"], 6),
-        (vec!["trust", "remove", &"0".repeat(64)], 5),
+        (vec!["trust", "remove", &sixty_four_zeros], 5),
     ];
     for (args, expected) in cases {
         let output = run(&env, &args);

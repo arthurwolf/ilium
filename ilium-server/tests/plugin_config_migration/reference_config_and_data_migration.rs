@@ -10,7 +10,7 @@ const READ_TERMINAL: &str = "settings.read-kernel:terminal";
 /// REQ: COR-030
 #[test]
 fn cor_030_first_owner_of_a_kernel_tab_installs() {
-    let rig = ConfigRig::new();
+    let mut rig = ConfigRig::new();
     let result = rig.install(&plugin("com.example.one", "T1", &[WRITE_TERMINAL]));
     assert!(result.ok, "{:?}", result.codes);
 }
@@ -18,7 +18,7 @@ fn cor_030_first_owner_of_a_kernel_tab_installs() {
 /// REQ: COR-030
 #[test]
 fn cor_030_second_owner_of_the_same_tab_is_refused_manifest_settings_owner() {
-    let rig = ConfigRig::new();
+    let mut rig = ConfigRig::new();
     assert!(rig.install(&plugin("com.example.one", "T1", &[WRITE_TERMINAL])).ok);
     let result = rig.install(&plugin("com.example.two", "T1", &[WRITE_TERMINAL]));
     assert!(!result.ok);
@@ -28,7 +28,7 @@ fn cor_030_second_owner_of_the_same_tab_is_refused_manifest_settings_owner() {
 /// REQ: COR-030
 #[test]
 fn cor_030_owner_of_another_tab_installs_beside_the_first() {
-    let rig = ConfigRig::new();
+    let mut rig = ConfigRig::new();
     assert!(rig.install(&plugin("com.example.one", "T1", &[WRITE_TERMINAL])).ok);
     let result = rig.install(&plugin("com.example.two", "T1", &["settings.write-kernel:editor"]));
     assert!(result.ok, "{:?}", result.codes);
@@ -37,7 +37,7 @@ fn cor_030_owner_of_another_tab_installs_beside_the_first() {
 /// REQ: COR-030
 #[test]
 fn cor_030_tab_is_free_again_after_the_owner_is_uninstalled() {
-    let rig = ConfigRig::new();
+    let mut rig = ConfigRig::new();
     assert!(rig.install(&plugin("com.example.one", "T1", &[WRITE_TERMINAL])).ok);
     assert!(rig.uninstall("com.example.one"));
     assert!(rig.install(&plugin("com.example.two", "T1", &[WRITE_TERMINAL])).ok);
@@ -55,7 +55,7 @@ fn cor_030_core_plugin_owns_each_built_in_tab_exactly_once() {
 /// REQ: COR-030
 #[test]
 fn cor_030_second_install_leaves_the_registry_unchanged() {
-    let rig = ConfigRig::new();
+    let mut rig = ConfigRig::new();
     assert!(rig.install(&plugin("com.example.one", "T1", &[WRITE_TERMINAL])).ok);
     let _ = rig.install(&plugin("com.example.two", "T1", &[WRITE_TERMINAL]));
     assert_eq!(rig.write_owners("terminal"), vec!["com.example.one".to_owned()]);
@@ -65,7 +65,7 @@ fn cor_030_second_install_leaves_the_registry_unchanged() {
 /// REQ: COR-031
 #[test]
 fn cor_031_t2_with_the_write_grant_is_refused_manifest_grant_tier() {
-    let rig = ConfigRig::new();
+    let mut rig = ConfigRig::new();
     let result = rig.install(&plugin("com.example.two", "T2", &[WRITE_TERMINAL]));
     assert!(!result.ok);
     assert!(result.codes.contains(&"manifest.grant-tier".to_owned()));
@@ -74,7 +74,7 @@ fn cor_031_t2_with_the_write_grant_is_refused_manifest_grant_tier() {
 /// REQ: COR-031
 #[test]
 fn cor_031_t3_with_the_write_grant_is_refused_manifest_grant_tier() {
-    let rig = ConfigRig::new();
+    let mut rig = ConfigRig::new();
     let result = rig.install(&plugin("com.example.three", "T3", &[WRITE_TERMINAL]));
     assert!(result.codes.contains(&"manifest.grant-tier".to_owned()));
 }
@@ -82,7 +82,7 @@ fn cor_031_t3_with_the_write_grant_is_refused_manifest_grant_tier() {
 /// REQ: COR-031
 #[test]
 fn cor_031_t1_with_the_write_grant_installs() {
-    let rig = ConfigRig::new();
+    let mut rig = ConfigRig::new();
     assert!(rig.install(&plugin("com.example.one", "T1", &[WRITE_TERMINAL])).ok);
 }
 
@@ -90,7 +90,7 @@ fn cor_031_t1_with_the_write_grant_installs() {
 #[test]
 fn cor_031_every_tier_may_hold_the_read_grant() {
     for (index, tier) in ["T1", "T2", "T3"].into_iter().enumerate() {
-        let rig = ConfigRig::new();
+        let mut rig = ConfigRig::new();
         let id = format!("com.example.reader{index}");
         let result = rig.install(&plugin(&id, tier, &[READ_TERMINAL]));
         assert!(result.ok, "{tier}: {:?}", result.codes);
@@ -100,7 +100,7 @@ fn cor_031_every_tier_may_hold_the_read_grant() {
 /// REQ: COR-031
 #[test]
 fn cor_031_write_grant_is_listed_as_high_risk() {
-    let rig = ConfigRig::new();
+    let mut rig = ConfigRig::new();
     assert!(rig.install(&plugin("com.example.one", "T1", &[WRITE_TERMINAL])).ok);
     assert_eq!(rig.risk_of(WRITE_TERMINAL).as_deref(), Some("high"));
     assert_ne!(rig.risk_of(READ_TERMINAL).as_deref(), Some("high"));
@@ -111,7 +111,7 @@ proptest! {
     #[test]
     fn cor_031_write_grant_installs_only_for_t1(tier_index in 0usize..3, tab in "[a-z][a-z-]{0,12}") {
         let tier = ["T1", "T2", "T3"][tier_index];
-        let rig = ConfigRig::new();
+        let mut rig = ConfigRig::new();
         let result = rig.install(&plugin("com.example.p", tier, &[&format!("settings.write-kernel:{tab}")]));
         prop_assert_eq!(result.codes.contains(&"manifest.grant-tier".to_owned()), tier != "T1");
     }
@@ -120,7 +120,7 @@ proptest! {
 /// REQ: COR-032
 #[test]
 fn cor_032_section_at_max_bytes_is_stored() {
-    let rig = ConfigRig::new();
+    let mut rig = ConfigRig::new();
     rig.install(&plugin("com.example.one", "T1", &[])).ok.then_some(()).expect("install");
     let section = rig.section("com.example.one", "state", 1, 256 * KIB);
     assert!(rig.write_section(&section, &body(256 * KIB, b'a')).is_ok());
@@ -130,7 +130,7 @@ fn cor_032_section_at_max_bytes_is_stored() {
 /// REQ: COR-032
 #[test]
 fn cor_032_section_one_byte_over_max_bytes_is_dropped_keeping_the_old_value() {
-    let rig = ConfigRig::new();
+    let mut rig = ConfigRig::new();
     assert!(rig.install(&plugin("com.example.one", "T1", &[])).ok);
     let section = rig.section("com.example.one", "state", 1, 256 * KIB);
     rig.write_section(&section, &body(10, b'o')).expect("first write");
@@ -141,7 +141,7 @@ fn cor_032_section_one_byte_over_max_bytes_is_dropped_keeping_the_old_value() {
 /// REQ: COR-032
 #[test]
 fn cor_032_300_kib_section_is_dropped_and_old_value_stays() {
-    let rig = ConfigRig::new();
+    let mut rig = ConfigRig::new();
     assert!(rig.install(&plugin("com.example.one", "T1", &[])).ok);
     let section = rig.section("com.example.one", "state", 1, 256 * KIB);
     rig.write_section(&section, &body(100, b'o')).expect("first write");
@@ -153,7 +153,7 @@ fn cor_032_300_kib_section_is_dropped_and_old_value_stays() {
 /// REQ: COR-032
 #[test]
 fn cor_032_section_one_byte_under_max_bytes_is_stored() {
-    let rig = ConfigRig::new();
+    let mut rig = ConfigRig::new();
     assert!(rig.install(&plugin("com.example.one", "T1", &[])).ok);
     let section = rig.section("com.example.one", "state", 1, 256 * KIB);
     assert!(rig.write_section(&section, &body(256 * KIB - 1, b'a')).is_ok());
@@ -162,7 +162,7 @@ fn cor_032_section_one_byte_under_max_bytes_is_stored() {
 /// REQ: COR-032
 #[test]
 fn cor_032_max_bytes_above_256_kib_is_refused_at_install() {
-    let rig = ConfigRig::new();
+    let mut rig = ConfigRig::new();
     let spec = plugin("com.example.one", "T1", &[]).snapshot_section("state", 1, 256 * KIB + 1);
     assert!(!rig.install(&spec).ok);
 }
@@ -170,7 +170,7 @@ fn cor_032_max_bytes_above_256_kib_is_refused_at_install() {
 /// REQ: COR-032
 #[test]
 fn cor_032_section_carries_its_schema_version() {
-    let rig = ConfigRig::new();
+    let mut rig = ConfigRig::new();
     assert!(rig.install(&plugin("com.example.one", "T1", &[])).ok);
     let section = rig.section("com.example.one", "state", 7, 1024);
     rig.write_section(&section, &body(4, b'a')).expect("write");
@@ -180,7 +180,7 @@ fn cor_032_section_carries_its_schema_version() {
 /// REQ: COR-032
 #[test]
 fn cor_032_crashed_plugin_does_not_block_the_snapshot_and_keeps_the_last_value() {
-    let rig = ConfigRig::new();
+    let mut rig = ConfigRig::new();
     assert!(rig.install(&plugin("com.example.one", "T1", &[])).ok);
     assert!(rig.install(&plugin("com.example.two", "T1", &[])).ok);
     let one = rig.section("com.example.one", "state", 1, 1024);
@@ -197,7 +197,7 @@ fn cor_032_crashed_plugin_does_not_block_the_snapshot_and_keeps_the_last_value()
 /// REQ: COR-032
 #[test]
 fn cor_032_state_outside_snapshot_sections_is_not_in_the_snapshot() {
-    let rig = ConfigRig::new();
+    let mut rig = ConfigRig::new();
     assert!(rig.install(&plugin("com.example.one", "T1", &[])).ok);
     rig.plugin_stores_in_storage("com.example.one", "k", b"v");
     rig.write_snapshot().expect("snapshot");
@@ -208,7 +208,7 @@ proptest! {
     /// REQ: COR-032
     #[test]
     fn cor_032_section_is_stored_iff_it_fits_max_bytes(max_kib in 1usize..=256, size in 0usize..300_000) {
-        let rig = ConfigRig::new();
+        let mut rig = ConfigRig::new();
         prop_assert!(rig.install(&plugin("com.example.one", "T1", &[])).ok);
         let max = max_kib * KIB;
         let section = rig.section("com.example.one", "state", 1, max);
@@ -222,7 +222,7 @@ const BASE_CONFIG: &str = "# my notes\n[terminal]\nscrollback = 1000\nunknown_ke
 /// REQ: COR-033
 #[test]
 fn cor_033_changing_one_setting_changes_only_that_line() {
-    let rig = ConfigRig::new();
+    let mut rig = ConfigRig::new();
     rig.write_config(BASE_CONFIG);
     rig.set_setting("terminal.scrollback", "2000");
     let after = rig.read_config();
@@ -232,7 +232,7 @@ fn cor_033_changing_one_setting_changes_only_that_line() {
 /// REQ: COR-033
 #[test]
 fn cor_033_unknown_keys_and_tables_survive() {
-    let rig = ConfigRig::new();
+    let mut rig = ConfigRig::new();
     rig.write_config(BASE_CONFIG);
     rig.set_setting("terminal.scrollback", "5");
     let after = rig.read_config();
@@ -244,7 +244,7 @@ fn cor_033_unknown_keys_and_tables_survive() {
 /// REQ: COR-033
 #[test]
 fn cor_033_project_yaml_unknown_keys_survive() {
-    let rig = ConfigRig::new();
+    let mut rig = ConfigRig::new();
     let yaml = "terminal:\n  scrollback: 1000\nfuture:\n  thing: 1\n";
     rig.write_project_config(yaml);
     rig.set_project_setting("terminal.scrollback", "9");
@@ -256,7 +256,7 @@ fn cor_033_project_yaml_unknown_keys_survive() {
 /// REQ: COR-033
 #[test]
 fn cor_033_plugin_build_renames_and_moves_no_key() {
-    let rig = ConfigRig::new();
+    let mut rig = ConfigRig::new();
     rig.write_config(BASE_CONFIG);
     let before = rig.config_key_paths();
     rig.run_plugin_build();
@@ -266,7 +266,7 @@ fn cor_033_plugin_build_renames_and_moves_no_key() {
 /// REQ: COR-033
 #[test]
 fn cor_033_a_setting_that_already_has_the_value_leaves_the_file_byte_identical() {
-    let rig = ConfigRig::new();
+    let mut rig = ConfigRig::new();
     rig.write_config(BASE_CONFIG);
     rig.set_setting("terminal.scrollback", "1000");
     assert_eq!(rig.read_config(), BASE_CONFIG);
@@ -276,7 +276,7 @@ proptest! {
     // REQ: COR-033
     #[test]
     fn cor_033_unknown_keys_survive_any_setting_change(key in "[a-z][a-z0-9_]{0,10}", value in 0u32..100_000) {
-        let rig = ConfigRig::new();
+        let mut rig = ConfigRig::new();
         let text = format!("[extra_{key}]\nunknown = {value}\n\n[terminal]\nscrollback = 1\n");
         rig.write_config(&text);
         rig.set_setting("terminal.scrollback", &value.to_string());
