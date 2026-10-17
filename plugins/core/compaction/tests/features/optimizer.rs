@@ -203,7 +203,7 @@ fn convert_115_a_converted_session_is_opened_for_inspection_with_open_external()
         Intent::OpenExternal(spec) => Some(spec.target),
         _ => None,
     });
-    assert!(matches!(target, Some(ExternalTarget::Path(path)) if path == "/home/u/.codex/sessions/rollout-1.jsonl"));
+    assert!(matches!(target, Some(ExternalTarget::File(path)) if path.path == "/home/u/.codex/sessions/rollout-1.jsonl"));
 }
 
 /// REQ: F-115

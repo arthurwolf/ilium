@@ -67,6 +67,7 @@ async fn terminate_keeps_the_pane_and_replace_swaps_it_in_place() {
         &mut client,
         &ClientRequest::Attach {
             session: "conversion-test".to_string(),
+            hello: Default::default(),
         },
     )
     .await
@@ -174,6 +175,7 @@ async fn freeze_rejects_generic_command_without_stopping_the_pane() {
         &mut client,
         &ClientRequest::Attach {
             session: "legacy-unfreeze-test".to_string(),
+            hello: Default::default(),
         },
     )
     .await
@@ -221,6 +223,7 @@ async fn terminating_an_unknown_pane_reports_the_failure() {
         &mut client,
         &ClientRequest::Attach {
             session: "conversion-unknown-test".to_string(),
+            hello: Default::default(),
         },
     )
     .await

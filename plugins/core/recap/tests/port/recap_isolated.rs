@@ -21,7 +21,7 @@ fn port_isolated_selected_shell_screen_reaches_the_fake_model() {
     let record = first_recap(&records);
     assert_eq!(record["pane_name"], "selected shell");
     assert_eq!(record["short"]["text"], words(4));
-    assert!(!String::from_utf8_lossy(&host.cli().refresh(&invocation).stdout()).contains("fakecredential12345"));
+    assert!(!host.cli().refresh(&invocation).stdout().contains("fakecredential12345"));
 }
 
 /// REQ: PORT:ilium/tests/recap_isolated.rs::recap_selected_shell_screen_reaches_fake_inference_with_matching_binaries

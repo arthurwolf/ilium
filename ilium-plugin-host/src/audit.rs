@@ -32,3 +32,37 @@ impl AuditLog {
         unimplemented!("host::audit::AuditLog::append")
     }
 }
+
+/// Every audit event name of the catalogue, in table order (reference-audit-log.md SEC-222).
+pub const EVENT_NAMES: &[&str] = &[
+    "install",
+    "update",
+    "downgrade",
+    "uninstall",
+    "enable",
+    "disable",
+    "failure-disable",
+    "grant-given",
+    "grant-revoked",
+    "consent-given",
+    "consent-withdrawn",
+    "trust-add",
+    "trust-remove",
+    "replacement-on",
+    "replacement-off",
+    "policy-loaded",
+    "policy-violation",
+    "sandbox-unavailable",
+    "sandbox-degraded",
+    "signature-failure",
+    "integrity-failure",
+    "blocklist-hit",
+    "process-run",
+    "write-outside-data",
+    "egress-host-first-use",
+    "extension-disabled-after-breaches",
+    "store-external-edit",
+    "h-grant-refused",
+    "project-trust",
+    "safe-mode",
+];

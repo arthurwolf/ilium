@@ -134,8 +134,9 @@ fn port_copy_inference_request_keeps_the_smart_copy_contract() {
     host.deliver_one(palette_command("smart-copy", Some(pane)));
     host.settle();
     let request = &host.inference().requests()[0];
-    assert_eq!(request.purpose, "smart-copy");
-    assert!(request.system.contains("Return the three most useful strings to copy, one per line."));
+    assert_eq!(request.1.purpose, "smart-copy");
+    let system: String = request.1.messages.iter().filter(|m| m.role == "system").map(|m| m.content.as_str()).collect();
+    assert!(system.contains("Return the three most useful strings to copy, one per line."));
 }
 
 /// REQ: PORT:ilium-client/src/app.rs::smart_copy_freezes_the_visible_screen_and_accepts_a_unique_streamed_record

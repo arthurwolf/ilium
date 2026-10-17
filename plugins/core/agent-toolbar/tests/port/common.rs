@@ -31,7 +31,7 @@ pub fn ask(place: Place, op: &str, request: Value) -> Value {
     match place {
         Place::Client => host.activate::<AgentToolbarClient>(),
         Place::Server => host.activate::<AgentToolbarServer>(),
-    }
+    };
     let submissions = host.deliver_one(Event::Message(MessageEvent {
         from: PluginId(PLUGIN_ID.to_string()),
         from_side,

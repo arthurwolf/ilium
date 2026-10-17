@@ -20,4 +20,10 @@ impl FakeStorage {
     pub fn get(&self, _bucket: Bucket, _key: &str) -> Option<Vec<u8>> {
         unimplemented!("DEV-465")
     }
+
+    /// Seeds one value before the plugin runs, as the real store would hold it (DEV-465, via
+    /// `FakeHost::storage_mut`).
+    pub fn put(&mut self, _bucket: Bucket, _key: &str, _value: &[u8]) {
+        unimplemented!("DEV-465")
+    }
 }

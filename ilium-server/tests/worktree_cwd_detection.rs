@@ -52,6 +52,7 @@ async fn focused_subdirectory_agent_resolves_session_and_persists_its_cwd() {
         &mut client,
         &ClientRequest::Attach {
             session: "worktree-cwd-detection".into(),
+            hello: Default::default(),
         },
     )
     .await

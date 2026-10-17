@@ -13,3 +13,9 @@ pub struct UiDelta {
 pub fn diff(previous: &UiTree, next: &UiTree) -> UiDelta {
     unimplemented!("host::render::diff")
 }
+
+/// Strips control and bidi characters from plugin text and cuts it to `limit` characters
+/// (reference-extension-security.md SEC-380).
+pub fn sanitize_plugin_text(text: &str, limit: usize) -> String {
+    unimplemented!("host::render::sanitize_plugin_text")
+}

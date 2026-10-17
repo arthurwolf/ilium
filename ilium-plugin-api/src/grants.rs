@@ -123,3 +123,8 @@ pub fn check_grant(grant: &Grant, tier: Tier, side: Side) -> Result<(), Diagnost
 pub fn risk_of(grants: &[Grant]) -> Risk {
     unimplemented!("api::grants::risk_of")
 }
+
+/// Whether a grant name is high risk (reference-capabilities.md, api-panes.md PAN-032).
+pub fn is_high_risk(grant: &str) -> bool {
+    unimplemented!("api::grants::is_high_risk")
+}

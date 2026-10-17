@@ -267,3 +267,10 @@ impl PluginEngine {
         unimplemented!("host::engine::PluginEngine::fuel_enabled")
     }
 }
+
+/// The compile-cache key of a component: its SHA-256 plus the engine identity (wasmtime version,
+/// CPU features and config), so a changed engine never serves a stale artifact
+/// (reference-install-and-update.md PKG-268).
+pub fn compile_cache_key(component_sha256: &str, engine_id: &str) -> String {
+    unimplemented!("host::engine::compile_cache_key")
+}

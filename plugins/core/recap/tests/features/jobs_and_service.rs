@@ -114,12 +114,12 @@ fn f_112_job_asks_the_model_once_for_both_lengths_with_purpose_recap() {
     host.run_job("recap-pane", input.as_bytes()).expect("job succeeds");
     let requests = host.inference_requests();
     assert_eq!(requests.len(), 1);
-    assert_eq!(requests[0].purpose, "recap");
-    assert_eq!(requests[0].messages[0].role, "system");
-    assert_eq!(requests[0].messages[1].role, "user");
-    assert_eq!(requests[0].messages[1].content, "$ cargo test");
-    assert!(requests[0].json_schema.is_some());
-    assert!(requests[0].max_output_tokens.is_none());
+    assert_eq!(requests[0].1.purpose, "recap");
+    assert_eq!(requests[0].1.messages[0].role, "system");
+    assert_eq!(requests[0].1.messages[1].role, "user");
+    assert_eq!(requests[0].1.messages[1].content, "$ cargo test");
+    assert!(requests[0].1.json_schema.is_some());
+    assert!(requests[0].1.max_output_tokens.is_none());
 }
 
 /// REQ: F-112

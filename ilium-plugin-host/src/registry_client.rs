@@ -14,10 +14,31 @@ pub enum FetchError {
     Status(u16),
 }
 
+/// A fetched response with its transport details (reference-install-and-update.md PKG-260, 261).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FetchResponse {
+    /// The HTTP status.
+    pub status: u16,
+    /// The `Location` header of a redirect.
+    pub location: Option<String>,
+    /// The `Content-Type` header.
+    pub content_type: Option<String>,
+    /// The declared `Content-Length`.
+    pub content_length: Option<u64>,
+    /// The body.
+    pub body: Vec<u8>,
+}
+
 /// Fetches a URL (injected; tests use a fake).
 pub trait Fetcher: Send + Sync {
     /// Gets the body of a URL.
     fn get(&self, url: &str) -> Result<Vec<u8>, FetchError>;
+
+    /// Gets a URL with status, redirect target, content type and declared size
+    /// (reference-install-and-update.md PKG-260, 261). Fakes that only answer `get` keep the default.
+    fn get_response(&self, url: &str) -> Result<FetchResponse, FetchError> {
+        unimplemented!("host::registry_client::Fetcher::get_response")
+    }
 }
 
 /// The revocation document `revocations.json` (reference-registry.md).

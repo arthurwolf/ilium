@@ -1,7 +1,8 @@
 //! Extension points (`sources`, `rank`), the `query` service and the contribution example.
 
 use ilium_plugin_sdk::exports::{ServiceCall, ServiceReply};
-use ilium_plugin_sdk::types::{HookReply, PluginId};
+use ilium_plugin_sdk::exports::HookReply;
+use ilium_plugin_sdk::types::PluginId;
 use serde_json::{json, Value};
 
 use crate::common::*;

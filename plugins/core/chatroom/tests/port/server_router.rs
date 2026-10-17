@@ -110,7 +110,7 @@ fn port_append_reader_returns_only_one_ordered_record_batch() {
 #[test]
 fn port_append_reader_can_resume_after_the_last_successfully_delivered_record() {
     let mut host = host_with_room();
-    host.inject_failure("topics.publish", PluginError::new(ErrorCode::Unavailable, "bus busy"));
+    host.inject_failure("topics.publish", PluginError::new(ErrorCode::Busy, "bus busy"));
     append_raw(&mut host, "- t | sender | first\n- t | sender | second\nhand-edited note\n");
     host.settle();
     let texts = published_texts(&host);

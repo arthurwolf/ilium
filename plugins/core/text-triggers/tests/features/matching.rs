@@ -2,7 +2,7 @@
 //! answered by one `send-input` intent, floods are logged from `events-dropped`, and matches are counted.
 
 use ilium_plugin_sdk::host::Bucket;
-use ilium_plugin_sdk::types::{Delivery, ErrorCode, Event, Outcome};
+use ilium_plugin_sdk::types::{Delivery, ErrorCode, Event, NodeId, Outcome};
 use serde_json::json;
 
 use crate::common::*;
@@ -111,8 +111,8 @@ fn feature_056_the_send_input_goes_to_the_pane_that_printed_the_line() {
     let second = add_agent_pane(&mut host, "codex");
     set_rules(&mut host, &[CONFIRM], &["y"]);
     let submissions = host.deliver_one(matched(second, &rule_id(0), "Continue? (y/n)", 1));
-    assert_eq!(send_inputs(&submissions)[0].pane, second);
-    assert_ne!(send_inputs(&submissions)[0].pane, first);
+    assert_eq!(send_inputs(&submissions)[0].pane, NodeId(second));
+    assert_ne!(send_inputs(&submissions)[0].pane, NodeId(first));
 }
 
 /// REQ: F-056
@@ -225,7 +225,7 @@ fn feature_056_a_match_with_a_foreign_filter_id_sends_nothing() {
 #[test]
 fn feature_056_events_other_than_matches_send_nothing() {
     let (mut host, _) = host_with_confirm_rule();
-    let submissions = host.deliver(vec![Event::PaneFocused(None), Event::TreeChanged(vec![1])]);
+    let submissions = host.deliver(vec![Event::PaneFocused(None), Event::TreeChanged(vec![NodeId(1)])]);
     assert!(send_inputs(&submissions).is_empty());
 }
 

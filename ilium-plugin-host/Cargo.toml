@@ -31,6 +31,12 @@ proptest = "1"
 ed25519-dalek = "2"
 tempfile = "3.27.0"
 toml = "0.8.23"
+# Hash checks of the cli, grants, registry and security lanes (DEV-097, DEV-111, DEV-136).
+sha2 = "0.10.9"
+# Public-key encoding checks of the registry lane (`base64::engine::general_purpose::URL_SAFE_NO_PAD`).
+base64 = "0.22.1"
+# `ilium_plugin_testkit::manual::pages_dir()` in the documentation-lint tests (DEV-762, DEV-780).
+ilium-plugin-testkit = { version = "0.1.1", path = "../ilium-plugin-testkit" }
 
 [features]
 # FakeKernel, NativeGuest, WAT loader and HostHarness for host and conformance tests.

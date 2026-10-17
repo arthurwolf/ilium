@@ -3,11 +3,23 @@
 //! loader and the host harness. LIF-279: the same conformance cases run against this harness and
 //! against the FakeHost of `ilium-plugin-testkit`.
 
+pub mod boot;
+pub mod config;
 pub mod fake_kernel;
 pub mod fake_net;
 pub mod harness;
 pub mod native_guest;
+pub mod user_rig;
+pub mod views;
 pub mod wat;
+pub mod ext_world;
+pub mod fake_registry;
+pub mod imports_fixture;
+pub mod life;
+pub mod menu;
+pub mod migration;
+pub mod ops;
+pub mod render;
 
 pub use fake_kernel::{FakeKernel, FakePaneScreen, HttpAnswer};
 pub use fake_net::{FakeNet, FakeResponse, SeenRequest};
@@ -19,3 +31,6 @@ pub use harness::{
 };
 pub use native_guest::NativeGuest;
 pub use wat::wat_component;
+pub use ext_world::{ExtWorld, HandlerAction, HandlerRun, HandlerScript, PointEntry, PointListing, ReplacementShape, SettingReading};
+pub use fake_registry::FakeRegistry;
+pub use menu::{MenuHarness, MenuOpening};

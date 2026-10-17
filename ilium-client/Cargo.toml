@@ -39,6 +39,8 @@ ilium-execution = { version = "0.1.1", path = "../ilium-execution" }
 ilium-core = { version = "0.1.1", path = "../ilium-core" }
 ilium-ipc = { version = "0.1.1", path = "../ilium-ipc" }
 ilium-plugin-host = { version = "0.1.1", path = "../ilium-plugin-host" }
+# `plugin_host::widget_rig::solve_row` takes the generated `Constraint` (WID-005..007).
+ilium-plugin-api = { version = "0.1.1", path = "../ilium-plugin-api" }
 ilium-inference = { version = "0.1.1", path = "../ilium-inference" }
 ilium-logging = { version = "0.1.1", path = "../ilium-logging" }
 ilium-remote-compaction = { version = "0.1.1", path = "../ilium-remote-compaction" }

@@ -5,8 +5,8 @@ use std::path::PathBuf;
 use ilium_plugin_core_text_triggers::{TextTriggersClient, TextTriggersServer};
 use ilium_plugin_sdk::testing::{FakeHost, TreeNode};
 use ilium_plugin_sdk::types::{
-    AgentActivity, AgentView, Delivery, DroppedCount, Event, Intent, NodeClass, OutputMatchedEvent, SendInputSpec,
-    Submission,
+    AgentActivity, AgentView, Delivery, DroppedCount, Event, Intent, NodeClass, NodeId, OutputMatchedEvent,
+    SendInputSpec, Submission,
 };
 use serde_json::{Value, json};
 
@@ -82,7 +82,7 @@ pub fn rule_id(index: usize) -> String {
 
 /// An `output-matched` event as the host filter raises it.
 pub fn matched(node: u64, filter_id: &str, line: &str, row: u32) -> Event {
-    Event::OutputMatched(OutputMatchedEvent { node, filter_id: filter_id.to_string(), line: line.to_string(), row })
+    Event::OutputMatched(OutputMatchedEvent { node: NodeId(node), filter_id: filter_id.to_string(), line: line.to_string(), row })
 }
 
 /// An `events-dropped` event with one `output-matched` record.
@@ -108,7 +108,7 @@ pub fn send_inputs(submissions: &[Submission]) -> Vec<SendInputSpec> {
 /// The exact `send-input` spec the page sample builds for a reply.
 pub fn expected_spec(node: u64, reply: &str) -> SendInputSpec {
     SendInputSpec {
-        pane: node,
+        pane: NodeId(node),
         text: reply.to_string(),
         delivery: Delivery::Submitted,
         prompt_epoch: None,

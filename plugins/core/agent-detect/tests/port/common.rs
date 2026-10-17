@@ -133,3 +133,6 @@ pub fn cleared(submissions: &[Submission], slot: &str) -> Vec<NodeId> {
         })
         .collect()
 }
+
+/// The braille spinner frames of a working agent (shared with the features suite).
+pub const SPINNER_FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];

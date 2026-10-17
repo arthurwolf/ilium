@@ -363,7 +363,7 @@ fn hst_206_submission_with_a_negative_balance_is_refused_with_quota_exceeded() {
     let mut bucket = ExecutionBucket::new();
     bucket.charge_cpu_ms(2_001);
     let refused = bucket.try_submit().expect_err("refused");
-    assert_eq!(refused.code.0, "quota-exceeded");
+    assert_eq!(refused.code.as_str(), "quota-exceeded");
 }
 
 proptest! {

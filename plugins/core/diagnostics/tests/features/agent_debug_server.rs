@@ -73,7 +73,7 @@ fn f_032_snapshot_preflight_rejects_a_too_small_limit_without_losing_the_journal
     enable(&mut session, true);
     agent_debug(&mut session, "append", json!({ "pane": 7, "at": 1, "source": "pty", "kind": "prompt-submitted", "summary": "kept", "reserve": 8192 })).expect("append");
     let refused = agent_debug(&mut session, "snapshot", json!({ "limit": 1024 })).expect_err("limit too small");
-    assert_eq!(refused.code, ErrorCode::ResourceExhausted);
+    assert_eq!(refused.code, ErrorCode::QuotaExceeded);
     let snapshot = agent_debug(&mut session, "snapshot", json!({ "limit": 16384 })).expect("larger allowance");
     assert_eq!(snapshot["panes"][0]["entries"][0]["summary"], "kept");
     assert_eq!(snapshot["panes"][0]["next_sequence"], 2);

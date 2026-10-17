@@ -75,7 +75,7 @@ fn wit_token_provider_tokens_accept_the_state_of_the_previous_call() {
 #[test]
 fn wit_catalog_provider_query_catalog_returns_a_page() {
     let mut world = export_world();
-    let reply = world.call_export(GUEST, ExportCall::QueryCatalog(CatalogQuery { catalog: "themes".to_owned(), text: String::new(), cursor: None, limit: 20 }));
+    let reply = world.call_export(GUEST, ExportCall::QueryCatalog(CatalogQuery { catalog: "themes".to_owned(), filter: String::new(), cursor: None, limit: 20 }));
     assert!(matches!(reply, Ok(ExportReply::CatalogPage(Ok(_)))));
 }
 
@@ -84,7 +84,7 @@ fn wit_catalog_provider_query_catalog_returns_a_page() {
 fn wit_catalog_provider_query_catalog_error_return_is_a_plugin_error_not_a_trap() {
     let mut world = export_world();
     world.script_export(GUEST, "query-catalog", HandlerScript { elapsed_ms: 1, action: HandlerAction::ErrorReturn });
-    let reply = world.call_export(GUEST, ExportCall::QueryCatalog(CatalogQuery { catalog: "themes".to_owned(), text: "x".to_owned(), cursor: None, limit: 20 }));
+    let reply = world.call_export(GUEST, ExportCall::QueryCatalog(CatalogQuery { catalog: "themes".to_owned(), filter: "x".to_owned(), cursor: None, limit: 20 }));
     assert!(matches!(reply, Ok(ExportReply::CatalogPage(Err(_)))), "{reply:?}");
 }
 
@@ -124,7 +124,7 @@ fn wit_virtual_rows_provider_error_return_is_a_plugin_error() {
 #[test]
 fn wit_service_provider_handle_returns_done_with_a_json_string() {
     let mut world = export_world();
-    let call = ServiceCall { call: 1, service: SERVICE.to_owned(), method: "echo".to_owned(), payload_json: r#"{"text":"hi"}"#.to_owned(), caller: "com.example.caller".to_owned() };
+    let call = ServiceCall { call: 1, service: SERVICE.to_owned(), method: "echo".to_owned(), payload_json: r#"{"text":"hi"}"#.to_owned(), caller: ilium_plugin_api::generated::types::PluginId("com.example.caller".to_owned()) };
     match world.call_export(GUEST, ExportCall::ServiceHandle(call)) {
         Ok(ExportReply::ServiceReply(ServiceReply::Done(text))) => {
             assert!(serde_json::from_str::<serde_json::Value>(&text).is_ok(), "{text}");
@@ -138,7 +138,7 @@ fn wit_service_provider_handle_returns_done_with_a_json_string() {
 fn wit_service_provider_handle_may_defer_and_answer_later() {
     let mut world = export_world();
     world.script_export(GUEST, "handle", HandlerScript { elapsed_ms: 1, action: HandlerAction::ServiceDeferred });
-    let call = ServiceCall { call: 2, service: SERVICE.to_owned(), method: "echo".to_owned(), payload_json: "{}".to_owned(), caller: "com.example.caller".to_owned() };
+    let call = ServiceCall { call: 2, service: SERVICE.to_owned(), method: "echo".to_owned(), payload_json: "{}".to_owned(), caller: ilium_plugin_api::generated::types::PluginId("com.example.caller".to_owned()) };
     assert!(matches!(world.call_export(GUEST, ExportCall::ServiceHandle(call)), Ok(ExportReply::ServiceReply(ServiceReply::Deferred))));
 }
 

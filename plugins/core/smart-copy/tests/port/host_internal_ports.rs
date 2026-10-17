@@ -336,7 +336,8 @@ fn port_internal_an_oversized_screen_makes_no_model_request_with_the_whole_captu
     host.inference().reply_text("w");
     ask(&mut host, pane);
     for request in host.inference().requests() {
-        assert!(request.system.len() + format!("{request:?}").len() < 400_000);
+        let system_len: usize = request.1.messages.iter().filter(|m| m.role == "system").map(|m| m.content.len()).sum();
+        assert!(system_len + format!("{request:?}").len() < 400_000);
     }
     assert!(host.failures().is_empty());
 }

@@ -136,7 +136,7 @@ fn service_090_set_writes_a_setting_by_key() {
 fn service_090_set_then_get_round_trips() {
     let mut session = started_session();
     session
-        .call_service(PLUGIN_ID, "ilium.core.settings/set", "^0.1", r#"{"key":"accent","value":"#102030"}"#)
+        .call_service(PLUGIN_ID, "ilium.core.settings/set", "^0.1", r##"{"key":"accent","value":"#102030"}"##)
         .expect("set answers");
     let reply = session
         .call_service(PLUGIN_ID, "ilium.core.settings/get", "^0.1", r#"{"key":"accent"}"#)

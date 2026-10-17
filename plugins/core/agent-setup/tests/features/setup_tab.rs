@@ -8,7 +8,7 @@ use crate::common::*;
 const SURFACE: &str = "setup";
 
 fn render(host: &mut FakeHost, width: u16) -> String {
-    host.render_kernel_tab(SURFACE, width, 30)
+    host.render_kernel_tab(SURFACE, width, 30).text()
 }
 
 fn lines_fit(text: &str, width: u16) {

@@ -114,7 +114,7 @@ fn hst_493_the_mirror_is_updated_before_tree_changed_is_delivered() {
     let sequence = lock(&env.probe.sequence).clone();
     let mirror = env.host.mirror_update_index();
     let delivered = sequence.iter().rposition(|s| s == "on-events").expect("delivery");
-    assert!(mirror <= delivered, "mirror update {mirror} before delivery {delivered}");
+    assert!(mirror <= delivered as u64, "mirror update {mirror} before delivery {delivered}");
 }
 
 /// REQ: HST-494

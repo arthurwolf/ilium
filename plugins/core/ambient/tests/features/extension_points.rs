@@ -221,5 +221,6 @@ fn contribute(host: &mut FakeHost, point: &str, id: &str, priority: i64, entry: 
 
 /// Calls a service of the plugin the way the host does, through the `service-provider` export.
 fn call_look_service(host: &mut FakeHost, method: &str, payload_json: &str) -> Value {
-    host.call_service("ilium.core.ambient/look", method, payload_json)
+    let reply = host.call_service("ilium.core.ambient/look", method, payload_json).expect("look service answers");
+    serde_json::from_str(&reply).expect("look service answers JSON")
 }

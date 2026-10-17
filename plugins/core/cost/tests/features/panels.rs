@@ -1,7 +1,7 @@
 //! The client panel (F-031) and its two figures (golden files equal the page figures).
 
 use ilium_plugin_sdk::testing::assert_golden;
-use ilium_plugin_sdk::ViewTarget;
+use ilium_plugin_sdk::types::ViewTarget;
 
 use crate::common::*;
 

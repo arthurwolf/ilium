@@ -17,7 +17,8 @@ fn started_host() -> (FakeHost, RequestRef) {
 }
 
 fn finish_ok(host: &mut FakeHost, request: RequestRef, text: &str, model: &str, elapsed_ms: u64) {
-    host.inference().script_completion(request.clone(), completion(text, model));
+    let RequestRef::Call(call) = request.clone() else { panic!("the test run is one slow inference call") };
+    host.inference().complete_inference(call, completion(text, model));
     host.advance_clock(elapsed_ms);
     host.complete(request, Outcome::Ok);
     host.settle();

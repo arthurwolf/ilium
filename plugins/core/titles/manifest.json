@@ -10,6 +10,10 @@
     "entry": "server.wasm",
     "world": "ilium:server/base@0.1.0"
   },
+  "client": {
+    "entry": "client.wasm",
+    "world": "ilium:client/base@0.1.0"
+  },
   "capabilities": {
     "server": [
       "inference",

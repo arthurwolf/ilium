@@ -189,7 +189,7 @@ fn sec_379_no_capture_call_returns_dialog_text() {
     for line in rig.host.render_dialog("trust", 48, true) {
         let trimmed = line.trim_matches(|c: char| !c.is_alphanumeric());
         if trimmed.chars().count() > 8 {
-            assert!(!capture.contains(trimmed), "{trimmed}");
+            assert!(!capture.iter().any(|line| line.contains(trimmed)), "{trimmed}");
         }
     }
 }

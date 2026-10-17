@@ -10,7 +10,7 @@ use crate::support::*;
 /// REQ: SEC-260
 #[test]
 fn sec_260_a_session_with_every_bundled_plugin_makes_no_outbound_connection() {
-    let rig = setup(&[]).tier(Tier::T1).start();
+    let mut rig = setup(&[]).tier(Tier::T1).start();
     rig.host.deliver(one_event());
     rig.host.pump(16);
     rig.host.advance_clock(std::time::Duration::from_secs(3600));

@@ -51,8 +51,9 @@ fn port_sp_03_unavailable_mouse_feature_row_is_inert() {
     let mut host = host_with_progress_missing();
     let before = get(&mut host, claude_file());
     let screen = host.render_kernel_tab(SURFACE, 100, 30);
-    let line = screen
-        .lines()
+    let rendered = screen.lines();
+    let line = rendered
+        .iter()
         .position(|line| line.contains("Chatroom") && line.contains("Set up by Ilium"))
         .expect("chatroom row for the global Claude file");
     host.click_kernel_tab(SURFACE, 2, u16::try_from(line).expect("row index"));
@@ -92,7 +93,8 @@ fn port_sp_05_keyboard_shortcuts_close_the_dialog_without_mutating() {
 fn port_sp_06_hit_test_tracks_each_visible_control_row() {
     let mut host = project_host();
     let screen = host.render_kernel_tab(SURFACE, 100, 30);
-    let lines: Vec<&str> = screen.lines().collect();
+    let rendered = screen.lines();
+    let lines: Vec<&str> = rendered.iter().map(String::as_str).collect();
     for (block, label) in [("chatroom", "Chatroom"), ("progress", "Progress")] {
         let index = lines.iter().position(|line| line.contains(label)).expect("row is visible");
         host.click_kernel_tab(SURFACE, 2, u16::try_from(index).expect("row index"));

@@ -109,7 +109,7 @@ fn router_f062_a_failed_publish_leaves_the_record_for_the_next_poll() {
     let mut host = host_with_room();
     host.inject_failure(
         "topics.publish",
-        ilium_plugin_sdk::types::PluginError::new(ilium_plugin_sdk::types::ErrorCode::Unavailable, "bus busy"),
+        ilium_plugin_sdk::types::PluginError::new(ilium_plugin_sdk::types::ErrorCode::Busy, "bus busy"),
     );
     append_raw(&mut host, "- t | sender | first\n- t | sender | second\nhand-edited note\n");
     host.settle();
@@ -260,7 +260,8 @@ fn router_f062_a_start_with_a_room_asks_agent_setup_to_repair_the_hook_in_place(
 #[test]
 fn router_f062_the_room_is_reconciled_on_a_one_second_deadline() {
     let mut host = host_with_room();
-    host.fs().seed(ROOM, format!("{}{}\n", room_text(&mut host), numbered_line(1)).as_bytes());
+    let text = room_text(&mut host);
+    host.fs().seed(ROOM, format!("{}{}\n", text, numbered_line(1)).as_bytes());
     host.advance_clock(999);
     assert!(published_texts(&host).is_empty(), "no reconcile before one second");
     host.advance_clock(1);

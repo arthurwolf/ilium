@@ -65,7 +65,7 @@ fn rqo_002_a_returned_request_id_completes_once_with_the_matching_id() {
     let completed = env.probe.events_of("request-completed");
     assert_eq!(completed.len(), 1);
     match &completed[0] {
-        Event::RequestCompleted(result) => assert_eq!(result.request, request),
+        Event::RequestCompleted(result) => assert_eq!(result.request, ilium_plugin_api::generated::types::RequestRef::Call(request)),
         other => panic!("unexpected {other:?}"),
     }
 }

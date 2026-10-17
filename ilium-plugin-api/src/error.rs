@@ -165,3 +165,17 @@ impl UnknownName {
         }
     }
 }
+
+impl PartialEq<str> for Code {
+    /// Compares the code text with a literal (reference-errors-and-limits.md).
+    fn eq(&self, other: &str) -> bool {
+        self.0 == other
+    }
+}
+
+impl PartialEq<&str> for Code {
+    /// Compares the code text with a literal (reference-errors-and-limits.md).
+    fn eq(&self, other: &&str) -> bool {
+        self.0 == *other
+    }
+}

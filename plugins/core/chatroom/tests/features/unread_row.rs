@@ -1,7 +1,7 @@
 //! The Chatroom row of the tree and its unread count (chatroom-B16, F-062): `list-virtual-children`,
 //! `set-virtual-rows` and `set-expanded`.
 
-use ilium_plugin_sdk::exports::VirtualRowsProvider;
+use ilium_plugin_sdk::VirtualRowsProvider;
 use ilium_plugin_sdk::types::intents::{ExpandTarget, Intent};
 
 use crate::common::*;
@@ -95,7 +95,8 @@ fn unread_f062_list_virtual_children_answers_one_file_child() {
     let (children, cursor) = plugin.list_virtual_children("chatroom", "chatroom", None).expect("children");
     assert_eq!(children.len(), 1);
     assert_eq!(children[0].id, "file");
-    assert_eq!(children[0].label, "CHATROOM.md");
+    let label: String = children[0].label.iter().map(|span| span.text.as_str()).collect();
+    assert_eq!(label, "CHATROOM.md");
     assert_eq!(cursor, None);
 }
 

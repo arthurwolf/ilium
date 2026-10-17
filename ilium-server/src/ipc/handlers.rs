@@ -139,11 +139,11 @@ pub async fn handle_request(
             send_direct(direct_tx, ServerEvent::PaneRecapScreen { pane_id, result }).await;
             false
         }
-        ClientRequest::Attach { session } => {
+        ClientRequest::Attach { session, .. } => {
             handle_attach(state, &session, direct_tx, true).await;
             false
         }
-        ClientRequest::AttachInteractive { session } => {
+        ClientRequest::AttachInteractive { session, .. } => {
             handle_attach(state, &session, direct_tx, false).await;
             false
         }

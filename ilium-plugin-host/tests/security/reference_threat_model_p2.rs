@@ -140,7 +140,7 @@ fn emit_outputs(rig: &mut Rig, count: u32, gap_millis: u64) -> usize {
     }
     rig.host.advance_clock(Duration::from_millis(200));
     rig.host.pump(8);
-    rig.host.screen_changed_count() - before
+    (rig.host.screen_changed_count() - before) as usize
 }
 
 /// REQ: SEC-371

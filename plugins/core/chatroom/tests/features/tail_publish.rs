@@ -81,7 +81,7 @@ fn tail_f062_a_failing_tail_read_publishes_nothing_and_keeps_the_plugin_alive() 
     seed_room(&mut host, &[]);
     host.inject_failure(
         "fs.tail",
-        ilium_plugin_sdk::types::PluginError::new(ilium_plugin_sdk::types::ErrorCode::Unavailable, "tail failed"),
+        ilium_plugin_sdk::types::PluginError::new(ilium_plugin_sdk::types::ErrorCode::Io, "tail failed"),
     );
     send(&mut host, "lost to the failure");
     host.settle();

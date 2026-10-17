@@ -288,7 +288,7 @@ fn feature_069_golden_tree_at_40_80_and_120_columns() {
 #[test]
 fn feature_072_golden_git_tab_at_48_columns_matches_the_page_figure() {
     let mut host = client_host();
-    let screen = host.render(ViewTarget::SettingsTab("git".to_string()), 48, 8);
+    let screen = host.render(ViewTarget::SettingsPage("git".to_string()), 48, 8);
     let text = (0..screen.rows).map(|row| screen.row(row).trim_end().to_string()).collect::<Vec<_>>().join("\n") + "\n";
     ilium_plugin_sdk::testing::assert_golden(&golden_path("page_figure_1_48.txt"), &text);
 }
@@ -298,7 +298,7 @@ fn feature_072_golden_git_tab_at_48_columns_matches_the_page_figure() {
 fn feature_072_golden_git_tab_at_40_80_and_120_columns() {
     for columns in [40u16, 80, 120] {
         let mut host = client_host();
-        let screen = host.render(ViewTarget::SettingsTab("git".to_string()), columns, 8);
+        let screen = host.render(ViewTarget::SettingsPage("git".to_string()), columns, 8);
         let text = (0..screen.rows).map(|row| screen.row(row).trim_end().to_string()).collect::<Vec<_>>().join("\n") + "\n";
         ilium_plugin_sdk::testing::assert_golden(&golden_path(&format!("git_{columns}.txt")), &text);
     }

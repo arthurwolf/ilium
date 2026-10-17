@@ -8,7 +8,7 @@ use crate::common::*;
 fn server_with_used_tokens(used_tokens: u32) -> (ilium_plugin_sdk::testing::FakeHost, u64) {
     let mut host = server_host();
     let pane = add_agent_pane(&mut host, "claude", "claude", AgentActivity::Working);
-    host.agents().set_context_used_tokens(pane, used_tokens);
+    host.agents().set_context_used_tokens(pane, u64::from(used_tokens));
     (host, pane)
 }
 

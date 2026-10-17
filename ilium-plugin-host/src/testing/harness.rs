@@ -55,6 +55,7 @@ use super::fake_net::FakeNet;
 use super::native_guest::NativeGuest;
 use crate::audit::AuditRecord;
 use crate::calls::Trap;
+use crate::instance::{ExportCall, ExportReply};
 use crate::dispatch::PumpReport;
 use crate::error::HostError;
 use crate::imports::agent::AgentImport;
@@ -191,6 +192,16 @@ pub struct ReviewRow {
     pub locked: bool,
     /// The row has a checkbox.
     pub checkable: bool,
+    /// The grant the row stands for (SEC-004).
+    pub grant: String,
+    /// The checkbox is ticked (SEC-007: high-risk rows start unticked).
+    pub checked: bool,
+    /// A note under the row, such as the administrator block (reference-admin-policy.md).
+    pub note: Option<String>,
+    /// The row is drawn in the warning style (reference-threat-model.md).
+    pub warning_style: bool,
+    /// The detail text naming the grants behind the row (reference-threat-model.md).
+    pub detail: String,
 }
 
 /// One message delivered to a plugin by a peer (SEC-01x peer messages).
@@ -232,10 +243,12 @@ pub struct DetectReport {
 }
 
 /// What the plugin store holds for the harness plugin (HST-07x store data).
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoreDataView {
     /// The plugin id.
-    pub plugin: String,
+    pub plugin: PluginId,
+    /// The side the store serves (HST-075).
+    pub side: Side,
     /// The authorization epoch at the last store write.
     pub authorization_epoch: u64,
     /// The instance generation.
@@ -590,7 +603,7 @@ impl HarnessHandle {
     }
 
     /// Moves the manual clock forward and fires due timers.
-    pub fn advance_clock(&mut self, by: Duration) {
+    pub fn advance_clock(&self, by: Duration) {
         unimplemented!("host::testing::HarnessHandle::advance_clock")
     }
 
@@ -1751,5 +1764,52 @@ impl HarnessHandle {
     /// Sets the pane's echo mode (off during password prompts).
     pub fn set_pane_echo(&self, echo: bool) {
         unimplemented!("host::testing::HarnessHandle::set_pane_echo")
+    }
+}
+
+impl HarnessHandle {
+    /// The instance state of one side of the harness plugin (reference-errors-and-limits.md).
+    pub fn state_of(&self, side: Side) -> InstanceState {
+        unimplemented!("host::testing::HarnessHandle::state_of")
+    }
+
+    /// The instance state of the second plugin (reference-errors-and-limits.md host capacity).
+    pub fn second_plugin_state(&self) -> InstanceState {
+        unimplemented!("host::testing::HarnessHandle::second_plugin_state")
+    }
+
+    /// Why the second plugin is not active, such as `host-capacity`.
+    pub fn second_plugin_reason(&self) -> Option<String> {
+        unimplemented!("host::testing::HarnessHandle::second_plugin_reason")
+    }
+
+    /// Opens an HTTP stream as plugin `plugin_index` of a two-plugin harness (API-070).
+    pub fn open_stream_as(&self, plugin_index: usize) -> ImportReply {
+        unimplemented!("host::testing::HarnessHandle::open_stream_as")
+    }
+
+    /// Calls an import as plugin `plugin_index` of a two-plugin harness with JSON arguments.
+    pub fn call_import_as(&self, plugin_index: usize, interface: &str, function: &str, args_json: &str) -> ImportReply {
+        unimplemented!("host::testing::HarnessHandle::call_import_as")
+    }
+
+    /// Every `request-completed` result delivered to the plugin so far (reference-events.md).
+    pub fn received_outcomes(&self) -> Vec<RequestResult> {
+        unimplemented!("host::testing::HarnessHandle::received_outcomes")
+    }
+
+    /// Submits an intent as the plugin (`intents.submit`, reference-wit.md section 5.9).
+    pub fn submit(&self, submission: Submission) -> Result<RequestId, ErrorCode> {
+        unimplemented!("host::testing::HarnessHandle::submit")
+    }
+
+    /// Submits an intent and runs the host until its outcome arrives (reference-events.md).
+    pub fn submit_and_wait(&self, submission: Submission) -> Outcome {
+        unimplemented!("host::testing::HarnessHandle::submit_and_wait")
+    }
+
+    /// Drives one export of the guest (reference-wit.md section 8).
+    pub fn call_export(&self, call: ExportCall) -> Result<ExportReply, Trap> {
+        unimplemented!("host::testing::HarnessHandle::call_export")
     }
 }

@@ -5,7 +5,28 @@
 #![allow(dead_code)]
 
 use ilium_plugin_sdk::testing::FakeHost;
-use serde_json::Value;
+
+/// One `agent.transcript` read the plugin made (primitives agent.wit `transcript-query`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TranscriptQuery {
+    /// Pane the transcript belongs to.
+    pub pane: u64,
+    /// `last-turns` of the query.
+    pub last_turns: u32,
+    /// `max-bytes` of the query.
+    pub max_bytes: u32,
+}
+
+/// One `read_screen` the plugin made (API_GAPS.md: F-112 reads the visible part, 40 rows).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScreenRequest {
+    /// Pane whose screen was read.
+    pub pane: u64,
+    /// Rows requested.
+    pub rows: u16,
+    /// Whether only the visible part was requested.
+    pub visible_only: bool,
+}
 
 /// Recap-lane hooks. Implemented for `FakeHost` with skeleton bodies.
 pub trait RecapHostExt {
@@ -27,10 +48,10 @@ pub trait RecapHostExt {
     fn running_job_limit(&self) -> usize { unimplemented!("recap.running-job-limit") }
     /// How often the plugin read a pane screen.
     fn screen_reads(&self) -> usize { unimplemented!("recap.screen-reads") }
-    /// Screen read requests, as JSON.
-    fn screen_requests(&self) -> Vec<Value> { unimplemented!("recap.screen-requests") }
-    /// Transcript queries, as JSON.
-    fn transcript_queries(&self) -> Vec<Value> { unimplemented!("recap.transcript-queries") }
+    /// Screen read requests, in order.
+    fn screen_requests(&self) -> Vec<ScreenRequest> { unimplemented!("recap.screen-requests") }
+    /// Transcript queries, in order.
+    fn transcript_queries(&self) -> Vec<TranscriptQuery> { unimplemented!("recap.transcript-queries") }
     /// How often the plugin read a transcript.
     fn transcript_reads(&self) -> usize { unimplemented!("recap.transcript-reads") }
 }

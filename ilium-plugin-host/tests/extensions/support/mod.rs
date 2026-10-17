@@ -238,14 +238,9 @@ pub struct Contrib {
     pub guard: bool,
 }
 
-/// The shape of a replacement plugin that deviates from its core plugin (EXT-051).
-#[derive(Debug, Clone, Default)]
-pub struct ReplacementShape {
-    pub drop_item: Option<String>,
-    pub point_mode_override: Option<(String, String)>,
-    pub point_version_override: Option<(String, String)>,
-    pub service_methods_override: Option<(String, Vec<String>)>,
-}
+/// The shape of a replacement plugin that deviates from its core plugin (EXT-051); the world
+/// builds the manifest from it, so the type is the host's.
+pub use ilium_plugin_host::testing::ReplacementShape;
 
 impl Contrib {
     /// A T3 contributor with the given full plugin id; its extension id is `e-<last segment>`.

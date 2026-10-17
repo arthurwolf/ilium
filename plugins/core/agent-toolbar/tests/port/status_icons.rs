@@ -152,7 +152,7 @@ fn port_status_icons_shell_activity_reason_sanitizes_and_bounds_observed_termina
         Place::Client,
         "status.shell-activity",
         r####"{"visible_text": true}"####,
-        r####"{"contains": ["seq 9..10", "r2 at update", "[truncated]"], "excludes": ["‮"], "max_chars": 512}"####,
+        r####"{"contains": ["seq 9..10", "r2 at update", "[truncated]"], "excludes": ["\u202e"], "max_chars": 512}"####,
     );
 }
 

@@ -7,14 +7,14 @@ use crate::common::*;
 /// REQ: F-038, F-040
 #[test]
 fn settings_040_unit_defaults_to_dollars() {
-    let host = activated_server();
+    let mut host = activated_server();
     assert_eq!(host.settings().get("unit"), Some(json!("dollars")));
 }
 
 /// REQ: F-038, F-040
 #[test]
 fn settings_040_display_defaults_to_tree_and_status() {
-    let host = activated_server();
+    let mut host = activated_server();
     assert_eq!(host.settings().get("display"), Some(json!(["tree", "status"])));
 }
 

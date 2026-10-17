@@ -29,7 +29,7 @@ fn port_layout_every_terminal_menu_action_is_offered_once_in_order() {
     let entries = host.menu_items(terminal_context(pane));
     let ids: Vec<&str> = entries.iter().map(|entry| entry.id.as_str()).collect();
     assert_eq!(ids, ["copy", "copy-path", "smart-copy", "transfer"]);
-    assert!(entries.iter().all(|entry| !entry.title.is_empty()));
+    assert!(entries.iter().all(|entry| !entry.label.is_empty()));
 }
 
 /// REQ: PORT:ilium-client/src/context_menu_layout.rs::hovering_a_visible_action_does_not_move_the_viewport

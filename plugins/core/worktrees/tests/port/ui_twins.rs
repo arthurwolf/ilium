@@ -70,7 +70,7 @@ fn port_072_reading_the_git_tab_submits_nothing_and_changes_no_setting() {
     let mut host = client_host();
     let before = host.kernel_settings().get("git", "default_where");
     let submitted = host.submitted().len();
-    let _ = host.render(ViewTarget::SettingsTab("git".to_string()), 48, 8);
+    let _ = host.render(ViewTarget::SettingsPage("git".to_string()), 48, 8);
     assert_eq!(host.kernel_settings().get("git", "default_where"), before);
     assert_eq!(host.submitted().len(), submitted);
     assert!(host.process().calls().is_empty());
@@ -100,7 +100,7 @@ fn port_072_an_unknown_default_where_is_refused_and_the_old_value_stays() {
 fn port_072_the_git_tab_paints_the_same_rows_at_every_width_inside_its_frame() {
     for columns in [40u16, 80, 120] {
         let mut host = client_host();
-        let screen = host.render(ViewTarget::SettingsTab("git".to_string()), columns, 8);
+        let screen = host.render(ViewTarget::SettingsPage("git".to_string()), columns, 8);
         let rows: Vec<String> = (0..screen.rows).map(|row| screen.row(row).trim_end().to_string()).collect();
         assert!(rows.iter().any(|row| row.contains("Worktree folder")), "{columns}: {rows:?}");
         assert!(rows.iter().any(|row| row.contains("Post-create command")), "{columns}: {rows:?}");

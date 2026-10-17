@@ -1,13 +1,13 @@
 //! F-066: the `smart-copy` command freezes the pane while the picker is open and unfreezes it on close.
 
-use ilium_plugin_sdk::types::{Intent, Key};
+use ilium_plugin_sdk::types::{GrabId, Intent, KeyEvent};
 
 use crate::common::{
     add_terminal_pane, candidates_message, client_host, intents, menu_command, palette_command,
 };
 
 fn key(name: &str) -> ilium_plugin_sdk::types::Event {
-    ilium_plugin_sdk::types::Event::Key(Key::named(name))
+    ilium_plugin_sdk::types::Event::KeyPressed(KeyEvent { grab: GrabId(0), pane: None, chord: name.to_string(), repeat: false })
 }
 
 /// REQ: F-066

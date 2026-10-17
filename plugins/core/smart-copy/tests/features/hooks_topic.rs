@@ -1,7 +1,7 @@
 //! EXT-042/F-066: the `after-copy` hook chain and the `copied` topic (page "Extension points").
 
 use ilium_plugin_sdk::exports::HookReply;
-use ilium_plugin_sdk::types::{Intent, Key};
+use ilium_plugin_sdk::types::{GrabId, Intent, KeyEvent};
 use serde_json::Value;
 
 use crate::common::{add_terminal_pane, candidates_message, client_host, PLUGIN_ID};
@@ -11,7 +11,12 @@ const COPIED: &str = "ilium.core.smart-copy/copied";
 
 fn copy_first(host: &mut ilium_plugin_sdk::testing::FakeHost, text: &str) {
     host.deliver_one(candidates_message(&[text]));
-    host.deliver_one(ilium_plugin_sdk::types::Event::Key(Key::named("1")));
+    host.deliver_one(ilium_plugin_sdk::types::Event::KeyPressed(KeyEvent {
+        grab: GrabId(0),
+        pane: None,
+        chord: "1".to_string(),
+        repeat: false,
+    }));
     host.settle();
 }
 

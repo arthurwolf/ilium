@@ -41,6 +41,7 @@ async fn create_plain_shell(
         client,
         &ClientRequest::Attach {
             session: session_name.to_string(),
+            hello: Default::default(),
         },
     )
     .await
@@ -99,6 +100,7 @@ async fn completed_shell_commands_update_the_title_for_other_clients_until_user_
         &mut observer,
         &ClientRequest::Attach {
             session: "shell-title-test".to_string(),
+            hello: Default::default(),
         },
     )
     .await
@@ -184,6 +186,7 @@ async fn completed_shell_commands_update_the_title_for_other_clients_until_user_
         &mut creator,
         &ClientRequest::Attach {
             session: "shell-title-test".to_string(),
+            hello: Default::default(),
         },
     )
     .await
@@ -260,6 +263,7 @@ async fn foreground_non_shell_commands_do_not_receive_automatic_titles() {
         &mut client,
         &ClientRequest::Attach {
             session: "non-shell-title-test".to_string(),
+            hello: Default::default(),
         },
     )
     .await

@@ -11,7 +11,7 @@ fn changed(node: u64, previous: AgentActivity, current: AgentActivity) -> Event 
 }
 
 fn goal_event(node: u64, goal: Option<&str>) -> Event {
-    Event::AgentGoalChanged(AgentGoalEvent { node: NodeId(node), goal: goal.map(str::to_string), revision: 2 })
+    Event::AgentGoalChanged(AgentGoalEvent { node: NodeId(node), goal: goal.map(str::to_string) })
 }
 
 fn panel_text(host: &mut FakeHost) -> String {

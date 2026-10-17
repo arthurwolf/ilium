@@ -323,7 +323,7 @@ fn scan_a_changed_size_or_mtime_invalidates_only_that_file() {
     let second = scan(&mut host, "claude");
     assert_eq!(summary(&second)["files_parsed"], 1);
     assert_eq!(summary(&second)["files_from_cache"], 2);
-    host.advance_clock(std::time::Duration::from_secs(5));
+    host.advance_clock(5_000);
     host.touch("agent-homes", &claude_main_path("-synthetic-project", "session-02"));
     let third = scan(&mut host, "claude");
     assert_eq!(summary(&third)["files_parsed"], 1);

@@ -4,7 +4,8 @@
 //! implementing the lifecycle, the handler and the exports its manifest lists. Every body is
 //! `unimplemented!` until the implementation phase moves the feature here.
 
-use ilium_plugin_sdk::{Lifecycle, Renderer, ilium_plugin};
+use ilium_plugin_sdk::{Lifecycle, NativeRenderer, Renderer, ilium_plugin};
+use ilium_plugin_sdk::plugin::NativeSurface;
 use ilium_plugin_sdk::generated::anim::renderer_types::FrameInput;
 use ilium_plugin_sdk::generated::anim::renderer_types::Readiness;
 use ilium_plugin_sdk::generated::anim::surface::FrameSurfaceHandle;
@@ -62,5 +63,25 @@ impl Renderer for ScenesScene {
 
     fn scene_renderer_status(&mut self, _handle: SceneRendererHandle) -> Option<String> {
         unimplemented!("ilium.core.scenes: scene renderer.scene_renderer_status")
+    }
+}
+
+/// Native (in-process) renderer of the scene side, used by `FakeScene::new::<ScenesScene>`
+/// (reference-test-harness.md "Scene harness", test-plan.md section 1.3).
+impl NativeRenderer for ScenesScene {
+    fn new(_spec_json: &str) -> Self {
+        unimplemented!("ilium.core.scenes: native renderer new")
+    }
+
+    fn render(&mut self, _frame: &FrameInput, _surface: &mut NativeSurface) {
+        unimplemented!("ilium.core.scenes: native renderer render")
+    }
+
+    fn set_palette(&mut self, _palette_rgb: Vec<u32>) {
+        unimplemented!("ilium.core.scenes: native renderer set_palette")
+    }
+
+    fn frames_per_second(&self) -> u32 {
+        unimplemented!("ilium.core.scenes: native renderer frames_per_second")
     }
 }

@@ -18,6 +18,7 @@
 #![allow(unused_variables, dead_code)]
 
 pub mod audit;
+pub mod autoupdate;
 pub mod calls;
 pub mod cli;
 pub mod conformance_hooks;
@@ -41,8 +42,16 @@ pub mod resolve;
 pub mod scheduler;
 pub mod services;
 pub mod settings;
+pub mod approval;
+pub mod consent;
+pub mod limits_rules;
+pub mod platform_rules;
+pub mod review;
+pub mod secrets;
+pub mod session;
 pub mod signing;
 pub mod storage;
+pub mod stores;
 pub mod sync;
 pub mod telemetry;
 #[cfg(feature = "testing")]

@@ -474,9 +474,11 @@ pub enum AntigravityStatuslineAction {
 /// carry data the server can forward opaquely.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ClientRequest {
-    /// Attach this client connection to the named session.
+    /// Attach this client connection to the named session. `hello` is the plugin handshake
+    /// record (reference-host-ipc.md HST-103).
     Attach {
         session: String,
+        hello: crate::plugin::PluginHello,
     },
     /// Create a new pane as a child of `parent_group`.
     NewPane {
@@ -757,6 +759,7 @@ pub enum ClientRequest {
     /// contract for diagnostics and older one-shot consumers.
     AttachInteractive {
         session: String,
+        hello: crate::plugin::PluginHello,
     },
     /// Replaces this connection's terminal-output subscription. Only panes
     /// occupying the right panel need live raw bytes; hidden panes remain
@@ -1027,6 +1030,9 @@ pub enum ClientRequest {
     GetPaneRecapScreen {
         pane_id: NodeId,
     },
+    /// One envelope of plugin traffic from the client half (reference-host-ipc.md HST-100).
+    /// Appended to preserve all prior request discriminants.
+    Plugin(crate::plugin::PluginEnvelope),
 }
 
 impl ClientRequest {
@@ -1035,6 +1041,7 @@ impl ClientRequest {
     /// decision instead of silently disappearing from the major-action trail.
     pub const fn diagnostic_name(&self) -> &'static str {
         match self {
+            Self::Plugin(_) => "plugin",
             Self::GetPaneRecapScreen { .. } => "get_pane_recap_screen",
             Self::Attach { .. } => "attach",
             Self::UserKeyInput { .. } => "user_key_input",
@@ -1530,4 +1537,11 @@ pub enum ServerEvent {
         pane_id: NodeId,
         result: Result<String, String>,
     },
+    /// One envelope of plugin traffic from the server half (reference-host-ipc.md HST-100).
+    /// Appended to preserve all prior event discriminants.
+    Plugin(crate::plugin::PluginEnvelope),
+    /// A contribution snapshot or increment (reference-host-ipc.md HST-107).
+    Contributions(crate::plugin::ContributionDelta),
+    /// The server refused the connection or an envelope (reference-host-ipc.md HST-103).
+    Rejected(crate::plugin::Rejection),
 }

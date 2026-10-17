@@ -10,7 +10,7 @@ use crate::support::*;
 /// REQ: PORT:ilium-client/src/trigger_settings.rs::defaults_enable_ai_retitling_and_restructuring
 #[test]
 fn port_001_defaults_enable_ai_retitling_and_restructuring() {
-    let host = client_host();
+    let mut host = client_host();
     assert_eq!(host.settings().get("startup_complete"), Some(json!(["restructure_all_projects"])));
     assert_eq!(host.settings().get("agent_waiting_background"), Some(json!(["retitle_element"])));
     assert_eq!(host.settings().get("agent_approval_required"), Some(json!([])));

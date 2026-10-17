@@ -164,7 +164,7 @@ fn view_b08_enter_sends_the_draft_to_the_server_side_on_the_post_channel() {
         .collect();
     assert_eq!(sent.len(), 1);
     assert_eq!(sent[0].channel, "post");
-    assert_eq!(sent[0].to.plugin, PLUGIN);
+    assert_eq!(sent[0].to.plugin, ilium_plugin_sdk::types::PluginId(PLUGIN.to_string()));
     assert_eq!(sent[0].to.side, ilium_plugin_sdk::types::PluginSide::Server);
     assert_eq!(sent[0].payload, b"hello room");
 }

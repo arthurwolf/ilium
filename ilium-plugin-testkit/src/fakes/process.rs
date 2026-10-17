@@ -34,6 +34,10 @@ pub struct ChildRecord {
     pub stdin_lines: Vec<String>,
     /// Signals the plugin sent, by name (`"terminate"`, `"kill"`), in order.
     pub signals: Vec<String>,
+    /// `SpawnSpec::stdin_open` of the spawn (reference-wit.md section 5.14).
+    pub stdin_open: bool,
+    /// `SpawnSpec::line_mode` of the spawn (reference-wit.md section 5.14).
+    pub line_mode: bool,
 }
 
 /// Handle on the fake process service of a host.

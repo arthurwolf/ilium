@@ -3,7 +3,8 @@
 use std::time::Duration;
 
 use ilium_plugin_api::generated::host::HostJobs;
-use ilium_plugin_api::generated::types::{ErrorCode, FieldError, PluginError};
+use ilium_plugin_api::generated::host::FieldError;
+use ilium_plugin_api::generated::types::{ErrorCode, PluginError};
 use ilium_plugin_api::Tier;
 use ilium_plugin_host::testing::imports_fixture::{ImportsFixture, UserInput, UserSave};
 use serde_json::json;

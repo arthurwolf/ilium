@@ -45,7 +45,7 @@ fn lock_b17_a_failed_append_still_releases_the_lock() {
     let mut host = host_with_room();
     host.inject_failure(
         "fs.write",
-        ilium_plugin_sdk::types::PluginError::new(ilium_plugin_sdk::types::ErrorCode::Unavailable, "disk full"),
+        ilium_plugin_sdk::types::PluginError::new(ilium_plugin_sdk::types::ErrorCode::Io, "disk full"),
     );
     send(&mut host, "fails");
     assert!(host.fs().held_locks().is_empty());

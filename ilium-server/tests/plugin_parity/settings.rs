@@ -111,7 +111,7 @@ fn f_086_the_five_newest_logs_per_session_are_kept() {
 fn f_086_log_root_follows_the_environment_override() {
     for mode in MODES {
         let kernel = world_with_config(mode, "");
-        kernel.set_environment("ILIUM_DEBUG_LOG_DIR", "logs-here");
+        kernel.set_environment("ILIUM_DEBUG_LOG_DIR", Some("logs-here"));
         assert!(kernel.debug_log_root().ends_with("logs-here"), "{:?}", kernel.debug_log_root());
     }
 }
@@ -163,7 +163,7 @@ fn f_091_a_broken_config_file_keeps_the_previous_values_live() {
 fn f_091_config_dir_override_is_made_absolute() {
     for mode in MODES {
         let kernel = world_with_config(mode, "");
-        kernel.set_environment("ILIUM_CONFIG_DIR", "relative/dir");
+        kernel.set_environment("ILIUM_CONFIG_DIR", Some("relative/dir"));
         assert!(kernel.config_dir().is_absolute(), "{:?}", kernel.config_dir());
         assert!(kernel.config_dir().ends_with("relative/dir"));
     }

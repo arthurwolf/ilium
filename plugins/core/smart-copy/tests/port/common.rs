@@ -225,11 +225,11 @@ pub fn page_figure(index: usize) -> Vec<String> {
 
 // ---- helpers of the ports part ----
 
-use ilium_plugin_sdk::types::{Key, NodeId as PortNodeId, ScreenChangedEvent};
+use ilium_plugin_sdk::types::{GrabId, KeyEvent, NodeId as PortNodeId, ScreenChangedEvent};
 
 /// A key event by name.
 pub fn key(name: &str) -> Event {
-    Event::Key(Key::named(name))
+    Event::KeyPressed(KeyEvent { grab: GrabId(0), pane: None, chord: name.to_string(), repeat: false })
 }
 
 /// A server host showing these rows on a fresh terminal pane; returns the host and the pane id.

@@ -101,7 +101,8 @@ fn feature_070_a_path_outside_the_worktrees_scope_is_never_removed() {
 #[test]
 fn feature_070_the_main_checkout_is_never_removed() {
     let mut host = server_host();
-    remove(&mut host, json!({"path": host.project_root().to_string_lossy(), "branch": "master"}));
+    let root = host.project_root().to_string_lossy().into_owned();
+    remove(&mut host, json!({"path": root, "branch": "master"}));
     assert!(remove_calls(&mut host).is_empty());
 }
 

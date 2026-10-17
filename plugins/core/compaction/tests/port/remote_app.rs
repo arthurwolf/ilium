@@ -2,15 +2,14 @@
 //! compaction settings tab behaviour and persistence). Gaps: `open_settings_tab`,
 //! `settings_key`, `settings_click`, `settings_row_geometry`, `settings_dialog` (see ../API_GAPS_port.md).
 
-use std::time::Duration;
-
 use serde_json::{json, Value};
 
 use ilium_plugin_sdk::testing::FakeHost;
 
 use crate::common::*;
 
-const DEBOUNCE: Duration = Duration::from_millis(600);
+/// The settings auto-save debounce, in fake-clock milliseconds.
+const DEBOUNCE_MS: u64 = 600;
 
 fn tab() -> FakeHost {
     let mut host = client_host();
@@ -51,15 +50,15 @@ fn rapp_numeric_rows_wait_for_the_debounce_then_save_once() {
     assert!(host.settings_save_pending());
     host.settle();
     assert_eq!(saved(&mut host)["threshold_percent"].as_u64().unwrap_or(65), 65, "nothing saved yet");
-    host.advance_clock(DEBOUNCE - Duration::from_millis(1));
+    host.advance_clock(DEBOUNCE_MS - 1);
     host.settle();
     assert_eq!(saved(&mut host)["threshold_percent"].as_u64().unwrap_or(65), 65);
-    host.advance_clock(Duration::from_millis(1));
+    host.advance_clock(1);
     host.settle();
     assert_eq!(saved(&mut host)["threshold_percent"], 67);
     assert!(!host.settings_save_pending());
     let writes = host.settings_write_count();
-    host.advance_clock(Duration::from_secs(5));
+    host.advance_clock(5_000);
     host.settle();
     assert_eq!(host.settings_write_count(), writes, "saved once");
 }
@@ -174,7 +173,7 @@ fn rapp_keyboard_walks_the_rows_toggles_and_cycles_each_agent_technique() {
     }
     assert_eq!(host.settings_value("threshold"), json!(66));
     assert!(host.settings_save_pending());
-    host.advance_clock(DEBOUNCE);
+    host.advance_clock(DEBOUNCE_MS);
     host.settle();
     assert_eq!(saved(&mut host)["threshold_percent"], 66);
     let before = saved(&mut host);
@@ -239,7 +238,7 @@ fn rapp_mouse_toggles_steps_and_cycles_technique_rows_from_the_control_halves() 
     let prompt = host.settings_row_geometry("custom_prompt");
     host.settings_click(prompt.box_column + 8, prompt.first_line);
     assert!(host.prompt_editor_text().is_some());
-    host.advance_clock(DEBOUNCE);
+    host.advance_clock(DEBOUNCE_MS);
     host.settle();
     let loaded = saved(&mut host);
     assert_eq!(loaded["enabled"], true);

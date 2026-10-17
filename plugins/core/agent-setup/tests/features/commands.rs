@@ -43,8 +43,9 @@ fn command_063_refresh_works_when_invoked_from_the_client_event_path() {
     let mut host = server_host();
     host.deliver_one(Event::CommandInvoked(ilium_plugin_sdk::types::CommandInvokedEvent {
         command: "agent-setup.refresh".to_string(),
-        origin: "palette".to_string(),
-        args_json: "{}".to_string(),
+        origin: ilium_plugin_sdk::types::CommandOrigin::Palette,
+        arguments_json: "{}".to_string(),
+        context: ilium_plugin_sdk::types::CommandContext::default(),
     }));
     host.settle();
     assert!(get(&mut host, claude_file()).is_some());

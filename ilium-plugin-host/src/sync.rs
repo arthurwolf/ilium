@@ -11,3 +11,8 @@ pub use loom::sync::{Arc, Mutex};
 pub use std::sync::atomic::{AtomicU64, Ordering};
 #[cfg(not(feature = "loom"))]
 pub use std::sync::{Arc, Mutex};
+
+/// Constant-time byte comparison for secrets (reference-threat-model.md SEC-376).
+pub fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
+    unimplemented!("host::sync::constant_time_eq")
+}

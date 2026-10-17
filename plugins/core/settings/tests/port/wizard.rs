@@ -1,7 +1,7 @@
 //! Twins of ilium-client/src/onboarding/*: the guided setup runs as the OnboardingStep view
 //! "first-run" of the plugin; the host owns the step state machine (F-089, F-090).
 
-use ilium_plugin_sdk::types::{ActionKind, ActionValue, ViewTarget};
+use ilium_plugin_sdk::types::{ActionKind, ActionValue, ErrorCode, PluginError, ViewTarget};
 use serde_json::json;
 
 use crate::common::*;

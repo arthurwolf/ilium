@@ -38,3 +38,8 @@ pub struct PluginLinker {
 pub fn build_linker(world: World, grants: &[Grant]) -> Result<PluginLinker, HostError> {
     unimplemented!("host::linker::build_linker")
 }
+
+/// The cache key of a linker: side, tier and the sorted grants (reference-host-runtime.md HST-06x).
+pub fn linker_cache_key(side: ilium_plugin_api::Side, tier: ilium_plugin_api::Tier, grants: &[Grant]) -> String {
+    unimplemented!("host::linker::linker_cache_key")
+}

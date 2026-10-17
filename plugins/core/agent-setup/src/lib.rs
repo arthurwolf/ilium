@@ -4,6 +4,8 @@
 //! implementing the lifecycle, the handler and the exports its manifest lists. Every body is
 //! `unimplemented!` until the implementation phase moves the feature here.
 
+pub mod config_writer;
+
 use ilium_plugin_sdk::{Handler, Lifecycle, ServiceProvider, Views, ilium_plugin};
 use ilium_plugin_sdk::generated::exports::service_provider::ServiceCall;
 use ilium_plugin_sdk::generated::exports::service_provider::ServiceReply;

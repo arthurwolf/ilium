@@ -12,7 +12,7 @@ use ilium_plugin_sdk_core::primitives::terminal::{OutputFilter, Selection};
 use ilium_plugin_sdk_core::primitives::{SessionRef, SignatureSpec, TranscriptTurn};
 use ilium_plugin_sdk_core::types::{
     ActionKind, ActionValue, AgentModel, Color, DeactivationReason, Event, Outcome, PluginError,
-    RequestId, RequestRef, Submission, UiTree, ViewTarget,
+    PointerModifiers, RequestId, RequestRef, Submission, UiTree, ViewTarget,
 };
 use ilium_plugin_sdk_core::NativeEntry;
 use serde_json::Value;
@@ -1218,8 +1218,9 @@ impl FakeAgents {
         unimplemented!("harness.agents-transcript")
     }
 
-    /// Backups the plugin made of the pane's transcript.
-    pub fn transcript_backups(&self, _pane: u64) -> Vec<Vec<u8>> {
+    /// Backups the plugin made of the pane's transcript: `(file name, bytes)` per backup, in order
+    /// (core-plugin-compaction.md "Backups": `<name>.pre-compaction-<stamp>.bak`).
+    pub fn transcript_backups(&self, _pane: u64) -> Vec<(String, Vec<u8>)> {
         unimplemented!("harness.agents-transcript-backups")
     }
 
@@ -1264,8 +1265,9 @@ impl FakeTerminal {
         unimplemented!("harness.terminal-set-selection")
     }
 
-    /// Pointer claims the plugin made on a pane, in order (`None` releases).
-    pub fn pointer_claims(&self, _pane: u64) -> Vec<Option<String>> {
+    /// Pointer claims the plugin made on a pane, in order: the claimed modifiers, `None` for a
+    /// release (primitives-terminal-pointer.md).
+    pub fn pointer_claims(&self, _pane: u64) -> Vec<Option<PointerModifiers>> {
         unimplemented!("harness.terminal-pointer-claims")
     }
 }
@@ -1429,6 +1431,12 @@ pub struct KeyGrab {
     pub id: u64,
     /// Whether it was released.
     pub released: bool,
+    /// `GrabSpec::chords` of the grab (reference-wit.md section 5.22).
+    pub chords: Vec<String>,
+    /// `GrabSpec::pane` of the grab: the pane id, or `None` for a global grab.
+    pub pane: Option<u64>,
+    /// `GrabSpec::until_release` of the grab.
+    pub until_release: bool,
 }
 
 /// The key-grab fake (reference-test-harness.md "Fakes").

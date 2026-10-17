@@ -179,6 +179,7 @@ async fn focusing_a_finished_agent_clears_its_bell_through_live_ipc() {
         &mut client,
         &ClientRequest::Attach {
             session: "focus-acknowledgement-test".to_string(),
+            hello: Default::default(),
         },
     )
     .await
@@ -223,6 +224,7 @@ async fn focusing_a_finished_agent_clears_its_bell_through_live_ipc() {
         &mut observer,
         &ClientRequest::Attach {
             session: "focus-acknowledgement-test".to_string(),
+            hello: Default::default(),
         },
     )
     .await
@@ -341,6 +343,7 @@ async fn a_real_process_named_codex_preserves_its_pursuing_goal_status_through_t
         &mut client,
         &ClientRequest::Attach {
             session: "live-agent-detection-test".to_string(),
+            hello: Default::default(),
         },
     )
     .await
@@ -888,6 +891,7 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
         &mut client,
         &ClientRequest::Attach {
             session: "live-session-id-discovery-test".to_string(),
+            hello: Default::default(),
         },
     )
     .await
@@ -1078,6 +1082,7 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
         &mut client,
         &ClientRequest::Attach {
             session: "live-session-id-discovery-test".to_string(),
+            hello: Default::default(),
         },
     )
     .await
@@ -1157,6 +1162,7 @@ async fn a_resumed_claude_processs_session_id_is_discovered_and_broadcast() {
         &mut client,
         &ClientRequest::Attach {
             session: "live-session-id-discovery-test".to_string(),
+            hello: Default::default(),
         },
     )
     .await
@@ -1207,6 +1213,7 @@ async fn a_resumed_codex_processs_session_id_is_discovered_and_broadcast() {
         &mut client,
         &ClientRequest::Attach {
             session: "live-codex-session-id-discovery-test".to_string(),
+            hello: Default::default(),
         },
     )
     .await
@@ -1311,6 +1318,7 @@ async fn progress_completion_notifies_a_codex_agent_without_touching_its_goal() 
         &mut client,
         &ClientRequest::Attach {
             session: "live-progress-goal-test".to_string(),
+            hello: Default::default(),
         },
     )
     .await
@@ -1504,6 +1512,7 @@ async fn a_codex_processs_open_transcript_is_discovered_and_broadcast() {
         &mut client,
         &ClientRequest::Attach {
             session: "live-open-transcript-discovery-test".to_string(),
+            hello: Default::default(),
         },
     )
     .await
@@ -1585,6 +1594,7 @@ async fn codex_clear_rebinds_the_same_process_to_its_new_open_transcript() {
         &mut client,
         &ClientRequest::Attach {
             session: "live-codex-clear-session-transition-test".to_string(),
+            hello: Default::default(),
         },
     )
     .await
@@ -1940,6 +1950,7 @@ async fn codex_clear_rebinds_the_same_process_to_its_new_open_transcript() {
         &mut reattached_client,
         &ClientRequest::Attach {
             session: "live-codex-clear-session-transition-test".to_string(),
+            hello: Default::default(),
         },
     )
     .await
@@ -1999,6 +2010,7 @@ async fn claude_resume_full_session_prompt_is_auto_answered() {
         &mut client,
         &ClientRequest::Attach {
             session: "auto-resume-prompt-test".to_string(),
+            hello: Default::default(),
         },
     )
     .await

@@ -89,8 +89,9 @@ impl ServerKernel {
         unimplemented!("server::plugin_host::ServerKernel::write_project_file")
     }
 
-    /// Sets an environment variable the server sees.
-    pub fn set_environment(&self, name: &str, value: &str) {
+    /// Sets (`Some`) or unsets (`None`) an environment variable the server sees
+    /// (parity-and-coverage.md, api-panes.md PAN-00x shell resolution).
+    pub fn set_environment(&self, name: &str, value: Option<&str>) {
         unimplemented!("server::plugin_host::ServerKernel::set_environment")
     }
 
@@ -375,5 +376,173 @@ impl ServerPluginHost {
     /// Reverse order within the shutdown budget.
     pub fn shutdown(&self) -> ShutdownReport {
         unimplemented!("server::plugin_host::ServerPluginHost::shutdown")
+    }
+}
+
+/// What identifies a pane across a process replacement: id, title, place and size
+/// (api-pane-lifecycle.md PAN-00x).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaneIdentity {
+    /// The node id.
+    pub node: NodeId,
+    /// The title.
+    pub title: String,
+    /// The parent node and index.
+    pub place: (Option<NodeId>, usize),
+    /// Columns and rows.
+    pub size: (u16, u16),
+}
+
+impl ServerKernel {
+    /// A kernel over a test tree holding a running, a restored, an exited and a neighbour pane,
+    /// with `plugin` holding `grants` (api-panes.md, api-pane-lifecycle.md).
+    pub fn for_test_world(plugin: &str, grants: &[&str]) -> ServerKernel {
+        unimplemented!("server::plugin_host::ServerKernel::for_test_world")
+    }
+
+    // ---- Pane lifecycle observers (api-pane-lifecycle.md) ----------------------------------
+
+    /// The lifecycle states a pane passed through, in order.
+    pub fn lifecycle_events(&self, pane: NodeId) -> Vec<ilium_plugin_api::generated::types::PaneLifecycleState> {
+        unimplemented!("server::plugin_host::ServerKernel::lifecycle_events")
+    }
+
+    /// The plugin that caused each lifecycle event (`None` for the user or the kernel).
+    pub fn lifecycle_event_causes(&self, pane: NodeId) -> Vec<Option<String>> {
+        unimplemented!("server::plugin_host::ServerKernel::lifecycle_event_causes")
+    }
+
+    /// Makes the kernel behave as on Windows (signals unsupported).
+    pub fn pretend_platform_windows(&self) {
+        unimplemented!("server::plugin_host::ServerKernel::pretend_platform_windows")
+    }
+
+    /// The identity a pane keeps across a process replacement.
+    pub fn pane_identity(&self, pane: NodeId) -> PaneIdentity {
+        unimplemented!("server::plugin_host::ServerKernel::pane_identity")
+    }
+
+    /// The working directory of a pane.
+    pub fn pane_cwd(&self, pane: NodeId) -> PathBuf {
+        unimplemented!("server::plugin_host::ServerKernel::pane_cwd")
+    }
+
+    /// Whether a node is in the tree.
+    pub fn node_exists(&self, node: NodeId) -> bool {
+        unimplemented!("server::plugin_host::ServerKernel::node_exists")
+    }
+
+    /// Whether a pane shows its process's exit status.
+    pub fn pane_shows_exit_status(&self, pane: NodeId) -> bool {
+        unimplemented!("server::plugin_host::ServerKernel::pane_shows_exit_status")
+    }
+
+    /// Makes the pane's process ignore the terminate signal.
+    pub fn make_process_ignore_terminate(&self, pane: NodeId) {
+        unimplemented!("server::plugin_host::ServerKernel::make_process_ignore_terminate")
+    }
+
+    /// Milliseconds between the terminate and the kill signal sent to a pane's process.
+    pub fn kill_was_sent_after_ms(&self, pane: NodeId) -> u64 {
+        unimplemented!("server::plugin_host::ServerKernel::kill_was_sent_after_ms")
+    }
+
+    /// A fingerprint of the whole tree (structure, titles, sizes).
+    pub fn tree_fingerprint(&self) -> String {
+        unimplemented!("server::plugin_host::ServerKernel::tree_fingerprint")
+    }
+
+    /// The restructure token of a restructure outcome (api-pane-lifecycle.md PAN-023).
+    pub fn last_restructure_token(&self, outcome: &ilium_plugin_api::generated::types::Outcome) -> u64 {
+        unimplemented!("server::plugin_host::ServerKernel::last_restructure_token")
+    }
+
+    /// The revision counter of a node.
+    pub fn node_revision(&self, node: NodeId) -> u64 {
+        unimplemented!("server::plugin_host::ServerKernel::node_revision")
+    }
+
+    /// Sets a manual icon on a node, as the user would.
+    pub fn set_manual_icon(&self, node: NodeId, icon: &str) {
+        unimplemented!("server::plugin_host::ServerKernel::set_manual_icon")
+    }
+
+    /// The log lines of a plugin.
+    pub fn plugin_log(&self, plugin: &str) -> Vec<String> {
+        unimplemented!("server::plugin_host::ServerKernel::plugin_log")
+    }
+
+    // ---- Panes (api-panes.md) ---------------------------------------------------------------
+
+    /// Creates a pane as the user would and returns its node.
+    pub fn create_pane_for_test(&self) -> NodeId {
+        unimplemented!("server::plugin_host::ServerKernel::create_pane_for_test")
+    }
+
+    /// The pane info a plugin sees for a node, if it is a pane.
+    pub fn pane_info(&self, node: NodeId) -> Option<ilium_plugin_api::generated::types::PaneInfo> {
+        unimplemented!("server::plugin_host::ServerKernel::pane_info")
+    }
+
+    /// Restores a pane from a snapshot that carries no size.
+    pub fn restore_pane_without_saved_size(&self, pane: NodeId) {
+        unimplemented!("server::plugin_host::ServerKernel::restore_pane_without_saved_size")
+    }
+
+    /// Starts the process of a restored pane.
+    pub fn start_restored_process(&self, pane: NodeId) {
+        unimplemented!("server::plugin_host::ServerKernel::start_restored_process")
+    }
+
+    /// The program of the most recently spawned pane process.
+    pub fn last_spawned_program(&self) -> Option<String> {
+        unimplemented!("server::plugin_host::ServerKernel::last_spawned_program")
+    }
+
+    /// The number of panes in the tree.
+    pub fn pane_count(&self) -> usize {
+        unimplemented!("server::plugin_host::ServerKernel::pane_count")
+    }
+
+    // ---- Detection loop (reference-host-scheduling.md HST-450..455) ------------------------
+
+    /// Runs one detection tick over every pane.
+    pub fn run_detection_tick(&self) {
+        unimplemented!("server::plugin_host::ServerKernel::run_detection_tick")
+    }
+
+    /// Runs one detection tick with the named fixture detector plugin.
+    pub fn run_detection_tick_with_fixture_detector(&self, fixture: &str) {
+        unimplemented!("server::plugin_host::ServerKernel::run_detection_tick_with_fixture_detector")
+    }
+
+    /// The thread names the detector calls ran on.
+    pub fn detector_thread_names(&self) -> Vec<String> {
+        unimplemented!("server::plugin_host::ServerKernel::detector_thread_names")
+    }
+
+    /// The thread name of the detection loop.
+    pub fn detection_loop_thread_name(&self) -> String {
+        unimplemented!("server::plugin_host::ServerKernel::detection_loop_thread_name")
+    }
+
+    /// Makes every detector call block for `ms`.
+    pub fn set_detector_block_ms(&self, ms: u64) {
+        unimplemented!("server::plugin_host::ServerKernel::set_detector_block_ms")
+    }
+
+    /// Makes the detector calls of one plugin block for `ms`.
+    pub fn set_detector_block_ms_for(&self, plugin: &str, ms: u64) {
+        unimplemented!("server::plugin_host::ServerKernel::set_detector_block_ms_for")
+    }
+
+    /// The number of detector calls the last tick made.
+    pub fn detector_calls_in_last_tick(&self) -> usize {
+        unimplemented!("server::plugin_host::ServerKernel::detector_calls_in_last_tick")
+    }
+
+    /// Waits up to `timeout` for a detector call of `plugin`; true when it happened.
+    pub fn wait_for_detector_call(&self, plugin: &str, timeout: std::time::Duration) -> bool {
+        unimplemented!("server::plugin_host::ServerKernel::wait_for_detector_call")
     }
 }

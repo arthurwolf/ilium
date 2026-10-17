@@ -111,3 +111,13 @@ impl EnableFlags {
         unimplemented!("host::registry::EnableFlags::set_enabled")
     }
 }
+
+/// The package download folder under the cache directory (reference-install-and-update.md PKG-267).
+pub fn downloads_dir(cache: &Path) -> PathBuf {
+    unimplemented!("host::registry::downloads_dir")
+}
+
+/// The offline cache folder of one registry URL under the cache directory (PKG-267).
+pub fn registry_cache_dir(cache: &Path, url: &str) -> PathBuf {
+    unimplemented!("host::registry::registry_cache_dir")
+}

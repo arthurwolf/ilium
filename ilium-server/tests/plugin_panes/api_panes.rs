@@ -9,7 +9,18 @@ use crate::common::*;
 const PANES: &[&str] = &["panes.read", "terminal.write", "panes.signal", "panes.lifecycle"];
 
 fn send_input(pane: NodeId) -> Intent {
-    Intent::SendInput(SendInputSpec { pane, text: "x".into(), delivery: Delivery::Raw, prompt_epoch: None, stages: Vec::new() })
+    Intent::SendInput(SendInputSpec {
+        pane,
+        text: "x".into(),
+        delivery: Delivery::Typed,
+        prompt_epoch: None,
+        stages: Vec::new(),
+        raw: None,
+        mouse: None,
+        if_current: None,
+        lock_user_input: false,
+        journal: false,
+    })
 }
 
 fn signal(pane: NodeId) -> Intent {

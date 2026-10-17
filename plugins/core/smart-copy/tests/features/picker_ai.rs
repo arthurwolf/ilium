@@ -1,6 +1,6 @@
 //! F-065/F-066: the picker keys, the clipboard writes and the inference ranking.
 
-use ilium_plugin_sdk::types::{Event, Intent, Key};
+use ilium_plugin_sdk::types::{Event, GrabId, Intent, KeyEvent};
 
 use crate::common::{
     add_terminal_pane, candidate_lines, candidates_message, client_host, intents, palette_command,
@@ -8,7 +8,7 @@ use crate::common::{
 };
 
 fn key(name: &str) -> Event {
-    Event::Key(Key::named(name))
+    Event::KeyPressed(KeyEvent { grab: GrabId(0), pane: None, chord: name.to_string(), repeat: false })
 }
 
 fn open_picker(lines: &[&str]) -> ilium_plugin_sdk::testing::FakeHost {
@@ -88,13 +88,13 @@ fn feature_066_command_asks_inference_once_with_the_ranking_prompt() {
     host.settle();
     let requests = host.inference().requests();
     assert_eq!(requests.len(), 1);
-    assert_eq!(requests[0].purpose, "smart-copy");
-    assert_eq!(requests[0].messages[0].role, "system");
+    assert_eq!(requests[0].1.purpose, "smart-copy");
+    assert_eq!(requests[0].1.messages[0].role, "system");
     assert_eq!(
-        requests[0].messages[0].content,
+        requests[0].1.messages[0].content,
         "Return the three most useful strings to copy, one per line."
     );
-    assert!(requests[0].messages[1].content.contains("src/lib.rs"));
+    assert!(requests[0].1.messages[1].content.contains("src/lib.rs"));
 }
 
 /// REQ: F-066
@@ -135,6 +135,6 @@ fn feature_066_inference_request_leaves_max_output_tokens_and_schema_unset() {
     host.deliver_one(palette_command("smart-copy", Some(pane)));
     host.settle();
     let request = &host.inference().requests()[0];
-    assert_eq!(request.max_output_tokens, None);
-    assert_eq!(request.json_schema, None);
+    assert_eq!(request.1.max_output_tokens, None);
+    assert_eq!(request.1.json_schema, None);
 }
