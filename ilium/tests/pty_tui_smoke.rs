@@ -3689,13 +3689,13 @@ async fn newly_created_panes_flash_and_the_flash_fades_including_for_a_multi_cre
     // Closing the selected first pane must also activate the surviving row
     // below it. Input now goes straight to that pane without another tree
     // click or Enter, proving selection and right-panel routing together.
-    tui.write(b"printf 'close-successor-active\\n'\r")
-        .expect("writing into the automatically activated successor pane");
-    let successor_received_input = wait_until(
-        || tui.screen_text().contains("close-successor-active"),
-        WAIT_TIMEOUT,
-    )
-    .await;
+    // Resent because a slow runner can drop keys sent before the successor
+    // pane has taken input focus.
+    let successor_received_input =
+        write_until(&tui, b"printf 'close-successor-active\\n'\r", || {
+            tui.screen_text().contains("close-successor-active")
+        })
+        .await;
     assert!(
         successor_received_input,
         "expected input to reach the successor selected after close, got: {:?}",

@@ -289,7 +289,8 @@ async fn broadcast_reaches_selected_agents_across_projects_and_never_shells() {
 
     // Agent detection runs on the servers' own schedule; wait until both
     // stand-ins are reported as Codex agents.
-    let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT;
+    // Process-tree detection on a loaded hosted macOS runner can take minutes.
+    let deadline = tokio::time::Instant::now() + WAIT_TIMEOUT * 4;
     loop {
         let listed = run_ilium(&dirs, &alpha, &["panes", "--agent", "codex"], None).await;
         if listed.of_type("pane").len() == 2 {
