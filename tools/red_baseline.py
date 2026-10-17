@@ -59,7 +59,8 @@ def parse_log(path):
 
 
 def read_allowlist(path):
-    """Exact `name` / `target::name` entries, plus `re:<regex>` lines matched against the bare test name."""
+    """Exact `name` / `target::name` entries, `re:<regex>` lines matched against the test name, and
+    `crate:<regex>` lines matched (full match) against the test binary name without its hash."""
     if path is None:
         return set()
     try:
@@ -72,7 +73,13 @@ def read_allowlist(path):
 def is_allowed(entry, allow):
     if entry["name"] in allow or f"{entry['target']}::{entry['name']}" in allow:
         return True
-    return any(item.startswith("re:") and re.search(item[3:], entry["name"]) for item in allow)
+    binary = re.sub(r"-[0-9a-f]{16}$", "", entry["crate"].rsplit("/", 1)[-1])
+    for item in allow:
+        if item.startswith("re:") and re.search(item[3:], entry["name"]):
+            return True
+        if item.startswith("crate:") and re.fullmatch(item[6:], binary):
+            return True
+    return False
 
 
 def attach_ids(tests, root):
