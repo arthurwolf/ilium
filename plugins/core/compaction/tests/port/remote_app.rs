@@ -18,7 +18,9 @@ fn tab() -> FakeHost {
 }
 
 fn saved(host: &mut FakeHost) -> Value {
-    host.settings().get("remote-compaction").unwrap_or_else(|| json!({}))
+    host.settings()
+        .get("remote-compaction")
+        .unwrap_or_else(|| json!({}))
 }
 
 fn dismissed_tab() -> FakeHost {
@@ -49,10 +51,17 @@ fn rapp_numeric_rows_wait_for_the_debounce_then_save_once() {
     host.settings_adjust_row("threshold", 1);
     assert!(host.settings_save_pending());
     host.settle();
-    assert_eq!(saved(&mut host)["threshold_percent"].as_u64().unwrap_or(65), 65, "nothing saved yet");
+    assert_eq!(
+        saved(&mut host)["threshold_percent"].as_u64().unwrap_or(65),
+        65,
+        "nothing saved yet"
+    );
     host.advance_clock(DEBOUNCE_MS - 1);
     host.settle();
-    assert_eq!(saved(&mut host)["threshold_percent"].as_u64().unwrap_or(65), 65);
+    assert_eq!(
+        saved(&mut host)["threshold_percent"].as_u64().unwrap_or(65),
+        65
+    );
     host.advance_clock(1);
     host.settle();
     assert_eq!(saved(&mut host)["threshold_percent"], 67);
@@ -126,13 +135,27 @@ fn rapp_the_configuration_command_is_byte_accounted_even_at_the_largest_prompt()
 fn rapp_keyboard_closes_the_banner_for_good_and_ignores_stray_arrows() {
     for dismiss in ["x", "Delete", "Enter", " "] {
         let mut host = tab();
-        assert_eq!(host.settings_rows().first().map(String::as_str), Some("privacy_banner"));
+        assert_eq!(
+            host.settings_rows().first().map(String::as_str),
+            Some("privacy_banner")
+        );
         host.settings_key("Right");
-        assert_ne!(saved(&mut host)["privacy_banner_dismissed"], true, "arrows never close it");
+        assert_ne!(
+            saved(&mut host)["privacy_banner_dismissed"],
+            true,
+            "arrows never close it"
+        );
         host.settings_key(dismiss);
         host.settle();
-        assert_eq!(saved(&mut host)["privacy_banner_dismissed"], true, "{dismiss}");
-        assert_eq!(host.settings_rows().first().map(String::as_str), Some("enabled"));
+        assert_eq!(
+            saved(&mut host)["privacy_banner_dismissed"],
+            true,
+            "{dismiss}"
+        );
+        assert_eq!(
+            host.settings_rows().first().map(String::as_str),
+            Some("enabled")
+        );
         assert_eq!(host.settings_selected_row(), 0);
     }
 }
@@ -157,7 +180,9 @@ fn rapp_keyboard_walks_the_rows_toggles_and_cycles_each_agent_technique() {
         host.settings_key("Left");
         assert_eq!(host.settings_value(&row), start);
         host.settings_key("Enter");
-        let dialog = host.settings_dialog().expect("Enter opens the technique catalogue");
+        let dialog = host
+            .settings_dialog()
+            .expect("Enter opens the technique catalogue");
         assert_eq!(dialog["selected_id"], start);
         host.settings_dialog_choose(next.as_str().expect("technique id"));
         host.settle();
@@ -206,12 +231,19 @@ fn rapp_mouse_click_on_the_x_closes_the_banner_for_good_and_other_clicks_do_not(
     let mut host = tab();
     let banner = host.settings_row_geometry("privacy_banner");
     host.settings_click(banner.box_column + 6, banner.first_line + 1);
-    assert_ne!(saved(&mut host)["privacy_banner_dismissed"], true, "a click off the button only selects the row");
+    assert_ne!(
+        saved(&mut host)["privacy_banner_dismissed"],
+        true,
+        "a click off the button only selects the row"
+    );
     assert_eq!(host.settings_selected_row(), 0);
     host.settings_click(banner.control_column + 1, banner.control_line);
     host.settle();
     assert_eq!(saved(&mut host)["privacy_banner_dismissed"], true);
-    assert_eq!(host.settings_rows().first().map(String::as_str), Some("enabled"));
+    assert_eq!(
+        host.settings_rows().first().map(String::as_str),
+        Some("enabled")
+    );
 }
 
 /// REQ: PORT:ilium-client/src/remote_compaction_app.rs::mouse_toggles_steps_and_cycles_technique_rows_from_the_control_halves
@@ -231,7 +263,11 @@ fn rapp_mouse_toggles_steps_and_cycles_technique_rows_from_the_control_halves() 
     assert_eq!(host.settings_value("threshold"), json!(64));
     let threshold = host.settings_row_geometry("threshold");
     host.settings_click(threshold.control_column + 4, threshold.control_line + 1);
-    assert_eq!(host.settings_value("threshold"), json!(64), "the description line is inert");
+    assert_eq!(
+        host.settings_value("threshold"),
+        json!(64),
+        "the description line is inert"
+    );
     let claude = host.settings_row_geometry("technique:claude");
     host.settings_click(claude.value_column, claude.control_line);
     assert_eq!(host.settings_value("technique:claude"), json!("codex"));
@@ -252,7 +288,9 @@ fn rapp_numeric_star_accepts_direct_entry_and_persists_remote_compaction_value()
     let mut host = dismissed_tab();
     let threshold = host.settings_row_geometry("threshold");
     host.settings_click(threshold.open_column, threshold.control_line);
-    let dialog = host.settings_dialog().expect("star opens direct numeric entry");
+    let dialog = host
+        .settings_dialog()
+        .expect("star opens direct numeric entry");
     assert_eq!(dialog["kind"], "number");
     for _ in 0..dialog["draft"].as_str().unwrap_or_default().chars().count() {
         host.settings_dialog_key("Backspace");
@@ -276,10 +314,17 @@ fn rapp_technique_plus_opens_full_catalog_and_pointer_selection_persists() {
     host.settings_set_value("technique:claude", json!(selected));
     let claude = host.settings_row_geometry("technique:claude");
     host.settings_click(claude.open_column, claude.control_line);
-    let dialog = host.settings_dialog().expect("plus opens the complete catalog");
+    let dialog = host
+        .settings_dialog()
+        .expect("plus opens the complete catalog");
     assert_eq!(dialog["target"], "technique:claude");
     assert_eq!(dialog["options"].as_array().unwrap().len(), all.len());
-    let index = dialog["options"].as_array().unwrap().iter().position(|o| o["id"] == wanted).expect("in catalog");
+    let index = dialog["options"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .position(|o| o["id"] == wanted)
+        .expect("in catalog");
     host.settings_dialog_click_option(index);
     host.settle();
     assert_eq!(saved(&mut host)["claude_technique"], json!(wanted));
@@ -291,7 +336,10 @@ fn rapp_the_prompt_row_opens_the_editor_on_the_stored_text() {
     let mut host = tab();
     host.settings_commit_prompt("Line one\nLine two");
     host.settings_adjust_row("custom_prompt", 0);
-    assert_eq!(host.prompt_editor_text().as_deref(), Some("Line one\nLine two"));
+    assert_eq!(
+        host.prompt_editor_text().as_deref(),
+        Some("Line one\nLine two")
+    );
     host.settings_commit_prompt("Changed");
     host.settle();
     assert_eq!(saved(&mut host)["custom_prompt"], "Changed");

@@ -28,7 +28,8 @@ pub fn manifest_value() -> serde_json::Value {
 }
 
 pub fn page_text() -> String {
-    std::fs::read_to_string(manual::pages_dir().join("core-plugin-titles.md")).expect("page is readable")
+    std::fs::read_to_string(manual::pages_dir().join("core-plugin-titles.md"))
+        .expect("page is readable")
 }
 
 pub fn pages_text(name: &str) -> String {
@@ -47,7 +48,9 @@ pub fn json_blocks(page: &str) -> Vec<String> {
     let mut rest = page;
     while let Some(start) = rest.find("```json\n") {
         let after = &rest[start + "```json\n".len()..];
-        let Some(end) = after.find("\n```") else { break };
+        let Some(end) = after.find("\n```") else {
+            break;
+        };
         blocks.push(after[..end].to_string());
         rest = &after[end + 4..];
     }
@@ -60,7 +63,9 @@ pub fn term_blocks(page: &str) -> Vec<String> {
     let mut rest = page;
     while let Some(start) = rest.find("<pre class=\"term\">") {
         let after = &rest[start + "<pre class=\"term\">".len()..];
-        let Some(end) = after.find("</pre>") else { break };
+        let Some(end) = after.find("</pre>") else {
+            break;
+        };
         let mut text = String::new();
         let mut in_tag = false;
         for symbol in after[..end].chars() {
@@ -71,7 +76,10 @@ pub fn term_blocks(page: &str) -> Vec<String> {
                 _ => {}
             }
         }
-        let text = text.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">");
+        let text = text
+            .replace("&amp;", "&")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">");
         blocks.push(text.trim_end_matches('\n').to_string());
         rest = &after[end + 6..];
     }
@@ -80,12 +88,17 @@ pub fn term_blocks(page: &str) -> Vec<String> {
 
 /// The cells of the first table row of a page that starts with `prefix`.
 pub fn table_row(page: &str, prefix: &str) -> Vec<String> {
-    let row = page.lines().find(|line| line.starts_with(prefix)).expect("table row exists");
+    let row = page
+        .lines()
+        .find(|line| line.starts_with(prefix))
+        .expect("table row exists");
     row.split('|').map(|cell| cell.trim().to_string()).collect()
 }
 
 pub fn server_host() -> FakeHost {
-    FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("server")
+    FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("server")
 }
 
 pub fn activated_server() -> FakeHost {
@@ -113,11 +126,20 @@ pub fn command_event(name: &str) -> Event {
 }
 
 pub fn completion(text: &str) -> Completion {
-    Completion { text: text.to_string(), model: "test-model".to_string(), input_tokens: 10, output_tokens: 4 }
+    Completion {
+        text: text.to_string(),
+        model: "test-model".to_string(),
+        input_tokens: 10,
+        output_tokens: 4,
+    }
 }
 
 pub fn plugin_error(code: ErrorCode) -> PluginError {
-    PluginError { code, message: "test".to_string(), retry_after_ms: None }
+    PluginError {
+        code,
+        message: "test".to_string(),
+        retry_after_ms: None,
+    }
 }
 
 /// Submits a prompt for `node`, answers the one inference request with `reply` and settles.
@@ -125,7 +147,10 @@ pub fn title_for_prompt(host: &mut FakeHost, node: u64, prompt: &str, reply: &st
     host.deliver_one(prompt_event(node, prompt));
     host.settle();
     let requests = host.inference_requests();
-    let (id, _) = requests.last().cloned().expect("an inference request was made");
+    let (id, _) = requests
+        .last()
+        .cloned()
+        .expect("an inference request was made");
     host.complete_inference(id, completion(reply));
     host.settle();
 }
@@ -171,11 +196,17 @@ pub fn reverts(submissions: &[Submission]) -> Vec<u64> {
 }
 
 pub fn outcome_event(correlation: u64, outcome: Outcome) -> Event {
-    Event::RequestCompleted(RequestResult { request: RequestRef::Submission(correlation), outcome })
+    Event::RequestCompleted(RequestResult {
+        request: RequestRef::Submission(correlation),
+        outcome,
+    })
 }
 
 pub fn call_event(id: RequestId, outcome: Outcome) -> Event {
-    Event::RequestCompleted(RequestResult { request: RequestRef::Call(id), outcome })
+    Event::RequestCompleted(RequestResult {
+        request: RequestRef::Call(id),
+        outcome,
+    })
 }
 
 pub fn inferred() -> TitleSource {

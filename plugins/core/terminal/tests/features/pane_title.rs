@@ -1,17 +1,28 @@
 //! F-018 pane title from the terminal: the page sample "Pane title from the terminal".
 //! OSC titles rename the pane with `source: inferred`; a manual name always wins.
 
-use ilium_plugin_sdk::types::{Event, Intent, NodeId, PaneTitleChangedEvent, RenameNodeSpec, TitleOrigin, TitleSource};
+use ilium_plugin_sdk::types::{
+    Event, Intent, NodeId, PaneTitleChangedEvent, RenameNodeSpec, TitleOrigin, TitleSource,
+};
 use proptest::prelude::*;
 
 use crate::common::{intents, server_host};
 
 fn title_event(node: u64, title: &str, source: TitleOrigin) -> Event {
-    Event::PaneTitleChanged(PaneTitleChangedEvent { node: NodeId(node), title: title.to_string(), source })
+    Event::PaneTitleChanged(PaneTitleChangedEvent {
+        node: NodeId(node),
+        title: title.to_string(),
+        source,
+    })
 }
 
 fn rename(node: u64, title: &str) -> Intent {
-    Intent::RenameNode(RenameNodeSpec { node: NodeId(node), title: title.to_string(), source: TitleSource::Inferred, expected_revision: None })
+    Intent::RenameNode(RenameNodeSpec {
+        node: NodeId(node),
+        title: title.to_string(),
+        source: TitleSource::Inferred,
+        expected_revision: None,
+    })
 }
 
 /// REQ: F-018
@@ -48,21 +59,28 @@ fn feature_018_the_rename_carries_no_expected_revision() {
 #[test]
 fn feature_018_a_manual_title_is_never_renamed() {
     let mut host = server_host();
-    assert!(host.deliver(vec![title_event(7, "my build", TitleOrigin::Manual)]).is_empty());
+    assert!(host
+        .deliver(vec![title_event(7, "my build", TitleOrigin::Manual)])
+        .is_empty());
 }
 
 /// REQ: F-018
 #[test]
 fn feature_018_an_inferred_title_is_never_renamed_again() {
     let mut host = server_host();
-    assert!(host.deliver(vec![title_event(7, "guess", TitleOrigin::Inferred)]).is_empty());
+    assert!(host
+        .deliver(vec![title_event(7, "guess", TitleOrigin::Inferred)])
+        .is_empty());
 }
 
 /// REQ: F-018
 #[test]
 fn feature_018_the_rename_is_keyed_by_the_pane_so_repeats_collapse() {
     let mut host = server_host();
-    let submissions = host.deliver(vec![title_event(7, "a", TitleOrigin::Osc), title_event(7, "b", TitleOrigin::Osc)]);
+    let submissions = host.deliver(vec![
+        title_event(7, "a", TitleOrigin::Osc),
+        title_event(7, "b", TitleOrigin::Osc),
+    ]);
     assert_eq!(submissions.len(), 2);
     assert_eq!(submissions[0].dedup_key.as_deref(), Some("osc-title-7"));
     assert_eq!(submissions[1].dedup_key.as_deref(), Some("osc-title-7"));
@@ -72,7 +90,10 @@ fn feature_018_the_rename_is_keyed_by_the_pane_so_repeats_collapse() {
 #[test]
 fn feature_018_different_panes_get_different_keys() {
     let mut host = server_host();
-    let submissions = host.deliver(vec![title_event(7, "a", TitleOrigin::Osc), title_event(8, "a", TitleOrigin::Osc)]);
+    let submissions = host.deliver(vec![
+        title_event(7, "a", TitleOrigin::Osc),
+        title_event(8, "a", TitleOrigin::Osc),
+    ]);
     assert_eq!(submissions[0].dedup_key.as_deref(), Some("osc-title-7"));
     assert_eq!(submissions[1].dedup_key.as_deref(), Some("osc-title-8"));
 }
@@ -86,7 +107,10 @@ fn feature_018_titles_of_several_panes_rename_in_event_order() {
         title_event(2, "two", TitleOrigin::Manual),
         title_event(4, "four", TitleOrigin::Osc),
     ]);
-    assert_eq!(intents(&submissions), vec![rename(9, "nine"), rename(4, "four")]);
+    assert_eq!(
+        intents(&submissions),
+        vec![rename(9, "nine"), rename(4, "four")]
+    );
 }
 
 /// REQ: F-018

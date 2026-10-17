@@ -11,7 +11,10 @@ use serde_json::json;
 fn a_ready_gpu_can_be_selected_from_the_keyboard_twin() {
     scene_rows_hold();
     let options = manifest_row("scene")["options"].clone();
-    assert_eq!(options, json!([{ "value": "stars", "title": "Stars" }, { "value": "clouds", "title": "Clouds" }]));
+    assert_eq!(
+        options,
+        json!([{ "value": "stars", "title": "Stars" }, { "value": "clouds", "title": "Clouds" }])
+    );
     let mut host = activated_client();
     assert!(host.settings().set("scene", json!("clouds")).is_ok());
     assert_eq!(host.settings().get("scene"), Some(json!("clouds")));

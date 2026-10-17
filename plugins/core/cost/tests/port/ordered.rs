@@ -10,7 +10,10 @@ const MIB: u64 = 1024 * 1024;
 /// REQ: PORT:ilium-client/src/filesystem/ordered.rs::original_configuration_cost_refuses_seventh_write_locally_before_capture
 #[test]
 fn port_ordered_original_configuration_cost_refuses_seventh_write_locally_before_capture() {
-    let reply = client("filesystem.ordered-config-writes", json!({ "enqueue": 7, "retained_limit_bytes": 64 * MIB }));
+    let reply = client(
+        "filesystem.ordered-config-writes",
+        json!({ "enqueue": 7, "retained_limit_bytes": 64 * MIB }),
+    );
     assert_eq!(reply["cost"]["input_bytes"], json!(8 * MIB));
     assert_eq!(reply["cost"]["result_bytes"], json!(2 * MIB));
     assert_eq!(reply["pending_after_six"], json!(6));

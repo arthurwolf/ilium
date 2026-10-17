@@ -48,7 +48,12 @@ fn panel_084_a_button_row_offers_test_provider() {
 #[test]
 fn panel_033_choosing_a_provider_writes_only_the_provider_key() {
     let mut host = client_host();
-    host.send_action(tab(), "provider", ActionKind::Changed, ActionValue::Index(2));
+    host.send_action(
+        tab(),
+        "provider",
+        ActionKind::Changed,
+        ActionValue::Index(2),
+    );
     let writes = host.settings().writes();
     assert_eq!(writes.len(), 1);
     assert_eq!(writes[0].0, "provider");
@@ -59,8 +64,16 @@ fn panel_033_choosing_a_provider_writes_only_the_provider_key() {
 fn panel_033_unknown_keys_in_the_section_are_kept() {
     let mut host = client_host();
     host.settings().seed(r#"{"future_key": 7}"#);
-    host.send_action(tab(), "provider", ActionKind::Changed, ActionValue::Index(1));
-    assert_eq!(host.settings().section_value("future_key"), Some(serde_json::json!(7)));
+    host.send_action(
+        tab(),
+        "provider",
+        ActionKind::Changed,
+        ActionValue::Index(1),
+    );
+    assert_eq!(
+        host.settings().section_value("future_key"),
+        Some(serde_json::json!(7))
+    );
 }
 
 proptest! {

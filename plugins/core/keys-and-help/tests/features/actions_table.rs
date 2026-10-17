@@ -8,18 +8,49 @@ use proptest::prelude::*;
 use crate::common::*;
 
 const EXPECTED_NAMES: [&str; 35] = [
-    "new_terminal", "new_agent_worktree", "new_editor", "new_board", "close_pane", "new_group",
-    "new_split_view", "new_folder", "rename", "toggle_move", "focus_tree", "focus_pane",
-    "focus_next_pane", "focus_previous_pane", "focus_pane_left", "focus_pane_right",
-    "focus_pane_up", "focus_pane_down", "cycle_next_in_group", "cycle_previous_in_group",
-    "jump_next_group", "jump_previous_group", "scrollback_up", "scrollback_down", "save",
-    "run_command", "search", "Help", "detach", "quit", "toggle_editor_view_mode",
-    "toggle_line_numbers", "toggle_minimap", "toggle_autosave", "settings",
+    "new_terminal",
+    "new_agent_worktree",
+    "new_editor",
+    "new_board",
+    "close_pane",
+    "new_group",
+    "new_split_view",
+    "new_folder",
+    "rename",
+    "toggle_move",
+    "focus_tree",
+    "focus_pane",
+    "focus_next_pane",
+    "focus_previous_pane",
+    "focus_pane_left",
+    "focus_pane_right",
+    "focus_pane_up",
+    "focus_pane_down",
+    "cycle_next_in_group",
+    "cycle_previous_in_group",
+    "jump_next_group",
+    "jump_previous_group",
+    "scrollback_up",
+    "scrollback_down",
+    "save",
+    "run_command",
+    "search",
+    "Help",
+    "detach",
+    "quit",
+    "toggle_editor_view_mode",
+    "toggle_line_numbers",
+    "toggle_minimap",
+    "toggle_autosave",
+    "settings",
 ];
 
 fn bindable(key: &str) -> bool {
     matches!(key, "Left" | "Right" | "Up" | "Down" | "PgUp" | "PgDn")
-        || (key.chars().count() == 1 && key.chars().all(|character| character.is_ascii_graphic() || character == ' '))
+        || (key.chars().count() == 1
+            && key
+                .chars()
+                .all(|character| character.is_ascii_graphic() || character == ' '))
 }
 
 /// REQ: COR-011, F-007
@@ -58,7 +89,11 @@ fn actions_011_only_rename_has_no_default_key() {
 /// REQ: COR-011, F-007
 #[test]
 fn actions_011_the_default_keys_are_unique() {
-    let keys: Vec<String> = action_rows().into_iter().map(|row| row.default).filter(|key| key != "unbound").collect();
+    let keys: Vec<String> = action_rows()
+        .into_iter()
+        .map(|row| row.default)
+        .filter(|key| key != "unbound")
+        .collect();
     let set: BTreeSet<&String> = keys.iter().collect();
     assert_eq!(set.len(), keys.len());
 }
@@ -114,10 +149,25 @@ fn actions_011_the_screen_preset_differs_from_tmux_on_the_documented_actions() {
     assert_eq!(
         differing,
         vec![
-            "close_pane", "new_split_view", "rename", "focus_tree", "focus_next_pane",
-            "focus_previous_pane", "focus_pane_left", "focus_pane_right", "focus_pane_up",
-            "focus_pane_down", "cycle_next_in_group", "cycle_previous_in_group", "jump_next_group",
-            "jump_previous_group", "save", "run_command", "search", "quit", "settings",
+            "close_pane",
+            "new_split_view",
+            "rename",
+            "focus_tree",
+            "focus_next_pane",
+            "focus_previous_pane",
+            "focus_pane_left",
+            "focus_pane_right",
+            "focus_pane_up",
+            "focus_pane_down",
+            "cycle_next_in_group",
+            "cycle_previous_in_group",
+            "jump_next_group",
+            "jump_previous_group",
+            "save",
+            "run_command",
+            "search",
+            "quit",
+            "settings",
         ]
     );
 }
@@ -126,7 +176,13 @@ fn actions_011_the_screen_preset_differs_from_tmux_on_the_documented_actions() {
 #[test]
 fn actions_011_screen_preset_keys_match_the_user_guide() {
     let rows = action_rows();
-    let key = |name: &str| rows.iter().find(|row| row.name == name).expect("row").screen.clone();
+    let key = |name: &str| {
+        rows.iter()
+            .find(|row| row.name == name)
+            .expect("row")
+            .screen
+            .clone()
+    };
     assert_eq!(key("new_terminal"), "c");
     assert_eq!(key("close_pane"), "k");
     assert_eq!(key("rename"), "A");
@@ -154,7 +210,13 @@ fn actions_011_screen_preset_keys_match_the_user_guide() {
 #[test]
 fn actions_011_tmux_preset_keys_match_the_user_guide() {
     let rows = action_rows();
-    let key = |name: &str| rows.iter().find(|row| row.name == name).expect("row").tmux.clone();
+    let key = |name: &str| {
+        rows.iter()
+            .find(|row| row.name == name)
+            .expect("row")
+            .tmux
+            .clone()
+    };
     assert_eq!(key("new_terminal"), "c");
     assert_eq!(key("close_pane"), "x");
     assert_eq!(key("rename"), ",");
@@ -181,9 +243,20 @@ fn actions_011_tmux_preset_keys_match_the_user_guide() {
 fn actions_011_ilium_only_actions_keep_the_same_key_in_every_column() {
     let rows = action_rows();
     for name in [
-        "new_agent_worktree", "new_editor", "new_board", "new_group", "new_folder", "toggle_move",
-        "focus_pane", "scrollback_up", "scrollback_down", "Help", "toggle_editor_view_mode",
-        "toggle_line_numbers", "toggle_minimap", "toggle_autosave",
+        "new_agent_worktree",
+        "new_editor",
+        "new_board",
+        "new_group",
+        "new_folder",
+        "toggle_move",
+        "focus_pane",
+        "scrollback_up",
+        "scrollback_down",
+        "Help",
+        "toggle_editor_view_mode",
+        "toggle_line_numbers",
+        "toggle_minimap",
+        "toggle_autosave",
     ] {
         let row = rows.iter().find(|row| row.name == name).expect("row");
         assert_eq!(row.default, row.screen, "{name}");
@@ -195,8 +268,14 @@ fn actions_011_ilium_only_actions_keep_the_same_key_in_every_column() {
 #[test]
 fn actions_011_the_help_action_is_bound_to_the_question_mark_in_all_columns() {
     let rows = action_rows();
-    let row = rows.iter().find(|row| row.name == "Help").expect("Help row");
-    assert_eq!((row.default.as_str(), row.screen.as_str(), row.tmux.as_str()), ("?", "?", "?"));
+    let row = rows
+        .iter()
+        .find(|row| row.name == "Help")
+        .expect("Help row");
+    assert_eq!(
+        (row.default.as_str(), row.screen.as_str(), row.tmux.as_str()),
+        ("?", "?", "?")
+    );
     assert_eq!(row.command, "kernel.Help");
 }
 
@@ -204,18 +283,30 @@ fn actions_011_the_help_action_is_bound_to_the_question_mark_in_all_columns() {
 #[test]
 fn actions_011_the_manifest_default_chord_equals_the_help_key() {
     let rows = action_rows();
-    let help = rows.iter().find(|row| row.name == "Help").expect("Help row");
-    assert_eq!(manifest()["contributes"]["keybindings"][0]["chord"], help.default.as_str());
-    assert_eq!(manifest()["contributes"]["settings"][0]["rows"][0]["default"], help.default.as_str());
+    let help = rows
+        .iter()
+        .find(|row| row.name == "Help")
+        .expect("Help row");
+    assert_eq!(
+        manifest()["contributes"]["keybindings"][0]["chord"],
+        help.default.as_str()
+    );
+    assert_eq!(
+        manifest()["contributes"]["settings"][0]["rows"][0]["default"],
+        help.default.as_str()
+    );
 }
 
 /// REQ: COR-011, F-007
 #[test]
 fn actions_011_the_prefix_rules_are_stated_on_the_page() {
     let page = page_text();
-    assert!(page.contains("`shortcut_base`, a `Ctrl` letter from `Ctrl+A` to `Ctrl+Z`, default `Ctrl+B`"));
+    assert!(page
+        .contains("`shortcut_base`, a `Ctrl` letter from `Ctrl+A` to `Ctrl+Z`, default `Ctrl+B`"));
     assert!(page.contains("`navigation_shortcut_base`"));
-    assert!(page.contains("moving the general prefix to `Ctrl+A` keeps `Ctrl+B n` for tree traversal"));
+    assert!(
+        page.contains("moving the general prefix to `Ctrl+A` keeps `Ctrl+B n` for tree traversal")
+    );
     assert!(page.contains("Pressing the prefix twice passes it through to the program in the pane"));
     assert!(page.contains("The GNU Screen preset sets the prefix to `Ctrl+A`, and the tmux preset sets it to `Ctrl+B`"));
 }
@@ -224,7 +315,12 @@ fn actions_011_the_prefix_rules_are_stated_on_the_page() {
 #[test]
 fn actions_011_four_tree_actions_use_the_navigation_prefix() {
     let page = page_text();
-    for name in ["cycle_next_in_group", "cycle_previous_in_group", "jump_next_group", "jump_previous_group"] {
+    for name in [
+        "cycle_next_in_group",
+        "cycle_previous_in_group",
+        "jump_next_group",
+        "jump_previous_group",
+    ] {
         assert!(page.contains(&format!("`{name}`")));
     }
     assert!(page.contains("The four tree actions"));

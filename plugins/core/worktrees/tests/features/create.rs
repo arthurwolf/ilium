@@ -10,7 +10,9 @@ use serde_json::{json, Value};
 
 use crate::common::*;
 
-fn add_call(host: &mut ilium_plugin_sdk::testing::FakeHost) -> ilium_plugin_sdk::host::process::ProcessSpec {
+fn add_call(
+    host: &mut ilium_plugin_sdk::testing::FakeHost,
+) -> ilium_plugin_sdk::host::process::ProcessSpec {
     let calls = worktree_add_calls(&host.process().calls());
     assert_eq!(calls.len(), 1, "exactly one git worktree add");
     calls[0].clone()
@@ -45,7 +47,11 @@ fn feature_067_the_default_path_is_the_repository_name_dot_worktrees_and_the_bra
     let mut host = server_host();
     create_worktree(&mut host, &json!({"branch": "fix-auth"}));
     let call = add_call(&mut host);
-    assert!(call.arguments[4].ends_with(".worktrees/fix-auth"), "{}", call.arguments[4]);
+    assert!(
+        call.arguments[4].ends_with(".worktrees/fix-auth"),
+        "{}",
+        call.arguments[4]
+    );
 }
 
 /// REQ: F-067
@@ -55,23 +61,38 @@ fn feature_067_the_branch_slug_replaces_the_slash_of_agent_fix_login() {
     create_worktree(&mut host, &json!({"branch": "agent/fix-login"}));
     let call = add_call(&mut host);
     assert_eq!(call.arguments[3], "agent/fix-login");
-    assert!(call.arguments[4].ends_with(".worktrees/agent-fix-login"), "{}", call.arguments[4]);
+    assert!(
+        call.arguments[4].ends_with(".worktrees/agent-fix-login"),
+        "{}",
+        call.arguments[4]
+    );
 }
 
 /// REQ: F-067, F-072
 #[test]
 fn feature_067_the_location_template_setting_decides_the_path() {
     let mut host = server_host();
-    set_git(&mut host, "worktree_location_template", json!("/srv/trees/{branch_slug}")).expect("valid template");
+    set_git(
+        &mut host,
+        "worktree_location_template",
+        json!("/srv/trees/{branch_slug}"),
+    )
+    .expect("valid template");
     create_worktree(&mut host, &json!({"branch": "agent/fix-login"}));
-    assert_eq!(add_call(&mut host).arguments[4], "/srv/trees/agent-fix-login");
+    assert_eq!(
+        add_call(&mut host).arguments[4],
+        "/srv/trees/agent-fix-login"
+    );
 }
 
 /// REQ: F-067
 #[test]
 fn feature_067_a_base_in_the_request_replaces_head() {
     let mut host = server_host();
-    create_worktree(&mut host, &json!({"branch": "agent/fix-login", "base": "main"}));
+    create_worktree(
+        &mut host,
+        &json!({"branch": "agent/fix-login", "base": "main"}),
+    );
     assert_eq!(add_call(&mut host).arguments[5], "main");
 }
 
@@ -105,7 +126,11 @@ fn feature_067_the_pane_starts_in_the_worktree_folder() {
     let mut host = server_host();
     let submitted = create_worktree(&mut host, &json!({"branch": "fix-auth"}));
     let panes = create_panes(&submitted);
-    assert!(cwd_text(&panes[0]).contains(".worktrees/fix-auth"), "{}", cwd_text(&panes[0]));
+    assert!(
+        cwd_text(&panes[0]).contains(".worktrees/fix-auth"),
+        "{}",
+        cwd_text(&panes[0])
+    );
 }
 
 /// REQ: F-067
@@ -127,7 +152,11 @@ fn feature_067_a_refused_process_call_creates_no_pane() {
     let mut host = server_host();
     host.inject_failure(
         "process.run",
-        PluginError { code: ErrorCode::NotPermitted, message: "no grant".to_string(), retry_after_ms: None },
+        PluginError {
+            code: ErrorCode::NotPermitted,
+            message: "no grant".to_string(),
+            retry_after_ms: None,
+        },
     );
     let submitted = create_worktree(&mut host, &json!({"branch": "fix-auth"}));
     assert!(create_panes(&submitted).is_empty());
@@ -136,7 +165,26 @@ fn feature_067_a_refused_process_call_creates_no_pane() {
 /// REQ: F-067
 #[test]
 fn feature_067_invalid_branch_names_never_reach_git() {
-    for branch in ["", "bad name", "a..b", "@", "x@{1}", "a//b", "-lead", "end/", "end.", "x.lock", "a/.hidden", "a~b", "a^b", "a:b", "a?b", "a*b", "a[b", "a\\b"] {
+    for branch in [
+        "",
+        "bad name",
+        "a..b",
+        "@",
+        "x@{1}",
+        "a//b",
+        "-lead",
+        "end/",
+        "end.",
+        "x.lock",
+        "a/.hidden",
+        "a~b",
+        "a^b",
+        "a:b",
+        "a?b",
+        "a*b",
+        "a[b",
+        "a\\b",
+    ] {
         let mut host = server_host();
         let submitted = create_worktree(&mut host, &json!({"branch": branch}));
         assert!(host.process().calls().is_empty(), "git ran for {branch:?}");
@@ -147,7 +195,12 @@ fn feature_067_invalid_branch_names_never_reach_git() {
 /// REQ: F-067
 #[test]
 fn feature_067_a_request_without_a_branch_or_with_broken_json_never_reaches_git() {
-    for payload in [b"{}".to_vec(), b"not json".to_vec(), Vec::new(), br#"{"branch": 5}"#.to_vec()] {
+    for payload in [
+        b"{}".to_vec(),
+        b"not json".to_vec(),
+        Vec::new(),
+        br#"{"branch": 5}"#.to_vec(),
+    ] {
         let mut host = server_host();
         host.deliver_one(channel_message("new-agent", payload));
         host.settle();
@@ -178,7 +231,11 @@ fn feature_067_the_registered_path_is_the_folder_of_the_git_call() {
     host.deliver_one(pane_created(14, "agent/fix-login"));
     host.settle();
     let records = registered(&mut host);
-    assert!(records[0].path.path.ends_with("agent-fix-login"), "{}", records[0].path.path);
+    assert!(
+        records[0].path.path.ends_with("agent-fix-login"),
+        "{}",
+        records[0].path.path
+    );
     assert!(add_call(&mut host).arguments[4].ends_with(&records[0].path.path));
 }
 
@@ -264,18 +321,29 @@ fn feature_067_before_create_receives_repo_branch_base_and_agent() {
     host.activate::<ilium_plugin_core_worktrees::WorktreesServer>();
     host.hook_chain(BEFORE_CREATE).reply_all(HookReply::Pass);
     create_worktree(&mut host, &json!({"branch": "fix-auth"}));
-    let payload = host.hook_chain(BEFORE_CREATE).last_payload().expect("payload");
+    let payload = host
+        .hook_chain(BEFORE_CREATE)
+        .last_payload()
+        .expect("payload");
     assert_eq!(payload["branch"], "fix-auth");
     assert_eq!(payload["base"], "HEAD");
-    assert_eq!(payload["repo"], "/work/ilium", "repo is the main checkout path");
-    assert_eq!(payload["agent"], "claude", "agent is the default agent command");
+    assert_eq!(
+        payload["repo"], "/work/ilium",
+        "repo is the main checkout path"
+    );
+    assert_eq!(
+        payload["agent"], "claude",
+        "agent is the default agent command"
+    );
 }
 
 /// REQ: EXT-042, F-067
 #[test]
 fn feature_067_a_replace_reply_with_a_branch_changes_the_branch_git_creates() {
     let mut host = server_host();
-    host.hook_chain(BEFORE_CREATE).reply_all(HookReply::Replace(json!({"branch": "renamed/x"}).to_string()));
+    host.hook_chain(BEFORE_CREATE).reply_all(HookReply::Replace(
+        json!({"branch": "renamed/x"}).to_string(),
+    ));
     let submitted = create_worktree(&mut host, &json!({"branch": "fix-auth"}));
     let call = add_call(&mut host);
     assert_eq!(call.arguments[3], "renamed/x");
@@ -286,7 +354,8 @@ fn feature_067_a_replace_reply_with_a_branch_changes_the_branch_git_creates() {
 #[test]
 fn feature_067_a_refuse_reply_creates_neither_worktree_nor_pane() {
     let mut host = server_host();
-    host.hook_chain(BEFORE_CREATE).reply_all(HookReply::Refuse("policy".to_string()));
+    host.hook_chain(BEFORE_CREATE)
+        .reply_all(HookReply::Refuse("policy".to_string()));
     let submitted = create_worktree(&mut host, &json!({"branch": "fix-auth"}));
     assert!(host.process().calls().is_empty());
     assert!(create_panes(&submitted).is_empty());
@@ -305,7 +374,9 @@ fn feature_067_a_pass_reply_keeps_the_requested_branch() {
 #[test]
 fn feature_067_a_replacement_branch_that_is_not_a_valid_branch_name_never_reaches_git() {
     let mut host = server_host();
-    host.hook_chain(BEFORE_CREATE).reply_all(HookReply::Replace(json!({"branch": "bad name"}).to_string()));
+    host.hook_chain(BEFORE_CREATE).reply_all(HookReply::Replace(
+        json!({"branch": "bad name"}).to_string(),
+    ));
     create_worktree(&mut host, &json!({"branch": "fix-auth"}));
     assert!(worktree_add_calls(&host.process().calls()).is_empty());
 }
@@ -314,8 +385,16 @@ fn feature_067_a_replacement_branch_that_is_not_a_valid_branch_name_never_reache
 #[test]
 fn feature_067_the_hook_chain_runs_in_priority_order() {
     let mut host = server_host();
-    host.hook_chain(BEFORE_CREATE).add("late", 200, HookReply::Replace(json!({"branch": "late"}).to_string()));
-    host.hook_chain(BEFORE_CREATE).add("early", 100, HookReply::Replace(json!({"branch": "early"}).to_string()));
+    host.hook_chain(BEFORE_CREATE).add(
+        "late",
+        200,
+        HookReply::Replace(json!({"branch": "late"}).to_string()),
+    );
+    host.hook_chain(BEFORE_CREATE).add(
+        "early",
+        100,
+        HookReply::Replace(json!({"branch": "early"}).to_string()),
+    );
     create_worktree(&mut host, &json!({"branch": "fix-auth"}));
     assert_eq!(add_call(&mut host).arguments[3], "late");
 }
@@ -327,7 +406,12 @@ fn feature_067_the_create_service_runs_git_worktree_add_for_the_branch() {
     session.install_core("worktrees").start();
     session.server(PLUGIN_ID).process().default_exit(ok_exit());
     let _reply = session
-        .call_service("ilium.core.fleet", "ilium.core.worktrees/create", "^0.1", &json!({"branch": "svc"}).to_string())
+        .call_service(
+            "ilium.core.fleet",
+            "ilium.core.worktrees/create",
+            "^0.1",
+            &json!({"branch": "svc"}).to_string(),
+        )
         .expect("service call");
     session.pump().expect("settles");
     let calls = worktree_add_calls(&session.server(PLUGIN_ID).process().calls());
@@ -342,12 +426,20 @@ fn feature_067_the_create_service_replies_with_the_worktree_path() {
     session.install_core("worktrees").start();
     session.server(PLUGIN_ID).process().default_exit(ok_exit());
     let reply = session
-        .call_service("ilium.core.fleet", "ilium.core.worktrees/create", "^0.1", &json!({"branch": "svc"}).to_string())
+        .call_service(
+            "ilium.core.fleet",
+            "ilium.core.worktrees/create",
+            "^0.1",
+            &json!({"branch": "svc"}).to_string(),
+        )
         .expect("service call");
     session.pump().expect("settles");
     if let ilium_plugin_sdk::exports::ServiceReply::Done(text) = reply {
         let value: Value = serde_json::from_str(&text).expect("reply is JSON");
-        assert!(value["path"].as_str().expect("path").ends_with(".worktrees/svc"));
+        assert!(value["path"]
+            .as_str()
+            .expect("path")
+            .ends_with(".worktrees/svc"));
     }
 }
 

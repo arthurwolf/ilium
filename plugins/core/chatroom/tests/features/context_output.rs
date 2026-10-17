@@ -28,7 +28,9 @@ fn context_b13_with_messages_is_the_context_template_followed_by_one_row_each() 
 #[test]
 fn context_b13_first_read_starts_with_ilium_chatroom_is_enabled() {
     let mut host = host_with_records(1);
-    assert!(chat(&mut host, &["context"]).out.starts_with("Ilium chatroom is enabled"));
+    assert!(chat(&mut host, &["context"])
+        .out
+        .starts_with("Ilium chatroom is enabled"));
 }
 
 /// REQ: chatroom-B13
@@ -38,7 +40,9 @@ fn context_b13_without_messages_the_empty_template_is_used() {
     seed_room(&mut host, &[]);
     let run = chat(&mut host, &["context"]);
     assert_eq!(run.out, render("chatroom-empty-context", &[&guidance()]));
-    assert!(run.out.starts_with("Ilium chatroom is enabled. No messages have been posted yet."));
+    assert!(run
+        .out
+        .starts_with("Ilium chatroom is enabled. No messages have been posted yet."));
 }
 
 /// REQ: chatroom-B13
@@ -95,15 +99,36 @@ fn context_b14_output_within_the_budget_has_no_omitted_note() {
 #[test]
 fn context_b14_output_never_exceeds_max_bytes_and_counts_the_omitted_records() {
     let mut host = server_host();
-    let lines: Vec<String> =
-        (0..30).map(|n| record_line(&stamp(n), "agent", &format!("record {n} {}", "x".repeat(200)))).collect();
+    let lines: Vec<String> = (0..30)
+        .map(|n| {
+            record_line(
+                &stamp(n),
+                "agent",
+                &format!("record {n} {}", "x".repeat(200)),
+            )
+        })
+        .collect();
     seed_room(&mut host, &lines);
-    let run = chat(&mut host, &["context", "--limit", "40", "--max-bytes", "2048"]);
+    let run = chat(
+        &mut host,
+        &["context", "--limit", "40", "--max-bytes", "2048"],
+    );
     assert!(run.out.len() <= 2048, "{} bytes", run.out.len());
     assert!(run.out.contains("record 29 "));
     assert!(!run.out.contains("record 0 "));
-    assert!(run.out.contains("earlier unread messages omitted to keep this short"));
-    let omitted: usize = run.out.split(" earlier unread messages omitted").next().expect("note").rsplit('(').next().expect("count").parse().expect("number");
+    assert!(run
+        .out
+        .contains("earlier unread messages omitted to keep this short"));
+    let omitted: usize = run
+        .out
+        .split(" earlier unread messages omitted")
+        .next()
+        .expect("note")
+        .rsplit('(')
+        .next()
+        .expect("count")
+        .parse()
+        .expect("number");
     assert!(omitted > 0 && omitted < 30);
 }
 
@@ -111,36 +136,70 @@ fn context_b14_output_never_exceeds_max_bytes_and_counts_the_omitted_records() {
 #[test]
 fn context_b14_the_omitted_note_follows_the_omitted_template() {
     let mut host = server_host();
-    let lines: Vec<String> =
-        (0..30).map(|n| record_line(&stamp(n), "agent", &format!("record {n} {}", "x".repeat(200)))).collect();
+    let lines: Vec<String> = (0..30)
+        .map(|n| {
+            record_line(
+                &stamp(n),
+                "agent",
+                &format!("record {n} {}", "x".repeat(200)),
+            )
+        })
+        .collect();
     seed_room(&mut host, &lines);
-    let run = chat(&mut host, &["context", "--limit", "40", "--max-bytes", "2048"]);
+    let run = chat(
+        &mut host,
+        &["context", "--limit", "40", "--max-bytes", "2048"],
+    );
     let header = header_with_messages();
     let after_header = &run.out[header.len()..];
-    let note_end = after_header.find('\n').map(|end| end + 1).expect("note line");
+    let note_end = after_header
+        .find('\n')
+        .map(|end| end + 1)
+        .expect("note line");
     let note = &after_header[..note_end];
-    let shown = run.out[header.len() + note_end..].matches("record ").count();
+    let shown = run.out[header.len() + note_end..]
+        .matches("record ")
+        .count();
     let omitted = 30 - shown;
-    assert_eq!(note, render("chatroom-omitted", &[&omitted.to_string(), "30"]));
+    assert_eq!(
+        note,
+        render("chatroom-omitted", &[&omitted.to_string(), "30"])
+    );
 }
 
 /// REQ: chatroom-B14, PORT:ilium-client/src/chatroom.rs::capped_context_keeps_newest_records_and_counts_the_rest
 #[test]
 fn context_b14_a_single_oversized_newest_record_is_cut_with_the_marker() {
     let mut host = server_host();
-    seed_room(&mut host, &[record_line(&stamp(1), "agent", &"y".repeat(3900))]);
-    let run = chat(&mut host, &["context", "--limit", "40", "--max-bytes", "2048"]);
+    seed_room(
+        &mut host,
+        &[record_line(&stamp(1), "agent", &"y".repeat(3900))],
+    );
+    let run = chat(
+        &mut host,
+        &["context", "--limit", "40", "--max-bytes", "2048"],
+    );
     assert!(run.out.len() <= 2048, "{} bytes", run.out.len());
     assert!(run.out.contains("yyyy"));
-    assert!(run.out.ends_with("\u{2026}\n"), "{:?}", &run.out[run.out.len().saturating_sub(20)..]);
+    assert!(
+        run.out.ends_with("\u{2026}\n"),
+        "{:?}",
+        &run.out[run.out.len().saturating_sub(20)..]
+    );
 }
 
 /// REQ: chatroom-B14
 #[test]
 fn context_b14_a_cut_never_splits_a_multibyte_character() {
     let mut host = server_host();
-    seed_room(&mut host, &[record_line(&stamp(1), "agent", &"\u{1F9ED}".repeat(1500))]);
-    let run = chat(&mut host, &["context", "--limit", "40", "--max-bytes", "2048"]);
+    seed_room(
+        &mut host,
+        &[record_line(&stamp(1), "agent", &"\u{1F9ED}".repeat(1500))],
+    );
+    let run = chat(
+        &mut host,
+        &["context", "--limit", "40", "--max-bytes", "2048"],
+    );
     assert!(run.out.len() <= 2048);
     assert!(run.out.ends_with("\u{2026}\n"));
 }
@@ -158,13 +217,41 @@ fn context_b14_a_budget_smaller_than_the_header_still_prints_the_header_and_the_
 #[test]
 fn context_b14_a_session_start_hook_gets_four_times_the_budget() {
     let mut host = server_host();
-    let lines: Vec<String> =
-        (0..30).map(|n| record_line(&stamp(n), "agent", &format!("record {n} {}", "x".repeat(200)))).collect();
+    let lines: Vec<String> = (0..30)
+        .map(|n| {
+            record_line(
+                &stamp(n),
+                "agent",
+                &format!("record {n} {}", "x".repeat(200)),
+            )
+        })
+        .collect();
     seed_room(&mut host, &lines);
-    let normal = chat(&mut host, &["context", "--limit", "40", "--since-last-read", "--reader", "a", "--max-bytes", "2048"]);
+    let normal = chat(
+        &mut host,
+        &[
+            "context",
+            "--limit",
+            "40",
+            "--since-last-read",
+            "--reader",
+            "a",
+            "--max-bytes",
+            "2048",
+        ],
+    );
     let start = chat_stdin(
         &mut host,
-        &["context", "--limit", "40", "--since-last-read", "--reader", "b", "--max-bytes", "2048"],
+        &[
+            "context",
+            "--limit",
+            "40",
+            "--since-last-read",
+            "--reader",
+            "b",
+            "--max-bytes",
+            "2048",
+        ],
         br#"{"hook_event_name":"SessionStart"}"#,
     );
     assert!(normal.out.len() <= 4 * 2048 && start.out.len() <= 4 * 2048);
@@ -178,7 +265,10 @@ fn context_b14_the_reserve_of_160_bytes_keeps_room_for_the_note() {
     // A budget of exactly header + 160 leaves no room for any row: every record is omitted or cut.
     let mut host = host_with_records(5);
     let header = header_with_messages().len();
-    let run = chat(&mut host, &["context", "--max-bytes", &(header + 160).to_string()]);
+    let run = chat(
+        &mut host,
+        &["context", "--max-bytes", &(header + 160).to_string()],
+    );
     assert!(run.out.len() <= header + 160, "{} bytes", run.out.len());
 }
 
@@ -188,7 +278,14 @@ fn hook_b12_the_documented_hook_command_runs_and_answers_within_the_budget() {
     let mut host = host_with_records(3);
     let run = chat_stdin(
         &mut host,
-        &["context", "--limit", "40", "--since-last-read", "--max-bytes", "2048"],
+        &[
+            "context",
+            "--limit",
+            "40",
+            "--since-last-read",
+            "--max-bytes",
+            "2048",
+        ],
         br#"{"session_id":"s9","hook_event_name":"UserPromptSubmit"}"#,
     );
     assert_eq!(run.code, Some(0));
@@ -214,8 +311,14 @@ fn hook_b12_the_hook_is_installed_by_agent_setup_not_by_this_plugin() {
 #[test]
 fn context_b13_an_unchanged_since_last_read_prints_nothing_and_exits_0() {
     let mut host = host_with_records(2);
-    chat(&mut host, &["context", "--since-last-read", "--reader", "r1"]);
-    let again = chat(&mut host, &["context", "--since-last-read", "--reader", "r1"]);
+    chat(
+        &mut host,
+        &["context", "--since-last-read", "--reader", "r1"],
+    );
+    let again = chat(
+        &mut host,
+        &["context", "--since-last-read", "--reader", "r1"],
+    );
     assert_eq!(again.out, "");
     assert_eq!(again.code, Some(0));
 }
@@ -224,14 +327,27 @@ fn context_b13_an_unchanged_since_last_read_prints_nothing_and_exits_0() {
 #[test]
 fn context_b13_the_unread_form_starts_with_the_unread_template() {
     let mut host = host_with_records(2);
-    chat(&mut host, &["context", "--since-last-read", "--reader", "r1"]);
+    chat(
+        &mut host,
+        &["context", "--since-last-read", "--reader", "r1"],
+    );
     send(&mut host, "fresh");
-    let run = chat(&mut host, &["context", "--since-last-read", "--reader", "r1"]);
+    let run = chat(
+        &mut host,
+        &["context", "--since-last-read", "--reader", "r1"],
+    );
     let unread_header = template("chatroom-unread-context");
     assert!(run.out.starts_with(&unread_header), "{}", run.out);
-    assert!(run.out.ends_with(&row_text_of(&run.out)), "last row is a context row");
+    assert!(
+        run.out.ends_with(&row_text_of(&run.out)),
+        "last row is a context row"
+    );
 }
 
 fn row_text_of(output: &str) -> String {
-    output.lines().last().map(|line| format!("{line}\n")).unwrap_or_default()
+    output
+        .lines()
+        .last()
+        .map(|line| format!("{line}\n"))
+        .unwrap_or_default()
 }

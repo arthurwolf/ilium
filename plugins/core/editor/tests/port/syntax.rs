@@ -38,7 +38,10 @@ fn port_syntax_known_extensions_are_highlighted() {
         ("README.md", "# Title\n\nSome **bold** and `code` text."),
     ];
     for (name, text) in samples {
-        assert!(colours_in_first_text_row(name, text, 4) > 1, "expected a syntax for {name}");
+        assert!(
+            colours_in_first_text_row(name, text, 4) > 1,
+            "expected a syntax for {name}"
+        );
     }
 }
 
@@ -52,7 +55,10 @@ fn port_syntax_extensionless_well_known_names_are_highlighted() {
 /// REQ: PORT:ilium-client/src/syntax.rs::returns_none_for_unrecognized_extension, PORT:ilium-client/src/syntax.rs::unrecognized_extension_yields_no_highlighting
 #[test]
 fn port_syntax_unrecognized_extension_draws_one_colour() {
-    assert_eq!(colours_in_first_text_row("data.unknownext", "fn main() { let s = \"hi\"; }", 3), 1);
+    assert_eq!(
+        colours_in_first_text_row("data.unknownext", "fn main() { let s = \"hi\"; }", 3),
+        1
+    );
 }
 
 /// REQ: PORT:ilium-client/src/editor_highlight.rs::unrecognized_language_leaves_highlighted_lines_empty
@@ -60,27 +66,46 @@ fn port_syntax_unrecognized_extension_draws_one_colour() {
 fn port_syntax_unrecognized_language_yields_no_tokens() {
     let mut editor = direct("{}");
     direct_open(&mut editor, 1, None, 1);
-    let (tokens, _) = TokenProvider::tokens(&mut editor, BufferId(1), 0, vec!["just plain text".to_string()], None);
+    let (tokens, _) = TokenProvider::tokens(
+        &mut editor,
+        BufferId(1),
+        0,
+        vec!["just plain text".to_string()],
+        None,
+    );
     assert!(tokens.is_empty(), "{tokens:?}");
 }
 
 /// REQ: PORT:ilium-client/src/syntax.rs::highlight_covers_every_byte_of_every_line_contiguously
 #[test]
 fn port_syntax_tokens_are_ordered_non_overlapping_and_inside_their_line() {
-    let lines = vec!["fn main() {".to_string(), "    println!(\"hi\");".to_string(), "}".to_string()];
+    let lines = vec![
+        "fn main() {".to_string(),
+        "    println!(\"hi\");".to_string(),
+        "}".to_string(),
+    ];
     let mut editor = direct("{}");
     direct_open(&mut editor, 1, Some("rust"), 3);
     let (tokens, _) = TokenProvider::tokens(&mut editor, BufferId(1), 0, lines.clone(), None);
     assert!(!tokens.is_empty());
     for (index, line) in lines.iter().enumerate() {
-        let on_line: Vec<&Token> = tokens.iter().filter(|token| token.line == index as u32).collect();
+        let on_line: Vec<&Token> = tokens
+            .iter()
+            .filter(|token| token.line == index as u32)
+            .collect();
         let mut next_free = 0u32;
         for token in on_line {
-            assert!(token.start >= next_free, "tokens overlap on line {index}: {tokens:?}");
+            assert!(
+                token.start >= next_free,
+                "tokens overlap on line {index}: {tokens:?}"
+            );
             assert!(token.length > 0);
             next_free = token.start + token.length;
         }
-        assert!(next_free as usize <= line.chars().count(), "token past the end of line {index}");
+        assert!(
+            next_free as usize <= line.chars().count(),
+            "token past the end of line {index}"
+        );
     }
 }
 
@@ -88,9 +113,18 @@ fn port_syntax_tokens_are_ordered_non_overlapping_and_inside_their_line() {
 #[test]
 fn port_syntax_every_requested_language_gets_more_than_one_colour() {
     let fixtures = [
-        ("main.rs", "fn main() {\n    let x = 1;\n    println!(\"{x}\");\n}"),
-        ("app.js", "function main() {\n    const x = 1;\n    console.log(x);\n}"),
-        ("app.ts", "function main(): void {\n    const x: number = 1;\n    console.log(x);\n}"),
+        (
+            "main.rs",
+            "fn main() {\n    let x = 1;\n    println!(\"{x}\");\n}",
+        ),
+        (
+            "app.js",
+            "function main() {\n    const x = 1;\n    console.log(x);\n}",
+        ),
+        (
+            "app.ts",
+            "function main(): void {\n    const x: number = 1;\n    console.log(x);\n}",
+        ),
         ("script.py", "def main():\n    x = 1\n    print(x)"),
         ("README.md", "# Title\n\nSome **bold** and `code` text."),
         ("Makefile", "build:\n\tcargo build --release"),

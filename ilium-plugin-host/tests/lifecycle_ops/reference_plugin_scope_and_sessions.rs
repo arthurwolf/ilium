@@ -10,9 +10,19 @@ fn lif_160_install_with_scope_project_refused_install_scope_unsupported() {
     let rig = rig();
     let path = rig.write_package(&pkg(NOTES, "1.0.0"));
     let path_text = path.to_string_lossy().into_owned();
-    let output = rig.cli(&["install", &path_text, "--yes", "--allow-unsigned", "--scope", "project"]);
+    let output = rig.cli(&[
+        "install",
+        &path_text,
+        "--yes",
+        "--allow-unsigned",
+        "--scope",
+        "project",
+    ]);
     assert_eq!(output.exit_code, 1);
-    assert_eq!(error_codes(&output), vec!["install.scope-unsupported".to_owned()]);
+    assert_eq!(
+        error_codes(&output),
+        vec!["install.scope-unsupported".to_owned()]
+    );
     assert!(registry_ids(&rig).is_empty());
 }
 
@@ -22,7 +32,14 @@ fn lif_160_install_with_scope_user_succeeds_and_is_the_default() {
     let rig = rig();
     let explicit = rig.write_package(&pkg(NOTES, "1.0.0"));
     let text = explicit.to_string_lossy().into_owned();
-    let output = rig.cli(&["install", &text, "--yes", "--allow-unsigned", "--scope", "user"]);
+    let output = rig.cli(&[
+        "install",
+        &text,
+        "--yes",
+        "--allow-unsigned",
+        "--scope",
+        "user",
+    ]);
     assert_eq!(output.exit_code, 0);
     assert_eq!(registry_ids(&rig), vec![NOTES.to_owned()]);
 }
@@ -33,7 +50,14 @@ fn lif_160_install_with_scope_global_or_unknown_is_not_accepted_as_project() {
     let rig = rig();
     let path = rig.write_package(&pkg(NOTES, "1.0.0"));
     let text = path.to_string_lossy().into_owned();
-    let output = rig.cli(&["install", &text, "--yes", "--allow-unsigned", "--scope", "galaxy"]);
+    let output = rig.cli(&[
+        "install",
+        &text,
+        "--yes",
+        "--allow-unsigned",
+        "--scope",
+        "galaxy",
+    ]);
     assert_ne!(output.exit_code, 0);
     assert!(registry_ids(&rig).is_empty());
 }
@@ -44,7 +68,14 @@ fn lif_160_project_scope_refusal_leaves_no_staging_files() {
     let rig = rig();
     let path = rig.write_package(&pkg(NOTES, "1.0.0"));
     let text = path.to_string_lossy().into_owned();
-    rig.cli(&["install", &text, "--yes", "--allow-unsigned", "--scope", "project"]);
+    rig.cli(&[
+        "install",
+        &text,
+        "--yes",
+        "--allow-unsigned",
+        "--scope",
+        "project",
+    ]);
     assert!(staging_entries(&rig).is_empty());
 }
 
@@ -196,7 +227,8 @@ fn lif_163_global_uninstall_reaches_two_sessions_within_2_seconds() {
 
 /// REQ: LIF-163
 #[test]
-fn lif_163_the_change_has_not_reached_a_session_after_only_one_millisecond_of_polling_less_than_the_bound() {
+fn lif_163_the_change_has_not_reached_a_session_after_only_one_millisecond_of_polling_less_than_the_bound(
+) {
     let rig = rig();
     install_ok(&rig, &pkg(NOTES, "1.0.0"));
     let a = rig.start_server("a");
@@ -235,8 +267,12 @@ fn lif_164_unreachable_session_gives_a_failed_line_and_a_non_zero_exit() {
     assert_ne!(output.exit_code, 0);
     let lines = lines_of(&output, "session-result");
     assert_eq!(lines.len(), 2);
-    assert!(lines.iter().any(|line| line["session"] == "b" && line["ok"] == false));
-    assert!(lines.iter().any(|line| line["session"] == "a" && line["ok"] == true));
+    assert!(lines
+        .iter()
+        .any(|line| line["session"] == "b" && line["ok"] == false));
+    assert!(lines
+        .iter()
+        .any(|line| line["session"] == "a" && line["ok"] == true));
 }
 
 /// REQ: LIF-164
@@ -263,7 +299,10 @@ fn lif_165_failure_disable_in_session_a_leaves_session_b_enabled() {
     }
     assert!(a.is_disabled_by_failure(NOTES));
     assert!(!b.is_disabled_by_failure(NOTES));
-    assert_eq!(b.state_of(NOTES, Side::Server), ilium_plugin_api::generated::host::plugins::InstanceState::Active);
+    assert_eq!(
+        b.state_of(NOTES, Side::Server),
+        ilium_plugin_api::generated::host::plugins::InstanceState::Active
+    );
 }
 
 /// REQ: LIF-165

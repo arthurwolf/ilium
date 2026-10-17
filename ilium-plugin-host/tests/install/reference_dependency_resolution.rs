@@ -39,7 +39,14 @@ fn code_of_range_error(text: &str) -> String {
 /// REQ: PKG-310
 #[test]
 fn pkg_310_plain_and_prerelease_versions_parse() {
-    for text in ["0.0.0", "1.2.3", "10.20.30", "1.0.0-alpha", "1.0.0-alpha.1", "1.0.0-0.3.7"] {
+    for text in [
+        "0.0.0",
+        "1.2.3",
+        "10.20.30",
+        "1.0.0-alpha",
+        "1.0.0-alpha.1",
+        "1.0.0-0.3.7",
+    ] {
         assert!(PluginVersion::parse(text).is_ok(), "{text}");
     }
 }
@@ -49,15 +56,25 @@ fn pkg_310_plain_and_prerelease_versions_parse() {
 fn pkg_310_numeric_parts_stop_at_2147483647() {
     assert!(PluginVersion::parse("2147483647.2147483647.2147483647").is_ok());
     for text in ["2147483648.0.0", "0.2147483648.0", "0.0.2147483648"] {
-        assert_eq!(code_of_version_error(text), "manifest.version-invalid", "{text}");
+        assert_eq!(
+            code_of_version_error(text),
+            "manifest.version-invalid",
+            "{text}"
+        );
     }
 }
 
 /// REQ: PKG-310
 #[test]
 fn pkg_310_leading_zeros_and_missing_parts_are_refused() {
-    for text in ["01.2.3", "1.02.3", "1.2.03", "1.2", "1", "1.2.3.4", "", "1.2.-3", "a.b.c"] {
-        assert_eq!(code_of_version_error(text), "manifest.version-invalid", "{text:?}");
+    for text in [
+        "01.2.3", "1.02.3", "1.2.03", "1.2", "1", "1.2.3.4", "", "1.2.-3", "a.b.c",
+    ] {
+        assert_eq!(
+            code_of_version_error(text),
+            "manifest.version-invalid",
+            "{text:?}"
+        );
     }
 }
 
@@ -84,8 +101,20 @@ fn pkg_311_prerelease_identifier_alphabet() {
     for ok in ["1.0.0-a-b", "1.0.0-0", "1.0.0-x.7.z.92", "1.0.0-A1.b2"] {
         assert!(PluginVersion::parse(ok).is_ok(), "{ok}");
     }
-    for bad in ["1.0.0-", "1.0.0-a..b", "1.0.0-a_b", "1.0.0-é", "1.0.0-a.", "1.0.0-01", "1.0.0-a.01"] {
-        assert_eq!(code_of_version_error(bad), "manifest.version-invalid", "{bad}");
+    for bad in [
+        "1.0.0-",
+        "1.0.0-a..b",
+        "1.0.0-a_b",
+        "1.0.0-é",
+        "1.0.0-a.",
+        "1.0.0-01",
+        "1.0.0-a.01",
+    ] {
+        assert_eq!(
+            code_of_version_error(bad),
+            "manifest.version-invalid",
+            "{bad}"
+        );
     }
 }
 
@@ -106,7 +135,11 @@ fn pkg_311_version_length_64_ok_65_refused() {
 #[test]
 fn pkg_312_leading_v_is_refused() {
     for text in ["v1.2.3", "V1.2.3", "=1.2.3-x"] {
-        assert_eq!(code_of_version_error(text), "manifest.version-invalid", "{text}");
+        assert_eq!(
+            code_of_version_error(text),
+            "manifest.version-invalid",
+            "{text}"
+        );
     }
 }
 
@@ -116,14 +149,21 @@ fn pkg_312_manifest_with_v_version_is_refused_at_install() {
     let fx = Fx::new();
     let out = fx.install(&Spec::new("example.a", "v1.2.3"));
     assert_eq!(out.exit_code, 1);
-    assert!(out.has_error("manifest.version-invalid"), "{:?}", out.error_codes());
+    assert!(
+        out.has_error("manifest.version-invalid"),
+        "{:?}",
+        out.error_codes()
+    );
 }
 
 /// REQ: PKG-313 WARN
 #[test]
 fn pkg_313_build_metadata_is_ignored_in_comparison() {
     assert_eq!(version("1.0.0+build.5"), version("1.0.0+other"));
-    assert_eq!(version("1.0.0+build.5").cmp(&version("1.0.0")), std::cmp::Ordering::Equal);
+    assert_eq!(
+        version("1.0.0+build.5").cmp(&version("1.0.0")),
+        std::cmp::Ordering::Equal
+    );
     assert!(PluginVersion::parse("1.0.0-rc.1+build.5").is_ok());
 }
 
@@ -133,7 +173,10 @@ fn pkg_313_registry_refuses_build_metadata() {
     let fx = Fx::new();
     let mut registry = ilium_plugin_host::testing::FakeRegistry::new(REGISTRY_URL);
     let published = registry.try_publish(Spec::new("example.a", "1.0.0+build.5").build(), "stable");
-    assert_eq!(published.err().map(|d| d.code.as_str().to_owned()), Some("registry.version-invalid".to_owned()));
+    assert_eq!(
+        published.err().map(|d| d.code.as_str().to_owned()),
+        Some("registry.version-invalid".to_owned())
+    );
     let _ = fx;
 }
 
@@ -141,12 +184,31 @@ fn pkg_313_registry_refuses_build_metadata() {
 #[test]
 fn pkg_314_semver_section_11_precedence_chain() {
     let ordered = [
-        "0.9.0", "1.0.0-alpha", "1.0.0-alpha.1", "1.0.0-alpha.beta", "1.0.0-beta", "1.0.0-beta.2", "1.0.0-beta.11",
-        "1.0.0-rc.1", "1.0.0", "1.0.1", "1.1.0",
+        "0.9.0",
+        "1.0.0-alpha",
+        "1.0.0-alpha.1",
+        "1.0.0-alpha.beta",
+        "1.0.0-beta",
+        "1.0.0-beta.2",
+        "1.0.0-beta.11",
+        "1.0.0-rc.1",
+        "1.0.0",
+        "1.0.1",
+        "1.1.0",
     ];
     for pair in ordered.windows(2) {
-        assert!(version(pair[0]) < version(pair[1]), "{} < {}", pair[0], pair[1]);
-        assert!(version(pair[1]) > version(pair[0]), "{} > {}", pair[1], pair[0]);
+        assert!(
+            version(pair[0]) < version(pair[1]),
+            "{} < {}",
+            pair[0],
+            pair[1]
+        );
+        assert!(
+            version(pair[1]) > version(pair[0]),
+            "{} > {}",
+            pair[1],
+            pair[0]
+        );
     }
 }
 
@@ -173,7 +235,11 @@ fn pkg_315_comparators_are_anded() {
 #[test]
 fn pkg_315_or_operator_is_refused() {
     for text in ["^1.0 || ^2.0", "1.0.0||2.0.0", ">=1 || <0"] {
-        assert_eq!(code_of_range_error(text), "manifest.requires-invalid", "{text}");
+        assert_eq!(
+            code_of_range_error(text),
+            "manifest.requires-invalid",
+            "{text}"
+        );
     }
 }
 
@@ -201,16 +267,31 @@ fn pkg_316_each_comparator_form() {
 #[test]
 fn pkg_316_unknown_operator_is_refused() {
     for text in ["!1.2.3", "==1.2.3", "^^1.2.3", ">>1.0.0", "x.y.z"] {
-        assert_eq!(code_of_range_error(text), "manifest.requires-invalid", "{text}");
+        assert_eq!(
+            code_of_range_error(text),
+            "manifest.requires-invalid",
+            "{text}"
+        );
     }
 }
 
 /// REQ: PKG-317
 #[test]
 fn pkg_317_bare_version_is_a_caret_range() {
-    for (bare, caret) in [("1.2.3", "^1.2.3"), ("1.2", "^1.2"), ("1", "^1"), ("0.1.0", "^0.1.0")] {
-        for probe in ["0.0.9", "0.1.0", "0.1.5", "0.2.0", "1.0.0", "1.2.3", "1.9.9", "2.0.0"] {
-            assert_eq!(matches(bare, probe), matches(caret, probe), "{bare} vs {caret} at {probe}");
+    for (bare, caret) in [
+        ("1.2.3", "^1.2.3"),
+        ("1.2", "^1.2"),
+        ("1", "^1"),
+        ("0.1.0", "^0.1.0"),
+    ] {
+        for probe in [
+            "0.0.9", "0.1.0", "0.1.5", "0.2.0", "1.0.0", "1.2.3", "1.9.9", "2.0.0",
+        ] {
+            assert_eq!(
+                matches(bare, probe),
+                matches(caret, probe),
+                "{bare} vs {caret} at {probe}"
+            );
         }
     }
 }
@@ -236,7 +317,9 @@ fn pkg_318_caret_table() {
 /// REQ: PKG-319
 #[test]
 fn pkg_319_tilde_table() {
-    assert!(matches("~1.2.3", "1.2.3") && matches("~1.2.3", "1.2.99") && !matches("~1.2.3", "1.3.0"));
+    assert!(
+        matches("~1.2.3", "1.2.3") && matches("~1.2.3", "1.2.99") && !matches("~1.2.3", "1.3.0")
+    );
     assert!(matches("~1.2", "1.2.0") && !matches("~1.2", "1.3.0"));
     assert!(matches("~1", "1.0.0") && matches("~1", "1.9.9") && !matches("~1", "2.0.0"));
     assert!(!matches("~1.2.3", "1.2.2"));
@@ -277,7 +360,12 @@ fn pkg_321_beta_channel_admits_prereleases() {
 fn pkg_322_range_length_127_128_129() {
     // 7 + n + 7 * 17 characters: ">=1.0.<1 followed by n zeros>" then 17 times " <9.0.0".
     let build = |zeros: usize| format!(">=1.0.1{}{}", "0".repeat(zeros), " <9.0.0".repeat(17));
-    for (zeros, length, ok) in [(0usize, 126usize, true), (1, 127, true), (2, 128, true), (3, 129, false)] {
+    for (zeros, length, ok) in [
+        (0usize, 126usize, true),
+        (1, 127, true),
+        (2, 128, true),
+        (3, 129, false),
+    ] {
         let text = build(zeros);
         assert_eq!(text.len(), length);
         if ok {
@@ -294,7 +382,11 @@ fn pkg_322_invalid_range_is_refused_at_install() {
     let fx = Fx::new();
     let out = fx.install(&Spec::new("example.a", "1.0.0").needs("example.b", "not-a-range", true));
     assert_eq!(out.exit_code, 1);
-    assert!(out.has_error("manifest.requires-invalid"), "{:?}", out.error_codes());
+    assert!(
+        out.has_error("manifest.requires-invalid"),
+        "{:?}",
+        out.error_codes()
+    );
 }
 
 // ---------------------------------------------------------------- requires
@@ -305,7 +397,11 @@ fn pkg_323_requiring_itself_is_refused_requires_self() {
     let fx = Fx::new();
     let out = fx.install(&Spec::new("example.a", "1.0.0").needs("example.a", "^1.0", false));
     assert_eq!(out.exit_code, 1);
-    assert!(out.has_error("manifest.requires-self"), "{:?}", out.error_codes());
+    assert!(
+        out.has_error("manifest.requires-self"),
+        "{:?}",
+        out.error_codes()
+    );
 }
 
 /// REQ: PKG-323
@@ -321,17 +417,27 @@ fn pkg_323_requiring_another_id_is_not_requires_self() {
 #[test]
 fn pkg_324_duplicate_required_id_is_refused_requires_invalid() {
     let fx = Fx::new();
-    let spec = Spec::new("example.a", "1.0.0").needs("example.b", "^1.0", true).needs("example.b", "^2.0", true);
+    let spec = Spec::new("example.a", "1.0.0")
+        .needs("example.b", "^1.0", true)
+        .needs("example.b", "^2.0", true);
     let out = fx.install(&spec);
     assert_eq!(out.exit_code, 1);
-    assert!(out.has_error("manifest.requires-invalid"), "{:?}", out.error_codes());
+    assert!(
+        out.has_error("manifest.requires-invalid"),
+        "{:?}",
+        out.error_codes()
+    );
 }
 
 /// REQ: PKG-324
 #[test]
 fn pkg_324_two_different_ids_are_fine() {
     let fx = Fx::new();
-    let out = fx.install(&Spec::new("example.a", "1.0.0").needs("example.b", "^1.0", true).needs("example.c", "^1.0", true));
+    let out = fx.install(
+        &Spec::new("example.a", "1.0.0")
+            .needs("example.b", "^1.0", true)
+            .needs("example.c", "^1.0", true),
+    );
     assert_eq!(out.exit_code, 0, "{:?}", out.stdout_jsonl);
 }
 
@@ -341,7 +447,11 @@ fn pkg_325_host_range_not_satisfied_is_refused_host_version() {
     let fx = Fx::new();
     let out = fx.install(&Spec::new("example.a", "1.0.0").host(">=9.0.0"));
     assert_eq!(out.exit_code, 1);
-    assert!(out.has_error("dependency.host-version"), "{:?}", out.error_codes());
+    assert!(
+        out.has_error("dependency.host-version"),
+        "{:?}",
+        out.error_codes()
+    );
     assert!(fx.record("example.a").is_none());
 }
 
@@ -357,30 +467,54 @@ fn pkg_325_host_range_satisfied_installs() {
 #[test]
 fn pkg_325_host_boundary_equal_passes_one_above_fails() {
     let fx = Fx::new();
-    assert_eq!(fx.install(&Spec::new("example.eq", "1.0.0").host(">=0.1.0")).exit_code, 0);
-    assert!(fx.install(&Spec::new("example.hi", "1.0.0").host(">=0.1.1")).has_error("dependency.host-version"));
+    assert_eq!(
+        fx.install(&Spec::new("example.eq", "1.0.0").host(">=0.1.0"))
+            .exit_code,
+        0
+    );
+    assert!(fx
+        .install(&Spec::new("example.hi", "1.0.0").host(">=0.1.1"))
+        .has_error("dependency.host-version"));
 }
 
 /// REQ: PKG-325
 #[test]
 fn pkg_325_a_later_load_keeps_the_plugin_disabled_with_a_reason() {
     let fx = Fx::new();
-    assert_eq!(fx.install(&Spec::new("example.a", "1.0.0").host(">=0.1.0")).exit_code, 0);
+    assert_eq!(
+        fx.install(&Spec::new("example.a", "1.0.0").host(">=0.1.0"))
+            .exit_code,
+        0
+    );
     let mut env = fx.env();
     env.host_release = "0.0.9".to_owned();
     let owned = vec!["list".to_owned(), "--json".to_owned()];
     let out = ilium_plugin_host::cli::run(&owned, &env);
-    assert!(out.all_text().contains("dependency.host-version") || out.all_text().contains("disabled"), "{}", out.all_text());
+    assert!(
+        out.all_text().contains("dependency.host-version") || out.all_text().contains("disabled"),
+        "{}",
+        out.all_text()
+    );
 }
 
 /// REQ: PKG-326
 #[test]
 fn pkg_326_wait_ms_5000_ok_5001_refused() {
     let fx = Fx::new();
-    assert_eq!(fx.install(&Spec::new("example.ok", "1.0.0").wait_ms(5000)).exit_code, 0);
+    assert_eq!(
+        fx.install(&Spec::new("example.ok", "1.0.0").wait_ms(5000))
+            .exit_code,
+        0
+    );
     let out = fx.install(&Spec::new("example.bad", "1.0.0").wait_ms(5001));
     assert_eq!(out.exit_code, 1);
-    assert!(out.error_codes().iter().any(|code| code.starts_with("manifest.")), "{:?}", out.error_codes());
+    assert!(
+        out.error_codes()
+            .iter()
+            .any(|code| code.starts_with("manifest.")),
+        "{:?}",
+        out.error_codes()
+    );
     assert!(fx.record("example.bad").is_none());
 }
 
@@ -388,36 +522,65 @@ fn pkg_326_wait_ms_5000_ok_5001_refused() {
 #[test]
 fn pkg_326_wait_ms_4999_and_zero() {
     let fx = Fx::new();
-    assert_eq!(fx.install(&Spec::new("example.a", "1.0.0").wait_ms(4999)).exit_code, 0);
-    assert_eq!(fx.install(&Spec::new("example.b", "1.0.0").wait_ms(0)).exit_code, 0);
+    assert_eq!(
+        fx.install(&Spec::new("example.a", "1.0.0").wait_ms(4999))
+            .exit_code,
+        0
+    );
+    assert_eq!(
+        fx.install(&Spec::new("example.b", "1.0.0").wait_ms(0))
+            .exit_code,
+        0
+    );
 }
 
 /// REQ: PKG-327
 #[test]
 fn pkg_327_service_forms_at_0_1_and_0_1_0_are_the_same() {
-    let short = ilium_plugin_host::resolve::parse_service_requirement("ilium:inference/provider@0.1").expect("short");
-    let long = ilium_plugin_host::resolve::parse_service_requirement("ilium:inference/provider@0.1.0").expect("long");
+    let short =
+        ilium_plugin_host::resolve::parse_service_requirement("ilium:inference/provider@0.1")
+            .expect("short");
+    let long =
+        ilium_plugin_host::resolve::parse_service_requirement("ilium:inference/provider@0.1.0")
+            .expect("long");
     assert_eq!(short.interface, long.interface);
     for probe in ["0.1.0", "0.1.7", "0.2.0", "1.0.0"] {
-        assert_eq!(short.range.matches(&version(probe), false), long.range.matches(&version(probe), false), "{probe}");
+        assert_eq!(
+            short.range.matches(&version(probe), false),
+            long.range.matches(&version(probe), false),
+            "{probe}"
+        );
     }
-    assert!(long.range.matches(&version("0.1.7"), false) && !long.range.matches(&version("0.2.0"), false));
+    assert!(
+        long.range.matches(&version("0.1.7"), false)
+            && !long.range.matches(&version("0.2.0"), false)
+    );
 }
 
 /// REQ: PKG-327
 #[test]
 fn pkg_327_service_form_uses_the_range_grammar() {
-    let service = ilium_plugin_host::resolve::parse_service_requirement("ilium:inference/provider@>=0.1.0 <0.3.0").expect("range");
-    assert!(service.range.matches(&version("0.2.5"), false) && !service.range.matches(&version("0.3.0"), false));
+    let service = ilium_plugin_host::resolve::parse_service_requirement(
+        "ilium:inference/provider@>=0.1.0 <0.3.0",
+    )
+    .expect("range");
+    assert!(
+        service.range.matches(&version("0.2.5"), false)
+            && !service.range.matches(&version("0.3.0"), false)
+    );
 }
 
 /// REQ: PKG-328
 #[test]
 fn pkg_328_extension_point_reference_bare_version_is_caret() {
-    let point = ilium_plugin_host::resolve::parse_point_reference("example.host/toolbar@1.2").expect("point");
+    let point = ilium_plugin_host::resolve::parse_point_reference("example.host/toolbar@1.2")
+        .expect("point");
     assert_eq!(point.plugin, "example.host");
     assert_eq!(point.point, "toolbar");
-    assert!(point.range.matches(&version("1.9.0"), false) && !point.range.matches(&version("2.0.0"), false));
+    assert!(
+        point.range.matches(&version("1.9.0"), false)
+            && !point.range.matches(&version("2.0.0"), false)
+    );
 }
 
 /// REQ: PKG-328
@@ -425,7 +588,10 @@ fn pkg_328_extension_point_reference_bare_version_is_caret() {
 fn pkg_328_requires_points_does_not_exist() {
     let fx = Fx::new();
     let mut spec = Spec::new("example.a", "1.0.0");
-    spec.extra_top_level.push(("requires".to_owned(), "{\"points\": [\"example.host/toolbar@1.0\"]}".to_owned()));
+    spec.extra_top_level.push((
+        "requires".to_owned(),
+        "{\"points\": [\"example.host/toolbar@1.0\"]}".to_owned(),
+    ));
     let out = fx.install(&spec);
     assert_eq!(out.exit_code, 1, "requires.points is not a manifest key");
 }
@@ -434,7 +600,8 @@ fn pkg_328_requires_points_does_not_exist() {
 #[test]
 fn pkg_329_missing_service_provider_does_not_block_install() {
     let fx = Fx::new();
-    let out = fx.install(&Spec::new("example.a", "1.0.0").service("ilium:inference/provider@0.1.0"));
+    let out =
+        fx.install(&Spec::new("example.a", "1.0.0").service("ilium:inference/provider@0.1.0"));
     assert_eq!(out.exit_code, 0, "{:?}", out.stdout_jsonl);
     assert!(fx.record("example.a").is_some());
 }
@@ -449,7 +616,13 @@ fn pkg_329_missing_point_owner_does_not_block_install() {
         "{\"extensions\": [{\"point\": \"example.host/toolbar@1.0\", \"id\": \"t\"}]}".to_owned(),
     ));
     let out = fx.install(&spec);
-    assert!(!out.error_codes().iter().any(|c| c.starts_with("dependency.")), "{:?}", out.error_codes());
+    assert!(
+        !out.error_codes()
+            .iter()
+            .any(|c| c.starts_with("dependency.")),
+        "{:?}",
+        out.error_codes()
+    );
 }
 
 /// REQ: PKG-329
@@ -458,25 +631,46 @@ fn pkg_329_missing_required_plugin_does_block_install() {
     let fx = Fx::new();
     let out = fx.install(&Spec::new("example.a", "1.0.0").needs("example.b", "^1.0", false));
     assert_eq!(out.exit_code, 1);
-    assert!(out.has_error("dependency.unresolved"), "{:?}", out.error_codes());
+    assert!(
+        out.has_error("dependency.unresolved"),
+        "{:?}",
+        out.error_codes()
+    );
 }
 
 // ---------------------------------------------------------------- resolver
 
 fn pkg(id: &str, ver: &str) -> PlanPackage {
-    PlanPackage { id: id.to_owned(), version: ver.to_owned(), needs: Vec::new(), host: None }
+    PlanPackage {
+        id: id.to_owned(),
+        version: ver.to_owned(),
+        needs: Vec::new(),
+        host: None,
+    }
 }
 
 fn needs(mut package: PlanPackage, dependency: &str, range: &str, optional: bool) -> PlanPackage {
-    package.needs.push((dependency.to_owned(), range.to_owned(), optional));
+    package
+        .needs
+        .push((dependency.to_owned(), range.to_owned(), optional));
     package
 }
 
 fn source(package: PlanPackage, rank: usize, sha: &str) -> SourcePackage {
-    SourcePackage { package, sha256: sha.to_owned(), yanked: false, channel: "stable".to_owned(), source_rank: rank }
+    SourcePackage {
+        package,
+        sha256: sha.to_owned(),
+        yanked: false,
+        channel: "stable".to_owned(),
+        source_rank: rank,
+    }
 }
 
-fn input(incoming: Vec<PlanPackage>, installed: Vec<PlanPackage>, sources: Vec<SourcePackage>) -> ResolveInput {
+fn input(
+    incoming: Vec<PlanPackage>,
+    installed: Vec<PlanPackage>,
+    sources: Vec<SourcePackage>,
+) -> ResolveInput {
     ResolveInput {
         incoming,
         installed,
@@ -488,14 +682,18 @@ fn input(incoming: Vec<PlanPackage>, installed: Vec<PlanPackage>, sources: Vec<S
     }
 }
 
-fn codes(result: &Result<ilium_plugin_host::resolve::ResolvedPlan, Vec<ilium_plugin_api::Diagnostic>>) -> Vec<String> {
+fn codes(
+    result: &Result<ilium_plugin_host::resolve::ResolvedPlan, Vec<ilium_plugin_api::Diagnostic>>,
+) -> Vec<String> {
     match result {
         Ok(_) => Vec::new(),
         Err(list) => list.iter().map(|d| d.code.as_str().to_owned()).collect(),
     }
 }
 
-fn step_list(result: Result<ilium_plugin_host::resolve::ResolvedPlan, Vec<ilium_plugin_api::Diagnostic>>) -> Vec<(PlanAction, String, String)> {
+fn step_list(
+    result: Result<ilium_plugin_host::resolve::ResolvedPlan, Vec<ilium_plugin_api::Diagnostic>>,
+) -> Vec<(PlanAction, String, String)> {
     result
         .unwrap_or_else(|d| panic!("plan expected: {d:?}"))
         .steps
@@ -516,11 +714,20 @@ fn b_sources() -> Vec<SourcePackage> {
 #[test]
 fn pkg_330_pins_sources_and_channel_are_inputs() {
     let incoming = vec![needs(pkg("example.a", "1.0.0"), "example.b", "^1.0", false)];
-    let mut pinned = input(incoming.clone(), vec![pkg("example.b", "1.0.0")], b_sources());
+    let mut pinned = input(
+        incoming.clone(),
+        vec![pkg("example.b", "1.0.0")],
+        b_sources(),
+    );
     pinned.pins = vec!["example.b".to_owned()];
     pinned.is_update = true;
     let steps = step_list(resolve_plan(&pinned));
-    assert!(steps.iter().any(|(a, id, v)| *a == PlanAction::Keep && id == "example.b" && v == "1.0.0"), "{steps:?}");
+    assert!(
+        steps
+            .iter()
+            .any(|(a, id, v)| *a == PlanAction::Keep && id == "example.b" && v == "1.0.0"),
+        "{steps:?}"
+    );
     let unpinned = input(incoming, Vec::new(), b_sources());
     assert_eq!(step_list(resolve_plan(&unpinned))[0].2, "1.2.0");
 }
@@ -529,9 +736,19 @@ fn pkg_330_pins_sources_and_channel_are_inputs() {
 #[test]
 fn pkg_331_highest_version_satisfying_all_ranges_wins() {
     let incoming = vec![needs(pkg("example.a", "1.0.0"), "example.b", "^1.0", false)];
-    let installed = vec![needs(pkg("example.c", "1.0.0"), "example.b", "<1.2.0", false)];
+    let installed = vec![needs(
+        pkg("example.c", "1.0.0"),
+        "example.b",
+        "<1.2.0",
+        false,
+    )];
     let steps = step_list(resolve_plan(&input(incoming, installed, b_sources())));
-    assert!(steps.iter().any(|(_, id, v)| id == "example.b" && v == "1.0.0"), "{steps:?}");
+    assert!(
+        steps
+            .iter()
+            .any(|(_, id, v)| id == "example.b" && v == "1.0.0"),
+        "{steps:?}"
+    );
 }
 
 /// REQ: PKG-331
@@ -541,7 +758,12 @@ fn pkg_331_yanked_version_is_not_chosen() {
     sources[1].yanked = true;
     let incoming = vec![needs(pkg("example.a", "1.0.0"), "example.b", "^1.0", false)];
     let steps = step_list(resolve_plan(&input(incoming, Vec::new(), sources)));
-    assert!(steps.iter().any(|(_, id, v)| id == "example.b" && v == "1.0.0"), "{steps:?}");
+    assert!(
+        steps
+            .iter()
+            .any(|(_, id, v)| id == "example.b" && v == "1.0.0"),
+        "{steps:?}"
+    );
 }
 
 /// REQ: PKG-331
@@ -551,19 +773,38 @@ fn pkg_331_version_from_a_channel_not_permitted_is_not_chosen() {
     sources[1].channel = "beta".to_owned();
     let incoming = vec![needs(pkg("example.a", "1.0.0"), "example.b", "^1.0", false)];
     let steps = step_list(resolve_plan(&input(incoming, Vec::new(), sources)));
-    assert!(steps.iter().any(|(_, id, v)| id == "example.b" && v == "1.0.0"), "{steps:?}");
+    assert!(
+        steps
+            .iter()
+            .any(|(_, id, v)| id == "example.b" && v == "1.0.0"),
+        "{steps:?}"
+    );
 }
 
 /// REQ: PKG-332
 #[test]
 fn pkg_332_installed_version_is_preferred_over_a_higher_one_when_not_an_update() {
     let incoming = vec![needs(pkg("example.a", "1.0.0"), "example.b", "^1.0", false)];
-    let steps = step_list(resolve_plan(&input(incoming.clone(), vec![pkg("example.b", "1.0.0")], b_sources())));
-    assert!(steps.iter().any(|(a, id, v)| *a == PlanAction::Keep && id == "example.b" && v == "1.0.0"), "{steps:?}");
+    let steps = step_list(resolve_plan(&input(
+        incoming.clone(),
+        vec![pkg("example.b", "1.0.0")],
+        b_sources(),
+    )));
+    assert!(
+        steps
+            .iter()
+            .any(|(a, id, v)| *a == PlanAction::Keep && id == "example.b" && v == "1.0.0"),
+        "{steps:?}"
+    );
     let mut update = input(incoming, vec![pkg("example.b", "1.0.0")], b_sources());
     update.is_update = true;
     let steps = step_list(resolve_plan(&update));
-    assert!(steps.iter().any(|(_, id, v)| id == "example.b" && v == "1.2.0"), "{steps:?}");
+    assert!(
+        steps
+            .iter()
+            .any(|(_, id, v)| id == "example.b" && v == "1.2.0"),
+        "{steps:?}"
+    );
 }
 
 /// REQ: PKG-333
@@ -575,17 +816,31 @@ fn pkg_333_no_common_version_is_a_conflict_listing_constraints_and_versions() {
     assert_eq!(codes(&result), vec!["dependency.conflict".to_owned()]);
     let message = result.err().expect("err")[0].message.clone();
     for fragment in ["example.a", "example.c", "^2.0", "^1.0", "1.2.0"] {
-        assert!(message.contains(fragment), "{fragment} missing from {message}");
+        assert!(
+            message.contains(fragment),
+            "{fragment} missing from {message}"
+        );
     }
 }
 
 /// REQ: PKG-334
 #[test]
 fn pkg_334_every_missing_id_is_listed_with_its_range() {
-    let incoming = vec![needs(needs(pkg("example.a", "1.0.0"), "example.x", "^1.0", false), "example.y", "~2.1", false)];
+    let incoming = vec![needs(
+        needs(pkg("example.a", "1.0.0"), "example.x", "^1.0", false),
+        "example.y",
+        "~2.1",
+        false,
+    )];
     let result = resolve_plan(&input(incoming, Vec::new(), Vec::new()));
     assert!(codes(&result).iter().all(|c| c == "dependency.unresolved"));
-    let text: String = result.err().expect("err").iter().map(|d| d.message.clone()).collect::<Vec<_>>().join("\n");
+    let text: String = result
+        .err()
+        .expect("err")
+        .iter()
+        .map(|d| d.message.clone())
+        .collect::<Vec<_>>()
+        .join("\n");
     for fragment in ["example.x", "^1.0", "example.y", "~2.1"] {
         assert!(text.contains(fragment), "{fragment} missing from {text}");
     }
@@ -628,14 +883,21 @@ fn pkg_336_tie_break_highest_version_then_source_order_then_lowest_sha() {
     let mut reversed = sources;
     reversed.reverse();
     let second = resolve_plan(&input(incoming, Vec::new(), reversed)).expect("plan");
-    assert_eq!(second.chosen_source_sha("example.b").expect("sha"), "cc", "deterministic");
+    assert_eq!(
+        second.chosen_source_sha("example.b").expect("sha"),
+        "cc",
+        "deterministic"
+    );
 }
 
 /// REQ: PKG-336
 #[test]
 fn pkg_336_source_order_wins_over_sha_when_versions_tie() {
     let incoming = vec![needs(pkg("example.a", "1.0.0"), "example.b", "^1.0", false)];
-    let sources = vec![source(pkg("example.b", "1.2.0"), 1, "00"), source(pkg("example.b", "1.2.0"), 0, "ff")];
+    let sources = vec![
+        source(pkg("example.b", "1.2.0"), 1, "00"),
+        source(pkg("example.b", "1.2.0"), 0, "ff"),
+    ];
     let plan = resolve_plan(&input(incoming, Vec::new(), sources)).expect("plan");
     assert_eq!(plan.chosen_source_sha("example.b").expect("sha"), "ff");
 }
@@ -645,7 +907,10 @@ fn pkg_336_source_order_wins_over_sha_when_versions_tie() {
 fn pkg_337_dry_run_prints_the_plan_and_changes_nothing() {
     let fx = Fx::new();
     let before = fx.snapshot_tree(&fx.data_dir());
-    let out = fx.install_with(&Spec::new("example.a", "1.0.0").needs("example.b", "^1.0", true), &["--dry-run"]);
+    let out = fx.install_with(
+        &Spec::new("example.a", "1.0.0").needs("example.b", "^1.0", true),
+        &["--dry-run"],
+    );
     assert_eq!(out.exit_code, 0, "{:?}", out.stdout_jsonl);
     assert!(out.all_text().contains("example.a"));
     assert_eq!(fx.snapshot_tree(&fx.data_dir()), before);
@@ -659,8 +924,16 @@ fn pkg_338_none_installed_highest_caret_match_then_dependant() {
     assert_eq!(
         steps,
         vec![
-            (PlanAction::Install, "example.b".to_owned(), "1.2.0".to_owned()),
-            (PlanAction::Install, "example.a".to_owned(), "1.0.0".to_owned())
+            (
+                PlanAction::Install,
+                "example.b".to_owned(),
+                "1.2.0".to_owned()
+            ),
+            (
+                PlanAction::Install,
+                "example.a".to_owned(),
+                "1.0.0".to_owned()
+            )
         ]
     );
 }
@@ -669,12 +942,20 @@ fn pkg_338_none_installed_highest_caret_match_then_dependant() {
 #[test]
 fn pkg_339_installed_dependency_is_kept() {
     let incoming = vec![needs(pkg("example.a", "1.0.0"), "example.b", "^1.0", false)];
-    let steps = step_list(resolve_plan(&input(incoming, vec![pkg("example.b", "1.0.0")], b_sources())));
+    let steps = step_list(resolve_plan(&input(
+        incoming,
+        vec![pkg("example.b", "1.0.0")],
+        b_sources(),
+    )));
     assert_eq!(
         steps,
         vec![
             (PlanAction::Keep, "example.b".to_owned(), "1.0.0".to_owned()),
-            (PlanAction::Install, "example.a".to_owned(), "1.0.0".to_owned())
+            (
+                PlanAction::Install,
+                "example.a".to_owned(),
+                "1.0.0".to_owned()
+            )
         ]
     );
 }
@@ -683,12 +964,24 @@ fn pkg_339_installed_dependency_is_kept() {
 #[test]
 fn pkg_340_range_forces_a_dependency_update_before_the_dependant() {
     let incoming = vec![needs(pkg("example.a", "1.0.0"), "example.b", "^1.1", false)];
-    let steps = step_list(resolve_plan(&input(incoming, vec![pkg("example.b", "1.0.0")], b_sources())));
+    let steps = step_list(resolve_plan(&input(
+        incoming,
+        vec![pkg("example.b", "1.0.0")],
+        b_sources(),
+    )));
     assert_eq!(
         steps,
         vec![
-            (PlanAction::Update, "example.b".to_owned(), "1.2.0".to_owned()),
-            (PlanAction::Install, "example.a".to_owned(), "1.0.0".to_owned())
+            (
+                PlanAction::Update,
+                "example.b".to_owned(),
+                "1.2.0".to_owned()
+            ),
+            (
+                PlanAction::Install,
+                "example.a".to_owned(),
+                "1.0.0".to_owned()
+            )
         ]
     );
 }
@@ -697,26 +990,42 @@ fn pkg_340_range_forces_a_dependency_update_before_the_dependant() {
 #[test]
 fn pkg_341_two_dependants_with_disjoint_ranges_conflict_naming_both() {
     let incoming = vec![needs(pkg("example.a", "1.0.0"), "example.b", "^2.0", false)];
-    let installed = vec![needs(pkg("example.c", "1.0.0"), "example.b", "^1.0", false), pkg("example.b", "1.0.0")];
+    let installed = vec![
+        needs(pkg("example.c", "1.0.0"), "example.b", "^1.0", false),
+        pkg("example.b", "1.0.0"),
+    ];
     let result = resolve_plan(&input(incoming, installed, b_sources()));
     assert_eq!(codes(&result), vec!["dependency.conflict".to_owned()]);
     let message = result.err().expect("err")[0].message.clone();
-    assert!(message.contains("example.a") && message.contains("example.c"), "{message}");
+    assert!(
+        message.contains("example.a") && message.contains("example.c"),
+        "{message}"
+    );
 }
 
 /// REQ: PKG-342
 #[test]
 fn pkg_342_no_source_has_the_dependency() {
     let incoming = vec![needs(pkg("example.a", "1.0.0"), "example.b", "^1.0", false)];
-    assert_eq!(codes(&resolve_plan(&input(incoming, Vec::new(), Vec::new()))), vec!["dependency.unresolved".to_owned()]);
+    assert_eq!(
+        codes(&resolve_plan(&input(incoming, Vec::new(), Vec::new()))),
+        vec!["dependency.unresolved".to_owned()]
+    );
 }
 
 /// REQ: PKG-343
 #[test]
 fn pkg_343_hard_mutual_requirement_is_a_cycle() {
     let a = needs(pkg("example.a", "1.0.0"), "example.b", "^1.0", false);
-    let sources = vec![source(needs(pkg("example.b", "1.0.0"), "example.a", "^1.0", false), 0, "b1")];
-    assert_eq!(codes(&resolve_plan(&input(vec![a], Vec::new(), sources))), vec!["dependency.cycle".to_owned()]);
+    let sources = vec![source(
+        needs(pkg("example.b", "1.0.0"), "example.a", "^1.0", false),
+        0,
+        "b1",
+    )];
+    assert_eq!(
+        codes(&resolve_plan(&input(vec![a], Vec::new(), sources))),
+        vec!["dependency.cycle".to_owned()]
+    );
 }
 
 /// REQ: PKG-344
@@ -724,7 +1033,14 @@ fn pkg_343_hard_mutual_requirement_is_a_cycle() {
 fn pkg_344_optional_missing_dependency_installs_the_dependant_only() {
     let incoming = vec![needs(pkg("example.a", "1.0.0"), "example.b", "^1.0", true)];
     let steps = step_list(resolve_plan(&input(incoming, Vec::new(), Vec::new())));
-    assert_eq!(steps, vec![(PlanAction::Install, "example.a".to_owned(), "1.0.0".to_owned())]);
+    assert_eq!(
+        steps,
+        vec![(
+            PlanAction::Install,
+            "example.a".to_owned(),
+            "1.0.0".to_owned()
+        )]
+    );
 }
 
 /// REQ: PKG-345
@@ -736,7 +1052,11 @@ fn pkg_345_missing_service_provider_installs_and_waits() {
     let record = fx.record("example.a").expect("record");
     assert_ne!(record["state"], "failed");
     let listed = fx.run(&["list", "--json"]);
-    assert!(listed.all_text().contains("waiting-dependency") || listed.all_text().contains("example.a"), "{}", listed.all_text());
+    assert!(
+        listed.all_text().contains("waiting-dependency") || listed.all_text().contains("example.a"),
+        "{}",
+        listed.all_text()
+    );
 }
 
 /// REQ: PKG-346
@@ -761,8 +1081,22 @@ fn pkg_346_host_range_equal_to_running_release_passes() {
 fn pkg_347_only_a_prerelease_exists_on_the_stable_channel() {
     let incoming = vec![needs(pkg("example.a", "1.0.0"), "example.b", "^1.0", false)];
     let sources = vec![source(pkg("example.b", "1.3.0-beta.1"), 0, "b1")];
-    assert_eq!(codes(&resolve_plan(&input(incoming.clone(), Vec::new(), sources.clone()))), vec!["dependency.unresolved".to_owned()]);
-    let mut beta = input(incoming, Vec::new(), vec![SourcePackage { channel: "beta".to_owned(), ..sources[0].clone() }]);
+    assert_eq!(
+        codes(&resolve_plan(&input(
+            incoming.clone(),
+            Vec::new(),
+            sources.clone()
+        ))),
+        vec!["dependency.unresolved".to_owned()]
+    );
+    let mut beta = input(
+        incoming,
+        Vec::new(),
+        vec![SourcePackage {
+            channel: "beta".to_owned(),
+            ..sources[0].clone()
+        }],
+    );
     beta.channel = "beta".to_owned();
     assert!(resolve_plan(&beta).is_ok());
 }
@@ -770,19 +1104,28 @@ fn pkg_347_only_a_prerelease_exists_on_the_stable_channel() {
 /// REQ: PKG-348
 #[test]
 fn pkg_348_update_that_strands_a_dependant_is_a_conflict_offering_update_all() {
-    let installed = vec![needs(pkg("example.a", "1.0.0"), "example.b", "^1.0", false), pkg("example.b", "1.0.0")];
+    let installed = vec![
+        needs(pkg("example.a", "1.0.0"), "example.b", "^1.0", false),
+        pkg("example.b", "1.0.0"),
+    ];
     let mut request = input(vec![pkg("example.b", "2.0.0")], installed, b_sources());
     request.is_update = true;
     let result = resolve_plan(&request);
     assert_eq!(codes(&result), vec!["dependency.conflict".to_owned()]);
     let message = result.err().expect("err")[0].message.clone();
-    assert!(message.contains("update --all") || message.contains("update example.b example.a"), "{message}");
+    assert!(
+        message.contains("update --all") || message.contains("update example.b example.a"),
+        "{message}"
+    );
 }
 
 /// REQ: PKG-348
 #[test]
 fn pkg_348_update_staying_inside_the_dependant_range_is_fine() {
-    let installed = vec![needs(pkg("example.a", "1.0.0"), "example.b", "^1.0", false), pkg("example.b", "1.0.0")];
+    let installed = vec![
+        needs(pkg("example.a", "1.0.0"), "example.b", "^1.0", false),
+        pkg("example.b", "1.0.0"),
+    ];
     let mut request = input(vec![pkg("example.b", "1.2.0")], installed, b_sources());
     request.is_update = true;
     assert!(resolve_plan(&request).is_ok());
@@ -792,7 +1135,11 @@ fn pkg_348_update_staying_inside_the_dependant_range_is_fine() {
 
 fn b_then_a(fx: &Fx) {
     assert_eq!(fx.install(&Spec::new("example.b", "1.0.0")).exit_code, 0);
-    assert_eq!(fx.install(&Spec::new("example.a", "1.0.0").needs("example.b", "^1.0", false)).exit_code, 0);
+    assert_eq!(
+        fx.install(&Spec::new("example.a", "1.0.0").needs("example.b", "^1.0", false))
+            .exit_code,
+        0
+    );
 }
 
 /// REQ: PKG-349
@@ -802,7 +1149,11 @@ fn pkg_349_uninstall_of_a_required_plugin_is_refused_in_use() {
     b_then_a(&fx);
     let out = fx.run(&["uninstall", "example.b"]);
     assert_eq!(out.exit_code, 1);
-    assert!(out.has_error("dependency.in-use"), "{:?}", out.error_codes());
+    assert!(
+        out.has_error("dependency.in-use"),
+        "{:?}",
+        out.error_codes()
+    );
     assert!(fx.record("example.b").is_some());
 }
 
@@ -816,7 +1167,10 @@ fn pkg_349_force_removes_it_and_disables_the_dependant_with_a_reason() {
     assert!(fx.record("example.b").is_none());
     let dependant = fx.record("example.a").expect("dependant stays installed");
     assert_ne!(dependant["state"], "installed-enabled");
-    assert!(fx.run(&["list", "--json"]).all_text().contains("requires example.b"));
+    assert!(fx
+        .run(&["list", "--json"])
+        .all_text()
+        .contains("requires example.b"));
 }
 
 /// REQ: PKG-349
@@ -824,7 +1178,11 @@ fn pkg_349_force_removes_it_and_disables_the_dependant_with_a_reason() {
 fn pkg_349_optional_dependants_do_not_block() {
     let fx = Fx::new();
     assert_eq!(fx.install(&Spec::new("example.b", "1.0.0")).exit_code, 0);
-    assert_eq!(fx.install(&Spec::new("example.a", "1.0.0").needs("example.b", "^1.0", true)).exit_code, 0);
+    assert_eq!(
+        fx.install(&Spec::new("example.a", "1.0.0").needs("example.b", "^1.0", true))
+            .exit_code,
+        0
+    );
     assert_eq!(fx.run(&["uninstall", "example.b"]).exit_code, 0);
 }
 
@@ -835,5 +1193,8 @@ fn pkg_349_installing_b_again_re_enables_the_dependant() {
     b_then_a(&fx);
     assert_eq!(fx.run(&["uninstall", "example.b", "--force"]).exit_code, 0);
     assert_eq!(fx.install(&Spec::new("example.b", "1.0.0")).exit_code, 0);
-    assert_eq!(fx.record("example.a").expect("record")["state"], "installed-enabled");
+    assert_eq!(
+        fx.record("example.a").expect("record")["state"],
+        "installed-enabled"
+    );
 }

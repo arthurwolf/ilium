@@ -8,7 +8,10 @@ use crate::common::*;
 /// REQ: COR-050
 #[test]
 fn manifest_050_equals_the_complete_manifest_of_the_page() {
-    assert_eq!(manifest(), json_block_after(&page_text(), "### Complete manifest"));
+    assert_eq!(
+        manifest(),
+        json_block_after(&page_text(), "### Complete manifest")
+    );
 }
 
 /// REQ: COR-050
@@ -28,8 +31,12 @@ fn manifest_050_fragment_grants_are_a_prefix_of_the_complete_grants() {
     let page = page_text();
     let fragment = json_block_after(&page, "### Manifest");
     let complete = json_block_after(&page, "### Complete manifest");
-    let short = fragment["capabilities"]["client"].as_array().expect("fragment grants");
-    let full = complete["capabilities"]["client"].as_array().expect("complete grants");
+    let short = fragment["capabilities"]["client"]
+        .as_array()
+        .expect("fragment grants");
+    let full = complete["capabilities"]["client"]
+        .as_array()
+        .expect("complete grants");
     assert_eq!(short.len(), 5);
     assert_eq!(&full[..short.len()], short.as_slice());
 }
@@ -147,8 +154,12 @@ fn manifest_007_one_prefix_mode_keybinding_on_the_question_mark() {
 #[test]
 fn manifest_010_the_keybinding_command_is_a_declared_command_of_this_plugin() {
     let manifest = manifest();
-    let binding = manifest["contributes"]["keybindings"][0]["command"].as_str().expect("command");
-    let local = binding.strip_prefix(&format!("{PLUGIN_ID}/")).expect("global id of this plugin");
+    let binding = manifest["contributes"]["keybindings"][0]["command"]
+        .as_str()
+        .expect("command");
+    let local = binding
+        .strip_prefix(&format!("{PLUGIN_ID}/"))
+        .expect("global id of this plugin");
     let ids: Vec<&str> = manifest["contributes"]["commands"]
         .as_array()
         .expect("commands")
@@ -183,7 +194,10 @@ fn manifest_010_one_help_topic_keys_overview_from_the_help_folder() {
 #[test]
 fn manifest_010_the_help_topic_file_is_shipped_with_the_plugin() {
     let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("help/keys-overview.md");
-    assert!(path.exists(), "{path:?} is the file the manifest names for the topic");
+    assert!(
+        path.exists(),
+        "{path:?} is the file the manifest names for the topic"
+    );
 }
 
 /// REQ: F-007
@@ -201,7 +215,8 @@ fn manifest_007_the_keyboard_tab_gets_one_client_section_at_the_end() {
 
 /// REQ: F-007
 #[test]
-fn manifest_007_the_section_holds_one_keybinding_row_for_show_keys_defaulting_to_the_question_mark() {
+fn manifest_007_the_section_holds_one_keybinding_row_for_show_keys_defaulting_to_the_question_mark()
+{
     assert_eq!(
         manifest()["contributes"]["settings"][0]["rows"],
         json!([{"type": "keybinding", "key": "show_keys", "title": "Key reference", "command": "show-keys", "default": "?"}])
@@ -212,7 +227,9 @@ fn manifest_007_the_section_holds_one_keybinding_row_for_show_keys_defaulting_to
 #[test]
 fn manifest_007_the_row_command_is_a_declared_local_command() {
     let manifest = manifest();
-    let command = manifest["contributes"]["settings"][0]["rows"][0]["command"].as_str().expect("command");
+    let command = manifest["contributes"]["settings"][0]["rows"][0]["command"]
+        .as_str()
+        .expect("command");
     assert!(manifest["contributes"]["commands"]
         .as_array()
         .expect("commands")
@@ -224,7 +241,13 @@ fn manifest_007_the_row_command_is_a_declared_local_command() {
 #[test]
 fn manifest_010_the_manifest_declares_no_hook_handlers_and_no_extra_exports() {
     let manifest = manifest();
-    assert_eq!(manifest["client"]["exports"].as_array().expect("exports").len(), 1);
+    assert_eq!(
+        manifest["client"]["exports"]
+            .as_array()
+            .expect("exports")
+            .len(),
+        1
+    );
     assert!(manifest["contributes"].get("hooks").is_none());
 }
 
@@ -232,7 +255,15 @@ fn manifest_010_the_manifest_declares_no_hook_handlers_and_no_extra_exports() {
 #[test]
 fn manifest_050_every_contribution_key_is_one_the_page_lists() {
     let contributes = manifest()["contributes"].clone();
-    let mut keys: Vec<&str> = contributes.as_object().expect("object").keys().map(String::as_str).collect();
+    let mut keys: Vec<&str> = contributes
+        .as_object()
+        .expect("object")
+        .keys()
+        .map(String::as_str)
+        .collect();
     keys.sort_unstable();
-    assert_eq!(keys, vec!["commands", "help", "keybindings", "panels", "settings"]);
+    assert_eq!(
+        keys,
+        vec!["commands", "help", "keybindings", "panels", "settings"]
+    );
 }

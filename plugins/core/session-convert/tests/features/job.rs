@@ -3,7 +3,9 @@
 //! reports progress every 50 lines and stops when cancelled.
 
 use ilium_plugin_sdk::testing::FakeHost;
-use ilium_plugin_sdk::types::{ErrorCode, FsPath, Intent, Outcome, PluginSide, RequestRef, RequestResult};
+use ilium_plugin_sdk::types::{
+    ErrorCode, FsPath, Intent, Outcome, PluginSide, RequestRef, RequestResult,
+};
 use serde_json::{json, Value};
 
 use crate::common::*;
@@ -46,19 +48,37 @@ fn input() -> Vec<u8> {
 
 fn host_with_rollout(lines: &[String]) -> FakeHost {
     let mut host = server_host();
-    host.fs().write(FsPath { scope: "agent-sessions:codex".into(), path: ROLLOUT.into() }, lines.join("\n").as_bytes());
+    host.fs().write(
+        FsPath {
+            scope: "agent-sessions:codex".into(),
+            path: ROLLOUT.into(),
+        },
+        lines.join("\n").as_bytes(),
+    );
     host
 }
 
 fn standard_lines() -> Vec<String> {
-    vec![user_line("hello there"), assistant_line("hi, how can I help"), call_line(), result_line(), reasoning_line(), token_line()]
+    vec![
+        user_line("hello there"),
+        assistant_line("hi, how can I help"),
+        call_line(),
+        result_line(),
+        reasoning_line(),
+        token_line(),
+    ]
 }
 
 fn output_of(host: &mut FakeHost) -> (String, u64, u64) {
-    let bytes = host.run_job("codex-to-claude", &input()).expect("job result");
+    let bytes = host
+        .run_job("codex-to-claude", &input())
+        .expect("job result");
     let value: Value = serde_json::from_slice(&bytes).expect("JSON output");
     (
-        value["claude_jsonl"].as_str().expect("claude_jsonl").to_string(),
+        value["claude_jsonl"]
+            .as_str()
+            .expect("claude_jsonl")
+            .to_string(),
         value["kept"].as_u64().expect("kept"),
         value["dropped"].as_u64().expect("dropped"),
     )
@@ -141,7 +161,9 @@ fn f_077_job_preserves_the_order_of_the_conversation() {
 /// REQ: F-077
 #[test]
 fn f_077_job_reports_progress_every_fifty_lines() {
-    let lines: Vec<String> = (0..120).map(|index| user_line(&format!("prompt {index}"))).collect();
+    let lines: Vec<String> = (0..120)
+        .map(|index| user_line(&format!("prompt {index}")))
+        .collect();
     let mut host = host_with_rollout(&lines);
     output_of(&mut host);
     let reported = host.jobs().reported_progress();
@@ -155,11 +177,16 @@ fn f_077_job_reports_progress_every_fifty_lines() {
 /// REQ: F-077
 #[test]
 fn f_077_job_progress_never_moves_backwards() {
-    let lines: Vec<String> = (0..260).map(|index| assistant_line(&format!("answer {index}"))).collect();
+    let lines: Vec<String> = (0..260)
+        .map(|index| assistant_line(&format!("answer {index}")))
+        .collect();
     let mut host = host_with_rollout(&lines);
     output_of(&mut host);
     let reported = host.jobs().reported_progress();
-    assert!(reported.windows(2).all(|pair| pair[0] <= pair[1]), "{reported:?}");
+    assert!(
+        reported.windows(2).all(|pair| pair[0] <= pair[1]),
+        "{reported:?}"
+    );
 }
 
 /// REQ: F-077
@@ -167,7 +194,9 @@ fn f_077_job_progress_never_moves_backwards() {
 fn f_077_job_stops_with_cancelled_when_the_user_cancels() {
     let mut host = host_with_rollout(&standard_lines());
     host.jobs().request_cancel();
-    let error = host.run_job("codex-to-claude", &input()).expect_err("cancelled");
+    let error = host
+        .run_job("codex-to-claude", &input())
+        .expect_err("cancelled");
     assert_eq!(error.code, ErrorCode::Cancelled);
 }
 
@@ -175,7 +204,9 @@ fn f_077_job_stops_with_cancelled_when_the_user_cancels() {
 #[test]
 fn f_077_job_a_missing_rollout_fails_with_not_found() {
     let mut host = server_host();
-    let error = host.run_job("codex-to-claude", &input()).expect_err("missing rollout");
+    let error = host
+        .run_job("codex-to-claude", &input())
+        .expect_err("missing rollout");
     assert_eq!(error.code, ErrorCode::NotFound);
 }
 
@@ -183,7 +214,9 @@ fn f_077_job_a_missing_rollout_fails_with_not_found() {
 #[test]
 fn f_077_job_malformed_input_fails_with_invalid_argument() {
     let mut host = host_with_rollout(&standard_lines());
-    let error = host.run_job("codex-to-claude", b"{").expect_err("bad input");
+    let error = host
+        .run_job("codex-to-claude", b"{")
+        .expect_err("bad input");
     assert_eq!(error.code, ErrorCode::InvalidArgument);
 }
 
@@ -191,7 +224,9 @@ fn f_077_job_malformed_input_fails_with_invalid_argument() {
 #[test]
 fn f_077_job_unknown_kind_fails_with_invalid_argument() {
     let mut host = host_with_rollout(&standard_lines());
-    let error = host.run_job("claude-to-codex", &input()).expect_err("no such job");
+    let error = host
+        .run_job("claude-to-codex", &input())
+        .expect_err("no such job");
     assert_eq!(error.code, ErrorCode::InvalidArgument);
 }
 
@@ -201,7 +236,13 @@ fn f_077_job_does_not_change_the_original_rollout() {
     let lines = standard_lines();
     let mut host = host_with_rollout(&lines);
     output_of(&mut host);
-    let after = host.fs().read(FsPath { scope: "agent-sessions:codex".into(), path: ROLLOUT.into() }).expect("rollout");
+    let after = host
+        .fs()
+        .read(FsPath {
+            scope: "agent-sessions:codex".into(),
+            path: ROLLOUT.into(),
+        })
+        .expect("rollout");
     assert_eq!(after, lines.join("\n").into_bytes());
 }
 
@@ -209,7 +250,9 @@ fn f_077_job_does_not_change_the_original_rollout() {
 #[test]
 fn f_077_job_input_with_extra_fields_still_runs() {
     let mut host = host_with_rollout(&standard_lines());
-    let bytes = json!({"rollout": ROLLOUT, "unused": true}).to_string().into_bytes();
+    let bytes = json!({"rollout": ROLLOUT, "unused": true})
+        .to_string()
+        .into_bytes();
     assert!(host.run_job("codex-to-claude", &bytes).is_ok());
 }
 
@@ -220,10 +263,12 @@ fn start_and_stop_codex(host: &mut FakeHost, pane: u64) {
         .iter()
         .find(|s| matches!(s.intent, Intent::TerminatePaneProcess(_)))
         .expect("terminate submitted");
-    host.deliver_one(ilium_plugin_sdk::types::Event::RequestCompleted(RequestResult {
-        request: RequestRef::Submission(terminate.correlation),
-        outcome: Outcome::Ok,
-    }));
+    host.deliver_one(ilium_plugin_sdk::types::Event::RequestCompleted(
+        RequestResult {
+            request: RequestRef::Submission(terminate.correlation),
+            outcome: Outcome::Ok,
+        },
+    ));
 }
 
 /// REQ: F-077
@@ -235,7 +280,10 @@ fn f_077_after_the_agent_stopped_the_server_starts_the_codex_to_claude_job() {
     assert_eq!(jobs.len(), 1, "{jobs:?}");
     assert_eq!(jobs[0].kind, "codex-to-claude");
     let sent: Value = serde_json::from_slice(&jobs[0].input).expect("JSON input");
-    assert_eq!(sent["rollout"], format!("projects/p/{SOURCE_SESSION}.jsonl"));
+    assert_eq!(
+        sent["rollout"],
+        format!("projects/p/{SOURCE_SESSION}.jsonl")
+    );
 }
 
 /// REQ: F-077
@@ -251,18 +299,26 @@ fn f_077_no_job_starts_while_the_agent_is_still_running() {
 fn f_077_a_refused_stop_starts_no_job_and_offers_no_resume() {
     let (mut host, pane) = server_with_pane("codex", true);
     let submissions = host.deliver_one(start_message(pane, "claude"));
-    let terminate = submissions.iter().find(|s| matches!(s.intent, Intent::TerminatePaneProcess(_))).expect("terminate");
-    let reply = host.deliver_one(ilium_plugin_sdk::types::Event::RequestCompleted(RequestResult {
-        request: RequestRef::Submission(terminate.correlation),
-        outcome: Outcome::Failed(ilium_plugin_sdk::types::PluginError {
-            code: ErrorCode::Busy,
-            message: "still running".into(),
-            retry_after_ms: None,
-        }),
-    }));
+    let terminate = submissions
+        .iter()
+        .find(|s| matches!(s.intent, Intent::TerminatePaneProcess(_)))
+        .expect("terminate");
+    let reply = host.deliver_one(ilium_plugin_sdk::types::Event::RequestCompleted(
+        RequestResult {
+            request: RequestRef::Submission(terminate.correlation),
+            outcome: Outcome::Failed(ilium_plugin_sdk::types::PluginError {
+                code: ErrorCode::Busy,
+                message: "still running".into(),
+                retry_after_ms: None,
+            }),
+        },
+    ));
     assert!(host.jobs().list().is_empty());
     let sent = messages(&reply);
-    let failed = sent.iter().find(|m| m.1 == PluginSide::Client && m.2 == "failed").expect("failed message");
+    let failed = sent
+        .iter()
+        .find(|m| m.1 == PluginSide::Client && m.2 == "failed")
+        .expect("failed message");
     let payload: Value = serde_json::from_str(&failed.3).unwrap();
     assert_eq!(payload["can_resume"], false);
 }

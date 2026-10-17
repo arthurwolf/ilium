@@ -4,7 +4,8 @@
 
 use ilium_plugin_sdk::testing::FakeHost;
 use ilium_plugin_sdk::types::{
-    ChildExitedEvent, ChildId, ChildOutputEvent, Event, FsPath, Intent, Outcome, OutputStream, RequestRef, RequestResult, Submission,
+    ChildExitedEvent, ChildId, ChildOutputEvent, Event, FsPath, Intent, Outcome, OutputStream,
+    RequestRef, RequestResult, Submission,
 };
 use serde_json::{json, Value};
 
@@ -33,7 +34,11 @@ pub fn stopped_claude() -> (FakeHost, u64) {
 pub fn failed_claude_to_codex() -> (FakeHost, u64) {
     let (mut host, pane) = stopped_claude();
     let child = host.process().children()[0].id;
-    host.deliver_one(Event::ChildExited(ChildExitedEvent { child: ChildId(child), status: Some(1), signal: None }));
+    host.deliver_one(Event::ChildExited(ChildExitedEvent {
+        child: ChildId(child),
+        status: Some(1),
+        signal: None,
+    }));
     (host, pane)
 }
 
@@ -51,17 +56,29 @@ fn stdin_methods(host: &mut FakeHost) -> Vec<String> {
     host.process().children()[0]
         .stdin_lines
         .iter()
-        .map(|line| serde_json::from_str::<Value>(line).expect("JSON line")["method"].as_str().unwrap_or("").to_string())
+        .map(|line| {
+            serde_json::from_str::<Value>(line).expect("JSON line")["method"]
+                .as_str()
+                .unwrap_or("")
+                .to_string()
+        })
         .collect()
 }
 
 /// Drives the handshake and the import to the completion notification; returns the submissions of the last step.
 fn complete_import(host: &mut FakeHost) -> Vec<Submission> {
     let child = host.process().children()[0].id;
-    say(host, child, json!({"id": 1, "result": {"userAgent": "codex 1.0", "codexHome": "/home/u/.codex"}}));
+    say(
+        host,
+        child,
+        json!({"id": 1, "result": {"userAgent": "codex 1.0", "codexHome": "/home/u/.codex"}}),
+    );
     say(host, child, json!({"id": 2, "result": {"importId": "i1"}}));
     host.fs().write(
-        FsPath { scope: "agent-sessions:codex".into(), path: format!("2030/01/01/rollout-{THREAD}.jsonl") },
+        FsPath {
+            scope: "agent-sessions:codex".into(),
+            path: format!("2030/01/01/rollout-{THREAD}.jsonl"),
+        },
         b"{\"type\":\"session_meta\"}\n",
     );
     say(
@@ -99,7 +116,8 @@ fn f_077_the_app_server_is_a_codex_app_server_child_with_open_stdin_in_line_mode
 #[test]
 fn f_077_the_first_line_sent_to_the_app_server_is_the_initialize_request() {
     let (mut host, _pane) = stopped_claude();
-    let first: Value = serde_json::from_str(&host.process().children()[0].stdin_lines[0]).expect("JSON line");
+    let first: Value =
+        serde_json::from_str(&host.process().children()[0].stdin_lines[0]).expect("JSON line");
     assert_eq!(first["method"], "initialize");
     assert_eq!(first["params"]["capabilities"]["experimentalApi"], true);
 }
@@ -109,8 +127,15 @@ fn f_077_the_first_line_sent_to_the_app_server_is_the_initialize_request() {
 fn f_077_after_the_initialize_answer_the_plugin_sends_initialized_then_the_import() {
     let (mut host, _pane) = stopped_claude();
     let child = host.process().children()[0].id;
-    say(&mut host, child, json!({"id": 1, "result": {"userAgent": "codex 1.0", "codexHome": "/home/u/.codex"}}));
-    assert_eq!(stdin_methods(&mut host), ["initialize", "initialized", "externalAgentConfig/import"]);
+    say(
+        &mut host,
+        child,
+        json!({"id": 1, "result": {"userAgent": "codex 1.0", "codexHome": "/home/u/.codex"}}),
+    );
+    assert_eq!(
+        stdin_methods(&mut host),
+        ["initialize", "initialized", "externalAgentConfig/import"]
+    );
 }
 
 /// REQ: F-077
@@ -118,13 +143,20 @@ fn f_077_after_the_initialize_answer_the_plugin_sends_initialized_then_the_impor
 fn f_077_the_import_request_names_the_claude_transcript_as_one_sessions_item() {
     let (mut host, _pane) = stopped_claude();
     let child = host.process().children()[0].id;
-    say(&mut host, child, json!({"id": 1, "result": {"userAgent": "codex 1.0", "codexHome": "/home/u/.codex"}}));
+    say(
+        &mut host,
+        child,
+        json!({"id": 1, "result": {"userAgent": "codex 1.0", "codexHome": "/home/u/.codex"}}),
+    );
     let lines = host.process().children()[0].stdin_lines.clone();
     let import: Value = serde_json::from_str(lines.last().unwrap()).expect("JSON line");
     let item = &import["params"]["migrationItems"][0];
     assert_eq!(item["itemType"], "SESSIONS");
     assert_eq!(item["details"]["sessions"].as_array().unwrap().len(), 1);
-    assert!(item["details"]["sessions"][0]["path"].as_str().unwrap().ends_with(&format!("{SOURCE_SESSION}.jsonl")));
+    assert!(item["details"]["sessions"][0]["path"]
+        .as_str()
+        .unwrap()
+        .ends_with(&format!("{SOURCE_SESSION}.jsonl")));
 }
 
 /// REQ: F-077
@@ -132,8 +164,16 @@ fn f_077_the_import_request_names_the_claude_transcript_as_one_sessions_item() {
 fn f_077_an_import_progress_notification_moves_the_progress_forward() {
     let (mut host, _pane) = stopped_claude();
     let child = host.process().children()[0].id;
-    say(&mut host, child, json!({"id": 1, "result": {"userAgent": "codex 1.0", "codexHome": "/home/u/.codex"}}));
-    say(&mut host, child, json!({"id": 2, "result": {"importId": "i1"}}));
+    say(
+        &mut host,
+        child,
+        json!({"id": 1, "result": {"userAgent": "codex 1.0", "codexHome": "/home/u/.codex"}}),
+    );
+    say(
+        &mut host,
+        child,
+        json!({"id": 2, "result": {"importId": "i1"}}),
+    );
     let submissions = say(
         &mut host,
         child,
@@ -141,7 +181,10 @@ fn f_077_an_import_progress_notification_moves_the_progress_forward() {
             {"itemType": "SESSIONS", "successes": [{"source": "x", "target": "y"}], "failures": []}
         ]}}),
     );
-    let progress = messages(&submissions).into_iter().filter(|m| m.2 == "progress").count();
+    let progress = messages(&submissions)
+        .into_iter()
+        .filter(|m| m.2 == "progress")
+        .count();
     assert!(progress >= 1, "{submissions:?}");
 }
 
@@ -178,7 +221,11 @@ fn f_077_the_app_server_is_stopped_with_terminate_when_the_conversion_succeeds()
 fn f_077_the_app_server_is_stopped_when_the_conversion_fails() {
     let (mut host, _pane) = stopped_claude();
     let child = host.process().children()[0].id;
-    say(&mut host, child, json!({"id": 1, "error": {"code": -1, "message": "no"}}));
+    say(
+        &mut host,
+        child,
+        json!({"id": 1, "error": {"code": -1, "message": "no"}}),
+    );
     assert_eq!(host.process().children()[0].signals, ["terminate"]);
 }
 
@@ -199,8 +246,16 @@ fn f_077_the_app_server_is_stopped_when_the_user_cancels() {
 fn f_077_an_import_with_a_failure_fails_the_conversion_and_offers_the_original() {
     let (mut host, _pane) = stopped_claude();
     let child = host.process().children()[0].id;
-    say(&mut host, child, json!({"id": 1, "result": {"userAgent": "codex 1.0", "codexHome": "/home/u/.codex"}}));
-    say(&mut host, child, json!({"id": 2, "result": {"importId": "i1"}}));
+    say(
+        &mut host,
+        child,
+        json!({"id": 1, "result": {"userAgent": "codex 1.0", "codexHome": "/home/u/.codex"}}),
+    );
+    say(
+        &mut host,
+        child,
+        json!({"id": 2, "result": {"importId": "i1"}}),
+    );
     let submissions = say(
         &mut host,
         child,
@@ -209,7 +264,10 @@ fn f_077_an_import_with_a_failure_fails_the_conversion_and_offers_the_original()
         ]}}),
     );
     assert!(created(&submissions).is_empty());
-    let failed = messages(&submissions).into_iter().find(|m| m.2 == "failed").expect("failed message");
+    let failed = messages(&submissions)
+        .into_iter()
+        .find(|m| m.2 == "failed")
+        .expect("failed message");
     let payload: Value = serde_json::from_str(&failed.3).unwrap();
     assert_eq!(payload["can_resume"], true);
     assert!(payload["message"].as_str().unwrap().contains("bad line"));
@@ -220,8 +278,11 @@ fn f_077_an_import_with_a_failure_fails_the_conversion_and_offers_the_original()
 fn f_077_an_app_server_that_exits_early_fails_the_conversion() {
     let (mut host, pane) = stopped_claude();
     let child = host.process().children()[0].id;
-    let submissions =
-        host.deliver_one(Event::ChildExited(ChildExitedEvent { child: ChildId(child), status: Some(1), signal: None }));
+    let submissions = host.deliver_one(Event::ChildExited(ChildExitedEvent {
+        child: ChildId(child),
+        status: Some(1),
+        signal: None,
+    }));
     assert!(created(&submissions).is_empty());
     assert!(messages(&submissions).iter().any(|m| m.2 == "failed"));
     assert!(closed(&submissions).iter().all(|node| *node != pane));
@@ -255,7 +316,10 @@ fn f_077_the_original_claude_transcript_is_left_untouched() {
     complete_import(&mut host);
     let bytes = host
         .fs()
-        .read(FsPath { scope: "agent-sessions:claude".into(), path: format!("projects/p/{SOURCE_SESSION}.jsonl") })
+        .read(FsPath {
+            scope: "agent-sessions:claude".into(),
+            path: format!("projects/p/{SOURCE_SESSION}.jsonl"),
+        })
         .expect("transcript");
     assert_eq!(bytes, b"{\"type\":\"user\"}\n");
 }

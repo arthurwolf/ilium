@@ -11,7 +11,12 @@ fn page_manifest() -> Value {
 }
 
 fn strings(value: &Value) -> Vec<String> {
-    value.as_array().expect("array").iter().map(|item| item.as_str().expect("string").to_string()).collect()
+    value
+        .as_array()
+        .expect("array")
+        .iter()
+        .map(|item| item.as_str().expect("string").to_string())
+        .collect()
 }
 
 /// REQ: COR-050, F-003
@@ -48,29 +53,44 @@ fn doc_cor_050_identity_fields_are_exact() {
 #[test]
 fn doc_cor_050_both_sides_have_entry_and_world() {
     let manifest = manifest_value();
-    assert_eq!(manifest["server"], json!({"entry": "server.wasm", "world": "ilium:server/base@0.1.0"}));
-    assert_eq!(manifest["client"], json!({"entry": "client.wasm", "world": "ilium:client/base@0.1.0"}));
+    assert_eq!(
+        manifest["server"],
+        json!({"entry": "server.wasm", "world": "ilium:server/base@0.1.0"})
+    );
+    assert_eq!(
+        manifest["client"],
+        json!({"entry": "client.wasm", "world": "ilium:client/base@0.1.0"})
+    );
 }
 
 /// REQ: COR-050, F-003
 #[test]
 fn doc_cor_050_server_capabilities_are_panes_read_panes_lifecycle_tree_restructure() {
     let manifest = manifest_value();
-    assert_eq!(strings(&manifest["capabilities"]["server"]), ["panes.read", "panes.lifecycle", "tree.restructure"]);
+    assert_eq!(
+        strings(&manifest["capabilities"]["server"]),
+        ["panes.read", "panes.lifecycle", "tree.restructure"]
+    );
 }
 
 /// REQ: COR-050, F-003
 #[test]
 fn doc_cor_050_client_capabilities_are_panes_read_ui_panels() {
     let manifest = manifest_value();
-    assert_eq!(strings(&manifest["capabilities"]["client"]), ["panes.read", "ui.panels"]);
+    assert_eq!(
+        strings(&manifest["capabilities"]["client"]),
+        ["panes.read", "ui.panels"]
+    );
 }
 
 /// REQ: COR-050, F-003
 #[test]
 fn doc_cor_050_activation_triggers_are_command_and_view() {
     let manifest = manifest_value();
-    assert_eq!(strings(&manifest["activation"]), ["command:layout.preset", "view:layout.presets"]);
+    assert_eq!(
+        strings(&manifest["activation"]),
+        ["command:layout.preset", "view:layout.presets"]
+    );
 }
 
 /// REQ: COR-050, F-003
@@ -88,7 +108,9 @@ fn f_003_server_host_holds_declared_server_grants_only() {
     let mut host = server_host();
     assert!(host.grant_now("tree.restructure").is_ok());
     assert!(host.grant_now("panes.lifecycle").is_ok());
-    let refused = host.grant_now("ui.panels").expect_err("ui.panels is a client grant");
+    let refused = host
+        .grant_now("ui.panels")
+        .expect_err("ui.panels is a client grant");
     assert_eq!(refused.code, "harness.grant-not-declared");
 }
 
@@ -98,7 +120,9 @@ fn f_003_client_host_holds_declared_client_grants_only() {
     let mut host = client_host();
     assert!(host.grant_now("ui.panels").is_ok());
     assert!(host.grant_now("panes.read").is_ok());
-    let refused = host.grant_now("tree.restructure").expect_err("tree.restructure is a server grant");
+    let refused = host
+        .grant_now("tree.restructure")
+        .expect_err("tree.restructure is a server grant");
     assert_eq!(refused.code, "harness.grant-not-declared");
 }
 

@@ -165,7 +165,10 @@ fn settings_set_json_that_changes_no_value_sends_no_settings_changed() {
 #[test]
 fn settings_set_json_event_has_origin_plugin_and_sorted_keys() {
     let mut fixture = settings_fixture(Tier::T2);
-    expect_ok(set(&mut fixture, r#"{"mode": "slow", "count": 9, "enabled": false}"#));
+    expect_ok(set(
+        &mut fixture,
+        r#"{"mode": "slow", "count": 9, "enabled": false}"#,
+    ));
     fixture.pump();
     let changes = changes_of(&fixture, PLUGIN);
     assert_eq!(changes.len(), 1);
@@ -208,7 +211,10 @@ fn settings_set_json_one_invalid_key_stores_nothing() {
 #[test]
 fn settings_set_json_integer_row_rejects_4_5_invalid_argument() {
     let mut fixture = settings_fixture(Tier::T2);
-    assert_eq!(expect_code(set(&mut fixture, r#"{"count": 4.5}"#)), ErrorCode::InvalidArgument);
+    assert_eq!(
+        expect_code(set(&mut fixture, r#"{"count": 4.5}"#)),
+        ErrorCode::InvalidArgument
+    );
 }
 
 /// REQ: WIT:ilium:host/settings.set-json
@@ -228,8 +234,14 @@ fn settings_set_json_number_row_accepts_an_integer_value() {
 #[test]
 fn settings_set_json_value_outside_the_number_range_invalid_argument() {
     let mut fixture = settings_fixture(Tier::T2);
-    assert_eq!(expect_code(set(&mut fixture, r#"{"count": 11}"#)), ErrorCode::InvalidArgument);
-    assert_eq!(expect_code(set(&mut fixture, r#"{"count": -1}"#)), ErrorCode::InvalidArgument);
+    assert_eq!(
+        expect_code(set(&mut fixture, r#"{"count": 11}"#)),
+        ErrorCode::InvalidArgument
+    );
+    assert_eq!(
+        expect_code(set(&mut fixture, r#"{"count": -1}"#)),
+        ErrorCode::InvalidArgument
+    );
     expect_ok(set(&mut fixture, r#"{"count": 10}"#));
     expect_ok(set(&mut fixture, r#"{"count": 0}"#));
 }
@@ -238,7 +250,10 @@ fn settings_set_json_value_outside_the_number_range_invalid_argument() {
 #[test]
 fn settings_set_json_choice_value_not_offered_invalid_argument() {
     let mut fixture = settings_fixture(Tier::T2);
-    assert_eq!(expect_code(set(&mut fixture, r#"{"mode": "medium"}"#)), ErrorCode::InvalidArgument);
+    assert_eq!(
+        expect_code(set(&mut fixture, r#"{"mode": "medium"}"#)),
+        ErrorCode::InvalidArgument
+    );
 }
 
 /// REQ: WIT:ilium:host/settings.set-json
@@ -258,7 +273,10 @@ fn settings_set_json_patch_of_256_kib_plus_one_byte_invalid_argument() {
     let body = r#"{"label": "w"}"#;
     let patch = format!("{body}{}", " ".repeat(256 * KIB + 1 - body.len()));
     assert_eq!(patch.len(), 256 * KIB + 1);
-    assert_eq!(expect_code(set(&mut fixture, &patch)), ErrorCode::InvalidArgument);
+    assert_eq!(
+        expect_code(set(&mut fixture, &patch)),
+        ErrorCode::InvalidArgument
+    );
 }
 
 /// REQ: WIT:ilium:host/settings.set-json
@@ -307,7 +325,10 @@ fn settings_set_json_runs_no_settings_validate_for_the_plugin_origin() {
 fn settings_list_settings_without_the_grant_returns_nothing_and_logs_not_permitted() {
     let mut fixture = admin_fixture(&[]);
     assert!(fixture.settings().list_settings().is_empty());
-    assert!(fixture.logs().iter().any(|line| line.message.contains("settings.read-all")));
+    assert!(fixture
+        .logs()
+        .iter()
+        .any(|line| line.message.contains("settings.read-all")));
 }
 
 /// REQ: WIT:ilium:host/settings.list-settings
@@ -333,7 +354,10 @@ fn settings_list_settings_leaves_out_plugins_without_settings() {
 fn settings_list_settings_tab_ids_are_global_plugin_slash_tab() {
     let mut fixture = admin_fixture(&[READ_ALL]);
     let refs = fixture.settings().list_settings();
-    let own = refs.iter().find(|entry| entry.plugin.0 == "test.other").expect("test.other listed");
+    let own = refs
+        .iter()
+        .find(|entry| entry.plugin.0 == "test.other")
+        .expect("test.other listed");
     assert_eq!(own.tab, "test.other/main");
     assert!(!own.title.is_empty());
 }
@@ -368,7 +392,11 @@ fn settings_list_settings_section_in_a_built_in_tab_names_the_kernel_tab() {
 #[test]
 fn settings_get_plugin_json_without_the_grant_not_permitted() {
     let mut fixture = admin_fixture(&[]);
-    let code = expect_code(fixture.settings().get_plugin_json(PluginId("test.other".to_owned())));
+    let code = expect_code(
+        fixture
+            .settings()
+            .get_plugin_json(PluginId("test.other".to_owned())),
+    );
     assert_eq!(code, ErrorCode::NotPermitted);
 }
 
@@ -376,7 +404,11 @@ fn settings_get_plugin_json_without_the_grant_not_permitted() {
 #[test]
 fn settings_get_plugin_json_returns_all_values_of_the_other_plugin() {
     let mut fixture = admin_fixture(&[READ_ALL]);
-    let text = expect_ok(fixture.settings().get_plugin_json(PluginId("test.other".to_owned())));
+    let text = expect_ok(
+        fixture
+            .settings()
+            .get_plugin_json(PluginId("test.other".to_owned())),
+    );
     let values: Value = serde_json::from_str(&text).unwrap();
     assert_eq!(values["level"], json!(3));
 }
@@ -385,7 +417,11 @@ fn settings_get_plugin_json_returns_all_values_of_the_other_plugin() {
 #[test]
 fn settings_get_plugin_json_unknown_plugin_not_found() {
     let mut fixture = admin_fixture(&[READ_ALL]);
-    let code = expect_code(fixture.settings().get_plugin_json(PluginId("test.ghost".to_owned())));
+    let code = expect_code(
+        fixture
+            .settings()
+            .get_plugin_json(PluginId("test.ghost".to_owned())),
+    );
     assert_eq!(code, ErrorCode::NotFound);
 }
 
@@ -393,7 +429,11 @@ fn settings_get_plugin_json_unknown_plugin_not_found() {
 #[test]
 fn settings_get_plugin_json_plugin_without_settings_is_an_empty_object() {
     let mut fixture = admin_fixture(&[READ_ALL]);
-    let text = expect_ok(fixture.settings().get_plugin_json(PluginId("test.plain".to_owned())));
+    let text = expect_ok(
+        fixture
+            .settings()
+            .get_plugin_json(PluginId("test.plain".to_owned())),
+    );
     assert_eq!(serde_json::from_str::<Value>(&text).unwrap(), json!({}));
 }
 
@@ -405,7 +445,11 @@ fn settings_get_plugin_json_secret_values_are_empty_strings_for_other_plugins() 
         PluginId("test.other".to_owned()),
         r#"{"token": "hunter2"}"#.to_owned(),
     ));
-    let text = expect_ok(fixture.settings().get_plugin_json(PluginId("test.other".to_owned())));
+    let text = expect_ok(
+        fixture
+            .settings()
+            .get_plugin_json(PluginId("test.other".to_owned())),
+    );
     let values: Value = serde_json::from_str(&text).unwrap();
     assert_eq!(values["token"], json!(""));
     assert!(!text.contains("hunter2"));
@@ -483,18 +527,26 @@ fn settings_set_plugin_json_value_breaking_the_schema_invalid_argument_and_store
         r#"{"level": 99}"#.to_owned(),
     ));
     assert_eq!(code, ErrorCode::InvalidArgument);
-    let text = expect_ok(fixture.settings().get_plugin_json(PluginId("test.other".to_owned())));
-    assert_eq!(serde_json::from_str::<Value>(&text).unwrap()["level"], json!(3));
+    let text = expect_ok(
+        fixture
+            .settings()
+            .get_plugin_json(PluginId("test.other".to_owned())),
+    );
+    assert_eq!(
+        serde_json::from_str::<Value>(&text).unwrap()["level"],
+        json!(3)
+    );
 }
 
 /// REQ: WIT:ilium:host/settings.set-plugin-json
 #[test]
 fn settings_set_plugin_json_non_empty_patch_to_a_plugin_without_settings_invalid_argument() {
     let mut fixture = admin_fixture(&[READ_ALL, WRITE_ALL]);
-    let code = expect_code(fixture.settings().set_plugin_json(
-        PluginId("test.plain".to_owned()),
-        r#"{"x": 1}"#.to_owned(),
-    ));
+    let code = expect_code(
+        fixture
+            .settings()
+            .set_plugin_json(PluginId("test.plain".to_owned()), r#"{"x": 1}"#.to_owned()),
+    );
     assert_eq!(code, ErrorCode::InvalidArgument);
 }
 
@@ -522,8 +574,15 @@ fn settings_set_plugin_json_null_resets_the_key_to_its_default() {
         PluginId("test.other".to_owned()),
         r#"{"level": null}"#.to_owned(),
     ));
-    let text = expect_ok(fixture.settings().get_plugin_json(PluginId("test.other".to_owned())));
-    assert_eq!(serde_json::from_str::<Value>(&text).unwrap()["level"], json!(3));
+    let text = expect_ok(
+        fixture
+            .settings()
+            .get_plugin_json(PluginId("test.other".to_owned())),
+    );
+    assert_eq!(
+        serde_json::from_str::<Value>(&text).unwrap()["level"],
+        json!(3)
+    );
 }
 
 // ---- open ------------------------------------------------------------------------------------
@@ -542,7 +601,10 @@ fn client_fixture() -> ImportsFixture {
 fn settings_open_own_tab_opens_settings_at_that_tab() {
     let mut fixture = client_fixture();
     expect_ok(fixture.settings().open("test.imports/main".to_owned()));
-    assert_eq!(fixture.opened_settings_target().as_deref(), Some("test.imports/main"));
+    assert_eq!(
+        fixture.opened_settings_target().as_deref(),
+        Some("test.imports/main")
+    );
 }
 
 /// REQ: WIT:ilium:host/settings.open
@@ -550,15 +612,25 @@ fn settings_open_own_tab_opens_settings_at_that_tab() {
 fn settings_open_own_section_opens_settings_at_that_section() {
     let mut fixture = client_fixture();
     expect_ok(fixture.settings().open("test.imports/general".to_owned()));
-    assert_eq!(fixture.opened_settings_target().as_deref(), Some("test.imports/general"));
+    assert_eq!(
+        fixture.opened_settings_target().as_deref(),
+        Some("test.imports/general")
+    );
 }
 
 /// REQ: WIT:ilium:host/settings.open
 #[test]
 fn settings_open_own_row_opens_settings_at_that_row() {
     let mut fixture = client_fixture();
-    expect_ok(fixture.settings().open("test.imports/general/count".to_owned()));
-    assert_eq!(fixture.opened_settings_target().as_deref(), Some("test.imports/general/count"));
+    expect_ok(
+        fixture
+            .settings()
+            .open("test.imports/general/count".to_owned()),
+    );
+    assert_eq!(
+        fixture.opened_settings_target().as_deref(),
+        Some("test.imports/general/count")
+    );
 }
 
 /// REQ: WIT:ilium:host/settings.open
@@ -590,7 +662,10 @@ fn settings_open_empty_target_invalid_argument() {
 
 fn options(count: usize) -> Vec<ChoiceOption> {
     (0..count)
-        .map(|index| ChoiceOption { value: format!("v{index}"), title: format!("Option {index}") })
+        .map(|index| ChoiceOption {
+            value: format!("v{index}"),
+            title: format!("Option {index}"),
+        })
         .collect()
 }
 
@@ -614,14 +689,22 @@ fn settings_set_choices_one_option_accepted() {
 #[test]
 fn settings_set_choices_64_options_accepted() {
     let mut fixture = settings_fixture(Tier::T2);
-    expect_ok(fixture.settings().set_choices("dyn".to_owned(), options(64)));
+    expect_ok(
+        fixture
+            .settings()
+            .set_choices("dyn".to_owned(), options(64)),
+    );
 }
 
 /// REQ: WIT:ilium:host/settings.set-choices
 #[test]
 fn settings_set_choices_65_options_invalid_argument() {
     let mut fixture = settings_fixture(Tier::T2);
-    let code = expect_code(fixture.settings().set_choices("dyn".to_owned(), options(65)));
+    let code = expect_code(
+        fixture
+            .settings()
+            .set_choices("dyn".to_owned(), options(65)),
+    );
     assert_eq!(code, ErrorCode::InvalidArgument);
     assert_eq!(fixture.choice_values("dyn"), vec!["a", "b"]);
 }
@@ -638,7 +721,11 @@ fn settings_set_choices_zero_options_invalid_argument() {
 #[test]
 fn settings_set_choices_unknown_key_not_found() {
     let mut fixture = settings_fixture(Tier::T2);
-    let code = expect_code(fixture.settings().set_choices("ghost".to_owned(), options(2)));
+    let code = expect_code(
+        fixture
+            .settings()
+            .set_choices("ghost".to_owned(), options(2)),
+    );
     assert_eq!(code, ErrorCode::NotFound);
 }
 
@@ -694,15 +781,26 @@ fn items(count: usize) -> Vec<CatalogItem> {
 #[test]
 fn settings_set_choice_items_replaces_the_items_of_a_catalogue_row() {
     let mut fixture = catalogue_fixture();
-    expect_ok(fixture.settings().set_choice_items("palette".to_owned(), items(3)));
-    assert_eq!(fixture.choice_item_ids("palette"), vec!["item0", "item1", "item2"]);
+    expect_ok(
+        fixture
+            .settings()
+            .set_choice_items("palette".to_owned(), items(3)),
+    );
+    assert_eq!(
+        fixture.choice_item_ids("palette"),
+        vec!["item0", "item1", "item2"]
+    );
 }
 
 /// REQ: WIT:ilium:host/settings.set-choice-items
 #[test]
 fn settings_set_choice_items_64_items_accepted() {
     let mut fixture = catalogue_fixture();
-    expect_ok(fixture.settings().set_choice_items("palette".to_owned(), items(64)));
+    expect_ok(
+        fixture
+            .settings()
+            .set_choice_items("palette".to_owned(), items(64)),
+    );
     let expected: Vec<String> = (0..64).map(|index| format!("item{index}")).collect();
     assert_eq!(fixture.choice_item_ids("palette"), expected);
 }
@@ -711,7 +809,11 @@ fn settings_set_choice_items_64_items_accepted() {
 #[test]
 fn settings_set_choice_items_65_items_invalid_argument() {
     let mut fixture = catalogue_fixture();
-    let code = expect_code(fixture.settings().set_choice_items("palette".to_owned(), items(65)));
+    let code = expect_code(
+        fixture
+            .settings()
+            .set_choice_items("palette".to_owned(), items(65)),
+    );
     assert_eq!(code, ErrorCode::InvalidArgument);
 }
 
@@ -719,7 +821,11 @@ fn settings_set_choice_items_65_items_invalid_argument() {
 #[test]
 fn settings_set_choice_items_unknown_key_not_found() {
     let mut fixture = catalogue_fixture();
-    let code = expect_code(fixture.settings().set_choice_items("ghost".to_owned(), items(1)));
+    let code = expect_code(
+        fixture
+            .settings()
+            .set_choice_items("ghost".to_owned(), items(1)),
+    );
     assert_eq!(code, ErrorCode::NotFound);
 }
 
@@ -727,7 +833,11 @@ fn settings_set_choice_items_unknown_key_not_found() {
 #[test]
 fn settings_set_choice_items_on_a_row_without_a_catalogue_source_invalid_argument() {
     let mut fixture = catalogue_fixture();
-    let code = expect_code(fixture.settings().set_choice_items("plain".to_owned(), items(1)));
+    let code = expect_code(
+        fixture
+            .settings()
+            .set_choice_items("plain".to_owned(), items(1)),
+    );
     assert_eq!(code, ErrorCode::InvalidArgument);
 }
 
@@ -737,7 +847,11 @@ fn settings_set_choice_items_description_121_characters_invalid_argument() {
     let mut fixture = catalogue_fixture();
     let mut list = items(1);
     list[0].description = Some(ascii(121));
-    let code = expect_code(fixture.settings().set_choice_items("palette".to_owned(), list));
+    let code = expect_code(
+        fixture
+            .settings()
+            .set_choice_items("palette".to_owned(), list),
+    );
     assert_eq!(code, ErrorCode::InvalidArgument);
 }
 
@@ -747,7 +861,11 @@ fn settings_set_choice_items_description_120_characters_accepted() {
     let mut fixture = catalogue_fixture();
     let mut list = items(1);
     list[0].description = Some(ascii(120));
-    expect_ok(fixture.settings().set_choice_items("palette".to_owned(), list));
+    expect_ok(
+        fixture
+            .settings()
+            .set_choice_items("palette".to_owned(), list),
+    );
 }
 
 /// REQ: WIT:ilium:host/settings.set-choice-items
@@ -756,7 +874,11 @@ fn settings_set_choice_items_disabled_reason_41_characters_invalid_argument() {
     let mut fixture = catalogue_fixture();
     let mut list = items(1);
     list[0].disabled_reason = Some(ascii(41));
-    let code = expect_code(fixture.settings().set_choice_items("palette".to_owned(), list));
+    let code = expect_code(
+        fixture
+            .settings()
+            .set_choice_items("palette".to_owned(), list),
+    );
     assert_eq!(code, ErrorCode::InvalidArgument);
 }
 
@@ -766,7 +888,11 @@ fn settings_set_choice_items_group_33_characters_invalid_argument() {
     let mut fixture = catalogue_fixture();
     let mut list = items(1);
     list[0].group = Some(ascii(33));
-    let code = expect_code(fixture.settings().set_choice_items("palette".to_owned(), list));
+    let code = expect_code(
+        fixture
+            .settings()
+            .set_choice_items("palette".to_owned(), list),
+    );
     assert_eq!(code, ErrorCode::InvalidArgument);
 }
 
@@ -776,7 +902,11 @@ fn settings_set_choice_items_nine_keywords_invalid_argument() {
     let mut fixture = catalogue_fixture();
     let mut list = items(1);
     list[0].keywords = (0..9).map(|index| format!("k{index}")).collect();
-    let code = expect_code(fixture.settings().set_choice_items("palette".to_owned(), list));
+    let code = expect_code(
+        fixture
+            .settings()
+            .set_choice_items("palette".to_owned(), list),
+    );
     assert_eq!(code, ErrorCode::InvalidArgument);
 }
 
@@ -786,7 +916,11 @@ fn settings_set_choice_items_eight_keywords_accepted() {
     let mut fixture = catalogue_fixture();
     let mut list = items(1);
     list[0].keywords = (0..8).map(|index| format!("k{index}")).collect();
-    expect_ok(fixture.settings().set_choice_items("palette".to_owned(), list));
+    expect_ok(
+        fixture
+            .settings()
+            .set_choice_items("palette".to_owned(), list),
+    );
     assert_eq!(fixture.choice_item_ids("palette"), vec!["item0"]);
 }
 
@@ -796,7 +930,11 @@ fn settings_set_choice_items_swatch_of_17_colours_invalid_argument() {
     let mut fixture = catalogue_fixture();
     let mut list = items(1);
     list[0].preview = Some(Preview::Swatch(vec![0xff0000; 17]));
-    let code = expect_code(fixture.settings().set_choice_items("palette".to_owned(), list));
+    let code = expect_code(
+        fixture
+            .settings()
+            .set_choice_items("palette".to_owned(), list),
+    );
     assert_eq!(code, ErrorCode::InvalidArgument);
 }
 
@@ -806,5 +944,9 @@ fn settings_set_choice_items_swatch_of_16_colours_accepted() {
     let mut fixture = catalogue_fixture();
     let mut list = items(1);
     list[0].preview = Some(Preview::Swatch(vec![0xff0000; 16]));
-    expect_ok(fixture.settings().set_choice_items("palette".to_owned(), list));
+    expect_ok(
+        fixture
+            .settings()
+            .set_choice_items("palette".to_owned(), list),
+    );
 }

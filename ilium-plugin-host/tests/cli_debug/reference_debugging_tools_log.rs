@@ -13,15 +13,15 @@ use ilium_plugin_host::telemetry::{
 };
 use proptest::prelude::*;
 
-use crate::common::{
-    env, error_code, log_line, record_types, records_of, run, scratch, write_log,
-};
+use crate::common::{env, error_code, log_line, record_types, records_of, run, scratch, write_log};
 
 const PLUGIN: &str = "example.notes";
 const AT: &str = "2030-01-01 09:14:02";
 
 fn file_lines(path: &Path) -> Vec<String> {
-    std::fs::read_to_string(path).map(|text| text.lines().map(str::to_owned).collect()).unwrap_or_default()
+    std::fs::read_to_string(path)
+        .map(|text| text.lines().map(str::to_owned).collect())
+        .unwrap_or_default()
 }
 
 fn open_log(dir: &Path, config: LogConfig) -> PluginLog {
@@ -33,8 +33,17 @@ fn open_log(dir: &Path, config: LogConfig) -> PluginLog {
 /// REQ: DEV-650
 #[test]
 fn dev_650_line_matches_the_documented_example() {
-    let line = format_log_line(AT, LogLevel::Info, LogSide::Server, PLUGIN, "activate: ready");
-    assert_eq!(line, "2030-01-01 09:14:02 info  server example.notes activate: ready");
+    let line = format_log_line(
+        AT,
+        LogLevel::Info,
+        LogSide::Server,
+        PLUGIN,
+        "activate: ready",
+    );
+    assert_eq!(
+        line,
+        "2030-01-01 09:14:02 info  server example.notes activate: ready"
+    );
 }
 
 /// REQ: DEV-650
@@ -95,7 +104,10 @@ fn dev_650_host_write_stores_a_line_with_side_host() {
     let mut log = open_log(scratch.path(), LogConfig::default());
     assert!(log.write_host(AT, 0, LogLevel::Warn, "events dropped"));
     let lines = file_lines(&scratch.path().join(format!("{PLUGIN}.log")));
-    assert_eq!(lines, vec![format!("{AT} warn  host   {PLUGIN} events dropped")]);
+    assert_eq!(
+        lines,
+        vec![format!("{AT} warn  host   {PLUGIN} events dropped")]
+    );
 }
 
 // ---------------------------------------------------------------- DEV-651
@@ -120,7 +132,11 @@ fn dev_651_message_of_16385_bytes_is_cut_and_marked() {
     let cut = truncate_message(&message);
     assert!(cut.ends_with("…[truncated]"));
     assert!(cut.len() <= 16_384, "cut message is {} bytes", cut.len());
-    assert_eq!(cut.len(), 16_384, "the cut keeps as many bytes as the limit allows");
+    assert_eq!(
+        cut.len(),
+        16_384,
+        "the cut keeps as many bytes as the limit allows"
+    );
 }
 
 /// REQ: DEV-651
@@ -178,11 +194,18 @@ fn dev_652_line_is_written_when_level_is_at_or_above_the_threshold() {
     for threshold in LogLevel::ALL {
         for level in LogLevel::ALL {
             let scratch = scratch();
-            let config = LogConfig { threshold, ..LogConfig::default() };
+            let config = LogConfig {
+                threshold,
+                ..LogConfig::default()
+            };
             let mut log = open_log(scratch.path(), config);
             let stored = log.write_plugin(AT, 0, Side::Server, level, "m");
             let lines = file_lines(&scratch.path().join(format!("{PLUGIN}.log")));
-            assert_eq!(stored, level >= threshold, "threshold {threshold:?} level {level:?}");
+            assert_eq!(
+                stored,
+                level >= threshold,
+                "threshold {threshold:?} level {level:?}"
+            );
             assert_eq!(lines.len(), usize::from(level >= threshold));
         }
     }
@@ -237,19 +260,28 @@ fn dev_654_environment_variable_sets_the_threshold() {
 /// REQ: DEV-654
 #[test]
 fn dev_654_command_sets_the_threshold() {
-    assert_eq!(resolve_threshold(Some(LogLevel::Error), None, false), LogLevel::Error);
+    assert_eq!(
+        resolve_threshold(Some(LogLevel::Error), None, false),
+        LogLevel::Error
+    );
 }
 
 /// REQ: DEV-654
 #[test]
 fn dev_654_command_wins_over_the_environment_variable() {
-    assert_eq!(resolve_threshold(Some(LogLevel::Debug), Some("error"), false), LogLevel::Debug);
+    assert_eq!(
+        resolve_threshold(Some(LogLevel::Debug), Some("error"), false),
+        LogLevel::Debug
+    );
 }
 
 /// REQ: DEV-654
 #[test]
 fn dev_654_environment_variable_wins_over_the_dev_default() {
-    assert_eq!(resolve_threshold(None, Some("error"), true), LogLevel::Error);
+    assert_eq!(
+        resolve_threshold(None, Some("error"), true),
+        LogLevel::Error
+    );
 }
 
 /// REQ: DEV-654, DEV-653
@@ -294,7 +326,9 @@ fn stored_count(dir: &Path) -> usize {
 fn dev_656_ordinary_plugin_stores_200_lines_in_one_second() {
     let scratch = scratch();
     let mut log = open_log(scratch.path(), LogConfig::default());
-    let stored = (0..250).filter(|n| log.write_plugin(AT, 100 + n, Side::Server, LogLevel::Info, "m")).count();
+    let stored = (0..250)
+        .filter(|n| log.write_plugin(AT, 100 + n, Side::Server, LogLevel::Info, "m"))
+        .count();
     assert_eq!(stored, 200);
     assert_eq!(stored_count(scratch.path()), 200);
 }
@@ -319,7 +353,9 @@ fn dev_656_trusted_t1_plugin_gets_1000_lines_per_second() {
     assert_eq!(LogConfig::for_tier(Tier::T3).rate_per_second, 200);
     let scratch = scratch();
     let mut log = open_log(scratch.path(), LogConfig::for_tier(Tier::T1));
-    let stored = (0..1_100).filter(|n| log.write_plugin(AT, n % 900, Side::Server, LogLevel::Info, "m")).count();
+    let stored = (0..1_100)
+        .filter(|n| log.write_plugin(AT, n % 900, Side::Server, LogLevel::Info, "m"))
+        .count();
     assert_eq!(stored, 1_000);
 }
 
@@ -334,9 +370,15 @@ fn dev_656_dropped_lines_are_summarised_once_per_second() {
     log.tick(AT, 1_100);
     log.tick(AT, 1_200);
     let lines = file_lines(&scratch.path().join(format!("{PLUGIN}.log")));
-    let summaries: Vec<&String> = lines.iter().filter(|line| line.contains("lines dropped")).collect();
+    let summaries: Vec<&String> = lines
+        .iter()
+        .filter(|line| line.contains("lines dropped"))
+        .collect();
     assert_eq!(summaries.len(), 1, "exactly one summary line");
-    assert_eq!(summaries[0], &format!("{AT} warn  host   {PLUGIN} 50 lines dropped in the last second"));
+    assert_eq!(
+        summaries[0],
+        &format!("{AT} warn  host   {PLUGIN} 50 lines dropped in the last second")
+    );
 }
 
 /// REQ: DEV-656
@@ -360,7 +402,9 @@ fn dev_656_summary_line_does_not_use_the_rate_budget() {
         log.write_plugin(AT, 100 + n % 800, Side::Server, LogLevel::Info, "m");
     }
     log.tick(AT, 1_100);
-    let stored = (0..200).filter(|n| log.write_plugin(AT, 1_100 + n, Side::Server, LogLevel::Info, "next")).count();
+    let stored = (0..200)
+        .filter(|n| log.write_plugin(AT, 1_100 + n, Side::Server, LogLevel::Info, "next"))
+        .count();
     assert_eq!(stored, 200, "a full budget remains after the summary line");
 }
 
@@ -373,7 +417,12 @@ fn dev_657_full_queue_writes_one_error_line_with_the_count() {
     let mut log = open_log(scratch.path(), LogConfig::default());
     log.queue_full(AT, 0, 5);
     let lines = file_lines(&scratch.path().join(format!("{PLUGIN}.log")));
-    assert_eq!(lines, vec![format!("{AT} error host   {PLUGIN} event queue full: dropped 5 events")]);
+    assert_eq!(
+        lines,
+        vec![format!(
+            "{AT} error host   {PLUGIN} event queue full: dropped 5 events"
+        )]
+    );
 }
 
 /// REQ: DEV-657
@@ -383,7 +432,11 @@ fn dev_657_message_carries_the_given_drop_count() {
     let mut log = open_log(scratch.path(), LogConfig::default());
     log.queue_full(AT, 0, 1_234);
     let lines = file_lines(&scratch.path().join(format!("{PLUGIN}.log")));
-    assert!(lines[0].ends_with("event queue full: dropped 1234 events"), "{}", lines[0]);
+    assert!(
+        lines[0].ends_with("event queue full: dropped 1234 events"),
+        "{}",
+        lines[0]
+    );
 }
 
 // ---------------------------------------------------------------- DEV-658
@@ -418,11 +471,17 @@ fn rotation_message(n: usize) -> String {
 }
 
 fn first_number(path: &Path) -> Option<usize> {
-    file_lines(path).first().and_then(|line| line.split_whitespace().nth(5)).and_then(|m| m[..5].parse().ok())
+    file_lines(path)
+        .first()
+        .and_then(|line| line.split_whitespace().nth(5))
+        .and_then(|m| m[..5].parse().ok())
 }
 
 fn last_number(path: &Path) -> Option<usize> {
-    file_lines(path).last().and_then(|line| line.split_whitespace().nth(5)).and_then(|m| m[..5].parse().ok())
+    file_lines(path)
+        .last()
+        .and_then(|line| line.split_whitespace().nth(5))
+        .and_then(|m| m[..5].parse().ok())
 }
 
 /// REQ: DEV-660
@@ -437,12 +496,22 @@ fn dev_660_active_file_rotates_to_log_1_when_it_reaches_4_mib() {
     let scratch = scratch();
     let mut log = open_log(scratch.path(), LogConfig::default());
     for n in 0..300 {
-        log.write_plugin(AT, n as u64 * 1_000, Side::Server, LogLevel::Info, &rotation_message(n));
+        log.write_plugin(
+            AT,
+            n as u64 * 1_000,
+            Side::Server,
+            LogLevel::Info,
+            &rotation_message(n),
+        );
     }
     let rotated = scratch.path().join(format!("{PLUGIN}.log.1"));
-    let size = std::fs::metadata(&rotated).expect("log.1 exists after rotation").len();
+    let size = std::fs::metadata(&rotated)
+        .expect("log.1 exists after rotation")
+        .len();
     assert!(size >= LOG_ROTATE_BYTES, "rotated file is {size} bytes");
-    let active = std::fs::metadata(scratch.path().join(format!("{PLUGIN}.log"))).expect("new active file").len();
+    let active = std::fs::metadata(scratch.path().join(format!("{PLUGIN}.log")))
+        .expect("new active file")
+        .len();
     assert!(active < LOG_ROTATE_BYTES);
 }
 
@@ -452,13 +521,28 @@ fn dev_660_five_files_are_kept_and_the_oldest_is_deleted() {
     let scratch = scratch();
     let mut log = open_log(scratch.path(), LogConfig::default());
     for n in 0..1_700 {
-        log.write_plugin(AT, n as u64 * 1_000, Side::Server, LogLevel::Info, &rotation_message(n));
+        log.write_plugin(
+            AT,
+            n as u64 * 1_000,
+            Side::Server,
+            LogLevel::Info,
+            &rotation_message(n),
+        );
     }
     for suffix in ["", ".1", ".2", ".3", ".4"] {
-        assert!(scratch.path().join(format!("{PLUGIN}.log{suffix}")).exists(), "missing .log{suffix}");
+        assert!(
+            scratch
+                .path()
+                .join(format!("{PLUGIN}.log{suffix}"))
+                .exists(),
+            "missing .log{suffix}"
+        );
     }
     assert!(!scratch.path().join(format!("{PLUGIN}.log.5")).exists());
-    assert!(first_number(&scratch.path().join(format!("{PLUGIN}.log.4"))).unwrap_or(0) > 0, "oldest lines are gone");
+    assert!(
+        first_number(&scratch.path().join(format!("{PLUGIN}.log.4"))).unwrap_or(0) > 0,
+        "oldest lines are gone"
+    );
 }
 
 /// REQ: DEV-660
@@ -467,15 +551,26 @@ fn dev_660_files_hold_consecutive_runs_oldest_in_the_highest_number() {
     let scratch = scratch();
     let mut log = open_log(scratch.path(), LogConfig::default());
     for n in 0..1_700 {
-        log.write_plugin(AT, n as u64 * 1_000, Side::Server, LogLevel::Info, &rotation_message(n));
+        log.write_plugin(
+            AT,
+            n as u64 * 1_000,
+            Side::Server,
+            LogLevel::Info,
+            &rotation_message(n),
+        );
     }
     let names = [".log.4", ".log.3", ".log.2", ".log.1", ".log"];
     for pair in names.windows(2) {
-        let older = last_number(&scratch.path().join(format!("{PLUGIN}{}", pair[0]))).expect("older file has lines");
-        let newer = first_number(&scratch.path().join(format!("{PLUGIN}{}", pair[1]))).expect("newer file has lines");
+        let older = last_number(&scratch.path().join(format!("{PLUGIN}{}", pair[0])))
+            .expect("older file has lines");
+        let newer = first_number(&scratch.path().join(format!("{PLUGIN}{}", pair[1])))
+            .expect("newer file has lines");
         assert_eq!(older + 1, newer, "{} then {}", pair[0], pair[1]);
     }
-    assert_eq!(last_number(&scratch.path().join(format!("{PLUGIN}.log"))), Some(1_699));
+    assert_eq!(
+        last_number(&scratch.path().join(format!("{PLUGIN}.log"))),
+        Some(1_699)
+    );
 }
 
 /// REQ: DEV-660
@@ -484,7 +579,13 @@ fn dev_660_no_rotation_below_4_mib() {
     let scratch = scratch();
     let mut log = open_log(scratch.path(), LogConfig::default());
     for n in 0..100 {
-        log.write_plugin(AT, n as u64 * 1_000, Side::Server, LogLevel::Info, &rotation_message(n));
+        log.write_plugin(
+            AT,
+            n as u64 * 1_000,
+            Side::Server,
+            LogLevel::Info,
+            &rotation_message(n),
+        );
     }
     assert!(!scratch.path().join(format!("{PLUGIN}.log.1")).exists());
 }
@@ -549,7 +650,10 @@ fn dev_663_log_folder_is_created_owner_only() {
     let scratch = scratch();
     let dir = scratch.path().join("plugins").join("logs").join("default");
     let _log = open_log(&dir, LogConfig::default());
-    let mode = std::fs::metadata(&dir).expect("log folder exists").permissions().mode();
+    let mode = std::fs::metadata(&dir)
+        .expect("log folder exists")
+        .permissions()
+        .mode();
     assert_eq!(mode & 0o777, 0o700);
 }
 
@@ -560,7 +664,10 @@ fn dev_663_log_files_are_not_group_or_world_accessible() {
     let dir = scratch.path().join("logs");
     let mut log = open_log(&dir, LogConfig::default());
     log.write_plugin(AT, 0, Side::Server, LogLevel::Info, "m");
-    let mode = std::fs::metadata(dir.join(format!("{PLUGIN}.log"))).expect("log file").permissions().mode();
+    let mode = std::fs::metadata(dir.join(format!("{PLUGIN}.log")))
+        .expect("log file")
+        .permissions()
+        .mode();
     assert_eq!(mode & 0o077, 0);
 }
 
@@ -572,7 +679,8 @@ fn dev_664_host_lines_for_dropped_events_hold_counts_only() {
     let scratch = scratch();
     let mut log = open_log(scratch.path(), LogConfig::default());
     log.queue_full(AT, 0, 3);
-    let text = std::fs::read_to_string(scratch.path().join(format!("{PLUGIN}.log"))).expect("log file");
+    let text =
+        std::fs::read_to_string(scratch.path().join(format!("{PLUGIN}.log"))).expect("log file");
     assert_eq!(text.lines().count(), 1);
     assert!(text.contains("dropped 3 events"));
     assert!(!text.contains("payload"));
@@ -592,10 +700,34 @@ fn dev_664_plugin_written_data_is_stored_as_written() {
 
 fn sample_lines() -> Vec<String> {
     vec![
-        log_line("2030-01-01 09:14:02", "info", "server", PLUGIN, "activate: ready"),
-        log_line("2030-01-01 09:14:09", "warn", "server", PLUGIN, "storage near quota: 912 KiB of 1 MiB"),
-        log_line("2030-01-01 09:15:40", "error", "host", PLUGIN, "restarting in 1 s (failure 1 of 3 in 10 minutes)"),
-        log_line("2030-01-01 09:16:00", "debug", "client", PLUGIN, "render done"),
+        log_line(
+            "2030-01-01 09:14:02",
+            "info",
+            "server",
+            PLUGIN,
+            "activate: ready",
+        ),
+        log_line(
+            "2030-01-01 09:14:09",
+            "warn",
+            "server",
+            PLUGIN,
+            "storage near quota: 912 KiB of 1 MiB",
+        ),
+        log_line(
+            "2030-01-01 09:15:40",
+            "error",
+            "host",
+            PLUGIN,
+            "restarting in 1 s (failure 1 of 3 in 10 minutes)",
+        ),
+        log_line(
+            "2030-01-01 09:16:00",
+            "debug",
+            "client",
+            PLUGIN,
+            "render done",
+        ),
     ]
 }
 
@@ -614,7 +746,10 @@ fn dev_665_level_shows_lines_at_or_above_it() {
     write_log(&env, PLUGIN, "", &sample_lines());
     let output = run(&env, &["logs", PLUGIN, "--json", "--level", "warn"]);
     assert_eq!(messages(&output).len(), 2);
-    let levels: Vec<&str> = records_of(&output, "log").iter().map(|r| r["level"].as_str().unwrap_or("")).collect();
+    let levels: Vec<&str> = records_of(&output, "log")
+        .iter()
+        .map(|r| r["level"].as_str().unwrap_or(""))
+        .collect();
     assert_eq!(levels, ["warn", "error"]);
 }
 
@@ -624,7 +759,13 @@ fn dev_665_level_debug_shows_everything_but_trace() {
     let scratch = scratch();
     let env = env(scratch.path());
     let mut lines = sample_lines();
-    lines.push(log_line("2030-01-01 09:17:00", "trace", "client", PLUGIN, "t"));
+    lines.push(log_line(
+        "2030-01-01 09:17:00",
+        "trace",
+        "client",
+        PLUGIN,
+        "t",
+    ));
     write_log(&env, PLUGIN, "", &lines);
     let output = run(&env, &["logs", PLUGIN, "--json", "--level", "debug"]);
     assert_eq!(messages(&output).len(), 4);
@@ -636,9 +777,19 @@ fn dev_665_since_takes_an_absolute_time() {
     let scratch = scratch();
     let env = env(scratch.path());
     write_log(&env, PLUGIN, "", &sample_lines());
-    let output = run(&env, &["logs", PLUGIN, "--json", "--since", "2030-01-01 09:14:09"]);
-    assert_eq!(messages(&output).len(), 3, "the line at the given second is included");
-    let output = run(&env, &["logs", PLUGIN, "--json", "--since", "2030-01-01 09:14:10"]);
+    let output = run(
+        &env,
+        &["logs", PLUGIN, "--json", "--since", "2030-01-01 09:14:09"],
+    );
+    assert_eq!(
+        messages(&output).len(),
+        3,
+        "the line at the given second is included"
+    );
+    let output = run(
+        &env,
+        &["logs", PLUGIN, "--json", "--since", "2030-01-01 09:14:10"],
+    );
     assert_eq!(messages(&output).len(), 2);
 }
 
@@ -653,7 +804,10 @@ fn dev_665_since_takes_a_duration() {
         &env,
         PLUGIN,
         "",
-        &[log_line(&old, "info", "server", PLUGIN, "old"), log_line(&recent, "info", "server", PLUGIN, "recent")],
+        &[
+            log_line(&old, "info", "server", PLUGIN, "old"),
+            log_line(&recent, "info", "server", PLUGIN, "recent"),
+        ],
     );
     let output = run(&env, &["logs", PLUGIN, "--json", "--since", "10m"]);
     assert_eq!(messages(&output), vec!["recent".to_owned()]);
@@ -665,7 +819,18 @@ fn dev_665_level_and_since_combine() {
     let scratch = scratch();
     let env = env(scratch.path());
     write_log(&env, PLUGIN, "", &sample_lines());
-    let output = run(&env, &["logs", PLUGIN, "--json", "--level", "warn", "--since", "2030-01-01 09:14:10"]);
+    let output = run(
+        &env,
+        &[
+            "logs",
+            PLUGIN,
+            "--json",
+            "--level",
+            "warn",
+            "--since",
+            "2030-01-01 09:14:10",
+        ],
+    );
     assert_eq!(messages(&output).len(), 1);
 }
 
@@ -675,7 +840,15 @@ fn dev_666_tail_defaults_to_200_lines() {
     let scratch = scratch();
     let env = env(scratch.path());
     let lines: Vec<String> = (0..250)
-        .map(|n| log_line("2030-01-01 09:14:02", "info", "server", PLUGIN, &format!("line {n}")))
+        .map(|n| {
+            log_line(
+                "2030-01-01 09:14:02",
+                "info",
+                "server",
+                PLUGIN,
+                &format!("line {n}"),
+            )
+        })
         .collect();
     write_log(&env, PLUGIN, "", &lines);
     let output = run(&env, &["logs", PLUGIN, "--json"]);
@@ -692,7 +865,13 @@ fn dev_666_tail_n_shows_the_last_n_lines() {
     let env = env(scratch.path());
     write_log(&env, PLUGIN, "", &sample_lines());
     let output = run(&env, &["logs", PLUGIN, "--json", "--tail", "2"]);
-    assert_eq!(messages(&output), vec!["restarting in 1 s (failure 1 of 3 in 10 minutes)".to_owned(), "render done".to_owned()]);
+    assert_eq!(
+        messages(&output),
+        vec![
+            "restarting in 1 s (failure 1 of 3 in 10 minutes)".to_owned(),
+            "render done".to_owned()
+        ]
+    );
 }
 
 /// REQ: DEV-666
@@ -746,7 +925,10 @@ fn dev_667_message_with_spaces_and_colons_stays_whole() {
     let env = env(scratch.path());
     write_log(&env, PLUGIN, "", &sample_lines()[1..2]);
     let output = run(&env, &["logs", PLUGIN, "--json"]);
-    assert_eq!(messages(&output), vec!["storage near quota: 912 KiB of 1 MiB".to_owned()]);
+    assert_eq!(
+        messages(&output),
+        vec!["storage near quota: 912 KiB of 1 MiB".to_owned()]
+    );
 }
 
 // ---------------------------------------------------------------- DEV-662
@@ -756,11 +938,47 @@ fn dev_667_message_with_spaces_and_colons_stays_whole() {
 fn dev_662_files_are_read_oldest_first_across_rotation() {
     let scratch = scratch();
     let env = env(scratch.path());
-    write_log(&env, PLUGIN, ".2", &[log_line("2030-01-01 08:00:00", "info", "server", PLUGIN, "first")]);
-    write_log(&env, PLUGIN, ".1", &[log_line("2030-01-01 08:30:00", "info", "server", PLUGIN, "second")]);
-    write_log(&env, PLUGIN, "", &[log_line("2030-01-01 09:00:00", "info", "server", PLUGIN, "third")]);
+    write_log(
+        &env,
+        PLUGIN,
+        ".2",
+        &[log_line(
+            "2030-01-01 08:00:00",
+            "info",
+            "server",
+            PLUGIN,
+            "first",
+        )],
+    );
+    write_log(
+        &env,
+        PLUGIN,
+        ".1",
+        &[log_line(
+            "2030-01-01 08:30:00",
+            "info",
+            "server",
+            PLUGIN,
+            "second",
+        )],
+    );
+    write_log(
+        &env,
+        PLUGIN,
+        "",
+        &[log_line(
+            "2030-01-01 09:00:00",
+            "info",
+            "server",
+            PLUGIN,
+            "third",
+        )],
+    );
     let output = run(&env, &["logs", PLUGIN, "--json"]);
-    assert_eq!(messages(&output), vec!["first".to_owned(), "second".to_owned(), "third".to_owned()]);
+    assert_eq!(
+        messages(&output),
+        vec!["first".to_owned(), "second".to_owned(), "third".to_owned()]
+    );
 }
 
 /// REQ: DEV-662
@@ -768,11 +986,31 @@ fn dev_662_files_are_read_oldest_first_across_rotation() {
 fn dev_662_all_five_files_are_read_in_order() {
     let scratch = scratch();
     let env = env(scratch.path());
-    for (suffix, name) in [(".4", "a"), (".3", "b"), (".2", "c"), (".1", "d"), ("", "e")] {
-        write_log(&env, PLUGIN, suffix, &[log_line("2030-01-01 08:00:00", "info", "server", PLUGIN, name)]);
+    for (suffix, name) in [
+        (".4", "a"),
+        (".3", "b"),
+        (".2", "c"),
+        (".1", "d"),
+        ("", "e"),
+    ] {
+        write_log(
+            &env,
+            PLUGIN,
+            suffix,
+            &[log_line(
+                "2030-01-01 08:00:00",
+                "info",
+                "server",
+                PLUGIN,
+                name,
+            )],
+        );
     }
     let output = run(&env, &["logs", PLUGIN, "--json"]);
-    assert_eq!(messages(&output), ["a", "b", "c", "d", "e"].map(str::to_owned).to_vec());
+    assert_eq!(
+        messages(&output),
+        ["a", "b", "c", "d", "e"].map(str::to_owned).to_vec()
+    );
 }
 
 /// REQ: DEV-662
@@ -780,8 +1018,30 @@ fn dev_662_all_five_files_are_read_in_order() {
 fn dev_662_tail_counts_from_the_newest_file() {
     let scratch = scratch();
     let env = env(scratch.path());
-    write_log(&env, PLUGIN, ".1", &[log_line("2030-01-01 08:30:00", "info", "server", PLUGIN, "old")]);
-    write_log(&env, PLUGIN, "", &[log_line("2030-01-01 09:00:00", "info", "server", PLUGIN, "new")]);
+    write_log(
+        &env,
+        PLUGIN,
+        ".1",
+        &[log_line(
+            "2030-01-01 08:30:00",
+            "info",
+            "server",
+            PLUGIN,
+            "old",
+        )],
+    );
+    write_log(
+        &env,
+        PLUGIN,
+        "",
+        &[log_line(
+            "2030-01-01 09:00:00",
+            "info",
+            "server",
+            PLUGIN,
+            "new",
+        )],
+    );
     let output = run(&env, &["logs", PLUGIN, "--json", "--tail", "1"]);
     assert_eq!(messages(&output), vec!["new".to_owned()]);
 }

@@ -28,7 +28,9 @@ pub fn page_text() -> String {
 
 /// Any page of the manual by file name.
 pub fn manual_page(name: &str) -> String {
-    let path = workspace_root().join("docs/plugins-manual/pages").join(name);
+    let path = workspace_root()
+        .join("docs/plugins-manual/pages")
+        .join(name);
     std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("{path:?}: {error}"))
 }
 
@@ -46,7 +48,9 @@ pub fn manifest() -> Value {
 
 /// The first json code block after the heading text `heading`.
 pub fn json_block_after(page: &str, heading: &str) -> Value {
-    let start = page.find(heading).unwrap_or_else(|| panic!("heading {heading} missing"));
+    let start = page
+        .find(heading)
+        .unwrap_or_else(|| panic!("heading {heading} missing"));
     let rest = &page[start..];
     let open = rest.find("```json\n").expect("json block") + "```json\n".len();
     let close = rest[open..].find("```").expect("block end");
@@ -65,7 +69,10 @@ pub fn client_grants() -> Vec<String> {
 
 /// A client-side host with the manifest grants and the plugin activated.
 pub fn client_host() -> FakeHost {
-    let mut host = FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("client").build();
+    let mut host = FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("client")
+        .build();
     host.activate::<KeysAndHelpClient>();
     host
 }
@@ -73,7 +80,10 @@ pub fn client_host() -> FakeHost {
 /// A client-side host with the plugin activated and the tmux default keymap seeded: the Keyboard
 /// tab holds `shortcut_base` `ctrl+b`, `navigation_shortcut_base` `ctrl+b` and preset `tmux`.
 pub fn seeded_host() -> FakeHost {
-    let mut host = FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("client").build();
+    let mut host = FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("client")
+        .build();
     host.kernel_settings().set_tab(
         "keyboard",
         serde_json::json!({"shortcut_base": "ctrl+b", "navigation_shortcut_base": "ctrl+b", "preset": "tmux"}),
@@ -114,12 +124,19 @@ pub fn seed_sample_labels(host: &mut FakeHost) {
 
 /// Rows of the first markdown table that starts with `header_prefix`: the cells of each body row.
 pub fn table_rows(text: &str, header_prefix: &str) -> Vec<Vec<String>> {
-    let start = text.find(header_prefix).unwrap_or_else(|| panic!("table {header_prefix} missing"));
+    let start = text
+        .find(header_prefix)
+        .unwrap_or_else(|| panic!("table {header_prefix} missing"));
     text[start..]
         .lines()
         .skip(2)
         .take_while(|line| line.starts_with('|'))
-        .map(|line| line.trim_matches('|').split('|').map(|cell| cell.trim().to_string()).collect())
+        .map(|line| {
+            line.trim_matches('|')
+                .split('|')
+                .map(|cell| cell.trim().to_string())
+                .collect()
+        })
         .collect()
 }
 

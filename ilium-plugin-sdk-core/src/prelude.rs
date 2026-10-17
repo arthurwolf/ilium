@@ -2,13 +2,13 @@
 
 pub use crate::dedup;
 pub use crate::generated::types::{
-    Activation, ActionKind, ActionValue, Area, DeactivationReason, ErrorCode, Event, Intent,
+    ActionKind, ActionValue, Activation, Area, DeactivationReason, ErrorCode, Event, Intent,
     NodeId, Outcome, PluginError, PluginId, RequestRef, Submission, UiTree, ViewTarget,
 };
 pub use crate::plugin::{
-    Annotator, CatalogProvider, Detector, Handler, HookHandler, InferenceProvider, JobRunner,
+    host, Annotator, CatalogProvider, Detector, Handler, HookHandler, InferenceProvider, JobRunner,
     Lifecycle, MenuProvider, Plugin, Renderer, ServiceProvider, TokenProvider, Views,
-    VirtualRowsProvider, host,
+    VirtualRowsProvider,
 };
 pub use crate::task;
 pub use crate::ui::build::{NodeBuilder, Tree};

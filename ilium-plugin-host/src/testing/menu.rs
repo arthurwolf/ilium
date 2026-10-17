@@ -34,7 +34,12 @@ impl MenuHarness {
     }
 
     /// A stopped provider that needs activation first.
-    pub fn add_stopped_provider(&mut self, plugin: &str, activation_ms: u32, entries: Vec<MenuEntry>) {
+    pub fn add_stopped_provider(
+        &mut self,
+        plugin: &str,
+        activation_ms: u32,
+        entries: Vec<MenuEntry>,
+    ) {
         unimplemented!("host::testing::menu::MenuHarness::add_stopped_provider")
     }
 

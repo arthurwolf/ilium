@@ -2,12 +2,17 @@
 //! every contribution. The page fragment agrees with the complete block.
 
 use ilium_plugin_sdk::testing::FakeHost;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::common::{fenced_block_after, manifest_json, manifest_path, page_text};
 
 fn strings(value: &Value) -> Vec<String> {
-    value.as_array().expect("array").iter().map(|item| item.as_str().expect("string").to_string()).collect()
+    value
+        .as_array()
+        .expect("array")
+        .iter()
+        .map(|item| item.as_str().expect("string").to_string())
+        .collect()
 }
 
 /// REQ: COR-050
@@ -20,7 +25,10 @@ fn cor_050_manifest_identity_fields_match_the_page() {
     assert_eq!(manifest["version"], "0.1.0");
     assert_eq!(manifest["publisher"], "Ilium");
     assert_eq!(manifest["license"], "MIT");
-    assert_eq!(manifest["description"], "Diagnostics helps when something goes wrong.");
+    assert_eq!(
+        manifest["description"],
+        "Diagnostics helps when something goes wrong."
+    );
 }
 
 /// REQ: COR-050
@@ -68,7 +76,10 @@ fn cor_050_server_capabilities_are_exactly_the_eight_of_the_page() {
 /// REQ: COR-050
 #[test]
 fn cor_050_client_capabilities_are_exactly_the_four_of_the_page() {
-    assert_eq!(strings(&manifest_json()["capabilities"]["client"]), ["ui.panels", "fs.pick", "notify.toast", "help.read"]);
+    assert_eq!(
+        strings(&manifest_json()["capabilities"]["client"]),
+        ["ui.panels", "fs.pick", "notify.toast", "help.read"]
+    );
 }
 
 /// REQ: COR-050
@@ -83,7 +94,10 @@ fn cor_050_the_server_never_holds_a_settings_write_grant() {
 #[test]
 fn cor_050_the_log_folder_grant_is_a_literal_path_not_a_scope_pattern() {
     let grants = strings(&manifest_json()["capabilities"]["server"]);
-    let read = grants.iter().find(|grant| grant.starts_with("fs.read:")).expect("fs.read grant");
+    let read = grants
+        .iter()
+        .find(|grant| grant.starts_with("fs.read:"))
+        .expect("fs.read grant");
     assert_eq!(read, "fs.read:path:/tmp/.ilium-1000/logs");
     assert!(!read.contains('*'));
 }
@@ -91,7 +105,10 @@ fn cor_050_the_log_folder_grant_is_a_literal_path_not_a_scope_pattern() {
 /// REQ: COR-050
 #[test]
 fn cor_050_activation_triggers_are_startup_and_the_warnings_view() {
-    assert_eq!(strings(&manifest_json()["activation"]), ["startup", "view:diagnostics.warnings"]);
+    assert_eq!(
+        strings(&manifest_json()["activation"]),
+        ["startup", "view:diagnostics.warnings"]
+    );
 }
 
 /// REQ: COR-050
@@ -105,7 +122,12 @@ fn cor_050_the_plugin_is_replaceable() {
 fn cor_050_surface_lists_the_service_both_points_and_the_command() {
     assert_eq!(
         strings(&manifest_json()["surface"]),
-        ["services:report", "points:log-sinks", "points:report-sections", "commands:build-report"]
+        [
+            "services:report",
+            "points:log-sinks",
+            "points:report-sections",
+            "commands:build-report"
+        ]
     );
 }
 
@@ -140,18 +162,27 @@ fn cor_050_contributes_one_help_topic_logs_and_reports() {
 #[test]
 fn cor_050_the_report_service_has_one_method_build_with_a_bounded_text_result() {
     let services = &manifest_json()["contributes"]["services"];
-    let report = services["ilium.core.diagnostics/report"].as_object().expect("service object");
+    let report = services["ilium.core.diagnostics/report"]
+        .as_object()
+        .expect("service object");
     assert_eq!(report.keys().collect::<Vec<_>>(), ["build"]);
-    assert_eq!(report["build"]["params"]["properties"]["include_log_tail"]["type"], "boolean");
+    assert_eq!(
+        report["build"]["params"]["properties"]["include_log_tail"]["type"],
+        "boolean"
+    );
     assert_eq!(report["build"]["result"]["required"], json!(["text"]));
-    assert_eq!(report["build"]["result"]["properties"]["text"]["maxLength"], 262144);
+    assert_eq!(
+        report["build"]["result"]["properties"]["text"]["maxLength"],
+        262144
+    );
 }
 
 /// REQ: COR-050
 #[test]
 fn cor_050_the_text_limit_of_the_service_result_is_256_kibibytes() {
     assert_eq!(262144, 256 * 1024);
-    let limit = &manifest_json()["contributes"]["services"]["ilium.core.diagnostics/report"]["build"]["result"]["properties"]["text"]["maxLength"];
+    let limit = &manifest_json()["contributes"]["services"]["ilium.core.diagnostics/report"]
+        ["build"]["result"]["properties"]["text"]["maxLength"];
     assert_eq!(limit.as_u64(), Some(256 * 1024));
 }
 
@@ -166,7 +197,9 @@ fn cor_050_complete_manifest_block_of_the_page_equals_the_file() {
 /// REQ: COR-050
 #[test]
 fn cor_050_every_key_of_the_fragment_block_agrees_with_the_complete_manifest() {
-    let fragment: Value = serde_json::from_str(&fenced_block_after(&page_text(), "### Manifest", "json")).expect("fragment is JSON");
+    let fragment: Value =
+        serde_json::from_str(&fenced_block_after(&page_text(), "### Manifest", "json"))
+            .expect("fragment is JSON");
     let manifest = manifest_json();
     for (key, value) in fragment.as_object().expect("object") {
         assert_eq!(&manifest[key], value, "key {key}");
@@ -176,7 +209,10 @@ fn cor_050_every_key_of_the_fragment_block_agrees_with_the_complete_manifest() {
 /// REQ: COR-050
 #[test]
 fn cor_050_the_server_host_built_from_the_manifest_holds_the_server_grants() {
-    let host = FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("server").build();
+    let host = FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("server")
+        .build();
     assert_eq!(host.current_mode(), ilium_plugin_sdk::testing::Mode::Native);
 }
 

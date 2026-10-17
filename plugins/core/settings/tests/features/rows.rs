@@ -5,7 +5,7 @@
 
 use ilium_plugin_sdk::types::ErrorCode;
 use proptest::prelude::*;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::common::*;
 
@@ -21,7 +21,9 @@ fn rows_090_density_defaults_to_comfortable() {
 fn rows_090_density_accepts_each_declared_option() {
     for option in ["compact", "comfortable"] {
         let mut host = client_host();
-        host.settings().set("density", json!(option)).expect("accepted");
+        host.settings()
+            .set("density", json!(option))
+            .expect("accepted");
         assert_eq!(host.settings().get("density"), Some(json!(option)));
     }
 }
@@ -30,7 +32,10 @@ fn rows_090_density_accepts_each_declared_option() {
 #[test]
 fn rows_090_density_refuses_a_value_that_is_not_an_option_with_invalid_argument() {
     let mut host = client_host();
-    let error = host.settings().set("density", json!("spacious")).expect_err("refused");
+    let error = host
+        .settings()
+        .set("density", json!("spacious"))
+        .expect_err("refused");
     assert_eq!(error.code, ErrorCode::InvalidArgument);
     assert_eq!(host.settings().get("density"), Some(json!("comfortable")));
 }
@@ -40,7 +45,10 @@ fn rows_090_density_refuses_a_value_that_is_not_an_option_with_invalid_argument(
 fn rows_090_density_refuses_the_standard_option_of_the_user_interface_tab_invalid_argument() {
     // The sidebar density of the tree has three options; this plugin row has two.
     let mut host = client_host();
-    let error = host.settings().set("density", json!("standard")).expect_err("refused");
+    let error = host
+        .settings()
+        .set("density", json!("standard"))
+        .expect_err("refused");
     assert_eq!(error.code, ErrorCode::InvalidArgument);
 }
 
@@ -48,7 +56,12 @@ fn rows_090_density_refuses_the_standard_option_of_the_user_interface_tab_invali
 #[test]
 fn rows_090_density_refuses_a_non_string_value_with_invalid_argument() {
     let mut host = client_host();
-    for value in [json!(1), json!(true), json!(["compact"]), json!({"value": "compact"})] {
+    for value in [
+        json!(1),
+        json!(true),
+        json!(["compact"]),
+        json!({"value": "compact"}),
+    ] {
         let error = host.settings().set("density", value).expect_err("refused");
         assert_eq!(error.code, ErrorCode::InvalidArgument);
     }
@@ -58,8 +71,12 @@ fn rows_090_density_refuses_a_non_string_value_with_invalid_argument() {
 #[test]
 fn rows_090_density_null_resets_to_the_default() {
     let mut host = client_host();
-    host.settings().set("density", json!("compact")).expect("accepted");
-    host.settings().set("density", Value::Null).expect("null resets");
+    host.settings()
+        .set("density", json!("compact"))
+        .expect("accepted");
+    host.settings()
+        .set("density", Value::Null)
+        .expect("null resets");
     assert_eq!(host.settings().get("density"), Some(json!("comfortable")));
 }
 
@@ -75,7 +92,9 @@ fn rows_092_accent_defaults_to_4a9eff() {
 fn rows_092_accent_accepts_lower_and_upper_case_hex() {
     for colour in ["#000000", "#ffffff", "#FFFFFF", "#1f6feb", "#AbCdEf"] {
         let mut host = client_host();
-        host.settings().set("accent", json!(colour)).expect("accepted");
+        host.settings()
+            .set("accent", json!(colour))
+            .expect("accepted");
         assert_eq!(host.settings().get("accent"), Some(json!(colour)));
     }
 }
@@ -83,11 +102,20 @@ fn rows_092_accent_accepts_lower_and_upper_case_hex() {
 /// REQ: F-092
 #[test]
 fn rows_092_accent_refuses_text_that_is_not_rrggbb_with_invalid_argument() {
-    for colour in ["red", "4a9eff", "#4a9ef", "#4a9eff0", "#4a9eg0", "", "#", "# 4a9eff", "#4a9eff "] {
+    for colour in [
+        "red", "4a9eff", "#4a9ef", "#4a9eff0", "#4a9eg0", "", "#", "# 4a9eff", "#4a9eff ",
+    ] {
         let mut host = client_host();
-        let error = host.settings().set("accent", json!(colour)).expect_err(colour);
+        let error = host
+            .settings()
+            .set("accent", json!(colour))
+            .expect_err(colour);
         assert_eq!(error.code, ErrorCode::InvalidArgument, "{colour}");
-        assert_eq!(host.settings().get("accent"), Some(json!("#4a9eff")), "{colour}");
+        assert_eq!(
+            host.settings().get("accent"),
+            Some(json!("#4a9eff")),
+            "{colour}"
+        );
     }
 }
 
@@ -105,8 +133,12 @@ fn rows_092_accent_refuses_a_non_string_value_with_invalid_argument() {
 #[test]
 fn rows_092_accent_null_resets_to_the_default() {
     let mut host = client_host();
-    host.settings().set("accent", json!("#000000")).expect("accepted");
-    host.settings().set("accent", Value::Null).expect("null resets");
+    host.settings()
+        .set("accent", json!("#000000"))
+        .expect("accepted");
+    host.settings()
+        .set("accent", Value::Null)
+        .expect("null resets");
     assert_eq!(host.settings().get("accent"), Some(json!("#4a9eff")));
 }
 
@@ -114,7 +146,10 @@ fn rows_092_accent_null_resets_to_the_default() {
 #[test]
 fn rows_090_an_unknown_key_of_the_appearance_section_is_refused_with_invalid_argument() {
     let mut host = client_host();
-    let error = host.settings().set("no_such_row", json!(1)).expect_err("refused");
+    let error = host
+        .settings()
+        .set("no_such_row", json!(1))
+        .expect_err("refused");
     assert_eq!(error.code, ErrorCode::InvalidArgument);
 }
 

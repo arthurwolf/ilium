@@ -8,7 +8,10 @@ use crate::common::*;
 #[test]
 fn usage_038_answers_at_once_with_done() {
     let reply = call_usage("usage", "{}");
-    assert!(matches!(reply, ilium_plugin_sdk::exports::ServiceReply::Done(_)));
+    assert!(matches!(
+        reply,
+        ilium_plugin_sdk::exports::ServiceReply::Done(_)
+    ));
 }
 
 /// REQ: F-038
@@ -64,7 +67,10 @@ fn usage_038_total_change_publishes_usage_changed_with_pane_and_total() {
     let pane = add_agent(&mut host, "claude", "claude");
     feed_pane(&mut host, pane, KNOWN_MODEL, 10_000);
     let topics = published_topics(&host);
-    let (_, payload) = topics.iter().find(|(topic, _)| topic == "ilium.core.cost/usage-changed").expect("published");
+    let (_, payload) = topics
+        .iter()
+        .find(|(topic, _)| topic == "ilium.core.cost/usage-changed")
+        .expect("published");
     let value: serde_json::Value = serde_json::from_str(payload).expect("JSON");
     assert_eq!(value["pane"], json!(pane));
     assert!(value.get("total").is_some());

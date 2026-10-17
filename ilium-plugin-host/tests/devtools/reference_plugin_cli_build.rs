@@ -6,13 +6,33 @@ use serde_json::Value;
 
 use crate::common::*;
 
-const STEPS: [&str; 6] = ["toolchain", "compile", "bundle", "component", "api-version", "strip"];
+const STEPS: [&str; 6] = [
+    "toolchain",
+    "compile",
+    "bundle",
+    "component",
+    "api-version",
+    "strip",
+];
 
 fn new_project(lang: &str, template: &str) -> (tempfile::TempDir, CliEnv, std::path::PathBuf) {
     let root = scratch();
     let env = env(root.path());
     let dir = root.path().join("out");
-    let made = run(&env, &["new", dir.to_str().unwrap(), "--id", "example.agent-tools", "--lang", lang, "--template", template, "--json"]);
+    let made = run(
+        &env,
+        &[
+            "new",
+            dir.to_str().unwrap(),
+            "--id",
+            "example.agent-tools",
+            "--lang",
+            lang,
+            "--template",
+            template,
+            "--json",
+        ],
+    );
     assert_eq!(made.exit_code, 0, "{:?}", made.stdout_jsonl);
     (root, env, dir)
 }
@@ -24,7 +44,10 @@ fn build(env: &CliEnv, dir: &std::path::Path, extra: &[&str]) -> CliOutput {
 }
 
 fn steps_of(output: &CliOutput) -> Vec<String> {
-    records_of(output, "progress").iter().filter_map(|r| r["step"].as_str().map(str::to_owned)).collect()
+    records_of(output, "progress")
+        .iter()
+        .filter_map(|r| r["step"].as_str().map(str::to_owned))
+        .collect()
 }
 
 fn build_json(dir: &std::path::Path) -> Value {
@@ -32,7 +55,9 @@ fn build_json(dir: &std::path::Path) -> Value {
 }
 
 fn bytes_contain(haystack: &[u8], needle: &[u8]) -> bool {
-    haystack.windows(needle.len()).any(|window| window == needle)
+    haystack
+        .windows(needle.len())
+        .any(|window| window == needle)
 }
 
 /// REQ: DEV-300
@@ -40,8 +65,14 @@ fn bytes_contain(haystack: &[u8], needle: &[u8]) -> bool {
 fn dev_300_rust_build_prints_a_progress_record_per_stage_in_order() {
     let (_root, env, dir) = new_project("rust", "server");
     let steps = steps_of(&build(&env, &dir, &[]));
-    let positions: Vec<usize> = STEPS.iter().filter_map(|s| steps.iter().position(|x| x == s)).collect();
-    assert!(positions.windows(2).all(|pair| pair[0] < pair[1]), "{steps:?}");
+    let positions: Vec<usize> = STEPS
+        .iter()
+        .filter_map(|s| steps.iter().position(|x| x == s))
+        .collect();
+    assert!(
+        positions.windows(2).all(|pair| pair[0] < pair[1]),
+        "{steps:?}"
+    );
     assert_eq!(steps.first().map(String::as_str), Some("toolchain"));
     assert_eq!(steps.last().map(String::as_str), Some("strip"));
 }
@@ -51,7 +82,10 @@ fn dev_300_rust_build_prints_a_progress_record_per_stage_in_order() {
 fn dev_300_typescript_build_uses_bundle_not_compile() {
     let (_root, env, dir) = new_project("typescript", "server");
     let steps = steps_of(&build(&env, &dir, &[]));
-    assert!(steps.contains(&"bundle".to_owned()) && !steps.contains(&"compile".to_owned()), "{steps:?}");
+    assert!(
+        steps.contains(&"bundle".to_owned()) && !steps.contains(&"compile".to_owned()),
+        "{steps:?}"
+    );
 }
 
 /// REQ: DEV-300
@@ -62,7 +96,10 @@ fn dev_300_a_failing_stage_stops_the_later_stages() {
     let output = build(&env, &dir, &[]);
     assert_eq!(error_code(&output).as_deref(), Some("build.compile-failed"));
     let steps = steps_of(&output);
-    assert!(!steps.contains(&"component".to_owned()) && !steps.contains(&"strip".to_owned()), "{steps:?}");
+    assert!(
+        !steps.contains(&"component".to_owned()) && !steps.contains(&"strip".to_owned()),
+        "{steps:?}"
+    );
 }
 
 /// REQ: DEV-301
@@ -70,8 +107,14 @@ fn dev_300_a_failing_stage_stops_the_later_stages() {
 fn dev_301_one_component_per_declared_side_with_fixed_names() {
     let (_root, env, dir) = new_project("rust", "both");
     build(&env, &dir, &[]);
-    let dist: Vec<String> = tree_of(&dir).into_iter().filter(|p| p.starts_with("dist/") && p.ends_with(".wasm")).collect();
-    assert_eq!(dist, vec!["dist/client.wasm".to_owned(), "dist/server.wasm".to_owned()]);
+    let dist: Vec<String> = tree_of(&dir)
+        .into_iter()
+        .filter(|p| p.starts_with("dist/") && p.ends_with(".wasm"))
+        .collect();
+    assert_eq!(
+        dist,
+        vec!["dist/client.wasm".to_owned(), "dist/server.wasm".to_owned()]
+    );
 }
 
 /// REQ: DEV-301
@@ -92,7 +135,10 @@ fn dev_302_api_version_section_is_three_big_endian_u16() {
     let payload = api_payload([0, 1, 0]);
     assert_eq!(payload.len(), 6);
     assert!(bytes_contain(&bytes, b"ilium:api-version"));
-    assert!(bytes_contain(&bytes, &payload), "section payload 0.1.0 as big-endian u16");
+    assert!(
+        bytes_contain(&bytes, &payload),
+        "section payload 0.1.0 as big-endian u16"
+    );
 }
 
 /// REQ: DEV-302
@@ -101,7 +147,11 @@ fn dev_302_a_component_world_that_differs_from_the_manifest_fails_with_world_mis
     let (_root, env, dir) = new_project("rust", "server");
     let mut manifest: Value = serde_json::from_str(&read_text(&dir, "ilium-plugin.json")).unwrap();
     manifest["server"]["world"] = Value::String("ilium:server/other@0.1.0".to_owned());
-    write_text(&dir, "ilium-plugin.json", &serde_json::to_string_pretty(&manifest).unwrap());
+    write_text(
+        &dir,
+        "ilium-plugin.json",
+        &serde_json::to_string_pretty(&manifest).unwrap(),
+    );
     let output = build(&env, &dir, &[]);
     assert_eq!(error_code(&output).as_deref(), Some("build.world-mismatch"));
     assert_eq!(output.exit_code, 1);
@@ -130,7 +180,10 @@ fn dev_303_release_typescript_build_writes_no_source_map() {
 fn dev_303_debug_rust_build_keeps_dwarf() {
     let (_root, env, dir) = new_project("rust", "server");
     build(&env, &dir, &["--debug"]);
-    assert!(bytes_contain(&std::fs::read(dir.join("dist/server.wasm")).unwrap(), b".debug_info"));
+    assert!(bytes_contain(
+        &std::fs::read(dir.join("dist/server.wasm")).unwrap(),
+        b".debug_info"
+    ));
 }
 
 /// REQ: DEV-303
@@ -147,7 +200,14 @@ fn dev_304_build_json_has_the_documented_keys() {
     let (_root, env, dir) = new_project("rust", "both");
     build(&env, &dir, &[]);
     let json = build_json(&dir);
-    for key in ["profile", "api", "input_hash", "sides", "toolchain", "cached"] {
+    for key in [
+        "profile",
+        "api",
+        "input_hash",
+        "sides",
+        "toolchain",
+        "cached",
+    ] {
         assert!(json.get(key).is_some(), "{key}");
     }
     let sides = json["sides"].as_array().expect("sides");
@@ -212,7 +272,8 @@ fn dev_305_manifest_edit_also_changes_the_hash() {
     let (_root, env, dir) = new_project("rust", "server");
     build(&env, &dir, &[]);
     let before = build_json(&dir)["input_hash"].clone();
-    let text = read_text(&dir, "ilium-plugin.json").replace("\"version\": \"0.1.0\"", "\"version\": \"0.1.1\"");
+    let text = read_text(&dir, "ilium-plugin.json")
+        .replace("\"version\": \"0.1.0\"", "\"version\": \"0.1.1\"");
     write_text(&dir, "ilium-plugin.json", &text);
     build(&env, &dir, &[]);
     assert_ne!(build_json(&dir)["input_hash"], before);
@@ -223,11 +284,17 @@ fn dev_305_manifest_edit_also_changes_the_hash() {
 fn dev_306_two_locked_builds_of_the_same_sources_are_byte_identical() {
     let (_root, env, dir) = new_project("rust", "both");
     build(&env, &dir, &["--locked"]);
-    let first: Vec<Vec<u8>> = ["dist/server.wasm", "dist/client.wasm"].iter().map(|p| std::fs::read(dir.join(p)).unwrap()).collect();
+    let first: Vec<Vec<u8>> = ["dist/server.wasm", "dist/client.wasm"]
+        .iter()
+        .map(|p| std::fs::read(dir.join(p)).unwrap())
+        .collect();
     std::fs::remove_dir_all(dir.join("dist")).unwrap();
     std::fs::remove_dir_all(dir.join(".ilium")).unwrap();
     build(&env, &dir, &["--locked"]);
-    let second: Vec<Vec<u8>> = ["dist/server.wasm", "dist/client.wasm"].iter().map(|p| std::fs::read(dir.join(p)).unwrap()).collect();
+    let second: Vec<Vec<u8>> = ["dist/server.wasm", "dist/client.wasm"]
+        .iter()
+        .map(|p| std::fs::read(dir.join(p)).unwrap())
+        .collect();
     assert_eq!(first, second);
 }
 
@@ -247,7 +314,11 @@ fn dev_306_typescript_locked_builds_are_byte_identical() {
 fn dev_307_build_cache_lives_under_dot_ilium_cache() {
     let (_root, env, dir) = new_project("rust", "server");
     build(&env, &dir, &[]);
-    assert!(tree_of(&dir).iter().any(|p| p.starts_with(".ilium/cache/")), "{:?}", tree_of(&dir));
+    assert!(
+        tree_of(&dir).iter().any(|p| p.starts_with(".ilium/cache/")),
+        "{:?}",
+        tree_of(&dir)
+    );
 }
 
 /// REQ: DEV-307
@@ -256,8 +327,17 @@ fn dev_307_no_cache_file_is_written_outside_the_allowed_places() {
     let (_root, env, dir) = new_project("typescript", "server");
     let before = tree_of(&dir);
     build(&env, &dir, &[]);
-    let added: Vec<String> = tree_of(&dir).into_iter().filter(|p| !before.contains(p)).collect();
-    assert!(added.iter().all(|p| p.starts_with("dist/") || p.starts_with(".ilium/") || p.starts_with("node_modules/") || p.starts_with("target/")), "{added:?}");
+    let added: Vec<String> = tree_of(&dir)
+        .into_iter()
+        .filter(|p| !before.contains(p))
+        .collect();
+    assert!(
+        added.iter().all(|p| p.starts_with("dist/")
+            || p.starts_with(".ilium/")
+            || p.starts_with("node_modules/")
+            || p.starts_with("target/")),
+        "{added:?}"
+    );
 }
 
 /// REQ: DEV-307

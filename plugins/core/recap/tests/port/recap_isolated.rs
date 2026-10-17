@@ -10,9 +10,18 @@ fn port_isolated_selected_shell_screen_reaches_the_fake_model() {
     open_gate(&mut host);
     let selected = host.tree().add(shell_pane("selected shell"));
     let other = host.tree().add(shell_pane("other shell"));
-    host.tree().set_screen(selected, rows(&["SELECTED_RECAP_MARKER", "export TOKEN_VALUE=fakecredential12345"]));
-    host.tree().set_screen(other, rows(&["UNSELECTED_RECAP_MARKER"]));
-    let invocation = host.cli().invoke(&["recap", "--pane", &selected.to_string()], b"");
+    host.tree().set_screen(
+        selected,
+        rows(&[
+            "SELECTED_RECAP_MARKER",
+            "export TOKEN_VALUE=fakecredential12345",
+        ]),
+    );
+    host.tree()
+        .set_screen(other, rows(&["UNSELECTED_RECAP_MARKER"]));
+    let invocation = host
+        .cli()
+        .invoke(&["recap", "--pane", &selected.to_string()], b"");
     let evidence = job_evidence(&mut host);
     assert!(evidence.contains("SELECTED_RECAP_MARKER"));
     assert!(!evidence.contains("UNSELECTED_RECAP_MARKER"));
@@ -21,7 +30,11 @@ fn port_isolated_selected_shell_screen_reaches_the_fake_model() {
     let record = first_recap(&records);
     assert_eq!(record["pane_name"], "selected shell");
     assert_eq!(record["short"]["text"], words(4));
-    assert!(!host.cli().refresh(&invocation).stdout().contains("fakecredential12345"));
+    assert!(!host
+        .cli()
+        .refresh(&invocation)
+        .stdout()
+        .contains("fakecredential12345"));
 }
 
 /// REQ: PORT:ilium/tests/recap_isolated.rs::recap_selected_shell_screen_reaches_fake_inference_with_matching_binaries

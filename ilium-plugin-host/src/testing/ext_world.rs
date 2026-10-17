@@ -140,17 +140,33 @@ impl ExtWorld {
     }
 
     /// Installs, enables and activates a plugin; `handlers` maps handler names to scripts.
-    pub fn install(&mut self, tier: Tier, manifest: Value, handlers: Vec<(String, HandlerScript)>) -> Result<(), Diagnostic> {
+    pub fn install(
+        &mut self,
+        tier: Tier,
+        manifest: Value,
+        handlers: Vec<(String, HandlerScript)>,
+    ) -> Result<(), Diagnostic> {
         unimplemented!("host::testing::ext_world::ExtWorld::install")
     }
 
     /// Installs a plugin on one side.
-    pub fn install_on(&mut self, tier: Tier, side: Side, manifest: Value, handlers: Vec<(String, HandlerScript)>) -> Result<(), Diagnostic> {
+    pub fn install_on(
+        &mut self,
+        tier: Tier,
+        side: Side,
+        manifest: Value,
+        handlers: Vec<(String, HandlerScript)>,
+    ) -> Result<(), Diagnostic> {
         unimplemented!("host::testing::ext_world::ExtWorld::install_on")
     }
 
     /// Updates a plugin.
-    pub fn update(&mut self, tier: Tier, manifest: Value, handlers: Vec<(String, HandlerScript)>) -> Result<(), Diagnostic> {
+    pub fn update(
+        &mut self,
+        tier: Tier,
+        manifest: Value,
+        handlers: Vec<(String, HandlerScript)>,
+    ) -> Result<(), Diagnostic> {
         unimplemented!("host::testing::ext_world::ExtWorld::update")
     }
 
@@ -210,7 +226,12 @@ impl ExtWorld {
     }
 
     /// `extensions.run-hook` as `caller`.
-    pub fn run_hook(&mut self, caller: &str, point: &str, payload_json: &str) -> Result<RequestId, PluginError> {
+    pub fn run_hook(
+        &mut self,
+        caller: &str,
+        point: &str,
+        payload_json: &str,
+    ) -> Result<RequestId, PluginError> {
         unimplemented!("host::testing::ext_world::ExtWorld::run_hook")
     }
 
@@ -230,12 +251,24 @@ impl ExtWorld {
     }
 
     /// `extensions.register`.
-    pub fn register(&mut self, caller: &str, point: &str, extension: &str, priority: u8, entry_json: &str) -> Result<(), PluginError> {
+    pub fn register(
+        &mut self,
+        caller: &str,
+        point: &str,
+        extension: &str,
+        priority: u8,
+        entry_json: &str,
+    ) -> Result<(), PluginError> {
         unimplemented!("host::testing::ext_world::ExtWorld::register")
     }
 
     /// `extensions.unregister`.
-    pub fn unregister(&mut self, caller: &str, point: &str, extension: &str) -> Result<(), PluginError> {
+    pub fn unregister(
+        &mut self,
+        caller: &str,
+        point: &str,
+        extension: &str,
+    ) -> Result<(), PluginError> {
         unimplemented!("host::testing::ext_world::ExtWorld::unregister")
     }
 
@@ -355,7 +388,13 @@ impl ExtWorld {
     }
 
     /// `services.call`.
-    pub fn call_service(&mut self, caller: &str, service: &str, method: &str, payload_json: &str) -> Result<RequestId, PluginError> {
+    pub fn call_service(
+        &mut self,
+        caller: &str,
+        service: &str,
+        method: &str,
+        payload_json: &str,
+    ) -> Result<RequestId, PluginError> {
         unimplemented!("host::testing::ext_world::ExtWorld::call_service")
     }
 
@@ -365,7 +404,12 @@ impl ExtWorld {
     }
 
     /// `services.reply`.
-    pub fn service_reply(&mut self, provider: &str, call: u64, outcome: Result<String, PluginError>) -> Result<(), PluginError> {
+    pub fn service_reply(
+        &mut self,
+        provider: &str,
+        call: u64,
+        outcome: Result<String, PluginError>,
+    ) -> Result<(), PluginError> {
         unimplemented!("host::testing::ext_world::ExtWorld::service_reply")
     }
 
@@ -380,17 +424,33 @@ impl ExtWorld {
     }
 
     /// `topics.publish`.
-    pub fn publish(&mut self, plugin: &str, topic: &str, payload_json: &str) -> Result<(), PluginError> {
+    pub fn publish(
+        &mut self,
+        plugin: &str,
+        topic: &str,
+        payload_json: &str,
+    ) -> Result<(), PluginError> {
         unimplemented!("host::testing::ext_world::ExtWorld::publish")
     }
 
     /// `commands.set-state`.
-    pub fn set_command_state(&mut self, plugin: &str, command: &str, enabled: bool, checked: Option<bool>) -> Result<(), PluginError> {
+    pub fn set_command_state(
+        &mut self,
+        plugin: &str,
+        command: &str,
+        enabled: bool,
+        checked: Option<bool>,
+    ) -> Result<(), PluginError> {
         unimplemented!("host::testing::ext_world::ExtWorld::set_command_state")
     }
 
     /// `commands.invoke`.
-    pub fn invoke_command(&mut self, caller: &str, command: &str, arguments_json: &str) -> Result<RequestId, PluginError> {
+    pub fn invoke_command(
+        &mut self,
+        caller: &str,
+        command: &str,
+        arguments_json: &str,
+    ) -> Result<RequestId, PluginError> {
         unimplemented!("host::testing::ext_world::ExtWorld::invoke_command")
     }
 
@@ -420,7 +480,13 @@ impl ExtWorld {
     }
 
     /// Sends a message between plugins.
-    pub fn send_message(&mut self, from: &str, to: &str, channel: &str, payload: &[u8]) -> Result<RequestId, PluginError> {
+    pub fn send_message(
+        &mut self,
+        from: &str,
+        to: &str,
+        channel: &str,
+        payload: &[u8],
+    ) -> Result<RequestId, PluginError> {
         unimplemented!("host::testing::ext_world::ExtWorld::send_message")
     }
 
@@ -670,7 +736,13 @@ impl ExtWorld {
     }
 
     /// Writes a project value of a row type.
-    pub fn set_project_value_of_type(&mut self, plugin: &str, key: &str, row_type: &str, value: Value) {
+    pub fn set_project_value_of_type(
+        &mut self,
+        plugin: &str,
+        key: &str,
+        row_type: &str,
+        value: Value,
+    ) {
         unimplemented!("host::testing::ext_world::ExtWorld::set_project_value_of_type")
     }
 

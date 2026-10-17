@@ -4,14 +4,14 @@
 //! onboarding demo) and F-054 (voice device selection), the manifest, the kernel tab `voice-control`, the
 //! extension points, the service and the topic, and the renders of the page (strip and confirmation).
 
-#[path = "../host_ext.rs"]
-mod host_ext;
 mod cli_say;
 mod common;
 mod confirmations;
 mod devices;
 mod doc_page;
 mod extension_points;
+#[path = "../host_ext.rs"]
+mod host_ext;
 mod manifest;
 mod onboarding;
 mod render;

@@ -1,7 +1,9 @@
 //! Baseline scenarios of src/docs/panes-and-layout.md and how-it-works.md, run with plugins and
 //! kernel only (COR-001): F-001..004, F-008, F-011..014.
 
-use ilium_plugin_api::generated::types::{Delivery, ErrorCode, Modifiers, NodeClass, Outcome, Placement, SplitDirection};
+use ilium_plugin_api::generated::types::{
+    Delivery, ErrorCode, Modifiers, NodeClass, Outcome, Placement, SplitDirection,
+};
 use ilium_plugin_api::kernel::KernelFacade;
 use ilium_plugin_host::lifecycle::StartMode;
 
@@ -73,7 +75,10 @@ fn f_002_closing_the_last_item_removes_the_empty_group() {
         let top = group(kernel, None, "scratch");
         let pane = terminal(kernel, Some(top), "shell", &["sh"]);
         close(kernel, pane);
-        assert!(kernel.tree().node(top).is_none(), "an empty group is removed automatically");
+        assert!(
+            kernel.tree().node(top).is_none(),
+            "an empty group is removed automatically"
+        );
     });
 }
 
@@ -105,12 +110,27 @@ fn f_002_a_project_is_never_removed_automatically() {
 #[test]
 fn f_003_split_of_two_three_and_four_panes_is_created() {
     in_both_modes(|kernel| {
-        let panes: Vec<_> = (0..4).map(|n| terminal(kernel, None, &format!("p{n}"), &["sh"])).collect();
-        assert!(matches!(split(kernel, &panes[..2], SplitDirection::Vertical), Outcome::OkNode(_)));
-        let more: Vec<_> = (0..3).map(|n| terminal(kernel, None, &format!("q{n}"), &["sh"])).collect();
-        assert!(matches!(split(kernel, &more, SplitDirection::Horizontal), Outcome::OkNode(_)));
-        let four: Vec<_> = (0..4).map(|n| terminal(kernel, None, &format!("r{n}"), &["sh"])).collect();
-        assert!(matches!(split(kernel, &four, SplitDirection::Vertical), Outcome::OkNode(_)));
+        let panes: Vec<_> = (0..4)
+            .map(|n| terminal(kernel, None, &format!("p{n}"), &["sh"]))
+            .collect();
+        assert!(matches!(
+            split(kernel, &panes[..2], SplitDirection::Vertical),
+            Outcome::OkNode(_)
+        ));
+        let more: Vec<_> = (0..3)
+            .map(|n| terminal(kernel, None, &format!("q{n}"), &["sh"]))
+            .collect();
+        assert!(matches!(
+            split(kernel, &more, SplitDirection::Horizontal),
+            Outcome::OkNode(_)
+        ));
+        let four: Vec<_> = (0..4)
+            .map(|n| terminal(kernel, None, &format!("r{n}"), &["sh"]))
+            .collect();
+        assert!(matches!(
+            split(kernel, &four, SplitDirection::Vertical),
+            Outcome::OkNode(_)
+        ));
     });
 }
 
@@ -118,7 +138,9 @@ fn f_003_split_of_two_three_and_four_panes_is_created() {
 #[test]
 fn f_003_a_split_of_five_panes_is_refused() {
     in_both_modes(|kernel| {
-        let panes: Vec<_> = (0..5).map(|n| terminal(kernel, None, &format!("p{n}"), &["sh"])).collect();
+        let panes: Vec<_> = (0..5)
+            .map(|n| terminal(kernel, None, &format!("p{n}"), &["sh"]))
+            .collect();
         assert!(is_refused(&split(kernel, &panes, SplitDirection::Vertical)));
     });
 }
@@ -128,7 +150,11 @@ fn f_003_a_split_of_five_panes_is_refused() {
 fn f_003_a_split_of_one_pane_is_refused() {
     in_both_modes(|kernel| {
         let pane = terminal(kernel, None, "only", &["sh"]);
-        assert!(is_refused(&split(kernel, &[pane], SplitDirection::Vertical)));
+        assert!(is_refused(&split(
+            kernel,
+            &[pane],
+            SplitDirection::Vertical
+        )));
     });
 }
 
@@ -140,7 +166,11 @@ fn f_003_a_pane_already_in_a_split_is_not_offered_to_a_second_split() {
         let b = terminal(kernel, None, "b", &["sh"]);
         let c = terminal(kernel, None, "c", &["sh"]);
         created(split(kernel, &[a, b], SplitDirection::Vertical));
-        assert!(is_refused(&split(kernel, &[b, c], SplitDirection::Vertical)));
+        assert!(is_refused(&split(
+            kernel,
+            &[b, c],
+            SplitDirection::Vertical
+        )));
     });
 }
 
@@ -161,10 +191,15 @@ fn f_003_two_panes_vertical_split_have_equal_columns_side_by_side() {
 #[test]
 fn f_003_three_panes_horizontal_split_have_equal_rows_stacked() {
     in_both_modes(|kernel| {
-        let panes: Vec<_> = (0..3).map(|n| terminal(kernel, None, &format!("p{n}"), &["sh"])).collect();
+        let panes: Vec<_> = (0..3)
+            .map(|n| terminal(kernel, None, &format!("p{n}"), &["sh"]))
+            .collect();
         let split_id = created(split(kernel, &panes, SplitDirection::Horizontal));
         let rects = kernel.split_rects(split_id, 90, 30);
-        assert_eq!(rects, vec![(0, 0, 90, 10), (0, 10, 90, 10), (0, 20, 90, 10)]);
+        assert_eq!(
+            rects,
+            vec![(0, 0, 90, 10), (0, 10, 90, 10), (0, 20, 90, 10)]
+        );
         rects
     });
 }
@@ -173,11 +208,20 @@ fn f_003_three_panes_horizontal_split_have_equal_rows_stacked() {
 #[test]
 fn f_003_four_panes_are_a_two_by_two_grid_in_either_direction() {
     in_both_modes(|kernel| {
-        let panes: Vec<_> = (0..4).map(|n| terminal(kernel, None, &format!("p{n}"), &["sh"])).collect();
+        let panes: Vec<_> = (0..4)
+            .map(|n| terminal(kernel, None, &format!("p{n}"), &["sh"]))
+            .collect();
         let vertical = created(split(kernel, &panes, SplitDirection::Vertical));
-        let grid = vec![(0, 0, 50, 20), (50, 0, 50, 20), (0, 20, 50, 20), (50, 20, 50, 20)];
+        let grid = vec![
+            (0, 0, 50, 20),
+            (50, 0, 50, 20),
+            (0, 20, 50, 20),
+            (50, 20, 50, 20),
+        ];
         assert_eq!(kernel.split_rects(vertical, 100, 40), grid);
-        let more: Vec<_> = (0..4).map(|n| terminal(kernel, None, &format!("q{n}"), &["sh"])).collect();
+        let more: Vec<_> = (0..4)
+            .map(|n| terminal(kernel, None, &format!("q{n}"), &["sh"]))
+            .collect();
         let horizontal = created(split(kernel, &more, SplitDirection::Horizontal));
         assert_eq!(kernel.split_rects(horizontal, 100, 40), grid);
     });
@@ -212,7 +256,10 @@ fn f_004_move_before_a_sibling_reorders_the_preorder() {
         let root = group(kernel, None, "g");
         let first = terminal(kernel, Some(root), "first", &["sh"]);
         let second = terminal(kernel, Some(root), "second", &["sh"]);
-        assert!(matches!(move_node(kernel, second, first, Placement::Before), Outcome::Ok));
+        assert!(matches!(
+            move_node(kernel, second, first, Placement::Before),
+            Outcome::Ok
+        ));
         titles(kernel)
     });
     assert_eq!(order, vec!["g", "second", "first"]);
@@ -225,7 +272,10 @@ fn f_004_move_inside_last_reparents_the_node() {
         let target = group(kernel, None, "target");
         let other = group(kernel, None, "other");
         let pane = terminal(kernel, Some(other), "p", &["sh"]);
-        assert!(matches!(move_node(kernel, pane, target, Placement::InsideLast), Outcome::Ok));
+        assert!(matches!(
+            move_node(kernel, pane, target, Placement::InsideLast),
+            Outcome::Ok
+        ));
         assert_eq!(node(kernel, pane).parent, Some(target));
     });
 }
@@ -236,7 +286,12 @@ fn f_004_moving_a_node_into_its_own_subtree_is_refused() {
     in_both_modes(|kernel| {
         let outer = group(kernel, None, "outer");
         let inner = group(kernel, Some(outer), "inner");
-        assert!(is_refused(&move_node(kernel, outer, inner, Placement::InsideLast)));
+        assert!(is_refused(&move_node(
+            kernel,
+            outer,
+            inner,
+            Placement::InsideLast
+        )));
     });
 }
 
@@ -244,7 +299,11 @@ fn f_004_moving_a_node_into_its_own_subtree_is_refused() {
 #[test]
 fn f_004_rename_of_a_missing_node_is_refused_not_found() {
     in_both_modes(|kernel| {
-        let outcome = rename(kernel, ilium_plugin_api::generated::types::NodeId(9_999), "x");
+        let outcome = rename(
+            kernel,
+            ilium_plugin_api::generated::types::NodeId(9_999),
+            "x",
+        );
         assert_eq!(refusal_code(&outcome), Some(ErrorCode::NotFound));
     });
 }
@@ -309,7 +368,12 @@ fn f_011_output_of_the_process_reaches_the_screen() {
 #[test]
 fn f_011_an_unstartable_command_keeps_the_pane_in_the_tree() {
     in_both_modes(|kernel| {
-        let pane = terminal(kernel, None, "broken", &["/nonexistent/ilium-parity-binary"]);
+        let pane = terminal(
+            kernel,
+            None,
+            "broken",
+            &["/nonexistent/ilium-parity-binary"],
+        );
         kernel.settle();
         assert!(kernel.tree().node(pane).is_some());
     });
@@ -356,7 +420,10 @@ fn f_012_cells_carry_the_style_of_sgr_sequences() {
 #[test]
 fn f_012_screen_of_an_unknown_pane_is_none() {
     in_both_modes(|kernel| {
-        assert!(kernel.panes().screen_text(ilium_plugin_api::generated::types::NodeId(777)).is_none());
+        assert!(kernel
+            .panes()
+            .screen_text(ilium_plugin_api::generated::types::NodeId(777))
+            .is_none());
     });
 }
 
@@ -370,7 +437,10 @@ fn f_013_history_keeps_the_last_lines_scrolled_off_the_screen_in_order() {
         let history = kernel.panes().history(pane, 3).expect("history");
         assert_eq!(history.len(), 3);
         assert!(history[0] < history[2] || history[0].len() <= history[2].len());
-        assert!(history.iter().all(|line| line.starts_with("line")), "{history:?}");
+        assert!(
+            history.iter().all(|line| line.starts_with("line")),
+            "{history:?}"
+        );
     });
 }
 
@@ -379,9 +449,18 @@ fn f_013_history_keeps_the_last_lines_scrolled_off_the_screen_in_order() {
 fn f_013_scrollback_budget_default_is_8_mib_and_accepts_4_to_512_in_steps_of_4() {
     for mode in MODES {
         let kernel = world(mode);
-        assert_eq!(kernel.setting("terminal", "scrollback_budget_mib").as_deref(), Some("8"));
+        assert_eq!(
+            kernel
+                .setting("terminal", "scrollback_budget_mib")
+                .as_deref(),
+            Some("8")
+        );
         for accepted in ["4", "8", "512"] {
-            assert_eq!(kernel.apply_setting("terminal", "scrollback_budget_mib", accepted), Ok(()), "{accepted}");
+            assert_eq!(
+                kernel.apply_setting("terminal", "scrollback_budget_mib", accepted),
+                Ok(()),
+                "{accepted}"
+            );
         }
     }
 }
@@ -392,9 +471,19 @@ fn f_013_scrollback_budget_outside_4_to_512_or_off_step_is_rejected() {
     for mode in MODES {
         let kernel = world(mode);
         for rejected in ["0", "3", "6", "516", "1024"] {
-            assert!(kernel.apply_setting("terminal", "scrollback_budget_mib", rejected).is_err(), "{rejected}");
+            assert!(
+                kernel
+                    .apply_setting("terminal", "scrollback_budget_mib", rejected)
+                    .is_err(),
+                "{rejected}"
+            );
         }
-        assert_eq!(kernel.setting("terminal", "scrollback_budget_mib").as_deref(), Some("8"));
+        assert_eq!(
+            kernel
+                .setting("terminal", "scrollback_budget_mib")
+                .as_deref(),
+            Some("8")
+        );
     }
 }
 
@@ -403,7 +492,12 @@ fn f_013_scrollback_budget_outside_4_to_512_or_off_step_is_rejected() {
 fn f_013_parser_pool_default_is_off_with_zero_budget() {
     for mode in MODES {
         let kernel = world(mode);
-        assert_eq!(kernel.setting("terminal", "engine_memory_budget_mib").as_deref(), Some("0"));
+        assert_eq!(
+            kernel
+                .setting("terminal", "engine_memory_budget_mib")
+                .as_deref(),
+            Some("0")
+        );
     }
 }
 
@@ -438,7 +532,10 @@ fn f_014_paste_is_wrapped_in_bracketed_paste_markers_when_the_pane_enabled_it() 
             },
         );
         apply(kernel, intent);
-        assert_eq!(kernel.pane_input_log(pane), b"\x1b[200~a\nb\x1b[201~".to_vec());
+        assert_eq!(
+            kernel.pane_input_log(pane),
+            b"\x1b[200~a\nb\x1b[201~".to_vec()
+        );
     });
 }
 
@@ -446,7 +543,11 @@ fn f_014_paste_is_wrapped_in_bracketed_paste_markers_when_the_pane_enabled_it() 
 #[test]
 fn f_014_input_to_an_unknown_pane_is_refused_not_found() {
     in_both_modes(|kernel| {
-        let outcome = type_text(kernel, ilium_plugin_api::generated::types::NodeId(4242), "x");
+        let outcome = type_text(
+            kernel,
+            ilium_plugin_api::generated::types::NodeId(4242),
+            "x",
+        );
         assert_eq!(refusal_code(&outcome), Some(ErrorCode::NotFound));
     });
 }
@@ -486,10 +587,23 @@ fn cor_001_the_plugin_build_has_the_same_tree_as_the_kernel_only_build_after_one
 #[test]
 fn f_001_tree_order_accepts_the_six_documented_values_and_nothing_else() {
     in_both_modes(|kernel| {
-        for value in ["manual", "type", "age_ascending", "age_descending", "name_ascending", "name_descending"] {
-            assert_eq!(kernel.apply_setting("ui", "tree_order", value), Ok(()), "{value}");
+        for value in [
+            "manual",
+            "type",
+            "age_ascending",
+            "age_descending",
+            "name_ascending",
+            "name_descending",
+        ] {
+            assert_eq!(
+                kernel.apply_setting("ui", "tree_order", value),
+                Ok(()),
+                "{value}"
+            );
         }
-        let error = kernel.apply_setting("ui", "tree_order", "random").expect_err("random is not a documented value");
+        let error = kernel
+            .apply_setting("ui", "tree_order", "random")
+            .expect_err("random is not a documented value");
         assert!(error.contains("invalid-argument"), "{error}");
     });
 }
@@ -499,9 +613,15 @@ fn f_001_tree_order_accepts_the_six_documented_values_and_nothing_else() {
 fn f_003_left_panel_sizing_mode_accepts_the_three_documented_values() {
     in_both_modes(|kernel| {
         for value in ["fixed", "focus_dependent", "terminal_width_dependent"] {
-            assert_eq!(kernel.apply_setting("ui", "left_panel_sizing_mode", value), Ok(()), "{value}");
+            assert_eq!(
+                kernel.apply_setting("ui", "left_panel_sizing_mode", value),
+                Ok(()),
+                "{value}"
+            );
         }
-        assert!(kernel.apply_setting("ui", "left_panel_sizing_mode", "floating").is_err());
+        assert!(kernel
+            .apply_setting("ui", "left_panel_sizing_mode", "floating")
+            .is_err());
     });
 }
 
@@ -510,10 +630,19 @@ fn f_003_left_panel_sizing_mode_accepts_the_three_documented_values() {
 fn f_003_left_panel_fixed_width_boundaries_are_16_and_80() {
     in_both_modes(|kernel| {
         for value in ["16", "17", "79", "80"] {
-            assert_eq!(kernel.apply_setting("ui", "left_panel_fixed_width", value), Ok(()), "{value}");
+            assert_eq!(
+                kernel.apply_setting("ui", "left_panel_fixed_width", value),
+                Ok(()),
+                "{value}"
+            );
         }
         for value in ["15", "81"] {
-            assert!(kernel.apply_setting("ui", "left_panel_fixed_width", value).is_err(), "{value}");
+            assert!(
+                kernel
+                    .apply_setting("ui", "left_panel_fixed_width", value)
+                    .is_err(),
+                "{value}"
+            );
         }
     });
 }

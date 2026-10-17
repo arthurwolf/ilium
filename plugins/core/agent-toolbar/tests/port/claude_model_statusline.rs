@@ -1,7 +1,7 @@
 //! Twins of claude_model_statusline.rs: capture of the Claude model through a chained statusline setting.
 //! Request/reply shape: see API_GAPS_ports.md.
-use serde_json::Value;
 use crate::common::{ask, Place};
+use serde_json::Value;
 
 fn check(place: Place, op: &str, request: &str, expected: &str) {
     let request: Value = serde_json::from_str(request).expect("request literal parses");
@@ -9,13 +9,18 @@ fn check(place: Place, op: &str, request: &str, expected: &str) {
     let reply = ask(place, op, request);
     let fields = expected.as_object().expect("expected is an object");
     for (name, value) in fields {
-        assert_eq!(&reply[name.as_str()], value, "field {name} of reply {reply}");
+        assert_eq!(
+            &reply[name.as_str()],
+            value,
+            "field {name} of reply {reply}"
+        );
     }
 }
 
 /// REQ: PORT:ilium-client/src/claude_model_statusline.rs::project_statusline_setting_chains_user_command_and_restores_only_owned_value
 #[test]
-fn port_claude_model_statusline_project_statusline_setting_chains_user_command_and_restores_only_owned_value() {
+fn port_claude_model_statusline_project_statusline_setting_chains_user_command_and_restores_only_owned_value(
+) {
     check(
         Place::Server,
         "statusline.claude.configure",

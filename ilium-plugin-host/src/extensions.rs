@@ -39,7 +39,12 @@ impl ExtensionRegistry {
     }
 
     /// Runs the chain of an extension point over a payload.
-    pub fn run_chain(&self, point: &str, mode: ChainMode, payload_json: String) -> Result<Vec<String>, PluginError> {
+    pub fn run_chain(
+        &self,
+        point: &str,
+        mode: ChainMode,
+        payload_json: String,
+    ) -> Result<Vec<String>, PluginError> {
         unimplemented!("host::extensions::ExtensionRegistry::run_chain")
     }
 }

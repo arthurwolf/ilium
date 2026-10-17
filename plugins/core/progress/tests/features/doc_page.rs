@@ -8,27 +8,46 @@ use crate::common::*;
 /// Rows of the behaviour contract table: `(id, rule, value, source)`.
 fn behaviour_rows() -> Vec<[String; 4]> {
     let page = page_text();
-    let start = page.find("| Id | Rule | Exact value or text | Baseline source |").expect("behaviour table");
+    let start = page
+        .find("| Id | Rule | Exact value or text | Baseline source |")
+        .expect("behaviour table");
     page[start..]
         .lines()
         .skip(2)
         .take_while(|line| line.starts_with('|'))
         .map(|line| {
-            let cells: Vec<String> = line.trim_matches('|').split('|').map(|cell| cell.trim().to_string()).collect();
-            [cells[0].clone(), cells[1].clone(), cells[2].clone(), cells[3].clone()]
+            let cells: Vec<String> = line
+                .trim_matches('|')
+                .split('|')
+                .map(|cell| cell.trim().to_string())
+                .collect();
+            [
+                cells[0].clone(),
+                cells[1].clone(),
+                cells[2].clone(),
+                cells[3].clone(),
+            ]
         })
         .collect()
 }
 
 fn row(id: &str) -> [String; 4] {
-    behaviour_rows().into_iter().find(|row| row[0] == id).unwrap_or_else(|| panic!("row {id}"))
+    behaviour_rows()
+        .into_iter()
+        .find(|row| row[0] == id)
+        .unwrap_or_else(|| panic!("row {id}"))
 }
 
 /// REQ: progress-B01, progress-B02, progress-B03, progress-B04, progress-B05
 #[test]
 fn doc_progress_b01_the_behaviour_table_holds_fifteen_rows_in_order() {
-    let ids: Vec<String> = behaviour_rows().into_iter().map(|row| row[0].clone()).collect();
-    let expected: Vec<String> = (1..=15).map(|number| format!("progress-B{number:02}")).collect();
+    let ids: Vec<String> = behaviour_rows()
+        .into_iter()
+        .map(|row| row[0].clone())
+        .collect();
+    let expected: Vec<String> = (1..=15)
+        .map(|number| format!("progress-B{number:02}"))
+        .collect();
     assert_eq!(ids, expected);
 }
 
@@ -92,7 +111,8 @@ fn doc_progress_b04_composer_notice_values_are_the_three_documented_words() {
 /// REQ: progress-B05
 #[test]
 fn doc_progress_b05_the_limit_is_eight_monitors_per_pane() {
-    assert!(row("progress-B05")[2].starts_with("At most 8. The 9th live monitor is rejected with code `too-many-monitors`."));
+    assert!(row("progress-B05")[2]
+        .starts_with("At most 8. The 9th live monitor is rejected with code `too-many-monitors`."));
     assert!(user_doc("cli-reference.md").contains("A pane holds up to 8 monitors at once"));
 }
 
@@ -129,15 +149,21 @@ fn doc_progress_b08_probe_run_is_one_shell_line_with_a_thirty_second_timeout() {
 /// REQ: progress-B09
 #[test]
 fn doc_progress_b09_three_consecutive_failures_fail_the_monitor() {
-    assert!(row("progress-B09")[2].starts_with("After 3 consecutive probe failures the monitor becomes `failed`"));
-    assert!(user_doc("automation.md").contains("After **three** consecutive failures the monitor is **failed**"));
+    assert!(row("progress-B09")[2]
+        .starts_with("After 3 consecutive probe failures the monitor becomes `failed`"));
+    assert!(user_doc("automation.md")
+        .contains("After **three** consecutive failures the monitor is **failed**"));
 }
 
 /// REQ: progress-B10
 #[test]
 fn doc_progress_b10_the_cli_waits_forty_five_seconds_for_the_server_reply() {
-    assert_eq!(row("progress-B10")[2], "The CLI waits up to 45 s for the server reply");
-    assert!(user_doc("cli-reference.md").contains("The CLI waits up to 45 seconds for the server's correlated reply."));
+    assert_eq!(
+        row("progress-B10")[2],
+        "The CLI waits up to 45 s for the server reply"
+    );
+    assert!(user_doc("cli-reference.md")
+        .contains("The CLI waits up to 45 seconds for the server's correlated reply."));
 }
 
 /// REQ: progress-B11
@@ -150,7 +176,9 @@ fn doc_progress_b11_same_probe_twice_returns_the_existing_monitor() {
 /// REQ: progress-B12
 #[test]
 fn doc_progress_b12_restore_needs_one_preflight_with_the_same_job_id() {
-    assert!(row("progress-B12")[2].contains("only after one preflight probe returns the same `job_id`"));
+    assert!(
+        row("progress-B12")[2].contains("only after one preflight probe returns the same `job_id`")
+    );
     assert!(row("progress-B12")[2].contains("fresh monitor id"));
 }
 
@@ -183,12 +211,21 @@ fn doc_progress_b14_terminal_result_is_typed_once_and_not_after_a_wait() {
 /// REQ: progress-B15
 #[test]
 fn doc_progress_b15_rejection_codes_equal_the_cli_reference_list() {
-    let codes: Vec<String> = row("progress-B15")[2].split(", ").map(|code| code.trim_matches('`').to_string()).collect();
+    let codes: Vec<String> = row("progress-B15")[2]
+        .split(", ")
+        .map(|code| code.trim_matches('`').to_string())
+        .collect();
     assert_eq!(codes.len(), 12);
     let reference = user_doc("cli-reference.md");
-    let start = reference.find("Rejection codes: ").expect("rejection codes line") + "Rejection codes: ".len();
+    let start = reference
+        .find("Rejection codes: ")
+        .expect("rejection codes line")
+        + "Rejection codes: ".len();
     let line = &reference[start..reference[start..].find('.').map(|end| start + end).unwrap()];
-    let documented: Vec<String> = line.split(", ").map(|code| code.trim_matches('`').to_string()).collect();
+    let documented: Vec<String> = line
+        .split(", ")
+        .map(|code| code.trim_matches('`').to_string())
+        .collect();
     assert_eq!(codes, documented);
 }
 
@@ -196,12 +233,19 @@ fn doc_progress_b15_rejection_codes_equal_the_cli_reference_list() {
 #[test]
 fn doc_059_the_four_settings_have_the_documented_defaults_and_ranges() {
     let page = page_text();
-    let start = page.find("| Key | Default | Range or values | Baseline source |").expect("settings table");
+    let start = page
+        .find("| Key | Default | Range or values | Baseline source |")
+        .expect("settings table");
     let rows: Vec<Vec<String>> = page[start..]
         .lines()
         .skip(2)
         .take_while(|line| line.starts_with('|'))
-        .map(|line| line.trim_matches('|').split('|').map(|cell| cell.trim().to_string()).collect())
+        .map(|line| {
+            line.trim_matches('|')
+                .split('|')
+                .map(|cell| cell.trim().to_string())
+                .collect()
+        })
         .collect();
     assert_eq!(rows.len(), 4);
     assert_eq!(rows[0][0], "`[ui] progress_monitor_enabled`");
@@ -213,7 +257,10 @@ fn doc_059_the_four_settings_have_the_documented_defaults_and_ranges() {
     assert_eq!(rows[2][1], "60");
     assert_eq!(rows[3][0], "`[ui] task_progress_frames`");
     assert_eq!(rows[3][1], "a preset");
-    assert_eq!(rows[3][2], "2 to 13 printable frames, all one cell wide or all two cells wide");
+    assert_eq!(
+        rows[3][2],
+        "2 to 13 printable frames, all one cell wide or all two cells wide"
+    );
 }
 
 /// REQ: F-061
@@ -229,8 +276,12 @@ fn doc_061_figure_one_equals_the_golden_file() {
 fn doc_060_figure_two_shows_the_registration_record_then_the_wait_record_and_exit_zero() {
     let figures = term_blocks(&page_text());
     let text = &figures[1];
-    let registration = text.find("{\"type\":\"progress_set\"").expect("progress_set");
-    let wait = text.find("{\"type\":\"progress_wait\"").expect("progress_wait");
+    let registration = text
+        .find("{\"type\":\"progress_set\"")
+        .expect("progress_set");
+    let wait = text
+        .find("{\"type\":\"progress_wait\"")
+        .expect("progress_wait");
     assert!(registration < wait);
     assert!(text.contains("\"outcome\":\"done\",\n \"exit_code\":0,"));
     let last_line = text.trim_end().lines().last().expect("last line").trim();
@@ -271,11 +322,16 @@ fn doc_059_the_page_names_the_plugin_id_and_both_sides() {
 fn doc_059_every_page_linked_in_abi_used_exists() {
     let page = page_text();
     let start = page.find("### ABI used").expect("ABI used");
-    let end = page[start..].find("### See also").map(|offset| start + offset).expect("See also");
+    let end = page[start..]
+        .find("### See also")
+        .map(|offset| start + offset)
+        .expect("See also");
     let mut checked = 0;
     for part in page[start..end].split("(/pages/").skip(1) {
         let stem = part.split(['/', ')']).next().unwrap();
-        let path = workspace_root().join("docs/plugins-manual/pages").join(format!("{stem}.md"));
+        let path = workspace_root()
+            .join("docs/plugins-manual/pages")
+            .join(format!("{stem}.md"));
         assert!(path.exists(), "{path:?}");
         checked += 1;
     }
@@ -289,6 +345,8 @@ fn doc_059_probe_contract_fields_and_status_values_match_the_cli_reference() {
     assert!(reference.contains("One of `not-started-yet`, `running`, `error`, `done`."));
     let automation = user_doc("automation.md");
     assert!(automation.contains("`not-started-yet` may move to any status."));
-    assert!(automation.contains("`running` may move to `running`, `error` or `done`, but never back to `not-started-yet`."));
+    assert!(automation.contains(
+        "`running` may move to `running`, `error` or `done`, but never back to `not-started-yet`."
+    ));
     assert!(automation.contains("`error` and `done` are final."));
 }

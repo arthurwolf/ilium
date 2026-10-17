@@ -64,7 +64,8 @@ fn doc_090_the_page_names_the_four_things_the_settings_plugin_owns() {
 /// REQ: F-090
 #[test]
 fn doc_090_the_page_states_the_600_ms_text_and_number_rule() {
-    assert!(page_text().contains("Toggles and choices save at once. Text and number inputs save after 600 ms."));
+    assert!(page_text()
+        .contains("Toggles and choices save at once. Text and number inputs save after 600 ms."));
 }
 
 /// REQ: F-090, F-091
@@ -76,7 +77,9 @@ fn doc_091_the_files_belong_to_the_kernel() {
 /// REQ: F-090
 #[test]
 fn doc_090_settings_all_grants_are_limited_to_bundled_first_party_plugins() {
-    assert!(page_text().contains("`settings.read-all` and `settings.write-all` are limited to bundled plugins of this tier."));
+    assert!(page_text().contains(
+        "`settings.read-all` and `settings.write-all` are limited to bundled plugins of this tier."
+    ));
 }
 
 /// REQ: F-089
@@ -92,7 +95,15 @@ fn doc_089_the_user_guide_lists_seven_guided_setup_steps_in_order() {
         .collect();
     assert_eq!(
         titles,
-        ["AI assistance", "Connect AI", "Your sound", "Sound studio", "Your controls", "Playground", "Voice control"]
+        [
+            "AI assistance",
+            "Connect AI",
+            "Your sound",
+            "Sound studio",
+            "Your controls",
+            "Playground",
+            "Voice control"
+        ]
     );
 }
 

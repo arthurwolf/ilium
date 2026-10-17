@@ -14,36 +14,132 @@ use crate::common::{assert_fails_with, with_clean_env};
 
 /// Name, extension points, services: the "Core stubs" table of the harness page, row by row.
 const STUB_TABLE: [(&str, &[&str], &[&str]); 30] = [
-    ("ilium.core.tree", &["before-move", "before-close", "node-sorts"], &[]),
-    ("ilium.core.layout", &["layout-presets", "before-split"], &[]),
-    ("ilium.core.terminal", &["before-send-input", "open-link", "link-actions"], &[]),
+    (
+        "ilium.core.tree",
+        &["before-move", "before-close", "node-sorts"],
+        &[],
+    ),
+    (
+        "ilium.core.layout",
+        &["layout-presets", "before-split"],
+        &[],
+    ),
+    (
+        "ilium.core.terminal",
+        &["before-send-input", "open-link", "link-actions"],
+        &[],
+    ),
     ("ilium.core.smart-copy", &["recognisers", "after-copy"], &[]),
-    ("ilium.core.editor", &["before-save", "file-openers", "line-badges"], &[]),
+    (
+        "ilium.core.editor",
+        &["before-save", "file-openers", "line-badges"],
+        &[],
+    ),
     ("ilium.core.kanban", &["card-actions", "card-moved"], &[]),
-    ("ilium.core.agent-detect", &["activity-rules", "classify"], &[]),
-    ("ilium.core.agent-toolbar", &["toolbar-actions", "banner-segments"], &[]),
+    (
+        "ilium.core.agent-detect",
+        &["activity-rules", "classify"],
+        &[],
+    ),
+    (
+        "ilium.core.agent-toolbar",
+        &["toolbar-actions", "banner-segments"],
+        &[],
+    ),
     ("ilium.core.fleet", &["selectors", "before-broadcast"], &[]),
-    ("ilium.core.cost", &["price-sources", "quota-sources"], &["usage"]),
-    ("ilium.core.titles", &["before-apply-title", "title-styles"], &[]),
-    ("ilium.core.inference", &["before-request", "after-response", "provider-profiles"], &[]),
-    ("ilium.core.notifications", &["before-notify", "channels"], &[]),
+    (
+        "ilium.core.cost",
+        &["price-sources", "quota-sources"],
+        &["usage"],
+    ),
+    (
+        "ilium.core.titles",
+        &["before-apply-title", "title-styles"],
+        &[],
+    ),
+    (
+        "ilium.core.inference",
+        &["before-request", "after-response", "provider-profiles"],
+        &[],
+    ),
+    (
+        "ilium.core.notifications",
+        &["before-notify", "channels"],
+        &[],
+    ),
     ("ilium.core.voice", &["transcript", "voice-intents"], &[]),
-    ("ilium.core.scheduler", &["schedule-sources", "before-send-scheduled"], &[]),
-    ("ilium.core.text-triggers", &["rule-packs", "before-fire"], &[]),
-    ("ilium.core.progress", &["footer-segments", "probe-kinds"], &[]),
-    ("ilium.core.chatroom", &["before-post", "message-renderers"], &[]),
-    ("ilium.core.worktrees", &["before-create", "post-create-steps", "before-remove"], &[]),
-    ("ilium.core.sessions", &["snapshot-sections", "before-restore"], &[]),
-    ("ilium.core.compaction", &["techniques", "before-compact"], &[]),
-    ("ilium.core.settings", &["config-importers", "onboarding-steps"], &[]),
-    ("ilium.core.keys-and-help", &["key-hints", "help-sources"], &[]),
+    (
+        "ilium.core.scheduler",
+        &["schedule-sources", "before-send-scheduled"],
+        &[],
+    ),
+    (
+        "ilium.core.text-triggers",
+        &["rule-packs", "before-fire"],
+        &[],
+    ),
+    (
+        "ilium.core.progress",
+        &["footer-segments", "probe-kinds"],
+        &[],
+    ),
+    (
+        "ilium.core.chatroom",
+        &["before-post", "message-renderers"],
+        &[],
+    ),
+    (
+        "ilium.core.worktrees",
+        &["before-create", "post-create-steps", "before-remove"],
+        &[],
+    ),
+    (
+        "ilium.core.sessions",
+        &["snapshot-sections", "before-restore"],
+        &[],
+    ),
+    (
+        "ilium.core.compaction",
+        &["techniques", "before-compact"],
+        &[],
+    ),
+    (
+        "ilium.core.settings",
+        &["config-importers", "onboarding-steps"],
+        &[],
+    ),
+    (
+        "ilium.core.keys-and-help",
+        &["key-hints", "help-sources"],
+        &[],
+    ),
     ("ilium.core.search", &["sources", "rank"], &[]),
     ("ilium.core.ambient", &["palettes", "style-presets"], &[]),
-    ("ilium.core.scenes", &["scene-packs", "scene-data-sources"], &[]),
-    ("ilium.core.recap", &["fact-sources", "before-recap"], &["recap"]),
-    ("ilium.core.session-convert", &["formats", "after-convert"], &["convert"]),
-    ("ilium.core.agent-setup", &["instruction-blocks", "targets", "before-install"], &["install"]),
-    ("ilium.core.diagnostics", &["log-sinks", "report-sections"], &["report"]),
+    (
+        "ilium.core.scenes",
+        &["scene-packs", "scene-data-sources"],
+        &[],
+    ),
+    (
+        "ilium.core.recap",
+        &["fact-sources", "before-recap"],
+        &["recap"],
+    ),
+    (
+        "ilium.core.session-convert",
+        &["formats", "after-convert"],
+        &["convert"],
+    ),
+    (
+        "ilium.core.agent-setup",
+        &["instruction-blocks", "targets", "before-install"],
+        &["install"],
+    ),
+    (
+        "ilium.core.diagnostics",
+        &["log-sinks", "report-sections"],
+        &["report"],
+    ),
 ];
 
 // ---- DEV-483, DEV-489 ------------------------------------------------------------------------
@@ -108,8 +204,14 @@ fn dev_489_a_hook_on_a_stub_yields_pass() {
     with_clean_env(|| {
         let mut session = FakeSession::new();
         session.install_core("ilium.core.tree").start();
-        let call = HookCall { call: 1, point: "before-move".to_string(), payload_json: "{}".to_string() };
-        let reply = session.run_hook("ilium.core.tree", call).expect("stub answers");
+        let call = HookCall {
+            call: 1,
+            point: "before-move".to_string(),
+            payload_json: "{}".to_string(),
+        };
+        let reply = session
+            .run_hook("ilium.core.tree", call)
+            .expect("stub answers");
         assert_eq!(format!("{reply:?}"), "Pass");
     });
 }
@@ -213,8 +315,14 @@ fn dev_487_run_hook_for_an_uninstalled_plugin_fails_with_plugin_unknown() {
     with_clean_env(|| {
         let mut session = FakeSession::new();
         session.start();
-        let call = HookCall { call: 1, point: "x".to_string(), payload_json: "{}".to_string() };
-        let error = session.run_hook("example.absent", call).expect_err("unknown plugin");
+        let call = HookCall {
+            call: 1,
+            point: "x".to_string(),
+            payload_json: "{}".to_string(),
+        };
+        let error = session
+            .run_hook("example.absent", call)
+            .expect_err("unknown plugin");
         assert_eq!(error.code, codes::PLUGIN_UNKNOWN);
     });
 }

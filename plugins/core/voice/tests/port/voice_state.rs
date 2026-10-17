@@ -13,9 +13,18 @@ fn port_034_the_agent_default_dictation_rule_is_stated_for_a_detected_agent_and_
     let mut host = enabled_client("semantic_vad");
     add_pane(&mut host, "docs");
     host.realtime().set_active_agent("claude");
-    let first = host.realtime().target_context().expect("a context for the detected agent");
-    assert!(first.contains("agent-default dictation rule is active"), "{first}");
-    assert!(first.contains("user's complete utterance as `text`"), "{first}");
+    let first = host
+        .realtime()
+        .target_context()
+        .expect("a context for the detected agent");
+    assert!(
+        first.contains("agent-default dictation rule is active"),
+        "{first}"
+    );
+    assert!(
+        first.contains("user's complete utterance as `text`"),
+        "{first}"
+    );
     host.realtime().set_active_agent("claude");
     assert_eq!(host.realtime().target_context(), Some(first));
 }
@@ -26,7 +35,9 @@ fn port_040_tool_calls_run_in_the_order_they_were_made() {
     let mut host = enabled_client("semantic_vad");
     add_pane(&mut host, "docs");
     for text in ["first", "second", "third"] {
-        host.realtime().call_tool("ilium_type_text", &json!({ "text": text }).to_string()).expect("typed");
+        host.realtime()
+            .call_tool("ilium_type_text", &json!({ "text": text }).to_string())
+            .expect("typed");
     }
     assert_eq!(host.realtime().typed_text(), ["first", "second", "third"]);
 }
@@ -45,7 +56,9 @@ fn port_041_the_maximum_custom_prompt_is_carried_into_the_system_prompt() {
 fn port_042_a_replaced_voice_session_starts_without_the_old_typed_text() {
     let mut host = enabled_client("semantic_vad");
     add_pane(&mut host, "docs");
-    host.realtime().call_tool("ilium_type_text", &json!({ "text": "old" }).to_string()).expect("typed");
+    host.realtime()
+        .call_tool("ilium_type_text", &json!({ "text": "old" }).to_string())
+        .expect("typed");
     configure(&mut host, "enabled", json!(false));
     configure(&mut host, "enabled", json!(true));
     assert_eq!(host.realtime().tool_calls(), Vec::<String>::new());
@@ -57,9 +70,20 @@ fn port_046_the_output_volume_reaches_both_ends_of_its_range_and_no_further() {
     let mut host = enabled_client("semantic_vad");
     for value in [0, 100] {
         configure(&mut host, "output_volume_percent", json!(value));
-        assert_eq!(host.kernel_settings().get("voice-control", "output_volume_percent"), Some(json!(value)));
+        assert_eq!(
+            host.kernel_settings()
+                .get("voice-control", "output_volume_percent"),
+            Some(json!(value))
+        );
     }
-    let above = host.kernel_settings().set("voice-control", "output_volume_percent", json!(101)).expect_err("101 refused");
+    let above = host
+        .kernel_settings()
+        .set("voice-control", "output_volume_percent", json!(101))
+        .expect_err("101 refused");
     assert_eq!(above.code, ErrorCode::InvalidArgument);
-    assert_eq!(host.kernel_settings().get("voice-control", "output_volume_percent"), Some(json!(100)));
+    assert_eq!(
+        host.kernel_settings()
+            .get("voice-control", "output_volume_percent"),
+        Some(json!(100))
+    );
 }

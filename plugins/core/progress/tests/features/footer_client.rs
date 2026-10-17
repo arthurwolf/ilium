@@ -2,9 +2,9 @@
 //! The client receives the monitors from the server side as a `message` on the `monitors`
 //! channel (assumed, see ../API_GAPS.md) in the shape of `GET /progress.json`.
 
-use ilium_plugin_sdk::testing::{FakeHost, assert_golden};
+use ilium_plugin_sdk::testing::{assert_golden, FakeHost};
 use ilium_plugin_sdk::types::{Intent, ViewTarget};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::common::*;
 
@@ -20,14 +20,20 @@ fn show(host: &mut FakeHost, monitors: Vec<Value>) {
 }
 
 fn footer(host: &mut FakeHost, cols: u16) -> String {
-    host.render(ViewTarget::Panel(FOOTER_VIEW.to_string()), cols, 12).text()
+    host.render(ViewTarget::Panel(FOOTER_VIEW.to_string()), cols, 12)
+        .text()
 }
 
 fn segments(host: &FakeHost) -> Vec<Intent> {
     host.submitted()
         .iter()
         .map(|s| s.intent.clone())
-        .filter(|i| matches!(i, Intent::SetStatusSegment(_) | Intent::ClearStatusSegment(_)))
+        .filter(|i| {
+            matches!(
+                i,
+                Intent::SetStatusSegment(_) | Intent::ClearStatusSegment(_)
+            )
+        })
         .collect()
 }
 
@@ -35,11 +41,16 @@ fn segments(host: &FakeHost) -> Vec<Intent> {
 #[test]
 fn f_061_the_footer_matches_the_documented_figure_at_50_columns() {
     let mut host = activated_client();
-    show(&mut host, vec![
-        monitor(1, "running", 42.0, "Running the unit tests, crate 9 of 22"),
-        monitor(2, "done", 100.0, "Export of 412 sessions finished"),
-    ]);
-    let text = host.render(ViewTarget::Panel(FOOTER_VIEW.to_string()), 50, 6).text();
+    show(
+        &mut host,
+        vec![
+            monitor(1, "running", 42.0, "Running the unit tests, crate 9 of 22"),
+            monitor(2, "done", 100.0, "Export of 412 sessions finished"),
+        ],
+    );
+    let text = host
+        .render(ViewTarget::Panel(FOOTER_VIEW.to_string()), 50, 6)
+        .text();
     assert_golden(&golden_path("progress_footer_50.txt"), &text);
 }
 
@@ -48,7 +59,15 @@ fn f_061_the_footer_matches_the_documented_figure_at_50_columns() {
 fn f_061_every_footer_line_fits_the_width_at_40_80_and_120_columns() {
     for cols in [40u16, 80, 120] {
         let mut host = activated_client();
-        show(&mut host, vec![monitor(1, "running", 42.0, "Running the unit tests, crate 9 of 22")]);
+        show(
+            &mut host,
+            vec![monitor(
+                1,
+                "running",
+                42.0,
+                "Running the unit tests, crate 9 of 22",
+            )],
+        );
         for line in footer(&mut host, cols).lines() {
             assert!(line.chars().count() <= cols as usize, "{cols}: {line:?}");
         }
@@ -71,7 +90,13 @@ fn f_061_the_footer_shows_percent_and_message_at_every_width() {
 #[test]
 fn f_061_a_running_monitor_shows_running_and_a_done_one_shows_done() {
     let mut host = activated_client();
-    show(&mut host, vec![monitor(1, "running", 10.0, "A"), monitor(2, "done", 100.0, "B")]);
+    show(
+        &mut host,
+        vec![
+            monitor(1, "running", 10.0, "A"),
+            monitor(2, "done", 100.0, "B"),
+        ],
+    );
     let text = footer(&mut host, 80);
     assert!(text.contains("RUNNING"), "{text}");
     assert!(text.contains("DONE"), "{text}");
@@ -91,7 +116,14 @@ fn f_061_an_error_monitor_shows_its_state_and_message() {
 #[test]
 fn f_061_the_status_segment_counts_running_monitors() {
     let mut host = activated_client();
-    show(&mut host, vec![monitor(1, "running", 10.0, "A"), monitor(2, "running", 20.0, "B"), monitor(3, "done", 100.0, "C")]);
+    show(
+        &mut host,
+        vec![
+            monitor(1, "running", 10.0, "A"),
+            monitor(2, "running", 20.0, "B"),
+            monitor(3, "done", 100.0, "C"),
+        ],
+    );
     let last = segments(&host).pop().expect("segment intent");
     match last {
         Intent::SetStatusSegment(spec) => {
@@ -109,7 +141,10 @@ fn f_061_the_status_segment_is_cleared_when_nothing_is_running() {
     let mut host = activated_client();
     show(&mut host, vec![monitor(1, "running", 10.0, "A")]);
     show(&mut host, vec![monitor(1, "done", 100.0, "A")]);
-    assert_eq!(segments(&host).pop(), Some(Intent::ClearStatusSegment(STATUS_SEGMENT.to_string())));
+    assert_eq!(
+        segments(&host).pop(),
+        Some(Intent::ClearStatusSegment(STATUS_SEGMENT.to_string()))
+    );
 }
 
 /// REQ: F-061
@@ -137,7 +172,12 @@ fn f_061_a_done_row_is_hidden_after_the_hide_delay_of_60_seconds() {
 #[test]
 fn f_061_a_hide_delay_of_zero_never_hides_a_done_row() {
     let mut host = activated_client();
-    set_kernel_setting(&mut host, "ui.completed_progress_hide_after_seconds", json!(0)).expect("accepted");
+    set_kernel_setting(
+        &mut host,
+        "ui.completed_progress_hide_after_seconds",
+        json!(0),
+    )
+    .expect("accepted");
     show(&mut host, vec![monitor(1, "done", 100.0, "Finished job")]);
     host.advance_clock(86_400_000);
     host.settle();
@@ -148,7 +188,10 @@ fn f_061_a_hide_delay_of_zero_never_hides_a_done_row() {
 #[test]
 fn f_061_a_running_row_at_100_percent_is_not_hidden_as_completed() {
     let mut host = activated_client();
-    show(&mut host, vec![monitor(1, "running", 100.0, "Almost there")]);
+    show(
+        &mut host,
+        vec![monitor(1, "running", 100.0, "Almost there")],
+    );
     host.advance_clock(120_000);
     host.settle();
     assert!(footer(&mut host, 80).contains("Almost there"));
@@ -159,9 +202,14 @@ fn f_061_a_running_row_at_100_percent_is_not_hidden_as_completed() {
 fn f_061_the_footer_is_limited_to_the_configured_number_of_lines() {
     let mut host = activated_client();
     set_kernel_setting(&mut host, "ui.progress_max_lines", json!(2)).expect("accepted");
-    let many: Vec<Value> = (1..=6).map(|n| monitor(n, "running", 10.0, &format!("Task number {n}"))).collect();
+    let many: Vec<Value> = (1..=6)
+        .map(|n| monitor(n, "running", 10.0, &format!("Task number {n}")))
+        .collect();
     show(&mut host, many);
-    let rows = footer(&mut host, 80).lines().filter(|line| line.contains("Task number")).count();
+    let rows = footer(&mut host, 80)
+        .lines()
+        .filter(|line| line.contains("Task number"))
+        .count();
     assert!(rows <= 2, "{rows} rows");
 }
 
@@ -169,8 +217,13 @@ fn f_061_the_footer_is_limited_to_the_configured_number_of_lines() {
 #[test]
 fn f_061_the_default_footer_height_is_four_lines() {
     let mut host = activated_client();
-    let many: Vec<Value> = (1..=8).map(|n| monitor(n, "running", 10.0, &format!("Task number {n}"))).collect();
+    let many: Vec<Value> = (1..=8)
+        .map(|n| monitor(n, "running", 10.0, &format!("Task number {n}")))
+        .collect();
     show(&mut host, many);
-    let rows = footer(&mut host, 80).lines().filter(|line| line.contains("Task number")).count();
+    let rows = footer(&mut host, 80)
+        .lines()
+        .filter(|line| line.contains("Task number"))
+        .count();
     assert!(rows <= 4, "{rows} rows");
 }

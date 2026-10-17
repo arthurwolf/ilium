@@ -39,7 +39,9 @@ fn aut_504_there_are_exactly_nine_colour_roles() {
         .lines()
         .find(|line| line.starts_with("enum color-role {"))
         .expect("the page declares enum color-role");
-    let inner = line.trim_start_matches("enum color-role {").trim_end_matches('}');
+    let inner = line
+        .trim_start_matches("enum color-role {")
+        .trim_end_matches('}');
     let declared: Vec<&str> = inner.split(',').map(str::trim).collect();
     assert_eq!(declared.len(), 9);
     assert_eq!(ColorRole::CASE_NAMES, declared.as_slice());
@@ -51,7 +53,11 @@ fn aut_504_there_are_exactly_nine_colour_roles() {
 fn aut_504_the_accessibility_page_names_every_role() {
     let text = page("accessibility-and-theming");
     for role in ROLES {
-        assert!(text.contains(role_name(role)), "role {} missing on the page", role_name(role));
+        assert!(
+            text.contains(role_name(role)),
+            "role {} missing on the page",
+            role_name(role)
+        );
     }
 }
 
@@ -80,7 +86,10 @@ fn aut_502_theme_extras_carry_the_reduced_motion_flag() {
         border: 0,
         icon_mode: IconMode::Normal,
     };
-    let off = ThemeExtras { reduced_motion: false, ..extras.clone() };
+    let off = ThemeExtras {
+        reduced_motion: false,
+        ..extras.clone()
+    };
     assert_ne!(extras, off);
 }
 
@@ -93,7 +102,10 @@ fn aut_506_constraint_cases_match_the_layout_page_table() {
     );
     let text = page("layout");
     for case in Constraint::CASE_NAMES {
-        assert!(text.contains(&format!("| `{case}` |")), "constraint {case} missing from the table");
+        assert!(
+            text.contains(&format!("| `{case}` |")),
+            "constraint {case} missing from the table"
+        );
     }
     assert_eq!(Constraint::Min(30).case_name(), "min");
     assert_eq!(Constraint::Fill(1).case_name(), "fill");

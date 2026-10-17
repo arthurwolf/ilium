@@ -83,7 +83,11 @@ fn segments(count: usize) -> Vec<MeterSegment> {
 #[test]
 fn settings_set_info_replaces_the_text_of_a_live_info_row() {
     let mut fixture = dynamic_fixture();
-    expect_ok(fixture.settings().set_info("status".to_owned(), "3 files".to_owned()));
+    expect_ok(
+        fixture
+            .settings()
+            .set_info("status".to_owned(), "3 files".to_owned()),
+    );
     assert_eq!(fixture.info_text("status").as_deref(), Some("3 files"));
 }
 
@@ -91,8 +95,16 @@ fn settings_set_info_replaces_the_text_of_a_live_info_row() {
 #[test]
 fn settings_set_info_second_call_replaces_the_first() {
     let mut fixture = dynamic_fixture();
-    expect_ok(fixture.settings().set_info("status".to_owned(), "one".to_owned()));
-    expect_ok(fixture.settings().set_info("status".to_owned(), "two".to_owned()));
+    expect_ok(
+        fixture
+            .settings()
+            .set_info("status".to_owned(), "one".to_owned()),
+    );
+    expect_ok(
+        fixture
+            .settings()
+            .set_info("status".to_owned(), "two".to_owned()),
+    );
     assert_eq!(fixture.info_text("status").as_deref(), Some("two"));
 }
 
@@ -101,7 +113,11 @@ fn settings_set_info_second_call_replaces_the_first() {
 fn settings_set_info_120_characters_accepted() {
     let mut fixture = dynamic_fixture();
     let text = repeat_char('a', 120);
-    expect_ok(fixture.settings().set_info("status".to_owned(), text.clone()));
+    expect_ok(
+        fixture
+            .settings()
+            .set_info("status".to_owned(), text.clone()),
+    );
     assert_eq!(fixture.info_text("status"), Some(text));
 }
 
@@ -130,7 +146,11 @@ fn settings_set_info_counts_characters_not_bytes() {
 #[test]
 fn settings_set_info_over_the_limit_keeps_the_previous_text() {
     let mut fixture = dynamic_fixture();
-    expect_ok(fixture.settings().set_info("status".to_owned(), "kept".to_owned()));
+    expect_ok(
+        fixture
+            .settings()
+            .set_info("status".to_owned(), "kept".to_owned()),
+    );
     let _ = fixture
         .settings()
         .set_info("status".to_owned(), repeat_char('a', 121));
@@ -141,7 +161,11 @@ fn settings_set_info_over_the_limit_keeps_the_previous_text() {
 #[test]
 fn settings_set_info_empty_text_accepted() {
     let mut fixture = dynamic_fixture();
-    expect_ok(fixture.settings().set_info("status".to_owned(), String::new()));
+    expect_ok(
+        fixture
+            .settings()
+            .set_info("status".to_owned(), String::new()),
+    );
     assert_eq!(fixture.info_text("status").as_deref(), Some(""));
 }
 
@@ -149,7 +173,11 @@ fn settings_set_info_empty_text_accepted() {
 #[test]
 fn settings_set_info_unknown_key_not_found() {
     let mut fixture = dynamic_fixture();
-    let code = expect_code(fixture.settings().set_info("nope".to_owned(), "x".to_owned()));
+    let code = expect_code(
+        fixture
+            .settings()
+            .set_info("nope".to_owned(), "x".to_owned()),
+    );
     assert_eq!(code, ErrorCode::NotFound);
 }
 
@@ -157,7 +185,11 @@ fn settings_set_info_unknown_key_not_found() {
 #[test]
 fn settings_set_info_on_an_info_row_without_live_invalid_argument() {
     let mut fixture = dynamic_fixture();
-    let code = expect_code(fixture.settings().set_info("plain".to_owned(), "x".to_owned()));
+    let code = expect_code(
+        fixture
+            .settings()
+            .set_info("plain".to_owned(), "x".to_owned()),
+    );
     assert_eq!(code, ErrorCode::InvalidArgument);
 }
 
@@ -165,7 +197,11 @@ fn settings_set_info_on_an_info_row_without_live_invalid_argument() {
 #[test]
 fn settings_set_info_on_a_value_row_invalid_argument() {
     let mut fixture = dynamic_fixture();
-    let code = expect_code(fixture.settings().set_info("label".to_owned(), "x".to_owned()));
+    let code = expect_code(
+        fixture
+            .settings()
+            .set_info("label".to_owned(), "x".to_owned()),
+    );
     assert_eq!(code, ErrorCode::InvalidArgument);
 }
 
@@ -192,7 +228,11 @@ proptest! {
 fn settings_set_info_rich_replaces_the_spans_of_a_live_rich_row() {
     let mut fixture = dynamic_fixture();
     let spans = vec![span("Signed in as "), span("ada")];
-    expect_ok(fixture.settings().set_info_rich("who".to_owned(), spans.clone()));
+    expect_ok(
+        fixture
+            .settings()
+            .set_info_rich("who".to_owned(), spans.clone()),
+    );
     assert_eq!(fixture.info_spans("who"), spans);
 }
 
@@ -202,7 +242,11 @@ fn settings_set_info_rich_keeps_the_tone_and_command_of_a_span() {
     let mut fixture = dynamic_fixture();
     let mut clickable = span("sign out");
     clickable.target = SpanTarget::Command("sign-out".to_owned());
-    expect_ok(fixture.settings().set_info_rich("who".to_owned(), vec![clickable.clone()]));
+    expect_ok(
+        fixture
+            .settings()
+            .set_info_rich("who".to_owned(), vec![clickable.clone()]),
+    );
     assert_eq!(fixture.info_spans("who"), vec![clickable]);
 }
 
@@ -227,7 +271,11 @@ fn settings_set_info_rich_121_characters_in_total_invalid_argument() {
 #[test]
 fn settings_set_info_rich_unknown_key_not_found() {
     let mut fixture = dynamic_fixture();
-    let code = expect_code(fixture.settings().set_info_rich("nope".to_owned(), vec![span("x")]));
+    let code = expect_code(
+        fixture
+            .settings()
+            .set_info_rich("nope".to_owned(), vec![span("x")]),
+    );
     assert_eq!(code, ErrorCode::NotFound);
 }
 
@@ -235,7 +283,11 @@ fn settings_set_info_rich_unknown_key_not_found() {
 #[test]
 fn settings_set_info_rich_on_an_info_row_without_rich_invalid_argument() {
     let mut fixture = dynamic_fixture();
-    let code = expect_code(fixture.settings().set_info_rich("status".to_owned(), vec![span("x")]));
+    let code = expect_code(
+        fixture
+            .settings()
+            .set_info_rich("status".to_owned(), vec![span("x")]),
+    );
     assert_eq!(code, ErrorCode::InvalidArgument);
 }
 
@@ -244,9 +296,17 @@ fn settings_set_info_rich_on_an_info_row_without_rich_invalid_argument() {
 fn settings_set_info_rich_is_rate_limited_above_10_calls_per_second() {
     let mut fixture = dynamic_fixture();
     for _ in 0..10 {
-        expect_ok(fixture.settings().set_info_rich("who".to_owned(), vec![span("x")]));
+        expect_ok(
+            fixture
+                .settings()
+                .set_info_rich("who".to_owned(), vec![span("x")]),
+        );
     }
-    let error = expect_error(fixture.settings().set_info_rich("who".to_owned(), vec![span("x")]));
+    let error = expect_error(
+        fixture
+            .settings()
+            .set_info_rich("who".to_owned(), vec![span("x")]),
+    );
     assert_eq!(error.code, ErrorCode::RateLimited);
     assert!(error.retry_after_ms.is_some());
 }
@@ -257,7 +317,11 @@ fn settings_set_info_rich_is_rate_limited_above_10_calls_per_second() {
 #[test]
 fn settings_set_row_note_sets_a_note_under_a_value_row() {
     let mut fixture = dynamic_fixture();
-    expect_ok(fixture.settings().set_row_note("label".to_owned(), Some("check this".to_owned())));
+    expect_ok(
+        fixture
+            .settings()
+            .set_row_note("label".to_owned(), Some("check this".to_owned())),
+    );
     assert_eq!(fixture.row_note("label").as_deref(), Some("check this"));
 }
 
@@ -265,7 +329,11 @@ fn settings_set_row_note_sets_a_note_under_a_value_row() {
 #[test]
 fn settings_set_row_note_none_clears_the_note() {
     let mut fixture = dynamic_fixture();
-    expect_ok(fixture.settings().set_row_note("label".to_owned(), Some("a".to_owned())));
+    expect_ok(
+        fixture
+            .settings()
+            .set_row_note("label".to_owned(), Some("a".to_owned())),
+    );
     expect_ok(fixture.settings().set_row_note("label".to_owned(), None));
     assert_eq!(fixture.row_note("label"), None);
 }
@@ -274,8 +342,16 @@ fn settings_set_row_note_none_clears_the_note() {
 #[test]
 fn settings_set_row_note_applies_to_any_row_kind() {
     let mut fixture = dynamic_fixture();
-    expect_ok(fixture.settings().set_row_note("status".to_owned(), Some("n".to_owned())));
-    expect_ok(fixture.settings().set_row_note("usage".to_owned(), Some("m".to_owned())));
+    expect_ok(
+        fixture
+            .settings()
+            .set_row_note("status".to_owned(), Some("n".to_owned())),
+    );
+    expect_ok(
+        fixture
+            .settings()
+            .set_row_note("usage".to_owned(), Some("m".to_owned())),
+    );
     assert_eq!(fixture.row_note("status").as_deref(), Some("n"));
     assert_eq!(fixture.row_note("usage").as_deref(), Some("m"));
 }
@@ -284,7 +360,11 @@ fn settings_set_row_note_applies_to_any_row_kind() {
 #[test]
 fn settings_set_row_note_120_characters_accepted() {
     let mut fixture = dynamic_fixture();
-    expect_ok(fixture.settings().set_row_note("label".to_owned(), Some(repeat_char('n', 120))));
+    expect_ok(
+        fixture
+            .settings()
+            .set_row_note("label".to_owned(), Some(repeat_char('n', 120))),
+    );
 }
 
 /// REQ: WIT:ilium:host/settings.set-row-note
@@ -303,7 +383,11 @@ fn settings_set_row_note_121_characters_invalid_argument() {
 #[test]
 fn settings_set_row_note_unknown_key_not_found() {
     let mut fixture = dynamic_fixture();
-    let code = expect_code(fixture.settings().set_row_note("nope".to_owned(), Some("x".to_owned())));
+    let code = expect_code(
+        fixture
+            .settings()
+            .set_row_note("nope".to_owned(), Some("x".to_owned())),
+    );
     assert_eq!(code, ErrorCode::NotFound);
 }
 
@@ -321,7 +405,11 @@ fn settings_set_row_state_each_of_the_four_kinds_is_applied() {
     ] {
         fixture.advance(Duration::from_secs(1));
         let wanted = state(kind, None);
-        expect_ok(fixture.settings().set_row_state("label".to_owned(), wanted.clone()));
+        expect_ok(
+            fixture
+                .settings()
+                .set_row_state("label".to_owned(), wanted.clone()),
+        );
         assert_eq!(fixture.row_state("label"), wanted);
     }
 }
@@ -331,7 +419,11 @@ fn settings_set_row_state_each_of_the_four_kinds_is_applied() {
 fn settings_set_row_state_message_is_kept() {
     let mut fixture = dynamic_fixture();
     let wanted = state(RowStateKind::Loading, Some("checking the key"));
-    expect_ok(fixture.settings().set_row_state("label".to_owned(), wanted.clone()));
+    expect_ok(
+        fixture
+            .settings()
+            .set_row_state("label".to_owned(), wanted.clone()),
+    );
     assert_eq!(fixture.row_state("label"), wanted);
 }
 
@@ -429,40 +521,78 @@ fn settings_set_row_state_is_accepted_again_after_the_window_passes() {
 #[test]
 fn settings_set_item_states_sets_the_state_of_single_items() {
     let mut fixture = dynamic_fixture();
-    expect_ok(fixture.settings().set_json(r#"{"queue": ["a", "b", "c"]}"#.to_owned()));
+    expect_ok(
+        fixture
+            .settings()
+            .set_json(r#"{"queue": ["a", "b", "c"]}"#.to_owned()),
+    );
     let items = vec![
-        ItemState { index: 0, state: state(RowStateKind::Pending, None) },
-        ItemState { index: 2, state: state(RowStateKind::Error, Some("refused")) },
+        ItemState {
+            index: 0,
+            state: state(RowStateKind::Pending, None),
+        },
+        ItemState {
+            index: 2,
+            state: state(RowStateKind::Error, Some("refused")),
+        },
     ];
-    expect_ok(fixture.settings().set_item_states("queue".to_owned(), items));
-    assert_eq!(fixture.item_state("queue", 0), Some(state(RowStateKind::Pending, None)));
-    assert_eq!(fixture.item_state("queue", 2), Some(state(RowStateKind::Error, Some("refused"))));
+    expect_ok(
+        fixture
+            .settings()
+            .set_item_states("queue".to_owned(), items),
+    );
+    assert_eq!(
+        fixture.item_state("queue", 0),
+        Some(state(RowStateKind::Pending, None))
+    );
+    assert_eq!(
+        fixture.item_state("queue", 2),
+        Some(state(RowStateKind::Error, Some("refused")))
+    );
 }
 
 /// REQ: WIT:ilium:host/settings.set-item-states
 #[test]
 fn settings_set_item_states_leaves_unnamed_items_unchanged() {
     let mut fixture = dynamic_fixture();
-    expect_ok(fixture.settings().set_json(r#"{"queue": ["a", "b"]}"#.to_owned()));
+    expect_ok(
+        fixture
+            .settings()
+            .set_json(r#"{"queue": ["a", "b"]}"#.to_owned()),
+    );
     expect_ok(fixture.settings().set_item_states(
         "queue".to_owned(),
-        vec![ItemState { index: 0, state: state(RowStateKind::Loading, None) }],
+        vec![ItemState {
+            index: 0,
+            state: state(RowStateKind::Loading, None),
+        }],
     ));
-    assert_ne!(fixture.item_state("queue", 1), Some(state(RowStateKind::Loading, None)));
+    assert_ne!(
+        fixture.item_state("queue", 1),
+        Some(state(RowStateKind::Loading, None))
+    );
 }
 
 /// REQ: WIT:ilium:host/settings.set-item-states
 #[test]
 fn settings_set_item_states_empty_list_accepted() {
     let mut fixture = dynamic_fixture();
-    expect_ok(fixture.settings().set_item_states("queue".to_owned(), Vec::new()));
+    expect_ok(
+        fixture
+            .settings()
+            .set_item_states("queue".to_owned(), Vec::new()),
+    );
 }
 
 /// REQ: WIT:ilium:host/settings.set-item-states
 #[test]
 fn settings_set_item_states_unknown_key_not_found() {
     let mut fixture = dynamic_fixture();
-    let code = expect_code(fixture.settings().set_item_states("nope".to_owned(), Vec::new()));
+    let code = expect_code(
+        fixture
+            .settings()
+            .set_item_states("nope".to_owned(), Vec::new()),
+    );
     assert_eq!(code, ErrorCode::NotFound);
 }
 
@@ -472,7 +602,10 @@ fn settings_set_item_states_on_a_list_without_remote_or_item_status_invalid_argu
     let mut fixture = dynamic_fixture();
     let code = expect_code(fixture.settings().set_item_states(
         "names".to_owned(),
-        vec![ItemState { index: 0, state: state(RowStateKind::Pending, None) }],
+        vec![ItemState {
+            index: 0,
+            state: state(RowStateKind::Pending, None),
+        }],
     ));
     assert_eq!(code, ErrorCode::InvalidArgument);
 }
@@ -481,7 +614,11 @@ fn settings_set_item_states_on_a_list_without_remote_or_item_status_invalid_argu
 #[test]
 fn settings_set_item_states_on_a_toggle_invalid_argument() {
     let mut fixture = dynamic_fixture();
-    let code = expect_code(fixture.settings().set_item_states("enabled".to_owned(), Vec::new()));
+    let code = expect_code(
+        fixture
+            .settings()
+            .set_item_states("enabled".to_owned(), Vec::new()),
+    );
     assert_eq!(code, ErrorCode::InvalidArgument);
 }
 
@@ -489,10 +626,17 @@ fn settings_set_item_states_on_a_toggle_invalid_argument() {
 #[test]
 fn settings_set_item_states_index_past_the_last_item_invalid_argument() {
     let mut fixture = dynamic_fixture();
-    expect_ok(fixture.settings().set_json(r#"{"queue": ["a"]}"#.to_owned()));
+    expect_ok(
+        fixture
+            .settings()
+            .set_json(r#"{"queue": ["a"]}"#.to_owned()),
+    );
     let code = expect_code(fixture.settings().set_item_states(
         "queue".to_owned(),
-        vec![ItemState { index: 1, state: state(RowStateKind::Pending, None) }],
+        vec![ItemState {
+            index: 1,
+            state: state(RowStateKind::Pending, None),
+        }],
     ));
     assert_eq!(code, ErrorCode::InvalidArgument);
 }
@@ -502,9 +646,17 @@ fn settings_set_item_states_index_past_the_last_item_invalid_argument() {
 fn settings_set_item_states_is_rate_limited_above_10_calls_per_second() {
     let mut fixture = dynamic_fixture();
     for _ in 0..10 {
-        expect_ok(fixture.settings().set_item_states("queue".to_owned(), Vec::new()));
+        expect_ok(
+            fixture
+                .settings()
+                .set_item_states("queue".to_owned(), Vec::new()),
+        );
     }
-    let code = expect_code(fixture.settings().set_item_states("queue".to_owned(), Vec::new()));
+    let code = expect_code(
+        fixture
+            .settings()
+            .set_item_states("queue".to_owned(), Vec::new()),
+    );
     assert_eq!(code, ErrorCode::RateLimited);
 }
 
@@ -514,8 +666,15 @@ fn settings_set_item_states_is_rate_limited_above_10_calls_per_second() {
 #[test]
 fn settings_set_meter_replaces_the_segments() {
     let mut fixture = dynamic_fixture();
-    let wanted = vec![segment("used", 40.0, Tone::Success), segment("free", 60.0, Tone::Muted)];
-    expect_ok(fixture.settings().set_meter("usage".to_owned(), wanted.clone()));
+    let wanted = vec![
+        segment("used", 40.0, Tone::Success),
+        segment("free", 60.0, Tone::Muted),
+    ];
+    expect_ok(
+        fixture
+            .settings()
+            .set_meter("usage".to_owned(), wanted.clone()),
+    );
     assert_eq!(fixture.meter_segments("usage"), wanted);
 }
 
@@ -523,8 +682,16 @@ fn settings_set_meter_replaces_the_segments() {
 #[test]
 fn settings_set_meter_second_call_replaces_the_first() {
     let mut fixture = dynamic_fixture();
-    expect_ok(fixture.settings().set_meter("usage".to_owned(), segments(3)));
-    expect_ok(fixture.settings().set_meter("usage".to_owned(), segments(1)));
+    expect_ok(
+        fixture
+            .settings()
+            .set_meter("usage".to_owned(), segments(3)),
+    );
+    expect_ok(
+        fixture
+            .settings()
+            .set_meter("usage".to_owned(), segments(1)),
+    );
     assert_eq!(fixture.meter_segments("usage"), segments(1));
 }
 
@@ -532,7 +699,11 @@ fn settings_set_meter_second_call_replaces_the_first() {
 #[test]
 fn settings_set_meter_8_segments_accepted() {
     let mut fixture = dynamic_fixture();
-    expect_ok(fixture.settings().set_meter("usage".to_owned(), segments(8)));
+    expect_ok(
+        fixture
+            .settings()
+            .set_meter("usage".to_owned(), segments(8)),
+    );
     assert_eq!(fixture.meter_segments("usage").len(), 8);
 }
 
@@ -540,7 +711,11 @@ fn settings_set_meter_8_segments_accepted() {
 #[test]
 fn settings_set_meter_9_segments_invalid_argument() {
     let mut fixture = dynamic_fixture();
-    let code = expect_code(fixture.settings().set_meter("usage".to_owned(), segments(9)));
+    let code = expect_code(
+        fixture
+            .settings()
+            .set_meter("usage".to_owned(), segments(9)),
+    );
     assert_eq!(code, ErrorCode::InvalidArgument);
 }
 
@@ -548,7 +723,11 @@ fn settings_set_meter_9_segments_invalid_argument() {
 #[test]
 fn settings_set_meter_empty_list_clears_the_meter() {
     let mut fixture = dynamic_fixture();
-    expect_ok(fixture.settings().set_meter("usage".to_owned(), segments(2)));
+    expect_ok(
+        fixture
+            .settings()
+            .set_meter("usage".to_owned(), segments(2)),
+    );
     expect_ok(fixture.settings().set_meter("usage".to_owned(), Vec::new()));
     assert!(fixture.meter_segments("usage").is_empty());
 }
@@ -565,7 +744,11 @@ fn settings_set_meter_unknown_id_not_found() {
 #[test]
 fn settings_set_meter_on_a_row_that_is_not_a_meter_invalid_argument() {
     let mut fixture = dynamic_fixture();
-    let code = expect_code(fixture.settings().set_meter("status".to_owned(), segments(1)));
+    let code = expect_code(
+        fixture
+            .settings()
+            .set_meter("status".to_owned(), segments(1)),
+    );
     assert_eq!(code, ErrorCode::InvalidArgument);
 }
 
@@ -574,9 +757,17 @@ fn settings_set_meter_on_a_row_that_is_not_a_meter_invalid_argument() {
 fn settings_set_meter_is_rate_limited_above_10_calls_per_second() {
     let mut fixture = dynamic_fixture();
     for _ in 0..10 {
-        expect_ok(fixture.settings().set_meter("usage".to_owned(), segments(1)));
+        expect_ok(
+            fixture
+                .settings()
+                .set_meter("usage".to_owned(), segments(1)),
+        );
     }
-    let code = expect_code(fixture.settings().set_meter("usage".to_owned(), segments(1)));
+    let code = expect_code(
+        fixture
+            .settings()
+            .set_meter("usage".to_owned(), segments(1)),
+    );
     assert_eq!(code, ErrorCode::RateLimited);
 }
 
@@ -585,13 +776,21 @@ fn settings_set_meter_is_rate_limited_above_10_calls_per_second() {
 fn settings_row_update_calls_share_one_limit_of_10_per_second() {
     let mut fixture = dynamic_fixture();
     for _ in 0..5 {
-        expect_ok(fixture.settings().set_meter("usage".to_owned(), segments(1)));
+        expect_ok(
+            fixture
+                .settings()
+                .set_meter("usage".to_owned(), segments(1)),
+        );
         expect_ok(
             fixture
                 .settings()
                 .set_row_state("label".to_owned(), state(RowStateKind::Idle, None)),
         );
     }
-    let code = expect_code(fixture.settings().set_meter("usage".to_owned(), segments(1)));
+    let code = expect_code(
+        fixture
+            .settings()
+            .set_meter("usage".to_owned(), segments(1)),
+    );
     assert_eq!(code, ErrorCode::RateLimited);
 }

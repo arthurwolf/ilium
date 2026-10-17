@@ -12,12 +12,19 @@ fn manifest_with_files(files: &[Listing]) -> Vec<u8> {
 }
 
 fn package_of_manifest(manifest: Vec<u8>) -> Vec<u8> {
-    zip_of(&[("manifest.json", manifest), ("server.wasm", vector_component())])
+    zip_of(&[
+        ("manifest.json", manifest),
+        ("server.wasm", vector_component()),
+    ])
 }
 
 fn component_listing() -> Listing {
     let component = vector_component();
-    ("server.wasm".to_string(), component.len(), sha256_hex(&component))
+    (
+        "server.wasm".to_string(),
+        component.len(),
+        sha256_hex(&component),
+    )
 }
 
 fn replaced(text: &str, from: &str, to: &str) -> Vec<u8> {
@@ -47,7 +54,11 @@ fn pkg_133_vector_files_item_is_accepted() {
 /// REQ: PKG-133
 #[test]
 fn pkg_133_extra_key_in_a_files_item_refused_key_unknown() {
-    let bytes = replaced("", "\"length\": 34,", "\"length\": 34,\n      \"mode\": 420,");
+    let bytes = replaced(
+        "",
+        "\"length\": 34,",
+        "\"length\": 34,\n      \"mode\": 420,",
+    );
     assert!(has(&check_codes(&bytes), "manifest.key-unknown"));
 }
 
@@ -108,13 +119,19 @@ fn pkg_133_hash_of_65_characters_refused_pattern_mismatch() {
 fn pkg_133_negative_length_refused_value_out_of_range() {
     let bytes = replaced("", "\"length\": 34", "\"length\": -1");
     let codes = check_codes(&bytes);
-    assert!(has(&codes, "manifest.value-out-of-range") || has(&codes, "manifest.type-mismatch"), "{codes:?}");
+    assert!(
+        has(&codes, "manifest.value-out-of-range") || has(&codes, "manifest.type-mismatch"),
+        "{codes:?}"
+    );
 }
 
 /// REQ: PKG-134
 #[test]
 fn pkg_134_files_in_archive_order_are_accepted() {
-    assert!(!has(&check_codes(&package_with(&[("assets/a.png", b"1")])), "manifest.files-order"));
+    assert!(!has(
+        &check_codes(&package_with(&[("assets/a.png", b"1")])),
+        "manifest.files-order"
+    ));
 }
 
 /// REQ: PKG-134
@@ -139,7 +156,10 @@ fn pkg_134_unsorted_files_refused_files_order() {
 fn pkg_134_path_listed_twice_refused() {
     let listing = vec![component_listing(), component_listing()];
     let codes = check_codes(&package_of_manifest(manifest_with_files(&listing)));
-    assert!(has(&codes, "manifest.files-order") || has(&codes, "manifest.file-duplicate"), "{codes:?}");
+    assert!(
+        has(&codes, "manifest.files-order") || has(&codes, "manifest.file-duplicate"),
+        "{codes:?}"
+    );
 }
 
 /// REQ: PKG-135
@@ -152,7 +172,10 @@ fn pkg_135_archive_entry_not_in_files_refused_file_unlisted() {
 /// REQ: PKG-135
 #[test]
 fn pkg_135_files_item_without_an_entry_refused_file_missing() {
-    let listing = vec![("assets/gone.png".to_string(), 1, sha256_hex(b"1")), component_listing()];
+    let listing = vec![
+        ("assets/gone.png".to_string(), 1, sha256_hex(b"1")),
+        component_listing(),
+    ];
     let codes = check_codes(&package_of_manifest(manifest_with_files(&listing)));
     assert_eq!(codes, strings(&["manifest.file-missing"]));
 }
@@ -163,7 +186,11 @@ fn pkg_135_files_listing_manifest_json_refused_file_self() {
     let manifest = vector_manifest();
     let listing = vec![
         component_listing(),
-        ("manifest.json".to_string(), manifest.len(), sha256_hex(&manifest)),
+        (
+            "manifest.json".to_string(),
+            manifest.len(),
+            sha256_hex(&manifest),
+        ),
     ];
     let mut sorted = listing;
     sorted.sort_by(|a, b| a.0.cmp(&b.0));
@@ -174,7 +201,10 @@ fn pkg_135_files_listing_manifest_json_refused_file_self() {
 /// REQ: PKG-135
 #[test]
 fn pkg_135_files_listing_signature_refused_file_self() {
-    let listing = vec![component_listing(), ("signature".to_string(), 1, sha256_hex(b"1"))];
+    let listing = vec![
+        component_listing(),
+        ("signature".to_string(), 1, sha256_hex(b"1")),
+    ];
     let mut sorted = listing;
     sorted.sort_by(|a, b| a.0.cmp(&b.0));
     let codes = check_codes(&package_of_manifest(manifest_with_files(&sorted)));
@@ -211,7 +241,9 @@ fn pkg_136_wrong_hash_refused_file_hash() {
 /// REQ: PKG-136
 #[test]
 fn pkg_136_exact_length_and_hash_are_accepted() {
-    let codes = check_codes(&package_of_manifest(manifest_with_files(&[component_listing()])));
+    let codes = check_codes(&package_of_manifest(manifest_with_files(&[
+        component_listing(),
+    ])));
     assert!(codes.is_empty());
 }
 
@@ -257,14 +289,20 @@ fn pkg_138_exactly_one_section_is_accepted() {
 /// REQ: PKG-138, PKG-178
 #[test]
 fn pkg_138_no_section_refused_api_section_missing() {
-    assert_eq!(component_codes(&component_with(&[])), strings(&["package.api-section-missing"]));
+    assert_eq!(
+        component_codes(&component_with(&[])),
+        strings(&["package.api-section-missing"])
+    );
 }
 
 /// REQ: PKG-138, PKG-178
 #[test]
 fn pkg_138_second_section_refused_api_section_repeated() {
     let bytes = component_with(&[api_section(&API_010), api_section(&API_010)]);
-    assert_eq!(component_codes(&bytes), strings(&["package.api-section-repeated"]));
+    assert_eq!(
+        component_codes(&bytes),
+        strings(&["package.api-section-repeated"])
+    );
 }
 
 /// REQ: PKG-138
@@ -278,7 +316,10 @@ fn pkg_138_other_custom_sections_do_not_count() {
 #[test]
 fn pkg_138_section_with_a_similar_name_does_not_count() {
     let bytes = component_with(&[custom_section("ilium:api-versions", &API_010)]);
-    assert_eq!(component_codes(&bytes), strings(&["package.api-section-missing"]));
+    assert_eq!(
+        component_codes(&bytes),
+        strings(&["package.api-section-missing"])
+    );
 }
 
 /// REQ: PKG-139
@@ -291,21 +332,30 @@ fn pkg_139_payload_of_6_bytes_is_accepted() {
 #[test]
 fn pkg_139_payload_of_5_bytes_refused_api_section_invalid() {
     let bytes = component_with(&[api_section(&[0, 0, 0, 1, 0])]);
-    assert_eq!(component_codes(&bytes), strings(&["package.api-section-invalid"]));
+    assert_eq!(
+        component_codes(&bytes),
+        strings(&["package.api-section-invalid"])
+    );
 }
 
 /// REQ: PKG-139
 #[test]
 fn pkg_139_payload_of_7_bytes_refused_api_section_invalid() {
     let bytes = component_with(&[api_section(&[0, 0, 0, 1, 0, 0, 0])]);
-    assert_eq!(component_codes(&bytes), strings(&["package.api-section-invalid"]));
+    assert_eq!(
+        component_codes(&bytes),
+        strings(&["package.api-section-invalid"])
+    );
 }
 
 /// REQ: PKG-139
 #[test]
 fn pkg_139_empty_payload_refused_api_section_invalid() {
     let bytes = component_with(&[api_section(&[])]);
-    assert_eq!(component_codes(&bytes), strings(&["package.api-section-invalid"]));
+    assert_eq!(
+        component_codes(&bytes),
+        strings(&["package.api-section-invalid"])
+    );
 }
 
 /// REQ: PKG-139
@@ -318,7 +368,10 @@ fn pkg_139_little_endian_payload_does_not_match_the_manifest_version() {
 /// REQ: PKG-140
 #[test]
 fn pkg_140_matching_version_is_accepted() {
-    assert!(!has(&component_codes(&component_with(&[api_section(&API_010)])), "manifest.api-version"));
+    assert!(!has(
+        &component_codes(&component_with(&[api_section(&API_010)])),
+        "manifest.api-version"
+    ));
 }
 
 /// REQ: PKG-140, PKG-180
@@ -345,14 +398,20 @@ fn pkg_140_patch_differs_refused_api_version() {
 /// REQ: PKG-141
 #[test]
 fn pkg_141_layer_1_is_a_component() {
-    assert!(!has(&component_codes(&component_with(&[api_section(&API_010)])), "package.component-invalid"));
+    assert!(!has(
+        &component_codes(&component_with(&[api_section(&API_010)])),
+        "package.component-invalid"
+    ));
 }
 
 /// REQ: PKG-141, PKG-177
 #[test]
 fn pkg_141_layer_0_core_module_refused_component_invalid() {
     let bytes = core_module_with(&[api_section(&API_010)]);
-    assert_eq!(component_codes(&bytes), strings(&["package.component-invalid"]));
+    assert_eq!(
+        component_codes(&bytes),
+        strings(&["package.component-invalid"])
+    );
 }
 
 /// REQ: PKG-141
@@ -360,7 +419,10 @@ fn pkg_141_layer_0_core_module_refused_component_invalid() {
 fn pkg_141_wrong_magic_refused_component_invalid() {
     let mut bytes = component_with(&[api_section(&API_010)]);
     bytes[1] = 0x62;
-    assert_eq!(component_codes(&bytes), strings(&["package.component-invalid"]));
+    assert_eq!(
+        component_codes(&bytes),
+        strings(&["package.component-invalid"])
+    );
 }
 
 /// REQ: PKG-141
@@ -368,7 +430,10 @@ fn pkg_141_wrong_magic_refused_component_invalid() {
 fn pkg_141_file_shorter_than_the_preamble_refused_component_invalid() {
     for length in [0usize, 1, 7] {
         let bytes = COMPONENT_PREAMBLE[..length].to_vec();
-        assert!(has(&component_codes(&bytes), "package.component-invalid"), "length {length}");
+        assert!(
+            has(&component_codes(&bytes), "package.component-invalid"),
+            "length {length}"
+        );
     }
 }
 
@@ -377,7 +442,10 @@ fn pkg_141_file_shorter_than_the_preamble_refused_component_invalid() {
 fn pkg_141_unknown_layer_refused_component_invalid() {
     let mut bytes = component_with(&[api_section(&API_010)]);
     bytes[6] = 2;
-    assert_eq!(component_codes(&bytes), strings(&["package.component-invalid"]));
+    assert_eq!(
+        component_codes(&bytes),
+        strings(&["package.component-invalid"])
+    );
 }
 
 /// REQ: PKG-142
@@ -393,7 +461,10 @@ fn pkg_142_truncated_component_body_refused_component_invalid() {
 fn pkg_142_exports_not_matching_the_manifest_refused_exports_mismatch() {
     let component = vector_component();
     let source = String::from_utf8(vector_manifest()).expect("utf8");
-    let declared = source.replace("\"exports\": []", "\"exports\": [\n      \"ilium:server/missing@0.1.0\"\n    ]");
+    let declared = source.replace(
+        "\"exports\": []",
+        "\"exports\": [\n      \"ilium:server/missing@0.1.0\"\n    ]",
+    );
     let manifest = declared.replace(&sha256_hex(&component), &sha256_hex(&component));
     let bytes = package_of_manifest(manifest.into_bytes());
     assert!(has(&check_codes(&bytes), "manifest.exports-mismatch"));
@@ -429,7 +500,10 @@ fn pack_in(fixture: &CliFixture, extra: &[&str]) -> (CliOutput, Vec<u8>) {
     let mut args = vec!["pack", "--allow-debug"];
     args.extend_from_slice(extra);
     let output = run_cli(fixture, &args);
-    let path = fixture.work().join("dist").join("example.minimal-0.1.0.iliumpkg");
+    let path = fixture
+        .work()
+        .join("dist")
+        .join("example.minimal-0.1.0.iliumpkg");
     let bytes = std::fs::read(path).unwrap_or_default();
     (output, bytes)
 }
@@ -466,8 +540,20 @@ fn pkg_143_pack_includes_assets_help_sounds_screenshots_and_documents() {
     let (output, bytes) = pack_in(&fixture, &[]);
     assert_eq!(output.exit_code, 0, "{:?}", output.stdout_jsonl);
     let names = names_of(&bytes);
-    for expected in ["assets/a.png", "help/t.md", "sounds/s.wav", "screenshots/p.png", "README.md", "CHANGELOG.md", "LICENSE", "NOTICE"] {
-        assert!(names.iter().any(|n| n == expected), "{expected} missing from {names:?}");
+    for expected in [
+        "assets/a.png",
+        "help/t.md",
+        "sounds/s.wav",
+        "screenshots/p.png",
+        "README.md",
+        "CHANGELOG.md",
+        "LICENSE",
+        "NOTICE",
+    ] {
+        assert!(
+            names.iter().any(|n| n == expected),
+            "{expected} missing from {names:?}"
+        );
     }
 }
 
@@ -514,7 +600,10 @@ fn pkg_144_pack_skips_ignored_names_with_a_warning() {
     write_file(&fixture.work().join("assets/keep.png"), b"x");
     let (output, bytes) = pack_in(&fixture, &[]);
     assert_eq!(output.exit_code, 0, "{:?}", output.stdout_jsonl);
-    assert_eq!(names_of(&bytes), vec!["assets/keep.png", "manifest.json", "server.wasm"]);
+    assert_eq!(
+        names_of(&bytes),
+        vec!["assets/keep.png", "manifest.json", "server.wasm"]
+    );
     assert!(records(&output, "warning").len() >= 8);
 }
 
@@ -527,7 +616,9 @@ fn pkg_144_pack_stops_on_a_remaining_file_that_breaks_a_path_rule() {
     let (output, bytes) = pack_in(&fixture, &[]);
     assert_ne!(output.exit_code, 0);
     assert!(bytes.is_empty());
-    assert!(record_codes(&output, "error").iter().any(|c| c == "package.path-invalid"));
+    assert!(record_codes(&output, "error")
+        .iter()
+        .any(|c| c == "package.path-invalid"));
 }
 
 /// REQ: PKG-145
@@ -570,8 +661,12 @@ fn pkg_145_source_manifest_written_in_other_style_is_reserialised() {
     let fixture = cli_fixture();
     write_pack_project(&fixture.work());
     let compact: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(fixture.work().join("manifest.json")).expect("read")).expect("json");
-    write_file(&fixture.work().join("manifest.json"), serde_json::to_string(&compact).expect("compact").as_bytes());
+        serde_json::from_slice(&std::fs::read(fixture.work().join("manifest.json")).expect("read"))
+            .expect("json");
+    write_file(
+        &fixture.work().join("manifest.json"),
+        serde_json::to_string(&compact).expect("compact").as_bytes(),
+    );
     let (output, bytes) = pack_in(&fixture, &[]);
     assert_eq!(output.exit_code, 0, "{:?}", output.stdout_jsonl);
     assert_eq!(data_of(&bytes, "manifest.json"), vector_manifest());
@@ -587,7 +682,10 @@ fn pkg_145_control_characters_in_strings_are_escaped_as_u00xx() {
     write_file(&fixture.work().join("manifest.json"), changed.as_bytes());
     let (_, bytes) = pack_in(&fixture, &[]);
     let text = String::from_utf8(data_of(&bytes, "manifest.json")).expect("utf8");
-    assert!(text.contains("\"name\": \"Min\\u0001imal\\\\ \\\"q\\\"\""), "{text}");
+    assert!(
+        text.contains("\"name\": \"Min\\u0001imal\\\\ \\\"q\\\"\""),
+        "{text}"
+    );
 }
 
 /// REQ: PKG-146
@@ -598,10 +696,24 @@ fn pkg_146_pack_output_has_sorted_entries_and_fixed_headers() {
     write_file(&fixture.work().join("assets/b.png"), b"b");
     write_file(&fixture.work().join("assets/A.png"), b"a");
     let (_, bytes) = pack_in(&fixture, &[]);
-    assert_eq!(names_of(&bytes), vec!["assets/A.png", "assets/b.png", "manifest.json", "server.wasm"]);
+    assert_eq!(
+        names_of(&bytes),
+        vec![
+            "assets/A.png",
+            "assets/b.png",
+            "manifest.json",
+            "server.wasm"
+        ]
+    );
     for fields in central_fields(&bytes) {
-        assert_eq!((fields.made, fields.needed, fields.flags, fields.method), (0x0314, 20, 0x0800, 0));
-        assert_eq!((fields.time, fields.date, fields.external), (0, 0x0021, 0x81A4_0000));
+        assert_eq!(
+            (fields.made, fields.needed, fields.flags, fields.method),
+            (0x0314, 20, 0x0800, 0)
+        );
+        assert_eq!(
+            (fields.time, fields.date, fields.external),
+            (0, 0x0021, 0x81A4_0000)
+        );
     }
 }
 
@@ -620,7 +732,8 @@ fn pkg_147_two_pack_runs_give_identical_bytes() {
     let fixture = cli_fixture();
     write_pack_project(&fixture.work());
     let (_, first) = pack_in(&fixture, &[]);
-    std::fs::remove_file(fixture.work().join("dist/example.minimal-0.1.0.iliumpkg")).expect("remove first output");
+    std::fs::remove_file(fixture.work().join("dist/example.minimal-0.1.0.iliumpkg"))
+        .expect("remove first output");
     let (_, second) = pack_in(&fixture, &[]);
     assert!(!first.is_empty());
     assert_eq!(sha256_hex(&first), sha256_hex(&second));
@@ -668,15 +781,28 @@ proptest! {
 /// REQ: PKG-148
 #[test]
 fn pkg_148_sign_adds_the_signature_entry_in_sorted_position() {
-    let signed = sign(&vector_unsigned(), &signing_key(), SignedAt(VECTOR_SIGNED_AT.to_string())).expect("sign");
-    assert_eq!(names_of(&signed), vec!["manifest.json", "server.wasm", "signature"]);
+    let signed = sign(
+        &vector_unsigned(),
+        &signing_key(),
+        SignedAt(VECTOR_SIGNED_AT.to_string()),
+    )
+    .expect("sign");
+    assert_eq!(
+        names_of(&signed),
+        vec!["manifest.json", "server.wasm", "signature"]
+    );
 }
 
 /// REQ: PKG-148
 #[test]
 fn pkg_148_sign_leaves_unsigned_entries_byte_identical() {
     let unsigned = vector_unsigned();
-    let signed = sign(&unsigned, &signing_key(), SignedAt(VECTOR_SIGNED_AT.to_string())).expect("sign");
+    let signed = sign(
+        &unsigned,
+        &signing_key(),
+        SignedAt(VECTOR_SIGNED_AT.to_string()),
+    )
+    .expect("sign");
     for name in ["manifest.json", "server.wasm"] {
         assert_eq!(data_of(&signed, name), data_of(&unsigned, name));
     }
@@ -685,7 +811,12 @@ fn pkg_148_sign_leaves_unsigned_entries_byte_identical() {
 /// REQ: PKG-148
 #[test]
 fn pkg_148_sign_reproduces_the_signed_vector() {
-    let signed = sign(&vector_unsigned(), &signing_key(), SignedAt(VECTOR_SIGNED_AT.to_string())).expect("sign");
+    let signed = sign(
+        &vector_unsigned(),
+        &signing_key(),
+        SignedAt(VECTOR_SIGNED_AT.to_string()),
+    )
+    .expect("sign");
     assert_eq!(sha256_hex(&signed), VECTOR_SIGNED_SHA256);
     assert_eq!(signed, vector_signed());
 }
@@ -695,18 +826,35 @@ fn pkg_148_sign_reproduces_the_signed_vector() {
 fn pkg_148_signed_vector_is_a_valid_archive_in_central_order() {
     let archive = read_package(&vector_signed()).expect("read signed");
     assert!(archive.signature.is_some());
-    assert_eq!(names_of(&vector_signed()), vec!["manifest.json", "server.wasm", "signature"]);
+    assert_eq!(
+        names_of(&vector_signed()),
+        vec!["manifest.json", "server.wasm", "signature"]
+    );
 }
 
 /// REQ: PKG-148
 #[test]
 fn pkg_148_signing_a_package_with_sounds_puts_signature_before_sounds() {
     let package = package_with(&[("sounds/a.wav", b"w")]);
-    let signed = sign(&package, &signing_key(), SignedAt(VECTOR_SIGNED_AT.to_string())).expect("sign");
+    let signed = sign(
+        &package,
+        &signing_key(),
+        SignedAt(VECTOR_SIGNED_AT.to_string()),
+    )
+    .expect("sign");
     let names = names_of(&signed);
-    let signature = names.iter().position(|n| n == "signature").expect("signature");
-    let sounds = names.iter().position(|n| n == "sounds/a.wav").expect("sounds");
-    let server = names.iter().position(|n| n == "server.wasm").expect("server");
+    let signature = names
+        .iter()
+        .position(|n| n == "signature")
+        .expect("signature");
+    let sounds = names
+        .iter()
+        .position(|n| n == "sounds/a.wav")
+        .expect("sounds");
+    let server = names
+        .iter()
+        .position(|n| n == "server.wasm")
+        .expect("server");
     assert!(server < signature && signature < sounds, "{names:?}");
 }
 
@@ -726,12 +874,17 @@ fn pkg_149_stage_1_error_stops_every_later_stage() {
     let bytes = changed_entry_order();
     let report = check(&bytes);
     assert_eq!(report.last_stage, 1);
-    assert!(error_codes(&report.diagnostics).iter().all(|c| c.starts_with("package.")));
+    assert!(error_codes(&report.diagnostics)
+        .iter()
+        .all(|c| c.starts_with("package.")));
 }
 
 fn changed_entry_order() -> Vec<u8> {
     build(
-        &[Z::new("server.wasm", &vector_component()), Z::new("manifest.json", b"not json")],
+        &[
+            Z::new("server.wasm", &vector_component()),
+            Z::new("manifest.json", b"not json"),
+        ],
         &Tail::default(),
     )
 }
@@ -739,10 +892,16 @@ fn changed_entry_order() -> Vec<u8> {
 /// REQ: PKG-149
 #[test]
 fn pkg_149_stage_2_error_stops_before_the_inventory_and_components() {
-    let bytes = zip_of(&[("manifest.json", b"{".to_vec()), ("server.wasm", b"junk".to_vec())]);
+    let bytes = zip_of(&[
+        ("manifest.json", b"{".to_vec()),
+        ("server.wasm", b"junk".to_vec()),
+    ]);
     let report = check(&bytes);
     assert_eq!(report.last_stage, 2);
-    assert_eq!(error_codes(&report.diagnostics), strings(&["manifest.json-invalid"]));
+    assert_eq!(
+        error_codes(&report.diagnostics),
+        strings(&["manifest.json-invalid"])
+    );
 }
 
 /// REQ: PKG-149
@@ -757,13 +916,17 @@ fn pkg_149_stage_5_error_stops_before_the_components() {
 fn pkg_149_stage_6_error_is_reported_without_stage_7_codes() {
     let report = check(&package_with_component(&component_with(&[])));
     assert_eq!(report.last_stage, 6);
-    assert!(error_codes(&report.diagnostics).iter().all(|c| c != "manifest.signature-invalid"));
+    assert!(error_codes(&report.diagnostics)
+        .iter()
+        .all(|c| c != "manifest.signature-invalid"));
 }
 
 /// REQ: PKG-150
 #[test]
 fn pkg_150_100_errors_in_a_stage_are_all_reported_without_a_warning() {
-    let extras: Vec<Z> = (0..100).map(|i| Z::new(&format!("assets/f{i:03}.bin"), b"x")).collect();
+    let extras: Vec<Z> = (0..100)
+        .map(|i| Z::new(&format!("assets/f{i:03}.bin"), b"x"))
+        .collect();
     let report = check(&vector_plus_unlisted(extras));
     assert_eq!(error_codes(&report.diagnostics).len(), 100);
     assert!(warning_diagnostics(&report.diagnostics).is_empty());
@@ -772,7 +935,9 @@ fn pkg_150_100_errors_in_a_stage_are_all_reported_without_a_warning() {
 /// REQ: PKG-150
 #[test]
 fn pkg_150_the_101st_error_becomes_one_warning_with_the_count() {
-    let extras: Vec<Z> = (0..101).map(|i| Z::new(&format!("assets/f{i:03}.bin"), b"x")).collect();
+    let extras: Vec<Z> = (0..101)
+        .map(|i| Z::new(&format!("assets/f{i:03}.bin"), b"x"))
+        .collect();
     let report = check(&vector_plus_unlisted(extras));
     assert_eq!(error_codes(&report.diagnostics).len(), 100);
     let warnings = warning_diagnostics(&report.diagnostics);
@@ -783,18 +948,26 @@ fn pkg_150_the_101st_error_becomes_one_warning_with_the_count() {
 /// REQ: PKG-150
 #[test]
 fn pkg_150_the_warning_counts_all_the_remaining_errors() {
-    let extras: Vec<Z> = (0..130).map(|i| Z::new(&format!("assets/f{i:03}.bin"), b"x")).collect();
+    let extras: Vec<Z> = (0..130)
+        .map(|i| Z::new(&format!("assets/f{i:03}.bin"), b"x"))
+        .collect();
     let report = check(&vector_plus_unlisted(extras));
     assert_eq!(error_codes(&report.diagnostics).len(), 100);
     let warnings = warning_diagnostics(&report.diagnostics);
     assert_eq!(warnings.len(), 1);
-    assert!(warnings[0].message.contains("30"), "{}", warnings[0].message);
+    assert!(
+        warnings[0].message.contains("30"),
+        "{}",
+        warnings[0].message
+    );
 }
 
 /// REQ: PKG-150
 #[test]
 fn pkg_150_99_errors_are_all_reported() {
-    let extras: Vec<Z> = (0..99).map(|i| Z::new(&format!("assets/f{i:03}.bin"), b"x")).collect();
+    let extras: Vec<Z> = (0..99)
+        .map(|i| Z::new(&format!("assets/f{i:03}.bin"), b"x"))
+        .collect();
     let report = check(&vector_plus_unlisted(extras));
     assert_eq!(error_codes(&report.diagnostics).len(), 99);
 }
@@ -803,7 +976,10 @@ fn pkg_150_99_errors_are_all_reported() {
 #[test]
 fn pkg_151_a_full_check_instantiates_no_component() {
     let (_dir, installer) = installer();
-    let _ = installer.check(&vector_signed(), ilium_plugin_api::manifest::CheckMode::Install);
+    let _ = installer.check(
+        &vector_signed(),
+        ilium_plugin_api::manifest::CheckMode::Install,
+    );
     assert_eq!(installer.instantiated_count(), 0);
 }
 
@@ -811,7 +987,10 @@ fn pkg_151_a_full_check_instantiates_no_component() {
 #[test]
 fn pkg_151_a_refused_package_instantiates_no_component() {
     let (_dir, installer) = installer();
-    let _ = installer.check(&package_with_component(&component_with(&[])), ilium_plugin_api::manifest::CheckMode::Install);
+    let _ = installer.check(
+        &package_with_component(&component_with(&[])),
+        ilium_plugin_api::manifest::CheckMode::Install,
+    );
     assert_eq!(installer.instantiated_count(), 0);
 }
 
@@ -876,7 +1055,9 @@ fn pkg_153_check_of_a_package_runs_through_stage_6() {
     write_file(&path, &package_with_component(&component_with(&[])));
     let output = run_cli(&fixture, &["check", path.to_str().expect("utf8")]);
     assert_eq!(output.exit_code, 3);
-    assert!(record_codes(&output, "error").iter().any(|c| c == "package.api-section-missing"));
+    assert!(record_codes(&output, "error")
+        .iter()
+        .any(|c| c == "package.api-section-missing"));
 }
 
 /// REQ: PKG-153
@@ -920,16 +1101,25 @@ fn pkg_154_verify_prints_one_progress_line_per_stage() {
         .filter_map(|r| r["stage"].as_i64())
         .collect();
     assert_eq!(stages, (1..=8).collect::<Vec<i64>>());
-    assert!(records(&output, "progress").iter().all(|r| r["name"].is_string()));
+    assert!(records(&output, "progress")
+        .iter()
+        .all(|r| r["name"].is_string()));
 }
 
 /// REQ: PKG-154
 #[test]
 fn pkg_154_verify_prints_errors_then_exactly_one_result_last() {
     let output = verify_output(&package_with_component(&component_with(&[])), None);
-    let kinds: Vec<&str> = output.stdout_jsonl.iter().filter_map(|r| r["type"].as_str()).collect();
+    let kinds: Vec<&str> = output
+        .stdout_jsonl
+        .iter()
+        .filter_map(|r| r["type"].as_str())
+        .collect();
     assert_eq!(kinds.iter().filter(|k| **k == "result").count(), 1);
-    let last_error = kinds.iter().rposition(|k| *k == "error").expect("an error line");
+    let last_error = kinds
+        .iter()
+        .rposition(|k| *k == "error")
+        .expect("an error line");
     let result = kinds.iter().position(|k| *k == "result").expect("result");
     assert!(last_error < result);
     assert!(kinds.iter().filter(|k| **k == "progress").count() < 8);
@@ -965,7 +1155,10 @@ fn pkg_155_unsigned_package_has_null_signer_and_untrusted_tier() {
 #[test]
 fn pkg_156_verify_exits_0_when_stages_1_to_7_pass() {
     assert_eq!(verify_output(&vector_unsigned(), None).exit_code, 0);
-    assert_eq!(verify_output(&vector_signed(), Some(("trusted", "null"))).exit_code, 0);
+    assert_eq!(
+        verify_output(&vector_signed(), Some(("trusted", "null"))).exit_code,
+        0
+    );
 }
 
 /// REQ: PKG-156
@@ -981,7 +1174,9 @@ fn pkg_156_verify_exits_1_when_a_stage_fails() {
 fn pkg_156_unknown_key_is_a_warning_with_tier_untrusted_and_exit_0() {
     let output = verify_output(&vector_signed(), None);
     assert_eq!(output.exit_code, 0);
-    assert!(record_codes(&output, "warning").iter().any(|c| c == "trust.key-unknown"));
+    assert!(record_codes(&output, "warning")
+        .iter()
+        .any(|c| c == "trust.key-unknown"));
     assert_eq!(records(&output, "result")[0]["tier"], "untrusted");
 }
 
@@ -990,10 +1185,15 @@ fn pkg_156_unknown_key_is_a_warning_with_tier_untrusted_and_exit_0() {
 fn pkg_156_revoked_key_is_an_error_and_exit_1() {
     let output = verify_output(
         &vector_signed(),
-        Some(("revoked", "{\"reason\":\"compromised\",\"at\":\"2026-10-12 11:00:00\"}")),
+        Some((
+            "revoked",
+            "{\"reason\":\"compromised\",\"at\":\"2026-10-12 11:00:00\"}",
+        )),
     );
     assert_eq!(output.exit_code, 1);
-    assert!(record_codes(&output, "error").iter().any(|c| c == "trust.key-revoked"));
+    assert!(record_codes(&output, "error")
+        .iter()
+        .any(|c| c == "trust.key-revoked"));
 }
 
 /// REQ: PKG-156

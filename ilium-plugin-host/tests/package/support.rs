@@ -27,7 +27,11 @@ pub fn crc32(data: &[u8]) -> u32 {
     for index in 0..256u32 {
         let mut value = index;
         for _ in 0..8 {
-            value = if value & 1 != 0 { 0xEDB8_8320 ^ (value >> 1) } else { value >> 1 };
+            value = if value & 1 != 0 {
+                0xEDB8_8320 ^ (value >> 1)
+            } else {
+                value >> 1
+            };
         }
         table[index as usize] = value;
     }
@@ -52,7 +56,8 @@ const SHA256_K: [u32; 64] = [
 /// SHA-256 of `data`.
 pub fn sha256(data: &[u8]) -> [u8; 32] {
     let mut state: [u32; 8] = [
-        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
+        0x5be0cd19,
     ];
     let mut padded = data.to_vec();
     padded.push(0x80);
@@ -71,8 +76,12 @@ pub fn sha256(data: &[u8]) -> [u8; 32] {
             ]);
         }
         for index in 16..64 {
-            let s0 = w[index - 15].rotate_right(7) ^ w[index - 15].rotate_right(18) ^ (w[index - 15] >> 3);
-            let s1 = w[index - 2].rotate_right(17) ^ w[index - 2].rotate_right(19) ^ (w[index - 2] >> 10);
+            let s0 = w[index - 15].rotate_right(7)
+                ^ w[index - 15].rotate_right(18)
+                ^ (w[index - 15] >> 3);
+            let s1 = w[index - 2].rotate_right(17)
+                ^ w[index - 2].rotate_right(19)
+                ^ (w[index - 2] >> 10);
             w[index] = w[index - 16]
                 .wrapping_add(s0)
                 .wrapping_add(w[index - 7])
@@ -119,7 +128,10 @@ pub fn sha256_hex(data: &[u8]) -> String {
 }
 
 pub fn unhex(text: &str) -> Vec<u8> {
-    let digits: Vec<u8> = text.bytes().filter(|byte| !byte.is_ascii_whitespace()).collect();
+    let digits: Vec<u8> = text
+        .bytes()
+        .filter(|byte| !byte.is_ascii_whitespace())
+        .collect();
     digits
         .chunks(2)
         .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap_or("00"), 16).unwrap_or(0))
@@ -130,12 +142,18 @@ pub fn unhex(text: &str) -> Vec<u8> {
 // Manual vectors (reference-package-format.md "Test vector", reference-signing-and-trust.md)
 // ---------------------------------------------------------------------------------------------
 
-pub const VECTOR_COMPONENT_SHA256: &str = "028fb8ab3e154570597f3cc09ad59782ab44d9a6873f1834490da625ef3c6cd8";
-pub const VECTOR_MANIFEST_SHA256: &str = "350b5e47c5781e72a9bb7b3d6630335fca0390402d0f625a48857a234f99c99d";
-pub const VECTOR_UNSIGNED_SHA256: &str = "58aa1172e083701a96593f7531f21c0f3668e2f66c3166899f9b90ee3fe5616a";
-pub const VECTOR_SIGNED_SHA256: &str = "d2238076eea48c58ceb4416dbb50438c6ffee23028051d7e9a0cb1f9ae7fc408";
-pub const VECTOR_SEED_HEX: &str = "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
-pub const VECTOR_PUBLIC_KEY_HEX: &str = "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8";
+pub const VECTOR_COMPONENT_SHA256: &str =
+    "028fb8ab3e154570597f3cc09ad59782ab44d9a6873f1834490da625ef3c6cd8";
+pub const VECTOR_MANIFEST_SHA256: &str =
+    "350b5e47c5781e72a9bb7b3d6630335fca0390402d0f625a48857a234f99c99d";
+pub const VECTOR_UNSIGNED_SHA256: &str =
+    "58aa1172e083701a96593f7531f21c0f3668e2f66c3166899f9b90ee3fe5616a";
+pub const VECTOR_SIGNED_SHA256: &str =
+    "d2238076eea48c58ceb4416dbb50438c6ffee23028051d7e9a0cb1f9ae7fc408";
+pub const VECTOR_SEED_HEX: &str =
+    "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
+pub const VECTOR_PUBLIC_KEY_HEX: &str =
+    "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8";
 pub const VECTOR_KEY_ID: &str = "56475aa75463474c0285df5dbf2bcab73da651358839e9b77481b2eab107708c";
 pub const VECTOR_SIGNATURE_HEX: &str =
     "8efe737031228839637cdfa2cb79d92ed0a049c99b4cc2683afd0cdd7f6bd03f539b876f76a138de0a441005bf72a56877a8984008de211f04d3ebc5c04a6507";
@@ -230,10 +248,17 @@ pub fn manifest_text(extra_top: &str, side: &str, entry: &str, files: &[(&str, &
     manifest_from_listing(extra_top, side, entry, &listing_of(files))
 }
 
-pub fn manifest_from_listing(extra_top: &str, side: &str, entry: &str, files: &[Listing]) -> Vec<u8> {
+pub fn manifest_from_listing(
+    extra_top: &str,
+    side: &str,
+    entry: &str,
+    files: &[Listing],
+) -> Vec<u8> {
     let mut text = String::new();
     text.push_str("{\n  \"api\": \"ilium:plugin@0.1.0\",\n  \"id\": \"example.minimal\",\n");
-    text.push_str("  \"name\": \"Minimal\",\n  \"version\": \"0.1.0\",\n  \"publisher\": \"Example Labs\",\n");
+    text.push_str(
+        "  \"name\": \"Minimal\",\n  \"version\": \"0.1.0\",\n  \"publisher\": \"Example Labs\",\n",
+    );
     text.push_str(extra_top);
     text.push_str(&format!(
         "  \"{side}\": {{\n    \"entry\": \"{entry}\",\n    \"world\": \"ilium:{side}/base@0.1.0\",\n    \"exports\": []\n  }},\n"
@@ -246,7 +271,11 @@ pub fn manifest_from_listing(extra_top: &str, side: &str, entry: &str, files: &[
             text.push_str(&format!(
                 "    {{\n      \"path\": \"{path}\",\n      \"length\": {length},\n      \"sha256\": \"{digest}\"\n    }}"
             ));
-            text.push_str(if index + 1 == files.len() { "\n" } else { ",\n" });
+            text.push_str(if index + 1 == files.len() {
+                "\n"
+            } else {
+                ",\n"
+            });
         }
         text.push_str("  ]\n}\n");
     }
@@ -387,7 +416,10 @@ pub fn build(entries: &[Z], tail: &Tail) -> Vec<u8> {
     }
     out.extend_from_slice(&tail.gap_before_cd);
     let central_start = out.len() as u32;
-    let order: Vec<usize> = tail.cd_order.clone().unwrap_or_else(|| (0..entries.len()).collect());
+    let order: Vec<usize> = tail
+        .cd_order
+        .clone()
+        .unwrap_or_else(|| (0..entries.len()).collect());
     let mut central = Vec::new();
     for index in &order {
         let entry = &entries[*index];
@@ -440,7 +472,10 @@ pub fn build(entries: &[Z], tail: &Tail) -> Vec<u8> {
 
 /// Builds a valid-shape archive from files already in archive order.
 pub fn zip_of(files: &[(&str, Vec<u8>)]) -> Vec<u8> {
-    let entries: Vec<Z> = files.iter().map(|(name, data)| Z::new(name, data)).collect();
+    let entries: Vec<Z> = files
+        .iter()
+        .map(|(name, data)| Z::new(name, data))
+        .collect();
     build(&entries, &Tail::default())
 }
 
@@ -477,7 +512,8 @@ pub fn layout(bytes: &[u8]) -> Vec<Loc> {
         let comment_len = rd16(bytes, position + 32) as usize;
         let local_off = rd32(bytes, position + 42) as usize;
         let len = rd32(bytes, position + 24) as usize;
-        let name = String::from_utf8_lossy(&bytes[position + 46..position + 46 + name_len]).to_string();
+        let name =
+            String::from_utf8_lossy(&bytes[position + 46..position + 46 + name_len]).to_string();
         let local_name_len = rd16(bytes, local_off + 26) as usize;
         let local_extra_len = rd16(bytes, local_off + 28) as usize;
         locs.push(Loc {
@@ -509,7 +545,13 @@ fn put32(bytes: &mut [u8], at: usize, value: u32) {
 }
 
 /// Changes one data byte of an entry; with `repair_crc` both headers get the new CRC-32.
-pub fn patch_data(bytes: &[u8], name: &str, index: usize, new_value: u8, repair_crc: bool) -> Vec<u8> {
+pub fn patch_data(
+    bytes: &[u8],
+    name: &str,
+    index: usize,
+    new_value: u8,
+    repair_crc: bool,
+) -> Vec<u8> {
     let mut out = bytes.to_vec();
     let loc = layout(bytes)
         .into_iter()
@@ -597,13 +639,19 @@ pub fn package_with(extras: &[(&str, &[u8])]) -> Vec<u8> {
 /// "rebuild with pack" rule of PKG-177..180).
 pub fn package_with_component(component: &[u8]) -> Vec<u8> {
     let manifest = manifest_text("", "server", "server.wasm", &[("server.wasm", component)]);
-    zip_of(&[("manifest.json", manifest), ("server.wasm", component.to_vec())])
+    zip_of(&[
+        ("manifest.json", manifest),
+        ("server.wasm", component.to_vec()),
+    ])
 }
 
 /// The vector plus entries added at their sorted position without listing them in `files`
 /// (the hostile matrix rule: "The entry is not listed in `files` unless the row says so").
 pub fn vector_plus_unlisted(extra: Vec<Z>) -> Vec<u8> {
-    let mut entries = vec![Z::new("manifest.json", &vector_manifest()), Z::new("server.wasm", &vector_component())];
+    let mut entries = vec![
+        Z::new("manifest.json", &vector_manifest()),
+        Z::new("server.wasm", &vector_component()),
+    ];
     entries.extend(extra);
     entries.sort_by(|left, right| left.name.cmp(&right.name));
     build(&entries, &Tail::default())
@@ -646,7 +694,9 @@ pub fn stage1_codes(bytes: &[u8]) -> Vec<String> {
 
 pub fn installer() -> (tempfile::TempDir, Installer) {
     let dir = tempfile::tempdir().expect("temporary store directory");
-    let installer = Installer::new(PackageStore { root: dir.path().to_path_buf() });
+    let installer = Installer::new(PackageStore {
+        root: dir.path().to_path_buf(),
+    });
     (dir, installer)
 }
 
@@ -757,14 +807,19 @@ pub fn write_trust_store(fixture: &CliFixture, status: &str, revoked_json: &str)
         "{{\n  \"format\": \"ilium-trust/1\",\n  \"keys\": [\n    {{\n      \"key_id\": \"{VECTOR_KEY_ID}\",\n      \"publisher_id\": \"example\",\n      \"publisher\": \"Example Labs\",\n      \"public_key\": \"A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg\",\n      \"added\": \"2026-10-12 10:05:00\",\n      \"added_by\": \"user\",\n      \"status\": \"{status}\",\n      \"revoked\": {revoked_json}\n    }}\n  ]\n}}\n"
     );
     write_file(&fixture.state().join("trust.json"), document.as_bytes());
-    write_file(&fixture.state().join("ilium").join("trust.json"), document.as_bytes());
+    write_file(
+        &fixture.state().join("ilium").join("trust.json"),
+        document.as_bytes(),
+    );
 }
 
 /// A pack project: the source manifest of the vector (no `files`), the built component in
 /// `dist/` and a `dist/build.json`. The input hash is a placeholder (see API_GAPS.md).
 pub fn write_pack_project(dir: &Path) {
     let source = String::from_utf8(vector_manifest()).expect("vector manifest is UTF-8");
-    let cut = source.find(",\n  \"files\"").expect("vector manifest has files");
+    let cut = source
+        .find(",\n  \"files\"")
+        .expect("vector manifest has files");
     let source_manifest = format!("{}\n}}\n", &source[..cut]);
     write_file(&dir.join("manifest.json"), source_manifest.as_bytes());
     write_file(&dir.join("dist").join("server.wasm"), &vector_component());

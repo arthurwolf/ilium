@@ -13,10 +13,10 @@ pub mod task;
 pub mod ui;
 
 pub use plugin::{
-    Annotator, CatalogProvider, Detector, Handler, HookHandler, HostApi, HostCalls,
+    host, set_host, Annotator, CatalogProvider, Detector, Handler, HookHandler, HostApi, HostCalls,
     InferenceProvider, JobRunner, Lifecycle, LifecycleState, MenuProvider, Migrator, NativeEntry,
     NativeRenderer, Plugin, Renderer, SceneRenderer, ServiceProvider, SettingsValidate,
-    TokenProvider, Views, VirtualRowsProvider, host, set_host,
+    TokenProvider, Views, VirtualRowsProvider,
 };
 
 /// Types of `ilium:types`, one module per WIT interface (rust-sdk.md "Module map").

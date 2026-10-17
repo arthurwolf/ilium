@@ -11,7 +11,12 @@ fn page_manifest() -> Value {
 }
 
 fn strings(value: &Value) -> Vec<String> {
-    value.as_array().expect("array").iter().map(|item| item.as_str().expect("string").to_string()).collect()
+    value
+        .as_array()
+        .expect("array")
+        .iter()
+        .map(|item| item.as_str().expect("string").to_string())
+        .collect()
 }
 
 /// REQ: COR-050, F-041
@@ -28,7 +33,10 @@ fn doc_cor_050_fragment_fields_match_complete_manifest() {
     let complete = page_manifest();
     assert_eq!(fragment["api"], complete["api"]);
     assert_eq!(fragment["id"], complete["id"]);
-    assert_eq!(fragment["capabilities"]["server"], complete["capabilities"]["server"]);
+    assert_eq!(
+        fragment["capabilities"]["server"],
+        complete["capabilities"]["server"]
+    );
 }
 
 /// REQ: COR-050, F-041
@@ -78,7 +86,14 @@ fn doc_cor_050_server_grants_are_exactly_the_six_listed_in_order() {
     let manifest = manifest_value();
     assert_eq!(
         strings(&manifest["capabilities"]["server"]),
-        ["inference", "agent.read-prompts", "tree.read", "tree.write", "tree.decorate", "tree.restructure"]
+        [
+            "inference",
+            "agent.read-prompts",
+            "tree.read",
+            "tree.write",
+            "tree.decorate",
+            "tree.restructure"
+        ]
     );
 }
 
@@ -88,7 +103,11 @@ fn doc_cor_050_client_grants_hold_the_panel_and_the_two_kernel_tabs() {
     let manifest = manifest_value();
     assert_eq!(
         strings(&manifest["capabilities"]["client"]),
-        ["ui.panels", "settings.write-kernel:titles", "settings.write-kernel:triggers"]
+        [
+            "ui.panels",
+            "settings.write-kernel:titles",
+            "settings.write-kernel:triggers"
+        ]
     );
 }
 
@@ -110,7 +129,10 @@ fn doc_cor_050_no_grant_is_listed_twice_and_no_grant_has_an_argument_except_kern
         unique.dedup();
         assert_eq!(unique.len(), grants.len(), "duplicate grant on {side}");
         for grant in grants {
-            assert!(!grant.contains(':') || grant.starts_with("settings.write-kernel:"), "{grant}");
+            assert!(
+                !grant.contains(':') || grant.starts_with("settings.write-kernel:"),
+                "{grant}"
+            );
         }
     }
 }
@@ -131,8 +153,18 @@ fn doc_cor_050_tree_restructure_is_the_only_high_risk_grant_and_the_page_says_so
 fn doc_cor_050_samples_use_only_granted_server_capabilities() {
     let granted = strings(&manifest_value()["capabilities"]["server"]);
     let page = page_text();
-    for line in page.lines().filter(|line| line.contains("// manifest: \"capabilities\"")) {
-        for word in ["inference", "agent.read-prompts", "tree.read", "tree.write", "tree.decorate", "tree.restructure"] {
+    for line in page
+        .lines()
+        .filter(|line| line.contains("// manifest: \"capabilities\""))
+    {
+        for word in [
+            "inference",
+            "agent.read-prompts",
+            "tree.read",
+            "tree.write",
+            "tree.decorate",
+            "tree.restructure",
+        ] {
             if line.contains(&format!("\"{word}\"")) {
                 assert!(granted.contains(&word.to_string()), "{word}");
             }

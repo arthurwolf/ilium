@@ -10,7 +10,12 @@ use crate::common::*;
 fn port_unfreeze_restarts_the_saved_provider_session_and_recovers_its_identity() {
     let mut host = activated_server();
     let pane = add_agent(&mut host, "claude", "claude");
-    verify_agent(&mut host, pane, signature("claude", Some(claude_template())), SESSION_ID);
+    verify_agent(
+        &mut host,
+        pane,
+        signature("claude", Some(claude_template())),
+        SESSION_ID,
+    );
     let submitted = restore_panes(&mut host, &[pane]);
     let frozen = freezes(&submitted);
     assert_eq!(frozen.len(), 1);
@@ -33,7 +38,12 @@ fn port_unfreeze_preserves_worktree_ownership() {
     // replacement is not re-parented, and the thaw addresses the same pane.
     let mut host = activated_server();
     let pane = add_agent(&mut host, "worktree agent", "claude");
-    verify_agent(&mut host, pane, signature("claude", Some(claude_template())), SESSION_ID);
+    verify_agent(
+        &mut host,
+        pane,
+        signature("claude", Some(claude_template())),
+        SESSION_ID,
+    );
     let other = add_shell(&mut host, "workspace");
     let submitted = restore_panes(&mut host, &[pane, other]);
     let commands = replace_commands(&submitted);
@@ -42,7 +52,10 @@ fn port_unfreeze_preserves_worktree_ownership() {
     assert!(commands[0].0.cwd.is_none());
     assert!(commands[0].0.keep_scrollback);
     // Thaw only after both panes run.
-    assert!(unfreezes(&host.deliver(vec![lifecycle_event(pane, PaneLifecycleState::Running)])).is_empty());
+    assert!(
+        unfreezes(&host.deliver(vec![lifecycle_event(pane, PaneLifecycleState::Running)]))
+            .is_empty()
+    );
     let thaw = unfreezes(&host.deliver(vec![lifecycle_event(other, PaneLifecycleState::Running)]));
     assert_eq!(thaw.len(), 2);
 }

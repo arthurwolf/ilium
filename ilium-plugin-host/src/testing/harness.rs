@@ -11,11 +11,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ilium_plugin_api::generated::exports::inference_provider::ProviderCall;
-use ilium_plugin_api::generated::host::plugins::InstanceState;
-use ilium_plugin_api::generated::primitives::agent::HostAgent;
-use ilium_plugin_api::generated::primitives::basic::HostBasic;
-use ilium_plugin_api::generated::primitives::editor::HostEditor;
-use ilium_plugin_api::generated::primitives::terminal::HostTerminal;
 use ilium_plugin_api::generated::host::audio::HostAudio;
 use ilium_plugin_api::generated::host::catalogs::HostCatalogs;
 use ilium_plugin_api::generated::host::cli::HostCli;
@@ -32,11 +27,16 @@ use ilium_plugin_api::generated::host::keys::HostKeys;
 use ilium_plugin_api::generated::host::location::HostLocation;
 use ilium_plugin_api::generated::host::media::HostMedia;
 use ilium_plugin_api::generated::host::plugins::HostPlugins;
+use ilium_plugin_api::generated::host::plugins::InstanceState;
 use ilium_plugin_api::generated::host::sessions::HostSessions;
 use ilium_plugin_api::generated::host::sounds::HostSounds;
 use ilium_plugin_api::generated::host::ui_host::HostUiHost;
 use ilium_plugin_api::generated::host::vector::HostVector;
 use ilium_plugin_api::generated::host::workspace::HostWorkspace;
+use ilium_plugin_api::generated::primitives::agent::HostAgent;
+use ilium_plugin_api::generated::primitives::basic::HostBasic;
+use ilium_plugin_api::generated::primitives::editor::HostEditor;
+use ilium_plugin_api::generated::primitives::terminal::HostTerminal;
 use ilium_plugin_api::generated::types::events::Event;
 use ilium_plugin_api::generated::types::ids::{NodeId, RequestId};
 use ilium_plugin_api::generated::types::intents::{Intent, Submission};
@@ -55,7 +55,6 @@ use super::fake_net::FakeNet;
 use super::native_guest::NativeGuest;
 use crate::audit::AuditRecord;
 use crate::calls::Trap;
-use crate::instance::{ExportCall, ExportReply};
 use crate::dispatch::PumpReport;
 use crate::error::HostError;
 use crate::imports::agent::AgentImport;
@@ -83,6 +82,7 @@ use crate::imports::terminal::TerminalImport;
 use crate::imports::ui_host::UiHostImport;
 use crate::imports::vector::VectorImport;
 use crate::imports::workspace::WorkspaceImport;
+use crate::instance::{ExportCall, ExportReply};
 use crate::telemetry::LogLine;
 
 /// A clock the test advances by hand; milliseconds since an arbitrary start.
@@ -390,7 +390,8 @@ impl HostHarness {
 
     /// Grants held by the plugin's instance on the other side (CAP-0xx per-side grants).
     pub fn other_side_grants(mut self, side: Side, grants: &[&str]) -> HostHarness {
-        self.other_side_grants.extend(grants.iter().map(|grant| (side, (*grant).to_owned())));
+        self.other_side_grants
+            .extend(grants.iter().map(|grant| (side, (*grant).to_owned())));
         self
     }
 
@@ -1789,7 +1790,13 @@ impl HarnessHandle {
     }
 
     /// Calls an import as plugin `plugin_index` of a two-plugin harness with JSON arguments.
-    pub fn call_import_as(&self, plugin_index: usize, interface: &str, function: &str, args_json: &str) -> ImportReply {
+    pub fn call_import_as(
+        &self,
+        plugin_index: usize,
+        interface: &str,
+        function: &str,
+        args_json: &str,
+    ) -> ImportReply {
         unimplemented!("host::testing::HarnessHandle::call_import_as")
     }
 

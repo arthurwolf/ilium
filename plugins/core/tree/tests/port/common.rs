@@ -9,7 +9,10 @@ use ilium_plugin_sdk::types::{Intent, NodeClass, NodeId, Submission};
 /// A server-side host with the manifest grants and the plugin activated.
 pub fn server_host() -> FakeHost {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("manifest.json");
-    let mut host = FakeHost::for_manifest(path).expect("manifest loads").side("server").build();
+    let mut host = FakeHost::for_manifest(path)
+        .expect("manifest loads")
+        .side("server")
+        .build();
     host.activate::<TreeServer>();
     host
 }
@@ -17,7 +20,10 @@ pub fn server_host() -> FakeHost {
 /// A client-side host with the manifest grants and the plugin activated.
 pub fn client_host() -> FakeHost {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("manifest.json");
-    let mut host = FakeHost::for_manifest(path).expect("manifest loads").side("client").build();
+    let mut host = FakeHost::for_manifest(path)
+        .expect("manifest loads")
+        .side("client")
+        .build();
     host.activate::<TreeClient>();
     host
 }
@@ -28,7 +34,14 @@ pub fn add_node(host: &mut FakeHost, parent: Option<u64>, name: &str, class: Nod
         NodeClass::Pane => Some("ilium.terminal".to_string()),
         _ => None,
     };
-    host.tree().add(TreeNode { id: 0, parent, name: name.to_string(), class, content_kind, agent: None })
+    host.tree().add(TreeNode {
+        id: 0,
+        parent,
+        name: name.to_string(),
+        class,
+        content_kind,
+        agent: None,
+    })
 }
 
 /// `(node, sort_key)` of every `order` decoration, in submission order.
@@ -46,7 +59,11 @@ pub fn order_keys(submissions: &[Submission]) -> Vec<(NodeId, Option<i64>)> {
 pub fn sorted_by_key(submissions: &[Submission], ids: &[u64]) -> Vec<u64> {
     let keys = order_keys(submissions);
     let key_of = |id: u64| {
-        keys.iter().rev().find(|(node, _)| *node == NodeId(id)).and_then(|(_, key)| *key).expect("a key for the node")
+        keys.iter()
+            .rev()
+            .find(|(node, _)| *node == NodeId(id))
+            .and_then(|(_, key)| *key)
+            .expect("a key for the node")
     };
     let mut ordered: Vec<u64> = ids.to_vec();
     ordered.sort_by_key(|id| (key_of(*id), *id));

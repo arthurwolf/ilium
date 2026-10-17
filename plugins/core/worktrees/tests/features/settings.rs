@@ -22,7 +22,10 @@ fn feature_072_defaults_of_the_seven_git_keys() {
     let mut host = client_host();
     assert_eq!(read(&mut host, "default_where"), Some(json!("here")));
     assert_eq!(read(&mut host, "branch_prefix"), Some(json!("agent/")));
-    assert_eq!(read(&mut host, "worktree_location_template"), Some(json!("{repo_parent}/{repo_name}.worktrees/{branch_slug}")));
+    assert_eq!(
+        read(&mut host, "worktree_location_template"),
+        Some(json!("{repo_parent}/{repo_name}.worktrees/{branch_slug}"))
+    );
     assert_eq!(read(&mut host, "default_base"), Some(json!("current")));
     assert_eq!(read(&mut host, "branch_line"), Some(json!("worktree_only")));
     assert_eq!(read(&mut host, "setup_command"), Some(json!("")));
@@ -47,7 +50,10 @@ fn feature_072_changing_one_key_leaves_the_other_six_unchanged() {
     assert_eq!(read(&mut host, "branch_line"), Some(json!("worktree_only")));
     assert_eq!(read(&mut host, "setup_command"), Some(json!("")));
     assert_eq!(read(&mut host, "default_close_policy"), Some(json!("keep")));
-    assert_eq!(read(&mut host, "default_base"), Some(json!("default_branch")));
+    assert_eq!(
+        read(&mut host, "default_base"),
+        Some(json!("default_branch"))
+    );
 }
 
 /// REQ: F-072
@@ -55,7 +61,8 @@ fn feature_072_changing_one_key_leaves_the_other_six_unchanged() {
 fn feature_072_default_where_accepts_here_new_worktree_and_existing_worktree() {
     let mut host = client_host();
     for value in ["here", "new_worktree", "existing_worktree"] {
-        set_git(&mut host, "default_where", json!(value)).unwrap_or_else(|error| panic!("{value}: {error:?}"));
+        set_git(&mut host, "default_where", json!(value))
+            .unwrap_or_else(|error| panic!("{value}: {error:?}"));
         assert_eq!(read(&mut host, "default_where"), Some(json!(value)));
     }
 }
@@ -63,7 +70,10 @@ fn feature_072_default_where_accepts_here_new_worktree_and_existing_worktree() {
 /// REQ: F-072
 #[test]
 fn feature_072_default_where_refuses_an_unknown_value_with_invalid_argument() {
-    assert_eq!(rejected("default_where", json!("elsewhere")).code, ErrorCode::InvalidArgument);
+    assert_eq!(
+        rejected("default_where", json!("elsewhere")).code,
+        ErrorCode::InvalidArgument
+    );
 }
 
 /// REQ: F-072
@@ -73,7 +83,10 @@ fn feature_072_default_base_accepts_current_and_default_branch_only() {
     for value in ["current", "default_branch"] {
         set_git(&mut host, "default_base", json!(value)).expect("valid");
     }
-    assert_eq!(rejected("default_base", json!("main")).code, ErrorCode::InvalidArgument);
+    assert_eq!(
+        rejected("default_base", json!("main")).code,
+        ErrorCode::InvalidArgument
+    );
 }
 
 /// REQ: F-072, F-069
@@ -83,7 +96,10 @@ fn feature_072_branch_line_accepts_worktree_only_and_off_only() {
     for value in ["worktree_only", "off"] {
         set_git(&mut host, "branch_line", json!(value)).expect("valid");
     }
-    assert_eq!(rejected("branch_line", json!("always")).code, ErrorCode::InvalidArgument);
+    assert_eq!(
+        rejected("branch_line", json!("always")).code,
+        ErrorCode::InvalidArgument
+    );
 }
 
 /// REQ: F-072, F-070
@@ -93,15 +109,24 @@ fn feature_072_default_close_policy_accepts_keep_and_offer_removal_when_safe_onl
     for value in ["keep", "offer_removal_when_safe"] {
         set_git(&mut host, "default_close_policy", json!(value)).expect("valid");
     }
-    assert_eq!(rejected("default_close_policy", json!("remove")).code, ErrorCode::InvalidArgument);
+    assert_eq!(
+        rejected("default_close_policy", json!("remove")).code,
+        ErrorCode::InvalidArgument
+    );
 }
 
 /// REQ: F-072
 #[test]
 fn feature_072_a_template_without_branch_slug_is_refused_with_the_loader_message() {
-    let error = rejected("worktree_location_template", json!("{repo_parent}/{repo_name}.worktrees"));
+    let error = rejected(
+        "worktree_location_template",
+        json!("{repo_parent}/{repo_name}.worktrees"),
+    );
     assert_eq!(error.code, ErrorCode::InvalidArgument);
-    assert_eq!(error.message, "Worktree location must include {branch_slug}");
+    assert_eq!(
+        error.message,
+        "Worktree location must include {branch_slug}"
+    );
 }
 
 /// REQ: F-072
@@ -109,7 +134,10 @@ fn feature_072_a_template_without_branch_slug_is_refused_with_the_loader_message
 fn feature_072_an_empty_or_blank_template_is_refused_with_the_branch_slug_message() {
     for value in ["", "   "] {
         let error = rejected("worktree_location_template", json!(value));
-        assert_eq!(error.message, "Worktree location must include {branch_slug}");
+        assert_eq!(
+            error.message,
+            "Worktree location must include {branch_slug}"
+        );
     }
 }
 
@@ -117,36 +145,61 @@ fn feature_072_an_empty_or_blank_template_is_refused_with_the_branch_slug_messag
 #[test]
 fn feature_072_an_unknown_placeholder_is_refused_naming_the_placeholder() {
     let error = rejected("worktree_location_template", json!("{home}/{branch_slug}"));
-    assert_eq!(error.message, "Unsupported worktree location placeholder: {home}");
+    assert_eq!(
+        error.message,
+        "Unsupported worktree location placeholder: {home}"
+    );
 }
 
 /// REQ: F-072
 #[test]
 fn feature_072_an_unclosed_placeholder_is_refused() {
-    let error = rejected("worktree_location_template", json!("{repo_parent}/{branch_slug}/{repo_name"));
-    assert_eq!(error.message, "Worktree location has an unclosed placeholder");
+    let error = rejected(
+        "worktree_location_template",
+        json!("{repo_parent}/{branch_slug}/{repo_name"),
+    );
+    assert_eq!(
+        error.message,
+        "Worktree location has an unclosed placeholder"
+    );
 }
 
 /// REQ: F-072
 #[test]
 fn feature_072_an_unmatched_closing_brace_before_a_placeholder_is_refused() {
     let error = rejected("worktree_location_template", json!("bad}/{branch_slug}"));
-    assert_eq!(error.message, "Worktree location has an unmatched closing brace");
+    assert_eq!(
+        error.message,
+        "Worktree location has an unmatched closing brace"
+    );
 }
 
 /// REQ: F-072
 #[test]
 fn feature_072_an_unmatched_closing_brace_after_the_last_placeholder_is_refused() {
     let error = rejected("worktree_location_template", json!("{branch_slug}/tail}"));
-    assert_eq!(error.message, "Worktree location has an unmatched closing brace");
+    assert_eq!(
+        error.message,
+        "Worktree location has an unmatched closing brace"
+    );
 }
 
 /// REQ: F-072
 #[test]
 fn feature_072_the_four_known_placeholders_are_accepted() {
     let mut host = client_host();
-    set_git(&mut host, "worktree_location_template", json!("{project}/{repo_parent}/{repo_name}/{branch_slug}")).expect("valid");
-    set_git(&mut host, "worktree_location_template", json!("{project}/.ilium/worktrees/{branch_slug}")).expect("valid");
+    set_git(
+        &mut host,
+        "worktree_location_template",
+        json!("{project}/{repo_parent}/{repo_name}/{branch_slug}"),
+    )
+    .expect("valid");
+    set_git(
+        &mut host,
+        "worktree_location_template",
+        json!("{project}/.ilium/worktrees/{branch_slug}"),
+    )
+    .expect("valid");
 }
 
 /// REQ: F-072
@@ -155,7 +208,11 @@ fn feature_072_a_branch_prefix_that_makes_an_invalid_branch_name_is_refused() {
     for prefix in ["bad prefix/", "../", "-lead/", "a..b/", "x:/"] {
         let error = rejected("branch_prefix", json!(prefix));
         assert_eq!(error.code, ErrorCode::InvalidArgument, "{prefix}");
-        assert!(error.message.starts_with("Invalid branch prefix: "), "{prefix}: {}", error.message);
+        assert!(
+            error.message.starts_with("Invalid branch prefix: "),
+            "{prefix}: {}",
+            error.message
+        );
     }
 }
 
@@ -178,7 +235,10 @@ fn feature_072_a_setup_command_of_exactly_8192_bytes_is_accepted() {
 fn feature_072_a_setup_command_of_8193_bytes_is_refused_with_the_loader_message() {
     let error = rejected("setup_command", json!("x".repeat(8193)));
     assert_eq!(error.code, ErrorCode::InvalidArgument);
-    assert_eq!(error.message, "Setup command must be at most 8192 bytes and contain no NUL");
+    assert_eq!(
+        error.message,
+        "Setup command must be at most 8192 bytes and contain no NUL"
+    );
 }
 
 /// REQ: F-072, F-071
@@ -194,14 +254,20 @@ fn feature_072_the_limit_counts_bytes_not_characters() {
     let two_byte = "é".repeat(4097);
     assert_eq!(two_byte.len(), 8194);
     let error = rejected("setup_command", json!(two_byte));
-    assert_eq!(error.message, "Setup command must be at most 8192 bytes and contain no NUL");
+    assert_eq!(
+        error.message,
+        "Setup command must be at most 8192 bytes and contain no NUL"
+    );
 }
 
 /// REQ: F-072, F-071
 #[test]
 fn feature_072_a_setup_command_with_a_nul_character_is_refused() {
     let error = rejected("setup_command", json!("bun install\u{0}"));
-    assert_eq!(error.message, "Setup command must be at most 8192 bytes and contain no NUL");
+    assert_eq!(
+        error.message,
+        "Setup command must be at most 8192 bytes and contain no NUL"
+    );
 }
 
 /// REQ: F-072, F-071

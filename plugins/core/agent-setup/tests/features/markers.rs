@@ -31,8 +31,15 @@ fn markers_063_the_chatroom_marker_carries_no_version() {
     let mut host = seeded("");
     install(&mut host, "chatroom", CLAUDE_GLOBAL).expect("install");
     let text = claude_text(&mut host);
-    assert_eq!(text.matches("<!-- ilium-agent-feature: chatroom").count(), 1);
-    assert_eq!(text.matches(CHATROOM_OPEN).count(), 1, "the opening marker is exactly the page marker");
+    assert_eq!(
+        text.matches("<!-- ilium-agent-feature: chatroom").count(),
+        1
+    );
+    assert_eq!(
+        text.matches(CHATROOM_OPEN).count(),
+        1,
+        "the opening marker is exactly the page marker"
+    );
 }
 
 /// REQ: F-063
@@ -60,7 +67,10 @@ fn markers_063_text_before_the_block_is_kept_and_separated_by_a_blank_line() {
     let mut host = seeded("# Existing\n");
     install(&mut host, "progress", CLAUDE_GLOBAL).expect("install");
     let text = claude_text(&mut host);
-    assert!(text.starts_with(&format!("# Existing\n\n{PROGRESS_OPEN}")), "{text}");
+    assert!(
+        text.starts_with(&format!("# Existing\n\n{PROGRESS_OPEN}")),
+        "{text}"
+    );
 }
 
 /// REQ: F-063
@@ -69,7 +79,10 @@ fn markers_063_a_file_without_a_final_newline_gets_a_blank_line_before_the_block
     let mut host = seeded("# Existing");
     install(&mut host, "progress", CLAUDE_GLOBAL).expect("install");
     let text = claude_text(&mut host);
-    assert!(text.starts_with(&format!("# Existing\n\n{PROGRESS_OPEN}")), "{text}");
+    assert!(
+        text.starts_with(&format!("# Existing\n\n{PROGRESS_OPEN}")),
+        "{text}"
+    );
 }
 
 /// REQ: F-063
@@ -137,7 +150,11 @@ fn markers_063_duplicate_blocks_are_repaired_to_one_current_copy() {
     let mut host = seeded(&format!("{block}\n{block}"));
     install(&mut host, "progress", CLAUDE_GLOBAL).expect("install");
     let text = claude_text(&mut host);
-    assert_eq!(text.matches("<!-- ilium-agent-feature: progress").count(), 1, "{text}");
+    assert_eq!(
+        text.matches("<!-- ilium-agent-feature: progress").count(),
+        1,
+        "{text}"
+    );
     assert_eq!(text.matches(PROGRESS_CLOSE).count(), 1, "{text}");
     assert!(!text.contains("Old wording."));
 }
@@ -196,7 +213,8 @@ fn markers_063_both_blocks_live_side_by_side_and_remove_takes_only_one() {
 /// REQ: F-063
 #[test]
 fn markers_063_a_marker_of_another_feature_name_is_plain_text() {
-    let other = "<!-- ilium-agent-feature: other -->\nSomething.\n<!-- /ilium-agent-feature: other -->\n";
+    let other =
+        "<!-- ilium-agent-feature: other -->\nSomething.\n<!-- /ilium-agent-feature: other -->\n";
     let mut host = seeded(other);
     install(&mut host, "progress", CLAUDE_GLOBAL).expect("install");
     assert!(claude_text(&mut host).starts_with(other));
@@ -230,7 +248,10 @@ fn markers_063_the_progress_block_teaches_the_registration_and_result_handling_r
         "ends every earlier wait",
         "find your monitor by `job_id`",
     ] {
-        assert!(block.contains(required), "progress block must contain {required:?}");
+        assert!(
+            block.contains(required),
+            "progress block must contain {required:?}"
+        );
     }
 }
 
@@ -240,8 +261,19 @@ fn markers_063_the_progress_block_never_mentions_goals_pausing_or_resuming() {
     let mut host = seeded("");
     install(&mut host, "progress", CLAUDE_GLOBAL).expect("install");
     let block = block_of(&claude_text(&mut host), "progress").to_lowercase();
-    for forbidden in ["/goal", "goal", "pause", "resume", "stop hook", "arm-goal-resume", "end the turn"] {
-        assert!(!block.contains(forbidden), "progress block must not mention {forbidden:?}");
+    for forbidden in [
+        "/goal",
+        "goal",
+        "pause",
+        "resume",
+        "stop hook",
+        "arm-goal-resume",
+        "end the turn",
+    ] {
+        assert!(
+            !block.contains(forbidden),
+            "progress block must not mention {forbidden:?}"
+        );
     }
     assert!(block.contains("must not poll"));
 }

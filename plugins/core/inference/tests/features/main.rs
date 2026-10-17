@@ -4,9 +4,9 @@
 //! Inference and LLM Instructions tabs), the page samples, the manifest, the extension points, the
 //! service and the topic, plus the renders of the page.
 
-mod common;
 mod catalog;
 mod client_panel;
+mod common;
 mod doc_page;
 mod hooks_topic;
 mod manifest;

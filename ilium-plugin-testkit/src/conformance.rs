@@ -14,6 +14,7 @@ pub struct CaseResult {
 }
 
 /// Runs the whole conformance suite against a plugin type in the current mode.
-pub fn run_suite<P: ilium_plugin_sdk_core::NativeEntry + Default>() -> Result<Vec<CaseResult>, HarnessError> {
+pub fn run_suite<P: ilium_plugin_sdk_core::NativeEntry + Default>(
+) -> Result<Vec<CaseResult>, HarnessError> {
     unimplemented!("conformance.suite")
 }

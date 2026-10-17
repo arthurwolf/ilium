@@ -30,7 +30,10 @@ pub fn plugin_id() -> PluginId {
 
 /// Absolute path of a manifest fixture of this crate.
 pub fn manifest_path(name: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures").join("manifests").join(name)
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("fixtures")
+        .join("manifests")
+        .join(name)
 }
 
 /// Text of a manifest fixture of this crate.
@@ -42,7 +45,10 @@ pub fn manifest_text(name: &str) -> String {
 /// Path of a built guest fixture component. A missing file is a red failure with
 /// `fixture.missing`, never a skip (test-plan.md 0.5).
 pub fn fixture_component(name: &str) -> PathBuf {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("target").join("plugin-fixtures");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("target")
+        .join("plugin-fixtures");
     let path = root.join(format!("{name}.wasm"));
     assert!(path.is_file(), "fixture.missing: {}", path.display());
     path
@@ -55,7 +61,9 @@ pub fn theme_event() -> Event {
 
 /// `count` distinct timer events (each keyed by its own timer, so none coalesce).
 pub fn timer_events(count: usize) -> Vec<Event> {
-    (0..count as u64).map(|n| Event::TimerFired(ilium_plugin_api::ids::TimerId(n + 1))).collect()
+    (0..count as u64)
+        .map(|n| Event::TimerFired(ilium_plugin_api::ids::TimerId(n + 1)))
+        .collect()
 }
 
 /// A `play-sound` submission with a plugin-owned correlation number.
@@ -112,7 +120,11 @@ impl ScriptedGuest {
 
 impl NativeGuest for ScriptedGuest {
     fn activate(&mut self, _activation: Activation) -> Result<(), PluginError> {
-        self.recorder.lock().expect("recorder lock").calls.push("activate".to_string());
+        self.recorder
+            .lock()
+            .expect("recorder lock")
+            .calls
+            .push("activate".to_string());
         match self.activate_error.clone() {
             Some(error) => Err(error),
             None => Ok(()),
@@ -121,7 +133,9 @@ impl NativeGuest for ScriptedGuest {
 
     fn deactivate(&mut self, reason: DeactivationReason) -> Option<Vec<u8>> {
         let mut recorder = self.recorder.lock().expect("recorder lock");
-        recorder.calls.push(format!("deactivate:{}", reason_name(&reason)));
+        recorder
+            .calls
+            .push(format!("deactivate:{}", reason_name(&reason)));
         recorder.reasons.push(reason);
         None
     }
@@ -151,7 +165,11 @@ pub fn reason_name(reason: &DeactivationReason) -> &'static str {
 
 /// A trap with the given code, as a guest call would end.
 pub fn trap(code: &'static str) -> Trap {
-    Trap { code: Code::from_static(code), interface: "handler".to_string(), function: "on-events".to_string() }
+    Trap {
+        code: Code::from_static(code),
+        interface: "handler".to_string(),
+        function: "on-events".to_string(),
+    }
 }
 
 /// A built harness around a scripted guest; the grants are those given.
@@ -209,7 +227,11 @@ pub fn run_cli(env: &CliEnv, args: &[&str]) -> CliOutput {
 
 /// The records of one `type` in the output, in order.
 pub fn records_of<'a>(output: &'a CliOutput, kind: &str) -> Vec<&'a serde_json::Value> {
-    output.stdout_jsonl.iter().filter(|record| record["type"] == kind).collect()
+    output
+        .stdout_jsonl
+        .iter()
+        .filter(|record| record["type"] == kind)
+        .collect()
 }
 
 /// Writes a minimal plugin project (manifest and one dist component) into `root` and returns
@@ -271,14 +293,18 @@ pub const CATALOGUE: &[(&str, &str)] = &[
 /// CONTRACT.txt`): `{"burn_ms":{"activate":2100,"on-events":25},"alloc_mib":40,...}`.
 /// Uses `with_component` and `settings_json`, both missing from the skeleton (gap.rs).
 pub fn probe_harness(plan: serde_json::Value, grants: &[&str]) -> HostHarness {
-    let bytes = std::fs::read(fixture_component("conformance-probe")).expect("read probe component");
+    let bytes =
+        std::fs::read(fixture_component("conformance-probe")).expect("read probe component");
     let harness = crate::gap::with_component(HostHarness::new().grants(grants), bytes);
     crate::gap::settings_json(harness, plan.to_string())
 }
 
 /// True when some trap in `handle.failures()` carries `code`.
 pub fn has_failure(handle: &HarnessHandle, code: &str) -> bool {
-    handle.failures().iter().any(|trap| trap.code.as_str() == code)
+    handle
+        .failures()
+        .iter()
+        .any(|trap| trap.code.as_str() == code)
 }
 
 /// The `refused(...)` results as (correlation, error code name, message). Results of calls
@@ -293,7 +319,11 @@ pub fn refused_codes(results: &[RequestResult]) -> Vec<(u64, String, String)> {
                     RequestRef::Submission(number) => *number,
                     RequestRef::Call(_) => 0,
                 };
-                Some((correlation, error.code.as_str().to_string(), error.message.clone()))
+                Some((
+                    correlation,
+                    error.code.as_str().to_string(),
+                    error.message.clone(),
+                ))
             }
             _ => None,
         })

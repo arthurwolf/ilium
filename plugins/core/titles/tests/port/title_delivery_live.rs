@@ -28,7 +28,10 @@ fn port_041_refused_rename_is_not_retried() {
         .find(|submission| matches!(submission.intent, Intent::RenameNode(_)))
         .expect("rename submission")
         .correlation;
-    host.deliver_one(outcome_event(correlation, Outcome::Refused(plugin_error(ErrorCode::Conflict))));
+    host.deliver_one(outcome_event(
+        correlation,
+        Outcome::Refused(plugin_error(ErrorCode::Conflict)),
+    ));
     host.settle();
     assert_eq!(renames(&host.submitted()).len(), 1);
     assert!(host.failures().is_empty());

@@ -5,7 +5,8 @@ use ilium_plugin_sdk::types::{ActionKind, ActionValue, AgentActivity, NodeId};
 
 use crate::common::*;
 
-const WARNING: &str = "DANGER: this will re-send forever whenever the agent finishes. Do not run it unmonitored.";
+const WARNING: &str =
+    "DANGER: this will re-send forever whenever the agent finishes. Do not run it unmonitored.";
 
 fn opened() -> (FakeSession, NodeId) {
     let mut session = session();
@@ -20,7 +21,12 @@ fn screen_text(session: &mut FakeSession) -> String {
 
 fn select_delivery(session: &mut FakeSession, index: u32) {
     let host = client(session);
-    host.send_action(popup(QUEUE_VIEW), "delivery", ActionKind::Selected, ActionValue::Index(index));
+    host.send_action(
+        popup(QUEUE_VIEW),
+        "delivery",
+        ActionKind::Selected,
+        ActionValue::Index(index),
+    );
     host.settle();
 }
 
@@ -73,7 +79,10 @@ fn qdialog_b11_enter_inserts_a_new_line_and_does_not_enqueue() {
     set_text(&mut session, QUEUE_VIEW, "prompt", "line one");
     press(&mut session, QUEUE_VIEW, "enter");
     pump(&mut session);
-    assert!(screen_text(&mut session).contains("Queue prompt after agent finishes"), "the dialog stays open");
+    assert!(
+        screen_text(&mut session).contains("Queue prompt after agent finishes"),
+        "the dialog stays open"
+    );
     assert!(list_queue(&mut session, pane).is_empty());
 }
 
@@ -227,7 +236,10 @@ fn qdialog_b13_the_warning_is_hidden_for_once_and_run_x_times() {
     let (mut session, _pane) = opened();
     for index in [0, 1] {
         select_delivery(&mut session, index);
-        assert!(!screen_text(&mut session).contains("DANGER: this will re-send forever"), "{index}");
+        assert!(
+            !screen_text(&mut session).contains("DANGER: this will re-send forever"),
+            "{index}"
+        );
     }
 }
 
@@ -318,10 +330,18 @@ fn qdialog_b15_clear_on_an_empty_queue_changes_nothing() {
 fn qdialog_b15_the_clear_menu_entry_is_listed_only_while_the_queue_is_not_empty() {
     let mut session = session();
     let pane = terminal_pane(&mut session, "claude-api");
-    let before = call_queue(&mut session, serde_json::json!({"method": "menu", "pane": pane.0})).expect("menu answers");
+    let before = call_queue(
+        &mut session,
+        serde_json::json!({"method": "menu", "pane": pane.0}),
+    )
+    .expect("menu answers");
     assert!(!before["entries"].to_string().contains("Clear prompt queue"));
     enqueue(&mut session, pane, "a", "once", 1).expect("a");
-    let after = call_queue(&mut session, serde_json::json!({"method": "menu", "pane": pane.0})).expect("menu answers");
+    let after = call_queue(
+        &mut session,
+        serde_json::json!({"method": "menu", "pane": pane.0}),
+    )
+    .expect("menu answers");
     assert!(after["entries"].to_string().contains("Clear prompt queue"));
 }
 
@@ -330,7 +350,11 @@ fn qdialog_b15_the_clear_menu_entry_is_listed_only_while_the_queue_is_not_empty(
 fn qdialog_b15_the_menu_has_queue_prompt_on_terminal_panes() {
     let mut session = session();
     let pane = terminal_pane(&mut session, "claude-api");
-    let menu = call_queue(&mut session, serde_json::json!({"method": "menu", "pane": pane.0})).expect("menu answers");
+    let menu = call_queue(
+        &mut session,
+        serde_json::json!({"method": "menu", "pane": pane.0}),
+    )
+    .expect("menu answers");
     let entries = menu["entries"].to_string();
     assert!(entries.contains("Queue prompt..."));
     assert!(entries.contains("Hit key(s) X time from now"));
@@ -341,7 +365,11 @@ fn qdialog_b15_the_menu_has_queue_prompt_on_terminal_panes() {
 fn qdialog_b01_b11_the_menu_of_an_editor_pane_has_neither_entry() {
     let mut session = session();
     let pane = add_pane(&mut session, "notes.md", EDITOR_KIND);
-    let menu = call_queue(&mut session, serde_json::json!({"method": "menu", "pane": pane.0})).expect("menu answers");
+    let menu = call_queue(
+        &mut session,
+        serde_json::json!({"method": "menu", "pane": pane.0}),
+    )
+    .expect("menu answers");
     let entries = menu["entries"].to_string();
     assert!(!entries.contains("Queue prompt..."));
     assert!(!entries.contains("Hit key(s) X time from now"));
@@ -352,7 +380,9 @@ fn qdialog_b01_b11_the_menu_of_an_editor_pane_has_neither_entry() {
 fn qdialog_b11_the_dialog_is_independent_of_the_agent_state() {
     let mut session = session();
     let pane = terminal_pane(&mut session, "claude-api");
-    client(&mut session).tree().set_activity(pane.0, AgentActivity::Working);
+    client(&mut session)
+        .tree()
+        .set_activity(pane.0, AgentActivity::Working);
     invoke_menu(&mut session, QUEUE_COMMAND, pane);
     assert!(screen_text(&mut session).contains("Queue prompt after agent finishes"));
 }

@@ -24,7 +24,8 @@ fn wit_sounds_catalog_adds_the_plugins_own_ids() {
 #[test]
 fn wit_sounds_catalog_hides_other_plugins_sounds() {
     let mut rig = rig(&["sound.play"]);
-    rig.kernel.set_other_plugin_sounds("other.plugin", &["theirs"]);
+    rig.kernel
+        .set_other_plugin_sounds("other.plugin", &["theirs"]);
     assert!(!rig.host.sounds().catalog().contains(&"theirs".to_owned()));
 }
 

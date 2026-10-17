@@ -52,7 +52,11 @@ fn port_902_moving_across_unicode_or_multiline_text_is_unavailable() {
         type_bytes(&rig, b"\r");
         assert_eq!(last_prompt(&rig), None, "cursor moved across {text:?}");
         type_bytes(&rig, b"after\r");
-        assert_eq!(last_prompt(&rig).as_deref(), Some("after"), "next prompt after {text:?}");
+        assert_eq!(
+            last_prompt(&rig).as_deref(),
+            Some("after"),
+            "next prompt after {text:?}"
+        );
     }
 }
 

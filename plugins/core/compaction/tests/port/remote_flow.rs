@@ -44,9 +44,15 @@ fn flow_monitor_stops_after_repeated_failures_until_the_context_drops() {
         host.monitor_record_failure(9);
     }
     assert!(!host.monitor_should_trigger(9, 90.0, 65.0, 0, 0));
-    assert!(!host.monitor_should_trigger(9, 61.0, 65.0, 0, 0), "inside the hysteresis margin");
+    assert!(
+        !host.monitor_should_trigger(9, 61.0, 65.0, 0, 0),
+        "inside the hysteresis margin"
+    );
     assert!(!host.monitor_should_trigger(9, 90.0, 65.0, 0, 0));
-    assert!(!host.monitor_should_trigger(9, 10.0, 65.0, 0, 0), "a real drop re-arms the pane");
+    assert!(
+        !host.monitor_should_trigger(9, 10.0, 65.0, 0, 0),
+        "a real drop re-arms the pane"
+    );
     assert!(host.monitor_should_trigger(9, 90.0, 65.0, 0, 0));
 }
 
@@ -65,8 +71,14 @@ fn flow_a_success_clears_the_failure_streak() {
 #[test]
 fn flow_only_claude_and_codex_map_to_a_transcript_format() {
     let mut host = server_host();
-    assert_eq!(host.transcript_format_for("claude").as_deref(), Some("claude"));
-    assert_eq!(host.transcript_format_for("codex").as_deref(), Some("codex"));
+    assert_eq!(
+        host.transcript_format_for("claude").as_deref(),
+        Some("claude")
+    );
+    assert_eq!(
+        host.transcript_format_for("codex").as_deref(),
+        Some("codex")
+    );
     assert_eq!(host.transcript_format_for("antigravity"), None);
 }
 
@@ -75,7 +87,10 @@ fn flow_only_claude_and_codex_map_to_a_transcript_format() {
 fn flow_disabled_feature_never_starts_and_never_replaces_compact() {
     let mut host = server_host();
     let pane = host.tree().add_agent_pane("agent", "claude");
-    assert!(!host.flow_try_start(pane, false), "disabled: the command does not start a dialog");
+    assert!(
+        !host.flow_try_start(pane, false),
+        "disabled: the command does not start a dialog"
+    );
     assert!(!host.flow_replaces_native_compact(pane));
     assert!(!host.flow_state()["open"].as_bool().unwrap());
 }
@@ -87,7 +102,10 @@ fn flow_reaching_the_pause_freezes_the_pane_and_stops_the_agent() {
     host.flow_event(json!({"kind": "PauseReached", "result": "ok"}));
     let state = host.flow_state();
     assert_eq!(state["frozen"], true);
-    assert_eq!(host.flow_requests(), vec![json!({"kind": "TerminatePaneProcess"})]);
+    assert_eq!(
+        host.flow_requests(),
+        vec![json!({"kind": "TerminatePaneProcess"})]
+    );
     assert_eq!(state["phase"], "StoppingAgent");
 }
 
@@ -182,5 +200,8 @@ fn flow_x_dismisses_the_privacy_banner_for_good() {
 fn flow_interrupt_request_sends_escape_to_the_pane() {
     let mut host = started();
     host.flow_event(json!({"kind": "InterruptRequested"}));
-    assert_eq!(host.flow_requests(), vec![json!({"kind": "KeyInput", "bytes": [27]})]);
+    assert_eq!(
+        host.flow_requests(),
+        vec![json!({"kind": "KeyInput", "bytes": [27]})]
+    );
 }

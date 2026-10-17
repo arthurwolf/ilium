@@ -20,9 +20,20 @@ fn doc_cor_050_manifest_file_equals_complete_manifest_on_page() {
 /// REQ: COR-050, F-112
 #[test]
 fn doc_cor_050_fragment_fields_match_complete_manifest() {
-    let fragment: Value = serde_json::from_str(&json_blocks(&page_text())[0]).expect("fragment is JSON");
+    let fragment: Value =
+        serde_json::from_str(&json_blocks(&page_text())[0]).expect("fragment is JSON");
     let complete = page_manifest();
-    for key in ["api", "id", "name", "version", "publisher", "limits_tier", "replaceable", "surface", "capabilities"] {
+    for key in [
+        "api",
+        "id",
+        "name",
+        "version",
+        "publisher",
+        "limits_tier",
+        "replaceable",
+        "surface",
+        "capabilities",
+    ] {
         assert_eq!(fragment[key], complete[key], "fragment key {key}");
     }
     assert_eq!(fragment["contributes"], complete["contributes"]);
@@ -49,7 +60,10 @@ fn doc_cor_050_runs_on_both_sides_with_the_base_worlds_and_two_server_exports() 
         manifest["server"],
         json!({"entry": "server.wasm", "world": "ilium:server/base@0.1.0", "exports": ["job-runner", "service-provider"]})
     );
-    assert_eq!(manifest["client"], json!({"entry": "client.wasm", "world": "ilium:client/base@0.1.0", "exports": []}));
+    assert_eq!(
+        manifest["client"],
+        json!({"entry": "client.wasm", "world": "ilium:client/base@0.1.0", "exports": []})
+    );
 }
 
 /// REQ: COR-050, F-112
@@ -77,13 +91,19 @@ fn doc_cor_050_server_capabilities_are_the_eleven_listed_grants_in_order() {
 /// REQ: COR-050, F-112
 #[test]
 fn doc_cor_050_client_capability_is_help_read_only() {
-    assert_eq!(strings(&manifest_value()["capabilities"]["client"]), ["help.read"]);
+    assert_eq!(
+        strings(&manifest_value()["capabilities"]["client"]),
+        ["help.read"]
+    );
 }
 
 /// REQ: COR-050, F-112
 #[test]
 fn doc_cor_050_activation_triggers_are_cli_recap_and_command_recap() {
-    assert_eq!(strings(&manifest_value()["activation"]), ["cli:recap", "command:recap"]);
+    assert_eq!(
+        strings(&manifest_value()["activation"]),
+        ["cli:recap", "command:recap"]
+    );
 }
 
 /// REQ: COR-050, F-112
@@ -93,7 +113,12 @@ fn doc_cor_050_replaceable_surface_lists_service_both_points_and_cli() {
     assert_eq!(manifest["replaceable"], true);
     assert_eq!(
         strings(&manifest["surface"]),
-        ["services:recap", "points:fact-sources", "points:before-recap", "cli:recap"]
+        [
+            "services:recap",
+            "points:fact-sources",
+            "points:before-recap",
+            "cli:recap"
+        ]
     );
 }
 
@@ -101,9 +126,23 @@ fn doc_cor_050_replaceable_surface_lists_service_both_points_and_cli() {
 #[test]
 fn doc_cor_050_contributes_has_exactly_the_six_documented_kinds() {
     let manifest = manifest_value();
-    let mut keys: Vec<&String> = manifest["contributes"].as_object().expect("object").keys().collect();
+    let mut keys: Vec<&String> = manifest["contributes"]
+        .as_object()
+        .expect("object")
+        .keys()
+        .collect();
     keys.sort();
-    assert_eq!(keys, ["cli", "client_requests", "extension_points", "help", "jobs", "services"]);
+    assert_eq!(
+        keys,
+        [
+            "cli",
+            "client_requests",
+            "extension_points",
+            "help",
+            "jobs",
+            "services"
+        ]
+    );
 }
 
 /// REQ: COR-050, F-112
@@ -135,7 +174,10 @@ fn doc_cor_050_job_kind_recap_pane_has_5000_ms_deadline_and_64_mib() {
 #[test]
 fn doc_cor_050_client_answers_the_onboarding_state_request_and_ships_the_privacy_help() {
     let contributes = &manifest_value()["contributes"];
-    assert_eq!(contributes["client_requests"], json!([{"kind": "onboarding-state"}]));
+    assert_eq!(
+        contributes["client_requests"],
+        json!([{"kind": "onboarding-state"}])
+    );
     assert_eq!(
         contributes["help"],
         json!([{"id": "recap-privacy", "file": "help/recap-privacy.md", "title": "What a recap sends"}])
@@ -146,8 +188,19 @@ fn doc_cor_050_client_answers_the_onboarding_state_request_and_ships_the_privacy
 #[test]
 fn doc_cor_050_no_settings_commands_keybindings_menus_or_panels_are_contributed() {
     let manifest = manifest_value();
-    for key in ["settings", "commands", "keybindings", "menus", "panels", "views", "topics"] {
-        assert!(manifest["contributes"].get(key).is_none(), "unexpected contribution {key}");
+    for key in [
+        "settings",
+        "commands",
+        "keybindings",
+        "menus",
+        "panels",
+        "views",
+        "topics",
+    ] {
+        assert!(
+            manifest["contributes"].get(key).is_none(),
+            "unexpected contribution {key}"
+        );
     }
 }
 
@@ -155,7 +208,9 @@ fn doc_cor_050_no_settings_commands_keybindings_menus_or_panels_are_contributed(
 #[test]
 fn recap_050_every_activation_trigger_names_a_declared_cli_name() {
     let manifest = manifest_value();
-    let cli_name = manifest["contributes"]["cli"]["name"].as_str().expect("name");
+    let cli_name = manifest["contributes"]["cli"]["name"]
+        .as_str()
+        .expect("name");
     for trigger in strings(&manifest["activation"]) {
         let (_, name) = trigger.split_once(':').expect("kind:name");
         assert_eq!(name, cli_name);

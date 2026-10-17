@@ -6,7 +6,11 @@ use ilium_plugin_sdk::types::{Event, NodeId, SignalChangedEvent};
 use crate::common::{decorations, plain, server_host};
 
 fn signal(pane: u64, name: &str, value: &str) -> Event {
-    Event::SignalChanged(SignalChangedEvent { pane: NodeId(pane), signal: name.to_string(), value: value.to_string() })
+    Event::SignalChanged(SignalChangedEvent {
+        pane: NodeId(pane),
+        signal: name.to_string(),
+        value: value.to_string(),
+    })
 }
 
 /// REQ: F-028
@@ -33,9 +37,15 @@ fn feature_028_a_signal_submission_carries_no_dedup_key() {
 #[test]
 fn feature_028_the_latest_value_of_a_signal_wins() {
     let mut host = server_host();
-    let submissions = host.deliver(vec![signal(4, "branch", "main"), signal(4, "branch", "feature")]);
+    let submissions = host.deliver(vec![
+        signal(4, "branch", "main"),
+        signal(4, "branch", "feature"),
+    ]);
     let specs = decorations(&submissions, "activity");
-    assert_eq!(plain(&specs.last().expect("a decoration").content), "branch: feature");
+    assert_eq!(
+        plain(&specs.last().expect("a decoration").content),
+        "branch: feature"
+    );
 }
 
 /// REQ: F-028
@@ -44,8 +54,17 @@ fn feature_028_signals_of_two_panes_update_their_own_rows() {
     let mut host = server_host();
     let submissions = host.deliver(vec![signal(1, "branch", "a"), signal(2, "branch", "b")]);
     let specs = decorations(&submissions, "activity");
-    let rows: Vec<(NodeId, String)> = specs.iter().map(|spec| (spec.node, plain(&spec.content))).collect();
-    assert_eq!(rows, [(NodeId(1), "branch: a".to_string()), (NodeId(2), "branch: b".to_string())]);
+    let rows: Vec<(NodeId, String)> = specs
+        .iter()
+        .map(|spec| (spec.node, plain(&spec.content)))
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            (NodeId(1), "branch: a".to_string()),
+            (NodeId(2), "branch: b".to_string())
+        ]
+    );
 }
 
 /// REQ: F-028

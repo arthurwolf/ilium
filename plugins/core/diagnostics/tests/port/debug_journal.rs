@@ -4,7 +4,7 @@
 
 use ilium_plugin_sdk::testing::FakeSession;
 use ilium_plugin_sdk::types::ErrorCode;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::common::{agent_debug, session};
 
@@ -19,8 +19,7 @@ fn request_line(session: &mut FakeSession, request: &str, fields: Value) -> Valu
 }
 
 fn log_text(session: &mut FakeSession) -> String {
-    agent_debug(session, "read_log", json!({}))
-        .expect("read_log")["text"]
+    agent_debug(session, "read_log", json!({})).expect("read_log")["text"]
         .as_str()
         .expect("text")
         .to_string()
@@ -31,8 +30,16 @@ fn log_text(session: &mut FakeSession) -> String {
 fn port_001_server_log_records_major_ipc_actions_and_errors_privately() {
     let mut session = session();
     enable(&mut session);
-    request_line(&mut session, "attach", json!({ "session": "debug-session", "ok": true }));
-    request_line(&mut session, "new_group", json!({ "name": "logged group", "ok": true }));
+    request_line(
+        &mut session,
+        "attach",
+        json!({ "session": "debug-session", "ok": true }),
+    );
+    request_line(
+        &mut session,
+        "new_group",
+        json!({ "name": "logged group", "ok": true }),
+    );
     let refused = request_line(
         &mut session,
         "attach",
@@ -52,9 +59,18 @@ fn port_001_server_log_records_major_ipc_actions_and_errors_privately() {
     ] {
         assert!(text.contains(expected), "log lacks {expected:?}: {text}");
     }
-    let directory = agent_debug(&mut session, "file_mode", json!({ "kind": "log-directory" })).expect("directory mode");
-    let file = agent_debug(&mut session, "file_mode", json!({ "kind": "log-file" })).expect("file mode");
-    assert_eq!((directory["mode"].clone(), file["mode"].clone()), (json!(0o700), json!(0o600)));
+    let directory = agent_debug(
+        &mut session,
+        "file_mode",
+        json!({ "kind": "log-directory" }),
+    )
+    .expect("directory mode");
+    let file =
+        agent_debug(&mut session, "file_mode", json!({ "kind": "log-file" })).expect("file mode");
+    assert_eq!(
+        (directory["mode"].clone(), file["mode"].clone()),
+        (json!(0o700), json!(0o600))
+    );
 }
 
 /// REQ: PORT:ilium-server/tests/smoke.rs::successful_resize_records_its_typed_client_cause_in_the_debug_journal
@@ -82,7 +98,10 @@ fn port_002_successful_resize_records_its_typed_client_cause_in_the_journal() {
     assert_eq!(resized[0]["is_tree_panel_animation_resize"], true);
     let fields = resized[0]["fields"].as_array().expect("fields");
     assert_eq!(
-        fields.iter().filter(|field| field["label"] == "cause" && field["value"] == "tree-panel-animation").count(),
+        fields
+            .iter()
+            .filter(|field| field["label"] == "cause" && field["value"] == "tree-panel-animation")
+            .count(),
         1,
         "{fields:?}"
     );
@@ -96,9 +115,21 @@ fn decision_entry(sequence: u64, label: &str, value: &str) -> Value {
 
 fn history() -> Vec<Value> {
     vec![
-        decision_entry(1, "Agent identity decision", "Codex because the process name matched"),
-        decision_entry(2, "Activity decision", "Working because a live status line is visible"),
-        decision_entry(3, "Goal decision", "No goal because no goal line is visible"),
+        decision_entry(
+            1,
+            "Agent identity decision",
+            "Codex because the process name matched",
+        ),
+        decision_entry(
+            2,
+            "Activity decision",
+            "Working because a live status line is visible",
+        ),
+        decision_entry(
+            3,
+            "Goal decision",
+            "No goal because no goal line is visible",
+        ),
         json!({ "sequence": 4, "at": 1_700_000_000_004_i64, "severity": "information", "source": "pty", "kind": "pane-resized",
             "summary": "Left panel focus/hover animation", "resize_cause": "tree-panel-animation" }),
     ]
@@ -115,7 +146,12 @@ fn exported(session: &mut FakeSession, path: &str) -> String {
 #[test]
 fn port_003_debug_log_filters_panel_resizes_and_saves_the_active_view() {
     let mut session = session();
-    let hidden = agent_debug(&mut session, "view", json!({ "entries": history(), "hide_tree_animation": true })).expect("view");
+    let hidden = agent_debug(
+        &mut session,
+        "view",
+        json!({ "entries": history(), "hide_tree_animation": true }),
+    )
+    .expect("view");
     let text = hidden["text"].as_str().expect("text");
     for expected in [
         "Agent debug log",
@@ -130,7 +166,10 @@ fn port_003_debug_log_filters_panel_resizes_and_saves_the_active_view() {
         assert!(text.contains(expected), "view lacks {expected:?}: {text}");
     }
     assert!(!text.contains("Left panel focus/hover animation"), "{text}");
-    assert_eq!((hidden["visible"].clone(), hidden["hidden"].clone()), (json!(3), json!(1)));
+    assert_eq!(
+        (hidden["visible"].clone(), hidden["hidden"].clone()),
+        (json!(3), json!(1))
+    );
 
     agent_debug(&mut session, "make_directory", json!({ "path": "exports" })).expect("mkdir");
     let first = agent_debug(
@@ -141,14 +180,28 @@ fn port_003_debug_log_filters_panel_resizes_and_saves_the_active_view() {
     .expect("first save");
     assert_eq!(first["saved"], true);
     let first_report = exported(&mut session, "exports/first.log");
-    assert_eq!(first_report.matches("[DETECTION]").count(), 3, "{first_report}");
-    assert!(first_report.contains("Filter: left-panel focus/hover animation resize events excluded"));
+    assert_eq!(
+        first_report.matches("[DETECTION]").count(),
+        3,
+        "{first_report}"
+    );
+    assert!(
+        first_report.contains("Filter: left-panel focus/hover animation resize events excluded")
+    );
     assert!(!first_report.contains("Left panel focus/hover animation"));
 
-    let shown = agent_debug(&mut session, "view", json!({ "entries": history(), "hide_tree_animation": false })).expect("view");
+    let shown = agent_debug(
+        &mut session,
+        "view",
+        json!({ "entries": history(), "hide_tree_animation": false }),
+    )
+    .expect("view");
     let shown_text = shown["text"].as_str().expect("text");
     assert!(shown_text.contains("Panel resizes shown"), "{shown_text}");
-    assert!(shown_text.contains("Left panel focus/hover animation"), "{shown_text}");
+    assert!(
+        shown_text.contains("Left panel focus/hover animation"),
+        "{shown_text}"
+    );
 
     let second = agent_debug(
         &mut session,
@@ -158,12 +211,19 @@ fn port_003_debug_log_filters_panel_resizes_and_saves_the_active_view() {
     .expect("second save");
     assert_eq!(second["saved"], true);
     let second_report = exported(&mut session, "exports/second.log");
-    assert!(second_report.contains("Filter: left-panel focus/hover animation resize events included"));
+    assert!(
+        second_report.contains("Filter: left-panel focus/hover animation resize events included")
+    );
     assert!(second_report.contains("Left panel focus/hover animation"));
     assert_eq!(second_report.matches("[DETECTION]").count(), 3);
     for forbidden in ["phase 1", "request generation", "repetition_count"] {
         assert!(!second_report.contains(forbidden), "{forbidden}");
     }
-    let missing = agent_debug(&mut session, "read_file", json!({ "path": "exports/third.log" })).expect_err("no third export");
+    let missing = agent_debug(
+        &mut session,
+        "read_file",
+        json!({ "path": "exports/third.log" }),
+    )
+    .expect_err("no third export");
     assert_eq!(missing.code, ErrorCode::NotFound);
 }

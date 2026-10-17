@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use ilium_plugin_core_settings::SettingsClient;
 use ilium_plugin_sdk::testing::FakeHost;
 use ilium_plugin_sdk::types::{ActionKind, ActionValue, ViewTarget};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 /// Path of the plugin manifest.
 pub fn manifest_path() -> PathBuf {
@@ -14,7 +14,10 @@ pub fn manifest_path() -> PathBuf {
 
 /// A client-side host with the manifest grants and the plugin activated.
 pub fn client_host() -> FakeHost {
-    let mut host = FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("client").build();
+    let mut host = FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("client")
+        .build();
     host.activate::<SettingsClient>();
     host
 }
@@ -31,19 +34,34 @@ pub fn tab_text(host: &mut FakeHost, id: &str, columns: u16, rows: u16) -> Strin
 
 /// Flip a toggle row of a tab the way the user does.
 pub fn toggle(host: &mut FakeHost, tab_id: &str, key: &str, value: bool) {
-    host.send_action(tab(tab_id), key, ActionKind::Toggled, ActionValue::Flag(value));
+    host.send_action(
+        tab(tab_id),
+        key,
+        ActionKind::Toggled,
+        ActionValue::Flag(value),
+    );
     host.settle();
 }
 
 /// Choose an option (or type a colour) in a row of a tab.
 pub fn choose(host: &mut FakeHost, tab_id: &str, key: &str, value: &str) {
-    host.send_action(tab(tab_id), key, ActionKind::Changed, ActionValue::Text(value.to_string()));
+    host.send_action(
+        tab(tab_id),
+        key,
+        ActionKind::Changed,
+        ActionValue::Text(value.to_string()),
+    );
     host.settle();
 }
 
 /// Type a number into a row of a tab and let the 600 ms auto-save elapse.
 pub fn type_number(host: &mut FakeHost, tab_id: &str, key: &str, value: f64) {
-    host.send_action(tab(tab_id), key, ActionKind::Changed, ActionValue::Number(value));
+    host.send_action(
+        tab(tab_id),
+        key,
+        ActionKind::Changed,
+        ActionValue::Number(value),
+    );
     host.advance_clock(600);
     host.settle();
 }

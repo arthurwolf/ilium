@@ -4,10 +4,12 @@ pub use crate::host_ext::*;
 use std::path::PathBuf;
 
 use ilium_plugin_core_agent_detect::{AgentDetectClient, AgentDetectServer};
-use ilium_plugin_sdk::Detector;
-use ilium_plugin_sdk::generated::exports::detector::{Classification, DetectorProcess, DetectorScreen};
+use ilium_plugin_sdk::generated::exports::detector::{
+    Classification, DetectorProcess, DetectorScreen,
+};
 use ilium_plugin_sdk::testing::{FakeHost, TreeNode};
 use ilium_plugin_sdk::types::{AgentActivity, AgentView, Intent, NodeClass, NodeId, Submission};
+use ilium_plugin_sdk::Detector;
 
 /// Path of the plugin manifest (the skeleton file, exact per the manual).
 pub fn manifest_path() -> PathBuf {
@@ -33,20 +35,28 @@ pub fn traceability_text() -> String {
 
 /// A captured screen of the existing detector suite (ilium-detect/tests/fixtures).
 pub fn fixture(name: &str) -> String {
-    let path = workspace_root().join("ilium-detect/tests/fixtures").join(name);
+    let path = workspace_root()
+        .join("ilium-detect/tests/fixtures")
+        .join(name);
     std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("fixture {path:?}: {error}"))
 }
 
 /// A server-side host with the manifest grants and the plugin activated.
 pub fn server_host() -> FakeHost {
-    let mut host = FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("server").build();
+    let mut host = FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("server")
+        .build();
     host.activate::<AgentDetectServer>();
     host
 }
 
 /// A client-side host with the manifest grants and the plugin activated.
 pub fn client_host() -> FakeHost {
-    let mut host = FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("client").build();
+    let mut host = FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("client")
+        .build();
     host.activate::<AgentDetectClient>();
     host
 }
@@ -54,9 +64,20 @@ pub fn client_host() -> FakeHost {
 /// Builds the detector screen the kernel hands to `classify` from plain screen text.
 pub fn screen_from_text(text: &str) -> DetectorScreen {
     let rows: Vec<String> = text.lines().map(str::to_string).collect();
-    let columns = rows.iter().map(|row| row.chars().count()).max().unwrap_or(0).max(80);
+    let columns = rows
+        .iter()
+        .map(|row| row.chars().count())
+        .max()
+        .unwrap_or(0)
+        .max(80);
     let cursor_row = u16::try_from(rows.len().saturating_sub(1)).unwrap_or(u16::MAX);
-    DetectorScreen { columns: u16::try_from(columns).unwrap_or(u16::MAX), rows, cursor_row, title: None, revision: 1 }
+    DetectorScreen {
+        columns: u16::try_from(columns).unwrap_or(u16::MAX),
+        rows,
+        cursor_row,
+        title: None,
+        revision: 1,
+    }
 }
 
 /// Runs `classify` of the server side on a screen text.
@@ -76,7 +97,10 @@ pub fn goal_of(signature: &str, fixture_name: &str) -> Option<String> {
 
 /// A process of the pane's tree as the kernel lists it for `identify`.
 pub fn process(name: &str, argv: &[&str]) -> DetectorProcess {
-    DetectorProcess { name: name.to_string(), argv: argv.iter().map(|argument| argument.to_string()).collect() }
+    DetectorProcess {
+        name: name.to_string(),
+        argv: argv.iter().map(|argument| argument.to_string()).collect(),
+    }
 }
 
 /// Runs `identify` of the server side on a list of processes.
@@ -118,7 +142,10 @@ pub fn plain(content: &[ilium_plugin_sdk::types::Span]) -> String {
 }
 
 /// Decoration specs with slot `slot`, in submission order.
-pub fn decorations(submissions: &[Submission], slot: &str) -> Vec<ilium_plugin_sdk::types::SetDecorationSpec> {
+pub fn decorations(
+    submissions: &[Submission],
+    slot: &str,
+) -> Vec<ilium_plugin_sdk::types::SetDecorationSpec> {
     submissions
         .iter()
         .filter_map(|submission| match &submission.intent {

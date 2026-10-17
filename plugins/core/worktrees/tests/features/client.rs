@@ -10,7 +10,11 @@ use crate::common::*;
 #[test]
 fn feature_067_the_command_sends_one_message_to_the_server_side_of_this_plugin() {
     let mut host = client_host();
-    let submitted = host.deliver_one(command_invoked(COMMAND, r#"{"branch":"fix-auth"}"#, CommandOrigin::Palette));
+    let submitted = host.deliver_one(command_invoked(
+        COMMAND,
+        r#"{"branch":"fix-auth"}"#,
+        CommandOrigin::Palette,
+    ));
     assert_eq!(submitted.len(), 1);
     match &submitted[0].intent {
         Intent::Message(spec) => {
@@ -27,8 +31,18 @@ fn feature_067_the_command_sends_one_message_to_the_server_side_of_this_plugin()
 #[test]
 fn feature_067_the_message_payload_is_the_arguments_json_bytes() {
     let mut host = client_host();
-    let submitted = host.deliver_one(command_invoked(COMMAND, r#"{"branch":"fix-auth"}"#, CommandOrigin::Palette));
-    assert_eq!(server_messages(&submitted), [("new-agent".to_string(), r#"{"branch":"fix-auth"}"#.to_string())]);
+    let submitted = host.deliver_one(command_invoked(
+        COMMAND,
+        r#"{"branch":"fix-auth"}"#,
+        CommandOrigin::Palette,
+    ));
+    assert_eq!(
+        server_messages(&submitted),
+        [(
+            "new-agent".to_string(),
+            r#"{"branch":"fix-auth"}"#.to_string()
+        )]
+    );
 }
 
 /// REQ: F-067
@@ -36,13 +50,23 @@ fn feature_067_the_message_payload_is_the_arguments_json_bytes() {
 fn feature_067_the_prefix_key_origin_sends_the_same_message() {
     let mut host = client_host();
     let submitted = host.deliver_one(command_invoked(COMMAND, "{}", CommandOrigin::Keybinding));
-    assert_eq!(server_messages(&submitted), [("new-agent".to_string(), "{}".to_string())]);
+    assert_eq!(
+        server_messages(&submitted),
+        [("new-agent".to_string(), "{}".to_string())]
+    );
 }
 
 /// REQ: F-067
 #[test]
 fn feature_067_every_origin_sends_the_message() {
-    for origin in [CommandOrigin::Keybinding, CommandOrigin::Palette, CommandOrigin::Toolbar, CommandOrigin::Menu, CommandOrigin::Voice, CommandOrigin::Cli] {
+    for origin in [
+        CommandOrigin::Keybinding,
+        CommandOrigin::Palette,
+        CommandOrigin::Toolbar,
+        CommandOrigin::Menu,
+        CommandOrigin::Voice,
+        CommandOrigin::Cli,
+    ] {
         let mut host = client_host();
         let submitted = host.deliver_one(command_invoked(COMMAND, "{}", origin));
         assert_eq!(server_messages(&submitted).len(), 1);
@@ -53,7 +77,11 @@ fn feature_067_every_origin_sends_the_message() {
 #[test]
 fn feature_067_a_command_of_another_plugin_submits_nothing() {
     let mut host = client_host();
-    let submitted = host.deliver_one(command_invoked("ilium.core.fleet/new-agent", "{}", CommandOrigin::Palette));
+    let submitted = host.deliver_one(command_invoked(
+        "ilium.core.fleet/new-agent",
+        "{}",
+        CommandOrigin::Palette,
+    ));
     assert!(submitted.is_empty());
 }
 
@@ -76,7 +104,11 @@ fn feature_067_an_event_that_is_not_a_command_submits_nothing() {
 #[test]
 fn feature_067_the_client_side_never_runs_git_itself() {
     let mut host = client_host();
-    host.deliver_one(command_invoked(COMMAND, r#"{"branch":"fix-auth"}"#, CommandOrigin::Palette));
+    host.deliver_one(command_invoked(
+        COMMAND,
+        r#"{"branch":"fix-auth"}"#,
+        CommandOrigin::Palette,
+    ));
     host.settle();
     assert!(host.process().calls().is_empty());
 }

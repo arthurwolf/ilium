@@ -11,7 +11,10 @@ const ROOT: &str = "/project";
 
 fn seeded() -> FakeHost {
     let mut host = server_host();
-    host.fs().seed(&format!("{ROOT}/.worktreeinclude"), b".env\n# comment\n\nconfig/*.toml\n");
+    host.fs().seed(
+        &format!("{ROOT}/.worktreeinclude"),
+        b".env\n# comment\n\nconfig/*.toml\n",
+    );
     host.fs().seed(&format!("{ROOT}/.env"), b"SECRET=1");
     host.fs().seed(&format!("{ROOT}/config/a.toml"), b"a=1");
     host
@@ -57,7 +60,8 @@ fn port_071_an_existing_destination_file_is_never_overwritten() {
 fn port_071_a_selected_symlink_is_rejected_and_no_pane_is_created() {
     let mut host = seeded();
     host.fs().symlink(&format!("{ROOT}/link"), "/etc/passwd");
-    host.fs().seed(&format!("{ROOT}/.worktreeinclude"), b"link\n");
+    host.fs()
+        .seed(&format!("{ROOT}/.worktreeinclude"), b"link\n");
     let submitted = create_worktree(&mut host, &json!({"branch": "fix-auth"}));
     assert!(create_panes(&submitted).is_empty());
 }
@@ -66,7 +70,10 @@ fn port_071_a_selected_symlink_is_rejected_and_no_pane_is_created() {
 #[test]
 fn port_071_a_failed_creation_removes_only_the_files_it_copied() {
     let mut host = seeded();
-    host.fs().seed(&format!("{ROOT}/.worktreeinclude"), b".env\n/etc/shadow\n../escape\n");
+    host.fs().seed(
+        &format!("{ROOT}/.worktreeinclude"),
+        b".env\n/etc/shadow\n../escape\n",
+    );
     let submitted = create_worktree(&mut host, &json!({"branch": "fix-auth"}));
     assert!(create_panes(&submitted).is_empty());
     assert_eq!(dest(&mut host, ".env"), None);
@@ -85,7 +92,11 @@ fn port_071_a_cancelled_creation_copies_nothing() {
 /// REQ: F-071
 #[test]
 fn feature_071_the_include_file_of_64_kib_is_read_and_one_byte_more_is_refused() {
-    for (size, expect_pane) in [(64 * 1024 - 1, true), (64 * 1024, true), (64 * 1024 + 1, false)] {
+    for (size, expect_pane) in [
+        (64 * 1024 - 1, true),
+        (64 * 1024, true),
+        (64 * 1024 + 1, false),
+    ] {
         let mut host = seeded();
         let mut body = b".env\n".to_vec();
         body.resize(size, b'#');
@@ -98,10 +109,15 @@ fn feature_071_the_include_file_of_64_kib_is_read_and_one_byte_more_is_refused()
 /// REQ: F-071, PORT:ilium-server/src/worktree_include.rs::byte_limit_rejects_selection_before_writing
 #[test]
 fn port_071_the_copy_limit_is_64_mib_and_larger_selections_write_nothing() {
-    for (size, expect_pane) in [(64u64 * 1024 * 1024 - 1, true), (64 * 1024 * 1024, true), (64 * 1024 * 1024 + 1, false)] {
+    for (size, expect_pane) in [
+        (64u64 * 1024 * 1024 - 1, true),
+        (64 * 1024 * 1024, true),
+        (64 * 1024 * 1024 + 1, false),
+    ] {
         let mut host = seeded();
         host.fs().seed_sparse(&format!("{ROOT}/big.bin"), size);
-        host.fs().seed(&format!("{ROOT}/.worktreeinclude"), b"big.bin\n");
+        host.fs()
+            .seed(&format!("{ROOT}/.worktreeinclude"), b"big.bin\n");
         let submitted = create_worktree(&mut host, &json!({"branch": "fix-auth"}));
         assert_eq!(!create_panes(&submitted).is_empty(), expect_pane, "{size}");
         if !expect_pane {
@@ -118,7 +134,8 @@ fn feature_071_the_copy_limit_is_1000_files() {
         for index in 0..count {
             host.fs().seed(&format!("{ROOT}/inc/f{index}"), b"x");
         }
-        host.fs().seed(&format!("{ROOT}/.worktreeinclude"), b"inc/\n");
+        host.fs()
+            .seed(&format!("{ROOT}/.worktreeinclude"), b"inc/\n");
         let submitted = create_worktree(&mut host, &json!({"branch": "fix-auth"}));
         assert_eq!(!create_panes(&submitted).is_empty(), expect_pane, "{count}");
     }
@@ -131,13 +148,18 @@ fn port_071_more_than_10000_visited_source_entries_are_refused_before_copying() 
     for index in 0..10_001 {
         host.fs().seed(&format!("{ROOT}/many/f{index}"), b"");
     }
-    host.fs().seed(&format!("{ROOT}/.worktreeinclude"), b"many/\n");
+    host.fs()
+        .seed(&format!("{ROOT}/.worktreeinclude"), b"many/\n");
     let submitted = create_worktree(&mut host, &json!({"branch": "fix-auth"}));
     assert!(create_panes(&submitted).is_empty());
 }
 
 fn sh_calls(host: &mut FakeHost) -> Vec<ilium_plugin_sdk::host::process::ProcessSpec> {
-    host.process().calls().into_iter().filter(|c| c.program == "sh").collect()
+    host.process()
+        .calls()
+        .into_iter()
+        .filter(|c| c.program == "sh")
+        .collect()
 }
 
 /// REQ: F-071
@@ -150,7 +172,12 @@ fn port_071_the_setup_command_runs_with_sh_dash_c_in_the_worktree_for_120_second
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].arguments, ["-c", "bun install"]);
     assert_eq!(calls[0].timeout_millis, 120_000);
-    assert!(calls[0].cwd.as_ref().map(|c| format!("{c:?}")).unwrap_or_default().contains("fix-auth"));
+    assert!(calls[0]
+        .cwd
+        .as_ref()
+        .map(|c| format!("{c:?}"))
+        .unwrap_or_default()
+        .contains("fix-auth"));
 }
 
 /// REQ: F-071
@@ -177,11 +204,18 @@ fn feature_071_setup_runs_after_the_worktree_exists_and_before_the_agent_pane() 
     let mut host = server_host();
     set_git(&mut host, "setup_command", json!("true")).expect("valid");
     create_worktree(&mut host, &json!({"branch": "fix-auth"}));
-    let programs: Vec<String> = host.process().calls().into_iter().map(|c| c.program).collect();
+    let programs: Vec<String> = host
+        .process()
+        .calls()
+        .into_iter()
+        .map(|c| c.program)
+        .collect();
     let git = programs.iter().position(|p| p == "git").expect("git");
     let sh = programs.iter().position(|p| p == "sh").expect("sh");
     assert!(git < sh);
-    assert!(host.order_of_calls_and_submissions().process_before_submission("sh", "create-pane"));
+    assert!(host
+        .order_of_calls_and_submissions()
+        .process_before_submission("sh", "create-pane"));
 }
 
 /// REQ: F-071
@@ -189,7 +223,15 @@ fn feature_071_setup_runs_after_the_worktree_exists_and_before_the_agent_pane() 
 fn port_071_a_failing_setup_keeps_the_worktree_creates_no_pane_and_hides_the_output() {
     let mut host = server_host();
     set_git(&mut host, "setup_command", json!("exit 3")).expect("valid");
-    host.process().on_program("sh", ilium_plugin_sdk::host::process::ProcessExit { status: Some(3), signal: None, stdout: b"TOKEN=abc".to_vec(), stderr: b"TOKEN=abc".to_vec() });
+    host.process().on_program(
+        "sh",
+        ilium_plugin_sdk::host::process::ProcessExit {
+            status: Some(3),
+            signal: None,
+            stdout: b"TOKEN=abc".to_vec(),
+            stderr: b"TOKEN=abc".to_vec(),
+        },
+    );
     let submitted = create_worktree(&mut host, &json!({"branch": "fix-auth"}));
     assert!(create_panes(&submitted).is_empty());
     assert_eq!(worktree_add_calls(&host.process().calls()).len(), 1);
@@ -223,7 +265,15 @@ fn port_071_a_cancelled_creation_never_creates_the_pane_after_setup() {
 fn port_071_large_setup_output_is_not_carried_into_any_submission() {
     let mut host = server_host();
     set_git(&mut host, "setup_command", json!("yes | head -c 10000000")).expect("valid");
-    host.process().on_program("sh", ilium_plugin_sdk::host::process::ProcessExit { status: Some(0), signal: None, stdout: vec![b'y'; 1 << 20], stderr: Vec::new() });
+    host.process().on_program(
+        "sh",
+        ilium_plugin_sdk::host::process::ProcessExit {
+            status: Some(0),
+            signal: None,
+            stdout: vec![b'y'; 1 << 20],
+            stderr: Vec::new(),
+        },
+    );
     let submitted = create_worktree(&mut host, &json!({"branch": "fix-auth"}));
     assert!(serde_json::to_string(&submitted).expect("serialises").len() < 64 * 1024);
 }
@@ -243,10 +293,15 @@ fn feature_071_setup_is_refused_on_a_platform_other_than_linux() {
 #[test]
 fn feature_071_post_create_steps_entries_run_in_priority_order_after_the_setup_command() {
     let mut host = server_host();
-    host.collect_point(POST_CREATE_STEPS).add("b", 60, json!({"title": "B", "command": "echo b"}));
-    host.collect_point(POST_CREATE_STEPS).add("a", 50, json!({"title": "A", "command": "echo a"}));
+    host.collect_point(POST_CREATE_STEPS)
+        .add("b", 60, json!({"title": "B", "command": "echo b"}));
+    host.collect_point(POST_CREATE_STEPS)
+        .add("a", 50, json!({"title": "A", "command": "echo a"}));
     create_worktree(&mut host, &json!({"branch": "fix-auth"}));
-    let commands: Vec<String> = sh_calls(&mut host).iter().map(|c| c.arguments[1].clone()).collect();
+    let commands: Vec<String> = sh_calls(&mut host)
+        .iter()
+        .map(|c| c.arguments[1].clone())
+        .collect();
     assert_eq!(commands, ["echo a", "echo b"]);
 }
 

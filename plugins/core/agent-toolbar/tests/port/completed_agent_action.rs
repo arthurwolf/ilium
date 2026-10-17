@@ -1,7 +1,7 @@
 //! Twins of completed_agent_action.rs: where the close action of a completed agent pane sits.
 //! Request/reply shape: see API_GAPS_ports.md.
-use serde_json::Value;
 use crate::common::{ask, Place};
+use serde_json::Value;
 
 fn check(place: Place, op: &str, request: &str, expected: &str) {
     let request: Value = serde_json::from_str(request).expect("request literal parses");
@@ -9,7 +9,11 @@ fn check(place: Place, op: &str, request: &str, expected: &str) {
     let reply = ask(place, op, request);
     let fields = expected.as_object().expect("expected is an object");
     for (name, value) in fields {
-        assert_eq!(&reply[name.as_str()], value, "field {name} of reply {reply}");
+        assert_eq!(
+            &reply[name.as_str()],
+            value,
+            "field {name} of reply {reply}"
+        );
     }
 }
 

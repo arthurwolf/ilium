@@ -3,66 +3,142 @@
 use crate::common::{page_text, workspace_root};
 
 const ACTION_IDS: [&str; 12] = [
-    "compact", "clear", "configure", "stop", "copy-screen", "smart-copy", "copy-last-message", "effort", "model", "fast-mode",
-    "exit", "text-selection",
+    "compact",
+    "clear",
+    "configure",
+    "stop",
+    "copy-screen",
+    "smart-copy",
+    "copy-last-message",
+    "effort",
+    "model",
+    "fast-mode",
+    "exit",
+    "text-selection",
 ];
 
 /// Rows of the toolbar action table: `[id, label, what, agents, route]`, backticks removed.
 fn action_rows() -> Vec<[String; 5]> {
     let page = page_text();
-    let start = page.find("| Action id | Label |").expect("toolbar action table");
+    let start = page
+        .find("| Action id | Label |")
+        .expect("toolbar action table");
     page[start..]
         .lines()
         .skip(2)
         .take_while(|line| line.starts_with('|'))
         .map(|line| {
-            let cells: Vec<String> = line.trim_matches('|').split('|').map(|cell| cell.trim().replace('`', "")).collect();
-            [cells[0].clone(), cells[1].clone(), cells[2].clone(), cells[3].clone(), cells[4].clone()]
+            let cells: Vec<String> = line
+                .trim_matches('|')
+                .split('|')
+                .map(|cell| cell.trim().replace('`', ""))
+                .collect();
+            [
+                cells[0].clone(),
+                cells[1].clone(),
+                cells[2].clone(),
+                cells[3].clone(),
+                cells[4].clone(),
+            ]
         })
         .collect()
 }
 
 fn row(id: &str) -> [String; 5] {
-    action_rows().into_iter().find(|row| row[0] == id).unwrap_or_else(|| panic!("row {id}"))
+    action_rows()
+        .into_iter()
+        .find(|row| row[0] == id)
+        .unwrap_or_else(|| panic!("row {id}"))
 }
 
 fn traceability_row(feature: &str) -> Vec<String> {
     let path = workspace_root().join("docs/plugins-manual/pages/reference-feature-traceability.md");
     let text = std::fs::read_to_string(path).expect("traceability page");
-    let line = text.lines().find(|line| line.starts_with(&format!("| {feature} |"))).unwrap_or_else(|| panic!("row {feature}"));
-    line.trim_matches('|').split('|').map(|cell| cell.trim().to_string()).collect()
+    let line = text
+        .lines()
+        .find(|line| line.starts_with(&format!("| {feature} |")))
+        .unwrap_or_else(|| panic!("row {feature}"));
+    line.trim_matches('|')
+        .split('|')
+        .map(|cell| cell.trim().to_string())
+        .collect()
 }
 
 /// REQ: F-035, COR-011
 #[test]
 fn doc_f_035_the_action_table_has_the_twelve_actions_in_order() {
-    let ids: Vec<String> = action_rows().into_iter().map(|row| row[0].clone()).collect();
+    let ids: Vec<String> = action_rows()
+        .into_iter()
+        .map(|row| row[0].clone())
+        .collect();
     assert_eq!(ids, ACTION_IDS);
 }
 
 /// REQ: F-035, COR-011
 #[test]
 fn doc_f_035_the_action_labels_are_as_documented() {
-    let labels: Vec<String> = action_rows().into_iter().map(|row| row[1].clone()).collect();
+    let labels: Vec<String> = action_rows()
+        .into_iter()
+        .map(|row| row[1].clone())
+        .collect();
     assert_eq!(
         labels,
-        ["Compact", "Clear", "Configure", "Stop", "Copy screen", "Smart Copy", "Copy last message", "Effort", "Model", "Fast mode", "Exit", "Text selection"]
+        [
+            "Compact",
+            "Clear",
+            "Configure",
+            "Stop",
+            "Copy screen",
+            "Smart Copy",
+            "Copy last message",
+            "Effort",
+            "Model",
+            "Fast mode",
+            "Exit",
+            "Text selection"
+        ]
     );
 }
 
 /// REQ: F-035, COR-011
 #[test]
 fn doc_f_035_actions_for_all_agents_are_stop_copy_screen_smart_copy_exit_and_text_selection() {
-    let all: Vec<String> = action_rows().into_iter().filter(|row| row[3] == "all agents").map(|row| row[0].clone()).collect();
-    assert_eq!(all, ["stop", "copy-screen", "smart-copy", "exit", "text-selection"]);
+    let all: Vec<String> = action_rows()
+        .into_iter()
+        .filter(|row| row[3] == "all agents")
+        .map(|row| row[0].clone())
+        .collect();
+    assert_eq!(
+        all,
+        [
+            "stop",
+            "copy-screen",
+            "smart-copy",
+            "exit",
+            "text-selection"
+        ]
+    );
 }
 
 /// REQ: F-035, COR-011
 #[test]
 fn doc_f_035_claude_and_codex_only_actions_are_listed() {
-    let provider: Vec<String> =
-        action_rows().into_iter().filter(|row| row[3] == "Claude Code, Codex").map(|row| row[0].clone()).collect();
-    assert_eq!(provider, ["compact", "clear", "configure", "copy-last-message", "effort", "model"]);
+    let provider: Vec<String> = action_rows()
+        .into_iter()
+        .filter(|row| row[3] == "Claude Code, Codex")
+        .map(|row| row[0].clone())
+        .collect();
+    assert_eq!(
+        provider,
+        [
+            "compact",
+            "clear",
+            "configure",
+            "copy-last-message",
+            "effort",
+            "model"
+        ]
+    );
 }
 
 /// REQ: F-035, COR-011
@@ -75,7 +151,11 @@ fn doc_f_035_fast_mode_exists_only_for_agents_that_have_it() {
 #[test]
 fn doc_f_081_compact_sends_slash_compact_or_starts_remote_compaction() {
     let compact = row("compact");
-    assert!(compact[4].starts_with("Sends /compact, or starts remote compaction when the"), "{}", compact[4]);
+    assert!(
+        compact[4].starts_with("Sends /compact, or starts remote compaction when the"),
+        "{}",
+        compact[4]
+    );
     assert!(compact[4].contains("set to remote"));
 }
 
@@ -103,7 +183,10 @@ fn doc_f_035_copy_actions_read_the_screen_or_the_transcript() {
 /// REQ: F-035
 #[test]
 fn doc_f_035_text_selection_toggles_the_terminal_selection_mode() {
-    assert_eq!(row("text-selection")[4], "Toggles the terminal selection mode");
+    assert_eq!(
+        row("text-selection")[4],
+        "Toggles the terminal selection mode"
+    );
 }
 
 /// REQ: F-035
@@ -120,7 +203,9 @@ fn doc_f_035_the_settings_sentence_names_the_four_keys_and_the_range() {
     let page = page_text();
     assert!(page.contains("The toolbar is shown when `agent_toolbar_enabled` is on (default)."));
     assert!(page.contains("`show_toolbar_labels` adds text after the icons."));
-    assert!(page.contains("`last_prompt_enabled` and its line count `last_prompt_max_lines` (1 to 20, default 4)"));
+    assert!(page.contains(
+        "`last_prompt_enabled` and its line count `last_prompt_max_lines` (1 to 20, default 4)"
+    ));
 }
 
 /// REQ: F-033

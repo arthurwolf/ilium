@@ -19,10 +19,16 @@ fn semantic_authored_video_reuse_and_missing_input_are_revalidated_twin() {
     semantic_holds();
     assert!(manifest_capabilities().contains(&"media.video".to_string()));
     let tree = direct_tree("gallery", 80, 24);
-    let clip = tree.nodes.iter().find(|node| node.key.as_deref() == Some("clip")).expect("clip video");
+    let clip = tree
+        .nodes
+        .iter()
+        .find(|node| node.key.as_deref() == Some("clip"))
+        .expect("clip video");
     match &clip.widget {
         ilium_plugin_sdk::types::Widget::Video(spec) => {
-            assert!(matches!(&spec.source, ilium_plugin_sdk::types::VideoSource::Asset(path) if path.starts_with("clips/") && path.ends_with(".webm")));
+            assert!(
+                matches!(&spec.source, ilium_plugin_sdk::types::VideoSource::Asset(path) if path.starts_with("clips/") && path.ends_with(".webm"))
+            );
         }
         other => panic!("expected a video, got {other:?}"),
     }

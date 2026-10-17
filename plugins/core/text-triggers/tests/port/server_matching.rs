@@ -38,7 +38,10 @@ fn port_003_ordered_cpu_steps_preserve_split_escape_sequences_and_resize_quiet_p
         all.extend(host.deliver_one(hit(pane, row)));
     }
     let keys: Vec<Option<String>> = all.iter().map(|s| s.dedup_key.clone()).collect();
-    assert_eq!(keys, [3u32, 1, 2].map(|row| Some(dedup_key(&rule_id(0), pane, row))));
+    assert_eq!(
+        keys,
+        [3u32, 1, 2].map(|row| Some(dedup_key(&rule_id(0), pane, row)))
+    );
 }
 
 /// REQ: PORT:ilium-server/src/text_triggers/matching.rs::refused_delivery_retains_decision_and_resumes_without_duplicate_matching
@@ -48,7 +51,10 @@ fn port_004_refused_delivery_retains_decision_and_resumes_without_duplicate_matc
     host.revoke("terminal.write");
     host.deliver_one(hit(pane, 1));
     host.settle();
-    assert!(host.outcomes().iter().any(|o| matches!(o, Outcome::Refused(e) if e.code == ErrorCode::NotPermitted)));
+    assert!(host
+        .outcomes()
+        .iter()
+        .any(|o| matches!(o, Outcome::Refused(e) if e.code == ErrorCode::NotPermitted)));
     let sent_after_refusal = host.submitted().len();
     host.deliver_one(dropped(&rule_id(0), 0));
     host.settle();
@@ -84,4 +90,3 @@ fn port_007_split_osc_highwater_tracks_library_termination_and_retained_capacity
     let submissions = host.deliver_one(matched(pane, &rule_id(0), &long, 1));
     assert_eq!(texts(&submissions), ["yes"]);
 }
-

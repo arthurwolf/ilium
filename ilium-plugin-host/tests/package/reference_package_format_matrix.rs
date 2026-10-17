@@ -13,7 +13,10 @@ fn sorted(mut entries: Vec<Z>) -> Vec<Z> {
 }
 
 fn vector_entries_z() -> Vec<Z> {
-    vec![Z::new("manifest.json", &vector_manifest()), Z::new("server.wasm", &vector_component())]
+    vec![
+        Z::new("manifest.json", &vector_manifest()),
+        Z::new("server.wasm", &vector_component()),
+    ]
 }
 
 /// REQ: PKG-157
@@ -21,7 +24,10 @@ fn vector_entries_z() -> Vec<Z> {
 fn pkg_157_zip_slip_entry_refused_path_invalid() {
     let mut entries = vector_entries_z();
     entries.insert(0, Z::new("../evil.wasm", b"x"));
-    assert_eq!(check_package_codes(&build(&entries, &Tail::default())), only("package.path-invalid"));
+    assert_eq!(
+        check_package_codes(&build(&entries, &Tail::default())),
+        only("package.path-invalid")
+    );
 }
 
 /// REQ: PKG-157
@@ -32,7 +38,10 @@ fn pkg_157_zip_slip_in_a_folder_refused_path_invalid() {
         v.push(Z::new("assets/../../evil", b"x"));
         v
     });
-    assert_eq!(check_package_codes(&build(&entries, &Tail::default())), only("package.path-invalid"));
+    assert_eq!(
+        check_package_codes(&build(&entries, &Tail::default())),
+        only("package.path-invalid")
+    );
 }
 
 /// REQ: PKG-158
@@ -40,7 +49,10 @@ fn pkg_157_zip_slip_in_a_folder_refused_path_invalid() {
 fn pkg_158_absolute_path_entry_refused_path_invalid() {
     let mut entries = vector_entries_z();
     entries.insert(0, Z::new("/etc/passwd", b"x"));
-    assert_eq!(check_package_codes(&build(&entries, &Tail::default())), only("package.path-invalid"));
+    assert_eq!(
+        check_package_codes(&build(&entries, &Tail::default())),
+        only("package.path-invalid")
+    );
 }
 
 /// REQ: PKG-159
@@ -51,7 +63,10 @@ fn pkg_159_backslash_entry_refused_path_invalid() {
         v.push(Z::new("assets\\x.png", b"x"));
         v
     });
-    assert_eq!(check_package_codes(&build(&entries, &Tail::default())), only("package.path-invalid"));
+    assert_eq!(
+        check_package_codes(&build(&entries, &Tail::default())),
+        only("package.path-invalid")
+    );
 }
 
 /// REQ: PKG-160
@@ -62,7 +77,10 @@ fn pkg_160_nul_byte_entry_refused_path_invalid() {
         v.push(Z::raw(b"assets/a\x00b.png", b"x"));
         v
     });
-    assert_eq!(check_package_codes(&build(&entries, &Tail::default())), only("package.path-invalid"));
+    assert_eq!(
+        check_package_codes(&build(&entries, &Tail::default())),
+        only("package.path-invalid")
+    );
 }
 
 /// REQ: PKG-161
@@ -86,7 +104,10 @@ fn pkg_161_server_and_capital_server_refused_unexpected_then_case_collision() {
 fn pkg_162_same_name_twice_refused_path_duplicate() {
     let mut entries = vector_entries_z();
     entries.push(Z::new("server.wasm", &vector_component()));
-    assert_eq!(stage1_codes(&build(&entries, &Tail::default())), only("package.path-duplicate"));
+    assert_eq!(
+        stage1_codes(&build(&entries, &Tail::default())),
+        only("package.path-duplicate")
+    );
 }
 
 /// REQ: PKG-163
@@ -94,7 +115,10 @@ fn pkg_162_same_name_twice_refused_path_duplicate() {
 fn pkg_163_central_offset_into_another_entry_refused_header_mismatch() {
     let mut entries = vector_entries_z();
     entries[1].offset = Some(5);
-    assert_eq!(stage1_codes(&build(&entries, &Tail::default())), only("package.header-mismatch"));
+    assert_eq!(
+        stage1_codes(&build(&entries, &Tail::default())),
+        only("package.header-mismatch")
+    );
 }
 
 /// REQ: PKG-164
@@ -107,14 +131,23 @@ fn pkg_164_one_data_byte_changed_with_crc_unchanged_refused_crc_mismatch() {
 /// REQ: PKG-165
 #[test]
 fn pkg_165_central_directory_cut_in_half_refused_zip_invalid() {
-    let bytes = build(&vector_entries_z(), &Tail { cut_cd: true, ..Tail::default() });
+    let bytes = build(
+        &vector_entries_z(),
+        &Tail {
+            cut_cd: true,
+            ..Tail::default()
+        },
+    );
     assert_eq!(stage1_codes(&bytes), only("package.zip-invalid"));
 }
 
 /// REQ: PKG-166
 #[test]
 fn pkg_166_empty_manifest_refused_manifest_json_invalid() {
-    let bytes = zip_of(&[("manifest.json", Vec::new()), ("server.wasm", vector_component())]);
+    let bytes = zip_of(&[
+        ("manifest.json", Vec::new()),
+        ("server.wasm", vector_component()),
+    ]);
     assert_eq!(check_codes(&bytes), only("manifest.json-invalid"));
 }
 
@@ -130,7 +163,10 @@ fn pkg_167_archive_without_manifest_refused_manifest_missing() {
 fn pkg_168_method_8_refused_zip_compressed() {
     let mut entries = vector_entries_z();
     entries[1].method = 8;
-    assert_eq!(stage1_codes(&build(&entries, &Tail::default())), only("package.zip-compressed"));
+    assert_eq!(
+        stage1_codes(&build(&entries, &Tail::default())),
+        only("package.zip-compressed")
+    );
 }
 
 /// REQ: PKG-169
@@ -138,20 +174,35 @@ fn pkg_168_method_8_refused_zip_compressed() {
 fn pkg_169_bit_0_set_refused_zip_encrypted() {
     let mut entries = vector_entries_z();
     entries[1].flags = 0x0801;
-    assert_eq!(stage1_codes(&build(&entries, &Tail::default())), only("package.zip-encrypted"));
+    assert_eq!(
+        stage1_codes(&build(&entries, &Tail::default())),
+        only("package.zip-encrypted")
+    );
 }
 
 /// REQ: PKG-170
 #[test]
 fn pkg_170_archive_comment_of_4_bytes_refused_zip_comment() {
-    let bytes = build(&vector_entries_z(), &Tail { comment: b"abcd".to_vec(), ..Tail::default() });
+    let bytes = build(
+        &vector_entries_z(),
+        &Tail {
+            comment: b"abcd".to_vec(),
+            ..Tail::default()
+        },
+    );
     assert_eq!(stage1_codes(&bytes), only("package.zip-comment"));
 }
 
 /// REQ: PKG-171
 #[test]
 fn pkg_171_16_bytes_after_the_end_record_refused_zip_trailing() {
-    let bytes = build(&vector_entries_z(), &Tail { trailing: vec![0u8; 16], ..Tail::default() });
+    let bytes = build(
+        &vector_entries_z(),
+        &Tail {
+            trailing: vec![0u8; 16],
+            ..Tail::default()
+        },
+    );
     assert_eq!(stage1_codes(&bytes), only("package.zip-trailing"));
 }
 
@@ -160,7 +211,10 @@ fn pkg_171_16_bytes_after_the_end_record_refused_zip_trailing() {
 fn pkg_172_symbolic_link_mode_refused_entry_symlink() {
     let mut entries = vector_entries_z();
     entries[1].external = 0xA1FF_0000;
-    assert_eq!(stage1_codes(&build(&entries, &Tail::default())), only("package.entry-symlink"));
+    assert_eq!(
+        stage1_codes(&build(&entries, &Tail::default())),
+        only("package.entry-symlink")
+    );
 }
 
 /// REQ: PKG-173
@@ -168,7 +222,10 @@ fn pkg_172_symbolic_link_mode_refused_entry_symlink() {
 fn pkg_173_directory_entry_refused_entry_directory() {
     let mut entries = vector_entries_z();
     entries.insert(0, Z::new("assets/", b""));
-    assert_eq!(stage1_codes(&build(&entries, &Tail::default())), only("package.entry-directory"));
+    assert_eq!(
+        stage1_codes(&build(&entries, &Tail::default())),
+        only("package.entry-directory")
+    );
 }
 
 /// REQ: PKG-174
@@ -179,14 +236,23 @@ fn pkg_174_unlisted_top_level_file_refused_entry_unexpected() {
         v.push(Z::new("extra.txt", b"x"));
         v
     });
-    assert_eq!(stage1_codes(&build(&entries, &Tail::default())), only("package.entry-unexpected"));
+    assert_eq!(
+        stage1_codes(&build(&entries, &Tail::default())),
+        only("package.entry-unexpected")
+    );
 }
 
 /// REQ: PKG-175
 #[test]
 fn pkg_175_manifest_and_server_swapped_refused_entry_order() {
-    let entries = vec![Z::new("server.wasm", &vector_component()), Z::new("manifest.json", &vector_manifest())];
-    assert_eq!(stage1_codes(&build(&entries, &Tail::default())), only("package.entry-order"));
+    let entries = vec![
+        Z::new("server.wasm", &vector_component()),
+        Z::new("manifest.json", &vector_manifest()),
+    ];
+    assert_eq!(
+        stage1_codes(&build(&entries, &Tail::default())),
+        only("package.entry-order")
+    );
 }
 
 /// REQ: PKG-176
@@ -198,7 +264,10 @@ fn pkg_176_4097_entries_refused_entry_limit() {
     }
     let entries = sorted(entries);
     assert_eq!(entries.len(), 4097);
-    assert_eq!(stage1_codes(&build(&entries, &Tail::default())), only("package.entry-limit"));
+    assert_eq!(
+        stage1_codes(&build(&entries, &Tail::default())),
+        only("package.entry-limit")
+    );
 }
 
 /// REQ: PKG-177
@@ -242,10 +311,17 @@ fn pkg_181_changed_component_byte_with_matching_crc_refused_file_hash() {
 fn pkg_182_manifest_letter_changed_in_a_signed_package_refused_signature_invalid() {
     let signed = vector_signed();
     let manifest = data_of(&signed, "manifest.json");
-    let at = String::from_utf8(manifest).expect("utf8").find("\"Minimal\"").expect("name") + 1;
+    let at = String::from_utf8(manifest)
+        .expect("utf8")
+        .find("\"Minimal\"")
+        .expect("name")
+        + 1;
     let bytes = patch_data(&signed, "manifest.json", at, b'N', true);
     let report = check(&bytes);
-    assert_eq!(error_codes(&report.diagnostics), only("manifest.signature-invalid"));
+    assert_eq!(
+        error_codes(&report.diagnostics),
+        only("manifest.signature-invalid")
+    );
     assert_eq!(report.last_stage, 7);
 }
 

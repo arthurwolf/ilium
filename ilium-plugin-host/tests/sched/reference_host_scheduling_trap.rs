@@ -34,7 +34,10 @@ fn hst_197_queued_calls_run_after_activate_returned_successfully() {
     scheduler.tick(base);
     scheduler.finish_activation(&who, true);
     scheduler.tick(at(base, 10));
-    assert_eq!(kinds_run(&scheduler), vec![CallKind::OnEvents, CallKind::Render]);
+    assert_eq!(
+        kinds_run(&scheduler),
+        vec![CallKind::OnEvents, CallKind::Render]
+    );
 }
 
 /// REQ: HST-197
@@ -283,7 +286,13 @@ fn hst_199_redelivered_event_sits_at_the_head_of_the_new_queue() {
 // ---- HST-200 ------------------------------------------------------------------------------
 
 /// Floods the queue until the side is stuck and returns the batches the guest saw afterwards.
-fn stuck_restart(extra_events: Vec<Event>) -> (Arc<Shared>, HarnessHandle, Arc<ilium_plugin_host::testing::FakeKernel>) {
+fn stuck_restart(
+    extra_events: Vec<Event>,
+) -> (
+    Arc<Shared>,
+    HarnessHandle,
+    Arc<ilium_plugin_host::testing::FakeKernel>,
+) {
     let kernel = kernel_with_nodes(3);
     let shared = Shared::new();
     let guest = ScriptedGuest::new(shared.clone());
@@ -307,8 +316,12 @@ fn hst_200_stuck_restart_discards_the_queued_user_input_events() {
 /// REQ: HST-200
 #[test]
 fn hst_200_stuck_restart_keeps_the_surviving_kinds() {
-    let (shared, _handle, _kernel) =
-        stuck_restart(vec![message(), durable_timer(), input_uncertain(), request_completed()]);
+    let (shared, _handle, _kernel) = stuck_restart(vec![
+        message(),
+        durable_timer(),
+        input_uncertain(),
+        request_completed(),
+    ]);
     let batches = shared.batches();
     assert_eq!(count_kind(&batches, &message()), 1);
     assert_eq!(count_kind(&batches, &durable_timer()), 1);
@@ -379,7 +392,10 @@ fn hst_201_retained_contributions_of_a_trapped_instance_are_marked_stale() {
     handle.seed_retained("decoration:1:badge");
     handle.deliver(vec![theme()]);
     settle(&mut handle);
-    assert!(handle.retained_contributions().iter().all(|entry| entry.stale));
+    assert!(handle
+        .retained_contributions()
+        .iter()
+        .all(|entry| entry.stale));
 }
 
 /// REQ: HST-201
@@ -393,8 +409,14 @@ fn hst_201_replacing_a_contribution_clears_its_stale_mark() {
     settle(&mut handle);
     handle.replace_retained("decoration:1:badge");
     let entries = handle.retained_contributions();
-    let badge = entries.iter().find(|entry| entry.key == "decoration:1:badge").expect("badge");
-    let other = entries.iter().find(|entry| entry.key == "decoration:1:other").expect("other");
+    let badge = entries
+        .iter()
+        .find(|entry| entry.key == "decoration:1:badge")
+        .expect("badge");
+    let other = entries
+        .iter()
+        .find(|entry| entry.key == "decoration:1:other")
+        .expect("other");
     assert!(!badge.stale);
     assert!(other.stale);
 }
@@ -406,5 +428,8 @@ fn hst_201_contributions_without_a_trap_are_not_stale() {
     handle.seed_retained("decoration:1:badge");
     handle.deliver(vec![theme()]);
     handle.pump(8);
-    assert!(handle.retained_contributions().iter().all(|entry| !entry.stale));
+    assert!(handle
+        .retained_contributions()
+        .iter()
+        .all(|entry| !entry.stale));
 }

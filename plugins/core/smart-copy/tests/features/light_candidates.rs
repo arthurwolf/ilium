@@ -17,7 +17,12 @@ fn host_showing(rows: &[&str]) -> (FakeHost, u64) {
 }
 
 fn screen_changed(pane: u64, first_row: u32, last_row: u32) -> Event {
-    Event::ScreenChanged(ScreenChangedEvent { pane: NodeId(pane), first_row, last_row, revision: 1 })
+    Event::ScreenChanged(ScreenChangedEvent {
+        pane: NodeId(pane),
+        first_row,
+        last_row,
+        revision: 1,
+    })
 }
 
 fn scan(rows: &[&str]) -> Vec<String> {
@@ -72,15 +77,29 @@ fn feature_065_a_seven_character_word_with_a_non_hex_letter_is_not_a_hash_candid
 #[test]
 fn feature_065_a_command_in_an_inline_code_span_is_a_candidate_without_the_backticks() {
     let lines = scan(&["run `cargo test -p ilium-server` now"]);
-    assert!(lines.contains(&"cargo test -p ilium-server".to_string()), "{lines:?}");
+    assert!(
+        lines.contains(&"cargo test -p ilium-server".to_string()),
+        "{lines:?}"
+    );
 }
 
 /// REQ: F-065
 #[test]
 fn feature_065_the_page_figure_example_offers_path_command_and_hash() {
-    let lines = scan(&["src/server/routes.rs", "`cargo test -p ilium-server`", "9f3c2ab"]);
-    for expected in ["src/server/routes.rs", "cargo test -p ilium-server", "9f3c2ab"] {
-        assert!(lines.contains(&expected.to_string()), "{expected} missing from {lines:?}");
+    let lines = scan(&[
+        "src/server/routes.rs",
+        "`cargo test -p ilium-server`",
+        "9f3c2ab",
+    ]);
+    for expected in [
+        "src/server/routes.rs",
+        "cargo test -p ilium-server",
+        "9f3c2ab",
+    ] {
+        assert!(
+            lines.contains(&expected.to_string()),
+            "{expected} missing from {lines:?}"
+        );
     }
 }
 
@@ -88,7 +107,12 @@ fn feature_065_the_page_figure_example_offers_path_command_and_hash() {
 #[test]
 fn feature_065_candidates_keep_reading_order_top_to_bottom() {
     let lines = scan(&["first src/a.rs", "then 9f3c2ab", "last src/z.rs"]);
-    let position = |text: &str| lines.iter().position(|line| line == text).unwrap_or_else(|| panic!("{text} missing"));
+    let position = |text: &str| {
+        lines
+            .iter()
+            .position(|line| line == text)
+            .unwrap_or_else(|| panic!("{text} missing"))
+    };
     assert!(position("src/a.rs") < position("9f3c2ab"));
     assert!(position("9f3c2ab") < position("src/z.rs"));
 }
@@ -97,8 +121,14 @@ fn feature_065_candidates_keep_reading_order_top_to_bottom() {
 #[test]
 fn feature_065_candidates_keep_reading_order_left_to_right() {
     let lines = scan(&["src/left.rs and src/right.rs"]);
-    let left = lines.iter().position(|line| line == "src/left.rs").expect("left");
-    let right = lines.iter().position(|line| line == "src/right.rs").expect("right");
+    let left = lines
+        .iter()
+        .position(|line| line == "src/left.rs")
+        .expect("left");
+    let right = lines
+        .iter()
+        .position(|line| line == "src/right.rs")
+        .expect("right");
     assert!(left < right);
 }
 
@@ -131,7 +161,10 @@ fn feature_065_an_empty_screen_offers_no_candidates() {
 fn feature_065_the_message_goes_to_the_client_side_of_this_plugin_on_channel_candidates() {
     let (mut host, pane) = host_showing(&["src/lib.rs"]);
     let submissions = host.deliver_one(screen_changed(pane, 0, 0));
-    assert_eq!(candidate_payloads(&submissions), vec!["src/lib.rs".to_string()]);
+    assert_eq!(
+        candidate_payloads(&submissions),
+        vec!["src/lib.rs".to_string()]
+    );
 }
 
 /// REQ: F-065
@@ -159,12 +192,21 @@ fn feature_065_light_never_calls_the_inference_provider() {
 fn feature_065_built_in_candidates_are_capped_at_1024() {
     // smart-copy.md "What the model sees and returns": at most 1024 candidates come from the built-in detectors.
     let rows: Vec<String> = (0..20)
-        .map(|row| (0..100).map(|column| format!("d{row}x{column}/f.rs")).collect::<Vec<_>>().join(" "))
+        .map(|row| {
+            (0..100)
+                .map(|column| format!("d{row}x{column}/f.rs"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
         .collect();
     let borrowed: Vec<&str> = rows.iter().map(String::as_str).collect();
     let lines = scan(&borrowed);
     assert!(lines.len() <= 1024, "{} candidates", lines.len());
-    assert!(lines.len() >= 1000, "the cap must not drop far below the limit: {}", lines.len());
+    assert!(
+        lines.len() >= 1000,
+        "the cap must not drop far below the limit: {}",
+        lines.len()
+    );
 }
 
 /// REQ: F-065
@@ -181,7 +223,10 @@ fn feature_065_a_screen_change_for_a_pane_that_is_gone_fails_nothing() {
 fn feature_065_a_repeated_path_is_offered_once_or_twice_but_never_dropped() {
     // The manual does not say whether duplicates collapse; both outcomes are allowed (MAY).
     let lines = scan(&["src/lib.rs", "src/lib.rs"]);
-    let count = lines.iter().filter(|line| line.as_str() == "src/lib.rs").count();
+    let count = lines
+        .iter()
+        .filter(|line| line.as_str() == "src/lib.rs")
+        .count();
     assert!((1..=2).contains(&count), "{lines:?}");
 }
 
@@ -208,7 +253,10 @@ fn feature_065_every_match_of_a_recogniser_is_offered_in_reading_order() {
         r#"{"id":"jira-key","kind":"ticket","regex":"[A-Z]+-[0-9]+","multiline":false,"label":"Jira key"}"#,
     );
     let lines = lines_of(&host.deliver_one(screen_changed(pane, 0, 1)));
-    let tickets: Vec<&String> = lines.iter().filter(|line| line.contains('-') && !line.contains('/')).collect();
+    let tickets: Vec<&String> = lines
+        .iter()
+        .filter(|line| line.contains('-') && !line.contains('/'))
+        .collect();
     assert_eq!(tickets, ["ABC-1", "ABC-22", "DEF-3"]);
 }
 

@@ -16,13 +16,24 @@ fn doc_aut_102_stay_under_half_of_each_default_budget() {
 /// REQ: AUT-103
 #[test]
 fn doc_aut_103_rebuildable_data_not_in_durable_bucket_perf() {
-    assert_rule("AUT-103", "MUST NOT", &["Rebuildable data MUST NOT go into a durable bucket", "16 MiB"]);
+    assert_rule(
+        "AUT-103",
+        "MUST NOT",
+        &[
+            "Rebuildable data MUST NOT go into a durable bucket",
+            "16 MiB",
+        ],
+    );
 }
 
 /// REQ: AUT-104 WARN
 #[test]
 fn doc_aut_104_own_timing_read_from_monotonic_millis() {
-    assert_rule("AUT-104", "SHOULD NOT", &["`monotonic-millis`", "SHOULD NOT depend on a host tool"]);
+    assert_rule(
+        "AUT-104",
+        "SHOULD NOT",
+        &["`monotonic-millis`", "SHOULD NOT depend on a host tool"],
+    );
 }
 
 /// REQ: AUT-105

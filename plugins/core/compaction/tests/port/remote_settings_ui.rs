@@ -27,11 +27,15 @@ fn dismissed() -> FakeHost {
 #[test]
 fn rsui_banner_text_names_the_configured_provider_and_model() {
     let host = tab();
-    let banner = host.settings_privacy_banner_text(json!({"provider": "Anthropic", "model": "claude-test-model"}));
+    let banner = host.settings_privacy_banner_text(
+        json!({"provider": "Anthropic", "model": "claude-test-model"}),
+    );
     assert!(banner.contains("Anthropic / claude-test-model"), "{banner}");
     assert!(banner.contains("privacy decision"));
     assert!(banner.contains("transcript"));
-    assert!(host.settings_privacy_banner_text(json!({"provider": null, "model": null})).contains("(no model selected)"));
+    assert!(host
+        .settings_privacy_banner_text(json!({"provider": null, "model": null}))
+        .contains("(no model selected)"));
 }
 
 /// REQ: PORT:ilium-client/src/remote_compaction_settings_ui.rs::the_tab_shows_the_banner_until_it_is_dismissed
@@ -43,13 +47,19 @@ fn rsui_the_tab_shows_the_banner_until_it_is_dismissed() {
     assert!(page.contains("[x]"));
     assert!(page.contains("sends this session's transcript"));
     assert!(page.contains("Kilo Gateway"));
-    assert_eq!(host.settings_rows().first().map(String::as_str), Some("privacy_banner"));
+    assert_eq!(
+        host.settings_rows().first().map(String::as_str),
+        Some("privacy_banner")
+    );
     host.settings_dismiss_banner();
     host.settle();
     let page = host.settings_page_text(110);
     assert!(!page.contains("Privacy decision"), "{page}");
     assert!(!page.contains("sends this session's transcript"));
-    assert_eq!(host.settings_rows().first().map(String::as_str), Some("enabled"));
+    assert_eq!(
+        host.settings_rows().first().map(String::as_str),
+        Some("enabled")
+    );
     assert!(!host.settings_banner_visible());
 }
 
@@ -65,9 +75,16 @@ fn rsui_the_page_lists_every_section_row_and_technique_description() {
         assert!(page.contains(&label), "{label}");
     }
     for expected in [
-        "[ ] Remote compaction", "[x] Redact secrets", "- 65% + *", "\u{2190} Claude Code + \u{2192}",
-        "\u{2190} Codex + \u{2192}", "the real upstream prompt", "- 20k tokens + *", "- 2 min + *",
-        "Kilo Gateway / ", "Change it there",
+        "[ ] Remote compaction",
+        "[x] Redact secrets",
+        "- 65% + *",
+        "\u{2190} Claude Code + \u{2192}",
+        "\u{2190} Codex + \u{2192}",
+        "the real upstream prompt",
+        "- 20k tokens + *",
+        "- 2 min + *",
+        "Kilo Gateway / ",
+        "Change it there",
     ] {
         assert!(page.contains(expected), "missing {expected:?} in\n{page}");
     }
@@ -104,7 +121,9 @@ fn rsui_rendered_page_and_dialog_banner_draw_and_report_the_close_button() {
     let drawn = host.settings_page_text(110);
     assert!(drawn.contains("Privacy decision"), "{drawn}");
     assert!(drawn.contains("Remote compaction"));
-    let close = host.settings_banner_close_rect().expect("close button published");
+    let close = host
+        .settings_banner_close_rect()
+        .expect("close button published");
     assert_eq!(close.row, "privacy_banner");
     assert_eq!(close.text, "[x]");
     assert_eq!((close.height, close.width), (1, 3));
@@ -118,33 +137,86 @@ fn rsui_rendered_page_and_dialog_banner_draw_and_report_the_close_button() {
 fn rsui_clicks_resolve_to_toggles_steppers_the_banner_close_button_and_inert_text() {
     let mut host = tab();
     let banner = host.settings_row_geometry("privacy_banner");
-    let close = host.settings_hit(banner.control_column + 1, banner.control_line).expect("hit");
-    assert_eq!((close.action.as_str(), close.row.as_str()), ("adjust:0", "privacy_banner"));
-    let elsewhere = host.settings_hit(banner.box_column + 6, banner.first_line + 1).expect("hit");
+    let close = host
+        .settings_hit(banner.control_column + 1, banner.control_line)
+        .expect("hit");
+    assert_eq!(
+        (close.action.as_str(), close.row.as_str()),
+        ("adjust:0", "privacy_banner")
+    );
+    let elsewhere = host
+        .settings_hit(banner.box_column + 6, banner.first_line + 1)
+        .expect("hit");
     assert_eq!(elsewhere.action, "select");
     host.settings_dismiss_banner();
     host.settle();
     let enabled = host.settings_row_geometry("enabled");
-    let toggle = host.settings_hit(enabled.box_column + 8, enabled.first_line).expect("hit");
+    let toggle = host
+        .settings_hit(enabled.box_column + 8, enabled.first_line)
+        .expect("hit");
     assert_eq!(toggle.action, "adjust:0");
     assert_eq!(toggle.row, "enabled");
     let threshold = host.settings_row_geometry("threshold");
-    assert_eq!(host.settings_hit(threshold.next_column, threshold.control_line).unwrap().action, "adjust:1");
-    assert_eq!(host.settings_hit(threshold.previous_column, threshold.control_line).unwrap().action, "adjust:-1");
-    assert_eq!(host.settings_hit(threshold.open_column, threshold.control_line).unwrap().action, "open");
-    assert_eq!(host.settings_hit(threshold.control_column + 4, threshold.control_line + 1).unwrap().action, "select");
+    assert_eq!(
+        host.settings_hit(threshold.next_column, threshold.control_line)
+            .unwrap()
+            .action,
+        "adjust:1"
+    );
+    assert_eq!(
+        host.settings_hit(threshold.previous_column, threshold.control_line)
+            .unwrap()
+            .action,
+        "adjust:-1"
+    );
+    assert_eq!(
+        host.settings_hit(threshold.open_column, threshold.control_line)
+            .unwrap()
+            .action,
+        "open"
+    );
+    assert_eq!(
+        host.settings_hit(threshold.control_column + 4, threshold.control_line + 1)
+            .unwrap()
+            .action,
+        "select"
+    );
     let claude = host.settings_row_geometry("technique:claude");
-    assert_eq!(host.settings_hit(claude.next_column, claude.control_line).unwrap().action, "adjust:1");
-    assert_eq!(host.settings_hit(claude.previous_column, claude.control_line).unwrap().action, "adjust:-1");
-    assert_eq!(host.settings_hit(claude.open_column, claude.control_line).unwrap().action, "open");
+    assert_eq!(
+        host.settings_hit(claude.next_column, claude.control_line)
+            .unwrap()
+            .action,
+        "adjust:1"
+    );
+    assert_eq!(
+        host.settings_hit(claude.previous_column, claude.control_line)
+            .unwrap()
+            .action,
+        "adjust:-1"
+    );
+    assert_eq!(
+        host.settings_hit(claude.open_column, claude.control_line)
+            .unwrap()
+            .action,
+        "open"
+    );
     let prompt = host.settings_row_geometry("custom_prompt");
-    assert_eq!(host.settings_hit(10, prompt.first_line).unwrap().action, "adjust:0");
+    assert_eq!(
+        host.settings_hit(10, prompt.first_line).unwrap().action,
+        "adjust:0"
+    );
     let model = host.settings_row_geometry("model");
-    assert_eq!(host.settings_hit(10, model.first_line).unwrap().action, "select");
+    assert_eq!(
+        host.settings_hit(10, model.first_line).unwrap().action,
+        "select"
+    );
     assert!(host.settings_hit(200, 0).is_none());
     let scrolled = host.settings_hit_after_scroll(2, 0).expect("hit");
     assert_eq!(scrolled.row, "enabled");
-    assert_ne!(host.settings_rows().first().map(String::as_str), Some("privacy_banner"));
+    assert_ne!(
+        host.settings_rows().first().map(String::as_str),
+        Some("privacy_banner")
+    );
 }
 
 /// REQ: PORT:ilium-client/src/remote_compaction_settings_ui.rs::rendered_remote_controls_use_shared_choice_and_centered_number_layouts
@@ -176,15 +248,29 @@ fn rsui_settings_screen_paints_and_hits_remote_controls_in_the_same_geometry() {
         assert!(geometry.previous_column < geometry.value_column, "{row}");
         assert!(geometry.value_right <= geometry.next_column, "{row}");
         assert!(geometry.next_column < geometry.open_column, "{row}");
-        assert_eq!(host.settings_painted_glyph(geometry.next_column, geometry.control_line), '+', "{row}");
-        assert_eq!(host.settings_hit(geometry.next_column, geometry.control_line).unwrap().action, "adjust:1");
+        assert_eq!(
+            host.settings_painted_glyph(geometry.next_column, geometry.control_line),
+            '+',
+            "{row}"
+        );
+        assert_eq!(
+            host.settings_hit(geometry.next_column, geometry.control_line)
+                .unwrap()
+                .action,
+            "adjust:1"
+        );
     }
     for row in ["technique:claude", "technique:codex"] {
         let geometry = host.settings_row_geometry(row);
         assert!(geometry.previous_column < geometry.value_column, "{row}");
         assert!(geometry.value_right <= geometry.open_column, "{row}");
         assert!(geometry.open_column < geometry.next_column, "{row}");
-        assert_eq!(host.settings_hit(geometry.open_column, geometry.control_line).unwrap().action, "open");
+        assert_eq!(
+            host.settings_hit(geometry.open_column, geometry.control_line)
+                .unwrap()
+                .action,
+            "open"
+        );
     }
 }
 
@@ -232,7 +318,10 @@ fn rsui_narrow_widths_never_panic_and_keep_the_banner_inside_the_page() {
         let lines = host.settings_page_lines(width);
         assert!(!lines.is_empty(), "width {width}");
         for line in &lines {
-            assert!(line.chars().count() <= usize::from(width), "width {width}: {line:?}");
+            assert!(
+                line.chars().count() <= usize::from(width),
+                "width {width}: {line:?}"
+            );
         }
         if let Some(close) = host.settings_banner_close_rect_at(width) {
             assert!(close.column + close.width <= width, "width {width}");

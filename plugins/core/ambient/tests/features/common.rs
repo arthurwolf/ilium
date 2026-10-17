@@ -9,7 +9,8 @@ use std::path::PathBuf;
 use ilium_plugin_core_ambient::AmbientClient;
 use ilium_plugin_sdk::testing::FakeHost;
 use ilium_plugin_sdk::types::{
-    Area, Event, PluginSide, SettingsChange, SettingsOrigin, Submission, UiNode, UiTree, ViewTarget, Widget,
+    Area, Event, PluginSide, SettingsChange, SettingsOrigin, Submission, UiNode, UiTree,
+    ViewTarget, Widget,
 };
 use ilium_plugin_sdk::Views;
 use serde_json::Value;
@@ -38,7 +39,9 @@ pub fn workspace_root() -> PathBuf {
 
 /// The text of a manual page by file stem, for example `core-plugin-ambient`.
 pub fn page(stem: &str) -> String {
-    let path = workspace_root().join("docs/plugins-manual/pages").join(format!("{stem}.md"));
+    let path = workspace_root()
+        .join("docs/plugins-manual/pages")
+        .join(format!("{stem}.md"));
     std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("page {path:?}: {error}"))
 }
 
@@ -58,7 +61,9 @@ pub fn json_blocks(page: &str) -> Vec<String> {
     let mut rest = page;
     while let Some(start) = rest.find("```json\n") {
         let after = &rest[start + "```json\n".len()..];
-        let Some(end) = after.find("\n```") else { break };
+        let Some(end) = after.find("\n```") else {
+            break;
+        };
         blocks.push(after[..end].to_string());
         rest = &after[end + 4..];
     }
@@ -71,7 +76,9 @@ pub fn term_blocks(page: &str) -> Vec<String> {
     let mut rest = page;
     while let Some(start) = rest.find("<pre class=\"term\">") {
         let after = &rest[start + "<pre class=\"term\">".len()..];
-        let Some(end) = after.find("</pre>") else { break };
+        let Some(end) = after.find("</pre>") else {
+            break;
+        };
         let mut text = String::new();
         let mut in_tag = false;
         for symbol in after[..end].chars() {
@@ -82,7 +89,10 @@ pub fn term_blocks(page: &str) -> Vec<String> {
                 _ => {}
             }
         }
-        let text = text.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">");
+        let text = text
+            .replace("&amp;", "&")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">");
         blocks.push(text.trim_end_matches('\n').to_string());
         rest = &after[end + 6..];
     }
@@ -98,14 +108,22 @@ pub fn table_row(text: &str, first_cell: &str) -> Vec<String> {
             cells.len() > 2 && cells[1] == first_cell
         })
         .unwrap_or_else(|| panic!("no table row starting with {first_cell}"));
-    let mut cells: Vec<String> = line.split('|').map(|cell| cell.trim().to_string()).collect();
+    let mut cells: Vec<String> = line
+        .split('|')
+        .map(|cell| cell.trim().to_string())
+        .collect();
     cells.remove(0);
     cells.pop();
     cells
 }
 
 pub fn strings(value: &Value) -> Vec<String> {
-    value.as_array().expect("array").iter().map(|item| item.as_str().expect("string").to_string()).collect()
+    value
+        .as_array()
+        .expect("array")
+        .iter()
+        .map(|item| item.as_str().expect("string").to_string())
+        .collect()
 }
 
 /// The `Complete manifest` block of the page (the second ```json fence).
@@ -122,7 +140,10 @@ pub fn fragment_on_page() -> Value {
 
 /// The rows of the one `look` section of the `animations` tab in the manifest.
 pub fn manifest_rows() -> Vec<Value> {
-    manifest_value()["contributes"]["settings"][0]["sections"][0]["rows"].as_array().expect("rows").clone()
+    manifest_value()["contributes"]["settings"][0]["sections"][0]["rows"]
+        .as_array()
+        .expect("rows")
+        .clone()
 }
 
 /// The manifest row with this `key`.
@@ -134,7 +155,10 @@ pub fn row(key: &str) -> Value {
 }
 
 pub fn client_host() -> FakeHost {
-    FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("client").build()
+    FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("client")
+        .build()
 }
 
 pub fn activated_client() -> FakeHost {
@@ -160,12 +184,19 @@ pub fn render_direct(view: ViewTarget, columns: u16, rows: u16) -> UiTree {
 
 /// The nodes of a tree whose widget satisfies `matches`.
 pub fn nodes_where(tree: &UiTree, matches: impl Fn(&Widget) -> bool) -> Vec<UiNode> {
-    tree.nodes.iter().filter(|node| matches(&node.widget)).cloned().collect()
+    tree.nodes
+        .iter()
+        .filter(|node| matches(&node.widget))
+        .cloned()
+        .collect()
 }
 
 /// The node with this widget key.
 pub fn node_by_key(tree: &UiTree, key: &str) -> Option<UiNode> {
-    tree.nodes.iter().find(|node| node.key.as_deref() == Some(key)).cloned()
+    tree.nodes
+        .iter()
+        .find(|node| node.key.as_deref() == Some(key))
+        .cloned()
 }
 
 /// Every `set-kernel-setting`-like submission is a `Submission`; this only counts them.
@@ -179,7 +210,8 @@ pub fn submission_count(submissions: &[Submission]) -> usize {
 
 /// Seeds one global-storage value before the plugin runs (the plugin keeps `last_suggestion` there).
 pub fn seed_global_storage(host: &mut FakeHost, key: &str, value: &[u8]) {
-    host.storage_mut().put(ilium_plugin_sdk::host::storage::Bucket::Global, key, value);
+    host.storage_mut()
+        .put(ilium_plugin_sdk::host::storage::Bucket::Global, key, value);
 }
 
 /// Sets the stored values of one kernel settings tab, as the kernel would return them from `read`.

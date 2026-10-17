@@ -80,7 +80,13 @@ pub fn record_types(output: &CliOutput) -> Vec<String> {
     output
         .stdout_jsonl
         .iter()
-        .map(|record| record.get("type").and_then(Value::as_str).unwrap_or("").to_owned())
+        .map(|record| {
+            record
+                .get("type")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_owned()
+        })
         .collect()
 }
 
@@ -97,7 +103,12 @@ pub fn error_code(output: &CliOutput) -> Option<String> {
 pub fn rules_of(output: &CliOutput, record_type: &str) -> Vec<String> {
     records_of(output, record_type)
         .iter()
-        .filter_map(|record| record.get("rule").and_then(Value::as_str).map(str::to_owned))
+        .filter_map(|record| {
+            record
+                .get("rule")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
         .collect()
 }
 
@@ -135,13 +146,16 @@ pub fn write_bytes(dir: &Path, relative: &str, bytes: &[u8]) {
 
 /// Reads a text file below `dir`.
 pub fn read_text(dir: &Path, relative: &str) -> String {
-    std::fs::read_to_string(dir.join(relative)).unwrap_or_else(|error| panic!("read {relative}: {error}"))
+    std::fs::read_to_string(dir.join(relative))
+        .unwrap_or_else(|error| panic!("read {relative}: {error}"))
 }
 
 /// Every file below `dir` as sorted relative paths with `/` separators.
 pub fn tree_of(dir: &Path) -> Vec<String> {
     fn walk(base: &Path, current: &Path, out: &mut Vec<String>) {
-        let Ok(entries) = std::fs::read_dir(current) else { return };
+        let Ok(entries) = std::fs::read_dir(current) else {
+            return;
+        };
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
@@ -179,7 +193,11 @@ pub fn base_manifest() -> Value {
 
 /// Writes `manifest.json` into `dir`.
 pub fn write_manifest(dir: &Path, manifest: &Value) {
-    write_text(dir, "manifest.json", &serde_json::to_string_pretty(manifest).expect("json"));
+    write_text(
+        dir,
+        "manifest.json",
+        &serde_json::to_string_pretty(manifest).expect("json"),
+    );
 }
 
 /// The README of a fresh project: grants explained, build and test commands.
@@ -302,20 +320,22 @@ pub fn write_dist(dir: &Path, side: &str, bytes: &[u8]) {
 }
 
 const SHA256_K: [u32; 64] = [
-    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98,
-    0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786,
-    0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8,
-    0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
-    0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819,
-    0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a,
-    0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7,
-    0xc67178f2,
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
 ];
 
 /// SHA-256 of `data` as 64 lowercase hexadecimal characters.
 pub fn sha256_hex(data: &[u8]) -> String {
-    let mut state: [u32; 8] =
-        [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+    let mut state: [u32; 8] = [
+        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
+        0x5be0cd19,
+    ];
     let mut padded = data.to_vec();
     padded.push(0x80);
     while padded.len() % 64 != 56 {
@@ -325,22 +345,47 @@ pub fn sha256_hex(data: &[u8]) -> String {
     for block in padded.chunks(64) {
         let mut w = [0u32; 64];
         for index in 0..16 {
-            w[index] = u32::from_be_bytes([block[index * 4], block[index * 4 + 1], block[index * 4 + 2], block[index * 4 + 3]]);
+            w[index] = u32::from_be_bytes([
+                block[index * 4],
+                block[index * 4 + 1],
+                block[index * 4 + 2],
+                block[index * 4 + 3],
+            ]);
         }
         for index in 16..64 {
-            let s0 = w[index - 15].rotate_right(7) ^ w[index - 15].rotate_right(18) ^ (w[index - 15] >> 3);
-            let s1 = w[index - 2].rotate_right(17) ^ w[index - 2].rotate_right(19) ^ (w[index - 2] >> 10);
-            w[index] = w[index - 16].wrapping_add(s0).wrapping_add(w[index - 7]).wrapping_add(s1);
+            let s0 = w[index - 15].rotate_right(7)
+                ^ w[index - 15].rotate_right(18)
+                ^ (w[index - 15] >> 3);
+            let s1 = w[index - 2].rotate_right(17)
+                ^ w[index - 2].rotate_right(19)
+                ^ (w[index - 2] >> 10);
+            w[index] = w[index - 16]
+                .wrapping_add(s0)
+                .wrapping_add(w[index - 7])
+                .wrapping_add(s1);
         }
         let mut v = state;
         for index in 0..64 {
             let s1 = v[4].rotate_right(6) ^ v[4].rotate_right(11) ^ v[4].rotate_right(25);
             let choice = (v[4] & v[5]) ^ ((!v[4]) & v[6]);
-            let t1 = v[7].wrapping_add(s1).wrapping_add(choice).wrapping_add(SHA256_K[index]).wrapping_add(w[index]);
+            let t1 = v[7]
+                .wrapping_add(s1)
+                .wrapping_add(choice)
+                .wrapping_add(SHA256_K[index])
+                .wrapping_add(w[index]);
             let s0 = v[0].rotate_right(2) ^ v[0].rotate_right(13) ^ v[0].rotate_right(22);
             let majority = (v[0] & v[1]) ^ (v[0] & v[2]) ^ (v[1] & v[2]);
             let t2 = s0.wrapping_add(majority);
-            v = [t1.wrapping_add(t2), v[0], v[1], v[2], v[3].wrapping_add(t1), v[4], v[5], v[6]];
+            v = [
+                t1.wrapping_add(t2),
+                v[0],
+                v[1],
+                v[2],
+                v[3].wrapping_add(t1),
+                v[4],
+                v[5],
+                v[6],
+            ];
         }
         for index in 0..8 {
             state[index] = state[index].wrapping_add(v[index]);
@@ -363,7 +408,10 @@ pub fn packed_manifest(files: &[(&str, &[u8])]) -> Vec<u8> {
 /// An unsigned `.iliumpkg` of the base manifest holding `dist/server.wasm`.
 pub fn unsigned_package(component: &[u8]) -> Vec<u8> {
     ilium_plugin_host::package::write_package(&[
-        ("manifest.json".to_owned(), packed_manifest(&[("dist/server.wasm", component)])),
+        (
+            "manifest.json".to_owned(),
+            packed_manifest(&[("dist/server.wasm", component)]),
+        ),
         ("dist/server.wasm".to_owned(), component.to_vec()),
     ])
     .expect("package")

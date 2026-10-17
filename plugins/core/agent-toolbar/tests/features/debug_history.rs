@@ -6,7 +6,10 @@ use serde_json::Value;
 
 use crate::common::*;
 
-const GOLDEN_47: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/features/golden/debug_history_47.txt");
+const GOLDEN_47: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/features/golden/debug_history_47.txt"
+);
 /// 2030-01-01 14:06:00 UTC: the "now" of the page figure; its entries are inside the last hour.
 const NOW_MS: u64 = CLOCK_START_MS + (14 * 3600 + 6 * 60) * 1000;
 const HOUR_MS: u64 = 3_600_000;
@@ -24,17 +27,31 @@ fn history_host() -> (ilium_plugin_sdk::testing::FakeHost, u64) {
 }
 
 fn request_history(host: &mut ilium_plugin_sdk::testing::FakeHost, pane: u64) -> Vec<Value> {
-    let submissions = host.deliver_one(message_from(PluginSide::Client, "history", pane.to_string().as_bytes()));
+    let submissions = host.deliver_one(message_from(
+        PluginSide::Client,
+        "history",
+        pane.to_string().as_bytes(),
+    ));
     let sent = messages(&submissions);
     assert_eq!(sent.len(), 1, "{sent:?}");
-    assert_eq!((sent[0].0.as_str(), sent[0].1, sent[0].2.as_str()), (PLUGIN_ID, PluginSide::Client, "history"));
-    serde_json::from_slice::<Value>(&sent[0].3).expect("payload is JSON").as_array().expect("a JSON array").clone()
+    assert_eq!(
+        (sent[0].0.as_str(), sent[0].1, sent[0].2.as_str()),
+        (PLUGIN_ID, PluginSide::Client, "history")
+    );
+    serde_json::from_slice::<Value>(&sent[0].3)
+        .expect("payload is JSON")
+        .as_array()
+        .expect("a JSON array")
+        .clone()
 }
 
 fn figure_entries(host: &mut ilium_plugin_sdk::testing::FakeHost, pane: u64) {
-    host.journal().append(pane, at(14, 2, 11), "input-sent", "/compact");
-    host.journal().append(pane, at(14, 2, 12), "activity", "idle to working");
-    host.journal().append(pane, at(14, 5, 40), "activity", "working to approval");
+    host.journal()
+        .append(pane, at(14, 2, 11), "input-sent", "/compact");
+    host.journal()
+        .append(pane, at(14, 2, 12), "activity", "idle to working");
+    host.journal()
+        .append(pane, at(14, 5, 40), "activity", "working to approval");
 }
 
 /// REQ: F-035
@@ -43,7 +60,15 @@ fn f_035_history_command_on_a_row_is_forwarded_with_the_pane_id() {
     let mut host = client_host();
     let submissions = host.deliver_one(command_on("history", CommandOrigin::RowAction, Some(12)));
     let sent = messages(&submissions);
-    assert_eq!(sent, vec![(PLUGIN_ID.to_string(), PluginSide::Server, "history".to_string(), b"12".to_vec())]);
+    assert_eq!(
+        sent,
+        vec![(
+            PLUGIN_ID.to_string(),
+            PluginSide::Server,
+            "history".to_string(),
+            b"12".to_vec()
+        )]
+    );
 }
 
 /// REQ: F-035
@@ -64,8 +89,14 @@ fn f_035_history_reply_lists_at_kind_and_detail_per_entry() {
 fn f_035_history_keeps_the_journal_order() {
     let (mut host, pane) = history_host();
     figure_entries(&mut host, pane);
-    let details: Vec<String> = request_history(&mut host, pane).iter().map(|row| row["detail"].as_str().unwrap().to_string()).collect();
-    assert_eq!(details, ["/compact", "idle to working", "working to approval"]);
+    let details: Vec<String> = request_history(&mut host, pane)
+        .iter()
+        .map(|row| row["detail"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(
+        details,
+        ["/compact", "idle to working", "working to approval"]
+    );
 }
 
 /// REQ: F-035
@@ -79,9 +110,14 @@ fn f_035_history_of_an_empty_journal_is_an_empty_array() {
 #[test]
 fn f_035_history_reads_only_the_last_hour() {
     let (mut host, pane) = history_host();
-    host.journal().append(pane, NOW_MS - HOUR_MS - 1, "activity", "too old");
-    host.journal().append(pane, NOW_MS - HOUR_MS + 1, "activity", "just inside");
-    let details: Vec<String> = request_history(&mut host, pane).iter().map(|row| row["detail"].as_str().unwrap().to_string()).collect();
+    host.journal()
+        .append(pane, NOW_MS - HOUR_MS - 1, "activity", "too old");
+    host.journal()
+        .append(pane, NOW_MS - HOUR_MS + 1, "activity", "just inside");
+    let details: Vec<String> = request_history(&mut host, pane)
+        .iter()
+        .map(|row| row["detail"].as_str().unwrap().to_string())
+        .collect();
     assert_eq!(details, ["just inside"]);
 }
 
@@ -90,7 +126,12 @@ fn f_035_history_reads_only_the_last_hour() {
 fn f_035_history_reads_at_most_50_entries() {
     let (mut host, pane) = history_host();
     for index in 0..51u64 {
-        host.journal().append(pane, NOW_MS - 1_000 + index, "activity", &format!("entry {index}"));
+        host.journal().append(
+            pane,
+            NOW_MS - 1_000 + index,
+            "activity",
+            &format!("entry {index}"),
+        );
     }
     assert!(request_history(&mut host, pane).len() <= JOURNAL_LIMIT);
 }
@@ -100,7 +141,12 @@ fn f_035_history_reads_at_most_50_entries() {
 fn f_035_history_of_exactly_50_entries_returns_all_of_them() {
     let (mut host, pane) = history_host();
     for index in 0..50u64 {
-        host.journal().append(pane, NOW_MS - 1_000 + index, "activity", &format!("entry {index}"));
+        host.journal().append(
+            pane,
+            NOW_MS - 1_000 + index,
+            "activity",
+            &format!("entry {index}"),
+        );
     }
     assert_eq!(request_history(&mut host, pane).len(), 50);
 }
@@ -110,7 +156,12 @@ fn f_035_history_of_exactly_50_entries_returns_all_of_them() {
 fn f_035_history_of_49_entries_returns_49() {
     let (mut host, pane) = history_host();
     for index in 0..49u64 {
-        host.journal().append(pane, NOW_MS - 1_000 + index, "activity", &format!("entry {index}"));
+        host.journal().append(
+            pane,
+            NOW_MS - 1_000 + index,
+            "activity",
+            &format!("entry {index}"),
+        );
     }
     assert_eq!(request_history(&mut host, pane).len(), 49);
 }
@@ -121,7 +172,8 @@ fn f_035_history_of_one_pane_excludes_the_entries_of_another() {
     let (mut host, pane) = history_host();
     let other = add_agent_pane(&mut host, "codex", "codex", AgentActivity::Working);
     host.journal().append(pane, NOW_MS - 10, "activity", "mine");
-    host.journal().append(other, NOW_MS - 10, "activity", "theirs");
+    host.journal()
+        .append(other, NOW_MS - 10, "activity", "theirs");
     let rows = request_history(&mut host, pane);
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0]["detail"], "mine");
@@ -144,7 +196,11 @@ fn client_with_history(host_pane_name: &str) -> (ilium_plugin_sdk::testing::Fake
         {"at": at(14, 2, 12), "kind": "activity", "detail": "idle to working"},
         {"at": at(14, 5, 40), "kind": "activity", "detail": "working to approval"},
     ]);
-    host.deliver_one(message_from(PluginSide::Server, "history", payload.to_string().as_bytes()));
+    host.deliver_one(message_from(
+        PluginSide::Server,
+        "history",
+        payload.to_string().as_bytes(),
+    ));
     (host, pane)
 }
 
@@ -175,7 +231,11 @@ fn f_035_popup_titles_itself_debug_history_and_has_the_three_columns() {
     let screen = host.render(popup(), 60, 8);
     assert!(screen.find("Debug history").is_some());
     let header = screen.row(1);
-    let (time, kind, detail) = (header.find("Time"), header.find("Kind"), header.find("Detail"));
+    let (time, kind, detail) = (
+        header.find("Time"),
+        header.find("Kind"),
+        header.find("Detail"),
+    );
     assert!(time.is_some() && time < kind && kind < detail, "{header:?}");
 }
 
@@ -194,7 +254,10 @@ fn f_035_popup_shows_the_time_as_hours_minutes_seconds_in_utc() {
 fn f_035_popup_rows_follow_the_entry_order() {
     let (mut host, _pane) = client_with_history("claude");
     let screen = host.render(popup(), 60, 8);
-    let rows: Vec<u16> = ["/compact", "idle to working", "working to approval"].iter().map(|text| screen.find(text).expect("row").0).collect();
+    let rows: Vec<u16> = ["/compact", "idle to working", "working to approval"]
+        .iter()
+        .map(|text| screen.find(text).expect("row").0)
+        .collect();
     assert!(rows[0] < rows[1] && rows[1] < rows[2], "{rows:?}");
 }
 
@@ -205,10 +268,16 @@ fn f_035_popup_renders_at_widths_40_80_and_120_without_losing_the_header() {
         let (mut host, _pane) = client_with_history("claude");
         let screen = host.render(popup(), width, 8);
         for label in ["Time", "Kind", "Detail"] {
-            assert!(screen.find(label).is_some(), "{label} missing at {width} columns");
+            assert!(
+                screen.find(label).is_some(),
+                "{label} missing at {width} columns"
+            );
         }
         for line in screen.text().lines() {
-            assert!(line.chars().count() <= usize::from(width), "row wider than {width}");
+            assert!(
+                line.chars().count() <= usize::from(width),
+                "row wider than {width}"
+            );
         }
     }
 }
@@ -220,10 +289,20 @@ fn f_035_popup_render_is_pure() {
     let first = host.render(popup(), 60, 8).text();
     let second = host.render(popup(), 60, 8).text();
     assert_eq!(first, second);
-    for (needle, time, kind) in [("/compact", "14:02:11", "input-sent"), ("idle to working", "14:02:12", "activity"), ("working to approval", "14:05:40", "activity")] {
-        let row = first.lines().find(|line| line.contains(needle)).unwrap_or_else(|| panic!("{needle} row missing"));
+    for (needle, time, kind) in [
+        ("/compact", "14:02:11", "input-sent"),
+        ("idle to working", "14:02:12", "activity"),
+        ("working to approval", "14:05:40", "activity"),
+    ] {
+        let row = first
+            .lines()
+            .find(|line| line.contains(needle))
+            .unwrap_or_else(|| panic!("{needle} row missing"));
         assert!(row.contains(time) && row.contains(kind), "{row:?}");
-        assert!(row.find(time) < row.find(kind) && row.find(kind) < row.find(needle), "{row:?}");
+        assert!(
+            row.find(time) < row.find(kind) && row.find(kind) < row.find(needle),
+            "{row:?}"
+        );
     }
 }
 

@@ -395,7 +395,11 @@ impl UserRig {
     }
 
     /// Starts an install without waiting for its review.
-    pub fn install_file_nonblocking(&mut self, package: &PackageSpec, args: &[&str]) -> PendingInstall {
+    pub fn install_file_nonblocking(
+        &mut self,
+        package: &PackageSpec,
+        args: &[&str],
+    ) -> PendingInstall {
         unimplemented!("host::testing::user_rig::UserRig::install_file_nonblocking")
     }
 

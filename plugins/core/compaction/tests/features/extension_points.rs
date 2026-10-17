@@ -11,7 +11,11 @@ const BEFORE_COMPACT: &str = "ilium.core.compaction/before-compact";
 const TOPIC_FINISHED: &str = "ilium.core.compaction/finished";
 
 fn start(host: &mut ilium_plugin_sdk::testing::FakeHost, pane: u64) {
-    host.deliver_one(command_on(COMPACT_COMMAND, CommandOrigin::Palette, Some(pane)));
+    host.deliver_one(command_on(
+        COMPACT_COMMAND,
+        CommandOrigin::Palette,
+        Some(pane),
+    ));
 }
 
 /// REQ: F-080
@@ -20,7 +24,10 @@ fn doc_extension_table_lists_techniques_as_a_standard_collect_point() {
     let row = table_row(&page_text(), "| `techniques` |");
     assert_eq!(row[2], "collect");
     assert_eq!(row[3], "Add a compaction technique.");
-    assert_eq!(row[4], "entry: id, title, service (summarises a transcript)");
+    assert_eq!(
+        row[4],
+        "entry: id, title, service (summarises a transcript)"
+    );
     assert_eq!(row[5], "standard");
 }
 
@@ -38,7 +45,9 @@ fn doc_extension_table_lists_before_compact_as_a_standard_veto_hook() {
 fn doc_service_and_topic_are_named_on_the_page() {
     let page = page_text();
     assert!(page.contains("`ilium.core.compaction/compact`: start: start a compaction of a pane"));
-    assert!(page.contains("`ilium.core.compaction/finished`: { pane, tokens_before, tokens_after }"));
+    assert!(
+        page.contains("`ilium.core.compaction/finished`: { pane, tokens_before, tokens_after }")
+    );
 }
 
 /// REQ: F-080
@@ -75,7 +84,10 @@ fn extension_080_before_compact_is_asked_once_before_the_job_with_pane_technique
 #[test]
 fn extension_080_a_refusing_contributor_stops_the_compaction() {
     let (mut host, pane) = server_with_transcript(&transcript_of(500));
-    host.set_hook_reply(BEFORE_COMPACT, HookReply::Refuse("a test run is active".to_string()));
+    host.set_hook_reply(
+        BEFORE_COMPACT,
+        HookReply::Refuse("a test run is active".to_string()),
+    );
     start(&mut host, pane);
     assert!(host.jobs().list().is_empty());
 }
@@ -84,9 +96,14 @@ fn extension_080_a_refusing_contributor_stops_the_compaction() {
 #[test]
 fn extension_080_a_refusal_leaves_the_agent_running_and_the_pane_unfrozen() {
     let (mut host, pane) = server_with_transcript(&transcript_of(500));
-    host.set_hook_reply(BEFORE_COMPACT, HookReply::Refuse("a test run is active".to_string()));
+    host.set_hook_reply(
+        BEFORE_COMPACT,
+        HookReply::Refuse("a test run is active".to_string()),
+    );
     start(&mut host, pane);
-    let frozen = intents(&host.submitted()).iter().any(|intent| matches!(intent, ilium_plugin_sdk::types::Intent::FreezePane(_)));
+    let frozen = intents(&host.submitted())
+        .iter()
+        .any(|intent| matches!(intent, ilium_plugin_sdk::types::Intent::FreezePane(_)));
     assert!(!frozen);
 }
 
@@ -134,7 +151,13 @@ fn extension_080_a_finished_compaction_publishes_the_finished_topic_with_pane_an
     let (mut host, pane) = server_with_transcript(&transcript_of(500));
     start(&mut host, pane);
     let request = host.jobs().list()[0].request;
-    host.jobs().finish(request, Ok(b"1. Primary Request and Intent: x\n7. Pending Tasks: none\n8. Current Work: y".to_vec()));
+    host.jobs().finish(
+        request,
+        Ok(
+            b"1. Primary Request and Intent: x\n7. Pending Tasks: none\n8. Current Work: y"
+                .to_vec(),
+        ),
+    );
     let topics = host.published_topics();
     assert_eq!(topics.len(), 1);
     assert_eq!(topics[0].0, TOPIC_FINISHED);
@@ -151,7 +174,11 @@ fn extension_080_a_failed_compaction_publishes_no_finished_topic() {
     let (mut host, pane) = server_with_transcript(&transcript_of(500));
     start(&mut host, pane);
     let request = host.jobs().list()[0].request;
-    let error = ilium_plugin_sdk::types::PluginError { code: ErrorCode::Internal, message: "failed".to_string(), retry_after_ms: None };
+    let error = ilium_plugin_sdk::types::PluginError {
+        code: ErrorCode::Internal,
+        message: "failed".to_string(),
+        retry_after_ms: None,
+    };
     host.jobs().finish(request, Err(error));
     assert!(host.published_topics().is_empty());
 }
@@ -161,9 +188,24 @@ fn extension_080_a_failed_compaction_publishes_no_finished_topic() {
 fn extension_080_the_compact_service_starts_a_compaction_of_the_named_pane() {
     let mut session = FakeSession::new();
     session.install_core("compaction").start();
-    let pane = add_agent_pane(session.server(PLUGIN_ID), "claude", "claude", ilium_plugin_sdk::types::AgentActivity::Idle);
-    session.server(PLUGIN_ID).agents().set_transcript(pane, transcript_of(500));
-    session.call_service("ilium.core.agent-toolbar", "ilium.core.compaction/compact", "^0.1", &json!({ "pane": pane }).to_string()).expect("service answers");
+    let pane = add_agent_pane(
+        session.server(PLUGIN_ID),
+        "claude",
+        "claude",
+        ilium_plugin_sdk::types::AgentActivity::Idle,
+    );
+    session
+        .server(PLUGIN_ID)
+        .agents()
+        .set_transcript(pane, transcript_of(500));
+    session
+        .call_service(
+            "ilium.core.agent-toolbar",
+            "ilium.core.compaction/compact",
+            "^0.1",
+            &json!({ "pane": pane }).to_string(),
+        )
+        .expect("service answers");
     assert_eq!(session.server(PLUGIN_ID).jobs().list().len(), 1);
 }
 
@@ -173,7 +215,12 @@ fn extension_080_the_compact_service_refuses_an_unknown_pane_with_not_found() {
     let mut session = FakeSession::new();
     session.install_core("compaction").start();
     let error = session
-        .call_service("ilium.core.agent-toolbar", "ilium.core.compaction/compact", "^0.1", &json!({ "pane": 4_242 }).to_string())
+        .call_service(
+            "ilium.core.agent-toolbar",
+            "ilium.core.compaction/compact",
+            "^0.1",
+            &json!({ "pane": 4_242 }).to_string(),
+        )
         .expect_err("no such pane");
     assert_eq!(error.code, ErrorCode::NotFound);
 }
@@ -184,7 +231,12 @@ fn extension_080_the_compact_service_refuses_a_request_without_a_pane_with_inval
     let mut session = FakeSession::new();
     session.install_core("compaction").start();
     let error = session
-        .call_service("ilium.core.agent-toolbar", "ilium.core.compaction/compact", "^0.1", "{}")
+        .call_service(
+            "ilium.core.agent-toolbar",
+            "ilium.core.compaction/compact",
+            "^0.1",
+            "{}",
+        )
         .expect_err("pane missing");
     assert_eq!(error.code, ErrorCode::InvalidArgument);
 }
@@ -197,6 +249,10 @@ fn extension_080_a_contributed_technique_appears_in_the_technique_rows_of_the_se
         "ilium.core.compaction/techniques",
         vec![json!({ "id": "acme.terse", "title": "Terse", "service": "acme.terse/summarise" })],
     );
-    let screen = host.render(ilium_plugin_sdk::types::ViewTarget::SettingsPage("remote-compaction".to_string()), 120, 40);
+    let screen = host.render(
+        ilium_plugin_sdk::types::ViewTarget::SettingsPage("remote-compaction".to_string()),
+        120,
+        40,
+    );
     assert!(screen.text().contains("Terse"));
 }

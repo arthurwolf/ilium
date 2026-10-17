@@ -23,7 +23,12 @@ fn port_043_command_hint_prefixes_pane_titles() {
 #[test]
 fn port_043_corrective_retry_repeats_instructions() {
     let mut host = host_with_two_panes();
-    host.settings().set("inference.instructions.organization", json!("Project convention")).expect("setting accepted");
+    host.settings()
+        .set(
+            "inference.instructions.organization",
+            json!("Project convention"),
+        )
+        .expect("setting accepted");
     host.settle();
     host.deliver_one(finished(1));
     host.settle();
@@ -33,7 +38,10 @@ fn port_043_corrective_retry_repeats_instructions() {
     let requests = restructure_requests(&host);
     assert_eq!(requests.len(), 2);
     for (_, request) in &requests {
-        assert!(request.messages.iter().any(|message| message.content.contains("Project convention")));
+        assert!(request
+            .messages
+            .iter()
+            .any(|message| message.content.contains("Project convention")));
     }
 }
 
@@ -75,7 +83,9 @@ fn port_043_invalid_plans_are_not_applied() {
 #[test]
 fn port_043_large_budget_is_accepted() {
     let mut host = host_with_two_panes();
-    host.settings().set("restructure_prompt_token_limit", json!(200000)).expect("setting accepted");
+    host.settings()
+        .set("restructure_prompt_token_limit", json!(200000))
+        .expect("setting accepted");
     host.settle();
     host.deliver_one(finished(1));
     host.settle();
@@ -107,7 +117,9 @@ fn port_043_non_terminal_panes_ignore_command_hints() {
     ], "animations": {"definitions": [], "project": "none"}}).to_string();
     host.complete_inference(id, completion(&reply));
     host.settle();
-    assert!(!applied_titles(&host).iter().any(|title| title.starts_with("[vim]")));
+    assert!(!applied_titles(&host)
+        .iter()
+        .any(|title| title.starts_with("[vim]")));
 }
 
 /// REQ: PORT:ilium-client/src/restructure.rs::prompt_includes_current_hierarchy_and_manual_or_llm_structure_sources, PORT:ilium-client/src/restructure.rs::prompt_includes_every_item_and_the_json_output_example
@@ -118,7 +130,12 @@ fn port_043_prompt_lists_every_pane() {
     host.settle();
     let requests = restructure_requests(&host);
     assert_eq!(requests.len(), 1);
-    let text: String = requests[0].1.messages.iter().map(|message| message.content.clone()).collect();
+    let text: String = requests[0]
+        .1
+        .messages
+        .iter()
+        .map(|message| message.content.clone())
+        .collect();
     assert!(text.contains("shell-1"));
     assert!(text.contains("shell-2"));
 }
@@ -126,7 +143,10 @@ fn port_043_prompt_lists_every_pane() {
 /// REQ: PORT:ilium-client/src/restructure.rs::tolerates_prose_surrounding_the_json_object
 #[test]
 fn port_043_prose_around_json_is_tolerated() {
-    let host = organised_host(&format!("Here is the plan:\n{}\nHope that helps.", plan_reply()));
+    let host = organised_host(&format!(
+        "Here is the plan:\n{}\nHope that helps.",
+        plan_reply()
+    ));
     assert_eq!(restructures(&host.submitted()).len(), 1);
 }
 
@@ -166,7 +186,10 @@ fn port_043_valid_plan_is_applied() {
         .operations
         .iter()
         .filter_map(|operation| match operation {
-            RestructureOp::CreateGroup(group) => Some((group.title.clone(), group.children.iter().map(|node| node.0).collect())),
+            RestructureOp::CreateGroup(group) => Some((
+                group.title.clone(),
+                group.children.iter().map(|node| node.0).collect(),
+            )),
             _ => None,
         })
         .collect();

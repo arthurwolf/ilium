@@ -1,7 +1,7 @@
 //! Twins of ilium/tests/pty_tui_smoke.rs: last prompt banner behaviour in a real terminal.
 //! Request/reply shape: see API_GAPS_ports.md.
-use serde_json::Value;
 use crate::common::{ask, Place};
+use serde_json::Value;
 
 fn check(place: Place, op: &str, request: &str, expected: &str) {
     let request: Value = serde_json::from_str(request).expect("request literal parses");
@@ -9,7 +9,11 @@ fn check(place: Place, op: &str, request: &str, expected: &str) {
     let reply = ask(place, op, request);
     let fields = expected.as_object().expect("expected is an object");
     for (name, value) in fields {
-        assert_eq!(&reply[name.as_str()], value, "field {name} of reply {reply}");
+        assert_eq!(
+            &reply[name.as_str()],
+            value,
+            "field {name} of reply {reply}"
+        );
     }
 }
 
@@ -37,7 +41,8 @@ fn port_pty_tui_smoke_last_prompt_banner_splits_a_bracketed_paste_on_lone_carria
 
 /// REQ: PORT:ilium/tests/pty_tui_smoke.rs::last_prompt_banner_updates_from_ordinary_typed_keystrokes_with_a_correction
 #[test]
-fn port_pty_tui_smoke_last_prompt_banner_updates_from_ordinary_typed_keystrokes_with_a_correction() {
+fn port_pty_tui_smoke_last_prompt_banner_updates_from_ordinary_typed_keystrokes_with_a_correction()
+{
     check(
         Place::Client,
         "banner.pty",

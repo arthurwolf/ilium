@@ -13,7 +13,11 @@ fn count(text: &str, needle: &str) -> usize {
 #[test]
 fn cor_050_a_warn_line_of_the_log_reaches_the_warnings_panel() {
     let mut session = session();
-    write_log(&mut session, LOG, log_line("WARN", "disk almost full").as_bytes());
+    write_log(
+        &mut session,
+        LOG,
+        log_line("WARN", "disk almost full").as_bytes(),
+    );
     session.pump().expect("session settles");
     assert!(warnings_panel(&mut session, 100, 20).contains("disk almost full"));
 }
@@ -22,7 +26,11 @@ fn cor_050_a_warn_line_of_the_log_reaches_the_warnings_panel() {
 #[test]
 fn cor_050_an_error_line_of_the_log_reaches_the_warnings_panel() {
     let mut session = session();
-    write_log(&mut session, LOG, log_line("ERROR", "model call failed").as_bytes());
+    write_log(
+        &mut session,
+        LOG,
+        log_line("ERROR", "model call failed").as_bytes(),
+    );
     session.pump().expect("session settles");
     assert!(warnings_panel(&mut session, 100, 20).contains("model call failed"));
 }
@@ -31,7 +39,12 @@ fn cor_050_an_error_line_of_the_log_reaches_the_warnings_panel() {
 #[test]
 fn cor_050_info_debug_and_trace_lines_do_not_reach_the_warnings_panel() {
     let mut session = session();
-    let text = [log_line("INFO", "started"), log_line("DEBUG", "tick"), log_line("TRACE", "poll")].concat();
+    let text = [
+        log_line("INFO", "started"),
+        log_line("DEBUG", "tick"),
+        log_line("TRACE", "poll"),
+    ]
+    .concat();
     write_log(&mut session, LOG, text.as_bytes());
     session.pump().expect("session settles");
     let panel = warnings_panel(&mut session, 100, 20);
@@ -44,7 +57,11 @@ fn cor_050_info_debug_and_trace_lines_do_not_reach_the_warnings_panel() {
 #[test]
 fn cor_050_a_line_needs_the_level_word_between_spaces() {
     let mut session = session();
-    write_log(&mut session, LOG, b"2026-10-12 09:14:03 WARNING not a level word\n2026-10-12 09:14:03 warn lower case\n");
+    write_log(
+        &mut session,
+        LOG,
+        b"2026-10-12 09:14:03 WARNING not a level word\n2026-10-12 09:14:03 warn lower case\n",
+    );
     session.pump().expect("session settles");
     let panel = warnings_panel(&mut session, 100, 20);
     assert!(!panel.contains("not a level word"), "{panel}");
@@ -55,7 +72,11 @@ fn cor_050_a_line_needs_the_level_word_between_spaces() {
 #[test]
 fn cor_050_the_second_poll_reads_only_the_bytes_after_the_cursor() {
     let mut session = session();
-    write_log(&mut session, LOG, log_line("WARN", "first problem").as_bytes());
+    write_log(
+        &mut session,
+        LOG,
+        log_line("WARN", "first problem").as_bytes(),
+    );
     session.pump().expect("session settles");
     append_log(&mut session, LOG, &log_line("WARN", "second problem"));
     session.pump().expect("session settles");
@@ -68,7 +89,12 @@ fn cor_050_the_second_poll_reads_only_the_bytes_after_the_cursor() {
 #[test]
 fn cor_050_lines_stay_in_log_order_oldest_first() {
     let mut session = session();
-    let text = [log_line("WARN", "alpha"), log_line("ERROR", "beta"), log_line("WARN", "gamma")].concat();
+    let text = [
+        log_line("WARN", "alpha"),
+        log_line("ERROR", "beta"),
+        log_line("WARN", "gamma"),
+    ]
+    .concat();
     write_log(&mut session, LOG, text.as_bytes());
     session.pump().expect("session settles");
     let panel = warnings_panel(&mut session, 100, 20);
@@ -82,7 +108,9 @@ fn cor_050_lines_stay_in_log_order_oldest_first() {
 #[test]
 fn cor_050_exactly_200_warning_lines_are_all_kept() {
     let mut session = session();
-    let text: String = (0..200).map(|index| log_line("WARN", &format!("problem number {index:03}"))).collect();
+    let text: String = (0..200)
+        .map(|index| log_line("WARN", &format!("problem number {index:03}")))
+        .collect();
     write_log(&mut session, LOG, text.as_bytes());
     session.pump().expect("session settles");
     let panel = warnings_panel(&mut session, 100, 400);
@@ -94,7 +122,9 @@ fn cor_050_exactly_200_warning_lines_are_all_kept() {
 #[test]
 fn cor_050_the_201st_warning_line_drops_the_oldest() {
     let mut session = session();
-    let text: String = (0..201).map(|index| log_line("WARN", &format!("problem number {index:03}"))).collect();
+    let text: String = (0..201)
+        .map(|index| log_line("WARN", &format!("problem number {index:03}")))
+        .collect();
     write_log(&mut session, LOG, text.as_bytes());
     session.pump().expect("session settles");
     let panel = warnings_panel(&mut session, 100, 400);
@@ -107,7 +137,14 @@ fn cor_050_the_201st_warning_line_drops_the_oldest() {
 #[test]
 fn cor_050_a_log_that_outgrew_one_chunk_adds_the_skipped_marker() {
     let mut session = session();
-    let filler: String = (0..2500).map(|index| log_line("WARN", &format!("filler line {index:05} with enough text to fill a chunk"))).collect();
+    let filler: String = (0..2500)
+        .map(|index| {
+            log_line(
+                "WARN",
+                &format!("filler line {index:05} with enough text to fill a chunk"),
+            )
+        })
+        .collect();
     assert!(filler.len() > 64 * 1024);
     write_log(&mut session, LOG, filler.as_bytes());
     session.pump().expect("session settles");
@@ -127,8 +164,16 @@ fn cor_050_a_small_log_has_no_skipped_marker() {
 #[test]
 fn cor_050_only_the_newest_log_file_of_the_folder_is_tailed() {
     let mut session = session();
-    write_log(&mut session, "log-2026-10-11 08-00-00.txt", log_line("WARN", "from the old file").as_bytes());
-    write_log(&mut session, LOG, log_line("WARN", "from the new file").as_bytes());
+    write_log(
+        &mut session,
+        "log-2026-10-11 08-00-00.txt",
+        log_line("WARN", "from the old file").as_bytes(),
+    );
+    write_log(
+        &mut session,
+        LOG,
+        log_line("WARN", "from the new file").as_bytes(),
+    );
     session.pump().expect("session settles");
     let panel = warnings_panel(&mut session, 100, 20);
     assert!(panel.contains("from the new file"), "{panel}");

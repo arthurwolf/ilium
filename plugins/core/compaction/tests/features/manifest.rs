@@ -12,7 +12,9 @@ fn manifest() -> Value {
 
 /// The first json code block after the heading line `heading`.
 fn json_block_after(page: &str, heading: &str) -> Value {
-    let start = page.find(heading).unwrap_or_else(|| panic!("heading {heading} missing"));
+    let start = page
+        .find(heading)
+        .unwrap_or_else(|| panic!("heading {heading} missing"));
     let rest = &page[start..];
     let open = rest.find("```json\n").expect("json block") + "```json\n".len();
     let close = rest[open..].find("```").expect("block end");
@@ -20,13 +22,21 @@ fn json_block_after(page: &str, heading: &str) -> Value {
 }
 
 fn strings(value: &Value) -> Vec<String> {
-    value.as_array().expect("array").iter().map(|item| item.as_str().expect("string").to_string()).collect()
+    value
+        .as_array()
+        .expect("array")
+        .iter()
+        .map(|item| item.as_str().expect("string").to_string())
+        .collect()
 }
 
 /// REQ: COR-050
 #[test]
 fn manifest_050_equals_the_complete_manifest_of_the_page() {
-    assert_eq!(manifest(), json_block_after(&page_text(), "### Complete manifest"));
+    assert_eq!(
+        manifest(),
+        json_block_after(&page_text(), "### Complete manifest")
+    );
 }
 
 /// REQ: COR-050
@@ -48,7 +58,10 @@ fn manifest_050_fragment_grants_are_a_subset_of_the_complete_manifest() {
     for side in ["server", "client"] {
         let all = strings(&complete["capabilities"][side]);
         for grant in strings(&fragment["capabilities"][side]) {
-            assert!(all.contains(&grant), "{side} grant {grant} missing from the complete manifest");
+            assert!(
+                all.contains(&grant),
+                "{side} grant {grant} missing from the complete manifest"
+            );
         }
     }
 }
@@ -119,7 +132,11 @@ fn manifest_050_client_grants_include_both_kernel_tab_writes() {
 fn manifest_050_activation_triggers_are_event_service_and_view() {
     assert_eq!(
         manifest()["activation"],
-        json!(["event:agent-context-low", "service:compact", "view:compaction.optimizer"])
+        json!([
+            "event:agent-context-low",
+            "service:compact",
+            "view:compaction.optimizer"
+        ])
     );
 }
 
@@ -127,7 +144,10 @@ fn manifest_050_activation_triggers_are_event_service_and_view() {
 #[test]
 fn manifest_050_job_kind_compact_has_the_five_minute_deadline_and_256_mib() {
     let jobs = manifest()["contributes"]["jobs"].clone();
-    assert_eq!(jobs, json!([{ "kind": "compact", "deadline_ms": 300000, "memory_mib": 256 }]));
+    assert_eq!(
+        jobs,
+        json!([{ "kind": "compact", "deadline_ms": 300000, "memory_mib": 256 }])
+    );
     assert_eq!(jobs[0]["deadline_ms"].as_u64(), Some(5 * 60 * 1000));
 }
 
@@ -135,8 +155,14 @@ fn manifest_050_job_kind_compact_has_the_five_minute_deadline_and_256_mib() {
 #[test]
 fn manifest_050_one_command_and_one_non_modal_panel_are_contributed() {
     let manifest = manifest();
-    assert_eq!(manifest["contributes"]["commands"], json!([{ "id": "compact", "title": "Compact this agent" }]));
-    assert_eq!(manifest["contributes"]["panels"], json!([{ "id": "optimizer", "title": "Compaction", "modal": false }]));
+    assert_eq!(
+        manifest["contributes"]["commands"],
+        json!([{ "id": "compact", "title": "Compact this agent" }])
+    );
+    assert_eq!(
+        manifest["contributes"]["panels"],
+        json!([{ "id": "optimizer", "title": "Compaction", "modal": false }])
+    );
 }
 
 /// REQ: COR-050, COR-033
@@ -151,7 +177,11 @@ fn manifest_050_declares_no_settings_rows_because_the_kernel_tabs_own_the_keys()
 #[test]
 fn manifest_050_page_declares_the_same_contribution_kinds_as_the_manifest() {
     let manifest = manifest();
-    let kinds: Vec<&String> = manifest["contributes"].as_object().expect("object").keys().collect();
+    let kinds: Vec<&String> = manifest["contributes"]
+        .as_object()
+        .expect("object")
+        .keys()
+        .collect();
     assert_eq!(kinds, ["commands", "jobs", "panels"]);
 }
 
@@ -159,7 +189,13 @@ fn manifest_050_page_declares_the_same_contribution_kinds_as_the_manifest() {
 #[test]
 fn manifest_050_a_grant_outside_the_manifest_is_refused_with_harness_grant_not_declared() {
     // The host refuses a grant the manifest never declared (harness.grant-not-declared).
-    let mut host = FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("client").build();
+    let mut host = FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("client")
+        .build();
     let refused = host.grant_now("fs.read:agent-homes");
-    assert_eq!(refused.expect_err("client side never declared it").code, "harness.grant-not-declared");
+    assert_eq!(
+        refused.expect_err("client side never declared it").code,
+        "harness.grant-not-declared"
+    );
 }

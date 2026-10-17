@@ -34,9 +34,18 @@ fn overhaul_loop_duration_uses_a_logarithmic_track_twin() {
     assert_eq!(row["key_pattern"], json!("^[a-z-]{1,24}$"));
     let mut host = activated_client();
     let longest = "a".repeat(24);
-    assert!(host.settings().set("saved_places", json!({ longest.clone(): "x" })).is_ok());
-    assert_eq!(refused("saved_places", json!({ "a".repeat(25): "x" })), ErrorCode::InvalidArgument);
-    assert_eq!(refused("saved_places", json!({ "Upper": "x" })), ErrorCode::InvalidArgument);
+    assert!(host
+        .settings()
+        .set("saved_places", json!({ longest.clone(): "x" }))
+        .is_ok());
+    assert_eq!(
+        refused("saved_places", json!({ "a".repeat(25): "x" })),
+        ErrorCode::InvalidArgument
+    );
+    assert_eq!(
+        refused("saved_places", json!({ "Upper": "x" })),
+        ErrorCode::InvalidArgument
+    );
 }
 
 /// REQ: PORT:ilium-client/src/animation_rows.rs::overhaul_ram_usage_is_visible_before_progress_details

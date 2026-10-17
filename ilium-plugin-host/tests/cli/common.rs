@@ -10,7 +10,9 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use ilium_plugin_host::cli::{self, BuildRunner, CliEnv, CliOutput, ComponentRunner, MemorySession, RunResult, ToolProbe};
+use ilium_plugin_host::cli::{
+    self, BuildRunner, CliEnv, CliOutput, ComponentRunner, MemorySession, RunResult, ToolProbe,
+};
 use ilium_plugin_host::registry_client::{FetchError, Fetcher};
 use serde_json::Value;
 
@@ -43,7 +45,10 @@ impl Default for FakeProbe {
         let mut versions = HashMap::new();
         versions.insert("rustc".to_owned(), "1.96.1".to_owned());
         versions.insert("bun".to_owned(), "1.2.5".to_owned());
-        FakeProbe { versions, rust_target: true }
+        FakeProbe {
+            versions,
+            rust_target: true,
+        }
     }
 }
 
@@ -85,25 +90,60 @@ pub struct FakeBuilder {
 
 impl FakeBuilder {
     pub fn ok() -> Arc<FakeBuilder> {
-        Arc::new(FakeBuilder { fail_stage: None, fail_build: None, runs: AtomicUsize::new(0), builds: AtomicUsize::new(0), outdated_lock: false, uncached_dependency: None })
+        Arc::new(FakeBuilder {
+            fail_stage: None,
+            fail_build: None,
+            runs: AtomicUsize::new(0),
+            builds: AtomicUsize::new(0),
+            outdated_lock: false,
+            uncached_dependency: None,
+        })
     }
 
     pub fn failing_at(stage: &'static str) -> Arc<FakeBuilder> {
-        Arc::new(FakeBuilder { fail_stage: Some(stage), fail_build: None, runs: AtomicUsize::new(0), builds: AtomicUsize::new(0), outdated_lock: false, uncached_dependency: None })
+        Arc::new(FakeBuilder {
+            fail_stage: Some(stage),
+            fail_build: None,
+            runs: AtomicUsize::new(0),
+            builds: AtomicUsize::new(0),
+            outdated_lock: false,
+            uncached_dependency: None,
+        })
     }
 
     pub fn failing_build(number: usize) -> Arc<FakeBuilder> {
-        Arc::new(FakeBuilder { fail_stage: None, fail_build: Some(number), runs: AtomicUsize::new(0), builds: AtomicUsize::new(0), outdated_lock: false, uncached_dependency: None })
+        Arc::new(FakeBuilder {
+            fail_stage: None,
+            fail_build: Some(number),
+            runs: AtomicUsize::new(0),
+            builds: AtomicUsize::new(0),
+            outdated_lock: false,
+            uncached_dependency: None,
+        })
     }
 }
 
 impl FakeBuilder {
     pub fn with_outdated_lock() -> Arc<FakeBuilder> {
-        Arc::new(FakeBuilder { fail_stage: None, fail_build: None, runs: AtomicUsize::new(0), builds: AtomicUsize::new(0), outdated_lock: true, uncached_dependency: None })
+        Arc::new(FakeBuilder {
+            fail_stage: None,
+            fail_build: None,
+            runs: AtomicUsize::new(0),
+            builds: AtomicUsize::new(0),
+            outdated_lock: true,
+            uncached_dependency: None,
+        })
     }
 
     pub fn with_uncached_dependency(name: &str) -> Arc<FakeBuilder> {
-        Arc::new(FakeBuilder { fail_stage: None, fail_build: None, runs: AtomicUsize::new(0), builds: AtomicUsize::new(0), outdated_lock: false, uncached_dependency: Some(name.to_owned()) })
+        Arc::new(FakeBuilder {
+            fail_stage: None,
+            fail_build: None,
+            runs: AtomicUsize::new(0),
+            builds: AtomicUsize::new(0),
+            outdated_lock: false,
+            uncached_dependency: Some(name.to_owned()),
+        })
     }
 }
 
@@ -116,21 +156,37 @@ pub struct ScriptedRunner {
 
 impl ScriptedRunner {
     pub fn passing() -> Arc<ScriptedRunner> {
-        Arc::new(ScriptedRunner { result: RunResult {
-            submissions: vec![serde_json::json!({"intent": "set-decoration", "slot": "work"})],
-            outcomes: vec![serde_json::json!("ok")],
-            logs: vec![serde_json::json!({"level": "info", "message": "activate"})],
-            trap: None,
-        }, project_test_runs: AtomicUsize::new(0) })
+        Arc::new(ScriptedRunner {
+            result: RunResult {
+                submissions: vec![serde_json::json!({"intent": "set-decoration", "slot": "work"})],
+                outcomes: vec![serde_json::json!("ok")],
+                logs: vec![serde_json::json!({"level": "info", "message": "activate"})],
+                trap: None,
+            },
+            project_test_runs: AtomicUsize::new(0),
+        })
     }
 
     pub fn trapping(reason: &str) -> Arc<ScriptedRunner> {
-        Arc::new(ScriptedRunner { result: RunResult { submissions: vec![], outcomes: vec![], logs: vec![], trap: Some(reason.to_owned()) }, project_test_runs: AtomicUsize::new(0) })
+        Arc::new(ScriptedRunner {
+            result: RunResult {
+                submissions: vec![],
+                outcomes: vec![],
+                logs: vec![],
+                trap: Some(reason.to_owned()),
+            },
+            project_test_runs: AtomicUsize::new(0),
+        })
     }
 }
 
 impl ComponentRunner for ScriptedRunner {
-    fn run_fixture(&self, _side: &str, _component: &[u8], _fixture: &Value) -> Result<RunResult, String> {
+    fn run_fixture(
+        &self,
+        _side: &str,
+        _component: &[u8],
+        _fixture: &Value,
+    ) -> Result<RunResult, String> {
         Ok(self.result.clone())
     }
 
@@ -221,7 +277,12 @@ pub fn code(output: &CliOutput) -> Option<String> {
 pub fn warning_codes(output: &CliOutput) -> Vec<String> {
     recs(output, "warning")
         .iter()
-        .filter_map(|record| record.get("code").and_then(Value::as_str).map(str::to_owned))
+        .filter_map(|record| {
+            record
+                .get("code")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
         .collect()
 }
 
@@ -230,7 +291,13 @@ pub fn types(output: &CliOutput) -> Vec<String> {
     output
         .stdout_jsonl
         .iter()
-        .map(|record| record.get("type").and_then(Value::as_str).unwrap_or("").to_owned())
+        .map(|record| {
+            record
+                .get("type")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_owned()
+        })
         .collect()
 }
 
@@ -255,13 +322,20 @@ pub fn scratch() -> tempfile::TempDir {
 /// Sorted relative listing of every file under `dir`.
 pub fn tree_listing(dir: &Path) -> Vec<String> {
     fn walk(base: &Path, dir: &Path, out: &mut Vec<String>) {
-        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
                 walk(base, &path, out);
             } else {
-                out.push(path.strip_prefix(base).expect("under base").to_string_lossy().replace('\\', "/"));
+                out.push(
+                    path.strip_prefix(base)
+                        .expect("under base")
+                        .to_string_lossy()
+                        .replace('\\', "/"),
+                );
             }
         }
     }
@@ -273,7 +347,10 @@ pub fn tree_listing(dir: &Path) -> Vec<String> {
 
 /// True for 64 lowercase hexadecimal characters.
 pub fn is_sha256_hex(text: &str) -> bool {
-    text.len() == 64 && text.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    text.len() == 64
+        && text
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 /// Creates a project with `ilium plugin new` under `root/<name>`; asserts the command worked.
@@ -282,7 +359,18 @@ pub fn new_project(env: &CliEnv, root: &Path, name: &str, template: &str, lang: 
     let id = format!("acme.{name}");
     let output = run(
         env,
-        &["new", dir.to_str().expect("utf8"), "--id", &id, "--lang", lang, "--template", template, "--publisher", "acme"],
+        &[
+            "new",
+            dir.to_str().expect("utf8"),
+            "--id",
+            &id,
+            "--lang",
+            lang,
+            "--template",
+            template,
+            "--publisher",
+            "acme",
+        ],
     );
     assert_eq!(output.exit_code, 0, "new failed: {:?}", output.stdout_jsonl);
     dir
@@ -300,7 +388,8 @@ pub fn read_json(path: &Path) -> Value {
 
 /// Writes a json file.
 pub fn write_json(path: &Path, value: &Value) {
-    std::fs::write(path, serde_json::to_vec_pretty(value).expect("encode json")).expect("write json file");
+    std::fs::write(path, serde_json::to_vec_pretty(value).expect("encode json"))
+        .expect("write json file");
 }
 
 /// Writes a `dist/` that matches the current sources: components for `sides` and a
@@ -310,7 +399,8 @@ pub fn write_dist(dir: &Path, sides: &[&str], profile: &str) {
     let hash = cli::project_input_hash(dir).expect("input hash");
     let mut side_entries = Vec::new();
     for side in sides {
-        std::fs::write(dir.join("dist").join(format!("{side}.wasm")), WASM_HEADER).expect("write component");
+        std::fs::write(dir.join("dist").join(format!("{side}.wasm")), WASM_HEADER)
+            .expect("write component");
         side_entries.push(serde_json::json!({
             "name": side, "bytes": WASM_HEADER.len(), "sha256": "0".repeat(64)
         }));
@@ -329,7 +419,11 @@ pub fn packed_project(env: &CliEnv, root: &Path) -> (PathBuf, PathBuf) {
     let dir = server_project(env, root);
     write_dist(&dir, &["server"], "release");
     let output = run_in(env, &dir, &["pack"]);
-    assert_eq!(output.exit_code, 0, "pack failed: {:?}", output.stdout_jsonl);
+    assert_eq!(
+        output.exit_code, 0,
+        "pack failed: {:?}",
+        output.stdout_jsonl
+    );
     let package = dir.join("dist/acme.demo-0.1.0.iliumpkg");
     (dir, package)
 }
@@ -339,9 +433,21 @@ pub fn make_key(env: &CliEnv, root: &Path, publisher_id: &str) -> (PathBuf, Path
     let out = root.join(format!("keys-{publisher_id}"));
     let output = run(
         env,
-        &["keygen", "--publisher-id", publisher_id, "--publisher", "Acme Labs", "--out", out.to_str().expect("utf8")],
+        &[
+            "keygen",
+            "--publisher-id",
+            publisher_id,
+            "--publisher",
+            "Acme Labs",
+            "--out",
+            out.to_str().expect("utf8"),
+        ],
     );
-    assert_eq!(output.exit_code, 0, "keygen failed: {:?}", output.stdout_jsonl);
+    assert_eq!(
+        output.exit_code, 0,
+        "keygen failed: {:?}",
+        output.stdout_jsonl
+    );
     (out.join("publisher.key"), out.join("publisher.pub"))
 }
 
@@ -361,7 +467,11 @@ pub fn packed_project_with_high_risk(env: &CliEnv, root: &Path) -> (PathBuf, Pat
     write_json(&dir.join("manifest.json"), &manifest);
     write_dist(&dir, &["server"], "release");
     let output = run_in(env, &dir, &["pack"]);
-    assert_eq!(output.exit_code, 0, "pack failed: {:?}", output.stdout_jsonl);
+    assert_eq!(
+        output.exit_code, 0,
+        "pack failed: {:?}",
+        output.stdout_jsonl
+    );
     let package = dir.join("dist/acme.demo-0.1.0.iliumpkg");
     (dir, package)
 }

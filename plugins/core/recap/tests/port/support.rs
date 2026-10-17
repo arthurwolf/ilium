@@ -40,7 +40,8 @@ pub fn start_agent_run(transcript: &[&str]) -> (FakeHost, u64, Invocation) {
     let mut host = activated_server();
     open_gate(&mut host);
     let pane = host.tree().add(agent_pane("worker", "claude"));
-    host.tree().set_agent_session(pane, "session-1", rows(transcript));
+    host.tree()
+        .set_agent_session(pane, "session-1", rows(transcript));
     let invocation = host.cli().invoke(&["recap"], b"");
     (host, pane, invocation)
 }
@@ -55,9 +56,17 @@ pub fn finish_run(host: &mut FakeHost, invocation: &Invocation, result: Vec<u8>)
 
 /// The `evidence` text of the first started job.
 pub fn job_evidence(host: &mut FakeHost) -> String {
-    let job = host.jobs().list().into_iter().next().expect("a job was started");
+    let job = host
+        .jobs()
+        .list()
+        .into_iter()
+        .next()
+        .expect("a job was started");
     let input: Value = serde_json::from_slice(&job.input).expect("job input is JSON");
-    input["evidence"].as_str().expect("evidence is a string").to_string()
+    input["evidence"]
+        .as_str()
+        .expect("evidence is a string")
+        .to_string()
 }
 
 pub fn first_recap(records: &[Value]) -> Value {
@@ -68,7 +77,8 @@ pub fn first_recap(records: &[Value]) -> Value {
 pub fn short_after_answer(screen: &[&str], files: &[(&str, &str)], body: Value) -> Value {
     let (mut host, _, invocation) = start_shell_run(screen);
     for (path, content) in files {
-        host.fs().write(&format!("project:{path}"), content.as_bytes());
+        host.fs()
+            .write(&format!("project:{path}"), content.as_bytes());
     }
     let records = finish_run(&mut host, &invocation, body.to_string().into_bytes());
     first_recap(&records)["short"].clone()
@@ -83,11 +93,15 @@ pub fn pointer_answer(path: &str, note: &str) -> Value {
 
 /// An agent pane with a verified session, the recorded goals `(objective, status)` set on it,
 /// then the run started. Status is one of active, paused, blocked, done, unknown.
-pub fn start_agent_run_with_goals(transcript: &[&str], goals: &[(String, &str)]) -> (FakeHost, u64, Invocation) {
+pub fn start_agent_run_with_goals(
+    transcript: &[&str],
+    goals: &[(String, &str)],
+) -> (FakeHost, u64, Invocation) {
     let mut host = activated_server();
     open_gate(&mut host);
     let pane = host.tree().add(agent_pane("worker", "claude"));
-    host.tree().set_agent_session(pane, "session-1", rows(transcript));
+    host.tree()
+        .set_agent_session(pane, "session-1", rows(transcript));
     for (objective, status) in goals {
         host.tree().set_agent_goal(pane, objective, status);
     }

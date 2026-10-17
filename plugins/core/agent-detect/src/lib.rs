@@ -4,7 +4,6 @@
 //! implementing the lifecycle, the handler and the exports its manifest lists. Every body is
 //! `unimplemented!` until the implementation phase moves the feature here.
 
-use ilium_plugin_sdk::{Detector, Handler, Lifecycle, ilium_plugin};
 use ilium_plugin_sdk::generated::exports::detector::Classification;
 use ilium_plugin_sdk::generated::exports::detector::DetectorProcess;
 use ilium_plugin_sdk::generated::exports::detector::DetectorScreen;
@@ -12,6 +11,7 @@ use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::generated::types::intents::Submission;
 use ilium_plugin_sdk::types::Activation;
 use ilium_plugin_sdk::types::PluginError;
+use ilium_plugin_sdk::{ilium_plugin, Detector, Handler, Lifecycle};
 
 /// The server side of `ilium.core.agent-detect` (core-plugin-agent-detect.md, world `ilium:server/base@0.1.0`).
 #[ilium_plugin(side = "server", exports = ["detector"])]

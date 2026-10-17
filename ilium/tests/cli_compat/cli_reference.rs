@@ -4,8 +4,18 @@
 
 use crate::common::*;
 
-const BASELINE_COMMANDS: [&str; 10] =
-    ["new-session", "ls", "kill-session", "new-pane", "chat", "progress", "voice", "panes", "broadcast", "help"];
+const BASELINE_COMMANDS: [&str; 10] = [
+    "new-session",
+    "ls",
+    "kill-session",
+    "new-pane",
+    "chat",
+    "progress",
+    "voice",
+    "panes",
+    "broadcast",
+    "help",
+];
 
 /// REQ: COR-041, F-078
 #[test]
@@ -14,7 +24,10 @@ fn cor_041_help_lists_every_command_of_the_baseline_synopsis() {
     assert_eq!(run.code, 0, "{}", run.stderr);
     let commands = help_commands(&run.stdout);
     for command in BASELINE_COMMANDS {
-        assert!(commands.iter().any(|listed| listed == command), "{command} missing from {commands:?}");
+        assert!(
+            commands.iter().any(|listed| listed == command),
+            "{command} missing from {commands:?}"
+        );
     }
 }
 
@@ -22,7 +35,13 @@ fn cor_041_help_lists_every_command_of_the_baseline_synopsis() {
 #[test]
 fn cor_041_help_also_lists_recap_from_the_quick_table() {
     let run = Sandbox::new().ilium(&["--help"]);
-    assert!(help_commands(&run.stdout).iter().any(|listed| listed == "recap"), "{}", run.stdout);
+    assert!(
+        help_commands(&run.stdout)
+            .iter()
+            .any(|listed| listed == "recap"),
+        "{}",
+        run.stdout
+    );
 }
 
 /// REQ: COR-041, F-078
@@ -37,7 +56,10 @@ fn cor_041_version_prints_the_program_name_and_exits_zero() {
 #[test]
 fn cor_041_short_version_flag_equals_the_long_one() {
     let sandbox = Sandbox::new();
-    assert_eq!(sandbox.ilium(&["-V"]).stdout, sandbox.ilium(&["--version"]).stdout);
+    assert_eq!(
+        sandbox.ilium(&["-V"]).stdout,
+        sandbox.ilium(&["--version"]).stdout
+    );
 }
 
 /// REQ: COR-041, F-078
@@ -55,8 +77,16 @@ fn cor_041_every_command_answers_dash_dash_help_with_exit_zero() {
 #[test]
 fn cor_041_global_options_are_accepted_by_every_subcommand_help() {
     let help = Sandbox::new().ilium(&["--help"]).stdout;
-    for option in ["--cwd", "--restart-server", "--reset-session", "--onboarding"] {
-        assert!(help.contains(option), "{option} missing from the global options");
+    for option in [
+        "--cwd",
+        "--restart-server",
+        "--reset-session",
+        "--onboarding",
+    ] {
+        assert!(
+            help.contains(option),
+            "{option} missing from the global options"
+        );
     }
 }
 
@@ -98,7 +128,13 @@ fn cor_041_cwd_that_is_not_a_directory_fails_with_exit_one_and_the_documented_me
     let failed = run_bounded(command);
     assert_eq!(failed.code, 1);
     assert!(failed.stderr.starts_with("ilium: "), "{:?}", failed.stderr);
-    assert!(failed.stderr.contains(&format!("--cwd \"{missing_text}\" is not a valid directory")), "{:?}", failed.stderr);
+    assert!(
+        failed.stderr.contains(&format!(
+            "--cwd \"{missing_text}\" is not a valid directory"
+        )),
+        "{:?}",
+        failed.stderr
+    );
 }
 
 /// REQ: COR-041, F-106
@@ -118,7 +154,13 @@ fn cor_041_ls_pads_the_name_to_24_columns_then_running_or_not_running() {
     std::fs::write(sessions.join("review.json"), "{}").expect("snapshot");
     let run = sandbox.ilium(&["ls"]);
     assert_eq!(run.code, 0, "{}", run.stderr);
-    assert_eq!(run.stdout, format!("{:<24} not running\n", "review").replace("review                   not", "review                   not"));
+    assert_eq!(
+        run.stdout,
+        format!("{:<24} not running\n", "review").replace(
+            "review                   not",
+            "review                   not"
+        )
+    );
     assert_eq!(run.stdout, "review                   not running\n");
 }
 
@@ -140,7 +182,9 @@ fn cor_041_new_session_rejects_a_name_with_a_space() {
     let run = Sandbox::new().ilium(&["new-session", "bad name"]);
     assert_eq!(run.code, 1);
     assert!(
-        run.stderr.contains("session name \"bad name\" must contain only letters, digits, hyphens, or underscores"),
+        run.stderr.contains(
+            "session name \"bad name\" must contain only letters, digits, hyphens, or underscores"
+        ),
         "{:?}",
         run.stderr
     );
@@ -168,7 +212,11 @@ fn cor_041_new_session_rejects_an_empty_name() {
 fn cor_041_kill_session_of_a_session_that_is_not_running_fails_with_exit_one() {
     let run = Sandbox::new().ilium(&["kill-session", "nope"]);
     assert_eq!(run.code, 1);
-    assert!(run.stderr.contains("session \"nope\" is not running"), "{:?}", run.stderr);
+    assert!(
+        run.stderr.contains("session \"nope\" is not running"),
+        "{:?}",
+        run.stderr
+    );
 }
 
 /// REQ: COR-041, F-106
@@ -221,11 +269,23 @@ fn cor_041_chat_init_creates_the_room_ignore_entries_and_both_hook_files() {
     assert_eq!(run.code, 0, "{}", run.stderr);
     let room = sandbox.project.join("CHATROOM.md");
     assert!(room.is_file());
-    assert_eq!(run.stdout.trim_end(), format!("chatroom ready at {}", room.display()));
+    assert_eq!(
+        run.stdout.trim_end(),
+        format!("chatroom ready at {}", room.display())
+    );
     let ignore = std::fs::read_to_string(sandbox.project.join(".gitignore")).expect(".gitignore");
-    assert!(ignore.lines().any(|line| line == "/CHATROOM.md"), "{ignore:?}");
-    assert!(ignore.lines().any(|line| line == "/CHATROOM.archive.md"), "{ignore:?}");
-    assert!(sandbox.project.join(".claude/settings.local.json").is_file());
+    assert!(
+        ignore.lines().any(|line| line == "/CHATROOM.md"),
+        "{ignore:?}"
+    );
+    assert!(
+        ignore.lines().any(|line| line == "/CHATROOM.archive.md"),
+        "{ignore:?}"
+    );
+    assert!(sandbox
+        .project
+        .join(".claude/settings.local.json")
+        .is_file());
     assert!(sandbox.project.join(".codex/hooks.json").is_file());
 }
 
@@ -234,9 +294,16 @@ fn cor_041_chat_init_creates_the_room_ignore_entries_and_both_hook_files() {
 fn cor_041_chat_hooks_call_context_since_last_read_on_session_start_and_prompt_submit() {
     let sandbox = Sandbox::new();
     sandbox.ilium(&["chat", "init"]);
-    let claude = std::fs::read_to_string(sandbox.project.join(".claude/settings.local.json")).expect("claude hooks");
-    assert!(claude.contains("SessionStart") && claude.contains("UserPromptSubmit"), "{claude}");
-    assert!(claude.contains("chat context --since-last-read"), "{claude}");
+    let claude = std::fs::read_to_string(sandbox.project.join(".claude/settings.local.json"))
+        .expect("claude hooks");
+    assert!(
+        claude.contains("SessionStart") && claude.contains("UserPromptSubmit"),
+        "{claude}"
+    );
+    assert!(
+        claude.contains("chat context --since-last-read"),
+        "{claude}"
+    );
 }
 
 /// REQ: COR-041
@@ -244,12 +311,23 @@ fn cor_041_chat_hooks_call_context_since_last_read_on_session_start_and_prompt_s
 fn cor_041_chat_send_prints_chatroom_message_sent_and_tail_shows_author_and_content() {
     let sandbox = Sandbox::new();
     sandbox.ilium(&["chat", "init"]);
-    let sent = sandbox.ilium(&["chat", "send", "--author", "claude", "--message", "Taking the auth refactor"]);
+    let sent = sandbox.ilium(&[
+        "chat",
+        "send",
+        "--author",
+        "claude",
+        "--message",
+        "Taking the auth refactor",
+    ]);
     assert_eq!(sent.code, 0, "{}", sent.stderr);
     assert_eq!(sent.stdout.trim_end(), "chatroom message sent");
     let tail = sandbox.ilium(&["chat", "tail", "--limit", "20"]);
     assert_eq!(tail.code, 0, "{}", tail.stderr);
-    assert!(tail.stdout.contains("| claude | Taking the auth refactor"), "{:?}", tail.stdout);
+    assert!(
+        tail.stdout.contains("| claude | Taking the auth refactor"),
+        "{:?}",
+        tail.stdout
+    );
 }
 
 /// REQ: COR-041
@@ -257,9 +335,18 @@ fn cor_041_chat_send_prints_chatroom_message_sent_and_tail_shows_author_and_cont
 fn cor_041_chat_send_author_defaults_come_from_the_environment_then_agent() {
     let sandbox = Sandbox::new();
     sandbox.ilium(&["chat", "init"]);
-    sandbox.ilium_env(&["chat", "send", "--message", "one"], &[("ILIUM_CHATROOM_AUTHOR", "alice"), ("AGENT_NAME", "bob")]);
-    sandbox.ilium_env(&["chat", "send", "--message", "two"], &[("AGENT_NAME", "bob")]);
-    sandbox.ilium_env(&["chat", "send", "--message", "three"], &[("ILIUM_CHATROOM_AUTHOR", ""), ("AGENT_NAME", "")]);
+    sandbox.ilium_env(
+        &["chat", "send", "--message", "one"],
+        &[("ILIUM_CHATROOM_AUTHOR", "alice"), ("AGENT_NAME", "bob")],
+    );
+    sandbox.ilium_env(
+        &["chat", "send", "--message", "two"],
+        &[("AGENT_NAME", "bob")],
+    );
+    sandbox.ilium_env(
+        &["chat", "send", "--message", "three"],
+        &[("ILIUM_CHATROOM_AUTHOR", ""), ("AGENT_NAME", "")],
+    );
     let tail = sandbox.ilium(&["chat", "tail"]).stdout;
     assert!(tail.contains("| alice | one"), "{tail:?}");
     assert!(tail.contains("| bob | two"), "{tail:?}");
@@ -281,8 +368,18 @@ fn cor_041_chat_send_message_of_4000_characters_is_accepted_and_4001_is_not() {
     sandbox.ilium(&["chat", "init"]);
     let at_limit = "x".repeat(4000);
     let over_limit = "x".repeat(4001);
-    assert_eq!(sandbox.ilium(&["chat", "send", "--message", &at_limit]).code, 0);
-    assert_eq!(sandbox.ilium(&["chat", "send", "--message", &over_limit]).code, 1);
+    assert_eq!(
+        sandbox
+            .ilium(&["chat", "send", "--message", &at_limit])
+            .code,
+        0
+    );
+    assert_eq!(
+        sandbox
+            .ilium(&["chat", "send", "--message", &over_limit])
+            .code,
+        1
+    );
 }
 
 /// REQ: COR-041
@@ -306,10 +403,20 @@ fn cor_041_chat_context_defaults_to_the_last_40_records() {
     let sandbox = Sandbox::new();
     sandbox.ilium(&["chat", "init"]);
     for n in 0..45 {
-        sandbox.ilium(&["chat", "send", "--author", "a", "--message", &format!("msg-{n:02}")]);
+        sandbox.ilium(&[
+            "chat",
+            "send",
+            "--author",
+            "a",
+            "--message",
+            &format!("msg-{n:02}"),
+        ]);
     }
     let context = sandbox.ilium(&["chat", "context"]).stdout;
-    assert!(context.contains("msg-44") && context.contains("msg-05"), "{context}");
+    assert!(
+        context.contains("msg-44") && context.contains("msg-05"),
+        "{context}"
+    );
     assert!(!context.contains("msg-04"), "{context}");
 }
 
@@ -319,7 +426,14 @@ fn cor_041_chat_tail_defaults_to_the_last_100_records() {
     let sandbox = Sandbox::new();
     sandbox.ilium(&["chat", "init"]);
     for n in 0..3 {
-        sandbox.ilium(&["chat", "send", "--author", "a", "--message", &format!("msg-{n}")]);
+        sandbox.ilium(&[
+            "chat",
+            "send",
+            "--author",
+            "a",
+            "--message",
+            &format!("msg-{n}"),
+        ]);
     }
     let tail = sandbox.ilium(&["chat", "tail"]).stdout;
     assert_eq!(tail.lines().count(), 3, "{tail:?}");
@@ -344,9 +458,18 @@ fn cor_041_chat_context_max_bytes_closes_with_a_note_that_points_to_chat_tail() 
     let sandbox = Sandbox::new();
     sandbox.ilium(&["chat", "init"]);
     for n in 0..10 {
-        sandbox.ilium(&["chat", "send", "--author", "a", "--message", &format!("{n}{}", "y".repeat(200))]);
+        sandbox.ilium(&[
+            "chat",
+            "send",
+            "--author",
+            "a",
+            "--message",
+            &format!("{n}{}", "y".repeat(200)),
+        ]);
     }
-    let context = sandbox.ilium(&["chat", "context", "--max-bytes", "600"]).stdout;
+    let context = sandbox
+        .ilium(&["chat", "context", "--max-bytes", "600"])
+        .stdout;
     assert!(context.contains("ilium chat tail"), "{context}");
 }
 
@@ -366,7 +489,9 @@ fn cor_041_chat_commands_find_the_room_from_a_subdirectory() {
         .env("XDG_RUNTIME_DIR", sandbox.path().join("run"));
     let run = run_bounded(command);
     assert_eq!(run.code, 0, "{}", run.stderr);
-    assert!(std::fs::read_to_string(sandbox.project.join("CHATROOM.md")).expect("room").contains("from below"));
+    assert!(std::fs::read_to_string(sandbox.project.join("CHATROOM.md"))
+        .expect("room")
+        .contains("from below"));
 }
 
 /// REQ: COR-041
@@ -443,8 +568,14 @@ fn cor_041_progress_outside_a_pane_prints_a_rejected_or_failed_record_and_exits_
     let run = Sandbox::new().ilium(&["progress", "status"]);
     assert_eq!(run.code, 1);
     let records = run.records();
-    let kind = records.last().expect("record")["type"].as_str().expect("type").to_owned();
-    assert!(kind == "progress_rejected" || kind == "progress_request_failed", "{kind}");
+    let kind = records.last().expect("record")["type"]
+        .as_str()
+        .expect("type")
+        .to_owned();
+    assert!(
+        kind == "progress_rejected" || kind == "progress_request_failed",
+        "{kind}"
+    );
 }
 
 /// REQ: COR-041
@@ -455,7 +586,10 @@ fn cor_041_wait_is_an_alias_of_progress_wait() {
     let full = sandbox.ilium(&["progress", "wait", "--help"]);
     assert_eq!(alias.code, 0, "{}", alias.stderr);
     assert_eq!(full.code, 0, "{}", full.stderr);
-    assert_eq!(alias.stdout.replace("ilium wait", "ilium progress wait"), full.stdout);
+    assert_eq!(
+        alias.stdout.replace("ilium wait", "ilium progress wait"),
+        full.stdout
+    );
 }
 
 /// REQ: COR-041
@@ -463,14 +597,21 @@ fn cor_041_wait_is_an_alias_of_progress_wait() {
 fn cor_041_progress_check_rejects_a_probe_that_is_not_one_json_object() {
     let run = Sandbox::new().ilium(&["progress", "check", "--command", "echo not-json"]);
     assert_eq!(run.code, 1);
-    assert_eq!(run.records().last().expect("record")["type"], "progress_rejected");
+    assert_eq!(
+        run.records().last().expect("record")["type"],
+        "progress_rejected"
+    );
 }
 
 /// REQ: F-111
 #[test]
 fn f_111_hidden_commands_are_not_listed_in_help() {
     let help = Sandbox::new().ilium(&["--help"]).stdout;
-    for hidden in ["clipboard-helper", "release-embedding-probe", "release-animation-probe"] {
+    for hidden in [
+        "clipboard-helper",
+        "release-embedding-probe",
+        "release-animation-probe",
+    ] {
         assert!(!help.contains(hidden), "{hidden} must stay hidden");
     }
 }
@@ -479,7 +620,11 @@ fn f_111_hidden_commands_are_not_listed_in_help() {
 #[test]
 fn f_111_hidden_commands_still_parse() {
     let sandbox = Sandbox::new();
-    for hidden in ["clipboard-helper", "release-embedding-probe", "release-animation-probe"] {
+    for hidden in [
+        "clipboard-helper",
+        "release-embedding-probe",
+        "release-animation-probe",
+    ] {
         let run = sandbox.ilium(&[hidden, "--help"]);
         assert_eq!(run.code, 0, "{hidden}: {}", run.stderr);
     }

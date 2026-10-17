@@ -36,10 +36,17 @@ fn f_019_list_returns_one_buffer_ref_per_open_buffer() {
     let listed = done_json(call_buffers(&mut editor, "list", json!({})));
     let entries = listed.as_array().cloned().unwrap_or_default();
     assert_eq!(entries.len(), 2);
-    let mut ids: Vec<u64> = entries.iter().filter_map(|entry| entry["buffer"].as_u64()).collect();
+    let mut ids: Vec<u64> = entries
+        .iter()
+        .filter_map(|entry| entry["buffer"].as_u64())
+        .collect();
     ids.sort();
     assert_eq!(ids, vec![1, 2]);
-    let first = entries.iter().find(|entry| entry["buffer"] == 1).cloned().unwrap_or_default();
+    let first = entries
+        .iter()
+        .find(|entry| entry["buffer"] == 1)
+        .cloned()
+        .unwrap_or_default();
     assert_eq!(first["language"], "rust");
     assert_eq!(first["line-count"], 6);
     assert_eq!(first["dirty"], false);
@@ -51,7 +58,12 @@ fn f_019_closed_buffer_leaves_the_list() {
     let mut editor = direct("{}");
     direct_open(&mut editor, 1, None, 1);
     direct_open(&mut editor, 2, None, 1);
-    Handler::on_events(&mut editor, vec![Event::EditorClosed(crate::support::buffer_ref(1, None, None, 1))]);
+    Handler::on_events(
+        &mut editor,
+        vec![Event::EditorClosed(crate::support::buffer_ref(
+            1, None, None, 1,
+        ))],
+    );
     let listed = done_json(call_buffers(&mut editor, "list", json!({})));
     let entries = listed.as_array().cloned().unwrap_or_default();
     assert_eq!(entries.len(), 1);
@@ -98,7 +110,10 @@ fn f_019_replace_range_replaces_the_named_range() {
         "replace-range",
         json!({"buffer": 1, "base-revision": 2, "edits": [edit((0, 0), (0, 5), "ALPHA")]}),
     );
-    assert!(matches!(reply, ServiceReply::Done(_)), "replace-range answers at once");
+    assert!(
+        matches!(reply, ServiceReply::Done(_)),
+        "replace-range answers at once"
+    );
     assert_eq!(read_lines(&mut editor, 1, 0, 2), json!(["ALPHA", "beta"]));
 }
 
@@ -141,7 +156,10 @@ fn f_019_replace_range_across_lines_joins_them() {
         "replace-range",
         json!({"buffer": 1, "base-revision": 2, "edits": [edit((0, 3), (1, 0), " ")]}),
     );
-    assert_eq!(read_lines(&mut editor, 1, 0, 2), json!(["one two", "three"]));
+    assert_eq!(
+        read_lines(&mut editor, 1, 0, 2),
+        json!(["one two", "three"])
+    );
 }
 
 /// REQ: F-019

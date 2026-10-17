@@ -64,7 +64,15 @@ fn doc_022_the_disabled_notice_text_is_the_one_the_page_gives() {
 #[test]
 fn doc_030_the_page_lists_the_keyboard_tab_with_its_config_tables_and_no_readers() {
     let rows = table_rows(&page_text(), "| Tab id |");
-    assert_eq!(rows, vec![vec!["`keyboard`", "Keyboard", "`[keyboard]`, `[keybindings]`", "none"]]);
+    assert_eq!(
+        rows,
+        vec![vec![
+            "`keyboard`",
+            "Keyboard",
+            "`[keyboard]`, `[keybindings]`",
+            "none"
+        ]]
+    );
 }
 
 /// REQ: COR-030

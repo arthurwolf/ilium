@@ -8,13 +8,16 @@ use ilium_plugin_api::uitree::{check_ui_tree, UiCaps};
 use ilium_plugin_api::Code;
 
 pub use ilium_plugin_host::testing::render::{
-    cell_width, frame_budget_ms, hit_layers_in_order, hit_stack_tree, install_prerender,
-    sanitise, scene_memory_limit_mib, set_decoration_with_frames, tab_next, tab_order,
-    tooltip_shown, tree_with_text, tree_with_tooltip, widget_families, Font, Rig, SceneRig,
-    SurfaceRig,
+    cell_width, frame_budget_ms, hit_layers_in_order, hit_stack_tree, install_prerender, sanitise,
+    scene_memory_limit_mib, set_decoration_with_frames, tab_next, tab_order, tooltip_shown,
+    tree_with_text, tree_with_tooltip, widget_families, Font, Rig, SceneRig, SurfaceRig,
 };
 
-pub const CAPS: UiCaps = UiCaps { max_nodes: 4096, max_kib: 1024, max_depth: 32 };
+pub const CAPS: UiCaps = UiCaps {
+    max_nodes: 4096,
+    max_kib: 1024,
+    max_depth: 32,
+};
 
 pub fn node(key: Option<&str>, children: Vec<u32>) -> UiNode {
     UiNode {
@@ -33,7 +36,11 @@ pub fn chain(depth: u32) -> UiTree {
     let nodes = (0..depth)
         .map(|i| node(None, if i + 1 < depth { vec![i + 1] } else { vec![] }))
         .collect();
-    UiTree { version: 1, nodes, root: 0 }
+    UiTree {
+        version: 1,
+        nodes,
+        root: 0,
+    }
 }
 
 /// A line with a key on every node after the root.
@@ -42,16 +49,31 @@ pub fn keyed_chain(keys: &[&str]) -> UiTree {
     let mut nodes = vec![node(None, vec![1])];
     for (i, key) in keys.iter().enumerate() {
         let index = i as u32 + 1;
-        nodes.push(node(Some(key), if index + 1 < count { vec![index + 1] } else { vec![] }));
+        nodes.push(node(
+            Some(key),
+            if index + 1 < count {
+                vec![index + 1]
+            } else {
+                vec![]
+            },
+        ));
     }
-    UiTree { version: 1, nodes, root: 0 }
+    UiTree {
+        version: 1,
+        nodes,
+        root: 0,
+    }
 }
 
 /// A root with `count - 1` direct children.
 pub fn chain_flat(count: u32) -> UiTree {
     let mut nodes = vec![node(None, (1..count).collect())];
     nodes.extend((1..count).map(|_| node(None, vec![])));
-    UiTree { version: 1, nodes, root: 0 }
+    UiTree {
+        version: 1,
+        nodes,
+        root: 0,
+    }
 }
 
 /// Two branches, each with a node keyed "save".
@@ -74,7 +96,10 @@ pub fn check(tree: &UiTree) -> Result<(), Code> {
 }
 
 pub fn code_of(tree: &UiTree) -> String {
-    check(tree).expect_err("tree must be refused").as_str().to_string()
+    check(tree)
+        .expect_err("tree must be refused")
+        .as_str()
+        .to_string()
 }
 
 /// Trees that break one named rule each, with the expected trap code.

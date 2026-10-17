@@ -11,7 +11,10 @@ fn keyboard_ui_port_capture_keeps_collision_retry_pending_and_escape_cancels_wit
     let mut host = tmux_host();
     set_keymap(
         &mut host,
-        vec![binding("Keyboard", "New terminal", "prefix+c", true), binding("Keyboard", "Detach", "prefix+d", true)],
+        vec![
+            binding("Keyboard", "New terminal", "prefix+c", true),
+            binding("Keyboard", "Detach", "prefix+d", true),
+        ],
         &[("prefix+c", "c"), ("prefix+d", "d")],
     );
     activate(&mut host, "Detach");
@@ -19,7 +22,10 @@ fn keyboard_ui_port_capture_keeps_collision_retry_pending_and_escape_cancels_wit
     host.settle();
     let text = render_text(&mut host, keyboard_page(), 120, 20);
     assert!(text.contains("used by New terminal"), "{text}");
-    assert!(text.contains("Press the new key chord."), "retry stays pending: {text}");
+    assert!(
+        text.contains("Press the new key chord."),
+        "retry stays pending: {text}"
+    );
     assert!(host.kernel_settings().writes().is_empty());
     host.key(keyboard_page(), "Esc");
     host.settle();
@@ -47,8 +53,18 @@ fn keyboard_ui_port_hit_testing_matches_live_rows_and_release_does_not_capture()
     let screen = host.render(keyboard_page(), 100, 60);
     let (row, _) = screen.find("detach").expect("detach row");
     assert!(screen.row(row).contains("detach"));
-    host.send_action(keyboard_page(), "capture-detach", ActionKind::HoverEnter, ActionValue::None);
-    host.send_action(keyboard_page(), "capture-detach", ActionKind::HoverLeave, ActionValue::None);
+    host.send_action(
+        keyboard_page(),
+        "capture-detach",
+        ActionKind::HoverEnter,
+        ActionValue::None,
+    );
+    host.send_action(
+        keyboard_page(),
+        "capture-detach",
+        ActionKind::HoverLeave,
+        ActionValue::None,
+    );
     host.settle();
     assert!(!render_text(&mut host, keyboard_page(), 100, 60).contains("Press the new key chord."));
     assert!(host.kernel_settings().writes().is_empty());
@@ -60,13 +76,21 @@ fn keyboard_ui_port_narrow_page_reveals_and_can_rebind_every_actual_binding() {
     let mut host = column_host(Column::Tmux);
     for row in action_rows() {
         let screen = host.render(keyboard_page(), 40, 120);
-        assert!(screen.find(&row.name).is_some(), "{} not reachable at 40 columns", row.name);
+        assert!(
+            screen.find(&row.name).is_some(),
+            "{} not reachable at 40 columns",
+            row.name
+        );
     }
     activate(&mut host, "close_pane");
     write_chord(&mut host, "q");
     host.key(keyboard_page(), "Enter");
     host.settle();
-    assert!(host.kernel_settings().writes().iter().any(|(tab, key, _)| tab == "keyboard" && key.contains("close_pane")));
+    assert!(host
+        .kernel_settings()
+        .writes()
+        .iter()
+        .any(|(tab, key, _)| tab == "keyboard" && key.contains("close_pane")));
 }
 
 /// REQ: PORT:ilium-client/src/onboarding/keyboard_ui.rs::rendering_is_read_only_and_geometry_is_available_before_paint
@@ -83,13 +107,28 @@ fn keyboard_ui_port_rendering_is_read_only_and_geometry_is_available_before_pain
 /// REQ: PORT:ilium-client/src/onboarding/keyboard_ui.rs::requests_read_authoritative_prefix_and_presets_do_not_fake_saved_values
 #[test]
 fn keyboard_ui_port_reads_authoritative_prefix_and_presets_do_not_fake_saved_values() {
-    let mut host = host_with_tab(json!({"shortcut_base": "ctrl+g", "navigation_shortcut_base": "ctrl+h", "preset": "custom"}));
+    let mut host = host_with_tab(
+        json!({"shortcut_base": "ctrl+g", "navigation_shortcut_base": "ctrl+h", "preset": "custom"}),
+    );
     let text = render_text(&mut host, keyboard_page(), 100, 40);
     assert!(text.contains("Ctrl+G"), "{text}");
     assert!(text.contains("Ctrl+H"), "{text}");
-    host.send_action(keyboard_page(), "preset", ActionKind::Changed, ActionValue::Text("screen".to_string()));
+    host.send_action(
+        keyboard_page(),
+        "preset",
+        ActionKind::Changed,
+        ActionValue::Text("screen".to_string()),
+    );
     host.settle();
     let writes = host.kernel_settings().writes();
-    assert!(writes.iter().any(|(_, key, value)| key == "preset" && value == "\"screen\""), "{writes:?}");
-    assert!(!writes.iter().any(|(_, key, _)| key == "shortcut_base"), "a preset must not rewrite the prefix: {writes:?}");
+    assert!(
+        writes
+            .iter()
+            .any(|(_, key, value)| key == "preset" && value == "\"screen\""),
+        "{writes:?}"
+    );
+    assert!(
+        !writes.iter().any(|(_, key, _)| key == "shortcut_base"),
+        "a preset must not rewrite the prefix: {writes:?}"
+    );
 }

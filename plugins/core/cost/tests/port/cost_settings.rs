@@ -10,7 +10,10 @@ use serde_json::{json, Value};
 use crate::common::client;
 
 fn apply(settings: Value, actions: Value) -> Value {
-    client("settings.apply", json!({ "settings": settings, "actions": actions }))
+    client(
+        "settings.apply",
+        json!({ "settings": settings, "actions": actions }),
+    )
 }
 
 fn adjust(row: &str, direction: i64) -> Value {
@@ -28,7 +31,10 @@ fn is_err(result: &Value) -> bool {
 /// REQ: PORT:ilium-client/src/cost_settings.rs::always_visible_options_show_without_hover
 #[test]
 fn port_cost_settings_always_visible_options_show_without_hover() {
-    let reply = apply(json!({}), json!([adjust("visibility:meter", 0), { "probe": { "option": "meter", "hovered": false } }]));
+    let reply = apply(
+        json!({}),
+        json!([adjust("visibility:meter", 0), { "probe": { "option": "meter", "hovered": false } }]),
+    );
     assert_eq!(reply["probes"][0], json!(true));
     let reply = apply(
         json!({}),
@@ -45,8 +51,14 @@ fn port_cost_settings_bad_quota_values_are_repaired() {
         json!([{ "sanitize": true }]),
     );
     let defaults = apply(json!({}), json!([]));
-    assert_eq!(reply["settings"]["quota_fixed_cuts"], defaults["settings"]["quota_fixed_cuts"]);
-    assert_eq!(reply["settings"]["quota_burn_cuts"], defaults["settings"]["quota_burn_cuts"]);
+    assert_eq!(
+        reply["settings"]["quota_fixed_cuts"],
+        defaults["settings"]["quota_fixed_cuts"]
+    );
+    assert_eq!(
+        reply["settings"]["quota_burn_cuts"],
+        defaults["settings"]["quota_burn_cuts"]
+    );
     assert_eq!(reply["settings"]["quota_budget_percent"], json!(10.0));
 }
 
@@ -92,24 +104,45 @@ fn port_cost_settings_direct_numbers_accept_valid_intermediates_without_ladder_q
 
 /// REQ: PORT:ilium-client/src/cost_settings.rs::direct_sparkline_window_preserves_native_duration_entry_and_rejects_invalid_drafts
 #[test]
-fn port_cost_settings_direct_sparkline_window_preserves_native_duration_entry_and_rejects_invalid_drafts() {
+fn port_cost_settings_direct_sparkline_window_preserves_native_duration_entry_and_rejects_invalid_drafts(
+) {
     for (text, minutes) in [("10h", 600), ("45m", 45), ("3d", 4320), ("1.5 h", 90)] {
         let reply = apply(json!({}), json!([set_number("sparkline_window", text)]));
-        assert_eq!(reply["settings"]["sparkline_window_minutes"], json!(minutes), "{text}");
+        assert_eq!(
+            reply["settings"]["sparkline_window_minutes"],
+            json!(minutes),
+            "{text}"
+        );
     }
     for text in ["5x", "0m", "366d", "NaN", ""] {
-        let reply = apply(json!({ "sparkline_window_minutes": 90 }), json!([set_number("sparkline_window", text)]));
+        let reply = apply(
+            json!({ "sparkline_window_minutes": 90 }),
+            json!([set_number("sparkline_window", text)]),
+        );
         assert!(is_err(&reply["results"][0]), "{text}");
         // An invalid duration must retain the prior value.
-        assert_eq!(reply["settings"]["sparkline_window_minutes"], json!(90), "{text}");
+        assert_eq!(
+            reply["settings"]["sparkline_window_minutes"],
+            json!(90),
+            "{text}"
+        );
     }
 }
 
 fn all_row_help_ids() -> Vec<String> {
     let mut ids = std::collections::BTreeSet::new();
     for metric in ["dollars", "quota"] {
-        for calibration in ["own_history", "fixed_bands", "budget", "burn_rate", "peer_relative"] {
-            let reply = client("settings.rows", json!({ "settings": { "metric": metric, "calibration": calibration } }));
+        for calibration in [
+            "own_history",
+            "fixed_bands",
+            "budget",
+            "burn_rate",
+            "peer_relative",
+        ] {
+            let reply = client(
+                "settings.rows",
+                json!({ "settings": { "metric": metric, "calibration": calibration } }),
+            );
             for id in reply["help_ids"].as_array().cloned().unwrap_or_default() {
                 ids.insert(id.as_str().unwrap_or("").to_string());
             }
@@ -129,7 +162,10 @@ fn port_cost_settings_every_row_has_a_distinct_catalogued_help_id() {
 #[test]
 fn port_cost_settings_every_row_has_a_distinct_or_shared_help_id_in_range() {
     for id in all_row_help_ids() {
-        let number: u32 = id.strip_prefix("COST-").and_then(|digits| digits.parse().ok()).unwrap_or(0);
+        let number: u32 = id
+            .strip_prefix("COST-")
+            .and_then(|digits| digits.parse().ok())
+            .unwrap_or(0);
         assert!((1..=23).contains(&number), "{id}");
     }
 }
@@ -158,9 +194,25 @@ fn port_cost_settings_invalid_direct_number_never_changes_settings() {
 /// REQ: PORT:ilium-client/src/cost_settings.rs::numeric_ladders_preserve_endpoints_and_values_outside_presets
 #[test]
 fn port_cost_settings_numeric_ladders_preserve_endpoints_and_values_outside_presets() {
-    let step = |ladder: &str, current: Value, direction: i64| client("settings.step-ladder", json!({ "ladder": ladder, "current": current, "direction": direction }));
-    for (current, direction, expected) in [(730, 1, 730), (7, -1, 7), (1000, 1, 1000), (1, -1, 1), (17, 1, 30), (17, -1, 14)] {
-        assert_eq!(step("history_day_steps", json!(current), direction), json!(expected), "{current} {direction}");
+    let step = |ladder: &str, current: Value, direction: i64| {
+        client(
+            "settings.step-ladder",
+            json!({ "ladder": ladder, "current": current, "direction": direction }),
+        )
+    };
+    for (current, direction, expected) in [
+        (730, 1, 730),
+        (7, -1, 7),
+        (1000, 1, 1000),
+        (1, -1, 1),
+        (17, 1, 30),
+        (17, -1, 14),
+    ] {
+        assert_eq!(
+            step("history_day_steps", json!(current), direction),
+            json!(expected),
+            "{current} {direction}"
+        );
     }
     assert_eq!(step("budget_steps", json!(1500.5), 1), json!(1500.5));
     assert_eq!(step("quota_budget_steps", json!(0.1), -1), json!(0.1));
@@ -170,16 +222,36 @@ fn port_cost_settings_numeric_ladders_preserve_endpoints_and_values_outside_pres
 /// REQ: PORT:ilium-client/src/cost_settings.rs::presets_wrap_and_custom_cuts_snap
 #[test]
 fn port_cost_settings_presets_wrap_and_custom_cuts_snap() {
-    let run = |settings: Value, direction: i64| apply(settings, json!([adjust("fixed_preset", direction)]));
+    let run = |settings: Value, direction: i64| {
+        apply(settings, json!([adjust("fixed_preset", direction)]))
+    };
     let presets = client("settings.presets", json!({}));
     let preset = |index: usize| presets["fixed_presets"][index].clone();
     let default = run(json!({}), 1);
-    assert_eq!(apply(json!({}), json!([]))["settings"]["fixed_cuts"], preset(2));
+    assert_eq!(
+        apply(json!({}), json!([]))["settings"]["fixed_cuts"],
+        preset(2)
+    );
     assert_eq!(default["settings"]["fixed_cuts"], preset(3));
-    assert_eq!(run(json!({ "fixed_cuts": [0.7, 3.0, 9.0, 30.0] }), 1)["settings"]["fixed_cuts"], preset(2));
-    assert_eq!(run(json!({ "fixed_cuts": preset(0) }), -1)["settings"]["fixed_cuts"], preset(4));
-    assert_eq!(client("settings.is-preset", json!({ "cuts": preset(1) })), json!(true));
-    assert_eq!(client("settings.is-preset", json!({ "cuts": [1.0, 2.0, 3.0, 4.0] })), json!(false));
+    assert_eq!(
+        run(json!({ "fixed_cuts": [0.7, 3.0, 9.0, 30.0] }), 1)["settings"]["fixed_cuts"],
+        preset(2)
+    );
+    assert_eq!(
+        run(json!({ "fixed_cuts": preset(0) }), -1)["settings"]["fixed_cuts"],
+        preset(4)
+    );
+    assert_eq!(
+        client("settings.is-preset", json!({ "cuts": preset(1) })),
+        json!(true)
+    );
+    assert_eq!(
+        client(
+            "settings.is-preset",
+            json!({ "cuts": [1.0, 2.0, 3.0, 4.0] })
+        ),
+        json!(false)
+    );
 }
 
 /// REQ: PORT:ilium-client/src/cost_settings.rs::quota_metric_adds_its_window_row_and_keeps_dollar_values_apart
@@ -187,11 +259,19 @@ fn port_cost_settings_presets_wrap_and_custom_cuts_snap() {
 fn port_cost_settings_quota_metric_adds_its_window_row_and_keeps_dollar_values_apart() {
     let dollars = client("settings.rows", json!({ "settings": {} }));
     assert_eq!(dollars["settings"]["metric"], json!("dollars"));
-    assert!(!dollars["rows"].as_array().cloned().unwrap_or_default().contains(&json!("quota_window")));
+    assert!(!dollars["rows"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .contains(&json!("quota_window")));
 
     let reply = apply(json!({}), json!([adjust("metric:dollars", 1)]));
     assert_eq!(reply["results"][0], json!(true));
-    let rows = client("settings.rows", json!({ "settings": reply["settings"].clone() }))["rows"].clone();
+    let rows = client(
+        "settings.rows",
+        json!({ "settings": reply["settings"].clone() }),
+    )["rows"]
+        .clone();
     assert_eq!(rows[0], json!("metric:quota"));
     assert_eq!(rows[1], json!("quota_window"));
     assert_eq!(rows[2], json!("calibration:own_history"));
@@ -201,34 +281,64 @@ fn port_cost_settings_quota_metric_adds_its_window_row_and_keeps_dollar_values_a
     let presets = client("settings.presets", json!({}));
     let next = apply(
         reply["settings"].clone(),
-        json!([adjust("fixed_preset", 1), adjust("budget", 1), adjust("burn_preset", -1)]),
+        json!([
+            adjust("fixed_preset", 1),
+            adjust("budget", 1),
+            adjust("burn_preset", -1)
+        ]),
     );
     assert_eq!(next["results"], json!([true, true, true]));
     assert_eq!(next["settings"]["fixed_cuts"], dollar_bands);
-    assert_eq!(next["settings"]["quota_fixed_cuts"], presets["quota_fixed_presets"][2]);
+    assert_eq!(
+        next["settings"]["quota_fixed_cuts"],
+        presets["quota_fixed_presets"][2]
+    );
     assert_eq!(next["settings"]["budget_usd"], json!(10.0));
     assert_eq!(next["settings"]["quota_budget_percent"], json!(20.0));
-    assert_eq!(next["settings"]["quota_burn_cuts"], presets["quota_burn_presets"][0]);
+    assert_eq!(
+        next["settings"]["quota_burn_cuts"],
+        presets["quota_burn_presets"][0]
+    );
     assert_eq!(next["active_fixed_cuts"], presets["quota_fixed_presets"][2]);
     assert_eq!(next["active_budget"], json!(20.0));
 
     let window = apply(next["settings"].clone(), json!([adjust("quota_window", 0)]));
     assert_eq!(window["results"][0], json!(true));
     assert_eq!(window["settings"]["quota_window"], json!("secondary"));
-    let window = apply(window["settings"].clone(), json!([adjust("quota_window", 1)]));
+    let window = apply(
+        window["settings"].clone(),
+        json!([adjust("quota_window", 1)]),
+    );
     assert_eq!(window["settings"]["quota_window"], json!("primary"));
 
-    let back = apply(window["settings"].clone(), json!([adjust("metric:dollars", 0)]));
+    let back = apply(
+        window["settings"].clone(),
+        json!([adjust("metric:dollars", 0)]),
+    );
     assert_eq!(back["active_fixed_cuts"], dollar_bands);
-    let rows = client("settings.rows", json!({ "settings": back["settings"].clone() }))["rows"].clone();
-    assert!(!rows.as_array().cloned().unwrap_or_default().contains(&json!("quota_window")));
+    let rows = client(
+        "settings.rows",
+        json!({ "settings": back["settings"].clone() }),
+    )["rows"]
+        .clone();
+    assert!(!rows
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .contains(&json!("quota_window")));
 }
 
 /// REQ: PORT:ilium-client/src/cost_settings.rs::rows_follow_the_selected_calibration
 #[test]
 fn port_cost_settings_rows_follow_the_selected_calibration() {
     let rows_with = |calibration: &str| -> Vec<Value> {
-        client("settings.rows", json!({ "settings": { "calibration": calibration } }))["rows"].as_array().cloned().unwrap_or_default()
+        client(
+            "settings.rows",
+            json!({ "settings": { "calibration": calibration } }),
+        )["rows"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
     };
     assert!(rows_with("own_history").contains(&json!("history_days")));
     assert!(!rows_with("own_history").contains(&json!("budget")));
@@ -257,16 +367,25 @@ fn port_cost_settings_sanitizing_repairs_hand_edited_nonsense() {
     assert_eq!(settings["budget_usd"], defaults["settings"]["budget_usd"]);
     assert_eq!(settings["history_days"], json!(1));
     assert_eq!(settings["sparkline_window_minutes"], json!(1));
-    assert_eq!(settings["sparkline_cells"], defaults["sparkline_cell_range"][1]);
+    assert_eq!(
+        settings["sparkline_cells"],
+        defaults["sparkline_cell_range"][1]
+    );
 }
 
 /// REQ: PORT:ilium-client/src/cost_settings.rs::sparkline_cells_are_clamped
 #[test]
 fn port_cost_settings_sparkline_cells_are_clamped() {
     let range = apply(json!({}), json!([]))["sparkline_cell_range"].clone();
-    let high = apply(json!({ "sparkline_cells": range[1] }), json!([adjust("sparkline_cells", 1)]));
+    let high = apply(
+        json!({ "sparkline_cells": range[1] }),
+        json!([adjust("sparkline_cells", 1)]),
+    );
     assert_eq!(high["results"][0], json!(false));
-    let low = apply(json!({ "sparkline_cells": range[0] }), json!([adjust("sparkline_cells", -1)]));
+    let low = apply(
+        json!({ "sparkline_cells": range[0] }),
+        json!([adjust("sparkline_cells", -1)]),
+    );
     assert_eq!(low["results"][0], json!(false));
 }
 
@@ -276,13 +395,25 @@ fn port_cost_settings_sparkline_window_steps_through_the_ladder_and_snaps_custom
     let up = apply(json!({}), json!([adjust("sparkline_window", 1)]));
     assert_eq!(up["results"][0], json!(true));
     assert_eq!(up["settings"]["sparkline_window_minutes"], json!(480));
-    let down = apply(up["settings"].clone(), json!([adjust("sparkline_window", -1)]));
+    let down = apply(
+        up["settings"].clone(),
+        json!([adjust("sparkline_window", -1)]),
+    );
     assert_eq!(down["settings"]["sparkline_window_minutes"], json!(360));
-    let snap_up = apply(json!({ "sparkline_window_minutes": 100 }), json!([adjust("sparkline_window", 1)]));
+    let snap_up = apply(
+        json!({ "sparkline_window_minutes": 100 }),
+        json!([adjust("sparkline_window", 1)]),
+    );
     assert_eq!(snap_up["settings"]["sparkline_window_minutes"], json!(120));
-    let snap_down = apply(json!({ "sparkline_window_minutes": 100 }), json!([adjust("sparkline_window", -1)]));
+    let snap_down = apply(
+        json!({ "sparkline_window_minutes": 100 }),
+        json!([adjust("sparkline_window", -1)]),
+    );
     assert_eq!(snap_down["settings"]["sparkline_window_minutes"], json!(90));
-    let top = apply(json!({ "sparkline_window_minutes": 43_200 }), json!([adjust("sparkline_window", 1)]));
+    let top = apply(
+        json!({ "sparkline_window_minutes": 43_200 }),
+        json!([adjust("sparkline_window", 1)]),
+    );
     assert_eq!(top["results"][0], json!(false));
     assert_eq!(top["settings"]["sparkline_window_minutes"], json!(43_200));
 }
@@ -292,9 +423,15 @@ fn port_cost_settings_sparkline_window_steps_through_the_ladder_and_snaps_custom
 fn port_cost_settings_toml_round_trip_keeps_nested_options_and_accepts_partial_files() {
     let reply = apply(
         json!({ "prices": { "gpt-reserve": { "input": 1.0, "output": 2.0, "cache_read": 0.1, "cache_write": 0.0 } } }),
-        json!([adjust("display:sparkline", 0), adjust("visibility:sparkline", 0)]),
+        json!([
+            adjust("display:sparkline", 0),
+            adjust("visibility:sparkline", 0)
+        ]),
     );
-    let round = client("settings.toml-round-trip", json!({ "settings": reply["settings"].clone() }));
+    let round = client(
+        "settings.toml-round-trip",
+        json!({ "settings": reply["settings"].clone() }),
+    );
     assert_eq!(round["settings"], reply["settings"]);
 
     let partial = client(

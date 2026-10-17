@@ -1,7 +1,7 @@
 //! Extension points (`sources`, `rank`), the `query` service and the contribution example.
 
-use ilium_plugin_sdk::exports::{ServiceCall, ServiceReply};
 use ilium_plugin_sdk::exports::HookReply;
+use ilium_plugin_sdk::exports::{ServiceCall, ServiceReply};
 use ilium_plugin_sdk::types::PluginId;
 use serde_json::{json, Value};
 
@@ -26,7 +26,10 @@ fn doc_f_009_page_lists_sources_as_a_standard_collect_point() {
 #[test]
 fn doc_f_009_sources_payload_has_the_four_entry_fields_in_order() {
     let row = table_row(&page_text(), "`sources`");
-    assert_eq!(row[3], "entry: id, title, kind, service (answers a query with ranked hits)");
+    assert_eq!(
+        row[3],
+        "entry: id, title, kind, service (answers a query with ranked hits)"
+    );
 }
 
 /// REQ: F-009
@@ -49,9 +52,15 @@ fn doc_f_009_rank_payload_carries_query_and_hits_and_replies_with_hits() {
 #[test]
 fn doc_f_009_the_plugin_owns_exactly_two_points() {
     let page = page_text();
-    let rows = page.lines().filter(|line| line.starts_with("| `sources`") || line.starts_with("| `rank`")).count();
+    let rows = page
+        .lines()
+        .filter(|line| line.starts_with("| `sources`") || line.starts_with("| `rank`"))
+        .count();
     assert_eq!(rows, 2);
-    let row = table_row(&points_page(), "[Workspace search](/pages/core-plugin-search/)");
+    let row = table_row(
+        &points_page(),
+        "[Workspace search](/pages/core-plugin-search/)",
+    );
     assert_eq!(&row[1..], ["`ilium.core.search`", "2", "1", "0", "yes"]);
 }
 
@@ -99,7 +108,10 @@ fn doc_f_009_the_issues_example_contributes_to_sources_with_priority_50() {
     let entry = &example["contributes"]["extensions"][0];
     assert_eq!(entry["id"], "issues");
     assert_eq!(entry["priority"], 50);
-    assert_eq!(entry["entry"], json!({ "title": "Issues", "kind": "issue", "service": "example.issues/search" }));
+    assert_eq!(
+        entry["entry"],
+        json!({ "title": "Issues", "kind": "issue", "service": "example.issues/search" })
+    );
 }
 
 // ---- behaviour: the query service ---------------------------------------------------------
@@ -143,15 +155,23 @@ fn search_009_query_service_with_an_empty_query_answers_no_hits() {
 #[test]
 fn search_009_rank_hook_receives_query_and_hits_with_id_kind_score() {
     let mut host = activated_server();
-    add_terminal(&mut host, "build shell", "the build failed with linker error");
-    host.extensions().on_run_hook("ilium.core.search/rank", HookReply::Pass);
+    add_terminal(
+        &mut host,
+        "build shell",
+        "the build failed with linker error",
+    );
+    host.extensions()
+        .on_run_hook("ilium.core.search/rank", HookReply::Pass);
     ask(&mut host, 1, "linker");
     let calls = host.extensions().hook_calls("ilium.core.search/rank");
     assert_eq!(calls.len(), 1);
     let payload: Value = serde_json::from_str(&calls[0]).expect("payload JSON");
     assert_eq!(payload["query"], "linker");
     let first = &payload["hits"][0];
-    assert!(first["id"].is_string() && first["kind"].is_string() && first["score"].is_number(), "{first}");
+    assert!(
+        first["id"].is_string() && first["kind"].is_string() && first["score"].is_number(),
+        "{first}"
+    );
 }
 
 /// REQ: F-009
@@ -164,9 +184,15 @@ fn search_009_rank_hook_replace_reorders_the_results_before_they_are_shown() {
         { "id": second, "kind": "terminal", "score": 1.0 },
         { "id": first, "kind": "terminal", "score": 0.5 },
     ]});
-    host.extensions().on_run_hook("ilium.core.search/rank", HookReply::Replace(reversed.to_string()));
+    host.extensions().on_run_hook(
+        "ilium.core.search/rank",
+        HookReply::Replace(reversed.to_string()),
+    );
     let hits = ask(&mut host, 1, "needle");
-    let ids: Vec<&str> = hits.iter().map(|hit| hit["id"].as_str().expect("id")).collect();
+    let ids: Vec<&str> = hits
+        .iter()
+        .map(|hit| hit["id"].as_str().expect("id"))
+        .collect();
     assert_eq!(ids, [second.as_str(), first.as_str()]);
 }
 
@@ -177,7 +203,8 @@ fn search_009_rank_hook_pass_keeps_the_original_order() {
     add_terminal(&mut host, "first shell", "alpha needle");
     add_terminal(&mut host, "second shell", "beta needle");
     let plain = ask(&mut host, 1, "needle");
-    host.extensions().on_run_hook("ilium.core.search/rank", HookReply::Pass);
+    host.extensions()
+        .on_run_hook("ilium.core.search/rank", HookReply::Pass);
     let passed = ask(&mut host, 2, "needle");
     assert_eq!(plain, passed);
 }
@@ -187,7 +214,10 @@ fn search_009_rank_hook_pass_keeps_the_original_order() {
 fn search_009_rank_hook_refusal_does_not_hide_results() {
     let mut host = activated_server();
     add_terminal(&mut host, "build shell", "needle");
-    host.extensions().on_run_hook("ilium.core.search/rank", HookReply::Refuse("no".to_string()));
+    host.extensions().on_run_hook(
+        "ilium.core.search/rank",
+        HookReply::Refuse("no".to_string()),
+    );
     let hits = ask(&mut host, 1, "needle");
     assert_eq!(hits.len(), 1);
 }
@@ -207,7 +237,11 @@ fn search_009_sources_entry_service_is_asked_and_its_hits_join_the_results() {
         json!({ "hits": [{ "id": "issue-12", "kind": "issue", "title": "Deploy fails", "score": 0.9 }] }),
     );
     let hits = ask(&mut host, 1, "deploy");
-    assert!(hits.iter().any(|hit| hit["id"] == "issue-12" && hit["kind"] == "issue"), "{hits:?}");
+    assert!(
+        hits.iter()
+            .any(|hit| hit["id"] == "issue-12" && hit["kind"] == "issue"),
+        "{hits:?}"
+    );
 }
 
 /// REQ: F-009
@@ -216,7 +250,10 @@ fn search_009_sources_without_contributions_add_only_the_built_in_kinds() {
     let mut host = activated_server();
     add_terminal(&mut host, "build shell", "deploy now");
     let hits = ask(&mut host, 1, "deploy");
-    assert!(hits.iter().all(|hit| ["agent", "terminal", "file", "meaning"].contains(&hit["kind"].as_str().unwrap_or(""))));
+    assert!(hits
+        .iter()
+        .all(|hit| ["agent", "terminal", "file", "meaning"]
+            .contains(&hit["kind"].as_str().unwrap_or(""))));
 }
 
 /// REQ: F-009

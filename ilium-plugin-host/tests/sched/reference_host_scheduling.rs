@@ -87,7 +87,10 @@ fn hst_181_deliver_returns_before_a_slow_plugin_runs() {
     let before = Instant::now();
     handle.deliver(vec![theme()]);
     let elapsed = before.elapsed();
-    assert!(elapsed < ms(10), "deliver blocked the caller for {elapsed:?}");
+    assert!(
+        elapsed < ms(10),
+        "deliver blocked the caller for {elapsed:?}"
+    );
     handle.pump(8);
     assert!(!shared.batches().is_empty());
 }
@@ -135,7 +138,11 @@ fn hst_181_ui_work_channel_accepts_again_after_the_executor_takes_work() {
 fn hst_182_server_executor_has_clamp_cores_over_2_between_2_and_4_threads() {
     let expected = [(1, 2), (2, 2), (4, 2), (8, 4), (64, 4)];
     for (cores, threads) in expected {
-        assert_eq!(executor_threads(ProcessKind::Server, cores), threads, "cores {cores}");
+        assert_eq!(
+            executor_threads(ProcessKind::Server, cores),
+            threads,
+            "cores {cores}"
+        );
     }
 }
 
@@ -144,7 +151,11 @@ fn hst_182_server_executor_has_clamp_cores_over_2_between_2_and_4_threads() {
 fn hst_182_server_executor_boundaries_of_the_clamp() {
     let expected = [(3, 2), (5, 2), (6, 3), (7, 3), (8, 4), (9, 4)];
     for (cores, threads) in expected {
-        assert_eq!(executor_threads(ProcessKind::Server, cores), threads, "cores {cores}");
+        assert_eq!(
+            executor_threads(ProcessKind::Server, cores),
+            threads,
+            "cores {cores}"
+        );
     }
 }
 
@@ -153,7 +164,11 @@ fn hst_182_server_executor_boundaries_of_the_clamp() {
 fn hst_182_client_executor_has_clamp_cores_over_4_between_1_and_2_threads() {
     let expected = [(1, 1), (2, 1), (4, 1), (8, 2), (64, 2)];
     for (cores, threads) in expected {
-        assert_eq!(executor_threads(ProcessKind::Client, cores), threads, "cores {cores}");
+        assert_eq!(
+            executor_threads(ProcessKind::Client, cores),
+            threads,
+            "cores {cores}"
+        );
     }
 }
 
@@ -162,7 +177,11 @@ fn hst_182_client_executor_has_clamp_cores_over_4_between_1_and_2_threads() {
 fn hst_182_client_executor_boundaries_of_the_clamp() {
     let expected = [(3, 1), (7, 1), (8, 2), (9, 2), (12, 2)];
     for (cores, threads) in expected {
-        assert_eq!(executor_threads(ProcessKind::Client, cores), threads, "cores {cores}");
+        assert_eq!(
+            executor_threads(ProcessKind::Client, cores),
+            threads,
+            "cores {cores}"
+        );
     }
 }
 
@@ -170,14 +189,27 @@ fn hst_182_client_executor_boundaries_of_the_clamp() {
 #[test]
 fn hst_182_cli_executor_is_a_one_thread_pool() {
     for cores in [1, 2, 8, 64] {
-        assert_eq!(executor_threads(ProcessKind::Cli, cores), 1, "cores {cores}");
+        assert_eq!(
+            executor_threads(ProcessKind::Cli, cores),
+            1,
+            "cores {cores}"
+        );
     }
 }
 
 /// REQ: HST-182
 #[test]
 fn hst_182_job_bank_is_min_4_cores_over_2_and_at_least_one() {
-    let expected = [(1, 1), (2, 1), (3, 1), (4, 2), (7, 3), (8, 4), (9, 4), (64, 4)];
+    let expected = [
+        (1, 1),
+        (2, 1),
+        (3, 1),
+        (4, 2),
+        (7, 3),
+        (8, 4),
+        (9, 4),
+        (64, 4),
+    ];
     for (cores, threads) in expected {
         assert_eq!(job_bank_threads(cores), threads, "cores {cores}");
     }
@@ -199,7 +231,9 @@ fn thread_probe() -> (Arc<Mutex<Vec<std::thread::ThreadId>>>, Work) {
     let seen = Arc::new(Mutex::new(Vec::new()));
     let sink = seen.clone();
     let work: Work = Box::new(move || {
-        sink.lock().expect("probe lock").push(std::thread::current().id());
+        sink.lock()
+            .expect("probe lock")
+            .push(std::thread::current().id());
     });
     (seen, work)
 }
@@ -244,7 +278,9 @@ fn hst_183_one_dedicated_scene_thread_serves_every_plugin() {
     for name in ["demo.a", "demo.b", "demo.c"] {
         let sink = seen.clone();
         let work: Work = Box::new(move || {
-            sink.lock().expect("probe lock").push(std::thread::current().id());
+            sink.lock()
+                .expect("probe lock")
+                .push(std::thread::current().id());
         });
         scheduler.enqueue(&plugin(name), CallKind::SceneFrame, base, work);
     }
@@ -362,7 +398,11 @@ fn hst_184_equal_priority_runs_in_arrival_order() {
         .map(|_| scheduler.enqueue(&who, CallKind::OnEvents, base, noop()))
         .collect();
     scheduler.tick(base);
-    let run: Vec<u64> = scheduler.executed().iter().map(|call| call.ticket).collect();
+    let run: Vec<u64> = scheduler
+        .executed()
+        .iter()
+        .map(|call| call.ticket)
+        .collect();
     assert_eq!(run, tickets);
 }
 
@@ -512,7 +552,11 @@ fn hst_185_sides_are_served_round_robin_one_call_per_turn() {
         scheduler.enqueue(&second, CallKind::OnEvents, base, noop());
     }
     scheduler.tick(at(base, 10));
-    let order: Vec<PluginId> = scheduler.executed().iter().map(|call| call.plugin.clone()).collect();
+    let order: Vec<PluginId> = scheduler
+        .executed()
+        .iter()
+        .map(|call| call.plugin.clone())
+        .collect();
     let expected = vec![
         first.clone(),
         second.clone(),

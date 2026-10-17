@@ -12732,12 +12732,16 @@ impl App {
     /// Ends the oldest pending shell or agent spinner: a confirmed new
     /// terminal pane cannot be attributed to one button more precisely.
     fn finish_oldest_pending_terminal_toolbar_action(&mut self) {
-        if let Some(index) = self.pending_toolbar_actions.iter().position(|(pending, _)| {
-            matches!(
-                pending,
-                TreeToolbarAction::Shell | TreeToolbarAction::Agent(_)
-            )
-        }) {
+        if let Some(index) = self
+            .pending_toolbar_actions
+            .iter()
+            .position(|(pending, _)| {
+                matches!(
+                    pending,
+                    TreeToolbarAction::Shell | TreeToolbarAction::Agent(_)
+                )
+            })
+        {
             self.pending_toolbar_actions.remove(index);
         }
     }

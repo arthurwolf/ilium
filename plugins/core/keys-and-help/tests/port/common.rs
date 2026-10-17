@@ -31,7 +31,10 @@ pub fn keyboard_page() -> ViewTarget {
 
 /// A client host with the manifest grants, the keyboard tab holding `tab`, the plugin activated.
 pub fn host_with_tab(tab: Value) -> FakeHost {
-    let mut host = FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("client").build();
+    let mut host = FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("client")
+        .build();
     host.kernel_settings().set_tab("keyboard", tab);
     host.keymap().set_bindings(Vec::new());
     host.activate::<KeysAndHelpClient>();
@@ -48,7 +51,12 @@ pub fn tmux_host() -> FakeHost {
 }
 
 pub fn binding(context: &str, label: &str, chord: &str, is_default: bool) -> Binding {
-    Binding { command: label.to_string(), chords: vec![chord.to_string()], context: context.to_string(), is_default }
+    Binding {
+        command: label.to_string(),
+        chords: vec![chord.to_string()],
+        context: context.to_string(),
+        is_default,
+    }
 }
 
 /// Seeds the keymap and tells the plugin through `keymap-changed`.
@@ -77,7 +85,9 @@ pub fn render_text(host: &mut FakeHost, target: ViewTarget, columns: u16, rows: 
 
 /// Display width in terminal cells (CJK and fullwidth forms take two).
 pub fn cell_width(text: &str) -> usize {
-    text.chars().map(|character| if (character as u32) >= 0x2E80 { 2 } else { 1 }).sum()
+    text.chars()
+        .map(|character| if (character as u32) >= 0x2E80 { 2 } else { 1 })
+        .sum()
 }
 
 /// Id of the capture action of a row label: lower case, spaces and underscores become hyphens.
@@ -86,11 +96,21 @@ pub fn capture_id(label: &str) -> String {
 }
 
 pub fn write_chord(host: &mut FakeHost, chord: &str) {
-    host.send_action(keyboard_page(), "chord", ActionKind::Changed, ActionValue::Text(chord.to_string()));
+    host.send_action(
+        keyboard_page(),
+        "chord",
+        ActionKind::Changed,
+        ActionValue::Text(chord.to_string()),
+    );
 }
 
 pub fn activate(host: &mut FakeHost, label: &str) {
-    host.send_action(keyboard_page(), &capture_id(label), ActionKind::Activated, ActionValue::None);
+    host.send_action(
+        keyboard_page(),
+        &capture_id(label),
+        ActionKind::Activated,
+        ActionValue::None,
+    );
     host.settle();
 }
 
@@ -153,7 +173,9 @@ pub fn column_host(column: Column) -> FakeHost {
         Column::Screen => ("ctrl+a", "screen"),
         _ => ("ctrl+b", "tmux"),
     };
-    let mut host = host_with_tab(json!({"shortcut_base": base, "navigation_shortcut_base": "ctrl+b", "preset": preset}));
+    let mut host = host_with_tab(
+        json!({"shortcut_base": base, "navigation_shortcut_base": "ctrl+b", "preset": preset}),
+    );
     let mut bindings = Vec::new();
     let mut labels: Vec<(String, String)> = Vec::new();
     for row in action_rows() {
@@ -170,11 +192,19 @@ pub fn column_host(column: Column) -> FakeHost {
         });
         labels.push((chord, key));
     }
-    let label_refs: Vec<(&str, &str)> = labels.iter().map(|(chord, label)| (chord.as_str(), label.as_str())).collect();
+    let label_refs: Vec<(&str, &str)> = labels
+        .iter()
+        .map(|(chord, label)| (chord.as_str(), label.as_str()))
+        .collect();
     set_keymap(&mut host, bindings, &label_refs);
     host
 }
 
 pub fn normalized(text: &str) -> String {
-    text.lines().map(str::trim_end).collect::<Vec<_>>().join("\n").trim_end_matches('\n').to_string()
+    text.lines()
+        .map(str::trim_end)
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim_end_matches('\n')
+        .to_string()
 }

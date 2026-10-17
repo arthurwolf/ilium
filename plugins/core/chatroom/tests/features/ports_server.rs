@@ -34,12 +34,20 @@ fn router_f062_an_escaped_record_is_published_with_its_escapes_intact() {
 fn router_f062_forwarded_text_keeps_one_input_line_per_enter_boundary() {
     let mut host = host_with_room();
     let pane = host.tree().add(named_pane("@compiler"));
-    append_raw(&mut host, "- 2026-10-07 05:00:00 +02:00 | @sender | @compiler\\n/goal wake the compiler\n");
+    append_raw(
+        &mut host,
+        "- 2026-10-07 05:00:00 +02:00 | @sender | @compiler\\n/goal wake the compiler\n",
+    );
     let inputs = sent_inputs(&host, pane);
     assert!(!inputs.is_empty());
     let joined = inputs.join("");
     assert!(joined.contains("/goal wake the compiler"), "{joined:?}");
-    assert!(joined.ends_with('\n') || inputs.last().is_some_and(|last| last.is_empty() || last.ends_with('\n')));
+    assert!(
+        joined.ends_with('\n')
+            || inputs
+                .last()
+                .is_some_and(|last| last.is_empty() || last.ends_with('\n'))
+    );
 }
 
 fn named_pane(name: &str) -> ilium_plugin_sdk::testing::TreeNode {
@@ -68,9 +76,17 @@ fn sent_inputs(host: &FakeHost, pane: u64) -> Vec<String> {
 fn router_f062_a_record_naming_a_pane_submits_each_forwarded_line_to_that_pane() {
     let mut host = host_with_room();
     let pane = host.tree().add(named_pane("@compiler"));
-    append_raw(&mut host, "- 2026-10-07 05:00:00 +02:00 | @sender | @compiler\\n/goal wake the compiler\n");
+    append_raw(
+        &mut host,
+        "- 2026-10-07 05:00:00 +02:00 | @sender | @compiler\\n/goal wake the compiler\n",
+    );
     let inputs = sent_inputs(&host, pane);
-    assert!(inputs.iter().any(|text| text.contains("/goal wake the compiler")), "{inputs:?}");
+    assert!(
+        inputs
+            .iter()
+            .any(|text| text.contains("/goal wake the compiler")),
+        "{inputs:?}"
+    );
 }
 
 /// REQ: F-062, F-064
@@ -95,7 +111,11 @@ fn router_f062_one_poll_publishes_at_most_64_records_and_the_next_poll_the_rest(
     host.fs().write(ROOM, current.as_bytes());
     host.deliver(Vec::new());
     let first = published_texts(&host);
-    assert_eq!(first.len(), 64, "one poll must not materialize the whole backlog");
+    assert_eq!(
+        first.len(),
+        64,
+        "one poll must not materialize the whole backlog"
+    );
     assert!(first[0].ends_with("record-0") && first[63].ends_with("record-63"));
     host.settle();
     let all = published_texts(&host);
@@ -109,13 +129,27 @@ fn router_f062_a_failed_publish_leaves_the_record_for_the_next_poll() {
     let mut host = host_with_room();
     host.inject_failure(
         "topics.publish",
-        ilium_plugin_sdk::types::PluginError::new(ilium_plugin_sdk::types::ErrorCode::Busy, "bus busy"),
+        ilium_plugin_sdk::types::PluginError::new(
+            ilium_plugin_sdk::types::ErrorCode::Busy,
+            "bus busy",
+        ),
     );
-    append_raw(&mut host, "- t | sender | first\n- t | sender | second\nhand-edited note\n");
+    append_raw(
+        &mut host,
+        "- t | sender | first\n- t | sender | second\nhand-edited note\n",
+    );
     host.settle();
     let texts = published_texts(&host);
-    assert_eq!(texts.iter().filter(|text| text.ends_with("first")).count(), 1, "{texts:?}");
-    assert_eq!(texts.iter().filter(|text| text.ends_with("second")).count(), 1, "{texts:?}");
+    assert_eq!(
+        texts.iter().filter(|text| text.ends_with("first")).count(),
+        1,
+        "{texts:?}"
+    );
+    assert_eq!(
+        texts.iter().filter(|text| text.ends_with("second")).count(),
+        1,
+        "{texts:?}"
+    );
 }
 
 /// REQ: F-062, F-064, PORT:ilium-server/src/chatroom_router.rs::append_reader_restarts_when_equal_length_log_is_atomically_replaced
@@ -124,11 +158,15 @@ fn router_f062_an_atomically_replaced_log_of_equal_length_is_read_again_from_the
     let mut host = host_with_room();
     host.fs().write(ROOM, b"- t | sender | old record\n");
     host.settle();
-    host.fs().replace_atomically(ROOM, b"- t | sender | new record\n");
+    host.fs()
+        .replace_atomically(ROOM, b"- t | sender | new record\n");
     host.settle();
     let texts = published_texts(&host);
     assert!(texts.iter().any(|text| text.ends_with("old record")));
-    assert!(texts.iter().any(|text| text.ends_with("new record")), "{texts:?}");
+    assert!(
+        texts.iter().any(|text| text.ends_with("new record")),
+        "{texts:?}"
+    );
 }
 
 /// REQ: F-062, F-064
@@ -137,9 +175,12 @@ fn router_f062_a_longer_replacement_is_read_from_byte_zero() {
     let mut host = host_with_room();
     host.fs().write(ROOM, b"- t | sender | new record\n");
     host.settle();
-    host.fs().replace_atomically(ROOM, b"- t | sender | a longer replacement record\n");
+    host.fs()
+        .replace_atomically(ROOM, b"- t | sender | a longer replacement record\n");
     host.settle();
-    assert!(published_texts(&host).iter().any(|text| text.ends_with("a longer replacement record")));
+    assert!(published_texts(&host)
+        .iter()
+        .any(|text| text.ends_with("a longer replacement record")));
 }
 
 /// REQ: F-062, F-064, PORT:ilium-server/src/chatroom_router.rs::append_reader_bounds_bytes_even_when_record_count_is_below_its_cap
@@ -153,7 +194,11 @@ fn router_f062_one_poll_reads_at_most_64_kib_even_with_fewer_than_64_records() {
     host.deliver(Vec::new());
     let first = published_texts(&host).len();
     assert!(first < 64);
-    assert!(first * line.len() <= 64 * 1024, "{first} records of {} bytes", line.len());
+    assert!(
+        first * line.len() <= 64 * 1024,
+        "{first} records of {} bytes",
+        line.len()
+    );
     assert!(first < 20, "the backlog is not read in one poll");
     host.settle();
     assert_eq!(published_texts(&host).len(), 20);
@@ -175,10 +220,19 @@ fn router_f062_an_unterminated_last_record_waits_for_its_newline() {
 #[test]
 fn router_f062_a_record_beyond_20_kib_is_refused_and_not_published() {
     let mut host = host_with_room();
-    append_raw(&mut host, &format!("- t | sender | {}\n", "x".repeat(20 * 1024)));
+    append_raw(
+        &mut host,
+        &format!("- t | sender | {}\n", "x".repeat(20 * 1024)),
+    );
     assert!(published_texts(&host).is_empty());
     assert!(!host.is_disabled());
-    assert!(host.diagnostics().iter().any(|entry| entry.message.contains("record")), "{:?}", host.diagnostics());
+    assert!(
+        host.diagnostics()
+            .iter()
+            .any(|entry| entry.message.contains("record")),
+        "{:?}",
+        host.diagnostics()
+    );
 }
 
 /// REQ: F-062, F-064
@@ -208,7 +262,10 @@ fn router_f062_the_read_is_bounded_in_bytes_per_call_of_fs_tail() {
     append_raw(&mut host, "- t | sender | bounded\n");
     let tails = host.fs().tail_log();
     assert!(!tails.is_empty());
-    assert!(tails.iter().all(|call| call.max_bytes <= 65_536), "{tails:?}");
+    assert!(
+        tails.iter().all(|call| call.max_bytes <= 65_536),
+        "{tails:?}"
+    );
     assert_eq!(published_texts(&host), ["t | sender | bounded"]);
 }
 
@@ -219,12 +276,20 @@ fn router_f062_the_tail_cursor_follows_the_file_length_after_each_read() {
     let first_length = room_text(&mut host).len() as u64;
     append_raw(&mut host, "- t | sender | one\n");
     let second_length = room_text(&mut host).len() as u64;
-    let cursors = host.fs().tail_log().iter().map(|call| call.returned_cursor).collect::<Vec<_>>();
+    let cursors = host
+        .fs()
+        .tail_log()
+        .iter()
+        .map(|call| call.returned_cursor)
+        .collect::<Vec<_>>();
     assert_eq!(cursors.last().copied(), Some(second_length));
     assert!(second_length > first_length);
     send(&mut host, "two");
     host.settle();
-    assert_eq!(host.fs().tail_log().last().map(|call| call.returned_cursor), Some(room_text(&mut host).len() as u64));
+    assert_eq!(
+        host.fs().tail_log().last().map(|call| call.returned_cursor),
+        Some(room_text(&mut host).len() as u64)
+    );
 }
 
 /// REQ: F-062, F-064, PORT:ilium-client/src/chatroom.rs::append_repairs_a_missing_trailing_newline_left_by_a_human_edit
@@ -251,9 +316,17 @@ fn router_f062_a_start_with_a_room_asks_agent_setup_to_repair_the_hook_in_place(
     host.fs().write(ROOM, initial_room().as_bytes());
     host.settle();
     let calls = host.service_calls();
-    let repairs = calls.iter().filter(|(service, method, _)| service == "ilium.core.agent-setup" && method == "install").count();
+    let repairs = calls
+        .iter()
+        .filter(|(service, method, _)| service == "ilium.core.agent-setup" && method == "install")
+        .count();
     assert!(repairs >= 1, "{calls:?}");
-    assert!(host.fs().read("project:.claude/settings.local.json").is_none(), "this plugin writes no agent file");
+    assert!(
+        host.fs()
+            .read("project:.claude/settings.local.json")
+            .is_none(),
+        "this plugin writes no agent file"
+    );
 }
 
 /// REQ: F-062, F-064, PORT:ilium-client/src/app.rs::chatroom_reconciliation_uses_an_independent_one_second_deadline
@@ -261,9 +334,13 @@ fn router_f062_a_start_with_a_room_asks_agent_setup_to_repair_the_hook_in_place(
 fn router_f062_the_room_is_reconciled_on_a_one_second_deadline() {
     let mut host = host_with_room();
     let text = room_text(&mut host);
-    host.fs().seed(ROOM, format!("{}{}\n", text, numbered_line(1)).as_bytes());
+    host.fs()
+        .seed(ROOM, format!("{}{}\n", text, numbered_line(1)).as_bytes());
     host.advance_clock(999);
-    assert!(published_texts(&host).is_empty(), "no reconcile before one second");
+    assert!(
+        published_texts(&host).is_empty(),
+        "no reconcile before one second"
+    );
     host.advance_clock(1);
     assert_eq!(published_texts(&host).len(), 1);
 }
@@ -272,14 +349,28 @@ fn router_f062_the_room_is_reconciled_on_a_one_second_deadline() {
 #[test]
 fn router_f062_full_repairs_run_at_most_once_every_15_seconds() {
     let mut host = host_with_room();
-    let count = |host: &FakeHost| host.service_calls().iter().filter(|(service, method, _)| service == "ilium.core.agent-setup" && method == "install").count();
+    let count = |host: &FakeHost| {
+        host.service_calls()
+            .iter()
+            .filter(|(service, method, _)| {
+                service == "ilium.core.agent-setup" && method == "install"
+            })
+            .count()
+    };
     host.advance_clock(1_000);
     let after_first = count(&host);
     host.advance_clock(13_000);
-    assert_eq!(count(&host), after_first, "no repair inside the 15 s interval");
+    assert_eq!(
+        count(&host),
+        after_first,
+        "no repair inside the 15 s interval"
+    );
     host.advance_clock(1_000);
     host.advance_clock(1_000);
-    assert!(count(&host) > after_first, "a repair runs once 15 s have passed");
+    assert!(
+        count(&host) > after_first,
+        "a repair runs once 15 s have passed"
+    );
 }
 
 /// REQ: F-062, F-064, PORT:ilium-client/src/app.rs::project_chatroom_setup_refresh_is_idempotent_and_preserves_room_data

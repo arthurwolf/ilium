@@ -2,7 +2,7 @@
 //! assumed: API_GAPS.md item 1. Methods: enable, observe, append, replay, snapshot, restore, remove, payload.
 
 use ilium_plugin_sdk::types::ErrorCode;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::agent_debug_history::{append, entries};
 use crate::common::{agent_debug, session};
@@ -30,7 +30,12 @@ fn f_032_disabled_recorder_does_not_create_a_journal() {
     enable(&mut session, false);
     let reply = append(&mut session, 1, "pty", "prompt-submitted", "hidden prompt");
     assert_eq!(reply["ignored"], true);
-    assert!(agent_debug(&mut session, "snapshot", json!({})).expect("snapshot")["panes"].as_array().unwrap().is_empty());
+    assert!(
+        agent_debug(&mut session, "snapshot", json!({})).expect("snapshot")["panes"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
 }
 
 /// REQ: F-032
@@ -43,9 +48,17 @@ fn f_032_replay_supports_initial_and_incremental_reads() {
         append(&mut session, 1, "pty", "prompt-submitted", summary);
     }
     let initial = agent_debug(&mut session, "replay", json!({ "pane": 1 })).expect("replay");
-    assert_eq!((initial["through_sequence"].clone(), initial["retained_from"].clone(), initial["dropped"].clone()), (json!(3), json!(1), json!(0)));
+    assert_eq!(
+        (
+            initial["through_sequence"].clone(),
+            initial["retained_from"].clone(),
+            initial["dropped"].clone()
+        ),
+        (json!(3), json!(1), json!(0))
+    );
     assert_eq!(initial["entries"].as_array().unwrap().len(), 3);
-    let incremental = agent_debug(&mut session, "replay", json!({ "pane": 1, "after": 2 })).expect("replay");
+    let incremental =
+        agent_debug(&mut session, "replay", json!({ "pane": 1, "after": 2 })).expect("replay");
     assert_eq!(incremental["entries"].as_array().unwrap().len(), 1);
     assert_eq!(incremental["entries"][0]["summary"], "third");
 }
@@ -59,7 +72,8 @@ fn f_032_snapshot_restore_and_remove_follow_the_pane_lifecycle() {
     append(&mut session, 1, "server", "agent-detected", "persist me");
     let snapshot = agent_debug(&mut session, "snapshot", json!({})).expect("snapshot");
     agent_debug(&mut session, "remove", json!({ "panes": [1] })).expect("remove");
-    let gone = agent_debug(&mut session, "replay", json!({ "pane": 1 })).expect_err("journal removed");
+    let gone =
+        agent_debug(&mut session, "replay", json!({ "pane": 1 })).expect_err("journal removed");
     assert_eq!(gone.code, ErrorCode::NotFound);
     agent_debug(&mut session, "restore", json!({ "snapshot": snapshot })).expect("restore");
     assert_eq!(entries(&mut session)["entries"][0]["summary"], "persist me");
@@ -72,9 +86,11 @@ fn f_032_snapshot_preflight_rejects_a_too_small_limit_without_losing_the_journal
     let mut session = session();
     enable(&mut session, true);
     agent_debug(&mut session, "append", json!({ "pane": 7, "at": 1, "source": "pty", "kind": "prompt-submitted", "summary": "kept", "reserve": 8192 })).expect("append");
-    let refused = agent_debug(&mut session, "snapshot", json!({ "limit": 1024 })).expect_err("limit too small");
+    let refused = agent_debug(&mut session, "snapshot", json!({ "limit": 1024 }))
+        .expect_err("limit too small");
     assert_eq!(refused.code, ErrorCode::QuotaExceeded);
-    let snapshot = agent_debug(&mut session, "snapshot", json!({ "limit": 16384 })).expect("larger allowance");
+    let snapshot =
+        agent_debug(&mut session, "snapshot", json!({ "limit": 16384 })).expect("larger allowance");
     assert_eq!(snapshot["panes"][0]["entries"][0]["summary"], "kept");
     assert_eq!(snapshot["panes"][0]["next_sequence"], 2);
     let replay = agent_debug(&mut session, "replay", json!({ "pane": 7 })).expect("journal kept");
@@ -87,10 +103,30 @@ fn f_032_snapshot_preflight_rejects_a_too_small_limit_without_losing_the_journal
 fn f_032_change_only_filter_ignores_repeated_detection_across_other_events() {
     let mut session = session();
     enable(&mut session, false);
-    assert!(observe(&mut session, "detector", "detection-cycle", "Codex is idle"));
-    assert!(observe(&mut session, "pty", "prompt-submitted", "independent prompt"));
-    assert!(!observe(&mut session, "detector", "detection-cycle", "Codex is idle"));
-    assert!(observe(&mut session, "detector", "detection-cycle", "Codex is working"));
+    assert!(observe(
+        &mut session,
+        "detector",
+        "detection-cycle",
+        "Codex is idle"
+    ));
+    assert!(observe(
+        &mut session,
+        "pty",
+        "prompt-submitted",
+        "independent prompt"
+    ));
+    assert!(!observe(
+        &mut session,
+        "detector",
+        "detection-cycle",
+        "Codex is idle"
+    ));
+    assert!(observe(
+        &mut session,
+        "detector",
+        "detection-cycle",
+        "Codex is working"
+    ));
 }
 
 /// REQ: F-032
@@ -99,7 +135,12 @@ fn f_032_change_only_filter_ignores_repeated_detection_across_other_events() {
 fn f_032_enabling_the_ui_journal_after_file_logging_still_records_a_baseline() {
     let mut session = session();
     enable(&mut session, false);
-    assert!(observe(&mut session, "detector", "detection-cycle", "Codex is idle"));
+    assert!(observe(
+        &mut session,
+        "detector",
+        "detection-cycle",
+        "Codex is idle"
+    ));
     enable(&mut session, true);
     let reply = agent_debug(&mut session, "append", json!({ "pane": 19, "at": 1, "source": "detector", "kind": "detection-cycle", "summary": "Codex is idle", "context": context() })).expect("append");
     assert!(reply.get("sequence").is_some(), "{reply}");

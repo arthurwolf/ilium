@@ -58,7 +58,10 @@ impl FakeSession {
     }
 
     /// Like `install` but returns the failure and the installed id.
-    pub fn try_install(&mut self, _package_dir: impl AsRef<Path>) -> Result<PluginId, HarnessError> {
+    pub fn try_install(
+        &mut self,
+        _package_dir: impl AsRef<Path>,
+    ) -> Result<PluginId, HarnessError> {
         unimplemented!("DEV-480")
     }
 
@@ -88,7 +91,11 @@ impl FakeSession {
     }
 
     /// Runs the hook handler of a plugin on its server side (DEV-487).
-    pub fn run_hook(&mut self, _id: impl IntoPluginId, _call: HookCall) -> Result<HookReply, HarnessError> {
+    pub fn run_hook(
+        &mut self,
+        _id: impl IntoPluginId,
+        _call: HookCall,
+    ) -> Result<HookReply, HarnessError> {
         unimplemented!("DEV-487")
     }
 
@@ -124,7 +131,13 @@ impl FakeSession {
     }
 
     /// A service of a stub plugin that answers `reply` (lane hook, see manual_gaps_fakes.md; DEV-483).
-    pub fn stub_service(&mut self, _plugin: &str, _service: &str, _method: &str, _reply: Result<String, PluginError>) {
+    pub fn stub_service(
+        &mut self,
+        _plugin: &str,
+        _service: &str,
+        _method: &str,
+        _reply: Result<String, PluginError>,
+    ) {
         unimplemented!("DEV-483")
     }
 
@@ -134,7 +147,14 @@ impl FakeSession {
     }
 
     /// Adds an extension contribution of `plugin` to a point (lane hook, see manual_gaps_fakes.md; DEV-487).
-    pub fn contribute(&mut self, _plugin: &str, _point: &str, _id: &str, _priority: i32, _entry: serde_json::Value) {
+    pub fn contribute(
+        &mut self,
+        _plugin: &str,
+        _point: &str,
+        _id: &str,
+        _priority: i32,
+        _entry: serde_json::Value,
+    ) {
         unimplemented!("DEV-487")
     }
 
@@ -144,7 +164,11 @@ impl FakeSession {
     }
 
     /// Runs a hook or collect point of the owner with this payload; the replies as JSON text (lane hook, see manual_gaps_fakes.md).
-    pub fn call_extension(&mut self, _point: &str, _payload_json: &str) -> Result<Vec<String>, HarnessError> {
+    pub fn call_extension(
+        &mut self,
+        _point: &str,
+        _payload_json: &str,
+    ) -> Result<Vec<String>, HarnessError> {
         unimplemented!("DEV-487")
     }
 

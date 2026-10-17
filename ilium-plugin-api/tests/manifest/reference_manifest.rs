@@ -72,7 +72,10 @@ fn pkg_001_byte_order_mark_refused_json_invalid() {
 #[test]
 fn pkg_001_truncated_json_refused_json_invalid_at_stage_two() {
     let found = diagnostics_of_text("{\"api\":", Tier::T3, CheckMode::Check);
-    assert_eq!(error_codes(&found), vec!["manifest.json-invalid".to_owned()]);
+    assert_eq!(
+        error_codes(&found),
+        vec!["manifest.json-invalid".to_owned()]
+    );
     assert_eq!(found[0].stage, Some(Stage(2)));
 }
 
@@ -146,7 +149,10 @@ fn pkg_003_duplicate_key_stops_validation_at_stage_two() {
     // The text also has an unknown key and a bad id; none of them is reported.
     let text = r#"{"id":"Bad","id":"Bad","unknown":1}"#;
     let found = diagnostics_of_text(text, Tier::T3, CheckMode::Check);
-    assert_eq!(error_codes(&found), vec!["manifest.duplicate-key".to_owned()]);
+    assert_eq!(
+        error_codes(&found),
+        vec!["manifest.duplicate-key".to_owned()]
+    );
     assert_eq!(found[0].stage, Some(Stage(2)));
 }
 
@@ -256,7 +262,13 @@ fn pkg_005_key_names_are_case_sensitive() {
 /// REQ: PKG-006
 #[test]
 fn pkg_006_null_values_refused_schema() {
-    for pointer in ["/description", "/license", "/icon", "/client/exports", "/requires"] {
+    for pointer in [
+        "/description",
+        "/license",
+        "/icon",
+        "/client/exports",
+        "/requires",
+    ] {
         let found = errors(&set(client(), pointer, Value::Null));
         assert_has(&found, "manifest.schema");
     }
@@ -280,12 +292,18 @@ fn pkg_006_omitting_unneeded_keys_is_accepted() {
 fn pkg_007_integer_forms_in_a_limit_value() {
     let accepted = ["10", "0", "4294967295"];
     for number in accepted {
-        let text = with_raw_member(&client(), &format!("\"limits\":{{\"memory_mib\":{number}}}"));
+        let text = with_raw_member(
+            &client(),
+            &format!("\"limits\":{{\"memory_mib\":{number}}}"),
+        );
         assert_lacks(&text_errors(&text), "manifest.schema");
     }
     let refused = ["10.0", "1e1", "1E1", "10.5", "-1", "4294967296"];
     for number in refused {
-        let text = with_raw_member(&client(), &format!("\"limits\":{{\"memory_mib\":{number}}}"));
+        let text = with_raw_member(
+            &client(),
+            &format!("\"limits\":{{\"memory_mib\":{number}}}"),
+        );
         assert_has(&text_errors(&text), "manifest.schema");
     }
 }
@@ -355,9 +373,9 @@ fn nested_schema(wrappers: usize, with_enum: bool) -> Value {
 }
 
 const FORBIDDEN_DISPLAY_CHARS: [char; 17] = [
-    '\u{0000}', '\u{0007}', '\u{0009}', '\u{000a}', '\u{000d}', '\u{001f}', '\u{007f}',
-    '\u{2028}', '\u{2029}', '\u{202a}', '\u{202b}', '\u{202c}', '\u{202d}', '\u{202e}',
-    '\u{2066}', '\u{2067}', '\u{2069}',
+    '\u{0000}', '\u{0007}', '\u{0009}', '\u{000a}', '\u{000d}', '\u{001f}', '\u{007f}', '\u{2028}',
+    '\u{2029}', '\u{202a}', '\u{202b}', '\u{202c}', '\u{202d}', '\u{202e}', '\u{2066}', '\u{2067}',
+    '\u{2069}',
 ];
 
 /// REQ: PKG-009
@@ -373,7 +391,11 @@ fn pkg_009_forbidden_characters_in_name_refused_display_name() {
 #[test]
 fn pkg_009_forbidden_characters_in_publisher_refused_display_name() {
     for character in FORBIDDEN_DISPLAY_CHARS {
-        let value = set(client(), "/publisher", json!(format!("Pub{character}lisher")));
+        let value = set(
+            client(),
+            "/publisher",
+            json!(format!("Pub{character}lisher")),
+        );
         assert_has(&errors(&value), "manifest.display-name");
     }
 }
@@ -381,8 +403,14 @@ fn pkg_009_forbidden_characters_in_publisher_refused_display_name() {
 /// REQ: PKG-009
 #[test]
 fn pkg_009_forbidden_characters_in_description_refused_display_name() {
-    for character in ['\u{0007}', '\u{001f}', '\u{007f}', '\u{2028}', '\u{2029}', '\u{202e}', '\u{2066}'] {
-        let value = set(client(), "/description", json!(format!("Text{character}more")));
+    for character in [
+        '\u{0007}', '\u{001f}', '\u{007f}', '\u{2028}', '\u{2029}', '\u{202e}', '\u{2066}',
+    ] {
+        let value = set(
+            client(),
+            "/description",
+            json!(format!("Text{character}more")),
+        );
         assert_has(&errors(&value), "manifest.display-name");
     }
 }
@@ -478,9 +506,23 @@ fn pkg_010_serialised_keys_follow_the_table_order_with_files_last() {
     let manifest: Manifest = serde_json::from_value(value).expect("deserializes");
     let text = serde_json::to_string(&manifest).expect("serializes");
     let table_order = [
-        "api", "id", "name", "version", "publisher", "description", "license", "icon",
-        "categories", "keywords", "homepage", "repository", "client", "activation", "replaces",
-        "unstable", "files",
+        "api",
+        "id",
+        "name",
+        "version",
+        "publisher",
+        "description",
+        "license",
+        "icon",
+        "categories",
+        "keywords",
+        "homepage",
+        "repository",
+        "client",
+        "activation",
+        "replaces",
+        "unstable",
+        "files",
     ];
     let mut last = 0usize;
     for key in table_order {
@@ -490,7 +532,9 @@ fn pkg_010_serialised_keys_follow_the_table_order_with_files_last() {
         assert!(position >= last, "{key} is out of table order in {text}");
         last = position;
     }
-    assert!(text.rfind("\"files\":").expect("files") > text.rfind("\"unstable\":").expect("unstable"));
+    assert!(
+        text.rfind("\"files\":").expect("files") > text.rfind("\"unstable\":").expect("unstable")
+    );
 }
 
 /// REQ: PKG-011
@@ -519,10 +563,7 @@ fn pkg_011_packed_manifest_with_files_has_no_key_missing() {
 fn pkg_011_check_ignores_files_in_a_source_manifest() {
     // A source manifest with an unsorted, wrong inventory is not refused by `check`.
     let mut value = client();
-    value["files"] = json!([
-        file_entry("zzz.png", 1),
-        file_entry("client.wasm", 1)
-    ]);
+    value["files"] = json!([file_entry("zzz.png", 1), file_entry("client.wasm", 1)]);
     let found = errors(&value);
     assert_lacks(&found, "manifest.files-order");
 }
@@ -590,10 +631,17 @@ fn pkg_013_exact_contract_string_is_accepted() {
 /// REQ: PKG-013
 #[test]
 fn pkg_013_well_formed_version_outside_the_window_refused_api_unsupported() {
-    for text in ["ilium:plugin@9.9.9", "ilium:plugin@10.0.0", "ilium:plugin@1.0.0"] {
+    for text in [
+        "ilium:plugin@9.9.9",
+        "ilium:plugin@10.0.0",
+        "ilium:plugin@1.0.0",
+    ] {
         let found = error_diagnostics(&set(client(), "/api", json!(text)));
         assert_eq!(
-            found.iter().map(|d| d.code.as_str().to_owned()).collect::<Vec<_>>(),
+            found
+                .iter()
+                .map(|d| d.code.as_str().to_owned())
+                .collect::<Vec<_>>(),
             vec!["package.api-unsupported".to_owned()],
             "{text}"
         );
@@ -605,8 +653,15 @@ fn pkg_013_well_formed_version_outside_the_window_refused_api_unsupported() {
 #[test]
 fn pkg_013_any_other_string_is_a_schema_error() {
     for text in [
-        "", "ilium:plugin@0.1", "ilium:plugin", "ilium:plugin@0.1.0 ", " ilium:plugin@0.1.0",
-        "ILIUM:plugin@0.1.0", "ilium:plugin@v0.1.0", "ilium:plugin@0.1.0-rc1", "ilium:host@0.1.0",
+        "",
+        "ilium:plugin@0.1",
+        "ilium:plugin",
+        "ilium:plugin@0.1.0 ",
+        " ilium:plugin@0.1.0",
+        "ILIUM:plugin@0.1.0",
+        "ilium:plugin@v0.1.0",
+        "ilium:plugin@0.1.0-rc1",
+        "ilium:host@0.1.0",
         "ilium:plugin@0.1.x",
     ] {
         let found = errors(&set(client(), "/api", json!(text)));
@@ -619,7 +674,10 @@ fn pkg_013_any_other_string_is_a_schema_error() {
 #[test]
 fn pkg_013_non_string_api_is_a_schema_error() {
     assert_has(&errors(&set(client(), "/api", json!(1))), "manifest.schema");
-    assert_has(&errors(&set(client(), "/api", json!(["ilium:plugin@0.1.0"]))), "manifest.schema");
+    assert_has(
+        &errors(&set(client(), "/api", json!(["ilium:plugin@0.1.0"]))),
+        "manifest.schema",
+    );
 }
 
 fn is_well_formed_api(text: &str) -> bool {
@@ -696,9 +754,18 @@ fn pkg_014_invalid_ids_refused_id_invalid() {
 /// REQ: PKG-014
 #[test]
 fn pkg_014_segment_length_boundary_32_and_33() {
-    assert_lacks(&id_codes(&format!("{}.x", repeat('a', 32))), "manifest.id-invalid");
-    assert_has(&id_codes(&format!("{}.x", repeat('a', 33))), "manifest.id-invalid");
-    assert_lacks(&id_codes(&format!("x.{}", repeat('a', 1))), "manifest.id-invalid");
+    assert_lacks(
+        &id_codes(&format!("{}.x", repeat('a', 32))),
+        "manifest.id-invalid",
+    );
+    assert_has(
+        &id_codes(&format!("{}.x", repeat('a', 33))),
+        "manifest.id-invalid",
+    );
+    assert_lacks(
+        &id_codes(&format!("x.{}", repeat('a', 1))),
+        "manifest.id-invalid",
+    );
 }
 
 /// REQ: PKG-014
@@ -729,7 +796,9 @@ fn pkg_014_whole_id_of_129_characters_is_refused() {
     assert_eq!(id.len(), 129);
     let found = id_codes(&id);
     assert!(
-        found.iter().any(|code| code == "manifest.id-invalid" || code == "manifest.schema"),
+        found
+            .iter()
+            .any(|code| code == "manifest.id-invalid" || code == "manifest.schema"),
         "{found:?}"
     );
 }
@@ -737,7 +806,13 @@ fn pkg_014_whole_id_of_129_characters_is_refused() {
 /// REQ: PKG-014
 #[test]
 fn pkg_014_reserved_first_segments_refused_id_reserved() {
-    for id in ["ilium.demo", "core.demo", "local.demo", "test.demo", "ilium.core.titles"] {
+    for id in [
+        "ilium.demo",
+        "core.demo",
+        "local.demo",
+        "test.demo",
+        "ilium.core.titles",
+    ] {
         assert_has(&id_codes(id), "manifest.id-reserved");
     }
 }
@@ -745,7 +820,13 @@ fn pkg_014_reserved_first_segments_refused_id_reserved() {
 /// REQ: PKG-014
 #[test]
 fn pkg_014_names_that_only_start_with_a_reserved_word_are_not_reserved() {
-    for id in ["coreutils.demo", "testing.demo", "locale.demo", "my.core.demo", "iliumx.demo"] {
+    for id in [
+        "coreutils.demo",
+        "testing.demo",
+        "locale.demo",
+        "my.core.demo",
+        "iliumx.demo",
+    ] {
         let found = id_codes(id);
         assert_lacks(&found, "manifest.id-reserved");
         assert_lacks(&found, "manifest.id-invalid");
@@ -788,13 +869,19 @@ proptest! {
 #[test]
 fn pkg_015_name_boundaries_64_and_65_characters() {
     assert_clean(&set(client(), "/name", json!(repeat('n', 64))));
-    assert_has(&errors(&set(client(), "/name", json!(repeat('n', 65)))), "manifest.schema");
+    assert_has(
+        &errors(&set(client(), "/name", json!(repeat('n', 65)))),
+        "manifest.schema",
+    );
 }
 
 /// REQ: PKG-015
 #[test]
 fn pkg_015_name_follows_the_display_text_rule() {
-    assert_has(&errors(&set(client(), "/name", json!("A\nB"))), "manifest.display-name");
+    assert_has(
+        &errors(&set(client(), "/name", json!("A\nB"))),
+        "manifest.display-name",
+    );
 }
 
 /// REQ: PKG-015
@@ -806,7 +893,10 @@ fn pkg_015_missing_name_refused_key_missing() {
 /// REQ: PKG-015
 #[test]
 fn pkg_015_name_of_a_wrong_type_refused_schema() {
-    assert_has(&errors(&set(client(), "/name", json!(5))), "manifest.schema");
+    assert_has(
+        &errors(&set(client(), "/name", json!(5))),
+        "manifest.schema",
+    );
 }
 
 fn version_codes(version: &str) -> Vec<String> {
@@ -817,8 +907,16 @@ fn version_codes(version: &str) -> Vec<String> {
 #[test]
 fn pkg_016_valid_semver_strings_are_accepted() {
     for version in [
-        "0.0.0", "1.2.3", "10.20.30", "1.0.0-alpha", "1.0.0-alpha.1", "1.0.0-0.3.7",
-        "1.0.0+build.5", "1.0.0-rc.1+build.5", "1.0.0-x-y-z", "1.0.0-0",
+        "0.0.0",
+        "1.2.3",
+        "10.20.30",
+        "1.0.0-alpha",
+        "1.0.0-alpha.1",
+        "1.0.0-0.3.7",
+        "1.0.0+build.5",
+        "1.0.0-rc.1+build.5",
+        "1.0.0-x-y-z",
+        "1.0.0-0",
     ] {
         assert_lacks(&version_codes(version), "manifest.version-invalid");
     }
@@ -828,8 +926,23 @@ fn pkg_016_valid_semver_strings_are_accepted() {
 #[test]
 fn pkg_016_invalid_strings_refused_version_invalid() {
     for version in [
-        "v1.0.0", "1.0", "1", "1.0.0.0", "01.0.0", "1.00.0", "1.0.00", "1.0.0-", "1.0.0-01",
-        "1.0.0+", "1.0.0-alpha..1", "", " 1.0.0", "1.0.0 ", "1.0.0-alpha_1", "1.-1.0", "x.y.z",
+        "v1.0.0",
+        "1.0",
+        "1",
+        "1.0.0.0",
+        "01.0.0",
+        "1.00.0",
+        "1.0.00",
+        "1.0.0-",
+        "1.0.0-01",
+        "1.0.0+",
+        "1.0.0-alpha..1",
+        "",
+        " 1.0.0",
+        "1.0.0 ",
+        "1.0.0-alpha_1",
+        "1.-1.0",
+        "x.y.z",
     ] {
         assert_has(&version_codes(version), "manifest.version-invalid");
     }
@@ -881,14 +994,23 @@ proptest! {
 #[test]
 fn pkg_017_publisher_boundaries_64_and_65_characters() {
     assert_clean(&set(client(), "/publisher", json!(repeat('p', 64))));
-    assert_has(&errors(&set(client(), "/publisher", json!(repeat('p', 65)))), "manifest.schema");
+    assert_has(
+        &errors(&set(client(), "/publisher", json!(repeat('p', 65)))),
+        "manifest.schema",
+    );
 }
 
 /// REQ: PKG-017
 #[test]
 fn pkg_017_publisher_is_display_text() {
-    assert_has(&errors(&set(client(), "/publisher", json!("P\u{202e}q"))), "manifest.display-name");
-    assert_has(&errors(&unset(client(), "/publisher")), "manifest.key-missing");
+    assert_has(
+        &errors(&set(client(), "/publisher", json!("P\u{202e}q"))),
+        "manifest.display-name",
+    );
+    assert_has(
+        &errors(&unset(client(), "/publisher")),
+        "manifest.key-missing",
+    );
 }
 
 /// REQ: PKG-017
@@ -921,7 +1043,11 @@ fn pkg_018_description_boundaries_500_and_501_characters() {
 #[test]
 fn pkg_018_description_with_a_control_character_refused_display_name() {
     assert_has(
-        &errors(&set(client(), "/description", json!("one\u{0007}paragraph"))),
+        &errors(&set(
+            client(),
+            "/description",
+            json!("one\u{0007}paragraph"),
+        )),
         "manifest.display-name",
     );
 }
@@ -932,8 +1058,15 @@ fn pkg_018_description_may_be_omitted_or_empty() {
     assert_clean(&unset(client(), "/description"));
     assert_clean(&set(client(), "/description", json!("")));
     let boundary = errors(&set(client(), "/description", json!(repeat('d', 500))));
-    assert_eq!(boundary, Vec::<String>::new(), "500 characters is the accepted maximum");
-    assert_lacks(&errors(&set(client(), "/description", json!(repeat('d', 501)))), "manifest.display-name");
+    assert_eq!(
+        boundary,
+        Vec::<String>::new(),
+        "500 characters is the accepted maximum"
+    );
+    assert_lacks(
+        &errors(&set(client(), "/description", json!(repeat('d', 501)))),
+        "manifest.display-name",
+    );
 }
 
 /// REQ: PKG-019
@@ -941,8 +1074,14 @@ fn pkg_018_description_may_be_omitted_or_empty() {
 fn pkg_019_license_length_boundaries_1_128_129() {
     assert_clean(&set(client(), "/license", json!("M")));
     assert_clean(&set(client(), "/license", json!(repeat('l', 128))));
-    assert_has(&errors(&set(client(), "/license", json!(repeat('l', 129)))), "manifest.schema");
-    assert_has(&errors(&set(client(), "/license", json!(""))), "manifest.schema");
+    assert_has(
+        &errors(&set(client(), "/license", json!(repeat('l', 129)))),
+        "manifest.schema",
+    );
+    assert_has(
+        &errors(&set(client(), "/license", json!(""))),
+        "manifest.schema",
+    );
 }
 
 /// REQ: PKG-019
@@ -952,7 +1091,10 @@ fn pkg_019_host_checks_only_the_length_of_the_license() {
     let odd = set(client(), "/license", json!("Not-An-SPDX-Id OR whatever"));
     assert_eq!(errors(&odd), Vec::<String>::new());
     assert_clean(&set(client(), "/license", json!(repeat('x', 128))));
-    assert_has(&errors(&set(client(), "/license", json!(repeat('x', 129)))), "manifest.schema");
+    assert_has(
+        &errors(&set(client(), "/license", json!(repeat('x', 129)))),
+        "manifest.schema",
+    );
 }
 
 /// REQ: PKG-020
@@ -961,15 +1103,30 @@ fn pkg_020_icon_pattern_and_length() {
     assert_clean(&set(client(), "/icon", json!("puzzle")));
     assert_clean(&set(client(), "/icon", json!("a")));
     assert_clean(&set(client(), "/icon", json!(repeat('i', 64))));
-    for icon in ["Puzzle", "-puzzle", "puzzle-", "pu zzle", "pu_zzle", "", &repeat('i', 65)] {
-        assert_has(&errors(&set(client(), "/icon", json!(icon))), "manifest.schema");
+    for icon in [
+        "Puzzle",
+        "-puzzle",
+        "puzzle-",
+        "pu zzle",
+        "pu_zzle",
+        "",
+        &repeat('i', 65),
+    ] {
+        assert_has(
+            &errors(&set(client(), "/icon", json!(icon))),
+            "manifest.schema",
+        );
     }
 }
 
 /// REQ: PKG-020
 #[test]
 fn pkg_020_unknown_icon_name_is_never_an_install_error() {
-    let value = set(packed(client()), "/icon", json!("no-such-icon-in-the-client"));
+    let value = set(
+        packed(client()),
+        "/icon",
+        json!("no-such-icon-in-the-client"),
+    );
     assert!(install_errors(&value, Tier::T3).is_empty());
 }
 
@@ -982,15 +1139,28 @@ fn categories_codes(value: Value) -> Vec<String> {
 fn pkg_021_one_to_three_distinct_known_categories_are_accepted() {
     assert_clean(&set(client(), "/categories", json!(["tools"])));
     assert_clean(&set(client(), "/categories", json!(["tools", "git"])));
-    assert_clean(&set(client(), "/categories", json!(["agents", "git", "voice"])));
+    assert_clean(&set(
+        client(),
+        "/categories",
+        json!(["agents", "git", "voice"]),
+    ));
 }
 
 /// REQ: PKG-021
 #[test]
 fn pkg_021_every_category_of_the_list_is_accepted() {
     for category in [
-        "agents", "appearance", "scenes", "editors", "git", "inference", "notifications",
-        "search", "terminal", "tools", "voice",
+        "agents",
+        "appearance",
+        "scenes",
+        "editors",
+        "git",
+        "inference",
+        "notifications",
+        "search",
+        "terminal",
+        "tools",
+        "voice",
     ] {
         assert_clean(&set(client(), "/categories", json!([category])));
     }
@@ -1000,8 +1170,14 @@ fn pkg_021_every_category_of_the_list_is_accepted() {
 #[test]
 fn pkg_021_empty_four_duplicate_and_unknown_categories_refused_schema() {
     assert_has(&categories_codes(json!([])), "manifest.schema");
-    assert_has(&categories_codes(json!(["tools", "git", "voice", "agents"])), "manifest.schema");
-    assert_has(&categories_codes(json!(["tools", "tools"])), "manifest.schema");
+    assert_has(
+        &categories_codes(json!(["tools", "git", "voice", "agents"])),
+        "manifest.schema",
+    );
+    assert_has(
+        &categories_codes(json!(["tools", "tools"])),
+        "manifest.schema",
+    );
     assert_has(&categories_codes(json!(["bogus"])), "manifest.schema");
     assert_has(&categories_codes(json!("tools")), "manifest.schema");
 }
@@ -1019,17 +1195,32 @@ fn pkg_022_keywords_count_and_length_boundaries() {
     let eight: Vec<String> = (0..8).map(|index| format!("k{index}")).collect();
     let nine: Vec<String> = (0..9).map(|index| format!("k{index}")).collect();
     assert_clean(&set(client(), "/keywords", json!(eight)));
-    assert_has(&errors(&set(client(), "/keywords", json!(nine))), "manifest.schema");
+    assert_has(
+        &errors(&set(client(), "/keywords", json!(nine))),
+        "manifest.schema",
+    );
     assert_clean(&set(client(), "/keywords", json!([repeat('w', 24)])));
-    assert_has(&errors(&set(client(), "/keywords", json!([repeat('w', 25)]))), "manifest.schema");
+    assert_has(
+        &errors(&set(client(), "/keywords", json!([repeat('w', 25)]))),
+        "manifest.schema",
+    );
 }
 
 /// REQ: PKG-022
 #[test]
 fn pkg_022_keywords_without_spaces_distinct_and_non_empty() {
-    assert_has(&errors(&set(client(), "/keywords", json!(["two words"]))), "manifest.schema");
-    assert_has(&errors(&set(client(), "/keywords", json!([""]))), "manifest.schema");
-    assert_has(&errors(&set(client(), "/keywords", json!(["dup", "dup"]))), "manifest.schema");
+    assert_has(
+        &errors(&set(client(), "/keywords", json!(["two words"]))),
+        "manifest.schema",
+    );
+    assert_has(
+        &errors(&set(client(), "/keywords", json!([""]))),
+        "manifest.schema",
+    );
+    assert_has(
+        &errors(&set(client(), "/keywords", json!(["dup", "dup"]))),
+        "manifest.schema",
+    );
 }
 
 fn link_codes(key: &str, value: &str) -> Vec<String> {
@@ -1040,7 +1231,10 @@ fn link_codes(key: &str, value: &str) -> Vec<String> {
 #[test]
 fn pkg_023_https_addresses_are_accepted_for_homepage_and_repository() {
     for key in ["homepage", "repository"] {
-        assert_lacks(&link_codes(key, "https://example.com/plugin"), "manifest.schema");
+        assert_lacks(
+            &link_codes(key, "https://example.com/plugin"),
+            "manifest.schema",
+        );
     }
 }
 
@@ -1048,7 +1242,13 @@ fn pkg_023_https_addresses_are_accepted_for_homepage_and_repository() {
 #[test]
 fn pkg_023_other_schemes_and_spaces_refused_schema() {
     for key in ["homepage", "repository"] {
-        for value in ["http://example.com", "ftp://example.com", "example.com", "https://a b", "https://"] {
+        for value in [
+            "http://example.com",
+            "ftp://example.com",
+            "example.com",
+            "https://a b",
+            "https://",
+        ] {
             assert_has(&link_codes(key, value), "manifest.schema");
         }
     }
@@ -1118,7 +1318,9 @@ fn pkg_025_list_for_a_side_without_a_component_refused_grant_side() {
 #[test]
 fn pkg_025_list_boundary_256_and_257_distinct_grants() {
     let grants = |count: usize| -> Vec<String> {
-        (0..count).map(|index| format!("topics.subscribe:topic-{index}")).collect()
+        (0..count)
+            .map(|index| format!("topics.subscribe:topic-{index}"))
+            .collect()
     };
     let at_limit = set(server(), "/capabilities/server", json!(grants(256)));
     assert_lacks(&errors(&at_limit), "manifest.schema");
@@ -1137,10 +1339,18 @@ fn pkg_025_duplicate_grants_in_one_list_are_refused() {
 #[test]
 fn pkg_026_activation_boundary_32_and_33_triggers() {
     let triggers = |count: usize| -> Vec<String> {
-        (0..count).map(|index| format!("event:ev-{index}")).collect()
+        (0..count)
+            .map(|index| format!("event:ev-{index}"))
+            .collect()
     };
-    assert_lacks(&errors(&set(client(), "/activation", json!(triggers(32)))), "manifest.schema");
-    assert_has(&errors(&set(client(), "/activation", json!(triggers(33)))), "manifest.schema");
+    assert_lacks(
+        &errors(&set(client(), "/activation", json!(triggers(32)))),
+        "manifest.schema",
+    );
+    assert_has(
+        &errors(&set(client(), "/activation", json!(triggers(33)))),
+        "manifest.schema",
+    );
 }
 
 /// REQ: PKG-026
@@ -1160,7 +1370,11 @@ fn pkg_026_unknown_trigger_kind_refused_schema() {
 /// REQ: PKG-026
 #[test]
 fn pkg_026_startup_and_durable_timer_triggers_are_accepted() {
-    assert_clean(&set(client(), "/activation", json!(["startup", "durable-timer"])));
+    assert_clean(&set(
+        client(),
+        "/activation",
+        json!(["startup", "durable-timer"]),
+    ));
 }
 
 /// REQ: PKG-027
@@ -1197,9 +1411,18 @@ fn pkg_027_malformed_requires_values_refused_requires_invalid() {
 /// REQ: PKG-027
 #[test]
 fn pkg_027_wait_ms_boundaries_0_5000_5001() {
-    assert_lacks(&errors(&set(client(), "/requires", json!({ "wait_ms": 0 }))), "manifest.requires-invalid");
-    assert_lacks(&errors(&set(client(), "/requires", json!({ "wait_ms": 5000 }))), "manifest.requires-invalid");
-    assert_has(&errors(&set(client(), "/requires", json!({ "wait_ms": 5001 }))), "manifest.requires-invalid");
+    assert_lacks(
+        &errors(&set(client(), "/requires", json!({ "wait_ms": 0 }))),
+        "manifest.requires-invalid",
+    );
+    assert_lacks(
+        &errors(&set(client(), "/requires", json!({ "wait_ms": 5000 }))),
+        "manifest.requires-invalid",
+    );
+    assert_has(
+        &errors(&set(client(), "/requires", json!({ "wait_ms": 5001 }))),
+        "manifest.requires-invalid",
+    );
 }
 
 /// REQ: PKG-027
@@ -1263,17 +1486,49 @@ fn pkg_027_bad_service_requirement_refused_requires_invalid() {
 #[test]
 fn pkg_027_list_boundaries_32_and_33_for_services_and_plugins() {
     let services = |count: usize| -> Vec<String> {
-        (0..count).map(|index| format!("com.example.s{index}/api")).collect()
+        (0..count)
+            .map(|index| format!("com.example.s{index}/api"))
+            .collect()
     };
     let plugins = |count: usize| -> Vec<Value> {
-        (0..count).map(|index| json!({ "id": format!("com.other.p{index}") })).collect()
+        (0..count)
+            .map(|index| json!({ "id": format!("com.other.p{index}") }))
+            .collect()
     };
     for count in [32usize] {
-        assert_lacks(&errors(&set(client(), "/requires", json!({ "services": services(count) }))), "manifest.requires-invalid");
-        assert_lacks(&errors(&set(client(), "/requires", json!({ "plugins": plugins(count) }))), "manifest.requires-invalid");
+        assert_lacks(
+            &errors(&set(
+                client(),
+                "/requires",
+                json!({ "services": services(count) }),
+            )),
+            "manifest.requires-invalid",
+        );
+        assert_lacks(
+            &errors(&set(
+                client(),
+                "/requires",
+                json!({ "plugins": plugins(count) }),
+            )),
+            "manifest.requires-invalid",
+        );
     }
-    assert_has(&errors(&set(client(), "/requires", json!({ "services": services(33) }))), "manifest.requires-invalid");
-    assert_has(&errors(&set(client(), "/requires", json!({ "plugins": plugins(33) }))), "manifest.requires-invalid");
+    assert_has(
+        &errors(&set(
+            client(),
+            "/requires",
+            json!({ "services": services(33) }),
+        )),
+        "manifest.requires-invalid",
+    );
+    assert_has(
+        &errors(&set(
+            client(),
+            "/requires",
+            json!({ "plugins": plugins(33) }),
+        )),
+        "manifest.requires-invalid",
+    );
 }
 
 fn replaces_errors(replaces: Value, tier: Tier) -> Vec<String> {
@@ -1308,14 +1563,24 @@ fn pkg_028_core_plugin_that_is_not_replaceable_refused_not_replaceable() {
 fn pkg_028_list_longer_than_four_refused_schema() {
     let four = json!(["a.one", "a.two", "a.three", "a.four"]);
     let five = json!(["a.one", "a.two", "a.three", "a.four", "a.five"]);
-    assert_lacks(&errors(&set(client(), "/replaces", four)), "manifest.schema");
-    assert_has(&errors(&set(client(), "/replaces", five)), "manifest.schema");
+    assert_lacks(
+        &errors(&set(client(), "/replaces", four)),
+        "manifest.schema",
+    );
+    assert_has(
+        &errors(&set(client(), "/replaces", five)),
+        "manifest.schema",
+    );
 }
 
 /// REQ: PKG-028
 #[test]
 fn pkg_028_duplicate_entries_refused_schema() {
-    let found = errors(&set(client(), "/replaces", json!(["ilium.core.titles", "ilium.core.titles"])));
+    let found = errors(&set(
+        client(),
+        "/replaces",
+        json!(["ilium.core.titles", "ilium.core.titles"]),
+    ));
     assert_has(&found, "manifest.schema");
 }
 
@@ -1336,7 +1601,9 @@ fn pkg_029_third_party_replaceable_refused() {
     );
     let found = install_errors(&value, Tier::T3);
     assert!(
-        found.iter().any(|code| code == "manifest.limits-tier" || code == "manifest.schema"),
+        found
+            .iter()
+            .any(|code| code == "manifest.limits-tier" || code == "manifest.schema"),
         "{found:?}"
     );
 }
@@ -1360,7 +1627,14 @@ fn pkg_029_surface_without_replaceable_refused_schema() {
 /// REQ: PKG-029
 #[test]
 fn pkg_029_surface_entries_have_a_known_kind() {
-    for kind in ["services", "points", "commands", "pane-kinds", "topics", "cli"] {
+    for kind in [
+        "services",
+        "points",
+        "commands",
+        "pane-kinds",
+        "topics",
+        "cli",
+    ] {
         let value = set(
             set(client(), "/replaceable", json!(true)),
             "/surface",
@@ -1387,12 +1661,39 @@ fn pkg_030_unknown_contributes_key_refused_unknown_key() {
 #[test]
 fn pkg_030_every_documented_contributes_key_is_known() {
     let keys = [
-        "commands", "keybindings", "settings", "help", "decoration_slots", "virtual_rows",
-        "toolbar_buttons", "context_menu", "panels", "pane_kinds", "scenes", "signatures",
-        "output_filters", "link_detectors", "editor_line_actions", "sounds", "cli",
-        "http_routes", "services", "topics", "jobs", "onboarding_steps", "extension_points",
-        "extensions", "tree_toolbar", "row_actions", "tree_orderings", "status_segments",
-        "pane_frame_slots", "display_modes", "catalogs", "client_requests", "languages",
+        "commands",
+        "keybindings",
+        "settings",
+        "help",
+        "decoration_slots",
+        "virtual_rows",
+        "toolbar_buttons",
+        "context_menu",
+        "panels",
+        "pane_kinds",
+        "scenes",
+        "signatures",
+        "output_filters",
+        "link_detectors",
+        "editor_line_actions",
+        "sounds",
+        "cli",
+        "http_routes",
+        "services",
+        "topics",
+        "jobs",
+        "onboarding_steps",
+        "extension_points",
+        "extensions",
+        "tree_toolbar",
+        "row_actions",
+        "tree_orderings",
+        "status_segments",
+        "pane_frame_slots",
+        "display_modes",
+        "catalogs",
+        "client_requests",
+        "languages",
     ];
     for key in keys {
         let value = set(client(), &format!("/contributes/{key}"), json!([]));
@@ -1422,18 +1723,27 @@ fn pkg_031_every_limit_key_of_the_table_is_a_known_key() {
     let table = section(&text, "## Limits object");
     let mut checked = 0;
     for cells in rows_of(&table) {
-        if cells.len() == 4 && cells[0].starts_with('`') && cells[1].chars().all(|c| c.is_ascii_digit()) {
+        if cells.len() == 4
+            && cells[0].starts_with('`')
+            && cells[1].chars().all(|c| c.is_ascii_digit())
+        {
             let key = unquote(&cells[0]);
             let value = set(client(), &format!("/limits/{key}"), json!(1));
             assert_lacks(&errors(&value), "manifest.unknown-key");
             checked += 1;
         }
     }
-    assert!(checked >= 40, "numeric-default rows of the limits table: {checked}");
+    assert!(
+        checked >= 40,
+        "numeric-default rows of the limits table: {checked}"
+    );
 }
 
 fn data_version_codes(text: &str) -> Vec<String> {
-    text_errors(&with_raw_member(&client(), &format!("\"data_version\":{text}")))
+    text_errors(&with_raw_member(
+        &client(),
+        &format!("\"data_version\":{text}"),
+    ))
 }
 
 /// REQ: PKG-032
@@ -1455,7 +1765,16 @@ fn pkg_032_boundaries_1_and_4294967295_are_accepted() {
 /// REQ: PKG-032
 #[test]
 fn pkg_032_zero_negative_and_too_large_refused_data_version() {
-    for text in ["0", "-1", "4294967296", "1.5", "2.0", "\"2\"", "null", "true"] {
+    for text in [
+        "0",
+        "-1",
+        "4294967296",
+        "1.5",
+        "2.0",
+        "\"2\"",
+        "null",
+        "true",
+    ] {
         assert_has(&data_version_codes(text), "manifest.data-version");
     }
 }
@@ -1479,16 +1798,32 @@ fn pkg_032_zero_is_refused_with_the_exact_message() {
 #[test]
 fn pkg_033_standard_is_the_default_and_the_only_other_value_is_first_party() {
     let parsed = parse_manifest(&client().to_string()).expect("parses");
-    assert_eq!(parsed.limits_tier, ilium_plugin_api::manifest::LimitsTier::Standard);
-    assert_has(&errors(&set(client(), "/limits_tier", json!("bogus"))), "manifest.schema");
-    assert_lacks(&errors(&set(client(), "/limits_tier", json!("standard"))), "manifest.schema");
-    assert_lacks(&errors(&set(client(), "/limits_tier", json!("first-party"))), "manifest.schema");
+    assert_eq!(
+        parsed.limits_tier,
+        ilium_plugin_api::manifest::LimitsTier::Standard
+    );
+    assert_has(
+        &errors(&set(client(), "/limits_tier", json!("bogus"))),
+        "manifest.schema",
+    );
+    assert_lacks(
+        &errors(&set(client(), "/limits_tier", json!("standard"))),
+        "manifest.schema",
+    );
+    assert_lacks(
+        &errors(&set(client(), "/limits_tier", json!("first-party"))),
+        "manifest.schema",
+    );
 }
 
 /// REQ: PKG-033
 #[test]
 fn pkg_033_bundled_ilium_plugin_may_use_first_party() {
-    let value = set(set(packed(client()), "/id", json!("ilium.core.demo")), "/limits_tier", json!("first-party"));
+    let value = set(
+        set(packed(client()), "/id", json!("ilium.core.demo")),
+        "/limits_tier",
+        json!("first-party"),
+    );
     assert_lacks(&install_errors(&value, Tier::T1), "manifest.limits-tier");
 }
 
@@ -1511,7 +1846,11 @@ fn pkg_033_first_party_on_a_bundled_package_without_an_ilium_id_refused() {
 }
 
 fn unstable_codes(names: Value, tier: Tier, mode: CheckMode) -> Vec<String> {
-    error_codes(&diagnostics(&set(packed(client()), "/unstable", names), tier, mode))
+    error_codes(&diagnostics(
+        &set(packed(client()), "/unstable", names),
+        tier,
+        mode,
+    ))
 }
 
 /// REQ: PKG-034
@@ -1552,7 +1891,11 @@ fn pkg_034_third_party_unstable_in_development_mode_is_accepted() {
 /// REQ: PKG-034
 #[test]
 fn pkg_034_more_than_eight_names_or_duplicates_refused_schema() {
-    let duplicate = errors(&set(client(), "/unstable", json!(["websocket", "websocket"])));
+    let duplicate = errors(&set(
+        client(),
+        "/unstable",
+        json!(["websocket", "websocket"]),
+    ));
     assert_has(&duplicate, "manifest.schema");
 }
 
@@ -1565,14 +1908,20 @@ fn files_codes(files: Vec<Value>) -> Vec<String> {
 /// REQ: PKG-035
 #[test]
 fn pkg_035_sorted_inventory_with_no_repeat_is_accepted() {
-    let found = files_codes(vec![file_entry("assets/a.png", 1), file_entry("client.wasm", 1)]);
+    let found = files_codes(vec![
+        file_entry("assets/a.png", 1),
+        file_entry("client.wasm", 1),
+    ]);
     assert_lacks(&found, "manifest.files-order");
 }
 
 /// REQ: PKG-035
 #[test]
 fn pkg_035_unsorted_inventory_refused_files_order() {
-    let found = files_codes(vec![file_entry("client.wasm", 1), file_entry("assets/a.png", 1)]);
+    let found = files_codes(vec![
+        file_entry("client.wasm", 1),
+        file_entry("assets/a.png", 1),
+    ]);
     assert_has(&found, "manifest.files-order");
 }
 
@@ -1619,8 +1968,14 @@ fn pkg_035_manifest_and_signature_must_not_be_listed_refused_file_self() {
 #[test]
 fn pkg_035_items_need_exactly_path_length_and_sha256() {
     let mut missing_hash = packed(client());
-    missing_hash["files"][0].as_object_mut().expect("item").remove("sha256");
-    assert_has(&install_errors(&missing_hash, Tier::T3), "manifest.key-missing");
+    missing_hash["files"][0]
+        .as_object_mut()
+        .expect("item")
+        .remove("sha256");
+    assert_has(
+        &install_errors(&missing_hash, Tier::T3),
+        "manifest.key-missing",
+    );
     let mut extra = packed(client());
     extra["files"][0]["mode"] = json!(420);
     assert_has(&install_errors(&extra, Tier::T3), "manifest.unknown-key");
@@ -1632,7 +1987,11 @@ fn pkg_035_validate_json_agrees_with_parse_then_validate_for_a_packed_manifest()
     let value = packed(client());
     let text = value.to_string();
     let direct = validate_json(&text, &context_with(Tier::T3, CheckMode::Install));
-    assert!(error_codes(&direct).is_empty(), "{:?}", error_codes(&direct));
+    assert!(
+        error_codes(&direct).is_empty(),
+        "{:?}",
+        error_codes(&direct)
+    );
 }
 
 #[allow(dead_code)]

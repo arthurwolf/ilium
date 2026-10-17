@@ -10,11 +10,21 @@ use crate::common::*;
 const GRANTS: &[&str] = &["keys.grab", "keys.intercept"];
 
 fn spec(chords: &[&str]) -> GrabSpec {
-    GrabSpec { chords: chords.iter().map(|c| (*c).to_owned()).collect(), pane: None, until_release: true }
+    GrabSpec {
+        chords: chords.iter().map(|c| (*c).to_owned()).collect(),
+        pane: None,
+        until_release: true,
+    }
 }
 
 fn chords_n(count: usize) -> GrabSpec {
-    GrabSpec { chords: (0..count).map(|n| format!("ctrl+alt+f{}", n % 12 + 1) + &"x".repeat(n / 12)).collect(), pane: None, until_release: true }
+    GrabSpec {
+        chords: (0..count)
+            .map(|n| format!("ctrl+alt+f{}", n % 12 + 1) + &"x".repeat(n / 12))
+            .collect(),
+        pane: None,
+        until_release: true,
+    }
 }
 
 /// REQ: WIT:ilium:host/keys.grab
@@ -41,21 +51,36 @@ fn wit_keys_grab_pane_scope_requires_an_existing_pane() {
 #[test]
 fn wit_keys_grab_chord_count_boundaries_invalid_argument() {
     let mut rig = rig(GRANTS);
-    assert_eq!(code_of(rig.host.keys().grab(spec(&[]))), ErrorCode::InvalidArgument);
+    assert_eq!(
+        code_of(rig.host.keys().grab(spec(&[]))),
+        ErrorCode::InvalidArgument
+    );
     let one = rig.host.keys().grab(spec(&["ctrl+k"])).expect("1 chord");
     rig.host.keys().release(one);
     let thirty_two = rig.host.keys().grab(chords_n(32)).expect("32 chords");
     rig.host.keys().release(thirty_two);
-    assert_eq!(code_of(rig.host.keys().grab(chords_n(33))), ErrorCode::InvalidArgument);
+    assert_eq!(
+        code_of(rig.host.keys().grab(chords_n(33))),
+        ErrorCode::InvalidArgument
+    );
 }
 
 /// REQ: WIT:ilium:host/keys.grab
 #[test]
 fn wit_keys_grab_bad_chord_grammar_invalid_argument() {
     let mut rig = rig(GRANTS);
-    assert_eq!(code_of(rig.host.keys().grab(spec(&["ctrl+"]))), ErrorCode::InvalidArgument);
-    assert_eq!(code_of(rig.host.keys().grab(spec(&["hyper+k"]))), ErrorCode::InvalidArgument);
-    assert_eq!(code_of(rig.host.keys().grab(spec(&[""]))), ErrorCode::InvalidArgument);
+    assert_eq!(
+        code_of(rig.host.keys().grab(spec(&["ctrl+"]))),
+        ErrorCode::InvalidArgument
+    );
+    assert_eq!(
+        code_of(rig.host.keys().grab(spec(&["hyper+k"]))),
+        ErrorCode::InvalidArgument
+    );
+    assert_eq!(
+        code_of(rig.host.keys().grab(spec(&[""]))),
+        ErrorCode::InvalidArgument
+    );
 }
 
 /// REQ: WIT:ilium:host/keys.grab
@@ -63,9 +88,15 @@ fn wit_keys_grab_bad_chord_grammar_invalid_argument() {
 fn wit_keys_grab_ninth_grab_quota_exceeded() {
     let mut rig = rig(GRANTS);
     for n in 0..8 {
-        rig.host.keys().grab(spec(&[&format!("ctrl+f{}", n + 1)])).expect("within quota");
+        rig.host
+            .keys()
+            .grab(spec(&[&format!("ctrl+f{}", n + 1)]))
+            .expect("within quota");
     }
-    assert_eq!(code_of(rig.host.keys().grab(spec(&["ctrl+f9"]))), ErrorCode::QuotaExceeded);
+    assert_eq!(
+        code_of(rig.host.keys().grab(spec(&["ctrl+f9"]))),
+        ErrorCode::QuotaExceeded
+    );
 }
 
 /// REQ: WIT:ilium:host/keys.grab
@@ -73,14 +104,20 @@ fn wit_keys_grab_ninth_grab_quota_exceeded() {
 fn wit_keys_grab_chord_held_by_another_plugin_conflict() {
     let mut rig = rig(GRANTS);
     rig.kernel.hold_chord_for("other.plugin", "ctrl+k");
-    assert_eq!(code_of(rig.host.keys().grab(spec(&["ctrl+k"]))), ErrorCode::Conflict);
+    assert_eq!(
+        code_of(rig.host.keys().grab(spec(&["ctrl+k"]))),
+        ErrorCode::Conflict
+    );
 }
 
 /// REQ: WIT:ilium:host/keys.grab
 #[test]
 fn wit_keys_grab_declined_grant_not_permitted() {
     let mut rig = declined_rig(&["keys.grab"]);
-    assert_eq!(code_of(rig.host.keys().grab(spec(&["ctrl+k"]))), ErrorCode::NotPermitted);
+    assert_eq!(
+        code_of(rig.host.keys().grab(spec(&["ctrl+k"]))),
+        ErrorCode::NotPermitted
+    );
 }
 
 proptest! {

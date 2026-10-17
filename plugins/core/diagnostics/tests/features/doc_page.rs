@@ -43,14 +43,18 @@ fn doc_the_five_log_levels_are_listed_in_order() {
 /// REQ: COR-050
 #[test]
 fn doc_the_report_holds_at_most_64_kibibytes_for_each_section() {
-    assert!(page_text().contains("one section for each contributor, at most 64 KiB for each section"));
+    assert!(
+        page_text().contains("one section for each contributor, at most 64 KiB for each section")
+    );
 }
 
 /// REQ: COR-050
 #[test]
 fn doc_the_debug_and_about_tabs_belong_to_the_settings_plugin() {
     let text = page_text();
-    assert!(text.contains("The Debug and About tabs, and the file logging switch, belong to the Settings plugin."));
+    assert!(text.contains(
+        "The Debug and About tabs, and the file logging switch, belong to the Settings plugin."
+    ));
     assert!(text.contains("It reads the Debug setting without writing it"));
 }
 
@@ -58,17 +62,27 @@ fn doc_the_debug_and_about_tabs_belong_to_the_settings_plugin() {
 #[test]
 fn doc_the_log_folder_grant_is_a_literal_absolute_path_with_high_risk() {
     let text = page_text();
-    assert!(text.contains("The log folder lives outside the plugin scopes, so reading it needs a literal path grant."));
+    assert!(text.contains(
+        "The log folder lives outside the plugin scopes, so reading it needs a literal path grant."
+    ));
     assert!(text.contains("A literal absolute path is high risk and needs an explicit user grant."));
-    assert!(text.contains("The example uses user id 1000, and the real grant is written at install from the user id."));
+    assert!(text.contains(
+        "The example uses user id 1000, and the real grant is written at install from the user id."
+    ));
 }
 
 /// REQ: COR-050
 #[test]
 fn doc_the_renders_are_marked_illustrative_and_state_their_width() {
     let text = page_text();
-    assert!(text.contains("There is no recording of this feature yet. The renders below are illustrative."));
-    assert_eq!(text.matches("Rendered at 48 columns. Illustrative.").count(), 2);
+    assert!(text.contains(
+        "There is no recording of this feature yet. The renders below are illustrative."
+    ));
+    assert_eq!(
+        text.matches("Rendered at 48 columns. Illustrative.")
+            .count(),
+        2
+    );
     assert!(text.contains("Rendered at 80 columns or fewer. Illustrative."));
 }
 
@@ -86,7 +100,9 @@ fn doc_the_diary_is_separate_from_the_ilium_log_file_and_limited_to_200_lines_pe
     let text = page_text();
     assert!(text.contains("at most 200 lines for each second"));
     assert!(text.contains("It is separate from the Ilium log file."));
-    assert!(text.contains("No import reads the diary back, so the plugin keeps what it needs itself."));
+    assert!(
+        text.contains("No import reads the diary back, so the plugin keeps what it needs itself.")
+    );
 }
 
 /// REQ: COR-050
@@ -108,7 +124,9 @@ fn doc_a_slow_or_failing_section_is_named_and_skipped() {
 fn doc_the_attach_dialog_warns_first_and_defaults_to_cancel() {
     let text = page_text();
     assert!(text.contains("A dialog warns that logs hold private text and shows the size."));
-    assert!(text.contains("Only after the user confirms does the plugin copy the log to the place the user chose."));
+    assert!(text.contains(
+        "Only after the user confirms does the plugin copy the log to the place the user chose."
+    ));
     assert!(text.contains("The default button is Cancel."));
     assert!(text.contains("The copy is a plain read and write, so it keeps the original."));
 }
@@ -124,7 +142,11 @@ fn doc_the_core_points_table_counts_two_points_one_service_no_topic_and_replacea
 /// REQ: COR-050
 #[test]
 fn doc_every_link_target_of_the_see_also_section_is_a_page_that_exists() {
-    for name in ["core-plugins.md", "core-plugin-settings.md", "settings-screens.md"] {
+    for name in [
+        "core-plugins.md",
+        "core-plugin-settings.md",
+        "settings-screens.md",
+    ] {
         let text = page(name);
         assert!(!text.is_empty(), "{name}");
     }

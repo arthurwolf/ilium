@@ -5,8 +5,8 @@
 use ilium_plugin_sdk::types::{AgentActivity, AgentActivityEvent, Event, NodeId};
 
 use crate::common::{
-    activity, classify_text, client_host, decorations, fixture, goal, identify, identify_argv, identify_name, is_busy,
-    launched, process, server_host, workspace_root,
+    activity, classify_text, client_host, decorations, fixture, goal, identify, identify_argv,
+    identify_name, is_busy, launched, process, server_host, workspace_root,
 };
 
 fn manual_page() -> String {
@@ -295,7 +295,8 @@ fn port_026_server_rejection_retains_draft_retry_uses_new_id_and_old_reply_canno
 
 /// REQ: PORT:ilium-client/src/value_detection.rs::working_and_idle_exact_saves_preserve_signatures_wait_for_own_reply_and_ignore_broadcast
 #[test]
-fn port_026_working_and_idle_exact_saves_preserve_signatures_wait_for_own_reply_and_ignore_broadcast() {
+fn port_026_working_and_idle_exact_saves_preserve_signatures_wait_for_own_reply_and_ignore_broadcast(
+) {
     let _host = client_host();
     let page = manual_page();
     assert!(page.contains("The client side draws the Agents panel and follows the display mode."));
@@ -306,7 +307,10 @@ fn port_026_working_and_idle_exact_saves_preserve_signatures_wait_for_own_reply_
 #[test]
 fn port_026_antigravity_prompt_readiness_requires_the_empty_composer_cursor() {
     let _host = server_host();
-    assert_eq!(identify_name("antigravity"), Some("antigravity".to_string()));
+    assert_eq!(
+        identify_name("antigravity"),
+        Some("antigravity".to_string())
+    );
     assert_eq!(identify_name("antimatter"), Some("antigravity".to_string()));
 }
 
@@ -314,21 +318,30 @@ fn port_026_antigravity_prompt_readiness_requires_the_empty_composer_cursor() {
 #[test]
 fn port_026_codex_composer_hint_under_a_live_modal_is_not_prompt_ready() {
     let _host = server_host();
-    assert_eq!(activity("codex", &fixture("codex_awaiting_approval.txt")), AgentActivity::AwaitingApproval);
+    assert_eq!(
+        activity("codex", &fixture("codex_awaiting_approval.txt")),
+        AgentActivity::AwaitingApproval
+    );
 }
 
 /// REQ: PORT:ilium-detect/src/lib.rs::codex_composer_placeholder_is_not_a_selection_prompt
 #[test]
 fn port_026_codex_composer_placeholder_is_not_a_selection_prompt() {
     let _host = server_host();
-    assert_eq!(activity("codex", &fixture("codex_dynamic_placeholder_idle.txt")), AgentActivity::Idle);
+    assert_eq!(
+        activity("codex", &fixture("codex_dynamic_placeholder_idle.txt")),
+        AgentActivity::Idle
+    );
 }
 
 /// REQ: PORT:ilium-detect/src/lib.rs::codex_cursor_aware_readiness_requires_the_first_input_cell
 #[test]
 fn port_026_codex_cursor_aware_readiness_requires_the_first_input_cell() {
     let _host = server_host();
-    assert_eq!(activity("codex", &fixture("codex_idle.txt")), AgentActivity::Idle);
+    assert_eq!(
+        activity("codex", &fixture("codex_idle.txt")),
+        AgentActivity::Idle
+    );
 }
 
 /// REQ: PORT:ilium-detect/src/lib.rs::codex_dirty_composer_is_not_prompt_ready
@@ -336,21 +349,30 @@ fn port_026_codex_cursor_aware_readiness_requires_the_first_input_cell() {
 fn port_026_codex_dirty_composer_is_not_prompt_ready() {
     let _host = server_host();
     let a = activity("codex", &fixture("codex_dirty_composer.txt"));
-    assert!(!matches!(a, AgentActivity::Done | AgentActivity::None), "{a:?}");
+    assert!(
+        !matches!(a, AgentActivity::Done | AgentActivity::None),
+        "{a:?}"
+    );
 }
 
 /// REQ: PORT:ilium-detect/src/lib.rs::codex_numbered_choice_cursor_is_not_a_free_form_composer
 #[test]
 fn port_026_codex_numbered_choice_cursor_is_not_a_free_form_composer() {
     let _host = server_host();
-    assert_eq!(activity("codex", "Select a mode\n› 1. Read only\n  2. Full access"), AgentActivity::AwaitingApproval);
+    assert_eq!(
+        activity("codex", "Select a mode\n› 1. Read only\n  2. Full access"),
+        AgentActivity::AwaitingApproval
+    );
 }
 
 /// REQ: PORT:ilium-detect/src/lib.rs::detailed_classification_retains_the_bounded_line_that_justified_it
 #[test]
 fn port_026_detailed_classification_retains_the_bounded_line_that_justified_it() {
     let _host = server_host();
-    assert_eq!(activity("codex", &fixture("codex_working.txt")), AgentActivity::Working);
+    assert_eq!(
+        activity("codex", &fixture("codex_working.txt")),
+        AgentActivity::Working
+    );
 }
 
 /// REQ: PORT:ilium-detect/src/lib.rs::detailed_goal_classification_retains_the_provider_status_line
@@ -367,14 +389,20 @@ fn port_026_fresh_screen_detection_covers_all_builtin_agents_without_treating_id
     for name in ["claude", "codex", "antigravity"] {
         assert_eq!(identify_name(name), Some(name.to_string()));
     }
-    assert_eq!(activity("claude", &fixture("claude_code_idle.txt")), AgentActivity::Idle);
+    assert_eq!(
+        activity("claude", &fixture("claude_code_idle.txt")),
+        AgentActivity::Idle
+    );
 }
 
 /// REQ: PORT:ilium-detect/src/lib.rs::identify_agent_prefers_a_native_child_over_an_interpreter_wrapper_match
 #[test]
 fn port_026_identify_agent_prefers_a_native_child_over_an_interpreter_wrapper_match() {
     let _host = server_host();
-    let found = identify(vec![process("node", &["node", "/opt/codex/bin/codex.js"]), process("codex", &["codex"])]);
+    let found = identify(vec![
+        process("node", &["node", "/opt/codex/bin/codex.js"]),
+        process("codex", &["codex"]),
+    ]);
     assert_eq!(found, Some("codex".to_string()));
 }
 
@@ -383,28 +411,41 @@ fn port_026_identify_agent_prefers_a_native_child_over_an_interpreter_wrapper_ma
 fn port_026_legacy_codex_box_must_be_visibly_empty() {
     let _host = server_host();
     let a = activity("codex", &fixture("codex_dirty_composer.txt"));
-    assert!(!matches!(a, AgentActivity::Done | AgentActivity::None), "{a:?}");
+    assert!(
+        !matches!(a, AgentActivity::Done | AgentActivity::None),
+        "{a:?}"
+    );
 }
 
 /// REQ: PORT:ilium-detect/src/lib.rs::prompt_readiness_requires_each_provider_visible_composer
 #[test]
 fn port_026_prompt_readiness_requires_each_provider_visible_composer() {
     let _host = server_host();
-    assert_eq!(activity("claude", &fixture("claude_code_idle.txt")), AgentActivity::Idle);
-    assert_eq!(activity("codex", &fixture("codex_idle.txt")), AgentActivity::Idle);
+    assert_eq!(
+        activity("claude", &fixture("claude_code_idle.txt")),
+        AgentActivity::Idle
+    );
+    assert_eq!(
+        activity("codex", &fixture("codex_idle.txt")),
+        AgentActivity::Idle
+    );
 }
 
 /// REQ: PORT:ilium-detect/tests/launcher_ancestor_identity.rs::remembered_launcher_accepts_a_new_native_descendant_and_same_pid_native_exec
 #[test]
 fn port_026_remembered_launcher_accepts_a_new_native_descendant_and_same_pid_native_exec() {
     let _host = server_host();
-    let found = identify(vec![launched(&["/usr/bin/node", "/opt/codex/bin/codex.js"]), launched(&["/opt/codex/codex"])]);
+    let found = identify(vec![
+        launched(&["/usr/bin/node", "/opt/codex/bin/codex.js"]),
+        launched(&["/opt/codex/codex"]),
+    ]);
     assert_eq!(found, Some("codex".to_string()));
 }
 
 /// REQ: PORT:ilium-detect/tests/launcher_ancestor_identity.rs::remembered_launcher_cannot_replace_exited_native_child_but_native_candidates_remain_searchable
 #[test]
-fn port_026_remembered_launcher_cannot_replace_exited_native_child_but_native_candidates_remain_searchable() {
+fn port_026_remembered_launcher_cannot_replace_exited_native_child_but_native_candidates_remain_searchable(
+) {
     let _host = server_host();
     assert_eq!(identify(vec![process("bash", &["bash"])]), None);
     assert_eq!(identify_name("codex"), Some("codex".to_string()));
@@ -415,15 +456,26 @@ fn port_026_remembered_launcher_cannot_replace_exited_native_child_but_native_ca
 fn port_026_background_diagnostics_choose_the_newest_eligible_matching_line() {
     let _host = server_host();
     let c = classify_text("claude", &fixture("claude_code_waiting_background.txt"));
-    assert_eq!(is_busy(&c.activity), true, "claude_code_waiting_background.txt: {:?}", c.activity);
+    assert_eq!(
+        is_busy(&c.activity),
+        true,
+        "claude_code_waiting_background.txt: {:?}",
+        c.activity
+    );
 }
 
 /// REQ: PORT:ilium-detect/tests/status_chronology.rs::current_live_status_keeps_generic_and_claude_evidence_distinct
 #[test]
 fn port_026_current_live_status_keeps_generic_and_claude_evidence_distinct() {
     let _host = server_host();
-    assert_eq!(activity("claude", &fixture("claude_code_working.txt")), AgentActivity::Working);
-    assert_eq!(activity("codex", &fixture("codex_working.txt")), AgentActivity::Working);
+    assert_eq!(
+        activity("claude", &fixture("claude_code_working.txt")),
+        AgentActivity::Working
+    );
+    assert_eq!(
+        activity("codex", &fixture("codex_working.txt")),
+        AgentActivity::Working
+    );
 }
 
 /// REQ: PORT:ilium-detect/tests/status_chronology.rs::newest_status_evidence_remains_bounded_and_control_character_free
@@ -432,7 +484,10 @@ fn port_026_newest_status_evidence_remains_bounded_and_control_character_free() 
     let _host = server_host();
     let text = goal("codex", &fixture("codex_goal_active_wide_footer.txt")).unwrap_or_default();
     assert!(!text.is_empty());
-    assert!(text.chars().all(|character| !character.is_control()), "{text:?}");
+    assert!(
+        text.chars().all(|character| !character.is_control()),
+        "{text:?}"
+    );
 }
 
 /// REQ: PORT:ilium-ipc/tests/agent_detection_settings_wire.rs::agent_detection_settings_event_round_trips_both_success_and_rejection
@@ -510,7 +565,10 @@ fn port_026_statusline_command_rejects_control_characters_and_oversized_commands
 fn port_026_a_launched_command_pane_without_an_agent_is_rechecked_quickly_for_a_while() {
     let _host = server_host();
     assert_eq!(identify_name("bash"), None);
-    assert_eq!(identify_argv(&["/tmp/fixtures/codex"]), Some("codex".to_string()));
+    assert_eq!(
+        identify_argv(&["/tmp/fixtures/codex"]),
+        Some("codex".to_string())
+    );
 }
 
 /// REQ: PORT:ilium-server/src/detection.rs::agent_disappearance_preserves_recovery_identity_without_completion
@@ -527,8 +585,14 @@ fn port_026_agent_disappearance_preserves_recovery_identity_without_completion()
 #[test]
 fn port_026_already_idle_stays_idle_rather_than_becoming_done() {
     let _host = server_host();
-    assert_eq!(activity("claude", &fixture("claude_code_idle.txt")), AgentActivity::Idle);
-    assert_eq!(activity("claude", &fixture("claude_code_idle.txt")), AgentActivity::Idle);
+    assert_eq!(
+        activity("claude", &fixture("claude_code_idle.txt")),
+        AgentActivity::Idle
+    );
+    assert_eq!(
+        activity("claude", &fixture("claude_code_idle.txt")),
+        AgentActivity::Idle
+    );
 }
 
 /// REQ: PORT:ilium-server/src/detection.rs::background_task_still_running_polls_on_the_fast_tier_like_working
@@ -536,7 +600,12 @@ fn port_026_already_idle_stays_idle_rather_than_becoming_done() {
 fn port_026_background_task_still_running_polls_on_the_fast_tier_like_working() {
     let _host = server_host();
     let c = classify_text("claude", &fixture("claude_code_monitor_still_running.txt"));
-    assert_eq!(is_busy(&c.activity), true, "claude_code_monitor_still_running.txt: {:?}", c.activity);
+    assert_eq!(
+        is_busy(&c.activity),
+        true,
+        "claude_code_monitor_still_running.txt: {:?}",
+        c.activity
+    );
 }
 
 /// REQ: PORT:ilium-server/src/detection.rs::benchmark_due_pane_collection_and_direct_snapshot_lookup
@@ -738,7 +807,12 @@ fn port_026_force_check_is_debounced() {
 fn port_026_idle_done_and_plain_shell_poll_on_the_slow_tier() {
     let _host = server_host();
     let c = classify_text("claude", &fixture("claude_code_idle.txt"));
-    assert_eq!(is_busy(&c.activity), false, "claude_code_idle.txt: {:?}", c.activity);
+    assert_eq!(
+        is_busy(&c.activity),
+        false,
+        "claude_code_idle.txt: {:?}",
+        c.activity
+    );
     assert_eq!(identify_name("bash"), None);
 }
 
@@ -765,14 +839,22 @@ fn port_026_no_prior_status_never_promotes_to_done() {
 fn port_026_non_idle_raw_activity_clears_completion() {
     let _host = server_host();
     let c = classify_text("claude", &fixture("claude_code_working.txt"));
-    assert_eq!(is_busy(&c.activity), true, "claude_code_working.txt: {:?}", c.activity);
+    assert_eq!(
+        is_busy(&c.activity),
+        true,
+        "claude_code_working.txt: {:?}",
+        c.activity
+    );
 }
 
 /// REQ: PORT:ilium-server/src/detection.rs::one_idle_flicker_does_not_mark_completion
 #[test]
 fn port_026_one_idle_flicker_does_not_mark_completion() {
     let _host = server_host();
-    assert_eq!(activity("claude", &fixture("claude_code_idle.txt")), AgentActivity::Idle);
+    assert_eq!(
+        activity("claude", &fixture("claude_code_idle.txt")),
+        AgentActivity::Idle
+    );
 }
 
 /// REQ: PORT:ilium-server/src/detection.rs::only_working_to_done_opens_the_prompt_queue_gate
@@ -843,7 +925,10 @@ fn port_026_stale_cached_agent_identity_revokes_queued_input_epoch() {
 fn port_026_verified_same_process_session_skips_rediscovery_until_ambiguous() {
     let _host = server_host();
     assert_eq!(identify_name("bash"), None);
-    assert_eq!(identify_argv(&["/tmp/fixtures/codex"]), Some("codex".to_string()));
+    assert_eq!(
+        identify_argv(&["/tmp/fixtures/codex"]),
+        Some("codex".to_string())
+    );
 }
 
 /// REQ: PORT:ilium-server/src/detection.rs::verified_session_explanation_is_stable_after_the_resolution_tick
@@ -871,7 +956,12 @@ fn port_026_volatile_terminal_counters_do_not_create_distinct_detection_evidence
 fn port_026_waiting_approval_polls_on_the_fast_tier_like_working() {
     let _host = server_host();
     let c = classify_text("claude", &fixture("claude_code_awaiting_approval.txt"));
-    assert_eq!(is_busy(&c.activity), true, "claude_code_awaiting_approval.txt: {:?}", c.activity);
+    assert_eq!(
+        is_busy(&c.activity),
+        true,
+        "claude_code_awaiting_approval.txt: {:?}",
+        c.activity
+    );
 }
 
 /// REQ: PORT:ilium-server/src/detection.rs::waiting_background_polls_on_the_fast_tier_like_working
@@ -879,7 +969,12 @@ fn port_026_waiting_approval_polls_on_the_fast_tier_like_working() {
 fn port_026_waiting_background_polls_on_the_fast_tier_like_working() {
     let _host = server_host();
     let c = classify_text("claude", &fixture("claude_code_waiting_background.txt"));
-    assert_eq!(is_busy(&c.activity), true, "claude_code_waiting_background.txt: {:?}", c.activity);
+    assert_eq!(
+        is_busy(&c.activity),
+        true,
+        "claude_code_waiting_background.txt: {:?}",
+        c.activity
+    );
 }
 
 /// REQ: PORT:ilium-server/src/foreground_observation.rs::blocked_native_probe_leaves_server_guards_and_executor_available

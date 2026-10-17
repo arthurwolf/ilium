@@ -14,7 +14,11 @@ const POINTS: [&str; 3] = [
 fn f_019_stub_registry_lists_the_three_extension_points() {
     let stub = core_stubs::find("ilium.core.editor");
     let stub = stub.expect("the editor is a known core plugin");
-    let mut points: Vec<String> = stub.extension_points.iter().map(|point| point.to_string()).collect();
+    let mut points: Vec<String> = stub
+        .extension_points
+        .iter()
+        .map(|point| point.to_string())
+        .collect();
     points.sort();
     assert_eq!(points, POINTS.to_vec());
 }
@@ -23,7 +27,10 @@ fn f_019_stub_registry_lists_the_three_extension_points() {
 #[test]
 fn f_019_stub_registry_lists_the_buffers_service() {
     let stub = core_stubs::find("ilium.core.editor").expect("known core plugin");
-    assert!(stub.services.iter().any(|service| *service == "ilium.core.editor/buffers"));
+    assert!(stub
+        .services
+        .iter()
+        .any(|service| *service == "ilium.core.editor/buffers"));
 }
 
 /// REQ: F-019

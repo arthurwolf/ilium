@@ -466,7 +466,11 @@ impl BootRun {
     }
 
     /// A plugin tries to unregister a kernel command.
-    pub fn plugin_tries_to_unregister_command(&mut self, id: &str, command: &str) -> Result<(), PluginError> {
+    pub fn plugin_tries_to_unregister_command(
+        &mut self,
+        id: &str,
+        command: &str,
+    ) -> Result<(), PluginError> {
         unimplemented!("host::testing::boot::BootRun::plugin_tries_to_unregister_command")
     }
 
@@ -660,7 +664,11 @@ impl BootRun {
     }
 
     /// Connects a client, retrying for `budget` with `interval` between tries.
-    pub fn client_connect_with_retry(&mut self, budget: Duration, interval: Duration) -> Result<ClientId, Code> {
+    pub fn client_connect_with_retry(
+        &mut self,
+        budget: Duration,
+        interval: Duration,
+    ) -> Result<ClientId, Code> {
         unimplemented!("host::testing::boot::BootRun::client_connect_with_retry")
     }
 

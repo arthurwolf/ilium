@@ -11,10 +11,16 @@ fn approval_sound_key(revision: u64) -> Option<String> {
     let mut host = server_host();
     set_setting(&mut host, "sound.events.approval_required", json!(true));
     let node = add_pane(&mut host, "claude-api", Some(AgentActivity::Working));
-    transition(&mut host, node, AgentActivity::Working, AgentActivity::AwaitingApproval, revision)
-        .iter()
-        .find(|submission| matches!(submission.intent, Intent::PlaySound(_)))
-        .and_then(|submission| submission.dedup_key.clone())
+    transition(
+        &mut host,
+        node,
+        AgentActivity::Working,
+        AgentActivity::AwaitingApproval,
+        revision,
+    )
+    .iter()
+    .find(|submission| matches!(submission.intent, Intent::PlaySound(_)))
+    .and_then(|submission| submission.dedup_key.clone())
 }
 
 /// REQ: F-047
@@ -40,7 +46,10 @@ fn dedup_047_a_repeat_of_the_same_event_repeats_the_same_keys() {
     let first = finish_turn(&mut host, node, 5);
     let second = finish_turn(&mut host, node, 5);
     let keys = |submissions: &[ilium_plugin_sdk::types::Submission]| -> Vec<Option<String>> {
-        submissions.iter().map(|submission| submission.dedup_key.clone()).collect()
+        submissions
+            .iter()
+            .map(|submission| submission.dedup_key.clone())
+            .collect()
     };
     assert_eq!(keys(&first), keys(&second));
 }
@@ -52,8 +61,14 @@ fn dedup_047_a_later_turn_of_the_same_pane_gets_other_keys() {
     let node = add_pane(&mut host, "claude-api", Some(AgentActivity::Working));
     let first = finish_turn(&mut host, node, 5);
     let later = finish_turn(&mut host, node, 6);
-    let first_keys: Vec<_> = first.iter().filter_map(|submission| submission.dedup_key.clone()).collect();
-    let later_keys: Vec<_> = later.iter().filter_map(|submission| submission.dedup_key.clone()).collect();
+    let first_keys: Vec<_> = first
+        .iter()
+        .filter_map(|submission| submission.dedup_key.clone())
+        .collect();
+    let later_keys: Vec<_> = later
+        .iter()
+        .filter_map(|submission| submission.dedup_key.clone())
+        .collect();
     assert!(!first_keys.is_empty());
     assert!(first_keys.iter().all(|key| !later_keys.contains(key)));
 }

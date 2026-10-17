@@ -22,8 +22,16 @@ fn pane(name: &str, parent: Option<u64>) -> TreeNode {
     }
 }
 
-fn restructure_requests(host: &FakeHost) -> Vec<(ilium_plugin_sdk::types::RequestId, ilium_plugin_sdk::host::inference::CompletionRequest)> {
-    host.inference_requests().into_iter().filter(|(_, request)| request.purpose.contains("restructure")).collect()
+fn restructure_requests(
+    host: &FakeHost,
+) -> Vec<(
+    ilium_plugin_sdk::types::RequestId,
+    ilium_plugin_sdk::host::inference::CompletionRequest,
+)> {
+    host.inference_requests()
+        .into_iter()
+        .filter(|(_, request)| request.purpose.contains("restructure"))
+        .collect()
 }
 
 /// A plan that groups panes 1 and 2 under "Billing API".
@@ -134,7 +142,9 @@ fn f_043_every_pane_appears_exactly_once_in_the_restructure() {
     for operation in &spec.operations {
         match operation {
             RestructureOp::Move(spec) => moved.push(spec.node.0),
-            RestructureOp::CreateGroup(group) => moved.extend(group.children.iter().map(|node| node.0)),
+            RestructureOp::CreateGroup(group) => {
+                moved.extend(group.children.iter().map(|node| node.0))
+            }
             _ => {}
         }
     }
@@ -168,7 +178,9 @@ fn f_043_malformed_replies_are_retried_up_to_three_attempts_in_all() {
     host.settle();
     for _ in 0..MAX_ATTEMPTS + 2 {
         let Some((id, _)) = restructure_requests(&host).into_iter().find(|(id, _)| {
-            host.pending_requests().iter().any(|pending| *pending == ilium_plugin_sdk::types::RequestRef::Call(*id))
+            host.pending_requests()
+                .iter()
+                .any(|pending| *pending == ilium_plugin_sdk::types::RequestRef::Call(*id))
         }) else {
             break;
         };
@@ -183,7 +195,12 @@ fn f_043_malformed_replies_are_retried_up_to_three_attempts_in_all() {
 #[test]
 fn f_043_a_corrective_retry_repeats_the_instructions_of_the_first_request() {
     let mut host = host_with_two_panes();
-    host.settings().set("inference.instructions.organization", json!("Group work by product first.")).expect("setting accepted");
+    host.settings()
+        .set(
+            "inference.instructions.organization",
+            json!("Group work by product first."),
+        )
+        .expect("setting accepted");
     host.settle();
     host.deliver_one(finished(1));
     host.settle();
@@ -193,7 +210,12 @@ fn f_043_a_corrective_retry_repeats_the_instructions_of_the_first_request() {
     let requests = restructure_requests(&host);
     assert_eq!(requests.len(), 2);
     let text = |request: &ilium_plugin_sdk::host::inference::CompletionRequest| {
-        request.messages.iter().map(|message| message.content.clone()).collect::<Vec<_>>().join("\n")
+        request
+            .messages
+            .iter()
+            .map(|message| message.content.clone())
+            .collect::<Vec<_>>()
+            .join("\n")
     };
     assert!(text(&first).contains("Group work by product first."));
     assert!(text(&requests[1].1).contains("Group work by product first."));
@@ -203,17 +225,43 @@ fn f_043_a_corrective_retry_repeats_the_instructions_of_the_first_request() {
 #[test]
 fn f_043_instructions_are_ordered_entry_naming_then_organization_then_shared_context() {
     let mut host = host_with_two_panes();
-    host.settings().set("inference.instructions.entry_naming", json!("ENTRY-NAMING-TEXT")).expect("accepted");
-    host.settings().set("inference.instructions.organization", json!("ORGANIZATION-TEXT")).expect("accepted");
-    host.settings().set("inference.instructions.naming_and_organization", json!("SHARED-CONTEXT-TEXT")).expect("accepted");
+    host.settings()
+        .set(
+            "inference.instructions.entry_naming",
+            json!("ENTRY-NAMING-TEXT"),
+        )
+        .expect("accepted");
+    host.settings()
+        .set(
+            "inference.instructions.organization",
+            json!("ORGANIZATION-TEXT"),
+        )
+        .expect("accepted");
+    host.settings()
+        .set(
+            "inference.instructions.naming_and_organization",
+            json!("SHARED-CONTEXT-TEXT"),
+        )
+        .expect("accepted");
     host.settle();
     host.deliver_one(finished(1));
     host.settle();
     let (_, request) = restructure_requests(&host).remove(0);
-    let text = request.messages.iter().map(|message| message.content.clone()).collect::<Vec<_>>().join("\n");
-    let entry = text.find("ENTRY-NAMING-TEXT").expect("entry naming present");
-    let organization = text.find("ORGANIZATION-TEXT").expect("organization present");
-    let shared = text.find("SHARED-CONTEXT-TEXT").expect("shared context present");
+    let text = request
+        .messages
+        .iter()
+        .map(|message| message.content.clone())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let entry = text
+        .find("ENTRY-NAMING-TEXT")
+        .expect("entry naming present");
+    let organization = text
+        .find("ORGANIZATION-TEXT")
+        .expect("organization present");
+    let shared = text
+        .find("SHARED-CONTEXT-TEXT")
+        .expect("shared context present");
     assert!(entry < organization && organization < shared);
 }
 
@@ -297,7 +345,10 @@ fn f_043_a_refused_revert_because_a_later_change_touched_the_nodes_is_accepted()
         .find(|submission| matches!(submission.intent, Intent::RevertRestructure(_)))
         .expect("revert")
         .correlation;
-    host.deliver_one(outcome_event(revert, Outcome::Refused(plugin_error(ErrorCode::Conflict))));
+    host.deliver_one(outcome_event(
+        revert,
+        Outcome::Refused(plugin_error(ErrorCode::Conflict)),
+    ));
     host.settle();
     assert!(!host.is_disabled());
     assert!(host.failures().is_empty());
@@ -308,7 +359,10 @@ fn f_043_a_refused_revert_because_a_later_change_touched_the_nodes_is_accepted()
 fn f_043_a_refused_restructure_keeps_no_undo_token() {
     let mut host = organised_host();
     let correlation = restructure_correlation(&host);
-    host.deliver_one(outcome_event(correlation, Outcome::Refused(plugin_error(ErrorCode::InvalidArgument))));
+    host.deliver_one(outcome_event(
+        correlation,
+        Outcome::Refused(plugin_error(ErrorCode::InvalidArgument)),
+    ));
     host.deliver_one(command_event("ilium.core.titles/undo-organise"));
     host.settle();
     assert!(reverts(&host.submitted()).is_empty());
@@ -355,7 +409,9 @@ fn f_043_default_restructure_token_budget_is_200000_and_must_be_positive() {
 #[test]
 fn f_043_a_zero_token_budget_is_rejected_by_the_setting() {
     let mut host = activated_server();
-    let result = host.settings().set("restructure_prompt_token_limit", json!(0));
+    let result = host
+        .settings()
+        .set("restructure_prompt_token_limit", json!(0));
     assert!(result.is_err());
 }
 
@@ -381,7 +437,10 @@ fn f_043_name_fixed_groups_are_kept_exactly_as_the_user_named_them() {
 fn f_043_organising_never_renames_a_hand_named_pane() {
     let mut host = organised_host();
     let correlation = restructure_correlation(&host);
-    host.deliver_one(outcome_event(correlation, Outcome::Refused(plugin_error(ErrorCode::Conflict))));
+    host.deliver_one(outcome_event(
+        correlation,
+        Outcome::Refused(plugin_error(ErrorCode::Conflict)),
+    ));
     host.settle();
     let spec = restructures(&host.submitted()).remove(0);
     assert!(spec.operations.iter().all(|operation| match operation {

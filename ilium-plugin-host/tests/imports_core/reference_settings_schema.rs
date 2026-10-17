@@ -14,7 +14,9 @@ use crate::support::*;
 const LIMIT: &str = "manifest.settings-limit";
 
 fn has(manifest: &Value, tier: Tier, code: &str) -> bool {
-    install_codes(manifest, tier).iter().any(|found| found == code)
+    install_codes(manifest, tier)
+        .iter()
+        .any(|found| found == code)
 }
 
 fn group(title: &str, children: Vec<Value>) -> Value {
@@ -67,7 +69,12 @@ fn set_001_one_tab_accepted() {
 #[test]
 fn set_001_eight_sections_in_a_tab_accepted() {
     let sections = (0..8)
-        .map(|index| section(&format!("s{index}"), vec![toggle(&format!("k{index}"), true)]))
+        .map(|index| {
+            section(
+                &format!("s{index}"),
+                vec![toggle(&format!("k{index}"), true)],
+            )
+        })
         .collect();
     assert!(!has(&manifest_with_tab(sections), Tier::T2, LIMIT));
 }
@@ -76,7 +83,12 @@ fn set_001_eight_sections_in_a_tab_accepted() {
 #[test]
 fn set_001_nine_sections_in_a_tab_refused_manifest_settings_limit() {
     let sections = (0..9)
-        .map(|index| section(&format!("s{index}"), vec![toggle(&format!("k{index}"), true)]))
+        .map(|index| {
+            section(
+                &format!("s{index}"),
+                vec![toggle(&format!("k{index}"), true)],
+            )
+        })
         .collect();
     assert!(has(&manifest_with_tab(sections), Tier::T2, LIMIT));
 }
@@ -85,7 +97,12 @@ fn set_001_nine_sections_in_a_tab_refused_manifest_settings_limit() {
 #[test]
 fn set_001_seven_sections_in_a_tab_accepted() {
     let sections = (0..7)
-        .map(|index| section(&format!("s{index}"), vec![toggle(&format!("k{index}"), true)]))
+        .map(|index| {
+            section(
+                &format!("s{index}"),
+                vec![toggle(&format!("k{index}"), true)],
+            )
+        })
         .collect();
     let manifest = manifest_with_tab(sections);
     assert!(!has(&manifest, Tier::T2, LIMIT));
@@ -95,19 +112,31 @@ fn set_001_seven_sections_in_a_tab_accepted() {
 /// REQ: SET-001
 #[test]
 fn set_001_twenty_three_rows_accepted() {
-    assert!(!has(&manifest_with_rows(rows_with_prefix(23, "r")), Tier::T2, LIMIT));
+    assert!(!has(
+        &manifest_with_rows(rows_with_prefix(23, "r")),
+        Tier::T2,
+        LIMIT
+    ));
 }
 
 /// REQ: SET-001
 #[test]
 fn set_001_twenty_four_rows_accepted() {
-    assert!(!has(&manifest_with_rows(rows_with_prefix(24, "r")), Tier::T2, LIMIT));
+    assert!(!has(
+        &manifest_with_rows(rows_with_prefix(24, "r")),
+        Tier::T2,
+        LIMIT
+    ));
 }
 
 /// REQ: SET-001
 #[test]
 fn set_001_twenty_five_rows_refused_manifest_settings_limit() {
-    assert!(has(&manifest_with_rows(rows_with_prefix(25, "r")), Tier::T2, LIMIT));
+    assert!(has(
+        &manifest_with_rows(rows_with_prefix(25, "r")),
+        Tier::T2,
+        LIMIT
+    ));
 }
 
 /// REQ: SET-001
@@ -165,19 +194,31 @@ fn sections_of_keys(total: usize) -> Vec<Value> {
 /// REQ: SET-002
 #[test]
 fn set_002_128_value_keys_accepted() {
-    assert!(!has(&manifest_with_tab(sections_of_keys(128)), Tier::T2, LIMIT));
+    assert!(!has(
+        &manifest_with_tab(sections_of_keys(128)),
+        Tier::T2,
+        LIMIT
+    ));
 }
 
 /// REQ: SET-002
 #[test]
 fn set_002_129_value_keys_refused_manifest_settings_limit() {
-    assert!(has(&manifest_with_tab(sections_of_keys(129)), Tier::T2, LIMIT));
+    assert!(has(
+        &manifest_with_tab(sections_of_keys(129)),
+        Tier::T2,
+        LIMIT
+    ));
 }
 
 /// REQ: SET-002
 #[test]
 fn set_002_127_value_keys_accepted() {
-    assert!(!has(&manifest_with_tab(sections_of_keys(127)), Tier::T2, LIMIT));
+    assert!(!has(
+        &manifest_with_tab(sections_of_keys(127)),
+        Tier::T2,
+        LIMIT
+    ));
 }
 
 /// REQ: SET-002
@@ -213,19 +254,31 @@ fn row_with_title(length: usize) -> Value {
 /// REQ: SET-003
 #[test]
 fn set_003_row_title_48_accepted() {
-    assert!(!has(&manifest_with_rows(vec![row_with_title(48)]), Tier::T2, LIMIT));
+    assert!(!has(
+        &manifest_with_rows(vec![row_with_title(48)]),
+        Tier::T2,
+        LIMIT
+    ));
 }
 
 /// REQ: SET-003
 #[test]
 fn set_003_row_title_49_refused_manifest_settings_limit() {
-    assert!(has(&manifest_with_rows(vec![row_with_title(49)]), Tier::T2, LIMIT));
+    assert!(has(
+        &manifest_with_rows(vec![row_with_title(49)]),
+        Tier::T2,
+        LIMIT
+    ));
 }
 
 /// REQ: SET-003
 #[test]
 fn set_003_row_title_47_accepted() {
-    assert!(!has(&manifest_with_rows(vec![row_with_title(47)]), Tier::T2, LIMIT));
+    assert!(!has(
+        &manifest_with_rows(vec![row_with_title(47)]),
+        Tier::T2,
+        LIMIT
+    ));
 }
 
 /// REQ: SET-003
@@ -291,7 +344,8 @@ fn set_003_info_text_121_refused_manifest_settings_limit() {
 /// REQ: SET-003
 #[test]
 fn set_003_button_label_20_accepted() {
-    let row = json!({ "type": "button", "id": "b", "title": "B", "label": ascii(20), "command": "go" });
+    let row =
+        json!({ "type": "button", "id": "b", "title": "B", "label": ascii(20), "command": "go" });
     let mut manifest = manifest_with_rows(vec![row]);
     manifest["contributes"]["commands"] = json!([{ "id": "go", "title": "Go" }]);
     assert!(!has(&manifest, Tier::T2, LIMIT));
@@ -300,7 +354,8 @@ fn set_003_button_label_20_accepted() {
 /// REQ: SET-003
 #[test]
 fn set_003_button_label_21_refused_manifest_settings_limit() {
-    let row = json!({ "type": "button", "id": "b", "title": "B", "label": ascii(21), "command": "go" });
+    let row =
+        json!({ "type": "button", "id": "b", "title": "B", "label": ascii(21), "command": "go" });
     let mut manifest = manifest_with_rows(vec![row]);
     manifest["contributes"]["commands"] = json!([{ "id": "go", "title": "Go" }]);
     assert!(has(&manifest, Tier::T2, LIMIT));
@@ -317,13 +372,21 @@ fn tabs(count: usize) -> Vec<Value> {
 /// REQ: SET-004
 #[test]
 fn set_004_nine_tabs_as_t2_refused_manifest_settings_limit() {
-    assert!(has(&manifest_with_settings_entries(tabs(9)), Tier::T2, LIMIT));
+    assert!(has(
+        &manifest_with_settings_entries(tabs(9)),
+        Tier::T2,
+        LIMIT
+    ));
 }
 
 /// REQ: SET-004
 #[test]
 fn set_004_nine_tabs_as_t3_refused_manifest_settings_limit() {
-    assert!(has(&manifest_with_settings_entries(tabs(9)), Tier::T3, LIMIT));
+    assert!(has(
+        &manifest_with_settings_entries(tabs(9)),
+        Tier::T3,
+        LIMIT
+    ));
 }
 
 /// REQ: SET-004
@@ -429,19 +492,31 @@ fn choice_with_options(count: usize) -> Value {
 /// REQ: SET-060
 #[test]
 fn set_060_choice_with_64_options_accepted() {
-    assert!(!has(&manifest_with_rows(vec![choice_with_options(64)]), Tier::T2, LIMIT));
+    assert!(!has(
+        &manifest_with_rows(vec![choice_with_options(64)]),
+        Tier::T2,
+        LIMIT
+    ));
 }
 
 /// REQ: SET-060
 #[test]
 fn set_060_choice_with_65_options_refused_manifest_settings_limit() {
-    assert!(has(&manifest_with_rows(vec![choice_with_options(65)]), Tier::T2, LIMIT));
+    assert!(has(
+        &manifest_with_rows(vec![choice_with_options(65)]),
+        Tier::T2,
+        LIMIT
+    ));
 }
 
 /// REQ: SET-060
 #[test]
 fn set_060_choice_with_63_options_accepted() {
-    assert!(!has(&manifest_with_rows(vec![choice_with_options(63)]), Tier::T2, LIMIT));
+    assert!(!has(
+        &manifest_with_rows(vec![choice_with_options(63)]),
+        Tier::T2,
+        LIMIT
+    ));
 }
 
 /// REQ: SET-060
@@ -517,7 +592,11 @@ fn set_060_notice_text_201_refused_manifest_settings_limit() {
 fn set_061_depends_on_missing_key_refused_manifest_settings_depends() {
     let mut row = toggle("a", true);
     row["depends_on"] = json!({ "key": "nope", "equals": true });
-    assert!(has(&manifest_with_rows(vec![row]), Tier::T2, "manifest.settings-depends"));
+    assert!(has(
+        &manifest_with_rows(vec![row]),
+        Tier::T2,
+        "manifest.settings-depends"
+    ));
 }
 
 /// REQ: SET-061
@@ -536,7 +615,11 @@ fn set_061_depends_on_cycle_refused_manifest_settings_depends() {
     first["depends_on"] = json!({ "key": "b", "equals": true });
     let mut second = toggle("b", true);
     second["depends_on"] = json!({ "key": "a", "equals": true });
-    assert!(has(&manifest_with_rows(vec![first, second]), Tier::T2, "manifest.settings-depends"));
+    assert!(has(
+        &manifest_with_rows(vec![first, second]),
+        Tier::T2,
+        "manifest.settings-depends"
+    ));
 }
 
 /// REQ: SET-061
@@ -544,7 +627,11 @@ fn set_061_depends_on_cycle_refused_manifest_settings_depends() {
 fn set_061_depends_on_itself_refused_manifest_settings_depends() {
     let mut row = toggle("a", true);
     row["depends_on"] = json!({ "key": "a", "equals": true });
-    assert!(has(&manifest_with_rows(vec![row]), Tier::T2, "manifest.settings-depends"));
+    assert!(has(
+        &manifest_with_rows(vec![row]),
+        Tier::T2,
+        "manifest.settings-depends"
+    ));
 }
 
 /// REQ: SET-062
@@ -558,39 +645,64 @@ fn set_062_key_with_space_and_capital_refused_manifest_settings_key() {
 #[test]
 fn set_062_key_64_characters_accepted() {
     let key = format!("a{}", ascii(63));
-    assert!(!has(&manifest_with_rows(vec![toggle(&key, true)]), Tier::T2, "manifest.settings-key"));
+    assert!(!has(
+        &manifest_with_rows(vec![toggle(&key, true)]),
+        Tier::T2,
+        "manifest.settings-key"
+    ));
 }
 
 /// REQ: SET-062
 #[test]
 fn set_062_key_65_characters_refused_manifest_settings_key() {
     let key = format!("a{}", ascii(64));
-    assert!(has(&manifest_with_rows(vec![toggle(&key, true)]), Tier::T2, "manifest.settings-key"));
+    assert!(has(
+        &manifest_with_rows(vec![toggle(&key, true)]),
+        Tier::T2,
+        "manifest.settings-key"
+    ));
 }
 
 /// REQ: SET-062
 #[test]
 fn set_062_key_starting_with_a_digit_refused_manifest_settings_key() {
-    assert!(has(&manifest_with_rows(vec![toggle("1abc", true)]), Tier::T2, "manifest.settings-key"));
+    assert!(has(
+        &manifest_with_rows(vec![toggle("1abc", true)]),
+        Tier::T2,
+        "manifest.settings-key"
+    ));
 }
 
 /// REQ: SET-062
 #[test]
 fn set_062_key_with_a_dash_refused_manifest_settings_key() {
-    assert!(has(&manifest_with_rows(vec![toggle("a-b", true)]), Tier::T2, "manifest.settings-key"));
+    assert!(has(
+        &manifest_with_rows(vec![toggle("a-b", true)]),
+        Tier::T2,
+        "manifest.settings-key"
+    ));
 }
 
 /// REQ: SET-062
 #[test]
 fn set_062_empty_key_refused_manifest_settings_key() {
-    assert!(has(&manifest_with_rows(vec![toggle("", true)]), Tier::T2, "manifest.settings-key"));
+    assert!(has(
+        &manifest_with_rows(vec![toggle("", true)]),
+        Tier::T2,
+        "manifest.settings-key"
+    ));
 }
 
 /// REQ: SET-063
 #[test]
 fn set_063_button_with_unknown_command_refused_manifest_settings_command() {
-    let row = json!({ "type": "button", "id": "b", "title": "B", "label": "Go", "command": "ghost" });
-    assert!(has(&manifest_with_rows(vec![row]), Tier::T2, "manifest.settings-command"));
+    let row =
+        json!({ "type": "button", "id": "b", "title": "B", "label": "Go", "command": "ghost" });
+    assert!(has(
+        &manifest_with_rows(vec![row]),
+        Tier::T2,
+        "manifest.settings-command"
+    ));
 }
 
 /// REQ: SET-063
@@ -606,7 +718,11 @@ fn set_063_button_with_a_contributed_command_accepted() {
 #[test]
 fn set_063_keybinding_row_with_unknown_command_refused_manifest_settings_command() {
     let row = json!({ "type": "keybinding", "key": "k", "title": "K", "command": "ghost", "default": "ctrl+alt+v" });
-    assert!(has(&manifest_with_rows(vec![row]), Tier::T2, "manifest.settings-command"));
+    assert!(has(
+        &manifest_with_rows(vec![row]),
+        Tier::T2,
+        "manifest.settings-command"
+    ));
 }
 
 /// REQ: SET-063
@@ -614,7 +730,11 @@ fn set_063_keybinding_row_with_unknown_command_refused_manifest_settings_command
 fn set_063_glyph_of_three_graphemes_refused_manifest_settings_glyph() {
     let mut entry = tab("alpha", "Alpha");
     entry["glyph"] = json!("abc");
-    assert!(has(&manifest_with_settings_entries(vec![entry]), Tier::T2, "manifest.settings-glyph"));
+    assert!(has(
+        &manifest_with_settings_entries(vec![entry]),
+        Tier::T2,
+        "manifest.settings-glyph"
+    ));
 }
 
 /// REQ: SET-063
@@ -622,7 +742,11 @@ fn set_063_glyph_of_three_graphemes_refused_manifest_settings_glyph() {
 fn set_063_glyph_of_one_grapheme_accepted() {
     let mut entry = tab("alpha", "Alpha");
     entry["glyph"] = json!("\u{29c9}");
-    assert!(!has(&manifest_with_settings_entries(vec![entry]), Tier::T2, "manifest.settings-glyph"));
+    assert!(!has(
+        &manifest_with_settings_entries(vec![entry]),
+        Tier::T2,
+        "manifest.settings-glyph"
+    ));
 }
 
 /// REQ: SET-063
@@ -630,7 +754,11 @@ fn set_063_glyph_of_one_grapheme_accepted() {
 fn set_063_help_id_not_contributed_refused_manifest_settings_help() {
     let mut row = toggle("k", true);
     row["help"] = json!("no-such-topic");
-    assert!(has(&manifest_with_rows(vec![row]), Tier::T2, "manifest.settings-help"));
+    assert!(has(
+        &manifest_with_rows(vec![row]),
+        Tier::T2,
+        "manifest.settings-help"
+    ));
 }
 
 /// REQ: SET-063
@@ -640,7 +768,11 @@ fn set_063_tab_after_a_never_anchor_refused_manifest_settings_tab_anchor() {
         let mut entry = tab("alpha", "Alpha");
         entry["after"] = json!(anchor);
         assert!(
-            has(&manifest_with_settings_entries(vec![entry]), Tier::T2, "manifest.settings-tab-anchor"),
+            has(
+                &manifest_with_settings_entries(vec![entry]),
+                Tier::T2,
+                "manifest.settings-tab-anchor"
+            ),
             "after {anchor} must be refused"
         );
     }
@@ -651,7 +783,11 @@ fn set_063_tab_after_a_never_anchor_refused_manifest_settings_tab_anchor() {
 fn set_063_tab_after_an_existing_tab_accepted() {
     let mut entry = tab("alpha", "Alpha");
     entry["after"] = json!("terminal");
-    assert!(!has(&manifest_with_settings_entries(vec![entry]), Tier::T2, "manifest.settings-tab-anchor"));
+    assert!(!has(
+        &manifest_with_settings_entries(vec![entry]),
+        Tier::T2,
+        "manifest.settings-tab-anchor"
+    ));
 }
 
 /// REQ: SET-064
@@ -680,13 +816,24 @@ fn set_064_allowed_keywords_only_accepted() {
 /// REQ: SET-064
 #[test]
 fn set_064_each_unsupported_keyword_refused_manifest_schema_keyword() {
-    for keyword in ["anyOf", "allOf", "not", "$ref", "if", "patternProperties", "format"] {
+    for keyword in [
+        "anyOf",
+        "allOf",
+        "not",
+        "$ref",
+        "if",
+        "patternProperties",
+        "format",
+    ] {
         let mut schema = json!({ "type": "object", "properties": { "a": { "type": "string" } } });
         schema[keyword] = json!({});
         let mut manifest = minimal_manifest();
         manifest["contributes"] =
             json!({ "commands": [{ "id": "go", "title": "Go", "arguments_schema": schema }] });
-        assert!(has(&manifest, Tier::T2, "manifest.schema-keyword"), "keyword {keyword}");
+        assert!(
+            has(&manifest, Tier::T2, "manifest.schema-keyword"),
+            "keyword {keyword}"
+        );
     }
 }
 

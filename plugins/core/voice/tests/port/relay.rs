@@ -3,7 +3,7 @@
 
 use ilium_plugin_sdk::testing::FakeHost;
 use ilium_plugin_sdk::types::{ClientId, Event};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::common::{client_attached, jsonl, server_host};
 
@@ -45,13 +45,19 @@ fn relay_052_without_a_voice_client_the_request_is_rejected_with_no_voice_client
 #[test]
 fn relay_052_a_running_session_receives_the_trimmed_sentences_with_start_false() {
     let mut host = host_with_clients(&[1]);
-    let run = host.cli().invoke(&["say", "  open the settings ", "close it"], b"");
+    let run = host
+        .cli()
+        .invoke(&["say", "  open the settings ", "close it"], b"");
     host.settle();
     let sent = host.client_requests().sent();
     let payload: Value = serde_json::from_str(&sent[0].payload_json).expect("payload");
-    assert_eq!(payload["sentences"], json!(["open the settings", "close it"]));
+    assert_eq!(
+        payload["sentences"],
+        json!(["open the settings", "close it"])
+    );
     assert_eq!(payload["start"], false);
-    host.client_requests().answer(sent[0].request.clone(), Ok(result_line(false)));
+    host.client_requests()
+        .answer(sent[0].request.clone(), Ok(result_line(false)));
     host.settle();
     let record = last_record(&run);
     assert_eq!(record["ok"], true);
@@ -66,8 +72,13 @@ fn relay_052_a_client_with_voice_running_wins_over_a_newer_one_that_is_off() {
     host.settle();
     let mut answered = 0;
     while let Some(offer) = host.client_requests().sent().get(answered).cloned() {
-        let reply = if offer.client == 1 { result_line(false) } else { error_line("voice-off", "voice control is off") };
-        host.client_requests().answer(offer.request.clone(), Ok(reply));
+        let reply = if offer.client == 1 {
+            result_line(false)
+        } else {
+            error_line("voice-off", "voice control is off")
+        };
+        host.client_requests()
+            .answer(offer.request.clone(), Ok(reply));
         host.settle();
         answered += 1;
         if run.exit_code().is_some() {
@@ -87,16 +98,24 @@ fn relay_052_start_is_offered_only_after_the_plain_offers_were_declined() {
     let mut seen: Vec<(u64, bool)> = Vec::new();
     let mut index = 0;
     for _ in 0..8 {
-        let Some(offer) = host.client_requests().sent().get(index).cloned() else { break };
+        let Some(offer) = host.client_requests().sent().get(index).cloned() else {
+            break;
+        };
         let payload: Value = serde_json::from_str(&offer.payload_json).expect("payload");
         seen.push((offer.client, payload["start"].as_bool().expect("start")));
-        host.client_requests().answer(offer.request.clone(), Ok(error_line("voice-off", "voice control is off")));
+        host.client_requests().answer(
+            offer.request.clone(),
+            Ok(error_line("voice-off", "voice control is off")),
+        );
         host.settle();
         index += 1;
     }
     let start_offers: Vec<_> = seen.iter().filter(|(_, start)| *start).collect();
     assert_eq!(start_offers.len(), 1, "{seen:?}");
-    let first_start = seen.iter().position(|(_, start)| *start).expect("a start offer");
+    let first_start = seen
+        .iter()
+        .position(|(_, start)| *start)
+        .expect("a start offer");
     assert!(seen[..first_start].iter().all(|(_, start)| !start));
     assert_eq!(start_offers[0].0, 2, "the newest client is tried first");
 }
@@ -115,12 +134,16 @@ fn relay_052_voice_unavailable_outranks_voice_off_and_keeps_its_message() {
         } else {
             error_line("voice-unavailable", "OpenAI API key must not be empty")
         };
-        host.client_requests().answer(offer.request.clone(), Ok(reply));
+        host.client_requests()
+            .answer(offer.request.clone(), Ok(reply));
         host.settle();
     }
     let record = last_record(&run);
     assert_eq!(record["code"], "voice-unavailable");
-    assert!(record["message"].as_str().expect("message").contains("API key"));
+    assert!(record["message"]
+        .as_str()
+        .expect("message")
+        .contains("API key"));
     assert_eq!(run.exit_code(), Some(1));
 }
 
@@ -134,7 +157,8 @@ fn relay_052_a_silent_client_ends_in_client_unresponsive_and_a_late_answer_is_ig
     host.advance_clock(5_001);
     host.settle();
     assert_eq!(last_record(&run)["code"], "client-unresponsive");
-    host.client_requests().answer(offer.request.clone(), Ok(result_line(false)));
+    host.client_requests()
+        .answer(offer.request.clone(), Ok(result_line(false)));
     host.settle();
     assert_eq!(last_record(&run)["code"], "client-unresponsive");
 }

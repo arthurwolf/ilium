@@ -75,7 +75,11 @@ pub fn runtime_config() -> RuntimeSettings {
 }
 
 /// Picks the allocator from measured `(p99 instantiate µs, rss MiB)` pairs (reference-host-runtime.md HST-066).
-pub fn select_allocator(on_demand: (f64, f64), pooling: (f64, f64), added_rss_mib: f64) -> AllocatorKind {
+pub fn select_allocator(
+    on_demand: (f64, f64),
+    pooling: (f64, f64),
+    added_rss_mib: f64,
+) -> AllocatorKind {
     unimplemented!("host::engine::select_allocator")
 }
 
@@ -115,12 +119,22 @@ pub struct ValidationContext {
 impl ValidationContext {
     /// A context for a world at an API version.
     pub fn new(world: World, api_version: (u16, u16, u16)) -> ValidationContext {
-        ValidationContext { world: Some(world), api_version, requested: Vec::new(), expected_world_text: None }
+        ValidationContext {
+            world: Some(world),
+            api_version,
+            requested: Vec::new(),
+            expected_world_text: None,
+        }
     }
 
     /// A context without a world, at an API version.
     pub fn bare(api_version: (u16, u16, u16)) -> ValidationContext {
-        ValidationContext { world: None, api_version, requested: Vec::new(), expected_world_text: None }
+        ValidationContext {
+            world: None,
+            api_version,
+            requested: Vec::new(),
+            expected_world_text: None,
+        }
     }
 
     /// With these requested grants.
@@ -233,7 +247,10 @@ impl PluginEngine {
     }
 
     /// Looks a precompiled component up in the cache (reference-host-runtime.md).
-    pub fn deserialize_cached(&self, key: &CacheKey) -> Result<Option<CompiledComponent>, HostError> {
+    pub fn deserialize_cached(
+        &self,
+        key: &CacheKey,
+    ) -> Result<Option<CompiledComponent>, HostError> {
         unimplemented!("host::engine::PluginEngine::deserialize_cached")
     }
 

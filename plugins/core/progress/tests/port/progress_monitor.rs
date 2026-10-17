@@ -1,7 +1,7 @@
 //! The probe contract as the monitor enforces it (original ilium-server/src/progress_monitor.rs).
 
 use ilium_plugin_sdk::types::{ErrorCode, PluginError};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::common::*;
 use crate::support::*;
@@ -11,7 +11,14 @@ fn check(host: &mut ilium_plugin_sdk::testing::FakeHost, pane: u64, stdout: &str
     progress(host, pane, &["check", "--command", PROBE])
 }
 
-fn raw(job: &str, status: &str, percent: f64, message: &str, details: &str, error: Value) -> String {
+fn raw(
+    job: &str,
+    status: &str,
+    percent: f64,
+    message: &str,
+    details: &str,
+    error: Value,
+) -> String {
     json!({"job_id": job, "status": status, "percent": percent, "message": message, "details": details, "error": error}).to_string()
 }
 
@@ -35,7 +42,11 @@ fn port_059_a_changed_job_id_and_a_status_regression_are_observation_failures() 
     expect_probe(&mut host, PROBE, &running("other-job", 31, "Other"));
     tick(&mut host, 1);
     assert_eq!(health_of(&status(&mut host, pane), id), "degraded");
-    expect_probe(&mut host, PROBE, &raw("job", "not-started-yet", 0.0, "m", "", Value::Null));
+    expect_probe(
+        &mut host,
+        PROBE,
+        &raw("job", "not-started-yet", 0.0, "m", "", Value::Null),
+    );
     tick(&mut host, 1);
     let record = status(&mut host, pane);
     assert_eq!(record["monitors"][0]["report"]["job_id"], "job");
@@ -49,7 +60,11 @@ fn port_059_clearing_one_monitor_leaves_the_other_polling_with_its_own_nonzero_i
     let first = register(&mut host, pane, "/opt/a.sh", &running("job-a", 0, "A"), &[]);
     let second = register(&mut host, pane, "/opt/b.sh", &running("job-b", 0, "B"), &[]);
     assert!(first != 0 && second != 0 && first != second);
-    progress(&mut host, pane, &["clear", "--monitor-id", &first.to_string()]);
+    progress(
+        &mut host,
+        pane,
+        &["clear", "--monitor-id", &first.to_string()],
+    );
     expect_probe(&mut host, "/opt/b.sh", &running("job-b", 50, "B halfway"));
     tick(&mut host, 1);
     let record = status(&mut host, pane);
@@ -62,12 +77,30 @@ fn port_059_clearing_one_monitor_leaves_the_other_polling_with_its_own_nonzero_i
 #[test]
 fn port_059_check_accepts_every_wire_status_and_normalizes_done_to_100_percent() {
     let (mut host, pane) = host_with_pane();
-    for (status_name, error) in [("not-started-yet", Value::Null), ("running", Value::Null), ("error", json!("boom"))] {
-        let run = check(&mut host, pane, &raw("job", status_name, 40.0, "m", "", error));
-        assert_eq!(record_of(&run.stdout, "progress_check")["report"]["status"], status_name);
+    for (status_name, error) in [
+        ("not-started-yet", Value::Null),
+        ("running", Value::Null),
+        ("error", json!("boom")),
+    ] {
+        let run = check(
+            &mut host,
+            pane,
+            &raw("job", status_name, 40.0, "m", "", error),
+        );
+        assert_eq!(
+            record_of(&run.stdout, "progress_check")["report"]["status"],
+            status_name
+        );
     }
-    let run = check(&mut host, pane, &raw("job", "done", 40.0, "m", "", Value::Null));
-    assert_eq!(record_of(&run.stdout, "progress_check")["report"]["percent"].as_f64(), Some(100.0));
+    let run = check(
+        &mut host,
+        pane,
+        &raw("job", "done", 40.0, "m", "", Value::Null),
+    );
+    assert_eq!(
+        record_of(&run.stdout, "progress_check")["report"]["percent"].as_f64(),
+        Some(100.0)
+    );
 }
 
 /// REQ: PORT:ilium-server/src/progress_monitor.rs::preflight_timestamps_successful_observation_after_probe_execution
@@ -75,10 +108,14 @@ fn port_059_check_accepts_every_wire_status_and_normalizes_done_to_100_percent()
 fn port_059_check_timestamps_the_observation_when_the_probe_has_run() {
     let (mut host, pane) = host_with_pane();
     let first = check(&mut host, pane, &running("job", 1, "W"));
-    let first_at = record_of(&first.stdout, "progress_check")["checked_at_unix_millis"].as_u64().expect("timestamp");
+    let first_at = record_of(&first.stdout, "progress_check")["checked_at_unix_millis"]
+        .as_u64()
+        .expect("timestamp");
     pass(&mut host, 5_000);
     let second = check(&mut host, pane, &running("job", 1, "W"));
-    let second_at = record_of(&second.stdout, "progress_check")["checked_at_unix_millis"].as_u64().expect("timestamp");
+    let second_at = record_of(&second.stdout, "progress_check")["checked_at_unix_millis"]
+        .as_u64()
+        .expect("timestamp");
     assert!(second_at >= first_at + 5_000, "{first_at} then {second_at}");
 }
 
@@ -89,16 +126,24 @@ fn port_059_probe_output_over_64_kib_is_rejected_probe_output_too_large() {
     let base = running("job", 1, "W");
     let padded = format!("{base}{}", " ".repeat(64 * 1024 + 1 - base.len()));
     assert_eq!(padded.len(), 64 * 1024 + 1);
-    assert_eq!(code(&check(&mut host, pane, &padded)), "probe-output-too-large");
+    assert_eq!(
+        code(&check(&mut host, pane, &padded)),
+        "probe-output-too-large"
+    );
     check(&mut host, pane, &base);
-    assert_eq!(host.process().calls().last().expect("call").timeout_millis, 30_000);
+    assert_eq!(
+        host.process().calls().last().expect("call").timeout_millis,
+        30_000
+    );
 }
 
 /// REQ: PORT:ilium-server/src/progress_monitor.rs::probe_timeout_terminates_descendant_processes
 #[test]
 fn port_059_a_probe_that_exceeds_its_time_is_rejected_probe_timed_out() {
     let (mut host, pane) = host_with_pane();
-    host.process().expect("sh", &["-c", PROBE]).fails(PluginError::new(ErrorCode::TimedOut, "timed out"));
+    host.process()
+        .expect("sh", &["-c", PROBE])
+        .fails(PluginError::new(ErrorCode::TimedOut, "timed out"));
     let run = progress(&mut host, pane, &["check", "--command", PROBE]);
     assert_eq!(code(&run), "probe-timed-out");
 }
@@ -108,7 +153,11 @@ fn port_059_a_probe_that_exceeds_its_time_is_rejected_probe_timed_out() {
 fn port_059_multi_line_details_travel_next_to_a_single_line_message() {
     let (mut host, pane) = host_with_pane();
     let details = "What: build\nWhy: release\nNext: install";
-    let run = check(&mut host, pane, &raw("job", "running", 10.0, "Building", details, Value::Null));
+    let run = check(
+        &mut host,
+        pane,
+        &raw("job", "running", 10.0, "Building", details, Value::Null),
+    );
     let record = record_of(&run.stdout, "progress_check");
     assert_eq!(record["report"]["message"], "Building");
     assert_eq!(record["report"]["details"], details);
@@ -127,6 +176,10 @@ fn port_059_trailing_json_unknown_fields_and_invalid_values_are_rejected_invalid
         raw("job", "running", 5.0, "two\nlines", "", Value::Null),
     ];
     for case in cases {
-        assert_eq!(code(&check(&mut host, pane, &case)), "invalid-probe-report", "{case:?}");
+        assert_eq!(
+            code(&check(&mut host, pane, &case)),
+            "invalid-probe-report",
+            "{case:?}"
+        );
     }
 }

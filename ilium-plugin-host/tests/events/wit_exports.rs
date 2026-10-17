@@ -19,7 +19,10 @@ fn wit_handler_on_events_receives_the_batch_and_returns_submissions() {
 #[test]
 fn wit_handler_on_events_signature_matches_the_wit_file() {
     let text = wit_file("exports/handler.wit");
-    assert!(text.contains("on-events: func(events: list<event>) -> list<submission>"), "{text}");
+    assert!(
+        text.contains("on-events: func(events: list<event>) -> list<submission>"),
+        "{text}"
+    );
 }
 
 /// REQ: WIT:ilium:exports/handler.on-events
@@ -75,7 +78,10 @@ fn wit_lifecycle_deactivate_carries_the_reason() {
     let env = Setup::new(&[]).build();
     env.host.restart_instance(DeactivationReason::CrashRestart);
     env.settle();
-    assert_eq!(lock(&env.probe.deactivations).first().cloned(), Some(DeactivationReason::CrashRestart));
+    assert_eq!(
+        lock(&env.probe.deactivations).first().cloned(),
+        Some(DeactivationReason::CrashRestart)
+    );
 }
 
 /// REQ: WIT:ilium:exports/lifecycle.deactivate
@@ -107,7 +113,10 @@ fn wit_intents_host_submit_without_the_grant_is_err_not_permitted_at_once() {
 #[test]
 fn wit_intents_host_submit_signature_matches_the_wit_file() {
     let text = wit_file("host/intents-host.wit");
-    assert!(text.contains("submit: func(submission: submission) -> result<request-id, error>"), "{text}");
+    assert!(
+        text.contains("submit: func(submission: submission) -> result<request-id, error>"),
+        "{text}"
+    );
 }
 
 #[allow(dead_code)]

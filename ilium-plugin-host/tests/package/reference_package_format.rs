@@ -76,7 +76,11 @@ fn pkg_100_method_deflate_refused_zip_compressed() {
 fn pkg_100_method_other_than_zero_refused_zip_compressed() {
     for method in [1u16, 9, 12, 93] {
         let bytes = changed(0, |entry| entry.method = method);
-        assert_eq!(stage1_codes(&bytes), one_code("package.zip-compressed"), "method {method}");
+        assert_eq!(
+            stage1_codes(&bytes),
+            one_code("package.zip-compressed"),
+            "method {method}"
+        );
     }
 }
 
@@ -84,7 +88,13 @@ fn pkg_100_method_other_than_zero_refused_zip_compressed() {
 #[test]
 fn pkg_101_utf8_flag_set_on_every_entry_is_accepted() {
     let bytes = build(&base(), &Tail::default());
-    assert_eq!(central_fields(&bytes).iter().map(|f| f.flags).collect::<Vec<_>>(), vec![0x0800, 0x0800]);
+    assert_eq!(
+        central_fields(&bytes)
+            .iter()
+            .map(|f| f.flags)
+            .collect::<Vec<_>>(),
+        vec![0x0800, 0x0800]
+    );
     assert!(stage1_codes(&bytes).is_empty());
 }
 
@@ -125,14 +135,23 @@ fn pkg_102_size_field_ffffffff_refused_zip64() {
         entry.size = Some(0xFFFF_FFFF);
         entry.local_size = Some(0xFFFF_FFFF);
     });
-    assert_eq!(stage1_codes(&bytes).first().map(String::as_str), Some("package.zip64"));
+    assert_eq!(
+        stage1_codes(&bytes).first().map(String::as_str),
+        Some("package.zip64")
+    );
 }
 
 /// REQ: PKG-102
 #[test]
 fn pkg_102_zip64_locator_refused_zip64() {
-    let bytes = with_tail(Tail { zip64_locator: true, ..Tail::default() });
-    assert_eq!(stage1_codes(&bytes).first().map(String::as_str), Some("package.zip64"));
+    let bytes = with_tail(Tail {
+        zip64_locator: true,
+        ..Tail::default()
+    });
+    assert_eq!(
+        stage1_codes(&bytes).first().map(String::as_str),
+        Some("package.zip64")
+    );
 }
 
 /// REQ: PKG-103
@@ -145,7 +164,9 @@ fn pkg_103_local_extra_field_refused_zip_extra() {
 /// REQ: PKG-103
 #[test]
 fn pkg_103_central_extra_field_refused_zip_extra() {
-    let bytes = changed(1, |entry| entry.central_extra = vec![0xCA, 0xFE, 0x00, 0x00]);
+    let bytes = changed(1, |entry| {
+        entry.central_extra = vec![0xCA, 0xFE, 0x00, 0x00]
+    });
     assert_eq!(stage1_codes(&bytes), one_code("package.zip-extra"));
 }
 
@@ -153,14 +174,19 @@ fn pkg_103_central_extra_field_refused_zip_extra() {
 #[test]
 fn pkg_103_extra_length_zero_everywhere_is_accepted() {
     let bytes = build(&base(), &Tail::default());
-    assert!(central_fields(&bytes).iter().all(|f| f.extra_len == 0 && f.local_extra_len == 0));
+    assert!(central_fields(&bytes)
+        .iter()
+        .all(|f| f.extra_len == 0 && f.local_extra_len == 0));
     assert!(stage1_codes(&bytes).is_empty());
 }
 
 /// REQ: PKG-104
 #[test]
 fn pkg_104_end_record_comment_refused_zip_comment() {
-    let bytes = with_tail(Tail { comment: b"note".to_vec(), ..Tail::default() });
+    let bytes = with_tail(Tail {
+        comment: b"note".to_vec(),
+        ..Tail::default()
+    });
     assert_eq!(stage1_codes(&bytes), one_code("package.zip-comment"));
 }
 
@@ -174,7 +200,10 @@ fn pkg_104_entry_comment_refused_zip_comment() {
 /// REQ: PKG-104
 #[test]
 fn pkg_104_one_byte_end_record_comment_refused_zip_comment() {
-    let bytes = with_tail(Tail { comment: b"x".to_vec(), ..Tail::default() });
+    let bytes = with_tail(Tail {
+        comment: b"x".to_vec(),
+        ..Tail::default()
+    });
     assert_eq!(stage1_codes(&bytes), one_code("package.zip-comment"));
 }
 
@@ -254,7 +283,10 @@ fn pkg_107_executable_mode_refused_entry_symlink() {
 fn pkg_108_written_headers_use_unix_2_0_values() {
     let bytes = write_package(&vector_entries()).expect("write the vector");
     for fields in central_fields(&bytes) {
-        assert_eq!((fields.made, fields.needed, fields.local_needed), (0x0314, 20, 20));
+        assert_eq!(
+            (fields.made, fields.needed, fields.local_needed),
+            (0x0314, 20, 20)
+        );
         assert_eq!((fields.disk, fields.internal), (0, 0));
     }
 }
@@ -336,7 +368,10 @@ fn pkg_110_crc_is_checked_before_the_content_is_parsed() {
     let mut entry = Z::new("manifest.json", &garbage);
     entry.crc = Some(crc32(&vector_manifest()));
     entry.local_crc = Some(crc32(&vector_manifest()));
-    let bytes = build(&[entry, Z::new("server.wasm", &vector_component())], &Tail::default());
+    let bytes = build(
+        &[entry, Z::new("server.wasm", &vector_component())],
+        &Tail::default(),
+    );
     let codes = check_codes(&bytes);
     assert_eq!(codes, one_code("package.crc-mismatch"));
 }
@@ -351,7 +386,10 @@ fn pkg_110_correct_crc_is_accepted() {
 /// REQ: PKG-111
 #[test]
 fn pkg_111_bytes_before_the_first_local_header_refused_zip_trailing() {
-    let bytes = with_tail(Tail { leading: vec![0xAA; 4], ..Tail::default() });
+    let bytes = with_tail(Tail {
+        leading: vec![0xAA; 4],
+        ..Tail::default()
+    });
     assert_eq!(stage1_codes(&bytes), one_code("package.zip-trailing"));
 }
 
@@ -365,14 +403,20 @@ fn pkg_111_bytes_between_records_refused_zip_trailing() {
 /// REQ: PKG-111
 #[test]
 fn pkg_111_bytes_between_last_entry_and_directory_refused_zip_trailing() {
-    let bytes = with_tail(Tail { gap_before_cd: vec![0x00; 2], ..Tail::default() });
+    let bytes = with_tail(Tail {
+        gap_before_cd: vec![0x00; 2],
+        ..Tail::default()
+    });
     assert_eq!(stage1_codes(&bytes), one_code("package.zip-trailing"));
 }
 
 /// REQ: PKG-111
 #[test]
 fn pkg_111_bytes_after_the_end_record_refused_zip_trailing() {
-    let bytes = with_tail(Tail { trailing: vec![0x00; 16], ..Tail::default() });
+    let bytes = with_tail(Tail {
+        trailing: vec![0x00; 16],
+        ..Tail::default()
+    });
     assert_eq!(stage1_codes(&bytes), one_code("package.zip-trailing"));
 }
 
@@ -386,8 +430,14 @@ fn pkg_112_central_offset_into_another_entry_refused_header_mismatch() {
 /// REQ: PKG-112
 #[test]
 fn pkg_112_central_order_differs_from_local_order_refused_header_mismatch() {
-    let bytes = with_tail(Tail { cd_order: Some(vec![1, 0]), ..Tail::default() });
-    assert_eq!(stage1_codes(&bytes).first().map(String::as_str), Some("package.header-mismatch"));
+    let bytes = with_tail(Tail {
+        cd_order: Some(vec![1, 0]),
+        ..Tail::default()
+    });
+    assert_eq!(
+        stage1_codes(&bytes).first().map(String::as_str),
+        Some("package.header-mismatch")
+    );
 }
 
 /// REQ: PKG-112
@@ -401,14 +451,20 @@ fn pkg_112_offset_one_past_the_next_unread_byte_refused_header_mismatch() {
 /// REQ: PKG-113
 #[test]
 fn pkg_113_entry_count_too_large_refused_zip_invalid() {
-    let bytes = with_tail(Tail { count: Some(3), ..Tail::default() });
+    let bytes = with_tail(Tail {
+        count: Some(3),
+        ..Tail::default()
+    });
     assert_eq!(stage1_codes(&bytes), one_code("package.zip-invalid"));
 }
 
 /// REQ: PKG-113
 #[test]
 fn pkg_113_entry_count_too_small_refused_zip_invalid() {
-    let bytes = with_tail(Tail { count: Some(1), ..Tail::default() });
+    let bytes = with_tail(Tail {
+        count: Some(1),
+        ..Tail::default()
+    });
     assert_eq!(stage1_codes(&bytes), one_code("package.zip-invalid"));
 }
 
@@ -416,22 +472,36 @@ fn pkg_113_entry_count_too_small_refused_zip_invalid() {
 #[test]
 fn pkg_113_directory_size_wrong_refused_zip_invalid() {
     let real = build(&base(), &Tail::default());
-    let size = u32::from_le_bytes([real[real.len() - 10], real[real.len() - 9], real[real.len() - 8], real[real.len() - 7]]);
-    let bytes = with_tail(Tail { cd_size: Some(size + 1), ..Tail::default() });
+    let size = u32::from_le_bytes([
+        real[real.len() - 10],
+        real[real.len() - 9],
+        real[real.len() - 8],
+        real[real.len() - 7],
+    ]);
+    let bytes = with_tail(Tail {
+        cd_size: Some(size + 1),
+        ..Tail::default()
+    });
     assert_eq!(stage1_codes(&bytes), one_code("package.zip-invalid"));
 }
 
 /// REQ: PKG-113
 #[test]
 fn pkg_113_directory_offset_wrong_refused_zip_invalid() {
-    let bytes = with_tail(Tail { cd_offset: Some(0), ..Tail::default() });
+    let bytes = with_tail(Tail {
+        cd_offset: Some(0),
+        ..Tail::default()
+    });
     assert_eq!(stage1_codes(&bytes), one_code("package.zip-invalid"));
 }
 
 /// REQ: PKG-113
 #[test]
 fn pkg_113_truncated_directory_refused_zip_invalid() {
-    let bytes = with_tail(Tail { cut_cd: true, ..Tail::default() });
+    let bytes = with_tail(Tail {
+        cut_cd: true,
+        ..Tail::default()
+    });
     assert_eq!(stage1_codes(&bytes), one_code("package.zip-invalid"));
 }
 
@@ -457,7 +527,11 @@ fn pkg_114_wrong_signature_at_minus_22_refused_zip_invalid() {
 fn pkg_114_file_shorter_than_22_bytes_refused_zip_invalid() {
     for length in [0usize, 1, 21] {
         let bytes = vec![0x50u8; length];
-        assert_eq!(stage1_codes(&bytes), one_code("package.zip-invalid"), "length {length}");
+        assert_eq!(
+            stage1_codes(&bytes),
+            one_code("package.zip-invalid"),
+            "length {length}"
+        );
     }
 }
 
@@ -573,7 +647,9 @@ fn pkg_115_non_ascii_refused_path_invalid() {
 /// REQ: PKG-115
 #[test]
 fn pkg_115_other_punctuation_refused_path_invalid() {
-    for punctuation in ["a:b", "a*b", "a?b", "a<b", "a|b", "a\"b", "a#b", "a%b", "a+b", "a@b"] {
+    for punctuation in [
+        "a:b", "a*b", "a?b", "a<b", "a|b", "a\"b", "a#b", "a%b", "a+b", "a@b",
+    ] {
         assert_path_invalid(format!("assets/{punctuation}.png").as_bytes());
     }
 }
@@ -724,7 +800,10 @@ fn pkg_120_case_only_collision_refused_path_case_collision() {
     entries.push(Z::new("assets/a.png", b"2"));
     entries.sort_by(|left, right| left.name.cmp(&right.name));
     let bytes = build(&entries, &Tail::default());
-    assert_eq!(stage1_codes(&bytes), one_code("package.path-case-collision"));
+    assert_eq!(
+        stage1_codes(&bytes),
+        one_code("package.path-case-collision")
+    );
 }
 
 /// REQ: PKG-120
@@ -735,14 +814,20 @@ fn pkg_120_case_collision_in_a_folder_component_refused_path_case_collision() {
     entries.push(Z::new("assets/dir/x.png", b"2"));
     entries.sort_by(|left, right| left.name.cmp(&right.name));
     let bytes = build(&entries, &Tail::default());
-    assert_eq!(stage1_codes(&bytes), one_code("package.path-case-collision"));
+    assert_eq!(
+        stage1_codes(&bytes),
+        one_code("package.path-case-collision")
+    );
 }
 
 /// REQ: PKG-120
 #[test]
 fn pkg_120_distinct_names_are_not_collisions() {
     assert_path_ok("assets/a.png");
-    let codes = check_package_codes(&package_with(&[("assets/a.png", b"1"), ("assets/b.png", b"2")]));
+    let codes = check_package_codes(&package_with(&[
+        ("assets/a.png", b"1"),
+        ("assets/b.png", b"2"),
+    ]));
     assert!(codes.is_empty());
 }
 
@@ -767,7 +852,10 @@ fn pkg_121_similar_prefix_without_slash_is_accepted() {
 /// REQ: PKG-122
 #[test]
 fn pkg_122_ascii_order_is_accepted() {
-    let codes = check_package_codes(&package_with(&[("assets/Z.png", b"1"), ("assets/a.png", b"2")]));
+    let codes = check_package_codes(&package_with(&[
+        ("assets/Z.png", b"1"),
+        ("assets/a.png", b"2"),
+    ]));
     assert!(codes.is_empty());
 }
 
@@ -795,12 +883,18 @@ fn pkg_122_lowercase_before_uppercase_refused_entry_order() {
 /// REQ: PKG-122
 #[test]
 fn pkg_122_slash_sorts_before_digits() {
-    let accepted = check_package_codes(&package_with(&[("assets/a/b.png", b"1"), ("assets/a0.png", b"2")]));
+    let accepted = check_package_codes(&package_with(&[
+        ("assets/a/b.png", b"1"),
+        ("assets/a0.png", b"2"),
+    ]));
     assert!(accepted.is_empty());
     let mut entries = base();
     entries.insert(0, Z::new("assets/a0.png", b"2"));
     entries.insert(1, Z::new("assets/a/b.png", b"1"));
-    assert_eq!(stage1_codes(&build(&entries, &Tail::default())), one_code("package.entry-order"));
+    assert_eq!(
+        stage1_codes(&build(&entries, &Tail::default())),
+        one_code("package.entry-order")
+    );
 }
 
 /// REQ: PKG-122
@@ -813,7 +907,15 @@ fn pkg_122_written_archive_is_in_bytewise_order() {
         ("server.wasm".to_string(), vector_component()),
     ];
     let bytes = write_package(&files).expect("write sorted files");
-    assert_eq!(names_of(&bytes), vec!["assets/Z.png", "assets/a.png", "manifest.json", "server.wasm"]);
+    assert_eq!(
+        names_of(&bytes),
+        vec![
+            "assets/Z.png",
+            "assets/a.png",
+            "manifest.json",
+            "server.wasm"
+        ]
+    );
 }
 
 proptest! {
@@ -871,33 +973,51 @@ fn pkg_123_listed_names_are_accepted() {
 /// REQ: PKG-123, PKG-174
 #[test]
 fn pkg_123_unlisted_top_level_file_refused_entry_unexpected() {
-    assert_eq!(location_codes("extra.txt"), one_code("package.entry-unexpected"));
+    assert_eq!(
+        location_codes("extra.txt"),
+        one_code("package.entry-unexpected")
+    );
 }
 
 /// REQ: PKG-123
 #[test]
 fn pkg_123_unlisted_top_level_folder_refused_entry_unexpected() {
-    assert_eq!(location_codes("docs/readme.md"), one_code("package.entry-unexpected"));
+    assert_eq!(
+        location_codes("docs/readme.md"),
+        one_code("package.entry-unexpected")
+    );
 }
 
 /// REQ: PKG-123
 #[test]
 fn pkg_123_names_differing_only_in_case_from_listed_ones_refused_entry_unexpected() {
-    assert_eq!(location_codes("readme.md"), one_code("package.entry-unexpected"));
-    assert_eq!(location_codes("Server.wasm"), one_code("package.entry-unexpected"));
+    assert_eq!(
+        location_codes("readme.md"),
+        one_code("package.entry-unexpected")
+    );
+    assert_eq!(
+        location_codes("Server.wasm"),
+        one_code("package.entry-unexpected")
+    );
 }
 
 /// REQ: PKG-123
 #[test]
 fn pkg_123_wasm_with_another_name_refused_entry_unexpected() {
-    assert_eq!(location_codes("plugin.wasm"), one_code("package.entry-unexpected"));
+    assert_eq!(
+        location_codes("plugin.wasm"),
+        one_code("package.entry-unexpected")
+    );
 }
 
 /// REQ: PKG-124
 #[test]
 fn pkg_124_help_holds_only_markdown() {
     assert!(location_codes("help/topic.md").is_empty());
-    assert_eq!(location_codes("help/topic.txt"), one_code("package.entry-unexpected"));
+    assert_eq!(
+        location_codes("help/topic.txt"),
+        one_code("package.entry-unexpected")
+    );
 }
 
 /// REQ: PKG-124
@@ -905,29 +1025,49 @@ fn pkg_124_help_holds_only_markdown() {
 fn pkg_124_sounds_hold_only_wav_and_ogg() {
     assert!(location_codes("sounds/a.wav").is_empty());
     assert!(location_codes("sounds/a.ogg").is_empty());
-    assert_eq!(location_codes("sounds/a.mp3"), one_code("package.entry-unexpected"));
+    assert_eq!(
+        location_codes("sounds/a.mp3"),
+        one_code("package.entry-unexpected")
+    );
 }
 
 /// REQ: PKG-124
 #[test]
 fn pkg_124_screenshots_hold_only_png() {
     assert!(location_codes("screenshots/a.png").is_empty());
-    assert_eq!(location_codes("screenshots/a.jpg"), one_code("package.entry-unexpected"));
+    assert_eq!(
+        location_codes("screenshots/a.jpg"),
+        one_code("package.entry-unexpected")
+    );
 }
 
 /// REQ: PKG-124
 #[test]
 fn pkg_124_flat_folders_refuse_nested_folders() {
-    assert_eq!(location_codes("help/sub/a.md"), one_code("package.entry-unexpected"));
-    assert_eq!(location_codes("sounds/x/y.wav"), one_code("package.entry-unexpected"));
-    assert_eq!(location_codes("screenshots/s/a.png"), one_code("package.entry-unexpected"));
+    assert_eq!(
+        location_codes("help/sub/a.md"),
+        one_code("package.entry-unexpected")
+    );
+    assert_eq!(
+        location_codes("sounds/x/y.wav"),
+        one_code("package.entry-unexpected")
+    );
+    assert_eq!(
+        location_codes("screenshots/s/a.png"),
+        one_code("package.entry-unexpected")
+    );
 }
 
 /// REQ: PKG-125
 #[test]
 fn pkg_125_server_wasm_declared_as_the_client_entry_refused_entry_invalid() {
     let component = vector_component();
-    let manifest = manifest_text("", "client", "server.wasm", &[("server.wasm", component.as_slice())]);
+    let manifest = manifest_text(
+        "",
+        "client",
+        "server.wasm",
+        &[("server.wasm", component.as_slice())],
+    );
     let bytes = zip_of(&[("manifest.json", manifest), ("server.wasm", component)]);
     assert!(check_codes(&bytes).contains(&"manifest.entry-invalid".to_string()));
 }
@@ -936,7 +1076,12 @@ fn pkg_125_server_wasm_declared_as_the_client_entry_refused_entry_invalid() {
 #[test]
 fn pkg_125_client_wasm_declared_as_the_server_entry_refused_entry_invalid() {
     let component = vector_component();
-    let manifest = manifest_text("", "server", "client.wasm", &[("client.wasm", component.as_slice())]);
+    let manifest = manifest_text(
+        "",
+        "server",
+        "client.wasm",
+        &[("client.wasm", component.as_slice())],
+    );
     let bytes = zip_of(&[("client.wasm", component), ("manifest.json", manifest)]);
     assert!(check_codes(&bytes).contains(&"manifest.entry-invalid".to_string()));
 }
@@ -945,7 +1090,12 @@ fn pkg_125_client_wasm_declared_as_the_server_entry_refused_entry_invalid() {
 #[test]
 fn pkg_125_component_named_after_its_side_is_accepted() {
     let component = vector_component();
-    let manifest = manifest_text("", "client", "client.wasm", &[("client.wasm", component.as_slice())]);
+    let manifest = manifest_text(
+        "",
+        "client",
+        "client.wasm",
+        &[("client.wasm", component.as_slice())],
+    );
     let bytes = zip_of(&[("client.wasm", component), ("manifest.json", manifest)]);
     assert!(!check_codes(&bytes).contains(&"manifest.entry-invalid".to_string()));
 }
@@ -988,7 +1138,10 @@ fn pkg_126_4095_entries_are_accepted() {
 #[test]
 fn pkg_127_manifest_of_1_mib_is_not_oversize() {
     let bytes = build(
-        &[Z::new("manifest.json", &vec![b' '; 1_048_576]), Z::new("server.wasm", &vector_component())],
+        &[
+            Z::new("manifest.json", &vec![b' '; 1_048_576]),
+            Z::new("server.wasm", &vector_component()),
+        ],
         &Tail::default(),
     );
     assert!(!stage1_codes(&bytes).contains(&"package.manifest-size".to_string()));
@@ -998,7 +1151,10 @@ fn pkg_127_manifest_of_1_mib_is_not_oversize() {
 #[test]
 fn pkg_127_manifest_one_byte_over_1_mib_refused_manifest_size() {
     let bytes = build(
-        &[Z::new("manifest.json", &vec![b' '; 1_048_577]), Z::new("server.wasm", &vector_component())],
+        &[
+            Z::new("manifest.json", &vec![b' '; 1_048_577]),
+            Z::new("server.wasm", &vector_component()),
+        ],
         &Tail::default(),
     );
     assert_eq!(stage1_codes(&bytes), one_code("package.manifest-size"));
@@ -1008,7 +1164,10 @@ fn pkg_127_manifest_one_byte_over_1_mib_refused_manifest_size() {
 #[test]
 fn pkg_127_manifest_one_byte_under_1_mib_is_not_oversize() {
     let bytes = build(
-        &[Z::new("manifest.json", &vec![b' '; 1_048_575]), Z::new("server.wasm", &vector_component())],
+        &[
+            Z::new("manifest.json", &vec![b' '; 1_048_575]),
+            Z::new("server.wasm", &vector_component()),
+        ],
         &Tail::default(),
     );
     assert!(!stage1_codes(&bytes).contains(&"package.manifest-size".to_string()));
@@ -1019,7 +1178,10 @@ fn pkg_127_manifest_one_byte_under_1_mib_is_not_oversize() {
 fn pkg_127_manifest_cap_is_checked_from_the_central_directory() {
     let mut oversize = Z::claiming("manifest.json", 1_048_577);
     oversize.data = vector_manifest();
-    let bytes = build(&[oversize, Z::new("server.wasm", &vector_component())], &Tail::default());
+    let bytes = build(
+        &[oversize, Z::new("server.wasm", &vector_component())],
+        &Tail::default(),
+    );
     assert!(stage1_codes(&bytes).contains(&"package.manifest-size".to_string()));
 }
 
@@ -1029,7 +1191,10 @@ fn pkg_128_component_over_64_mib_refused_size_limit() {
     let mut entries = base();
     entries[1] = Z::claiming("server.wasm", 64 * MIB + 1);
     let codes = stage1_codes(&build(&entries, &Tail::default()));
-    assert!(codes.contains(&"package.size-limit".to_string()), "{codes:?}");
+    assert!(
+        codes.contains(&"package.size-limit".to_string()),
+        "{codes:?}"
+    );
 }
 
 /// REQ: PKG-128
@@ -1038,7 +1203,10 @@ fn pkg_128_component_of_exactly_64_mib_is_not_over_the_cap() {
     let mut entries = base();
     entries[1] = Z::claiming("server.wasm", 64 * MIB);
     let codes = stage1_codes(&build(&entries, &Tail::default()));
-    assert!(!codes.contains(&"package.size-limit".to_string()), "{codes:?}");
+    assert!(
+        !codes.contains(&"package.size-limit".to_string()),
+        "{codes:?}"
+    );
 }
 
 /// REQ: PKG-128
@@ -1046,28 +1214,38 @@ fn pkg_128_component_of_exactly_64_mib_is_not_over_the_cap() {
 fn pkg_128_component_one_byte_under_64_mib_is_not_over_the_cap() {
     let mut entries = base();
     entries[1] = Z::claiming("server.wasm", 64 * MIB - 1);
-    assert!(!stage1_codes(&build(&entries, &Tail::default())).contains(&"package.size-limit".to_string()));
+    assert!(!stage1_codes(&build(&entries, &Tail::default()))
+        .contains(&"package.size-limit".to_string()));
 }
 
 /// REQ: PKG-129
 #[test]
 fn pkg_129_non_component_entry_over_64_mib_refused_size_limit() {
     let codes = claiming_codes("src/big.bin", 64 * MIB + 1);
-    assert!(codes.contains(&"package.size-limit".to_string()), "{codes:?}");
+    assert!(
+        codes.contains(&"package.size-limit".to_string()),
+        "{codes:?}"
+    );
 }
 
 /// REQ: PKG-129
 #[test]
 fn pkg_129_non_component_entry_of_exactly_64_mib_is_not_over_the_cap() {
     let codes = claiming_codes("src/big.bin", 64 * MIB);
-    assert!(!codes.contains(&"package.size-limit".to_string()), "{codes:?}");
+    assert!(
+        !codes.contains(&"package.size-limit".to_string()),
+        "{codes:?}"
+    );
 }
 
 /// REQ: PKG-129
 #[test]
 fn pkg_129_screenshot_over_64_mib_refused_size_limit() {
     let codes = claiming_codes("screenshots/big.png", 64 * MIB + 1);
-    assert!(codes.contains(&"package.size-limit".to_string()), "{codes:?}");
+    assert!(
+        codes.contains(&"package.size-limit".to_string()),
+        "{codes:?}"
+    );
 }
 
 /// REQ: PKG-130
@@ -1075,7 +1253,11 @@ fn pkg_129_screenshot_over_64_mib_refused_size_limit() {
 fn pkg_130_package_file_over_300_mib_refused_size_limit() {
     let bytes = vec![0u8; 300 * 1024 * 1024 + 1];
     let codes = stage1_codes(&bytes);
-    assert_eq!(codes.first().map(String::as_str), Some("package.size-limit"), "{codes:?}");
+    assert_eq!(
+        codes.first().map(String::as_str),
+        Some("package.size-limit"),
+        "{codes:?}"
+    );
 }
 
 /// REQ: PKG-130
@@ -1089,7 +1271,8 @@ fn pkg_130_small_package_is_not_over_the_file_cap() {
 fn pkg_131_signature_of_16_kib_is_not_over_the_cap() {
     let mut entries = base();
     entries.push(Z::new("signature", &vec![b' '; 16 * 1024]));
-    assert!(!stage1_codes(&build(&entries, &Tail::default())).contains(&"package.size-limit".to_string()));
+    assert!(!stage1_codes(&build(&entries, &Tail::default()))
+        .contains(&"package.size-limit".to_string()));
 }
 
 /// REQ: PKG-131
@@ -1098,7 +1281,10 @@ fn pkg_131_signature_one_byte_over_16_kib_refused_size_limit() {
     let mut entries = base();
     entries.push(Z::new("signature", &vec![b' '; 16 * 1024 + 1]));
     let codes = stage1_codes(&build(&entries, &Tail::default()));
-    assert!(codes.contains(&"package.size-limit".to_string()), "{codes:?}");
+    assert!(
+        codes.contains(&"package.size-limit".to_string()),
+        "{codes:?}"
+    );
 }
 
 /// REQ: PKG-131
@@ -1106,7 +1292,8 @@ fn pkg_131_signature_one_byte_over_16_kib_refused_size_limit() {
 fn pkg_131_signature_one_byte_under_16_kib_is_not_over_the_cap() {
     let mut entries = base();
     entries.push(Z::new("signature", &vec![b' '; 16 * 1024 - 1]));
-    assert!(!stage1_codes(&build(&entries, &Tail::default())).contains(&"package.size-limit".to_string()));
+    assert!(!stage1_codes(&build(&entries, &Tail::default()))
+        .contains(&"package.size-limit".to_string()));
 }
 
 /// Two zero-filled asset files whose sizes add up to `second_len + 40 MiB`, with the inventory
@@ -1115,9 +1302,21 @@ fn asset_total_package(second_len: usize, second_crc: u32, second_sha: &str) -> 
     let first_len = 40 * 1024 * 1024;
     let component = vector_component();
     let listing = vec![
-        ("assets/a.bin".to_string(), first_len, "80a3721188e40218b08b26776bc53bdae81e4784fff71d71450a197319cba113".to_string()),
-        ("assets/b.bin".to_string(), second_len, second_sha.to_string()),
-        ("server.wasm".to_string(), component.len(), sha256_hex(&component)),
+        (
+            "assets/a.bin".to_string(),
+            first_len,
+            "80a3721188e40218b08b26776bc53bdae81e4784fff71d71450a197319cba113".to_string(),
+        ),
+        (
+            "assets/b.bin".to_string(),
+            second_len,
+            second_sha.to_string(),
+        ),
+        (
+            "server.wasm".to_string(),
+            component.len(),
+            sha256_hex(&component),
+        ),
     ];
     let manifest = manifest_from_listing("", "server", "server.wasm", &listing);
     let mut first = Z::new("assets/a.bin", &[]);
@@ -1129,7 +1328,12 @@ fn asset_total_package(second_len: usize, second_crc: u32, second_sha: &str) -> 
     second.crc = Some(second_crc);
     second.local_crc = Some(second_crc);
     build(
-        &[first, second, Z::new("manifest.json", &manifest), Z::new("server.wasm", &component)],
+        &[
+            first,
+            second,
+            Z::new("manifest.json", &manifest),
+            Z::new("server.wasm", &component),
+        ],
         &Tail::default(),
     )
 }
@@ -1164,5 +1368,8 @@ fn pkg_132_components_and_sources_do_not_count_toward_the_asset_total() {
     entries.push(Z::claiming("screenshots/a.png", 40 * MIB));
     entries.sort_by(|left, right| left.name.cmp(&right.name));
     let codes = check_codes(&build(&entries, &Tail::default()));
-    assert!(!codes.contains(&"manifest.asset-size".to_string()), "{codes:?}");
+    assert!(
+        !codes.contains(&"manifest.asset-size".to_string()),
+        "{codes:?}"
+    );
 }

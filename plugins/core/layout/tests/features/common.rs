@@ -28,7 +28,8 @@ pub fn manifest_value() -> serde_json::Value {
 }
 
 pub fn page_text() -> String {
-    std::fs::read_to_string(manual::pages_dir().join("core-plugin-layout.md")).expect("page is readable")
+    std::fs::read_to_string(manual::pages_dir().join("core-plugin-layout.md"))
+        .expect("page is readable")
 }
 
 pub fn extension_points_page_text() -> String {
@@ -42,7 +43,9 @@ pub fn json_blocks(page: &str) -> Vec<String> {
     let mut rest = page;
     while let Some(start) = rest.find("```json\n") {
         let after = &rest[start + "```json\n".len()..];
-        let Some(end) = after.find("\n```") else { break };
+        let Some(end) = after.find("\n```") else {
+            break;
+        };
         blocks.push(after[..end].to_string());
         rest = &after[end + 4..];
     }
@@ -55,7 +58,9 @@ pub fn term_blocks(page: &str) -> Vec<String> {
     let mut rest = page;
     while let Some(start) = rest.find("<pre class=\"term\">") {
         let after = &rest[start + "<pre class=\"term\">".len()..];
-        let Some(end) = after.find("</pre>") else { break };
+        let Some(end) = after.find("</pre>") else {
+            break;
+        };
         let mut text = String::new();
         let mut in_tag = false;
         for symbol in after[..end].chars() {
@@ -66,7 +71,10 @@ pub fn term_blocks(page: &str) -> Vec<String> {
                 _ => {}
             }
         }
-        let text = text.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">");
+        let text = text
+            .replace("&amp;", "&")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">");
         blocks.push(text.trim_end_matches('\n').to_string());
         rest = &after[end + 6..];
     }
@@ -74,11 +82,15 @@ pub fn term_blocks(page: &str) -> Vec<String> {
 }
 
 pub fn server_host() -> FakeHost {
-    FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("server")
+    FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("server")
 }
 
 pub fn client_host() -> FakeHost {
-    FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("client")
+    FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("client")
 }
 
 pub fn activated_server() -> FakeHost {
@@ -98,7 +110,10 @@ pub fn command_event(name: &str, pane: Option<u64>) -> Event {
         command: name.to_string(),
         arguments_json: "{}".to_string(),
         origin: CommandOrigin::Palette,
-        context: CommandContext { pane: pane.map(NodeId), ..CommandContext::default() },
+        context: CommandContext {
+            pane: pane.map(NodeId),
+            ..CommandContext::default()
+        },
     })
 }
 
@@ -163,7 +178,11 @@ pub fn resizes(submissions: &[Submission]) -> Vec<ResizePaneSpec> {
 }
 
 /// A tree node for `host.tree().add`.
-pub fn pane_node(name: &str, content_kind: &str, parent: Option<u64>) -> ilium_plugin_sdk::testing::TreeNode {
+pub fn pane_node(
+    name: &str,
+    content_kind: &str,
+    parent: Option<u64>,
+) -> ilium_plugin_sdk::testing::TreeNode {
     ilium_plugin_sdk::testing::TreeNode {
         id: 0,
         parent,

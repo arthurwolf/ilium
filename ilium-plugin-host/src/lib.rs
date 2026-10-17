@@ -17,11 +17,13 @@
 // are unused by design (test plan 1.3).
 #![allow(unused_variables, dead_code)]
 
+pub mod approval;
 pub mod audit;
 pub mod autoupdate;
 pub mod calls;
 pub mod cli;
 pub mod conformance_hooks;
+pub mod consent;
 pub mod devtools;
 pub mod dispatch;
 pub mod engine;
@@ -33,23 +35,21 @@ pub mod install;
 pub mod instance;
 pub mod ipc;
 pub mod lifecycle;
+pub mod limits_rules;
 pub mod linker;
 pub mod package;
+pub mod platform_rules;
 pub mod policy;
 pub mod registry;
 pub mod registry_client;
 pub mod render;
 pub mod resolve;
-pub mod scheduler;
-pub mod services;
-pub mod settings;
-pub mod approval;
-pub mod consent;
-pub mod limits_rules;
-pub mod platform_rules;
 pub mod review;
+pub mod scheduler;
 pub mod secrets;
+pub mod services;
 pub mod session;
+pub mod settings;
 pub mod signing;
 pub mod storage;
 pub mod stores;

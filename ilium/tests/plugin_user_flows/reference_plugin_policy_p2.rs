@@ -2,10 +2,14 @@
 
 use crate::support::*;
 
-const DENIED_AND_ALLOWED: &str = "version = 1\n[plugins]\nallow_ids = [\"com.example.t3\"]\ndeny_ids = [\"com.example.t3\"]\n";
+const DENIED_AND_ALLOWED: &str =
+    "version = 1\n[plugins]\nallow_ids = [\"com.example.t3\"]\ndeny_ids = [\"com.example.t3\"]\n";
 
 fn first_message(output: &CliOutput) -> String {
-    error_messages(output).into_iter().next().unwrap_or_default()
+    error_messages(output)
+        .into_iter()
+        .next()
+        .unwrap_or_default()
 }
 
 fn four_failing_keys_policy() -> String {
@@ -24,7 +28,10 @@ fn usr_216_id_in_deny_and_allow_cannot_be_installed_with_policy_blocked() {
     let mut rig = UserRig::new();
     rig.write_system_policy(DENIED_AND_ALLOWED);
     rig.start_server();
-    let output = rig.install_file(&spec("com.example.t3", "1.0.0", &[]), &["--allow-unsigned", "--yes"]);
+    let output = rig.install_file(
+        &spec("com.example.t3", "1.0.0", &[]),
+        &["--allow-unsigned", "--yes"],
+    );
     assert_eq!(error_codes(&output), vec!["policy.blocked".to_string()]);
     assert_ne!(result_exit_code(&output), 0);
 }
@@ -35,8 +42,15 @@ fn usr_216_the_message_starts_with_policy_id_denied_colon_space() {
     let mut rig = UserRig::new();
     rig.write_system_policy(DENIED_AND_ALLOWED);
     rig.start_server();
-    let output = rig.install_file(&spec("com.example.t3", "1.0.0", &[]), &["--allow-unsigned", "--yes"]);
-    assert!(first_message(&output).starts_with("policy.id-denied: "), "{}", first_message(&output));
+    let output = rig.install_file(
+        &spec("com.example.t3", "1.0.0", &[]),
+        &["--allow-unsigned", "--yes"],
+    );
+    assert!(
+        first_message(&output).starts_with("policy.id-denied: "),
+        "{}",
+        first_message(&output)
+    );
 }
 
 /// REQ: USR-216
@@ -45,7 +59,10 @@ fn usr_216_an_allow_only_entry_still_installs() {
     let mut rig = UserRig::new();
     rig.write_system_policy("version = 1\n[plugins]\nallow_ids = [\"com.example.t3\"]\n");
     rig.start_server();
-    let output = rig.install_file(&spec("com.example.t3", "1.0.0", &[]), &["--allow-unsigned", "--yes"]);
+    let output = rig.install_file(
+        &spec("com.example.t3", "1.0.0", &[]),
+        &["--allow-unsigned", "--yes"],
+    );
     assert_eq!(result_exit_code(&output), 0, "{:?}", error_codes(&output));
 }
 
@@ -55,7 +72,10 @@ fn usr_216_an_id_missing_from_the_allow_list_is_denied_with_the_same_detail() {
     let mut rig = UserRig::new();
     rig.write_system_policy("version = 1\n[plugins]\nallow_ids = [\"com.example.other\"]\n");
     rig.start_server();
-    let output = rig.install_file(&spec("com.example.t3", "1.0.0", &[]), &["--allow-unsigned", "--yes"]);
+    let output = rig.install_file(
+        &spec("com.example.t3", "1.0.0", &[]),
+        &["--allow-unsigned", "--yes"],
+    );
     assert_eq!(error_codes(&output), vec!["policy.blocked".to_string()]);
     assert!(first_message(&output).starts_with("policy.id-denied: "));
 }
@@ -68,9 +88,16 @@ fn usr_217_four_failing_keys_report_the_first_in_the_order() {
     let mut rig = UserRig::new();
     rig.write_system_policy(&four_failing_keys_policy());
     rig.start_server();
-    let output = rig.install_file(&spec("com.example.t3", "1.0.0", &[]), &["--allow-unsigned", "--yes"]);
+    let output = rig.install_file(
+        &spec("com.example.t3", "1.0.0", &[]),
+        &["--allow-unsigned", "--yes"],
+    );
     assert_eq!(error_codes(&output), vec!["policy.blocked".to_string()]);
-    assert!(first_message(&output).starts_with("policy.third-party-denied: "), "{}", first_message(&output));
+    assert!(
+        first_message(&output).starts_with("policy.third-party-denied: "),
+        "{}",
+        first_message(&output)
+    );
 }
 
 /// REQ: USR-217
@@ -81,8 +108,15 @@ fn usr_217_without_the_first_key_the_second_key_is_reported() {
         "version = 1\n[packages]\nallowed_tiers = [\"T1\"]\n[plugins]\ndeny_ids = [\"com.example.t3\"]\n",
     );
     rig.start_server();
-    let output = rig.install_file(&spec("com.example.t3", "1.0.0", &[]), &["--allow-unsigned", "--yes"]);
-    assert!(first_message(&output).starts_with("policy.id-denied: "), "{}", first_message(&output));
+    let output = rig.install_file(
+        &spec("com.example.t3", "1.0.0", &[]),
+        &["--allow-unsigned", "--yes"],
+    );
+    assert!(
+        first_message(&output).starts_with("policy.id-denied: "),
+        "{}",
+        first_message(&output)
+    );
 }
 
 /// REQ: USR-217
@@ -93,8 +127,15 @@ fn usr_217_tier_check_comes_before_publisher_and_source_checks() {
         "version = 1\n[packages]\nallowed_tiers = [\"T1\"]\nallowed_sources = [\"https://registry.example.org/\"]\n[publishers]\nallow = [\"someone-else\"]\n",
     );
     rig.start_server();
-    let output = rig.install_file(&spec("com.example.t3", "1.0.0", &[]), &["--allow-unsigned", "--yes"]);
-    assert!(first_message(&output).starts_with("policy.tier-denied: "), "{}", first_message(&output));
+    let output = rig.install_file(
+        &spec("com.example.t3", "1.0.0", &[]),
+        &["--allow-unsigned", "--yes"],
+    );
+    assert!(
+        first_message(&output).starts_with("policy.tier-denied: "),
+        "{}",
+        first_message(&output)
+    );
 }
 
 /// REQ: USR-217
@@ -105,8 +146,15 @@ fn usr_217_publisher_check_comes_before_the_source_check() {
         "version = 1\n[packages]\nallowed_sources = [\"https://registry.example.org/\"]\n[publishers]\nallow = [\"someone-else\"]\n",
     );
     rig.start_server();
-    let output = rig.install_file(&spec("com.example.t3", "1.0.0", &[]), &["--allow-unsigned", "--yes"]);
-    assert!(first_message(&output).starts_with("policy.publisher-denied: "), "{}", first_message(&output));
+    let output = rig.install_file(
+        &spec("com.example.t3", "1.0.0", &[]),
+        &["--allow-unsigned", "--yes"],
+    );
+    assert!(
+        first_message(&output).starts_with("policy.publisher-denied: "),
+        "{}",
+        first_message(&output)
+    );
 }
 
 // ---- USR-218 ----
@@ -115,7 +163,9 @@ fn usr_217_publisher_check_comes_before_the_source_check() {
 #[test]
 fn usr_218_all_thirty_core_plugins_start_under_the_strictest_package_policy() {
     let mut rig = UserRig::new();
-    rig.write_system_policy("version = 1\n[packages]\nallow_third_party = false\nallowed_tiers = []\n");
+    rig.write_system_policy(
+        "version = 1\n[packages]\nallow_third_party = false\nallowed_tiers = []\n",
+    );
     rig.start_server();
     let ids = core_plugin_ids_from_manual();
     assert_eq!(ids.len(), 30, "{ids:?}");
@@ -135,9 +185,14 @@ fn usr_218_all_thirty_core_plugins_start_under_the_strictest_package_policy() {
 fn usr_218_the_same_policy_blocks_an_installed_third_party_plugin() {
     let mut rig = UserRig::new();
     install_ok(&mut rig, &spec("com.example.t3", "1.0.0", &[]));
-    rig.write_system_policy("version = 1\n[packages]\nallow_third_party = false\nallowed_tiers = []\n");
+    rig.write_system_policy(
+        "version = 1\n[packages]\nallow_third_party = false\nallowed_tiers = []\n",
+    );
     rig.start_server();
-    assert_eq!(list_row(&mut rig, "com.example.t3").state, "Blocked by policy");
+    assert_eq!(
+        list_row(&mut rig, "com.example.t3").state,
+        "Blocked by policy"
+    );
     assert_eq!(list_row(&mut rig, "ilium.core.tree").state, "On");
 }
 
@@ -145,7 +200,9 @@ fn usr_218_the_same_policy_blocks_an_installed_third_party_plugin() {
 #[test]
 fn usr_218_core_plugins_ignore_a_plugin_deny_list_naming_them() {
     let mut rig = UserRig::new();
-    rig.write_system_policy("version = 1\n[plugins]\ndeny_ids = [\"ilium.core.tree\"]\n[publishers]\nallow = [\"x\"]\n");
+    rig.write_system_policy(
+        "version = 1\n[plugins]\ndeny_ids = [\"ilium.core.tree\"]\n[publishers]\nallow = [\"x\"]\n",
+    );
     rig.start_server();
     assert_eq!(list_row(&mut rig, "ilium.core.tree").state, "On");
 }
@@ -196,7 +253,10 @@ fn usr_219_the_records_contain_no_plugin_data() {
         for record in rig.audit_records_of(event) {
             let text = record.to_string();
             assert!(!text.contains("secret-marker-8f3a"), "{event}: {text}");
-            assert!(record.get("data").is_none() && record.get("settings").is_none(), "{event}: {text}");
+            assert!(
+                record.get("data").is_none() && record.get("settings").is_none(),
+                "{event}: {text}"
+            );
         }
     }
 }

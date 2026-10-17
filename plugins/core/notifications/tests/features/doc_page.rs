@@ -105,7 +105,10 @@ fn doc_048_sample_four_limits_the_mark_reason_to_80_characters() {
 #[test]
 fn doc_047_the_guide_has_six_sound_events_and_four_desktop_events() {
     let guide = user_doc("notifications.md");
-    let rows = table_rows(&guide, "| Event | Sound switch | Desktop switch | Sound default | Desktop default |");
+    let rows = table_rows(
+        &guide,
+        "| Event | Sound switch | Desktop switch | Sound default | Desktop default |",
+    );
     assert_eq!(rows.len(), 6);
     let desktop = rows.iter().filter(|row| row[2] != "none").count();
     assert_eq!(desktop, 4);
@@ -116,8 +119,15 @@ fn doc_047_the_guide_has_six_sound_events_and_four_desktop_events() {
 #[test]
 fn doc_047_the_guide_sound_defaults_are_finished_and_failed_only() {
     let guide = user_doc("notifications.md");
-    let rows = table_rows(&guide, "| Event | Sound switch | Desktop switch | Sound default | Desktop default |");
-    let on: Vec<&str> = rows.iter().filter(|row| row[3] == "On").map(|row| row[1].as_str()).collect();
+    let rows = table_rows(
+        &guide,
+        "| Event | Sound switch | Desktop switch | Sound default | Desktop default |",
+    );
+    let on: Vec<&str> = rows
+        .iter()
+        .filter(|row| row[3] == "On")
+        .map(|row| row[1].as_str())
+        .collect();
     assert_eq!(on, ["Agent finished", "Task failed or monitor lost"]);
 }
 
@@ -125,10 +135,24 @@ fn doc_047_the_guide_sound_defaults_are_finished_and_failed_only() {
 #[test]
 fn doc_048_the_guide_desktop_defaults_are_everything_but_task_succeeded() {
     let guide = user_doc("notifications.md");
-    let rows = table_rows(&guide, "| Event | Sound switch | Desktop switch | Sound default | Desktop default |");
-    let on: Vec<&str> = rows.iter().filter(|row| row[4] == "On").map(|row| row[2].as_str()).collect();
-    assert_eq!(on, ["Agent finished", "Approval required", "Task failed or lost"]);
-    let off: Vec<&str> = rows.iter().filter(|row| row[4] == "Off").map(|row| row[2].as_str()).collect();
+    let rows = table_rows(
+        &guide,
+        "| Event | Sound switch | Desktop switch | Sound default | Desktop default |",
+    );
+    let on: Vec<&str> = rows
+        .iter()
+        .filter(|row| row[4] == "On")
+        .map(|row| row[2].as_str())
+        .collect();
+    assert_eq!(
+        on,
+        ["Agent finished", "Approval required", "Task failed or lost"]
+    );
+    let off: Vec<&str> = rows
+        .iter()
+        .filter(|row| row[4] == "Off")
+        .map(|row| row[2].as_str())
+        .collect();
     assert_eq!(off, ["Task succeeded"]);
 }
 
@@ -137,7 +161,10 @@ fn doc_048_the_guide_desktop_defaults_are_everything_but_task_succeeded() {
 fn doc_048_the_guide_switch_table_lists_the_seven_config_keys_with_defaults() {
     let guide = user_doc("notifications.md");
     let rows = table_rows(&guide, "| Switch | `config.toml` key | Default |");
-    let pairs: Vec<(String, String)> = rows.iter().map(|row| (row[1].clone(), row[2].clone())).collect();
+    let pairs: Vec<(String, String)> = rows
+        .iter()
+        .map(|row| (row[1].clone(), row[2].clone()))
+        .collect();
     let expected = [
         ("`enabled`", "On"),
         ("`agent_finished`", "On"),
@@ -159,14 +186,17 @@ fn doc_049_the_guide_states_the_merge_window_rules() {
     let guide = user_doc("notifications.md");
     assert!(guide.contains("The window is 30 seconds by default, adjustable in 10-second steps up to 600 seconds. `0` disables merging."));
     assert!(guide.contains("Kinds are counted separately, so a success and a failure on one pane do not merge with each other."));
-    assert!(guide.contains("task_coalesce_seconds = 30        # 0 to 600; values above 600 are clamped"));
+    assert!(guide
+        .contains("task_coalesce_seconds = 30        # 0 to 600; values above 600 are clamped"));
 }
 
 /// REQ: F-049
 #[test]
 fn doc_049_the_guide_states_the_redundant_outcome_rule() {
     let guide = user_doc("notifications.md");
-    assert!(guide.contains("Task alerts are skipped while the agent in that pane is idle, finished-unread or parked."));
+    assert!(guide.contains(
+        "Task alerts are skipped while the agent in that pane is idle, finished-unread or parked."
+    ));
     assert!(guide.contains("Panes with no agent are never skipped."));
     assert!(guide.contains("Turn this off with `suppress_redundant_task_outcomes = false`."));
 }
@@ -175,7 +205,13 @@ fn doc_049_the_guide_states_the_redundant_outcome_rule() {
 #[test]
 fn doc_047_the_guide_lists_the_five_sound_sources() {
     let guide = user_doc("notifications.md");
-    for source in ["`system_beep`", "`sound_file`", "`bundled_chirping`", "`generated`", "`muted`"] {
+    for source in [
+        "`system_beep`",
+        "`sound_file`",
+        "`bundled_chirping`",
+        "`generated`",
+        "`muted`",
+    ] {
         assert!(guide.contains(source), "{source}");
     }
 }

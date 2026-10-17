@@ -7,8 +7,9 @@ use ilium_plugin_sdk::exports::{MenuContext, MenuEntry};
 use ilium_plugin_sdk::primitives::SessionRef;
 use ilium_plugin_sdk::testing::{FakeHost, TreeNode};
 use ilium_plugin_sdk::types::{
-    AgentActivity, AgentView, CommandContext, CommandInvokedEvent, CommandOrigin, Event, FsPath, Intent, MessageEvent,
-    NodeClass, NodeId, Outcome, PluginId, PluginSide, RequestRef, RequestResult, Submission, ViewTarget,
+    AgentActivity, AgentView, CommandContext, CommandInvokedEvent, CommandOrigin, Event, FsPath,
+    Intent, MessageEvent, NodeClass, NodeId, Outcome, PluginId, PluginSide, RequestRef,
+    RequestResult, Submission, ViewTarget,
 };
 use serde_json::{json, Value};
 
@@ -20,13 +21,19 @@ pub fn manifest_path() -> PathBuf {
 }
 
 pub fn server_host() -> FakeHost {
-    let mut host = FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("server").build();
+    let mut host = FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("server")
+        .build();
     host.activate::<SessionConvertServer>();
     host
 }
 
 pub fn client_host() -> FakeHost {
-    let mut host = FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("client").build();
+    let mut host = FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("client")
+        .build();
     host.activate::<SessionConvertClient>();
     host
 }
@@ -67,7 +74,10 @@ pub fn server_with_pane(signature: &str, with_transcript: bool) -> (FakeHost, u6
     let pane = pane_with_session(&mut host, signature);
     if with_transcript {
         host.fs().write(
-            FsPath { scope: format!("agent-sessions:{signature}"), path: format!("projects/p/{SOURCE_SESSION}.jsonl") },
+            FsPath {
+                scope: format!("agent-sessions:{signature}"),
+                path: format!("projects/p/{SOURCE_SESSION}.jsonl"),
+            },
             b"{\"type\":\"user\"}\n",
         );
     }
@@ -118,15 +128,29 @@ pub fn message_from(side: PluginSide, channel: &str, payload: &[u8]) -> Event {
 }
 
 pub fn start_message(pane: u64, target: &str) -> Event {
-    message_from(PluginSide::Client, "start", json!({"pane": pane, "target": target}).to_string().as_bytes())
+    message_from(
+        PluginSide::Client,
+        "start",
+        json!({"pane": pane, "target": target})
+            .to_string()
+            .as_bytes(),
+    )
 }
 
 pub fn client_message(channel: &str, pane: u64) -> Event {
-    message_from(PluginSide::Client, channel, json!({"pane": pane}).to_string().as_bytes())
+    message_from(
+        PluginSide::Client,
+        channel,
+        json!({"pane": pane}).to_string().as_bytes(),
+    )
 }
 
 pub fn server_says(host: &mut FakeHost, channel: &str, payload: Value) {
-    host.deliver_one(message_from(PluginSide::Server, channel, payload.to_string().as_bytes()));
+    host.deliver_one(message_from(
+        PluginSide::Server,
+        channel,
+        payload.to_string().as_bytes(),
+    ));
 }
 
 pub fn panel() -> ViewTarget {
@@ -134,7 +158,10 @@ pub fn panel() -> ViewTarget {
 }
 
 pub fn intents(submissions: &[Submission]) -> Vec<Intent> {
-    submissions.iter().map(|submission| submission.intent.clone()).collect()
+    submissions
+        .iter()
+        .map(|submission| submission.intent.clone())
+        .collect()
 }
 
 pub fn frozen(submissions: &[Submission]) -> Vec<u64> {
@@ -182,7 +209,11 @@ pub fn created(submissions: &[Submission]) -> Vec<(String, String, Vec<String>)>
     submissions
         .iter()
         .filter_map(|s| match &s.intent {
-            Intent::CreatePane(spec) => Some((spec.title.clone(), spec.content_kind.clone(), spec.command.clone().unwrap_or_default())),
+            Intent::CreatePane(spec) => Some((
+                spec.title.clone(),
+                spec.content_kind.clone(),
+                spec.command.clone().unwrap_or_default(),
+            )),
             _ => None,
         })
         .collect()
@@ -193,7 +224,9 @@ pub fn replaced(submissions: &[Submission]) -> Vec<(u64, Vec<String>, bool)> {
     submissions
         .iter()
         .filter_map(|s| match &s.intent {
-            Intent::ReplacePaneCommand(spec) => Some((spec.pane.0, spec.command.clone(), spec.keep_scrollback)),
+            Intent::ReplacePaneCommand(spec) => {
+                Some((spec.pane.0, spec.command.clone(), spec.keep_scrollback))
+            }
             _ => None,
         })
         .collect()
@@ -204,23 +237,37 @@ pub fn messages(submissions: &[Submission]) -> Vec<(PluginSide, String, String)>
     submissions
         .iter()
         .filter_map(|s| match &s.intent {
-            Intent::Message(spec) => Some((spec.to.side, spec.channel.clone(), String::from_utf8_lossy(&spec.payload).to_string())),
+            Intent::Message(spec) => Some((
+                spec.to.side,
+                spec.channel.clone(),
+                String::from_utf8_lossy(&spec.payload).to_string(),
+            )),
             _ => None,
         })
         .collect()
 }
 
 pub fn toasts(submissions: &[Submission]) -> usize {
-    submissions.iter().filter(|s| matches!(s.intent, Intent::Toast(_))).count()
+    submissions
+        .iter()
+        .filter(|s| matches!(s.intent, Intent::Toast(_)))
+        .count()
 }
 
 /// Answers the `terminate-pane-process` submission with `outcome`, as the host would.
-pub fn answer_terminate(host: &mut FakeHost, submissions: &[Submission], outcome: Outcome) -> Vec<Submission> {
+pub fn answer_terminate(
+    host: &mut FakeHost,
+    submissions: &[Submission],
+    outcome: Outcome,
+) -> Vec<Submission> {
     let terminate = submissions
         .iter()
         .find(|s| matches!(s.intent, Intent::TerminatePaneProcess(_)))
         .expect("terminate submitted");
-    host.deliver_one(Event::RequestCompleted(RequestResult { request: RequestRef::Submission(terminate.correlation), outcome }))
+    host.deliver_one(Event::RequestCompleted(RequestResult {
+        request: RequestRef::Submission(terminate.correlation),
+        outcome,
+    }))
 }
 
 /// Starts a conversion of the pane and completes the stop of the agent; returns the submissions of the start.
@@ -232,8 +279,12 @@ pub fn start_and_stop(host: &mut FakeHost, pane: u64, target: &str) -> Vec<Submi
 
 /// The job output for `lines` converted lines claiming `kept` kept items.
 pub fn job_output(lines: usize, kept: usize) -> Vec<u8> {
-    let jsonl: Vec<String> = (0..lines).map(|index| json!({"type": "user", "n": index}).to_string()).collect();
-    json!({"claude_jsonl": jsonl.join("\n"), "kept": kept, "dropped": 2}).to_string().into_bytes()
+    let jsonl: Vec<String> = (0..lines)
+        .map(|index| json!({"type": "user", "n": index}).to_string())
+        .collect();
+    json!({"claude_jsonl": jsonl.join("\n"), "kept": kept, "dropped": 2})
+        .to_string()
+        .into_bytes()
 }
 
 /// A Codex to Claude conversion whose job finished well; returns the host, the pane and everything submitted.

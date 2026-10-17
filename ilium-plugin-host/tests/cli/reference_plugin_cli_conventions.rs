@@ -11,19 +11,93 @@ use crate::common::*;
 const ALLOWED_FIELDS: &[(&str, &[&str])] = &[
     ("progress", &["step", "message", "current", "total"]),
     ("warning", &["code", "message", "file", "line", "column"]),
-    ("error", &["code", "message", "file", "line", "column", "key_path", "hint"]),
+    (
+        "error",
+        &[
+            "code", "message", "file", "line", "column", "key_path", "hint",
+        ],
+    ),
     ("artifact", &["kind", "path", "sha256", "bytes"]),
-    ("check", &["rule", "severity", "message", "file", "line", "column", "key_path"]),
-    ("lint", &["rule", "severity", "message", "file", "line", "column", "key_path", "fix", "suppressed"]),
-    ("test-case", &["name", "fixture", "side", "status", "duration_ms", "diff", "reason"]),
-    ("diff", &["subject", "expected", "actual", "first_difference"]),
-    ("submission", &["index", "correlation", "intent", "dedup_key"]),
+    (
+        "check",
+        &[
+            "rule", "severity", "message", "file", "line", "column", "key_path",
+        ],
+    ),
+    (
+        "lint",
+        &[
+            "rule",
+            "severity",
+            "message",
+            "file",
+            "line",
+            "column",
+            "key_path",
+            "fix",
+            "suppressed",
+        ],
+    ),
+    (
+        "test-case",
+        &[
+            "name",
+            "fixture",
+            "side",
+            "status",
+            "duration_ms",
+            "diff",
+            "reason",
+        ],
+    ),
+    (
+        "diff",
+        &["subject", "expected", "actual", "first_difference"],
+    ),
+    (
+        "submission",
+        &["index", "correlation", "intent", "dedup_key"],
+    ),
     ("outcome", &["correlation", "outcome", "code"]),
-    ("reload", &["plugin", "side", "version", "restored_bytes", "restore_dropped", "build_ms"]),
+    (
+        "reload",
+        &[
+            "plugin",
+            "side",
+            "version",
+            "restored_bytes",
+            "restore_dropped",
+            "build_ms",
+        ],
+    ),
     ("log", &["at", "plugin", "side", "level", "message"]),
-    ("timing", &["plugin", "side", "export", "calls", "p50_ms", "p99_ms", "max_ms", "deadline_ms"]),
+    (
+        "timing",
+        &[
+            "plugin",
+            "side",
+            "export",
+            "calls",
+            "p50_ms",
+            "p99_ms",
+            "max_ms",
+            "deadline_ms",
+        ],
+    ),
     ("trace", &["at", "plugin", "side", "kind", "detail"]),
-    ("plugin", &["id", "version", "tier", "state", "dev", "sides", "grants_granted", "grants_requested"]),
+    (
+        "plugin",
+        &[
+            "id",
+            "version",
+            "tier",
+            "state",
+            "dev",
+            "sides",
+            "grants_granted",
+            "grants_requested",
+        ],
+    ),
     ("grant", &["plugin", "grant", "risk", "state"]),
     ("inspect", &["section", "data"]),
     ("doctor-check", &["item", "status", "message", "fix"]),
@@ -34,9 +108,16 @@ const ALLOWED_FIELDS: &[(&str, &[&str])] = &[
 fn assert_fields_defined(records: &[Value]) {
     for record in records {
         let record_type = record["type"].as_str().expect("type");
-        let allowed = ALLOWED_FIELDS.iter().find(|(name, _)| *name == record_type).expect("known record type").1;
+        let allowed = ALLOWED_FIELDS
+            .iter()
+            .find(|(name, _)| *name == record_type)
+            .expect("known record type")
+            .1;
         for key in record.as_object().expect("object").keys() {
-            assert!(key == "type" || key == "details" || allowed.contains(&key.as_str()), "{record_type} has undefined field {key}");
+            assert!(
+                key == "type" || key == "details" || allowed.contains(&key.as_str()),
+                "{record_type} has undefined field {key}"
+            );
         }
     }
 }
@@ -52,8 +133,14 @@ fn dev_001_check_without_dir_uses_the_working_directory() {
     let implicit = run(&env, &["check", "--json"]);
     assert_eq!(types(&implicit), types(&explicit));
     assert_eq!(implicit.exit_code, explicit.exit_code);
-    assert!([0, 3].contains(&implicit.exit_code), "check ran to the end: ok or findings");
-    assert_eq!(recs(&implicit, "result")[0]["exit_code"], implicit.exit_code);
+    assert!(
+        [0, 3].contains(&implicit.exit_code),
+        "check ran to the end: ok or findings"
+    );
+    assert_eq!(
+        recs(&implicit, "result")[0]["exit_code"],
+        implicit.exit_code
+    );
 }
 
 /// REQ: DEV-001
@@ -77,7 +164,10 @@ fn dev_001_dir_is_the_folder_with_the_manifest_not_cwd() {
     let output = run_in(&env, &dir, &["build"]);
     assert_eq!(output.exit_code, 0);
     assert!(dir.join("dist/server.wasm").is_file());
-    assert!(!env.cwd.join("dist").exists(), "cwd is not the project when <dir> is given");
+    assert!(
+        !env.cwd.join("dist").exists(),
+        "cwd is not the project when <dir> is given"
+    );
 }
 
 /// REQ: DEV-002
@@ -88,7 +178,12 @@ fn dev_002_cargo_toml_alone_means_rust() {
     let dir = server_project(&env, root.path());
     let output = run_in(&env, &dir, &["build"]);
     assert_eq!(output.exit_code, 0);
-    assert!(recs(&output, "progress").iter().any(|r| r["step"] == "compile"), "rust has a compile stage");
+    assert!(
+        recs(&output, "progress")
+            .iter()
+            .any(|r| r["step"] == "compile"),
+        "rust has a compile stage"
+    );
 }
 
 /// REQ: DEV-002
@@ -99,7 +194,12 @@ fn dev_002_package_json_alone_means_typescript() {
     let dir = new_project(&env, root.path(), "tsdemo", "server", "typescript");
     let output = run_in(&env, &dir, &["build"]);
     assert_eq!(output.exit_code, 0);
-    assert!(recs(&output, "progress").iter().any(|r| r["step"] == "bundle"), "typescript has a bundle stage");
+    assert!(
+        recs(&output, "progress")
+            .iter()
+            .any(|r| r["step"] == "bundle"),
+        "typescript has a bundle stage"
+    );
 }
 
 /// REQ: DEV-002
@@ -110,7 +210,10 @@ fn dev_002_both_files_fail_language_ambiguous() {
     let dir = server_project(&env, root.path());
     std::fs::write(dir.join("package.json"), "{}").expect("write");
     let output = run_in(&env, &dir, &["build"]);
-    assert_eq!(code(&output).as_deref(), Some("toolchain.language-ambiguous"));
+    assert_eq!(
+        code(&output).as_deref(),
+        Some("toolchain.language-ambiguous")
+    );
     assert_eq!(output.exit_code, 4);
 }
 
@@ -133,9 +236,24 @@ fn dev_003_global_flags_are_accepted_by_a_command_that_ignores_them() {
     let env = env(root.path());
     let dir = server_project(&env, root.path());
     let cwd = root.path().to_string_lossy().into_owned();
-    let output = run_in(&env, &dir, &["lint", "--quiet", "--no-color", "--json", "--session", "other", "--cwd", &cwd]);
+    let output = run_in(
+        &env,
+        &dir,
+        &[
+            "lint",
+            "--quiet",
+            "--no-color",
+            "--json",
+            "--session",
+            "other",
+            "--cwd",
+            &cwd,
+        ],
+    );
     assert_ne!(output.exit_code, 2, "no usage error for global flags");
-    assert!(recs(&output, "error").iter().all(|r| !r["code"].as_str().unwrap_or("").starts_with("usage.")));
+    assert!(recs(&output, "error")
+        .iter()
+        .all(|r| !r["code"].as_str().unwrap_or("").starts_with("usage.")));
 }
 
 /// REQ: DEV-003
@@ -149,7 +267,9 @@ fn dev_003_session_flag_is_ignored_by_a_command_that_never_contacts_a_session() 
     assert_eq!(with.exit_code, without.exit_code);
     assert_eq!(types(&with), types(&without));
     assert_ne!(with.exit_code, 6, "session.unreachable must not be raised");
-    assert!(recs(&with, "error").iter().all(|r| r["code"] != "session.unreachable"));
+    assert!(recs(&with, "error")
+        .iter()
+        .all(|r| r["code"] != "session.unreachable"));
 }
 
 /// REQ: DEV-003
@@ -159,9 +279,20 @@ fn dev_003_help_prints_usage_and_exits_zero() {
     let env = env(root.path());
     let output = run(&env, &["--help"]);
     assert_eq!(output.exit_code, 0);
-    let first_line = output.stdout_text.lines().find(|line| !line.trim().is_empty()).expect("usage line");
+    let first_line = output
+        .stdout_text
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .expect("usage line");
     assert!(first_line.contains("ilium plugin"), "{first_line}");
-    for flag in ["--session", "--cwd", "--quiet", "--no-color", "--json", "--help"] {
+    for flag in [
+        "--session",
+        "--cwd",
+        "--quiet",
+        "--no-color",
+        "--json",
+        "--help",
+    ] {
         assert!(output.stdout_text.contains(flag), "usage lists {flag}");
     }
 }
@@ -172,7 +303,12 @@ fn dev_003_each_global_flag_is_accepted_by_build() {
     let root = scratch();
     let env = env(root.path());
     let dir = server_project(&env, root.path());
-    for flag in [&["--quiet"][..], &["--no-color"], &["--json"], &["--session", "x"]] {
+    for flag in [
+        &["--quiet"][..],
+        &["--no-color"],
+        &["--json"],
+        &["--session", "x"],
+    ] {
         let mut args = vec!["build"];
         args.extend_from_slice(flag);
         let output = run_in(&env, &dir, &args);
@@ -230,8 +366,14 @@ fn dev_004_cwd_flag_names_the_project_of_the_session() {
     let env = env_session(root.path(), &session);
     let other = root.path().join("elsewhere");
     std::fs::create_dir_all(&other).expect("create");
-    let output = run(&env, &["list", "--json", "--cwd", other.to_str().expect("utf8")]);
-    assert_eq!(output.exit_code, 6, "the session lives in the project of the working directory, not in `elsewhere`");
+    let output = run(
+        &env,
+        &["list", "--json", "--cwd", other.to_str().expect("utf8")],
+    );
+    assert_eq!(
+        output.exit_code, 6,
+        "the session lives in the project of the working directory, not in `elsewhere`"
+    );
 }
 
 /// REQ: DEV-005
@@ -247,7 +389,10 @@ fn dev_005_offline_commands_need_no_session_network_or_config() {
     assert_eq!(run_in(&env, &dir, &["build"]).exit_code, 0);
     make_key(&env, root.path(), "acme");
     assert_eq!(fetcher.calls.load(Ordering::SeqCst), 0, "no network");
-    assert!(!env.config_dir.exists(), "no home configuration was needed or created");
+    assert!(
+        !env.config_dir.exists(),
+        "no home configuration was needed or created"
+    );
 }
 
 /// REQ: DEV-005
@@ -256,7 +401,14 @@ fn dev_005_doctor_and_inspect_of_a_file_work_offline() {
     let root = scratch();
     let env = env(root.path());
     let (_, package) = packed_project(&env, root.path());
-    assert_eq!(run(&env, &["inspect", package.to_str().expect("utf8"), "--json"]).exit_code, 0);
+    assert_eq!(
+        run(
+            &env,
+            &["inspect", package.to_str().expect("utf8"), "--json"]
+        )
+        .exit_code,
+        0
+    );
     let doctor = run(&env, &["doctor", "--json"]);
     assert!(doctor.exit_code == 0 || doctor.exit_code == 4);
     assert_ne!(code(&doctor).as_deref(), Some("session.unreachable"));
@@ -341,7 +493,13 @@ fn dev_007_exit_code_is_one_of_the_table() {
     let root = scratch();
     let env = env(root.path());
     let allowed = [0, 1, 2, 3, 4, 5, 6, 7, 8, 130];
-    for args in [&["nonsense"][..], &["new"], &["list"], &["pack"], &["trust", "list", "--json"]] {
+    for args in [
+        &["nonsense"][..],
+        &["new"],
+        &["list"],
+        &["pack"],
+        &["trust", "list", "--json"],
+    ] {
         assert!(allowed.contains(&run(&env, args).exit_code), "{args:?}");
     }
 }
@@ -396,7 +554,17 @@ fn dev_010_usage_error_exits_two_and_writes_no_file() {
     let root = scratch();
     let env = env(root.path());
     let dir = root.path().join("fresh");
-    let output = run(&env, &["new", dir.to_str().expect("utf8"), "--lang", "rust", "--template", "server"]);
+    let output = run(
+        &env,
+        &[
+            "new",
+            dir.to_str().expect("utf8"),
+            "--lang",
+            "rust",
+            "--template",
+            "server",
+        ],
+    );
     assert_eq!(output.exit_code, 2);
     assert!(!dir.exists(), "nothing was written");
 }
@@ -444,7 +612,9 @@ fn dev_011_warn_finding_under_plain_lint_returns_zero() {
     manifest["description"] = json!("");
     write_json(&dir.join("manifest.json"), &manifest);
     let output = run_in(&env, &dir, &["lint", "--json"]);
-    assert!(recs(&output, "lint").iter().any(|r| r["severity"] == "warn"));
+    assert!(recs(&output, "lint")
+        .iter()
+        .any(|r| r["severity"] == "warn"));
     assert_eq!(output.exit_code, 0);
 }
 
@@ -467,9 +637,15 @@ fn dev_011_lint_error_rule_exits_three_without_deny() {
     let root = scratch();
     let env = env(root.path());
     let dir = server_project(&env, root.path());
-    std::fs::write(dir.join("lint.toml"), "[[suppress]]\nrule = \"lint.description-missing\"\n").expect("write");
+    std::fs::write(
+        dir.join("lint.toml"),
+        "[[suppress]]\nrule = \"lint.description-missing\"\n",
+    )
+    .expect("write");
     let output = run_in(&env, &dir, &["lint", "--json"]);
-    assert!(recs(&output, "lint").iter().any(|r| r["rule"] == "lint.suppression-reason-missing" && r["severity"] == "error"));
+    assert!(recs(&output, "lint")
+        .iter()
+        .any(|r| r["rule"] == "lint.suppression-reason-missing" && r["severity"] == "error"));
     assert_eq!(output.exit_code, 3);
 }
 
@@ -490,7 +666,9 @@ fn dev_012_doctor_with_a_failing_item_exits_four() {
     let root = scratch();
     let env = env(root.path()).with_probe(Arc::new(FakeProbe::without("rustc")));
     let output = run(&env, &["doctor", "--json"]);
-    assert!(recs(&output, "doctor-check").iter().any(|r| r["status"] == "fail"));
+    assert!(recs(&output, "doctor-check")
+        .iter()
+        .any(|r| r["status"] == "fail"));
     assert_eq!(output.exit_code, 4);
 }
 
@@ -500,7 +678,9 @@ fn dev_012_doctor_with_no_failing_item_does_not_exit_four() {
     let root = scratch();
     let env = env(root.path());
     let output = run(&env, &["doctor", "--json"]);
-    assert!(recs(&output, "doctor-check").iter().all(|r| r["status"] != "fail"));
+    assert!(recs(&output, "doctor-check")
+        .iter()
+        .all(|r| r["status"] != "fail"));
     assert_eq!(output.exit_code, 0);
 }
 
@@ -582,7 +762,10 @@ fn dev_015_interrupt_leaves_no_half_written_file() {
     let env = env.with_interrupt(raised_interrupt());
     run_in(&env, &dir, &["build", "--watch"]);
     for path in tree_listing(&dir.join("dist")) {
-        assert!(!path.ends_with(".tmp") && !path.contains(".tmp."), "left over {path}");
+        assert!(
+            !path.ends_with(".tmp") && !path.contains(".tmp."),
+            "left over {path}"
+        );
     }
 }
 
@@ -607,7 +790,10 @@ fn dev_016_every_stdout_line_is_json_with_type_first() {
     let dir = server_project(&env, root.path());
     let output = run_in(&env, &dir, &["build"]);
     for line in output.stdout_raw.lines() {
-        assert!(line.starts_with("{\"type\":"), "type is not the first key: {line}");
+        assert!(
+            line.starts_with("{\"type\":"),
+            "type is not the first key: {line}"
+        );
         serde_json::from_str::<Value>(line).expect("line is json");
     }
     assert!(!output.stdout_raw.is_empty());
@@ -679,7 +865,10 @@ fn dev_018_sizes_are_unsigned_integers_and_hashes_are_lowercase_hex() {
     let output = run_in(&env, &dir, &["build"]);
     for artifact in recs(&output, "artifact") {
         assert!(artifact["bytes"].is_u64(), "{artifact}");
-        assert!(is_sha256_hex(artifact["sha256"].as_str().expect("sha256")), "{artifact}");
+        assert!(
+            is_sha256_hex(artifact["sha256"].as_str().expect("sha256")),
+            "{artifact}"
+        );
     }
     assert!(!recs(&output, "artifact").is_empty());
 }
@@ -756,7 +945,10 @@ fn dev_020_quiet_keeps_every_other_record() {
     let dir = server_project(&env, root.path());
     let loud = run_in(&env, &dir, &["build"]);
     let quiet = run_in(&env, &dir, &["build", "--quiet"]);
-    let without_progress: Vec<String> = types(&loud).into_iter().filter(|t| t != "progress").collect();
+    let without_progress: Vec<String> = types(&loud)
+        .into_iter()
+        .filter(|t| t != "progress")
+        .collect();
     assert_eq!(types(&quiet), without_progress);
 }
 
@@ -777,13 +969,28 @@ fn dev_021_progress_steps_are_from_the_fixed_set() {
     let env = env(root.path());
     let dir = server_project(&env, root.path());
     let allowed = [
-        "toolchain", "compile", "bundle", "component", "api-version", "strip", "inventory", "pack", "sign", "check",
-        "lint", "test", "install", "watch",
+        "toolchain",
+        "compile",
+        "bundle",
+        "component",
+        "api-version",
+        "strip",
+        "inventory",
+        "pack",
+        "sign",
+        "check",
+        "lint",
+        "test",
+        "install",
+        "watch",
     ];
     let output = run_in(&env, &dir, &["build"]);
     assert!(!recs(&output, "progress").is_empty());
     for record in recs(&output, "progress") {
-        assert!(allowed.contains(&record["step"].as_str().expect("step")), "{record}");
+        assert!(
+            allowed.contains(&record["step"].as_str().expect("step")),
+            "{record}"
+        );
     }
 }
 
@@ -796,7 +1003,10 @@ fn dev_021_new_and_pack_steps_are_from_the_fixed_set() {
     let allowed = ["inventory", "pack", "toolchain", "check", "sign"];
     let output = run_in(&env, &dir, &["pack"]);
     for record in recs(&output, "progress") {
-        assert!(allowed.contains(&record["step"].as_str().expect("step")), "{record}");
+        assert!(
+            allowed.contains(&record["step"].as_str().expect("step")),
+            "{record}"
+        );
     }
 }
 
@@ -807,12 +1017,35 @@ fn dev_022_artifact_kinds_are_from_the_fixed_set() {
     let env = env(root.path());
     let (dir, package) = packed_project(&env, root.path());
     let (key, _) = make_key(&env, root.path(), "acme");
-    let allowed = ["component", "package", "source-map", "build-info", "key", "public-key", "signature", "replay"];
-    let mut outputs = vec![run_in(&env, &dir, &["build"]), run_in(&env, &dir, &["pack"])];
-    outputs.push(run(&env, &["sign", package.to_str().expect("utf8"), "--key", key.to_str().expect("utf8")]));
+    let allowed = [
+        "component",
+        "package",
+        "source-map",
+        "build-info",
+        "key",
+        "public-key",
+        "signature",
+        "replay",
+    ];
+    let mut outputs = vec![
+        run_in(&env, &dir, &["build"]),
+        run_in(&env, &dir, &["pack"]),
+    ];
+    outputs.push(run(
+        &env,
+        &[
+            "sign",
+            package.to_str().expect("utf8"),
+            "--key",
+            key.to_str().expect("utf8"),
+        ],
+    ));
     for output in outputs {
         for record in recs(&output, "artifact") {
-            assert!(allowed.contains(&record["kind"].as_str().expect("kind")), "{record}");
+            assert!(
+                allowed.contains(&record["kind"].as_str().expect("kind")),
+                "{record}"
+            );
         }
     }
 }
@@ -823,7 +1056,18 @@ fn dev_022_keygen_prints_key_and_public_key_artifacts() {
     let root = scratch();
     let env = env(root.path());
     let out = root.path().join("k");
-    let output = run(&env, &["keygen", "--publisher-id", "acme", "--publisher", "Acme", "--out", out.to_str().expect("utf8")]);
+    let output = run(
+        &env,
+        &[
+            "keygen",
+            "--publisher-id",
+            "acme",
+            "--publisher",
+            "Acme",
+            "--out",
+            out.to_str().expect("utf8"),
+        ],
+    );
     assert_eq!(artifacts(&output, "key").len(), 1);
     assert_eq!(artifacts(&output, "public-key").len(), 1);
 }
@@ -836,7 +1080,10 @@ fn dev_023_check_severity_is_error_or_warn() {
     let dir = server_project(&env, root.path());
     let output = run_in(&env, &dir, &["check", "--json"]);
     for record in recs(&output, "check") {
-        assert!(record["severity"] == "error" || record["severity"] == "warn", "{record}");
+        assert!(
+            record["severity"] == "error" || record["severity"] == "warn",
+            "{record}"
+        );
     }
 }
 
@@ -849,7 +1096,9 @@ fn dev_023_lint_severity_may_also_be_info() {
     std::fs::remove_file(dir.join("README.md")).expect("remove readme");
     let output = run_in(&env, &dir, &["lint", "--json"]);
     let found: Vec<&Value> = recs(&output, "lint");
-    assert!(found.iter().any(|r| r["rule"] == "lint.readme-missing" && r["severity"] == "info"));
+    assert!(found
+        .iter()
+        .any(|r| r["rule"] == "lint.readme-missing" && r["severity"] == "info"));
     for record in found {
         assert!(["error", "warn", "info"].contains(&record["severity"].as_str().expect("severity")));
     }
@@ -863,7 +1112,9 @@ fn dev_023_check_never_uses_info() {
     let dir = server_project(&env, root.path());
     std::fs::remove_file(dir.join("README.md")).expect("remove readme");
     let output = run_in(&env, &dir, &["check", "--json"]);
-    assert!(recs(&output, "check").iter().all(|r| r["severity"] != "info"));
+    assert!(recs(&output, "check")
+        .iter()
+        .all(|r| r["severity"] != "info"));
 }
 
 /// REQ: DEV-024
@@ -877,7 +1128,10 @@ fn dev_024_test_case_status_is_pass_fail_trap_or_skip() {
     let cases = recs(&output, "test-case");
     assert!(!cases.is_empty());
     for record in cases {
-        assert!(["pass", "fail", "trap", "skip"].contains(&record["status"].as_str().expect("status")), "{record}");
+        assert!(
+            ["pass", "fail", "trap", "skip"].contains(&record["status"].as_str().expect("status")),
+            "{record}"
+        );
     }
 }
 
@@ -889,7 +1143,10 @@ fn dev_024_doctor_check_status_is_ok_warn_or_fail() {
     let output = run(&env, &["doctor", "--json"]);
     assert!(!recs(&output, "doctor-check").is_empty());
     for record in recs(&output, "doctor-check") {
-        assert!(["ok", "warn", "fail"].contains(&record["status"].as_str().expect("status")), "{record}");
+        assert!(
+            ["ok", "warn", "fail"].contains(&record["status"].as_str().expect("status")),
+            "{record}"
+        );
     }
 }
 
@@ -902,7 +1159,10 @@ fn dev_025_test_case_side_is_server_client_scene_or_host() {
     run_in(&env, &dir, &["build"]);
     let output = run_in(&env, &dir, &["test"]);
     for record in recs(&output, "test-case") {
-        assert!(["server", "client", "scene", "host"].contains(&record["side"].as_str().expect("side")), "{record}");
+        assert!(
+            ["server", "client", "scene", "host"].contains(&record["side"].as_str().expect("side")),
+            "{record}"
+        );
     }
 }
 
@@ -951,7 +1211,10 @@ fn dev_027_text_commands_print_text_by_default() {
     let dir = server_project(&env, root.path());
     for args in [&["check"][..], &["lint"]] {
         let output = run_in(&env, &dir, args);
-        assert!(output.stdout_jsonl.is_empty(), "{args:?} printed JSONL by default");
+        assert!(
+            output.stdout_jsonl.is_empty(),
+            "{args:?} printed JSONL by default"
+        );
     }
     assert!(run(&env, &["trust", "list"]).stdout_jsonl.is_empty());
 }
@@ -968,7 +1231,10 @@ fn dev_027_text_commands_end_with_summary_and_result_under_json() {
         assert_eq!(&kinds[kinds.len() - 2..], ["summary", "result"], "{args:?}");
     }
     let trust = run(&env, &["trust", "list", "--json"]);
-    assert_eq!(&types(&trust)[types(&trust).len() - 2..], ["summary", "result"]);
+    assert_eq!(
+        &types(&trust)[types(&trust).len() - 2..],
+        ["summary", "result"]
+    );
 }
 
 /// REQ: DEV-027
@@ -976,12 +1242,22 @@ fn dev_027_text_commands_end_with_summary_and_result_under_json() {
 fn dev_027_session_text_commands_follow_the_same_rule() {
     let root = scratch();
     let session = MemorySession::new();
-    session.add_plugin("acme.demo", "0.1.0", "T3", "running", false, &[("fs.read", "low", "granted")]);
+    session.add_plugin(
+        "acme.demo",
+        "0.1.0",
+        "T3",
+        "running",
+        false,
+        &[("fs.read", "low", "granted")],
+    );
     let env = env_session(root.path(), &session);
     assert!(run(&env, &["list"]).stdout_jsonl.is_empty());
     assert!(run(&env, &["grants", "acme.demo"]).stdout_jsonl.is_empty());
     assert_eq!(recs(&run(&env, &["list", "--json"]), "plugin").len(), 1);
-    assert_eq!(recs(&run(&env, &["grants", "acme.demo", "--json"]), "grant").len(), 1);
+    assert_eq!(
+        recs(&run(&env, &["grants", "acme.demo", "--json"]), "grant").len(),
+        1
+    );
 }
 
 /// REQ: DEV-028
@@ -994,7 +1270,10 @@ fn dev_028_scripts_get_a_stable_contract_from_json() {
     let first = run(&env, &["list", "--json"]);
     let second = run(&env, &["list", "--json"]);
     assert_eq!(first.stdout_jsonl[0]["id"], "acme.demo");
-    assert_eq!(first.stdout_raw.lines().next(), second.stdout_raw.lines().next());
+    assert_eq!(
+        first.stdout_raw.lines().next(),
+        second.stdout_raw.lines().next()
+    );
 }
 
 /// REQ: DEV-028
@@ -1019,8 +1298,20 @@ fn dev_029_key_flag_overrides_the_signing_key_variable() {
     let bad = root.path().join("bad.key");
     std::fs::write(&bad, "garbage").expect("write");
     let env = env(root.path()).with_var("ILIUM_PLUGIN_SIGNING_KEY", bad.to_str().expect("utf8"));
-    let output = run(&env, &["sign", package.to_str().expect("utf8"), "--key", good.to_str().expect("utf8")]);
-    assert_eq!(output.exit_code, 0, "the flag wins over the variable: {:?}", output.stdout_jsonl);
+    let output = run(
+        &env,
+        &[
+            "sign",
+            package.to_str().expect("utf8"),
+            "--key",
+            good.to_str().expect("utf8"),
+        ],
+    );
+    assert_eq!(
+        output.exit_code, 0,
+        "the flag wins over the variable: {:?}",
+        output.stdout_jsonl
+    );
 }
 
 /// REQ: DEV-029
@@ -1031,7 +1322,10 @@ fn dev_029_the_variable_is_used_when_the_flag_is_absent() {
     let (_, package) = packed_project(&base, root.path());
     let (good, _) = make_key(&base, root.path(), "acme");
     let env = base.with_var("ILIUM_PLUGIN_SIGNING_KEY", good.to_str().expect("utf8"));
-    assert_eq!(run(&env, &["sign", package.to_str().expect("utf8")]).exit_code, 0);
+    assert_eq!(
+        run(&env, &["sign", package.to_str().expect("utf8")]).exit_code,
+        0
+    );
 }
 
 /// REQ: DEV-029
@@ -1041,7 +1335,10 @@ fn dev_029_offline_flag_beats_the_offline_variable() {
     let env = env(root.path()).with_var("ILIUM_PLUGIN_OFFLINE", "0");
     let dir = server_project(&env, root.path());
     let output = run_in(&env, &dir, &["build", "--offline"]);
-    assert!(code(&output).map_or(true, |c| c == "build.offline-missing"), "--offline was honoured");
+    assert!(
+        code(&output).map_or(true, |c| c == "build.offline-missing"),
+        "--offline was honoured"
+    );
 }
 
 /// REQ: DEV-030
@@ -1054,7 +1351,10 @@ fn dev_030_a_failed_build_keeps_the_previous_component_intact() {
     let before = std::fs::read(dir.join("dist/server.wasm")).expect("read");
     let failing = base.with_builder(FakeBuilder::failing_at("component"));
     run_in(&failing, &dir, &["build"]);
-    assert_eq!(std::fs::read(dir.join("dist/server.wasm")).expect("read"), before);
+    assert_eq!(
+        std::fs::read(dir.join("dist/server.wasm")).expect("read"),
+        before
+    );
 }
 
 /// REQ: DEV-030
@@ -1064,7 +1364,10 @@ fn dev_030_no_temporary_file_remains_after_success() {
     let env = env(root.path());
     let dir = server_project(&env, root.path());
     run_in(&env, &dir, &["build"]);
-    assert_eq!(tree_listing(&dir.join("dist")), ["build.json", "server.wasm"]);
+    assert_eq!(
+        tree_listing(&dir.join("dist")),
+        ["build.json", "server.wasm"]
+    );
 }
 
 /// REQ: DEV-030
@@ -1077,6 +1380,10 @@ fn dev_030_pack_replaces_its_output_without_leaving_a_temporary_file() {
     let second = run_in(&env, &dir, &["pack"]);
     assert_eq!(second.exit_code, 0);
     assert!(package.is_file());
-    assert_eq!(tree_listing(&dir.join("dist")), before, "the replaced output leaves exactly the same file set");
+    assert_eq!(
+        tree_listing(&dir.join("dist")),
+        before,
+        "the replaced output leaves exactly the same file set"
+    );
     assert_eq!(artifacts(&second, "package").len(), 1);
 }

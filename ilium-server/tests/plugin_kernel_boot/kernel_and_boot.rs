@@ -9,10 +9,26 @@ use proptest::prelude::*;
 use crate::common::*;
 
 const SERVER_STARTUP: [&str; 11] = [
-    "agent-detect", "chatroom", "cost", "diagnostics", "notifications", "progress", "scheduler",
-    "sessions", "text-triggers", "titles", "tree",
+    "agent-detect",
+    "chatroom",
+    "cost",
+    "diagnostics",
+    "notifications",
+    "progress",
+    "scheduler",
+    "sessions",
+    "text-triggers",
+    "titles",
+    "tree",
 ];
-const CLIENT_STARTUP: [&str; 6] = ["agent-toolbar", "ambient", "progress", "settings", "terminal", "tree"];
+const CLIENT_STARTUP: [&str; 6] = [
+    "agent-toolbar",
+    "ambient",
+    "progress",
+    "settings",
+    "terminal",
+    "tree",
+];
 
 fn full_core_run(kind: ProcessKind) -> ilium_plugin_host::testing::boot::BootRun {
     let mut harness = BootHarness::new(kind).core_activation_table();
@@ -45,7 +61,9 @@ fn cor_010_the_kernel_owns_the_listener_and_the_route_works_when_enabled() {
 /// REQ: COR-010
 #[test]
 fn cor_010_the_tree_model_stays_in_the_kernel_with_no_plugin() {
-    let mut run = BootHarness::new(ProcessKind::Server).restored_tree(5).build();
+    let mut run = BootHarness::new(ProcessKind::Server)
+        .restored_tree(5)
+        .build();
     run.start();
     assert_eq!(run.kernel_tree_rows().len(), 5);
 }
@@ -80,7 +98,11 @@ fn cor_020_startup_plugins_activate_in_dependency_order() {
     run.start();
     assert_eq!(
         run.activation_order(),
-        vec!["ilium.core.a".to_owned(), "ilium.core.b".to_owned(), "ilium.core.c".to_owned()]
+        vec![
+            "ilium.core.a".to_owned(),
+            "ilium.core.b".to_owned(),
+            "ilium.core.c".to_owned()
+        ]
     );
 }
 
@@ -92,10 +114,25 @@ fn cor_020_the_client_socket_is_bound_last() {
         .build();
     run.start();
     let trace = run.trace();
-    let bind = trace.iter().position(|entry| entry == "bind-client-socket").expect("bind marker");
-    let last_activation = trace.iter().rposition(|entry| entry.starts_with("activate:")).expect("activation");
-    let restore = trace.iter().position(|entry| entry == "restore-snapshot").expect("restore marker");
-    assert!(restore < trace.iter().position(|entry| entry.starts_with("instantiate:")).expect("instantiate"));
+    let bind = trace
+        .iter()
+        .position(|entry| entry == "bind-client-socket")
+        .expect("bind marker");
+    let last_activation = trace
+        .iter()
+        .rposition(|entry| entry.starts_with("activate:"))
+        .expect("activation");
+    let restore = trace
+        .iter()
+        .position(|entry| entry == "restore-snapshot")
+        .expect("restore marker");
+    assert!(
+        restore
+            < trace
+                .iter()
+                .position(|entry| entry.starts_with("instantiate:"))
+                .expect("instantiate")
+    );
     assert!(last_activation < bind);
     assert_eq!(bind, trace.len() - 1);
 }
@@ -135,7 +172,10 @@ fn active_sides(run: &ilium_plugin_host::testing::boot::BootRun, side: Side) -> 
 #[test]
 fn cor_021_exactly_the_server_startup_plugins_are_active_at_boot() {
     let run = full_core_run(ProcessKind::Server);
-    let expected: BTreeSet<String> = SERVER_STARTUP.iter().map(|name| (*name).to_owned()).collect();
+    let expected: BTreeSet<String> = SERVER_STARTUP
+        .iter()
+        .map(|name| (*name).to_owned())
+        .collect();
     assert_eq!(active_sides(&run, Side::Server), expected);
 }
 
@@ -144,7 +184,10 @@ fn cor_021_exactly_the_server_startup_plugins_are_active_at_boot() {
 fn cor_021_exactly_the_client_startup_plugins_are_active_after_connect() {
     let mut run = full_core_run(ProcessKind::Server);
     run.attach_client().expect("client attaches");
-    let expected: BTreeSet<String> = CLIENT_STARTUP.iter().map(|name| (*name).to_owned()).collect();
+    let expected: BTreeSet<String> = CLIENT_STARTUP
+        .iter()
+        .map(|name| (*name).to_owned())
+        .collect();
     assert_eq!(active_sides(&run, Side::Client), expected);
 }
 
@@ -152,22 +195,53 @@ fn cor_021_exactly_the_client_startup_plugins_are_active_after_connect() {
 #[test]
 fn cor_021_other_plugins_stay_inactive_until_their_trigger_fires() {
     let mut run = full_core_run(ProcessKind::Server);
-    assert_ne!(run.side_state("ilium.core.recap", Side::Server).state, "active");
+    assert_ne!(
+        run.side_state("ilium.core.recap", Side::Server).state,
+        "active"
+    );
     run.fire_trigger("command:recap");
-    assert_eq!(run.side_state("ilium.core.recap", Side::Server).state, "active");
+    assert_eq!(
+        run.side_state("ilium.core.recap", Side::Server).state,
+        "active"
+    );
 }
 
 /// REQ: COR-021
 #[test]
 fn cor_021_the_activation_table_in_the_manual_matches_the_expected_sets() {
     let page = manual_page("reference-kernel-and-boot");
-    for name in ["Agent detect", "Chatroom", "Cost", "Diagnostics", "Notifications", "Progress", "Scheduler", "Sessions", "Text triggers", "Titles", "Tree"] {
-        let row = page.lines().find(|line| line.starts_with(&format!("| {name} |"))).unwrap_or_else(|| panic!("row {name}"));
+    for name in [
+        "Agent detect",
+        "Chatroom",
+        "Cost",
+        "Diagnostics",
+        "Notifications",
+        "Progress",
+        "Scheduler",
+        "Sessions",
+        "Text triggers",
+        "Titles",
+        "Tree",
+    ] {
+        let row = page
+            .lines()
+            .find(|line| line.starts_with(&format!("| {name} |")))
+            .unwrap_or_else(|| panic!("row {name}"));
         let server_cell = row.split('|').nth(2).expect("server cell");
         assert!(server_cell.contains("`startup`"), "{name}: {server_cell}");
     }
-    for name in ["Agent toolbar", "Ambient look", "Progress", "Settings", "Terminal", "Tree"] {
-        let row = page.lines().find(|line| line.starts_with(&format!("| {name} |"))).unwrap_or_else(|| panic!("row {name}"));
+    for name in [
+        "Agent toolbar",
+        "Ambient look",
+        "Progress",
+        "Settings",
+        "Terminal",
+        "Tree",
+    ] {
+        let row = page
+            .lines()
+            .find(|line| line.starts_with(&format!("| {name} |")))
+            .unwrap_or_else(|| panic!("row {name}"));
         let client_cell = row.split('|').nth(3).expect("client cell");
         assert!(client_cell.contains("`startup`"), "{name}: {client_cell}");
     }
@@ -177,7 +251,9 @@ fn cor_021_the_activation_table_in_the_manual_matches_the_expected_sets() {
 fn run_with_data_for_all() -> ilium_plugin_host::testing::boot::BootRun {
     let mut harness = BootHarness::new(ProcessKind::Server).core_activation_table();
     for name in CORE_PLUGINS {
-        harness = harness.plugin_from_table(&core_id(name)).store_data(&core_id(name), "k", "v");
+        harness = harness
+            .plugin_from_table(&core_id(name))
+            .store_data(&core_id(name), "k", "v");
     }
     let mut run = harness.build();
     run.start();
@@ -233,8 +309,15 @@ fn cor_022_enabling_again_restores_the_plugin_with_its_data() {
 #[test]
 fn cor_022_the_manual_table_lists_all_thirty_plugins() {
     let page = manual_page("reference-kernel-and-boot");
-    let heading = page.find("What the user keeps when a plugin is off").expect("table heading");
-    let rows = page[heading..].lines().filter(|line| line.starts_with("| ") && !line.starts_with("| ---") && !line.starts_with("|---")).count();
+    let heading = page
+        .find("What the user keeps when a plugin is off")
+        .expect("table heading");
+    let rows = page[heading..]
+        .lines()
+        .filter(|line| {
+            line.starts_with("| ") && !line.starts_with("| ---") && !line.starts_with("|---")
+        })
+        .count();
     assert!(rows >= 31, "header plus 30 rows, found {rows}");
 }
 
@@ -245,7 +328,9 @@ fn cor_024_a_kernel_setting_change_is_seen_live() {
     let mut run = full_core_run(ProcessKind::Server);
     let client = run.attach_client().expect("client");
     run.change_kernel_setting("sound", "off");
-    assert!(run.events_seen_by_client_plugins(client).contains(&"kernel-settings-changed".to_owned()));
+    assert!(run
+        .events_seen_by_client_plugins(client)
+        .contains(&"kernel-settings-changed".to_owned()));
     assert_eq!(run.server_restarts(), 0);
 }
 
@@ -255,7 +340,9 @@ fn cor_024_a_plugin_setting_change_is_seen_live() {
     let mut run = full_core_run(ProcessKind::Server);
     run.attach_client().expect("client");
     run.change_plugin_setting("ilium.core.titles", "mode", "short");
-    assert!(run.plugin_events("ilium.core.titles").contains(&"settings-changed".to_owned()));
+    assert!(run
+        .plugin_events("ilium.core.titles")
+        .contains(&"settings-changed".to_owned()));
 }
 
 /// REQ: COR-024
@@ -264,7 +351,9 @@ fn cor_024_a_key_binding_change_sends_keymap_changed() {
     let mut run = full_core_run(ProcessKind::Server);
     let client = run.attach_client().expect("client");
     run.change_key_binding("F8", "command:voice.toggle");
-    assert!(run.events_seen_by_client_plugins(client).contains(&"keymap-changed".to_owned()));
+    assert!(run
+        .events_seen_by_client_plugins(client)
+        .contains(&"keymap-changed".to_owned()));
 }
 
 /// REQ: COR-024
@@ -272,9 +361,15 @@ fn cor_024_a_key_binding_change_sends_keymap_changed() {
 fn cor_024_enable_and_disable_apply_live() {
     let mut run = full_core_run(ProcessKind::Server);
     run.disable("ilium.core.titles");
-    assert_ne!(run.side_state("ilium.core.titles", Side::Server).state, "active");
+    assert_ne!(
+        run.side_state("ilium.core.titles", Side::Server).state,
+        "active"
+    );
     run.enable("ilium.core.titles");
-    assert_eq!(run.side_state("ilium.core.titles", Side::Server).state, "active");
+    assert_eq!(
+        run.side_state("ilium.core.titles", Side::Server).state,
+        "active"
+    );
     assert_eq!(run.server_restarts(), 0);
 }
 
@@ -283,7 +378,9 @@ fn cor_024_enable_and_disable_apply_live() {
 fn cor_024_grant_changes_apply_live() {
     let mut run = full_core_run(ProcessKind::Server);
     run.revoke_grant("ilium.core.titles", "tree.read");
-    assert!(!run.granted("ilium.core.titles").contains(&"tree.read".to_owned()));
+    assert!(!run
+        .granted("ilium.core.titles")
+        .contains(&"tree.read".to_owned()));
     assert_eq!(run.server_restarts(), 0);
 }
 
@@ -293,9 +390,15 @@ fn cor_024_plugin_limits_apply_to_new_instances_only() {
     let mut run = full_core_run(ProcessKind::Server);
     let before = run.effective_limit("ilium.core.titles", "memory_mib");
     run.change_limit("memory_mib", before + 8);
-    assert_eq!(run.effective_limit("ilium.core.titles", "memory_mib"), before);
+    assert_eq!(
+        run.effective_limit("ilium.core.titles", "memory_mib"),
+        before
+    );
     run.restart_plugin("ilium.core.titles");
-    assert_eq!(run.effective_limit("ilium.core.titles", "memory_mib"), before + 8);
+    assert_eq!(
+        run.effective_limit("ilium.core.titles", "memory_mib"),
+        before + 8
+    );
 }
 
 /// REQ: COR-024
@@ -312,7 +415,10 @@ fn cor_024_http_port_and_safe_switches_need_a_server_restart() {
 #[test]
 fn cor_024_the_manual_table_names_the_three_classes() {
     let page = manual_page("reference-kernel-and-boot");
-    for row in ["| A value on any kernel Settings tab | Live |", "| `[plugins.limits]` in `config.toml` | Live for new instances |"] {
+    for row in [
+        "| A value on any kernel Settings tab | Live |",
+        "| `[plugins.limits]` in `config.toml` | Live for new instances |",
+    ] {
         assert!(page.contains(row), "{row}");
     }
 }

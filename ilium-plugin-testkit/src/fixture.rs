@@ -30,6 +30,8 @@ impl Fixture {
 }
 
 /// Runs one fixture against the plugin type and compares the expectation file next to it.
-pub fn run<P: ilium_plugin_sdk_core::NativeEntry + Default>(_path: &Path) -> Result<FixtureStatus, HarnessError> {
+pub fn run<P: ilium_plugin_sdk_core::NativeEntry + Default>(
+    _path: &Path,
+) -> Result<FixtureStatus, HarnessError> {
     unimplemented!("DEV-423")
 }

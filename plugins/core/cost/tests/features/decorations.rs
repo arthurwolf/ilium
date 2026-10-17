@@ -45,8 +45,14 @@ fn decor_039_sort_key_is_negative_cents_so_highest_cost_sorts_first() {
 fn decor_039_more_tokens_give_a_smaller_sort_key() {
     let (host_low, pane_low, before_low) = fed(KNOWN_MODEL, 100_000);
     let (host_high, pane_high, before_high) = fed(KNOWN_MODEL, 10_000_000);
-    let low = latest_cost_decoration(&host_low, before_low, pane_low).expect("low").sort_key.expect("key");
-    let high = latest_cost_decoration(&host_high, before_high, pane_high).expect("high").sort_key.expect("key");
+    let low = latest_cost_decoration(&host_low, before_low, pane_low)
+        .expect("low")
+        .sort_key
+        .expect("key");
+    let high = latest_cost_decoration(&host_high, before_high, pane_high)
+        .expect("high")
+        .sort_key
+        .expect("key");
     assert!(high < low);
 }
 
@@ -78,7 +84,9 @@ fn decor_038_quota_unit_gives_claude_panes_no_indicator() {
 #[test]
 fn decor_038_display_without_tree_emits_no_tree_decoration() {
     let mut host = activated_server();
-    host.settings().set("display", json!(["status"])).expect("valid");
+    host.settings()
+        .set("display", json!(["status"]))
+        .expect("valid");
     let pane = add_agent(&mut host, "claude", "claude");
     let before = host.submitted().len();
     feed_pane(&mut host, pane, KNOWN_MODEL, 100_000);
@@ -95,8 +103,10 @@ fn decor_038_changing_the_unit_re_emits_the_decoration() {
     host.settle();
     let after = host.submitted();
     assert!(after.len() > seen);
-    assert!(after[seen..].iter().any(|s| matches!(&s.intent, Intent::SetDecoration(spec) if spec.node.0 == pane)
-        || matches!(&s.intent, Intent::ClearDecoration(key) if key.node.0 == pane)));
+    assert!(after[seen..].iter().any(
+        |s| matches!(&s.intent, Intent::SetDecoration(spec) if spec.node.0 == pane)
+            || matches!(&s.intent, Intent::ClearDecoration(key) if key.node.0 == pane)
+    ));
 }
 
 /// REQ: F-038
@@ -105,5 +115,7 @@ fn decor_038_decoration_targets_the_fed_pane_only() {
     let (mut host, pane, before) = fed(KNOWN_MODEL, 100_000);
     let other = add_agent(&mut host, "other", "claude");
     let all = cost_decorations(&host.submitted()[before..]);
-    assert!(all.iter().all(|spec| spec.node.0 == pane && spec.node.0 != other));
+    assert!(all
+        .iter()
+        .all(|spec| spec.node.0 == pane && spec.node.0 != other));
 }

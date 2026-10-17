@@ -5,12 +5,12 @@
 
 use std::collections::BTreeMap;
 
-pub use ilium_plugin_host::testing::migration::{
-    ActivateReport, Bucket, MigServer, MigrateCall, MigrateScope, MigrationRig, PluginSpec, Step,
-};
 use ilium_plugin_api::manifest::{validate_json, CheckMode, Diagnostic, ValidationContext};
 use ilium_plugin_api::{ErrorCode, Platform, PluginError, Tier};
 use ilium_plugin_host::cli::CliOutput;
+pub use ilium_plugin_host::testing::migration::{
+    ActivateReport, Bucket, MigServer, MigrateCall, MigrateScope, MigrationRig, PluginSpec, Step,
+};
 use serde_json::Value;
 
 /// The plugin id most tests use.
@@ -31,12 +31,16 @@ pub fn notes_v1() -> PluginSpec {
 
 /// Version 2.0.0 of the notes plugin with `data_version` 2 and the given migrator steps.
 pub fn notes_v2(steps: Vec<Step>) -> PluginSpec {
-    PluginSpec::new(NOTES, "2.0.0").data_version(2).migrator(steps)
+    PluginSpec::new(NOTES, "2.0.0")
+        .data_version(2)
+        .migrator(steps)
 }
 
 /// Version 3.0.0 of the notes plugin with `data_version` 3 and the given migrator steps.
 pub fn notes_v3(steps: Vec<Step>) -> PluginSpec {
-    PluginSpec::new(NOTES, "3.0.0").data_version(3).migrator(steps)
+    PluginSpec::new(NOTES, "3.0.0")
+        .data_version(3)
+        .migrator(steps)
 }
 
 /// UTF-8 bytes of a text.
@@ -46,7 +50,11 @@ pub fn bytes(text: &str) -> Vec<u8> {
 
 /// A plugin error with the given code and message.
 pub fn plugin_error(code: ErrorCode, message: &str) -> PluginError {
-    PluginError { code, message: message.to_owned(), retry_after_ms: None }
+    PluginError {
+        code,
+        message: message.to_owned(),
+        retry_after_ms: None,
+    }
 }
 
 /// Every `code` of the `error` lines of CLI output, in order.
@@ -62,13 +70,21 @@ pub fn error_codes(output: &CliOutput) -> Vec<String> {
 /// Installs a spec and asserts exit code 0.
 pub fn install_ok(rig: &MigrationRig, spec: &PluginSpec) {
     let output = rig.install(spec);
-    assert_eq!(output.exit_code, 0, "install failed: {:?}", output.stdout_jsonl);
+    assert_eq!(
+        output.exit_code, 0,
+        "install failed: {:?}",
+        output.stdout_jsonl
+    );
 }
 
 /// Updates with a spec and asserts exit code 0.
 pub fn update_ok(rig: &MigrationRig, spec: &PluginSpec, flags: &[&str]) {
     let output = rig.update(spec, flags);
-    assert_eq!(output.exit_code, 0, "update failed: {:?}", output.stdout_jsonl);
+    assert_eq!(
+        output.exit_code, 0,
+        "update failed: {:?}",
+        output.stdout_jsonl
+    );
 }
 
 /// A baseline manifest as JSON text with an extra raw `data_version` member when given.
@@ -104,13 +120,18 @@ pub fn diagnostics_of(text: &str) -> Vec<Diagnostic> {
 
 /// The codes of the diagnostics, in order.
 pub fn codes_of(found: &[Diagnostic]) -> Vec<String> {
-    found.iter().map(|diagnostic| diagnostic.code.as_str().to_owned()).collect()
+    found
+        .iter()
+        .map(|diagnostic| diagnostic.code.as_str().to_owned())
+        .collect()
 }
 
 /// Whether a manifest with this raw `data_version` member is refused with `manifest.data-version`.
 pub fn is_refused_for_data_version(raw: &str) -> bool {
     let found = diagnostics_of(&manifest_text(Some(raw)));
-    codes_of(&found).iter().any(|code| code == "manifest.data-version")
+    codes_of(&found)
+        .iter()
+        .any(|code| code == "manifest.data-version")
 }
 
 /// The registry entry (`installed.json`) of a plugin, or `Value::Null`.
@@ -161,6 +182,9 @@ pub fn is_backup_name(name: &str, version: &str) -> bool {
 pub fn running_v1(rig: &MigrationRig, name: &str, project: &str, session: &str) -> MigServer {
     let server = rig.server(name, project, session);
     let report = server.activate(NOTES);
-    assert_eq!(report.active_version, "1.0.0", "v1 did not activate: {report:?}");
+    assert_eq!(
+        report.active_version, "1.0.0",
+        "v1 did not activate: {report:?}"
+    );
     server
 }

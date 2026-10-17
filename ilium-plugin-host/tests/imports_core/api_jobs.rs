@@ -18,7 +18,9 @@ fn manifest_with_job() -> String {
     manifest.to_string()
 }
 
-fn job_fixture(runner: Box<dyn FnMut(&str, &[u8]) -> Result<Vec<u8>, PluginError>>) -> ImportsFixture {
+fn job_fixture(
+    runner: Box<dyn FnMut(&str, &[u8]) -> Result<Vec<u8>, PluginError>>,
+) -> ImportsFixture {
     ImportsFixture::builder()
         .tier(Tier::T2)
         .grants(&["jobs.run"])
@@ -33,7 +35,11 @@ fn echo_fixture() -> ImportsFixture {
 
 fn failing(code: ErrorCode) -> ImportsFixture {
     job_fixture(Box::new(move |_kind, _input| {
-        Err(PluginError { code, message: "boom".to_owned(), retry_after_ms: None })
+        Err(PluginError {
+            code,
+            message: "boom".to_owned(),
+            retry_after_ms: None,
+        })
     }))
 }
 
@@ -63,23 +69,36 @@ fn jobs_start_without_the_jobs_run_grant_not_permitted() {
         .tier(Tier::T2)
         .manifest_json(&manifest_with_job())
         .build();
-    assert_eq!(expect_code(fixture.jobs().start(KIND.to_owned(), Vec::new())), ErrorCode::NotPermitted);
+    assert_eq!(
+        expect_code(fixture.jobs().start(KIND.to_owned(), Vec::new())),
+        ErrorCode::NotPermitted
+    );
 }
 
 /// REQ: WIT:ilium:host/jobs.start
 #[test]
 fn jobs_start_undeclared_kind_invalid_argument() {
     let mut fixture = echo_fixture();
-    assert_eq!(expect_code(fixture.jobs().start("undeclared".to_owned(), Vec::new())), ErrorCode::InvalidArgument);
+    assert_eq!(
+        expect_code(fixture.jobs().start("undeclared".to_owned(), Vec::new())),
+        ErrorCode::InvalidArgument
+    );
 }
 
 /// REQ: WIT:ilium:host/jobs.start
 #[test]
 fn jobs_start_input_of_exactly_16_mib_accepted_and_one_more_invalid_argument() {
     let mut fixture = echo_fixture();
-    assert!(fixture.jobs().start(KIND.to_owned(), vec![0u8; 16 * MIB]).is_ok());
+    assert!(fixture
+        .jobs()
+        .start(KIND.to_owned(), vec![0u8; 16 * MIB])
+        .is_ok());
     assert_eq!(
-        expect_code(fixture.jobs().start(KIND.to_owned(), vec![0u8; 16 * MIB + 1])),
+        expect_code(
+            fixture
+                .jobs()
+                .start(KIND.to_owned(), vec![0u8; 16 * MIB + 1])
+        ),
         ErrorCode::InvalidArgument
     );
 }
@@ -130,7 +149,10 @@ fn jobs_start_a_trapping_job_fails_internal() {
     let mut fixture = echo_fixture();
     fixture.make_next_job_trap();
     let job = expect_ok(fixture.jobs().start(KIND.to_owned(), Vec::new()));
-    assert_eq!(outcome_code(&complete(&mut fixture, job)), Some(ErrorCode::Internal));
+    assert_eq!(
+        outcome_code(&complete(&mut fixture, job)),
+        Some(ErrorCode::Internal)
+    );
 }
 
 /// REQ: WIT:ilium:host/jobs.start
@@ -140,7 +162,10 @@ fn jobs_start_a_job_over_its_time_budget_fails_timed_out() {
     fixture.make_next_job_run_forever();
     let job = expect_ok(fixture.jobs().start(KIND.to_owned(), Vec::new()));
     fixture.advance(std::time::Duration::from_secs(3600));
-    assert_eq!(outcome_code(&complete(&mut fixture, job)), Some(ErrorCode::TimedOut));
+    assert_eq!(
+        outcome_code(&complete(&mut fixture, job)),
+        Some(ErrorCode::TimedOut)
+    );
 }
 
 /// REQ: WIT:ilium:host/jobs.start
@@ -149,7 +174,10 @@ fn jobs_start_a_job_over_its_memory_limit_fails_quota_exceeded() {
     let mut fixture = echo_fixture();
     fixture.make_next_job_exceed_memory();
     let job = expect_ok(fixture.jobs().start(KIND.to_owned(), Vec::new()));
-    assert_eq!(outcome_code(&complete(&mut fixture, job)), Some(ErrorCode::QuotaExceeded));
+    assert_eq!(
+        outcome_code(&complete(&mut fixture, job)),
+        Some(ErrorCode::QuotaExceeded)
+    );
 }
 
 /// REQ: WIT:ilium:host/jobs.start
@@ -157,7 +185,10 @@ fn jobs_start_a_job_over_its_memory_limit_fails_quota_exceeded() {
 fn jobs_start_output_over_the_limit_fails_invalid_argument() {
     let mut fixture = job_fixture(Box::new(|_kind, _input| Ok(vec![0u8; 16 * MIB + 1])));
     let job = expect_ok(fixture.jobs().start(KIND.to_owned(), Vec::new()));
-    assert_eq!(outcome_code(&complete(&mut fixture, job)), Some(ErrorCode::InvalidArgument));
+    assert_eq!(
+        outcome_code(&complete(&mut fixture, job)),
+        Some(ErrorCode::InvalidArgument)
+    );
 }
 
 /// REQ: WIT:ilium:host/jobs.start
@@ -231,7 +262,10 @@ fn jobs_report_progress_values_reach_the_host_clamped_to_0_100() {
     for percent in [-5.0f32, 0.0, 42.5, 100.0, 250.0] {
         instance.jobs().report_progress(percent);
     }
-    assert_eq!(instance.reported_progress(), vec![0.0, 0.0, 42.5, 100.0, 100.0]);
+    assert_eq!(
+        instance.reported_progress(),
+        vec![0.0, 0.0, 42.5, 100.0, 100.0]
+    );
 }
 
 /// REQ: WIT:ilium:host/jobs.report-progress
@@ -240,7 +274,10 @@ fn jobs_report_progress_not_a_number_is_ignored() {
     let mut fixture = echo_fixture();
     let mut instance = fixture.job_instance(KIND, b"");
     instance.jobs().report_progress(f32::NAN);
-    assert!(instance.reported_progress().iter().all(|value| value.is_finite()));
+    assert!(instance
+        .reported_progress()
+        .iter()
+        .all(|value| value.is_finite()));
 }
 
 // ---- wait-request ----------------------------------------------------------------------------
@@ -260,7 +297,10 @@ fn jobs_wait_request_returns_once_the_awaited_request_completes() {
 fn jobs_wait_request_unknown_request_not_found() {
     let mut fixture = echo_fixture();
     let mut instance = fixture.job_instance(KIND, b"");
-    assert_eq!(expect_code(instance.jobs().wait_request(RequestId(999_001), 10)), ErrorCode::NotFound);
+    assert_eq!(
+        expect_code(instance.jobs().wait_request(RequestId(999_001), 10)),
+        ErrorCode::NotFound
+    );
 }
 
 /// REQ: WIT:ilium:host/jobs.wait-request
@@ -269,14 +309,20 @@ fn jobs_wait_request_timeout_elapsing_timed_out() {
     let mut fixture = echo_fixture();
     let awaited = fixture.start_background_request();
     let mut instance = fixture.job_instance(KIND, b"");
-    assert_eq!(expect_code(instance.jobs().wait_request(awaited, 50)), ErrorCode::TimedOut);
+    assert_eq!(
+        expect_code(instance.jobs().wait_request(awaited, 50)),
+        ErrorCode::TimedOut
+    );
 }
 
 /// REQ: WIT:ilium:host/jobs.wait-request
 #[test]
 fn jobs_wait_request_outside_a_job_run_unsupported() {
     let mut fixture = echo_fixture();
-    assert_eq!(expect_code(fixture.jobs().wait_request(RequestId(1), 10)), ErrorCode::Unsupported);
+    assert_eq!(
+        expect_code(fixture.jobs().wait_request(RequestId(1), 10)),
+        ErrorCode::Unsupported
+    );
 }
 
 // ---- what a job instance may call ------------------------------------------------------------
@@ -286,7 +332,10 @@ fn jobs_wait_request_outside_a_job_run_unsupported() {
 fn jobs_start_from_inside_a_job_instance_unsupported() {
     let mut fixture = echo_fixture();
     let mut instance = fixture.job_instance(KIND, b"");
-    assert_eq!(expect_code(instance.jobs().start(KIND.to_owned(), Vec::new())), ErrorCode::Unsupported);
+    assert_eq!(
+        expect_code(instance.jobs().start(KIND.to_owned(), Vec::new())),
+        ErrorCode::Unsupported
+    );
 }
 
 /// REQ: WIT:ilium:host/jobs.start
@@ -294,7 +343,10 @@ fn jobs_start_from_inside_a_job_instance_unsupported() {
 fn jobs_job_instance_calls_to_settings_are_unsupported() {
     let mut fixture = echo_fixture();
     let mut instance = fixture.job_instance(KIND, b"");
-    assert_eq!(expect_code(instance.settings().set_json("{}".to_owned())), ErrorCode::Unsupported);
+    assert_eq!(
+        expect_code(instance.settings().set_json("{}".to_owned())),
+        ErrorCode::Unsupported
+    );
 }
 
 /// REQ: WIT:ilium:host/jobs.start
@@ -305,5 +357,8 @@ fn jobs_job_instance_may_call_clock_and_log() {
     let mut instance = fixture.job_instance(KIND, b"");
     assert_eq!(instance.clock().now_unix_millis(), TEST_CLOCK_START_MILLIS);
     instance.log().log(Level::Info, "from the job".to_owned());
-    assert!(fixture.logs().iter().any(|line| line.message == "from the job"));
+    assert!(fixture
+        .logs()
+        .iter()
+        .any(|line| line.message == "from the job"));
 }

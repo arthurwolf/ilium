@@ -9,7 +9,7 @@ use ilium_plugin_sdk::types::{
 };
 
 use crate::support::{
-    tick, InOrder, RevisionKeyEmitter, Resync, SameKeyEmitter, StaleGuard, Versioned,
+    tick, InOrder, Resync, RevisionKeyEmitter, SameKeyEmitter, StaleGuard, Versioned,
 };
 
 const SOUND_GRANT: &str = "sound.play";
@@ -91,7 +91,10 @@ fn aut_002_busy_editor_never_holds_more_than_one_timer() {
     for _ in 0..1_000 {
         debounce.touch(&mut timers, QUIET_MILLIS).unwrap();
     }
-    assert_eq!(timers.most_held, 1, "cancel runs before set, so one timer is held at most");
+    assert_eq!(
+        timers.most_held, 1,
+        "cancel runs before set, so one timer is held at most"
+    );
     assert!(timers.held.len() <= 1);
     assert!(timers.most_held <= 64);
 }
@@ -104,7 +107,10 @@ fn aut_003_only_the_stored_timer_id_ends_the_quiet_period() {
     debounce.touch(&mut timers, QUIET_MILLIS).unwrap();
     assert!(!debounce.fired(999));
     assert!(debounce.fired(1));
-    assert!(!debounce.fired(1), "a second event for the same id is ignored");
+    assert!(
+        !debounce.fired(1),
+        "a second event for the same id is ignored"
+    );
 }
 
 /// REQ: AUT-004
@@ -114,7 +120,10 @@ fn aut_004_delay_below_50_ms_is_refused_invalid_argument() {
     let mut debounce = Debounce::default();
     let refused = debounce.touch(&mut timers, 49).unwrap_err();
     assert_eq!(refused.code, ErrorCode::InvalidArgument);
-    assert!(debounce.touch(&mut timers, 50).is_ok(), "50 ms is the lowest accepted delay");
+    assert!(
+        debounce.touch(&mut timers, 50).is_ok(),
+        "50 ms is the lowest accepted delay"
+    );
     assert!(QUIET_MILLIS >= 50);
 }
 
@@ -127,7 +136,10 @@ struct Throttle {
 
 impl Throttle {
     fn new(interval_millis: u64) -> Self {
-        Self { interval_millis, last: None }
+        Self {
+            interval_millis,
+            last: None,
+        }
     }
     fn allow(&mut self, now: u64) -> bool {
         match self.last {
@@ -154,9 +166,15 @@ fn aut_006_nothing_is_sent_before_retry_after_ms_on_the_fake_clock() {
     host.advance_clock(1_500);
     assert!(!throttle.allow(host.clock().now()));
     host.advance_clock(499);
-    assert!(!throttle.allow(host.clock().now()), "1 ms before the delay ends");
+    assert!(
+        !throttle.allow(host.clock().now()),
+        "1 ms before the delay ends"
+    );
     host.advance_clock(1);
-    assert!(throttle.allow(host.clock().now()), "exactly retry-after-ms later");
+    assert!(
+        throttle.allow(host.clock().now()),
+        "exactly retry-after-ms later"
+    );
 }
 
 /// REQ: AUT-005 WARN
@@ -173,7 +191,10 @@ fn aut_005_own_rate_stays_under_the_toast_limit_of_3_per_10_seconds() {
         host.advance_clock(100);
     }
     let seconds = (host.clock().now() - start) / 1_000;
-    assert!(sent * 10 <= 3 * (seconds + 10), "sent {sent} toasts in {seconds} s");
+    assert!(
+        sent * 10 <= 3 * (seconds + 10),
+        "sent {sent} toasts in {seconds} s"
+    );
 }
 
 /// REQ: AUT-007
@@ -181,7 +202,10 @@ fn aut_005_own_rate_stays_under_the_toast_limit_of_3_per_10_seconds() {
 fn aut_007_time_going_backwards_does_not_underflow() {
     let mut throttle = Throttle::new(100);
     assert!(throttle.allow(1_000));
-    assert!(!throttle.allow(500), "now below last saturates to 0 elapsed");
+    assert!(
+        !throttle.allow(500),
+        "now below last saturates to 0 elapsed"
+    );
     assert!(!throttle.allow(0));
     assert!(throttle.allow(1_100));
 }
@@ -195,7 +219,11 @@ fn aut_001_clock_is_read_once_per_batch_and_passed_in() {
     assert_eq!(submissions.len(), 3);
     let first = host.clock().now();
     host.advance_clock(5);
-    assert_eq!(host.clock().now(), first + 5, "the fake clock moves only through advance_clock");
+    assert_eq!(
+        host.clock().now(),
+        first + 5,
+        "the fake clock moves only through advance_clock"
+    );
 }
 
 // ---------------------------------------------------------------- recipe 3: cache
@@ -222,7 +250,11 @@ fn is_fresh(stored: &[u8], now: u64) -> bool {
 fn aut_009_cached_value_round_trips_with_its_fetch_time() {
     let bytes = encode(1_234, b"body");
     assert_eq!(decode(&bytes), Some((1_234, &b"body"[..])));
-    assert_eq!(decode(&[1, 2, 3]), None, "fewer than 8 bytes carry no fetch time");
+    assert_eq!(
+        decode(&[1, 2, 3]),
+        None,
+        "fewer than 8 bytes carry no fetch time"
+    );
     assert_eq!(decode(&[0; 8]), Some((0, &b""[..])));
 }
 
@@ -235,7 +267,10 @@ fn aut_009_entry_is_stale_at_exactly_the_time_limit_on_the_fake_clock() {
     host.advance_clock(TTL_MILLIS - 1);
     assert!(is_fresh(&bytes, host.clock().now()));
     host.advance_clock(1);
-    assert!(!is_fresh(&bytes, host.clock().now()), "the host does not expire it, the reader does");
+    assert!(
+        !is_fresh(&bytes, host.clock().now()),
+        "the host does not expire it, the reader does"
+    );
 }
 
 // ---------------------------------------------------------------- recipe 4: windows
@@ -249,7 +284,10 @@ fn window(total: usize, offset: usize, visible: usize) -> Window {
     let margin = 4;
     let first = offset.saturating_sub(margin).min(total);
     let end = (offset + visible + margin).min(total);
-    Window { first, len: end - first }
+    Window {
+        first,
+        len: end - first,
+    }
 }
 
 fn with_group_separator(value: usize) -> String {
@@ -265,7 +303,10 @@ fn with_group_separator(value: usize) -> String {
 }
 
 fn window_label(first_one_based: usize, last: usize, total: usize) -> String {
-    format!("{first_one_based} to {last} of {}", with_group_separator(total))
+    format!(
+        "{first_one_based} to {last} of {}",
+        with_group_separator(total)
+    )
 }
 
 /// REQ: AUT-011
@@ -275,7 +316,11 @@ fn aut_011_window_is_clamped_to_the_list() {
     assert_eq!(w.first, 4);
     assert_eq!(w.first + w.len, 10);
     assert_eq!(window(0, 0, 5).len, 0);
-    assert_eq!(window(10, 50, 5).len, 0, "offset beyond the list gives an empty window");
+    assert_eq!(
+        window(10, 50, 5).len,
+        0,
+        "offset beyond the list gives an empty window"
+    );
 }
 
 /// REQ: AUT-011
@@ -301,7 +346,14 @@ fn aut_012_label_shows_window_and_total_with_group_separator() {
 // ---------------------------------------------------------------- recipe 5: retry
 
 fn is_transient(code: ErrorCode) -> bool {
-    matches!(code, ErrorCode::TimedOut | ErrorCode::Busy | ErrorCode::Network | ErrorCode::RateLimited | ErrorCode::Io)
+    matches!(
+        code,
+        ErrorCode::TimedOut
+            | ErrorCode::Busy
+            | ErrorCode::Network
+            | ErrorCode::RateLimited
+            | ErrorCode::Io
+    )
 }
 
 fn backoff_millis(attempt: u32, retry_after_ms: Option<u32>) -> Option<u32> {
@@ -334,7 +386,12 @@ const ALL_CODES: [ErrorCode; 15] = [
 /// REQ: AUT-013
 #[test]
 fn aut_013_permanent_codes_are_never_retried() {
-    for code in [ErrorCode::NotPermitted, ErrorCode::Revoked, ErrorCode::InvalidArgument, ErrorCode::Unsupported] {
+    for code in [
+        ErrorCode::NotPermitted,
+        ErrorCode::Revoked,
+        ErrorCode::InvalidArgument,
+        ErrorCode::Unsupported,
+    ] {
         assert!(!is_transient(code), "{} must not be retried", code.as_str());
     }
 }
@@ -342,8 +399,15 @@ fn aut_013_permanent_codes_are_never_retried() {
 /// REQ: AUT-013
 #[test]
 fn aut_013_exactly_five_of_fifteen_codes_retry_with_backoff() {
-    let retried: Vec<&str> = ALL_CODES.iter().filter(|code| is_transient(**code)).map(|code| code.as_str()).collect();
-    assert_eq!(retried, vec!["rate-limited", "busy", "timed-out", "io", "network"]);
+    let retried: Vec<&str> = ALL_CODES
+        .iter()
+        .filter(|code| is_transient(**code))
+        .map(|code| code.as_str())
+        .collect();
+    assert_eq!(
+        retried,
+        vec!["rate-limited", "busy", "timed-out", "io", "network"]
+    );
     assert_eq!(ALL_CODES.len(), ErrorCode::CASE_NAMES.len());
 }
 
@@ -366,7 +430,10 @@ fn aut_014_retry_after_ms_raises_the_delay_and_the_cap_is_60_seconds() {
         let delay = backoff_millis(attempt, None).unwrap();
         assert!(delay <= 60_000);
         if attempt > 1 {
-            assert!(delay > backoff_millis(attempt - 1, None).unwrap(), "the delay grows");
+            assert!(
+                delay > backoff_millis(attempt - 1, None).unwrap(),
+                "the delay grows"
+            );
         }
     }
 }
@@ -409,11 +476,17 @@ fn aut_016_key_is_accepted_again_after_10_minutes() {
     host.advance_clock(10 * 60 * 1000 - 1);
     host.deliver(vec![tick()]);
     host.settle();
-    assert!(matches!(host.outcomes()[1], Outcome::Duplicate(_)), "still reserved 1 ms before the window ends");
+    assert!(
+        matches!(host.outcomes()[1], Outcome::Duplicate(_)),
+        "still reserved 1 ms before the window ends"
+    );
     host.advance_clock(2);
     host.deliver(vec![tick()]);
     host.settle();
-    assert!(!matches!(host.outcomes()[2], Outcome::Duplicate(_)), "free again after 10 minutes");
+    assert!(
+        !matches!(host.outcomes()[2], Outcome::Duplicate(_)),
+        "free again after 10 minutes"
+    );
 }
 
 /// REQ: AUT-015
@@ -423,10 +496,16 @@ fn aut_015_key_from_id_and_revision_lets_each_revision_through() {
     host.activate::<RevisionKeyEmitter>();
     let submissions = host.deliver(vec![tick(), tick(), tick()]);
     host.settle();
-    let keys: Vec<String> = submissions.iter().map(|s| s.dedup_key.clone().expect("keyed")).collect();
+    let keys: Vec<String> = submissions
+        .iter()
+        .map(|s| s.dedup_key.clone().expect("keyed"))
+        .collect();
     assert_eq!(keys.len(), 3);
     assert!(keys[0] != keys[1] && keys[1] != keys[2] && keys[0] != keys[2]);
-    assert!(host.outcomes().iter().all(|outcome| !matches!(outcome, Outcome::Duplicate(_))));
+    assert!(host
+        .outcomes()
+        .iter()
+        .all(|outcome| !matches!(outcome, Outcome::Duplicate(_))));
 }
 
 /// REQ: AUT-015
@@ -434,10 +513,18 @@ fn aut_015_key_from_id_and_revision_lets_each_revision_through() {
 fn aut_015_generated_key_matches_the_allowed_alphabet_and_length() {
     let key = ilium_plugin_sdk::dedup::key_for(&["finished", "42", "7"]);
     assert!(!key.is_empty() && key.len() <= 128);
-    assert!(key.chars().all(|c| c.is_ascii_alphanumeric() || "._:/-".contains(c)), "key {key}");
+    assert!(
+        key.chars()
+            .all(|c| c.is_ascii_alphanumeric() || "._:/-".contains(c)),
+        "key {key}"
+    );
     let long = "a".repeat(300);
     assert!(ilium_plugin_sdk::dedup::key_for(&[&long]).len() <= 128);
-    assert_eq!(key, ilium_plugin_sdk::dedup::key_for(&["finished", "42", "7"]), "the same parts give the same key");
+    assert_eq!(
+        key,
+        ilium_plugin_sdk::dedup::key_for(&["finished", "42", "7"]),
+        "the same parts give the same key"
+    );
 }
 
 // ---------------------------------------------------------------- recipe 7: restart
@@ -447,7 +534,9 @@ fn aut_015_generated_key_matches_the_allowed_alphabet_and_length() {
 fn aut_017_saved_bytes_start_with_the_format_byte() {
     let mut host = FakeHost::new();
     host.activate::<Versioned>();
-    let bytes = host.deactivate(DeactivationReason::Upgrade).expect("restore bytes");
+    let bytes = host
+        .deactivate(DeactivationReason::Upgrade)
+        .expect("restore bytes");
     assert_eq!(bytes[0], Versioned::FORMAT);
     assert_eq!(bytes.len(), 5);
 }
@@ -455,12 +544,25 @@ fn aut_017_saved_bytes_start_with_the_format_byte() {
 /// REQ: AUT-017
 #[test]
 fn aut_017_bad_format_or_length_falls_back_to_defaults() {
-    for bad in [vec![], vec![9, 7, 0, 0, 0], vec![2], vec![2, 7, 0, 0], vec![2, 7, 0, 0, 0, 0], vec![0, 0, 0, 0, 0]] {
+    for bad in [
+        vec![],
+        vec![9, 7, 0, 0, 0],
+        vec![2],
+        vec![2, 7, 0, 0],
+        vec![2, 7, 0, 0, 0, 0],
+        vec![0, 0, 0, 0, 0],
+    ] {
         let mut host = FakeHost::new();
         host.activate::<Versioned>();
         host.restart_with(bad.clone());
-        let saved = host.deactivate(DeactivationReason::Shutdown).expect("restore bytes");
-        assert_eq!(Versioned::load(&saved).value, 0, "bytes {bad:?} must give defaults");
+        let saved = host
+            .deactivate(DeactivationReason::Shutdown)
+            .expect("restore bytes");
+        assert_eq!(
+            Versioned::load(&saved).value,
+            0,
+            "bytes {bad:?} must give defaults"
+        );
     }
 }
 
@@ -487,8 +589,16 @@ fn aut_018_after_a_trap_nothing_is_saved_by_deactivate() {
     assert_eq!(failures.len(), 1);
     assert_eq!(failures[0].code, "trap.panic");
     assert_eq!(host.restarts().len(), 1);
-    assert_eq!(host.restarts()[0].delay_ms, 1_000, "first failure restarts after 1 s");
-    assert_eq!(host.restored(), None, "a trap drops the instance without restore bytes");
+    assert_eq!(
+        host.restarts()[0].delay_ms,
+        1_000,
+        "first failure restarts after 1 s"
+    );
+    assert_eq!(
+        host.restored(),
+        None,
+        "a trap drops the instance without restore bytes"
+    );
 }
 
 // ---------------------------------------------------------------- recipe 8: stale results
@@ -513,17 +623,34 @@ fn aut_019_old_completion_is_discarded_and_new_one_applied_on_the_host() {
     let second = host.deliver(vec![tick()]);
     host.complete(RequestRef::Submission(first[0].correlation), Outcome::Ok);
     host.settle();
-    assert_eq!(host.submitted().len(), 2, "the old completion produced no apply");
+    assert_eq!(
+        host.submitted().len(),
+        2,
+        "the old completion produced no apply"
+    );
     host.complete(RequestRef::Submission(second[0].correlation), Outcome::Ok);
     host.settle();
-    assert_eq!(host.submitted().len(), 3, "the newest completion is applied");
+    assert_eq!(
+        host.submitted().len(),
+        3,
+        "the newest completion is applied"
+    );
 }
 
 /// REQ: AUT-019
 #[test]
 fn aut_019_completion_event_carries_the_submission_correlation() {
-    let event = Event::RequestCompleted(RequestResult { request: RequestRef::Submission(5), outcome: Outcome::Ok });
-    assert!(matches!(event, Event::RequestCompleted(RequestResult { request: RequestRef::Submission(5), .. })));
+    let event = Event::RequestCompleted(RequestResult {
+        request: RequestRef::Submission(5),
+        outcome: Outcome::Ok,
+    });
+    assert!(matches!(
+        event,
+        Event::RequestCompleted(RequestResult {
+            request: RequestRef::Submission(5),
+            ..
+        })
+    ));
 }
 
 // ---------------------------------------------------------------- recipe 9 and 10: batches
@@ -533,11 +660,22 @@ fn aut_019_completion_event_carries_the_submission_correlation() {
 fn aut_020_submissions_follow_the_order_of_the_batch() {
     let mut host = FakeHost::new().grants(&[TOAST_GRANT]);
     host.activate::<InOrder>();
-    let submissions = host.deliver(vec![tick(), Event::KeymapChanged, Event::DisplayModeChanged(None), Event::CliCancelled(1)]);
+    let submissions = host.deliver(vec![
+        tick(),
+        Event::KeymapChanged,
+        Event::DisplayModeChanged(None),
+        Event::CliCancelled(1),
+    ]);
     let correlations: Vec<u64> = submissions.iter().map(|s| s.correlation).collect();
     assert_eq!(submissions.len(), 4);
-    assert!(correlations.windows(2).all(|pair| pair[0] < pair[1]), "correlations ascend with the batch order");
-    assert!(correlations[0] >= 1 << 63, "the SDK numbers correlations from 2^63");
+    assert!(
+        correlations.windows(2).all(|pair| pair[0] < pair[1]),
+        "correlations ascend with the batch order"
+    );
+    assert!(
+        correlations[0] >= 1 << 63,
+        "the SDK numbers correlations from 2^63"
+    );
 }
 
 /// REQ: AUT-020
@@ -556,7 +694,11 @@ fn aut_022_a_handler_that_breaches_its_deadline_traps_the_instance() {
     host.activate::<InOrder>();
     host.breach_deadline("on-events");
     host.deliver_one(tick());
-    let codes: Vec<String> = host.failures().into_iter().map(|failure| failure.code).collect();
+    let codes: Vec<String> = host
+        .failures()
+        .into_iter()
+        .map(|failure| failure.code)
+        .collect();
     assert_eq!(codes, vec!["trap.deadline".to_string()]);
     assert_eq!(host.restarts().len(), 1);
 }
@@ -603,16 +745,27 @@ fn aut_025_running_migrate_twice_gives_the_same_result() {
 fn aut_025_interrupted_run_restarts_from_the_same_arguments_without_loss() {
     let mut bucket = BTreeMap::from([("notes".to_string(), b"abc".to_vec())]);
     migrate(&mut bucket, 1, 2, true);
-    assert!(bucket.contains_key("notes") && bucket.contains_key("notes.v2"), "new value is written before the old one goes");
+    assert!(
+        bucket.contains_key("notes") && bucket.contains_key("notes.v2"),
+        "new value is written before the old one goes"
+    );
     migrate(&mut bucket, 1, 2, false);
-    assert_eq!(bucket.keys().cloned().collect::<Vec<_>>(), vec!["notes.v2".to_string()]);
+    assert_eq!(
+        bucket.keys().cloned().collect::<Vec<_>>(),
+        vec!["notes.v2".to_string()]
+    );
 }
 
 /// REQ: AUT-024
 #[test]
 fn aut_024_storage_snapshot_of_the_old_layout_loads_at_data_version_1() {
-    let snapshot = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/authoring/fixtures/storage-v1.json");
-    let mut host = FakeHost::new().with_data_version(1).with_storage_snapshot(snapshot);
+    let snapshot = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/authoring/fixtures/storage-v1.json"
+    );
+    let mut host = FakeHost::new()
+        .with_data_version(1)
+        .with_storage_snapshot(snapshot);
     host.activate::<Versioned>();
     let state = host.snapshot();
     assert_eq!(state.storage["global"]["notes"], b"notes".to_vec());

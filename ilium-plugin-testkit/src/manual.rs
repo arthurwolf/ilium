@@ -11,5 +11,9 @@ pub fn pages_dir() -> PathBuf {
     if let Some(overridden) = std::env::var_os(MANUAL_DIR_ENV) {
         return PathBuf::from(overridden);
     }
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("docs").join("plugins-manual").join("pages")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("docs")
+        .join("plugins-manual")
+        .join("pages")
 }

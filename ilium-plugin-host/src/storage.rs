@@ -40,6 +40,10 @@ impl PluginStorage {
 
 /// Sets the data version a plugin's storage was last written with (reference-storage.md,
 /// reference-install-and-update.md PKG-288).
-pub fn write_bucket_stamp(storage_root: &std::path::Path, plugin: &str, data_version: u64) -> std::io::Result<()> {
+pub fn write_bucket_stamp(
+    storage_root: &std::path::Path,
+    plugin: &str,
+    data_version: u64,
+) -> std::io::Result<()> {
     unimplemented!("host::storage::write_bucket_stamp")
 }

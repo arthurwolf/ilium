@@ -79,7 +79,11 @@ pub enum BreachVerdict {
 }
 
 /// Classifies an elapsed time against the class deadline (reference-host-scheduling.md HST-189).
-pub fn evaluate_breach(class: CallClass, elapsed: Duration, limits: &ResolvedLimits) -> BreachVerdict {
+pub fn evaluate_breach(
+    class: CallClass,
+    elapsed: Duration,
+    limits: &ResolvedLimits,
+) -> BreachVerdict {
     unimplemented!("host::calls::evaluate_breach")
 }
 

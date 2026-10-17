@@ -14,16 +14,27 @@ struct HookShape {
 
 impl HookShape {
     fn veto() -> HookShape {
-        HookShape { mode: "veto", high: false, final_check: false }
+        HookShape {
+            mode: "veto",
+            high: false,
+            final_check: false,
+        }
     }
     fn transform() -> HookShape {
-        HookShape { mode: "transform", high: false, final_check: false }
+        HookShape {
+            mode: "transform",
+            high: false,
+            final_check: false,
+        }
     }
     fn high(self) -> HookShape {
         HookShape { high: true, ..self }
     }
     fn with_final_check(self) -> HookShape {
-        HookShape { final_check: true, ..self }
+        HookShape {
+            final_check: true,
+            ..self
+        }
     }
 }
 
@@ -63,18 +74,30 @@ impl ChainResult {
 fn run_chain(world: &mut ExtWorld, _source: u32, contribs: Vec<Contrib>) -> ChainResult {
     for c in &contribs {
         let installed = install_contrib(world, POINT, c);
-        assert!(installed.is_ok(), "contributor {} install failed: {installed:?}", c.plugin);
+        assert!(
+            installed.is_ok(),
+            "contributor {} install failed: {installed:?}",
+            c.plugin
+        );
     }
     world.settle();
     let (outcome, _reply) = crate::support::run_chain(world, r#"{"text":"start","locked":"x"}"#);
-    ChainResult { outcome, reason: world.last_veto_reason(), ui_text: world.last_veto_ui_text() }
+    ChainResult {
+        outcome,
+        reason: world.last_veto_reason(),
+        ui_text: world.last_veto_ui_text(),
+    }
 }
 
 fn high_points_in_security_page() -> Vec<String> {
     let text = page("reference-extension-security.md");
     table_after(&text, "## Risk marks of core points")
         .into_iter()
-        .filter(|row| row.get(1).map(|risk| risk.trim() == "high").unwrap_or(false))
+        .filter(|row| {
+            row.get(1)
+                .map(|risk| risk.trim() == "high")
+                .unwrap_or(false)
+        })
         .map(|row| row[0].trim_matches('`').to_owned())
         .collect()
 }
@@ -88,7 +111,11 @@ fn doc_sec_280_security_page_lists_19_high_risk_points() {
 /// REQ: SEC-280, SEC-293
 #[test]
 fn doc_sec_293_core_points_table_marks_exactly_the_points_the_security_page_marks_high() {
-    let mut from_table: Vec<String> = core_points().into_iter().filter(|(_, _, risk)| risk.trim() == "high").map(|(point, _, _)| point).collect();
+    let mut from_table: Vec<String> = core_points()
+        .into_iter()
+        .filter(|(_, _, risk)| risk.trim() == "high")
+        .map(|(point, _, _)| point)
+        .collect();
     let mut from_security = high_points_in_security_page();
     from_table.sort();
     from_security.sort();
@@ -98,7 +125,10 @@ fn doc_sec_293_core_points_table_marks_exactly_the_points_the_security_page_mark
 /// REQ: SEC-293
 #[test]
 fn doc_sec_293_every_point_of_the_security_table_exists_in_the_core_points_table() {
-    let known: std::collections::BTreeSet<String> = core_points().into_iter().map(|(point, _, _)| point).collect();
+    let known: std::collections::BTreeSet<String> = core_points()
+        .into_iter()
+        .map(|(point, _, _)| point)
+        .collect();
     for point in high_points_in_security_page() {
         assert!(known.contains(&point), "{point} is not a core point");
     }
@@ -111,9 +141,14 @@ fn doc_sec_293_each_core_page_repeats_the_marks_of_its_own_points() {
         let (owner, name) = point.rsplit_once('/').unwrap_or(("", ""));
         let slug = owner.trim_start_matches("ilium.core.");
         let body = page(&format!("core-plugin-{slug}.md"));
-        let row = body.lines().find(|line| line.starts_with('|') && line.contains(&format!("`{name}`")));
+        let row = body
+            .lines()
+            .find(|line| line.starts_with('|') && line.contains(&format!("`{name}`")));
         let row = row.unwrap_or("");
-        assert!(row.contains(risk.trim()), "{point}: page row `{row}` lacks risk {risk}");
+        assert!(
+            row.contains(risk.trim()),
+            "{point}: page row `{row}` lacks risk {risk}"
+        );
     }
 }
 
@@ -125,7 +160,10 @@ fn sec_280_third_party_point_with_standard_risk_and_terminal_text_fails_point_ri
     point["entry_schema"] = json!({"type":"object","properties":{"text":{"type":"string","x-ilium-data":"terminal-text"}}});
     point["risk"] = json!("standard");
     let manifest = owner_manifest("com.example.risk", vec![point]);
-    assert_eq!(diag_code(&world.install(Tier::T3, manifest, Vec::new())), "manifest.point-risk");
+    assert_eq!(
+        diag_code(&world.install(Tier::T3, manifest, Vec::new())),
+        "manifest.point-risk"
+    );
 }
 
 /// REQ: SEC-280, SEC-281
@@ -134,10 +172,15 @@ fn sec_281_each_sensitive_data_class_raises_the_point_to_high() {
     for class in ["terminal-text", "agent-prompt", "file-content", "secret"] {
         let mut world = ExtWorld::new();
         let mut point = collect_point("sens", 8, false);
-        point["entry_schema"] = json!({"type":"object","properties":{"v":{"type":"string","x-ilium-data":class}}});
+        point["entry_schema"] =
+            json!({"type":"object","properties":{"v":{"type":"string","x-ilium-data":class}}});
         let manifest = owner_manifest("com.example.cls", vec![point]);
         let _ = world.install(Tier::T3, manifest, Vec::new());
-        assert_eq!(world.point_risk("com.example.cls/sens"), Some("high".to_owned()), "{class}");
+        assert_eq!(
+            world.point_risk("com.example.cls/sens"),
+            Some("high".to_owned()),
+            "{class}"
+        );
     }
 }
 
@@ -147,10 +190,15 @@ fn sec_281_non_sensitive_classes_stay_standard() {
     for class in ["path", "user-text"] {
         let mut world = ExtWorld::new();
         let mut point = collect_point("plain", 8, false);
-        point["entry_schema"] = json!({"type":"object","properties":{"v":{"type":"string","x-ilium-data":class}}});
+        point["entry_schema"] =
+            json!({"type":"object","properties":{"v":{"type":"string","x-ilium-data":class}}});
         let manifest = owner_manifest("com.example.cls", vec![point]);
         let _ = world.install(Tier::T3, manifest, Vec::new());
-        assert_eq!(world.point_risk("com.example.cls/plain"), Some("standard".to_owned()), "{class}");
+        assert_eq!(
+            world.point_risk("com.example.cls/plain"),
+            Some("standard".to_owned()),
+            "{class}"
+        );
     }
 }
 
@@ -159,7 +207,8 @@ fn sec_281_non_sensitive_classes_stay_standard() {
 fn sec_281_unknown_data_class_fails_schema() {
     let mut world = ExtWorld::new();
     let mut point = collect_point("odd", 8, false);
-    point["entry_schema"] = json!({"type":"object","properties":{"v":{"type":"string","x-ilium-data":"bogus"}}});
+    point["entry_schema"] =
+        json!({"type":"object","properties":{"v":{"type":"string","x-ilium-data":"bogus"}}});
     let manifest = owner_manifest("com.example.odd", vec![point]);
     assert!(world.install(Tier::T3, manifest, Vec::new()).is_err());
 }
@@ -169,8 +218,16 @@ fn sec_281_unknown_data_class_fails_schema() {
 fn sec_281_review_dialog_lists_the_classes_in_the_adds_to_other_plugins_row() {
     let mut world = ExtWorld::new();
     let mut point = collect_point("sens", 8, false);
-    point["entry_schema"] = json!({"type":"object","properties":{"v":{"type":"string","x-ilium-data":"secret"}}});
-    assert_eq!(diag_code(&world.install(Tier::T3, owner_manifest("com.example.cls", vec![point]), Vec::new())), "ok");
+    point["entry_schema"] =
+        json!({"type":"object","properties":{"v":{"type":"string","x-ilium-data":"secret"}}});
+    assert_eq!(
+        diag_code(&world.install(
+            Tier::T3,
+            owner_manifest("com.example.cls", vec![point]),
+            Vec::new()
+        )),
+        "ok"
+    );
     let contributor = contributor_manifest_on("com.example.con", "com.example.cls/sens", vec![]);
     let row = world.review_row("Adds to other plugins", &contributor);
     assert!(row.contains("secret"), "{row}");
@@ -182,22 +239,51 @@ fn sec_282_contributor_without_the_matching_read_grant_fails_grant_dependency() 
     let mut world = ExtWorld::new();
     let mut point = collect_point("term", 8, false);
     point["entry_schema"] = json!({"type":"object","properties":{"v":{"type":"string","x-ilium-data":"terminal-text"}}});
-    assert_eq!(diag_code(&world.install(Tier::T3, owner_manifest("com.example.cls", vec![point]), Vec::new())), "ok");
+    assert_eq!(
+        diag_code(&world.install(
+            Tier::T3,
+            owner_manifest("com.example.cls", vec![point]),
+            Vec::new()
+        )),
+        "ok"
+    );
     let contributor = contributor_manifest_on("com.example.con", "com.example.cls/term", vec![]);
-    assert_eq!(diag_code(&world.install(Tier::T3, contributor, Vec::new())), "manifest.grant-dependency");
+    assert_eq!(
+        diag_code(&world.install(Tier::T3, contributor, Vec::new())),
+        "manifest.grant-dependency"
+    );
 }
 
 /// REQ: SEC-282
 #[test]
 fn sec_282_each_data_class_accepts_its_own_grant() {
-    for (class, grant) in [("terminal-text", "terminal.read-screen"), ("terminal-text", "terminal.history"), ("agent-prompt", "agent.read-prompts")] {
+    for (class, grant) in [
+        ("terminal-text", "terminal.read-screen"),
+        ("terminal-text", "terminal.history"),
+        ("agent-prompt", "agent.read-prompts"),
+    ] {
         let mut world = ExtWorld::new();
         let mut point = collect_point("sens", 8, false);
-        point["entry_schema"] = json!({"type":"object","properties":{"v":{"type":"string","x-ilium-data":class}}});
-        assert_eq!(diag_code(&world.install(Tier::T3, owner_manifest("com.example.cls", vec![point]), Vec::new())), "ok");
-        let mut contributor = contributor_manifest_on("com.example.con", "com.example.cls/sens", vec![]);
-        contributor["capabilities"]["server"].as_array_mut().map(|list| list.push(json!(grant)));
-        assert_eq!(diag_code(&world.install(Tier::T3, contributor, Vec::new())), "ok", "{class} with {grant}");
+        point["entry_schema"] =
+            json!({"type":"object","properties":{"v":{"type":"string","x-ilium-data":class}}});
+        assert_eq!(
+            diag_code(&world.install(
+                Tier::T3,
+                owner_manifest("com.example.cls", vec![point]),
+                Vec::new()
+            )),
+            "ok"
+        );
+        let mut contributor =
+            contributor_manifest_on("com.example.con", "com.example.cls/sens", vec![]);
+        contributor["capabilities"]["server"]
+            .as_array_mut()
+            .map(|list| list.push(json!(grant)));
+        assert_eq!(
+            diag_code(&world.install(Tier::T3, contributor, Vec::new())),
+            "ok",
+            "{class} with {grant}"
+        );
     }
 }
 
@@ -211,7 +297,12 @@ fn sec_283_review_dialog_shows_a_can_make_line_per_privileged_entry_type() {
         "contributes": {"extensions": [ext_entry("ilium.core.worktrees/post-create-steps", "s", 50, json!({"id":"s","title":"S","program":"git","args":["status"]}))]}
     });
     let row = world.review_lines(&contributor);
-    assert!(row.iter().any(|line| line.starts_with("Can make ilium.core.worktrees") || line.starts_with("Can make Worktrees")), "{row:?}");
+    assert!(
+        row.iter()
+            .any(|line| line.starts_with("Can make ilium.core.worktrees")
+                || line.starts_with("Can make Worktrees")),
+        "{row:?}"
+    );
 }
 
 /// REQ: SEC-283
@@ -225,15 +316,30 @@ fn sec_283_owner_rejects_an_entry_outside_its_allowlist() {
     });
     let _ = world.install(Tier::T2, contributor, Vec::new());
     world.settle();
-    assert!(world.entries_of("ilium.core.worktrees/post-create-steps").iter().all(|entry| entry.id != "s"));
+    assert!(world
+        .entries_of("ilium.core.worktrees/post-create-steps")
+        .iter()
+        .all(|entry| entry.id != "s"));
     assert!(has_log(&world, "extension.entry-rejected") || has_log(&world, "rejected"));
 }
 
 /// REQ: SEC-284
 #[test]
-fn sec_284_transform_changing_a_field_outside_the_reply_schema_counts_as_pass_and_logs_schema_mismatch() {
+fn sec_284_transform_changing_a_field_outside_the_reply_schema_counts_as_pass_and_logs_schema_mismatch(
+) {
     let mut world = hook_world(HookShape::transform());
-    run_chain(&mut world, 1, vec![Contrib::new("com.example.c1", 50, script(1, HandlerAction::Replace(json!({"text":"ok","locked":"changed"}))))]);
+    run_chain(
+        &mut world,
+        1,
+        vec![Contrib::new(
+            "com.example.c1",
+            50,
+            script(
+                1,
+                HandlerAction::Replace(json!({"text":"ok","locked":"changed"})),
+            ),
+        )],
+    );
     assert!(has_log(&world, "extension.schema-mismatch"));
 }
 
@@ -241,10 +347,18 @@ fn sec_284_transform_changing_a_field_outside_the_reply_schema_counts_as_pass_an
 #[test]
 fn sec_284_output_failing_payload_schema_is_not_passed_to_the_next_handler() {
     let mut world = hook_world(HookShape::transform());
-    run_chain(&mut world, 1, vec![
-        Contrib::new("com.example.c1", 50, script(1, HandlerAction::Replace(json!({"text": 5})))),
-        Contrib::new("com.example.c2", 50, script(1, HandlerAction::Pass)),
-    ]);
+    run_chain(
+        &mut world,
+        1,
+        vec![
+            Contrib::new(
+                "com.example.c1",
+                50,
+                script(1, HandlerAction::Replace(json!({"text": 5}))),
+            ),
+            Contrib::new("com.example.c2", 50, script(1, HandlerAction::Pass)),
+        ],
+    );
     assert_eq!(world.seen_payload("com.example.c2")["text"], json!("start"));
 }
 
@@ -252,7 +366,15 @@ fn sec_284_output_failing_payload_schema_is_not_passed_to_the_next_handler() {
 #[test]
 fn sec_284_final_check_guard_runs_after_all_transform_handlers() {
     let mut world = hook_world(HookShape::transform().with_final_check());
-    run_chain(&mut world, 1, vec![Contrib::guard("com.example.g", 50, script(1, HandlerAction::Refuse("no".to_owned())))]);
+    run_chain(
+        &mut world,
+        1,
+        vec![Contrib::guard(
+            "com.example.g",
+            50,
+            script(1, HandlerAction::Refuse("no".to_owned())),
+        )],
+    );
     assert!(world.guard_ran_after_transforms());
 }
 
@@ -260,28 +382,61 @@ fn sec_284_final_check_guard_runs_after_all_transform_handlers() {
 #[test]
 fn sec_286_veto_handler_sees_the_final_payload() {
     let mut world = hook_world(HookShape::veto());
-    run_chain(&mut world, 1, vec![Contrib::new("com.example.c1", 50, script(1, HandlerAction::Pass))]);
-    assert_eq!(world.seen_payload("com.example.c1"), world.initial_payload());
+    run_chain(
+        &mut world,
+        1,
+        vec![Contrib::new(
+            "com.example.c1",
+            50,
+            script(1, HandlerAction::Pass),
+        )],
+    );
+    assert_eq!(
+        world.seen_payload("com.example.c1"),
+        world.initial_payload()
+    );
 }
 
 /// REQ: SEC-286
 #[test]
 fn sec_286_guard_on_a_final_check_point_sees_the_transform_output() {
     let mut world = hook_world(HookShape::transform().with_final_check());
-    run_chain(&mut world, 1, vec![
-        Contrib::new("com.example.t", 50, script(1, HandlerAction::Replace(json!({"text":"changed"})))),
-        Contrib::guard("com.example.g", 50, script(1, HandlerAction::Pass)),
-    ]);
-    assert_eq!(world.seen_payload("com.example.g")["text"], json!("changed"));
+    run_chain(
+        &mut world,
+        1,
+        vec![
+            Contrib::new(
+                "com.example.t",
+                50,
+                script(1, HandlerAction::Replace(json!({"text":"changed"}))),
+            ),
+            Contrib::guard("com.example.g", 50, script(1, HandlerAction::Pass)),
+        ],
+    );
+    assert_eq!(
+        world.seen_payload("com.example.g")["text"],
+        json!("changed")
+    );
 }
 
 /// REQ: SEC-287
 #[test]
 fn sec_287_timed_out_trapping_and_erroring_handlers_count_as_pass() {
-    for action in [HandlerAction::Trap, HandlerAction::ErrorReturn, HandlerAction::Sleep(500)] {
+    for action in [
+        HandlerAction::Trap,
+        HandlerAction::ErrorReturn,
+        HandlerAction::Sleep(500),
+    ] {
         let mut world = hook_world(HookShape::veto());
-        let outcome = run_chain(&mut world, 1, vec![Contrib::new("com.example.c1", 50, script(1, action))]);
-        assert!(!outcome.refused(), "a failing handler must not refuse a standard point");
+        let outcome = run_chain(
+            &mut world,
+            1,
+            vec![Contrib::new("com.example.c1", 50, script(1, action))],
+        );
+        assert!(
+            !outcome.refused(),
+            "a failing handler must not refuse a standard point"
+        );
     }
 }
 
@@ -291,18 +446,38 @@ fn sec_287_on_failure_on_a_standard_point_fails_extension_point_invalid() {
     let mut world = ExtWorld::new();
     let mut point = hook_point("p", "veto");
     point["on_failure"] = json!("refuse");
-    assert_eq!(diag_code(&world.install(Tier::T3, owner_manifest("com.example.of", vec![point]), Vec::new())), "manifest.extension-point-invalid");
+    assert_eq!(
+        diag_code(&world.install(
+            Tier::T3,
+            owner_manifest("com.example.of", vec![point]),
+            Vec::new()
+        )),
+        "manifest.extension-point-invalid"
+    );
 }
 
 /// REQ: SEC-287
 #[test]
 fn sec_287_on_failure_is_allowed_on_high_veto_and_transform_points_only() {
-    for (mode, expected) in [("veto", "ok"), ("transform", "ok"), ("observe", "manifest.extension-point-invalid"), ("first", "manifest.extension-point-invalid")] {
+    for (mode, expected) in [
+        ("veto", "ok"),
+        ("transform", "ok"),
+        ("observe", "manifest.extension-point-invalid"),
+        ("first", "manifest.extension-point-invalid"),
+    ] {
         let mut world = ExtWorld::new();
         let mut point = hook_point("p", mode);
         point["risk"] = json!("high");
         point["on_failure"] = json!("pass");
-        assert_eq!(diag_code(&world.install(Tier::T3, owner_manifest("com.example.of", vec![point]), Vec::new())), expected, "{mode}");
+        assert_eq!(
+            diag_code(&world.install(
+                Tier::T3,
+                owner_manifest("com.example.of", vec![point]),
+                Vec::new()
+            )),
+            expected,
+            "{mode}"
+        );
     }
 }
 
@@ -310,7 +485,15 @@ fn sec_287_on_failure_is_allowed_on_high_veto_and_transform_points_only() {
 #[test]
 fn sec_287_a_high_veto_point_defaults_to_refuse_and_a_guard_failure_vetoes_with_guard_failed() {
     let mut world = hook_world(HookShape::veto().high());
-    let outcome = run_chain(&mut world, 1, vec![Contrib::guard("com.example.g", 50, script(1, HandlerAction::Trap))]);
+    let outcome = run_chain(
+        &mut world,
+        1,
+        vec![Contrib::guard(
+            "com.example.g",
+            50,
+            script(1, HandlerAction::Trap),
+        )],
+    );
     assert!(outcome.refused());
     assert_eq!(outcome.reason(), Some("guard-failed".to_owned()));
 }
@@ -338,7 +521,10 @@ fn sec_291_a_user_started_veto_on_the_six_listed_points_can_be_overridden() {
 fn sec_291_a_plugin_started_action_cannot_be_overridden_by_the_user() {
     let mut world = ExtWorld::with_core_plugins();
     for point in OVERRIDABLE {
-        assert!(!world.veto_overridable(point, "plugin:com.example.x"), "{point}");
+        assert!(
+            !world.veto_overridable(point, "plugin:com.example.x"),
+            "{point}"
+        );
     }
 }
 
@@ -347,7 +533,10 @@ fn sec_291_a_plugin_started_action_cannot_be_overridden_by_the_user() {
 fn sec_291_each_user_source_value_counts_as_user_started() {
     let mut world = ExtWorld::with_core_plugins();
     for source in ["user", "paste", "mouse", "keys", "manual-trigger"] {
-        assert!(world.veto_overridable("ilium.core.tree/before-close", source), "{source}");
+        assert!(
+            world.veto_overridable("ilium.core.tree/before-close", source),
+            "{source}"
+        );
     }
     assert!(!world.veto_overridable("ilium.core.tree/before-close", "scheduler"));
 }
@@ -364,8 +553,20 @@ fn sec_291_other_points_have_no_user_override() {
 fn sec_292_reason_of_120_characters_is_kept_and_121_is_cut_to_120() {
     let mut world = hook_world(HookShape::veto());
     for (length, expected) in [(119usize, 119usize), (120, 120), (121, 120)] {
-        let outcome = run_chain(&mut world, 1, vec![Contrib::new("com.example.c1", 50, script(1, HandlerAction::Refuse("r".repeat(length))))]);
-        assert_eq!(outcome.reason().map(|text| text.chars().count()), Some(expected), "length {length}");
+        let outcome = run_chain(
+            &mut world,
+            1,
+            vec![Contrib::new(
+                "com.example.c1",
+                50,
+                script(1, HandlerAction::Refuse("r".repeat(length))),
+            )],
+        );
+        assert_eq!(
+            outcome.reason().map(|text| text.chars().count()),
+            Some(expected),
+            "length {length}"
+        );
     }
 }
 
@@ -373,7 +574,15 @@ fn sec_292_reason_of_120_characters_is_kept_and_121_is_cut_to_120() {
 #[test]
 fn sec_292_control_characters_and_bidi_overrides_are_removed_from_reasons() {
     let mut world = hook_world(HookShape::veto());
-    let outcome = run_chain(&mut world, 1, vec![Contrib::new("com.example.c1", 50, script(1, HandlerAction::Refuse("a\u{0007}b\u{202e}c\n".to_owned())))]);
+    let outcome = run_chain(
+        &mut world,
+        1,
+        vec![Contrib::new(
+            "com.example.c1",
+            50,
+            script(1, HandlerAction::Refuse("a\u{0007}b\u{202e}c\n".to_owned())),
+        )],
+    );
     assert_eq!(outcome.reason(), Some("abc".to_owned()));
 }
 
@@ -381,7 +590,15 @@ fn sec_292_control_characters_and_bidi_overrides_are_removed_from_reasons() {
 #[test]
 fn sec_292_ui_text_is_prefixed_with_the_contributors_display_name() {
     let mut world = hook_world(HookShape::veto());
-    let outcome = run_chain(&mut world, 1, vec![Contrib::new("com.example.c1", 50, script(1, HandlerAction::Refuse("blocked".to_owned())))]);
+    let outcome = run_chain(
+        &mut world,
+        1,
+        vec![Contrib::new(
+            "com.example.c1",
+            50,
+            script(1, HandlerAction::Refuse("blocked".to_owned())),
+        )],
+    );
     assert!(outcome.ui_text().starts_with("com.example.c1") || outcome.ui_text().contains("c1"));
 }
 
@@ -403,7 +620,13 @@ proptest! {
 fn sec_310_untrusted_project_asks_once_and_stores_the_answer_per_canonical_path() {
     let mut world = ExtWorld::new();
     world.open_project("/p/one", true);
-    assert_eq!(world.trust_prompts(), vec!["Trust this project? It contains plugin settings that could change how plugins behave.".to_owned()]);
+    assert_eq!(
+        world.trust_prompts(),
+        vec![
+            "Trust this project? It contains plugin settings that could change how plugins behave."
+                .to_owned()
+        ]
+    );
     world.answer_trust(true);
     world.open_project("/p/one/../one", true);
     assert_eq!(world.trust_prompts().len(), 1, "asked once");
@@ -428,7 +651,11 @@ fn sec_311_untrusted_project_values_are_ignored_and_get_reports_default_or_user(
     world.answer_trust(false);
     world.set_project_value("com.example.cfg", "mode", json!("project"));
     let value = world.get_setting("com.example.cfg", "mode");
-    assert!(value.source == "default" || value.source == "user", "{}", value.source);
+    assert!(
+        value.source == "default" || value.source == "user",
+        "{}",
+        value.source
+    );
     assert!(world.ignored_project_values_notice().is_some());
 }
 
@@ -438,11 +665,24 @@ fn sec_312_trust_sensitive_rows_show_the_first_use_of_each_project_value() {
     let mut world = ExtWorld::new();
     world.open_project("/p/three", true);
     world.answer_trust(true);
-    world.set_project_value_of_type("com.example.cfg", "endpoint", "url", json!("https://example.org"));
-    assert!(world.first_use_prompt("com.example.cfg", "endpoint").is_some());
-    assert_eq!(world.get_setting("com.example.cfg", "endpoint").source, "user");
+    world.set_project_value_of_type(
+        "com.example.cfg",
+        "endpoint",
+        "url",
+        json!("https://example.org"),
+    );
+    assert!(world
+        .first_use_prompt("com.example.cfg", "endpoint")
+        .is_some());
+    assert_eq!(
+        world.get_setting("com.example.cfg", "endpoint").source,
+        "user"
+    );
     world.answer_first_use(true);
-    assert_eq!(world.get_setting("com.example.cfg", "endpoint").source, "project");
+    assert_eq!(
+        world.get_setting("com.example.cfg", "endpoint").source,
+        "project"
+    );
 }
 
 /// REQ: SEC-312
@@ -453,7 +693,10 @@ fn sec_312_each_row_type_path_url_host_and_command_needs_the_extra_step() {
         world.open_project("/p/four", true);
         world.answer_trust(true);
         world.set_project_value_of_type("com.example.cfg", "row", kind, json!("x"));
-        assert!(world.first_use_prompt("com.example.cfg", "row").is_some(), "{kind}");
+        assert!(
+            world.first_use_prompt("com.example.cfg", "row").is_some(),
+            "{kind}"
+        );
     }
 }
 
@@ -464,7 +707,10 @@ fn sec_313_secret_rows_never_take_project_values() {
     world.open_project("/p/five", true);
     world.answer_trust(true);
     world.set_project_value_of_type("com.example.cfg", "token", "secret", json!("hunter2"));
-    assert_ne!(world.get_setting("com.example.cfg", "token").source, "project");
+    assert_ne!(
+        world.get_setting("com.example.cfg", "token").source,
+        "project"
+    );
 }
 
 /// REQ: SEC-314
@@ -475,7 +721,10 @@ fn sec_314_policy_allow_project_values_false_ignores_values_even_when_trusted() 
     world.open_project("/p/six", true);
     world.answer_trust(true);
     world.set_project_value("com.example.cfg", "mode", json!("project"));
-    assert_ne!(world.get_setting("com.example.cfg", "mode").source, "project");
+    assert_ne!(
+        world.get_setting("com.example.cfg", "mode").source,
+        "project"
+    );
 }
 
 /// REQ: SEC-315
@@ -492,7 +741,10 @@ fn sec_315_project_trusted_is_false_until_the_user_trusts_the_folder() {
 #[test]
 fn doc_sec_315_page_states_64_kib_200_rules_and_the_regex_limits() {
     let text = page("reference-extension-security.md");
-    let line = text.lines().find(|line| line.contains("[SEC-315]")).unwrap_or("");
+    let line = text
+        .lines()
+        .find(|line| line.contains("[SEC-315]"))
+        .unwrap_or("");
     for needle in ["64 KiB", "200 rules", "SEC-046"] {
         assert!(line.contains(needle), "{needle}");
     }

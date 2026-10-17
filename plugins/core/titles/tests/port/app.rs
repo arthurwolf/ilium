@@ -10,7 +10,9 @@ use crate::common::*;
 #[test]
 fn port_044_cleared_trigger_starts_no_inference() {
     let mut host = activated_server();
-    host.settings().set(PROMPT_EVENT, json!([])).expect("setting accepted");
+    host.settings()
+        .set(PROMPT_EVENT, json!([]))
+        .expect("setting accepted");
     host.settle();
     host.deliver_one(prompt_event(3, "Fix the login bug"));
     host.settle();

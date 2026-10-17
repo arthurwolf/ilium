@@ -30,7 +30,10 @@ fn ask_with_scan(host: &mut FakeHost, revision: u64, query: &str) -> Vec<Value> 
 }
 
 fn file_hits(hits: &[Value]) -> Vec<Value> {
-    hits.iter().filter(|hit| hit["kind"] == "file").cloned().collect()
+    hits.iter()
+        .filter(|hit| hit["kind"] == "file")
+        .cloned()
+        .collect()
 }
 
 // ---- matching and context -----------------------------------------------------------------
@@ -39,7 +42,11 @@ fn file_hits(hits: &[Value]) -> Vec<Value> {
 #[test]
 fn port_search_ui_file_search_is_case_insensitive_and_keeps_the_zero_based_line() {
     let mut host = activated_server();
-    write_project_file(&mut host, "note.md", b"one\ntwo\nthree\nfour\nA Needle appears\n");
+    write_project_file(
+        &mut host,
+        "note.md",
+        b"one\ntwo\nthree\nfour\nA Needle appears\n",
+    );
     let hits = file_hits(&ask_with_scan(&mut host, 1, "needle"));
     assert_eq!(hits.len(), 1, "{hits:?}");
     assert_eq!(hits[0]["matched"], "Needle");
@@ -99,7 +106,11 @@ fn port_search_ui_text_around_an_invalid_utf8_byte_stays_searchable() {
 #[test]
 fn port_search_ui_embedded_newlines_in_the_context_become_spaces() {
     let mut host = activated_server();
-    write_project_file(&mut host, "note.md", b"first line\nsecond needle third\nline");
+    write_project_file(
+        &mut host,
+        "note.md",
+        b"first line\nsecond needle third\nline",
+    );
     let hits = file_hits(&ask_with_scan(&mut host, 1, "needle"));
     assert_eq!(hits[0]["before"], "first line second ");
     assert_eq!(hits[0]["after"], " third line");
@@ -114,8 +125,14 @@ fn search_009_context_keeps_72_characters_on_each_side_of_a_match() {
     let text = format!("{}needle{}", "b".repeat(100), "a".repeat(100));
     write_project_file(&mut host, "wide.txt", text.as_bytes());
     let hits = file_hits(&ask_with_scan(&mut host, 1, "needle"));
-    assert_eq!(hits[0]["before"].as_str().expect("before").chars().count(), 72);
-    assert_eq!(hits[0]["after"].as_str().expect("after").chars().count(), 72);
+    assert_eq!(
+        hits[0]["before"].as_str().expect("before").chars().count(),
+        72
+    );
+    assert_eq!(
+        hits[0]["after"].as_str().expect("after").chars().count(),
+        72
+    );
 }
 
 /// REQ: F-009
@@ -127,8 +144,10 @@ fn search_009_context_of_71_and_73_characters_is_kept_whole_and_cut_at_72() {
         write_project_file(&mut host, &format!("f{index}.txt"), text.as_bytes());
     }
     let hits = file_hits(&ask_with_scan(&mut host, 1, "needle"));
-    let mut lengths: Vec<usize> =
-        hits.iter().map(|hit| hit["before"].as_str().expect("before").chars().count()).collect();
+    let mut lengths: Vec<usize> = hits
+        .iter()
+        .map(|hit| hit["before"].as_str().expect("before").chars().count())
+        .collect();
     lengths.sort_unstable();
     assert_eq!(lengths, [71, 72, 72]);
 }
@@ -158,7 +177,11 @@ fn search_009_800_matches_are_all_reported() {
 #[test]
 fn port_app_a_terminal_screen_is_found_case_insensitively_with_its_pane_id() {
     let mut host = activated_server();
-    let pane = add_terminal(&mut host, "shell", "before\r\nWORKSPACE_SEARCH_NEEDLE\r\nafter\r\n");
+    let pane = add_terminal(
+        &mut host,
+        "shell",
+        "before\r\nWORKSPACE_SEARCH_NEEDLE\r\nafter\r\n",
+    );
     let hits = ask(&mut host, 1, "workspace_search_needle");
     assert_eq!(hits.len(), 1, "{hits:?}");
     assert_eq!(hits[0]["id"], pane.to_string());
@@ -172,7 +195,10 @@ fn search_009_a_terminal_whose_name_matches_is_found_by_name() {
     let mut host = activated_server();
     add_terminal(&mut host, "build shell", "nothing special");
     let hits = ask(&mut host, 1, "build");
-    assert!(hits.iter().any(|hit| hit["title"] == "build shell"), "{hits:?}");
+    assert!(
+        hits.iter().any(|hit| hit["title"] == "build shell"),
+        "{hits:?}"
+    );
 }
 
 /// REQ: F-009
@@ -253,7 +279,9 @@ fn search_009_job_progress_does_not_produce_an_answer_before_the_job_completes()
 #[test]
 fn search_009_job_runner_refuses_an_unknown_kind_with_invalid_argument() {
     let mut runner = ilium_plugin_core_search::SearchServer::default();
-    let error = runner.run("other-kind".to_string(), Vec::new()).expect_err("unknown kind");
+    let error = runner
+        .run("other-kind".to_string(), Vec::new())
+        .expect_err("unknown kind");
     assert_eq!(error.code, ErrorCode::InvalidArgument);
 }
 
@@ -273,16 +301,29 @@ fn port_search_workers_a_second_query_while_a_scan_runs_returns_at_once_and_leav
     host.settle();
     host.deliver(vec![query_event(1, 2, "needle")]);
     host.settle();
-    let live: Vec<_> = host.jobs().list().into_iter().filter(|job| job.kind == "scan-files").collect();
+    let live: Vec<_> = host
+        .jobs()
+        .list()
+        .into_iter()
+        .filter(|job| job.kind == "scan-files")
+        .collect();
     assert!(live.len() <= 2, "{live:?}");
     drive_jobs(&mut host);
     let answers: Vec<_> = result_messages(&host.submitted());
     let revisions_with_hits: Vec<u64> = answers
         .iter()
-        .filter(|(_, payload)| payload["hits"].as_array().is_some_and(|hits| !hits.is_empty()))
+        .filter(|(_, payload)| {
+            payload["hits"]
+                .as_array()
+                .is_some_and(|hits| !hits.is_empty())
+        })
         .map(|(_, payload)| payload["revision"].as_u64().expect("revision"))
         .collect();
-    assert_eq!(revisions_with_hits, [2], "only the newest query is answered with hits");
+    assert_eq!(
+        revisions_with_hits,
+        [2],
+        "only the newest query is answered with hits"
+    );
 }
 
 /// REQ: F-009, PORT:ilium-client/src/search_workers.rs::blocked_shared_cpu_does_not_block_producer_and_cancel_keeps_one_receipt
@@ -305,7 +346,9 @@ fn port_search_workers_a_cancelled_scan_gives_exactly_one_answer_without_hits() 
     host.settle();
     let answers = result_messages(&host.submitted());
     assert!(answers.len() <= 1, "{answers:?}");
-    assert!(answers.iter().all(|(_, payload)| payload["hits"] == serde_json::json!([])));
+    assert!(answers
+        .iter()
+        .all(|(_, payload)| payload["hits"] == serde_json::json!([])));
 }
 
 /// REQ: F-009, PORT:ilium-client/src/search_workers.rs::oversize_capture_is_rejected_before_any_job_is_published
@@ -330,7 +373,10 @@ fn port_search_workers_a_file_over_8_mib_is_skipped_before_any_job_reads_it() {
 fn port_search_workers_each_client_gets_only_the_answer_to_its_own_query() {
     let mut host = activated_server();
     write_project_file(&mut host, "note.md", b"needle");
-    host.deliver(vec![query_event(1, 1, "needle"), query_event(2, 1, "needle")]);
+    host.deliver(vec![
+        query_event(1, 1, "needle"),
+        query_event(2, 1, "needle"),
+    ]);
     host.settle();
     drive_jobs(&mut host);
     let answers = result_messages(&host.submitted());
@@ -338,7 +384,10 @@ fn port_search_workers_each_client_gets_only_the_answer_to_its_own_query() {
     clients.sort_unstable();
     clients.dedup();
     assert_eq!(clients, [1, 2]);
-    assert!(answers.iter().all(|(client, _)| client.is_some()), "never broadcast to every client");
+    assert!(
+        answers.iter().all(|(client, _)| client.is_some()),
+        "never broadcast to every client"
+    );
 }
 
 /// REQ: F-009, PORT:ilium-client/src/search_workers.rs::displayed_results_release_finite_input_credit_and_keep_measured_storage
@@ -353,7 +402,10 @@ fn port_search_workers_a_finished_scan_frees_the_slot_and_keeps_its_hit_for_the_
     let started = host.jobs().list().len();
     host.deliver(vec![query_event(1, 2, "needle")]);
     host.settle();
-    assert!(host.jobs().list().len() > started, "a new query starts a new job");
+    assert!(
+        host.jobs().list().len() > started,
+        "a new query starts a new job"
+    );
 }
 
 // ---- search by meaning --------------------------------------------------------------------

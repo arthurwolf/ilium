@@ -290,4 +290,3 @@ pub fn input_uncertain(payload: InputUncertainEvent) -> Event {
 pub fn display_mode_changed(payload: Option<String>) -> Event {
     Event::DisplayModeChanged(payload)
 }
-

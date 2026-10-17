@@ -10,7 +10,8 @@ fn holds_bookmark_flag(value: &serde_json::Value) -> bool {
     match value {
         serde_json::Value::Array(items) => items.iter().any(holds_bookmark_flag),
         serde_json::Value::Object(map) => map.iter().any(|(key, item)| {
-            (key.contains("bookmark") && item == &serde_json::Value::Bool(true)) || holds_bookmark_flag(item)
+            (key.contains("bookmark") && item == &serde_json::Value::Bool(true))
+                || holds_bookmark_flag(item)
         }),
         _ => false,
     }
@@ -27,19 +28,34 @@ fn port_001_bookmark_intent_is_accepted_and_marks_the_tree_for_persistence() {
         let writes_before = kernel.snapshot_write_count();
         let fingerprint_before = kernel.tree_fingerprint();
 
-        let outcome = apply(kernel, Intent::SetBookmarked(SetBookmarkedSpec { node: work, bookmarked: true }));
+        let outcome = apply(
+            kernel,
+            Intent::SetBookmarked(SetBookmarkedSpec {
+                node: work,
+                bookmarked: true,
+            }),
+        );
         assert_eq!(outcome, Outcome::Ok);
 
         // The bookmark is a tree change: the snapshot is marked dirty and written after the debounce.
         kernel.advance_clock_ms(750);
         kernel.settle();
-        assert_eq!(kernel.snapshot_write_count(), writes_before + 1, "the bookmark must dirty the snapshot");
+        assert_eq!(
+            kernel.snapshot_write_count(),
+            writes_before + 1,
+            "the bookmark must dirty the snapshot"
+        );
         // A bookmark changes neither structure, titles nor sizes.
         assert_eq!(kernel.tree_fingerprint(), fingerprint_before);
         assert_eq!(node(kernel, work).title, "work");
 
-        let text = kernel.read_project_file(".ilium/sessions/default.json").expect("snapshot file");
+        let text = kernel
+            .read_project_file(".ilium/sessions/default.json")
+            .expect("snapshot file");
         let json: serde_json::Value = serde_json::from_str(&text).expect("valid JSON snapshot");
-        assert!(holds_bookmark_flag(&json), "snapshot does not record the bookmark: {json}");
+        assert!(
+            holds_bookmark_flag(&json),
+            "snapshot does not record the bookmark: {json}"
+        );
     });
 }

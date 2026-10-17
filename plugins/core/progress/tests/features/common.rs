@@ -11,9 +11,10 @@ use ilium_plugin_core_progress::{ProgressClient, ProgressServer};
 use ilium_plugin_sdk::host::process::ProcessExit;
 use ilium_plugin_sdk::testing::{FakeHost, TreeNode};
 use ilium_plugin_sdk::types::{
-    AgentView, Event, Intent, MessageEvent, NodeClass, NodeId, PluginId, PluginSide, SendInputSpec, Submission,
+    AgentView, Event, Intent, MessageEvent, NodeClass, NodeId, PluginId, PluginSide, SendInputSpec,
+    Submission,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 pub const PLUGIN_ID: &str = "ilium.core.progress";
 pub const FOOTER_VIEW: &str = "progress.footer";
@@ -40,7 +41,9 @@ pub fn workspace_root() -> PathBuf {
 
 /// The text of a manual page by file stem, for example `core-plugin-progress`.
 pub fn page(stem: &str) -> String {
-    let path = workspace_root().join("docs/plugins-manual/pages").join(format!("{stem}.md"));
+    let path = workspace_root()
+        .join("docs/plugins-manual/pages")
+        .join(format!("{stem}.md"));
     std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("page {path:?}: {error}"))
 }
 
@@ -55,7 +58,10 @@ pub fn user_doc(name: &str) -> String {
 }
 
 pub fn golden_path(name: &str) -> String {
-    format!("{}/tests/features/golden/{name}", env!("CARGO_MANIFEST_DIR"))
+    format!(
+        "{}/tests/features/golden/{name}",
+        env!("CARGO_MANIFEST_DIR")
+    )
 }
 
 /// The bodies of the ```json fences of a page, in order.
@@ -64,7 +70,9 @@ pub fn json_blocks(page: &str) -> Vec<String> {
     let mut rest = page;
     while let Some(start) = rest.find("```json\n") {
         let after = &rest[start + "```json\n".len()..];
-        let Some(end) = after.find("\n```") else { break };
+        let Some(end) = after.find("\n```") else {
+            break;
+        };
         blocks.push(after[..end].to_string());
         rest = &after[end + 4..];
     }
@@ -73,7 +81,9 @@ pub fn json_blocks(page: &str) -> Vec<String> {
 
 /// The first json block after the heading `heading`.
 pub fn json_block_after(page: &str, heading: &str) -> Value {
-    let start = page.find(heading).unwrap_or_else(|| panic!("heading {heading} missing"));
+    let start = page
+        .find(heading)
+        .unwrap_or_else(|| panic!("heading {heading} missing"));
     let rest = &page[start..];
     let open = rest.find("```json\n").expect("json block") + "```json\n".len();
     let close = rest[open..].find("```").expect("block end");
@@ -86,7 +96,9 @@ pub fn term_blocks(page: &str) -> Vec<String> {
     let mut rest = page;
     while let Some(start) = rest.find("<pre class=\"term\">") {
         let after = &rest[start + "<pre class=\"term\">".len()..];
-        let Some(end) = after.find("</pre>") else { break };
+        let Some(end) = after.find("</pre>") else {
+            break;
+        };
         let mut text = String::new();
         let mut in_tag = false;
         for symbol in after[..end].chars() {
@@ -97,7 +109,10 @@ pub fn term_blocks(page: &str) -> Vec<String> {
                 _ => {}
             }
         }
-        let text = text.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">");
+        let text = text
+            .replace("&amp;", "&")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">");
         blocks.push(text.trim_matches('\n').to_string());
         rest = &after[end + 6..];
     }
@@ -113,14 +128,22 @@ pub fn table_row(text: &str, first_cell: &str) -> Vec<String> {
             cells.len() > 2 && cells[1] == first_cell
         })
         .unwrap_or_else(|| panic!("no table row starting with {first_cell}"));
-    let mut cells: Vec<String> = line.split('|').map(|cell| cell.trim().to_string()).collect();
+    let mut cells: Vec<String> = line
+        .split('|')
+        .map(|cell| cell.trim().to_string())
+        .collect();
     cells.remove(0);
     cells.pop();
     cells
 }
 
 pub fn strings(value: &Value) -> Vec<String> {
-    value.as_array().expect("array").iter().map(|item| item.as_str().expect("string").to_string()).collect()
+    value
+        .as_array()
+        .expect("array")
+        .iter()
+        .map(|item| item.as_str().expect("string").to_string())
+        .collect()
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -128,11 +151,17 @@ pub fn strings(value: &Value) -> Vec<String> {
 // ---------------------------------------------------------------------------------------------
 
 pub fn server_host() -> FakeHost {
-    FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("server").build()
+    FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("server")
+        .build()
 }
 
 pub fn client_host() -> FakeHost {
-    FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("client").build()
+    FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("client")
+        .build()
 }
 
 pub fn activated_server() -> FakeHost {
@@ -189,16 +218,27 @@ pub fn host_with_pane() -> (FakeHost, u64) {
 
 /// A successful probe exit with the given standard output.
 pub fn probe_exit(stdout: &str) -> ProcessExit {
-    ProcessExit { status: Some(0), signal: None, stdout: stdout.as_bytes().to_vec(), stderr: Vec::new() }
+    ProcessExit {
+        status: Some(0),
+        signal: None,
+        stdout: stdout.as_bytes().to_vec(),
+        stderr: Vec::new(),
+    }
 }
 
 pub fn failing_exit(status: i32) -> ProcessExit {
-    ProcessExit { status: Some(status), signal: None, stdout: Vec::new(), stderr: b"boom".to_vec() }
+    ProcessExit {
+        status: Some(status),
+        signal: None,
+        stdout: Vec::new(),
+        stderr: b"boom".to_vec(),
+    }
 }
 
 /// The probe output for a running task.
 pub fn running(job_id: &str, percent: u32, message: &str) -> String {
-    json!({"job_id": job_id, "status": "running", "percent": percent, "message": message}).to_string()
+    json!({"job_id": job_id, "status": "running", "percent": percent, "message": message})
+        .to_string()
 }
 
 /// The probe output for a finished task.
@@ -214,7 +254,9 @@ pub fn failed(job_id: &str, percent: u32, message: &str, error: &str) -> String 
 
 /// Registers one expected probe run: `sh -c <command>` printing `stdout` and exiting 0.
 pub fn expect_probe(host: &mut FakeHost, command: &str, stdout: &str) {
-    host.process().expect("sh", &["-c", command]).returns(probe_exit(stdout));
+    host.process()
+        .expect("sh", &["-c", command])
+        .returns(probe_exit(stdout));
 }
 
 /// Registers one expected probe run with a prepared exit.
@@ -241,7 +283,9 @@ pub fn probe_runs(host: &mut FakeHost) -> usize {
 pub fn records(text: &str) -> Vec<Value> {
     text.lines()
         .filter(|line| !line.trim().is_empty())
-        .map(|line| serde_json::from_str(line).unwrap_or_else(|error| panic!("not JSON: {line:?}: {error}")))
+        .map(|line| {
+            serde_json::from_str(line).unwrap_or_else(|error| panic!("not JSON: {line:?}: {error}"))
+        })
         .collect()
 }
 
@@ -329,7 +373,11 @@ pub fn progress(host: &mut FakeHost, pane: u64, args: &[&str]) -> Run {
 pub fn run_in_pane(host: &mut FakeHost, pane: u64, args: &[&str]) -> Run {
     set_pane_env(host, Some(pane));
     let invocation = host.cli().invoke(args, b"");
-    Run { stdout: invocation.stdout(), stderr: invocation.stderr(), exit: invocation.exit_code() }
+    Run {
+        stdout: invocation.stdout(),
+        stderr: invocation.stderr(),
+        exit: invocation.exit_code(),
+    }
 }
 
 /// A command line that stays open (a `--wait`); read it again with [`Open::read`] after time passes.
@@ -339,7 +387,11 @@ pub struct Open {
 
 impl Open {
     pub fn read(&self) -> Run {
-        Run { stdout: self.invocation.stdout(), stderr: self.invocation.stderr(), exit: self.invocation.exit_code() }
+        Run {
+            stdout: self.invocation.stdout(),
+            stderr: self.invocation.stderr(),
+            exit: self.invocation.exit_code(),
+        }
     }
 }
 
@@ -354,17 +406,27 @@ impl Open {
 /// Starts `ilium <args>` in `pane` without reading its result yet.
 pub fn start_in_pane(host: &mut FakeHost, pane: u64, args: &[&str]) -> Open {
     set_pane_env(host, Some(pane));
-    Open { invocation: host.cli().invoke(args, b"") }
+    Open {
+        invocation: host.cli().invoke(args, b""),
+    }
 }
 
 /// Registers a monitor with `progress set`, one probe run answering `first_stdout`; returns its id.
-pub fn register(host: &mut FakeHost, pane: u64, command: &str, first_stdout: &str, extra: &[&str]) -> u64 {
+pub fn register(
+    host: &mut FakeHost,
+    pane: u64,
+    command: &str,
+    first_stdout: &str,
+    extra: &[&str],
+) -> u64 {
     expect_probe(host, command, first_stdout);
     let mut args = vec!["set", "--command", command];
     args.extend_from_slice(extra);
     let run = progress(host, pane, &args);
     let record = record_of(&run.stdout, "progress_set");
-    record["monitor_id"].as_u64().unwrap_or_else(|| panic!("monitor_id in {record}"))
+    record["monitor_id"]
+        .as_u64()
+        .unwrap_or_else(|| panic!("monitor_id in {record}"))
 }
 
 /// All probe outputs for a command, used with [`feed`].
@@ -410,7 +472,11 @@ pub fn sent_inputs(host: &FakeHost) -> Vec<SendInputSpec> {
 
 /// The text of every `send-input` to `pane`.
 pub fn typed_texts(host: &FakeHost, pane: u64) -> Vec<String> {
-    sent_inputs(host).into_iter().filter(|spec| spec.pane == NodeId(pane)).map(|spec| spec.text).collect()
+    sent_inputs(host)
+        .into_iter()
+        .filter(|spec| spec.pane == NodeId(pane))
+        .map(|spec| spec.text)
+        .collect()
 }
 
 /// A `message` event from the server side of the plugin to the client side.
@@ -442,7 +508,11 @@ pub fn http_replies(host: &FakeHost) -> Vec<(u64, u16, Vec<(String, String)>, Ve
 }
 
 /// Sets a kernel setting of the tab `agent-monitoring` and delivers `kernel-settings-changed`.
-pub fn set_kernel_setting(host: &mut FakeHost, key: &str, value: Value) -> Result<(), ilium_plugin_sdk::types::PluginError> {
+pub fn set_kernel_setting(
+    host: &mut FakeHost,
+    key: &str,
+    value: Value,
+) -> Result<(), ilium_plugin_sdk::types::PluginError> {
     host.settings().set(key, value)?;
     host.settle();
     Ok(())
@@ -455,7 +525,10 @@ pub fn contribute(host: &mut FakeHost, point: &str, id: &str, priority: i32, ent
 }
 
 /// Calls the service `ilium.core.progress/report` of the plugin; returns the reply text.
-pub fn call_report(host: &mut FakeHost, request_json: &str) -> Result<String, ilium_plugin_sdk::types::PluginError> {
+pub fn call_report(
+    host: &mut FakeHost,
+    request_json: &str,
+) -> Result<String, ilium_plugin_sdk::types::PluginError> {
     host.call_own_service("ilium.core.progress/report", request_json)
 }
 

@@ -9,8 +9,10 @@ mod host_calls {
     use std::cell::RefCell;
 
     use ilium_plugin_sdk_core::host::{HttpRequest, HttpResponse};
-    use ilium_plugin_sdk_core::types::{Activation, DeactivationReason, ErrorCode, Event, FsPath, PluginError, Submission};
-    use ilium_plugin_sdk_core::{NativeEntry, host};
+    use ilium_plugin_sdk_core::types::{
+        Activation, DeactivationReason, ErrorCode, Event, FsPath, PluginError, Submission,
+    };
+    use ilium_plugin_sdk_core::{host, NativeEntry};
     use ilium_plugin_testkit::FakeHost;
 
     use crate::common::{client_batch, with_clean_env};
@@ -36,7 +38,10 @@ mod host_calls {
         }
 
         fn native_on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
-            let path = FsPath { scope: "project".to_string(), path: "a.txt".to_string() };
+            let path = FsPath {
+                scope: "project".to_string(),
+                path: "a.txt".to_string(),
+            };
             let read = host().read(path, 0, 1024);
             READ_RESULT.with(|slot| *slot.borrow_mut() = Some(read));
             let request = HttpRequest {
@@ -59,12 +64,20 @@ mod host_calls {
         host.http().expect(
             "GET",
             "https://api.example.com/x",
-            HttpResponse { status: 200, headers: Vec::new(), body: Vec::new() },
+            HttpResponse {
+                status: 200,
+                headers: Vec::new(),
+                body: Vec::new(),
+            },
         );
         host.deliver(client_batch(1));
         (
-            READ_RESULT.with(|slot| slot.borrow_mut().take()).expect("read ran"),
-            FETCH_RESULT.with(|slot| slot.borrow_mut().take()).expect("fetch ran"),
+            READ_RESULT
+                .with(|slot| slot.borrow_mut().take())
+                .expect("read ran"),
+            FETCH_RESULT
+                .with(|slot| slot.borrow_mut().take())
+                .expect("fetch ran"),
         )
     }
 
@@ -73,7 +86,10 @@ mod host_calls {
     fn dev_455_a_read_outside_the_granted_scope_returns_not_permitted() {
         with_clean_env(|| {
             let (read, _) = probe(&["fs.read:session"]);
-            assert_eq!(read.expect_err("scope not granted").code, ErrorCode::NotPermitted);
+            assert_eq!(
+                read.expect_err("scope not granted").code,
+                ErrorCode::NotPermitted
+            );
         });
     }
 
@@ -91,7 +107,10 @@ mod host_calls {
     fn dev_463_a_request_to_a_host_outside_the_grant_returns_not_permitted() {
         with_clean_env(|| {
             let (_, fetch) = probe(&["http:api.example.com"]);
-            assert_eq!(fetch.expect_err("other.example.org is not granted").code, ErrorCode::NotPermitted);
+            assert_eq!(
+                fetch.expect_err("other.example.org is not granted").code,
+                ErrorCode::NotPermitted
+            );
         });
     }
 
@@ -100,9 +119,19 @@ mod host_calls {
     fn dev_463_a_wildcard_pattern_covers_subdomains_only() {
         with_clean_env(|| {
             let (_, fetch) = probe(&["http:*.example.org"]);
-            assert_eq!(fetch.as_ref().err().map(|error| format!("{:?}", error.code)), None, "other.example.org matches *.example.org");
+            assert_eq!(
+                fetch
+                    .as_ref()
+                    .err()
+                    .map(|error| format!("{:?}", error.code)),
+                None,
+                "other.example.org matches *.example.org"
+            );
             let (_, fetch) = probe(&["http:*.example.com"]);
-            assert_eq!(fetch.expect_err("different domain").code, ErrorCode::NotPermitted);
+            assert_eq!(
+                fetch.expect_err("different domain").code,
+                ErrorCode::NotPermitted
+            );
         });
     }
 }
@@ -113,7 +142,9 @@ mod session_routing {
     use ilium_plugin_sdk_core::events;
     use ilium_plugin_testkit::session::FakeSession;
 
-    use crate::common::{Spy, spy, spy_reset, spy_script, temp_dir, with_clean_env, write_file, manifest_text};
+    use crate::common::{
+        manifest_text, spy, spy_reset, spy_script, temp_dir, with_clean_env, write_file, Spy,
+    };
 
     fn package(label: &str, id: &str, extra: &str) -> std::path::PathBuf {
         let dir = temp_dir(label);
@@ -127,19 +158,39 @@ mod session_routing {
     fn dev_480_a_service_call_reaches_the_provider_that_services_provide_names() {
         with_clean_env(|| {
             spy_reset();
-            let provider = package("s480p", "example.provider", r#""services": { "provide": ["example.provider/status"] }"#);
-            let caller = package("s480c", "example.caller", r#""services": { "use": ["example.provider/status"] }"#);
+            let provider = package(
+                "s480p",
+                "example.provider",
+                r#""services": { "provide": ["example.provider/status"] }"#,
+            );
+            let caller = package(
+                "s480c",
+                "example.caller",
+                r#""services": { "use": ["example.provider/status"] }"#,
+            );
             let mut session = FakeSession::new();
-            session.install_native::<Spy>(&provider).install_native::<Spy>(&caller).start();
-            let reply = session.call_service("example.caller", "example.provider/status", "*", "{}");
+            session
+                .install_native::<Spy>(&provider)
+                .install_native::<Spy>(&caller)
+                .start();
+            let reply =
+                session.call_service("example.caller", "example.provider/status", "*", "{}");
             let reply = reply.expect("the provider named by services.provide answers");
             assert!(
-                matches!(reply, ilium_plugin_sdk_core::types::ServiceReply::Done(_) | ilium_plugin_sdk_core::types::ServiceReply::Deferred),
+                matches!(
+                    reply,
+                    ilium_plugin_sdk_core::types::ServiceReply::Done(_)
+                        | ilium_plugin_sdk_core::types::ServiceReply::Deferred
+                ),
                 "reply was {reply:?}"
             );
             assert!(!spy().batches.is_empty(), "the provider handled the call");
-            let missing = session.call_service("example.caller", "example.unprovided/status", "*", "{}");
-            assert_eq!(missing.expect_err("no provider").code, ilium_plugin_sdk_core::types::ErrorCode::NotFound);
+            let missing =
+                session.call_service("example.caller", "example.unprovided/status", "*", "{}");
+            assert_eq!(
+                missing.expect_err("no provider").code,
+                ilium_plugin_sdk_core::types::ErrorCode::NotFound
+            );
         });
     }
 
@@ -151,17 +202,25 @@ mod session_routing {
             let dir = package("s481", "example.both", r#""x-note": "two sides""#);
             let mut session = FakeSession::new();
             session.install_native::<Spy>(&dir).start();
-            use ilium_plugin_sdk_core::types::{Event, Intent, MessageSpec, MessageTarget, PluginId, PluginSide, Submission};
+            use ilium_plugin_sdk_core::types::{
+                Event, Intent, MessageSpec, MessageTarget, PluginId, PluginSide, Submission,
+            };
             spy_script(vec![vec![Submission {
                 intent: Intent::Message(MessageSpec {
-                    to: MessageTarget { plugin: PluginId("example.both".to_string()), side: PluginSide::Client, client: None },
+                    to: MessageTarget {
+                        plugin: PluginId("example.both".to_string()),
+                        side: PluginSide::Client,
+                        client: None,
+                    },
                     channel: "note".to_string(),
                     payload: b"hello".to_vec(),
                 }),
                 correlation: 1,
                 dedup_key: None,
             }]]);
-            session.server("example.both").deliver(vec![events::command("send", &[])]);
+            session
+                .server("example.both")
+                .deliver(vec![events::command("send", &[])]);
             session.pump().expect("settles");
             let received = spy()
                 .batches

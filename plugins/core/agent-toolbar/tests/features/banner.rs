@@ -17,7 +17,14 @@ fn f_033_submitted_line_sets_the_prompt_slot_of_its_pane() {
     let mut host = client_host();
     let pane = add_agent_pane(&mut host, "claude", "claude", AgentActivity::Working);
     let slots = set_slots(&host.deliver_one(user_line(pane, "refactor the parser to use a lexer")));
-    assert_eq!(slots, vec![(pane, "prompt".to_string(), "> refactor the parser to use a lexer".to_string())]);
+    assert_eq!(
+        slots,
+        vec![(
+            pane,
+            "prompt".to_string(),
+            "> refactor the parser to use a lexer".to_string()
+        )]
+    );
 }
 
 /// REQ: F-033
@@ -95,10 +102,14 @@ fn f_033_each_pane_gets_its_own_banner_in_one_batch() {
     let mut host = client_host();
     let first = add_agent_pane(&mut host, "claude", "claude", AgentActivity::Working);
     let second = add_agent_pane(&mut host, "codex", "codex", AgentActivity::Working);
-    let slots = set_slots(&host.deliver(vec![user_line(first, "alpha"), user_line(second, "beta")]));
+    let slots =
+        set_slots(&host.deliver(vec![user_line(first, "alpha"), user_line(second, "beta")]));
     assert_eq!(
         slots,
-        vec![(first, "prompt".to_string(), "> alpha".to_string()), (second, "prompt".to_string(), "> beta".to_string())]
+        vec![
+            (first, "prompt".to_string(), "> alpha".to_string()),
+            (second, "prompt".to_string(), "> beta".to_string())
+        ]
     );
 }
 
@@ -107,7 +118,11 @@ fn f_033_each_pane_gets_its_own_banner_in_one_batch() {
 fn f_033_an_empty_line_in_a_batch_does_not_hide_the_others() {
     let mut host = client_host();
     let pane = add_agent_pane(&mut host, "claude", "claude", AgentActivity::Working);
-    let slots = set_slots(&host.deliver(vec![user_line(pane, "first"), user_line(pane, "  "), user_line(pane, "third")]));
+    let slots = set_slots(&host.deliver(vec![
+        user_line(pane, "first"),
+        user_line(pane, "  "),
+        user_line(pane, "third"),
+    ]));
     let texts: Vec<&str> = slots.iter().map(|slot| slot.2.as_str()).collect();
     assert_eq!(texts, ["> first", "> third"]);
 }
@@ -119,7 +134,10 @@ fn f_033_a_later_prompt_replaces_the_earlier_one_in_the_same_slot() {
     let pane = add_agent_pane(&mut host, "claude", "claude", AgentActivity::Working);
     host.deliver_one(user_line(pane, "first prompt"));
     let slots = set_slots(&host.deliver_one(user_line(pane, "second prompt")));
-    assert_eq!(slots, vec![(pane, "prompt".to_string(), "> second prompt".to_string())]);
+    assert_eq!(
+        slots,
+        vec![(pane, "prompt".to_string(), "> second prompt".to_string())]
+    );
 }
 
 /// REQ: F-033
@@ -129,7 +147,11 @@ fn f_033_the_banner_submission_is_accepted_by_the_host() {
     let pane = add_agent_pane(&mut host, "claude", "claude", AgentActivity::Working);
     host.deliver_one(user_line(pane, "do it"));
     host.settle();
-    assert!(host.outcomes().iter().all(|outcome| outcome.is_ok()), "{:?}", host.outcomes());
+    assert!(
+        host.outcomes().iter().all(|outcome| outcome.is_ok()),
+        "{:?}",
+        host.outcomes()
+    );
 }
 
 /// REQ: F-033
@@ -139,7 +161,9 @@ fn f_033_only_the_prompt_slot_is_written_by_a_submitted_line() {
     let pane = add_agent_pane(&mut host, "claude", "claude", AgentActivity::Working);
     let submissions = host.deliver_one(user_line(pane, "do it"));
     assert_eq!(submissions.len(), 1);
-    assert!(matches!(&submissions[0].intent, Intent::SetFrameSlot(spec) if spec.slot == "prompt" && spec.icon.is_none() && spec.tooltip.is_none()));
+    assert!(
+        matches!(&submissions[0].intent, Intent::SetFrameSlot(spec) if spec.slot == "prompt" && spec.icon.is_none() && spec.tooltip.is_none())
+    );
 }
 
 /// REQ: F-033
@@ -147,7 +171,10 @@ fn f_033_only_the_prompt_slot_is_written_by_a_submitted_line() {
 fn f_033_unrelated_events_produce_no_banner_intents() {
     let mut host = client_host();
     let pane = add_agent_pane(&mut host, "claude", "claude", AgentActivity::Working);
-    let submissions = host.deliver(vec![Event::PaneFocused(Some(NodeId(pane))), Event::ThemeChanged]);
+    let submissions = host.deliver(vec![
+        Event::PaneFocused(Some(NodeId(pane))),
+        Event::ThemeChanged,
+    ]);
     assert!(set_slots(&submissions).is_empty());
 }
 
@@ -168,8 +195,14 @@ fn f_033_goal_changes_are_remembered_without_submitting() {
 fn f_033_a_cleared_goal_submits_nothing_either() {
     let mut host = client_host();
     let pane = add_agent_pane(&mut host, "codex", "codex", AgentActivity::Working);
-    let set = Event::AgentGoalChanged(ilium_plugin_sdk::types::AgentGoalEvent { node: NodeId(pane), goal: Some("g".into()) });
-    let cleared = Event::AgentGoalChanged(ilium_plugin_sdk::types::AgentGoalEvent { node: NodeId(pane), goal: None });
+    let set = Event::AgentGoalChanged(ilium_plugin_sdk::types::AgentGoalEvent {
+        node: NodeId(pane),
+        goal: Some("g".into()),
+    });
+    let cleared = Event::AgentGoalChanged(ilium_plugin_sdk::types::AgentGoalEvent {
+        node: NodeId(pane),
+        goal: None,
+    });
     host.deliver_one(set);
     assert!(host.deliver_one(cleared).is_empty());
 }

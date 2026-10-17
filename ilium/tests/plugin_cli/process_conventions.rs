@@ -26,7 +26,8 @@ fn lines(output: &Output) -> Vec<Value> {
 }
 
 fn scratch() -> tempfile::TempDir {
-    tempfile::tempdir_in("/media/arthur/tmp").unwrap_or_else(|_| tempfile::tempdir().expect("tempdir"))
+    tempfile::tempdir_in("/media/arthur/tmp")
+        .unwrap_or_else(|_| tempfile::tempdir().expect("tempdir"))
 }
 
 /// REQ: DEV-003
@@ -44,7 +45,10 @@ fn dev_007_process_exit_code_equals_the_result_record() {
     let records = lines(&output);
     let result = records.last().expect("result");
     assert_eq!(result["type"], "result");
-    assert_eq!(Some(result["exit_code"].as_i64().expect("exit_code") as i32), output.status.code());
+    assert_eq!(
+        Some(result["exit_code"].as_i64().expect("exit_code") as i32),
+        output.status.code()
+    );
 }
 
 /// REQ: DEV-004
@@ -53,12 +57,23 @@ fn dev_007_process_exit_code_equals_the_result_record() {
 fn dev_006_session_command_without_a_session_exits_six_without_retry() {
     let dir = scratch();
     let started = std::time::Instant::now();
-    let output = ilium(dir.path(), &["list", "--json", "--cwd", dir.path().to_str().expect("utf8")]);
+    let output = ilium(
+        dir.path(),
+        &[
+            "list",
+            "--json",
+            "--cwd",
+            dir.path().to_str().expect("utf8"),
+        ],
+    );
     assert_eq!(output.status.code(), Some(6));
     let records = lines(&output);
     assert_eq!(records.iter().filter(|r| r["type"] == "error").count(), 1);
     assert_eq!(records[0]["code"], "session.unreachable");
-    assert!(started.elapsed() < std::time::Duration::from_secs(10), "no retry loop");
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(10),
+        "no retry loop"
+    );
 }
 
 /// REQ: DEV-010
@@ -66,7 +81,15 @@ fn dev_006_session_command_without_a_session_exits_six_without_retry() {
 fn dev_010_usage_error_exits_two_and_writes_no_files() {
     let dir = scratch();
     let target = dir.path().join("proj");
-    let output = ilium(dir.path(), &["new", target.to_str().expect("utf8"), "--template", "no-such-template"]);
+    let output = ilium(
+        dir.path(),
+        &[
+            "new",
+            target.to_str().expect("utf8"),
+            "--template",
+            "no-such-template",
+        ],
+    );
     assert_eq!(output.status.code(), Some(2));
     assert!(!target.exists());
 }
@@ -77,8 +100,15 @@ fn dev_016_stdout_is_jsonl_and_text_goes_to_stderr() {
     let dir = scratch();
     let output = ilium(dir.path(), &["trust", "list", "--json"]);
     let records = lines(&output);
-    assert!(records.iter().all(|r| r.as_object().and_then(|o| o.keys().next()).map(String::as_str) == Some("type")));
-    assert!(!String::from_utf8_lossy(&output.stdout).contains("\u{1b}["), "no ANSI on stdout");
+    assert!(records.iter().all(|r| r
+        .as_object()
+        .and_then(|o| o.keys().next())
+        .map(String::as_str)
+        == Some("type")));
+    assert!(
+        !String::from_utf8_lossy(&output.stdout).contains("\u{1b}["),
+        "no ANSI on stdout"
+    );
 }
 
 /// REQ: DEV-017

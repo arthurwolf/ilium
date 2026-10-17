@@ -21,7 +21,10 @@ fn ambient_decoration_preserves_source_and_colored_spaces_but_fills_plain_backgr
 fn capture_all_animation_settings_frames_twin() {
     render_holds(80, 24);
     render_holds(24, 6);
-    assert_eq!(activated_client().settings().get("scene"), Some(json!("stars")));
+    assert_eq!(
+        activated_client().settings().get("scene"),
+        Some(json!("stars"))
+    );
 }
 
 /// REQ: PORT:ilium-client/src/background_acceptance.rs::colour_controls_survive_scene_switch_and_project_reload

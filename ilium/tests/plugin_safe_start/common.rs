@@ -6,13 +6,19 @@ use std::time::{Duration, Instant};
 
 /// The workspace root.
 pub fn workspace_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).parent().expect("workspace root").to_path_buf()
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("workspace root")
+        .to_path_buf()
 }
 
 /// The text of one manual page.
 pub fn manual_page(name: &str) -> String {
-    let path = workspace_root().join("docs/plugins-manual/pages").join(format!("{name}.md"));
-    std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
+    let path = workspace_root()
+        .join("docs/plugins-manual/pages")
+        .join(format!("{name}.md"));
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
 }
 
 /// Runs the `ilium` binary with isolated state and a hard time bound.

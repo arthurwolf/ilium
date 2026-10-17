@@ -18,7 +18,16 @@ pub struct Process {
 
 impl Process {
     pub const fn claude() -> Self {
-        Self { turns: 160, trigger: 150_000, start_context: 20_000, growth: 2_000, growth_jitter: 1_000, post_cache_read: 15_000, post_fresh: 50_000, epoch_seconds: 1_780_000_000 }
+        Self {
+            turns: 160,
+            trigger: 150_000,
+            start_context: 20_000,
+            growth: 2_000,
+            growth_jitter: 1_000,
+            post_cache_read: 15_000,
+            post_fresh: 50_000,
+            epoch_seconds: 1_780_000_000,
+        }
     }
     pub const fn codex() -> Self {
         Self::claude()
@@ -75,7 +84,10 @@ pub fn claude_session(process: &Process, index: usize, tag: &str) -> String {
         } else if after_compaction {
             (process.post_cache_read, process.post_fresh)
         } else {
-            (context, process.growth + jitter(index, turn, process.growth_jitter))
+            (
+                context,
+                process.growth + jitter(index, turn, process.growth_jitter),
+            )
         };
         lines.push(claude_usage_line(&id, clock, read, write, 300));
         context = read + write + 2;
@@ -131,7 +143,13 @@ pub fn codex_session(process: &Process, index: usize, tag: &str) -> String {
             clock += 15_000;
             serial += 1;
             let request_id = format!("resp_{tag}_{index}_{serial}");
-            lines.push(codex_record(&request_id, clock, context + 200, context * 9 / 10, 4_000));
+            lines.push(codex_record(
+                &request_id,
+                clock,
+                context + 200,
+                context * 9 / 10,
+                4_000,
+            ));
             lines.push(format!(
                 r#"{{"timestamp":"{}","type":"compacted","payload":{{"message":"","replacement_history":[],"compaction_response_id":"{request_id}"}}}}"#,
                 iso(clock + 10)
@@ -150,7 +168,8 @@ pub fn codex_session(process: &Process, index: usize, tag: &str) -> String {
 
 /// Writes `text` at the `agent-homes:` relative path.
 pub fn put(host: &mut FakeHost, relative: &str, text: &str) {
-    host.fs().write(format!("agent-homes:{relative}"), text.as_bytes());
+    host.fs()
+        .write(format!("agent-homes:{relative}"), text.as_bytes());
 }
 
 pub fn claude_main_path(project: &str, name: &str) -> String {
@@ -174,7 +193,11 @@ pub fn write_claude_corpus(host: &mut FakeHost, sessions: usize) {
     let process = Process::claude();
     for index in 0..sessions {
         let text = claude_session(&process, index, "c");
-        put(host, &claude_main_path("-synthetic-project", &format!("session-{index:02}")), &text);
+        put(
+            host,
+            &claude_main_path("-synthetic-project", &format!("session-{index:02}")),
+            &text,
+        );
     }
 }
 

@@ -4,8 +4,8 @@
 use proptest::prelude::*;
 
 use ilium_plugin_api::generated::types::lifecycle::DeactivationReason;
-use ilium_plugin_api::limits::{ceiling, clamp, Limits};
 use ilium_plugin_api::limits::LimitKey;
+use ilium_plugin_api::limits::{ceiling, clamp, Limits};
 use ilium_plugin_api::Tier;
 use ilium_plugin_host::calls::{
     batch_call_class, deadline_for, evaluate_breach, streak_limit, BreachVerdict, CallBudget,
@@ -191,8 +191,14 @@ fn hst_189_soft_class_below_its_deadline_is_timely() {
 #[test]
 fn hst_189_soft_class_past_its_deadline_is_late_and_its_result_dropped() {
     let limits = default_limits();
-    assert_eq!(evaluate_breach(CallClass::Annotate, ms(11), &limits), BreachVerdict::SoftLate);
-    assert_eq!(evaluate_breach(CallClass::Annotate, ms(109), &limits), BreachVerdict::SoftLate);
+    assert_eq!(
+        evaluate_breach(CallClass::Annotate, ms(11), &limits),
+        BreachVerdict::SoftLate
+    );
+    assert_eq!(
+        evaluate_breach(CallClass::Annotate, ms(109), &limits),
+        BreachVerdict::SoftLate
+    );
 }
 
 /// REQ: HST-189
@@ -200,9 +206,18 @@ fn hst_189_soft_class_past_its_deadline_is_late_and_its_result_dropped() {
 fn hst_189_soft_class_past_deadline_plus_100_ms_traps() {
     assert_eq!(SOFT_GRACE_MS, 100);
     let limits = default_limits();
-    assert_eq!(evaluate_breach(CallClass::Annotate, ms(111), &limits), BreachVerdict::SoftTrap);
-    assert_eq!(evaluate_breach(CallClass::Detector, ms(121), &limits), BreachVerdict::SoftTrap);
-    assert_eq!(evaluate_breach(CallClass::Detector, ms(119), &limits), BreachVerdict::SoftLate);
+    assert_eq!(
+        evaluate_breach(CallClass::Annotate, ms(111), &limits),
+        BreachVerdict::SoftTrap
+    );
+    assert_eq!(
+        evaluate_breach(CallClass::Detector, ms(121), &limits),
+        BreachVerdict::SoftTrap
+    );
+    assert_eq!(
+        evaluate_breach(CallClass::Detector, ms(119), &limits),
+        BreachVerdict::SoftLate
+    );
 }
 
 /// REQ: HST-189
@@ -260,7 +275,12 @@ fn hst_190_streak_limit_is_30_for_scene_frames() {
 /// REQ: HST-190
 #[test]
 fn hst_190_hard_classes_have_no_streak() {
-    for class in [CallClass::Event, CallClass::Render, CallClass::Activate, CallClass::Deactivate] {
+    for class in [
+        CallClass::Event,
+        CallClass::Render,
+        CallClass::Activate,
+        CallClass::Deactivate,
+    ] {
         assert_eq!(streak_limit(class), None, "{class:?}");
     }
 }
@@ -378,7 +398,10 @@ fn hst_191_timely_deactivate_keeps_the_restore_bytes() {
     let mut guest = ScriptedGuest::new(shared);
     guest.restore = Some(vec![9, 8, 7]);
     let handle = build(guest);
-    assert_eq!(handle.deactivate(DeactivationReason::Disabled), Some(vec![9, 8, 7]));
+    assert_eq!(
+        handle.deactivate(DeactivationReason::Disabled),
+        Some(vec![9, 8, 7])
+    );
     assert!(handle
         .logs()
         .iter()
@@ -390,7 +413,10 @@ fn hst_191_timely_deactivate_keeps_the_restore_bytes() {
 /// REQ: HST-192
 #[test]
 fn hst_192_batch_with_command_invoked_selects_the_command_class() {
-    assert_eq!(batch_call_class(&[theme(), command_invoked()]), CallClass::Command);
+    assert_eq!(
+        batch_call_class(&[theme(), command_invoked()]),
+        CallClass::Command
+    );
     assert_eq!(batch_call_class(&[command_invoked()]), CallClass::Command);
 }
 
@@ -406,7 +432,10 @@ fn hst_192_command_invoked_anywhere_in_the_batch_selects_the_command_class() {
 /// REQ: HST-192
 #[test]
 fn hst_192_batch_without_command_uses_the_event_class() {
-    assert_eq!(batch_call_class(&[theme(), key_pressed(), ui_action()]), CallClass::Event);
+    assert_eq!(
+        batch_call_class(&[theme(), key_pressed(), ui_action()]),
+        CallClass::Event
+    );
     assert_eq!(batch_call_class(&[theme()]), CallClass::Event);
 }
 
@@ -463,7 +492,10 @@ fn limits_with(entries: &[(&str, u64)]) -> Limits {
 fn hst_193_deadline_above_the_ceiling_is_clamped_for_the_tier() {
     let requested = limits_with(&[("event_deadline_ms", 500)]);
     let resolved = clamp(&requested, Tier::T3).expect("clamped");
-    assert_eq!(deadline_for(CallClass::Event, &ResolvedLimits(resolved)), ms(20));
+    assert_eq!(
+        deadline_for(CallClass::Event, &ResolvedLimits(resolved)),
+        ms(20)
+    );
 }
 
 /// REQ: HST-193
@@ -471,7 +503,10 @@ fn hst_193_deadline_above_the_ceiling_is_clamped_for_the_tier() {
 fn hst_193_t1_ceiling_is_higher_than_the_t3_ceiling() {
     let requested = limits_with(&[("event_deadline_ms", 500)]);
     let resolved = clamp(&requested, Tier::T1).expect("clamped");
-    assert_eq!(deadline_for(CallClass::Event, &ResolvedLimits(resolved)), ms(50));
+    assert_eq!(
+        deadline_for(CallClass::Event, &ResolvedLimits(resolved)),
+        ms(50)
+    );
 }
 
 /// REQ: HST-193
@@ -654,7 +689,9 @@ fn hst_196_non_yielding_calls_stay_on_one_thread_until_they_return() {
     let sink = seen.clone();
     let work: Work = Box::new(move || {
         for _ in 0..4 {
-            sink.lock().expect("seen lock").push(std::thread::current().id());
+            sink.lock()
+                .expect("seen lock")
+                .push(std::thread::current().id());
             std::thread::sleep(ms(8));
         }
     });

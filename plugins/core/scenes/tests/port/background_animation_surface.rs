@@ -9,10 +9,17 @@ fn port_blocked_render_returns_to_ui_and_completion_wakes_one_fps_surface() {
     let mut scene = fake_scene("waves", 24, 12);
     let small = scene.frame(braille_frame(24, 12, 0));
     assert_eq!((small.columns, small.rows), (24, 12));
-    assert!(scene.reconfigure("{}"), "an empty settings object is accepted in place");
+    assert!(
+        scene.reconfigure("{}"),
+        "an empty settings object is accepted in place"
+    );
     let mut resized = fake_scene("waves", 10, 4);
     let screen = resized.frame(braille_frame(10, 4, 0));
-    assert_eq!((screen.columns, screen.rows), (10, 4), "a new generation uses its own size, never a stale one");
+    assert_eq!(
+        (screen.columns, screen.rows),
+        (10, 4),
+        "a new generation uses its own size, never a stale one"
+    );
     for id in MANIFEST_SCENES {
         let fps = u64::from(fake_scene(id, 40, 10).frames_per_second());
         let cap = scene_entry(id)["frame_rate_cap"].as_u64().unwrap();
@@ -27,10 +34,17 @@ fn port_render_admission_reserves_capacity_for_the_ordered_pause_transition() {
     let mut scene = fake_scene("waves", 24, 12);
     let small = scene.frame(braille_frame(24, 12, 0));
     assert_eq!((small.columns, small.rows), (24, 12));
-    assert!(scene.reconfigure("{}"), "an empty settings object is accepted in place");
+    assert!(
+        scene.reconfigure("{}"),
+        "an empty settings object is accepted in place"
+    );
     let mut resized = fake_scene("waves", 10, 4);
     let screen = resized.frame(braille_frame(10, 4, 0));
-    assert_eq!((screen.columns, screen.rows), (10, 4), "a new generation uses its own size, never a stale one");
+    assert_eq!(
+        (screen.columns, screen.rows),
+        (10, 4),
+        "a new generation uses its own size, never a stale one"
+    );
     for id in MANIFEST_SCENES {
         let fps = u64::from(fake_scene(id, 40, 10).frames_per_second());
         let cap = scene_entry(id)["frame_rate_cap"].as_u64().unwrap();
@@ -45,10 +59,17 @@ fn port_scene_credit_waits_for_real_terminal_owner_flush_acknowledgement() {
     let mut scene = fake_scene("waves", 24, 12);
     let small = scene.frame(braille_frame(24, 12, 0));
     assert_eq!((small.columns, small.rows), (24, 12));
-    assert!(scene.reconfigure("{}"), "an empty settings object is accepted in place");
+    assert!(
+        scene.reconfigure("{}"),
+        "an empty settings object is accepted in place"
+    );
     let mut resized = fake_scene("waves", 10, 4);
     let screen = resized.frame(braille_frame(10, 4, 0));
-    assert_eq!((screen.columns, screen.rows), (10, 4), "a new generation uses its own size, never a stale one");
+    assert_eq!(
+        (screen.columns, screen.rows),
+        (10, 4),
+        "a new generation uses its own size, never a stale one"
+    );
     for id in MANIFEST_SCENES {
         let fps = u64::from(fake_scene(id, 40, 10).frames_per_second());
         let cap = scene_entry(id)["frame_rate_cap"].as_u64().unwrap();
@@ -63,10 +84,17 @@ fn port_settings_transitions_remain_ordered_while_first_render_is_blocked() {
     let mut scene = fake_scene("waves", 24, 12);
     let small = scene.frame(braille_frame(24, 12, 0));
     assert_eq!((small.columns, small.rows), (24, 12));
-    assert!(scene.reconfigure("{}"), "an empty settings object is accepted in place");
+    assert!(
+        scene.reconfigure("{}"),
+        "an empty settings object is accepted in place"
+    );
     let mut resized = fake_scene("waves", 10, 4);
     let screen = resized.frame(braille_frame(10, 4, 0));
-    assert_eq!((screen.columns, screen.rows), (10, 4), "a new generation uses its own size, never a stale one");
+    assert_eq!(
+        (screen.columns, screen.rows),
+        (10, 4),
+        "a new generation uses its own size, never a stale one"
+    );
     for id in MANIFEST_SCENES {
         let fps = u64::from(fake_scene(id, 40, 10).frames_per_second());
         let cap = scene_entry(id)["frame_rate_cap"].as_u64().unwrap();
@@ -81,10 +109,17 @@ fn port_uncertain_live_output_retains_lease_and_blocks_next_composition() {
     let mut scene = fake_scene("waves", 24, 12);
     let small = scene.frame(braille_frame(24, 12, 0));
     assert_eq!((small.columns, small.rows), (24, 12));
-    assert!(scene.reconfigure("{}"), "an empty settings object is accepted in place");
+    assert!(
+        scene.reconfigure("{}"),
+        "an empty settings object is accepted in place"
+    );
     let mut resized = fake_scene("waves", 10, 4);
     let screen = resized.frame(braille_frame(10, 4, 0));
-    assert_eq!((screen.columns, screen.rows), (10, 4), "a new generation uses its own size, never a stale one");
+    assert_eq!(
+        (screen.columns, screen.rows),
+        (10, 4),
+        "a new generation uses its own size, never a stale one"
+    );
     for id in MANIFEST_SCENES {
         let fps = u64::from(fake_scene(id, 40, 10).frames_per_second());
         let cap = scene_entry(id)["frame_rate_cap"].as_u64().unwrap();
@@ -102,5 +137,9 @@ fn port_unconfigured_surface_refuses_before_spawning_and_preserves_error() {
         assert!(!scene.reconfigure(bad), "{bad:?} is refused");
     }
     let after = scene.frame(braille_frame(24, 12, 500));
-    assert_eq!(before.text(), after.text(), "a refused configuration leaves the previous one in force");
+    assert_eq!(
+        before.text(),
+        after.text(),
+        "a refused configuration leaves the previous one in force"
+    );
 }

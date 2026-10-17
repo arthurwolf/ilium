@@ -35,7 +35,12 @@ fn port_089_a_second_render_of_every_tab_is_identical() {
 fn port_089_the_panel_header_never_overflows_from_14_to_120_columns() {
     let mut host = client_host();
     for columns in [14u16, 15, 16, 24, 40, 80, 120] {
-        let screen = render_checked(&mut host, ViewTarget::Panel("overview".to_string()), columns, 12);
+        let screen = render_checked(
+            &mut host,
+            ViewTarget::Panel("overview".to_string()),
+            columns,
+            12,
+        );
         assert_eq!(screen.columns, columns);
     }
     assert!(host.failures().is_empty());
@@ -48,7 +53,10 @@ fn port_089_scrolling_down_moves_a_tall_tab_and_scrolling_up_restores_the_top() 
     let top = host.render(tab("icons"), 60, 6).text();
     scroll(&mut host, "icons", 3.0);
     let moved = host.render(tab("icons"), 60, 6).text();
-    assert_ne!(top, moved, "a 6-row viewport cannot show the whole icons tab");
+    assert_ne!(
+        top, moved,
+        "a 6-row viewport cannot show the whole icons tab"
+    );
     scroll(&mut host, "icons", -3.0);
     assert_eq!(host.render(tab("icons"), 60, 6).text(), top);
     assert!(host.failures().is_empty());
@@ -61,7 +69,11 @@ fn port_089_scrolling_past_the_end_is_clamped_in_both_directions() {
     scroll(&mut host, "about", 1_000_000.0);
     let bottom = host.render(tab("about"), 100, 60).text();
     scroll(&mut host, "about", 1_000_000.0);
-    assert_eq!(host.render(tab("about"), 100, 60).text(), bottom, "already at the end");
+    assert_eq!(
+        host.render(tab("about"), 100, 60).text(),
+        bottom,
+        "already at the end"
+    );
     scroll(&mut host, "about", -1_000_000.0);
     scroll(&mut host, "about", -1.0);
     let top = host.render(tab("about"), 100, 60).text();
@@ -77,7 +89,9 @@ fn port_089_clicking_any_visible_text_of_every_tab_never_fails() {
             let screen = host.render(tab(id), columns, rows);
             for row in 0..rows {
                 let text = screen.row(row);
-                let Some(first) = text.chars().position(|symbol| symbol != ' ') else { continue };
+                let Some(first) = text.chars().position(|symbol| symbol != ' ') else {
+                    continue;
+                };
                 let _ = host.click(tab(id), first as u16, row);
             }
             host.settle();
@@ -97,7 +111,10 @@ fn port_089_a_click_on_the_row_title_hits_the_same_row_the_text_is_drawn_on() {
     host.settle();
     assert!(host.failures().is_empty());
     let after = host.settings().get("density");
-    assert!(after == before || after.is_some(), "a click on the title may focus or cycle, never clear");
+    assert!(
+        after == before || after.is_some(),
+        "a click on the title may focus or cycle, never clear"
+    );
 }
 
 /// REQ: PORT:ilium-client/src/settings_ui.rs::compact_settings_choice_chrome_keeps_arrows_and_catalog_for_every_field, PORT:ilium-client/src/settings_ui.rs::settings_choice_chrome_paints_and_hits_every_bound_catalog, PORT:ilium-client/src/settings_ui.rs::appearance_view_exposes_three_cards_dynamic_controls_and_general_options, PORT:ilium-client/src/settings_ui.rs::appearance_view_uses_one_sizing_selector_at_all_widths, F-089, F-090
@@ -136,7 +153,13 @@ fn port_089_compact_navigation_keeps_every_tab_reachable_and_distinct() {
     let mut host = client_host();
     let screen = render_checked(&mut host, ViewTarget::Panel("overview".to_string()), 40, 12);
     assert!(!screen.text().trim().is_empty());
-    let wide = render_checked(&mut host, ViewTarget::Panel("overview".to_string()), 120, 40).text();
+    let wide = render_checked(
+        &mut host,
+        ViewTarget::Panel("overview".to_string()),
+        120,
+        40,
+    )
+    .text();
     let mut seen = 0;
     for label in ["Icons", "Debug", "About", "Setup", "Keyboard"] {
         if wide.contains(label) {
@@ -157,7 +180,10 @@ fn port_089_wrapped_guidance_never_hides_the_rows_below_it() {
         let _ = render_checked(&mut host, tab("text-triggers"), width, 14);
     }
     toggle(&mut host, "debug", "debug.file_logging_enabled", true);
-    assert_eq!(value_of(&mut host, "debug.file_logging_enabled"), Some(json!(true)));
+    assert_eq!(
+        value_of(&mut host, "debug.file_logging_enabled"),
+        Some(json!(true))
+    );
     assert!(host.failures().is_empty());
 }
 
@@ -165,16 +191,24 @@ fn port_089_wrapped_guidance_never_hides_the_rows_below_it() {
 #[test]
 fn port_090_numeric_rows_keep_their_values_visible_and_bounded_at_narrow_widths() {
     let mut host = client_host();
-    host.settings().set("ui.left_panel_fixed_width", json!(32)).expect("in range");
+    host.settings()
+        .set("ui.left_panel_fixed_width", json!(32))
+        .expect("in range");
     for width in [40u16, 60, 80] {
         let text = render_checked(&mut host, tab("user-interface"), width, 40).text();
-        assert!(text.contains("32") || !text.trim().is_empty(), "width {width}");
+        assert!(
+            text.contains("32") || !text.trim().is_empty(),
+            "width {width}"
+        );
     }
     let before = value_of(&mut host, "inference.restructure_prompt_token_limit");
     for width in [40u16, 80, 140] {
         let _ = render_checked(&mut host, tab("inference"), width, 40);
     }
-    assert_eq!(value_of(&mut host, "inference.restructure_prompt_token_limit"), before);
+    assert_eq!(
+        value_of(&mut host, "inference.restructure_prompt_token_limit"),
+        before
+    );
 }
 
 /// REQ: PORT:ilium-client/src/settings_ui.rs::active_discovery_prefix_keeps_inference_mouse_rows_aligned, PORT:ilium-client/src/settings_ui.rs::inference_rows_hide_impossible_fields_and_warn_for_kilo, PORT:ilium-client/src/settings_ui.rs::inference_test_lifecycle_renders_a_boxed_running_log_and_failure, PORT:ilium-client/src/settings_ui.rs::running_inference_test_is_visibly_boxed_in_the_rendered_settings_screen, PORT:ilium-client/src/settings_ui.rs::running_ollama_discovery_is_visibly_boxed_in_the_rendered_settings_screen, PORT:ilium-client/src/settings_ui.rs::openai_model_catalog_is_visible_with_refresh_and_manual_entry_guidance, PORT:ilium-client/src/settings_ui.rs::empty_model_with_one_distinct_discovered_option_disables_cycle_but_keeps_catalog, F-089, F-090
@@ -206,7 +240,10 @@ fn port_089_icons_tab_shows_the_catalogue_button_table_and_picker_at_compact_wid
         for row in 0..rows {
             for column in 0..columns {
                 let cell = screen.cell(row, column);
-                assert!(cell.symbol.chars().count() <= 8, "one cell never holds more than a ZWJ cluster");
+                assert!(
+                    cell.symbol.chars().count() <= 8,
+                    "one cell never holds more than a ZWJ cluster"
+                );
             }
         }
     }
@@ -221,7 +258,10 @@ fn port_089_icon_table_columns_stay_aligned_for_short_and_long_titles() {
     let wide = render_checked(&mut host, tab("icons"), 200, 60);
     let narrow = render_checked(&mut host, tab("icons"), 60, 60);
     assert!(!wide.text().trim().is_empty() && !narrow.text().trim().is_empty());
-    let widest = (0..60).map(|row| wide.row(row).chars().count()).max().unwrap_or(0);
+    let widest = (0..60)
+        .map(|row| wide.row(row).chars().count())
+        .max()
+        .unwrap_or(0);
     assert!(widest <= 200);
 }
 
@@ -242,7 +282,13 @@ fn port_089_keyboard_tab_lists_every_action_and_each_bindable_key_once() {
 #[test]
 fn port_089_sound_voice_titles_triggers_and_board_tabs_render_their_guidance() {
     let mut host = client_host();
-    for id in ["sound", "voice-control", "titles", "triggers", "kanban-board"] {
+    for id in [
+        "sound",
+        "voice-control",
+        "titles",
+        "triggers",
+        "kanban-board",
+    ] {
         for (columns, rows) in SIZES {
             let text = render_checked(&mut host, tab(id), columns, rows).text();
             assert!(!text.trim().is_empty(), "{id} {columns}x{rows}");
@@ -254,12 +300,25 @@ fn port_089_sound_voice_titles_triggers_and_board_tabs_render_their_guidance() {
 /// REQ: PORT:ilium-client/src/settings_ui.rs::masked_key_masks_short_ascii_keys_without_underflow, PORT:ilium-client/src/settings_ui.rs::masked_key_never_panics_on_a_non_ascii_key_cut_mid_character, F-089, F-090
 #[test]
 fn port_089_masked_secrets_show_a_fixed_shape_for_short_and_non_ascii_keys() {
-    for secret in ["", "a", "ab", "abcd", "abcdefgh", "k\u{e9}y-\u{4e2d}\u{6587}-\u{1f511}-secret", "\u{1f511}"] {
+    for secret in [
+        "",
+        "a",
+        "ab",
+        "abcd",
+        "abcdefgh",
+        "k\u{e9}y-\u{4e2d}\u{6587}-\u{1f511}-secret",
+        "\u{1f511}",
+    ] {
         let mut host = client_host();
-        let _ = host.settings().set("inference.openai_api_key", json!(secret));
+        let _ = host
+            .settings()
+            .set("inference.openai_api_key", json!(secret));
         let text = render_checked(&mut host, tab("inference"), 100, 40).text();
         if secret.chars().count() > 4 {
-            assert!(!text.contains(secret), "the key {secret:?} is never drawn in full");
+            assert!(
+                !text.contains(secret),
+                "the key {secret:?} is never drawn in full"
+            );
         }
         assert!(host.failures().is_empty());
     }
@@ -271,11 +330,27 @@ fn port_090_every_light_and_motion_choice_is_saved_without_touching_other_keys()
     let mut host = client_host();
     choose(&mut host, "user-interface", "ui.color_scheme", "light");
     assert_eq!(value_of(&mut host, "ui.color_scheme"), Some(json!("light")));
-    toggle(&mut host, "user-interface", "ui.terminal_text_selection_enabled", false);
-    assert_eq!(value_of(&mut host, "ui.terminal_text_selection_enabled"), Some(json!(false)));
+    toggle(
+        &mut host,
+        "user-interface",
+        "ui.terminal_text_selection_enabled",
+        false,
+    );
+    assert_eq!(
+        value_of(&mut host, "ui.terminal_text_selection_enabled"),
+        Some(json!(false))
+    );
     assert_eq!(value_of(&mut host, "ui.color_scheme"), Some(json!("light")));
-    toggle(&mut host, "user-interface", "ui.terminal_text_selection_enabled", true);
-    assert_eq!(value_of(&mut host, "ui.terminal_text_selection_enabled"), Some(json!(true)));
+    toggle(
+        &mut host,
+        "user-interface",
+        "ui.terminal_text_selection_enabled",
+        true,
+    );
+    assert_eq!(
+        value_of(&mut host, "ui.terminal_text_selection_enabled"),
+        Some(json!(true))
+    );
 }
 
 /// REQ: PORT:ilium-client/src/mouse.rs::model_icon_setting_toggles_when_its_label_is_clicked, F-089, F-090
@@ -288,8 +363,16 @@ fn port_090_clicking_the_model_icon_label_toggles_and_saves_the_setting() {
     match clicked {
         Some(true) => assert_ne!(value_of(&mut host, "ui.agent_tree_model_icons"), before),
         _ => {
-            toggle(&mut host, "agent-monitoring", "ui.agent_tree_model_icons", true);
-            assert_eq!(value_of(&mut host, "ui.agent_tree_model_icons"), Some(json!(true)));
+            toggle(
+                &mut host,
+                "agent-monitoring",
+                "ui.agent_tree_model_icons",
+                true,
+            );
+            assert_eq!(
+                value_of(&mut host, "ui.agent_tree_model_icons"),
+                Some(json!(true))
+            );
         }
     }
     assert!(host.failures().is_empty());
@@ -305,7 +388,10 @@ fn port_089_scrollbar_click_and_wheel_move_the_visible_document_by_three_lines()
     scroll(&mut host, "text-triggers", 1_000_000.0);
     let bottom = host.render(tab("text-triggers"), 60, 8).text();
     assert_ne!(top, bottom, "the document is longer than 8 rows");
-    assert!(after_wheel == top || after_wheel != bottom, "three lines is not yet the end");
+    assert!(
+        after_wheel == top || after_wheel != bottom,
+        "three lines is not yet the end"
+    );
     scroll(&mut host, "text-triggers", -1_000_000.0);
     assert_eq!(host.render(tab("text-triggers"), 60, 8).text(), top);
 }
@@ -316,12 +402,31 @@ fn port_089_navigation_wheel_changes_the_tab_not_the_content_scroll() {
     let mut host = client_host();
     let overview = ViewTarget::Panel("overview".to_string());
     let before = host.render(tab("text-triggers"), 60, 8).text();
-    host.send_action(overview.clone(), "navigation", ActionKind::Scrolled, ActionValue::Number(1.0));
+    host.send_action(
+        overview.clone(),
+        "navigation",
+        ActionKind::Scrolled,
+        ActionValue::Number(1.0),
+    );
     host.settle();
-    assert_eq!(host.render(tab("text-triggers"), 60, 8).text(), before, "tab content keeps its scroll");
-    host.send_action(overview.clone(), "navigation", ActionKind::Scrolled, ActionValue::Number(-100.0));
+    assert_eq!(
+        host.render(tab("text-triggers"), 60, 8).text(),
+        before,
+        "tab content keeps its scroll"
+    );
+    host.send_action(
+        overview.clone(),
+        "navigation",
+        ActionKind::Scrolled,
+        ActionValue::Number(-100.0),
+    );
     host.settle();
-    host.send_action(overview, "navigation", ActionKind::Scrolled, ActionValue::Number(100.0));
+    host.send_action(
+        overview,
+        "navigation",
+        ActionKind::Scrolled,
+        ActionValue::Number(100.0),
+    );
     host.settle();
     assert!(host.failures().is_empty());
 }

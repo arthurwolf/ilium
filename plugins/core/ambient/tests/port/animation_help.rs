@@ -7,7 +7,10 @@ use serde_json::json;
 
 fn topic_text(id: &str) -> Option<String> {
     let manifest = manifest_json();
-    let topics = manifest["contributes"]["help"].as_array().cloned().unwrap_or_default();
+    let topics = manifest["contributes"]["help"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
     topics
         .iter()
         .find(|topic| topic["id"] == json!(id))
@@ -18,15 +21,25 @@ fn topic_text(id: &str) -> Option<String> {
 #[test]
 fn port_animation_help_explains_the_palette_ranges_and_has_a_topic_per_scene_control() {
     for (id, phrase) in [("AN-30", "60%"), ("AN-31", "359"), ("AN-32", "0%")] {
-        let text = topic_text(id).unwrap_or_else(|| panic!("palette help topic {id} is contributed"));
-        assert!(text.contains(phrase), "{id} explains its range or default: {text}");
+        let text =
+            topic_text(id).unwrap_or_else(|| panic!("palette help topic {id} is contributed"));
+        assert!(
+            text.contains(phrase),
+            "{id} explains its range or default: {text}"
+        );
     }
     for index in 39..=42 {
         let id = format!("AN-{index:02}");
-        assert!(topic_text(&id).is_some(), "scene-control help topic {id} is contributed");
+        assert!(
+            topic_text(&id).is_some(),
+            "scene-control help topic {id} is contributed"
+        );
     }
     for id in ["AN-52", "AN-53", "AN-54"] {
-        assert!(topic_text(id).is_some(), "scene help topic {id} is contributed");
+        assert!(
+            topic_text(id).is_some(),
+            "scene help topic {id} is contributed"
+        );
     }
 }
 
@@ -44,14 +57,27 @@ fn port_narrow_animation_settings_render_every_control_with_its_help_reachable()
         .collect();
     assert!(!keys.is_empty(), "the settings page declares keyed rows");
     let text = host
-        .render(ilium_plugin_sdk::types::ViewTarget::SettingsPage("ambient".to_string()), 80, 24)
+        .render(
+            ilium_plugin_sdk::types::ViewTarget::SettingsPage("ambient".to_string()),
+            80,
+            24,
+        )
         .text();
     for key in &keys {
         let id = manifest_row(key)["help"].as_str().map(str::to_owned);
-        assert!(id.as_deref().is_some_and(|id| topic_text(id).is_some()), "row {key} names a contributed help topic");
+        assert!(
+            id.as_deref().is_some_and(|id| topic_text(id).is_some()),
+            "row {key} names a contributed help topic"
+        );
     }
     for key in &keys {
-        let label = manifest_row(key)["label"].as_str().map(str::to_owned).unwrap_or_default();
-        assert!(text.contains(&label), "row {key} with label {label:?} is rendered on the narrow page: {text}");
+        let label = manifest_row(key)["label"]
+            .as_str()
+            .map(str::to_owned)
+            .unwrap_or_default();
+        assert!(
+            text.contains(&label),
+            "row {key} with label {label:?} is rendered on the narrow page: {text}"
+        );
     }
 }

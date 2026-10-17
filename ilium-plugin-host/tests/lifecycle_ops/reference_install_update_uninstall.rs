@@ -213,7 +213,10 @@ fn lif_067_registry_format_99_refused_with_install_registry_format() {
     let bytes = registry_with_format(&rig, "ilium-installed/99");
     let output = rig.cli(&["list"]);
     assert_eq!(output.exit_code, 1);
-    assert_eq!(error_codes(&output), vec!["install.registry-format".to_owned()]);
+    assert_eq!(
+        error_codes(&output),
+        vec!["install.registry-format".to_owned()]
+    );
     assert_eq!(rig.registry_bytes(), bytes);
 }
 
@@ -234,7 +237,10 @@ fn lif_067_registry_format_2_is_the_next_higher_number_and_is_refused() {
     let rig = rig();
     let bytes = registry_with_format(&rig, "ilium-installed/2");
     let output = rig.cli(&["list"]);
-    assert_eq!(error_codes(&output), vec!["install.registry-format".to_owned()]);
+    assert_eq!(
+        error_codes(&output),
+        vec!["install.registry-format".to_owned()]
+    );
     assert_eq!(rig.registry_bytes(), bytes);
 }
 
@@ -254,7 +260,9 @@ fn lif_067_server_start_over_a_newer_registry_format_leaves_the_file_alone() {
     let rig = rig();
     let bytes = registry_with_format(&rig, "ilium-installed/99");
     let server = rig.start_server("s1");
-    assert!(server.log_codes().contains(&"install.registry-format".to_owned()));
+    assert!(server
+        .log_codes()
+        .contains(&"install.registry-format".to_owned()));
     assert_eq!(rig.registry_bytes(), bytes);
 }
 
@@ -268,10 +276,19 @@ fn assert_state_corrupt(mutate: impl FnOnce(&mut Value)) {
     rig.set_registry_bytes(&bytes);
     let output = rig.cli(&["list"]);
     assert_eq!(output.exit_code, 1);
-    assert_eq!(error_codes(&output), vec!["install.state-corrupt".to_owned()]);
-    assert_eq!(rig.registry_bytes(), bytes, "the file must not be rewritten");
+    assert_eq!(
+        error_codes(&output),
+        vec!["install.state-corrupt".to_owned()]
+    );
+    assert_eq!(
+        rig.registry_bytes(),
+        bytes,
+        "the file must not be rewritten"
+    );
     let server = rig.start_server("s1");
-    assert!(server.log_codes().contains(&"install.state-corrupt".to_owned()));
+    assert!(server
+        .log_codes()
+        .contains(&"install.state-corrupt".to_owned()));
     assert_eq!(rig.registry_bytes(), bytes);
 }
 
@@ -311,7 +328,10 @@ fn lif_282_local_time_installed_at_refused_with_install_state_corrupt() {
 #[test]
 fn lif_282_missing_required_key_refused_with_install_state_corrupt() {
     assert_state_corrupt(|value| {
-        value["plugins"][0].as_object_mut().expect("plugin object").remove("skip");
+        value["plugins"][0]
+            .as_object_mut()
+            .expect("plugin object")
+            .remove("skip");
     });
 }
 
@@ -362,12 +382,17 @@ fn lif_282_valid_update_object_with_attempts_two_is_accepted() {
 fn lif_068_declined_review_runs_no_package_code_review_declined() {
     let rig = rig();
     let marker = rig.scratch_dir().join("start-ran.txt");
-    let spec = pkg(NOTES, "1.0.0").high_risk_grant("process.spawn").start_writes_file(&marker);
+    let spec = pkg(NOTES, "1.0.0")
+        .high_risk_grant("process.spawn")
+        .start_writes_file(&marker);
     let path = rig.write_package(&spec);
     let path_text = path.to_string_lossy().into_owned();
     let output = rig.cli_tty(&["install", &path_text, "--allow-unsigned"], &["n"]);
     assert_eq!(output.exit_code, 1);
-    assert_eq!(error_codes(&output), vec!["install.review-declined".to_owned()]);
+    assert_eq!(
+        error_codes(&output),
+        vec!["install.review-declined".to_owned()]
+    );
     assert!(!marker.exists());
 }
 
@@ -410,11 +435,28 @@ fn fail_install_at(step: u8, expected_code: &str) {
     rig.inject(Fault::InstallFails(step));
     let output = install(&rig, &pkg(NOTES, "1.0.0"));
     assert_ne!(output.exit_code, 0);
-    assert!(error_codes(&output).contains(&expected_code.to_owned()), "{:?}", output.stdout_jsonl);
-    assert_eq!(rig.registry_bytes(), registry_before, "registry changed at step {step}");
-    assert!(staging_entries(&rig).is_empty(), "staging left at step {step}");
-    assert_eq!(snapshot_tree(&rig.plugins_root().join("store")), store_before);
-    assert!(store_versions(&rig, NOTES).is_empty(), "store entry left at step {step}");
+    assert!(
+        error_codes(&output).contains(&expected_code.to_owned()),
+        "{:?}",
+        output.stdout_jsonl
+    );
+    assert_eq!(
+        rig.registry_bytes(),
+        registry_before,
+        "registry changed at step {step}"
+    );
+    assert!(
+        staging_entries(&rig).is_empty(),
+        "staging left at step {step}"
+    );
+    assert_eq!(
+        snapshot_tree(&rig.plugins_root().join("store")),
+        store_before
+    );
+    assert!(
+        store_versions(&rig, NOTES).is_empty(),
+        "store entry left at step {step}"
+    );
 }
 
 /// REQ: LIF-069
@@ -503,7 +545,10 @@ fn lif_070_install_makes_no_network_attempt() {
 #[test]
 fn lif_071_bad_manifest_and_bad_signature_report_manifest_schema_only() {
     let rig = rig();
-    let spec = pkg(NOTES, "1.0.0").signed("key-a").bad_manifest().bad_signature();
+    let spec = pkg(NOTES, "1.0.0")
+        .signed("key-a")
+        .bad_manifest()
+        .bad_signature();
     let output = install(&rig, &spec);
     let codes = error_codes(&output);
     assert_eq!(codes.first().map(String::as_str), Some("manifest.schema"));
@@ -514,7 +559,9 @@ fn lif_071_bad_manifest_and_bad_signature_report_manifest_schema_only() {
 #[test]
 fn lif_071_no_prompt_appears_for_a_package_refused_at_an_earlier_stage() {
     let rig = rig();
-    let spec = pkg(NOTES, "1.0.0").high_risk_grant("process.spawn").bad_manifest();
+    let spec = pkg(NOTES, "1.0.0")
+        .high_risk_grant("process.spawn")
+        .bad_manifest();
     let path = rig.write_package(&spec);
     let path_text = path.to_string_lossy().into_owned();
     let output = rig.cli_tty(&["install", &path_text, "--allow-unsigned"], &["y"]);
@@ -541,7 +588,10 @@ fn lif_072_installing_the_same_package_twice_is_a_no_op_with_a_warning() {
     let before = rig.registry_bytes();
     let output = install(&rig, &spec);
     assert_eq!(output.exit_code, 0);
-    assert_eq!(warning_codes(&output), vec!["install.already-installed".to_owned()]);
+    assert_eq!(
+        warning_codes(&output),
+        vec!["install.already-installed".to_owned()]
+    );
     assert_eq!(rig.registry_bytes(), before);
 }
 
@@ -553,7 +603,10 @@ fn lif_072_same_version_with_different_manifest_hash_refused_package_version_reu
     let before = rig.registry_bytes();
     let output = install(&rig, &pkg(NOTES, "1.0.0").content_marker("changed"));
     assert_eq!(output.exit_code, 1);
-    assert_eq!(error_codes(&output), vec!["package.version-reused".to_owned()]);
+    assert_eq!(
+        error_codes(&output),
+        vec!["package.version-reused".to_owned()]
+    );
     assert_eq!(rig.registry_bytes(), before);
 }
 
@@ -563,10 +616,15 @@ fn lif_072_same_manifest_signed_again_is_still_a_no_op() {
     let rig = rig();
     install_ok(&rig, &pkg(NOTES, "1.0.0").signed("key-a"));
     let before = rig.registry_bytes();
-    let again = pkg(NOTES, "1.0.0").signed("key-a").resigned("second signature");
+    let again = pkg(NOTES, "1.0.0")
+        .signed("key-a")
+        .resigned("second signature");
     let output = install(&rig, &again);
     assert_eq!(output.exit_code, 0);
-    assert_eq!(warning_codes(&output), vec!["install.already-installed".to_owned()]);
+    assert_eq!(
+        warning_codes(&output),
+        vec!["install.already-installed".to_owned()]
+    );
     assert_eq!(rig.registry_bytes(), before);
 }
 
@@ -578,11 +636,22 @@ fn lif_072_reinstall_flag_rewrites_the_store_entry_from_the_package() {
     install_ok(&rig, &spec);
     let original = snapshot_tree(&rig.plugins_root().join("store").join(NOTES).join("1.0.0"));
     let (first_name, _) = original.first().cloned().expect("store has files");
-    let damaged = rig.plugins_root().join("store").join(NOTES).join("1.0.0").join(&first_name);
+    let damaged = rig
+        .plugins_root()
+        .join("store")
+        .join(NOTES)
+        .join("1.0.0")
+        .join(&first_name);
     std::fs::write(&damaged, b"damaged").expect("damage a store file");
     let path = rig.write_package(&spec);
     let path_text = path.to_string_lossy().into_owned();
-    let output = rig.cli(&["install", &path_text, "--yes", "--allow-unsigned", "--reinstall"]);
+    let output = rig.cli(&[
+        "install",
+        &path_text,
+        "--yes",
+        "--allow-unsigned",
+        "--reinstall",
+    ]);
     assert_eq!(output.exit_code, 0);
     assert_eq!(
         snapshot_tree(&rig.plugins_root().join("store").join(NOTES).join("1.0.0")),
@@ -615,7 +684,11 @@ fn lif_073_first_server_to_apply_decides_and_the_version_commits() {
     install_ok(&rig, &pkg(NOTES, "1.0.0"));
     let (a, b) = two_manual_servers(&rig);
     b.fail_activation_of_version("1.1.0");
-    update(&rig, &pkg(NOTES, "1.1.0")).exit_code.eq(&0).then_some(()).expect("update ok");
+    update(&rig, &pkg(NOTES, "1.1.0"))
+        .exit_code
+        .eq(&0)
+        .then_some(())
+        .expect("update ok");
     a.apply_pending();
     assert_eq!(registry_entry(&rig, NOTES)["active_version"], "1.1.0");
     b.apply_pending();
@@ -671,7 +744,10 @@ fn kill_server_at(stage: UpdateStage) -> (OpsRig, Option<String>) {
 
 fn assert_old_or_new(version: Option<String>, stage: UpdateStage) {
     let version = version.unwrap_or_else(|| panic!("no version active after a kill at {stage:?}"));
-    assert!(version == "1.0.0" || version == "1.1.0", "{version} after {stage:?}");
+    assert!(
+        version == "1.0.0" || version == "1.1.0",
+        "{version} after {stage:?}"
+    );
 }
 
 /// REQ: LIF-074
@@ -737,14 +813,19 @@ fn lif_075_candidate_activate_error_rolls_back_to_the_previous_version() {
     let entry = registry_entry(&rig, NOTES);
     assert_eq!(entry["active_version"], "1.0.0");
     assert_eq!(entry["update"], Value::Null);
-    assert!(server.log_codes().contains(&"update.rolled-back".to_owned()));
+    assert!(server
+        .log_codes()
+        .contains(&"update.rolled-back".to_owned()));
 }
 
 /// REQ: LIF-075
 #[test]
 fn lif_075_rolled_back_candidate_is_marked_skip() {
     let (rig, _server) = update_with_failing_candidate(pkg(NOTES, "1.1.0").activate_error());
-    assert_eq!(registry_entry(&rig, NOTES)["skip"], serde_json::json!(["1.1.0"]));
+    assert_eq!(
+        registry_entry(&rig, NOTES)["skip"],
+        serde_json::json!(["1.1.0"])
+    );
 }
 
 /// REQ: LIF-075
@@ -794,7 +875,10 @@ fn lif_075_rollback_restores_the_pre_update_data_snapshot_after_a_migration() {
     update(&rig, &pkg(NOTES, "2.0.0").data_version(2).activate_error());
     rig.advance(secs(3));
     assert_eq!(server.active_version(NOTES).as_deref(), Some("1.0.0"));
-    assert_eq!(std::fs::read(&data_file).expect("data after rollback"), before);
+    assert_eq!(
+        std::fs::read(&data_file).expect("data after rollback"),
+        before
+    );
     assert_eq!(rig.bucket_stamp(NOTES), Some(1));
 }
 
@@ -802,7 +886,9 @@ fn lif_075_rollback_restores_the_pre_update_data_snapshot_after_a_migration() {
 #[test]
 fn lif_075_rollback_shows_the_toast_update_failed_rolled_back() {
     let (_rig, server) = update_with_failing_candidate(pkg(NOTES, "1.1.0").activate_error());
-    assert!(server.toasts().contains(&"Update failed, rolled back".to_owned()));
+    assert!(server
+        .toasts()
+        .contains(&"Update failed, rolled back".to_owned()));
 }
 
 /// REQ: LIF-076
@@ -815,7 +901,10 @@ fn lif_076_after_three_committed_updates_store_holds_exactly_two_versions() {
         update(&rig, &pkg(NOTES, version));
         rig.advance(secs(3));
     }
-    assert_eq!(store_versions(&rig, NOTES), vec!["1.2.0".to_owned(), "1.3.0".to_owned()]);
+    assert_eq!(
+        store_versions(&rig, NOTES),
+        vec!["1.2.0".to_owned(), "1.3.0".to_owned()]
+    );
     let entry = registry_entry(&rig, NOTES);
     assert_eq!(entry["active_version"], "1.3.0");
     assert_eq!(entry["previous_version"], "1.2.0");
@@ -830,7 +919,10 @@ fn lif_076_first_install_keeps_a_single_version_and_first_update_keeps_two() {
     let _server = rig.start_server("s1");
     update(&rig, &pkg(NOTES, "1.1.0"));
     rig.advance(secs(3));
-    assert_eq!(store_versions(&rig, NOTES), vec!["1.0.0".to_owned(), "1.1.0".to_owned()]);
+    assert_eq!(
+        store_versions(&rig, NOTES),
+        vec!["1.0.0".to_owned(), "1.1.0".to_owned()]
+    );
 }
 
 /// REQ: LIF-076
@@ -847,7 +939,8 @@ fn lif_076_older_versions_stay_until_the_update_commits() {
         store_versions(&rig, NOTES),
         vec!["1.0.0".to_owned(), "1.1.0".to_owned(), "1.2.0".to_owned()]
             .into_iter()
-            .filter(|version| version != "1.0.0" || registry_entry(&rig, NOTES)["previous_version"] == "1.0.0")
+            .filter(|version| version != "1.0.0"
+                || registry_entry(&rig, NOTES)["previous_version"] == "1.0.0")
             .collect::<Vec<_>>()
     );
 }
@@ -871,7 +964,13 @@ fn lif_077_explicit_reinstall_of_the_candidate_tries_it_again() {
     let path = rig.write_package(&fixed);
     let path_text = path.to_string_lossy().into_owned();
     let restarted = rig.start_server("s2");
-    let output = rig.cli(&["install", &path_text, "--yes", "--allow-unsigned", "--reinstall"]);
+    let output = rig.cli(&[
+        "install",
+        &path_text,
+        "--yes",
+        "--allow-unsigned",
+        "--reinstall",
+    ]);
     assert_eq!(output.exit_code, 0);
     rig.advance(secs(3));
     assert!(restarted.activations(NOTES).contains(&"1.1.0".to_owned()));
@@ -883,7 +982,10 @@ fn lif_077_skip_list_survives_in_the_registry_across_restarts() {
     let (rig, server) = update_with_failing_candidate(pkg(NOTES, "1.1.0").activate_error());
     server.crash();
     let _restarted = rig.start_server("s1");
-    assert_eq!(registry_entry(&rig, NOTES)["skip"], serde_json::json!(["1.1.0"]));
+    assert_eq!(
+        registry_entry(&rig, NOTES)["skip"],
+        serde_json::json!(["1.1.0"])
+    );
 }
 
 /// REQ: LIF-078
@@ -892,11 +994,18 @@ fn lif_078_declined_extra_grant_keeps_the_old_version_and_update_staged() {
     let rig = rig();
     install_ok(&rig, &pkg(NOTES, "1.0.0").grant("fs.read"));
     let server = rig.start_server("s1");
-    let path = rig.write_package(&pkg(NOTES, "1.1.0").grant("fs.read").high_risk_grant("process.spawn"));
+    let path = rig.write_package(
+        &pkg(NOTES, "1.1.0")
+            .grant("fs.read")
+            .high_risk_grant("process.spawn"),
+    );
     let path_text = path.to_string_lossy().into_owned();
     let output = rig.cli_tty(&["update", &path_text, "--allow-unsigned"], &["n"]);
     assert_eq!(output.exit_code, 1);
-    assert_eq!(error_codes(&output), vec!["install.review-declined".to_owned()]);
+    assert_eq!(
+        error_codes(&output),
+        vec!["install.review-declined".to_owned()]
+    );
     rig.advance(secs(3));
     assert_eq!(server.active_version(NOTES).as_deref(), Some("1.0.0"));
     assert!(!server.granted(NOTES).contains(&"process.spawn".to_owned()));
@@ -907,7 +1016,11 @@ fn lif_078_declined_extra_grant_keeps_the_old_version_and_update_staged() {
 fn lif_078_review_dialog_shows_only_the_new_capabilities() {
     let rig = rig();
     install_ok(&rig, &pkg(NOTES, "1.0.0").grant("fs.read"));
-    let path = rig.write_package(&pkg(NOTES, "1.1.0").grant("fs.read").high_risk_grant("process.spawn"));
+    let path = rig.write_package(
+        &pkg(NOTES, "1.1.0")
+            .grant("fs.read")
+            .high_risk_grant("process.spawn"),
+    );
     let path_text = path.to_string_lossy().into_owned();
     let _output = rig.cli_tty(&["update", &path_text, "--allow-unsigned"], &["y"]);
     assert_eq!(rig.last_review(), vec!["process.spawn".to_owned()]);
@@ -919,7 +1032,11 @@ fn lif_078_accepted_extra_grant_reaches_the_new_version() {
     let rig = rig();
     install_ok(&rig, &pkg(NOTES, "1.0.0").grant("fs.read"));
     let server = rig.start_server("s1");
-    let path = rig.write_package(&pkg(NOTES, "1.1.0").grant("fs.read").high_risk_grant("process.spawn"));
+    let path = rig.write_package(
+        &pkg(NOTES, "1.1.0")
+            .grant("fs.read")
+            .high_risk_grant("process.spawn"),
+    );
     let path_text = path.to_string_lossy().into_owned();
     let output = rig.cli_tty(&["update", &path_text, "--allow-unsigned"], &["y"]);
     assert_eq!(output.exit_code, 0);
@@ -974,7 +1091,10 @@ fn lif_079_rollback_over_newer_data_refused_migration_data_newer() {
     let (rig, _server) = migrated_rig();
     let output = rig.cli(&["rollback", NOTES]);
     assert_eq!(output.exit_code, 1);
-    assert_eq!(error_codes(&output), vec!["migration.data-newer".to_owned()]);
+    assert_eq!(
+        error_codes(&output),
+        vec!["migration.data-newer".to_owned()]
+    );
     assert_eq!(registry_entry(&rig, NOTES)["active_version"], "2.0.0");
 }
 
@@ -1009,9 +1129,18 @@ fn lif_079_downgrade_install_over_newer_data_refused_migration_data_newer() {
     let (rig, _server) = migrated_rig();
     let path = rig.write_package(&pkg(NOTES, "1.5.0").data_version(1));
     let path_text = path.to_string_lossy().into_owned();
-    let output = rig.cli(&["install", &path_text, "--yes", "--allow-unsigned", "--allow-downgrade"]);
+    let output = rig.cli(&[
+        "install",
+        &path_text,
+        "--yes",
+        "--allow-unsigned",
+        "--allow-downgrade",
+    ]);
     assert_eq!(output.exit_code, 1);
-    assert_eq!(error_codes(&output), vec!["migration.data-newer".to_owned()]);
+    assert_eq!(
+        error_codes(&output),
+        vec!["migration.data-newer".to_owned()]
+    );
 }
 
 /// REQ: LIF-079
@@ -1090,7 +1219,10 @@ fn lif_081_rollback_deactivates_with_upgrade_then_activates_the_previous_version
         deactivations.last(),
         Some(&ilium_plugin_api::generated::types::lifecycle::DeactivationReason::Upgrade)
     );
-    assert_eq!(server.activations(NOTES).last().map(String::as_str), Some("1.0.0"));
+    assert_eq!(
+        server.activations(NOTES).last().map(String::as_str),
+        Some("1.0.0")
+    );
 }
 
 /// REQ: LIF-081
@@ -1160,7 +1292,10 @@ fn lif_082_uninstall_prints_the_kept_paths_as_warning_lines() {
     let warnings = lines_of(&output, "warning");
     assert!(!warnings.is_empty());
     let data = rig.data_dir(NOTES).to_string_lossy().into_owned();
-    assert!(warnings.iter().any(|line| line["path"] == data.as_str()), "{warnings:?}");
+    assert!(
+        warnings.iter().any(|line| line["path"] == data.as_str()),
+        "{warnings:?}"
+    );
 }
 
 /// REQ: LIF-082
@@ -1280,7 +1415,9 @@ fn lif_084_node_metadata_of_an_uninstalled_plugin_stays_in_the_snapshot() {
     let _output = rig.cli(&["uninstall", NOTES]);
     rig.advance(secs(3));
     server.snapshot_now();
-    assert!(rig.snapshot_metadata_keys("s1", NOTES).contains(&"mark".to_owned()));
+    assert!(rig
+        .snapshot_metadata_keys("s1", NOTES)
+        .contains(&"mark".to_owned()));
 }
 
 /// REQ: LIF-084
@@ -1332,7 +1469,9 @@ fn lif_084_other_project_deletes_its_metadata_when_it_next_opens() {
     let _output = rig.cli(&["uninstall", NOTES, "--purge"]);
     let reopened = rig.start_server("other-project");
     assert_eq!(reopened.node_metadata_as(NOTES, 9, NOTES, "mark"), None);
-    assert!(rig.snapshot_metadata_keys("other-project", NOTES).is_empty());
+    assert!(rig
+        .snapshot_metadata_keys("other-project", NOTES)
+        .is_empty());
 }
 
 /// REQ: LIF-084
@@ -1340,7 +1479,10 @@ fn lif_084_other_project_deletes_its_metadata_when_it_next_opens() {
 fn lif_084_plain_uninstall_adds_no_tombstone() {
     let rig = installed_with_data();
     let _output = rig.cli(&["uninstall", NOTES]);
-    assert_eq!(rig.registry_json()["purge_tombstones"], serde_json::json!([]));
+    assert_eq!(
+        rig.registry_json()["purge_tombstones"],
+        serde_json::json!([])
+    );
 }
 
 /// REQ: LIF-085
@@ -1413,7 +1555,10 @@ fn lif_086_uninstall_leaves_the_directories_of_other_plugins_unchanged() {
     let store_before = snapshot_tree(&rig.plugins_root().join("store").join(OTHER));
     let _output = rig.cli(&["uninstall", NOTES, "--purge"]);
     assert_eq!(snapshot_tree(&rig.data_dir(OTHER)), before);
-    assert_eq!(snapshot_tree(&rig.plugins_root().join("store").join(OTHER)), store_before);
+    assert_eq!(
+        snapshot_tree(&rig.plugins_root().join("store").join(OTHER)),
+        store_before
+    );
     assert_eq!(rig.bucket_stamp(OTHER), Some(1));
 }
 
@@ -1425,7 +1570,10 @@ fn lif_086_uninstall_does_not_remove_a_publisher_key() {
     install_ok(&rig, &pkg(NOTES, "1.0.0").signed("key-a"));
     let before = std::fs::read(rig.state_dir().join("trust.json")).expect("trust store");
     let _output = rig.cli(&["uninstall", NOTES, "--purge"]);
-    assert_eq!(std::fs::read(rig.state_dir().join("trust.json")).expect("trust store"), before);
+    assert_eq!(
+        std::fs::read(rig.state_dir().join("trust.json")).expect("trust store"),
+        before
+    );
 }
 
 /// REQ: LIF-086
@@ -1438,8 +1586,13 @@ fn lif_086_uninstall_of_a_provider_warns_for_each_dependant_and_keeps_them_activ
     rig.advance(secs(3));
     let output = rig.cli(&["uninstall", NOTES]);
     assert_eq!(output.exit_code, 0);
-    assert!(lines_of(&output, "warning").iter().any(|line| line["message"].as_str().unwrap_or("").contains(OTHER)));
-    assert_eq!(server.state_of(OTHER, Side::Server), ilium_plugin_api::generated::host::plugins::InstanceState::Active);
+    assert!(lines_of(&output, "warning")
+        .iter()
+        .any(|line| line["message"].as_str().unwrap_or("").contains(OTHER)));
+    assert_eq!(
+        server.state_of(OTHER, Side::Server),
+        ilium_plugin_api::generated::host::plugins::InstanceState::Active
+    );
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1460,7 +1613,10 @@ fn commands_on_a_prepared_rig() -> Vec<(String, ilium_plugin_host::cli::CliOutpu
     let mut run = |label: &str, args: &[&str]| {
         results.push((label.to_owned(), rig.cli(args)));
     };
-    run("install", &["install", &path_text, "--yes", "--allow-unsigned"]);
+    run(
+        "install",
+        &["install", &path_text, "--yes", "--allow-unsigned"],
+    );
     run("list", &["list"]);
     run("info", &["info", NOTES]);
     run("disable", &["disable", NOTES]);
@@ -1469,12 +1625,18 @@ fn commands_on_a_prepared_rig() -> Vec<(String, ilium_plugin_host::cli::CliOutpu
     run("stats", &["stats", NOTES]);
     run("logs", &["logs", NOTES, "--tail", "5"]);
     run("reset-failures", &["reset-failures", NOTES]);
-    run("update", &["update", &second_text, "--yes", "--allow-unsigned"]);
+    run(
+        "update",
+        &["update", &second_text, "--yes", "--allow-unsigned"],
+    );
     run("rollback", &["rollback", NOTES]);
     run("reinstall", &["reinstall", NOTES]);
     run("uninstall", &["uninstall", NOTES]);
     run("info-unknown", &["info", "no.such.plugin"]);
-    run("update-unknown", &["update", &path_text, "--yes", "--allow-unsigned"]);
+    run(
+        "update-unknown",
+        &["update", &path_text, "--yes", "--allow-unsigned"],
+    );
     results
 }
 
@@ -1493,7 +1655,11 @@ fn lif_087_every_command_prints_only_typed_json_lines_in_a_pipe() {
 #[test]
 fn lif_087_every_command_uses_a_documented_exit_code() {
     for (label, output) in commands_on_a_prepared_rig() {
-        assert!(EXIT_CODES.contains(&output.exit_code), "{label}: {}", output.exit_code);
+        assert!(
+            EXIT_CODES.contains(&output.exit_code),
+            "{label}: {}",
+            output.exit_code
+        );
     }
 }
 
@@ -1504,7 +1670,10 @@ fn lif_087_every_error_line_carries_a_code_from_the_catalogue() {
     for (label, output) in commands_on_a_prepared_rig() {
         for line in lines_of(&output, "error") {
             let code = line["code"].as_str().unwrap_or("");
-            assert!(catalogue.contains(code), "{label}: `{code}` not in the catalogue");
+            assert!(
+                catalogue.contains(code),
+                "{label}: `{code}` not in the catalogue"
+            );
         }
     }
 }
@@ -1515,7 +1684,10 @@ fn lif_087_update_of_an_unknown_id_exits_5_with_install_not_installed() {
     let rig = rig();
     let output = update(&rig, &pkg(NOTES, "1.0.0"));
     assert_eq!(output.exit_code, 5);
-    assert_eq!(error_codes(&output), vec!["install.not-installed".to_owned()]);
+    assert_eq!(
+        error_codes(&output),
+        vec!["install.not-installed".to_owned()]
+    );
 }
 
 /// REQ: LIF-087
@@ -1547,7 +1719,10 @@ fn lif_087_declined_review_exits_1_with_install_review_declined() {
     let path_text = path.to_string_lossy().into_owned();
     let output = rig.cli_tty(&["install", &path_text, "--allow-unsigned"], &["n"]);
     assert_eq!(output.exit_code, 1);
-    assert_eq!(error_codes(&output), vec!["install.review-declined".to_owned()]);
+    assert_eq!(
+        error_codes(&output),
+        vec!["install.review-declined".to_owned()]
+    );
 }
 
 /// REQ: LIF-088
@@ -1629,8 +1804,12 @@ fn lif_089_installing_cli_sends_plugins_changed_to_every_server_it_finds() {
     let a = rig.start_server_manual("a");
     let b = rig.start_server_manual("b");
     install_ok(&rig, &pkg(NOTES, "1.0.0"));
-    assert!(a.received_messages().contains(&"plugins-changed".to_owned()));
-    assert!(b.received_messages().contains(&"plugins-changed".to_owned()));
+    assert!(a
+        .received_messages()
+        .contains(&"plugins-changed".to_owned()));
+    assert!(b
+        .received_messages()
+        .contains(&"plugins-changed".to_owned()));
 }
 
 /// REQ: LIF-089
@@ -1646,7 +1825,9 @@ fn lif_089_unreachable_server_gives_an_install_notify_failed_warning_and_still_s
     assert_eq!(warnings.len(), 1);
     assert_eq!(warnings[0]["code"], "install.notify-failed");
     assert_eq!(warnings[0]["session"], "b");
-    assert!(reachable.received_messages().contains(&"plugins-changed".to_owned()));
+    assert!(reachable
+        .received_messages()
+        .contains(&"plugins-changed".to_owned()));
 }
 
 /// REQ: LIF-089
@@ -1712,9 +1893,18 @@ fn lif_091_the_two_changes_never_interleave_for_one_plugin() {
     install_ok(&rig, &pkg(NOTES, "1.0.0"));
     let server = rig.start_server("s1");
     let trace = server.race_disable_and_update(NOTES, &pkg(NOTES, "1.1.0"));
-    let disable: Vec<usize> = ["disable.begin", "disable.end"].iter().map(|n| position_of(&trace, n)).collect();
-    let update: Vec<usize> = ["update.begin", "update.end"].iter().map(|n| position_of(&trace, n)).collect();
-    assert!(disable[1] < update[0] || update[1] < disable[0], "{trace:?}");
+    let disable: Vec<usize> = ["disable.begin", "disable.end"]
+        .iter()
+        .map(|n| position_of(&trace, n))
+        .collect();
+    let update: Vec<usize> = ["update.begin", "update.end"]
+        .iter()
+        .map(|n| position_of(&trace, n))
+        .collect();
+    assert!(
+        disable[1] < update[0] || update[1] < disable[0],
+        "{trace:?}"
+    );
 }
 
 /// REQ: LIF-091
@@ -1879,13 +2069,20 @@ fn lif_093_reinstall_without_the_cached_package_fails_package_cache_missing() {
     rig.delete_cached_package(NOTES, "1.0.0");
     let output = rig.cli(&["reinstall", NOTES]);
     assert_eq!(output.exit_code, 1);
-    assert_eq!(error_codes(&output), vec!["package.cache-missing".to_owned()]);
+    assert_eq!(
+        error_codes(&output),
+        vec!["package.cache-missing".to_owned()]
+    );
 }
 
 /// REQ: LIF-094
 #[test]
 fn lif_094_power_loss_during_the_registry_write_finds_the_old_or_the_new_registry() {
-    for step in [RegistryStep::TempWritten, RegistryStep::TempSynced, RegistryStep::Renamed] {
+    for step in [
+        RegistryStep::TempWritten,
+        RegistryStep::TempSynced,
+        RegistryStep::Renamed,
+    ] {
         let rig = rig();
         install_ok(&rig, &pkg(NOTES, "1.0.0"));
         let old = rig.registry_bytes();
@@ -1893,7 +2090,10 @@ fn lif_094_power_loss_during_the_registry_write_finds_the_old_or_the_new_registr
         let _killed = update(&rig, &pkg(NOTES, "1.1.0"));
         let seen = rig.registry_bytes();
         let value: Value = serde_json::from_slice(&seen).expect("a whole registry");
-        assert!(seen == old || value["plugins"][0]["update"]["candidate"] == "1.1.0", "{step:?}");
+        assert!(
+            seen == old || value["plugins"][0]["update"]["candidate"] == "1.1.0",
+            "{step:?}"
+        );
     }
 }
 
@@ -1916,7 +2116,10 @@ fn restart_after_pause_at(stage: UpdateStage) -> (OpsRig, ServerHandle) {
 fn lif_094_update_in_staged_is_finished_at_the_next_activation() {
     let (rig, server) = restart_after_pause_at(UpdateStage::Staged);
     assert_eq!(registry_entry(&rig, NOTES)["update"], Value::Null);
-    assert!(matches!(server.active_version(NOTES).as_deref(), Some("1.0.0") | Some("1.1.0")));
+    assert!(matches!(
+        server.active_version(NOTES).as_deref(),
+        Some("1.0.0") | Some("1.1.0")
+    ));
 }
 
 /// REQ: LIF-094

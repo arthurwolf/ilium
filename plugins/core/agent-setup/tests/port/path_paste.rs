@@ -19,7 +19,11 @@ fn saved_path(host: &mut FakeHost) -> Option<serde_json::Value> {
 fn port_sp_10_a_pasted_second_line_is_refused_and_never_submits_or_leaks_keys() {
     let mut host = server_host();
     host.type_into_field("setup", "global-file", "/tmp/custom-CLAUDE.md\nr");
-    assert_eq!(saved_path(&mut host), Some(json!("~/.claude/CLAUDE.md")), "nothing is saved and the r did not restore");
+    assert_eq!(
+        saved_path(&mut host),
+        Some(json!("~/.claude/CLAUDE.md")),
+        "nothing is saved and the r did not restore"
+    );
     let notice = host.last_notice().expect("a notice explains the refusal");
     assert_eq!(notice, "The instruction-file path must be one line");
 }

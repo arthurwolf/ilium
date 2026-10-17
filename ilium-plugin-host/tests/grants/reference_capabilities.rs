@@ -34,7 +34,10 @@ fn is_ok(result: &ImportResult) -> bool {
 #[test]
 fn cap_011_log_succeeds_with_an_empty_capabilities_list() {
     let rig = rig(Tier::T3, Side::Server, &[]);
-    let result = rig.host.call_import("ilium:host/log.log", json!({ "level": "info", "message": "hello" }));
+    let result = rig.host.call_import(
+        "ilium:host/log.log",
+        json!({ "level": "info", "message": "hello" }),
+    );
     assert!(is_ok(&result), "{result:?}");
 }
 
@@ -42,9 +45,15 @@ fn cap_011_log_succeeds_with_an_empty_capabilities_list() {
 #[test]
 fn cap_011_storage_succeeds_with_an_empty_capabilities_list() {
     let rig = rig(Tier::T3, Side::Server, &[]);
-    let put = rig.host.call_import("ilium:host/storage.put", json!({ "bucket": "global", "key": "k", "value": [1, 2, 3] }));
+    let put = rig.host.call_import(
+        "ilium:host/storage.put",
+        json!({ "bucket": "global", "key": "k", "value": [1, 2, 3] }),
+    );
     assert!(is_ok(&put), "{put:?}");
-    let get = rig.host.call_import("ilium:host/storage.get", json!({ "bucket": "global", "key": "k" }));
+    let get = rig.host.call_import(
+        "ilium:host/storage.get",
+        json!({ "bucket": "global", "key": "k" }),
+    );
     assert!(is_ok(&get), "{get:?}");
 }
 
@@ -55,7 +64,10 @@ fn cap_011_clock_timers_codec_and_settings_need_no_grant() {
     for (name, args) in [
         ("ilium:host/clock.now-unix-millis", json!({})),
         ("ilium:host/clock.monotonic-millis", json!({})),
-        ("ilium:host/timers.set", json!({ "after-millis": 1000, "repeat-millis": null })),
+        (
+            "ilium:host/timers.set",
+            json!({ "after-millis": 1000, "repeat-millis": null }),
+        ),
         ("ilium:host/codec.sha256", json!({ "data": [1, 2, 3] })),
         ("ilium:host/settings.get-json", json!({})),
     ] {
@@ -82,7 +94,9 @@ fn cap_011_fs_write_data_and_cache_need_no_grant() {
 fn cap_011_fs_read_package_data_and_cache_are_never_not_permitted() {
     let rig = rig(Tier::T3, Side::Server, &[]);
     for path in ["/package/a.txt", "/data/a.txt", "/cache/a.txt"] {
-        let result = rig.host.call_import("ilium:host/fs.metadata", json!({ "path": path }));
+        let result = rig
+            .host
+            .call_import("ilium:host/fs.metadata", json!({ "path": path }));
         assert!(!is_not_permitted(&result), "{path}: {result:?}");
     }
 }
@@ -92,7 +106,10 @@ fn cap_011_fs_read_package_data_and_cache_are_never_not_permitted() {
 fn cap_011_fs_watch_of_always_granted_scopes_needs_no_grant() {
     let rig = rig(Tier::T3, Side::Server, &[]);
     for path in ["/package", "/data", "/cache"] {
-        let result = rig.host.call_import("ilium:host/fs.watch", json!({ "path": path, "recursive": false }));
+        let result = rig.host.call_import(
+            "ilium:host/fs.watch",
+            json!({ "path": path, "recursive": false }),
+        );
         assert!(is_ok(&result), "{path}: {result:?}");
     }
 }
@@ -100,12 +117,25 @@ fn cap_011_fs_watch_of_always_granted_scopes_needs_no_grant() {
 /// REQ: CAP-011
 #[test]
 fn cap_011_fs_watch_of_project_without_a_grant_is_not_permitted_not_granted() {
-    let rig = rig_from(HostHarness::new().tier(Tier::T3).side(Side::Server).declined(&["fs.read:project"]));
-    let result = rig.host.call_import("ilium:host/fs.watch", json!({ "path": "/project", "recursive": false }));
+    let rig = rig_from(
+        HostHarness::new()
+            .tier(Tier::T3)
+            .side(Side::Server)
+            .declined(&["fs.read:project"]),
+    );
+    let result = rig.host.call_import(
+        "ilium:host/fs.watch",
+        json!({ "path": "/project", "recursive": false }),
+    );
     match result {
         ImportResult::Err(error) => {
             assert_eq!(error.code, ErrorCode::NotPermitted);
-            assert!(error.message.starts_with("not-granted: ") || error.message.starts_with("declined: "), "{}", error.message);
+            assert!(
+                error.message.starts_with("not-granted: ")
+                    || error.message.starts_with("declined: "),
+                "{}",
+                error.message
+            );
         }
         other => panic!("expected not-permitted, got {other:?}"),
     }
@@ -123,7 +153,9 @@ fn cap_012_server_grant_does_not_authorize_a_client_call() {
             .other_side_grants(Side::Server, &["fs.read:project"])
             .declined(&["fs.read:project"]),
     );
-    let result = rig.host.call_import("ilium:host/fs.read-all", read_project());
+    let result = rig
+        .host
+        .call_import("ilium:host/fs.read-all", read_project());
     assert!(is_not_permitted(&result), "{result:?}");
 }
 
@@ -131,7 +163,9 @@ fn cap_012_server_grant_does_not_authorize_a_client_call() {
 #[test]
 fn cap_012_the_same_call_succeeds_on_the_side_that_holds_the_grant() {
     let rig = rig(Tier::T2, Side::Server, &["fs.read:project"]);
-    let result = rig.host.call_import("ilium:host/fs.read-all", read_project());
+    let result = rig
+        .host
+        .call_import("ilium:host/fs.read-all", read_project());
     assert!(is_ok(&result), "{result:?}");
 }
 
@@ -158,7 +192,9 @@ fn cap_012_a_client_grant_does_not_authorize_the_server_side() {
             .other_side_grants(Side::Client, &["fs.read:project"])
             .declined(&["fs.read:project"]),
     );
-    let result = rig.host.call_import("ilium:host/fs.read-all", read_project());
+    let result = rig
+        .host
+        .call_import("ilium:host/fs.read-all", read_project());
     assert!(is_not_permitted(&result), "{result:?}");
 }
 
@@ -167,7 +203,12 @@ fn cap_012_a_client_grant_does_not_authorize_the_server_side() {
 /// REQ: CAP-013
 #[test]
 fn cap_013_plugin_still_loads_when_a_grant_is_declined() {
-    let rig = rig_from(HostHarness::new().tier(Tier::T2).side(Side::Server).declined(&["fs.read:project"]));
+    let rig = rig_from(
+        HostHarness::new()
+            .tier(Tier::T2)
+            .side(Side::Server)
+            .declined(&["fs.read:project"]),
+    );
     assert_eq!(rig.seen.activation_count(), 1);
     assert_eq!(rig.host.state(), InstanceState::Active);
 }
@@ -175,8 +216,16 @@ fn cap_013_plugin_still_loads_when_a_grant_is_declined() {
 /// REQ: CAP-013
 #[test]
 fn cap_013_call_that_needs_the_declined_grant_is_not_permitted() {
-    let rig = rig_from(HostHarness::new().tier(Tier::T2).side(Side::Server).declined(&["fs.read:project"]));
-    match rig.host.call_import("ilium:host/fs.read-all", read_project()) {
+    let rig = rig_from(
+        HostHarness::new()
+            .tier(Tier::T2)
+            .side(Side::Server)
+            .declined(&["fs.read:project"]),
+    );
+    match rig
+        .host
+        .call_import("ilium:host/fs.read-all", read_project())
+    {
         ImportResult::Err(error) => {
             assert_eq!(error.code, ErrorCode::NotPermitted);
             assert!(error.message.starts_with("declined: "), "{}", error.message);
@@ -203,7 +252,12 @@ fn cap_013_granted_list_omits_the_declined_grant_and_keeps_the_others() {
 /// REQ: CAP-013
 #[test]
 fn cap_013_declined_intent_grant_refuses_the_submission_only() {
-    let mut rig = rig_from(HostHarness::new().tier(Tier::T2).side(Side::Server).declined(&["sound.play"]));
+    let mut rig = rig_from(
+        HostHarness::new()
+            .tier(Tier::T2)
+            .side(Side::Server)
+            .declined(&["sound.play"]),
+    );
     let error = refusal(rig.submit(Intent::PlaySound("bell".to_owned())));
     assert_eq!(error.code, ErrorCode::NotPermitted);
     assert_eq!(rig.host.state(), InstanceState::Active);
@@ -212,8 +266,15 @@ fn cap_013_declined_intent_grant_refuses_the_submission_only() {
 /// REQ: CAP-013
 #[test]
 fn cap_013_a_declined_grant_is_not_counted_as_a_plugin_failure() {
-    let rig = rig_from(HostHarness::new().tier(Tier::T2).side(Side::Server).declined(&["fs.read:project"]));
-    let _ = rig.host.call_import("ilium:host/fs.read-all", read_project());
+    let rig = rig_from(
+        HostHarness::new()
+            .tier(Tier::T2)
+            .side(Side::Server)
+            .declined(&["fs.read:project"]),
+    );
+    let _ = rig
+        .host
+        .call_import("ilium:host/fs.read-all", read_project());
     assert!(rig.host.failures().is_empty());
 }
 
@@ -222,10 +283,17 @@ fn cap_013_a_declined_grant_is_not_counted_as_a_plugin_failure() {
 /// REQ: CAP-014
 #[test]
 fn cap_014_refused_intent_is_logged_with_grant_and_reason() {
-    let mut rig = rig_from(HostHarness::new().tier(Tier::T2).side(Side::Server).declined(&["sound.play"]));
+    let mut rig = rig_from(
+        HostHarness::new()
+            .tier(Tier::T2)
+            .side(Side::Server)
+            .declined(&["sound.play"]),
+    );
     let _ = rig.submit(Intent::PlaySound("bell".to_owned()));
     assert!(
-        rig.log_messages().iter().any(|line| line == "refused sound.play because declined"),
+        rig.log_messages()
+            .iter()
+            .any(|line| line == "refused sound.play because declined"),
         "{:?}",
         rig.log_messages()
     );
@@ -234,20 +302,52 @@ fn cap_014_refused_intent_is_logged_with_grant_and_reason() {
 /// REQ: CAP-014
 #[test]
 fn cap_014_refused_import_is_logged_with_a_refused_prefix() {
-    let rig = rig_from(HostHarness::new().tier(Tier::T2).side(Side::Server).declined(&["fs.read:project"]));
-    let _ = rig.host.call_import("ilium:host/fs.read-all", read_project());
+    let rig = rig_from(
+        HostHarness::new()
+            .tier(Tier::T2)
+            .side(Side::Server)
+            .declined(&["fs.read:project"]),
+    );
+    let _ = rig
+        .host
+        .call_import("ilium:host/fs.read-all", read_project());
     let lines = rig.log_messages();
-    assert!(lines.iter().any(|line| line.starts_with("refused fs.read:project because ")), "{lines:?}");
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.starts_with("refused fs.read:project because ")),
+        "{lines:?}"
+    );
 }
 
 /// REQ: CAP-014
 #[test]
 fn cap_014_reason_is_one_word_of_the_closed_list() {
-    let rig = rig_from(HostHarness::new().tier(Tier::T2).side(Side::Server).declined(&["fs.read:project"]));
-    let _ = rig.host.call_import("ilium:host/fs.read-all", read_project());
+    let rig = rig_from(
+        HostHarness::new()
+            .tier(Tier::T2)
+            .side(Side::Server)
+            .declined(&["fs.read:project"]),
+    );
+    let _ = rig
+        .host
+        .call_import("ilium:host/fs.read-all", read_project());
     let closed = [
-        "declined", "revoked", "not-granted", "scope", "policy", "offline", "private-address", "reserved",
-        "downgrade", "not-user-initiated", "file-type", "unavailable", "response-size", "stream-size", "tls",
+        "declined",
+        "revoked",
+        "not-granted",
+        "scope",
+        "policy",
+        "offline",
+        "private-address",
+        "reserved",
+        "downgrade",
+        "not-user-initiated",
+        "file-type",
+        "unavailable",
+        "response-size",
+        "stream-size",
+        "tls",
     ];
     let line = rig
         .log_messages()
@@ -262,8 +362,13 @@ fn cap_014_reason_is_one_word_of_the_closed_list() {
 #[test]
 fn cap_014_a_permitted_call_writes_no_refusal_line() {
     let rig = rig(Tier::T2, Side::Server, &["fs.read:project"]);
-    let _ = rig.host.call_import("ilium:host/fs.read-all", read_project());
-    assert!(rig.log_messages().iter().all(|line| !line.starts_with("refused ")));
+    let _ = rig
+        .host
+        .call_import("ilium:host/fs.read-all", read_project());
+    assert!(rig
+        .log_messages()
+        .iter()
+        .all(|line| !line.starts_with("refused ")));
 }
 
 // ---------------------------------------------------------------- CAP-015 run-time revoke
@@ -285,7 +390,10 @@ fn cap_015_call_entering_after_the_revoke_is_not_permitted_with_a_revoked_messag
     let rig = rig(Tier::T2, Side::Server, &["fs.read:project"]);
     rig.host.revoke("fs.read:project");
     rig.host.pump(8);
-    match rig.host.call_import("ilium:host/fs.read-all", read_project()) {
+    match rig
+        .host
+        .call_import("ilium:host/fs.read-all", read_project())
+    {
         ImportResult::Err(error) => {
             assert_eq!(error.code, ErrorCode::NotPermitted);
             assert!(error.message.starts_with("revoked: "), "{}", error.message);
@@ -335,7 +443,12 @@ fn cap_015_revoking_a_grant_the_plugin_does_not_hold_changes_nothing() {
 /// REQ: CAP-015
 #[test]
 fn cap_015_a_grant_added_later_reactivates_with_reason_granted() {
-    let rig = rig_from(HostHarness::new().tier(Tier::T2).side(Side::Server).declined(&["sound.play"]));
+    let rig = rig_from(
+        HostHarness::new()
+            .tier(Tier::T2)
+            .side(Side::Server)
+            .declined(&["sound.play"]),
+    );
     rig.host.grant_now("sound.play");
     rig.host.pump(8);
     assert_eq!(rig.seen.reasons(), vec![DeactivationReason::Granted]);
@@ -349,7 +462,10 @@ fn cap_015_a_grant_added_later_reactivates_with_reason_granted() {
 fn cap_016_upgrade_adding_one_grant_lists_exactly_one_row() {
     use ilium_plugin_api::grants::Grant;
     use ilium_plugin_host::review::update_review;
-    let old = [Grant::parse("tree.read").expect("grant"), Grant::parse("fs.read:project").expect("grant")];
+    let old = [
+        Grant::parse("tree.read").expect("grant"),
+        Grant::parse("fs.read:project").expect("grant"),
+    ];
     let new = [
         Grant::parse("tree.read").expect("grant"),
         Grant::parse("fs.read:project").expect("grant"),
@@ -367,7 +483,10 @@ fn cap_016_upgrade_adding_one_grant_lists_exactly_one_row() {
 fn cap_016_unchanged_grants_are_not_listed() {
     use ilium_plugin_api::grants::Grant;
     use ilium_plugin_host::review::update_review;
-    let same = [Grant::parse("tree.read").expect("grant"), Grant::parse("fs.read:project").expect("grant")];
+    let same = [
+        Grant::parse("tree.read").expect("grant"),
+        Grant::parse("fs.read:project").expect("grant"),
+    ];
     let review = update_review(&same, &same);
     assert!(review.new.is_empty() && review.wider.is_empty() && review.removed.is_empty());
     assert_eq!(review.unchanged.len(), 2);
@@ -379,7 +498,10 @@ fn cap_016_unchanged_grants_are_not_listed() {
 #[test]
 fn cap_018_import_never_requested_traps() {
     let rig = rig(Tier::T3, Side::Server, &[]);
-    match rig.host.call_import("ilium:host/fs.read-all", read_project()) {
+    match rig
+        .host
+        .call_import("ilium:host/fs.read-all", read_project())
+    {
         ImportResult::Trap(trap) => assert_eq!(trap.code.as_str(), "host.capability-not-requested"),
         other => panic!("expected a trap, got {other:?}"),
     }
@@ -389,7 +511,9 @@ fn cap_018_import_never_requested_traps() {
 #[test]
 fn cap_018_trap_is_recorded_as_a_plugin_failure() {
     let rig = rig(Tier::T3, Side::Server, &[]);
-    let _ = rig.host.call_import("ilium:host/fs.read-all", read_project());
+    let _ = rig
+        .host
+        .call_import("ilium:host/fs.read-all", read_project());
     let failures = rig.host.failures();
     assert_eq!(failures.len(), 1);
     assert_eq!(failures[0].code.as_str(), "host.capability-not-requested");
@@ -398,8 +522,15 @@ fn cap_018_trap_is_recorded_as_a_plugin_failure() {
 /// REQ: CAP-018
 #[test]
 fn cap_018_import_whose_grant_was_declined_returns_not_permitted_not_a_trap() {
-    let rig = rig_from(HostHarness::new().tier(Tier::T3).side(Side::Server).declined(&["fs.read:project"]));
-    let result = rig.host.call_import("ilium:host/fs.read-all", read_project());
+    let rig = rig_from(
+        HostHarness::new()
+            .tier(Tier::T3)
+            .side(Side::Server)
+            .declined(&["fs.read:project"]),
+    );
+    let result = rig
+        .host
+        .call_import("ilium:host/fs.read-all", read_project());
     assert!(is_not_permitted(&result), "{result:?}");
     assert!(rig.host.failures().is_empty());
 }
@@ -410,7 +541,9 @@ fn cap_018_import_whose_grant_was_revoked_returns_not_permitted() {
     let rig = rig(Tier::T3, Side::Server, &["fs.read:project"]);
     rig.host.revoke("fs.read:project");
     rig.host.pump(8);
-    let result = rig.host.call_import("ilium:host/fs.read-all", read_project());
+    let result = rig
+        .host
+        .call_import("ilium:host/fs.read-all", read_project());
     assert!(is_not_permitted(&result), "{result:?}");
 }
 
@@ -418,6 +551,8 @@ fn cap_018_import_whose_grant_was_revoked_returns_not_permitted() {
 #[test]
 fn cap_018_a_granted_import_is_neither_trap_nor_refusal() {
     let rig = rig(Tier::T3, Side::Server, &["fs.read:project"]);
-    let result = rig.host.call_import("ilium:host/fs.read-all", read_project());
+    let result = rig
+        .host
+        .call_import("ilium:host/fs.read-all", read_project());
     assert!(is_ok(&result), "{result:?}");
 }

@@ -3,7 +3,7 @@
 use ilium_plugin_sdk::types::ViewTarget;
 use serde_json::json;
 
-use crate::common::{SAMPLE_BOARD, board_file, board_host, draw, press, sections};
+use crate::common::{board_file, board_host, draw, press, sections, SAMPLE_BOARD};
 
 fn board_with(cards: &[&str]) -> String {
     let mut text = String::from("## To do\n");
@@ -18,12 +18,20 @@ fn board_with(cards: &[&str]) -> String {
 fn port_board_ui_footer_hints_name_the_board_actions_and_fit_every_width() {
     let (mut host, node) = board_host(SAMPLE_BOARD);
     let wide = draw(&mut host, node, 120, 24).text();
-    for expected in ["column", "card", "details", "new", "rename", "delete", "move", "drag"] {
-        assert!(wide.contains(expected), "missing board action {expected}: {wide}");
+    for expected in [
+        "column", "card", "details", "new", "rename", "delete", "move", "drag",
+    ] {
+        assert!(
+            wide.contains(expected),
+            "missing board action {expected}: {wide}"
+        );
     }
     for width in [20u16, 40, 60, 80, 120, 180] {
         for line in draw(&mut host, node, width, 24).text().lines() {
-            assert!(line.chars().count() <= usize::from(width), "clipped at {width}: {line}");
+            assert!(
+                line.chars().count() <= usize::from(width),
+                "clipped at {width}: {line}"
+            );
         }
     }
 }
@@ -36,7 +44,10 @@ fn port_board_ui_detail_panel_owns_the_rightmost_third() {
     press(&mut host, node, "enter");
     let screen = draw(&mut host, node, 120, 30);
     let (_, column) = screen.find("complete body").expect("detail body drawn");
-    assert!(column >= 80, "detail starts at column {column}, expected the rightmost third (80..120)");
+    assert!(
+        column >= 80,
+        "detail starts at column {column}, expected the rightmost third (80..120)"
+    );
 }
 
 /// REQ: PORT:ilium-client/src/board_ui.rs::minimum_width_pages_columns_and_exposes_horizontal_scrollbar
@@ -47,10 +58,18 @@ fn port_board_ui_minimum_width_pages_columns_and_shows_a_horizontal_scrollbar() 
         text.push_str(&format!("## Column {index}\n- card\n\n"));
     }
     let (mut host, node) = board_host(&text);
-    host.settings().set("column_width", json!(20)).expect("valid");
+    host.settings()
+        .set("column_width", json!(20))
+        .expect("valid");
     let screen = draw(&mut host, node, 60, 20).text();
-    assert!(screen.contains("Column 0") && !screen.contains("Column 4"), "{screen}");
-    assert!(screen.contains('\u{25B6}'), "scrollbar arrow missing: {screen}");
+    assert!(
+        screen.contains("Column 0") && !screen.contains("Column 4"),
+        "{screen}"
+    );
+    assert!(
+        screen.contains('\u{25B6}'),
+        "scrollbar arrow missing: {screen}"
+    );
 }
 
 /// REQ: PORT:ilium-client/src/board_ui.rs::cards_leave_a_spacer_row_and_follow_the_preview_line_setting
@@ -83,7 +102,11 @@ fn port_board_ui_selected_card_beyond_the_first_page_stays_visible() {
         press(&mut host, node, "j");
     }
     let screen = draw(&mut host, node, 60, 14);
-    assert!(screen.find("Card 7").is_some() && screen.find("Card 0").is_none(), "{}", screen.text());
+    assert!(
+        screen.find("Card 7").is_some() && screen.find("Card 0").is_none(),
+        "{}",
+        screen.text()
+    );
     let (row, column) = screen.find("Card 7").expect("card 7");
     assert!(host.click(ViewTarget::Pane(node), column, row));
 }
@@ -103,8 +126,15 @@ fn port_board_ui_clicks_hit_the_card_that_is_drawn_there() {
 /// REQ: PORT:ilium-client/src/board_ui.rs::render_shows_three_wrapped_lines_without_a_blank_card_row
 #[test]
 fn port_board_ui_a_long_title_wraps_into_three_lines() {
-    let (mut host, node) = board_host(&board_with(&["one two three four five six seven", "second item"]));
-    let rows: Vec<String> = draw(&mut host, node, 18, 20).text().lines().map(str::to_string).collect();
+    let (mut host, node) = board_host(&board_with(&[
+        "one two three four five six seven",
+        "second item",
+    ]));
+    let rows: Vec<String> = draw(&mut host, node, 18, 20)
+        .text()
+        .lines()
+        .map(str::to_string)
+        .collect();
     assert!(rows[2].contains("one two three"), "{rows:?}");
     assert!(rows[3].contains("four five six"), "{rows:?}");
     assert!(rows[4].contains("seven"), "{rows:?}");
@@ -115,12 +145,17 @@ fn port_board_ui_a_long_title_wraps_into_three_lines() {
 #[test]
 fn port_board_ui_checkbox_click_toggles_the_marker_that_was_hit() {
     let (mut host, node) = board_host(&board_with(&["AAAA [ ] second [x] third"]));
-    host.settings().set("column_width", json!(12)).expect("valid");
+    host.settings()
+        .set("column_width", json!(12))
+        .expect("valid");
     let screen = draw(&mut host, node, 11, 20);
     let (row, column) = screen.find("[x]").expect("second marker drawn");
     assert!(host.click(ViewTarget::Pane(node), column + 1, row));
     host.settle();
-    assert_eq!(sections(&board_file(&mut host))[0].1, ["AAAA [ ] second [ ] third"]);
+    assert_eq!(
+        sections(&board_file(&mut host))[0].1,
+        ["AAAA [ ] second [ ] third"]
+    );
 }
 
 /// REQ: PORT:ilium-client/src/board_ui.rs::active_drag_renders_a_visible_insertion_line
@@ -147,9 +182,18 @@ fn port_board_ui_an_active_drag_draws_an_insertion_line() {
 #[test]
 fn port_board_ui_a_checkbox_marker_is_never_split_across_a_wrap_point() {
     let (mut host, node) = board_host(&board_with(&["AAAA [ ]"]));
-    host.settings().set("column_width", json!(12)).expect("valid");
+    host.settings()
+        .set("column_width", json!(12))
+        .expect("valid");
     let screen = draw(&mut host, node, 9, 12);
-    assert!(screen.text().lines().any(|line| line.contains('[') && line.contains(']')), "{}", screen.text());
+    assert!(
+        screen
+            .text()
+            .lines()
+            .any(|line| line.contains('[') && line.contains(']')),
+        "{}",
+        screen.text()
+    );
     let (row, column) = screen.find("[").expect("marker");
     assert!(host.click(ViewTarget::Pane(node), column + 1, row));
     host.settle();

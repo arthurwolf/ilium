@@ -63,17 +63,20 @@ impl Enc {
         self
     }
     pub fn str(mut self, value: &str) -> Enc {
-        self.0.extend_from_slice(&(value.len() as u64).to_le_bytes());
+        self.0
+            .extend_from_slice(&(value.len() as u64).to_le_bytes());
         self.0.extend_from_slice(value.as_bytes());
         self
     }
     pub fn bytes(mut self, value: &[u8]) -> Enc {
-        self.0.extend_from_slice(&(value.len() as u64).to_le_bytes());
+        self.0
+            .extend_from_slice(&(value.len() as u64).to_le_bytes());
         self.0.extend_from_slice(value);
         self
     }
     pub fn strs(mut self, values: &[&str]) -> Enc {
-        self.0.extend_from_slice(&(values.len() as u64).to_le_bytes());
+        self.0
+            .extend_from_slice(&(values.len() as u64).to_le_bytes());
         for value in values {
             self = self.str(value);
         }
@@ -113,7 +116,8 @@ impl<'a> Dec<'a> {
         self.take(1).map(|b| b[0])
     }
     pub fn u32(&mut self) -> Option<u32> {
-        self.take(4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+        self.take(4)
+            .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
     }
     pub fn u64(&mut self) -> Option<u64> {
         self.take(8).map(|b| {
@@ -207,7 +211,12 @@ pub fn parse_heartbeat(frame: &[u8]) -> Option<u64> {
     dec.u64()
 }
 
-pub fn msg_instantiate(plugin: &str, fingerprint: &str, component: &[u8], restored: &[u8]) -> Vec<u8> {
+pub fn msg_instantiate(
+    plugin: &str,
+    fingerprint: &str,
+    component: &[u8],
+    restored: &[u8],
+) -> Vec<u8> {
     Enc::new(tag::INSTANTIATE)
         .str(plugin)
         .str(fingerprint)
@@ -256,8 +265,16 @@ impl Enc {
 /// An `Instantiate` body of exactly `total` bytes (padding goes into `restored`).
 pub fn instantiate_of_size(total: usize, fingerprint: &str) -> Vec<u8> {
     let base = msg_instantiate("pad", fingerprint, EMPTY_COMPONENT, &[]);
-    assert!(total >= base.len(), "requested size below the fixed message prefix");
-    msg_instantiate("pad", fingerprint, EMPTY_COMPONENT, &vec![0u8; total - base.len()])
+    assert!(
+        total >= base.len(),
+        "requested size below the fixed message prefix"
+    );
+    msg_instantiate(
+        "pad",
+        fingerprint,
+        EMPTY_COMPONENT,
+        &vec![0u8; total - base.len()],
+    )
 }
 
 pub fn framed(body: &[u8]) -> Vec<u8> {
@@ -282,7 +299,11 @@ pub struct Helper {
 }
 
 impl Helper {
-    fn start(child: Child, writer: Box<dyn Write + Send>, mut reader: Box<dyn Read + Send>) -> Helper {
+    fn start(
+        child: Child,
+        writer: Box<dyn Write + Send>,
+        mut reader: Box<dyn Read + Send>,
+    ) -> Helper {
         let (tx, rx) = channel();
         std::thread::spawn(move || loop {
             let mut len = [0u8; 4];
@@ -301,7 +322,12 @@ impl Helper {
                 break;
             }
         });
-        Helper { child, writer, rx, hello: None }
+        Helper {
+            child,
+            writer,
+            rx,
+            hello: None,
+        }
     }
 
     /// Spawns the helper binary with stdin and stdout as the dispatcher channel (pipes).
@@ -364,7 +390,9 @@ impl Helper {
     pub fn recv_tag(&self, wanted: u32, millis: u64) -> Option<Vec<u8>> {
         let deadline = Instant::now() + Duration::from_millis(millis);
         loop {
-            let left = deadline.saturating_duration_since(Instant::now()).as_millis() as u64;
+            let left = deadline
+                .saturating_duration_since(Instant::now())
+                .as_millis() as u64;
             match self.recv(left.max(1)) {
                 Recv::Frame(frame) if frame_tag(&frame) == Some(wanted) => return Some(frame),
                 Recv::Frame(_) => continue,
@@ -375,7 +403,9 @@ impl Helper {
 
     /// Reads `Hello` (at most 5,000 ms) and remembers it.
     pub fn expect_hello(&mut self) -> Hello {
-        let frame = self.recv_tag(tag::HELLO, 5_000).expect("helper sent no Hello");
+        let frame = self
+            .recv_tag(tag::HELLO, 5_000)
+            .expect("helper sent no Hello");
         let hello = parse_hello(&frame).expect("Hello frame does not decode");
         self.hello = Some(hello.clone());
         hello
@@ -392,11 +422,17 @@ impl Helper {
         }
         let deadline = Instant::now() + Duration::from_millis(5_000);
         loop {
-            let left = deadline.saturating_duration_since(Instant::now()).as_millis() as u64;
+            let left = deadline
+                .saturating_duration_since(Instant::now())
+                .as_millis() as u64;
             match self.recv(left.max(1)) {
                 Recv::Frame(frame) => match frame_tag(&frame) {
                     Some(tag::READY) => return Ok(()),
-                    Some(tag::INSTANTIATE_FAILED) => return Err(Dec::new(&frame[4..]).string().unwrap_or_else(|| "InstantiateFailed".into())),
+                    Some(tag::INSTANTIATE_FAILED) => {
+                        return Err(Dec::new(&frame[4..])
+                            .string()
+                            .unwrap_or_else(|| "InstantiateFailed".into()))
+                    }
                     _ => continue,
                 },
                 Recv::Timeout => return Err("Ready not received in 5000 ms".into()),
@@ -450,7 +486,11 @@ impl Helper {
         let mut out = Vec::new();
         if let Ok(entries) = std::fs::read_dir(format!("/proc/{}/fd", self.pid())) {
             for entry in entries.flatten() {
-                let number = entry.file_name().to_string_lossy().parse::<u32>().unwrap_or(u32::MAX);
+                let number = entry
+                    .file_name()
+                    .to_string_lossy()
+                    .parse::<u32>()
+                    .unwrap_or(u32::MAX);
                 let target = std::fs::read_link(entry.path())
                     .map(|p| p.to_string_lossy().into_owned())
                     .unwrap_or_default();
@@ -486,7 +526,9 @@ pub fn run_call(
     }
     let deadline = Instant::now() + Duration::from_millis(wait_ms);
     loop {
-        let left = deadline.saturating_duration_since(Instant::now()).as_millis() as u64;
+        let left = deadline
+            .saturating_duration_since(Instant::now())
+            .as_millis() as u64;
         if left == 0 {
             return (None, imports);
         }
@@ -533,7 +575,8 @@ pub fn manual_dir() -> PathBuf {
 /// A manual page with runs of whitespace collapsed to single spaces.
 pub fn page(name: &str) -> String {
     let path = manual_dir().join(format!("{name}.md"));
-    let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("manual page {}: {e}", path.display()));
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("manual page {}: {e}", path.display()));
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
@@ -554,9 +597,9 @@ pub struct Hostile {
 impl Hostile {
     /// True when some forwarded import has a name containing `part` and arguments containing `needle`.
     pub fn forwarded(&self, part: &str, needle: &[u8]) -> bool {
-        self.calls
-            .iter()
-            .any(|(name, args)| name.contains(part) && args.windows(needle.len().max(1)).any(|w| w == needle))
+        self.calls.iter().any(|(name, args)| {
+            name.contains(part) && args.windows(needle.len().max(1)).any(|w| w == needle)
+        })
     }
 }
 
@@ -583,7 +626,9 @@ pub fn hostile_call(export: &str, arg: &[u8], host_error: Option<&str>) -> Hosti
 /// The text of the section of `page_name` that starts at `heading` (up to the next `## ` heading).
 pub fn section(page_name: &str, heading: &str) -> String {
     let text = page(page_name);
-    let start = text.find(heading).unwrap_or_else(|| panic!("heading {heading} missing in {page_name}"));
+    let start = text
+        .find(heading)
+        .unwrap_or_else(|| panic!("heading {heading} missing in {page_name}"));
     let rest = &text[start + heading.len()..];
     let end = rest.find(" ## ").unwrap_or(rest.len());
     rest[..end].to_string()

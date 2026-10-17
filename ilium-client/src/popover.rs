@@ -234,8 +234,7 @@ pub fn render(
     if !geometry.compact {
         frame.render_widget(theme::block(false), geometry.area);
         frame.render_widget(
-            Paragraph::new(header_text(popover))
-                .style(Style::new().fg(label_color(scheme))),
+            Paragraph::new(header_text(popover)).style(Style::new().fg(label_color(scheme))),
             geometry.header,
         );
     }

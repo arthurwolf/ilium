@@ -21,7 +21,10 @@ fn session(files: &[(&str, &str)]) -> FakeSession {
     let mut session = FakeSession::new();
     session.install_core("compaction").start();
     for (path, content) in files {
-        session.server(PLUGIN_ID).fs().write(*path, content.as_bytes());
+        session
+            .server(PLUGIN_ID)
+            .fs()
+            .write(*path, content.as_bytes());
     }
     session.pump().expect("session settles");
     session
@@ -106,7 +109,11 @@ fn trigger_083_a_low_claude_setting_shadows_the_remote_threshold_with_advice() {
 #[test]
 fn trigger_083_the_warning_follows_the_threshold_setting() {
     let mut session = session(&[(CLAUDE_FILE, "{\"autoCompactWindow\": 130000}")]);
-    session.client(PLUGIN_ID).settings().set("remote_compaction.threshold_percent", serde_json::json!(88)).expect("setting accepted");
+    session
+        .client(PLUGIN_ID)
+        .settings()
+        .set("remote_compaction.threshold_percent", serde_json::json!(88))
+        .expect("setting accepted");
     assert!(screen_text(&mut session).contains("before the 88% remote threshold (880k tokens)"));
 }
 
@@ -145,7 +152,8 @@ fn trigger_083_a_codex_profile_override_is_listed_as_a_note_not_resolved() {
     let config = "model_auto_compact_token_limit = 200000\n\n[profiles.fast]\nmodel_auto_compact_token_limit = 100000\n";
     let mut session = session(&[(CODEX_FILE, config)]);
     let text = screen_text(&mut session);
-    assert!(text.contains("profile \"fast\" sets 100000; it applies only when that profile is selected"));
+    assert!(text
+        .contains("profile \"fast\" sets 100000; it applies only when that profile is selected"));
     assert!(text.contains("Configured: 200000 tokens from user file"));
 }
 
@@ -153,7 +161,8 @@ fn trigger_083_a_codex_profile_override_is_listed_as_a_note_not_resolved() {
 #[test]
 fn trigger_083_a_malformed_claude_file_reads_as_not_configured() {
     let mut session = session(&[(CLAUDE_FILE, "{ this is not json")]);
-    assert!(screen_text(&mut session).contains("Configured: not configured. CLI default: 967k tokens (97%)."));
+    assert!(screen_text(&mut session)
+        .contains("Configured: not configured. CLI default: 967k tokens (97%)."));
 }
 
 /// REQ: F-083
@@ -172,8 +181,14 @@ fn trigger_083_reading_never_changes_the_agent_files() {
     let codex = "# my settings\nmodel_auto_compact_token_limit = 123456\n";
     let mut session = session(&[(CLAUDE_FILE, claude), (CODEX_FILE, codex)]);
     let _ = screen_text(&mut session);
-    assert_eq!(session.server(PLUGIN_ID).fs().read(CLAUDE_FILE), Some(claude.as_bytes().to_vec()));
-    assert_eq!(session.server(PLUGIN_ID).fs().read(CODEX_FILE), Some(codex.as_bytes().to_vec()));
+    assert_eq!(
+        session.server(PLUGIN_ID).fs().read(CLAUDE_FILE),
+        Some(claude.as_bytes().to_vec())
+    );
+    assert_eq!(
+        session.server(PLUGIN_ID).fs().read(CODEX_FILE),
+        Some(codex.as_bytes().to_vec())
+    );
 }
 
 /// REQ: F-083
@@ -181,9 +196,22 @@ fn trigger_083_reading_never_changes_the_agent_files() {
 fn trigger_083_the_values_are_read_again_each_time_the_tab_becomes_visible() {
     let mut session = session(&[(CODEX_FILE, &codex_with(200_000))]);
     assert!(screen_text(&mut session).contains("Configured: 200000 tokens"));
-    session.server(PLUGIN_ID).fs().write(CODEX_FILE, codex_with(150_000).as_bytes());
-    session.client(PLUGIN_ID).deliver_one(Event::ViewVisibility(ViewVisibilityEvent { view: tab(), visible: false }));
-    session.client(PLUGIN_ID).deliver_one(Event::ViewVisibility(ViewVisibilityEvent { view: tab(), visible: true }));
+    session
+        .server(PLUGIN_ID)
+        .fs()
+        .write(CODEX_FILE, codex_with(150_000).as_bytes());
+    session
+        .client(PLUGIN_ID)
+        .deliver_one(Event::ViewVisibility(ViewVisibilityEvent {
+            view: tab(),
+            visible: false,
+        }));
+    session
+        .client(PLUGIN_ID)
+        .deliver_one(Event::ViewVisibility(ViewVisibilityEvent {
+            view: tab(),
+            visible: true,
+        }));
     session.pump().expect("session settles");
     assert!(screen_text(&mut session).contains("Configured: 150000 tokens"));
 }
@@ -192,7 +220,12 @@ fn trigger_083_the_values_are_read_again_each_time_the_tab_becomes_visible() {
 #[test]
 fn trigger_083_the_reader_needs_the_agent_homes_read_grant_on_the_server_side() {
     let manifest = manifest_value();
-    let server: Vec<&str> = manifest["capabilities"]["server"].as_array().expect("grants").iter().filter_map(|grant| grant.as_str()).collect();
+    let server: Vec<&str> = manifest["capabilities"]["server"]
+        .as_array()
+        .expect("grants")
+        .iter()
+        .filter_map(|grant| grant.as_str())
+        .collect();
     assert!(server.contains(&"fs.read:agent-homes"));
 }
 

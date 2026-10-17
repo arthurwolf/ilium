@@ -32,28 +32,58 @@ fn device_054_a_saved_input_device_name_is_passed_to_the_capture() {
     configure(&mut host, "input_device_name", json!("USB Microphone"));
     configure(&mut host, "enabled", json!(true));
     press_f8(&mut host);
-    assert_eq!(host.audio().captures()[0].device.as_deref(), Some("USB Microphone"));
+    assert_eq!(
+        host.audio().captures()[0].device.as_deref(),
+        Some("USB Microphone")
+    );
 }
 
 /// REQ: F-054
 #[test]
 fn device_054_choosing_a_discovered_microphone_saves_its_name() {
     let mut host = client_host();
-    host.audio().set_input_devices(vec!["Built-in Microphone".to_string(), "USB Microphone".to_string()]);
-    host.send_action(page(), "input_device_name", ActionKind::Selected, ActionValue::Index(2));
+    host.audio().set_input_devices(vec![
+        "Built-in Microphone".to_string(),
+        "USB Microphone".to_string(),
+    ]);
+    host.send_action(
+        page(),
+        "input_device_name",
+        ActionKind::Selected,
+        ActionValue::Index(2),
+    );
     host.settle();
-    assert_eq!(host.kernel_settings().get("voice-control", "input_device_name"), Some(json!("USB Microphone")));
+    assert_eq!(
+        host.kernel_settings()
+            .get("voice-control", "input_device_name"),
+        Some(json!("USB Microphone"))
+    );
 }
 
 /// REQ: F-054
 #[test]
 fn device_054_index_zero_is_the_system_default_and_removes_the_saved_name() {
     let mut host = client_host();
-    host.audio().set_input_devices(vec!["USB Microphone".to_string()]);
-    host.send_action(page(), "input_device_name", ActionKind::Selected, ActionValue::Index(1));
-    host.send_action(page(), "input_device_name", ActionKind::Selected, ActionValue::Index(0));
+    host.audio()
+        .set_input_devices(vec!["USB Microphone".to_string()]);
+    host.send_action(
+        page(),
+        "input_device_name",
+        ActionKind::Selected,
+        ActionValue::Index(1),
+    );
+    host.send_action(
+        page(),
+        "input_device_name",
+        ActionKind::Selected,
+        ActionValue::Index(0),
+    );
     host.settle();
-    assert_eq!(host.kernel_settings().get("voice-control", "input_device_name"), None);
+    assert_eq!(
+        host.kernel_settings()
+            .get("voice-control", "input_device_name"),
+        None
+    );
 }
 
 /// REQ: F-054
@@ -61,20 +91,38 @@ fn device_054_index_zero_is_the_system_default_and_removes_the_saved_name() {
 fn device_054_choosing_a_discovered_speaker_saves_its_name() {
     let mut host = client_host();
     host.audio().set_output_devices(vec!["Headset".to_string()]);
-    host.send_action(page(), "output_device_name", ActionKind::Selected, ActionValue::Index(1));
+    host.send_action(
+        page(),
+        "output_device_name",
+        ActionKind::Selected,
+        ActionValue::Index(1),
+    );
     host.settle();
-    assert_eq!(host.kernel_settings().get("voice-control", "output_device_name"), Some(json!("Headset")));
+    assert_eq!(
+        host.kernel_settings()
+            .get("voice-control", "output_device_name"),
+        Some(json!("Headset"))
+    );
 }
 
 /// REQ: F-054
 #[test]
 fn device_054_the_device_rows_list_the_discovered_names() {
     let mut host = client_host();
-    host.audio().set_input_devices(vec!["Built-in Microphone".to_string()]);
-    host.send_action(page(), "input_device_name", ActionKind::Activated, ActionValue::None);
+    host.audio()
+        .set_input_devices(vec!["Built-in Microphone".to_string()]);
+    host.send_action(
+        page(),
+        "input_device_name",
+        ActionKind::Activated,
+        ActionValue::None,
+    );
     host.settle();
     let text = host.render(page(), 100, 30).text();
-    assert!(text.contains("System default") && text.contains("Built-in Microphone"), "{text}");
+    assert!(
+        text.contains("System default") && text.contains("Built-in Microphone"),
+        "{text}"
+    );
 }
 
 /// REQ: F-054
@@ -91,7 +139,8 @@ fn device_054_changing_the_input_device_while_listening_reopens_the_capture_on_i
 #[test]
 fn device_054_an_unplugged_device_leaves_no_open_capture() {
     let mut host = client_host();
-    host.audio().set_input_devices(vec!["USB Microphone".to_string()]);
+    host.audio()
+        .set_input_devices(vec!["USB Microphone".to_string()]);
     configure(&mut host, "input_device_name", json!("USB Microphone"));
     configure(&mut host, "enabled", json!(true));
     host.audio().unplug("USB Microphone");
@@ -103,13 +152,19 @@ fn device_054_an_unplugged_device_leaves_no_open_capture() {
 #[test]
 fn device_054_reconnect_now_recovers_when_the_device_returns() {
     let mut host = client_host();
-    host.audio().set_input_devices(vec!["USB Microphone".to_string()]);
+    host.audio()
+        .set_input_devices(vec!["USB Microphone".to_string()]);
     configure(&mut host, "input_device_name", json!("USB Microphone"));
     configure(&mut host, "enabled", json!(true));
     host.audio().unplug("USB Microphone");
     configure(&mut host, "output_volume_percent", json!(70));
     host.audio().plug("USB Microphone");
-    host.send_action(page(), "reconnect", ActionKind::Activated, ActionValue::None);
+    host.send_action(
+        page(),
+        "reconnect",
+        ActionKind::Activated,
+        ActionValue::None,
+    );
     host.settle();
     let last = host.audio().captures().last().cloned().expect("capture");
     assert!(last.open);
@@ -120,7 +175,12 @@ fn device_054_reconnect_now_recovers_when_the_device_returns() {
 #[test]
 fn device_054_reconnect_now_with_voice_off_opens_nothing() {
     let mut host = client_host();
-    host.send_action(page(), "reconnect", ActionKind::Activated, ActionValue::None);
+    host.send_action(
+        page(),
+        "reconnect",
+        ActionKind::Activated,
+        ActionValue::None,
+    );
     host.settle();
     assert!(host.audio().captures().is_empty());
 }

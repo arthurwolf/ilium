@@ -11,7 +11,11 @@ use crate::support::*;
 fn refuse_next_settings_write(host: &mut ilium_plugin_sdk::testing::FakeHost) {
     host.inject_failure(
         "kernel-settings.write",
-        PluginError { code: ErrorCode::Internal, message: "disk full".to_string(), retry_after_ms: None },
+        PluginError {
+            code: ErrorCode::Internal,
+            message: "disk full".to_string(),
+            retry_after_ms: None,
+        },
     );
 }
 
@@ -20,10 +24,18 @@ fn refuse_next_settings_write(host: &mut ilium_plugin_sdk::testing::FakeHost) {
 fn port_010_disk_save_failure_keeps_the_stored_table_and_sends_no_request() {
     let mut host = client_host();
     set_rules(&mut host, &["unsaved-pattern"], &["old-message"]);
-    let stored = host.kernel_settings().tab("text_triggers").expect("table stored");
+    let stored = host
+        .kernel_settings()
+        .tab("text_triggers")
+        .expect("table stored");
     let requests_before = host.client_requests().sent().len();
     refuse_next_settings_write(&mut host);
-    host.send_action(tab(), "reply-0", ActionKind::Changed, ActionValue::Text("unsaved-message".to_string()));
+    host.send_action(
+        tab(),
+        "reply-0",
+        ActionKind::Changed,
+        ActionValue::Text("unsaved-message".to_string()),
+    );
     host.settle();
     assert_eq!(host.kernel_settings().tab("text_triggers"), Some(stored));
     assert_eq!(host.client_requests().sent().len(), requests_before);
@@ -36,15 +48,27 @@ fn port_010_disk_save_failure_keeps_the_stored_table_and_sends_no_request() {
 fn port_011_failed_save_is_painted_and_the_retry_keeps_the_rule_identity() {
     let mut host = client_host();
     set_rules(&mut host, &["a"], &["r"]);
-    host.settings().set("ids", json!(["authored-rule"])).expect("id");
+    host.settings()
+        .set("ids", json!(["authored-rule"]))
+        .expect("id");
     refuse_next_settings_write(&mut host);
-    host.send_action(tab(), "reply-0", ActionKind::Changed, ActionValue::Text("kept".to_string()));
+    host.send_action(
+        tab(),
+        "reply-0",
+        ActionKind::Changed,
+        ActionValue::Text("kept".to_string()),
+    );
     host.settle();
     for columns in [80, 120] {
         let text = render_tab(&mut host, columns);
         assert!(text.contains("not saved"), "{columns} columns: {text}");
     }
-    host.send_action(tab(), "reply-0", ActionKind::Changed, ActionValue::Text("kept".to_string()));
+    host.send_action(
+        tab(),
+        "reply-0",
+        ActionKind::Changed,
+        ActionValue::Text("kept".to_string()),
+    );
     host.settle();
     let table = host.kernel_settings().tab("text_triggers").expect("table");
     assert_eq!(table["ids"], json!(["authored-rule"]));
@@ -70,10 +94,21 @@ fn port_012_editing_one_rule_preserves_unrelated_concurrent_changes_and_addition
             "replies": ["new-message", "added-message", "edited-message"],
         }),
     );
-    host.send_action(tab(), "reply-0", ActionKind::Changed, ActionValue::Text("unsaved-message".to_string()));
+    host.send_action(
+        tab(),
+        "reply-0",
+        ActionKind::Changed,
+        ActionValue::Text("unsaved-message".to_string()),
+    );
     host.settle();
     let table = host.kernel_settings().tab("text_triggers").expect("table");
     assert_eq!(table["ids"], json!(["other", "added", "edited"]));
-    assert_eq!(table["patterns"], json!(["other-pattern", "added-pattern", "edited-pattern"]));
-    assert_eq!(table["replies"], json!(["new-message", "added-message", "unsaved-message"]));
+    assert_eq!(
+        table["patterns"],
+        json!(["other-pattern", "added-pattern", "edited-pattern"])
+    );
+    assert_eq!(
+        table["replies"],
+        json!(["new-message", "added-message", "unsaved-message"])
+    );
 }

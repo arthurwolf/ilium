@@ -94,7 +94,10 @@ fn f_046_a_manual_icon_wins_and_the_refusal_is_not_retried() {
         .find(|submission| matches!(submission.intent, Intent::SetInferredIcon(_)))
         .expect("icon submission")
         .correlation;
-    host.deliver_one(outcome_event(correlation, Outcome::Refused(plugin_error(ErrorCode::Conflict))));
+    host.deliver_one(outcome_event(
+        correlation,
+        Outcome::Refused(plugin_error(ErrorCode::Conflict)),
+    ));
     host.settle();
     assert_eq!(icons(&host.submitted()).len(), 1);
     assert!(host.failures().is_empty());
@@ -116,13 +119,17 @@ fn f_046_each_titled_pane_gets_its_own_icon() {
 #[test]
 fn f_046_page_states_a_manual_icon_is_never_replaced() {
     let page = page_text();
-    assert!(page.contains("An icon that you set by hand is never replaced: the host answers `refused(conflict)`."));
+    assert!(page.contains(
+        "An icon that you set by hand is never replaced: the host answers `refused(conflict)`."
+    ));
 }
 
 /// REQ: F-046
 #[test]
 fn f_046_tree_decorate_is_granted_for_the_icon_intent() {
     let manifest = manifest_value();
-    let grants = manifest["capabilities"]["server"].as_array().expect("grants");
+    let grants = manifest["capabilities"]["server"]
+        .as_array()
+        .expect("grants");
     assert!(grants.iter().any(|grant| grant == "tree.decorate"));
 }

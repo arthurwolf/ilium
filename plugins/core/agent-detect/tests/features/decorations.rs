@@ -1,12 +1,19 @@
 //! F-027 and F-034: activity icons in the tree. On `agent-activity-changed` the plugin submits
 //! `set-decoration` for the `activity` slot; the host steps the frames itself (page "Activity icons in the tree").
 
-use ilium_plugin_sdk::types::{AgentActivity, AgentActivityEvent, AgentIdentifiedEvent, Event, NodeId};
+use ilium_plugin_sdk::types::{
+    AgentActivity, AgentActivityEvent, AgentIdentifiedEvent, Event, NodeId,
+};
 
-use crate::common::{SPINNER_FRAMES, decorations, plain, server_host};
+use crate::common::{decorations, plain, server_host, SPINNER_FRAMES};
 
 fn changed(node: u64, previous: AgentActivity, current: AgentActivity) -> Event {
-    Event::AgentActivityChanged(AgentActivityEvent { node: NodeId(node), previous, current, revision: 2 })
+    Event::AgentActivityChanged(AgentActivityEvent {
+        node: NodeId(node),
+        previous,
+        current,
+        revision: 2,
+    })
 }
 
 /// REQ: F-027, F-034
@@ -37,7 +44,10 @@ fn feature_034_the_spinner_steps_every_hundred_milliseconds() {
     let submissions = host.deliver_one(changed(7, AgentActivity::Idle, AgentActivity::Working));
     let spec = &decorations(&submissions, "activity")[0];
     assert_eq!(spec.frame_ms, 100);
-    assert!(spec.frame_ms >= 90, "the host refuses a frame time below 90 ms");
+    assert!(
+        spec.frame_ms >= 90,
+        "the host refuses a frame time below 90 ms"
+    );
 }
 
 /// REQ: F-027, F-034
@@ -53,7 +63,11 @@ fn feature_034_the_frame_count_is_inside_the_two_to_sixteen_limit() {
 #[test]
 fn feature_034_an_agent_awaiting_approval_gets_a_still_question_mark() {
     let mut host = server_host();
-    let submissions = host.deliver_one(changed(7, AgentActivity::Working, AgentActivity::AwaitingApproval));
+    let submissions = host.deliver_one(changed(
+        7,
+        AgentActivity::Working,
+        AgentActivity::AwaitingApproval,
+    ));
     let spec = &decorations(&submissions, "activity")[0];
     assert_eq!(spec.icon.as_deref(), Some("?"));
     assert!(spec.frames.is_empty());
@@ -135,7 +149,10 @@ fn feature_027_a_batch_submits_in_event_order() {
         Event::TreeChanged(vec![NodeId(9)]),
         changed(4, AgentActivity::Idle, AgentActivity::AwaitingApproval),
     ]);
-    let nodes: Vec<NodeId> = decorations(&submissions, "activity").iter().map(|spec| spec.node).collect();
+    let nodes: Vec<NodeId> = decorations(&submissions, "activity")
+        .iter()
+        .map(|spec| spec.node)
+        .collect();
     assert_eq!(nodes, [NodeId(3), NodeId(4)]);
 }
 
@@ -149,7 +166,11 @@ fn feature_026_agent_identified_logs_the_node_and_signature_at_info_level() {
     }));
     assert!(submissions.is_empty());
     let logs = host.logs();
-    assert!(logs.iter().any(|line| line.level == "info" && line.message == "node 7 runs example-agent"), "{logs:?}");
+    assert!(
+        logs.iter()
+            .any(|line| line.level == "info" && line.message == "node 7 runs example-agent"),
+        "{logs:?}"
+    );
 }
 
 /// REQ: F-026
@@ -157,8 +178,14 @@ fn feature_026_agent_identified_logs_the_node_and_signature_at_info_level() {
 fn feature_026_each_identified_agent_logs_one_line() {
     let mut host = server_host();
     host.deliver(vec![
-        Event::AgentIdentified(AgentIdentifiedEvent { node: NodeId(1), signature: "claude".to_string() }),
-        Event::AgentIdentified(AgentIdentifiedEvent { node: NodeId(2), signature: "codex".to_string() }),
+        Event::AgentIdentified(AgentIdentifiedEvent {
+            node: NodeId(1),
+            signature: "claude".to_string(),
+        }),
+        Event::AgentIdentified(AgentIdentifiedEvent {
+            node: NodeId(2),
+            signature: "codex".to_string(),
+        }),
     ]);
     let lines: Vec<String> = host.logs().into_iter().map(|line| line.message).collect();
     assert!(lines.contains(&"node 1 runs claude".to_string()));

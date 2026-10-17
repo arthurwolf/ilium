@@ -51,7 +51,12 @@ fn onboarding_089_the_step_shows_its_position_and_the_enter_and_escape_hints() {
 #[test]
 fn onboarding_089_a_change_in_the_step_form_makes_no_submission_the_host_saves_it() {
     let mut host = client_host();
-    host.send_action(first_run(), "form", ActionKind::Changed, ActionValue::Flag(true));
+    host.send_action(
+        first_run(),
+        "form",
+        ActionKind::Changed,
+        ActionValue::Flag(true),
+    );
     host.settle();
     assert!(host.submitted().is_empty());
     assert!(host.failures().is_empty());
@@ -61,7 +66,13 @@ fn onboarding_089_a_change_in_the_step_form_makes_no_submission_the_host_saves_i
 #[test]
 fn onboarding_089_the_settings_page_gets_the_appearance_form() {
     let mut host = client_host();
-    let settings = host.render(ViewTarget::SettingsPage("user-interface".to_string()), 80, 12).text();
+    let settings = host
+        .render(
+            ViewTarget::SettingsPage("user-interface".to_string()),
+            80,
+            12,
+        )
+        .text();
     assert!(settings.contains("Density"), "{settings}");
 }
 

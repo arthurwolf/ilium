@@ -2,10 +2,14 @@
 
 use ilium_plugin_sdk::testing::assert_golden;
 
-use crate::common::{SAMPLE_BOARD, board_host, draw, rows_of, workspace_root};
+use crate::common::{board_host, draw, rows_of, workspace_root, SAMPLE_BOARD};
 
 fn golden_path(name: &str) -> String {
-    workspace_root().join("plugins/core/kanban/tests/features/golden").join(name).to_string_lossy().into_owned()
+    workspace_root()
+        .join("plugins/core/kanban/tests/features/golden")
+        .join(name)
+        .to_string_lossy()
+        .into_owned()
 }
 
 /// The first `pre.term` block of the page (the board figure), HTML-unescaped.
@@ -35,7 +39,10 @@ fn render_024_the_figure_is_48_cells_wide_in_every_row() {
 fn render_024_headers_show_the_three_columns_with_card_counts_at_80() {
     let (mut host, node) = board_host(SAMPLE_BOARD);
     let screen = draw(&mut host, node, 80, 20);
-    let header = rows_of(&screen).into_iter().find(|row| row.contains("To do")).expect("header row");
+    let header = rows_of(&screen)
+        .into_iter()
+        .find(|row| row.contains("To do"))
+        .expect("header row");
     assert!(header.contains("To do (2)"), "{header}");
     assert!(header.contains("Doing (1)"), "{header}");
     assert!(header.contains("Done (1)"), "{header}");
@@ -99,7 +106,12 @@ fn render_024_no_row_is_wider_than_the_area_at_40_80_and_120() {
         let (mut host, node) = board_host(SAMPLE_BOARD);
         let screen = draw(&mut host, node, width, 20);
         assert_eq!((screen.columns, screen.rows), (width, 20));
-        assert!(rows_of(&screen).iter().all(|row| row.chars().count() <= usize::from(width)), "width {width}");
+        assert!(
+            rows_of(&screen)
+                .iter()
+                .all(|row| row.chars().count() <= usize::from(width)),
+            "width {width}"
+        );
     }
 }
 
@@ -110,7 +122,10 @@ fn render_024_at_40_cells_the_first_column_is_whole_and_the_board_scrolls_horizo
     let text = draw(&mut host, node, 40, 20).text();
     assert!(text.contains("To do (2)"), "{text}");
     assert!(text.contains("Write docs"), "{text}");
-    assert!(!text.contains("Done (1)"), "narrow viewports show whole columns behind a scrollbar:\n{text}");
+    assert!(
+        !text.contains("Done (1)"),
+        "narrow viewports show whole columns behind a scrollbar:\n{text}"
+    );
 }
 
 /// REQ: F-024
@@ -134,7 +149,10 @@ fn render_024_an_empty_board_file_draws_no_columns() {
 fn render_024_headings_with_no_cards_show_a_zero_count() {
     let (mut host, node) = board_host("# Board\n\n## To do\n\n## Doing\n\n## Done\n");
     let text = draw(&mut host, node, 120, 20).text();
-    assert!(text.contains("To do (0)") && text.contains("Doing (0)") && text.contains("Done (0)"), "{text}");
+    assert!(
+        text.contains("To do (0)") && text.contains("Doing (0)") && text.contains("Done (0)"),
+        "{text}"
+    );
 }
 
 /// REQ: F-024
@@ -144,7 +162,11 @@ fn render_024_a_long_card_title_wraps_inside_its_column() {
     let (mut host, node) = board_host(&format!("# Board\n\n## To do\n- {long}\n"));
     let screen = draw(&mut host, node, 80, 20);
     assert!(rows_of(&screen).iter().all(|row| row.chars().count() <= 80));
-    assert!(screen.text().contains("A very long card"), "{}", screen.text());
+    assert!(
+        screen.text().contains("A very long card"),
+        "{}",
+        screen.text()
+    );
 }
 
 /// REQ: F-024
@@ -174,7 +196,9 @@ fn render_024_a_redraw_keeps_the_selected_card_in_view_state() {
 fn render_024_card_preview_off_hides_the_notes_of_a_card() {
     let text = "# Board\n\n## To do\n- Write docs\n  Notes line one\n  Notes line two\n";
     let (mut host, node) = board_host(text);
-    host.settings().set("card_preview", serde_json::json!(false)).expect("valid");
+    host.settings()
+        .set("card_preview", serde_json::json!(false))
+        .expect("valid");
     let screen = draw(&mut host, node, 80, 20).text();
     assert!(screen.contains("Write docs"));
     assert!(!screen.contains("Notes line one"), "{screen}");

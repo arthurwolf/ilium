@@ -5,7 +5,8 @@
 use std::time::Instant;
 
 use ilium_plugin_api::lifecycle::{
-    RestartDecision, RestartPolicy, FAILURE_WINDOW_MS, FIRST_RESTART_DELAY_MS, SECOND_RESTART_DELAY_MS,
+    RestartDecision, RestartPolicy, FAILURE_WINDOW_MS, FIRST_RESTART_DELAY_MS,
+    SECOND_RESTART_DELAY_MS,
 };
 use ilium_plugin_testkit::{FakeHost, Restart};
 use proptest::prelude::*;
@@ -31,7 +32,13 @@ fn trap_at(host: &mut FakeHost, at_ms: u64) {
 fn conf_restart_01_first_failure_restarts_after_1000_ms() {
     let mut host = host();
     trap_at(&mut host, 0);
-    assert_eq!(host.restarts(), vec![Restart { at_ms: 0, delay_ms: 1_000 }]);
+    assert_eq!(
+        host.restarts(),
+        vec![Restart {
+            at_ms: 0,
+            delay_ms: 1_000
+        }]
+    );
     assert!(!host.is_disabled());
 }
 
@@ -61,7 +68,13 @@ fn conf_restart_02_second_failure_inside_ten_minutes_restarts_after_5000_ms() {
     trap_at(&mut host, 30_000);
     let restarts = host.restarts();
     assert_eq!(restarts.len(), 2);
-    assert_eq!(restarts[1], Restart { at_ms: 30_000, delay_ms: 5_000 });
+    assert_eq!(
+        restarts[1],
+        Restart {
+            at_ms: 30_000,
+            delay_ms: 5_000
+        }
+    );
 }
 
 /// REQ: CONF-RESTART-02
@@ -79,7 +92,10 @@ fn conf_restart_02_pure_rule_second_failure_is_restart_after_5000_ms() {
 fn conf_restart_02_second_failure_one_millisecond_before_the_window_ends_still_counts() {
     let mut policy = RestartPolicy::default();
     let _ = policy.on_failure(0);
-    assert_eq!(policy.on_failure(FAILURE_WINDOW_MS - 1), RestartDecision::RestartAfterMs(5_000));
+    assert_eq!(
+        policy.on_failure(FAILURE_WINDOW_MS - 1),
+        RestartDecision::RestartAfterMs(5_000)
+    );
 }
 
 // ---- CONF-RESTART-03 ----
@@ -92,7 +108,11 @@ fn conf_restart_03_third_failure_inside_ten_minutes_disables_the_plugin() {
         trap_at(&mut host, at);
     }
     assert!(host.is_disabled());
-    assert_eq!(host.restarts().len(), 2, "the third failure schedules no restart");
+    assert_eq!(
+        host.restarts().len(),
+        2,
+        "the third failure schedules no restart"
+    );
 }
 
 /// REQ: CONF-RESTART-03
@@ -110,7 +130,10 @@ fn conf_restart_03_third_failure_at_window_minus_one_ms_disables() {
     let mut policy = RestartPolicy::default();
     let _ = policy.on_failure(0);
     let _ = policy.on_failure(1);
-    assert_eq!(policy.on_failure(FAILURE_WINDOW_MS - 1), RestartDecision::Disable);
+    assert_eq!(
+        policy.on_failure(FAILURE_WINDOW_MS - 1),
+        RestartDecision::Disable
+    );
 }
 
 /// REQ: CONF-RESTART-03
@@ -119,7 +142,10 @@ fn conf_restart_03_third_failure_at_window_plus_one_ms_does_not_disable() {
     let mut policy = RestartPolicy::default();
     let _ = policy.on_failure(0);
     let _ = policy.on_failure(300_000);
-    assert_eq!(policy.on_failure(FAILURE_WINDOW_MS + 1), RestartDecision::RestartAfterMs(5_000));
+    assert_eq!(
+        policy.on_failure(FAILURE_WINDOW_MS + 1),
+        RestartDecision::RestartAfterMs(5_000)
+    );
 }
 
 /// REQ: CONF-RESTART-03
@@ -143,7 +169,11 @@ fn conf_restart_04_traps_at_0_6_and_11_minutes_restart_after_1_5_and_5_seconds()
     for at in [0, 6 * MINUTE_MS, 11 * MINUTE_MS] {
         trap_at(&mut host, at);
     }
-    let delays: Vec<u32> = host.restarts().iter().map(|restart| restart.delay_ms).collect();
+    let delays: Vec<u32> = host
+        .restarts()
+        .iter()
+        .map(|restart| restart.delay_ms)
+        .collect();
     assert_eq!(delays, vec![1_000, 5_000, 5_000]);
     assert!(!host.is_disabled());
 }
@@ -153,8 +183,14 @@ fn conf_restart_04_traps_at_0_6_and_11_minutes_restart_after_1_5_and_5_seconds()
 fn conf_restart_04_pure_rule_expires_the_oldest_failure() {
     let mut policy = RestartPolicy::default();
     assert_eq!(policy.on_failure(0), RestartDecision::RestartAfterMs(1_000));
-    assert_eq!(policy.on_failure(6 * MINUTE_MS), RestartDecision::RestartAfterMs(5_000));
-    assert_eq!(policy.on_failure(11 * MINUTE_MS), RestartDecision::RestartAfterMs(5_000));
+    assert_eq!(
+        policy.on_failure(6 * MINUTE_MS),
+        RestartDecision::RestartAfterMs(5_000)
+    );
+    assert_eq!(
+        policy.on_failure(11 * MINUTE_MS),
+        RestartDecision::RestartAfterMs(5_000)
+    );
     assert_eq!(policy.failures_in_window(11 * MINUTE_MS), 2);
 }
 
@@ -172,7 +208,11 @@ fn conf_restart_05_traps_at_0_and_11_minutes_both_restart_after_1_second() {
     let mut host = host();
     trap_at(&mut host, 0);
     trap_at(&mut host, 11 * MINUTE_MS);
-    let delays: Vec<u32> = host.restarts().iter().map(|restart| restart.delay_ms).collect();
+    let delays: Vec<u32> = host
+        .restarts()
+        .iter()
+        .map(|restart| restart.delay_ms)
+        .collect();
     assert_eq!(delays, vec![1_000, 1_000]);
 }
 
@@ -181,7 +221,10 @@ fn conf_restart_05_traps_at_0_and_11_minutes_both_restart_after_1_second() {
 fn conf_restart_05_pure_rule_a_lone_old_failure_does_not_count() {
     let mut policy = RestartPolicy::default();
     let _ = policy.on_failure(0);
-    assert_eq!(policy.on_failure(11 * MINUTE_MS), RestartDecision::RestartAfterMs(1_000));
+    assert_eq!(
+        policy.on_failure(11 * MINUTE_MS),
+        RestartDecision::RestartAfterMs(1_000)
+    );
     assert_eq!(policy.failures_in_window(11 * MINUTE_MS), 1);
 }
 

@@ -8,12 +8,21 @@ use serde_json::json;
 fn port_accepted_plan_preserves_authored_names_splits_and_newer_activity() {
     for id in MANIFEST_SCENES {
         let mut scene = fake_scene(id, 40, 10);
-        assert!(scene.reconfigure(&json!({}).to_string()), "{id}: empty settings accepted");
-        assert!(!scene.reconfigure("{not json"), "{id}: malformed settings refused");
+        assert!(
+            scene.reconfigure(&json!({}).to_string()),
+            "{id}: empty settings accepted"
+        );
+        assert!(
+            !scene.reconfigure("{not json"),
+            "{id}: malformed settings refused"
+        );
     }
     let mut session = session_with_plugin();
     let scenes = catalog_scenes(&mut session);
-    let mut ids: Vec<String> = scenes.iter().map(|s| s["id"].as_str().expect("id").to_string()).collect();
+    let mut ids: Vec<String> = scenes
+        .iter()
+        .map(|s| s["id"].as_str().expect("id").to_string())
+        .collect();
     let total = ids.len();
     ids.sort();
     ids.dedup();
@@ -28,12 +37,21 @@ fn port_accepted_plan_preserves_authored_names_splits_and_newer_activity() {
 fn port_changed_protected_order_is_rejected_atomically() {
     for id in MANIFEST_SCENES {
         let mut scene = fake_scene(id, 40, 10);
-        assert!(scene.reconfigure(&json!({}).to_string()), "{id}: empty settings accepted");
-        assert!(!scene.reconfigure("{not json"), "{id}: malformed settings refused");
+        assert!(
+            scene.reconfigure(&json!({}).to_string()),
+            "{id}: empty settings accepted"
+        );
+        assert!(
+            !scene.reconfigure("{not json"),
+            "{id}: malformed settings refused"
+        );
     }
     let mut session = session_with_plugin();
     let scenes = catalog_scenes(&mut session);
-    let mut ids: Vec<String> = scenes.iter().map(|s| s["id"].as_str().expect("id").to_string()).collect();
+    let mut ids: Vec<String> = scenes
+        .iter()
+        .map(|s| s["id"].as_str().expect("id").to_string())
+        .collect();
     let total = ids.len();
     ids.sort();
     ids.dedup();
@@ -48,12 +66,21 @@ fn port_changed_protected_order_is_rejected_atomically() {
 fn port_exact_path_coverage_and_envelope_errors_are_atomic() {
     for id in MANIFEST_SCENES {
         let mut scene = fake_scene(id, 40, 10);
-        assert!(scene.reconfigure(&json!({}).to_string()), "{id}: empty settings accepted");
-        assert!(!scene.reconfigure("{not json"), "{id}: malformed settings refused");
+        assert!(
+            scene.reconfigure(&json!({}).to_string()),
+            "{id}: empty settings accepted"
+        );
+        assert!(
+            !scene.reconfigure("{not json"),
+            "{id}: malformed settings refused"
+        );
     }
     let mut session = session_with_plugin();
     let scenes = catalog_scenes(&mut session);
-    let mut ids: Vec<String> = scenes.iter().map(|s| s["id"].as_str().expect("id").to_string()).collect();
+    let mut ids: Vec<String> = scenes
+        .iter()
+        .map(|s| s["id"].as_str().expect("id").to_string())
+        .collect();
     let total = ids.len();
     ids.sort();
     ids.dedup();
@@ -69,10 +96,17 @@ fn port_generation_exhaustion_preserves_the_tree() {
     let mut scene = fake_scene("waves", 24, 12);
     let small = scene.frame(braille_frame(24, 12, 0));
     assert_eq!((small.columns, small.rows), (24, 12));
-    assert!(scene.reconfigure("{}"), "an empty settings object is accepted in place");
+    assert!(
+        scene.reconfigure("{}"),
+        "an empty settings object is accepted in place"
+    );
     let mut resized = fake_scene("waves", 10, 4);
     let screen = resized.frame(braille_frame(10, 4, 0));
-    assert_eq!((screen.columns, screen.rows), (10, 4), "a new generation uses its own size, never a stale one");
+    assert_eq!(
+        (screen.columns, screen.rows),
+        (10, 4),
+        "a new generation uses its own size, never a stale one"
+    );
     for id in MANIFEST_SCENES {
         let fps = u64::from(fake_scene(id, 40, 10).frames_per_second());
         let cap = scene_entry(id)["frame_rate_cap"].as_u64().unwrap();
@@ -86,12 +120,21 @@ fn port_generation_exhaustion_preserves_the_tree() {
 fn port_saved_choice_identity_is_bounded_and_single_line() {
     for id in MANIFEST_SCENES {
         let mut scene = fake_scene(id, 40, 10);
-        assert!(scene.reconfigure(&json!({}).to_string()), "{id}: empty settings accepted");
-        assert!(!scene.reconfigure("{not json"), "{id}: malformed settings refused");
+        assert!(
+            scene.reconfigure(&json!({}).to_string()),
+            "{id}: empty settings accepted"
+        );
+        assert!(
+            !scene.reconfigure("{not json"),
+            "{id}: malformed settings refused"
+        );
     }
     let mut session = session_with_plugin();
     let scenes = catalog_scenes(&mut session);
-    let mut ids: Vec<String> = scenes.iter().map(|s| s["id"].as_str().expect("id").to_string()).collect();
+    let mut ids: Vec<String> = scenes
+        .iter()
+        .map(|s| s["id"].as_str().expect("id").to_string())
+        .collect();
     let total = ids.len();
     ids.sort();
     ids.dedup();
@@ -107,10 +150,17 @@ fn port_stale_generation_and_undo_are_fenced() {
     let mut scene = fake_scene("waves", 24, 12);
     let small = scene.frame(braille_frame(24, 12, 0));
     assert_eq!((small.columns, small.rows), (24, 12));
-    assert!(scene.reconfigure("{}"), "an empty settings object is accepted in place");
+    assert!(
+        scene.reconfigure("{}"),
+        "an empty settings object is accepted in place"
+    );
     let mut resized = fake_scene("waves", 10, 4);
     let screen = resized.frame(braille_frame(10, 4, 0));
-    assert_eq!((screen.columns, screen.rows), (10, 4), "a new generation uses its own size, never a stale one");
+    assert_eq!(
+        (screen.columns, screen.rows),
+        (10, 4),
+        "a new generation uses its own size, never a stale one"
+    );
     for id in MANIFEST_SCENES {
         let fps = u64::from(fake_scene(id, 40, 10).frames_per_second());
         let cap = scene_entry(id)["frame_rate_cap"].as_u64().unwrap();
@@ -124,12 +174,21 @@ fn port_stale_generation_and_undo_are_fenced() {
 fn port_untrusted_envelope_rejects_versions_recursive_kinds_and_duplicate_parameters() {
     for id in MANIFEST_SCENES {
         let mut scene = fake_scene(id, 40, 10);
-        assert!(scene.reconfigure(&json!({}).to_string()), "{id}: empty settings accepted");
-        assert!(!scene.reconfigure("{not json"), "{id}: malformed settings refused");
+        assert!(
+            scene.reconfigure(&json!({}).to_string()),
+            "{id}: empty settings accepted"
+        );
+        assert!(
+            !scene.reconfigure("{not json"),
+            "{id}: malformed settings refused"
+        );
     }
     let mut session = session_with_plugin();
     let scenes = catalog_scenes(&mut session);
-    let mut ids: Vec<String> = scenes.iter().map(|s| s["id"].as_str().expect("id").to_string()).collect();
+    let mut ids: Vec<String> = scenes
+        .iter()
+        .map(|s| s["id"].as_str().expect("id").to_string())
+        .collect();
     let total = ids.len();
     ids.sort();
     ids.dedup();

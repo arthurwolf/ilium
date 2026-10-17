@@ -22,7 +22,13 @@ fn context(pane: Option<u64>) -> MenuContext {
 }
 
 fn selection(text: &str) -> Selection {
-    Selection { first_row: 1, first_column: 2, last_row: 1, last_column: 9, text: text.to_string() }
+    Selection {
+        first_row: 1,
+        first_column: 2,
+        last_row: 1,
+        last_column: 9,
+        text: text.to_string(),
+    }
 }
 
 fn menu(host: &mut FakeHost, pane: Option<u64>) -> Vec<MenuEntry> {
@@ -30,7 +36,10 @@ fn menu(host: &mut FakeHost, pane: Option<u64>) -> Vec<MenuEntry> {
 }
 
 fn entry<'a>(entries: &'a [MenuEntry], id: &str) -> &'a MenuEntry {
-    entries.iter().find(|entry| entry.id == id).unwrap_or_else(|| panic!("entry {id} missing"))
+    entries
+        .iter()
+        .find(|entry| entry.id == id)
+        .unwrap_or_else(|| panic!("entry {id} missing"))
 }
 
 /// REQ: F-016
@@ -38,7 +47,10 @@ fn entry<'a>(entries: &'a [MenuEntry], id: &str) -> &'a MenuEntry {
 fn feature_016_menu_lists_copy_copy_path_smart_copy_and_transfer_in_that_order() {
     let mut host = client_host();
     let pane = add_terminal_pane(&mut host, "api");
-    let ids: Vec<String> = menu(&mut host, Some(pane)).into_iter().map(|entry| entry.id).collect();
+    let ids: Vec<String> = menu(&mut host, Some(pane))
+        .into_iter()
+        .map(|entry| entry.id)
+        .collect();
     assert_eq!(ids, ["copy", "copy-path", "smart-copy", "transfer"]);
 }
 
@@ -47,8 +59,14 @@ fn feature_016_menu_lists_copy_copy_path_smart_copy_and_transfer_in_that_order()
 fn feature_016_menu_labels_are_the_ones_of_the_page_figure() {
     let mut host = client_host();
     let pane = add_terminal_pane(&mut host, "api");
-    let labels: Vec<String> = menu(&mut host, Some(pane)).into_iter().map(|entry| entry.label).collect();
-    assert_eq!(labels, ["Copy", "Copy path", "Smart Copy", "Transfer screen"]);
+    let labels: Vec<String> = menu(&mut host, Some(pane))
+        .into_iter()
+        .map(|entry| entry.label)
+        .collect();
+    assert_eq!(
+        labels,
+        ["Copy", "Copy path", "Smart Copy", "Transfer screen"]
+    );
 }
 
 /// REQ: F-016
@@ -57,7 +75,10 @@ fn feature_016_copy_is_disabled_with_a_reason_when_nothing_is_selected() {
     let mut host = client_host();
     let pane = add_terminal_pane(&mut host, "api");
     let entries = menu(&mut host, Some(pane));
-    assert_eq!(entry(&entries, "copy").disabled_reason.as_deref(), Some("nothing selected"));
+    assert_eq!(
+        entry(&entries, "copy").disabled_reason.as_deref(),
+        Some("nothing selected")
+    );
 }
 
 /// REQ: F-016
@@ -65,7 +86,8 @@ fn feature_016_copy_is_disabled_with_a_reason_when_nothing_is_selected() {
 fn feature_016_copy_is_enabled_when_the_selection_has_text() {
     let mut host = client_host();
     let pane = add_terminal_pane(&mut host, "api");
-    host.terminal().set_selection(pane, selection("modified: src/lib.rs"));
+    host.terminal()
+        .set_selection(pane, selection("modified: src/lib.rs"));
     let entries = menu(&mut host, Some(pane));
     assert_eq!(entry(&entries, "copy").disabled_reason, None);
 }
@@ -77,7 +99,10 @@ fn feature_016_copy_stays_disabled_for_an_empty_selection_text() {
     let pane = add_terminal_pane(&mut host, "api");
     host.terminal().set_selection(pane, selection(""));
     let entries = menu(&mut host, Some(pane));
-    assert_eq!(entry(&entries, "copy").disabled_reason.as_deref(), Some("nothing selected"));
+    assert_eq!(
+        entry(&entries, "copy").disabled_reason.as_deref(),
+        Some("nothing selected")
+    );
 }
 
 /// REQ: F-016
@@ -86,7 +111,10 @@ fn feature_016_copy_reason_fits_the_forty_character_limit() {
     let mut host = client_host();
     let pane = add_terminal_pane(&mut host, "api");
     let entries = menu(&mut host, Some(pane));
-    let reason = entry(&entries, "copy").disabled_reason.clone().expect("disabled");
+    let reason = entry(&entries, "copy")
+        .disabled_reason
+        .clone()
+        .expect("disabled");
     assert!(reason.chars().count() <= 40);
 }
 
@@ -98,7 +126,10 @@ fn feature_016_a_selection_on_another_pane_does_not_enable_copy() {
     let second = add_terminal_pane(&mut host, "web");
     host.terminal().set_selection(first, selection("abc"));
     let entries = menu(&mut host, Some(second));
-    assert_eq!(entry(&entries, "copy").disabled_reason.as_deref(), Some("nothing selected"));
+    assert_eq!(
+        entry(&entries, "copy").disabled_reason.as_deref(),
+        Some("nothing selected")
+    );
 }
 
 /// REQ: F-016
@@ -107,7 +138,10 @@ fn feature_016_smart_copy_entry_carries_the_ctrl_shift_c_shortcut() {
     let mut host = client_host();
     let pane = add_terminal_pane(&mut host, "api");
     let entries = menu(&mut host, Some(pane));
-    assert_eq!(entry(&entries, "smart-copy").shortcut.as_deref(), Some("ctrl+shift+c"));
+    assert_eq!(
+        entry(&entries, "smart-copy").shortcut.as_deref(),
+        Some("ctrl+shift+c")
+    );
 }
 
 /// REQ: F-016
@@ -146,7 +180,9 @@ fn feature_016_menu_has_at_most_sixty_four_entries_and_no_submenus() {
     let pane = add_terminal_pane(&mut host, "api");
     let entries = menu(&mut host, Some(pane));
     assert!(entries.len() <= 64);
-    assert!(entries.iter().all(|entry| !entry.is_submenu && entry.parent.is_none()));
+    assert!(entries
+        .iter()
+        .all(|entry| !entry.is_submenu && entry.parent.is_none()));
 }
 
 /// REQ: F-016

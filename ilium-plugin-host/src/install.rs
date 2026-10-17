@@ -154,12 +154,24 @@ pub struct Installer {
 impl Installer {
     /// An installer over a package store.
     pub fn new(store: PackageStore) -> Installer {
-        Installer { store, state_dir: None, options: InstallOptions::default() }
+        Installer {
+            store,
+            state_dir: None,
+            options: InstallOptions::default(),
+        }
     }
 
     /// An installer over a package store with a state directory and options (PKG-262).
-    pub fn with_options(store: PackageStore, state_dir: PathBuf, options: InstallOptions) -> Installer {
-        Installer { store, state_dir: Some(state_dir), options }
+    pub fn with_options(
+        store: PackageStore,
+        state_dir: PathBuf,
+        options: InstallOptions,
+    ) -> Installer {
+        Installer {
+            store,
+            state_dir: Some(state_dir),
+            options,
+        }
     }
 
     /// Runs the stages without changing disk (reference-check-and-lint-rules.md).
@@ -168,12 +180,21 @@ impl Installer {
     }
 
     /// Installs a package after consent.
-    pub fn install(&self, package: &[u8], consent: &dyn Consent) -> Result<InstallReport, Diagnostic> {
+    pub fn install(
+        &self,
+        package: &[u8],
+        consent: &dyn Consent,
+    ) -> Result<InstallReport, Diagnostic> {
         unimplemented!("host::install::Installer::install")
     }
 
     /// Installs, then stops as if the process died right after `step` (testing hook, PKG-270..272).
-    pub fn install_crashing_after(&self, package: &[u8], consent: &dyn Consent, step: InstallStep) -> Result<(), Diagnostic> {
+    pub fn install_crashing_after(
+        &self,
+        package: &[u8],
+        consent: &dyn Consent,
+        step: InstallStep,
+    ) -> Result<(), Diagnostic> {
         unimplemented!("host::install::Installer::install_crashing_after")
     }
 
@@ -188,12 +209,20 @@ impl Installer {
     }
 
     /// Stages an update; the swap happens at the next safe point.
-    pub fn update(&self, package: &[u8], consent: &dyn Consent) -> Result<InstallReport, Diagnostic> {
+    pub fn update(
+        &self,
+        package: &[u8],
+        consent: &dyn Consent,
+    ) -> Result<InstallReport, Diagnostic> {
         unimplemented!("host::install::Installer::update")
     }
 
     /// Commits or rolls back a staged update after its first activation (PKG-280, LIF-075).
-    pub fn finish_update(&self, plugin: &PluginId, first: FirstActivate) -> Result<UpdateOutcome, Diagnostic> {
+    pub fn finish_update(
+        &self,
+        plugin: &PluginId,
+        first: FirstActivate,
+    ) -> Result<UpdateOutcome, Diagnostic> {
         unimplemented!("host::install::Installer::finish_update")
     }
 

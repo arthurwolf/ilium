@@ -30,22 +30,35 @@ fn read_golden(name: &str) -> String {
 /// REQ: F-009
 #[test]
 fn doc_f_009_results_golden_equals_the_first_page_figure() {
-    assert_eq!(read_golden("search_results_48.txt"), term_blocks(&page_text())[0]);
+    assert_eq!(
+        read_golden("search_results_48.txt"),
+        term_blocks(&page_text())[0]
+    );
 }
 
 /// REQ: F-009
 #[test]
 fn doc_f_009_meaning_golden_equals_the_second_page_figure() {
-    assert_eq!(read_golden("search_meaning_48.txt"), term_blocks(&page_text())[1]);
+    assert_eq!(
+        read_golden("search_meaning_48.txt"),
+        term_blocks(&page_text())[1]
+    );
 }
 
 /// REQ: F-009
 #[test]
 fn doc_f_009_both_figures_are_titled_frames_48_columns_wide() {
     for figure in term_blocks(&page_text()) {
-        assert!(figure.lines().next().expect("line").starts_with("╭─ Workspace search"));
+        assert!(figure
+            .lines()
+            .next()
+            .expect("line")
+            .starts_with("╭─ Workspace search"));
         assert!(figure.lines().last().expect("line").starts_with('╰'));
-        assert!(figure.lines().all(|line| line.chars().count() == 48), "{figure}");
+        assert!(
+            figure.lines().all(|line| line.chars().count() == 48),
+            "{figure}"
+        );
     }
 }
 
@@ -73,7 +86,13 @@ fn render_at(columns: u16, rows: u16) -> String {
 }
 
 fn assert_grouped_structure(text: &str, columns: u16) {
-    assert!(text.lines().next().expect("first row").starts_with("╭─ Workspace search"), "{text}");
+    assert!(
+        text.lines()
+            .next()
+            .expect("first row")
+            .starts_with("╭─ Workspace search"),
+        "{text}"
+    );
     assert!(text.contains("Search deploy"), "{text}");
     for heading in ["Agents", "Terminals", "Files"] {
         assert!(text.contains(heading), "{heading} missing in {text}");
@@ -81,8 +100,13 @@ fn assert_grouped_structure(text: &str, columns: u16) {
     let agents = text.find("Agents").expect("agents");
     let terminals = text.find("Terminals").expect("terminals");
     let files = text.find("Files").expect("files");
-    assert!(agents < terminals && terminals < files, "groups appear as Agents, Terminals, Files");
-    assert!(text.lines().all(|line| line.chars().count() <= usize::from(columns)));
+    assert!(
+        agents < terminals && terminals < files,
+        "groups appear as Agents, Terminals, Files"
+    );
+    assert!(text
+        .lines()
+        .all(|line| line.chars().count() <= usize::from(columns)));
 }
 
 /// REQ: F-009
@@ -107,9 +131,15 @@ fn search_009_panel_renders_the_grouped_tree_at_width_120() {
 #[test]
 fn search_009_the_first_result_row_is_marked_with_the_selection_arrow() {
     let text = render_at(80, 14);
-    let line = text.lines().find(|line| line.contains("claude: deploy script fix")).expect("row");
+    let line = text
+        .lines()
+        .find(|line| line.contains("claude: deploy script fix"))
+        .expect("row");
     assert!(line.contains("▸"), "{line}");
-    let other = text.lines().find(|line| line.contains("build shell")).expect("row");
+    let other = text
+        .lines()
+        .find(|line| line.contains("build shell"))
+        .expect("row");
     assert!(!other.contains("▸"), "{other}");
 }
 
@@ -121,7 +151,10 @@ fn search_009_the_panel_without_a_query_shows_the_empty_field_and_no_groups() {
     let text = host.render(panel(), 80, 14).text();
     assert!(text.contains("Search"), "{text}");
     for heading in ["Agents", "Terminals", "Files", "Meaning"] {
-        assert!(!text.contains(heading), "{heading} shown without a query: {text}");
+        assert!(
+            !text.contains(heading),
+            "{heading} shown without a query: {text}"
+        );
     }
 }
 
@@ -152,7 +185,10 @@ fn port_search_ui_render_shows_the_live_query_in_the_field_at_48_columns() {
     let screen = host.render(panel(), 48, 18);
     assert!(screen.text().contains("needle"));
     let (row, _) = screen.find("needle").expect("query on screen");
-    assert_eq!(row, 1, "the query field sits on the first row inside the frame");
+    assert_eq!(
+        row, 1,
+        "the query field sits on the first row inside the frame"
+    );
 }
 
 /// REQ: F-009, PORT:ilium-client/src/search_ui.rs::full_screen_render_shows_object_metadata_and_highlighted_match
@@ -177,8 +213,15 @@ fn port_search_ui_frames_stay_inside_the_area_at_every_size() {
         let mut host = client_showing("deploy", grouped_hits());
         let screen = host.render(panel(), columns, rows);
         let text = screen.text();
-        assert!(text.lines().count() <= usize::from(rows), "{columns}x{rows}: {text}");
-        assert!(text.lines().all(|line| line.chars().count() <= usize::from(columns)), "{columns}x{rows}");
+        assert!(
+            text.lines().count() <= usize::from(rows),
+            "{columns}x{rows}: {text}"
+        );
+        assert!(
+            text.lines()
+                .all(|line| line.chars().count() <= usize::from(columns)),
+            "{columns}x{rows}"
+        );
     }
 }
 
@@ -196,7 +239,10 @@ fn port_search_ui_overflowing_results_reserve_a_separate_scrollbar_column() {
         let line = screen.row(row);
         let cells: Vec<char> = line.chars().collect();
         assert!(cells.len() >= 40, "{line:?}");
-        assert!(!cells[38].is_alphanumeric(), "text runs into the scrollbar column: {line:?}");
+        assert!(
+            !cells[38].is_alphanumeric(),
+            "text runs into the scrollbar column: {line:?}"
+        );
     }
     assert!(screen.text().contains("file-00.md"));
 }
@@ -204,7 +250,10 @@ fn port_search_ui_overflowing_results_reserve_a_separate_scrollbar_column() {
 /// REQ: F-009, PORT:ilium-client/src/search_ui.rs::overflowing_results_reserve_a_separate_scrollbar_column
 #[test]
 fn port_search_ui_few_results_draw_no_scrollbar() {
-    let mut host = client_showing("file", json!([{ "id": "f1", "kind": "file", "title": "one.md" }]));
+    let mut host = client_showing(
+        "file",
+        json!([{ "id": "f1", "kind": "file", "title": "one.md" }]),
+    );
     let with_one = host.render(panel(), 40, 12).text();
     let many: Vec<Value> = (0..30)
         .map(|index| json!({ "id": format!("f{index}"), "kind": "file", "title": format!("file-{index:02}.md") }))
@@ -213,8 +262,20 @@ fn port_search_ui_few_results_draw_no_scrollbar() {
     let with_many = crowded.render(panel(), 40, 12).text();
     let bar = ['█', '▐', '▌', '┃', '│', '║'];
     let right_column = |text: &str| -> Vec<char> {
-        text.lines().skip(2).take(8).filter_map(|line| line.chars().nth(38)).collect()
+        text.lines()
+            .skip(2)
+            .take(8)
+            .filter_map(|line| line.chars().nth(38))
+            .collect()
     };
-    assert!(right_column(&with_one).iter().all(|symbol| *symbol == ' '), "{with_one}");
-    assert!(right_column(&with_many).iter().any(|symbol| bar.contains(symbol)), "{with_many}");
+    assert!(
+        right_column(&with_one).iter().all(|symbol| *symbol == ' '),
+        "{with_one}"
+    );
+    assert!(
+        right_column(&with_many)
+            .iter()
+            .any(|symbol| bar.contains(symbol)),
+        "{with_many}"
+    );
 }

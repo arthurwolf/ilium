@@ -13,7 +13,10 @@ fn ext_011_a_selector_entry_adds_a_group_to_the_broadcast_targets() {
     let mut host = server_host();
     add_agent(&mut host, "a", "claude", AgentActivity::Idle);
     add_session(&mut host, "default", true, &[]);
-    host.set_extension_entries("ilium.core.fleet/selectors", vec![r#"{"id":"mine","label":"Mine","panes":[1]}"#.to_string()]);
+    host.set_extension_entries(
+        "ilium.core.fleet/selectors",
+        vec![r#"{"id":"mine","label":"Mine","panes":[1]}"#.to_string()],
+    );
     let (stdout, _, exit) = run_cli(&mut host, &["panes"], b"");
     assert_eq!(exit, Some(0));
     assert!(!stdout.is_empty());
@@ -30,7 +33,12 @@ fn ext_011_the_hook_payload_keys_are_message_targets_and_source() {
     let calls = host.hook_payloads("ilium.core.fleet/before-broadcast");
     assert_eq!(calls.len(), 1);
     let payload: Value = serde_json::from_str(&calls[0]).expect("JSON");
-    let mut keys: Vec<&str> = payload.as_object().unwrap().keys().map(String::as_str).collect();
+    let mut keys: Vec<&str> = payload
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
     keys.sort();
     assert_eq!(keys, ["message", "source", "targets"]);
 }
@@ -41,7 +49,10 @@ fn ext_011_a_replace_without_a_message_field_leaves_the_text_unchanged() {
     let mut host = server_host();
     add_agent(&mut host, "a", "claude", AgentActivity::Idle);
     add_session(&mut host, "default", true, &[]);
-    host.set_hook_reply("ilium.core.fleet/before-broadcast", HookReply::Replace("{}".to_string()));
+    host.set_hook_reply(
+        "ilium.core.fleet/before-broadcast",
+        HookReply::Replace("{}".to_string()),
+    );
     run_cli(&mut host, &["broadcast", "hi"], b"");
     assert!(sent_inputs(&host).iter().all(|s| s.text == "hi"));
 }

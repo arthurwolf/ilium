@@ -10,12 +10,26 @@ use serde_json::json;
 use crate::common::{client_host, configure};
 
 fn step_text(host: &mut FakeHost, columns: u16, rows: u16) -> String {
-    host.render(ViewTarget::OnboardingStep("voice".to_string()), columns, rows).text()
+    host.render(
+        ViewTarget::OnboardingStep("voice".to_string()),
+        columns,
+        rows,
+    )
+    .text()
 }
 
 const ROWS: [&str; 11] = [
-    "Enable voice after setup", "OpenAI API key", "Realtime model", "Speaking voice", "Turn detection",
-    "Microphone", "Speaker", "Output volume", "Reasoning", "VAD responsiveness", "Pause other media",
+    "Enable voice after setup",
+    "OpenAI API key",
+    "Realtime model",
+    "Speaking voice",
+    "Turn detection",
+    "Microphone",
+    "Speaker",
+    "Output volume",
+    "Reasoning",
+    "VAD responsiveness",
+    "Pause other media",
 ];
 
 /// REQ: PORT:ilium-client/src/onboarding/voice_ui.rs::every_configuration_and_live_action_is_reachable_on_small_and_wide_screens
@@ -59,7 +73,10 @@ fn step_053_the_configuration_cards_use_rounded_frames_at_both_sizes() {
     let mut host = client_host();
     for (columns, rows) in [(60u16, 24u16), (120, 40)] {
         let text = step_text(&mut host, columns, rows);
-        assert!(text.contains('\u{256d}') && text.contains('\u{256f}'), "{columns}x{rows}: {text}");
+        assert!(
+            text.contains('\u{256d}') && text.contains('\u{256f}'),
+            "{columns}x{rows}: {text}"
+        );
     }
 }
 
@@ -86,7 +103,11 @@ fn step_053_the_settings_and_the_transcript_scroll_independently() {
     // A click on the settings column must not move what the transcript column shows.
     host.click(target, 10, 10);
     let after = step_text(&mut host, 160, 12);
-    let transcript_column = |text: &str| text.lines().map(|line| line.chars().skip(80).collect::<String>()).collect::<Vec<_>>();
+    let transcript_column = |text: &str| {
+        text.lines()
+            .map(|line| line.chars().skip(80).collect::<String>())
+            .collect::<Vec<_>>()
+    };
     assert_eq!(transcript_column(&before), transcript_column(&after));
 }
 
@@ -98,7 +119,10 @@ fn step_053_a_test_with_an_invalid_configuration_never_opens_audio() {
     host.key(ViewTarget::OnboardingStep("voice".to_string()), "t");
     host.settle();
     assert!(host.audio().captures().is_empty());
-    assert!(step_text(&mut host, 100, 40).contains("Ready to test") || step_text(&mut host, 100, 40).contains("API key"));
+    assert!(
+        step_text(&mut host, 100, 40).contains("Ready to test")
+            || step_text(&mut host, 100, 40).contains("API key")
+    );
 }
 
 /// REQ: PORT:ilium-client/src/onboarding/voice_runtime.rs::stop_is_nonblocking_and_preserves_original_queued_text
@@ -125,11 +149,19 @@ fn demo_053_the_only_advertised_tool_is_the_bulb_and_calls_run_in_order() {
     assert_eq!(host.onboarding_demo("voice").tools(), ["set_lightbulb"]);
     for (index, on) in [true, false, true].into_iter().enumerate() {
         let id = format!("order-{index}");
-        let result = host.onboarding_demo("voice").call(&id, "set_lightbulb", &json!({ "on": on }).to_string());
+        let result = host.onboarding_demo("voice").call(
+            &id,
+            "set_lightbulb",
+            &json!({ "on": on }).to_string(),
+        );
         assert!(result.is_ok(), "{id}");
         assert_eq!(host.onboarding_demo("voice").bulb(), Some(on), "{id}");
     }
-    let replay = host.onboarding_demo("voice").call("order-0", "set_lightbulb", &json!({ "on": true }).to_string());
+    let replay = host.onboarding_demo("voice").call(
+        "order-0",
+        "set_lightbulb",
+        &json!({ "on": true }).to_string(),
+    );
     assert!(replay.is_ok());
     assert_eq!(host.onboarding_demo("voice").bulb(), Some(true));
 }
@@ -144,16 +176,34 @@ fn demo_053_the_demonstration_offers_only_the_bulb_and_runs_it_by_call_id() {
     let mut host = client_host();
     let tools = host.onboarding_demo("voice").tools();
     assert_eq!(tools, ["set_lightbulb"]);
-    let on = host.onboarding_demo("voice").call("c1", "set_lightbulb", &json!({ "on": true }).to_string());
+    let on = host.onboarding_demo("voice").call(
+        "c1",
+        "set_lightbulb",
+        &json!({ "on": true }).to_string(),
+    );
     assert!(on.is_ok());
     assert_eq!(host.onboarding_demo("voice").bulb(), Some(true));
-    let off = host.onboarding_demo("voice").call("c2", "set_lightbulb", &json!({ "on": false }).to_string());
+    let off = host.onboarding_demo("voice").call(
+        "c2",
+        "set_lightbulb",
+        &json!({ "on": false }).to_string(),
+    );
     assert!(off.is_ok());
     assert_eq!(host.onboarding_demo("voice").bulb(), Some(false));
-    let replay = host.onboarding_demo("voice").call("c1", "set_lightbulb", &json!({ "on": true }).to_string());
+    let replay = host.onboarding_demo("voice").call(
+        "c1",
+        "set_lightbulb",
+        &json!({ "on": true }).to_string(),
+    );
     assert_eq!(replay, on);
     assert_eq!(host.onboarding_demo("voice").bulb(), Some(false));
-    assert!(host.onboarding_demo("voice").call("c3", "set_lightbulb", "{\"on\":\"yes\"}").is_err());
-    assert!(host.onboarding_demo("voice").call("c4", "ilium_close_pane", "{}").is_err());
+    assert!(host
+        .onboarding_demo("voice")
+        .call("c3", "set_lightbulb", "{\"on\":\"yes\"}")
+        .is_err());
+    assert!(host
+        .onboarding_demo("voice")
+        .call("c4", "ilium_close_pane", "{}")
+        .is_err());
     assert_eq!(host.onboarding_demo("voice").bulb(), Some(false));
 }

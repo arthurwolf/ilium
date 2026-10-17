@@ -10,9 +10,9 @@ use std::path::PathBuf;
 use ilium_plugin_core_smart_copy::{SmartCopyClient, SmartCopyServer};
 use ilium_plugin_sdk::testing::{FakeHost, TreeNode};
 use ilium_plugin_sdk::types::{
-    CommandContext, CommandInvokedEvent, CommandOrigin, Event, Intent, MessageEvent, NodeClass, NodeId,
-    PaneInfo, PluginId, PluginSide, PointerButton, PointerEvent, PointerKind, PointerModifiers,
-    PrimitiveKind, Submission, ViewTarget,
+    CommandContext, CommandInvokedEvent, CommandOrigin, Event, Intent, MessageEvent, NodeClass,
+    NodeId, PaneInfo, PluginId, PluginSide, PointerButton, PointerEvent, PointerKind,
+    PointerModifiers, PrimitiveKind, Submission, ViewTarget,
 };
 
 /// The plugin id of the page.
@@ -30,7 +30,9 @@ pub fn workspace_root() -> PathBuf {
 
 /// A page of the manual by file name.
 pub fn manual_page(name: &str) -> String {
-    let path = workspace_root().join("docs/plugins-manual/pages").join(name);
+    let path = workspace_root()
+        .join("docs/plugins-manual/pages")
+        .join(name);
     std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("page {path:?}: {error}"))
 }
 
@@ -41,12 +43,18 @@ pub fn page_text() -> String {
 
 /// A server-side host with the manifest grants, not yet activated.
 pub fn server_host_unactivated() -> FakeHost {
-    FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("server").build()
+    FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("server")
+        .build()
 }
 
 /// A client-side host with the manifest grants, not yet activated.
 pub fn client_host_unactivated() -> FakeHost {
-    FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("client").build()
+    FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("client")
+        .build()
 }
 
 /// A server-side host with the plugin activated.
@@ -138,7 +146,10 @@ pub fn palette_command(command: &str, pane: Option<u64>) -> Event {
         command: command.to_string(),
         arguments_json: "{}".to_string(),
         origin: CommandOrigin::Palette,
-        context: CommandContext { pane: pane.map(NodeId), ..CommandContext::default() },
+        context: CommandContext {
+            pane: pane.map(NodeId),
+            ..CommandContext::default()
+        },
     })
 }
 
@@ -160,7 +171,10 @@ pub fn picker_target() -> ViewTarget {
 
 /// The intents of a submission list, in order.
 pub fn intents(submissions: &[Submission]) -> Vec<Intent> {
-    submissions.iter().map(|submission| submission.intent.clone()).collect()
+    submissions
+        .iter()
+        .map(|submission| submission.intent.clone())
+        .collect()
 }
 
 /// Message intents addressed to the client side of this plugin on channel `candidates`: the payloads as text.
@@ -190,12 +204,14 @@ pub fn candidate_lines(submissions: &[Submission]) -> Vec<String> {
 
 /// True when any status segment intent carries text containing `needle`.
 pub fn status_contains(submissions: &[Submission], needle: &str) -> bool {
-    submissions.iter().any(|submission| match &submission.intent {
-        Intent::SetStatusSegment(spec) => {
-            serde_json::to_string(&spec.content).expect("rich text serialises").contains(needle)
-        }
-        _ => false,
-    })
+    submissions
+        .iter()
+        .any(|submission| match &submission.intent {
+            Intent::SetStatusSegment(spec) => serde_json::to_string(&spec.content)
+                .expect("rich text serialises")
+                .contains(needle),
+            _ => false,
+        })
 }
 
 /// The `<pre class="term">` figure with this index on the page, tags removed, rows without trailing spaces.
@@ -204,7 +220,8 @@ pub fn page_figure(index: usize) -> Vec<String> {
     let mut rest = page.as_str();
     let mut found = None;
     for _ in 0..=index {
-        let start = rest.find("<pre class=\"term\">").expect("figure present") + "<pre class=\"term\">".len();
+        let start = rest.find("<pre class=\"term\">").expect("figure present")
+            + "<pre class=\"term\">".len();
         let end = rest[start..].find("</pre>").expect("figure end");
         found = Some(&rest[start..start + end]);
         rest = &rest[start + end..];
@@ -220,5 +237,8 @@ pub fn page_figure(index: usize) -> Vec<String> {
             _ => {}
         }
     }
-    text.lines().map(|line| line.trim_end().to_string()).filter(|line| !line.is_empty()).collect()
+    text.lines()
+        .map(|line| line.trim_end().to_string())
+        .filter(|line| !line.is_empty())
+        .collect()
 }

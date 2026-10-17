@@ -5,6 +5,7 @@
 
 mod support;
 
+mod events;
 mod extensions;
 mod manifest;
 mod markdown;
@@ -12,4 +13,3 @@ mod render_editor;
 mod service;
 mod settings;
 mod tokens;
-mod events;

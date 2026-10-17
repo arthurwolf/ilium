@@ -9,7 +9,7 @@ use ilium_plugin_sdk_core::types::{Color, NodeId, ViewTarget};
 use ilium_plugin_testkit::errors::codes;
 use ilium_plugin_testkit::{FakeHost, Screen, ScreenCell};
 
-use crate::common::{Spy, assert_fails_with, panic_text, spy_reset, with_clean_env};
+use crate::common::{assert_fails_with, panic_text, spy_reset, with_clean_env, Spy};
 
 /// A screen whose rows are the given strings, one character per cell.
 fn screen_of(columns: u16, rows: &[&str]) -> Screen {
@@ -28,7 +28,11 @@ fn screen_of(columns: u16, rows: &[&str]) -> Screen {
             });
         }
     }
-    Screen { columns, rows: rows.len() as u16, cells }
+    Screen {
+        columns,
+        rows: rows.len() as u16,
+        cells,
+    }
 }
 
 fn active_host() -> FakeHost {
@@ -161,12 +165,12 @@ fn panel_text(host: &mut FakeHost, columns: u16, rows: u16) -> String {
 mod plugin_output {
     use std::cell::RefCell;
 
-    use ilium_plugin_sdk_core::Views as ExportViews;
     use ilium_plugin_sdk_core::types::{
         Activation, Alignment, Area, ButtonRole, ButtonSpec, DeactivationReason, Event, NodeFlags,
         ParagraphSpec, PluginError, Span, Style, Submission, UiNode, UiTree, Widget,
     };
     use ilium_plugin_sdk_core::NativeEntry;
+    use ilium_plugin_sdk_core::Views as ExportViews;
 
     use super::*;
     use crate::common::spy;
@@ -205,7 +209,10 @@ mod plugin_output {
         UiNode {
             key: key.map(str::to_string),
             widget: Widget::Paragraph(ParagraphSpec {
-                lines: vec![vec![Span { text: text.to_string(), style: Style::default() }]],
+                lines: vec![vec![Span {
+                    text: text.to_string(),
+                    style: Style::default(),
+                }]],
                 rich: None,
                 wrap: None,
                 alignment: Alignment::Left,
@@ -246,7 +253,11 @@ mod plugin_output {
             RENDER_COUNT.with(|cell| *cell.borrow_mut() += 1);
             let shape = SHAPE.with(|cell| cell.borrow().clone());
             match shape {
-                Shape::Text(text) => UiTree { version: 1, nodes: vec![paragraph(&text, None)], root: 0 },
+                Shape::Text(text) => UiTree {
+                    version: 1,
+                    nodes: vec![paragraph(&text, None)],
+                    root: 0,
+                },
                 Shape::Button(label) => UiTree {
                     version: 1,
                     nodes: vec![UiNode {
@@ -265,10 +276,16 @@ mod plugin_output {
                     }],
                     root: 0,
                 },
-                Shape::RootOutOfRange => UiTree { version: 1, nodes: vec![paragraph("x", None)], root: 7 },
+                Shape::RootOutOfRange => UiTree {
+                    version: 1,
+                    nodes: vec![paragraph("x", None)],
+                    root: 7,
+                },
                 Shape::TooManyNodes(count) => UiTree {
                     version: 1,
-                    nodes: (0..count).map(|index| paragraph("x", Some(&format!("k{index}")))).collect(),
+                    nodes: (0..count)
+                        .map(|index| paragraph("x", Some(&format!("k{index}"))))
+                        .collect(),
                     root: 0,
                 },
                 Shape::DuplicateKeys => UiTree {
@@ -316,7 +333,10 @@ mod plugin_output {
             set_shape(Shape::Text("ab".to_string()));
             let mut host = view_host();
             let screen = host.render(panel(), 10, 1);
-            assert_eq!((screen.columns, screen.rows, screen.cells.len()), (10, 1, 10));
+            assert_eq!(
+                (screen.columns, screen.rows, screen.cells.len()),
+                (10, 1, 10)
+            );
         });
     }
 
@@ -327,7 +347,10 @@ mod plugin_output {
             set_shape(Shape::Text("ab".to_string()));
             let mut host = view_host();
             let screen = host.render(panel(), 500, 200);
-            assert_eq!((screen.columns, screen.rows, screen.cells.len()), (500, 200, 100_000));
+            assert_eq!(
+                (screen.columns, screen.rows, screen.cells.len()),
+                (500, 200, 100_000)
+            );
         });
     }
 
@@ -398,7 +421,9 @@ mod plugin_output {
             let mut host = view_host();
             host.render(panel(), 20, 4);
             assert!(!host.click(panel(), 19, 3));
-            assert!(received_events().iter().all(|event| !matches!(event, Event::UiAction(_))));
+            assert!(received_events()
+                .iter()
+                .all(|event| !matches!(event, Event::UiAction(_))));
         });
     }
 
@@ -461,7 +486,8 @@ fn dev_446_render_of_each_view_target_case_fails_only_by_size_when_the_size_is_b
             ViewTarget::SettingsPage("s".to_string()),
             ViewTarget::OnboardingStep("o".to_string()),
         ] {
-            let text = panic_text(|| host.render(target.clone(), 5, 5)).expect("size 5 is too small");
+            let text =
+                panic_text(|| host.render(target.clone(), 5, 5)).expect("size 5 is too small");
             assert!(text.contains(codes::RENDER_SIZE), "{target:?}: {text}");
         }
     });

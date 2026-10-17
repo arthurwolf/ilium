@@ -4,12 +4,13 @@
 use std::path::PathBuf;
 
 use ilium_plugin_core_titles::TitlesServer;
-use ilium_plugin_sdk::host::inference::{CompletionRequest, Completion};
+use ilium_plugin_sdk::host::inference::{Completion, CompletionRequest};
 use ilium_plugin_sdk::testing::{FakeHost, TreeNode};
 use ilium_plugin_sdk::types::{
-    AgentActivity, AgentActivityEvent, CommandContext, CommandInvokedEvent, CommandOrigin, ErrorCode, Event,
-    InputSource, InputSubmittedEvent, Intent, NodeClass, NodeId, Outcome, PluginError, RenameNodeSpec, RequestId,
-    RequestRef, RequestResult, RestructureOp, RestructureSpec, SetInferredIconSpec, Submission,
+    AgentActivity, AgentActivityEvent, CommandContext, CommandInvokedEvent, CommandOrigin,
+    ErrorCode, Event, InputSource, InputSubmittedEvent, Intent, NodeClass, NodeId, Outcome,
+    PluginError, RenameNodeSpec, RequestId, RequestRef, RequestResult, RestructureOp,
+    RestructureSpec, SetInferredIconSpec, Submission,
 };
 use serde_json::json;
 
@@ -21,13 +22,20 @@ pub fn manifest_path() -> PathBuf {
 }
 
 pub fn activated_server() -> FakeHost {
-    let mut host = FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("server");
+    let mut host = FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("server");
     host.activate::<TitlesServer>();
     host
 }
 
 pub fn prompt_event(node: u64, text: &str) -> Event {
-    Event::InputSubmitted(InputSubmittedEvent { node: NodeId(node), text: text.to_string(), source: InputSource::User, epoch: 1 })
+    Event::InputSubmitted(InputSubmittedEvent {
+        node: NodeId(node),
+        text: text.to_string(),
+        source: InputSource::User,
+        epoch: 1,
+    })
 }
 
 pub fn command_event(name: &str) -> Event {
@@ -58,18 +66,30 @@ pub fn started_working(node: u64) -> Event {
 }
 
 pub fn completion(text: &str) -> Completion {
-    Completion { text: text.to_string(), model: "test-model".to_string(), input_tokens: 10, output_tokens: 4 }
+    Completion {
+        text: text.to_string(),
+        model: "test-model".to_string(),
+        input_tokens: 10,
+        output_tokens: 4,
+    }
 }
 
 pub fn plugin_error(code: ErrorCode) -> PluginError {
-    PluginError { code, message: "test".to_string(), retry_after_ms: None }
+    PluginError {
+        code,
+        message: "test".to_string(),
+        retry_after_ms: None,
+    }
 }
 
 pub fn title_for_prompt(host: &mut FakeHost, node: u64, prompt: &str, reply: &str) {
     host.deliver_one(prompt_event(node, prompt));
     host.settle();
     let requests = host.inference_requests();
-    let (id, _) = requests.last().cloned().expect("an inference request was made");
+    let (id, _) = requests
+        .last()
+        .cloned()
+        .expect("an inference request was made");
     host.complete_inference(id, completion(reply));
     host.settle();
 }
@@ -115,7 +135,10 @@ pub fn reverts(submissions: &[Submission]) -> Vec<u64> {
 }
 
 pub fn outcome_event(correlation: u64, outcome: Outcome) -> Event {
-    Event::RequestCompleted(RequestResult { request: RequestRef::Submission(correlation), outcome })
+    Event::RequestCompleted(RequestResult {
+        request: RequestRef::Submission(correlation),
+        outcome,
+    })
 }
 
 pub fn pane(name: &str, parent: Option<u64>) -> TreeNode {
@@ -130,7 +153,10 @@ pub fn pane(name: &str, parent: Option<u64>) -> TreeNode {
 }
 
 pub fn editor_pane(name: &str) -> TreeNode {
-    TreeNode { content_kind: Some("ilium.editor".to_string()), ..pane(name, None) }
+    TreeNode {
+        content_kind: Some("ilium.editor".to_string()),
+        ..pane(name, None)
+    }
 }
 
 pub fn host_with_two_panes() -> FakeHost {
@@ -142,7 +168,10 @@ pub fn host_with_two_panes() -> FakeHost {
 }
 
 pub fn restructure_requests(host: &FakeHost) -> Vec<(RequestId, CompletionRequest)> {
-    host.inference_requests().into_iter().filter(|(_, request)| request.purpose.contains("restructure")).collect()
+    host.inference_requests()
+        .into_iter()
+        .filter(|(_, request)| request.purpose.contains("restructure"))
+        .collect()
 }
 
 fn plan(children: serde_json::Value) -> String {
@@ -150,10 +179,12 @@ fn plan(children: serde_json::Value) -> String {
 }
 
 pub fn plan_reply() -> String {
-    plan(json!([{"kind": "group", "title": "Billing API", "short_title": "Billing", "icon": null, "children": [
-        {"kind": "pane", "id": 1, "title": "claude", "short_title": null, "icon": null},
-        {"kind": "pane", "id": 2, "title": "shell-1", "short_title": null, "icon": null}
-    ]}]))
+    plan(
+        json!([{"kind": "group", "title": "Billing API", "short_title": "Billing", "icon": null, "children": [
+            {"kind": "pane", "id": 1, "title": "claude", "short_title": null, "icon": null},
+            {"kind": "pane", "id": 2, "title": "shell-1", "short_title": null, "icon": null}
+        ]}]),
+    )
 }
 
 pub fn plan_without_pane_two() -> String {
@@ -192,7 +223,9 @@ pub fn rejected_host(reply: &str) -> FakeHost {
     host.deliver_one(finished(1));
     host.settle();
     for _ in 0..MAX_ATTEMPTS {
-        let Some((id, _)) = restructure_requests(&host).pop() else { break };
+        let Some((id, _)) = restructure_requests(&host).pop() else {
+            break;
+        };
         host.complete_inference(id, completion(reply));
         host.settle();
     }

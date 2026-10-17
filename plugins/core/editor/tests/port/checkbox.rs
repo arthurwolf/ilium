@@ -15,11 +15,19 @@ fn click_edit(line: &str, column: u32) -> Option<(u32, u32, u32, u32, String)> {
 fn flips(line: &str, bracket_offset: u32, replacement: &str) {
     let inner = bracket_offset + 1;
     let edit = click_edit(line, inner);
-    assert_eq!(edit, Some((0, inner, 0, inner + 1, replacement.to_string())), "{line:?}");
+    assert_eq!(
+        edit,
+        Some((0, inner, 0, inner + 1, replacement.to_string())),
+        "{line:?}"
+    );
 }
 
 fn inert(line: &str, column: u32) {
-    assert_eq!(click_edit(line, column), None, "{line:?} at column {column}");
+    assert_eq!(
+        click_edit(line, column),
+        None,
+        "{line:?} at column {column}"
+    );
 }
 
 /// REQ: PORT:ilium-client/src/markdown/checkbox.rs::unchecked_dash_item

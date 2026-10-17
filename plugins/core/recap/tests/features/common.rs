@@ -34,7 +34,9 @@ pub fn json_blocks(page: &str) -> Vec<String> {
     let mut rest = page;
     while let Some(start) = rest.find("```json\n") {
         let after = &rest[start + "```json\n".len()..];
-        let Some(end) = after.find("\n```") else { break };
+        let Some(end) = after.find("\n```") else {
+            break;
+        };
         blocks.push(after[..end].to_string());
         rest = &after[end + 4..];
     }
@@ -47,7 +49,9 @@ pub fn term_blocks(page: &str) -> Vec<String> {
     let mut rest = page;
     while let Some(start) = rest.find("<pre class=\"term\">") {
         let after = &rest[start + "<pre class=\"term\">".len()..];
-        let Some(end) = after.find("</pre>") else { break };
+        let Some(end) = after.find("</pre>") else {
+            break;
+        };
         let mut text = String::new();
         let mut in_tag = false;
         for symbol in after[..end].chars() {
@@ -58,7 +62,10 @@ pub fn term_blocks(page: &str) -> Vec<String> {
                 _ => {}
             }
         }
-        let text = text.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">");
+        let text = text
+            .replace("&amp;", "&")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">");
         blocks.push(text.trim_end_matches('\n').to_string());
         rest = &after[end + 6..];
     }
@@ -67,20 +74,36 @@ pub fn term_blocks(page: &str) -> Vec<String> {
 
 /// The cells of the first table row of `page` that starts with `prefix`.
 pub fn table_row(page: &str, prefix: &str) -> Vec<String> {
-    let row = page.lines().find(|line| line.starts_with(prefix)).expect("table row");
-    row.trim().trim_matches('|').split('|').map(|cell| cell.trim().to_string()).collect()
+    let row = page
+        .lines()
+        .find(|line| line.starts_with(prefix))
+        .expect("table row");
+    row.trim()
+        .trim_matches('|')
+        .split('|')
+        .map(|cell| cell.trim().to_string())
+        .collect()
 }
 
 pub fn strings(value: &Value) -> Vec<String> {
-    value.as_array().expect("array").iter().map(|item| item.as_str().expect("string").to_string()).collect()
+    value
+        .as_array()
+        .expect("array")
+        .iter()
+        .map(|item| item.as_str().expect("string").to_string())
+        .collect()
 }
 
 pub fn server_host() -> FakeHost {
-    FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("server")
+    FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("server")
 }
 
 pub fn client_host() -> FakeHost {
-    FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("client")
+    FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("client")
 }
 
 pub fn activated_server() -> FakeHost {
@@ -139,7 +162,11 @@ pub fn editor_pane(name: &str) -> TreeNode {
 /// Runs `ilium <args>` (args start with the command name) and returns (stdout, stderr, exit code).
 pub fn run_cli(host: &mut FakeHost, args: &[&str]) -> (String, String, Option<u8>) {
     let invocation = host.cli().invoke(args, b"");
-    (invocation.stdout(), invocation.stderr(), invocation.exit_code())
+    (
+        invocation.stdout(),
+        invocation.stderr(),
+        invocation.exit_code(),
+    )
 }
 
 /// Every non-empty stdout line parsed as one JSON object.
@@ -163,11 +190,13 @@ pub fn summary(all: &[Value]) -> Value {
 
 /// Closes the consent gate: automatic AI is off in the kernel `inference` tab.
 pub fn close_gate(host: &mut FakeHost) {
-    host.kernel_settings().set_tab("inference", serde_json::json!({"automatic_ai": false}));
+    host.kernel_settings()
+        .set_tab("inference", serde_json::json!({"automatic_ai": false}));
 }
 
 /// Opens the consent gate: automatic AI is on and the client answers `onboarding-state` finished.
 pub fn open_gate(host: &mut FakeHost) {
-    host.kernel_settings().set_tab("inference", serde_json::json!({"automatic_ai": true}));
+    host.kernel_settings()
+        .set_tab("inference", serde_json::json!({"automatic_ai": true}));
     host.set_onboarding_finished(true);
 }

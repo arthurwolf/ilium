@@ -2,8 +2,8 @@
 
 use ilium_plugin_sdk::testing::FakeHost;
 use ilium_plugin_sdk::types::{
-    ActionKind, ActionValue, Event, NodeId, PluginSide, PointerButton, PointerKind, PointerModifiers,
-    ViewPointer, ViewTarget, ViewVisibilityEvent,
+    ActionKind, ActionValue, Event, NodeId, PluginSide, PointerButton, PointerKind,
+    PointerModifiers, ViewPointer, ViewTarget, ViewVisibilityEvent,
 };
 use proptest::prelude::*;
 
@@ -34,12 +34,18 @@ fn drag(host: &mut FakeHost, column: u16) {
 fn client_with_focus(focused: u64) -> FakeHost {
     let mut host = activated_client();
     host.deliver_one(Event::PaneFocused(Some(NodeId(focused))));
-    host.deliver_one(Event::ViewVisibility(ViewVisibilityEvent { view: panel(), visible: true }));
+    host.deliver_one(Event::ViewVisibility(ViewVisibilityEvent {
+        view: panel(),
+        visible: true,
+    }));
     host
 }
 
 fn resize_messages(host: &FakeHost) -> Vec<ilium_plugin_sdk::types::MessageSpec> {
-    messages(&host.submitted()).into_iter().filter(|spec| spec.channel == "resize").collect()
+    messages(&host.submitted())
+        .into_iter()
+        .filter(|spec| spec.channel == "resize")
+        .collect()
 }
 
 /// REQ: F-003
@@ -62,14 +68,20 @@ fn f_003_resize_payload_is_focused_id_then_columns_as_10_little_endian_bytes() {
     assert_eq!(payload.len(), 10);
     assert_eq!(&payload[..8], &3u64.to_le_bytes());
     let columns = u16::from_le_bytes([payload[8], payload[9]]);
-    assert!(columns >= 20, "columns = divider column x columns per cell, at least the divider column");
+    assert!(
+        columns >= 20,
+        "columns = divider column x columns per cell, at least the divider column"
+    );
 }
 
 /// REQ: F-003
 #[test]
 fn f_003_drag_while_the_view_is_hidden_sends_nothing() {
     let mut host = client_with_focus(3);
-    host.deliver_one(Event::ViewVisibility(ViewVisibilityEvent { view: panel(), visible: false }));
+    host.deliver_one(Event::ViewVisibility(ViewVisibilityEvent {
+        view: panel(),
+        visible: false,
+    }));
     drag(&mut host, 20);
     assert!(resize_messages(&host).is_empty());
 }
@@ -78,8 +90,14 @@ fn f_003_drag_while_the_view_is_hidden_sends_nothing() {
 #[test]
 fn f_003_drag_after_the_view_is_visible_again_sends_the_message() {
     let mut host = client_with_focus(3);
-    host.deliver_one(Event::ViewVisibility(ViewVisibilityEvent { view: panel(), visible: false }));
-    host.deliver_one(Event::ViewVisibility(ViewVisibilityEvent { view: panel(), visible: true }));
+    host.deliver_one(Event::ViewVisibility(ViewVisibilityEvent {
+        view: panel(),
+        visible: false,
+    }));
+    host.deliver_one(Event::ViewVisibility(ViewVisibilityEvent {
+        view: panel(),
+        visible: true,
+    }));
     drag(&mut host, 20);
     assert_eq!(resize_messages(&host).len(), 1);
 }
@@ -117,7 +135,8 @@ fn f_003_server_resize_accepts_the_smallest_width() {
 #[test]
 fn f_003_server_resize_accepts_the_largest_width() {
     let mut host = activated_server();
-    let resized = resizes(&host.deliver_one(message_from_client("resize", resize_payload(3, u16::MAX))));
+    let resized =
+        resizes(&host.deliver_one(message_from_client("resize", resize_payload(3, u16::MAX))));
     assert_eq!(resized[0].columns, Some(u16::MAX));
 }
 

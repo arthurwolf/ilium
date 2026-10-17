@@ -6,7 +6,7 @@
 use ilium_plugin_sdk::exports::ServiceReply;
 use ilium_plugin_sdk::testing::FakeSession;
 use ilium_plugin_sdk::types::ErrorCode;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::common::*;
 
@@ -21,7 +21,10 @@ fn reference_page() -> String {
 /// REQ: F-089, F-090
 #[test]
 fn points_090_the_page_lists_exactly_two_points() {
-    let names: Vec<String> = point_rows().into_iter().map(|row| row[0].trim_matches('`').to_string()).collect();
+    let names: Vec<String> = point_rows()
+        .into_iter()
+        .map(|row| row[0].trim_matches('`').to_string())
+        .collect();
     assert_eq!(names, ["config-importers", "onboarding-steps"]);
 }
 
@@ -29,10 +32,16 @@ fn points_090_the_page_lists_exactly_two_points() {
 #[test]
 fn points_090_config_importers_is_a_collect_point_with_entry_id_title_service() {
     let rows = point_rows();
-    let row = rows.iter().find(|row| row[0] == "`config-importers`").expect("row");
+    let row = rows
+        .iter()
+        .find(|row| row[0] == "`config-importers`")
+        .expect("row");
     assert_eq!(row[1], "collect");
     assert_eq!(row[2], "Offer to import settings from another tool.");
-    assert_eq!(row[3], "entry: id, title, service (returns key and value pairs)");
+    assert_eq!(
+        row[3],
+        "entry: id, title, service (returns key and value pairs)"
+    );
     assert_eq!(row[4], "standard");
 }
 
@@ -40,10 +49,16 @@ fn points_090_config_importers_is_a_collect_point_with_entry_id_title_service() 
 #[test]
 fn points_089_onboarding_steps_is_a_collect_point_with_entry_id_title_order() {
     let rows = point_rows();
-    let row = rows.iter().find(|row| row[0] == "`onboarding-steps`").expect("row");
+    let row = rows
+        .iter()
+        .find(|row| row[0] == "`onboarding-steps`")
+        .expect("row");
     assert_eq!(row[1], "collect");
     assert_eq!(row[2], "Add a step to the guided setup.");
-    assert_eq!(row[3], "entry: id, title, order (the plugin fills it with a view)");
+    assert_eq!(
+        row[3],
+        "entry: id, title, order (the plugin fills it with a view)"
+    );
     assert_eq!(row[4], "standard");
 }
 
@@ -59,7 +74,9 @@ fn points_090_the_reference_page_agrees_with_the_plugin_page() {
     let reference = reference_page();
     assert!(reference.contains("| `ilium.core.settings/config-importers` | collect | standard | Offer to import settings from another tool. |"));
     assert!(reference.contains("| `ilium.core.settings/onboarding-steps` | collect | standard | Add a step to the guided setup. |"));
-    assert!(reference.contains("| [Settings](/pages/core-plugin-settings/) | `ilium.core.settings` | 2 | 2 | 1 | no |"));
+    assert!(reference.contains(
+        "| [Settings](/pages/core-plugin-settings/) | `ilium.core.settings` | 2 | 2 | 1 | no |"
+    ));
 }
 
 /// REQ: F-090
@@ -73,18 +90,25 @@ fn points_090_the_plugin_is_not_replaceable() {
 #[test]
 fn points_090_the_plugin_owns_its_points_through_the_provide_grant() {
     assert!(page_text().contains("(grant `extensions.provide:ilium.core.settings/<point>`)"));
-    assert!(page_text().contains("Contributors need `extensions.contribute:ilium.core.settings/<point>`."));
+    assert!(page_text()
+        .contains("Contributors need `extensions.contribute:ilium.core.settings/<point>`."));
 }
 
 /// REQ: F-090
 #[test]
 fn points_090_the_example_import_entry_names_the_service_the_package_provides() {
-    let example = json_block_after(&page_text(), "#### Example: Adds an import for tmux key settings");
+    let example = json_block_after(
+        &page_text(),
+        "#### Example: Adds an import for tmux key settings",
+    );
     let entry = &example["contributes"]["extensions"][0];
     assert_eq!(entry["point"], "ilium.core.settings/config-importers");
     assert_eq!(entry["entry"]["service"], "example.tmux/import");
     assert_eq!(entry["priority"], 50);
-    assert_eq!(example["capabilities"]["server"], json!(["services.provide:example.tmux/import"]));
+    assert_eq!(
+        example["capabilities"]["server"],
+        json!(["services.provide:example.tmux/import"])
+    );
 }
 
 fn started_session() -> FakeSession {
@@ -105,7 +129,12 @@ fn reply_json(reply: ServiceReply) -> Value {
 fn service_090_get_reads_a_setting_by_key() {
     let mut session = started_session();
     let reply = session
-        .call_service(PLUGIN_ID, "ilium.core.settings/get", "^0.1", r#"{"key":"density"}"#)
+        .call_service(
+            PLUGIN_ID,
+            "ilium.core.settings/get",
+            "^0.1",
+            r#"{"key":"density"}"#,
+        )
         .expect("service answers");
     assert_eq!(reply_json(reply)["value"], json!("comfortable"));
 }
@@ -115,7 +144,12 @@ fn service_090_get_reads_a_setting_by_key() {
 fn service_090_get_reads_a_kernel_tab_value() {
     let mut session = started_session();
     let reply = session
-        .call_service(PLUGIN_ID, "ilium.core.settings/get", "^0.1", r#"{"key":"ui.motion_level"}"#)
+        .call_service(
+            PLUGIN_ID,
+            "ilium.core.settings/get",
+            "^0.1",
+            r#"{"key":"ui.motion_level"}"#,
+        )
         .expect("service answers");
     assert_eq!(reply_json(reply)["value"], json!("reduced"));
 }
@@ -125,10 +159,18 @@ fn service_090_get_reads_a_kernel_tab_value() {
 fn service_090_set_writes_a_setting_by_key() {
     let mut session = started_session();
     session
-        .call_service(PLUGIN_ID, "ilium.core.settings/set", "^0.1", r#"{"key":"density","value":"compact"}"#)
+        .call_service(
+            PLUGIN_ID,
+            "ilium.core.settings/set",
+            "^0.1",
+            r#"{"key":"density","value":"compact"}"#,
+        )
         .expect("service answers");
     session.pump().expect("pump");
-    assert_eq!(session.plugin(PLUGIN_ID).settings().get("density"), Some(json!("compact")));
+    assert_eq!(
+        session.plugin(PLUGIN_ID).settings().get("density"),
+        Some(json!("compact"))
+    );
 }
 
 /// REQ: F-090
@@ -136,10 +178,20 @@ fn service_090_set_writes_a_setting_by_key() {
 fn service_090_set_then_get_round_trips() {
     let mut session = started_session();
     session
-        .call_service(PLUGIN_ID, "ilium.core.settings/set", "^0.1", r##"{"key":"accent","value":"#102030"}"##)
+        .call_service(
+            PLUGIN_ID,
+            "ilium.core.settings/set",
+            "^0.1",
+            r##"{"key":"accent","value":"#102030"}"##,
+        )
         .expect("set answers");
     let reply = session
-        .call_service(PLUGIN_ID, "ilium.core.settings/get", "^0.1", r#"{"key":"accent"}"#)
+        .call_service(
+            PLUGIN_ID,
+            "ilium.core.settings/get",
+            "^0.1",
+            r#"{"key":"accent"}"#,
+        )
         .expect("get answers");
     assert_eq!(reply_json(reply)["value"], json!("#102030"));
 }
@@ -149,10 +201,18 @@ fn service_090_set_then_get_round_trips() {
 fn service_090_set_with_an_invalid_value_is_refused_with_invalid_argument() {
     let mut session = started_session();
     let error = session
-        .call_service(PLUGIN_ID, "ilium.core.settings/set", "^0.1", r#"{"key":"density","value":"spacious"}"#)
+        .call_service(
+            PLUGIN_ID,
+            "ilium.core.settings/set",
+            "^0.1",
+            r#"{"key":"density","value":"spacious"}"#,
+        )
         .expect_err("refused");
     assert_eq!(error.code, ErrorCode::InvalidArgument);
-    assert_eq!(session.plugin(PLUGIN_ID).settings().get("density"), Some(json!("comfortable")));
+    assert_eq!(
+        session.plugin(PLUGIN_ID).settings().get("density"),
+        Some(json!("comfortable"))
+    );
 }
 
 /// REQ: F-090
@@ -160,7 +220,9 @@ fn service_090_set_with_an_invalid_value_is_refused_with_invalid_argument() {
 fn service_090_a_request_that_is_not_json_is_refused_with_invalid_argument() {
     let mut session = started_session();
     for name in ["ilium.core.settings/get", "ilium.core.settings/set"] {
-        let error = session.call_service(PLUGIN_ID, name, "^0.1", "{not json").expect_err("refused");
+        let error = session
+            .call_service(PLUGIN_ID, name, "^0.1", "{not json")
+            .expect_err("refused");
         assert_eq!(error.code, ErrorCode::InvalidArgument, "{name}");
     }
 }

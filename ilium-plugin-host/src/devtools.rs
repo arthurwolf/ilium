@@ -24,7 +24,10 @@ pub struct BuildPlan {
 }
 
 /// The files a template creates.
-pub fn template_files(template: &str, plugin_id: &str) -> Result<Vec<(String, String)>, Diagnostic> {
+pub fn template_files(
+    template: &str,
+    plugin_id: &str,
+) -> Result<Vec<(String, String)>, Diagnostic> {
     unimplemented!("host::devtools::template_files")
 }
 

@@ -43,7 +43,9 @@ pub fn workspace_root() -> PathBuf {
 
 /// The text of a manual page by file stem, for example `core-plugin-sessions`.
 pub fn page(stem: &str) -> String {
-    let path = workspace_root().join("docs/plugins-manual/pages").join(format!("{stem}.md"));
+    let path = workspace_root()
+        .join("docs/plugins-manual/pages")
+        .join(format!("{stem}.md"));
     std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("page {path:?}: {error}"))
 }
 
@@ -63,7 +65,9 @@ pub fn json_blocks(page: &str) -> Vec<String> {
     let mut rest = page;
     while let Some(start) = rest.find("```json\n") {
         let after = &rest[start + "```json\n".len()..];
-        let Some(end) = after.find("\n```") else { break };
+        let Some(end) = after.find("\n```") else {
+            break;
+        };
         blocks.push(after[..end].to_string());
         rest = &after[end + 4..];
     }
@@ -73,7 +77,10 @@ pub fn json_blocks(page: &str) -> Vec<String> {
 /// The complete manifest block of the page (the one that holds the whole manifest).
 pub fn page_manifest() -> Value {
     let blocks = json_blocks(&page_text());
-    let text = blocks.iter().find(|block| block.contains("\"name\": \"Sessions\"")).expect("complete manifest block");
+    let text = blocks
+        .iter()
+        .find(|block| block.contains("\"name\": \"Sessions\""))
+        .expect("complete manifest block");
     serde_json::from_str(text).expect("page manifest is JSON")
 }
 
@@ -83,7 +90,9 @@ pub fn term_blocks(page: &str) -> Vec<String> {
     let mut rest = page;
     while let Some(start) = rest.find("<pre class=\"term\">") {
         let after = &rest[start + "<pre class=\"term\">".len()..];
-        let Some(end) = after.find("</pre>") else { break };
+        let Some(end) = after.find("</pre>") else {
+            break;
+        };
         let mut text = String::new();
         let mut in_tag = false;
         for symbol in after[..end].chars() {
@@ -94,7 +103,10 @@ pub fn term_blocks(page: &str) -> Vec<String> {
                 _ => {}
             }
         }
-        let text = text.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">");
+        let text = text
+            .replace("&amp;", "&")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">");
         blocks.push(text.trim_end_matches('\n').to_string());
         rest = &after[end + 6..];
     }
@@ -110,22 +122,36 @@ pub fn table_row(text: &str, first_cell: &str) -> Vec<String> {
             cells.len() > 2 && cells[1] == first_cell
         })
         .unwrap_or_else(|| panic!("no table row starting with {first_cell}"));
-    let mut cells: Vec<String> = line.split('|').map(|cell| cell.trim().to_string()).collect();
+    let mut cells: Vec<String> = line
+        .split('|')
+        .map(|cell| cell.trim().to_string())
+        .collect();
     cells.remove(0);
     cells.pop();
     cells
 }
 
 pub fn strings(value: &Value) -> Vec<String> {
-    value.as_array().expect("array").iter().map(|item| item.as_str().expect("string").to_string()).collect()
+    value
+        .as_array()
+        .expect("array")
+        .iter()
+        .map(|item| item.as_str().expect("string").to_string())
+        .collect()
 }
 
 pub fn server_host() -> FakeHost {
-    FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("server").build()
+    FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("server")
+        .build()
 }
 
 pub fn client_host() -> FakeHost {
-    FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("client").build()
+    FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("client")
+        .build()
 }
 
 pub fn activated_server() -> FakeHost {
@@ -184,7 +210,11 @@ pub fn pane_created(pane: u64, is_restored: bool) -> Event {
 }
 
 pub fn lifecycle_event(pane: u64, state: PaneLifecycleState) -> Event {
-    Event::PaneLifecycleChanged(PaneLifecycleEvent { pane: NodeId(pane), state, by: None })
+    Event::PaneLifecycleChanged(PaneLifecycleEvent {
+        pane: NodeId(pane),
+        state,
+        by: None,
+    })
 }
 
 pub fn attached(client: u64) -> Event {
@@ -195,7 +225,9 @@ pub fn detached(client: u64) -> Event {
     Event::ClientDetached(ClientId(client))
 }
 
-pub fn replace_commands(submissions: &[Submission]) -> Vec<(ReplacePaneCommandSpec, Option<String>)> {
+pub fn replace_commands(
+    submissions: &[Submission],
+) -> Vec<(ReplacePaneCommandSpec, Option<String>)> {
     submissions
         .iter()
         .filter_map(|submission| match &submission.intent {
@@ -229,7 +261,9 @@ pub fn terminations(submissions: &[Submission]) -> Vec<(TerminatePaneProcessSpec
     submissions
         .iter()
         .filter_map(|submission| match &submission.intent {
-            Intent::TerminatePaneProcess(spec) => Some((spec.clone(), submission.dedup_key.clone())),
+            Intent::TerminatePaneProcess(spec) => {
+                Some((spec.clone(), submission.dedup_key.clone()))
+            }
             _ => None,
         })
         .collect()
@@ -281,7 +315,12 @@ pub fn restore_panes(host: &mut FakeHost, panes: &[u64]) -> Vec<Submission> {
 // ---------------------------------------------------------------------------------------------
 
 /// Registers the signature with its resume template and gives the pane a verified session id.
-pub fn verify_agent(host: &mut FakeHost, pane: u64, signature_spec: SignatureSpec, session_id: &str) {
+pub fn verify_agent(
+    host: &mut FakeHost,
+    pane: u64,
+    signature_spec: SignatureSpec,
+    session_id: &str,
+) {
     host.agents().add_signature(signature_spec);
     host.agents().set_session(pane, session_ref(session_id));
 }

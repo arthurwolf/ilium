@@ -3,5 +3,5 @@
 
 #![allow(dead_code)]
 
-pub use ilium_plugin_api::generated::types::Constraint;
 pub use ilium_client::plugin_host::widget_rig::{install_with_widget, solve_row, WidgetRig};
+pub use ilium_plugin_api::generated::types::Constraint;

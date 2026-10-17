@@ -4,8 +4,8 @@
 use ilium_plugin_api::ErrorCode;
 use ilium_plugin_host::calls::CallClass;
 use ilium_plugin_host::limits_rules::{
-    client_request_timeout_ms, reply_deadline_ms, retry_after_ms, soft_breach_verdict, ProcessQuota,
-    ReplyKind, SoftVerdict,
+    client_request_timeout_ms, reply_deadline_ms, retry_after_ms, soft_breach_verdict,
+    ProcessQuota, ReplyKind, SoftVerdict,
 };
 use proptest::prelude::*;
 
@@ -99,7 +99,10 @@ fn hst_497_a_full_session_makes_spawn_return_quota_exceeded() {
     for _ in 0..16 {
         quota.spawn().expect("within limit");
     }
-    assert_eq!(quota.spawn().expect_err("seventeenth").code, ErrorCode::QuotaExceeded);
+    assert_eq!(
+        quota.spawn().expect_err("seventeenth").code,
+        ErrorCode::QuotaExceeded
+    );
 }
 
 /// REQ: HST-497
@@ -130,57 +133,90 @@ fn hst_497_an_exited_child_frees_a_slot() {
 /// REQ: HST-498
 #[test]
 fn hst_498_streak_two_does_not_trap() {
-    assert_eq!(soft_breach_verdict(CallClass::Annotate, 2, 10), SoftVerdict::Tolerated);
+    assert_eq!(
+        soft_breach_verdict(CallClass::Annotate, 2, 10),
+        SoftVerdict::Tolerated
+    );
 }
 
 /// REQ: HST-498
 #[test]
 fn hst_498_streak_three_traps_and_counts_as_a_failure() {
-    assert_eq!(soft_breach_verdict(CallClass::Annotate, 3, 10), SoftVerdict::TrapCounted);
+    assert_eq!(
+        soft_breach_verdict(CallClass::Annotate, 3, 10),
+        SoftVerdict::TrapCounted
+    );
 }
 
 /// REQ: HST-498
 #[test]
 fn hst_498_streak_four_traps_and_counts_as_a_failure() {
-    assert_eq!(soft_breach_verdict(CallClass::Detector, 4, 10), SoftVerdict::TrapCounted);
+    assert_eq!(
+        soft_breach_verdict(CallClass::Detector, 4, 10),
+        SoftVerdict::TrapCounted
+    );
 }
 
 /// REQ: HST-498
 #[test]
 fn hst_498_overshoot_99_ms_is_tolerated() {
-    assert_eq!(soft_breach_verdict(CallClass::Annotate, 1, 99), SoftVerdict::Tolerated);
+    assert_eq!(
+        soft_breach_verdict(CallClass::Annotate, 1, 99),
+        SoftVerdict::Tolerated
+    );
 }
 
 /// REQ: HST-498
 #[test]
 fn hst_498_overshoot_100_ms_traps() {
-    assert_eq!(soft_breach_verdict(CallClass::Annotate, 1, 100), SoftVerdict::TrapCounted);
+    assert_eq!(
+        soft_breach_verdict(CallClass::Annotate, 1, 100),
+        SoftVerdict::TrapCounted
+    );
 }
 
 /// REQ: HST-498
 #[test]
 fn hst_498_overshoot_101_ms_traps() {
-    assert_eq!(soft_breach_verdict(CallClass::Annotate, 1, 101), SoftVerdict::TrapCounted);
+    assert_eq!(
+        soft_breach_verdict(CallClass::Annotate, 1, 101),
+        SoftVerdict::TrapCounted
+    );
 }
 
 /// REQ: HST-498
 #[test]
 fn hst_498_scene_frame_streaks_29_30_31() {
-    assert_eq!(soft_breach_verdict(CallClass::Frame, 29, 10), SoftVerdict::Tolerated);
-    assert_eq!(soft_breach_verdict(CallClass::Frame, 30, 10), SoftVerdict::TrapCounted);
-    assert_eq!(soft_breach_verdict(CallClass::Frame, 31, 10), SoftVerdict::TrapCounted);
+    assert_eq!(
+        soft_breach_verdict(CallClass::Frame, 29, 10),
+        SoftVerdict::Tolerated
+    );
+    assert_eq!(
+        soft_breach_verdict(CallClass::Frame, 30, 10),
+        SoftVerdict::TrapCounted
+    );
+    assert_eq!(
+        soft_breach_verdict(CallClass::Frame, 31, 10),
+        SoftVerdict::TrapCounted
+    );
 }
 
 /// REQ: HST-498
 #[test]
 fn hst_498_a_scene_frame_streak_of_three_is_still_tolerated() {
-    assert_eq!(soft_breach_verdict(CallClass::Frame, 3, 10), SoftVerdict::Tolerated);
+    assert_eq!(
+        soft_breach_verdict(CallClass::Frame, 3, 10),
+        SoftVerdict::Tolerated
+    );
 }
 
 /// REQ: HST-498
 #[test]
 fn hst_498_a_hook_handler_breach_disables_the_handler_without_a_failure() {
-    assert_eq!(soft_breach_verdict(CallClass::Annotate, 1, 10).clone(), SoftVerdict::Tolerated);
+    assert_eq!(
+        soft_breach_verdict(CallClass::Annotate, 1, 10).clone(),
+        SoftVerdict::Tolerated
+    );
     assert_eq!(
         ilium_plugin_host::limits_rules::hook_handler_breach_verdict(3),
         SoftVerdict::DisableHandlerNoFailure
@@ -252,7 +288,11 @@ fn hst_499_a_silent_provider_returns_timed_out_after_the_deadline() {
         waiter.advance_ms(reply_deadline_ms(kind) - 1);
         assert!(waiter.result().is_none(), "{kind:?} early");
         waiter.advance_ms(1);
-        assert_eq!(waiter.result().expect("deadline reached").code, ErrorCode::TimedOut, "{kind:?}");
+        assert_eq!(
+            waiter.result().expect("deadline reached").code,
+            ErrorCode::TimedOut,
+            "{kind:?}"
+        );
     }
 }
 

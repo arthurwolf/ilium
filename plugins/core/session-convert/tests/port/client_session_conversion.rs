@@ -9,18 +9,33 @@ use crate::common::*;
 
 fn claude_dialog() -> FakeHost {
     let mut host = client_host();
-    server_says(&mut host, "begin", json!({"pane": 7, "source": "claude", "target": "codex"}));
+    server_says(
+        &mut host,
+        "begin",
+        json!({"pane": 7, "source": "claude", "target": "codex"}),
+    );
     host
 }
 
 fn rows(host: &mut FakeHost, height: u16) -> Vec<String> {
-    host.render(panel(), 48, height).text().split('\n').map(str::to_string).collect()
+    host.render(panel(), 48, height)
+        .text()
+        .split('\n')
+        .map(str::to_string)
+        .collect()
 }
 
 fn percent_shown(host: &mut FakeHost) -> u32 {
     let text = host.render(panel(), 48, 12).text();
     let at = text.find('%').expect("percent sign");
-    let digits: String = text[..at].chars().rev().take_while(char::is_ascii_digit).collect::<Vec<_>>().into_iter().rev().collect();
+    let digits: String = text[..at]
+        .chars()
+        .rev()
+        .take_while(char::is_ascii_digit)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
     digits.parse().expect("percent digits")
 }
 
@@ -36,11 +51,13 @@ fn failed_claude_to_codex() -> (FakeHost, u64) {
     start_and_stop(&mut host, pane, "codex");
     host.settle();
     let child = host.process().children()[0].id;
-    host.deliver_one(ilium_plugin_sdk::types::Event::ChildExited(ilium_plugin_sdk::types::ChildExitedEvent {
-        child: ilium_plugin_sdk::types::ChildId(child),
-        status: Some(1),
-        signal: None,
-    }));
+    host.deliver_one(ilium_plugin_sdk::types::Event::ChildExited(
+        ilium_plugin_sdk::types::ChildExitedEvent {
+            child: ilium_plugin_sdk::types::ChildId(child),
+            status: Some(1),
+            signal: None,
+        },
+    ));
     (host, pane)
 }
 
@@ -49,7 +66,11 @@ fn failed_codex_to_claude() -> (FakeHost, u64) {
     let (mut host, pane) = server_with_pane("codex", true);
     start_and_stop(&mut host, pane, "claude");
     let request = host.jobs().list().first().expect("job started").request;
-    let error = PluginError { code: ErrorCode::Io, message: "transcript unreadable".into(), retry_after_ms: None };
+    let error = PluginError {
+        code: ErrorCode::Io,
+        message: "transcript unreadable".into(),
+        retry_after_ms: None,
+    };
     host.jobs().finish(request, Err(error));
     host.settle();
     (host, pane)
@@ -84,7 +105,11 @@ fn port_session_conversion_worker_completion_is_reported_with_one_finished_or_fa
 fn port_session_conversion_step_events_populate_the_step_list_and_log() {
     let mut host = claude_dialog();
     server_says(&mut host, "step", json!({"index": 2}));
-    server_says(&mut host, "progress", json!({"percent": 10, "message": "read 12 lines"}));
+    server_says(
+        &mut host,
+        "progress",
+        json!({"percent": 10, "message": "read 12 lines"}),
+    );
     let rows = rows(&mut host, 12);
     assert!(rows[1].starts_with("│ ✓ "), "{}", rows[1]);
     assert!(rows[2].starts_with("│ ▶ "), "{}", rows[2]);
@@ -96,10 +121,22 @@ fn port_session_conversion_step_events_populate_the_step_list_and_log() {
 #[test]
 fn port_session_conversion_progress_never_moves_backwards_or_past_one() {
     let mut host = claude_dialog();
-    server_says(&mut host, "progress", json!({"percent": 60, "message": "a"}));
-    server_says(&mut host, "progress", json!({"percent": 20, "message": "b"}));
+    server_says(
+        &mut host,
+        "progress",
+        json!({"percent": 60, "message": "a"}),
+    );
+    server_says(
+        &mut host,
+        "progress",
+        json!({"percent": 20, "message": "b"}),
+    );
     assert_eq!(percent_shown(&mut host), 60);
-    server_says(&mut host, "progress", json!({"percent": 300, "message": "c"}));
+    server_says(
+        &mut host,
+        "progress",
+        json!({"percent": 300, "message": "c"}),
+    );
     assert_eq!(percent_shown(&mut host), 100);
 }
 
@@ -107,12 +144,19 @@ fn port_session_conversion_progress_never_moves_backwards_or_past_one() {
 #[test]
 fn port_session_conversion_failure_is_terminal_and_shown_with_its_message() {
     let mut host = claude_dialog();
-    server_says(&mut host, "failed", json!({"message": "codex is not installed", "carried": 0, "left_out": 0, "can_resume": false}));
+    server_says(
+        &mut host,
+        "failed",
+        json!({"message": "codex is not installed", "carried": 0, "left_out": 0, "can_resume": false}),
+    );
     let screen = host.render(panel(), 48, 10).text();
     assert!(screen.contains("✕ Conversion failed"), "{screen}");
     assert!(screen.contains("codex is not installed"), "{screen}");
     server_says(&mut host, "step", json!({"index": 3}));
-    assert!(host.render(panel(), 48, 10).text().contains("✕ Conversion failed"));
+    assert!(host
+        .render(panel(), 48, 10)
+        .text()
+        .contains("✕ Conversion failed"));
 }
 
 /// REQ: PORT:ilium-client/src/session_conversion.rs::log_is_bounded
@@ -120,7 +164,11 @@ fn port_session_conversion_failure_is_terminal_and_shown_with_its_message() {
 fn port_session_conversion_log_stays_bounded_and_shows_the_last_line() {
     let mut host = claude_dialog();
     for index in 0..550 {
-        server_says(&mut host, "progress", json!({"percent": 1, "message": format!("line {index}")}));
+        server_says(
+            &mut host,
+            "progress",
+            json!({"percent": 1, "message": format!("line {index}")}),
+        );
     }
     let rows = rows(&mut host, 12);
     assert!(rows.len() <= 12, "{}", rows.len());
@@ -133,7 +181,18 @@ fn port_session_conversion_log_stays_bounded_and_shows_the_last_line() {
 fn port_session_conversion_resume_command_of_a_codex_pane_is_codex_resume() {
     let (mut host, pane) = failed_codex_to_claude();
     let submissions = host.deliver_one(client_message("resume", pane));
-    assert_eq!(replaced(&submissions), [(pane, vec!["codex".to_string(), "resume".to_string(), SOURCE_SESSION.to_string()], true)]);
+    assert_eq!(
+        replaced(&submissions),
+        [(
+            pane,
+            vec![
+                "codex".to_string(),
+                "resume".to_string(),
+                SOURCE_SESSION.to_string()
+            ],
+            true
+        )]
+    );
 }
 
 /// REQ: PORT:ilium-client/src/session_conversion.rs::resume_command_uses_the_provider_grammar
@@ -141,7 +200,18 @@ fn port_session_conversion_resume_command_of_a_codex_pane_is_codex_resume() {
 fn port_session_conversion_resume_command_of_a_claude_pane_is_claude_dash_dash_resume() {
     let (mut host, pane) = failed_claude_to_codex();
     let submissions = host.deliver_one(client_message("resume", pane));
-    assert_eq!(replaced(&submissions), [(pane, vec!["claude".to_string(), "--resume".to_string(), SOURCE_SESSION.to_string()], true)]);
+    assert_eq!(
+        replaced(&submissions),
+        [(
+            pane,
+            vec![
+                "claude".to_string(),
+                "--resume".to_string(),
+                SOURCE_SESSION.to_string()
+            ],
+            true
+        )]
+    );
 }
 
 /// REQ: PORT:ilium-client/src/session_conversion.rs::only_the_opposite_builtin_provider_is_offered
@@ -151,8 +221,20 @@ fn port_session_conversion_only_the_opposite_builtin_provider_is_offered() {
     let claude = pane_with_session(&mut host, "claude");
     let codex = pane_with_session(&mut host, "codex");
     let antigravity = pane_with_session(&mut host, "antigravity");
-    assert_eq!(menu(&mut host, Some(claude)).iter().map(|e| e.id.clone()).collect::<Vec<_>>(), ["to-codex"]);
-    assert_eq!(menu(&mut host, Some(codex)).iter().map(|e| e.id.clone()).collect::<Vec<_>>(), ["to-claude"]);
+    assert_eq!(
+        menu(&mut host, Some(claude))
+            .iter()
+            .map(|e| e.id.clone())
+            .collect::<Vec<_>>(),
+        ["to-codex"]
+    );
+    assert_eq!(
+        menu(&mut host, Some(codex))
+            .iter()
+            .map(|e| e.id.clone())
+            .collect::<Vec<_>>(),
+        ["to-claude"]
+    );
     assert!(menu(&mut host, Some(antigravity)).is_empty());
 }
 
@@ -163,7 +245,10 @@ fn port_session_conversion_a_pane_without_a_resolved_session_is_not_convertible(
     let pane = add_agent_pane(&mut host, "claude", "claude");
     let entries = menu(&mut host, Some(pane));
     assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].disabled_reason.as_deref(), Some("no verified session"));
+    assert_eq!(
+        entries[0].disabled_reason.as_deref(),
+        Some("no verified session")
+    );
     assert!(host.deliver_one(convert_click("to-codex", pane)).is_empty());
 }
 
@@ -174,7 +259,10 @@ fn port_session_conversion_no_second_conversion_is_offered_while_one_is_active()
     let pane = pane_with_session(&mut host, "claude");
     host.deliver_one(convert_click("to-codex", pane));
     let entries = menu(&mut host, Some(pane));
-    assert_eq!(entries[0].disabled_reason.as_deref(), Some("another conversion runs"));
+    assert_eq!(
+        entries[0].disabled_reason.as_deref(),
+        Some("another conversion runs")
+    );
     assert!(host.deliver_one(convert_click("to-codex", pane)).is_empty());
 }
 
@@ -183,7 +271,10 @@ fn port_session_conversion_no_second_conversion_is_offered_while_one_is_active()
 fn port_session_conversion_a_stopped_agent_starts_the_worker() {
     let (mut host, pane) = server_with_pane("codex", true);
     let submissions = host.deliver_one(start_message(pane, "claude"));
-    assert!(host.jobs().list().is_empty(), "no worker before the agent stopped");
+    assert!(
+        host.jobs().list().is_empty(),
+        "no worker before the agent stopped"
+    );
     answer_terminate(&mut host, &submissions, Outcome::Ok);
     let jobs = host.jobs().list();
     assert_eq!(jobs.len(), 1);
@@ -195,10 +286,17 @@ fn port_session_conversion_a_stopped_agent_starts_the_worker() {
 fn port_session_conversion_a_failed_stop_starts_no_worker_and_offers_no_resume() {
     let (mut host, pane) = server_with_pane("codex", true);
     let submissions = host.deliver_one(start_message(pane, "claude"));
-    let error = PluginError { code: ErrorCode::Busy, message: "still running".into(), retry_after_ms: None };
+    let error = PluginError {
+        code: ErrorCode::Busy,
+        message: "still running".into(),
+        retry_after_ms: None,
+    };
     let reply = answer_terminate(&mut host, &submissions, Outcome::Failed(error));
     assert!(host.jobs().list().is_empty());
-    assert_eq!(failed_payload(&reply).expect("failed message")["can_resume"], false);
+    assert_eq!(
+        failed_payload(&reply).expect("failed message")["can_resume"],
+        false
+    );
 }
 
 /// REQ: PORT:ilium-client/src/session_conversion.rs::success_replaces_the_pane_with_the_converted_session_and_closes_the_dialog
@@ -226,24 +324,52 @@ fn port_session_conversion_success_closes_the_dialog() {
 fn port_session_conversion_failure_after_the_stop_offers_resuming_the_original_session() {
     let (mut host, pane) = failed_codex_to_claude();
     let submissions = host.submitted();
-    assert_eq!(failed_payload(&submissions).expect("failed message")["can_resume"], true);
+    assert_eq!(
+        failed_payload(&submissions).expect("failed message")["can_resume"],
+        true
+    );
     let _ = pane;
     let mut client = claude_dialog();
-    server_says(&mut client, "failed", json!({"message": "transcript unreadable", "carried": 0, "left_out": 0, "can_resume": true}));
+    server_says(
+        &mut client,
+        "failed",
+        json!({"message": "transcript unreadable", "carried": 0, "left_out": 0, "can_resume": true}),
+    );
     let sent = messages(&press(&mut client, "Enter"));
     assert_eq!(sent.len(), 1, "{sent:?}");
-    assert_eq!((sent[0].0, sent[0].1.as_str()), (PluginSide::Server, "resume"));
-    assert_eq!(serde_json::from_str::<Value>(&sent[0].2).unwrap(), json!({"pane": 7}));
+    assert_eq!(
+        (sent[0].0, sent[0].1.as_str()),
+        (PluginSide::Server, "resume")
+    );
+    assert_eq!(
+        serde_json::from_str::<Value>(&sent[0].2).unwrap(),
+        json!({"pane": 7})
+    );
 }
 
 /// REQ: PORT:ilium-client/src/session_conversion.rs::escape_closes_a_failed_dialog_and_unfreezes_the_pane
 #[test]
 fn port_session_conversion_escape_closes_a_failed_dialog_and_unfreezes_the_pane() {
     let mut client = claude_dialog();
-    server_says(&mut client, "failed", json!({"message": "nope", "carried": 0, "left_out": 0, "can_resume": false}));
-    assert!(messages(&press(&mut client, "Enter")).iter().all(|m| m.1 != "resume"), "Enter must not resume a live agent");
+    server_says(
+        &mut client,
+        "failed",
+        json!({"message": "nope", "carried": 0, "left_out": 0, "can_resume": false}),
+    );
+    assert!(
+        messages(&press(&mut client, "Enter"))
+            .iter()
+            .all(|m| m.1 != "resume"),
+        "Enter must not resume a live agent"
+    );
     let submissions = press(&mut client, "Esc");
-    assert_eq!(messages(&submissions).iter().filter(|m| m.1 == "close").count(), 1);
+    assert_eq!(
+        messages(&submissions)
+            .iter()
+            .filter(|m| m.1 == "close")
+            .count(),
+        1
+    );
     assert!(intents(&submissions).contains(&Intent::CloseView(panel())));
 
     let (mut server, pane) = server_with_pane("claude", true);
@@ -259,8 +385,13 @@ fn port_session_conversion_escape_while_converting_requests_cancellation() {
     let submissions = press(&mut client, "Esc");
     let sent = messages(&submissions);
     assert_eq!(sent.len(), 1, "{sent:?}");
-    assert_eq!((sent[0].0, sent[0].1.as_str()), (PluginSide::Server, "cancel"));
-    assert!(!intents(&submissions).iter().any(|intent| matches!(intent, Intent::CloseView(_))));
+    assert_eq!(
+        (sent[0].0, sent[0].1.as_str()),
+        (PluginSide::Server, "cancel")
+    );
+    assert!(!intents(&submissions)
+        .iter()
+        .any(|intent| matches!(intent, Intent::CloseView(_))));
 
     let (mut server, pane) = server_with_pane("codex", true);
     start_and_stop(&mut server, pane, "claude");

@@ -113,7 +113,12 @@ fn lif_283_an_update_signed_by_another_trusted_key_of_the_publisher_leaves_disab
     rig.trust_publisher("key-b");
     let _server = rig.start_server("s1");
     rig.revoke_key("key-a", "compromised");
-    let output = update(&rig, &pkg(NOTES, "1.1.0").signed("key-b").same_publisher_as("key-a"));
+    let output = update(
+        &rig,
+        &pkg(NOTES, "1.1.0")
+            .signed("key-b")
+            .same_publisher_as("key-a"),
+    );
     assert_eq!(output.exit_code, 0);
     assert_eq!(registry_entry(&rig, NOTES)["state"], "installed-enabled");
 }
@@ -148,7 +153,9 @@ fn consumer_waiting_rig(wait_ms: u32) -> (OpsRig, ServerHandle) {
     install_ok(&rig, &pkg(NOTES, "1.0.0").provides_service("svc.notes"));
     install_ok(
         &rig,
-        &pkg(OTHER, "1.0.0").requires_service("svc.notes").wait_ms(wait_ms),
+        &pkg(OTHER, "1.0.0")
+            .requires_service("svc.notes")
+            .wait_ms(wait_ms),
     );
     rig.cli(&["disable", NOTES]);
     let server = rig.start_server("s1");
@@ -161,7 +168,10 @@ fn consumer_waiting_rig(wait_ms: u32) -> (OpsRig, ServerHandle) {
 fn lif_284_consumer_with_a_disabled_provider_waits_without_counting_a_failure() {
     let (rig, server) = consumer_waiting_rig(5_000);
     rig.advance(secs(1));
-    assert_eq!(server.state_of(OTHER, Side::Server), InstanceState::WaitingDependency);
+    assert_eq!(
+        server.state_of(OTHER, Side::Server),
+        InstanceState::WaitingDependency
+    );
     assert_eq!(server.failure_count(OTHER, Side::Server), 0);
 }
 
@@ -173,7 +183,10 @@ fn lif_284_enabling_the_provider_moves_the_consumer_to_activating() {
     rig.cli(&["enable", NOTES]);
     rig.advance(ms(500));
     let state = server.state_of(OTHER, Side::Server);
-    assert!(matches!(state, InstanceState::Activating | InstanceState::Active), "{state:?}");
+    assert!(
+        matches!(state, InstanceState::Activating | InstanceState::Active),
+        "{state:?}"
+    );
 }
 
 /// REQ: LIF-284
@@ -181,8 +194,14 @@ fn lif_284_enabling_the_provider_moves_the_consumer_to_activating() {
 fn lif_284_provider_that_stays_off_longer_than_wait_ms_leaves_the_consumer_inactive() {
     let (rig, server) = consumer_waiting_rig(2_000);
     rig.advance(secs(3));
-    assert_eq!(server.state_of(OTHER, Side::Server), InstanceState::Inactive);
-    assert_eq!(server.inactive_reason(OTHER).as_deref(), Some("dependency.unresolved"));
+    assert_eq!(
+        server.state_of(OTHER, Side::Server),
+        InstanceState::Inactive
+    );
+    assert_eq!(
+        server.inactive_reason(OTHER).as_deref(),
+        Some("dependency.unresolved")
+    );
     assert_eq!(server.failure_count(OTHER, Side::Server), 0);
 }
 
@@ -191,7 +210,10 @@ fn lif_284_provider_that_stays_off_longer_than_wait_ms_leaves_the_consumer_inact
 fn lif_284_the_wait_is_not_over_just_before_wait_ms() {
     let (rig, server) = consumer_waiting_rig(2_000);
     rig.advance(ms(1_900));
-    assert_eq!(server.state_of(OTHER, Side::Server), InstanceState::WaitingDependency);
+    assert_eq!(
+        server.state_of(OTHER, Side::Server),
+        InstanceState::WaitingDependency
+    );
 }
 
 /// REQ: LIF-284
@@ -202,7 +224,10 @@ fn lif_284_retries_run_after_1_5_and_30_seconds_then_every_60_seconds() {
     let retries = server.dependency_retry_times(OTHER);
     let seconds: Vec<u64> = retries.iter().map(|t| t.as_secs()).collect();
     assert!(seconds.starts_with(&[1, 6, 36]), "{seconds:?}");
-    assert!(seconds[3..].windows(2).all(|pair| pair[1] - pair[0] == 60), "{seconds:?}");
+    assert!(
+        seconds[3..].windows(2).all(|pair| pair[1] - pair[0] == 60),
+        "{seconds:?}"
+    );
 }
 
 /// REQ: LIF-284

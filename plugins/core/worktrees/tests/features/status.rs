@@ -13,7 +13,11 @@ const TREE_PANEL: &str = "worktrees";
 
 fn branch_rows(host: &mut FakeHost, columns: u16) -> Vec<String> {
     let screen = host.render(ViewTarget::Panel(TREE_PANEL.to_string()), columns, 12);
-    (0..screen.rows).map(|row| screen.row(row)).filter(|row| row.contains('🌿')).map(|row| row.trim_end().to_string()).collect()
+    (0..screen.rows)
+        .map(|row| screen.row(row))
+        .filter(|row| row.contains('🌿'))
+        .map(|row| row.trim_end().to_string())
+        .collect()
 }
 
 fn publish(host: &mut FakeHost, path: &str, state: &str) {
@@ -39,11 +43,22 @@ fn feature_069_the_state_is_joined_to_the_label_by_dotted_leaders_with_a_blank_o
     publish(&mut host, "/work/ilium.worktrees/fix-auth", "clean");
     for columns in [40u16, 48, 80, 120] {
         let row = branch_rows(&mut host, columns).remove(0);
-        let first = row.find('…').unwrap_or_else(|| panic!("no leader at {columns}: {row}"));
+        let first = row
+            .find('…')
+            .unwrap_or_else(|| panic!("no leader at {columns}: {row}"));
         let last = row.rfind('…').expect("last leader");
-        assert!(row[first..=last + '…'.len_utf8() - 1].chars().all(|character| character == '…'), "{row}");
+        assert!(
+            row[first..=last + '…'.len_utf8() - 1]
+                .chars()
+                .all(|character| character == '…'),
+            "{row}"
+        );
         assert_eq!(row[..first].chars().last(), Some(' '), "{row}");
-        assert_eq!(row[last + '…'.len_utf8()..].chars().next(), Some(' '), "{row}");
+        assert_eq!(
+            row[last + '…'.len_utf8()..].chars().next(),
+            Some(' '),
+            "{row}"
+        );
     }
 }
 
@@ -146,7 +161,11 @@ fn feature_069_a_malformed_topic_payload_makes_no_row_and_no_failure() {
 #[test]
 fn port_069_a_long_branch_is_elided_in_the_middle_keeping_prefix_and_suffix_within_the_width() {
     let mut host = client_host();
-    publish(&mut host, "/work/ilium.worktrees/agent-fix-very-long-recognizable-suffix", "clean");
+    publish(
+        &mut host,
+        "/work/ilium.worktrees/agent-fix-very-long-recognizable-suffix",
+        "clean",
+    );
     host.deliver_one(Event::TopicPublished(TopicPublishedEvent {
         topic: TOPIC_CHANGED.to_string(),
         from: PluginId(PLUGIN_ID.to_string()),
@@ -179,7 +198,11 @@ fn port_069_the_live_checkout_branch_wins_over_the_recorded_one_and_detached_hea
     };
     assert!(send(&mut host, json!({"branch": "agent/switched"})).contains("agent/switched"));
     assert!(send(&mut host, json!({"branch": null, "detached": true})).contains("detached HEAD"));
-    assert!(send(&mut host, json!({"branch": null, "detached": true, "missing": true})).contains("agent/original"));
+    assert!(send(
+        &mut host,
+        json!({"branch": null, "detached": true, "missing": true})
+    )
+    .contains("agent/original"));
 }
 
 /// REQ: F-069
@@ -192,10 +215,17 @@ fn feature_069_the_server_probes_each_worktree_every_ten_seconds() {
     let before = host.process().calls().len();
     host.advance_clock(9_999);
     host.settle();
-    assert_eq!(host.process().calls().len(), before, "no probe before ten seconds");
+    assert_eq!(
+        host.process().calls().len(),
+        before,
+        "no probe before ten seconds"
+    );
     host.advance_clock(1);
     host.settle();
-    assert!(host.process().calls().len() > before, "a probe at ten seconds");
+    assert!(
+        host.process().calls().len() > before,
+        "a probe at ten seconds"
+    );
 }
 
 /// REQ: F-069
@@ -235,7 +265,11 @@ fn feature_069_a_probe_publishes_the_changed_topic_with_the_state_of_the_worktre
     host.advance_clock(10_000);
     host.settle();
     let published = host.published(TOPIC_CHANGED);
-    assert_eq!(published.len(), before + 1, "one probe round publishes the topic exactly once for the one worktree");
+    assert_eq!(
+        published.len(),
+        before + 1,
+        "one probe round publishes the topic exactly once for the one worktree"
+    );
     let last: Value = serde_json::from_str(published.last().expect("a publication")).expect("JSON");
     assert!(last["path"].as_str().expect("path").ends_with("fix-auth"));
     assert!(last["state"].is_string());
@@ -258,7 +292,11 @@ proptest! {
 
 fn screen_text(host: &mut FakeHost, columns: u16) -> String {
     let screen = host.render(ViewTarget::Panel(TREE_PANEL.to_string()), columns, 8);
-    (0..screen.rows).map(|row| screen.row(row).trim_end().to_string()).collect::<Vec<_>>().join("\n") + "\n"
+    (0..screen.rows)
+        .map(|row| screen.row(row).trim_end().to_string())
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n"
 }
 
 fn two_worktrees(host: &mut FakeHost) {
@@ -271,7 +309,10 @@ fn two_worktrees(host: &mut FakeHost) {
 fn feature_069_golden_tree_at_48_columns_matches_the_page_figure() {
     let mut host = client_host();
     two_worktrees(&mut host);
-    ilium_plugin_sdk::testing::assert_golden(&golden_path("page_figure_0_48.txt"), &screen_text(&mut host, 48));
+    ilium_plugin_sdk::testing::assert_golden(
+        &golden_path("page_figure_0_48.txt"),
+        &screen_text(&mut host, 48),
+    );
 }
 
 /// REQ: F-069
@@ -280,7 +321,10 @@ fn feature_069_golden_tree_at_40_80_and_120_columns() {
     for columns in [40u16, 80, 120] {
         let mut host = client_host();
         two_worktrees(&mut host);
-        ilium_plugin_sdk::testing::assert_golden(&golden_path(&format!("tree_{columns}.txt")), &screen_text(&mut host, columns));
+        ilium_plugin_sdk::testing::assert_golden(
+            &golden_path(&format!("tree_{columns}.txt")),
+            &screen_text(&mut host, columns),
+        );
     }
 }
 
@@ -289,7 +333,11 @@ fn feature_069_golden_tree_at_40_80_and_120_columns() {
 fn feature_072_golden_git_tab_at_48_columns_matches_the_page_figure() {
     let mut host = client_host();
     let screen = host.render(ViewTarget::SettingsPage("git".to_string()), 48, 8);
-    let text = (0..screen.rows).map(|row| screen.row(row).trim_end().to_string()).collect::<Vec<_>>().join("\n") + "\n";
+    let text = (0..screen.rows)
+        .map(|row| screen.row(row).trim_end().to_string())
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
     ilium_plugin_sdk::testing::assert_golden(&golden_path("page_figure_1_48.txt"), &text);
 }
 
@@ -299,7 +347,14 @@ fn feature_072_golden_git_tab_at_40_80_and_120_columns() {
     for columns in [40u16, 80, 120] {
         let mut host = client_host();
         let screen = host.render(ViewTarget::SettingsPage("git".to_string()), columns, 8);
-        let text = (0..screen.rows).map(|row| screen.row(row).trim_end().to_string()).collect::<Vec<_>>().join("\n") + "\n";
-        ilium_plugin_sdk::testing::assert_golden(&golden_path(&format!("git_{columns}.txt")), &text);
+        let text = (0..screen.rows)
+            .map(|row| screen.row(row).trim_end().to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+        ilium_plugin_sdk::testing::assert_golden(
+            &golden_path(&format!("git_{columns}.txt")),
+            &text,
+        );
     }
 }

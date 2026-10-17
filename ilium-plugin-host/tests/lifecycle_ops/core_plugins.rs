@@ -30,7 +30,13 @@ fn lif_276_a_non_essential_plugin_has_a_switch() {
     let rig = rig();
     install_ok(&rig, &pkg(NOTES, "1.0.0"));
     let server = rig.start_server("s1");
-    assert!(server.render_plugins_screen().row_for(NOTES).expect("row").has_switch);
+    assert!(
+        server
+            .render_plugins_screen()
+            .row_for(NOTES)
+            .expect("row")
+            .has_switch
+    );
 }
 
 /// REQ: LIF-276

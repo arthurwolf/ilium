@@ -5,10 +5,10 @@ use std::path::PathBuf;
 use ilium_plugin_core_text_triggers::{TextTriggersClient, TextTriggersServer};
 use ilium_plugin_sdk::testing::{FakeHost, TreeNode};
 use ilium_plugin_sdk::types::{
-    AgentActivity, AgentView, Delivery, DroppedCount, Event, Intent, NodeClass, NodeId, OutputMatchedEvent,
-    SendInputSpec, Submission,
+    AgentActivity, AgentView, Delivery, DroppedCount, Event, Intent, NodeClass, NodeId,
+    OutputMatchedEvent, SendInputSpec, Submission,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 pub const PLUGIN_ID: &str = "ilium.core.text-triggers";
 /// The filter rate the page sample uses (`rate_per_second: 2`).
@@ -28,7 +28,9 @@ pub fn workspace_root() -> PathBuf {
 
 /// A page of the manual by file name.
 pub fn manual_page(name: &str) -> String {
-    let path = workspace_root().join("docs/plugins-manual/pages").join(name);
+    let path = workspace_root()
+        .join("docs/plugins-manual/pages")
+        .join(name);
     std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("page {path:?}: {error}"))
 }
 
@@ -39,14 +41,20 @@ pub fn page_text() -> String {
 
 /// A server-side host with the manifest grants and the plugin activated.
 pub fn server_host() -> FakeHost {
-    let mut host = FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("server").build();
+    let mut host = FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("server")
+        .build();
     host.activate::<TextTriggersServer>();
     host
 }
 
 /// A client-side host with the manifest grants and the plugin activated.
 pub fn client_host() -> FakeHost {
-    let mut host = FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("client").build();
+    let mut host = FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("client")
+        .build();
     host.activate::<TextTriggersClient>();
     host
 }
@@ -70,8 +78,12 @@ pub fn add_agent_pane(host: &mut FakeHost, name: &str) -> u64 {
 
 /// Writes the pattern and reply lists (page sample keys `patterns` and `replies`).
 pub fn set_rules(host: &mut FakeHost, patterns: &[&str], replies: &[&str]) {
-    host.settings().set("patterns", json!(patterns)).expect("patterns accepted");
-    host.settings().set("replies", json!(replies)).expect("replies accepted");
+    host.settings()
+        .set("patterns", json!(patterns))
+        .expect("patterns accepted");
+    host.settings()
+        .set("replies", json!(replies))
+        .expect("replies accepted");
     host.settle();
 }
 
@@ -82,7 +94,12 @@ pub fn rule_id(index: usize) -> String {
 
 /// An `output-matched` event as the host filter raises it.
 pub fn matched(node: u64, filter_id: &str, line: &str, row: u32) -> Event {
-    Event::OutputMatched(OutputMatchedEvent { node: NodeId(node), filter_id: filter_id.to_string(), line: line.to_string(), row })
+    Event::OutputMatched(OutputMatchedEvent {
+        node: NodeId(node),
+        filter_id: filter_id.to_string(),
+        line: line.to_string(),
+        row,
+    })
 }
 
 /// An `events-dropped` event with one `output-matched` record.
@@ -134,7 +151,9 @@ pub fn manifest() -> Value {
 
 /// The first json code block after `heading`.
 pub fn json_block_after(page: &str, heading: &str) -> Value {
-    let start = page.find(heading).unwrap_or_else(|| panic!("heading {heading} missing"));
+    let start = page
+        .find(heading)
+        .unwrap_or_else(|| panic!("heading {heading} missing"));
     let rest = &page[start..];
     let open = rest.find("```json\n").expect("json block") + "```json\n".len();
     let close = rest[open..].find("```").expect("block end");
@@ -143,12 +162,19 @@ pub fn json_block_after(page: &str, heading: &str) -> Value {
 
 /// Rows of the first table that follows `anchor`: cells of every row after the separator.
 pub fn table_after(page: &str, anchor: &str) -> Vec<Vec<String>> {
-    let start = page.find(anchor).unwrap_or_else(|| panic!("anchor {anchor} missing"));
+    let start = page
+        .find(anchor)
+        .unwrap_or_else(|| panic!("anchor {anchor} missing"));
     page[start..]
         .lines()
         .skip_while(|line| !line.starts_with('|'))
         .skip(2)
         .take_while(|line| line.starts_with('|'))
-        .map(|line| line.trim_matches('|').split('|').map(|cell| cell.trim().to_string()).collect())
+        .map(|line| {
+            line.trim_matches('|')
+                .split('|')
+                .map(|cell| cell.trim().to_string())
+                .collect()
+        })
         .collect()
 }

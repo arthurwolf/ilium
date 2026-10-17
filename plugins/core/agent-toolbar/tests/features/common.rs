@@ -5,9 +5,9 @@ use std::path::PathBuf;
 use ilium_plugin_core_agent_toolbar::{AgentToolbarClient, AgentToolbarServer};
 use ilium_plugin_sdk::testing::{FakeHost, TreeNode};
 use ilium_plugin_sdk::types::{
-    AgentActivity, AgentActivityEvent, AgentModel, AgentModelEvent, AgentView, CommandContext, CommandInvokedEvent,
-    CommandOrigin, EpochMs, Event, Intent, MessageEvent, NodeClass, NodeId, PluginId, PluginSide, RichSpan, RichText,
-    SpanTarget, Style, Submission, UserLineEvent,
+    AgentActivity, AgentActivityEvent, AgentModel, AgentModelEvent, AgentView, CommandContext,
+    CommandInvokedEvent, CommandOrigin, EpochMs, Event, Intent, MessageEvent, NodeClass, NodeId,
+    PluginId, PluginSide, RichSpan, RichText, SpanTarget, Style, Submission, UserLineEvent,
 };
 
 pub const PLUGIN_ID: &str = "ilium.core.agent-toolbar";
@@ -49,7 +49,11 @@ pub fn term_blocks(page: &str) -> Vec<String> {
                 _ => {}
             }
         }
-        blocks.push(text.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&"));
+        blocks.push(
+            text.replace("&lt;", "<")
+                .replace("&gt;", ">")
+                .replace("&amp;", "&"),
+        );
         rest = &body[end..];
     }
     blocks
@@ -57,33 +61,54 @@ pub fn term_blocks(page: &str) -> Vec<String> {
 
 /// A server-side host with the manifest grants and the plugin activated.
 pub fn server_host() -> FakeHost {
-    let mut host = FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("server").build();
+    let mut host = FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("server")
+        .build();
     host.activate::<AgentToolbarServer>();
     host
 }
 
 /// A client-side host with the manifest grants and the plugin activated.
 pub fn client_host() -> FakeHost {
-    let mut host = FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("client").build();
+    let mut host = FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("client")
+        .build();
     host.activate::<AgentToolbarClient>();
     host
 }
 
 /// Adds an agent pane with the given signature and activity to the fake tree.
-pub fn add_agent_pane(host: &mut FakeHost, name: &str, signature: &str, activity: AgentActivity) -> u64 {
+pub fn add_agent_pane(
+    host: &mut FakeHost,
+    name: &str,
+    signature: &str,
+    activity: AgentActivity,
+) -> u64 {
     host.tree().add(TreeNode {
         id: 0,
         parent: None,
         name: name.to_string(),
         class: NodeClass::Pane,
         content_kind: Some("ilium.terminal".to_string()),
-        agent: Some(AgentView { signature: signature.to_string(), activity, objective: None, goal: None }),
+        agent: Some(AgentView {
+            signature: signature.to_string(),
+            activity,
+            objective: None,
+            goal: None,
+        }),
     })
 }
 
 /// Rich text of one plain span, as the banner and recover slots carry it.
 pub fn plain(text: &str) -> RichText {
-    vec![RichSpan { text: text.to_string(), style: Style::default(), target: SpanTarget::None, tooltip: None }]
+    vec![RichSpan {
+        text: text.to_string(),
+        style: Style::default(),
+        target: SpanTarget::None,
+        tooltip: None,
+    }]
 }
 
 /// Concatenated text of a rich text.
@@ -93,12 +118,21 @@ pub fn rich_to_string(content: &RichText) -> String {
 
 /// A `user-line-submitted` event.
 pub fn user_line(pane: u64, text: &str) -> Event {
-    Event::UserLineSubmitted(UserLineEvent { pane: NodeId(pane), text: text.to_string(), at: EpochMs(CLOCK_START_MS) })
+    Event::UserLineSubmitted(UserLineEvent {
+        pane: NodeId(pane),
+        text: text.to_string(),
+        at: EpochMs(CLOCK_START_MS),
+    })
 }
 
 /// An `agent-activity-changed` event.
 pub fn activity(node: u64, previous: AgentActivity, current: AgentActivity) -> Event {
-    Event::AgentActivityChanged(AgentActivityEvent { node: NodeId(node), previous, current, revision: 1 })
+    Event::AgentActivityChanged(AgentActivityEvent {
+        node: NodeId(node),
+        previous,
+        current,
+        revision: 1,
+    })
 }
 
 /// An `agent-model-changed` event.
@@ -144,7 +178,10 @@ pub fn message_from(side: PluginSide, channel: &str, payload: &[u8]) -> Event {
 
 /// The intents of a submission list, in order.
 pub fn intents(submissions: &[Submission]) -> Vec<Intent> {
-    submissions.iter().map(|submission| submission.intent.clone()).collect()
+    submissions
+        .iter()
+        .map(|submission| submission.intent.clone())
+        .collect()
 }
 
 /// `(pane, slot, text)` of every `set-frame-slot` intent, in order.
@@ -152,7 +189,11 @@ pub fn set_slots(submissions: &[Submission]) -> Vec<(u64, String, String)> {
     submissions
         .iter()
         .filter_map(|submission| match &submission.intent {
-            Intent::SetFrameSlot(spec) => Some((spec.pane.0, spec.slot.clone(), rich_to_string(&spec.content))),
+            Intent::SetFrameSlot(spec) => Some((
+                spec.pane.0,
+                spec.slot.clone(),
+                rich_to_string(&spec.content),
+            )),
             _ => None,
         })
         .collect()
@@ -185,9 +226,12 @@ pub fn messages(submissions: &[Submission]) -> Vec<(String, PluginSide, String, 
     submissions
         .iter()
         .filter_map(|submission| match &submission.intent {
-            Intent::Message(spec) => {
-                Some((spec.to.plugin.0.clone(), spec.to.side, spec.channel.clone(), spec.payload.clone()))
-            }
+            Intent::Message(spec) => Some((
+                spec.to.plugin.0.clone(),
+                spec.to.side,
+                spec.channel.clone(),
+                spec.payload.clone(),
+            )),
             _ => None,
         })
         .collect()

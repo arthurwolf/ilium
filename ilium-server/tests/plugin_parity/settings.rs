@@ -9,7 +9,10 @@ use crate::common::*;
 #[test]
 fn f_007_default_prefix_is_ctrl_b() {
     in_both_modes(|kernel| {
-        assert_eq!(kernel.setting("keyboard", "shortcut_base").as_deref(), Some("ctrl+b"));
+        assert_eq!(
+            kernel.setting("keyboard", "shortcut_base").as_deref(),
+            Some("ctrl+b")
+        );
     });
 }
 
@@ -17,8 +20,14 @@ fn f_007_default_prefix_is_ctrl_b() {
 #[test]
 fn f_007_default_prefix_then_d_detaches_and_prefix_then_ampersand_kills_the_session() {
     in_both_modes(|kernel| {
-        assert_eq!(kernel.resolve_key(&["ctrl+b", "d"]).as_deref(), Some("detach_client"));
-        assert_eq!(kernel.resolve_key(&["ctrl+b", "&"]).as_deref(), Some("kill_session"));
+        assert_eq!(
+            kernel.resolve_key(&["ctrl+b", "d"]).as_deref(),
+            Some("detach_client")
+        );
+        assert_eq!(
+            kernel.resolve_key(&["ctrl+b", "&"]).as_deref(),
+            Some("kill_session")
+        );
     });
 }
 
@@ -26,7 +35,10 @@ fn f_007_default_prefix_then_d_detaches_and_prefix_then_ampersand_kills_the_sess
 #[test]
 fn f_007_prefix_then_quote_opens_a_new_split_view() {
     in_both_modes(|kernel| {
-        assert_eq!(kernel.resolve_key(&["ctrl+b", "\""]).as_deref(), Some("new_split_view"));
+        assert_eq!(
+            kernel.resolve_key(&["ctrl+b", "\""]).as_deref(),
+            Some("new_split_view")
+        );
     });
 }
 
@@ -36,8 +48,16 @@ fn f_007_documented_remap_example_moves_the_prefix_and_new_terminal() {
     let config = "[keyboard]\nshortcut_base = \"ctrl+a\"\n\n[keybindings]\nnew_terminal = \"c\"\ncycle_next_in_group = \"down\"\n";
     for mode in MODES {
         let kernel = world_with_config(mode, config);
-        assert_eq!(kernel.resolve_key(&["ctrl+a", "c"]).as_deref(), Some("new_terminal"), "{mode:?}");
-        assert_eq!(kernel.resolve_key(&["ctrl+a", "down"]).as_deref(), Some("cycle_next_in_group"), "{mode:?}");
+        assert_eq!(
+            kernel.resolve_key(&["ctrl+a", "c"]).as_deref(),
+            Some("new_terminal"),
+            "{mode:?}"
+        );
+        assert_eq!(
+            kernel.resolve_key(&["ctrl+a", "down"]).as_deref(),
+            Some("cycle_next_in_group"),
+            "{mode:?}"
+        );
     }
 }
 
@@ -65,8 +85,13 @@ fn f_007_an_action_name_that_does_not_exist_cannot_be_defined_by_remapping() {
 #[test]
 fn f_007_a_prefix_that_is_not_a_ctrl_letter_is_rejected() {
     in_both_modes(|kernel| {
-        assert!(kernel.apply_setting("keyboard", "shortcut_base", "alt+b").is_err());
-        assert_eq!(kernel.setting("keyboard", "shortcut_base").as_deref(), Some("ctrl+b"));
+        assert!(kernel
+            .apply_setting("keyboard", "shortcut_base", "alt+b")
+            .is_err());
+        assert_eq!(
+            kernel.setting("keyboard", "shortcut_base").as_deref(),
+            Some("ctrl+b")
+        );
     });
 }
 
@@ -74,7 +99,10 @@ fn f_007_a_prefix_that_is_not_a_ctrl_letter_is_rejected() {
 #[test]
 fn f_086_file_logging_is_off_by_default_and_writes_nothing() {
     in_both_modes(|kernel| {
-        assert_eq!(kernel.setting("debug", "file_logging_enabled").as_deref(), Some("false"));
+        assert_eq!(
+            kernel.setting("debug", "file_logging_enabled").as_deref(),
+            Some("false")
+        );
         project(kernel, "api");
         kernel.settle();
         assert!(kernel.debug_log_files().is_empty());
@@ -85,7 +113,9 @@ fn f_086_file_logging_is_off_by_default_and_writes_nothing() {
 #[test]
 fn f_086_enabling_file_logging_creates_a_log_under_the_debug_log_root() {
     in_both_modes(|kernel| {
-        kernel.apply_setting("debug", "file_logging_enabled", "true").expect("enable");
+        kernel
+            .apply_setting("debug", "file_logging_enabled", "true")
+            .expect("enable");
         project(kernel, "api");
         kernel.settle();
         let files = kernel.debug_log_files();
@@ -98,7 +128,9 @@ fn f_086_enabling_file_logging_creates_a_log_under_the_debug_log_root() {
 #[test]
 fn f_086_the_five_newest_logs_per_session_are_kept() {
     in_both_modes(|kernel| {
-        kernel.apply_setting("debug", "file_logging_enabled", "true").expect("enable");
+        kernel
+            .apply_setting("debug", "file_logging_enabled", "true")
+            .expect("enable");
         for _ in 0..7 {
             kernel.restart_logging_session();
         }
@@ -112,7 +144,11 @@ fn f_086_log_root_follows_the_environment_override() {
     for mode in MODES {
         let kernel = world_with_config(mode, "");
         kernel.set_environment("ILIUM_DEBUG_LOG_DIR", Some("logs-here"));
-        assert!(kernel.debug_log_root().ends_with("logs-here"), "{:?}", kernel.debug_log_root());
+        assert!(
+            kernel.debug_log_root().ends_with("logs-here"),
+            "{:?}",
+            kernel.debug_log_root()
+        );
     }
 }
 
@@ -120,10 +156,15 @@ fn f_086_log_root_follows_the_environment_override() {
 #[test]
 fn f_091_a_changed_setting_is_written_to_config_toml() {
     in_both_modes(|kernel| {
-        kernel.apply_setting("terminal", "scrollback_budget_mib", "16").expect("apply");
+        kernel
+            .apply_setting("terminal", "scrollback_budget_mib", "16")
+            .expect("apply");
         let text = kernel.config_text();
         let table: toml::Table = text.parse().expect("valid TOML");
-        assert_eq!(table["terminal"]["scrollback_budget_mib"].as_integer(), Some(16));
+        assert_eq!(
+            table["terminal"]["scrollback_budget_mib"].as_integer(),
+            Some(16)
+        );
     });
 }
 
@@ -132,8 +173,13 @@ fn f_091_a_changed_setting_is_written_to_config_toml() {
 fn f_091_keys_of_the_file_that_ilium_does_not_know_are_preserved() {
     for mode in MODES {
         let kernel = world_with_config(mode, "[custom]\nsomething = \"kept\"\n");
-        kernel.apply_setting("terminal", "scrollback_budget_mib", "16").expect("apply");
-        assert!(kernel.config_text().contains("something = \"kept\""), "{mode:?}");
+        kernel
+            .apply_setting("terminal", "scrollback_budget_mib", "16")
+            .expect("apply");
+        assert!(
+            kernel.config_text().contains("something = \"kept\""),
+            "{mode:?}"
+        );
     }
 }
 
@@ -143,7 +189,12 @@ fn f_091_a_setting_changed_on_disk_reaches_the_live_server() {
     in_both_modes(|kernel| {
         kernel.write_config_file("[terminal]\nscrollback_budget_mib = 32\n");
         kernel.reload_config();
-        assert_eq!(kernel.setting("terminal", "scrollback_budget_mib").as_deref(), Some("32"));
+        assert_eq!(
+            kernel
+                .setting("terminal", "scrollback_budget_mib")
+                .as_deref(),
+            Some("32")
+        );
     });
 }
 
@@ -151,10 +202,17 @@ fn f_091_a_setting_changed_on_disk_reaches_the_live_server() {
 #[test]
 fn f_091_a_broken_config_file_keeps_the_previous_values_live() {
     in_both_modes(|kernel| {
-        kernel.apply_setting("terminal", "scrollback_budget_mib", "16").expect("apply");
+        kernel
+            .apply_setting("terminal", "scrollback_budget_mib", "16")
+            .expect("apply");
         kernel.write_config_file("[terminal\nscrollback_budget_mib = ");
         kernel.reload_config();
-        assert_eq!(kernel.setting("terminal", "scrollback_budget_mib").as_deref(), Some("16"));
+        assert_eq!(
+            kernel
+                .setting("terminal", "scrollback_budget_mib")
+                .as_deref(),
+            Some("16")
+        );
     });
 }
 
@@ -164,7 +222,11 @@ fn f_091_config_dir_override_is_made_absolute() {
     for mode in MODES {
         let kernel = world_with_config(mode, "");
         kernel.set_environment("ILIUM_CONFIG_DIR", Some("relative/dir"));
-        assert!(kernel.config_dir().is_absolute(), "{:?}", kernel.config_dir());
+        assert!(
+            kernel.config_dir().is_absolute(),
+            "{:?}",
+            kernel.config_dir()
+        );
         assert!(kernel.config_dir().ends_with("relative/dir"));
     }
 }
@@ -173,10 +235,22 @@ fn f_091_config_dir_override_is_made_absolute() {
 #[test]
 fn f_092_defaults_are_dark_theme_reduced_motion_standard_density_stable_glyphs_off() {
     in_both_modes(|kernel| {
-        assert_eq!(kernel.setting("ui", "motion_level").as_deref(), Some("reduced"));
-        assert_eq!(kernel.setting("ui", "sidebar_density").as_deref(), Some("standard"));
-        assert_eq!(kernel.setting("ui", "use_stable_glyphs").as_deref(), Some("false"));
-        assert_eq!(kernel.setting("ui", "color_scheme").as_deref(), Some("dark"));
+        assert_eq!(
+            kernel.setting("ui", "motion_level").as_deref(),
+            Some("reduced")
+        );
+        assert_eq!(
+            kernel.setting("ui", "sidebar_density").as_deref(),
+            Some("standard")
+        );
+        assert_eq!(
+            kernel.setting("ui", "use_stable_glyphs").as_deref(),
+            Some("false")
+        );
+        assert_eq!(
+            kernel.setting("ui", "color_scheme").as_deref(),
+            Some("dark")
+        );
     });
 }
 
@@ -185,9 +259,15 @@ fn f_092_defaults_are_dark_theme_reduced_motion_standard_density_stable_glyphs_o
 fn f_092_motion_level_accepts_full_reduced_off_and_nothing_else() {
     in_both_modes(|kernel| {
         for value in ["full", "reduced", "off"] {
-            assert_eq!(kernel.apply_setting("ui", "motion_level", value), Ok(()), "{value}");
+            assert_eq!(
+                kernel.apply_setting("ui", "motion_level", value),
+                Ok(()),
+                "{value}"
+            );
         }
-        assert!(kernel.apply_setting("ui", "motion_level", "ludicrous").is_err());
+        assert!(kernel
+            .apply_setting("ui", "motion_level", "ludicrous")
+            .is_err());
     });
 }
 
@@ -196,9 +276,15 @@ fn f_092_motion_level_accepts_full_reduced_off_and_nothing_else() {
 fn f_092_sidebar_density_accepts_compact_standard_comfortable_and_nothing_else() {
     in_both_modes(|kernel| {
         for value in ["compact", "standard", "comfortable"] {
-            assert_eq!(kernel.apply_setting("ui", "sidebar_density", value), Ok(()), "{value}");
+            assert_eq!(
+                kernel.apply_setting("ui", "sidebar_density", value),
+                Ok(()),
+                "{value}"
+            );
         }
-        assert!(kernel.apply_setting("ui", "sidebar_density", "cramped").is_err());
+        assert!(kernel
+            .apply_setting("ui", "sidebar_density", "cramped")
+            .is_err());
     });
 }
 
@@ -206,8 +292,17 @@ fn f_092_sidebar_density_accepts_compact_standard_comfortable_and_nothing_else()
 #[test]
 fn f_092_theme_table_takes_four_hex_colour_overrides() {
     in_both_modes(|kernel| {
-        for key in ["accent_bg", "accent_fg", "border_focused", "border_unfocused"] {
-            assert_eq!(kernel.apply_setting("theme", key, "#1f6feb"), Ok(()), "{key}");
+        for key in [
+            "accent_bg",
+            "accent_fg",
+            "border_focused",
+            "border_unfocused",
+        ] {
+            assert_eq!(
+                kernel.apply_setting("theme", key, "#1f6feb"),
+                Ok(()),
+                "{key}"
+            );
         }
     });
 }
@@ -217,7 +312,9 @@ fn f_092_theme_table_takes_four_hex_colour_overrides() {
 fn f_092_a_theme_override_that_is_not_hex_is_rejected() {
     in_both_modes(|kernel| {
         assert!(kernel.apply_setting("theme", "accent_bg", "blue").is_err());
-        assert!(kernel.apply_setting("theme", "accent_bg", "#12345").is_err());
+        assert!(kernel
+            .apply_setting("theme", "accent_bg", "#12345")
+            .is_err());
     });
 }
 
@@ -227,6 +324,10 @@ fn f_092_stable_glyphs_stay_off_unless_the_user_turns_them_on() {
     for mode in [StartMode::Normal, StartMode::NoPlugins] {
         let kernel = world_with_config(mode, "");
         kernel.reload_config();
-        assert_eq!(kernel.setting("ui", "use_stable_glyphs").as_deref(), Some("false"), "{mode:?}");
+        assert_eq!(
+            kernel.setting("ui", "use_stable_glyphs").as_deref(),
+            Some("false"),
+            "{mode:?}"
+        );
     }
 }

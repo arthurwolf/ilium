@@ -2,7 +2,9 @@
 //! `ask-for-update` popup and channel and through `POST /create_agent`.
 
 use ilium_plugin_sdk::testing::FakeHost;
-use ilium_plugin_sdk::types::{ActionKind, ActionValue, AgentActivity, Delivery, Event, Intent, NodeId};
+use ilium_plugin_sdk::types::{
+    ActionKind, ActionValue, AgentActivity, Delivery, Event, Intent, NodeId,
+};
 use serde_json::json;
 
 use crate::common::*;
@@ -11,12 +13,14 @@ const FIXED_PROMPT: &str = "please remind me, in a very compact way, what you we
 
 fn open_dialog() -> FakeHost {
     let mut host = client_host();
-    host.deliver_one(Event::CommandInvoked(ilium_plugin_sdk::types::CommandInvokedEvent {
-        command: "ask-for-update".to_string(),
-        arguments_json: "{}".to_string(),
-        origin: ilium_plugin_sdk::types::CommandOrigin::Palette,
-        context: ilium_plugin_sdk::types::CommandContext::default(),
-    }));
+    host.deliver_one(Event::CommandInvoked(
+        ilium_plugin_sdk::types::CommandInvokedEvent {
+            command: "ask-for-update".to_string(),
+            arguments_json: "{}".to_string(),
+            origin: ilium_plugin_sdk::types::CommandOrigin::Palette,
+            context: ilium_plugin_sdk::types::CommandContext::default(),
+        },
+    ));
     host.settle();
     host
 }
@@ -24,13 +28,27 @@ fn open_dialog() -> FakeHost {
 fn messages(host: &FakeHost) -> Vec<(String, Vec<u8>)> {
     host.submitted()
         .into_iter()
-        .filter_map(|s| if let Intent::Message(m) = s.intent { Some((m.channel, m.payload)) } else { None })
+        .filter_map(|s| {
+            if let Intent::Message(m) = s.intent {
+                Some((m.channel, m.payload))
+            } else {
+                None
+            }
+        })
         .collect()
 }
 
 fn type_and_send(host: &mut FakeHost, text: &str) {
-    host.deliver_one(dialog_action("update-text", ActionKind::Changed, Some(ActionValue::Text(text.to_string()))));
-    host.deliver_one(dialog_action("update-send", ActionKind::Activated, Some(ActionValue::None)));
+    host.deliver_one(dialog_action(
+        "update-text",
+        ActionKind::Changed,
+        Some(ActionValue::Text(text.to_string())),
+    ));
+    host.deliver_one(dialog_action(
+        "update-send",
+        ActionKind::Activated,
+        Some(ActionValue::None),
+    ));
     host.settle();
 }
 
@@ -55,7 +73,13 @@ fn app_agent_message_dialog_rejects_blank_input_without_requests() {
 fn app_agent_message_dialog_sends_the_typed_message_unchanged() {
     let mut host = open_dialog();
     type_and_send(&mut host, "  keep my spacing\nand lines ");
-    assert_eq!(messages(&host), [("ask-for-update".to_string(), b"  keep my spacing\nand lines ".to_vec())]);
+    assert_eq!(
+        messages(&host),
+        [(
+            "ask-for-update".to_string(),
+            b"  keep my spacing\nand lines ".to_vec()
+        )]
+    );
 }
 
 /// REQ: PORT:ilium-client/src/app.rs::agent_message_dialog_leaves_multiline_paste_mode_to_the_server
@@ -63,7 +87,11 @@ fn app_agent_message_dialog_sends_the_typed_message_unchanged() {
 fn app_agent_message_dialog_leaves_multiline_paste_mode_to_the_server() {
     let mut host = open_dialog();
     type_and_send(&mut host, "one\ntwo");
-    assert_eq!(messages(&host)[0].1, b"one\ntwo".to_vec(), "the dialog sends the text literally");
+    assert_eq!(
+        messages(&host)[0].1,
+        b"one\ntwo".to_vec(),
+        "the dialog sends the text literally"
+    );
     let (mut server, ..) = agents();
     server.deliver_one(message("ask-for-update", b"one\ntwo".to_vec()));
     server.settle();
@@ -81,7 +109,9 @@ fn app_ask_for_update_sends_the_fixed_prompt_to_idle_and_done_agents_and_never_a
     let sent = sent_panes(&host);
     assert!(sent.contains(&NodeId(idle)) && sent.contains(&NodeId(done)));
     assert!(!sent.contains(&NodeId(shell)));
-    assert!(sent_inputs(&host).iter().all(|spec| spec.text == FIXED_PROMPT));
+    assert!(sent_inputs(&host)
+        .iter()
+        .all(|spec| spec.text == FIXED_PROMPT));
 }
 
 /// REQ: PORT:ilium-client/src/app.rs::create_agent_dialog_queues_selected_command_prompt_and_submission
@@ -89,7 +119,12 @@ fn app_ask_for_update_sends_the_fixed_prompt_to_idle_and_done_agents_and_never_a
 fn app_create_agent_queues_the_selected_command_and_prompt_as_one_creation() {
     let mut host = server_host();
     let body = json!({"agent_type": "codex", "project": "/home/me/dev/app", "prompt": "/goal custom task"});
-    host.deliver_one(http_call(1, "POST", "/create_agent", body.to_string().as_bytes()));
+    host.deliver_one(http_call(
+        1,
+        "POST",
+        "/create_agent",
+        body.to_string().as_bytes(),
+    ));
     host.settle();
     let specs = created_panes(&host);
     assert_eq!(specs.len(), 1);
@@ -102,7 +137,12 @@ fn app_create_agent_queues_the_selected_command_and_prompt_as_one_creation() {
 fn app_create_agent_with_a_blank_prompt_creates_nothing() {
     let mut host = server_host();
     let body = json!({"agent_type": "codex", "project": "/home/me/dev/app", "prompt": " \t"});
-    host.deliver_one(http_call(1, "POST", "/create_agent", body.to_string().as_bytes()));
+    host.deliver_one(http_call(
+        1,
+        "POST",
+        "/create_agent",
+        body.to_string().as_bytes(),
+    ));
     host.settle();
     assert!(created_panes(&host).is_empty());
 }
@@ -112,18 +152,27 @@ fn app_create_agent_with_a_blank_prompt_creates_nothing() {
 fn app_create_agent_a_refused_creation_can_be_retried_and_is_accepted_once() {
     use ilium_plugin_sdk::types::{ErrorCode, Outcome, PluginError};
     let mut host = server_host();
-    let body = json!({"agent_type": "codex", "project": "/home/me/dev/app", "prompt": "exact task"}).to_string();
+    let body =
+        json!({"agent_type": "codex", "project": "/home/me/dev/app", "prompt": "exact task"})
+            .to_string();
     host.deliver_one(http_call(1, "POST", "/create_agent", body.as_bytes()));
     host.settle();
     for request in host.pending_requests() {
         host.complete(
             request,
-            Outcome::Failed(PluginError { code: ErrorCode::Io, message: "refused".to_string(), retry_after_ms: None }),
+            Outcome::Failed(PluginError {
+                code: ErrorCode::Io,
+                message: "refused".to_string(),
+                retry_after_ms: None,
+            }),
         );
     }
     host.settle();
     host.deliver_one(http_call(2, "POST", "/create_agent", body.as_bytes()));
     host.settle();
     let specs = created_panes(&host);
-    assert_eq!(specs.last().and_then(|s| s.initial_input.as_deref()), Some("exact task"));
+    assert_eq!(
+        specs.last().and_then(|s| s.initial_input.as_deref()),
+        Some("exact task")
+    );
 }

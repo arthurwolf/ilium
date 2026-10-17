@@ -11,7 +11,12 @@ use crate::common::*;
 fn initial_input_for(prompt: &str) -> Option<String> {
     let mut host: FakeHost = server_host();
     let body = json!({"agent_type": "claude", "project": "/home/me/dev/app", "prompt": prompt});
-    host.deliver_one(http_call(1, "POST", "/create_agent", body.to_string().as_bytes()));
+    host.deliver_one(http_call(
+        1,
+        "POST",
+        "/create_agent",
+        body.to_string().as_bytes(),
+    ));
     host.settle();
     let specs = created_panes(&host);
     assert_eq!(specs.len(), 1, "one create-pane expected for {prompt:?}");
@@ -21,11 +26,17 @@ fn initial_input_for(prompt: &str) -> Option<String> {
 /// REQ: PORT:ilium-server/src/initial_prompt.rs::single_line_initial_prompt_is_written_verbatim
 #[test]
 fn initial_prompt_single_line_initial_prompt_is_written_verbatim() {
-    assert_eq!(initial_input_for("/goal fix it").as_deref(), Some("/goal fix it"));
+    assert_eq!(
+        initial_input_for("/goal fix it").as_deref(),
+        Some("/goal fix it")
+    );
 }
 
 /// REQ: PORT:ilium-server/src/initial_prompt.rs::multiline_initial_prompt_is_one_bracketed_paste_body
 #[test]
 fn initial_prompt_multiline_initial_prompt_is_one_bracketed_paste_body() {
-    assert_eq!(initial_input_for("line one\nline two").as_deref(), Some("line one\nline two"));
+    assert_eq!(
+        initial_input_for("line one\nline two").as_deref(),
+        Some("line one\nline two")
+    );
 }

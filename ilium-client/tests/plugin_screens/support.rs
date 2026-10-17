@@ -9,18 +9,28 @@ use std::path::{Path, PathBuf};
 
 /// The workspace root.
 pub fn workspace_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).parent().expect("workspace root").to_path_buf()
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("workspace root")
+        .to_path_buf()
 }
 
 /// The text of one manual page, without the `.md` suffix in `name`.
 pub fn manual_page(name: &str) -> String {
-    let path = workspace_root().join("docs/plugins-manual/pages").join(format!("{name}.md"));
-    std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
+    let path = workspace_root()
+        .join("docs/plugins-manual/pages")
+        .join(format!("{name}.md"));
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
 }
 
 /// The screen text with trailing blanks trimmed from every row.
 pub fn trimmed(screen: &str) -> String {
-    screen.lines().map(str::trim_end).collect::<Vec<_>>().join("\n")
+    screen
+        .lines()
+        .map(str::trim_end)
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// True when some row of `screen` contains `needle` after the box-drawing frame is stripped.
@@ -38,5 +48,13 @@ pub fn row_with(screen: &str, needle: &str) -> String {
 }
 
 /// The eight row words of the table in core-plugin-settings.md, in table order.
-pub const ROW_WORDS: [&str; 8] =
-    ["On", "On, slow", "Restarting", "Failed", "Off", "Waiting for", "Blocked by policy", "Refused:"];
+pub const ROW_WORDS: [&str; 8] = [
+    "On",
+    "On, slow",
+    "Restarting",
+    "Failed",
+    "Off",
+    "Waiting for",
+    "Blocked by policy",
+    "Refused:",
+];

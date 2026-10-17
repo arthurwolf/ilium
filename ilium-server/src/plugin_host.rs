@@ -33,7 +33,11 @@ impl ServerKernel {
     }
 
     /// Like `for_parity_world`, owning the named session (parity-and-coverage.md COR-010).
-    pub fn for_parity_world_named(mode: StartMode, config_toml: &str, session: &str) -> ServerKernel {
+    pub fn for_parity_world_named(
+        mode: StartMode,
+        config_toml: &str,
+        session: &str,
+    ) -> ServerKernel {
         unimplemented!("server::plugin_host::ServerKernel::for_parity_world_named")
     }
 
@@ -403,7 +407,10 @@ impl ServerKernel {
     // ---- Pane lifecycle observers (api-pane-lifecycle.md) ----------------------------------
 
     /// The lifecycle states a pane passed through, in order.
-    pub fn lifecycle_events(&self, pane: NodeId) -> Vec<ilium_plugin_api::generated::types::PaneLifecycleState> {
+    pub fn lifecycle_events(
+        &self,
+        pane: NodeId,
+    ) -> Vec<ilium_plugin_api::generated::types::PaneLifecycleState> {
         unimplemented!("server::plugin_host::ServerKernel::lifecycle_events")
     }
 
@@ -453,7 +460,10 @@ impl ServerKernel {
     }
 
     /// The restructure token of a restructure outcome (api-pane-lifecycle.md PAN-023).
-    pub fn last_restructure_token(&self, outcome: &ilium_plugin_api::generated::types::Outcome) -> u64 {
+    pub fn last_restructure_token(
+        &self,
+        outcome: &ilium_plugin_api::generated::types::Outcome,
+    ) -> u64 {
         unimplemented!("server::plugin_host::ServerKernel::last_restructure_token")
     }
 
@@ -513,7 +523,9 @@ impl ServerKernel {
 
     /// Runs one detection tick with the named fixture detector plugin.
     pub fn run_detection_tick_with_fixture_detector(&self, fixture: &str) {
-        unimplemented!("server::plugin_host::ServerKernel::run_detection_tick_with_fixture_detector")
+        unimplemented!(
+            "server::plugin_host::ServerKernel::run_detection_tick_with_fixture_detector"
+        )
     }
 
     /// The thread names the detector calls ran on.

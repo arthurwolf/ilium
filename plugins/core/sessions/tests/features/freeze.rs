@@ -7,7 +7,9 @@ use crate::common::*;
 
 fn three_restored() -> (ilium_plugin_sdk::testing::FakeHost, Vec<u64>) {
     let mut host = activated_server();
-    let panes: Vec<u64> = (0..3).map(|index| add_shell(&mut host, &format!("shell-{index}"))).collect();
+    let panes: Vec<u64> = (0..3)
+        .map(|index| add_shell(&mut host, &format!("shell-{index}")))
+        .collect();
     (host, panes)
 }
 
@@ -36,8 +38,15 @@ fn freeze_076_a_pane_created_live_is_not_frozen() {
 #[test]
 fn freeze_076_only_restored_panes_of_a_mixed_batch_are_frozen() {
     let (mut host, panes) = three_restored();
-    let submitted = host.deliver(vec![pane_created(panes[0], true), pane_created(panes[1], false), pane_created(panes[2], true)]);
-    let frozen: Vec<NodeId> = freezes(&submitted).into_iter().map(|(spec, _)| spec.pane).collect();
+    let submitted = host.deliver(vec![
+        pane_created(panes[0], true),
+        pane_created(panes[1], false),
+        pane_created(panes[2], true),
+    ]);
+    let frozen: Vec<NodeId> = freezes(&submitted)
+        .into_iter()
+        .map(|(spec, _)| spec.pane)
+        .collect();
     assert_eq!(frozen, [NodeId(panes[0]), NodeId(panes[2])]);
 }
 
@@ -91,7 +100,10 @@ fn freeze_076_the_last_running_pane_thaws_every_restored_pane_with_keys() {
 fn freeze_076_all_running_in_one_batch_thaws_once() {
     let (mut host, panes) = three_restored();
     restore_panes(&mut host, &panes);
-    let events = panes.iter().map(|pane| lifecycle_event(*pane, PaneLifecycleState::Running)).collect();
+    let events = panes
+        .iter()
+        .map(|pane| lifecycle_event(*pane, PaneLifecycleState::Running))
+        .collect();
     let submitted = host.deliver(events);
     assert_eq!(unfreezes(&submitted).len(), 3);
 }
@@ -101,7 +113,10 @@ fn freeze_076_all_running_in_one_batch_thaws_once() {
 fn freeze_076_frozen_state_reports_do_not_count_as_running() {
     let (mut host, panes) = three_restored();
     restore_panes(&mut host, &panes);
-    let mut events: Vec<_> = panes[..2].iter().map(|pane| lifecycle_event(*pane, PaneLifecycleState::Running)).collect();
+    let mut events: Vec<_> = panes[..2]
+        .iter()
+        .map(|pane| lifecycle_event(*pane, PaneLifecycleState::Running))
+        .collect();
     events.push(lifecycle_event(panes[2], PaneLifecycleState::Frozen));
     assert!(unfreezes(&host.deliver(events)).is_empty());
 }
@@ -111,7 +126,10 @@ fn freeze_076_frozen_state_reports_do_not_count_as_running() {
 fn freeze_076_restarting_state_reports_do_not_count_as_running() {
     let (mut host, panes) = three_restored();
     restore_panes(&mut host, &panes);
-    let mut events: Vec<_> = panes[..2].iter().map(|pane| lifecycle_event(*pane, PaneLifecycleState::Running)).collect();
+    let mut events: Vec<_> = panes[..2]
+        .iter()
+        .map(|pane| lifecycle_event(*pane, PaneLifecycleState::Running))
+        .collect();
     events.push(lifecycle_event(panes[2], PaneLifecycleState::Restarting));
     assert!(unfreezes(&host.deliver(events)).is_empty());
 }
@@ -131,7 +149,10 @@ fn freeze_076_the_same_pane_running_twice_does_not_complete_the_wait() {
 fn freeze_076_running_events_after_the_thaw_submit_nothing_more() {
     let (mut host, panes) = three_restored();
     restore_panes(&mut host, &panes);
-    let events = panes.iter().map(|pane| lifecycle_event(*pane, PaneLifecycleState::Running)).collect();
+    let events = panes
+        .iter()
+        .map(|pane| lifecycle_event(*pane, PaneLifecycleState::Running))
+        .collect();
     host.deliver(events);
     let submitted = host.deliver(vec![lifecycle_event(panes[0], PaneLifecycleState::Running)]);
     assert!(unfreezes(&submitted).is_empty());

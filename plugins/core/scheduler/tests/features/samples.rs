@@ -1,7 +1,8 @@
 //! The four page samples as behaviour: durable timer, queue, multi-stage input, retry after an uncertain delivery.
 
 use ilium_plugin_sdk::types::{
-    Delivery, DeactivationReason, DurableTimerEvent, Event, InputStage, InputUncertainEvent, NodeId, SendInputSpec, TimerId,
+    DeactivationReason, Delivery, DurableTimerEvent, Event, InputStage, InputUncertainEvent,
+    NodeId, SendInputSpec, TimerId,
 };
 
 use crate::common::*;
@@ -31,7 +32,11 @@ fn sample_055_a_second_fire_of_the_same_timer_sends_nothing() {
     let pane = terminal_pane(&mut session, "claude-api");
     schedule(&mut session, pane, 0, 0, 10, "x", true).expect("schedule");
     let event = || {
-        Event::DurableTimerFired(DurableTimerEvent { timer: TimerId(1), name: format!("send:{}", pane.0), late_by_millis: 0 })
+        Event::DurableTimerFired(DurableTimerEvent {
+            timer: TimerId(1),
+            name: format!("send:{}", pane.0),
+            late_by_millis: 0,
+        })
     };
     assert_eq!(sends(&server(&mut session).deliver_one(event())).len(), 1);
     assert!(sends(&server(&mut session).deliver_one(event())).is_empty());
@@ -62,13 +67,36 @@ fn sample_055_multi_stage_input_needs_the_raw_input_and_input_lock_grants() {
 #[test]
 fn sample_055_the_slash_command_stages_fit_the_send_input_limits() {
     let stages = [
-        InputStage { text: "/model".into(), delay_ms: 0, delivery: Delivery::Typed },
-        InputStage { text: "opus".into(), delay_ms: 150, delivery: Delivery::Typed },
-        InputStage { text: String::new(), delay_ms: 120, delivery: Delivery::Submitted },
+        InputStage {
+            text: "/model".into(),
+            delay_ms: 0,
+            delivery: Delivery::Typed,
+        },
+        InputStage {
+            text: "opus".into(),
+            delay_ms: 150,
+            delivery: Delivery::Typed,
+        },
+        InputStage {
+            text: String::new(),
+            delay_ms: 120,
+            delivery: Delivery::Submitted,
+        },
     ];
     assert!(stages.len() <= 16, "at most 16 stages");
-    assert!(stages.iter().map(|stage| u64::from(stage.delay_ms)).sum::<u64>() <= 10_000, "total delay at most 10 s");
-    let spec = SendInputSpec { stages: stages.to_vec(), lock_user_input: true, ..plain_spec(NodeId(1), "", Delivery::Typed) };
+    assert!(
+        stages
+            .iter()
+            .map(|stage| u64::from(stage.delay_ms))
+            .sum::<u64>()
+            <= 10_000,
+        "total delay at most 10 s"
+    );
+    let spec = SendInputSpec {
+        stages: stages.to_vec(),
+        lock_user_input: true,
+        ..plain_spec(NodeId(1), "", Delivery::Typed)
+    };
     assert!(spec.lock_user_input);
 }
 
@@ -100,7 +128,11 @@ fn sample_retry_a_delivery_whose_journal_entry_exists_is_not_retried() {
         dedup_key: format!("send:{}", pane.0),
     }));
     server(&mut session).advance_clock(10_000);
-    assert_eq!(sends(&server(&mut session).submitted()).len(), before, "the entry is in the journal: no retry");
+    assert_eq!(
+        sends(&server(&mut session).submitted()).len(),
+        before,
+        "the entry is in the journal: no retry"
+    );
 }
 
 /// REQ: F-055, F-057
@@ -117,11 +149,18 @@ fn sample_retry_a_missing_journal_entry_is_retried_once_after_2_seconds_with_the
         dedup_key: format!("send:{}", pane.0),
     }));
     server(&mut session).advance_clock(1_999);
-    assert_eq!(sends(&server(&mut session).submitted()).len(), first.len(), "back-off not over");
+    assert_eq!(
+        sends(&server(&mut session).submitted()).len(),
+        first.len(),
+        "back-off not over"
+    );
     server(&mut session).advance_clock(1);
     let all = sends(&server(&mut session).submitted());
     assert_eq!(all.len(), first.len() + 1, "exactly one retry");
-    assert_eq!(all.last().map(|entry| entry.1.clone()), Some(Some(format!("send:{}", pane.0))));
+    assert_eq!(
+        all.last().map(|entry| entry.1.clone()),
+        Some(Some(format!("send:{}", pane.0)))
+    );
 }
 
 /// REQ: F-055, F-057

@@ -27,23 +27,38 @@ impl DevBackend for FakeDevBackend {
         self.outcomes.lock().expect("lock").remove(0)
     }
     fn deactivate(&self, reason: &str) {
-        self.steps.lock().expect("lock").push(format!("deactivate:{reason}"));
+        self.steps
+            .lock()
+            .expect("lock")
+            .push(format!("deactivate:{reason}"));
     }
     fn load(&self, version: &str) {
-        self.steps.lock().expect("lock").push(format!("load:{version}"));
+        self.steps
+            .lock()
+            .expect("lock")
+            .push(format!("load:{version}"));
     }
     fn activate(&self) {
         self.steps.lock().expect("lock").push("activate".to_owned());
     }
 }
 
-fn dev_loop(release_installed: bool, outcomes: Vec<RebuildOutcome>) -> (DevLoop, Arc<FakeDevBackend>) {
-    let backend = Arc::new(FakeDevBackend { release_installed, outcomes: Mutex::new(outcomes), steps: Mutex::default() });
+fn dev_loop(
+    release_installed: bool,
+    outcomes: Vec<RebuildOutcome>,
+) -> (DevLoop, Arc<FakeDevBackend>) {
+    let backend = Arc::new(FakeDevBackend {
+        release_installed,
+        outcomes: Mutex::new(outcomes),
+        steps: Mutex::default(),
+    });
     (DevLoop::new(backend.clone()), backend)
 }
 
 fn built(version: &str) -> RebuildOutcome {
-    RebuildOutcome::Built { version: version.to_owned() }
+    RebuildOutcome::Built {
+        version: version.to_owned(),
+    }
 }
 
 /// REQ: DEV-710
@@ -74,7 +89,9 @@ fn dev_711_dev_install_has_its_own_data_folder() {
 #[test]
 fn dev_711_refuses_when_the_release_is_installed_dev_id_installed() {
     let (mut dev, _) = dev_loop(true, vec![]);
-    let refusal = dev.start("example.notes", false).expect_err("release installed");
+    let refusal = dev
+        .start("example.notes", false)
+        .expect_err("release installed");
     assert_eq!(refusal.code.as_str(), "dev.id-installed");
 }
 
@@ -92,7 +109,10 @@ fn dev_712_rebuild_deactivates_with_upgrade_then_loads_then_activates() {
     dev.start("example.notes", false).expect("start");
     let report = dev.rebuild();
     assert!(report.reloaded);
-    assert_eq!(*backend.steps.lock().expect("lock"), ["deactivate:upgrade", "load:0.1.1", "activate"]);
+    assert_eq!(
+        *backend.steps.lock().expect("lock"),
+        ["deactivate:upgrade", "load:0.1.1", "activate"]
+    );
 }
 
 /// REQ: DEV-712
@@ -106,20 +126,28 @@ fn dev_712_storage_is_kept_across_the_reload() {
 /// REQ: DEV-713
 #[test]
 fn dev_713_failed_rebuild_keeps_the_running_version() {
-    let failed = RebuildOutcome::Failed { errors: vec!["src/server.rs:12: expected `;`".to_owned()] };
+    let failed = RebuildOutcome::Failed {
+        errors: vec!["src/server.rs:12: expected `;`".to_owned()],
+    };
     let (mut dev, backend) = dev_loop(false, vec![built("0.1.0"), failed]);
     dev.start("example.notes", false).expect("start");
     dev.rebuild();
     let report = dev.rebuild();
     assert!(!report.reloaded);
     assert_eq!(report.running_version, "0.1.0");
-    assert_eq!(backend.steps.lock().expect("lock").len(), 3, "only the first, successful rebuild reloaded");
+    assert_eq!(
+        backend.steps.lock().expect("lock").len(),
+        3,
+        "only the first, successful rebuild reloaded"
+    );
 }
 
 /// REQ: DEV-713
 #[test]
 fn dev_713_failed_rebuild_prints_the_build_errors() {
-    let failed = RebuildOutcome::Failed { errors: vec!["src/server.rs:12: expected `;`".to_owned()] };
+    let failed = RebuildOutcome::Failed {
+        errors: vec!["src/server.rs:12: expected `;`".to_owned()],
+    };
     let (mut dev, _) = dev_loop(false, vec![failed]);
     dev.start("example.notes", false).expect("start");
     let report = dev.rebuild();
@@ -129,7 +157,9 @@ fn dev_713_failed_rebuild_prints_the_build_errors() {
 /// REQ: DEV-713
 #[test]
 fn dev_713_failed_rebuild_does_not_deactivate() {
-    let failed = RebuildOutcome::Failed { errors: vec!["boom".to_owned()] };
+    let failed = RebuildOutcome::Failed {
+        errors: vec!["boom".to_owned()],
+    };
     let (mut dev, backend) = dev_loop(false, vec![failed]);
     dev.start("example.notes", false).expect("start");
     dev.rebuild();
@@ -139,8 +169,14 @@ fn dev_713_failed_rebuild_does_not_deactivate() {
 /// REQ: DEV-715
 #[test]
 fn dev_715_source_map_lives_at_dist_side_wasm_map() {
-    assert_eq!(source_map_path(Side::Server).to_str(), Some("dist/server.wasm.map"));
-    assert_eq!(source_map_path(Side::Client).to_str(), Some("dist/client.wasm.map"));
+    assert_eq!(
+        source_map_path(Side::Server).to_str(),
+        Some("dist/server.wasm.map")
+    );
+    assert_eq!(
+        source_map_path(Side::Client).to_str(),
+        Some("dist/client.wasm.map")
+    );
 }
 
 /// REQ: DEV-716
@@ -177,18 +213,31 @@ fn dev_741_tag_must_equal_v_plus_version() {
 #[test]
 fn dev_742_sha256_sidecar_names_the_package() {
     let line = sha256_sidecar_line(b"abc", "example.notes-0.1.0.ilp");
-    assert_eq!(line, "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad  example.notes-0.1.0.ilp");
+    assert_eq!(
+        line,
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad  example.notes-0.1.0.ilp"
+    );
 }
 
 /// REQ: DEV-743
 #[test]
 fn dev_743_every_error_record_has_code_and_message() {
     let scratch = scratch();
-    let output = run(&env(scratch.path()), &["inspect", scratch.path().join("missing.ilp").to_str().expect("utf8"), "--json"]);
+    let output = run(
+        &env(scratch.path()),
+        &[
+            "inspect",
+            scratch.path().join("missing.ilp").to_str().expect("utf8"),
+            "--json",
+        ],
+    );
     let errors = records_of(&output, "error");
     assert!(!errors.is_empty());
     for error in errors {
-        assert!(error["code"].is_string() && error["message"].is_string(), "{error}");
+        assert!(
+            error["code"].is_string() && error["message"].is_string(),
+            "{error}"
+        );
     }
 }
 

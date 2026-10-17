@@ -1,12 +1,13 @@
 //! F-050: the voice session. F8 is grabbed through keys.intercept, a 16 kHz mono capture runs while the key is
 //! held, `audio-frames` are buffered and a `transcribe` job runs on release; `voice.toggle` flips `enabled`.
 
-use ilium_plugin_sdk::types::{AudioFramesEvent, Event, ErrorCode, PluginError};
+use ilium_plugin_sdk::types::{AudioFramesEvent, ErrorCode, Event, PluginError};
 use proptest::prelude::*;
 use serde_json::json;
 
 use crate::common::{
-    client_host, command_invoked, configure, enabled_client, f8_grab, invoked_commands, key_pressed, key_released,
+    client_host, command_invoked, configure, enabled_client, f8_grab, invoked_commands,
+    key_pressed, key_released,
 };
 
 fn frames(capture: u64, samples: Vec<i16>) -> Event {
@@ -14,7 +15,10 @@ fn frames(capture: u64, samples: Vec<i16>) -> Event {
 }
 
 fn le_bytes(samples: &[i16]) -> Vec<u8> {
-    samples.iter().flat_map(|sample| sample.to_le_bytes()).collect()
+    samples
+        .iter()
+        .flat_map(|sample| sample.to_le_bytes())
+        .collect()
 }
 
 /// Enabled push-to-talk host with the key pressed; returns the host, the grab and the open capture id.
@@ -51,7 +55,12 @@ fn session_050_disabled_voice_holds_no_grab() {
 fn session_050_enabling_twice_keeps_exactly_one_grab() {
     let mut host = enabled_client("push_to_talk");
     configure(&mut host, "enabled", json!(true));
-    let live = host.keys().grabs().into_iter().filter(|grab| !grab.released).count();
+    let live = host
+        .keys()
+        .grabs()
+        .into_iter()
+        .filter(|grab| !grab.released)
+        .count();
     assert_eq!(live, 1);
 }
 
@@ -69,7 +78,14 @@ fn session_050_turning_voice_on_again_grabs_f8_again() {
     let mut host = enabled_client("push_to_talk");
     configure(&mut host, "enabled", json!(false));
     configure(&mut host, "enabled", json!(true));
-    assert_eq!(host.keys().grabs().iter().filter(|grab| !grab.released).count(), 1);
+    assert_eq!(
+        host.keys()
+            .grabs()
+            .iter()
+            .filter(|grab| !grab.released)
+            .count(),
+        1
+    );
 }
 
 /// REQ: F-050
@@ -194,10 +210,17 @@ fn session_050_a_failed_transcription_is_logged_as_a_warning() {
     let request = host.jobs().list()[0].request;
     host.jobs().finish(
         request,
-        Err(PluginError { code: ErrorCode::Internal, message: "no model".to_string(), retry_after_ms: None }),
+        Err(PluginError {
+            code: ErrorCode::Internal,
+            message: "no model".to_string(),
+            retry_after_ms: None,
+        }),
     );
     host.settle();
-    assert!(host.logs().iter().any(|line| line.level == "warn" && line.message.starts_with("transcription failed")));
+    assert!(host
+        .logs()
+        .iter()
+        .any(|line| line.level == "warn" && line.message.starts_with("transcription failed")));
 }
 
 /// REQ: F-050
@@ -210,7 +233,11 @@ fn session_050_a_failed_transcription_submits_no_command() {
     let request = host.jobs().list()[0].request;
     host.jobs().finish(
         request,
-        Err(PluginError { code: ErrorCode::Internal, message: "no model".to_string(), retry_after_ms: None }),
+        Err(PluginError {
+            code: ErrorCode::Internal,
+            message: "no model".to_string(),
+            retry_after_ms: None,
+        }),
     );
     host.settle();
     assert!(invoked_commands(&host.submitted()).is_empty());
@@ -222,7 +249,10 @@ fn session_050_toggle_command_turns_voice_on_and_saves_enabled() {
     let mut host = client_host();
     host.deliver_one(command_invoked("voice.toggle"));
     host.settle();
-    assert_eq!(host.kernel_settings().get("voice-control", "enabled"), Some(json!(true)));
+    assert_eq!(
+        host.kernel_settings().get("voice-control", "enabled"),
+        Some(json!(true))
+    );
 }
 
 /// REQ: F-050
@@ -232,7 +262,10 @@ fn session_050_toggle_command_twice_turns_voice_off_again() {
     host.deliver_one(command_invoked("voice.toggle"));
     host.deliver_one(command_invoked("voice.toggle"));
     host.settle();
-    assert_eq!(host.kernel_settings().get("voice-control", "enabled"), Some(json!(false)));
+    assert_eq!(
+        host.kernel_settings().get("voice-control", "enabled"),
+        Some(json!(false))
+    );
 }
 
 /// REQ: F-050
@@ -242,10 +275,16 @@ fn session_050_semantic_vad_f8_press_toggles_voice_and_release_does_nothing() {
     let grab = f8_grab(&mut host);
     host.deliver_one(key_pressed(grab, false));
     host.settle();
-    assert_eq!(host.kernel_settings().get("voice-control", "enabled"), Some(json!(false)));
+    assert_eq!(
+        host.kernel_settings().get("voice-control", "enabled"),
+        Some(json!(false))
+    );
     host.deliver_one(key_released(grab));
     host.settle();
-    assert_eq!(host.kernel_settings().get("voice-control", "enabled"), Some(json!(false)));
+    assert_eq!(
+        host.kernel_settings().get("voice-control", "enabled"),
+        Some(json!(false))
+    );
     assert!(host.jobs().list().is_empty());
 }
 
@@ -256,7 +295,10 @@ fn session_050_push_to_talk_toggle_from_off_turns_voice_on_and_a_press_then_reco
     configure(&mut host, "input_mode", json!("push_to_talk"));
     host.deliver_one(command_invoked("voice.toggle"));
     host.settle();
-    assert_eq!(host.kernel_settings().get("voice-control", "enabled"), Some(json!(true)));
+    assert_eq!(
+        host.kernel_settings().get("voice-control", "enabled"),
+        Some(json!(true))
+    );
     let grab = f8_grab(&mut host);
     host.deliver_one(key_pressed(grab, false));
     host.settle();
@@ -269,7 +311,10 @@ fn session_050_push_to_talk_f8_press_does_not_toggle_voice_off() {
     let (mut host, grab, _capture) = recording();
     host.deliver_one(key_pressed(grab, false));
     host.settle();
-    assert_eq!(host.kernel_settings().get("voice-control", "enabled"), Some(json!(true)));
+    assert_eq!(
+        host.kernel_settings().get("voice-control", "enabled"),
+        Some(json!(true))
+    );
     assert_eq!(host.audio().captures().len(), 1);
     assert!(host.audio().captures()[0].open);
 }
@@ -291,7 +336,8 @@ fn session_050_a_phrase_heard_runs_the_matched_command_through_an_invoke_command
         "ilium.core.voice/voice-intents",
         "open-board",
         50,
-        &json!({ "phrases": ["open the board"], "command": "open-board", "confirm": false }).to_string(),
+        &json!({ "phrases": ["open the board"], "command": "open-board", "confirm": false })
+            .to_string(),
     );
     host.deliver_one(frames(capture, vec![1]));
     host.deliver_one(key_released(grab));
@@ -310,7 +356,8 @@ fn session_050_an_unknown_phrase_runs_no_command() {
     host.deliver_one(key_released(grab));
     host.settle();
     let request = host.jobs().list()[0].request;
-    host.jobs().finish(request, Ok(b"zzz qqq unmatched".to_vec()));
+    host.jobs()
+        .finish(request, Ok(b"zzz qqq unmatched".to_vec()));
     host.settle();
     assert!(invoked_commands(&host.submitted()).is_empty());
 }

@@ -17,7 +17,12 @@ fn lif_273_a_replacement_disabled_after_three_crashes_re_enables_the_core_plugin
     }
     assert!(server.is_enabled("ilium.core.tree"));
     let notices = server.notices();
-    assert!(notices.iter().any(|text| text.contains("ilium.core.tree") && text.contains("com.example.replace")), "{notices:?}");
+    assert!(
+        notices
+            .iter()
+            .any(|text| text.contains("ilium.core.tree") && text.contains("com.example.replace")),
+        "{notices:?}"
+    );
 }
 
 /// REQ: LIF-273
@@ -31,7 +36,11 @@ fn lif_273_the_notice_is_visible_exactly_once_per_disable() {
         server.fail("com.example.replace", Side::Server);
         rig.advance(secs(6));
     }
-    let count = server.notices().iter().filter(|text| text.contains("ilium.core.tree")).count();
+    let count = server
+        .notices()
+        .iter()
+        .filter(|text| text.contains("ilium.core.tree"))
+        .count();
     assert_eq!(count, 1);
 }
 

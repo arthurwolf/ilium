@@ -24,7 +24,10 @@ fn tail_f062_records_are_published_in_file_order() {
         send(&mut host, text);
     }
     host.settle();
-    let contents: Vec<String> = published_texts(&host).iter().map(|line| split_record(line).2).collect();
+    let contents: Vec<String> = published_texts(&host)
+        .iter()
+        .map(|line| split_record(line).2)
+        .collect();
     assert_eq!(contents, ["a", "b", "c"]);
 }
 
@@ -61,7 +64,10 @@ fn tail_f062_a_hand_appended_record_is_published_too() {
     text.push_str(&format!("{}\n", numbered_line(7)));
     host.fs().write(ROOM, text.as_bytes());
     host.settle();
-    assert_eq!(published_texts(&host), [numbered_line(7).trim_start_matches("- ").to_string()]);
+    assert_eq!(
+        published_texts(&host),
+        [numbered_line(7).trim_start_matches("- ").to_string()]
+    );
 }
 
 /// REQ: F-062
@@ -81,7 +87,10 @@ fn tail_f062_a_failing_tail_read_publishes_nothing_and_keeps_the_plugin_alive() 
     seed_room(&mut host, &[]);
     host.inject_failure(
         "fs.tail",
-        ilium_plugin_sdk::types::PluginError::new(ilium_plugin_sdk::types::ErrorCode::Io, "tail failed"),
+        ilium_plugin_sdk::types::PluginError::new(
+            ilium_plugin_sdk::types::ErrorCode::Io,
+            "tail failed",
+        ),
     );
     send(&mut host, "lost to the failure");
     host.settle();
@@ -109,10 +118,22 @@ fn tail_f062_a_chunk_boundary_inside_a_record_waits_for_the_rest_of_the_line() {
 #[test]
 fn tail_f062_the_server_subscribes_to_no_topic_other_than_chatroom() {
     let manifest: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(manifest_path()).expect("manifest")).expect("json");
-    let server: Vec<&str> = manifest["capabilities"]["server"].as_array().expect("array").iter().filter_map(|v| v.as_str()).collect();
+        serde_json::from_str(&std::fs::read_to_string(manifest_path()).expect("manifest"))
+            .expect("json");
+    let server: Vec<&str> = manifest["capabilities"]["server"]
+        .as_array()
+        .expect("array")
+        .iter()
+        .filter_map(|v| v.as_str())
+        .collect();
     assert!(server.contains(&"topics.subscribe:chatroom"));
-    assert!(server.iter().filter(|name| name.starts_with("topics.")).count() == 1);
+    assert!(
+        server
+            .iter()
+            .filter(|name| name.starts_with("topics."))
+            .count()
+            == 1
+    );
 }
 
 /// REQ: F-062, chatroom-B09
@@ -121,7 +142,11 @@ fn tail_f062_the_client_shows_a_row_when_a_topic_published_event_arrives() {
     let mut host = client_host();
     host.deliver_one(topic_event(numbered_line(1).trim_start_matches("- ")));
     host.settle();
-    let screen = host.render(ilium_plugin_sdk::types::ViewTarget::Panel(PANEL.to_string()), 80, 12);
+    let screen = host.render(
+        ilium_plugin_sdk::types::ViewTarget::Panel(PANEL.to_string()),
+        80,
+        12,
+    );
     assert!(screen.text().contains("record 1"), "{}", screen.text());
 }
 
@@ -135,7 +160,11 @@ fn tail_f062_the_client_ignores_topics_other_than_chatroom() {
     }
     host.deliver_one(event);
     host.settle();
-    let screen = host.render(ilium_plugin_sdk::types::ViewTarget::Panel(PANEL.to_string()), 80, 12);
+    let screen = host.render(
+        ilium_plugin_sdk::types::ViewTarget::Panel(PANEL.to_string()),
+        80,
+        12,
+    );
     assert!(!screen.text().contains("other topic"));
 }
 

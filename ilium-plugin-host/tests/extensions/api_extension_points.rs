@@ -4,11 +4,15 @@
 use crate::support::*;
 
 fn points_16(count: usize) -> Vec<Value> {
-    (0..count).map(|index| hook_point(&format!("p{index}"), "observe")).collect()
+    (0..count)
+        .map(|index| hook_point(&format!("p{index}"), "observe"))
+        .collect()
 }
 
 fn extensions_64(count: usize) -> Vec<Value> {
-    (0..count).map(|index| ext_handler(POINT, &format!("x{index}"), 50, "h")).collect()
+    (0..count)
+        .map(|index| ext_handler(POINT, &format!("x{index}"), 50, "h"))
+        .collect()
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -67,7 +71,11 @@ fn ext_002_run_hook_without_provide_grant_not_permitted() {
     let mut world = world_with_ungranted_plugin();
     let error = err_of(world.run_hook("com.example.nogrant", POINT, r#"{"text":"a"}"#));
     assert_eq!(code_of(&error), ErrorCode::NotPermitted);
-    assert!(message_has_prefix(&error, "extension.not-granted"), "{}", error.message);
+    assert!(
+        message_has_prefix(&error, "extension.not-granted"),
+        "{}",
+        error.message
+    );
 }
 
 /// REQ: EXT-002
@@ -84,9 +92,21 @@ fn ext_002_list_without_provide_grant_not_permitted() {
 fn ext_002_register_without_contribute_grant_not_permitted() {
     let mut world = ExtWorld::new();
     let point = with(collect_point("c", 8, true), "dynamic", json!(true));
-    assert_eq!(diag_code(&world.install(Tier::T3, owner_manifest(OWNER, vec![point]), Vec::new())), "ok");
-    assert_eq!(diag_code(&world.install(Tier::T3, json!({"id": "com.example.nogrant"}), Vec::new())), "ok");
-    let error = err_of(world.register("com.example.nogrant", "com.example.owner/c", "e1", 50, r#"{"id":"e1"}"#));
+    assert_eq!(
+        diag_code(&world.install(Tier::T3, owner_manifest(OWNER, vec![point]), Vec::new())),
+        "ok"
+    );
+    assert_eq!(
+        diag_code(&world.install(Tier::T3, json!({"id": "com.example.nogrant"}), Vec::new())),
+        "ok"
+    );
+    let error = err_of(world.register(
+        "com.example.nogrant",
+        "com.example.owner/c",
+        "e1",
+        50,
+        r#"{"id":"e1"}"#,
+    ));
     assert_eq!(code_of(&error), ErrorCode::NotPermitted);
     assert!(message_has_prefix(&error, "extension.not-granted"));
 }
@@ -145,7 +165,9 @@ fn ext_003_veto_message_starts_with_code_plugin_id_and_reason() {
     let error = refused_error(&outcome);
     assert_eq!(code_of(&error), ErrorCode::Conflict);
     assert!(
-        error.message.starts_with("extension.vetoed: com.example.quiet-hours: "),
+        error
+            .message
+            .starts_with("extension.vetoed: com.example.quiet-hours: "),
         "{}",
         error.message
     );
@@ -156,7 +178,11 @@ fn ext_003_veto_message_starts_with_code_plugin_id_and_reason() {
 fn ext_003_unknown_point_message_starts_with_code_colon_space() {
     let mut world = hook_world("veto", Vec::new());
     let error = err_of(world.run_hook(OWNER, "com.example.owner/missing", "{}"));
-    assert!(message_has_prefix(&error, "extension.unknown-point"), "{}", error.message);
+    assert!(
+        message_has_prefix(&error, "extension.unknown-point"),
+        "{}",
+        error.message
+    );
 }
 
 /// REQ: EXT-003
@@ -170,10 +196,18 @@ fn ext_003_not_granted_message_starts_with_code_colon_space() {
 /// REQ: EXT-003
 #[test]
 fn ext_003_reentrant_message_starts_with_code_colon_space() {
-    let mut world = hook_world("observe", vec![contrib("c1", 50, runs_hook(1, POINT, r#"{"text":"a"}"#))]);
+    let mut world = hook_world(
+        "observe",
+        vec![contrib("c1", 50, runs_hook(1, POINT, r#"{"text":"a"}"#))],
+    );
     let _ = run_chain(&mut world, r#"{"text":"a"}"#);
     let errors = world.hook_errors();
-    assert!(errors.iter().any(|(_, error)| message_has_prefix(error, "extension.reentrant")), "{errors:?}");
+    assert!(
+        errors
+            .iter()
+            .any(|(_, error)| message_has_prefix(error, "extension.reentrant")),
+        "{errors:?}"
+    );
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -184,13 +218,19 @@ fn ext_003_reentrant_message_starts_with_code_colon_space() {
 fn active_for(owner_version: &str, requested: Option<&str>) -> bool {
     let mut world = ExtWorld::new();
     let point = with(hook_point("p", "observe"), "version", json!(owner_version));
-    assert_eq!(diag_code(&world.install(Tier::T3, owner_manifest(OWNER, vec![point]), Vec::new())), "ok");
+    assert_eq!(
+        diag_code(&world.install(Tier::T3, owner_manifest(OWNER, vec![point]), Vec::new())),
+        "ok"
+    );
     let target = match requested {
         Some(version) => format!("{POINT}@{version}"),
         None => POINT.to_owned(),
     };
     let manifest = contributor_manifest("com.example.v", vec![ext_handler(&target, "x", 50, "h")]);
-    assert_eq!(diag_code(&world.install(Tier::T3, manifest, vec![("h".to_owned(), pass(0))])), "ok");
+    assert_eq!(
+        diag_code(&world.install(Tier::T3, manifest, vec![("h".to_owned(), pass(0))])),
+        "ok"
+    );
     world.settle();
     world.is_active("com.example.v", POINT, "x")
 }
@@ -258,12 +298,24 @@ fn ext_006_owner_0_1_2_dormant_for_requested_0_2_0_and_0_0_5() {
 fn ext_006_dormant_contribution_becomes_active_when_owner_updates() {
     let mut world = ExtWorld::new();
     let point = with(hook_point("p", "observe"), "version", json!("1.0.0"));
-    assert_eq!(diag_code(&world.install(Tier::T3, owner_manifest(OWNER, vec![point]), Vec::new())), "ok");
-    let manifest = contributor_manifest("com.example.v", vec![ext_handler(&format!("{POINT}@1.3.0"), "x", 50, "h")]);
-    assert_eq!(diag_code(&world.install(Tier::T3, manifest, vec![("h".to_owned(), pass(0))])), "ok");
+    assert_eq!(
+        diag_code(&world.install(Tier::T3, owner_manifest(OWNER, vec![point]), Vec::new())),
+        "ok"
+    );
+    let manifest = contributor_manifest(
+        "com.example.v",
+        vec![ext_handler(&format!("{POINT}@1.3.0"), "x", 50, "h")],
+    );
+    assert_eq!(
+        diag_code(&world.install(Tier::T3, manifest, vec![("h".to_owned(), pass(0))])),
+        "ok"
+    );
     assert!(!world.is_active("com.example.v", POINT, "x"));
     let newer = with(hook_point("p", "observe"), "version", json!("1.3.0"));
-    assert_eq!(diag_code(&world.update(Tier::T3, owner_manifest(OWNER, vec![newer]), Vec::new())), "ok");
+    assert_eq!(
+        diag_code(&world.update(Tier::T3, owner_manifest(OWNER, vec![newer]), Vec::new())),
+        "ok"
+    );
     world.settle();
     assert!(world.is_active("com.example.v", POINT, "x"));
 }
@@ -295,24 +347,47 @@ proptest! {
 /// REQ: EXT-007
 #[test]
 fn ext_007_same_priority_runs_in_plugin_id_order() {
-    let mut world = hook_world("observe", vec![contrib("zeta", 10, pass(1)), contrib("alpha", 10, pass(1))]);
+    let mut world = hook_world(
+        "observe",
+        vec![contrib("zeta", 10, pass(1)), contrib("alpha", 10, pass(1))],
+    );
     let _ = run_chain(&mut world, r#"{"text":"a"}"#);
-    assert_eq!(run_order(&world), vec!["com.example.alpha", "com.example.zeta"]);
+    assert_eq!(
+        run_order(&world),
+        vec!["com.example.alpha", "com.example.zeta"]
+    );
 }
 
 /// REQ: EXT-007
 #[test]
 fn ext_007_same_plugin_and_priority_orders_by_extension_id_bytewise() {
     let mut world = ExtWorld::new();
-    assert_eq!(diag_code(&world.install(Tier::T3, owner_manifest(OWNER, vec![hook_point("p", "observe")]), Vec::new())), "ok");
+    assert_eq!(
+        diag_code(&world.install(
+            Tier::T3,
+            owner_manifest(OWNER, vec![hook_point("p", "observe")]),
+            Vec::new()
+        )),
+        "ok"
+    );
     let manifest = contributor_manifest(
         "com.example.two",
-        vec![ext_handler(POINT, "ext-9", 10, "h9"), ext_handler(POINT, "ext-10", 10, "h10")],
+        vec![
+            ext_handler(POINT, "ext-9", 10, "h9"),
+            ext_handler(POINT, "ext-10", 10, "h10"),
+        ],
     );
     let handlers = vec![("h9".to_owned(), pass(1)), ("h10".to_owned(), pass(1))];
-    assert_eq!(diag_code(&world.install(Tier::T3, manifest, handlers)), "ok");
+    assert_eq!(
+        diag_code(&world.install(Tier::T3, manifest, handlers)),
+        "ok"
+    );
     let _ = run_chain(&mut world, r#"{"text":"a"}"#);
-    let handlers_run: Vec<String> = world.handler_runs().into_iter().map(|run| run.handler).collect();
+    let handlers_run: Vec<String> = world
+        .handler_runs()
+        .into_iter()
+        .map(|run| run.handler)
+        .collect();
     assert_eq!(handlers_run, vec!["h10", "h9"]);
 }
 
@@ -327,7 +402,10 @@ fn ext_007_t1_runs_before_t3_of_any_priority() {
         ],
     );
     let _ = run_chain(&mut world, r#"{"text":"a"}"#);
-    assert_eq!(run_order(&world), vec!["com.example.early", "com.example.late"]);
+    assert_eq!(
+        run_order(&world),
+        vec!["com.example.early", "com.example.late"]
+    );
 }
 
 /// REQ: EXT-007
@@ -335,7 +413,10 @@ fn ext_007_t1_runs_before_t3_of_any_priority() {
 fn ext_007_t1_runs_before_t2_of_any_priority() {
     let mut world = hook_world(
         "observe",
-        vec![contrib_tier("t2", 0, Tier::T2, pass(1)), contrib_tier("t1", 100, Tier::T1, pass(1))],
+        vec![
+            contrib_tier("t2", 0, Tier::T2, pass(1)),
+            contrib_tier("t1", 100, Tier::T1, pass(1)),
+        ],
     );
     let _ = run_chain(&mut world, r#"{"text":"a"}"#);
     assert_eq!(run_order(&world), vec!["com.example.t1", "com.example.t2"]);
@@ -365,7 +446,10 @@ proptest! {
 }
 
 fn two_handler_world() -> ExtWorld {
-    hook_world("observe", vec![contrib("a", 10, pass(1)), contrib("b", 20, pass(1))])
+    hook_world(
+        "observe",
+        vec![contrib("a", 10, pass(1)), contrib("b", 20, pass(1))],
+    )
 }
 
 /// REQ: EXT-008
@@ -382,7 +466,10 @@ fn ext_008_user_order_moves_b_above_a() {
     let mut world = two_handler_world();
     world.set_user_order(
         POINT,
-        vec![("com.example.b".to_owned(), "e-b".to_owned()), ("com.example.a".to_owned(), "e-a".to_owned())],
+        vec![
+            ("com.example.b".to_owned(), "e-b".to_owned()),
+            ("com.example.a".to_owned(), "e-a".to_owned()),
+        ],
     );
     let _ = run_chain(&mut world, r#"{"text":"a"}"#);
     assert_eq!(run_order(&world), vec!["com.example.b", "com.example.a"]);
@@ -394,11 +481,17 @@ fn ext_008_contributor_installed_after_reorder_runs_after_both() {
     let mut world = two_handler_world();
     world.set_user_order(
         POINT,
-        vec![("com.example.b".to_owned(), "e-b".to_owned()), ("com.example.a".to_owned(), "e-a".to_owned())],
+        vec![
+            ("com.example.b".to_owned(), "e-b".to_owned()),
+            ("com.example.a".to_owned(), "e-a".to_owned()),
+        ],
     );
     assert!(install_contrib(&mut world, POINT, &contrib("c", 0, pass(1))).is_ok());
     let _ = run_chain(&mut world, r#"{"text":"a"}"#);
-    assert_eq!(run_order(&world), vec!["com.example.b", "com.example.a", "com.example.c"]);
+    assert_eq!(
+        run_order(&world),
+        vec!["com.example.b", "com.example.a", "com.example.c"]
+    );
 }
 
 /// REQ: EXT-008
@@ -407,11 +500,20 @@ fn ext_008_update_keeps_stored_position() {
     let mut world = two_handler_world();
     world.set_user_order(
         POINT,
-        vec![("com.example.b".to_owned(), "e-b".to_owned()), ("com.example.a".to_owned(), "e-a".to_owned())],
+        vec![
+            ("com.example.b".to_owned(), "e-b".to_owned()),
+            ("com.example.a".to_owned(), "e-a".to_owned()),
+        ],
     );
     let again = contrib("a", 10, pass(1));
-    let manifest = contributor_manifest(&again.plugin, vec![ext_handler(POINT, &again.extension, 10, "h")]);
-    assert_eq!(diag_code(&world.update(Tier::T3, manifest, vec![("h".to_owned(), pass(1))])), "ok");
+    let manifest = contributor_manifest(
+        &again.plugin,
+        vec![ext_handler(POINT, &again.extension, 10, "h")],
+    );
+    assert_eq!(
+        diag_code(&world.update(Tier::T3, manifest, vec![("h".to_owned(), pass(1))])),
+        "ok"
+    );
     let _ = run_chain(&mut world, r#"{"text":"a"}"#);
     assert_eq!(run_order(&world), vec!["com.example.b", "com.example.a"]);
 }
@@ -422,7 +524,10 @@ fn ext_008_uninstall_removes_the_stored_position() {
     let mut world = two_handler_world();
     world.set_user_order(
         POINT,
-        vec![("com.example.b".to_owned(), "e-b".to_owned()), ("com.example.a".to_owned(), "e-a".to_owned())],
+        vec![
+            ("com.example.b".to_owned(), "e-b".to_owned()),
+            ("com.example.a".to_owned(), "e-a".to_owned()),
+        ],
     );
     world.uninstall("com.example.b");
     assert!(install_contrib(&mut world, POINT, &contrib("b", 20, pass(1))).is_ok());
@@ -435,7 +540,10 @@ fn ext_008_uninstall_removes_the_stored_position() {
 fn ext_008_list_on_collect_point_follows_the_user_order() {
     let mut world = ExtWorld::new();
     let point = collect_point("c", 8, false);
-    assert_eq!(diag_code(&world.install(Tier::T3, owner_manifest(OWNER, vec![point]), Vec::new())), "ok");
+    assert_eq!(
+        diag_code(&world.install(Tier::T3, owner_manifest(OWNER, vec![point]), Vec::new())),
+        "ok"
+    );
     for (name, priority) in [("a", 10u8), ("b", 20u8)] {
         let target = "com.example.owner/c";
         let manifest = json!({
@@ -443,7 +551,10 @@ fn ext_008_list_on_collect_point_follows_the_user_order() {
             "capabilities": {"server": [format!("extensions.contribute:{target}")]},
             "contributes": {"extensions": [ext_entry(target, &format!("e-{name}"), priority, json!({"id": name}))]}
         });
-        assert_eq!(diag_code(&world.install(Tier::T3, manifest, Vec::new())), "ok");
+        assert_eq!(
+            diag_code(&world.install(Tier::T3, manifest, Vec::new())),
+            "ok"
+        );
     }
     let before: Vec<String> = match world.list(OWNER, "com.example.owner/c") {
         Ok(entries) => entries.into_iter().map(|entry| entry.extension).collect(),
@@ -452,7 +563,10 @@ fn ext_008_list_on_collect_point_follows_the_user_order() {
     assert_eq!(before, vec!["e-a", "e-b"]);
     world.set_user_order(
         "com.example.owner/c",
-        vec![("com.example.b".to_owned(), "e-b".to_owned()), ("com.example.a".to_owned(), "e-a".to_owned())],
+        vec![
+            ("com.example.b".to_owned(), "e-b".to_owned()),
+            ("com.example.a".to_owned(), "e-a".to_owned()),
+        ],
     );
     let after: Vec<String> = match world.list(OWNER, "com.example.owner/c") {
         Ok(entries) => entries.into_iter().map(|entry| entry.extension).collect(),
@@ -465,16 +579,29 @@ fn ext_008_list_on_collect_point_follows_the_user_order() {
 #[test]
 fn ext_008_list_returns_declared_priority_unchanged_by_tier() {
     let mut world = ExtWorld::new();
-    assert_eq!(diag_code(&world.install(Tier::T3, owner_manifest(OWNER, vec![collect_point("c", 8, false)]), Vec::new())), "ok");
+    assert_eq!(
+        diag_code(&world.install(
+            Tier::T3,
+            owner_manifest(OWNER, vec![collect_point("c", 8, false)]),
+            Vec::new()
+        )),
+        "ok"
+    );
     let target = "com.example.owner/c";
     let manifest = json!({
         "id": "com.example.t3",
         "capabilities": {"server": [format!("extensions.contribute:{target}")]},
         "contributes": {"extensions": [ext_entry(target, "e", 77, json!({"id": "x"}))]}
     });
-    assert_eq!(diag_code(&world.install(Tier::T3, manifest, Vec::new())), "ok");
+    assert_eq!(
+        diag_code(&world.install(Tier::T3, manifest, Vec::new())),
+        "ok"
+    );
     let entries = world.list(OWNER, target);
-    assert!(matches!(&entries, Ok(list) if list.len() == 1 && list[0].priority == 77), "{entries:?}");
+    assert!(
+        matches!(&entries, Ok(list) if list.len() == 1 && list[0].priority == 77),
+        "{entries:?}"
+    );
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -520,14 +647,21 @@ fn ext_024_list_on_undeclared_point_not_found() {
 fn collect_world(dynamic: bool) -> ExtWorld {
     let mut world = ExtWorld::new();
     assert_eq!(
-        diag_code(&world.install(Tier::T3, owner_manifest(OWNER, vec![collect_point("c", 8, dynamic)]), Vec::new())),
+        diag_code(&world.install(
+            Tier::T3,
+            owner_manifest(OWNER, vec![collect_point("c", 8, dynamic)]),
+            Vec::new()
+        )),
         "ok"
     );
     let manifest = json!({
         "id": "com.example.reg",
         "capabilities": {"server": ["extensions.contribute:com.example.owner/c"]}
     });
-    assert_eq!(diag_code(&world.install(Tier::T3, manifest, Vec::new())), "ok");
+    assert_eq!(
+        diag_code(&world.install(Tier::T3, manifest, Vec::new())),
+        "ok"
+    );
     world
 }
 
@@ -555,17 +689,26 @@ fn ext_025_unregister_on_static_point_unsupported_not_dynamic() {
 #[test]
 fn ext_025_register_on_dynamic_point_ok_and_listed() {
     let mut world = collect_world(true);
-    assert!(world.register("com.example.reg", COLLECT, "e1", 50, r#"{"id":"e1"}"#).is_ok());
+    assert!(world
+        .register("com.example.reg", COLLECT, "e1", 50, r#"{"id":"e1"}"#)
+        .is_ok());
     let listed = world.list(OWNER, COLLECT);
-    assert!(matches!(&listed, Ok(list) if list.len() == 1 && list[0].extension == "e1"), "{listed:?}");
+    assert!(
+        matches!(&listed, Ok(list) if list.len() == 1 && list[0].extension == "e1"),
+        "{listed:?}"
+    );
 }
 
 /// REQ: EXT-025
 #[test]
 fn ext_025_register_same_id_replaces_the_entry() {
     let mut world = collect_world(true);
-    assert!(world.register("com.example.reg", COLLECT, "e1", 50, r#"{"id":"first"}"#).is_ok());
-    assert!(world.register("com.example.reg", COLLECT, "e1", 60, r#"{"id":"second"}"#).is_ok());
+    assert!(world
+        .register("com.example.reg", COLLECT, "e1", 50, r#"{"id":"first"}"#)
+        .is_ok());
+    assert!(world
+        .register("com.example.reg", COLLECT, "e1", 60, r#"{"id":"second"}"#)
+        .is_ok());
     let listed = world.list(OWNER, COLLECT);
     assert!(
         matches!(&listed, Ok(list) if list.len() == 1 && list[0].priority == 60 && list[0].entry_json.contains("second")),
@@ -577,7 +720,9 @@ fn ext_025_register_same_id_replaces_the_entry() {
 #[test]
 fn ext_025_unregister_removes_only_own_entry_and_unknown_is_not_found() {
     let mut world = collect_world(true);
-    assert!(world.register("com.example.reg", COLLECT, "e1", 50, r#"{"id":"e1"}"#).is_ok());
+    assert!(world
+        .register("com.example.reg", COLLECT, "e1", 50, r#"{"id":"e1"}"#)
+        .is_ok());
     assert!(world.unregister("com.example.reg", COLLECT, "e1").is_ok());
     let error = err_of(world.unregister("com.example.reg", COLLECT, "e1"));
     assert_eq!(code_of(&error), ErrorCode::NotFound);
@@ -636,7 +781,15 @@ fn ext_026_three_registers_within_50_ms_merge_into_one_topic() {
     world.settle();
     let before = changed_topics(&world, OWNER).len();
     for index in 0..3 {
-        assert!(world.register("com.example.reg", COLLECT, &format!("e{index}"), 50, r#"{"id":"x"}"#).is_ok());
+        assert!(world
+            .register(
+                "com.example.reg",
+                COLLECT,
+                &format!("e{index}"),
+                50,
+                r#"{"id":"x"}"#
+            )
+            .is_ok());
         world.advance_ms(10);
     }
     world.advance_ms(100);
@@ -651,10 +804,14 @@ fn ext_026_registers_more_than_50_ms_apart_send_two_topics() {
     world.advance_ms(100);
     world.settle();
     let before = changed_topics(&world, OWNER).len();
-    assert!(world.register("com.example.reg", COLLECT, "e0", 50, r#"{"id":"x"}"#).is_ok());
+    assert!(world
+        .register("com.example.reg", COLLECT, "e0", 50, r#"{"id":"x"}"#)
+        .is_ok());
     world.advance_ms(200);
     world.settle();
-    assert!(world.register("com.example.reg", COLLECT, "e1", 50, r#"{"id":"x"}"#).is_ok());
+    assert!(world
+        .register("com.example.reg", COLLECT, "e1", 50, r#"{"id":"x"}"#)
+        .is_ok());
     world.advance_ms(200);
     world.settle();
     assert_eq!(changed_topics(&world, OWNER).len() - before, 2);
@@ -664,7 +821,9 @@ fn ext_026_registers_more_than_50_ms_apart_send_two_topics() {
 #[test]
 fn ext_026_uninstall_disable_enable_and_unregister_each_send_a_topic() {
     let mut world = collect_world(true);
-    assert!(world.register("com.example.reg", COLLECT, "e0", 50, r#"{"id":"x"}"#).is_ok());
+    assert!(world
+        .register("com.example.reg", COLLECT, "e0", 50, r#"{"id":"x"}"#)
+        .is_ok());
     world.advance_ms(200);
     world.settle();
     let mut seen = changed_topics(&world, OWNER).len();
@@ -682,13 +841,19 @@ fn ext_026_uninstall_disable_enable_and_unregister_each_send_a_topic() {
 /// REQ: EXT-026
 #[test]
 fn ext_026_user_reorder_sends_a_topic() {
-    let mut world = hook_world("observe", vec![contrib("a", 10, pass(1)), contrib("b", 20, pass(1))]);
+    let mut world = hook_world(
+        "observe",
+        vec![contrib("a", 10, pass(1)), contrib("b", 20, pass(1))],
+    );
     world.advance_ms(200);
     world.settle();
     let before = changed_topics(&world, OWNER).len();
     world.set_user_order(
         POINT,
-        vec![("com.example.b".to_owned(), "e-b".to_owned()), ("com.example.a".to_owned(), "e-a".to_owned())],
+        vec![
+            ("com.example.b".to_owned(), "e-b".to_owned()),
+            ("com.example.a".to_owned(), "e-a".to_owned()),
+        ],
     );
     world.advance_ms(200);
     world.settle();
@@ -704,7 +869,9 @@ fn ext_026_owner_needs_no_topics_subscribe_grant() {
     world.settle();
     let granted = &world.audit();
     assert!(!changed_topics(&world, OWNER).is_empty());
-    assert!(granted.iter().all(|record| record.action != "grant-topics-subscribe"));
+    assert!(granted
+        .iter()
+        .all(|record| record.action != "grant-topics-subscribe"));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -725,7 +892,14 @@ fn ext_027_contributor_installed_before_owner_succeeds_and_is_dormant() {
 fn ext_027_dormant_contribution_becomes_active_when_owner_appears() {
     let mut world = ExtWorld::new();
     assert!(install_contrib(&mut world, POINT, &contrib("c1", 50, pass(1))).is_ok());
-    assert_eq!(diag_code(&world.install(Tier::T3, owner_manifest(OWNER, vec![hook_point("p", "observe")]), Vec::new())), "ok");
+    assert_eq!(
+        diag_code(&world.install(
+            Tier::T3,
+            owner_manifest(OWNER, vec![hook_point("p", "observe")]),
+            Vec::new()
+        )),
+        "ok"
+    );
     world.settle();
     assert!(world.is_active("com.example.c1", POINT, "e-c1"));
 }
@@ -764,7 +938,11 @@ fn ext_027_inactive_owner_does_not_make_contribution_dormant() {
 #[test]
 fn ext_028_client_handler_for_server_point_fails_extension_side() {
     let mut world = hook_world("observe", Vec::new());
-    let manifest = contributor_manifest_on("com.example.cli", "client", vec![ext_handler(POINT, "x", 50, "h")]);
+    let manifest = contributor_manifest_on(
+        "com.example.cli",
+        "client",
+        vec![ext_handler(POINT, "x", 50, "h")],
+    );
     let result = world.install(Tier::T3, manifest, vec![("h".to_owned(), pass(0))]);
     assert_eq!(diag_code(&result), "manifest.extension-side");
 }
@@ -775,7 +953,11 @@ fn ext_028_server_handler_for_client_point_fails_extension_side() {
     let mut world = ExtWorld::new();
     let owner = owner_manifest_on(OWNER, "client", vec![hook_point("p", "observe")]);
     assert_eq!(diag_code(&world.install(Tier::T3, owner, Vec::new())), "ok");
-    let manifest = contributor_manifest_on("com.example.srv", "server", vec![ext_handler(POINT, "x", 50, "h")]);
+    let manifest = contributor_manifest_on(
+        "com.example.srv",
+        "server",
+        vec![ext_handler(POINT, "x", 50, "h")],
+    );
     let result = world.install(Tier::T3, manifest, vec![("h".to_owned(), pass(0))]);
     assert_eq!(diag_code(&result), "manifest.extension-side");
 }
@@ -786,8 +968,15 @@ fn ext_028_handler_on_the_owner_side_installs() {
     let mut world = ExtWorld::new();
     let owner = owner_manifest_on(OWNER, "client", vec![hook_point("p", "observe")]);
     assert_eq!(diag_code(&world.install(Tier::T3, owner, Vec::new())), "ok");
-    let manifest = contributor_manifest_on("com.example.cli", "client", vec![ext_handler(POINT, "x", 50, "h")]);
-    assert_eq!(diag_code(&world.install(Tier::T3, manifest, vec![("h".to_owned(), pass(0))])), "ok");
+    let manifest = contributor_manifest_on(
+        "com.example.cli",
+        "client",
+        vec![ext_handler(POINT, "x", 50, "h")],
+    );
+    assert_eq!(
+        diag_code(&world.install(Tier::T3, manifest, vec![("h".to_owned(), pass(0))])),
+        "ok"
+    );
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -795,11 +984,21 @@ fn ext_028_handler_on_the_owner_side_installs() {
 // ---------------------------------------------------------------------------------------------
 
 fn service_entry_manifest(id: &str, service: &str, provides: bool) -> Value {
-    let provided = if provides { vec![service.to_owned()] } else { Vec::new() };
+    let provided = if provides {
+        vec![service.to_owned()]
+    } else {
+        Vec::new()
+    };
     let mut grants = vec!["extensions.contribute:ilium.core.search/sources".to_owned()];
-    grants.extend(provided.iter().map(|name| format!("services.provide:{name}")));
-    let services: Vec<Value> =
-        provided.iter().map(|name| json!({"name": name, "version": "0.1.0", "schema": service_schema()})).collect();
+    grants.extend(
+        provided
+            .iter()
+            .map(|name| format!("services.provide:{name}")),
+    );
+    let services: Vec<Value> = provided
+        .iter()
+        .map(|name| json!({"name": name, "version": "0.1.0", "schema": service_schema()}))
+        .collect();
     json!({
         "id": id,
         "exports": ["service-provider"],
@@ -819,7 +1018,14 @@ fn service_entry_manifest(id: &str, service: &str, provides: bool) -> Value {
 fn ext_043_entry_service_of_own_prefix_that_it_provides_installs() {
     let mut world = ExtWorld::with_core_plugins();
     let manifest = service_entry_manifest("com.example.issues", "com.example.issues/search", true);
-    let result = world.install(Tier::T3, manifest, vec![("com.example.issues/search#query".to_owned(), script(1, HandlerAction::ServiceDone("[]".to_owned())))]);
+    let result = world.install(
+        Tier::T3,
+        manifest,
+        vec![(
+            "com.example.issues/search#query".to_owned(),
+            script(1, HandlerAction::ServiceDone("[]".to_owned())),
+        )],
+    );
     assert_eq!(diag_code(&result), "ok");
 }
 
@@ -846,10 +1052,21 @@ fn ext_043_entry_service_with_own_prefix_but_not_provided_fails_extension_entry_
 fn ext_043_owner_calls_entry_service_without_services_use() {
     let mut world = ExtWorld::with_core_plugins();
     let manifest = service_entry_manifest("com.example.issues", "com.example.issues/search", true);
-    let handlers = vec![("com.example.issues/search#query".to_owned(), script(1, HandlerAction::ServiceDone("[]".to_owned())))];
-    assert_eq!(diag_code(&world.install(Tier::T3, manifest, handlers)), "ok");
+    let handlers = vec![(
+        "com.example.issues/search#query".to_owned(),
+        script(1, HandlerAction::ServiceDone("[]".to_owned())),
+    )];
+    assert_eq!(
+        diag_code(&world.install(Tier::T3, manifest, handlers)),
+        "ok"
+    );
     world.settle();
-    let request = world.call_service("ilium.core.search", "com.example.issues/search", "query", "{}");
+    let request = world.call_service(
+        "ilium.core.search",
+        "com.example.issues/search",
+        "query",
+        "{}",
+    );
     assert!(request.is_ok(), "{request:?}");
 }
 
@@ -858,10 +1075,24 @@ fn ext_043_owner_calls_entry_service_without_services_use() {
 fn ext_043_other_plugin_without_services_use_is_still_not_permitted() {
     let mut world = ExtWorld::with_core_plugins();
     let manifest = service_entry_manifest("com.example.issues", "com.example.issues/search", true);
-    let handlers = vec![("com.example.issues/search#query".to_owned(), script(1, HandlerAction::ServiceDone("[]".to_owned())))];
-    assert_eq!(diag_code(&world.install(Tier::T3, manifest, handlers)), "ok");
-    assert_eq!(diag_code(&world.install(Tier::T3, json!({"id": "com.example.nogrant"}), Vec::new())), "ok");
-    let error = err_of(world.call_service("com.example.nogrant", "com.example.issues/search", "query", "{}"));
+    let handlers = vec![(
+        "com.example.issues/search#query".to_owned(),
+        script(1, HandlerAction::ServiceDone("[]".to_owned())),
+    )];
+    assert_eq!(
+        diag_code(&world.install(Tier::T3, manifest, handlers)),
+        "ok"
+    );
+    assert_eq!(
+        diag_code(&world.install(Tier::T3, json!({"id": "com.example.nogrant"}), Vec::new())),
+        "ok"
+    );
+    let error = err_of(world.call_service(
+        "com.example.nogrant",
+        "com.example.issues/search",
+        "query",
+        "{}",
+    ));
     assert_eq!(code_of(&error), ErrorCode::NotPermitted);
 }
 
@@ -883,36 +1114,67 @@ fn install_owner(point: Value) -> Result<(), Diagnostic> {
 /// REQ: EXT-044
 #[test]
 fn ext_044_on_failure_on_high_veto_point_is_allowed() {
-    assert_eq!(diag_code(&install_owner(high_veto_point(json!({"on_failure": "refuse"})))), "ok");
-    assert_eq!(diag_code(&install_owner(high_veto_point(json!({"on_failure": "pass"})))), "ok");
+    assert_eq!(
+        diag_code(&install_owner(high_veto_point(
+            json!({"on_failure": "refuse"})
+        ))),
+        "ok"
+    );
+    assert_eq!(
+        diag_code(&install_owner(high_veto_point(
+            json!({"on_failure": "pass"})
+        ))),
+        "ok"
+    );
 }
 
 /// REQ: EXT-044
 #[test]
 fn ext_044_on_failure_on_high_transform_point_is_allowed() {
-    let point = with(with(hook_point("p", "transform"), "risk", json!("high")), "on_failure", json!("refuse"));
+    let point = with(
+        with(hook_point("p", "transform"), "risk", json!("high")),
+        "on_failure",
+        json!("refuse"),
+    );
     assert_eq!(diag_code(&install_owner(point)), "ok");
 }
 
 /// REQ: EXT-044
 #[test]
 fn ext_044_on_failure_on_observe_point_fails_extension_point_invalid() {
-    let point = with(with(hook_point("p", "observe"), "risk", json!("high")), "on_failure", json!("pass"));
-    assert_eq!(diag_code(&install_owner(point)), "manifest.extension-point-invalid");
+    let point = with(
+        with(hook_point("p", "observe"), "risk", json!("high")),
+        "on_failure",
+        json!("pass"),
+    );
+    assert_eq!(
+        diag_code(&install_owner(point)),
+        "manifest.extension-point-invalid"
+    );
 }
 
 /// REQ: EXT-044
 #[test]
 fn ext_044_on_failure_on_standard_veto_point_fails_extension_point_invalid() {
     let point = with(hook_point("p", "veto"), "on_failure", json!("pass"));
-    assert_eq!(diag_code(&install_owner(point)), "manifest.extension-point-invalid");
+    assert_eq!(
+        diag_code(&install_owner(point)),
+        "manifest.extension-point-invalid"
+    );
 }
 
 /// REQ: EXT-044
 #[test]
 fn ext_044_on_failure_on_first_point_fails_extension_point_invalid() {
-    let point = with(with(hook_point("p", "first"), "risk", json!("high")), "on_failure", json!("pass"));
-    assert_eq!(diag_code(&install_owner(point)), "manifest.extension-point-invalid");
+    let point = with(
+        with(hook_point("p", "first"), "risk", json!("high")),
+        "on_failure",
+        json!("pass"),
+    );
+    assert_eq!(
+        diag_code(&install_owner(point)),
+        "manifest.extension-point-invalid"
+    );
 }
 
 /// REQ: EXT-044
@@ -926,7 +1188,10 @@ fn ext_044_final_check_on_transform_point_is_allowed() {
 #[test]
 fn ext_044_final_check_on_veto_point_fails_extension_point_invalid() {
     let point = with(hook_point("p", "veto"), "final_check", json!(true));
-    assert_eq!(diag_code(&install_owner(point)), "manifest.extension-point-invalid");
+    assert_eq!(
+        diag_code(&install_owner(point)),
+        "manifest.extension-point-invalid"
+    );
 }
 
 /// REQ: EXT-044
@@ -934,16 +1199,29 @@ fn ext_044_final_check_on_veto_point_fails_extension_point_invalid() {
 fn ext_044_guard_on_point_with_final_check_installs() {
     let mut world = ExtWorld::new();
     let point = with(hook_point("p", "transform"), "final_check", json!(true));
-    assert_eq!(diag_code(&world.install(Tier::T3, owner_manifest(OWNER, vec![point]), Vec::new())), "ok");
+    assert_eq!(
+        diag_code(&world.install(Tier::T3, owner_manifest(OWNER, vec![point]), Vec::new())),
+        "ok"
+    );
     let manifest = contributor_manifest("com.example.g", vec![ext_guard(POINT, "g", 50, "h")]);
-    assert_eq!(diag_code(&world.install(Tier::T3, manifest, vec![("h".to_owned(), pass(0))])), "ok");
+    assert_eq!(
+        diag_code(&world.install(Tier::T3, manifest, vec![("h".to_owned(), pass(0))])),
+        "ok"
+    );
 }
 
 /// REQ: EXT-044
 #[test]
 fn ext_044_guard_on_point_without_final_check_fails_extension_point_invalid() {
     let mut world = ExtWorld::new();
-    assert_eq!(diag_code(&world.install(Tier::T3, owner_manifest(OWNER, vec![hook_point("p", "transform")]), Vec::new())), "ok");
+    assert_eq!(
+        diag_code(&world.install(
+            Tier::T3,
+            owner_manifest(OWNER, vec![hook_point("p", "transform")]),
+            Vec::new()
+        )),
+        "ok"
+    );
     let manifest = contributor_manifest("com.example.g", vec![ext_guard(POINT, "g", 50, "h")]);
     let result = world.install(Tier::T3, manifest, vec![("h".to_owned(), pass(0))]);
     assert_eq!(diag_code(&result), "manifest.extension-point-invalid");
@@ -954,9 +1232,16 @@ fn ext_044_guard_on_point_without_final_check_fails_extension_point_invalid() {
 fn ext_044_guard_without_handler_fails_extension_point_invalid() {
     let mut world = ExtWorld::new();
     let point = with(hook_point("p", "transform"), "final_check", json!(true));
-    assert_eq!(diag_code(&world.install(Tier::T3, owner_manifest(OWNER, vec![point]), Vec::new())), "ok");
+    assert_eq!(
+        diag_code(&world.install(Tier::T3, owner_manifest(OWNER, vec![point]), Vec::new())),
+        "ok"
+    );
     let guard = json!({"point": POINT, "id": "g", "priority": 50, "guard": true});
-    let result = world.install(Tier::T3, contributor_manifest("com.example.g", vec![guard]), Vec::new());
+    let result = world.install(
+        Tier::T3,
+        contributor_manifest("com.example.g", vec![guard]),
+        Vec::new(),
+    );
     assert_eq!(diag_code(&result), "manifest.extension-point-invalid");
 }
 
@@ -964,14 +1249,24 @@ fn ext_044_guard_without_handler_fails_extension_point_invalid() {
 #[test]
 fn ext_045_veto_point_with_reply_schema_fails_extension_point_invalid() {
     let point = with(hook_point("p", "veto"), "reply_schema", reply_schema_text());
-    assert_eq!(diag_code(&install_owner(point)), "manifest.extension-point-invalid");
+    assert_eq!(
+        diag_code(&install_owner(point)),
+        "manifest.extension-point-invalid"
+    );
 }
 
 /// REQ: EXT-045
 #[test]
 fn ext_045_observe_point_with_reply_schema_fails_extension_point_invalid() {
-    let point = with(hook_point("p", "observe"), "reply_schema", reply_schema_text());
-    assert_eq!(diag_code(&install_owner(point)), "manifest.extension-point-invalid");
+    let point = with(
+        hook_point("p", "observe"),
+        "reply_schema",
+        reply_schema_text(),
+    );
+    assert_eq!(
+        diag_code(&install_owner(point)),
+        "manifest.extension-point-invalid"
+    );
 }
 
 /// REQ: EXT-045
@@ -981,7 +1276,10 @@ fn ext_045_transform_point_without_reply_schema_fails_extension_point_invalid() 
     if let Some(object) = point.as_object_mut() {
         object.remove("reply_schema");
     }
-    assert_eq!(diag_code(&install_owner(point)), "manifest.extension-point-invalid");
+    assert_eq!(
+        diag_code(&install_owner(point)),
+        "manifest.extension-point-invalid"
+    );
 }
 
 /// REQ: EXT-045
@@ -991,13 +1289,19 @@ fn ext_045_first_point_without_reply_schema_fails_extension_point_invalid() {
     if let Some(object) = point.as_object_mut() {
         object.remove("reply_schema");
     }
-    assert_eq!(diag_code(&install_owner(point)), "manifest.extension-point-invalid");
+    assert_eq!(
+        diag_code(&install_owner(point)),
+        "manifest.extension-point-invalid"
+    );
 }
 
 /// REQ: EXT-045
 #[test]
 fn ext_045_transform_and_first_points_with_reply_schema_install() {
-    assert_eq!(diag_code(&install_owner(hook_point("p", "transform"))), "ok");
+    assert_eq!(
+        diag_code(&install_owner(hook_point("p", "transform"))),
+        "ok"
+    );
     assert_eq!(diag_code(&install_owner(hook_point("p", "first"))), "ok");
 }
 

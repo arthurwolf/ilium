@@ -137,12 +137,16 @@ impl ScreensRig {
 
     /// USR-014/USR-031/USR-161/USR-162 set-up.
     pub fn install_plugin_that_traps_on_activate(&mut self, _id: &str, _name: &str) {
-        unimplemented!("client::plugin_host::screens_rig::ScreensRig::install_plugin_that_traps_on_activate")
+        unimplemented!(
+            "client::plugin_host::screens_rig::ScreensRig::install_plugin_that_traps_on_activate"
+        )
     }
 
     /// USR-014/USR-031/USR-161/USR-162 set-up.
     pub fn install_plugin_that_traps_in_render(&mut self, _id: &str, _name: &str, _view: &str) {
-        unimplemented!("client::plugin_host::screens_rig::ScreensRig::install_plugin_that_traps_in_render")
+        unimplemented!(
+            "client::plugin_host::screens_rig::ScreensRig::install_plugin_that_traps_in_render"
+        )
     }
 
     /// USR-014/USR-031/USR-161/USR-162 set-up.
@@ -156,7 +160,14 @@ impl ScreensRig {
     }
 
     /// USR-014/USR-031/USR-161/USR-162 set-up.
-    pub fn install_contributor(&mut self, _id: &str, _owner: &str, _point: &str, _hook_name: &str, _priority: i32) {
+    pub fn install_contributor(
+        &mut self,
+        _id: &str,
+        _owner: &str,
+        _point: &str,
+        _hook_name: &str,
+        _priority: i32,
+    ) {
         unimplemented!("client::plugin_host::screens_rig::ScreensRig::install_contributor")
     }
 
@@ -192,7 +203,9 @@ impl ScreensRig {
 
     /// USR-014/USR-031/USR-161/USR-162 set-up.
     pub fn write_system_policy_with_mode(&mut self, _toml: &str, _mode: u32) {
-        unimplemented!("client::plugin_host::screens_rig::ScreensRig::write_system_policy_with_mode")
+        unimplemented!(
+            "client::plugin_host::screens_rig::ScreensRig::write_system_policy_with_mode"
+        )
     }
 
     /// USR-014/USR-031/USR-161/USR-162 set-up.
@@ -277,7 +290,9 @@ impl ScreensRig {
 
     /// USR-022/USR-050/USR-120/USR-122 screens.
     pub fn open_extensions_contributor_view(&mut self, _id: &str) {
-        unimplemented!("client::plugin_host::screens_rig::ScreensRig::open_extensions_contributor_view")
+        unimplemented!(
+            "client::plugin_host::screens_rig::ScreensRig::open_extensions_contributor_view"
+        )
     }
 
     /// USR-032/USR-053/USR-080/USR-160/USR-163 read-back.
@@ -331,7 +346,13 @@ impl ScreensRig {
     }
 
     /// USR-032/USR-053/USR-080/USR-160/USR-163 read-back.
-    pub fn breach_extension(&mut self, _contributor: &str, _owner: &str, _point: &str, _times: u32) {
+    pub fn breach_extension(
+        &mut self,
+        _contributor: &str,
+        _owner: &str,
+        _point: &str,
+        _times: u32,
+    ) {
         unimplemented!("client::plugin_host::screens_rig::ScreensRig::breach_extension")
     }
 
@@ -367,7 +388,9 @@ impl ScreensRig {
 
     /// USR-032/USR-053/USR-080/USR-160/USR-163 read-back.
     pub fn restart_requested_in_safe_mode(&self) -> bool {
-        unimplemented!("client::plugin_host::screens_rig::ScreensRig::restart_requested_in_safe_mode")
+        unimplemented!(
+            "client::plugin_host::screens_rig::ScreensRig::restart_requested_in_safe_mode"
+        )
     }
 
     /// USR-032/USR-053/USR-080/USR-160/USR-163 read-back.

@@ -11,7 +11,13 @@ fn copy_reason(text: &str, rows: (u32, u32, u32, u32)) -> Option<String> {
     let pane = add_terminal_pane(&mut host, "api");
     host.terminal().set_selection(
         pane,
-        Selection { first_row: rows.0, first_column: rows.1 as u16, last_row: rows.2, last_column: rows.3 as u16, text: text.to_string() },
+        Selection {
+            first_row: rows.0,
+            first_column: rows.1 as u16,
+            last_row: rows.2,
+            last_column: rows.3 as u16,
+            text: text.to_string(),
+        },
     );
     let context = MenuContext {
         menu: "terminal".to_string(),
@@ -29,7 +35,10 @@ fn copy_reason(text: &str, rows: (u32, u32, u32, u32)) -> Option<String> {
 /// REQ: PORT:ilium-client/src/terminal_selection.rs::a_fresh_selection_is_empty
 #[test]
 fn port_selection_an_empty_selection_leaves_copy_disabled() {
-    assert_eq!(copy_reason("", (0, 0, 0, 0)).as_deref(), Some("nothing selected"));
+    assert_eq!(
+        copy_reason("", (0, 0, 0, 0)).as_deref(),
+        Some("nothing selected")
+    );
 }
 
 /// REQ: PORT:ilium-client/src/terminal_selection.rs::extracts_text_within_a_single_row

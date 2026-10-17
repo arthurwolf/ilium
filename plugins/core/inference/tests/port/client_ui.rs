@@ -11,7 +11,12 @@ fn tab() -> ViewTarget {
 }
 
 fn choose(host: &mut ilium_plugin_sdk::testing::FakeHost, index: u32) {
-    host.send_action(tab(), "provider", ActionKind::Changed, ActionValue::Index(index));
+    host.send_action(
+        tab(),
+        "provider",
+        ActionKind::Changed,
+        ActionValue::Index(index),
+    );
 }
 
 /// REQ: PORT:ilium-client/src/app.rs::freezing_stores_the_provider_session_resume_command
@@ -76,7 +81,10 @@ fn port_085_every_provider_choice_renders_a_provider_row_within_the_width() {
         choose(&mut host, index);
         let text = host.render(tab(), 56, 14).text();
         assert!(text.contains("Provider"), "index {index}");
-        assert!(text.lines().all(|line| line.chars().count() <= 56), "index {index}");
+        assert!(
+            text.lines().all(|line| line.chars().count() <= 56),
+            "index {index}"
+        );
     }
 }
 

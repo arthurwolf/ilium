@@ -48,7 +48,10 @@ fn author_b04_the_author_option_wins_over_both_variables() {
     let mut host = host_with_room();
     host.cli().set_env("AGENT_NAME", "review");
     host.cli().set_env("ILIUM_CHATROOM_AUTHOR", "fix-auth");
-    chat(&mut host, &["send", "--message", "hello", "--author", "explicit"]);
+    chat(
+        &mut host,
+        &["send", "--message", "hello", "--author", "explicit"],
+    );
     assert_eq!(author_of_only_record(&mut host), "explicit");
 }
 
@@ -79,7 +82,10 @@ fn output_b10_init_prints_chatroom_ready_at_the_path_of_the_room() {
 fn output_b10_tail_prints_timestamp_author_content_lines() {
     let mut host = host_with_room();
     send(&mut host, "one");
-    chat(&mut host, &["send", "--message", "two", "--author", "review"]);
+    chat(
+        &mut host,
+        &["send", "--message", "two", "--author", "review"],
+    );
     let run = chat(&mut host, &["tail"]);
     assert_eq!(run.code, Some(0));
     let lines: Vec<&str> = run.out.lines().collect();
@@ -99,7 +105,11 @@ fn output_b10_tail_defaults_to_100_records() {
     let lines: Vec<&str> = run.out.lines().collect();
     assert_eq!(lines.len(), 100);
     assert!(lines[0].ends_with(" | agent | record 1"), "{}", lines[0]);
-    assert!(lines[99].ends_with(" | agent | record 100"), "{}", lines[99]);
+    assert!(
+        lines[99].ends_with(" | agent | record 100"),
+        "{}",
+        lines[99]
+    );
 }
 
 /// REQ: chatroom-B10
@@ -121,7 +131,11 @@ fn output_b10_tail_with_99_records_prints_99() {
 fn output_b10_tail_limit_selects_the_newest_records() {
     let mut host = host_with_records(10);
     let run = chat(&mut host, &["tail", "--limit", "3"]);
-    let contents: Vec<String> = run.out.lines().map(|line| line.rsplit(" | ").next().unwrap_or("").to_string()).collect();
+    let contents: Vec<String> = run
+        .out
+        .lines()
+        .map(|line| line.rsplit(" | ").next().unwrap_or("").to_string())
+        .collect();
     assert_eq!(contents, ["record 7", "record 8", "record 9"]);
 }
 
@@ -206,8 +220,12 @@ fn command_f062_send_without_any_room_in_the_parents_fails_in_the_current_direct
 #[test]
 fn command_f062_help_lists_the_four_subcommands_in_the_summary() {
     let manifest: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(manifest_path()).expect("manifest")).expect("json");
-    assert_eq!(manifest["contributes"]["cli"]["summary"], "Project chatroom: init, send, context, tail");
+        serde_json::from_str(&std::fs::read_to_string(manifest_path()).expect("manifest"))
+            .expect("json");
+    assert_eq!(
+        manifest["contributes"]["cli"]["summary"],
+        "Project chatroom: init, send, context, tail"
+    );
 }
 
 /// REQ: F-062
@@ -215,7 +233,8 @@ fn command_f062_help_lists_the_four_subcommands_in_the_summary() {
 fn command_f062_send_while_the_server_side_is_the_only_one_running_needs_no_client() {
     // requires_server is false in the manifest: the command works on the file alone.
     let manifest: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(manifest_path()).expect("manifest")).expect("json");
+        serde_json::from_str(&std::fs::read_to_string(manifest_path()).expect("manifest"))
+            .expect("json");
     assert_eq!(manifest["contributes"]["cli"]["requires_server"], false);
     let mut host = host_with_room();
     assert_eq!(send(&mut host, "no client").code, Some(0));

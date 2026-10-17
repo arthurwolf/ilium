@@ -73,7 +73,9 @@ pub fn with_component(_harness: HostHarness, _bytes: Vec<u8>) -> HostHarness {
 
 /// ilium-plugin-host `HostHarness::settings_json(json: String) -> HostHarness` (CONF probe cases).
 pub fn settings_json(_harness: HostHarness, _json: String) -> HostHarness {
-    missing("ilium_plugin_host::testing::HostHarness::settings_json(self, json: String) -> HostHarness")
+    missing(
+        "ilium_plugin_host::testing::HostHarness::settings_json(self, json: String) -> HostHarness",
+    )
 }
 
 /// ilium-plugin-host `HarnessHandle::deactivate(reason) -> Option<Vec<u8>>` (CONF-LIFE-03, -05).

@@ -5,7 +5,11 @@ use ilium_plugin_sdk::types::ErrorCode;
 
 use crate::common::*;
 
-fn raw(host: &mut ilium_plugin_sdk::testing::FakeHost, method: &str, payload: &str) -> Result<String, ilium_plugin_sdk::types::PluginError> {
+fn raw(
+    host: &mut ilium_plugin_sdk::testing::FakeHost,
+    method: &str,
+    payload: &str,
+) -> Result<String, ilium_plugin_sdk::types::PluginError> {
     host.call_service(SERVICE, method, payload)
 }
 
@@ -13,7 +17,8 @@ fn raw(host: &mut ilium_plugin_sdk::testing::FakeHost, method: &str, payload: &s
 #[test]
 fn service_063_install_without_a_block_is_invalid_argument() {
     let mut host = server_host();
-    let error = raw(&mut host, "install", r#"{"target":"claude-global"}"#).expect_err("block is required");
+    let error =
+        raw(&mut host, "install", r#"{"target":"claude-global"}"#).expect_err("block is required");
     assert_eq!(error.code, ErrorCode::InvalidArgument);
 }
 
@@ -21,7 +26,8 @@ fn service_063_install_without_a_block_is_invalid_argument() {
 #[test]
 fn service_063_install_without_a_target_is_invalid_argument() {
     let mut host = server_host();
-    let error = raw(&mut host, "install", r#"{"block":"progress"}"#).expect_err("target is required");
+    let error =
+        raw(&mut host, "install", r#"{"block":"progress"}"#).expect_err("target is required");
     assert_eq!(error.code, ErrorCode::InvalidArgument);
 }
 
@@ -29,14 +35,22 @@ fn service_063_install_without_a_target_is_invalid_argument() {
 #[test]
 fn service_063_remove_without_a_block_or_target_is_invalid_argument() {
     let mut host = server_host();
-    assert_eq!(raw(&mut host, "remove", "{}").expect_err("params").code, ErrorCode::InvalidArgument);
+    assert_eq!(
+        raw(&mut host, "remove", "{}").expect_err("params").code,
+        ErrorCode::InvalidArgument
+    );
 }
 
 /// REQ: F-063
 #[test]
 fn service_063_a_block_that_is_not_a_string_is_invalid_argument() {
     let mut host = server_host();
-    let error = raw(&mut host, "install", r#"{"block":7,"target":"claude-global"}"#).expect_err("type");
+    let error = raw(
+        &mut host,
+        "install",
+        r#"{"block":7,"target":"claude-global"}"#,
+    )
+    .expect_err("type");
     assert_eq!(error.code, ErrorCode::InvalidArgument);
 }
 
@@ -44,14 +58,22 @@ fn service_063_a_block_that_is_not_a_string_is_invalid_argument() {
 #[test]
 fn service_063_a_payload_that_is_not_json_is_invalid_argument() {
     let mut host = server_host();
-    assert_eq!(raw(&mut host, "install", "not json").expect_err("json").code, ErrorCode::InvalidArgument);
+    assert_eq!(
+        raw(&mut host, "install", "not json")
+            .expect_err("json")
+            .code,
+        ErrorCode::InvalidArgument
+    );
 }
 
 /// REQ: F-063
 #[test]
 fn service_063_a_payload_that_is_not_an_object_is_invalid_argument() {
     let mut host = server_host();
-    assert_eq!(raw(&mut host, "status", "[1]").expect_err("object").code, ErrorCode::InvalidArgument);
+    assert_eq!(
+        raw(&mut host, "status", "[1]").expect_err("object").code,
+        ErrorCode::InvalidArgument
+    );
 }
 
 /// REQ: F-063
@@ -94,7 +116,9 @@ fn service_063_status_accepts_an_empty_object_and_returns_the_targets_array() {
 fn service_063_install_into_the_project_claude_file_creates_it_with_the_block() {
     let mut host = project_host();
     install(&mut host, "progress", CLAUDE_PROJECT).expect("install");
-    assert!(get(&mut host, project_claude_file()).expect("file").contains(PROGRESS_OPEN));
+    assert!(get(&mut host, project_claude_file())
+        .expect("file")
+        .contains(PROGRESS_OPEN));
     assert_eq!(get(&mut host, project_agents_file()), None);
 }
 
@@ -103,7 +127,9 @@ fn service_063_install_into_the_project_claude_file_creates_it_with_the_block() 
 fn service_063_install_into_the_project_agents_file_leaves_the_claude_file_alone() {
     let mut host = project_host();
     install(&mut host, "progress", CODEX_PROJECT).expect("install");
-    assert!(get(&mut host, project_agents_file()).expect("file").contains(PROGRESS_OPEN));
+    assert!(get(&mut host, project_agents_file())
+        .expect("file")
+        .contains(PROGRESS_OPEN));
     assert_eq!(get(&mut host, project_claude_file()), None);
 }
 
@@ -114,7 +140,10 @@ fn service_063_remove_from_a_project_file_keeps_the_project_text() {
     put(&mut host, project_claude_file(), "# Project\n");
     install(&mut host, "chatroom", CLAUDE_PROJECT).expect("install");
     call(&mut host, "remove", "chatroom", CLAUDE_PROJECT).expect("remove");
-    assert_eq!(get(&mut host, project_claude_file()).as_deref(), Some("# Project\n"));
+    assert_eq!(
+        get(&mut host, project_claude_file()).as_deref(),
+        Some("# Project\n")
+    );
 }
 
 /// REQ: F-063
@@ -122,7 +151,10 @@ fn service_063_remove_from_a_project_file_keeps_the_project_text() {
 fn service_063_chatroom_setup_in_a_project_also_creates_chatroom_md() {
     let mut host = project_host();
     install(&mut host, "chatroom", CLAUDE_PROJECT).expect("install");
-    assert!(get(&mut host, chatroom_file()).is_some(), "CHATROOM.md exists");
+    assert!(
+        get(&mut host, chatroom_file()).is_some(),
+        "CHATROOM.md exists"
+    );
 }
 
 /// REQ: F-063
@@ -137,9 +169,16 @@ fn service_063_progress_setup_does_not_create_chatroom_md() {
 #[test]
 fn service_063_chatroom_setup_keeps_an_existing_chatroom_md_byte_for_byte() {
     let mut host = project_host();
-    put(&mut host, chatroom_file(), "2026-10-13 10:00:00 user hello\n");
+    put(
+        &mut host,
+        chatroom_file(),
+        "2026-10-13 10:00:00 user hello\n",
+    );
     install(&mut host, "chatroom", CLAUDE_PROJECT).expect("install");
-    assert_eq!(get(&mut host, chatroom_file()).as_deref(), Some("2026-10-13 10:00:00 user hello\n"));
+    assert_eq!(
+        get(&mut host, chatroom_file()).as_deref(),
+        Some("2026-10-13 10:00:00 user hello\n")
+    );
 }
 
 /// REQ: F-063
@@ -151,7 +190,8 @@ fn service_063_chatroom_setup_installs_the_hook_command_that_delivers_messages()
     let mut found = false;
     for path in paths {
         if let Some(text) = get(&mut host, path) {
-            found |= text.contains("ilium chat context --limit 40 --since-last-read --max-bytes 2048");
+            found |=
+                text.contains("ilium chat context --limit 40 --since-last-read --max-bytes 2048");
         }
     }
     assert!(found, "no file holds the chatroom hook command");
@@ -195,5 +235,12 @@ fn service_063_installing_the_chatroom_hook_twice_does_not_duplicate_it() {
 fn service_063_the_install_reply_is_a_json_object_with_only_the_status_key() {
     let mut host = server_host();
     let reply = install(&mut host, "chatroom", CODEX_GLOBAL).expect("install");
-    assert_eq!(reply.as_object().expect("object").keys().collect::<Vec<_>>(), ["status"]);
+    assert_eq!(
+        reply
+            .as_object()
+            .expect("object")
+            .keys()
+            .collect::<Vec<_>>(),
+        ["status"]
+    );
 }

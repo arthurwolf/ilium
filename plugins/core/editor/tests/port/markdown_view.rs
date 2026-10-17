@@ -15,7 +15,12 @@ fn port_view_blank_line_blocks_count_in_height_and_leave_rows() {
 #[test]
 fn port_view_scrolling_across_blank_rows_keeps_content_aligned() {
     let text: String = (0..30).map(|n| format!("line {n}\n\n")).collect();
-    let mut host = plain_host("n.md", Some("markdown"), &text, &[("markdown_rendered_by_default", json!(true))]);
+    let mut host = plain_host(
+        "n.md",
+        Some("markdown"),
+        &text,
+        &[("markdown_rendered_by_default", json!(true))],
+    );
     let top = render_pane(&mut host, 40, 8);
     assert!(top.find("line 0").is_some());
     let gap = row_of(&top, "line 1") - row_of(&top, "line 0");
@@ -33,11 +38,27 @@ fn port_view_fitted_document_shows_everything_without_scrolling() {
 #[test]
 fn port_view_line_display_changes_rendered_height_and_text() {
     let clip = {
-        let mut host = plain_host("n.md", Some("markdown"), "abcdef\n", &[("markdown_rendered_by_default", json!(true)), ("line_display", json!("clip"))]);
+        let mut host = plain_host(
+            "n.md",
+            Some("markdown"),
+            "abcdef\n",
+            &[
+                ("markdown_rendered_by_default", json!(true)),
+                ("line_display", json!("clip")),
+            ],
+        );
         render_pane(&mut host, 3, 6)
     };
     let wrap = {
-        let mut host = plain_host("n.md", Some("markdown"), "abcdef\n", &[("markdown_rendered_by_default", json!(true)), ("line_display", json!("wrap"))]);
+        let mut host = plain_host(
+            "n.md",
+            Some("markdown"),
+            "abcdef\n",
+            &[
+                ("markdown_rendered_by_default", json!(true)),
+                ("line_display", json!("wrap")),
+            ],
+        );
         render_pane(&mut host, 3, 6)
     };
     assert!(clip.find("def").is_none(), "{}", clip.text());
@@ -45,7 +66,12 @@ fn port_view_line_display_changes_rendered_height_and_text() {
     let (abc_row, _) = wrap.find("abc").expect("abc on the first wrapped row");
     let (def_row, def_column) = wrap.find("def").expect("def wrapped onto a following row");
     assert!(def_row > abc_row, "{}", wrap.text());
-    assert_eq!(def_column, wrap.find("abc").expect("abc").1, "{}", wrap.text());
+    assert_eq!(
+        def_column,
+        wrap.find("abc").expect("abc").1,
+        "{}",
+        wrap.text()
+    );
 }
 
 /// REQ: PORT:ilium-client/src/markdown/render.rs::plain_text_heading_avoids_the_graphics_protocol_and_remains_bold
@@ -59,7 +85,9 @@ fn port_render_plain_text_heading_is_bold() {
 /// REQ: PORT:ilium-client/src/markdown/render.rs::missing_local_image_falls_back_to_placeholder_text
 #[test]
 fn port_render_missing_local_image_falls_back_to_placeholder_text() {
-    assert!(rendered_screen("![alt text](missing.png)\n").text().contains("alt text"));
+    assert!(rendered_screen("![alt text](missing.png)\n")
+        .text()
+        .contains("alt text"));
 }
 
 /// REQ: PORT:ilium-client/src/markdown/render.rs::source_blank_line_paints_an_empty_terminal_row
@@ -76,5 +104,8 @@ fn port_render_blank_line_after_code_block_has_no_code_background() {
     let screen = rendered_screen("```\ncode\n```\n\ntext\n");
     let (code_row, code_column) = screen.find("code").expect("code");
     let blank = screen.cell(code_row + 2, code_column);
-    assert_ne!(blank.background, screen.cell(code_row, code_column).background);
+    assert_ne!(
+        blank.background,
+        screen.cell(code_row, code_column).background
+    );
 }

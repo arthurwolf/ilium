@@ -3,8 +3,8 @@
 
 use std::time::Duration;
 
-use ilium_plugin_api::Diagnostic;
 use ilium_plugin_api::platform::Platform;
+use ilium_plugin_api::Diagnostic;
 use ilium_plugin_api::Tier;
 
 /// Whether the tier's sandbox is available on the platform; `sandbox.unavailable` otherwise.

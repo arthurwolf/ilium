@@ -3,8 +3,8 @@
 
 use crate::support::{active_host, buffer_ref, open_file};
 use ilium_plugin_sdk::generated::types::{
-    BufferId, EditorChangedEvent, EditorPointerEvent, Event, Intent, NodeId, PointerButton, PointerKind,
-    PointerModifiers, TextPosition, ViewPointer,
+    BufferId, EditorChangedEvent, EditorPointerEvent, Event, Intent, NodeId, PointerButton,
+    PointerKind, PointerModifiers, TextPosition, ViewPointer,
 };
 use serde_json::json;
 
@@ -38,7 +38,9 @@ fn f_114_click_on_a_todo_line_creates_a_pane_with_the_line_as_input() {
     let mut host = todo_host("fn a() {}\nTODO write docs\n");
     let submissions = host.deliver_one(pointer(1, 1, PointerKind::Down));
     assert_eq!(submissions.len(), 1);
-    let Intent::CreatePane(spec) = &submissions[0].intent else { panic!("create-pane") };
+    let Intent::CreatePane(spec) = &submissions[0].intent else {
+        panic!("create-pane")
+    };
     assert_eq!(spec.content_kind, "ilium.terminal");
     let input = spec.initial_input.clone().unwrap_or_default();
     assert!(input.contains("TODO write docs"), "{input}");
@@ -49,9 +51,14 @@ fn f_114_click_on_a_todo_line_creates_a_pane_with_the_line_as_input() {
 fn f_114_default_prompt_names_the_file_and_the_one_based_line() {
     let mut host = todo_host("fn a() {}\nTODO write docs\n");
     let submissions = host.deliver_one(pointer(1, 1, PointerKind::Down));
-    let Intent::CreatePane(spec) = &submissions[0].intent else { panic!("create-pane") };
+    let Intent::CreatePane(spec) = &submissions[0].intent else {
+        panic!("create-pane")
+    };
     let input = spec.initial_input.clone().unwrap_or_default();
-    assert!(input.starts_with("/goal please do the following task: \"TODO write docs\""), "{input}");
+    assert!(
+        input.starts_with("/goal please do the following task: \"TODO write docs\""),
+        "{input}"
+    );
     assert!(input.contains("src/todo.rs at line 2"), "{input}");
 }
 
@@ -60,7 +67,9 @@ fn f_114_default_prompt_names_the_file_and_the_one_based_line() {
 fn f_023_line_text_is_kept_verbatim_without_template_interpretation() {
     let mut host = todo_host("TODO <b>{{x}} $HOME \"q\"\n");
     let submissions = host.deliver_one(pointer(1, 0, PointerKind::Down));
-    let Intent::CreatePane(spec) = &submissions[0].intent else { panic!("create-pane") };
+    let Intent::CreatePane(spec) = &submissions[0].intent else {
+        panic!("create-pane")
+    };
     let input = spec.initial_input.clone().unwrap_or_default();
     assert!(input.contains("TODO <b>{{x}} $HOME \"q\""), "{input}");
 }
@@ -76,28 +85,36 @@ fn f_114_indented_todo_line_still_counts() {
 #[test]
 fn f_023_click_on_a_non_todo_line_submits_nothing() {
     let mut host = todo_host("fn a() {}\nTODO write docs\n");
-    assert!(host.deliver_one(pointer(1, 0, PointerKind::Down)).is_empty());
+    assert!(host
+        .deliver_one(pointer(1, 0, PointerKind::Down))
+        .is_empty());
 }
 
 /// REQ: F-023
 #[test]
 fn f_023_todo_in_the_middle_of_a_line_does_not_count() {
     let mut host = todo_host("let x = 1; // TODO later\n");
-    assert!(host.deliver_one(pointer(1, 0, PointerKind::Down)).is_empty());
+    assert!(host
+        .deliver_one(pointer(1, 0, PointerKind::Down))
+        .is_empty());
 }
 
 /// REQ: F-023
 #[test]
 fn f_023_pointer_in_an_unknown_buffer_submits_nothing() {
     let mut host = todo_host("TODO write docs\n");
-    assert!(host.deliver_one(pointer(9, 0, PointerKind::Down)).is_empty());
+    assert!(host
+        .deliver_one(pointer(9, 0, PointerKind::Down))
+        .is_empty());
 }
 
 /// REQ: F-023
 #[test]
 fn f_023_pointer_beyond_the_last_line_submits_nothing() {
     let mut host = todo_host("TODO write docs\n");
-    assert!(host.deliver_one(pointer(1, 40, PointerKind::Down)).is_empty());
+    assert!(host
+        .deliver_one(pointer(1, 40, PointerKind::Down))
+        .is_empty());
 }
 
 /// REQ: F-023
@@ -116,7 +133,9 @@ fn f_023_dedup_key_is_per_buffer_and_line() {
 fn f_114_create_pane_does_not_name_a_parent() {
     let mut host = todo_host("TODO a\n");
     let submissions = host.deliver_one(pointer(1, 0, PointerKind::Down));
-    let Intent::CreatePane(spec) = &submissions[0].intent else { panic!("create-pane") };
+    let Intent::CreatePane(spec) = &submissions[0].intent else {
+        panic!("create-pane")
+    };
     assert!(spec.parent.is_none());
 }
 
@@ -124,8 +143,12 @@ fn f_114_create_pane_does_not_name_a_parent() {
 #[test]
 fn f_019_editor_opened_and_closed_submit_nothing() {
     let mut host = active_host(&[]);
-    assert!(host.deliver_one(Event::EditorOpened(buffer_ref(1, None, Some("rust"), 1))).is_empty());
-    assert!(host.deliver_one(Event::EditorClosed(buffer_ref(1, None, Some("rust"), 1))).is_empty());
+    assert!(host
+        .deliver_one(Event::EditorOpened(buffer_ref(1, None, Some("rust"), 1)))
+        .is_empty());
+    assert!(host
+        .deliver_one(Event::EditorClosed(buffer_ref(1, None, Some("rust"), 1)))
+        .is_empty());
 }
 
 /// REQ: F-019

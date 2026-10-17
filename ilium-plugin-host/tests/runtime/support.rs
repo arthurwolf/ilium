@@ -149,7 +149,10 @@ pub fn log_text(host: &HarnessHandle) -> String {
 
 /// Number of log lines whose message contains the needle.
 pub fn log_count(host: &HarnessHandle, needle: &str) -> usize {
-    host.logs().iter().filter(|line| line.message.contains(needle)).count()
+    host.logs()
+        .iter()
+        .filter(|line| line.message.contains(needle))
+        .count()
 }
 
 /// The code text of a trap.
@@ -164,13 +167,19 @@ pub fn workspace_root() -> PathBuf {
 
 /// The text of a manual page under docs/plugins-manual/pages.
 pub fn manual_page(name: &str) -> String {
-    let path = workspace_root().join("docs/plugins-manual/pages").join(name);
+    let path = workspace_root()
+        .join("docs/plugins-manual/pages")
+        .join(name);
     std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("manual page {name}: {error}"))
 }
 
 /// Bytes of a built guest fixture; fails red with `fixture.missing` until the toolchain builds it.
 pub fn fixture_wasm(name: &str) -> Vec<u8> {
-    let path = workspace_root().join("plugins/fixtures").join(name).join("dist").join(format!("{name}.wasm"));
+    let path = workspace_root()
+        .join("plugins/fixtures")
+        .join(name)
+        .join("dist")
+        .join(format!("{name}.wasm"));
     assert!(path.exists(), "fixture.missing: {}", path.display());
     std::fs::read(&path).expect("fixture file is readable")
 }

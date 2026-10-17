@@ -29,12 +29,19 @@ impl CliRun {
 
     /// The raw stdout lines that start with `{`.
     pub fn record_lines(&self) -> Vec<String> {
-        self.stdout.lines().filter(|line| line.starts_with('{')).map(str::to_string).collect()
+        self.stdout
+            .lines()
+            .filter(|line| line.starts_with('{'))
+            .map(str::to_string)
+            .collect()
     }
 
     /// Records whose `type` equals `kind`.
     pub fn of_type(&self, kind: &str) -> Vec<serde_json::Value> {
-        self.records().into_iter().filter(|record| record["type"] == kind).collect()
+        self.records()
+            .into_iter()
+            .filter(|record| record["type"] == kind)
+            .collect()
     }
 }
 
@@ -64,8 +71,11 @@ pub fn project(label: &str, fixtures: &[(&str, &str)]) -> PathBuf {
 "#,
     );
     std::fs::create_dir_all(dir.join("dist")).expect("create dist");
-    std::fs::copy(required_env("ILIUM_TEST_COMPONENT_SERVER"), dir.join("dist/server.wasm"))
-        .expect("copy the built component fixture");
+    std::fs::copy(
+        required_env("ILIUM_TEST_COMPONENT_SERVER"),
+        dir.join("dist/server.wasm"),
+    )
+    .expect("copy the built component fixture");
     for (name, body) in fixtures {
         write_file(&dir, &format!("tests/fixtures/{name}"), body);
     }
@@ -94,7 +104,11 @@ pub fn run_with_env(dir: &Path, args: &[&str], envs: &[(&str, &str)]) -> CliRun 
 
 /// Runs the same command under a pseudo terminal with `script(1)`, so stdout is a terminal.
 pub fn run_on_terminal(dir: &Path, args: &[&str]) -> CliRun {
-    let mut line = format!("{} plugin test '{}'", required_env("ILIUM_BIN"), dir.display());
+    let mut line = format!(
+        "{} plugin test '{}'",
+        required_env("ILIUM_BIN"),
+        dir.display()
+    );
     for arg in args {
         line.push_str(&format!(" '{arg}'"));
     }

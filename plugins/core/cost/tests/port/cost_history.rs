@@ -24,7 +24,8 @@ fn error_of(reply: &Value) -> String {
 /// REQ: PORT:ilium-client/src/cost_history.rs::a_stop_request_ends_the_scan_without_panicking
 #[test]
 fn port_cost_history_a_stop_request_ends_the_scan_without_panicking() {
-    let reply = scan(json!({ "files": [claude("a", Some(5.0))], "window_days": 30, "cancelled": true }));
+    let reply =
+        scan(json!({ "files": [claude("a", Some(5.0))], "window_days": 30, "cancelled": true }));
     assert!(error_of(&reply).contains("incomplete"), "{reply}");
 }
 
@@ -51,7 +52,8 @@ fn port_cost_history_claude_sessions_carry_no_quota() {
 /// REQ: PORT:ilium-client/src/cost_history.rs::codex_quota_use_is_the_rise_inside_one_window_period
 #[test]
 fn port_cost_history_codex_quota_use_is_the_rise_inside_one_window_period() {
-    let quota = |name: &str, readings: Value| json!({ "agent": "codex", "name": name, "quota": readings });
+    let quota =
+        |name: &str, readings: Value| json!({ "agent": "codex", "name": name, "quota": readings });
     let reply = scan(json!({
         "files": [
             quota("rise", json!([[20.0, 100], [24.0, 100], [31.5, 100]])),
@@ -71,7 +73,12 @@ fn port_cost_history_codex_quota_use_is_the_rise_inside_one_window_period() {
 /// REQ: PORT:ilium-client/src/cost_history.rs::last_line_extraction_handles_missing_and_partial_lines
 #[test]
 fn port_cost_history_last_line_extraction_handles_missing_and_partial_lines() {
-    let find = |text: &str, needle: &str| client("history.last-line-containing", json!({ "text": text, "needle": needle }));
+    let find = |text: &str, needle: &str| {
+        client(
+            "history.last-line-containing",
+            json!({ "text": text, "needle": needle }),
+        )
+    };
     let text = "one\ntwo needle\nthree\nfour needle tail";
     assert_eq!(find(text, "needle"), json!("two needle"));
     assert_eq!(find("no newline needle", "needle"), Value::Null);
@@ -81,16 +88,16 @@ fn port_cost_history_last_line_extraction_handles_missing_and_partial_lines() {
 /// REQ: PORT:ilium-client/src/cost_history.rs::old_files_are_ignored
 #[test]
 fn port_cost_history_old_files_are_ignored() {
-    let reply = scan(json!({ "files": [claude("a", Some(5.0))], "window_days": 30, "now_offset_days": 200 }));
+    let reply = scan(
+        json!({ "files": [claude("a", Some(5.0))], "window_days": 30, "now_offset_days": 200 }),
+    );
     assert_eq!(reply["entries"], json!(0));
 }
 
 /// REQ: PORT:ilium-client/src/cost_history.rs::prices_codex_sessions_from_cumulative_tokens_and_the_last_model
 #[test]
 fn port_cost_history_prices_codex_sessions_from_cumulative_tokens_and_the_last_model() {
-    let codex = |name: &str, model: &str, input: u64, cached: u64, output: u64| {
-        json!({ "agent": "codex", "name": name, "model": model, "input": input, "cached": cached, "output": output })
-    };
+    let codex = |name: &str, model: &str, input: u64, cached: u64, output: u64| json!({ "agent": "codex", "name": name, "model": model, "input": input, "cached": cached, "output": output });
     let reply = scan(json!({
         "files": [
             codex("a", "gpt-5.6-sol", 2_000_000, 1_000_000, 100_000),
@@ -107,7 +114,8 @@ fn port_cost_history_prices_codex_sessions_from_cumulative_tokens_and_the_last_m
 /// REQ: PORT:ilium-client/src/cost_history.rs::reads_the_last_reported_claude_total_and_skips_files_without_one
 #[test]
 fn port_cost_history_reads_the_last_reported_claude_total_and_skips_files_without_one() {
-    let reply = scan(json!({ "files": [claude("a", Some(12.5)), claude("b", None)], "window_days": 30 }));
+    let reply =
+        scan(json!({ "files": [claude("a", Some(12.5)), claude("b", None)], "window_days": 30 }));
     assert_eq!(reply["entries"], json!(2));
     assert_eq!(reply["totals"], json!([12.5]));
 }
@@ -123,7 +131,9 @@ fn port_cost_history_refuses_calibration_when_a_configured_history_root_cannot_b
 /// REQ: PORT:ilium-client/src/cost_history.rs::unchanged_files_come_from_the_cache_and_changes_are_reparsed
 #[test]
 fn port_cost_history_unchanged_files_come_from_the_cache_and_changes_are_reparsed() {
-    let first = scan(json!({ "files": [claude("a", Some(3.0))], "window_days": 30, "cache": { "path": "cache/history.json" } }));
+    let first = scan(
+        json!({ "files": [claude("a", Some(3.0))], "window_days": 30, "cache": { "path": "cache/history.json" } }),
+    );
     assert_eq!(first["entries"], json!(1));
     // Poison the cached total; an unchanged file must return the cache.
     let second = scan(json!({

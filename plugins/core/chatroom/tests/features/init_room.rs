@@ -57,7 +57,10 @@ fn init_b05_twice_keeps_the_room_and_leaves_existing_agent_guidance_alone() {
     init(&mut host);
     init(&mut host);
     assert_eq!(room_text(&mut host), initial_room());
-    assert_eq!(host.fs().read("project:AGENTS.md").expect("kept"), b"# Existing\n");
+    assert_eq!(
+        host.fs().read("project:AGENTS.md").expect("kept"),
+        b"# Existing\n"
+    );
     assert!(room_text(&mut host).contains("Do not post routine progress narration"));
 }
 
@@ -111,7 +114,10 @@ fn init_b05_a_symlink_to_a_regular_file_is_refused_too() {
     host.fs().symlink(ROOM, "project:elsewhere.md");
     let run = init(&mut host);
     assert_eq!(run.code, Some(1));
-    assert_eq!(host.fs().read("project:elsewhere.md").expect("kept"), b"x\n");
+    assert_eq!(
+        host.fs().read("project:elsewhere.md").expect("kept"),
+        b"x\n"
+    );
 }
 
 /// REQ: chatroom-B05, chatroom-B11
@@ -122,7 +128,10 @@ fn init_b05_send_refuses_a_symlinked_room() {
     host.fs().symlink(ROOM, "project:elsewhere.md");
     let run = send(&mut host, "hello");
     assert_eq!(run.code, Some(1));
-    assert_eq!(host.fs().read("project:elsewhere.md").expect("kept"), b"x\n");
+    assert_eq!(
+        host.fs().read("project:elsewhere.md").expect("kept"),
+        b"x\n"
+    );
 }
 
 /// REQ: chatroom-B06
@@ -130,7 +139,8 @@ fn init_b05_send_refuses_a_symlinked_room() {
 fn ignore_b06_init_creates_the_gitignore_with_both_lines() {
     let mut host = server_host();
     init(&mut host);
-    let text = String::from_utf8(host.fs().read(GITIGNORE).expect(".gitignore created")).expect("utf-8");
+    let text =
+        String::from_utf8(host.fs().read(GITIGNORE).expect(".gitignore created")).expect("utf-8");
     assert_eq!(text, "/CHATROOM.md\n/CHATROOM.archive.md\n");
 }
 
@@ -179,7 +189,8 @@ fn ignore_b06_running_init_twice_adds_no_duplicate_line() {
 #[test]
 fn ignore_b06_a_line_with_surrounding_spaces_still_counts_as_present() {
     let mut host = server_host();
-    host.fs().write(GITIGNORE, b"  /CHATROOM.md  \n/CHATROOM.archive.md\n");
+    host.fs()
+        .write(GITIGNORE, b"  /CHATROOM.md  \n/CHATROOM.archive.md\n");
     init(&mut host);
     let text = String::from_utf8(host.fs().read(GITIGNORE).expect("kept")).expect("utf-8");
     assert_eq!(text.matches("CHATROOM.md").count(), 1);
@@ -211,7 +222,10 @@ fn init_f062_the_plugin_writes_no_agent_file_itself() {
         "project:AGENTS.md",
         "project:CLAUDE.md",
     ] {
-        assert!(host.fs().read(path).is_none(), "{path} must belong to Agent setup");
+        assert!(
+            host.fs().read(path).is_none(),
+            "{path} must belong to Agent setup"
+        );
     }
 }
 
@@ -219,10 +233,13 @@ fn init_f062_the_plugin_writes_no_agent_file_itself() {
 #[test]
 fn init_f062_a_failing_agent_setup_call_still_leaves_the_room_created() {
     let mut host = server_host();
-    host.inject_failure("services.call", ilium_plugin_sdk::types::PluginError::new(
-        ilium_plugin_sdk::types::ErrorCode::NotFound,
-        "agent-setup is not installed",
-    ));
+    host.inject_failure(
+        "services.call",
+        ilium_plugin_sdk::types::PluginError::new(
+            ilium_plugin_sdk::types::ErrorCode::NotFound,
+            "agent-setup is not installed",
+        ),
+    );
     let run = init(&mut host);
     assert_eq!(room_text(&mut host), initial_room());
     assert!(run.code.is_some());

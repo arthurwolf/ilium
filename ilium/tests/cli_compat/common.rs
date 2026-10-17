@@ -19,7 +19,10 @@ impl Run {
         self.stdout
             .lines()
             .filter(|line| !line.trim().is_empty())
-            .map(|line| serde_json::from_str(line).unwrap_or_else(|error| panic!("not JSON {line:?}: {error}")))
+            .map(|line| {
+                serde_json::from_str(line)
+                    .unwrap_or_else(|error| panic!("not JSON {line:?}: {error}"))
+            })
             .collect()
     }
 }
@@ -33,7 +36,10 @@ pub struct Sandbox {
 impl Sandbox {
     pub fn new() -> Sandbox {
         // Short prefix: the derived Unix socket path must fit sockaddr_un.
-        let root = tempfile::Builder::new().prefix("ic").tempdir().expect("sandbox dir");
+        let root = tempfile::Builder::new()
+            .prefix("ic")
+            .tempdir()
+            .expect("sandbox dir");
         let project = root.path().join("project");
         std::fs::create_dir_all(&project).expect("project dir");
         Sandbox { root, project }
@@ -99,21 +105,31 @@ pub fn run_bounded(mut command: Command) -> Run {
 }
 
 pub fn workspace_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).parent().expect("workspace root").to_path_buf()
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("workspace root")
+        .to_path_buf()
 }
 
 pub fn manual_page(name: &str) -> String {
-    let path = workspace_root().join("docs/plugins-manual/pages").join(format!("{name}.md"));
-    std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
+    let path = workspace_root()
+        .join("docs/plugins-manual/pages")
+        .join(format!("{name}.md"));
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
 }
 
 pub fn user_doc(name: &str) -> String {
     let path = workspace_root().join("src/docs").join(format!("{name}.md"));
-    std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
 }
 
 /// The first line of a record list that has the given `type`.
-pub fn first_of_type<'a>(records: &'a [serde_json::Value], kind: &str) -> Option<&'a serde_json::Value> {
+pub fn first_of_type<'a>(
+    records: &'a [serde_json::Value],
+    kind: &str,
+) -> Option<&'a serde_json::Value> {
     records.iter().find(|record| record["type"] == kind)
 }
 

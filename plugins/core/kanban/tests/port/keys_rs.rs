@@ -14,17 +14,41 @@ fn port_keys_board_dialog_types_plain_p_and_reserves_control_p_for_browse() {
     host.render(popup.clone(), 48, 8);
     host.key(popup.clone(), "p");
     host.settle();
-    assert_eq!(host.pending_requests().len(), 0, "a plain p starts no picker");
+    assert_eq!(
+        host.pending_requests().len(),
+        0,
+        "a plain p starts no picker"
+    );
     let typed = rows_of(&host.render(popup.clone(), 48, 8));
-    assert!(typed.iter().any(|row| row.contains("Markdown file") && row.contains('p')), "{typed:?}");
+    assert!(
+        typed
+            .iter()
+            .any(|row| row.contains("Markdown file") && row.contains('p')),
+        "{typed:?}"
+    );
 
     host.key(popup.clone(), "ctrl+p");
     host.settle();
-    assert_eq!(host.pending_requests().len(), 1, "ctrl+p starts the one fs.pick request");
-    let request = host.pending_requests().into_iter().next().expect("pick request");
+    assert_eq!(
+        host.pending_requests().len(),
+        1,
+        "ctrl+p starts the one fs.pick request"
+    );
+    let request = host
+        .pending_requests()
+        .into_iter()
+        .next()
+        .expect("pick request");
     host.complete(request, Outcome::Cancelled);
     host.settle();
     let back = rows_of(&host.render(popup, 48, 8));
-    assert!(back.iter().any(|row| row.contains("Open board from file")), "{back:?}");
-    assert!(back.iter().any(|row| row.contains("Markdown file") && row.contains('p')), "{back:?}");
+    assert!(
+        back.iter().any(|row| row.contains("Open board from file")),
+        "{back:?}"
+    );
+    assert!(
+        back.iter()
+            .any(|row| row.contains("Markdown file") && row.contains('p')),
+        "{back:?}"
+    );
 }

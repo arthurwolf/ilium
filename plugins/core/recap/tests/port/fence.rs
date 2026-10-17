@@ -7,7 +7,8 @@ use crate::support::*;
 #[test]
 fn port_fence_rejects_a_reattached_session_and_a_vanished_pane() {
     let (mut host, pane, invocation) = start_agent_run(&["user: fix the parser"]);
-    host.tree().set_agent_session(pane, "session-2", rows(&["user: fix the parser"]));
+    host.tree()
+        .set_agent_session(pane, "session-2", rows(&["user: fix the parser"]));
     let reattached = finish_run(&mut host, &invocation, answer(5, 5));
     assert_eq!(first_recap(&reattached)["state"], "stale");
 
@@ -28,9 +29,19 @@ fn port_fence_fingerprint_changes_with_evidence() {
     finish_run(&mut host, &invocation, answer(5, 5));
     let again = host.cli().invoke(&["recap"], b"");
     host.settle();
-    assert!(host.jobs().list().is_empty(), "identical evidence reuses the cached text");
-    assert_eq!(first_recap(&jsonl(&host.cli().refresh(&again).stdout()))["state"], "summarized");
+    assert!(
+        host.jobs().list().is_empty(),
+        "identical evidence reuses the cached text"
+    );
+    assert_eq!(
+        first_recap(&jsonl(&host.cli().refresh(&again).stdout()))["state"],
+        "summarized"
+    );
     host.tree().set_screen(pane, rows(&["b"]));
     host.cli().invoke(&["recap"], b"");
-    assert_eq!(host.jobs().list().len(), 1, "different evidence starts a new job");
+    assert_eq!(
+        host.jobs().list().len(),
+        1,
+        "different evidence starts a new job"
+    );
 }

@@ -91,7 +91,10 @@ fn wid_011_escape_order_capture_selection_popup_panel() {
     while let Some(layer) = rig.press_escape_and_report_layer() {
         order.push(layer);
     }
-    assert_eq!(order, vec!["key-capture", "selection", "popup", "modal-panel"]);
+    assert_eq!(
+        order,
+        vec!["key-capture", "selection", "popup", "modal-panel"]
+    );
 }
 
 /// REQ: WID-011
@@ -143,7 +146,10 @@ fn wid_029_close_popup_on_unopened_id_is_noop_ok() {
 fn wid_029_popup_id_unique_across_open_views() {
     let mut rig = WidgetRig::new(40, 10);
     rig.open_popup_in_view(0, "same").unwrap();
-    assert_eq!(rig.open_popup_in_view(1, "same").unwrap_err(), "already-exists");
+    assert_eq!(
+        rig.open_popup_in_view(1, "same").unwrap_err(),
+        "already-exists"
+    );
 }
 
 /// REQ: WID-013
@@ -197,7 +203,9 @@ fn wid_028_corrupt_image_shows_image_not_available() {
 /// REQ: WID-028
 #[test]
 fn wid_028_missing_buffer_or_pane_shows_not_found() {
-    let mut rig = WidgetRig::new(40, 5).grant("editor.read").grant("terminal.read-screen");
+    let mut rig = WidgetRig::new(40, 5)
+        .grant("editor.read")
+        .grant("terminal.read-screen");
     rig.show_code_view_missing_buffer();
     assert!(rig.screen_text().contains("not found"));
     rig.show_terminal_view_pane(9999);
@@ -207,7 +215,10 @@ fn wid_028_missing_buffer_or_pane_shows_not_found() {
 /// REQ: WID-022
 #[test]
 fn wid_022_calendar_without_unstable_listing_fails_install_unstable_missing() {
-    assert_eq!(install_with_widget("calendar", false).unwrap_err(), "manifest.unstable-missing");
+    assert_eq!(
+        install_with_widget("calendar", false).unwrap_err(),
+        "manifest.unstable-missing"
+    );
 }
 
 /// REQ: WID-022
@@ -263,7 +274,10 @@ fn wid_023_progress_row_percent_above_100_clamped() {
 fn wid_024_chart_draws_braille_when_supported() {
     let mut rig = WidgetRig::new(30, 8).capability("braille", true);
     rig.show_chart(&[1.0, 3.0, 2.0, 5.0]);
-    assert!(rig.screen_text().chars().any(|c| ('\u{2800}'..='\u{28ff}').contains(&c)));
+    assert!(rig
+        .screen_text()
+        .chars()
+        .any(|c| ('\u{2800}'..='\u{28ff}').contains(&c)));
 }
 
 /// REQ: WID-024
@@ -271,7 +285,10 @@ fn wid_024_chart_draws_braille_when_supported() {
 fn wid_024_chart_falls_back_to_text_line() {
     let mut rig = WidgetRig::new(30, 8).capability("braille", false);
     rig.show_chart(&[1.0, 3.0, 2.0, 5.0]);
-    assert!(!rig.screen_text().chars().any(|c| ('\u{2800}'..='\u{28ff}').contains(&c)));
+    assert!(!rig
+        .screen_text()
+        .chars()
+        .any(|c| ('\u{2800}'..='\u{28ff}').contains(&c)));
     assert!(rig.screen_text().chars().any(|c| !c.is_whitespace()));
 }
 
@@ -283,7 +300,13 @@ fn wid_025_paragraph_wraps_at_area_width() {
     for row in rig.screen_rows() {
         assert!(row.trim_end().chars().count() <= 10);
     }
-    assert!(rig.screen_rows().iter().filter(|r| !r.trim().is_empty()).count() >= 2);
+    assert!(
+        rig.screen_rows()
+            .iter()
+            .filter(|r| !r.trim().is_empty())
+            .count()
+            >= 2
+    );
 }
 
 /// REQ: WID-025, WID-008

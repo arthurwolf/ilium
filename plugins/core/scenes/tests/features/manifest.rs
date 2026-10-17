@@ -30,7 +30,10 @@ fn manifest_010_scene_side_only_with_base_world() {
 #[test]
 fn manifest_010_scene_capabilities_are_exact() {
     let m = manifest_value();
-    assert_eq!(m["capabilities"], json!({"scene": ["media.video", "location.observer", "gpu.kernels", "http:services.swpc.noaa.gov"]}));
+    assert_eq!(
+        m["capabilities"],
+        json!({"scene": ["media.video", "location.observer", "gpu.kernels", "http:services.swpc.noaa.gov"]})
+    );
 }
 
 /// REQ: COR-010
@@ -44,7 +47,10 @@ fn manifest_010_activation_is_scene_wildcard_and_tier_first_party() {
 /// REQ: COR-010, COR-011
 #[test]
 fn manifest_011_contributes_exactly_three_scenes_in_page_order() {
-    let ids: Vec<String> = scene_entries().iter().map(|e| e["id"].as_str().unwrap().to_string()).collect();
+    let ids: Vec<String> = scene_entries()
+        .iter()
+        .map(|e| e["id"].as_str().unwrap().to_string())
+        .collect();
     assert_eq!(ids, MANIFEST_SCENES);
 }
 
@@ -80,8 +86,20 @@ fn manifest_011_stars_entry_is_exact() {
 fn manifest_011_no_scene_declares_look_controls() {
     for entry in scene_entries() {
         let props = entry["settings_schema"]["properties"].as_object().unwrap();
-        for forbidden in ["brightness", "contrast", "hue", "palette", "dither", "gamma", "saturation"] {
-            assert!(!props.contains_key(forbidden), "{} declares {forbidden}", entry["id"]);
+        for forbidden in [
+            "brightness",
+            "contrast",
+            "hue",
+            "palette",
+            "dither",
+            "gamma",
+            "saturation",
+        ] {
+            assert!(
+                !props.contains_key(forbidden),
+                "{} declares {forbidden}",
+                entry["id"]
+            );
         }
     }
 }
@@ -99,7 +117,11 @@ fn manifest_011_boundary_frame_rate_caps_are_positive_and_within_sixty() {
 #[test]
 fn manifest_011_only_waves_is_pre_rendered_and_has_a_clip_length() {
     for entry in scene_entries() {
-        let pre = entry["modes"].as_array().unwrap().iter().any(|m| m == "pre-rendered");
+        let pre = entry["modes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m == "pre-rendered");
         assert_eq!(pre, entry["id"] == "waves", "{}", entry["id"]);
         assert_eq!(entry.get("clip_seconds").is_some(), pre, "{}", entry["id"]);
     }

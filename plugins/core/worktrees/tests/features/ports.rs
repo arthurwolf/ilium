@@ -11,8 +11,13 @@ fn port_067_an_invalid_branch_leaves_no_pane_and_no_worktree() {
     let submitted = create_worktree(&mut host, &json!({"branch": "bad name"}));
     assert!(create_panes(&submitted).is_empty());
     assert!(host.process().calls().is_empty());
-    let notice = host.last_notice().expect("the refusal is shown to the user");
-    assert!(notice.contains("bad name"), "the notice names the refused branch: {notice}");
+    let notice = host
+        .last_notice()
+        .expect("the refusal is shown to the user");
+    assert!(
+        notice.contains("bad name"),
+        "the notice names the refused branch: {notice}"
+    );
     assert!(host.published(TOPIC_CHANGED).is_empty());
 }
 
@@ -85,12 +90,37 @@ fn port_068_concurrent_existing_worktree_requests_admit_one_agent() {
 #[test]
 fn port_070_the_close_policy_persists_and_a_dirty_checkout_is_kept() {
     let mut host = server_host();
-    set_git(&mut host, "default_close_policy", json!("offer_removal_when_safe")).expect("valid");
-    assert_eq!(host.kernel_settings().get("git", "default_close_policy"), Some(json!("offer_removal_when_safe")));
-    host.process().on_args(&["status", "--porcelain"], ilium_plugin_sdk::host::process::ProcessExit { status: Some(0), signal: None, stdout: b" M a\n".to_vec(), stderr: Vec::new() });
-    host.deliver_one(channel_message("remove", json!({"path": "/w/a", "branch": "a"}).to_string().into_bytes()));
+    set_git(
+        &mut host,
+        "default_close_policy",
+        json!("offer_removal_when_safe"),
+    )
+    .expect("valid");
+    assert_eq!(
+        host.kernel_settings().get("git", "default_close_policy"),
+        Some(json!("offer_removal_when_safe"))
+    );
+    host.process().on_args(
+        &["status", "--porcelain"],
+        ilium_plugin_sdk::host::process::ProcessExit {
+            status: Some(0),
+            signal: None,
+            stdout: b" M a\n".to_vec(),
+            stderr: Vec::new(),
+        },
+    );
+    host.deliver_one(channel_message(
+        "remove",
+        json!({"path": "/w/a", "branch": "a"})
+            .to_string()
+            .into_bytes(),
+    ));
     host.settle();
-    assert!(host.process().calls().iter().all(|c| c.arguments.get(1).map(String::as_str) != Some("remove")));
+    assert!(host
+        .process()
+        .calls()
+        .iter()
+        .all(|c| c.arguments.get(1).map(String::as_str) != Some("remove")));
 }
 
 /// REQ: F-070, PORT:ilium-server/tests/workspace_ipc.rs::isolated_server_creates_attaches_and_removes_only_owned_worktree
@@ -98,9 +128,18 @@ fn port_070_the_close_policy_persists_and_a_dirty_checkout_is_kept() {
 fn port_070_only_an_owned_worktree_is_removed() {
     let mut host = server_host();
     host.workspace().add_foreign("docs-sweep", "docs-sweep");
-    host.deliver_one(channel_message("remove", json!({"path": "docs-sweep", "branch": "docs-sweep"}).to_string().into_bytes()));
+    host.deliver_one(channel_message(
+        "remove",
+        json!({"path": "docs-sweep", "branch": "docs-sweep"})
+            .to_string()
+            .into_bytes(),
+    ));
     host.settle();
-    assert!(host.process().calls().iter().all(|c| c.arguments.get(1).map(String::as_str) != Some("remove")));
+    assert!(host
+        .process()
+        .calls()
+        .iter()
+        .all(|c| c.arguments.get(1).map(String::as_str) != Some("remove")));
 }
 
 /// REQ: F-069, PORT:ilium-server/tests/workspace_ipc.rs::live_worktree_status_refreshes_and_replays_after_head_changes
@@ -144,7 +183,9 @@ fn port_067_a_retained_owned_worktree_is_still_registered_after_its_pane_closed(
     let mut host = server_host();
     create_worktree(&mut host, &json!({"branch": "fix-auth"}));
     host.deliver_one(pane_created(14, "fix-auth"));
-    host.deliver_one(ilium_plugin_sdk::types::Event::NodeRemoved(ilium_plugin_sdk::types::NodeId(14)));
+    host.deliver_one(ilium_plugin_sdk::types::Event::NodeRemoved(
+        ilium_plugin_sdk::types::NodeId(14),
+    ));
     host.settle();
     assert_eq!(registered(&mut host).len(), 1);
 }
@@ -154,9 +195,18 @@ fn port_067_a_retained_owned_worktree_is_still_registered_after_its_pane_closed(
 fn port_070_a_worktree_used_as_a_folder_root_is_not_removed() {
     let mut host = server_host();
     host.panes().add_running_in("/w/a");
-    host.deliver_one(channel_message("remove", json!({"path": "/w/a", "branch": "a"}).to_string().into_bytes()));
+    host.deliver_one(channel_message(
+        "remove",
+        json!({"path": "/w/a", "branch": "a"})
+            .to_string()
+            .into_bytes(),
+    ));
     host.settle();
-    assert!(host.process().calls().iter().all(|c| c.arguments.get(1).map(String::as_str) != Some("remove")));
+    assert!(host
+        .process()
+        .calls()
+        .iter()
+        .all(|c| c.arguments.get(1).map(String::as_str) != Some("remove")));
 }
 
 /// REQ: F-070, PORT:ilium-server/tests/workspace_ipc.rs::retained_worktree_with_an_open_editor_cannot_be_pruned
@@ -164,9 +214,18 @@ fn port_070_a_worktree_used_as_a_folder_root_is_not_removed() {
 fn port_070_a_worktree_with_an_open_editor_is_not_removed() {
     let mut host = server_host();
     host.panes().add_running_in("/w/a/src");
-    host.deliver_one(channel_message("remove", json!({"path": "/w/a", "branch": "a"}).to_string().into_bytes()));
+    host.deliver_one(channel_message(
+        "remove",
+        json!({"path": "/w/a", "branch": "a"})
+            .to_string()
+            .into_bytes(),
+    ));
     host.settle();
-    assert!(host.process().calls().iter().all(|c| c.arguments.get(1).map(String::as_str) != Some("remove")));
+    assert!(host
+        .process()
+        .calls()
+        .iter()
+        .all(|c| c.arguments.get(1).map(String::as_str) != Some("remove")));
 }
 
 /// REQ: F-067, PORT:ilium-server/tests/workspace_http.rs::disconnect_during_worktree_add_never_commits_a_pane

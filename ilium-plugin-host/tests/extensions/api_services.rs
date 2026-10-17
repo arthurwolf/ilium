@@ -30,7 +30,10 @@ fn never() -> HandlerScript {
 #[test]
 fn svc_001_call_without_services_use_returns_not_permitted() {
     let mut world = service_world("0.1.0", done(1, r#""x""#));
-    assert_eq!(diag_code(&world.install(Tier::T3, json!({"id": "com.example.nogrant"}), Vec::new())), "ok");
+    assert_eq!(
+        diag_code(&world.install(Tier::T3, json!({"id": "com.example.nogrant"}), Vec::new())),
+        "ok"
+    );
     let error = err_of(world.call_service("com.example.nogrant", SERVICE, "echo", OK_PAYLOAD));
     assert_eq!(code_of(&error), ErrorCode::NotPermitted);
 }
@@ -58,7 +61,11 @@ fn svc_001_provider_without_services_provide_fails_the_install() {
     let mut world = ExtWorld::new();
     let mut manifest = provider_manifest("com.example.prov", SERVICE, "0.1.0");
     manifest["capabilities"] = json!({"server": []});
-    let result = world.install(Tier::T3, manifest, vec![(method_key(SERVICE, "echo"), done(1, r#""x""#))]);
+    let result = world.install(
+        Tier::T3,
+        manifest,
+        vec![(method_key(SERVICE, "echo"), done(1, r#""x""#))],
+    );
     assert!(result.is_err());
 }
 
@@ -71,8 +78,12 @@ fn svc_001_provider_without_services_provide_fails_the_install() {
 fn svc_002_service_nobody_provides_returns_not_found_at_once() {
     let mut world = ExtWorld::new();
     let consumer = consumer_manifest("com.example.cons", "com.example.none/svc", None);
-    assert_eq!(diag_code(&world.install(Tier::T3, consumer, Vec::new())), "ok");
-    let error = err_of(world.call_service("com.example.cons", "com.example.none/svc", "echo", "{}"));
+    assert_eq!(
+        diag_code(&world.install(Tier::T3, consumer, Vec::new())),
+        "ok"
+    );
+    let error =
+        err_of(world.call_service("com.example.cons", "com.example.none/svc", "echo", "{}"));
     assert_eq!(code_of(&error), ErrorCode::NotFound);
     assert_eq!(world.now_ms(), 0);
 }
@@ -134,7 +145,10 @@ fn svc_003_reply_over_1_mib_completes_failed_invalid_argument() {
     let mut world = service_world("0.1.0", done(1, &big));
     let id = call_echo(&mut world, OK_PAYLOAD).unwrap_or(RequestId(0));
     world.settle();
-    assert_eq!(code_of(&failed_error(&world.outcome("com.example.cons", id))), ErrorCode::InvalidArgument);
+    assert_eq!(
+        code_of(&failed_error(&world.outcome("com.example.cons", id))),
+        ErrorCode::InvalidArgument
+    );
 }
 
 /// REQ: SVC-003
@@ -144,7 +158,10 @@ fn svc_003_reply_of_exactly_1_mib_is_delivered() {
     let mut world = service_world("0.1.0", done(1, &exact));
     let id = call_echo(&mut world, OK_PAYLOAD).unwrap_or(RequestId(0));
     world.settle();
-    assert!(matches!(world.outcome("com.example.cons", id), Some(Outcome::Ok)));
+    assert!(matches!(
+        world.outcome("com.example.cons", id),
+        Some(Outcome::Ok)
+    ));
 }
 
 /// REQ: SVC-004
@@ -159,7 +176,9 @@ fn svc_004_method_not_in_the_schema_returns_unsupported() {
 #[test]
 fn svc_004_method_in_the_schema_is_accepted() {
     let mut world = service_world("0.1.0", done(1, r#""x""#));
-    assert!(world.call_service("com.example.cons", SERVICE, "query", "{}").is_ok());
+    assert!(world
+        .call_service("com.example.cons", SERVICE, "query", "{}")
+        .is_ok());
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -194,7 +213,9 @@ fn svc_005_a_completed_call_frees_a_slot() {
         let _ = call_echo(&mut world, OK_PAYLOAD);
     }
     let first = world.service_calls_seen("com.example.prov")[0].0;
-    assert!(world.service_reply("com.example.prov", first, Ok(r#""done""#.to_owned())).is_ok());
+    assert!(world
+        .service_reply("com.example.prov", first, Ok(r#""done""#.to_owned()))
+        .is_ok());
     world.settle();
     assert!(call_echo(&mut world, OK_PAYLOAD).is_ok());
 }
@@ -205,13 +226,18 @@ fn svc_014_provider_accepts_64_in_flight_calls_and_the_65th_returns_busy() {
     let mut world = service_world("0.1.0", deferred());
     for name in ["c2", "c3"] {
         let manifest = consumer_manifest(&format!("com.example.{name}"), SERVICE, None);
-        assert_eq!(diag_code(&world.install(Tier::T3, manifest, Vec::new())), "ok");
+        assert_eq!(
+            diag_code(&world.install(Tier::T3, manifest, Vec::new())),
+            "ok"
+        );
     }
     for _ in 0..32 {
         assert!(call_echo(&mut world, OK_PAYLOAD).is_ok());
     }
     for _ in 0..32 {
-        assert!(world.call_service("com.example.c2", SERVICE, "echo", OK_PAYLOAD).is_ok());
+        assert!(world
+            .call_service("com.example.c2", SERVICE, "echo", OK_PAYLOAD)
+            .is_ok());
     }
     let error = err_of(world.call_service("com.example.c3", SERVICE, "echo", OK_PAYLOAD));
     assert_eq!(code_of(&error), ErrorCode::Busy);
@@ -224,7 +250,14 @@ fn svc_014_provider_accepts_64_in_flight_calls_and_the_65th_returns_busy() {
 fn consumer_active(provided: &str, required: &str) -> bool {
     let mut world = ExtWorld::new();
     let provider = provider_manifest("com.example.prov", SERVICE, provided);
-    assert_eq!(diag_code(&world.install(Tier::T3, provider, vec![(method_key(SERVICE, "echo"), done(1, r#""x""#))])), "ok");
+    assert_eq!(
+        diag_code(&world.install(
+            Tier::T3,
+            provider,
+            vec![(method_key(SERVICE, "echo"), done(1, r#""x""#))]
+        )),
+        "ok"
+    );
     let consumer = consumer_manifest("com.example.cons", SERVICE, Some(required));
     let result = world.install(Tier::T3, consumer, Vec::new());
     assert_eq!(diag_code(&result), "ok");
@@ -303,10 +336,16 @@ fn svc_007_provider_never_replies_completes_failed_timed_out_at_30_s() {
     let id = call_echo(&mut world, OK_PAYLOAD).unwrap_or(RequestId(0));
     world.advance_ms(29_999);
     world.settle();
-    assert!(world.outcome("com.example.cons", id).is_none(), "still pending at 29.999 s");
+    assert!(
+        world.outcome("com.example.cons", id).is_none(),
+        "still pending at 29.999 s"
+    );
     world.advance_ms(1);
     world.settle();
-    assert_eq!(code_of(&failed_error(&world.outcome("com.example.cons", id))), ErrorCode::TimedOut);
+    assert_eq!(
+        code_of(&failed_error(&world.outcome("com.example.cons", id))),
+        ErrorCode::TimedOut
+    );
 }
 
 /// REQ: SVC-007
@@ -316,9 +355,14 @@ fn svc_007_reply_just_before_30_s_completes_normally() {
     let id = call_echo(&mut world, OK_PAYLOAD).unwrap_or(RequestId(0));
     world.advance_ms(29_999);
     let call = world.service_calls_seen("com.example.prov")[0].0;
-    assert!(world.service_reply("com.example.prov", call, Ok(r#""late but ok""#.to_owned())).is_ok());
+    assert!(world
+        .service_reply("com.example.prov", call, Ok(r#""late but ok""#.to_owned()))
+        .is_ok());
     world.settle();
-    assert!(matches!(world.outcome("com.example.cons", id), Some(Outcome::Ok)));
+    assert!(matches!(
+        world.outcome("com.example.cons", id),
+        Some(Outcome::Ok)
+    ));
 }
 
 /// REQ: SVC-008
@@ -328,7 +372,10 @@ fn svc_008_provider_restart_mid_call_completes_failed_cancelled() {
     let id = call_echo(&mut world, OK_PAYLOAD).unwrap_or(RequestId(0));
     world.restart("com.example.prov");
     world.settle();
-    assert_eq!(code_of(&failed_error(&world.outcome("com.example.cons", id))), ErrorCode::Cancelled);
+    assert_eq!(
+        code_of(&failed_error(&world.outcome("com.example.cons", id))),
+        ErrorCode::Cancelled
+    );
 }
 
 /// REQ: SVC-008
@@ -338,7 +385,10 @@ fn svc_008_provider_disabled_mid_call_completes_failed_cancelled() {
     let id = call_echo(&mut world, OK_PAYLOAD).unwrap_or(RequestId(0));
     world.set_enabled("com.example.prov", false);
     world.settle();
-    assert_eq!(code_of(&failed_error(&world.outcome("com.example.cons", id))), ErrorCode::Cancelled);
+    assert_eq!(
+        code_of(&failed_error(&world.outcome("com.example.cons", id))),
+        ErrorCode::Cancelled
+    );
 }
 
 /// REQ: SVC-008
@@ -348,7 +398,10 @@ fn svc_008_provider_uninstalled_mid_call_completes_failed_cancelled() {
     let id = call_echo(&mut world, OK_PAYLOAD).unwrap_or(RequestId(0));
     world.uninstall("com.example.prov");
     world.settle();
-    assert_eq!(code_of(&failed_error(&world.outcome("com.example.cons", id))), ErrorCode::Cancelled);
+    assert_eq!(
+        code_of(&failed_error(&world.outcome("com.example.cons", id))),
+        ErrorCode::Cancelled
+    );
 }
 
 /// REQ: SVC-008
@@ -357,29 +410,44 @@ fn svc_008_provider_trap_mid_call_completes_failed_cancelled() {
     let mut world = service_world("0.1.0", script(1, HandlerAction::Trap));
     let id = call_echo(&mut world, OK_PAYLOAD).unwrap_or(RequestId(0));
     world.settle();
-    assert_eq!(code_of(&failed_error(&world.outcome("com.example.cons", id))), ErrorCode::Cancelled);
+    assert_eq!(
+        code_of(&failed_error(&world.outcome("com.example.cons", id))),
+        ErrorCode::Cancelled
+    );
 }
 
 /// REQ: SVC-008
 #[test]
 fn svc_008_every_pending_caller_is_cancelled() {
     let mut world = service_world("0.1.0", deferred());
-    let ids: Vec<RequestId> = (0..5).filter_map(|_| call_echo(&mut world, OK_PAYLOAD).ok()).collect();
+    let ids: Vec<RequestId> = (0..5)
+        .filter_map(|_| call_echo(&mut world, OK_PAYLOAD).ok())
+        .collect();
     world.restart("com.example.prov");
     world.settle();
     for id in ids {
-        assert_eq!(code_of(&failed_error(&world.outcome("com.example.cons", id))), ErrorCode::Cancelled);
+        assert_eq!(
+            code_of(&failed_error(&world.outcome("com.example.cons", id))),
+            ErrorCode::Cancelled
+        );
     }
 }
 
 /// REQ: SVC-009
 #[test]
-fn svc_009_reply_failing_the_result_schema_completes_failed_invalid_argument_and_provider_logs_error() {
+fn svc_009_reply_failing_the_result_schema_completes_failed_invalid_argument_and_provider_logs_error(
+) {
     let mut world = service_world("0.1.0", done(1, "42"));
     let id = call_echo(&mut world, OK_PAYLOAD).unwrap_or(RequestId(0));
     world.settle();
-    assert_eq!(code_of(&failed_error(&world.outcome("com.example.cons", id))), ErrorCode::InvalidArgument);
-    let logged = world.all_logs().iter().any(|line| line.plugin == "com.example.prov" && line.level == "error");
+    assert_eq!(
+        code_of(&failed_error(&world.outcome("com.example.cons", id))),
+        ErrorCode::InvalidArgument
+    );
+    let logged = world
+        .all_logs()
+        .iter()
+        .any(|line| line.plugin == "com.example.prov" && line.level == "error");
     assert!(logged, "the provider logs an error");
 }
 
@@ -389,7 +457,10 @@ fn svc_009_reply_matching_the_result_schema_completes_ok() {
     let mut world = service_world("0.1.0", done(1, r#""fine""#));
     let id = call_echo(&mut world, OK_PAYLOAD).unwrap_or(RequestId(0));
     world.settle();
-    assert!(matches!(world.outcome("com.example.cons", id), Some(Outcome::Ok)));
+    assert!(matches!(
+        world.outcome("com.example.cons", id),
+        Some(Outcome::Ok)
+    ));
 }
 
 /// REQ: SVC-010, WIT:ilium:host/services.take-reply
@@ -398,7 +469,10 @@ fn svc_010_take_reply_returns_the_json_once_and_none_the_second_time() {
     let mut world = service_world("0.1.0", done(1, r#""fine""#));
     let id = call_echo(&mut world, OK_PAYLOAD).unwrap_or(RequestId(0));
     world.settle();
-    assert_eq!(world.service_take_reply("com.example.cons", id), Some(r#""fine""#.to_owned()));
+    assert_eq!(
+        world.service_take_reply("com.example.cons", id),
+        Some(r#""fine""#.to_owned())
+    );
     assert_eq!(world.service_take_reply("com.example.cons", id), None);
 }
 
@@ -436,7 +510,9 @@ fn svc_011_second_reply_to_the_same_call_returns_not_found() {
     let mut world = service_world("0.1.0", deferred());
     let _ = call_echo(&mut world, OK_PAYLOAD);
     let call = world.service_calls_seen("com.example.prov")[0].0;
-    assert!(world.service_reply("com.example.prov", call, Ok(r#""a""#.to_owned())).is_ok());
+    assert!(world
+        .service_reply("com.example.prov", call, Ok(r#""a""#.to_owned()))
+        .is_ok());
     let error = err_of(world.service_reply("com.example.prov", call, Ok(r#""b""#.to_owned())));
     assert_eq!(code_of(&error), ErrorCode::NotFound);
 }
@@ -450,11 +526,21 @@ fn svc_011_second_reply_to_the_same_call_returns_not_found() {
 fn svc_012_consumer_installed_first_activates_after_the_provider() {
     let mut world = ExtWorld::new();
     let consumer = consumer_manifest("com.example.cons", SERVICE, Some("0.1.0"));
-    assert_eq!(diag_code(&world.install(Tier::T3, consumer, Vec::new())), "ok");
+    assert_eq!(
+        diag_code(&world.install(Tier::T3, consumer, Vec::new())),
+        "ok"
+    );
     world.settle();
     assert!(!world.plugin_active("com.example.cons"));
     let provider = provider_manifest("com.example.prov", SERVICE, "0.1.0");
-    assert_eq!(diag_code(&world.install(Tier::T3, provider, vec![(method_key(SERVICE, "echo"), done(1, r#""x""#))])), "ok");
+    assert_eq!(
+        diag_code(&world.install(
+            Tier::T3,
+            provider,
+            vec![(method_key(SERVICE, "echo"), done(1, r#""x""#))]
+        )),
+        "ok"
+    );
     world.settle();
     assert!(world.plugin_active("com.example.cons"));
 }
@@ -464,7 +550,10 @@ fn svc_012_consumer_installed_first_activates_after_the_provider() {
 fn svc_012_consumer_without_requires_activates_without_a_provider() {
     let mut world = ExtWorld::new();
     let consumer = consumer_manifest("com.example.cons", SERVICE, None);
-    assert_eq!(diag_code(&world.install(Tier::T3, consumer, Vec::new())), "ok");
+    assert_eq!(
+        diag_code(&world.install(Tier::T3, consumer, Vec::new())),
+        "ok"
+    );
     world.settle();
     assert!(world.plugin_active("com.example.cons"));
 }
@@ -474,17 +563,37 @@ fn svc_012_consumer_without_requires_activates_without_a_provider() {
 fn svc_013_provider_bumped_to_a_new_major_makes_the_old_consumer_inactive_until_updated() {
     let mut world = ExtWorld::new();
     let v1 = provider_manifest("com.example.prov", SERVICE, "1.0.0");
-    assert_eq!(diag_code(&world.install(Tier::T3, v1, vec![(method_key(SERVICE, "echo"), done(1, r#""x""#))])), "ok");
+    assert_eq!(
+        diag_code(&world.install(
+            Tier::T3,
+            v1,
+            vec![(method_key(SERVICE, "echo"), done(1, r#""x""#))]
+        )),
+        "ok"
+    );
     let consumer = consumer_manifest("com.example.cons", SERVICE, Some("1.0.0"));
-    assert_eq!(diag_code(&world.install(Tier::T3, consumer, Vec::new())), "ok");
+    assert_eq!(
+        diag_code(&world.install(Tier::T3, consumer, Vec::new())),
+        "ok"
+    );
     world.settle();
     assert!(world.plugin_active("com.example.cons"));
     let v2 = provider_manifest("com.example.prov", SERVICE, "2.0.0");
-    assert_eq!(diag_code(&world.update(Tier::T3, v2, vec![(method_key(SERVICE, "echo"), done(1, r#""x""#))])), "ok");
+    assert_eq!(
+        diag_code(&world.update(
+            Tier::T3,
+            v2,
+            vec![(method_key(SERVICE, "echo"), done(1, r#""x""#))]
+        )),
+        "ok"
+    );
     world.settle();
     assert!(!world.plugin_active("com.example.cons"));
     let consumer2 = consumer_manifest("com.example.cons", SERVICE, Some("2.0.0"));
-    assert_eq!(diag_code(&world.update(Tier::T3, consumer2, Vec::new())), "ok");
+    assert_eq!(
+        diag_code(&world.update(Tier::T3, consumer2, Vec::new())),
+        "ok"
+    );
     world.settle();
     assert!(world.plugin_active("com.example.cons"));
 }

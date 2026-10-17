@@ -26,7 +26,11 @@ fn port_002_exact_sample_limit_preserves_unicode_and_separating_lf() {
     assert_eq!(sample.len(), 1024 * 1024);
     let reply = preview(&mut host, "\u{1f980}", "r", &sample);
     let text = reply["preview"].as_str().expect("preview text");
-    assert!(text.ends_with("\n\u{2713} [\u{1f980}]"), "tail: {:?}", &text[text.len().saturating_sub(40)..]);
+    assert!(
+        text.ends_with("\n\u{2713} [\u{1f980}]"),
+        "tail: {:?}",
+        &text[text.len().saturating_sub(40)..]
+    );
 }
 
 /// REQ: PORT:ilium-client/src/text_trigger_dialog/preview_tests.rs::installed_result_keeps_job_and_storage_debit_until_physical_cpu_retirement
@@ -45,7 +49,10 @@ fn port_004_intrinsic_cpu_limit_reports_unavailable_before_copy_instead_of_retry
     let outcome = preview_result(&mut host, "(((a{100}){100}){100}){100}", "r", "aaaa");
     match outcome {
         Err(error) => assert_eq!(error.code, ErrorCode::InvalidArgument),
-        Ok(reply) => assert!(!reply["issues"].as_array().expect("issues").is_empty(), "{reply}"),
+        Ok(reply) => assert!(
+            !reply["issues"].as_array().expect("issues").is_empty(),
+            "{reply}"
+        ),
     }
 }
 
@@ -57,7 +64,10 @@ fn port_005_newer_revision_cancels_queued_old_original_and_old_result_never_inst
     let new = preview(&mut host, "two", "r", "one two");
     assert!(old["preview"].as_str().expect("old").contains("[one]"));
     let new_text = new["preview"].as_str().expect("new");
-    assert!(new_text.contains("[two]") && !new_text.contains("[one]"), "{new_text}");
+    assert!(
+        new_text.contains("[two]") && !new_text.contains("[one]"),
+        "{new_text}"
+    );
 }
 
 /// REQ: PORT:ilium-client/src/text_trigger_dialog/preview_tests.rs::sample_limit_with_one_to_three_bytes_before_unicode_refuses_without_livelock
@@ -68,7 +78,10 @@ fn port_006_sample_limit_with_one_to_three_bytes_before_unicode_refuses_without_
         let sample = format!("{}\u{1f980}", "a".repeat(1024 * 1024 - short));
         let reply = preview(&mut host, "a", "r", &sample);
         let issues = reply["issues"].as_array().expect("issues");
-        assert!(issues.iter().any(|issue| issue == "capture-limit"), "short {short}: {reply}");
+        assert!(
+            issues.iter().any(|issue| issue == "capture-limit"),
+            "short {short}: {reply}"
+        );
     }
 }
 
@@ -77,7 +90,12 @@ fn port_006_sample_limit_with_one_to_three_bytes_before_unicode_refuses_without_
 fn port_007_transient_job_refusal_retries_without_capturing_authored_draft() {
     let mut host = client_host();
     set_rules(&mut host, &["draft"], &["r"]);
-    assert!(preview_result(&mut host, "[", "r", "x").is_err() || preview(&mut host, "[", "r", "x")["issues"].as_array().is_some());
+    assert!(
+        preview_result(&mut host, "[", "r", "x").is_err()
+            || preview(&mut host, "[", "r", "x")["issues"]
+                .as_array()
+                .is_some()
+    );
     let ok = preview(&mut host, "x", "r", "x");
     assert!(ok["preview"].as_str().expect("preview").contains("[x]"));
     assert_eq!(host.settings().get("patterns"), Some(json!(["draft"])));
@@ -90,6 +108,8 @@ fn port_008_worker_preserves_exact_preview_semantics_and_regex_work_is_off_ui() 
     let reply = preview(&mut host, "bb", "r", "abba\nxxx");
     assert_eq!(reply["preview"], json!("\u{2713} a[bb]a\n\u{b7} xxx"));
     let zero = preview(&mut host, "^", "r", "alpha");
-    assert_eq!(zero["preview"], json!("\u{2713} alpha  \u{27ea}zero-width match\u{27eb}"));
+    assert_eq!(
+        zero["preview"],
+        json!("\u{2713} alpha  \u{27ea}zero-width match\u{27eb}")
+    );
 }
-

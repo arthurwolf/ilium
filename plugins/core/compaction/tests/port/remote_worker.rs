@@ -21,7 +21,10 @@ fn rwrk_progress_overflow_never_rewrites_a_committed_success_into_failure() {
         Err("Remote compaction stopped because its UI event queue was full".to_string())
     );
     assert_eq!(
-        host.worker_annotate_progress_overflow(Err("transcript verification failed".to_string()), true),
+        host.worker_annotate_progress_overflow(
+            Err("transcript verification failed".to_string()),
+            true
+        ),
         Err("transcript verification failed".to_string()),
         "progress overload must not hide the actual domain failure"
     );
@@ -31,7 +34,12 @@ fn rwrk_progress_overflow_never_rewrites_a_committed_success_into_failure() {
 #[test]
 fn rwrk_payload_too_large_asks_for_a_smaller_chunk() {
     let host = client_host();
-    assert_eq!(host.worker_classify_inference_error(json!({"http": {"status": 413, "message": "payload too large"}})), "context-too-long");
+    assert_eq!(
+        host.worker_classify_inference_error(
+            json!({"http": {"status": 413, "message": "payload too large"}})
+        ),
+        "context-too-long"
+    );
 }
 
 /// REQ: PORT:ilium-client/src/remote_compaction_worker.rs::bad_request_about_context_length_asks_for_a_smaller_chunk
@@ -39,7 +47,10 @@ fn rwrk_payload_too_large_asks_for_a_smaller_chunk() {
 fn rwrk_bad_request_about_context_length_asks_for_a_smaller_chunk() {
     let host = client_host();
     let error = json!({"http": {"status": 400, "message": "This model's maximum context length is 128000 tokens"}});
-    assert_eq!(host.worker_classify_inference_error(error), "context-too-long");
+    assert_eq!(
+        host.worker_classify_inference_error(error),
+        "context-too-long"
+    );
 }
 
 /// REQ: PORT:ilium-client/src/remote_compaction_worker.rs::other_failures_stay_plain_failures
@@ -59,8 +70,13 @@ fn rwrk_other_failures_stay_plain_failures() {
 #[test]
 fn rwrk_pause_wait_returns_when_cancelled() {
     let host = client_host();
-    let outcome = host.worker_await_pause("claude", "/nonexistent/transcript.jsonl",
-        Duration::from_secs(60), Duration::from_secs(60), true);
+    let outcome = host.worker_await_pause(
+        "claude",
+        "/nonexistent/transcript.jsonl",
+        Duration::from_secs(60),
+        Duration::from_secs(60),
+        true,
+    );
     assert_eq!(outcome.result, Err("cancelled".to_string()));
 }
 
@@ -68,8 +84,13 @@ fn rwrk_pause_wait_returns_when_cancelled() {
 #[test]
 fn rwrk_pause_wait_requests_one_interrupt_then_gives_up() {
     let host = client_host();
-    let outcome = host.worker_await_pause("claude", "/nonexistent/transcript.jsonl",
-        Duration::ZERO, Duration::from_millis(600), false);
+    let outcome = host.worker_await_pause(
+        "claude",
+        "/nonexistent/transcript.jsonl",
+        Duration::ZERO,
+        Duration::from_millis(600),
+        false,
+    );
     assert_eq!(outcome.interrupts, 1);
     assert!(outcome.result.is_err());
 }
@@ -87,9 +108,22 @@ fn rwrk_pause_probe_admission_covers_tail_parsing_peak() {
 fn rwrk_cancellation_completes_even_when_the_ui_event_queue_is_full() {
     let mut host = client_host();
     host.worker_fill_event_queue();
-    host.worker_start_pause_job("claude", "/nonexistent/remote-compaction-transcript", Duration::ZERO);
-    assert!(host.worker_wait_interrupt_pending(Duration::from_secs(2)), "the pause job attempts its interrupt");
+    host.worker_start_pause_job(
+        "claude",
+        "/nonexistent/remote-compaction-transcript",
+        Duration::ZERO,
+    );
+    assert!(
+        host.worker_wait_interrupt_pending(Duration::from_secs(2)),
+        "the pause job attempts its interrupt"
+    );
     host.worker_cancel();
-    assert!(host.worker_cancel_observed(Duration::from_secs(2)), "cancellation completes with a full queue");
-    assert!(host.worker_idle(Duration::from_secs(2)), "no job stays active after cancellation");
+    assert!(
+        host.worker_cancel_observed(Duration::from_secs(2)),
+        "cancellation completes with a full queue"
+    );
+    assert!(
+        host.worker_idle(Duration::from_secs(2)),
+        "no job stays active after cancellation"
+    );
 }

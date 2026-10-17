@@ -18,7 +18,13 @@ fn sounds_port_alerts_are_played_in_the_order_they_were_raised() {
     let first = add_pane(&mut host, "one", Some(AgentActivity::Working));
     let second = add_pane(&mut host, "two", Some(AgentActivity::Working));
     let mut played = sounds(&finish_turn(&mut host, first, 1));
-    played.extend(sounds(&transition(&mut host, second, AgentActivity::Working, AgentActivity::AwaitingApproval, 2)));
+    played.extend(sounds(&transition(
+        &mut host,
+        second,
+        AgentActivity::Working,
+        AgentActivity::AwaitingApproval,
+        2,
+    )));
     assert_eq!(played, ["finished", "ask"]);
 }
 
@@ -27,9 +33,22 @@ fn sounds_port_alerts_are_played_in_the_order_they_were_raised() {
 fn sounds_port_a_changed_sound_table_applies_to_the_running_plugin() {
     let mut host = server_host();
     let node = add_pane(&mut host, "claude-api", Some(AgentActivity::Working));
-    assert!(sounds(&transition(&mut host, node, AgentActivity::Idle, AgentActivity::AwaitingApproval, 1)).is_empty());
+    assert!(sounds(&transition(
+        &mut host,
+        node,
+        AgentActivity::Idle,
+        AgentActivity::AwaitingApproval,
+        1
+    ))
+    .is_empty());
     set_setting(&mut host, "sound.events.approval_required", json!(true));
-    let played = sounds(&transition(&mut host, node, AgentActivity::Idle, AgentActivity::AwaitingApproval, 2));
+    let played = sounds(&transition(
+        &mut host,
+        node,
+        AgentActivity::Idle,
+        AgentActivity::AwaitingApproval,
+        2,
+    ));
     assert_eq!(played, ["ask"]);
 }
 
@@ -37,7 +56,10 @@ fn sounds_port_a_changed_sound_table_applies_to_the_running_plugin() {
 #[test]
 fn sounds_port_every_notification_row_persists_and_reads_back() {
     let mut host = server_host();
-    assert_eq!(host.settings().get("notifications.task_succeeded"), Some(json!(false)));
+    assert_eq!(
+        host.settings().get("notifications.task_succeeded"),
+        Some(json!(false))
+    );
     for key in [
         "notifications.task_succeeded",
         "notifications.task_failed",
@@ -46,27 +68,60 @@ fn sounds_port_every_notification_row_persists_and_reads_back() {
         "notifications.suppress_redundant_task_outcomes",
         "notifications.enabled",
     ] {
-        let before = host.settings().get(key).and_then(|value| value.as_bool()).expect(key);
+        let before = host
+            .settings()
+            .get(key)
+            .and_then(|value| value.as_bool())
+            .expect(key);
         set_setting(&mut host, key, json!(!before));
         assert_eq!(host.settings().get(key), Some(json!(!before)), "{key}");
     }
     // Final state of the original: task_succeeded on, every other row flipped off.
-    assert_eq!(host.settings().get("notifications.task_succeeded"), Some(json!(true)));
-    assert_eq!(host.settings().get("notifications.task_failed"), Some(json!(false)));
-    assert_eq!(host.settings().get("notifications.agent_finished"), Some(json!(false)));
-    assert_eq!(host.settings().get("notifications.approval_required"), Some(json!(false)));
-    assert_eq!(host.settings().get("notifications.suppress_redundant_task_outcomes"), Some(json!(false)));
-    assert_eq!(host.settings().get("notifications.enabled"), Some(json!(false)));
+    assert_eq!(
+        host.settings().get("notifications.task_succeeded"),
+        Some(json!(true))
+    );
+    assert_eq!(
+        host.settings().get("notifications.task_failed"),
+        Some(json!(false))
+    );
+    assert_eq!(
+        host.settings().get("notifications.agent_finished"),
+        Some(json!(false))
+    );
+    assert_eq!(
+        host.settings().get("notifications.approval_required"),
+        Some(json!(false))
+    );
+    assert_eq!(
+        host.settings()
+            .get("notifications.suppress_redundant_task_outcomes"),
+        Some(json!(false))
+    );
+    assert_eq!(
+        host.settings().get("notifications.enabled"),
+        Some(json!(false))
+    );
 }
 
 /// REQ: PORT:ilium-client/src/app.rs::notification_rows_persist_every_toggle_and_stepper_without_an_ipc_update
 #[test]
 fn sounds_port_the_merge_window_steps_by_ten_seconds_from_thirty() {
     let mut host = server_host();
-    assert_eq!(host.settings().get("notifications.task_coalesce_seconds"), Some(json!(30)));
+    assert_eq!(
+        host.settings().get("notifications.task_coalesce_seconds"),
+        Some(json!(30))
+    );
     for step in [40, 50, 40] {
-        set_setting(&mut host, "notifications.task_coalesce_seconds", json!(step));
-        assert_eq!(host.settings().get("notifications.task_coalesce_seconds"), Some(json!(step)));
+        set_setting(
+            &mut host,
+            "notifications.task_coalesce_seconds",
+            json!(step),
+        );
+        assert_eq!(
+            host.settings().get("notifications.task_coalesce_seconds"),
+            Some(json!(step))
+        );
     }
 }
 
@@ -74,10 +129,20 @@ fn sounds_port_the_merge_window_steps_by_ten_seconds_from_thirty() {
 #[test]
 fn sounds_port_a_sound_file_choice_persists_and_reaches_the_running_plugin() {
     let mut host = server_host();
-    set_setting(&mut host, "sound.file", json!("/usr/share/sounds/complete.oga"));
+    set_setting(
+        &mut host,
+        "sound.file",
+        json!("/usr/share/sounds/complete.oga"),
+    );
     set_setting(&mut host, "sound.source", json!("sound_file"));
-    assert_eq!(host.settings().get("sound.source"), Some(json!("sound_file")));
-    assert_eq!(host.settings().get("sound.file"), Some(json!("/usr/share/sounds/complete.oga")));
+    assert_eq!(
+        host.settings().get("sound.source"),
+        Some(json!("sound_file"))
+    );
+    assert_eq!(
+        host.settings().get("sound.file"),
+        Some(json!("/usr/share/sounds/complete.oga"))
+    );
     let node = add_pane(&mut host, "claude-api", Some(AgentActivity::Working));
     assert_eq!(sounds(&finish_turn(&mut host, node, 1)).len(), 1);
 }
@@ -96,7 +161,23 @@ fn sounds_port_a_muted_source_plays_nothing() {
 fn sounds_port_a_busy_agent_reaching_done_is_agent_finished_and_busy_to_idle_is_not() {
     let mut host = server_host();
     let node = add_pane(&mut host, "codex", Some(AgentActivity::Working));
-    assert_eq!(sounds(&transition(&mut host, node, AgentActivity::Working, AgentActivity::Done, 1)), ["finished"]);
+    assert_eq!(
+        sounds(&transition(
+            &mut host,
+            node,
+            AgentActivity::Working,
+            AgentActivity::Done,
+            1
+        )),
+        ["finished"]
+    );
     let other = add_pane_signature(&mut host, "codex-2", "codex", AgentActivity::Working);
-    assert!(sounds(&transition(&mut host, other, AgentActivity::Working, AgentActivity::Idle, 2)).is_empty());
+    assert!(sounds(&transition(
+        &mut host,
+        other,
+        AgentActivity::Working,
+        AgentActivity::Idle,
+        2
+    ))
+    .is_empty());
 }

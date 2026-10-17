@@ -28,7 +28,9 @@ fn topic_048_a_raised_notice_is_published_with_event_pane_and_urgency() {
     keys.sort();
     assert_eq!(keys, ["event", "pane", "urgency"]);
     assert_eq!(payload["pane"], node.0);
-    assert!(["low", "normal", "high"].contains(&payload["urgency"].as_str().expect("urgency string")));
+    assert!(
+        ["low", "normal", "high"].contains(&payload["urgency"].as_str().expect("urgency string"))
+    );
 }
 
 /// REQ: F-048
@@ -36,7 +38,13 @@ fn topic_048_a_raised_notice_is_published_with_event_pane_and_urgency() {
 fn topic_048_nothing_is_published_when_no_notice_is_raised() {
     let mut host = server_host();
     let node = add_pane(&mut host, "claude-api", Some(AgentActivity::Idle));
-    transition(&mut host, node, AgentActivity::Idle, AgentActivity::Working, 1);
+    transition(
+        &mut host,
+        node,
+        AgentActivity::Idle,
+        AgentActivity::Working,
+        1,
+    );
     assert!(raised_payloads(&host).is_empty());
 }
 

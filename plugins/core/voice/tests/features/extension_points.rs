@@ -14,7 +14,10 @@ fn point_rows() -> Vec<Vec<String>> {
 /// REQ: F-050
 #[test]
 fn points_050_the_page_lists_exactly_two_points() {
-    let names: Vec<String> = point_rows().into_iter().map(|row| row[0].trim_matches('`').to_string()).collect();
+    let names: Vec<String> = point_rows()
+        .into_iter()
+        .map(|row| row[0].trim_matches('`').to_string())
+        .collect();
     assert_eq!(names, ["transcript", "voice-intents"]);
 }
 
@@ -22,9 +25,15 @@ fn points_050_the_page_lists_exactly_two_points() {
 #[test]
 fn points_050_transcript_is_a_transform_hook_with_text_confidence_and_language() {
     let rows = point_rows();
-    let row = rows.iter().find(|row| row[0] == "`transcript`").expect("row");
+    let row = rows
+        .iter()
+        .find(|row| row[0] == "`transcript`")
+        .expect("row");
     assert_eq!(row[1], "hook (transform)");
-    assert_eq!(row[2], "Correct the transcript before commands are matched.");
+    assert_eq!(
+        row[2],
+        "Correct the transcript before commands are matched."
+    );
     assert_eq!(row[3], "text, confidence, language; reply: text");
     assert_eq!(row[4], "standard");
 }
@@ -33,7 +42,10 @@ fn points_050_transcript_is_a_transform_hook_with_text_confidence_and_language()
 #[test]
 fn points_050_voice_intents_is_a_collect_point_with_phrases_command_and_confirm() {
     let rows = point_rows();
-    let row = rows.iter().find(|row| row[0] == "`voice-intents`").expect("row");
+    let row = rows
+        .iter()
+        .find(|row| row[0] == "`voice-intents`")
+        .expect("row");
     assert_eq!(row[1], "collect");
     assert_eq!(row[2], "Add a spoken phrase that runs a command.");
     assert_eq!(row[3], "entry: id, phrases, command, confirm");
@@ -52,7 +64,8 @@ fn points_050_the_page_names_the_provide_and_contribute_grants() {
 #[test]
 fn points_050_the_core_extension_point_tables_agree_with_the_page() {
     let core = manual_page("reference-core-extension-points.md");
-    assert!(core.contains("| [Voice](/pages/core-plugin-voice/) | `ilium.core.voice` | 2 | 1 | 1 | yes |"));
+    assert!(core
+        .contains("| [Voice](/pages/core-plugin-voice/) | `ilium.core.voice` | 2 | 1 | 1 | yes |"));
     assert!(core.contains("| `ilium.core.voice/transcript` | hook: transform | standard | Correct the transcript before commands are matched. |"));
     assert!(core.contains("| `ilium.core.voice/voice-intents` | collect | standard | Add a spoken phrase that runs a command. |"));
 }
@@ -61,7 +74,8 @@ fn points_050_the_core_extension_point_tables_agree_with_the_page() {
 #[test]
 fn points_050_the_say_service_and_heard_topic_are_declared() {
     let page = page_text();
-    assert!(page.contains("- `ilium.core.voice/say`: type: type a sentence into the live voice session"));
+    assert!(page
+        .contains("- `ilium.core.voice/say`: type: type a sentence into the live voice session"));
     assert!(page.contains("(grant `services.use:<name>`)"));
     assert!(page.contains("- `ilium.core.voice/heard`: { text, command }"));
 }
@@ -69,7 +83,9 @@ fn points_050_the_say_service_and_heard_topic_are_declared() {
 /// REQ: F-050
 #[test]
 fn points_050_the_plugin_is_replaceable() {
-    assert!(page_text().contains("**Replaceable:** yes. A replacement lists `\"replaces\": [\"ilium.core.voice\"]`"));
+    assert!(page_text().contains(
+        "**Replaceable:** yes. A replacement lists `\"replaces\": [\"ilium.core.voice\"]`"
+    ));
 }
 
 /// REQ: F-050
@@ -106,7 +122,11 @@ fn points_050_the_transcript_hook_is_called_with_text_confidence_and_language() 
 /// REQ: F-050
 #[test]
 fn points_050_the_hook_call_shape_is_a_plain_hook_call() {
-    let call = HookCall { call: 1, point: "transcript".to_string(), payload_json: "{}".to_string() };
+    let call = HookCall {
+        call: 1,
+        point: "transcript".to_string(),
+        payload_json: "{}".to_string(),
+    };
     assert_eq!(call.point, "transcript");
 }
 
@@ -114,13 +134,25 @@ fn points_050_the_hook_call_shape_is_a_plain_hook_call() {
 #[test]
 fn points_050_heard_topic_publishes_text_and_command_for_a_matched_phrase() {
     let mut host = enabled_client("push_to_talk");
-    crate::common::contribute_phrase(&mut host, "open-board", "open the board", "open-board", false);
+    crate::common::contribute_phrase(
+        &mut host,
+        "open-board",
+        "open the board",
+        "open-board",
+        false,
+    );
     hear(&mut host, "open the board");
     let topics = host.published_topics();
-    let heard: Vec<_> = topics.iter().filter(|(name, _)| name == "ilium.core.voice/heard").collect();
+    let heard: Vec<_> = topics
+        .iter()
+        .filter(|(name, _)| name == "ilium.core.voice/heard")
+        .collect();
     assert_eq!(heard.len(), 1);
     let payload: serde_json::Value = serde_json::from_str(&heard[0].1).expect("payload JSON");
-    assert_eq!(payload, json!({ "text": "open the board", "command": "open-board" }));
+    assert_eq!(
+        payload,
+        json!({ "text": "open the board", "command": "open-board" })
+    );
 }
 
 /// REQ: F-050
@@ -129,7 +161,10 @@ fn points_050_heard_topic_carries_a_null_command_for_an_unmatched_phrase() {
     let mut host = enabled_client("push_to_talk");
     hear(&mut host, "nothing matches this");
     let topics = host.published_topics();
-    let heard: Vec<_> = topics.iter().filter(|(name, _)| name == "ilium.core.voice/heard").collect();
+    let heard: Vec<_> = topics
+        .iter()
+        .filter(|(name, _)| name == "ilium.core.voice/heard")
+        .collect();
     assert_eq!(heard.len(), 1);
     let payload: serde_json::Value = serde_json::from_str(&heard[0].1).expect("payload JSON");
     assert_eq!(payload["text"], "nothing matches this");
@@ -147,7 +182,10 @@ fn points_050_say_service_is_not_found_when_voice_is_not_installed() {
         "^0.1.0",
         &json!({ "text": "open the board" }).to_string(),
     );
-    assert_eq!(reply.expect_err("no provider").code, ilium_plugin_sdk::types::ErrorCode::NotFound);
+    assert_eq!(
+        reply.expect_err("no provider").code,
+        ilium_plugin_sdk::types::ErrorCode::NotFound
+    );
 }
 
 /// REQ: F-050

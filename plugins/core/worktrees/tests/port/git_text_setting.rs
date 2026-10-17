@@ -16,10 +16,19 @@ fn port_072_enter_on_the_branch_prefix_opens_an_editor_and_escape_returns_to_the
     host.key(page.clone(), "enter");
     host.settle();
     let editing = host.render(page.clone(), 80, 12).text();
-    assert!(editing.contains("agent/"), "the editor shows the current prefix: {editing}");
+    assert!(
+        editing.contains("agent/"),
+        "the editor shows the current prefix: {editing}"
+    );
     host.key(page.clone(), "esc");
     host.settle();
     let back = host.render(page, 80, 12).text();
-    assert!(back.contains("Worktree folder"), "the Git tab is shown again: {back}");
-    assert_eq!(host.kernel_settings().get("git", "branch_prefix"), Some(json!("agent/")));
+    assert!(
+        back.contains("Worktree folder"),
+        "the Git tab is shown again: {back}"
+    );
+    assert_eq!(
+        host.kernel_settings().get("git", "branch_prefix"),
+        Some(json!("agent/"))
+    );
 }

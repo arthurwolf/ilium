@@ -23,7 +23,11 @@ fn doc_pkg_652_the_page_carries_the_jcs_string_and_its_sha256() {
     let text = page_text(PAGE);
     assert!(text.contains(VECTOR_JCS), "JCS vector line missing");
     assert!(text.contains(VECTOR_SHA), "vector hash missing");
-    assert_row(PAGE, "PKG-652", &["JCS (RFC 8785)", "refusal of duplicate keys"]);
+    assert_row(
+        PAGE,
+        "PKG-652",
+        &["JCS (RFC 8785)", "refusal of duplicate keys"],
+    );
 }
 
 /// REQ: PKG-652
@@ -47,14 +51,27 @@ fn pkg_652_a_document_with_reordered_keys_and_whitespace_still_verifies() {
     let mut doc: serde_json::Value = serde_json::from_slice(&original).expect("json");
     let signed = doc["signed"].clone();
     let signatures = doc["signatures"].clone();
-    let mut keys: Vec<(String, serde_json::Value)> = signed.as_object().expect("object").iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+    let mut keys: Vec<(String, serde_json::Value)> = signed
+        .as_object()
+        .expect("object")
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
     keys.reverse();
-    let body: Vec<String> = keys.iter().map(|(k, v)| format!("  \"{k}\"  :   {v}")).collect();
-    let text = format!("{{\n \"signatures\" : {signatures},\n \"signed\" : {{\n{}\n }}\n}}\n", body.join(",\n"));
+    let body: Vec<String> = keys
+        .iter()
+        .map(|(k, v)| format!("  \"{k}\"  :   {v}"))
+        .collect();
+    let text = format!(
+        "{{\n \"signatures\" : {signatures},\n \"signed\" : {{\n{}\n }}\n}}\n",
+        body.join(",\n")
+    );
     doc = serde_json::from_str(&text).expect("hand written JSON parses");
     assert_eq!(jcs(&doc["signed"]), jcs(&signed));
     let sandbox = Sandbox::with_registry(&builder);
-    sandbox.net.put_file(&format!("{BASE}timestamp.json"), text.into_bytes());
+    sandbox
+        .net
+        .put_file(&format!("{BASE}timestamp.json"), text.into_bytes());
     let output = sandbox.run(&["search"]);
     assert_ok(&output);
 }
@@ -64,7 +81,8 @@ fn pkg_652_a_document_with_reordered_keys_and_whitespace_still_verifies() {
 fn pkg_652_a_signed_value_with_a_duplicate_key_is_refused() {
     let builder = RegistryBuilder::standard();
     let tree = builder.build();
-    let text = String::from_utf8(tree.get("timestamp.json").expect("timestamp").clone()).expect("utf-8");
+    let text =
+        String::from_utf8(tree.get("timestamp.json").expect("timestamp").clone()).expect("utf-8");
     let marker = "\"signed\":";
     let at_signed = text.find(marker).expect("signed key");
     let after = &text[at_signed + marker.len()..];
@@ -72,7 +90,9 @@ fn pkg_652_a_signed_value_with_a_duplicate_key_is_refused() {
     let open = at_signed + marker.len() + brace + 1;
     let forged = format!("{}\"version\":1,{}", &text[..open], &text[open..]);
     let sandbox = Sandbox::with_registry(&builder);
-    sandbox.net.put_file(&format!("{BASE}timestamp.json"), forged.into_bytes());
+    sandbox
+        .net
+        .put_file(&format!("{BASE}timestamp.json"), forged.into_bytes());
     let output = sandbox.run(&["search"]);
     assert_registry_failure(&output);
     assert_no_plugin_records(&output);
@@ -83,17 +103,29 @@ fn pkg_652_a_signed_value_with_a_duplicate_key_is_refused() {
 fn pkg_652_a_changed_signed_value_breaks_the_signature() {
     let builder = RegistryBuilder::standard();
     let tree = builder.build();
-    let mut doc: serde_json::Value = serde_json::from_slice(tree.get("timestamp.json").expect("timestamp")).expect("json");
+    let mut doc: serde_json::Value =
+        serde_json::from_slice(tree.get("timestamp.json").expect("timestamp")).expect("json");
     doc["signed"]["version"] = json!(doc["signed"]["version"].as_u64().unwrap_or(1) + 1);
     let sandbox = Sandbox::with_registry(&builder);
-    sandbox.net.put_file(&format!("{BASE}timestamp.json"), serde_json::to_vec(&doc).expect("json"));
+    sandbox.net.put_file(
+        &format!("{BASE}timestamp.json"),
+        serde_json::to_vec(&doc).expect("json"),
+    );
     assert_code(&sandbox.run(&["search"]), "registry.signature-invalid");
 }
 
 /// REQ: PKG-653
 #[test]
 fn doc_pkg_653_revocations_use_the_wrapper_and_the_timestamp_role_keys() {
-    assert_row(PAGE, "PKG-653", &["`signed` and `signatures` wrapper", "`timestamp` role keys", "`registry.signature-invalid`"]);
+    assert_row(
+        PAGE,
+        "PKG-653",
+        &[
+            "`signed` and `signatures` wrapper",
+            "`timestamp` role keys",
+            "`registry.signature-invalid`",
+        ],
+    );
 }
 
 /// REQ: PKG-653
@@ -120,7 +152,11 @@ fn pkg_653_revocations_without_any_signature_are_refused_signature_invalid() {
 #[test]
 fn pkg_653_revocations_signed_by_a_foreign_key_are_refused_signature_invalid() {
     let mut builder = RegistryBuilder::standard();
-    let doc = builder.build().get("revocations.json").expect("revocations").clone();
+    let doc = builder
+        .build()
+        .get("revocations.json")
+        .expect("revocations")
+        .clone();
     let forged = edit_signed(&doc, &[KEY_FOREIGN], |_| {});
     builder.overrides.insert("revocations".to_owned(), forged);
     let sandbox = Sandbox::with_registry(&builder);
@@ -134,7 +170,11 @@ fn pkg_653_a_threshold_of_two_is_not_met_by_one_signature() {
     builder.role_keys = vec![KEY_A, KEY_B];
     builder.threshold = 2;
     builder.signer_count = 2;
-    let doc = builder.build().get("revocations.json").expect("revocations").clone();
+    let doc = builder
+        .build()
+        .get("revocations.json")
+        .expect("revocations")
+        .clone();
     let one = edit_signed(&doc, &[KEY_A], |_| {});
     builder.overrides.insert("revocations".to_owned(), one);
     let sandbox = Sandbox::with_registry(&builder);

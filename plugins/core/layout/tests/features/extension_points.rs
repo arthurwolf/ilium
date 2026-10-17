@@ -12,7 +12,10 @@ fn core_points_page() -> String {
 #[test]
 fn doc_f_003_page_lists_layout_presets_as_a_collect_point() {
     let page = page_text();
-    let row = page.lines().find(|line| line.starts_with("| `layout-presets` |")).expect("row");
+    let row = page
+        .lines()
+        .find(|line| line.starts_with("| `layout-presets` |"))
+        .expect("row");
     let cells: Vec<&str> = row.split('|').map(str::trim).collect();
     assert_eq!(cells[2], "collect");
     assert_eq!(cells[5], "standard");
@@ -22,7 +25,10 @@ fn doc_f_003_page_lists_layout_presets_as_a_collect_point() {
 #[test]
 fn doc_f_003_page_lists_before_split_as_a_veto_hook_with_node_direction_pane_count() {
     let page = page_text();
-    let row = page.lines().find(|line| line.starts_with("| `before-split` |")).expect("row");
+    let row = page
+        .lines()
+        .find(|line| line.starts_with("| `before-split` |"))
+        .expect("row");
     let cells: Vec<&str> = row.split('|').map(str::trim).collect();
     assert_eq!(cells[2], "hook (veto)");
     assert_eq!(cells[4], "node, direction, pane_count");
@@ -87,7 +93,10 @@ fn f_003_the_published_changed_topic_carries_group_and_split_count() {
     host.deliver_one(message_from_client("split-right", id_bytes(focused)));
     host.settle();
     let topics = host.published_topics();
-    let changed: Vec<&(String, String)> = topics.iter().filter(|(topic, _)| topic == "ilium.core.layout/changed").collect();
+    let changed: Vec<&(String, String)> = topics
+        .iter()
+        .filter(|(topic, _)| topic == "ilium.core.layout/changed")
+        .collect();
     assert_eq!(changed.len(), 1);
     let payload: Value = serde_json::from_str(&changed[0].1).expect("payload is JSON");
     assert!(payload.get("group").is_some());
@@ -102,5 +111,8 @@ fn f_003_no_changed_topic_is_published_when_the_split_is_refused() {
     host.revoke("tree.restructure");
     host.deliver_one(message_from_client("split-right", id_bytes(focused)));
     host.settle();
-    assert!(host.published_topics().iter().all(|(topic, _)| topic != "ilium.core.layout/changed"));
+    assert!(host
+        .published_topics()
+        .iter()
+        .all(|(topic, _)| topic != "ilium.core.layout/changed"));
 }

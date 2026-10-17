@@ -10,7 +10,9 @@ use ilium_plugin_sdk::testing::FakeHost;
 /// Agent-detect-lane hooks. Implemented for `FakeHost` with skeleton bodies.
 pub trait AgentDetectHostExt {
     /// Classifies `screen` for the agent `agent` through the activated detector, after hooks ran.
-    fn classify(&mut self, _agent: &str, _screen: DetectorScreen) -> Classification { unimplemented!("agent-detect.classify") }
+    fn classify(&mut self, _agent: &str, _screen: DetectorScreen) -> Classification {
+        unimplemented!("agent-detect.classify")
+    }
 }
 
 impl AgentDetectHostExt for FakeHost {}

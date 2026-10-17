@@ -68,5 +68,8 @@ fn flags_100_stars_status_names_the_observer_after_a_frame() {
     let mut scene = fake_scene_at("stars-overhead", 40, 20, 38.72, -9.14);
     scene.frame(braille_frame(40, 20, 0));
     let status = status_of(&scene).expect("status after a frame");
-    assert!(status.contains("38.72") && status.contains("9.14"), "{status}");
+    assert!(
+        status.contains("38.72") && status.contains("9.14"),
+        "{status}"
+    );
 }

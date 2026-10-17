@@ -4,17 +4,17 @@
 
 use std::time::Duration;
 
+use ilium_plugin_api::grants::Grant;
+use ilium_plugin_api::manifest::CheckMode;
 use ilium_plugin_host::approval::{ApprovalChannel, ApprovalError};
 use ilium_plugin_host::cli::run_cli;
 use ilium_plugin_host::consent::{ConsentGate, ConsentOutcome, DialogGuard, DialogKind};
-use ilium_plugin_api::manifest::CheckMode;
 use ilium_plugin_host::install::Installer;
 use ilium_plugin_host::registry::PackageStore;
 use ilium_plugin_host::review::{
     display_name, review_rows, scroll_indicator, update_review, DeclineCounter, Widening,
 };
 use ilium_plugin_host::stores::{AuditLog, ConsentStore, GrantStore, StoreError, TrustStore};
-use ilium_plugin_api::grants::Grant;
 
 use crate::support::{args, cli_env, file_names, package_bytes, scratch, PackageSpec};
 
@@ -27,12 +27,24 @@ fn grant(text: &str) -> Grant {
 /// REQ: SEC-100
 #[test]
 fn sec_100_defective_inventory_is_reported_before_a_later_grant_fault() {
-    let bytes = package_bytes(&PackageSpec { corrupt_hash: true, ..PackageSpec::with_grants(&["fs.nope"]) });
+    let bytes = package_bytes(&PackageSpec {
+        corrupt_hash: true,
+        ..PackageSpec::with_grants(&["fs.nope"])
+    });
     let dir = scratch();
-    let installer = Installer::new(PackageStore { root: dir.path().to_path_buf() });
+    let installer = Installer::new(PackageStore {
+        root: dir.path().to_path_buf(),
+    });
     let report = installer.check(&bytes, CheckMode::Check);
-    let first = report.diagnostics.first().expect("a defective package reports a diagnostic");
-    assert_ne!(first.code.as_str(), "manifest.grant-unknown", "inventory fails first");
+    let first = report
+        .diagnostics
+        .first()
+        .expect("a defective package reports a diagnostic");
+    assert_ne!(
+        first.code.as_str(),
+        "manifest.grant-unknown",
+        "inventory fails first"
+    );
 }
 
 /// REQ: SEC-100
@@ -40,10 +52,15 @@ fn sec_100_defective_inventory_is_reported_before_a_later_grant_fault() {
 fn sec_100_grant_faults_are_reported_once_the_inventory_is_sound() {
     let bytes = package_bytes(&PackageSpec::with_grants(&["fs.nope"]));
     let dir = scratch();
-    let installer = Installer::new(PackageStore { root: dir.path().to_path_buf() });
+    let installer = Installer::new(PackageStore {
+        root: dir.path().to_path_buf(),
+    });
     let report = installer.check(&bytes, CheckMode::Check);
     assert!(
-        report.diagnostics.iter().any(|d| d.code.as_str() == "manifest.grant-unknown"),
+        report
+            .diagnostics
+            .iter()
+            .any(|d| d.code.as_str() == "manifest.grant-unknown"),
         "{:?}",
         report.diagnostics
     );
@@ -54,7 +71,12 @@ fn sec_100_grant_faults_are_reported_once_the_inventory_is_sound() {
 /// REQ: SEC-102
 #[test]
 fn sec_102_dialog_kinds_are_drawn_by_the_kernel_only() {
-    for kind in [DialogKind::Review, DialogKind::Consent, DialogKind::Update, DialogKind::Trust] {
+    for kind in [
+        DialogKind::Review,
+        DialogKind::Consent,
+        DialogKind::Update,
+        DialogKind::Trust,
+    ] {
         assert!(kind.is_kernel_drawn(), "{kind:?}");
     }
 }
@@ -120,8 +142,11 @@ fn sec_104_a_plain_name_is_shown_unchanged() {
 #[test]
 fn sec_105_second_prompt_while_one_is_open_is_busy() {
     let mut gate = ConsentGate::new();
-    gate.open("test.plugin", "net.http:example.com").expect("first prompt opens");
-    let outcome = gate.open("other.plugin", "net.http:example.org").expect_err("busy");
+    gate.open("test.plugin", "net.http:example.com")
+        .expect("first prompt opens");
+    let outcome = gate
+        .open("other.plugin", "net.http:example.org")
+        .expect_err("busy");
     assert_eq!(outcome, ConsentOutcome::Busy);
 }
 
@@ -144,8 +169,12 @@ fn sec_105_a_plugin_is_rate_limited_after_repeated_prompts() {
 #[test]
 fn sec_105_an_unanswered_prompt_times_out() {
     let mut gate = ConsentGate::new();
-    gate.open("test.plugin", "net.http:example.com").expect("opens");
-    assert_eq!(gate.tick(Duration::from_secs(24 * 3600)), Some(ConsentOutcome::TimedOut));
+    gate.open("test.plugin", "net.http:example.com")
+        .expect("opens");
+    assert_eq!(
+        gate.tick(Duration::from_secs(24 * 3600)),
+        Some(ConsentOutcome::TimedOut)
+    );
 }
 
 // ---------------------------------------------------------------- SEC-106 / 107 review rows and details
@@ -185,7 +214,10 @@ fn sec_108_widened_argument_is_listed_as_wider() {
 /// REQ: SEC-108
 #[test]
 fn sec_108_removed_grants_are_listed() {
-    let review = update_review(&[grant("tree.read"), grant("sound.play")], &[grant("tree.read")]);
+    let review = update_review(
+        &[grant("tree.read"), grant("sound.play")],
+        &[grant("tree.read")],
+    );
     assert_eq!(review.removed.len(), 1);
 }
 
@@ -203,7 +235,9 @@ fn sec_108_narrowing_is_not_listed_as_wider() {
 fn sec_109_a_changed_signing_key_resets_stored_decisions() {
     let dir = scratch();
     let mut store = GrantStore::open(dir.path()).expect("opens");
-    store.set("test.plugin", "key-a", "T2", &[grant("tree.read")]).expect("set");
+    store
+        .set("test.plugin", "key-a", "T2", &[grant("tree.read")])
+        .expect("set");
     let kept = store.load("test.plugin", "key-b", "T2").expect("load");
     assert!(kept.is_empty());
 }
@@ -213,8 +247,13 @@ fn sec_109_a_changed_signing_key_resets_stored_decisions() {
 fn sec_109_a_changed_tier_resets_stored_decisions() {
     let dir = scratch();
     let mut store = GrantStore::open(dir.path()).expect("opens");
-    store.set("test.plugin", "key-a", "T2", &[grant("tree.read")]).expect("set");
-    assert!(store.load("test.plugin", "key-a", "T3").expect("load").is_empty());
+    store
+        .set("test.plugin", "key-a", "T2", &[grant("tree.read")])
+        .expect("set");
+    assert!(store
+        .load("test.plugin", "key-a", "T3")
+        .expect("load")
+        .is_empty());
 }
 
 // ---------------------------------------------------------------- SEC-110 three declines
@@ -246,7 +285,10 @@ fn sec_110_two_declines_do_not_silence() {
 fn sec_111_first_start_without_decisions_grants_nothing() {
     let dir = scratch();
     let store = GrantStore::open(dir.path()).expect("opens");
-    assert!(store.load("test.plugin", "key-a", "T2").expect("load").is_empty());
+    assert!(store
+        .load("test.plugin", "key-a", "T2")
+        .expect("load")
+        .is_empty());
 }
 
 // ---------------------------------------------------------------- SEC-112..114 stores
@@ -258,9 +300,15 @@ fn sec_112_grant_store_file_is_owner_only() {
     use std::os::unix::fs::PermissionsExt;
     let dir = scratch();
     let mut store = GrantStore::open(dir.path()).expect("opens");
-    store.set("test.plugin", "key-a", "T2", &[grant("tree.read")]).expect("set");
+    store
+        .set("test.plugin", "key-a", "T2", &[grant("tree.read")])
+        .expect("set");
     let path = store.path().to_owned();
-    let mode = std::fs::metadata(path).expect("metadata").permissions().mode() & 0o777;
+    let mode = std::fs::metadata(path)
+        .expect("metadata")
+        .permissions()
+        .mode()
+        & 0o777;
     assert_eq!(mode, 0o600);
 }
 
@@ -280,8 +328,13 @@ fn sec_113_corrupt_store_is_renamed_and_a_fresh_one_starts() {
     let dir = scratch();
     std::fs::write(dir.path().join("grants.json"), b"{ not json").expect("write");
     let store = GrantStore::open(dir.path()).expect("recovers");
-    assert!(store.load("test.plugin", "key-a", "T2").expect("load").is_empty());
-    assert!(file_names(dir.path()).iter().any(|name| name.starts_with("grants.json.corrupt")));
+    assert!(store
+        .load("test.plugin", "key-a", "T2")
+        .expect("load")
+        .is_empty());
+    assert!(file_names(dir.path())
+        .iter()
+        .any(|name| name.starts_with("grants.json.corrupt")));
 }
 
 /// REQ: SEC-114
@@ -289,14 +342,20 @@ fn sec_113_corrupt_store_is_renamed_and_a_fresh_one_starts() {
 fn sec_114_external_edit_of_the_store_is_recorded_in_the_audit_log() {
     let dir = scratch();
     let mut store = GrantStore::open(dir.path()).expect("opens");
-    store.set("test.plugin", "key-a", "T2", &[grant("tree.read")]).expect("set");
+    store
+        .set("test.plugin", "key-a", "T2", &[grant("tree.read")])
+        .expect("set");
     let path = store.path().to_owned();
     drop(store);
     std::fs::write(&path, br#"{"version":1,"plugins":{"test.plugin":{"key":"key-a","tier":"T2","grants":["fs.read:home"]}}}"#)
         .expect("external edit");
     let _ = GrantStore::open(dir.path()).expect("reopens");
     let log = AuditLog::open(dir.path()).expect("audit").entries();
-    assert!(log.iter().any(|entry| entry.kind == "store-edited-externally"), "{log:?}");
+    assert!(
+        log.iter()
+            .any(|entry| entry.kind == "store-edited-externally"),
+        "{log:?}"
+    );
 }
 
 // ---------------------------------------------------------------- SEC-116 / 117 approval channel
@@ -306,14 +365,20 @@ fn sec_114_external_edit_of_the_store_is_recorded_in_the_audit_log() {
 fn sec_116_high_risk_approval_goes_through_an_attached_client() {
     let mut channel = ApprovalChannel::with_client();
     channel.script_answer(true);
-    assert_eq!(channel.ask("test.plugin", &[grant("fs.read:home")]), Ok(true));
+    assert_eq!(
+        channel.ask("test.plugin", &[grant("fs.read:home")]),
+        Ok(true)
+    );
 }
 
 /// REQ: SEC-117
 #[test]
 fn sec_117_without_a_client_a_high_risk_grant_needs_review() {
     let mut channel = ApprovalChannel::without_client();
-    assert_eq!(channel.ask("test.plugin", &[grant("fs.read:home")]), Err(ApprovalError::ReviewRequired));
+    assert_eq!(
+        channel.ask("test.plugin", &[grant("fs.read:home")]),
+        Err(ApprovalError::ReviewRequired)
+    );
 }
 
 /// REQ: SEC-117
@@ -321,9 +386,23 @@ fn sec_117_without_a_client_a_high_risk_grant_needs_review() {
 fn sec_117_the_cli_reports_install_review_required_without_a_client() {
     let dir = scratch();
     let env = cli_env(dir.path());
-    let outcome = run_cli(&env, &args(&["plugin", "grants", "test.plugin", "--grant", "fs.read:home", "--json"]));
+    let outcome = run_cli(
+        &env,
+        &args(&[
+            "plugin",
+            "grants",
+            "test.plugin",
+            "--grant",
+            "fs.read:home",
+            "--json",
+        ]),
+    );
     assert_eq!(outcome.exit_code, 1);
-    assert!(outcome.stdout.contains("install.review-required"), "{}", outcome.stdout);
+    assert!(
+        outcome.stdout.contains("install.review-required"),
+        "{}",
+        outcome.stdout
+    );
 }
 
 // ---------------------------------------------------------------- SEC-118..120 revoke, uninstall, CLI
@@ -333,9 +412,19 @@ fn sec_117_the_cli_reports_install_review_required_without_a_client() {
 fn sec_118_revoking_a_grant_removes_it_from_the_store() {
     let dir = scratch();
     let mut store = GrantStore::open(dir.path()).expect("opens");
-    store.set("test.plugin", "key-a", "T2", &[grant("tree.read"), grant("sound.play")]).expect("set");
+    store
+        .set(
+            "test.plugin",
+            "key-a",
+            "T2",
+            &[grant("tree.read"), grant("sound.play")],
+        )
+        .expect("set");
     store.revoke("test.plugin", "sound.play").expect("revoke");
-    assert_eq!(store.load("test.plugin", "key-a", "T2").expect("load"), vec![grant("tree.read")]);
+    assert_eq!(
+        store.load("test.plugin", "key-a", "T2").expect("load"),
+        vec![grant("tree.read")]
+    );
 }
 
 /// REQ: SEC-119
@@ -343,12 +432,19 @@ fn sec_118_revoking_a_grant_removes_it_from_the_store() {
 fn sec_119_uninstall_deletes_grants_and_consents() {
     let dir = scratch();
     let mut grants = GrantStore::open(dir.path()).expect("opens");
-    grants.set("test.plugin", "key-a", "T2", &[grant("tree.read")]).expect("set");
+    grants
+        .set("test.plugin", "key-a", "T2", &[grant("tree.read")])
+        .expect("set");
     let mut consents = ConsentStore::open(dir.path()).expect("opens");
-    consents.record("test.plugin", "net.http:example.com", true).expect("record");
+    consents
+        .record("test.plugin", "net.http:example.com", true)
+        .expect("record");
     grants.forget("test.plugin").expect("forget");
     consents.forget("test.plugin").expect("forget");
-    assert!(grants.load("test.plugin", "key-a", "T2").expect("load").is_empty());
+    assert!(grants
+        .load("test.plugin", "key-a", "T2")
+        .expect("load")
+        .is_empty());
     assert!(consents.decisions("test.plugin").is_empty());
 }
 
@@ -357,9 +453,15 @@ fn sec_119_uninstall_deletes_grants_and_consents() {
 fn sec_120_cli_consents_lists_stored_decisions_as_json() {
     let dir = scratch();
     let env = cli_env(dir.path());
-    let outcome = run_cli(&env, &args(&["plugin", "consents", "test.plugin", "--json"]));
+    let outcome = run_cli(
+        &env,
+        &args(&["plugin", "consents", "test.plugin", "--json"]),
+    );
     assert_eq!(outcome.exit_code, 0);
-    assert!(outcome.stdout.trim_start().starts_with('{') || outcome.stdout.trim_start().starts_with('['));
+    assert!(
+        outcome.stdout.trim_start().starts_with('{')
+            || outcome.stdout.trim_start().starts_with('[')
+    );
 }
 
 /// REQ: SEC-120
@@ -367,7 +469,17 @@ fn sec_120_cli_consents_lists_stored_decisions_as_json() {
 fn sec_120_cli_grants_with_unknown_grant_fails_with_the_grant_code() {
     let dir = scratch();
     let env = cli_env(dir.path());
-    let outcome = run_cli(&env, &args(&["plugin", "grants", "test.plugin", "--grant", "fs.nope", "--json"]));
+    let outcome = run_cli(
+        &env,
+        &args(&[
+            "plugin",
+            "grants",
+            "test.plugin",
+            "--grant",
+            "fs.nope",
+            "--json",
+        ]),
+    );
     assert_ne!(outcome.exit_code, 0);
 }
 

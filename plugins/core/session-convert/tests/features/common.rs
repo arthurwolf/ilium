@@ -5,8 +5,8 @@ use std::path::PathBuf;
 use ilium_plugin_core_session_convert::{SessionConvertClient, SessionConvertServer};
 use ilium_plugin_sdk::testing::{FakeHost, TreeNode};
 use ilium_plugin_sdk::types::{
-    AgentActivity, AgentView, CommandContext, CommandInvokedEvent, CommandOrigin, Event, Intent, MessageEvent, NodeClass,
-    NodeId, PluginId, PluginSide, Submission,
+    AgentActivity, AgentView, CommandContext, CommandInvokedEvent, CommandOrigin, Event, Intent,
+    MessageEvent, NodeClass, NodeId, PluginId, PluginSide, Submission,
 };
 
 pub const PLUGIN_ID: &str = "ilium.core.session-convert";
@@ -31,7 +31,10 @@ pub fn workspace_root() -> PathBuf {
 
 /// Absolute path of a golden file of this suite.
 pub fn golden(name: &str) -> String {
-    format!("{}/tests/features/golden/{name}", env!("CARGO_MANIFEST_DIR"))
+    format!(
+        "{}/tests/features/golden/{name}",
+        env!("CARGO_MANIFEST_DIR")
+    )
 }
 
 /// The manual page of this plugin.
@@ -57,7 +60,11 @@ pub fn term_blocks(page: &str) -> Vec<String> {
                 _ => {}
             }
         }
-        blocks.push(text.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&"));
+        blocks.push(
+            text.replace("&lt;", "<")
+                .replace("&gt;", ">")
+                .replace("&amp;", "&"),
+        );
         rest = &body[end..];
     }
     blocks
@@ -65,14 +72,20 @@ pub fn term_blocks(page: &str) -> Vec<String> {
 
 /// A server-side host with the manifest grants and the plugin activated.
 pub fn server_host() -> FakeHost {
-    let mut host = FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("server").build();
+    let mut host = FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("server")
+        .build();
     host.activate::<SessionConvertServer>();
     host
 }
 
 /// A client-side host with the manifest grants and the plugin activated.
 pub fn client_host() -> FakeHost {
-    let mut host = FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("client").build();
+    let mut host = FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("client")
+        .build();
     host.activate::<SessionConvertClient>();
     host
 }
@@ -125,7 +138,10 @@ pub fn message_from(side: PluginSide, channel: &str, payload: &[u8]) -> Event {
 
 /// The intents of a submission list, in order.
 pub fn intents(submissions: &[Submission]) -> Vec<Intent> {
-    submissions.iter().map(|submission| submission.intent.clone()).collect()
+    submissions
+        .iter()
+        .map(|submission| submission.intent.clone())
+        .collect()
 }
 
 /// Panes of every `freeze-pane` intent, in order.
@@ -166,9 +182,11 @@ pub fn created(submissions: &[Submission]) -> Vec<(String, String, Vec<String>)>
     submissions
         .iter()
         .filter_map(|submission| match &submission.intent {
-            Intent::CreatePane(spec) => {
-                Some((spec.title.clone(), spec.content_kind.clone(), spec.command.clone().unwrap_or_default()))
-            }
+            Intent::CreatePane(spec) => Some((
+                spec.title.clone(),
+                spec.content_kind.clone(),
+                spec.command.clone().unwrap_or_default(),
+            )),
             _ => None,
         })
         .collect()
@@ -179,7 +197,9 @@ pub fn replaced(submissions: &[Submission]) -> Vec<(u64, Vec<String>, bool)> {
     submissions
         .iter()
         .filter_map(|submission| match &submission.intent {
-            Intent::ReplacePaneCommand(spec) => Some((spec.pane.0, spec.command.clone(), spec.keep_scrollback)),
+            Intent::ReplacePaneCommand(spec) => {
+                Some((spec.pane.0, spec.command.clone(), spec.keep_scrollback))
+            }
             _ => None,
         })
         .collect()

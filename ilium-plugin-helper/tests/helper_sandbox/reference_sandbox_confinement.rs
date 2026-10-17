@@ -17,7 +17,10 @@ fn applied(name: &str, env: &[(&str, String)]) -> Probe {
 }
 
 fn temp_dir(label: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("ilium-helper-sandbox-{label}-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!(
+        "ilium-helper-sandbox-{label}-{}",
+        std::process::id()
+    ));
     std::fs::create_dir_all(&dir).expect("create probe dir");
     dir
 }
@@ -50,7 +53,12 @@ fn sec_020_one_helper_refuses_a_second_plugin() {
     let mut helper = Helper::spawn();
     assert_eq!(helper.ready("plugin-a"), Ok(()));
     let fingerprint = helper.hello.clone().expect("hello").fingerprint;
-    helper.send(&msg_instantiate("plugin-b", &fingerprint, EMPTY_COMPONENT, &[]));
+    helper.send(&msg_instantiate(
+        "plugin-b",
+        &fingerprint,
+        EMPTY_COMPONENT,
+        &[],
+    ));
     assert!(helper.recv_tag(tag::READY, 1_500).is_none());
 }
 
@@ -60,8 +68,19 @@ fn sec_020_hostile_guest_cannot_read_another_plugins_data_folder() {
     let wasm = require_fixture("conformance-probe");
     let mut helper = Helper::spawn();
     assert_eq!(helper.ready_with("plugin-a", &wasm), Ok(()));
-    let (result, _) = run_call(&mut helper, 1, "read-other-plugin-data", b"plugin-b", 2_000, 3_000, |_| (Vec::new(), None));
-    assert_eq!(String::from_utf8_lossy(&result.expect("call result").result), "not-found");
+    let (result, _) = run_call(
+        &mut helper,
+        1,
+        "read-other-plugin-data",
+        b"plugin-b",
+        2_000,
+        3_000,
+        |_| (Vec::new(), None),
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&result.expect("call result").result),
+        "not-found"
+    );
 }
 
 // ------------------------------------------------------------------ SEC-021
@@ -72,7 +91,11 @@ fn sec_021_user_mount_ipc_uts_and_net_namespaces_differ_from_the_server() {
     let probe = applied("ns", &[]);
     let inner = probe.map("ns");
     for kind in ["user", "mnt", "ipc", "uts", "net"] {
-        assert_ne!(inner.get(kind).cloned(), Some(parent_ns(kind)), "{kind} namespace is shared");
+        assert_ne!(
+            inner.get(kind).cloned(),
+            Some(parent_ns(kind)),
+            "{kind} namespace is shared"
+        );
     }
 }
 
@@ -93,14 +116,23 @@ fn sec_021_pid_namespace_differs_from_the_server() {
 fn sec_021_no_capabilities_outside_the_user_namespace() {
     let probe = applied("privs", &[]);
     let status = probe.map("status");
-    assert_eq!(status.get("CapEff").map(String::as_str), Some("0000000000000000"));
-    assert_eq!(status.get("CapPrm").map(String::as_str), Some("0000000000000000"));
+    assert_eq!(
+        status.get("CapEff").map(String::as_str),
+        Some("0000000000000000")
+    );
+    assert_eq!(
+        status.get("CapPrm").map(String::as_str),
+        Some("0000000000000000")
+    );
 }
 
 /// REQ: SEC-021
 #[test]
 fn doc_sec_021_manual_lists_the_six_namespaces() {
-    assert_page_has(PAGE, "The helper runs in new user, mount, PID, IPC, UTS and network namespaces");
+    assert_page_has(
+        PAGE,
+        "The helper runs in new user, mount, PID, IPC, UTS and network namespaces",
+    );
 }
 
 // ------------------------------------------------------------------ SEC-022
@@ -131,13 +163,29 @@ fn sec_022_creating_a_udp_socket_fails() {
 fn sec_022_only_loopback_interface_exists() {
     let probe = applied("net", &[]);
     let interfaces = probe.all("interface");
-    assert!(interfaces.iter().all(|name| name == "lo"), "interfaces: {interfaces:?}");
+    assert!(
+        interfaces.iter().all(|name| name == "lo"),
+        "interfaces: {interfaces:?}"
+    );
 }
 
 // ------------------------------------------------------------------ SEC-023
 
 const ALLOWED_ROOT: [&str; 14] = [
-    "usr", "bin", "lib", "lib64", "etc", "proc", "dev", "tmp", "package", "data", "cache", "project", "worktrees", "picked",
+    "usr",
+    "bin",
+    "lib",
+    "lib64",
+    "etc",
+    "proc",
+    "dev",
+    "tmp",
+    "package",
+    "data",
+    "cache",
+    "project",
+    "worktrees",
+    "picked",
 ];
 
 /// REQ: SEC-023
@@ -146,7 +194,10 @@ fn sec_023_root_holds_only_the_specified_paths() {
     let probe = applied("mounts", &[]);
     let entries = probe.all("root_entry");
     for entry in &entries {
-        assert!(ALLOWED_ROOT.contains(&entry.as_str()), "unexpected /{entry}");
+        assert!(
+            ALLOWED_ROOT.contains(&entry.as_str()),
+            "unexpected /{entry}"
+        );
     }
     for required in ["usr", "bin", "etc", "proc", "dev", "tmp"] {
         assert!(entries.iter().any(|e| e == required), "missing /{required}");
@@ -186,14 +237,24 @@ fn sec_023_tmp_is_a_64_mib_tmpfs() {
 #[test]
 fn sec_023_writable_scope_mounts_are_noexec_nosuid_nodev() {
     let dir = temp_dir("scope");
-    let probe = applied("mounts", &[("ILIUM_PROBE_WRITE", dir.display().to_string())]);
+    let probe = applied(
+        "mounts",
+        &[("ILIUM_PROBE_WRITE", dir.display().to_string())],
+    );
     let line = probe
         .all("mountinfo")
         .into_iter()
         .find(|l| l.split(' ').nth(4) == Some(dir.to_str().expect("utf8")))
         .expect("the granted scope is mounted");
     for flag in ["noexec", "nosuid", "nodev"] {
-        assert!(line.split(' ').nth(5).unwrap_or("").split(',').any(|f| f == flag), "{flag} missing: {line}");
+        assert!(
+            line.split(' ')
+                .nth(5)
+                .unwrap_or("")
+                .split(',')
+                .any(|f| f == flag),
+            "{flag} missing: {line}"
+        );
     }
 }
 
@@ -201,8 +262,14 @@ fn sec_023_writable_scope_mounts_are_noexec_nosuid_nodev() {
 #[test]
 fn sec_023_executing_a_binary_from_a_writable_scope_fails_with_eacces() {
     let dir = temp_dir("exec");
-    let probe = applied("mounts", &[("ILIUM_PROBE_WRITE", dir.display().to_string())]);
-    assert_eq!(probe.one("exec"), Some(format!("{}=errno13", dir.display())));
+    let probe = applied(
+        "mounts",
+        &[("ILIUM_PROBE_WRITE", dir.display().to_string())],
+    );
+    assert_eq!(
+        probe.one("exec"),
+        Some(format!("{}=errno13", dir.display()))
+    );
 }
 
 // ------------------------------------------------------------------ SEC-024
@@ -211,14 +278,20 @@ fn sec_023_executing_a_binary_from_a_writable_scope_fails_with_eacces() {
 #[test]
 fn sec_024_no_new_privs_is_set() {
     let probe = applied("privs", &[]);
-    assert_eq!(probe.map("status").get("NoNewPrivs").map(String::as_str), Some("1"));
+    assert_eq!(
+        probe.map("status").get("NoNewPrivs").map(String::as_str),
+        Some("1")
+    );
 }
 
 /// REQ: SEC-024
 #[test]
 fn sec_024_seccomp_filter_mode_is_installed() {
     let probe = applied("privs", &[]);
-    assert_eq!(probe.map("status").get("Seccomp").map(String::as_str), Some("2"));
+    assert_eq!(
+        probe.map("status").get("Seccomp").map(String::as_str),
+        Some("2")
+    );
 }
 
 /// REQ: SEC-024
@@ -227,7 +300,11 @@ fn sec_024_every_capability_set_is_empty() {
     let probe = applied("privs", &[]);
     let status = probe.map("status");
     for key in ["CapEff", "CapPrm", "CapBnd", "CapAmb"] {
-        assert_eq!(status.get(key).map(String::as_str), Some("0000000000000000"), "{key}");
+        assert_eq!(
+            status.get(key).map(String::as_str),
+            Some("0000000000000000"),
+            "{key}"
+        );
     }
 }
 
@@ -239,8 +316,19 @@ fn sec_025_escape_probe_suite_all_attempts_are_denied() {
     let wasm = require_fixture("hostile-escape");
     let mut helper = Helper::spawn();
     assert_eq!(helper.ready_with("hostile", &wasm), Ok(()));
-    let (result, _) = run_call(&mut helper, 1, "run-escape-suite", b"", 10_000, 15_000, |_| (Vec::new(), None));
-    assert_eq!(String::from_utf8_lossy(&result.expect("call result").result), "all-denied");
+    let (result, _) = run_call(
+        &mut helper,
+        1,
+        "run-escape-suite",
+        b"",
+        10_000,
+        15_000,
+        |_| (Vec::new(), None),
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&result.expect("call result").result),
+        "all-denied"
+    );
 }
 
 /// REQ: SEC-025
@@ -262,7 +350,10 @@ fn sec_026_the_servers_proc_entry_does_not_exist() {
 #[test]
 fn sec_026_the_servers_environ_cannot_be_read() {
     let probe = applied("proc", &[]);
-    assert_eq!(probe.one("outer_environ_readable").as_deref(), Some("false"));
+    assert_eq!(
+        probe.one("outer_environ_readable").as_deref(),
+        Some("false")
+    );
 }
 
 /// REQ: SEC-026
@@ -275,13 +366,24 @@ fn sec_026_sys_class_is_absent() {
 // ------------------------------------------------------------------ SEC-027
 
 const FORBIDDEN_ENV: [&str; 10] = [
-    "SSH_AUTH_SOCK", "DBUS_SESSION_BUS_ADDRESS", "WAYLAND_DISPLAY", "DISPLAY", "XDG_RUNTIME_DIR",
-    "HTTPS_PROXY", "http_proxy", "SERVICE_TOKEN", "SERVICE_KEY", "SERVICE_SECRET",
+    "SSH_AUTH_SOCK",
+    "DBUS_SESSION_BUS_ADDRESS",
+    "WAYLAND_DISPLAY",
+    "DISPLAY",
+    "XDG_RUNTIME_DIR",
+    "HTTPS_PROXY",
+    "http_proxy",
+    "SERVICE_TOKEN",
+    "SERVICE_KEY",
+    "SERVICE_SECRET",
 ];
 const ALLOWED_ENV: [&str; 5] = ["HOME", "TMPDIR", "LANG", "PATH", "ILIUM_PLUGIN_ID"];
 
 fn polluted_env() -> Vec<(&'static str, String)> {
-    FORBIDDEN_ENV.iter().map(|k| (*k, "leak".to_string())).collect()
+    FORBIDDEN_ENV
+        .iter()
+        .map(|k| (*k, "leak".to_string()))
+        .collect()
 }
 
 /// REQ: SEC-027
@@ -299,7 +401,10 @@ fn sec_027_forbidden_variables_are_absent() {
 fn sec_027_only_allowlist_variables_remain() {
     let probe = applied("env", &polluted_env());
     for key in probe.map("env").keys() {
-        assert!(ALLOWED_ENV.contains(&key.as_str()), "unexpected variable {key}");
+        assert!(
+            ALLOWED_ENV.contains(&key.as_str()),
+            "unexpected variable {key}"
+        );
     }
 }
 
@@ -342,8 +447,17 @@ fn sec_028_helper_has_its_own_session_and_no_controlling_terminal() {
 fn sec_028_terminal_injection_ioctls_fail() {
     let probe = applied("fds", &[]);
     for name in ["TIOCSTI", "TIOCLINUX", "TIOCSCTTY"] {
-        let line = probe.all("ioctl").into_iter().find(|l| l.starts_with(name)).expect(name);
-        let ret: i64 = line.split_once('=').expect("value").1.parse().expect("number");
+        let line = probe
+            .all("ioctl")
+            .into_iter()
+            .find(|l| l.starts_with(name))
+            .expect(name);
+        let ret: i64 = line
+            .split_once('=')
+            .expect("value")
+            .1
+            .parse()
+            .expect("number");
         assert!(ret < 0, "{name} returned {ret}");
     }
 }
@@ -353,7 +467,10 @@ fn sec_028_terminal_injection_ioctls_fail() {
 /// REQ: SEC-029
 #[test]
 fn doc_sec_029_manual_states_the_cgroup_limits() {
-    assert_page_has(PAGE, "`memory.max` = plugin `memory_mib` plus 32 MiB overhead");
+    assert_page_has(
+        PAGE,
+        "`memory.max` = plugin `memory_mib` plus 32 MiB overhead",
+    );
     assert_page_has(PAGE, "`pids.max` = 64 plus 8 per allowed child");
     assert_page_has(PAGE, "`cpu.weight` = 10 (low priority)");
     assert_page_has(PAGE, "`cpu.max` = the manifest `cpu_ms_per_s` quota");
@@ -366,7 +483,10 @@ fn sec_029_allocating_past_the_memory_limit_kills_the_helper() {
     let mut helper = Helper::spawn();
     assert_eq!(helper.ready_with("hostile", &wasm), Ok(()));
     helper.send(&msg_call_export(1, "allocate-past-limit", b"", 10_000));
-    assert!(helper.wait_exit(15_000).is_some(), "helper must be killed at memory.max");
+    assert!(
+        helper.wait_exit(15_000).is_some(),
+        "helper must be killed at memory.max"
+    );
 }
 
 /// REQ: SEC-029
@@ -375,8 +495,13 @@ fn sec_029_fork_bomb_fails_with_eagain_and_helper_stays_responsive() {
     let wasm = require_fixture("hostile-escape");
     let mut helper = Helper::spawn();
     assert_eq!(helper.ready_with("hostile", &wasm), Ok(()));
-    let (result, _) = run_call(&mut helper, 1, "fork-bomb", b"", 10_000, 15_000, |_| (Vec::new(), None));
-    assert_eq!(String::from_utf8_lossy(&result.expect("call result").result), "EAGAIN");
+    let (result, _) = run_call(&mut helper, 1, "fork-bomb", b"", 10_000, 15_000, |_| {
+        (Vec::new(), None)
+    });
+    assert_eq!(
+        String::from_utf8_lossy(&result.expect("call result").result),
+        "EAGAIN"
+    );
     assert!(helper.heartbeat_echo(3, 2_000));
 }
 
@@ -388,11 +513,20 @@ fn sec_055_a_helper_that_serves_is_sandboxed_before_the_first_plugin_byte() {
     let mut helper = Helper::spawn();
     let served = helper.recv_tag(tag::HELLO, 5_000).is_some();
     if served {
-        let status = std::fs::read_to_string(format!("/proc/{}/status", helper.pid())).unwrap_or_default();
-        assert!(status.contains("NoNewPrivs:\t1"), "served without no_new_privs");
-        assert!(status.contains("Seccomp:\t2"), "served without a seccomp filter");
+        let status =
+            std::fs::read_to_string(format!("/proc/{}/status", helper.pid())).unwrap_or_default();
+        assert!(
+            status.contains("NoNewPrivs:\t1"),
+            "served without no_new_privs"
+        );
+        assert!(
+            status.contains("Seccomp:\t2"),
+            "served without a seccomp filter"
+        );
     } else {
-        let exit = helper.wait_exit(3_000).expect("an unavailable sandbox ends the helper, never serves unconfined");
+        let exit = helper
+            .wait_exit(3_000)
+            .expect("an unavailable sandbox ends the helper, never serves unconfined");
         assert!(!exit.success());
     }
 }
@@ -401,8 +535,16 @@ fn sec_055_a_helper_that_serves_is_sandboxed_before_the_first_plugin_byte() {
 #[test]
 fn doc_sec_055_manual_names_the_error_code_and_prerequisites() {
     assert_page_has(PAGE, "refuse to load with error code `sandbox.unavailable`");
-    assert_page_has(PAGE, "There is no silent fallback to in-process or unconfined execution");
-    for needle in ["`user namespaces`", "`cgroup v2`", "`seccomp`", "`procfs mount`"] {
+    assert_page_has(
+        PAGE,
+        "There is no silent fallback to in-process or unconfined execution",
+    );
+    for needle in [
+        "`user namespaces`",
+        "`cgroup v2`",
+        "`seccomp`",
+        "`procfs mount`",
+    ] {
         assert_page_has(PAGE, needle);
     }
 }
@@ -411,11 +553,16 @@ fn doc_sec_055_manual_names_the_error_code_and_prerequisites() {
 #[test]
 fn sec_056_root_user_never_gets_a_served_helper() {
     let status = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
-    let is_root = status.lines().any(|l| l.starts_with("Uid:") && l.split_whitespace().nth(2) == Some("0"));
+    let is_root = status
+        .lines()
+        .any(|l| l.starts_with("Uid:") && l.split_whitespace().nth(2) == Some("0"));
     let mut helper = Helper::spawn();
     let served = helper.recv_tag(tag::HELLO, 5_000).is_some();
     if is_root {
-        assert!(!served, "running as root is not supported for third-party plugins");
+        assert!(
+            !served,
+            "running as root is not supported for third-party plugins"
+        );
     } else {
         assert!(served || helper.wait_exit(3_000).is_some());
     }
@@ -424,7 +571,10 @@ fn sec_056_root_user_never_gets_a_served_helper() {
 /// REQ: SEC-056
 #[test]
 fn doc_sec_056_manual_states_the_root_message() {
-    assert_page_has(PAGE, "`running as root is not supported for third-party plugins`");
+    assert_page_has(
+        PAGE,
+        "`running as root is not supported for third-party plugins`",
+    );
 }
 
 /// REQ: SEC-057
@@ -453,10 +603,16 @@ fn sec_057_on_linux_the_helper_binary_starts() {
 /// REQ: SEC-065
 #[test]
 fn sec_065_without_cgroup_delegation_rlimits_bound_address_space_processes_and_cpu() {
-    let probe = applied("limits", &[("ILIUM_PLUGIN_FORCE_NO_CGROUP", "1".to_string())]);
+    let probe = applied(
+        "limits",
+        &[("ILIUM_PLUGIN_FORCE_NO_CGROUP", "1".to_string())],
+    );
     let limits = probe.all("limit");
     for name in ["Max address space", "Max processes", "Max cpu time"] {
-        let line = limits.iter().find(|l| l.starts_with(name)).unwrap_or_else(|| panic!("{name} missing"));
+        let line = limits
+            .iter()
+            .find(|l| l.starts_with(name))
+            .unwrap_or_else(|| panic!("{name} missing"));
         assert!(!line.contains("unlimited"), "{name} is unlimited: {line}");
     }
 }
@@ -464,8 +620,14 @@ fn sec_065_without_cgroup_delegation_rlimits_bound_address_space_processes_and_c
 /// REQ: SEC-065
 #[test]
 fn doc_sec_065_manual_states_setrlimit_fallback_and_audit_entry() {
-    assert_page_has(PAGE, "`setrlimit` (`RLIMIT_AS`, `RLIMIT_NPROC`, `RLIMIT_CPU`)");
-    assert_page_has(PAGE, "records `sandbox-degraded` with the controller list once per start");
+    assert_page_has(
+        PAGE,
+        "`setrlimit` (`RLIMIT_AS`, `RLIMIT_NPROC`, `RLIMIT_CPU`)",
+    );
+    assert_page_has(
+        PAGE,
+        "records `sandbox-degraded` with the controller list once per start",
+    );
 }
 
 // ------------------------------------------------------------------ SEC-067
@@ -483,9 +645,17 @@ fn syscall_results(group: &str) -> Vec<(String, i64)> {
 }
 
 fn assert_group_denied(group: &str) {
-    let expected = SYSCALL_GROUPS.iter().find(|(g, _)| *g == group).expect("group").1;
+    let expected = SYSCALL_GROUPS
+        .iter()
+        .find(|(g, _)| *g == group)
+        .expect("group")
+        .1;
     let results = syscall_results(group);
-    assert_eq!(results.len(), expected.len(), "the child was killed or skipped calls: {results:?}");
+    assert_eq!(
+        results.len(),
+        expected.len(),
+        "the child was killed or skipped calls: {results:?}"
+    );
     for (name, ret) in results {
         assert_eq!(ret, -1, "{name} must return EPERM");
     }
@@ -531,19 +701,44 @@ fn sec_067_privilege_calls_are_denied() {
 #[test]
 fn doc_sec_067_every_denied_call_of_the_manual_is_in_the_probe_table() {
     let text = page(PAGE);
-    let start = text.find("These calls are always denied").expect("denied table");
+    let start = text
+        .find("These calls are always denied")
+        .expect("denied table");
     let table = &text[start..];
-    let probe_names: Vec<&str> = SYSCALL_GROUPS.iter().flat_map(|(_, calls)| calls.iter().map(|(n, _)| *n)).collect();
+    let probe_names: Vec<&str> = SYSCALL_GROUPS
+        .iter()
+        .flat_map(|(_, calls)| calls.iter().map(|(n, _)| *n))
+        .collect();
     for name in probe_names {
-        assert!(table.contains(&format!("`{name}`")), "{name} not in the manual table");
+        assert!(
+            table.contains(&format!("`{name}`")),
+            "{name} not in the manual table"
+        );
     }
-    for name in ["ptrace", "process_vm_readv", "bpf", "io_uring_setup", "pivot_root", "reboot", "accept4", "personality"] {
-        assert!(SYSCALL_GROUPS.iter().any(|(_, calls)| calls.iter().any(|(n, _)| *n == name)), "{name} missing from the probe table");
+    for name in [
+        "ptrace",
+        "process_vm_readv",
+        "bpf",
+        "io_uring_setup",
+        "pivot_root",
+        "reboot",
+        "accept4",
+        "personality",
+    ] {
+        assert!(
+            SYSCALL_GROUPS
+                .iter()
+                .any(|(_, calls)| calls.iter().any(|(n, _)| *n == name)),
+            "{name} missing from the probe table"
+        );
     }
 }
 
 /// REQ: SEC-067
 #[test]
 fn doc_sec_067_manual_requires_a_published_generated_list() {
-    assert_page_has(PAGE, "MUST publish the list as a generated file with the release");
+    assert_page_has(
+        PAGE,
+        "MUST publish the list as a generated file with the release",
+    );
 }

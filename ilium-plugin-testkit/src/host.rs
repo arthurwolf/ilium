@@ -11,15 +11,15 @@ use ilium_plugin_sdk_core::host::workspace::WorkspaceSpec;
 use ilium_plugin_sdk_core::primitives::terminal::{OutputFilter, Selection};
 use ilium_plugin_sdk_core::primitives::{SessionRef, SignatureSpec, TranscriptTurn};
 use ilium_plugin_sdk_core::types::{
-    ActionKind, ActionValue, AgentModel, Color, ColorRole, DeactivationReason, Event, Outcome, PluginError,
-    PointerModifiers, RequestId, RequestRef, Submission, UiTree, ViewTarget,
+    ActionKind, ActionValue, AgentModel, Color, ColorRole, DeactivationReason, Event, Outcome,
+    PluginError, PointerModifiers, RequestId, RequestRef, Submission, UiTree, ViewTarget,
 };
 use ilium_plugin_sdk_core::NativeEntry;
 use serde_json::Value;
 
 use crate::errors::HarnessError;
-use crate::fakes::clock::FakeClock;
 use crate::fakes::cli::FakeCli;
+use crate::fakes::clock::FakeClock;
 use crate::fakes::fs::FakeFs;
 use crate::fakes::http::FakeHttp;
 use crate::fakes::jobs::FakeJobs;
@@ -69,7 +69,14 @@ impl Default for ScreenCell {
     /// A blank cell in the default foreground role.
     fn default() -> Self {
         let color = Color::Role(ColorRole::Foreground);
-        ScreenCell { symbol: " ".to_string(), foreground: color.clone(), background: color, bold: false, italic: false, underline: false }
+        ScreenCell {
+            symbol: " ".to_string(),
+            foreground: color.clone(),
+            background: color,
+            bold: false,
+            italic: false,
+            underline: false,
+        }
     }
 }
 /// Harness-page name of [`ScreenCell`].
@@ -182,7 +189,10 @@ pub struct FakeHost {
 impl FakeHost {
     /// An empty host: no grants, tier T1, side server, empty tree. Seed 1 unless `ILIUM_PLUGIN_TEST_SEED` is set (DEV-413).
     pub fn new() -> FakeHost {
-        FakeHost { mode: Mode::Native, seed: 1 }
+        FakeHost {
+            mode: Mode::Native,
+            seed: 1,
+        }
     }
 
     /// Takes id, side, grants and tier from a manifest (DEV-411).
@@ -311,7 +321,13 @@ impl FakeHost {
     }
 
     /// Sends an action to a widget key of a view.
-    pub fn send_action(&mut self, _target: ViewTarget, _key: &str, _kind: ActionKind, _value: ActionValue) {
+    pub fn send_action(
+        &mut self,
+        _target: ViewTarget,
+        _key: &str,
+        _kind: ActionKind,
+        _value: ActionValue,
+    ) {
         unimplemented!("DEV-441")
     }
 
@@ -587,7 +603,13 @@ impl FakeHost {
     // ---- extension points ----
 
     /// Contributes an entry to a collect point as another plugin (reference-test-harness.md "Extension points").
-    pub fn contribute_extension(&mut self, _point: &str, _id: &str, _priority: impl Into<i64>, _entry: impl IntoJsonText) {
+    pub fn contribute_extension(
+        &mut self,
+        _point: &str,
+        _id: &str,
+        _priority: impl Into<i64>,
+        _entry: impl IntoJsonText,
+    ) {
         unimplemented!("harness.contribute-extension")
     }
 
@@ -674,7 +696,11 @@ impl FakeHost {
     }
 
     /// Installs a closure as the fake contributor at `point` (reference-test-harness.md "Extension points").
-    pub fn set_hook_handler(&mut self, _point: &str, _handler: impl Fn(HookCall) -> HookReply + 'static) {
+    pub fn set_hook_handler(
+        &mut self,
+        _point: &str,
+        _handler: impl Fn(HookCall) -> HookReply + 'static,
+    ) {
         unimplemented!("harness.set-hook-handler")
     }
 
@@ -686,12 +712,21 @@ impl FakeHost {
     // ---- services ----
 
     /// Calls a service method the plugin exposes, as the kernel would (reference-test-harness.md "Services").
-    pub fn call_service(&mut self, _service: &str, _method: &str, _payload_json: &str) -> Result<String, PluginError> {
+    pub fn call_service(
+        &mut self,
+        _service: &str,
+        _method: &str,
+        _payload_json: &str,
+    ) -> Result<String, PluginError> {
         unimplemented!("harness.call-service")
     }
 
     /// Calls the plugin's own single-method service (reference-test-harness.md "Services").
-    pub fn call_own_service(&mut self, _service: &str, _request_json: &str) -> Result<String, PluginError> {
+    pub fn call_own_service(
+        &mut self,
+        _service: &str,
+        _request_json: &str,
+    ) -> Result<String, PluginError> {
         unimplemented!("harness.call-own-service")
     }
 
@@ -723,7 +758,11 @@ impl FakeHost {
     // ---- jobs ----
 
     /// Runs one of the plugin's job kinds to completion (reference-test-harness.md "Jobs").
-    pub fn run_job(&mut self, _kind: &str, _input: impl AsRef<[u8]>) -> Result<Vec<u8>, PluginError> {
+    pub fn run_job(
+        &mut self,
+        _kind: &str,
+        _input: impl AsRef<[u8]>,
+    ) -> Result<Vec<u8>, PluginError> {
         unimplemented!("harness.run-job")
     }
 
@@ -1067,12 +1106,24 @@ pub struct FakeExtensions;
 
 impl FakeExtensions {
     /// Contributes an entry to a collect point.
-    pub fn contribute(&mut self, _point: &str, _id: &str, _priority: impl Into<i64>, _entry: impl IntoJsonText) {
+    pub fn contribute(
+        &mut self,
+        _point: &str,
+        _id: &str,
+        _priority: impl Into<i64>,
+        _entry: impl IntoJsonText,
+    ) {
         unimplemented!("harness.extensions-contribute")
     }
 
     /// Contributes an entry and returns nothing; alias used by lanes that collect right away.
-    pub fn contribute_collect(&mut self, _point: &str, _id: &str, _priority: impl Into<i64>, _entry: impl IntoJsonText) {
+    pub fn contribute_collect(
+        &mut self,
+        _point: &str,
+        _id: &str,
+        _priority: impl Into<i64>,
+        _entry: impl IntoJsonText,
+    ) {
         unimplemented!("harness.extensions-contribute-collect")
     }
 

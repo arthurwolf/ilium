@@ -1,7 +1,7 @@
 //! Twins of tree_ui.rs: the tree toolbar.
 //! Request/reply shape: see API_GAPS_ports.md.
-use serde_json::Value;
 use crate::common::{ask, Place};
+use serde_json::Value;
 
 fn check(place: Place, op: &str, request: &str, expected: &str) {
     let request: Value = serde_json::from_str(request).expect("request literal parses");
@@ -9,7 +9,11 @@ fn check(place: Place, op: &str, request: &str, expected: &str) {
     let reply = ask(place, op, request);
     let fields = expected.as_object().expect("expected is an object");
     for (name, value) in fields {
-        assert_eq!(&reply[name.as_str()], value, "field {name} of reply {reply}");
+        assert_eq!(
+            &reply[name.as_str()],
+            value,
+            "field {name} of reply {reply}"
+        );
     }
 }
 
@@ -57,8 +61,14 @@ fn port_tree_ui_stopped_agent_row_keeps_its_recovery_indicator_in_normal_and_att
                     "row": {"kind": "agent-unavailable", "title": "Recover authored work"},
                 });
                 let reply = ask(Place::Client, "tree-row.render", request.clone());
-                assert_eq!(reply["indicator"], "agent-unavailable", "{request} -> {reply}");
-                assert_eq!(reply["text"], "Recover authored work [unavailable]", "{request} -> {reply}");
+                assert_eq!(
+                    reply["indicator"], "agent-unavailable",
+                    "{request} -> {reply}"
+                );
+                assert_eq!(
+                    reply["text"], "Recover authored work [unavailable]",
+                    "{request} -> {reply}"
+                );
                 assert_eq!(reply["agent_state"], Value::Null, "{request} -> {reply}");
             }
         }

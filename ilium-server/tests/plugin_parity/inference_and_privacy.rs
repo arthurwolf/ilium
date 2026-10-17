@@ -35,7 +35,10 @@ fn f_085_choosing_skip_in_setup_keeps_automatic_requests_off() {
 #[test]
 fn f_085_default_provider_is_kilo_gateway() {
     in_both_modes(|kernel| {
-        assert_eq!(kernel.setting("inference", "selected_provider").as_deref(), Some("kilo_gateway"));
+        assert_eq!(
+            kernel.setting("inference", "selected_provider").as_deref(),
+            Some("kilo_gateway")
+        );
     });
 }
 
@@ -43,9 +46,21 @@ fn f_085_default_provider_is_kilo_gateway() {
 #[test]
 fn f_085_selected_provider_accepts_the_five_documented_providers_only() {
     in_both_modes(|kernel| {
-        for value in ["kilo_gateway", "ollama", "open_ai", "anthropic", "open_router"] {
-            assert_eq!(kernel.apply_setting("inference", "selected_provider", value), Ok(()), "{value}");
+        for value in [
+            "kilo_gateway",
+            "ollama",
+            "open_ai",
+            "anthropic",
+            "open_router",
+        ] {
+            assert_eq!(
+                kernel.apply_setting("inference", "selected_provider", value),
+                Ok(()),
+                "{value}"
+            );
         }
-        assert!(kernel.apply_setting("inference", "selected_provider", "telepathy").is_err());
+        assert!(kernel
+            .apply_setting("inference", "selected_provider", "telepathy")
+            .is_err());
     });
 }

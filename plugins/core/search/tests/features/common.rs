@@ -42,7 +42,9 @@ pub fn workspace_root() -> PathBuf {
 
 /// The text of a manual page by file stem, for example `core-plugin-search`.
 pub fn page(stem: &str) -> String {
-    let path = workspace_root().join("docs/plugins-manual/pages").join(format!("{stem}.md"));
+    let path = workspace_root()
+        .join("docs/plugins-manual/pages")
+        .join(format!("{stem}.md"));
     std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("page {path:?}: {error}"))
 }
 
@@ -51,7 +53,10 @@ pub fn page_text() -> String {
 }
 
 pub fn golden_path(name: &str) -> String {
-    format!("{}/tests/features/golden/{name}", env!("CARGO_MANIFEST_DIR"))
+    format!(
+        "{}/tests/features/golden/{name}",
+        env!("CARGO_MANIFEST_DIR")
+    )
 }
 
 /// The bodies of the ```json fences of a page, in order.
@@ -60,7 +65,9 @@ pub fn json_blocks(page: &str) -> Vec<String> {
     let mut rest = page;
     while let Some(start) = rest.find("```json\n") {
         let after = &rest[start + "```json\n".len()..];
-        let Some(end) = after.find("\n```") else { break };
+        let Some(end) = after.find("\n```") else {
+            break;
+        };
         blocks.push(after[..end].to_string());
         rest = &after[end + 4..];
     }
@@ -73,7 +80,9 @@ pub fn term_blocks(page: &str) -> Vec<String> {
     let mut rest = page;
     while let Some(start) = rest.find("<pre class=\"term\">") {
         let after = &rest[start + "<pre class=\"term\">".len()..];
-        let Some(end) = after.find("</pre>") else { break };
+        let Some(end) = after.find("</pre>") else {
+            break;
+        };
         let mut text = String::new();
         let mut in_tag = false;
         for symbol in after[..end].chars() {
@@ -84,7 +93,10 @@ pub fn term_blocks(page: &str) -> Vec<String> {
                 _ => {}
             }
         }
-        let text = text.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">");
+        let text = text
+            .replace("&amp;", "&")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">");
         blocks.push(text.trim_end_matches('\n').to_string());
         rest = &after[end + 6..];
     }
@@ -100,22 +112,36 @@ pub fn table_row(text: &str, first_cell: &str) -> Vec<String> {
             cells.len() > 2 && cells[1] == first_cell
         })
         .unwrap_or_else(|| panic!("no table row starting with {first_cell}"));
-    let mut cells: Vec<String> = line.split('|').map(|cell| cell.trim().to_string()).collect();
+    let mut cells: Vec<String> = line
+        .split('|')
+        .map(|cell| cell.trim().to_string())
+        .collect();
     cells.remove(0);
     cells.pop();
     cells
 }
 
 pub fn strings(value: &Value) -> Vec<String> {
-    value.as_array().expect("array").iter().map(|item| item.as_str().expect("string").to_string()).collect()
+    value
+        .as_array()
+        .expect("array")
+        .iter()
+        .map(|item| item.as_str().expect("string").to_string())
+        .collect()
 }
 
 pub fn server_host() -> FakeHost {
-    FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("server").build()
+    FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("server")
+        .build()
 }
 
 pub fn client_host() -> FakeHost {
-    FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("client").build()
+    FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("client")
+        .build()
 }
 
 pub fn activated_server() -> FakeHost {
@@ -155,16 +181,27 @@ pub fn action(key: &str, kind: ActionKind, value: ActionValue) -> Event {
 }
 
 pub fn text_changed(text: &str) -> Event {
-    action("query", ActionKind::Changed, ActionValue::Text(text.to_string()))
+    action(
+        "query",
+        ActionKind::Changed,
+        ActionValue::Text(text.to_string()),
+    )
 }
 
 pub fn filter_changed(text: &str) -> Event {
-    action("query", ActionKind::FilterChanged, ActionValue::Text(text.to_string()))
+    action(
+        "query",
+        ActionKind::FilterChanged,
+        ActionValue::Text(text.to_string()),
+    )
 }
 
 /// The intents of the submissions, in order.
 pub fn intents(submissions: &[Submission]) -> Vec<Intent> {
-    submissions.iter().map(|submission| submission.intent.clone()).collect()
+    submissions
+        .iter()
+        .map(|submission| submission.intent.clone())
+        .collect()
 }
 
 /// Every `open-view` for the panel among the submissions.
@@ -179,7 +216,9 @@ pub fn open_views(submissions: &[Submission]) -> Vec<Submission> {
 pub fn close_views(submissions: &[Submission]) -> Vec<Submission> {
     submissions
         .iter()
-        .filter(|submission| matches!(&submission.intent, Intent::CloseView(view) if *view == panel()))
+        .filter(
+            |submission| matches!(&submission.intent, Intent::CloseView(view) if *view == panel()),
+        )
         .cloned()
         .collect()
 }
@@ -209,7 +248,8 @@ pub fn query_event(client: u64, revision: u64, query: &str) -> Event {
         from_side: PluginSide::Client,
         from_client: Some(ClientId(client)),
         channel: QUERY_CHANNEL.to_string(),
-        payload: serde_json::to_vec(&json!({ "revision": revision, "query": query })).expect("json"),
+        payload: serde_json::to_vec(&json!({ "revision": revision, "query": query }))
+            .expect("json"),
     })
 }
 
@@ -251,7 +291,9 @@ pub fn client_showing(query: &str, hits: Value) -> FakeHost {
     host.deliver(vec![open_command_event()]);
     host.deliver(vec![text_changed(query)]);
     host.settle();
-    let revision = query_messages(&host.submitted()).last().map_or(1, |message| message["revision"].as_u64().unwrap_or(1));
+    let revision = query_messages(&host.submitted())
+        .last()
+        .map_or(1, |message| message["revision"].as_u64().unwrap_or(1));
     host.deliver(vec![results_event(revision, hits)]);
     host.settle();
     host
@@ -268,7 +310,8 @@ pub fn add_terminal(host: &mut FakeHost, name: &str, screen_text: &str) -> u64 {
         content_kind: Some("ilium.terminal".to_string()),
         agent: None,
     });
-    host.tree().set_screen(id, screen_text.lines().map(str::to_string).collect());
+    host.tree()
+        .set_screen(id, screen_text.lines().map(str::to_string).collect());
     id
 }
 

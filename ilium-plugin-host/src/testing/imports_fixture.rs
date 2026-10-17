@@ -6,12 +6,12 @@ use std::path::Path;
 use std::time::Duration;
 
 use ilium_plugin_api::generated::host::{
-    Bucket, ChildHandle, FieldError, HostClock, HostCodec, HostFs, HostHttp, HostJobs, HostJournal, HostLog, HostPanes,
-    HostProcess, HostSettings, HostStorage, HostTimers, HostTree,
+    Bucket, ChildHandle, FieldError, HostClock, HostCodec, HostFs, HostHttp, HostJobs, HostJournal,
+    HostLog, HostPanes, HostProcess, HostSettings, HostStorage, HostTimers, HostTree,
 };
 use ilium_plugin_api::generated::types::{
-    ErrorCode, Event, FsPath, MeterSegment, NodeId, Outcome, PluginError, RequestId, RichSpan, RowState, StreamId,
-    WatchId,
+    ErrorCode, Event, FsPath, MeterSegment, NodeId, Outcome, PluginError, RequestId, RichSpan,
+    RowState, StreamId, WatchId,
 };
 use ilium_plugin_api::side::Side;
 use ilium_plugin_api::Tier;
@@ -106,7 +106,9 @@ impl ImportsFixtureBuilder {
 
     /// The virtual latency of the fake settings-validate export.
     pub fn settings_validate_latency(self, latency: Duration) -> ImportsFixtureBuilder {
-        unimplemented!("host::testing::imports_fixture::ImportsFixtureBuilder::settings_validate_latency")
+        unimplemented!(
+            "host::testing::imports_fixture::ImportsFixtureBuilder::settings_validate_latency"
+        )
     }
 
     /// The fake job-runner export.
@@ -402,7 +404,9 @@ impl ImportsFixture {
 
     /// The next job exceeds its memory limit.
     pub fn make_next_job_exceed_memory(&mut self) {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::make_next_job_exceed_memory")
+        unimplemented!(
+            "host::testing::imports_fixture::ImportsFixture::make_next_job_exceed_memory"
+        )
     }
 
     /// The next settings-validate call traps.
@@ -422,7 +426,9 @@ impl ImportsFixture {
 
     /// Completes a background request.
     pub fn complete_background_request(&mut self, request: RequestId) {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::complete_background_request")
+        unimplemented!(
+            "host::testing::imports_fixture::ImportsFixture::complete_background_request"
+        )
     }
 
     /// The user chooses paths in the picker.
@@ -441,12 +447,22 @@ impl ImportsFixture {
     }
 
     /// Waits for chunks of a stream.
-    pub fn wait_stream_chunks(&mut self, stream: StreamId, count: usize, timeout: Duration) -> Vec<Vec<u8>> {
+    pub fn wait_stream_chunks(
+        &mut self,
+        stream: StreamId,
+        count: usize,
+        timeout: Duration,
+    ) -> Vec<Vec<u8>> {
         unimplemented!("host::testing::imports_fixture::ImportsFixture::wait_stream_chunks")
     }
 
     /// Waits for output of a child.
-    pub fn wait_child_output(&mut self, child: ChildHandle, expected: &[u8], timeout: Duration) -> bool {
+    pub fn wait_child_output(
+        &mut self,
+        child: ChildHandle,
+        expected: &[u8],
+        timeout: Duration,
+    ) -> bool {
         unimplemented!("host::testing::imports_fixture::ImportsFixture::wait_child_output")
     }
 
@@ -476,7 +492,13 @@ impl ImportsFixture {
     }
 
     /// Adds a terminal pane under a parent.
-    pub fn add_terminal_pane_under(&mut self, parent: NodeId, title: &str, columns: u16, rows: u16) -> NodeId {
+    pub fn add_terminal_pane_under(
+        &mut self,
+        parent: NodeId,
+        title: &str,
+        columns: u16,
+        rows: u16,
+    ) -> NodeId {
         unimplemented!("host::testing::imports_fixture::ImportsFixture::add_terminal_pane_under")
     }
 
@@ -502,7 +524,9 @@ impl ImportsFixture {
 
     /// Makes the on-disk data version of a bucket newer.
     pub fn make_bucket_data_version_newer(&mut self, bucket: Bucket) {
-        unimplemented!("host::testing::imports_fixture::ImportsFixture::make_bucket_data_version_newer")
+        unimplemented!(
+            "host::testing::imports_fixture::ImportsFixture::make_bucket_data_version_newer"
+        )
     }
 
     /// The code of the last refused infallible import call.

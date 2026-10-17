@@ -89,7 +89,13 @@ fn pkg_041_other_worlds_refused_schema() {
 /// REQ: PKG-042
 #[test]
 fn pkg_042_optional_exports_of_each_side_are_accepted() {
-    for name in ["views", "annotator", "service-provider", "migrator", "hook-handler"] {
+    for name in [
+        "views",
+        "annotator",
+        "service-provider",
+        "migrator",
+        "hook-handler",
+    ] {
         let value = set(client(), "/client/exports", json!([name]));
         assert_lacks(&errors(&value), "manifest.schema");
     }
@@ -107,9 +113,18 @@ fn pkg_042_required_unknown_and_wrong_side_exports_refused_schema() {
         assert_has(&errors(&value), "manifest.schema");
     }
     // `detector` is server only, `views` is client only.
-    assert_has(&errors(&set(client(), "/client/exports", json!(["detector"]))), "manifest.schema");
-    assert_has(&errors(&set(server(), "/server/exports", json!(["views"]))), "manifest.schema");
-    assert_has(&errors(&set(scene(), "/scene/exports", json!(["migrator"]))), "manifest.schema");
+    assert_has(
+        &errors(&set(client(), "/client/exports", json!(["detector"]))),
+        "manifest.schema",
+    );
+    assert_has(
+        &errors(&set(server(), "/server/exports", json!(["views"]))),
+        "manifest.schema",
+    );
+    assert_has(
+        &errors(&set(scene(), "/scene/exports", json!(["migrator"]))),
+        "manifest.schema",
+    );
 }
 
 /// REQ: PKG-042
@@ -219,7 +234,11 @@ fn pkg_044_handler_extension_without_hook_handler_in_the_list_refused_exports_mi
 /// REQ: PKG-044
 #[test]
 fn pkg_044_extension_without_handler_needs_no_hook_handler() {
-    let value = set(client(), "/contributes/extensions", json!([extension_value(None)]));
+    let value = set(
+        client(),
+        "/contributes/extensions",
+        json!([extension_value(None)]),
+    );
     assert_lacks(&errors(&value), "manifest.exports-mismatch");
 }
 
@@ -237,7 +256,10 @@ fn pkg_045_data_version_above_one_needs_migrator_in_exports() {
 fn pkg_045_data_version_one_needs_no_migrator() {
     let value = set(client(), "/data_version", json!(1));
     assert_clean(&value);
-    assert_has(&errors(&set(client(), "/data_version", json!(2))), "manifest.exports-mismatch");
+    assert_has(
+        &errors(&set(client(), "/data_version", json!(2))),
+        "manifest.exports-mismatch",
+    );
 }
 
 /// REQ: PKG-045
@@ -291,7 +313,9 @@ fn pkg_045_the_component_must_really_export_migrator() {
 // ---------------------------------------------------------------------------------------------
 
 fn grant_code(text: &str) -> Option<String> {
-    Grant::parse(text).err().map(|diagnostic| diagnostic.code.as_str().to_owned())
+    Grant::parse(text)
+        .err()
+        .map(|diagnostic| diagnostic.code.as_str().to_owned())
 }
 
 /// REQ: PKG-050
@@ -315,7 +339,10 @@ fn pkg_050_length_boundary_3_and_256_characters() {
     let argument = repeat('a', 256 - "topics.subscribe:".len());
     let at_limit = format!("topics.subscribe:{argument}");
     assert_eq!(at_limit.len(), 256);
-    assert_ne!(grant_code(&at_limit).as_deref(), Some("manifest.grant-argument"));
+    assert_ne!(
+        grant_code(&at_limit).as_deref(),
+        Some("manifest.grant-argument")
+    );
     let over = format!("{at_limit}a");
     assert!(grant_code(&over).is_some());
 }
@@ -323,10 +350,22 @@ fn pkg_050_length_boundary_3_and_256_characters() {
 /// REQ: PKG-050
 #[test]
 fn pkg_050_malformed_names_are_refused() {
-    for text in ["", "Tree.Read", "tree_read", "tree read", ".tree", "tree.", "tree..read", ":x"] {
+    for text in [
+        "",
+        "Tree.Read",
+        "tree_read",
+        "tree read",
+        ".tree",
+        "tree.",
+        "tree..read",
+        ":x",
+    ] {
         let code = grant_code(text);
         assert!(
-            matches!(code.as_deref(), Some("manifest.grant-unknown") | Some("manifest.grant-argument")),
+            matches!(
+                code.as_deref(),
+                Some("manifest.grant-unknown") | Some("manifest.grant-argument")
+            ),
             "{text:?} gave {code:?}"
         );
     }
@@ -338,7 +377,8 @@ fn pkg_050_in_a_manifest_a_bad_grant_string_is_refused_with_a_grant_code() {
     let value = client_with_grants(&["Tree.Read"]);
     let found = errors(&value);
     assert!(
-        found.iter().any(|code| code == "manifest.grant-unknown" || code == "manifest.grant-argument"
+        found.iter().any(|code| code == "manifest.grant-unknown"
+            || code == "manifest.grant-argument"
             || code == "manifest.schema"),
         "{found:?}"
     );
@@ -347,8 +387,14 @@ fn pkg_050_in_a_manifest_a_bad_grant_string_is_refused_with_a_grant_code() {
 /// REQ: PKG-051
 #[test]
 fn pkg_051_a_grant_outside_the_capability_table_refused_grant_unknown() {
-    assert_eq!(grant_code("teleport.now").as_deref(), Some("manifest.grant-unknown"));
-    assert_has(&errors(&client_with_grants(&["teleport.now"])), "manifest.grant-unknown");
+    assert_eq!(
+        grant_code("teleport.now").as_deref(),
+        Some("manifest.grant-unknown")
+    );
+    assert_has(
+        &errors(&client_with_grants(&["teleport.now"])),
+        "manifest.grant-unknown",
+    );
 }
 
 /// REQ: PKG-051
@@ -364,8 +410,19 @@ fn pkg_051_every_family_of_the_table_is_known() {
 /// REQ: PKG-052
 #[test]
 fn pkg_052_a_grant_that_needs_an_argument_and_has_none_refused() {
-    for text in ["http", "process.run", "fs.read", "services.use", "messages.peer", "topics.subscribe"] {
-        assert_eq!(grant_code(text).as_deref(), Some("manifest.grant-argument-missing"), "{text}");
+    for text in [
+        "http",
+        "process.run",
+        "fs.read",
+        "services.use",
+        "messages.peer",
+        "topics.subscribe",
+    ] {
+        assert_eq!(
+            grant_code(text).as_deref(),
+            Some("manifest.grant-argument-missing"),
+            "{text}"
+        );
     }
 }
 
@@ -373,7 +430,11 @@ fn pkg_052_a_grant_that_needs_an_argument_and_has_none_refused() {
 #[test]
 fn pkg_052_a_grant_without_argument_but_given_one_refused_grant_argument() {
     for text in ["tree.read:everything", "fs.pick:x", "sessions.cross:all"] {
-        assert_eq!(grant_code(text).as_deref(), Some("manifest.grant-argument"), "{text}");
+        assert_eq!(
+            grant_code(text).as_deref(),
+            Some("manifest.grant-argument"),
+            "{text}"
+        );
     }
 }
 
@@ -382,7 +443,10 @@ fn pkg_052_a_grant_without_argument_but_given_one_refused_grant_argument() {
 fn pkg_052_an_empty_argument_counts_as_missing_or_invalid() {
     let code = grant_code("http:");
     assert!(
-        matches!(code.as_deref(), Some("manifest.grant-argument-missing") | Some("manifest.grant-argument")),
+        matches!(
+            code.as_deref(),
+            Some("manifest.grant-argument-missing") | Some("manifest.grant-argument")
+        ),
         "{code:?}"
     );
 }
@@ -395,12 +459,23 @@ fn pkg_053_wildcards_only_where_the_grammar_allows() {
     assert_eq!(grant_code("commands.invoke:*"), None);
     assert_eq!(grant_code("commands.invoke:com.example.a/*"), None);
     assert_eq!(grant_code("http:*.example.com"), None);
-    for text in ["messages.peer:*", "services.use:*", "process.run:*", "fs.read:work*trees"] {
+    for text in [
+        "messages.peer:*",
+        "services.use:*",
+        "process.run:*",
+        "fs.read:work*trees",
+    ] {
         let code = grant_code(text);
         assert!(code.is_some(), "{text} must be refused");
     }
-    assert_eq!(grant_code("messages.peer:*").as_deref(), Some("manifest.grant-wildcard"));
-    assert_eq!(grant_code("services.use:*").as_deref(), Some("manifest.grant-wildcard"));
+    assert_eq!(
+        grant_code("messages.peer:*").as_deref(),
+        Some("manifest.grant-wildcard")
+    );
+    assert_eq!(
+        grant_code("services.use:*").as_deref(),
+        Some("manifest.grant-wildcard")
+    );
 }
 
 /// REQ: PKG-053
@@ -415,7 +490,10 @@ fn pkg_053_a_wildcard_inside_a_path_template_other_than_the_final_double_star_re
 fn pkg_054_a_grant_on_a_side_that_does_not_have_it_refused_grant_side() {
     let grant = Grant::parse("settings.read-all").expect("parses");
     let found = check_grant(&grant, Tier::T1, Side::Server);
-    assert_eq!(found.err().map(|d| d.code.as_str().to_owned()).as_deref(), Some("manifest.grant-side"));
+    assert_eq!(
+        found.err().map(|d| d.code.as_str().to_owned()).as_deref(),
+        Some("manifest.grant-side")
+    );
     assert!(check_grant(&grant, Tier::T1, Side::Client).is_ok());
 }
 
@@ -424,7 +502,10 @@ fn pkg_054_a_grant_on_a_side_that_does_not_have_it_refused_grant_side() {
 fn pkg_054_server_only_grant_on_the_client_list_refused_grant_side() {
     let grant = Grant::parse("sessions.cross").expect("parses");
     assert_eq!(
-        check_grant(&grant, Tier::T1, Side::Client).err().map(|d| d.code.as_str().to_owned()).as_deref(),
+        check_grant(&grant, Tier::T1, Side::Client)
+            .err()
+            .map(|d| d.code.as_str().to_owned())
+            .as_deref(),
         Some("manifest.grant-side")
     );
     assert!(check_grant(&grant, Tier::T1, Side::Server).is_ok());
@@ -433,20 +514,25 @@ fn pkg_054_server_only_grant_on_the_client_list_refused_grant_side() {
 /// REQ: PKG-054
 #[test]
 fn pkg_054_a_manifest_that_lists_a_grant_on_the_wrong_side_is_refused() {
-    let value = set(
-        client(),
-        "/capabilities/client",
-        json!(["sessions.cross"]),
-    );
+    let value = set(client(), "/capabilities/client", json!(["sessions.cross"]));
     assert_has(&errors(&value), "manifest.grant-side");
 }
 
 /// REQ: PKG-055
 #[test]
 fn pkg_055_fs_pick_needs_a_picked_scope_in_the_same_list() {
-    assert_has(&errors(&client_with_grants(&["fs.pick"])), "manifest.grant-dependency");
-    assert_lacks(&errors(&client_with_grants(&["fs.pick", "fs.read:picked"])), "manifest.grant-dependency");
-    assert_lacks(&errors(&client_with_grants(&["fs.pick", "fs.write:picked"])), "manifest.grant-dependency");
+    assert_has(
+        &errors(&client_with_grants(&["fs.pick"])),
+        "manifest.grant-dependency",
+    );
+    assert_lacks(
+        &errors(&client_with_grants(&["fs.pick", "fs.read:picked"])),
+        "manifest.grant-dependency",
+    );
+    assert_lacks(
+        &errors(&client_with_grants(&["fs.pick", "fs.write:picked"])),
+        "manifest.grant-dependency",
+    );
 }
 
 /// REQ: PKG-055
@@ -469,7 +555,10 @@ fn pkg_055_the_dependency_must_be_on_the_same_side() {
 fn pkg_055_settings_write_all_needs_settings_read_all() {
     let alone = errors(&client_with_grants(&["settings.write-all"]));
     assert_has(&alone, "manifest.grant-dependency");
-    let both = errors(&client_with_grants(&["settings.write-all", "settings.read-all"]));
+    let both = errors(&client_with_grants(&[
+        "settings.write-all",
+        "settings.read-all",
+    ]));
     assert_lacks(&both, "manifest.grant-dependency");
 }
 
@@ -490,14 +579,21 @@ fn pkg_056_process_run_with_arguments_a_relative_path_or_dot_dot_refused_grant_p
         "process.run:/usr/../bin/git",
         "process.run:./git",
     ] {
-        assert_eq!(grant_code(text).as_deref(), Some("manifest.grant-program"), "{text}");
+        assert_eq!(
+            grant_code(text).as_deref(),
+            Some("manifest.grant-program"),
+            "{text}"
+        );
     }
 }
 
 /// REQ: PKG-056
 #[test]
 fn pkg_056_an_unknown_fs_scope_refused_grant_scope() {
-    assert_eq!(grant_code("fs.read:nowhere").as_deref(), Some("manifest.grant-scope"));
+    assert_eq!(
+        grant_code("fs.read:nowhere").as_deref(),
+        Some("manifest.grant-scope")
+    );
     assert_eq!(grant_code("fs.read:worktrees"), None);
     assert_eq!(grant_code("fs.read:picked"), None);
 }
@@ -518,7 +614,10 @@ fn pkg_057_settings_read_all_is_bundled_only() {
     assert!(check_grant(&grant, Tier::T1, Side::Client).is_ok());
     for tier in [Tier::T2, Tier::T3] {
         assert_eq!(
-            check_grant(&grant, tier, Side::Client).err().map(|d| d.code.as_str().to_owned()).as_deref(),
+            check_grant(&grant, tier, Side::Client)
+                .err()
+                .map(|d| d.code.as_str().to_owned())
+                .as_deref(),
             Some("manifest.grant-tier")
         );
     }
@@ -529,7 +628,10 @@ fn pkg_057_settings_read_all_is_bundled_only() {
 fn pkg_057_sessions_cross_is_refused_for_t3() {
     let grant = Grant::parse("sessions.cross").expect("parses");
     assert_eq!(
-        check_grant(&grant, Tier::T3, Side::Server).err().map(|d| d.code.as_str().to_owned()).as_deref(),
+        check_grant(&grant, Tier::T3, Side::Server)
+            .err()
+            .map(|d| d.code.as_str().to_owned())
+            .as_deref(),
         Some("manifest.grant-tier")
     );
 }
@@ -596,8 +698,14 @@ fn pkg_059_a_manifest_without_activation_is_lazy_and_valid() {
 #[test]
 fn pkg_059_manifest_with_33_triggers_or_a_duplicate_refused_schema() {
     let many: Vec<String> = (0..33).map(|index| format!("event:e{index}")).collect();
-    assert_has(&errors(&set(client(), "/activation", json!(many))), "manifest.schema");
-    assert_has(&errors(&set(client(), "/activation", json!(["startup", "startup"]))), "manifest.schema");
+    assert_has(
+        &errors(&set(client(), "/activation", json!(many))),
+        "manifest.schema",
+    );
+    assert_has(
+        &errors(&set(client(), "/activation", json!(["startup", "startup"]))),
+        "manifest.schema",
+    );
 }
 
 /// REQ: PKG-060
@@ -615,8 +723,15 @@ fn pkg_060_a_trigger_that_names_an_existing_own_command_is_accepted() {
 #[test]
 fn pkg_060_a_trigger_that_names_a_missing_own_contribution_refused_contribution_target() {
     for trigger in [
-        "command:missing", "view:missing", "pane-kind:missing", "scene:missing", "cli:missing",
-        "settings:missing", "catalog:missing", "menu:missing", "virtual-rows:missing",
+        "command:missing",
+        "view:missing",
+        "pane-kind:missing",
+        "scene:missing",
+        "cli:missing",
+        "settings:missing",
+        "catalog:missing",
+        "menu:missing",
+        "virtual-rows:missing",
     ] {
         let value = set(client(), "/activation", json!([trigger]));
         assert_has(&errors(&value), "manifest.contribution-target");
@@ -627,7 +742,9 @@ fn pkg_060_a_trigger_that_names_a_missing_own_contribution_refused_contribution_
 #[test]
 fn pkg_061_a_list_of_32_entries_is_accepted_and_33_refused() {
     let commands = |count: usize| -> Vec<Value> {
-        (0..count).map(|index| json!({ "id": format!("c{index}"), "title": "T" })).collect()
+        (0..count)
+            .map(|index| json!({ "id": format!("c{index}"), "title": "T" }))
+            .collect()
     };
     assert_lacks(
         &errors(&set(client(), "/contributes/commands", json!(commands(32)))),
@@ -642,10 +759,18 @@ fn pkg_061_a_list_of_32_entries_is_accepted_and_33_refused() {
 /// REQ: PKG-061
 #[test]
 fn pkg_061_entry_id_grammar_and_uniqueness() {
-    let ok = set(client(), "/contributes/commands", json!([{ "id": repeat('a', 64), "title": "T" }]));
+    let ok = set(
+        client(),
+        "/contributes/commands",
+        json!([{ "id": repeat('a', 64), "title": "T" }]),
+    );
     assert_lacks(&errors(&ok), "manifest.schema");
     for id in ["", "A", "a_b", "a b", repeat('a', 65).as_str()] {
-        let value = set(client(), "/contributes/commands", json!([{ "id": id, "title": "T" }]));
+        let value = set(
+            client(),
+            "/contributes/commands",
+            json!([{ "id": id, "title": "T" }]),
+        );
         assert_has(&errors(&value), "manifest.schema");
     }
     let duplicate = set(
@@ -655,7 +780,9 @@ fn pkg_061_entry_id_grammar_and_uniqueness() {
     );
     let found = errors(&duplicate);
     assert!(
-        found.iter().any(|code| code == "manifest.schema" || code == "manifest.contribution-limit"),
+        found
+            .iter()
+            .any(|code| code == "manifest.schema" || code == "manifest.contribution-limit"),
         "{found:?}"
     );
 }
@@ -675,7 +802,11 @@ fn pkg_062_keybinding_naming_a_missing_command_refused_contribution_target() {
 #[test]
 fn pkg_062_keybinding_naming_an_own_command_is_accepted() {
     let value = set(
-        set(client(), "/contributes/commands", json!([{ "id": "run", "title": "Run" }])),
+        set(
+            client(),
+            "/contributes/commands",
+            json!([{ "id": "run", "title": "Run" }]),
+        ),
         "/contributes/keybindings",
         json!([{ "command": "run", "chord": "ctrl+k" }]),
     );
@@ -843,7 +974,12 @@ fn pkg_065_a_cli_alias_that_collides_with_a_name_of_the_same_plugin_is_refused()
 // ---------------------------------------------------------------------------------------------
 
 fn limits_of(pairs: &[(&str, u64)]) -> Limits {
-    Limits(pairs.iter().map(|(key, value)| ((*key).to_owned(), *value)).collect::<BTreeMap<_, _>>())
+    Limits(
+        pairs
+            .iter()
+            .map(|(key, value)| ((*key).to_owned(), *value))
+            .collect::<BTreeMap<_, _>>(),
+    )
 }
 
 /// REQ: PKG-070
@@ -894,15 +1030,25 @@ fn pkg_071_zero_means_the_default() {
 /// REQ: PKG-071
 #[test]
 fn pkg_071_a_request_above_the_ceiling_in_a_manifest_is_accepted_at_install() {
-    let value = set(packed(client()), "/limits/memory_mib", json!(4_294_967_295u64));
+    let value = set(
+        packed(client()),
+        "/limits/memory_mib",
+        json!(4_294_967_295u64),
+    );
     assert!(install_errors(&value, Tier::T3).is_empty());
 }
 
 /// REQ: PKG-072
 #[test]
 fn pkg_072_a_limit_key_outside_the_table_refused_unknown_key() {
-    assert_has(&errors(&set(client(), "/limits/memory", json!(1))), "manifest.unknown-key");
-    assert_has(&errors(&set(client(), "/limits/Memory_MiB", json!(1))), "manifest.unknown-key");
+    assert_has(
+        &errors(&set(client(), "/limits/memory", json!(1))),
+        "manifest.unknown-key",
+    );
+    assert_has(
+        &errors(&set(client(), "/limits/Memory_MiB", json!(1))),
+        "manifest.unknown-key",
+    );
 }
 
 /// REQ: PKG-072
@@ -932,7 +1078,10 @@ fn pkg_073_the_ceiling_depends_on_the_tier_and_never_on_the_manifest() {
 fn pkg_073_ceilings_are_never_below_the_defaults() {
     for key in LimitKey::ALL {
         for tier in [Tier::T1, Tier::T2, Tier::T3] {
-            assert!(limits::ceiling(key, tier) >= limits::default_of(key), "{key:?} {tier:?}");
+            assert!(
+                limits::ceiling(key, tier) >= limits::default_of(key),
+                "{key:?} {tier:?}"
+            );
         }
     }
 }
@@ -1015,7 +1164,11 @@ fn pkg_076_every_error_has_a_code_a_message_and_a_pointer_when_it_has_a_value() 
 /// REQ: PKG-076
 #[test]
 fn pkg_076_pointers_use_rfc_6901_escaping() {
-    let value = set(client(), "/contributes/commands", json!([{ "id": "a", "title": "T", "bogus": 1 }]));
+    let value = set(
+        client(),
+        "/contributes/commands",
+        json!([{ "id": "a", "title": "T", "bogus": 1 }]),
+    );
     let found = error_diagnostics(&value);
     let diagnostic = first_with(&found, "manifest.unknown-key");
     assert_eq!(diagnostic.pointer, "/contributes/commands/0/bogus");
@@ -1121,7 +1274,10 @@ fn pkg_079_a_missing_schema_file_refused_file_missing() {
         "/contributes/services",
         json!([{ "provides": ["example.demo/status"], "schema": "schemas/status.json" }]),
     );
-    assert_has(&install_errors(&packed(value), Tier::T3), "manifest.file-missing");
+    assert_has(
+        &install_errors(&packed(value), Tier::T3),
+        "manifest.file-missing",
+    );
 }
 
 /// REQ: PKG-079

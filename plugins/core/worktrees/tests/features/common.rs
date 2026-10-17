@@ -11,8 +11,9 @@ use ilium_plugin_sdk::host::process::{ProcessExit, ProcessSpec};
 use ilium_plugin_sdk::host::workspace::WorkspaceSpec;
 use ilium_plugin_sdk::testing::FakeHost;
 use ilium_plugin_sdk::types::{
-    CommandContext, CommandInvokedEvent, CommandOrigin, CreatePaneSpec, Event, Intent, MessageEvent, NodeId,
-    PaneInfo, PluginId, PluginSide, PrimitiveKind, Submission, TopicPublishedEvent,
+    CommandContext, CommandInvokedEvent, CommandOrigin, CreatePaneSpec, Event, Intent,
+    MessageEvent, NodeId, PaneInfo, PluginId, PluginSide, PrimitiveKind, Submission,
+    TopicPublishedEvent,
 };
 use serde_json::{json, Value};
 
@@ -42,7 +43,9 @@ pub fn workspace_root() -> PathBuf {
 
 /// The text of a manual page by file stem, for example `core-plugin-worktrees`.
 pub fn page(stem: &str) -> String {
-    let path = workspace_root().join("docs/plugins-manual/pages").join(format!("{stem}.md"));
+    let path = workspace_root()
+        .join("docs/plugins-manual/pages")
+        .join(format!("{stem}.md"));
     std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("page {path:?}: {error}"))
 }
 
@@ -57,7 +60,10 @@ pub fn user_doc(name: &str) -> String {
 }
 
 pub fn golden_path(name: &str) -> String {
-    format!("{}/tests/features/golden/{name}", env!("CARGO_MANIFEST_DIR"))
+    format!(
+        "{}/tests/features/golden/{name}",
+        env!("CARGO_MANIFEST_DIR")
+    )
 }
 
 /// Table rows (cells trimmed) of the first table after the line starting with `anchor`.
@@ -68,7 +74,12 @@ pub fn table_after(text: &str, anchor: &str) -> Vec<Vec<String>> {
         .skip_while(|line| !line.starts_with('|'))
         .take_while(|line| line.starts_with('|'))
         .skip(2)
-        .map(|line| line.trim_matches('|').split('|').map(|cell| cell.trim().to_string()).collect())
+        .map(|line| {
+            line.trim_matches('|')
+                .split('|')
+                .map(|cell| cell.trim().to_string())
+                .collect()
+        })
         .collect()
 }
 
@@ -91,7 +102,8 @@ pub fn page_figure(index: usize) -> Vec<String> {
     let mut rest = page.as_str();
     let mut found = None;
     for _ in 0..=index {
-        let start = rest.find("<pre class=\"term\">").expect("figure present") + "<pre class=\"term\">".len();
+        let start = rest.find("<pre class=\"term\">").expect("figure present")
+            + "<pre class=\"term\">".len();
         let end = rest[start..].find("</pre>").expect("figure end");
         found = Some(&rest[start..start + end]);
         rest = &rest[start + end..];
@@ -107,17 +119,30 @@ pub fn page_figure(index: usize) -> Vec<String> {
             _ => {}
         }
     }
-    text.lines().map(|line| line.trim_end().to_string()).filter(|line| !line.is_empty()).collect()
+    text.lines()
+        .map(|line| line.trim_end().to_string())
+        .filter(|line| !line.is_empty())
+        .collect()
 }
 
 // ---- events -------------------------------------------------------------------------------
 
 pub fn ok_exit() -> ProcessExit {
-    ProcessExit { status: Some(0), signal: None, stdout: Vec::new(), stderr: Vec::new() }
+    ProcessExit {
+        status: Some(0),
+        signal: None,
+        stdout: Vec::new(),
+        stderr: Vec::new(),
+    }
 }
 
 pub fn failed_exit(status: i32) -> ProcessExit {
-    ProcessExit { status: Some(status), signal: None, stdout: Vec::new(), stderr: b"fatal: refused".to_vec() }
+    ProcessExit {
+        status: Some(status),
+        signal: None,
+        stdout: Vec::new(),
+        stderr: b"fatal: refused".to_vec(),
+    }
 }
 
 /// The message the client side of this plugin sends to the server side on channel `new-agent`.
@@ -182,7 +207,9 @@ pub fn create_panes(submissions: &[Submission]) -> Vec<CreatePaneSpec> {
 
 /// The `cwd` of a create-pane spec as text, whatever the skeleton type of the field is.
 pub fn cwd_text(spec: &CreatePaneSpec) -> String {
-    serde_json::to_value(&spec.cwd).expect("cwd serialises").to_string()
+    serde_json::to_value(&spec.cwd)
+        .expect("cwd serialises")
+        .to_string()
 }
 
 /// Messages addressed to this plugin's server side, as (channel, payload text).
@@ -190,8 +217,14 @@ pub fn server_messages(submissions: &[Submission]) -> Vec<(String, String)> {
     submissions
         .iter()
         .filter_map(|submission| match &submission.intent {
-            Intent::Message(spec) if spec.to.plugin == PluginId(PLUGIN_ID.to_string()) && spec.to.side == PluginSide::Server => {
-                Some((spec.channel.clone(), String::from_utf8(spec.payload.clone()).expect("UTF-8 payload")))
+            Intent::Message(spec)
+                if spec.to.plugin == PluginId(PLUGIN_ID.to_string())
+                    && spec.to.side == PluginSide::Server =>
+            {
+                Some((
+                    spec.channel.clone(),
+                    String::from_utf8(spec.payload.clone()).expect("UTF-8 payload"),
+                ))
             }
             _ => None,
         })
@@ -202,7 +235,11 @@ pub fn server_messages(submissions: &[Submission]) -> Vec<(String, String)> {
 pub fn worktree_add_calls(calls: &[ProcessSpec]) -> Vec<ProcessSpec> {
     calls
         .iter()
-        .filter(|call| call.program == "git" && call.arguments.first().map(String::as_str) == Some("worktree") && call.arguments.get(1).map(String::as_str) == Some("add"))
+        .filter(|call| {
+            call.program == "git"
+                && call.arguments.first().map(String::as_str) == Some("worktree")
+                && call.arguments.get(1).map(String::as_str) == Some("add")
+        })
         .cloned()
         .collect()
 }
@@ -215,12 +252,18 @@ pub fn registered(host: &mut FakeHost) -> Vec<WorkspaceSpec> {
 
 /// A server-side host with the manifest grants, not yet activated.
 pub fn server_host_unactivated() -> FakeHost {
-    FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("server").build()
+    FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("server")
+        .build()
 }
 
 /// A client-side host with the manifest grants, not yet activated.
 pub fn client_host_unactivated() -> FakeHost {
-    FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("client").build()
+    FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("client")
+        .build()
 }
 
 /// A server-side host with the plugin activated; every git run succeeds with empty output.
@@ -246,11 +289,19 @@ pub fn create_worktree(host: &mut FakeHost, payload: &Value) -> Vec<Submission> 
 }
 
 /// Sets a key of the `[git]` kernel settings tab (the values stay in the same config.toml table).
-pub fn set_git(host: &mut FakeHost, key: &str, value: Value) -> Result<(), ilium_plugin_sdk::types::PluginError> {
+pub fn set_git(
+    host: &mut FakeHost,
+    key: &str,
+    value: Value,
+) -> Result<(), ilium_plugin_sdk::types::PluginError> {
     host.kernel_settings().set("git", key, value)
 }
 
 /// A server-side host whose project root is `root`, not yet activated.
 pub fn server_host_unactivated_at(root: &str) -> FakeHost {
-    FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("server").with_project_root(PathBuf::from(root)).build()
+    FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("server")
+        .with_project_root(PathBuf::from(root))
+        .build()
 }

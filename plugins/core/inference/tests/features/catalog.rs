@@ -12,7 +12,12 @@ use serde_json::json;
 use crate::common::{row_command, server_host};
 
 fn query(filter: &str) -> CatalogQuery {
-    CatalogQuery { catalog: "models".to_string(), filter: filter.to_string(), cursor: None, limit: 100 }
+    CatalogQuery {
+        catalog: "models".to_string(),
+        filter: filter.to_string(),
+        cursor: None,
+        limit: 100,
+    }
 }
 
 fn loaded_host(ids: &[&str]) -> FakeHost {
@@ -21,7 +26,11 @@ fn loaded_host(ids: &[&str]) -> FakeHost {
     host.http().expect(
         "GET",
         "https://api.openai.com/v1/models",
-        HttpResponse { status: 200, headers: vec![], body: json!({"data": data}).to_string().into_bytes() },
+        HttpResponse {
+            status: 200,
+            headers: vec![],
+            body: json!({"data": data}).to_string().into_bytes(),
+        },
     );
     host.deliver_one(row_command("ilium.core.inference/load-models"));
     host.settle();
@@ -29,7 +38,9 @@ fn loaded_host(ids: &[&str]) -> FakeHost {
 }
 
 fn ask(host: &mut FakeHost, filter: &str) -> CatalogPage {
-    host.instance_mut::<InferenceServer>().query_catalog(query(filter)).expect("catalogue answers")
+    host.instance_mut::<InferenceServer>()
+        .query_catalog(query(filter))
+        .expect("catalogue answers")
 }
 
 /// REQ: F-084
@@ -98,7 +109,11 @@ fn catalog_084_the_saved_model_is_listed_even_before_any_load() {
 fn catalog_084_the_catalogue_and_the_models_export_agree() {
     use ilium_plugin_sdk::InferenceProvider;
     let mut host = loaded_host(&["m-1", "m-2"]);
-    let mut from_catalogue: Vec<String> = ask(&mut host, "").items.into_iter().map(|item| item.id).collect();
+    let mut from_catalogue: Vec<String> = ask(&mut host, "")
+        .items
+        .into_iter()
+        .map(|item| item.id)
+        .collect();
     let mut from_export = host.instance_mut::<InferenceServer>().models();
     from_catalogue.sort();
     from_export.sort();
@@ -109,7 +124,10 @@ fn catalog_084_the_catalogue_and_the_models_export_agree() {
 #[test]
 fn catalog_084_a_query_for_another_catalogue_is_refused_with_not_found() {
     let mut host = server_host();
-    let other = CatalogQuery { catalog: "palettes".to_string(), ..query("") };
+    let other = CatalogQuery {
+        catalog: "palettes".to_string(),
+        ..query("")
+    };
     let answer = host.instance_mut::<InferenceServer>().query_catalog(other);
     assert_eq!(answer.expect_err("refused").code, ErrorCode::NotFound);
 }
@@ -118,16 +136,32 @@ fn catalog_084_a_query_for_another_catalogue_is_refused_with_not_found() {
 #[test]
 fn catalog_084_limit_zero_is_refused_with_invalid_argument() {
     let mut host = server_host();
-    let answer = host.instance_mut::<InferenceServer>().query_catalog(CatalogQuery { limit: 0, ..query("") });
-    assert_eq!(answer.expect_err("refused").code, ErrorCode::InvalidArgument);
+    let answer = host
+        .instance_mut::<InferenceServer>()
+        .query_catalog(CatalogQuery {
+            limit: 0,
+            ..query("")
+        });
+    assert_eq!(
+        answer.expect_err("refused").code,
+        ErrorCode::InvalidArgument
+    );
 }
 
 /// REQ: F-084
 #[test]
 fn catalog_084_limit_257_is_refused_with_invalid_argument() {
     let mut host = server_host();
-    let answer = host.instance_mut::<InferenceServer>().query_catalog(CatalogQuery { limit: 257, ..query("") });
-    assert_eq!(answer.expect_err("refused").code, ErrorCode::InvalidArgument);
+    let answer = host
+        .instance_mut::<InferenceServer>()
+        .query_catalog(CatalogQuery {
+            limit: 257,
+            ..query("")
+        });
+    assert_eq!(
+        answer.expect_err("refused").code,
+        ErrorCode::InvalidArgument
+    );
 }
 
 /// REQ: F-084
@@ -148,7 +182,13 @@ fn catalog_084_limits_one_and_256_are_accepted() {
 #[test]
 fn catalog_084_a_page_never_holds_more_items_than_the_limit_and_offers_a_cursor() {
     let mut host = loaded_host(&["m-1", "m-2", "m-3"]);
-    let page = host.instance_mut::<InferenceServer>().query_catalog(CatalogQuery { limit: 1, ..query("") }).expect("ok");
+    let page = host
+        .instance_mut::<InferenceServer>()
+        .query_catalog(CatalogQuery {
+            limit: 1,
+            ..query("")
+        })
+        .expect("ok");
     assert_eq!(page.items.len(), 1);
     assert!(page.next.is_some());
 }
@@ -162,7 +202,11 @@ fn catalog_084_following_the_cursor_visits_every_model_once() {
     for _ in 0..10 {
         let page = host
             .instance_mut::<InferenceServer>()
-            .query_catalog(CatalogQuery { limit: 1, cursor: cursor.clone(), ..query("") })
+            .query_catalog(CatalogQuery {
+                limit: 1,
+                cursor: cursor.clone(),
+                ..query("")
+            })
             .expect("ok");
         seen.extend(page.items.into_iter().map(|item| item.id));
         cursor = page.next;

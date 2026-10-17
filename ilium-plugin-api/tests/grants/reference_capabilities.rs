@@ -17,7 +17,11 @@ fn grant(text: &str) -> Grant {
 }
 
 fn code_of(result: Result<(), ilium_plugin_api::Diagnostic>) -> String {
-    result.expect_err("the grant is refused").code.as_str().to_owned()
+    result
+        .expect_err("the grant is refused")
+        .code
+        .as_str()
+        .to_owned()
 }
 
 // ---------------------------------------------------------------- CAP-001 grant syntax
@@ -51,7 +55,12 @@ fn cap_001_loopback_host_with_port_keeps_port_in_argument() {
 #[test]
 fn cap_001_picked_with_extra_argument_is_judged_on_the_whole_argument() {
     // fs.read:picked:x -> the argument is "picked:x", which is not a scope.
-    assert!(reports(Tier::T2, Side::Client, &["fs.read:picked:x"], "manifest.grant-scope"));
+    assert!(reports(
+        Tier::T2,
+        Side::Client,
+        &["fs.read:picked:x"],
+        "manifest.grant-scope"
+    ));
     if let Ok(parsed) = Grant::parse("fs.read:picked:x") {
         assert_eq!(parsed.argument(), Some("picked:x"));
     }
@@ -86,14 +95,22 @@ fn cap_002_unknown_grant_name_is_grant_unknown_on_parse() {
 #[test]
 fn cap_002_unknown_grant_name_fails_the_install_check() {
     for side in [Side::Server, Side::Client] {
-        assert!(reports(Tier::T2, side, &["files.read"], "manifest.grant-unknown"), "{side}");
+        assert!(
+            reports(Tier::T2, side, &["files.read"], "manifest.grant-unknown"),
+            "{side}"
+        );
     }
 }
 
 /// REQ: CAP-002
 #[test]
 fn cap_002_known_names_are_not_reported_unknown() {
-    assert!(!reports(Tier::T2, Side::Server, &["tree.read", "fs.read:project"], "manifest.grant-unknown"));
+    assert!(!reports(
+        Tier::T2,
+        Side::Server,
+        &["tree.read", "fs.read:project"],
+        "manifest.grant-unknown"
+    ));
 }
 
 // ---------------------------------------------------------------- CAP-003 wildcards
@@ -101,21 +118,44 @@ fn cap_002_known_names_are_not_reported_unknown() {
 /// REQ: CAP-003
 #[test]
 fn cap_003_plugin_wide_command_wildcard_is_valid() {
-    assert!(!reports_any_grant_code(Tier::T2, Side::Server, &["commands.invoke:com.example.notes/*"]));
-    assert!(!reports_any_grant_code(Tier::T2, Side::Server, &["commands.invoke:ilium.git/status"]));
+    assert!(!reports_any_grant_code(
+        Tier::T2,
+        Side::Server,
+        &["commands.invoke:com.example.notes/*"]
+    ));
+    assert!(!reports_any_grant_code(
+        Tier::T2,
+        Side::Server,
+        &["commands.invoke:ilium.git/status"]
+    ));
 }
 
 /// REQ: CAP-003
 #[test]
 fn cap_003_wildcard_before_the_slash_is_refused() {
-    assert!(reports(Tier::T2, Side::Server, &["commands.invoke:*/notes"], "manifest.grant-wildcard"));
-    assert!(reports(Tier::T2, Side::Server, &["commands.invoke:*/status"], "manifest.grant-wildcard"));
+    assert!(reports(
+        Tier::T2,
+        Side::Server,
+        &["commands.invoke:*/notes"],
+        "manifest.grant-wildcard"
+    ));
+    assert!(reports(
+        Tier::T2,
+        Side::Server,
+        &["commands.invoke:*/status"],
+        "manifest.grant-wildcard"
+    ));
 }
 
 /// REQ: CAP-003
 #[test]
 fn cap_003_partial_wildcard_in_a_command_id_is_refused() {
-    assert!(reports(Tier::T2, Side::Server, &["commands.invoke:ilium.git/prefix*"], "manifest.grant-wildcard"));
+    assert!(reports(
+        Tier::T2,
+        Side::Server,
+        &["commands.invoke:ilium.git/prefix*"],
+        "manifest.grant-wildcard"
+    ));
 }
 
 /// REQ: CAP-003
@@ -132,19 +172,39 @@ fn cap_003_wildcards_are_refused_where_the_table_forbids_them() {
     for text in refused {
         let codes = codes_for(Tier::T2, Side::Server, &[text]);
         assert!(
-            codes.iter().any(|code| code == "manifest.grant-wildcard" || code == "manifest.grant-program"),
+            codes
+                .iter()
+                .any(|code| code == "manifest.grant-wildcard" || code == "manifest.grant-program"),
             "{text}: {codes:?}"
         );
     }
-    assert!(reports(Tier::T2, Side::Server, &["http:*"], "manifest.grant-wildcard"));
-    assert!(reports(Tier::T2, Side::Server, &["messages.peer:com.example.*"], "manifest.grant-wildcard"));
+    assert!(reports(
+        Tier::T2,
+        Side::Server,
+        &["http:*"],
+        "manifest.grant-wildcard"
+    ));
+    assert!(reports(
+        Tier::T2,
+        Side::Server,
+        &["messages.peer:com.example.*"],
+        "manifest.grant-wildcard"
+    ));
 }
 
 /// REQ: CAP-003
 #[test]
 fn cap_003_wildcards_the_table_allows_are_not_refused() {
-    for text in ["http:*.openstreetmap.org", "commands.invoke:*", "topics.subscribe:ilium.progress/*", "topics.subscribe:*"] {
-        assert!(!reports(Tier::T2, Side::Server, &[text], "manifest.grant-wildcard"), "{text}");
+    for text in [
+        "http:*.openstreetmap.org",
+        "commands.invoke:*",
+        "topics.subscribe:ilium.progress/*",
+        "topics.subscribe:*",
+    ] {
+        assert!(
+            !reports(Tier::T2, Side::Server, &[text], "manifest.grant-wildcard"),
+            "{text}"
+        );
     }
 }
 
@@ -153,26 +213,65 @@ fn cap_003_wildcards_the_table_allows_are_not_refused() {
 /// REQ: CAP-004
 #[test]
 fn cap_004_grant_that_takes_no_argument_refuses_one() {
-    for text in ["tree.read:x", "fs.pick:project", "sessions.cross:all", "notify.toast:x"] {
-        assert!(reports(Tier::T1, Side::Server, &[text], "manifest.grant-argument")
-            || reports(Tier::T1, Side::Client, &[text], "manifest.grant-argument"), "{text}");
+    for text in [
+        "tree.read:x",
+        "fs.pick:project",
+        "sessions.cross:all",
+        "notify.toast:x",
+    ] {
+        assert!(
+            reports(Tier::T1, Side::Server, &[text], "manifest.grant-argument")
+                || reports(Tier::T1, Side::Client, &[text], "manifest.grant-argument"),
+            "{text}"
+        );
     }
 }
 
 /// REQ: CAP-004
 #[test]
 fn cap_004_grant_that_needs_an_argument_refuses_none() {
-    for text in ["process.run", "commands.invoke", "fs.read", "http", "services.use", "messages.peer", "http-api.route"] {
-        assert!(reports(Tier::T2, Side::Server, &[text], "manifest.grant-argument-missing"), "{text}");
+    for text in [
+        "process.run",
+        "commands.invoke",
+        "fs.read",
+        "http",
+        "services.use",
+        "messages.peer",
+        "http-api.route",
+    ] {
+        assert!(
+            reports(
+                Tier::T2,
+                Side::Server,
+                &[text],
+                "manifest.grant-argument-missing"
+            ),
+            "{text}"
+        );
     }
 }
 
 /// REQ: CAP-004
 #[test]
 fn cap_004_loopback_host_without_port_is_an_argument_error() {
-    assert!(reports(Tier::T2, Side::Server, &["http:localhost"], "manifest.grant-argument"));
-    assert!(reports(Tier::T2, Side::Server, &["http:127.0.0.1"], "manifest.grant-argument"));
-    assert!(!reports(Tier::T2, Side::Server, &["http:localhost:8080"], "manifest.grant-argument"));
+    assert!(reports(
+        Tier::T2,
+        Side::Server,
+        &["http:localhost"],
+        "manifest.grant-argument"
+    ));
+    assert!(reports(
+        Tier::T2,
+        Side::Server,
+        &["http:127.0.0.1"],
+        "manifest.grant-argument"
+    ));
+    assert!(!reports(
+        Tier::T2,
+        Side::Server,
+        &["http:localhost:8080"],
+        "manifest.grant-argument"
+    ));
 }
 
 /// REQ: CAP-004
@@ -200,7 +299,11 @@ fn cap_005_t1_only_grants_fail_in_t2_and_t3_with_grant_tier() {
         let parsed = grant(&text);
         let side = info(family).expect("table row").sides[0];
         for tier in [Tier::T2, Tier::T3] {
-            assert_eq!(code_of(check_grant(&parsed, tier, side)), "manifest.grant-tier", "{text} {tier}");
+            assert_eq!(
+                code_of(check_grant(&parsed, tier, side)),
+                "manifest.grant-tier",
+                "{text} {tier}"
+            );
         }
         assert!(check_grant(&parsed, Tier::T1, side).is_ok(), "{text} at T1");
     }
@@ -209,17 +312,40 @@ fn cap_005_t1_only_grants_fail_in_t2_and_t3_with_grant_tier() {
 /// REQ: CAP-005
 #[test]
 fn cap_005_install_check_reports_grant_tier_for_a_t2_package() {
-    assert!(reports(Tier::T2, Side::Client, &["plugins.manage"], "manifest.grant-tier"));
-    assert!(reports(Tier::T2, Side::Client, &["settings.read-all"], "manifest.grant-tier"));
-    assert!(reports(Tier::T3, Side::Server, &["settings.write-kernel:api"], "manifest.grant-tier"));
-    assert!(!reports(Tier::T1, Side::Client, &["plugins.manage"], "manifest.grant-tier"));
+    assert!(reports(
+        Tier::T2,
+        Side::Client,
+        &["plugins.manage"],
+        "manifest.grant-tier"
+    ));
+    assert!(reports(
+        Tier::T2,
+        Side::Client,
+        &["settings.read-all"],
+        "manifest.grant-tier"
+    ));
+    assert!(reports(
+        Tier::T3,
+        Side::Server,
+        &["settings.write-kernel:api"],
+        "manifest.grant-tier"
+    ));
+    assert!(!reports(
+        Tier::T1,
+        Side::Client,
+        &["plugins.manage"],
+        "manifest.grant-tier"
+    ));
 }
 
 /// REQ: CAP-005
 #[test]
 fn cap_005_ordinary_grants_pass_the_tier_check_at_every_tier() {
     for tier in Tier::ALL {
-        assert!(check_grant(&grant("tree.read"), tier, Side::Server).is_ok(), "{tier}");
+        assert!(
+            check_grant(&grant("tree.read"), tier, Side::Server).is_ok(),
+            "{tier}"
+        );
     }
 }
 
@@ -228,25 +354,57 @@ fn cap_005_ordinary_grants_pass_the_tier_check_at_every_tier() {
 /// REQ: CAP-006
 #[test]
 fn cap_006_client_only_grant_on_the_server_side_is_grant_side() {
-    for text in ["ui.panels", "editor.read", "terminal.pointer", "keymap.read"] {
-        assert_eq!(code_of(check_grant(&grant(text), Tier::T2, Side::Server)), "manifest.grant-side", "{text}");
+    for text in [
+        "ui.panels",
+        "editor.read",
+        "terminal.pointer",
+        "keymap.read",
+    ] {
+        assert_eq!(
+            code_of(check_grant(&grant(text), Tier::T2, Side::Server)),
+            "manifest.grant-side",
+            "{text}"
+        );
     }
-    assert!(reports(Tier::T2, Side::Server, &["ui.panels"], "manifest.grant-side"));
+    assert!(reports(
+        Tier::T2,
+        Side::Server,
+        &["ui.panels"],
+        "manifest.grant-side"
+    ));
 }
 
 /// REQ: CAP-006
 #[test]
 fn cap_006_server_only_grant_on_the_client_side_is_grant_side() {
-    for text in ["panes.signal", "panes.lifecycle", "terminal.output-filter", "cli.contribute", "workspace.manage"] {
-        assert_eq!(code_of(check_grant(&grant(text), Tier::T2, Side::Client)), "manifest.grant-side", "{text}");
+    for text in [
+        "panes.signal",
+        "panes.lifecycle",
+        "terminal.output-filter",
+        "cli.contribute",
+        "workspace.manage",
+    ] {
+        assert_eq!(
+            code_of(check_grant(&grant(text), Tier::T2, Side::Client)),
+            "manifest.grant-side",
+            "{text}"
+        );
     }
-    assert!(reports(Tier::T2, Side::Client, &["cli.contribute"], "manifest.grant-side"));
+    assert!(reports(
+        Tier::T2,
+        Side::Client,
+        &["cli.contribute"],
+        "manifest.grant-side"
+    ));
 }
 
 /// REQ: CAP-006
 #[test]
 fn cap_006_scene_side_accepts_only_scene_grants() {
-    assert_eq!(code_of(check_grant(&grant("tree.read"), Tier::T2, Side::Scene)), "manifest.grant-side");
+    assert_eq!(
+        code_of(check_grant(&grant("tree.read"), Tier::T2, Side::Scene)),
+        "manifest.grant-side"
+    );
     assert!(check_grant(&grant("fs.read:project"), Tier::T2, Side::Scene).is_ok());
     assert!(check_grant(&grant("jobs.run"), Tier::T2, Side::Scene).is_ok());
 }
@@ -254,7 +412,14 @@ fn cap_006_scene_side_accepts_only_scene_grants() {
 /// REQ: CAP-006
 #[test]
 fn cap_006_sessions_cross_is_refused_on_the_client_side() {
-    assert_eq!(code_of(check_grant(&grant("sessions.cross"), Tier::T2, Side::Client)), "manifest.grant-side");
+    assert_eq!(
+        code_of(check_grant(
+            &grant("sessions.cross"),
+            Tier::T2,
+            Side::Client
+        )),
+        "manifest.grant-side"
+    );
 }
 
 // ---------------------------------------------------------------- CAP-007 dependencies
@@ -262,41 +427,91 @@ fn cap_006_sessions_cross_is_refused_on_the_client_side() {
 /// REQ: CAP-007
 #[test]
 fn cap_007_fs_pick_alone_is_a_dependency_error() {
-    assert!(reports(Tier::T2, Side::Client, &["fs.pick"], "manifest.grant-dependency"));
+    assert!(reports(
+        Tier::T2,
+        Side::Client,
+        &["fs.pick"],
+        "manifest.grant-dependency"
+    ));
 }
 
 /// REQ: CAP-007
 #[test]
 fn cap_007_fs_pick_with_a_picked_grant_has_no_dependency_error() {
-    assert!(!reports(Tier::T2, Side::Client, &["fs.pick", "fs.read:picked"], "manifest.grant-dependency"));
-    assert!(!reports(Tier::T2, Side::Client, &["fs.pick", "fs.write:picked"], "manifest.grant-dependency"));
+    assert!(!reports(
+        Tier::T2,
+        Side::Client,
+        &["fs.pick", "fs.read:picked"],
+        "manifest.grant-dependency"
+    ));
+    assert!(!reports(
+        Tier::T2,
+        Side::Client,
+        &["fs.pick", "fs.write:picked"],
+        "manifest.grant-dependency"
+    ));
 }
 
 /// REQ: CAP-007
 #[test]
 fn cap_007_fs_pick_with_an_unrelated_fs_grant_is_still_a_dependency_error() {
-    assert!(reports(Tier::T2, Side::Client, &["fs.pick", "fs.read:project"], "manifest.grant-dependency"));
+    assert!(reports(
+        Tier::T2,
+        Side::Client,
+        &["fs.pick", "fs.read:project"],
+        "manifest.grant-dependency"
+    ));
 }
 
 /// REQ: CAP-007
 #[test]
 fn cap_007_settings_write_all_needs_settings_read_all() {
-    assert!(reports(Tier::T1, Side::Client, &["settings.write-all"], "manifest.grant-dependency"));
-    assert!(!reports(Tier::T1, Side::Client, &["settings.read-all", "settings.write-all"], "manifest.grant-dependency"));
+    assert!(reports(
+        Tier::T1,
+        Side::Client,
+        &["settings.write-all"],
+        "manifest.grant-dependency"
+    ));
+    assert!(!reports(
+        Tier::T1,
+        Side::Client,
+        &["settings.read-all", "settings.write-all"],
+        "manifest.grant-dependency"
+    ));
 }
 
 /// REQ: CAP-007
 #[test]
 fn cap_007_panes_create_command_needs_panes_create_on_the_same_side() {
-    assert!(reports(Tier::T2, Side::Server, &["panes.create-command:htop"], "manifest.grant-dependency"));
-    assert!(!reports(Tier::T2, Side::Server, &["panes.create", "panes.create-command:htop"], "manifest.grant-dependency"));
+    assert!(reports(
+        Tier::T2,
+        Side::Server,
+        &["panes.create-command:htop"],
+        "manifest.grant-dependency"
+    ));
+    assert!(!reports(
+        Tier::T2,
+        Side::Server,
+        &["panes.create", "panes.create-command:htop"],
+        "manifest.grant-dependency"
+    ));
 }
 
 /// REQ: CAP-007
 #[test]
 fn cap_007_process_long_lived_needs_process_run() {
-    assert!(reports(Tier::T2, Side::Server, &["process.long-lived"], "manifest.grant-dependency"));
-    assert!(!reports(Tier::T2, Side::Server, &["process.run:git", "process.long-lived"], "manifest.grant-dependency"));
+    assert!(reports(
+        Tier::T2,
+        Side::Server,
+        &["process.long-lived"],
+        "manifest.grant-dependency"
+    ));
+    assert!(!reports(
+        Tier::T2,
+        Side::Server,
+        &["process.run:git", "process.long-lived"],
+        "manifest.grant-dependency"
+    ));
 }
 
 // ---------------------------------------------------------------- CAP-008 fs scopes
@@ -310,16 +525,27 @@ fn cap_008_write_to_read_only_scopes_is_grant_scope() {
         "fs.write:agent-config:claude",
         "fs.watch:agent-config:claude",
     ] {
-        assert!(reports(Tier::T2, Side::Server, &[text], "manifest.grant-scope"), "{text}");
+        assert!(
+            reports(Tier::T2, Side::Server, &[text], "manifest.grant-scope"),
+            "{text}"
+        );
     }
 }
 
 /// REQ: CAP-008
 #[test]
 fn cap_008_unknown_scope_and_bare_absolute_path_are_grant_scope() {
-    for text in ["fs.read:nowhere", "fs.read:/srv/logs", "fs.write:/srv/logs", "fs.read:path:/srv/logs"] {
+    for text in [
+        "fs.read:nowhere",
+        "fs.read:/srv/logs",
+        "fs.write:/srv/logs",
+        "fs.read:path:/srv/logs",
+    ] {
         let codes = codes_for(Tier::T2, Side::Server, &[text]);
-        assert!(codes.iter().any(|code| code == "manifest.grant-scope"), "{text}: {codes:?}");
+        assert!(
+            codes.iter().any(|code| code == "manifest.grant-scope"),
+            "{text}: {codes:?}"
+        );
     }
 }
 
@@ -334,7 +560,10 @@ fn cap_008_valid_scopes_are_accepted() {
         "fs.read:package",
         "fs.write:data",
     ] {
-        assert!(!reports(Tier::T2, Side::Server, &[text], "manifest.grant-scope"), "{text}");
+        assert!(
+            !reports(Tier::T2, Side::Server, &[text], "manifest.grant-scope"),
+            "{text}"
+        );
     }
 }
 
@@ -343,14 +572,28 @@ fn cap_008_valid_scopes_are_accepted() {
 /// REQ: CAP-009
 #[test]
 fn cap_009_process_run_with_arguments_is_grant_program() {
-    assert!(reports(Tier::T2, Side::Server, &["process.run:git status"], "manifest.grant-program"));
+    assert!(reports(
+        Tier::T2,
+        Side::Server,
+        &["process.run:git status"],
+        "manifest.grant-program"
+    ));
 }
 
 /// REQ: CAP-009
 #[test]
 fn cap_009_wildcard_relative_path_and_dotdot_are_grant_program() {
-    for text in ["process.run:git*", "process.run:./bin/tool", "process.run:bin/tool", "process.run:../x", "process.run:"] {
-        assert!(reports(Tier::T2, Side::Server, &[text], "manifest.grant-program"), "{text}");
+    for text in [
+        "process.run:git*",
+        "process.run:./bin/tool",
+        "process.run:bin/tool",
+        "process.run:../x",
+        "process.run:",
+    ] {
+        assert!(
+            reports(Tier::T2, Side::Server, &[text], "manifest.grant-program"),
+            "{text}"
+        );
     }
 }
 
@@ -358,16 +601,34 @@ fn cap_009_wildcard_relative_path_and_dotdot_are_grant_program() {
 #[test]
 fn cap_009_program_name_and_absolute_path_are_accepted() {
     for text in ["process.run:git", "process.run:/usr/bin/git"] {
-        assert!(!reports(Tier::T2, Side::Server, &[text], "manifest.grant-program"), "{text}");
+        assert!(
+            !reports(Tier::T2, Side::Server, &[text], "manifest.grant-program"),
+            "{text}"
+        );
     }
 }
 
 /// REQ: CAP-009
 #[test]
 fn cap_009_panes_create_command_uses_the_same_program_validation() {
-    assert!(reports(Tier::T2, Side::Server, &["panes.create", "panes.create-command:htop -d"], "manifest.grant-program"));
-    assert!(reports(Tier::T2, Side::Server, &["panes.create", "panes.create-command:a/b"], "manifest.grant-program"));
-    assert!(!reports(Tier::T2, Side::Server, &["panes.create", "panes.create-command:htop"], "manifest.grant-program"));
+    assert!(reports(
+        Tier::T2,
+        Side::Server,
+        &["panes.create", "panes.create-command:htop -d"],
+        "manifest.grant-program"
+    ));
+    assert!(reports(
+        Tier::T2,
+        Side::Server,
+        &["panes.create", "panes.create-command:a/b"],
+        "manifest.grant-program"
+    ));
+    assert!(!reports(
+        Tier::T2,
+        Side::Server,
+        &["panes.create", "panes.create-command:htop"],
+        "manifest.grant-program"
+    ));
 }
 
 // ---------------------------------------------------------------- CAP-010 risk
@@ -398,13 +659,19 @@ fn cap_010_risk_of_names_the_table_risk_for_pure_rows() {
 #[test]
 fn cap_010_mixed_rows_depend_on_the_argument() {
     assert_eq!(risk_of(&[grant("commands.invoke:*")]), Risk::High);
-    assert_eq!(risk_of(&[grant("commands.invoke:ilium.git/status")]), Risk::Low);
+    assert_eq!(
+        risk_of(&[grant("commands.invoke:ilium.git/status")]),
+        Risk::Low
+    );
     assert_eq!(risk_of(&[grant("http:localhost:8080")]), Risk::High);
     assert_eq!(risk_of(&[grant("http:api.example.com")]), Risk::Low);
     assert_eq!(risk_of(&[grant("clipboard.read")]), Risk::High);
     assert_eq!(risk_of(&[grant("clipboard.write")]), Risk::Low);
     assert_eq!(risk_of(&[grant("fs.read:project")]), Risk::Low);
-    assert_eq!(risk_of(&[grant("fs.read:agent-sessions:claude")]), Risk::High);
+    assert_eq!(
+        risk_of(&[grant("fs.read:agent-sessions:claude")]),
+        Risk::High
+    );
     assert_eq!(risk_of(&[grant("fs.write:project")]), Risk::High);
     assert_eq!(risk_of(&[grant("fs.write:data")]), Risk::Low);
     assert_eq!(risk_of(&[grant("topics.subscribe:*")]), Risk::High);
@@ -414,9 +681,18 @@ fn cap_010_mixed_rows_depend_on_the_argument() {
 /// REQ: CAP-010
 #[test]
 fn cap_010_risk_of_a_list_is_the_highest_member() {
-    assert_eq!(risk_of(&[grant("tree.read"), grant("terminal.history")]), Risk::High);
-    assert_eq!(risk_of(&[grant("tree.read"), grant("tree.write")]), Risk::Low);
-    assert_eq!(risk_of(&[grant("terminal.history"), grant("tree.read")]), Risk::High);
+    assert_eq!(
+        risk_of(&[grant("tree.read"), grant("terminal.history")]),
+        Risk::High
+    );
+    assert_eq!(
+        risk_of(&[grant("tree.read"), grant("tree.write")]),
+        Risk::Low
+    );
+    assert_eq!(
+        risk_of(&[grant("terminal.history"), grant("tree.read")]),
+        Risk::High
+    );
 }
 
 /// REQ: CAP-010
@@ -463,19 +739,44 @@ fn doc_cap_011_page_lists_the_always_granted_capabilities() {
         .and_then(|rest| rest.split("\n## Table").next())
         .expect("the Always granted section");
     for name in [
-        "log", "clock", "timers", "storage", "settings", "codec", "fs.read:package", "fs.read:data",
-        "fs.write:data", "fs.read:cache", "fs.write:cache", "fs.watch:package", "fs.watch:data",
-        "fs.watch:cache", "messages", "ui.invalidate",
+        "log",
+        "clock",
+        "timers",
+        "storage",
+        "settings",
+        "codec",
+        "fs.read:package",
+        "fs.read:data",
+        "fs.write:data",
+        "fs.read:cache",
+        "fs.write:cache",
+        "fs.watch:package",
+        "fs.watch:data",
+        "fs.watch:cache",
+        "messages",
+        "ui.invalidate",
     ] {
-        assert!(section.contains(&format!("`{name}`")), "always granted: {name}");
+        assert!(
+            section.contains(&format!("`{name}`")),
+            "always granted: {name}"
+        );
     }
 }
 
 /// REQ: CAP-011
 #[test]
 fn cap_011_always_granted_fs_grants_in_a_manifest_are_not_errors() {
-    for text in ["fs.read:data", "fs.write:data", "fs.read:cache", "fs.write:cache", "fs.read:package"] {
-        assert!(!reports_any_grant_code(Tier::T2, Side::Server, &[text]), "{text}");
+    for text in [
+        "fs.read:data",
+        "fs.write:data",
+        "fs.read:cache",
+        "fs.write:cache",
+        "fs.read:package",
+    ] {
+        assert!(
+            !reports_any_grant_code(Tier::T2, Side::Server, &[text]),
+            "{text}"
+        );
     }
 }
 
@@ -484,7 +785,10 @@ fn cap_011_always_granted_fs_grants_in_a_manifest_are_not_errors() {
 /// REQ: CAP-017
 #[test]
 fn doc_cap_017_table_families_match_the_api_table() {
-    let from_manual: BTreeSet<String> = table_rows().into_iter().flat_map(|row| row.families).collect();
+    let from_manual: BTreeSet<String> = table_rows()
+        .into_iter()
+        .flat_map(|row| row.families)
+        .collect();
     let from_api: BTreeSet<String> = table().iter().map(|row| row.family.to_owned()).collect();
     assert_eq!(from_api, from_manual);
 }
@@ -501,7 +805,10 @@ fn cap_017_every_table_row_has_a_unique_family() {
 /// REQ: CAP-017
 #[test]
 fn doc_cap_017_every_grant_used_in_capability_pages_exists_in_the_table() {
-    let known: BTreeSet<String> = table_rows().into_iter().flat_map(|row| row.families).collect();
+    let known: BTreeSet<String> = table_rows()
+        .into_iter()
+        .flat_map(|row| row.families)
+        .collect();
     let mut missing = Vec::new();
     let directory = manual_dir();
     let mut names: Vec<String> = std::fs::read_dir(&directory)
@@ -513,19 +820,33 @@ fn doc_cap_017_every_grant_used_in_capability_pages_exists_in_the_table() {
     names.sort();
     for name in names {
         let page = manual_page(&name);
-        for line in page.lines().filter(|line| line.contains("\"capabilities\"") || line.contains("\"server\": [") || line.contains("\"client\": [")) {
+        for line in page.lines().filter(|line| {
+            line.contains("\"capabilities\"")
+                || line.contains("\"server\": [")
+                || line.contains("\"client\": [")
+        }) {
             for quoted in line.split('"').skip(1).step_by(2) {
                 let family = quoted.split(':').next().unwrap_or("");
-                if family.contains('.') && family.chars().all(|c| c.is_ascii_lowercase() || c == '.' || c == '-')
-                    && !known.contains(family) && !quoted.contains('/') && !quoted.ends_with(".wasm")
-                    && !family.starts_with("ilium") && !family.starts_with("com") && !family.starts_with("example")
+                if family.contains('.')
+                    && family
+                        .chars()
+                        .all(|c| c.is_ascii_lowercase() || c == '.' || c == '-')
+                    && !known.contains(family)
+                    && !quoted.contains('/')
+                    && !quoted.ends_with(".wasm")
+                    && !family.starts_with("ilium")
+                    && !family.starts_with("com")
+                    && !family.starts_with("example")
                 {
                     missing.push(format!("{name}: {quoted}"));
                 }
             }
         }
     }
-    assert!(missing.is_empty(), "grants missing from the table: {missing:?}");
+    assert!(
+        missing.is_empty(),
+        "grants missing from the table: {missing:?}"
+    );
 }
 
 /// REQ: CAP-017
@@ -558,8 +879,16 @@ fn matrix_for_side(side: Side) {
                 let result = check_grant(&parsed, tier, side);
                 match (side_allowed, tier_allowed) {
                     (true, true) => assert!(result.is_ok(), "{text} {tier} {side}"),
-                    (false, true) => assert_eq!(code_of(result), "manifest.grant-side", "{text} {tier} {side}"),
-                    (true, false) => assert_eq!(code_of(result), "manifest.grant-tier", "{text} {tier} {side}"),
+                    (false, true) => assert_eq!(
+                        code_of(result),
+                        "manifest.grant-side",
+                        "{text} {tier} {side}"
+                    ),
+                    (true, false) => assert_eq!(
+                        code_of(result),
+                        "manifest.grant-tier",
+                        "{text} {tier} {side}"
+                    ),
                     (false, false) => assert!(result.is_err(), "{text} {tier} {side}"),
                 }
             }
@@ -606,9 +935,16 @@ fn cap_017_api_table_sides_equal_the_manual_sides() {
 #[test]
 fn cap_017_api_table_tiers_exclude_t2_and_t3_for_t1_only_families() {
     for family in T1_ONLY {
-        assert_eq!(info(family).expect("table row").tiers, &[Tier::T1], "{family}");
+        assert_eq!(
+            info(family).expect("table row").tiers,
+            &[Tier::T1],
+            "{family}"
+        );
     }
-    assert!(info("tree.read").expect("table row").tiers.contains(&Tier::T3));
+    assert!(info("tree.read")
+        .expect("table row")
+        .tiers
+        .contains(&Tier::T3));
 }
 
 proptest! {

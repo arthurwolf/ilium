@@ -9,18 +9,23 @@ use crate::common::*;
 /// REQ: PORT:ilium-client/src/restructure_semantic_tests.rs::semantic_contract_rejects_invented_animation_instead_of_ignoring_it, PORT:ilium-client/src/restructure_semantic_tests.rs::semantic_contract_rejects_missing_invalid_duplicate_and_unused_definitions, PORT:ilium-client/src/restructure_semantic_tests.rs::semantic_contract_rejects_title_only_restructure_even_when_feature_is_disabled
 #[test]
 fn port_043_animation_contract_is_enforced() {
-    for animations in [json!({"definitions": [], "project": "invented_animation"}), json!({"definitions": [{"id": "unused"}], "project": "none"})] {
+    for animations in [
+        json!({"definitions": [], "project": "invented_animation"}),
+        json!({"definitions": [{"id": "unused"}], "project": "none"}),
+    ] {
         let reply = json!({"children": [
             {"kind": "pane", "id": 1, "title": "claude", "short_title": null, "icon": null},
             {"kind": "pane", "id": 2, "title": "shell-1", "short_title": null, "icon": null}
-        ], "animations": animations}).to_string();
+        ], "animations": animations})
+        .to_string();
         let host = rejected_host(&reply);
         assert!(restructures(&host.submitted()).is_empty());
     }
     let title_only = json!({"children": [
         {"kind": "pane", "id": 1, "title": "claude", "short_title": null, "icon": null},
         {"kind": "pane", "id": 2, "title": "shell-1", "short_title": null, "icon": null}
-    ]}).to_string();
+    ]})
+    .to_string();
     assert!(restructures(&rejected_host(&title_only).submitted()).is_empty());
 }
 
@@ -32,7 +37,12 @@ fn port_043_prompt_lists_every_pane() {
     host.settle();
     let requests = restructure_requests(&host);
     assert_eq!(requests.len(), 1);
-    let text: String = requests[0].1.messages.iter().map(|message| message.content.clone()).collect();
+    let text: String = requests[0]
+        .1
+        .messages
+        .iter()
+        .map(|message| message.content.clone())
+        .collect();
     assert!(text.contains("shell-1"));
     assert!(text.contains("shell-2"));
 }

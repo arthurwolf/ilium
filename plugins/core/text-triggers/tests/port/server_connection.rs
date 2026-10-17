@@ -17,7 +17,10 @@ fn port_001_text_trigger_attach_and_live_broadcast_use_current_authority() {
     set_rules(&mut host, &["a", "b"], &["r", "s"]);
     assert_eq!(filter_regexes(&host, pane), ["a", "b"]);
     let mut client = client_host();
-    client.kernel_settings().set_tab("text_triggers", host.kernel_settings().tab("text_triggers").expect("table"));
+    client.kernel_settings().set_tab(
+        "text_triggers",
+        host.kernel_settings().tab("text_triggers").expect("table"),
+    );
     client.settle();
     assert_eq!(client.settings().get("patterns"), Some(json!(["a", "b"])));
 }
@@ -48,8 +51,12 @@ fn port_003_text_trigger_reader_exit_drain_cannot_restore_a_stale_payload() {
 #[test]
 fn port_004_text_trigger_stalled_socket_releases_settings_and_orders_later_frames() {
     let (mut host, pane) = armed("go", "yes");
-    host.settings().set("replies", json!(["first"])).expect("accepted");
-    host.settings().set("replies", json!(["second"])).expect("accepted");
+    host.settings()
+        .set("replies", json!(["first"]))
+        .expect("accepted");
+    host.settings()
+        .set("replies", json!(["second"]))
+        .expect("accepted");
     host.settle();
     let submissions = host.deliver_one(hit(pane, 1));
     assert_eq!(texts(&submissions), ["second"]);
@@ -78,4 +85,3 @@ fn port_006_authoritative_text_trigger_snapshot_replaces_an_undersized_queue_lea
     set_rules(&mut host, &refs, &reply_refs);
     assert_eq!(filter_ids(&host, pane).len(), MAX_RULES);
 }
-

@@ -26,8 +26,16 @@ pub const MAX_ERROR_MESSAGE_CHARS: usize = 256;
 impl PluginError {
     /// Builds an error with the message cut to 256 characters.
     pub fn new(code: ErrorCode, message: impl Into<String>) -> PluginError {
-        let message: String = message.into().chars().take(MAX_ERROR_MESSAGE_CHARS).collect();
-        PluginError { code, message, retry_after_ms: None }
+        let message: String = message
+            .into()
+            .chars()
+            .take(MAX_ERROR_MESSAGE_CHARS)
+            .collect();
+        PluginError {
+            code,
+            message,
+            retry_after_ms: None,
+        }
     }
 
     /// `timed-out` error (rust-sdk.md "Errors").
@@ -52,7 +60,10 @@ impl PluginError {
 
     /// `busy` error with a retry hint.
     pub fn busy(message: impl Into<String>, retry_after_ms: u32) -> PluginError {
-        PluginError { retry_after_ms: Some(retry_after_ms), ..PluginError::new(ErrorCode::Busy, message) }
+        PluginError {
+            retry_after_ms: Some(retry_after_ms),
+            ..PluginError::new(ErrorCode::Busy, message)
+        }
     }
 }
 
@@ -265,4 +276,3 @@ pub fn toast(payload: ToastSpec) -> Intent {
 pub fn dismiss_toast(payload: String) -> Intent {
     Intent::DismissToast(payload)
 }
-

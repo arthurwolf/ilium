@@ -3,12 +3,17 @@
 
 use crate::common::{candidates_message, client_host, page_figure, picker_target};
 
-const CANDIDATES: [&str; 3] = ["src/server/routes.rs", "cargo test -p ilium-server", "9f3c2ab"];
+const CANDIDATES: [&str; 3] = [
+    "src/server/routes.rs",
+    "cargo test -p ilium-server",
+    "9f3c2ab",
+];
 
 fn render(width: u16, height: u16) -> Vec<String> {
     let mut host = client_host();
     host.deliver_one(candidates_message(&CANDIDATES));
-    host.render(picker_target(), width, height).lines()
+    host.render(picker_target(), width, height)
+        .lines()
         .into_iter()
         .map(|row| row.trim_end().to_string())
         .collect()
@@ -18,7 +23,10 @@ fn render(width: u16, height: u16) -> Vec<String> {
 #[test]
 fn feature_065_picker_at_48_columns_matches_the_page_figure() {
     let figure = page_figure(1);
-    let rows: Vec<String> = render(48, 7).into_iter().filter(|row| !row.is_empty()).collect();
+    let rows: Vec<String> = render(48, 7)
+        .into_iter()
+        .filter(|row| !row.is_empty())
+        .collect();
     assert_eq!(rows, figure);
 }
 
@@ -27,7 +35,10 @@ fn feature_065_picker_at_48_columns_matches_the_page_figure() {
 fn feature_065_picker_lists_the_three_candidates_numbered() {
     let text = render(80, 10).join("\n");
     for (index, candidate) in CANDIDATES.iter().enumerate() {
-        assert!(text.contains(&format!("{} {}", index + 1, candidate)), "{candidate}\n{text}");
+        assert!(
+            text.contains(&format!("{} {}", index + 1, candidate)),
+            "{candidate}\n{text}"
+        );
     }
 }
 
@@ -56,7 +67,9 @@ fn feature_065_picker_never_exceeds_the_screen_width() {
 #[test]
 fn feature_065_picker_keeps_numbers_visible_when_a_candidate_is_wider_than_the_screen() {
     let mut host = client_host();
-    host.deliver_one(candidates_message(&["a/very/long/path/that/keeps/going/and/going/and/going/forever.rs"]));
+    host.deliver_one(candidates_message(&[
+        "a/very/long/path/that/keeps/going/and/going/and/going/forever.rs",
+    ]));
     let rows = host.render(picker_target(), 40, 8).lines();
     let text = rows.join("\n");
     assert!(text.contains("1 a/very"), "{text}");
@@ -75,7 +88,12 @@ fn feature_065_picker_is_empty_before_any_candidates_arrive() {
 #[test]
 fn feature_066_picker_shows_at_most_three_regions() {
     let mut host = client_host();
-    host.deliver_one(candidates_message(&["one/a.rs", "two/b.rs", "three/c.rs", "four/d.rs"]));
+    host.deliver_one(candidates_message(&[
+        "one/a.rs",
+        "two/b.rs",
+        "three/c.rs",
+        "four/d.rs",
+    ]));
     let text = host.render(picker_target(), 80, 12).lines().join("\n");
     assert!(text.contains("3 three/c.rs"), "{text}");
     assert!(!text.contains("four/d.rs"), "{text}");

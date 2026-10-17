@@ -2,7 +2,7 @@
 //! (command, help topic, service, three extension points, grants, activation) matches the Manifest fragment.
 
 use ilium_plugin_sdk::testing::FakeHost;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::common::{manifest_path, page_text, workspace_root};
 
@@ -13,7 +13,9 @@ fn manifest() -> Value {
 
 /// The first json code block after the heading line `heading`.
 fn json_block_after(page: &str, heading: &str) -> Value {
-    let start = page.find(heading).unwrap_or_else(|| panic!("heading {heading} missing"));
+    let start = page
+        .find(heading)
+        .unwrap_or_else(|| panic!("heading {heading} missing"));
     let rest = &page[start..];
     let open = rest.find("```json\n").expect("json block") + "```json\n".len();
     let close = rest[open..].find("```").expect("block end");
@@ -21,7 +23,12 @@ fn json_block_after(page: &str, heading: &str) -> Value {
 }
 
 fn strings(value: &Value) -> Vec<String> {
-    value.as_array().expect("array").iter().map(|item| item.as_str().expect("string").to_string()).collect()
+    value
+        .as_array()
+        .expect("array")
+        .iter()
+        .map(|item| item.as_str().expect("string").to_string())
+        .collect()
 }
 
 fn point<'a>(manifest: &'a Value, id: &str) -> &'a Value {
@@ -53,12 +60,16 @@ fn manifest_050_fragment_contributions_equal_the_complete_manifest() {
     assert_eq!(fragment["surface"], complete["surface"]);
     assert_eq!(fragment["replaceable"], complete["replaceable"]);
     assert_eq!(fragment["limits_tier"], complete["limits_tier"]);
-    assert_eq!(fragment["capabilities"]["server"], complete["capabilities"]["server"]);
+    assert_eq!(
+        fragment["capabilities"]["server"],
+        complete["capabilities"]["server"]
+    );
 }
 
 /// REQ: COR-050, COR-030
 #[test]
-fn manifest_050_the_complete_manifest_adds_only_the_kernel_tab_grant_to_the_fragment_client_grants() {
+fn manifest_050_the_complete_manifest_adds_only_the_kernel_tab_grant_to_the_fragment_client_grants()
+{
     let page = page_text();
     let fragment = json_block_after(&page, "### Manifest");
     let complete = json_block_after(&page, "### Complete manifest");
@@ -122,21 +133,30 @@ fn manifest_050_server_grants_are_the_twelve_file_service_and_extension_grants_i
 #[test]
 fn manifest_050_client_grants_include_the_kernel_tab_write_grant_of_the_setup_tab() {
     let manifest = manifest();
-    assert_eq!(strings(&manifest["capabilities"]["client"]), ["ui.panels", "help.read", "settings.write-kernel:setup"]);
+    assert_eq!(
+        strings(&manifest["capabilities"]["client"]),
+        ["ui.panels", "help.read", "settings.write-kernel:setup"]
+    );
 }
 
 /// REQ: COR-050, COR-033
 #[test]
 fn manifest_050_only_this_plugin_holds_the_write_grant_of_the_setup_tab() {
     let grants = strings(&manifest()["capabilities"]["client"]);
-    let holders: Vec<&String> = grants.iter().filter(|grant| grant.starts_with("settings.write-kernel:")).collect();
+    let holders: Vec<&String> = grants
+        .iter()
+        .filter(|grant| grant.starts_with("settings.write-kernel:"))
+        .collect();
     assert_eq!(holders, ["settings.write-kernel:setup"]);
 }
 
 /// REQ: COR-050, F-063
 #[test]
 fn manifest_050_activation_triggers_are_the_tab_the_command_and_the_service() {
-    assert_eq!(manifest()["activation"], json!(["settings:setup", "command:refresh", "service:install"]));
+    assert_eq!(
+        manifest()["activation"],
+        json!(["settings:setup", "command:refresh", "service:install"])
+    );
 }
 
 /// REQ: COR-050
@@ -192,7 +212,11 @@ fn manifest_050_the_help_file_named_by_the_manifest_exists_in_the_plugin_folder(
 fn manifest_050_the_install_service_has_install_remove_and_status() {
     let manifest = manifest();
     let service = &manifest["contributes"]["services"]["ilium.core.agent-setup/install"];
-    let mut methods: Vec<&String> = service.as_object().expect("service object").keys().collect();
+    let mut methods: Vec<&String> = service
+        .as_object()
+        .expect("service object")
+        .keys()
+        .collect();
     methods.sort();
     assert_eq!(methods, ["install", "remove", "status"]);
 }
@@ -207,7 +231,10 @@ fn manifest_050_install_and_remove_require_block_and_target_strings() {
         assert_eq!(params["required"], json!(["block", "target"]), "{method}");
         assert_eq!(params["properties"]["block"]["type"], "string", "{method}");
         assert_eq!(params["properties"]["target"]["type"], "string", "{method}");
-        assert_eq!(service[method]["result"]["properties"]["status"]["type"], "string", "{method}");
+        assert_eq!(
+            service[method]["result"]["properties"]["status"]["type"], "string",
+            "{method}"
+        );
     }
 }
 
@@ -243,7 +270,10 @@ fn manifest_050_instruction_blocks_is_a_static_collect_point_of_at_most_eight_en
     assert_eq!(block["dynamic"], false);
     assert_eq!(block["version"], "0.1.0");
     assert_eq!(block["title"], "Instruction blocks");
-    assert_eq!(block["entry_schema"]["required"], json!(["id", "title", "marker", "file"]));
+    assert_eq!(
+        block["entry_schema"]["required"],
+        json!(["id", "title", "marker", "file"])
+    );
 }
 
 /// REQ: COR-050, F-063
@@ -255,7 +285,10 @@ fn manifest_050_targets_is_a_static_collect_point_of_at_most_sixteen_entries() {
     assert_eq!(targets["max_entries"], 16);
     assert_eq!(targets["dynamic"], false);
     assert_eq!(targets["title"], "Target files");
-    assert_eq!(targets["entry_schema"]["required"], json!(["id", "title", "path_template", "scope"]));
+    assert_eq!(
+        targets["entry_schema"]["required"],
+        json!(["id", "title", "path_template", "scope"])
+    );
 }
 
 /// REQ: COR-050, F-063
@@ -263,7 +296,10 @@ fn manifest_050_targets_is_a_static_collect_point_of_at_most_sixteen_entries() {
 fn manifest_050_target_scope_is_limited_to_global_and_project() {
     let manifest = manifest();
     let targets = point(&manifest, "targets");
-    assert_eq!(targets["entry_schema"]["properties"]["scope"]["enum"], json!(["global", "project"]));
+    assert_eq!(
+        targets["entry_schema"]["properties"]["scope"]["enum"],
+        json!(["global", "project"])
+    );
 }
 
 /// REQ: COR-050, F-063
@@ -277,7 +313,11 @@ fn manifest_050_before_install_is_a_high_risk_veto_hook_with_a_twenty_millisecon
     assert_eq!(hook["deadline_ms"], 20);
     assert_eq!(hook["max_handlers"], 4);
     assert_eq!(hook["version"], "0.1.0");
-    let mut payload: Vec<&String> = hook["payload_schema"]["properties"].as_object().expect("payload").keys().collect();
+    let mut payload: Vec<&String> = hook["payload_schema"]["properties"]
+        .as_object()
+        .expect("payload")
+        .keys()
+        .collect();
     payload.sort();
     assert_eq!(payload, ["block", "path", "target"]);
 }
@@ -285,7 +325,10 @@ fn manifest_050_before_install_is_a_high_risk_veto_hook_with_a_twenty_millisecon
 /// REQ: COR-050
 #[test]
 fn manifest_050_a_host_built_for_the_manifest_loads_with_every_declared_grant() {
-    let host = FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("server").build();
+    let host = FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("server")
+        .build();
     drop(host);
 }
 
@@ -298,8 +341,21 @@ fn manifest_050_the_manifest_has_no_undeclared_top_level_key() {
     assert_eq!(
         keys,
         [
-            "activation", "api", "capabilities", "client", "contributes", "description", "id", "license",
-            "limits_tier", "name", "publisher", "replaceable", "server", "surface", "version"
+            "activation",
+            "api",
+            "capabilities",
+            "client",
+            "contributes",
+            "description",
+            "id",
+            "license",
+            "limits_tier",
+            "name",
+            "publisher",
+            "replaceable",
+            "server",
+            "surface",
+            "version"
         ]
     );
 }
@@ -307,5 +363,7 @@ fn manifest_050_the_manifest_has_no_undeclared_top_level_key() {
 /// REQ: COR-050
 #[test]
 fn manifest_050_the_plugin_crate_is_a_member_of_the_core_plugin_folder() {
-    assert!(workspace_root().join("plugins/core/agent-setup/Cargo.toml").is_file());
+    assert!(workspace_root()
+        .join("plugins/core/agent-setup/Cargo.toml")
+        .is_file());
 }

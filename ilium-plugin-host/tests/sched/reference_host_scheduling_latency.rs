@@ -73,7 +73,10 @@ fn hst_216_call_abandoned_in_the_queue_logs_host_queue_timeout() {
     scheduler.set_store_busy(&who, true);
     scheduler.enqueue(&who, CallKind::MenuItems, base, noop());
     drain(&scheduler, base, 4);
-    assert!(scheduler.log_lines().iter().any(|line| line.contains("host.queue-timeout")));
+    assert!(scheduler
+        .log_lines()
+        .iter()
+        .any(|line| line.contains("host.queue-timeout")));
 }
 
 /// REQ: HST-216
@@ -97,6 +100,9 @@ fn hst_216_call_that_started_in_time_logs_nothing_and_counts_nothing() {
     let base = Instant::now();
     scheduler.enqueue(&who, CallKind::MenuItems, base, noop());
     drain(&scheduler, base, 4);
-    assert!(scheduler.log_lines().iter().all(|line| !line.contains("host.queue-timeout")));
+    assert!(scheduler
+        .log_lines()
+        .iter()
+        .all(|line| !line.contains("host.queue-timeout")));
     assert_eq!(scheduler.breach_count(&who, CallClass::MenuItems), 0);
 }

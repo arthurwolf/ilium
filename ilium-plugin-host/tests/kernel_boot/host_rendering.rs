@@ -5,7 +5,12 @@ use ilium_plugin_host::testing::views::ViewHarness;
 
 fn harness_with_popups(count: usize) -> ViewHarness {
     let mut harness = ViewHarness::new();
-    harness.open_view("main", &(0..count).map(|index| format!("pop{index}")).collect::<Vec<_>>());
+    harness.open_view(
+        "main",
+        &(0..count)
+            .map(|index| format!("pop{index}"))
+            .collect::<Vec<_>>(),
+    );
     harness
 }
 
@@ -20,7 +25,10 @@ fn hst_495_a_unique_popup_id_opens() {
 #[test]
 fn hst_495_a_missing_popup_id_returns_not_found() {
     let mut harness = harness_with_popups(1);
-    assert_eq!(harness.open_popup("nope").expect_err("missing").code, ErrorCode::NotFound);
+    assert_eq!(
+        harness.open_popup("nope").expect_err("missing").code,
+        ErrorCode::NotFound
+    );
 }
 
 /// REQ: HST-495
@@ -29,7 +37,10 @@ fn hst_495_two_matching_popup_ids_return_invalid_argument() {
     let mut harness = ViewHarness::new();
     harness.open_view("one", &["dup".to_owned()]);
     harness.open_view("two", &["dup".to_owned()]);
-    assert_eq!(harness.open_popup("dup").expect_err("ambiguous").code, ErrorCode::InvalidArgument);
+    assert_eq!(
+        harness.open_popup("dup").expect_err("ambiguous").code,
+        ErrorCode::InvalidArgument
+    );
 }
 
 /// REQ: HST-495
@@ -37,7 +48,10 @@ fn hst_495_two_matching_popup_ids_return_invalid_argument() {
 fn hst_495_the_fourth_open_popup_is_accepted() {
     let mut harness = harness_with_popups(5);
     for index in 0..4 {
-        assert!(harness.open_popup(&format!("pop{index}")).is_ok(), "popup {index}");
+        assert!(
+            harness.open_popup(&format!("pop{index}")).is_ok(),
+            "popup {index}"
+        );
     }
 }
 
@@ -46,9 +60,14 @@ fn hst_495_the_fourth_open_popup_is_accepted() {
 fn hst_495_the_fifth_open_popup_returns_quota_exceeded() {
     let mut harness = harness_with_popups(6);
     for index in 0..4 {
-        harness.open_popup(&format!("pop{index}")).expect("within limit");
+        harness
+            .open_popup(&format!("pop{index}"))
+            .expect("within limit");
     }
-    assert_eq!(harness.open_popup("pop4").expect_err("fifth").code, ErrorCode::QuotaExceeded);
+    assert_eq!(
+        harness.open_popup("pop4").expect_err("fifth").code,
+        ErrorCode::QuotaExceeded
+    );
 }
 
 /// REQ: HST-495

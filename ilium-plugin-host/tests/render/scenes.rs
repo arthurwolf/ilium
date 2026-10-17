@@ -75,7 +75,11 @@ fn rnd_003_return_without_present_drops_frame_and_warns_once_per_second() {
     let mut rig = SceneRig::new(30);
     rig.never_present();
     rig.run_for_ms(3000);
-    let warns = rig.log_lines().into_iter().filter(|(l, _)| l == "warn").count();
+    let warns = rig
+        .log_lines()
+        .into_iter()
+        .filter(|(l, _)| l == "warn")
+        .count();
     assert_eq!(warns, 3);
     assert_eq!(rig.presented_frames(), 0);
 }
@@ -86,7 +90,13 @@ fn rnd_003_one_second_without_present_writes_one_warn() {
     let mut rig = SceneRig::new(30);
     rig.never_present();
     rig.run_for_ms(900);
-    assert_eq!(rig.log_lines().into_iter().filter(|(l, _)| l == "warn").count(), 1);
+    assert_eq!(
+        rig.log_lines()
+            .into_iter()
+            .filter(|(l, _)| l == "warn")
+            .count(),
+        1
+    );
 }
 
 /// REQ: RND-004, WIT:ilium:anim/surface.frame-surface.write-rows
@@ -297,7 +307,10 @@ fn surface_set_owner_ids_recorded_in_receipt() {
 #[test]
 fn surface_set_owner_ids_wrong_length_returns_invalid_argument() {
     let mut s = SurfaceRig::new(4, 2, "gray8");
-    assert_eq!(s.set_owner_ids_checked(&[1, 2, 3]).unwrap_err(), "invalid-argument");
+    assert_eq!(
+        s.set_owner_ids_checked(&[1, 2, 3]).unwrap_err(),
+        "invalid-argument"
+    );
 }
 
 /// REQ: RND-003, WIT:ilium:anim/surface.frame-surface.present
@@ -433,7 +446,14 @@ fn rnd_010_revoking_ungranted_name_does_not_restart() {
 fn rnd_011_scene_cannot_add_its_own_look_controls() {
     let rig = SceneRig::new(30);
     let controls = rig.scene_control_ids();
-    for forbidden in ["brightness", "contrast", "palette", "dither", "hue", "saturation"] {
+    for forbidden in [
+        "brightness",
+        "contrast",
+        "palette",
+        "dither",
+        "hue",
+        "saturation",
+    ] {
         assert!(!controls.iter().any(|c| c == forbidden), "{forbidden}");
     }
 }
@@ -537,7 +557,10 @@ fn rnd_014_allocating_16_mib_at_default_is_fine() {
 /// REQ: RND-017
 #[test]
 fn rnd_017_3601_frame_loop_fails_install_with_scene_prerender() {
-    assert_eq!(install_prerender(3601, 30, 1).unwrap_err(), "manifest.scene-prerender");
+    assert_eq!(
+        install_prerender(3601, 30, 1).unwrap_err(),
+        "manifest.scene-prerender"
+    );
 }
 
 /// REQ: RND-017
@@ -549,15 +572,24 @@ fn rnd_017_3600_frame_loop_at_30_fps_installs() {
 /// REQ: RND-017
 #[test]
 fn rnd_017_over_30_fps_or_128_mib_fails_install() {
-    assert_eq!(install_prerender(100, 31, 1).unwrap_err(), "manifest.scene-prerender");
-    assert_eq!(install_prerender(100, 30, 129).unwrap_err(), "manifest.scene-prerender");
+    assert_eq!(
+        install_prerender(100, 31, 1).unwrap_err(),
+        "manifest.scene-prerender"
+    );
+    assert_eq!(
+        install_prerender(100, 30, 129).unwrap_err(),
+        "manifest.scene-prerender"
+    );
     assert!(install_prerender(100, 30, 128).is_ok());
 }
 
 /// REQ: RND-018
 #[test]
 fn rnd_018_seventeen_decoration_frames_invalid_argument() {
-    assert_eq!(set_decoration_with_frames(17, 100).unwrap_err(), "invalid-argument");
+    assert_eq!(
+        set_decoration_with_frames(17, 100).unwrap_err(),
+        "invalid-argument"
+    );
 }
 
 /// REQ: RND-018
@@ -570,13 +602,19 @@ fn rnd_018_sixteen_frames_at_90_ms_accepted() {
 /// REQ: RND-018
 #[test]
 fn rnd_018_frame_ms_below_90_invalid_argument() {
-    assert_eq!(set_decoration_with_frames(4, 89).unwrap_err(), "invalid-argument");
+    assert_eq!(
+        set_decoration_with_frames(4, 89).unwrap_err(),
+        "invalid-argument"
+    );
 }
 
 /// REQ: RND-018
 #[test]
 fn rnd_018_single_frame_invalid_argument() {
-    assert_eq!(set_decoration_with_frames(1, 100).unwrap_err(), "invalid-argument");
+    assert_eq!(
+        set_decoration_with_frames(1, 100).unwrap_err(),
+        "invalid-argument"
+    );
 }
 
 /// REQ: RND-001, WIT:ilium:exports/renderer.scene-renderer.frames-per-second

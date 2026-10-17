@@ -46,7 +46,10 @@ fn port_089_the_setup_opens_for_fresh_and_partial_users_and_not_for_completed_on
     assert!(text.contains("Welcome"), "{text}");
     toggle(&mut host, "user-interface", "ui.use_stable_glyphs", true);
     let text = render_checked(&mut host, first_run(), 80, 24).text();
-    assert!(text.contains("Welcome"), "a saved setting does not remove the step: {text}");
+    assert!(
+        text.contains("Welcome"),
+        "a saved setting does not remove the step: {text}"
+    );
     assert!(host.submitted().is_empty());
 }
 
@@ -54,7 +57,10 @@ fn port_089_the_setup_opens_for_fresh_and_partial_users_and_not_for_completed_on
 #[test]
 fn port_089_every_step_card_stays_reachable_at_the_acceptance_sizes() {
     let mut host = client_host();
-    let _ = host.settings().set("inference.openai_api_key", json!("fixture-secret-do-not-render"));
+    let _ = host.settings().set(
+        "inference.openai_api_key",
+        json!("fixture-secret-do-not-render"),
+    );
     for (columns, rows) in SIZES {
         let screen = render_checked(&mut host, first_run(), columns, rows);
         assert!(!screen.text().trim().is_empty(), "{columns}x{rows}");
@@ -76,11 +82,24 @@ fn port_089_the_progress_marker_of_every_width_shows_the_step_position() {
     let mut host = client_host();
     for width in 40u16..=160 {
         let text = render_checked(&mut host, first_run(), width, 16).text();
-        assert!(text.contains("Step ") && text.contains(" of "), "width {width}: {text}");
+        assert!(
+            text.contains("Step ") && text.contains(" of "),
+            "width {width}: {text}"
+        );
     }
-    host.send_action(first_run(), "card", ActionKind::HoverEnter, ActionValue::Index(1));
+    host.send_action(
+        first_run(),
+        "card",
+        ActionKind::HoverEnter,
+        ActionValue::Index(1),
+    );
     host.settle();
-    host.send_action(first_run(), "card", ActionKind::HoverLeave, ActionValue::None);
+    host.send_action(
+        first_run(),
+        "card",
+        ActionKind::HoverLeave,
+        ActionValue::None,
+    );
     host.settle();
     assert!(host.failures().is_empty());
 }
@@ -89,9 +108,17 @@ fn port_089_the_progress_marker_of_every_width_shows_the_step_position() {
 #[test]
 fn port_089_the_practice_playground_keys_never_reach_the_settings() {
     let mut host = client_host();
-    let keys = ["ui.color_scheme", "ui.motion_level", "ui.use_stable_glyphs", "density", "ui.left_panel_fixed_width"];
+    let keys = [
+        "ui.color_scheme",
+        "ui.motion_level",
+        "ui.use_stable_glyphs",
+        "density",
+        "ui.left_panel_fixed_width",
+    ];
     let before: Vec<_> = keys.iter().map(|key| value_of(&mut host, key)).collect();
-    for key in ["Ctrl+b", "c", "Ctrl+a", "x", "Tab", "Enter", "PageDown", "Left", "Right", "Esc"] {
+    for key in [
+        "Ctrl+b", "c", "Ctrl+a", "x", "Tab", "Enter", "PageDown", "Left", "Right", "Esc",
+    ] {
         host.key(first_run(), key);
     }
     host.settle();
@@ -128,7 +155,12 @@ fn port_089_ai_and_voice_value_rows_cycle_both_directions_and_open_the_catalog()
         choose(&mut host, "user-interface", "density", option);
         assert_eq!(value_of(&mut host, "density"), Some(json!(option)));
     }
-    host.send_action(first_run(), "form", ActionKind::Selected, ActionValue::Index(1));
+    host.send_action(
+        first_run(),
+        "form",
+        ActionKind::Selected,
+        ActionValue::Index(1),
+    );
     host.settle();
     assert!(host.failures().is_empty());
 }
@@ -137,11 +169,19 @@ fn port_089_ai_and_voice_value_rows_cycle_both_directions_and_open_the_catalog()
 #[test]
 fn port_090_a_failed_save_in_a_step_stays_visible_and_is_never_reported_as_success() {
     let mut host = client_host();
-    host.inject_failure("settings.set", PluginError::new(ErrorCode::Io, "fixture failure"));
+    host.inject_failure(
+        "settings.set",
+        PluginError::new(ErrorCode::Io, "fixture failure"),
+    );
     choose(&mut host, "user-interface", "ui.color_scheme", "light");
     assert_eq!(value_of(&mut host, "ui.color_scheme"), Some(json!("dark")));
     let text = tab_text(&mut host, "user-interface", 100, 40);
-    assert!(!text.to_lowercase().contains("saved") || text.contains("fixture failure") || text.contains("Could not"), "{text}");
+    assert!(
+        !text.to_lowercase().contains("saved")
+            || text.contains("fixture failure")
+            || text.contains("Could not"),
+        "{text}"
+    );
     choose(&mut host, "user-interface", "ui.color_scheme", "light");
     assert_eq!(value_of(&mut host, "ui.color_scheme"), Some(json!("light")));
 }
@@ -151,11 +191,27 @@ fn port_090_a_failed_save_in_a_step_stays_visible_and_is_never_reported_as_succe
 fn port_090_studio_edits_persist_and_out_of_range_entries_change_nothing() {
     let mut host = client_host();
     let before = value_of(&mut host, "ui.last_prompt_max_lines");
-    type_number(&mut host, "user-interface", "ui.last_prompt_max_lines", 1801.0);
+    type_number(
+        &mut host,
+        "user-interface",
+        "ui.last_prompt_max_lines",
+        1801.0,
+    );
     assert_eq!(value_of(&mut host, "ui.last_prompt_max_lines"), before);
-    type_number(&mut host, "user-interface", "ui.last_prompt_max_lines", 14.0);
-    assert_eq!(value_of(&mut host, "ui.last_prompt_max_lines"), Some(json!(14)));
-    assert!(host.submitted().is_empty(), "a preview or edit submits nothing");
+    type_number(
+        &mut host,
+        "user-interface",
+        "ui.last_prompt_max_lines",
+        14.0,
+    );
+    assert_eq!(
+        value_of(&mut host, "ui.last_prompt_max_lines"),
+        Some(json!(14))
+    );
+    assert!(
+        host.submitted().is_empty(),
+        "a preview or edit submits nothing"
+    );
 }
 
 /// REQ: PORT:ilium-client/src/onboarding/integration.rs::resumed_step_initializes_studio_and_practice_clock, PORT:ilium-client/src/onboarding/integration.rs::starting_a_new_binding_capture_clears_previous_feedback, F-089, F-090
@@ -167,7 +223,14 @@ fn port_089_resuming_a_step_and_starting_a_new_capture_clear_stale_feedback() {
     let resumed = render_checked(&mut host, first_run(), 80, 24).text();
     assert!(resumed.contains("Welcome"), "{resumed}");
     assert!(first.contains("Welcome"));
-    host.send_action(first_run(), "capture", ActionKind::Activated, ActionValue::None);
+    host.send_action(
+        first_run(),
+        "capture",
+        ActionKind::Activated,
+        ActionValue::None,
+    );
     host.settle();
-    assert!(!render_checked(&mut host, first_run(), 80, 24).text().contains("collision"));
+    assert!(!render_checked(&mut host, first_run(), 80, 24)
+        .text()
+        .contains("collision"));
 }

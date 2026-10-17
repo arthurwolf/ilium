@@ -14,7 +14,11 @@ use serde_json::json;
 use crate::common::*;
 
 /// A terminal pane running `command` that is created with `initial_input`.
-fn terminal_with_initial_input(kernel: &ilium_server::plugin_host::ServerKernel, command: &[&str], initial_input: &str) -> NodeId {
+fn terminal_with_initial_input(
+    kernel: &ilium_server::plugin_host::ServerKernel,
+    command: &[&str],
+    initial_input: &str,
+) -> NodeId {
     created(apply(
         kernel,
         Intent::CreatePane(CreatePaneSpec {
@@ -72,11 +76,15 @@ fn port_005_initial_input_waits_past_the_codex_loading_composer_then_arrives() {
         kernel.settle();
         kernel.advance_clock_ms(3_000);
         kernel.settle();
-        let after_ready = String::from_utf8_lossy(&kernel.pane_input_log(pane)).contains("after startup");
+        let after_ready =
+            String::from_utf8_lossy(&kernel.pane_input_log(pane)).contains("after startup");
         (while_loading, after_ready)
     });
     assert_eq!(while_loading, Vec::<u8>::new());
-    assert!(after_ready, "the body must be typed once the loading banner is gone");
+    assert!(
+        after_ready,
+        "the body must be typed once the loading banner is gone"
+    );
 }
 
 /// REQ: PORT:ilium-server/src/http_api.rs::lookup_refusal_precedes_callback_and_allows_original_input_retry
@@ -90,9 +98,18 @@ fn port_007_an_oversized_project_is_refused_before_any_pane_and_the_same_input_c
             json!({"agent_type": "claude", "project": oversized, "prompt": "retry me"}),
         );
         assert_eq!(status, 400, "{body}");
-        assert!(body["error"].as_str().is_some_and(|message| !message.is_empty()), "{body}");
+        assert!(
+            body["error"]
+                .as_str()
+                .is_some_and(|message| !message.is_empty()),
+            "{body}"
+        );
         kernel.settle();
-        assert_eq!(kernel.tree().nodes().len(), nodes_before, "a refused lookup creates nothing");
+        assert_eq!(
+            kernel.tree().nodes().len(),
+            nodes_before,
+            "a refused lookup creates nothing"
+        );
 
         let (retry_status, retry_body) = kernel.http_post(
             "/create_agent",
@@ -108,7 +125,9 @@ fn port_007_an_oversized_project_is_refused_before_any_pane_and_the_same_input_c
 #[test]
 fn port_006_a_client_that_hangs_up_mid_request_leaves_the_route_and_job_banks_healthy() {
     on_plugin_build(|kernel| {
-        let address = kernel.http_listener_address().expect("the local listener is up");
+        let address = kernel
+            .http_listener_address()
+            .expect("the local listener is up");
         let workers_before = kernel.bank_worker_count("bank-a");
         let body = json!({"agent_type": "claude", "project": kernel.project_root(), "prompt": "abandoned"}).to_string();
         let request = format!(
@@ -117,9 +136,14 @@ fn port_006_a_client_that_hangs_up_mid_request_leaves_the_route_and_job_banks_he
             body
         );
         {
-            let mut stream = TcpStream::connect_timeout(&address, Duration::from_secs(5)).expect("connect to the listener");
-            stream.set_write_timeout(Some(Duration::from_secs(5))).expect("bounded write");
-            stream.write_all(request.as_bytes()).expect("send the request");
+            let mut stream = TcpStream::connect_timeout(&address, Duration::from_secs(5))
+                .expect("connect to the listener");
+            stream
+                .set_write_timeout(Some(Duration::from_secs(5)))
+                .expect("bounded write");
+            stream
+                .write_all(request.as_bytes())
+                .expect("send the request");
             // Dropped here without reading: the waiter is cancelled while the lookup may run.
         }
         kernel.settle();

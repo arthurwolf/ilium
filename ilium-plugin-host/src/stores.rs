@@ -30,7 +30,13 @@ impl GrantStore {
     }
 
     /// Records the grants of a plugin signed by `key` at `tier`.
-    pub fn set(&mut self, plugin: &str, key: &str, tier: &str, grants: &[Grant]) -> Result<(), StoreError> {
+    pub fn set(
+        &mut self,
+        plugin: &str,
+        key: &str,
+        tier: &str,
+        grants: &[Grant],
+    ) -> Result<(), StoreError> {
         unimplemented!("host::stores::GrantStore::set")
     }
 

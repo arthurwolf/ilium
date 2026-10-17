@@ -19,7 +19,10 @@ fn cor_030_first_owner_of_a_kernel_tab_installs() {
 #[test]
 fn cor_030_second_owner_of_the_same_tab_is_refused_manifest_settings_owner() {
     let mut rig = ConfigRig::new();
-    assert!(rig.install(&plugin("com.example.one", "T1", &[WRITE_TERMINAL])).ok);
+    assert!(
+        rig.install(&plugin("com.example.one", "T1", &[WRITE_TERMINAL]))
+            .ok
+    );
     let result = rig.install(&plugin("com.example.two", "T1", &[WRITE_TERMINAL]));
     assert!(!result.ok);
     assert!(result.codes.contains(&"manifest.settings-owner".to_owned()));
@@ -29,8 +32,15 @@ fn cor_030_second_owner_of_the_same_tab_is_refused_manifest_settings_owner() {
 #[test]
 fn cor_030_owner_of_another_tab_installs_beside_the_first() {
     let mut rig = ConfigRig::new();
-    assert!(rig.install(&plugin("com.example.one", "T1", &[WRITE_TERMINAL])).ok);
-    let result = rig.install(&plugin("com.example.two", "T1", &["settings.write-kernel:editor"]));
+    assert!(
+        rig.install(&plugin("com.example.one", "T1", &[WRITE_TERMINAL]))
+            .ok
+    );
+    let result = rig.install(&plugin(
+        "com.example.two",
+        "T1",
+        &["settings.write-kernel:editor"],
+    ));
     assert!(result.ok, "{:?}", result.codes);
 }
 
@@ -38,9 +48,15 @@ fn cor_030_owner_of_another_tab_installs_beside_the_first() {
 #[test]
 fn cor_030_tab_is_free_again_after_the_owner_is_uninstalled() {
     let mut rig = ConfigRig::new();
-    assert!(rig.install(&plugin("com.example.one", "T1", &[WRITE_TERMINAL])).ok);
+    assert!(
+        rig.install(&plugin("com.example.one", "T1", &[WRITE_TERMINAL]))
+            .ok
+    );
     assert!(rig.uninstall("com.example.one"));
-    assert!(rig.install(&plugin("com.example.two", "T1", &[WRITE_TERMINAL])).ok);
+    assert!(
+        rig.install(&plugin("com.example.two", "T1", &[WRITE_TERMINAL]))
+            .ok
+    );
 }
 
 /// REQ: COR-030
@@ -56,9 +72,15 @@ fn cor_030_core_plugin_owns_each_built_in_tab_exactly_once() {
 #[test]
 fn cor_030_second_install_leaves_the_registry_unchanged() {
     let mut rig = ConfigRig::new();
-    assert!(rig.install(&plugin("com.example.one", "T1", &[WRITE_TERMINAL])).ok);
+    assert!(
+        rig.install(&plugin("com.example.one", "T1", &[WRITE_TERMINAL]))
+            .ok
+    );
     let _ = rig.install(&plugin("com.example.two", "T1", &[WRITE_TERMINAL]));
-    assert_eq!(rig.write_owners("terminal"), vec!["com.example.one".to_owned()]);
+    assert_eq!(
+        rig.write_owners("terminal"),
+        vec!["com.example.one".to_owned()]
+    );
     assert!(!rig.is_installed("com.example.two"));
 }
 
@@ -83,7 +105,10 @@ fn cor_031_t3_with_the_write_grant_is_refused_manifest_grant_tier() {
 #[test]
 fn cor_031_t1_with_the_write_grant_installs() {
     let mut rig = ConfigRig::new();
-    assert!(rig.install(&plugin("com.example.one", "T1", &[WRITE_TERMINAL])).ok);
+    assert!(
+        rig.install(&plugin("com.example.one", "T1", &[WRITE_TERMINAL]))
+            .ok
+    );
 }
 
 /// REQ: COR-031
@@ -101,7 +126,10 @@ fn cor_031_every_tier_may_hold_the_read_grant() {
 #[test]
 fn cor_031_write_grant_is_listed_as_high_risk() {
     let mut rig = ConfigRig::new();
-    assert!(rig.install(&plugin("com.example.one", "T1", &[WRITE_TERMINAL])).ok);
+    assert!(
+        rig.install(&plugin("com.example.one", "T1", &[WRITE_TERMINAL]))
+            .ok
+    );
     assert_eq!(rig.risk_of(WRITE_TERMINAL).as_deref(), Some("high"));
     assert_ne!(rig.risk_of(READ_TERMINAL).as_deref(), Some("high"));
 }
@@ -121,10 +149,16 @@ proptest! {
 #[test]
 fn cor_032_section_at_max_bytes_is_stored() {
     let mut rig = ConfigRig::new();
-    rig.install(&plugin("com.example.one", "T1", &[])).ok.then_some(()).expect("install");
+    rig.install(&plugin("com.example.one", "T1", &[]))
+        .ok
+        .then_some(())
+        .expect("install");
     let section = rig.section("com.example.one", "state", 1, 256 * KIB);
     assert!(rig.write_section(&section, &body(256 * KIB, b'a')).is_ok());
-    assert_eq!(rig.snapshot().section("state").map(|bytes| bytes.len()), Some(256 * KIB));
+    assert_eq!(
+        rig.snapshot().section("state").map(|bytes| bytes.len()),
+        Some(256 * KIB)
+    );
 }
 
 /// REQ: COR-032
@@ -133,8 +167,11 @@ fn cor_032_section_one_byte_over_max_bytes_is_dropped_keeping_the_old_value() {
     let mut rig = ConfigRig::new();
     assert!(rig.install(&plugin("com.example.one", "T1", &[])).ok);
     let section = rig.section("com.example.one", "state", 1, 256 * KIB);
-    rig.write_section(&section, &body(10, b'o')).expect("first write");
-    assert!(rig.write_section(&section, &body(256 * KIB + 1, b'n')).is_err());
+    rig.write_section(&section, &body(10, b'o'))
+        .expect("first write");
+    assert!(rig
+        .write_section(&section, &body(256 * KIB + 1, b'n'))
+        .is_err());
     assert_eq!(rig.snapshot().section("state"), Some(body(10, b'o')));
 }
 
@@ -144,7 +181,8 @@ fn cor_032_300_kib_section_is_dropped_and_old_value_stays() {
     let mut rig = ConfigRig::new();
     assert!(rig.install(&plugin("com.example.one", "T1", &[])).ok);
     let section = rig.section("com.example.one", "state", 1, 256 * KIB);
-    rig.write_section(&section, &body(100, b'o')).expect("first write");
+    rig.write_section(&section, &body(100, b'o'))
+        .expect("first write");
     assert!(rig.write_section(&section, &body(300 * KIB, b'n')).is_err());
     assert_eq!(rig.snapshot().section("state"), Some(body(100, b'o')));
     assert!(rig.log_codes().iter().any(|code| code.contains("snapshot")));
@@ -156,7 +194,9 @@ fn cor_032_section_one_byte_under_max_bytes_is_stored() {
     let mut rig = ConfigRig::new();
     assert!(rig.install(&plugin("com.example.one", "T1", &[])).ok);
     let section = rig.section("com.example.one", "state", 1, 256 * KIB);
-    assert!(rig.write_section(&section, &body(256 * KIB - 1, b'a')).is_ok());
+    assert!(rig
+        .write_section(&section, &body(256 * KIB - 1, b'a'))
+        .is_ok());
 }
 
 /// REQ: COR-032
@@ -189,8 +229,15 @@ fn cor_032_crashed_plugin_does_not_block_the_snapshot_and_keeps_the_last_value()
     rig.write_section(&two, &body(5, b'2')).expect("write");
     rig.crash_plugin("com.example.one");
     let written = rig.write_snapshot();
-    assert!(written.is_ok(), "a failed plugin must not block the snapshot");
-    assert_eq!(rig.snapshot().section("state"), Some(body(5, b'1')), "last value still in the file");
+    assert!(
+        written.is_ok(),
+        "a failed plugin must not block the snapshot"
+    );
+    assert_eq!(
+        rig.snapshot().section("state"),
+        Some(body(5, b'1')),
+        "last value still in the file"
+    );
     assert_eq!(rig.snapshot().section("state2"), Some(body(5, b'2')));
 }
 
@@ -201,7 +248,10 @@ fn cor_032_state_outside_snapshot_sections_is_not_in_the_snapshot() {
     assert!(rig.install(&plugin("com.example.one", "T1", &[])).ok);
     rig.plugin_stores_in_storage("com.example.one", "k", b"v");
     rig.write_snapshot().expect("snapshot");
-    assert!(rig.snapshot().plugin_keys().is_empty(), "only snapshot-sections reach the file");
+    assert!(
+        rig.snapshot().plugin_keys().is_empty(),
+        "only snapshot-sections reach the file"
+    );
 }
 
 proptest! {
@@ -226,7 +276,10 @@ fn cor_033_changing_one_setting_changes_only_that_line() {
     rig.write_config(BASE_CONFIG);
     rig.set_setting("terminal.scrollback", "2000");
     let after = rig.read_config();
-    assert_eq!(after, BASE_CONFIG.replace("scrollback = 1000", "scrollback = 2000"));
+    assert_eq!(
+        after,
+        BASE_CONFIG.replace("scrollback = 1000", "scrollback = 2000")
+    );
 }
 
 /// REQ: COR-033

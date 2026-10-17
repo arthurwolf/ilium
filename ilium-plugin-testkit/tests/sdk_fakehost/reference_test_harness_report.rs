@@ -5,10 +5,14 @@ use crate::cli_support::{project, run_on_terminal, run_test};
 
 const EMPTY_FIXTURE: &str = r#"{ "schema": 1 }"#;
 const PASSING_EXPECT: &str = r#"{ "schema": 1, "outcomes": { "match": "exact", "items": [] } }"#;
-const FAILING_EXPECT: &str = r#"{ "schema": 1, "outcomes": { "match": "exact", "items": ["ok"] } }"#;
+const FAILING_EXPECT: &str =
+    r#"{ "schema": 1, "outcomes": { "match": "exact", "items": ["ok"] } }"#;
 
 fn test_case_names(run: &crate::cli_support::CliRun) -> Vec<String> {
-    run.of_type("test-case").iter().map(|r| r["name"].as_str().unwrap_or_default().to_string()).collect()
+    run.of_type("test-case")
+        .iter()
+        .map(|r| r["name"].as_str().unwrap_or_default().to_string())
+        .collect()
 }
 
 // ---- DEV-517 ---------------------------------------------------------------------------------
@@ -16,17 +20,26 @@ fn test_case_names(run: &crate::cli_support::CliRun) -> Vec<String> {
 /// REQ: DEV-517
 #[test]
 fn dev_517_every_fixture_file_becomes_a_test_case_named_fixture_colon_file() {
-    let dir = project("t517a", &[("a.json", EMPTY_FIXTURE), ("b.json", EMPTY_FIXTURE)]);
+    let dir = project(
+        "t517a",
+        &[("a.json", EMPTY_FIXTURE), ("b.json", EMPTY_FIXTURE)],
+    );
     let run = run_test(&dir, &["--json"]);
     let mut names = test_case_names(&run);
     names.sort();
-    assert_eq!(names, vec!["fixture:a.json".to_string(), "fixture:b.json".to_string()]);
+    assert_eq!(
+        names,
+        vec!["fixture:a.json".to_string(), "fixture:b.json".to_string()]
+    );
 }
 
 /// REQ: DEV-517
 #[test]
 fn dev_517_expectation_files_are_not_run_as_fixtures() {
-    let dir = project("t517b", &[("a.json", EMPTY_FIXTURE), ("a.expect.json", PASSING_EXPECT)]);
+    let dir = project(
+        "t517b",
+        &[("a.json", EMPTY_FIXTURE), ("a.expect.json", PASSING_EXPECT)],
+    );
     let run = run_test(&dir, &["--json"]);
     assert_eq!(test_case_names(&run), vec!["fixture:a.json".to_string()]);
 }
@@ -34,7 +47,10 @@ fn dev_517_expectation_files_are_not_run_as_fixtures() {
 /// REQ: DEV-517
 #[test]
 fn dev_517_a_matching_expectation_file_passes() {
-    let dir = project("t517c", &[("a.json", EMPTY_FIXTURE), ("a.expect.json", PASSING_EXPECT)]);
+    let dir = project(
+        "t517c",
+        &[("a.json", EMPTY_FIXTURE), ("a.expect.json", PASSING_EXPECT)],
+    );
     let run = run_test(&dir, &["--json"]);
     assert_eq!(run.code, 0, "stdout: {}", run.stdout);
     assert_eq!(run.of_type("test-case")[0]["status"], "pass");
@@ -43,7 +59,10 @@ fn dev_517_a_matching_expectation_file_passes() {
 /// REQ: DEV-517
 #[test]
 fn dev_517_a_differing_expectation_file_fails_the_case_and_exits_3() {
-    let dir = project("t517d", &[("a.json", EMPTY_FIXTURE), ("a.expect.json", FAILING_EXPECT)]);
+    let dir = project(
+        "t517d",
+        &[("a.json", EMPTY_FIXTURE), ("a.expect.json", FAILING_EXPECT)],
+    );
     let run = run_test(&dir, &["--json"]);
     assert_eq!(run.code, 3, "stdout: {}", run.stdout);
     assert_eq!(run.of_type("test-case")[0]["status"], "fail");
@@ -62,7 +81,14 @@ fn dev_517_a_project_with_no_fixture_has_no_test_case() {
 /// REQ: DEV-550
 #[test]
 fn dev_550_names_are_the_same_in_two_runs() {
-    let dir = project("t550a", &[("a.json", EMPTY_FIXTURE), ("b.json", EMPTY_FIXTURE), ("c.json", EMPTY_FIXTURE)]);
+    let dir = project(
+        "t550a",
+        &[
+            ("a.json", EMPTY_FIXTURE),
+            ("b.json", EMPTY_FIXTURE),
+            ("c.json", EMPTY_FIXTURE),
+        ],
+    );
     let first = test_case_names(&run_test(&dir, &["--json"]));
     let second = test_case_names(&run_test(&dir, &["--json"]));
     assert_eq!(first, second);
@@ -110,23 +136,40 @@ fn dev_551_the_warning_test_no_expectation_is_printed() {
     let dir = project("t551b", &[("a.json", EMPTY_FIXTURE)]);
     let run = run_test(&dir, &["--json"]);
     let warnings = run.of_type("warning");
-    assert!(warnings.iter().any(|w| w["code"] == "test.no-expectation"), "stdout: {}", run.stdout);
+    assert!(
+        warnings.iter().any(|w| w["code"] == "test.no-expectation"),
+        "stdout: {}",
+        run.stdout
+    );
 }
 
 /// REQ: DEV-551
 #[test]
 fn dev_551_a_fixture_with_an_expectation_file_gets_no_such_warning() {
-    let dir = project("t551c", &[("a.json", EMPTY_FIXTURE), ("a.expect.json", PASSING_EXPECT)]);
+    let dir = project(
+        "t551c",
+        &[("a.json", EMPTY_FIXTURE), ("a.expect.json", PASSING_EXPECT)],
+    );
     let run = run_test(&dir, &["--json"]);
-    assert!(!run.of_type("warning").iter().any(|w| w["code"] == "test.no-expectation"));
+    assert!(!run
+        .of_type("warning")
+        .iter()
+        .any(|w| w["code"] == "test.no-expectation"));
 }
 
 /// REQ: DEV-551
 #[test]
 fn dev_551_one_warning_per_fixture_without_an_expectation() {
-    let dir = project("t551d", &[("a.json", EMPTY_FIXTURE), ("b.json", EMPTY_FIXTURE)]);
+    let dir = project(
+        "t551d",
+        &[("a.json", EMPTY_FIXTURE), ("b.json", EMPTY_FIXTURE)],
+    );
     let run = run_test(&dir, &["--json"]);
-    let count = run.of_type("warning").iter().filter(|w| w["code"] == "test.no-expectation").count();
+    let count = run
+        .of_type("warning")
+        .iter()
+        .filter(|w| w["code"] == "test.no-expectation")
+        .count();
     assert_eq!(count, 2);
 }
 
@@ -139,7 +182,8 @@ fn dev_552_piped_stdout_prints_only_json_lines() {
     let run = run_test(&dir, &[]);
     assert!(!run.stdout.trim().is_empty());
     for line in run.stdout.lines() {
-        serde_json::from_str::<serde_json::Value>(line).unwrap_or_else(|_| panic!("not JSON: {line}"));
+        serde_json::from_str::<serde_json::Value>(line)
+            .unwrap_or_else(|_| panic!("not JSON: {line}"));
     }
 }
 
@@ -150,7 +194,10 @@ fn dev_552_the_json_flag_gives_the_same_records_as_a_pipe() {
     let piped = run_test(&dir, &[]);
     let flagged = run_test(&dir, &["--json"]);
     let kinds = |run: &crate::cli_support::CliRun| -> Vec<String> {
-        run.records().iter().map(|r| r["type"].as_str().unwrap_or_default().to_string()).collect()
+        run.records()
+            .iter()
+            .map(|r| r["type"].as_str().unwrap_or_default().to_string())
+            .collect()
     };
     assert_eq!(kinds(&piped), kinds(&flagged));
 }
@@ -170,22 +217,47 @@ fn dev_552_the_json_summary_record_has_passed_failed_skipped_and_duration() {
 /// REQ: DEV-552
 #[test]
 fn dev_552_a_terminal_gets_one_line_per_test_and_the_summary_line() {
-    let dir = project("t552d", &[("a.json", EMPTY_FIXTURE), ("b.json", EMPTY_FIXTURE)]);
+    let dir = project(
+        "t552d",
+        &[("a.json", EMPTY_FIXTURE), ("b.json", EMPTY_FIXTURE)],
+    );
     let run = run_on_terminal(&dir, &[]);
-    let lines: Vec<&str> = run.stdout.lines().filter(|line| !line.trim().is_empty()).collect();
+    let lines: Vec<&str> = run
+        .stdout
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .collect();
     let last = lines.last().expect("some output");
-    assert!(last.starts_with("summary: 2 passed, 0 failed, 0 skipped ("), "last line was {last}");
+    assert!(
+        last.starts_with("summary: 2 passed, 0 failed, 0 skipped ("),
+        "last line was {last}"
+    );
     assert!(last.ends_with(" ms)"), "last line was {last}");
-    assert!(lines.iter().all(|line| !line.starts_with('{')), "no JSON on a terminal");
+    assert!(
+        lines.iter().all(|line| !line.starts_with('{')),
+        "no JSON on a terminal"
+    );
 }
 
 /// REQ: DEV-552
 #[test]
 fn dev_552_the_terminal_summary_counts_a_failing_case() {
-    let dir = project("t552e", &[("a.json", EMPTY_FIXTURE), ("a.expect.json", FAILING_EXPECT)]);
+    let dir = project(
+        "t552e",
+        &[("a.json", EMPTY_FIXTURE), ("a.expect.json", FAILING_EXPECT)],
+    );
     let run = run_on_terminal(&dir, &[]);
-    let last = run.stdout.lines().filter(|l| !l.trim().is_empty()).last().expect("output").to_string();
-    assert!(last.starts_with("summary: 0 passed, 1 failed, 0 skipped ("), "last line was {last}");
+    let last = run
+        .stdout
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .last()
+        .expect("output")
+        .to_string();
+    assert!(
+        last.starts_with("summary: 0 passed, 1 failed, 0 skipped ("),
+        "last line was {last}"
+    );
 }
 
 /// REQ: DEV-552

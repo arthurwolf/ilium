@@ -26,15 +26,23 @@ fn port_app_cost_controls_persist_immediately_and_sorting_follows_the_switch() {
         "adjust": [{ "row": "display:sparkline", "direction": 0 }, { "row": "visibility:sparkline", "direction": 0 }],
     }));
     assert_eq!(reply["settings"]["sparkline"]["enabled"], json!(true));
-    assert_eq!(reply["settings"]["sparkline"]["visibility"], json!("always"));
+    assert_eq!(
+        reply["settings"]["sparkline"]["visibility"],
+        json!("always")
+    );
     assert_eq!(reply["persisted_cost"], reply["settings"]);
 
     let sorted = run(json!({ "adjust": [{ "row": "sort_by_cost", "direction": 0 }] }));
     assert_eq!(sorted["effective_tree_order"], json!("cost_descending"));
-    assert_eq!(run(json!({}))["effective_tree_order"], run(json!({}))["configured_tree_order"]);
+    assert_eq!(
+        run(json!({}))["effective_tree_order"],
+        run(json!({}))["configured_tree_order"]
+    );
 
     // A direct manual move leaves every automatic view, cost order included.
-    let manual = run(json!({ "adjust": [{ "row": "sort_by_cost", "direction": 0 }], "manual_tree_mutation": true }));
+    let manual = run(
+        json!({ "adjust": [{ "row": "sort_by_cost", "direction": 0 }], "manual_tree_mutation": true }),
+    );
     assert_eq!(manual["settings"]["sort_by_cost"], json!(false));
     assert_eq!(manual["effective_tree_order"], json!("manual"));
     assert_eq!(manual["persisted_cost"]["sort_by_cost"], json!(false));

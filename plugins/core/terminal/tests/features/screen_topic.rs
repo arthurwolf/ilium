@@ -9,14 +9,24 @@ use crate::common::server_host;
 const TOPIC: &str = "ilium.core.terminal/screen-changed";
 
 fn changed(pane: u64, first_row: u32, last_row: u32, revision: u64) -> Event {
-    Event::ScreenChanged(ScreenChangedEvent { pane: NodeId(pane), first_row, last_row, revision })
+    Event::ScreenChanged(ScreenChangedEvent {
+        pane: NodeId(pane),
+        first_row,
+        last_row,
+        revision,
+    })
 }
 
 fn published(host: &ilium_plugin_sdk::testing::FakeHost) -> Vec<(String, Value)> {
     host.published_topics()
         .into_iter()
         .filter(|(topic, _)| topic == TOPIC)
-        .map(|(topic, payload)| (topic, serde_json::from_str(&payload).expect("payload is JSON")))
+        .map(|(topic, payload)| {
+            (
+                topic,
+                serde_json::from_str(&payload).expect("payload is JSON"),
+            )
+        })
         .collect()
 }
 
@@ -50,7 +60,11 @@ fn feature_013_at_most_ten_publications_in_one_second_of_fake_time() {
         host.deliver(vec![changed(7, 0, 1, step + 1)]);
         host.advance_clock(25);
     }
-    assert!(published(&host).len() <= 10, "{} publications in 1000 ms", published(&host).len());
+    assert!(
+        published(&host).len() <= 10,
+        "{} publications in 1000 ms",
+        published(&host).len()
+    );
 }
 
 /// REQ: F-013

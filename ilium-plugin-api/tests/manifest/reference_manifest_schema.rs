@@ -15,7 +15,10 @@ fn shipped_schema() -> Value {
 #[test]
 fn pkg_560_schema_declares_draft_2020_12_and_the_urn_id() {
     let schema = shipped_schema();
-    assert_eq!(schema["$schema"], "https://json-schema.org/draft/2020-12/schema");
+    assert_eq!(
+        schema["$schema"],
+        "https://json-schema.org/draft/2020-12/schema"
+    );
     assert_eq!(schema["$id"], "urn:ilium:schema:plugin-manifest:0.1.0");
 }
 
@@ -23,7 +26,10 @@ fn pkg_560_schema_declares_draft_2020_12_and_the_urn_id() {
 #[test]
 fn pkg_560_the_page_copy_declares_the_same_identity() {
     let schema = page_schema();
-    assert_eq!(schema["$schema"], "https://json-schema.org/draft/2020-12/schema");
+    assert_eq!(
+        schema["$schema"],
+        "https://json-schema.org/draft/2020-12/schema"
+    );
     assert_eq!(schema["$id"], "urn:ilium:schema:plugin-manifest:0.1.0");
 }
 
@@ -44,14 +50,23 @@ fn keywords(value: &Value, found: &mut std::collections::BTreeSet<String>) {
 #[test]
 fn pkg_560_schema_uses_no_keyword_outside_the_core_and_validation_vocabularies() {
     const FORBIDDEN: [&str; 8] = [
-        "format", "contentEncoding", "contentMediaType", "contentSchema", "unevaluatedProperties",
-        "$dynamicRef", "$vocabulary", "x-ilium",
+        "format",
+        "contentEncoding",
+        "contentMediaType",
+        "contentSchema",
+        "unevaluatedProperties",
+        "$dynamicRef",
+        "$vocabulary",
+        "x-ilium",
     ];
     let mut found = std::collections::BTreeSet::new();
     keywords(&shipped_schema(), &mut found);
     for keyword in FORBIDDEN {
         // `format` may appear as a property name inside `properties`; the shipped schema has none.
-        assert!(!found.contains(keyword), "keyword {keyword} is outside the allowed vocabularies");
+        assert!(
+            !found.contains(keyword),
+            "keyword {keyword} is outside the allowed vocabularies"
+        );
     }
 }
 
@@ -64,7 +79,9 @@ fn pkg_560_shipped_schema_equals_the_schema_printed_on_the_page() {
 fn assert_stage_three_code(value: Value, expected: &str) {
     let found = error_diagnostics(&value);
     assert!(
-        found.iter().any(|d| d.code.as_str() == expected && d.stage == Some(Stage(3))),
+        found
+            .iter()
+            .any(|d| d.code.as_str() == expected && d.stage == Some(Stage(3))),
         "expected {expected} at stage 3, got {:?}",
         error_codes(&found)
     );
@@ -88,7 +105,11 @@ fn pkg_561_a_manifest_the_schema_refuses_is_refused_at_stage_three() {
 /// REQ: PKG-561
 #[test]
 fn pkg_561_extra_rules_apply_at_stage_four_after_a_clean_schema() {
-    let value = set(client(), "/requires", json!({ "plugins": [{ "id": "example.demo" }] }));
+    let value = set(
+        client(),
+        "/requires",
+        json!({ "plugins": [{ "id": "example.demo" }] }),
+    );
     let found = error_diagnostics(&value);
     let diagnostic = first_with(&found, "manifest.requires-self");
     assert_eq!(diagnostic.stage, Some(Stage(4)));
@@ -97,15 +118,39 @@ fn pkg_561_extra_rules_apply_at_stage_four_after_a_clean_schema() {
 /// REQ: PKG-562
 #[test]
 fn pkg_562_each_mapping_row_gives_its_code() {
-    assert_has(&errors(&set(client(), "/zzz", json!(1))), "manifest.unknown-key");
+    assert_has(
+        &errors(&set(client(), "/zzz", json!(1))),
+        "manifest.unknown-key",
+    );
     assert_has(&errors(&unset(client(), "/id")), "manifest.key-missing");
-    assert_has(&errors(&set(client(), "/id", json!("Bad Id"))), "manifest.id-invalid");
-    assert_has(&errors(&set(client(), "/version", json!("1.0"))), "manifest.version-invalid");
-    assert_has(&errors(&set(client(), "/name", json!("a\nb"))), "manifest.display-name");
-    assert_has(&errors(&set(client(), "/publisher", json!("a\nb"))), "manifest.display-name");
-    assert_has(&errors(&set(client(), "/description", json!("a\nb"))), "manifest.display-name");
-    assert_has(&errors(&set(client(), "/data_version", json!(0))), "manifest.data-version");
-    assert_has(&errors(&set(client(), "/homepage", json!("ftp://x"))), "manifest.schema");
+    assert_has(
+        &errors(&set(client(), "/id", json!("Bad Id"))),
+        "manifest.id-invalid",
+    );
+    assert_has(
+        &errors(&set(client(), "/version", json!("1.0"))),
+        "manifest.version-invalid",
+    );
+    assert_has(
+        &errors(&set(client(), "/name", json!("a\nb"))),
+        "manifest.display-name",
+    );
+    assert_has(
+        &errors(&set(client(), "/publisher", json!("a\nb"))),
+        "manifest.display-name",
+    );
+    assert_has(
+        &errors(&set(client(), "/description", json!("a\nb"))),
+        "manifest.display-name",
+    );
+    assert_has(
+        &errors(&set(client(), "/data_version", json!(0))),
+        "manifest.data-version",
+    );
+    assert_has(
+        &errors(&set(client(), "/homepage", json!("ftp://x"))),
+        "manifest.schema",
+    );
 }
 
 /// REQ: PKG-562
@@ -113,7 +158,10 @@ fn pkg_562_each_mapping_row_gives_its_code() {
 fn pkg_562_unknown_key_wins_over_other_failures_of_the_same_value() {
     // An unknown property is reported first for a value that is also of a wrong type.
     let found = errors(&set(set(client(), "/zzz", json!(1)), "/name", json!(5)));
-    assert_eq!(found.first().map(String::as_str), Some("manifest.unknown-key"));
+    assert_eq!(
+        found.first().map(String::as_str),
+        Some("manifest.unknown-key")
+    );
     assert_has(&found, "manifest.unknown-key");
 }
 
@@ -149,7 +197,10 @@ fn pkg_563_doc_check_print_schema_writes_the_schema_to_standard_output() {
 #[test]
 fn pkg_564_reserved_prefixes_refused_id_reserved() {
     for id in ["ilium.demo", "core.demo", "local.demo", "test.demo"] {
-        assert_has(&errors(&set(client(), "/id", json!(id))), "manifest.id-reserved");
+        assert_has(
+            &errors(&set(client(), "/id", json!(id))),
+            "manifest.id-reserved",
+        );
     }
 }
 
@@ -163,7 +214,8 @@ fn pkg_564_ordinary_ids_are_not_reserved() {
 #[test]
 fn pkg_565_exports_list_must_match_the_real_component() {
     use ilium_plugin_api::manifest::{check_component, ComponentSummary};
-    let manifest = ilium_plugin_api::manifest::parse_manifest(&client().to_string()).expect("parses");
+    let manifest =
+        ilium_plugin_api::manifest::parse_manifest(&client().to_string()).expect("parses");
     let component = ComponentSummary {
         exports: vec!["lifecycle".into(), "handler".into(), "views".into()],
         ..ComponentSummary::default()
@@ -180,10 +232,22 @@ fn pkg_565_exports_list_must_match_the_real_component() {
 /// REQ: PKG-566
 #[test]
 fn pkg_566_grants_must_exist_follow_their_grammar_and_fit_their_side() {
-    assert_has(&errors(&client_with_grants(&["teleport.now"])), "manifest.grant-unknown");
-    assert_has(&errors(&client_with_grants(&["http"])), "manifest.grant-argument-missing");
-    assert_has(&errors(&client_with_grants(&["tree.read:x"])), "manifest.grant-argument");
-    assert_has(&errors(&client_with_grants(&["sessions.cross"])), "manifest.grant-side");
+    assert_has(
+        &errors(&client_with_grants(&["teleport.now"])),
+        "manifest.grant-unknown",
+    );
+    assert_has(
+        &errors(&client_with_grants(&["http"])),
+        "manifest.grant-argument-missing",
+    );
+    assert_has(
+        &errors(&client_with_grants(&["tree.read:x"])),
+        "manifest.grant-argument",
+    );
+    assert_has(
+        &errors(&client_with_grants(&["sessions.cross"])),
+        "manifest.grant-side",
+    );
     assert_clean(&client_with_grants(&["tree.read", "http:api.example.com"]));
 }
 
@@ -245,18 +309,37 @@ fn pkg_568_duplicate_ids_in_a_contribution_list_refused() {
 /// REQ: PKG-568
 #[test]
 fn pkg_568_topics_may_publish_only_under_the_plugin_prefix() {
-    let own = set(client(), "/contributes/topics", json!([{ "publishes": ["example.demo/ready"] }]));
+    let own = set(
+        client(),
+        "/contributes/topics",
+        json!([{ "publishes": ["example.demo/ready"] }]),
+    );
     assert_clean(&own);
-    let foreign = set(client(), "/contributes/topics", json!([{ "publishes": ["com.other/ready"] }]));
+    let foreign = set(
+        client(),
+        "/contributes/topics",
+        json!([{ "publishes": ["com.other/ready"] }]),
+    );
     let found = errors(&foreign);
-    assert_eq!(found.len(), 1, "exactly one refusal for the foreign prefix, got {found:?}");
-    assert!(found[0].starts_with("manifest."), "a manifest.* code, got {found:?}");
+    assert_eq!(
+        found.len(),
+        1,
+        "exactly one refusal for the foreign prefix, got {found:?}"
+    );
+    assert!(
+        found[0].starts_with("manifest."),
+        "a manifest.* code, got {found:?}"
+    );
 }
 
 /// REQ: PKG-568
 #[test]
 fn pkg_568_commands_global_id_uses_the_plugin_id_prefix() {
-    let value = set(client(), "/contributes/commands", json!([{ "id": "run", "title": "Run" }]));
+    let value = set(
+        client(),
+        "/contributes/commands",
+        json!([{ "id": "run", "title": "Run" }]),
+    );
     assert_clean(&value);
 }
 
@@ -267,7 +350,10 @@ fn pkg_569_requires_ranges_must_parse() {
         json!({ "host": "garbage" }),
         json!({ "plugins": [{ "id": "com.other.a", "version": "not a range" }] }),
     ] {
-        assert_has(&errors(&set(client(), "/requires", requires)), "manifest.requires-invalid");
+        assert_has(
+            &errors(&set(client(), "/requires", requires)),
+            "manifest.requires-invalid",
+        );
     }
 }
 
@@ -285,7 +371,11 @@ fn pkg_569_duplicate_plugin_requirement_refused_requires_invalid() {
 /// REQ: PKG-569
 #[test]
 fn pkg_569_requiring_itself_refused_requires_self() {
-    let value = set(client(), "/requires", json!({ "plugins": [{ "id": "example.demo" }] }));
+    let value = set(
+        client(),
+        "/requires",
+        json!({ "plugins": [{ "id": "example.demo" }] }),
+    );
     assert_has(&errors(&value), "manifest.requires-self");
 }
 
@@ -305,7 +395,10 @@ fn pkg_570_help_and_sound_files_named_by_a_contribution_must_exist() {
         "/contributes/help",
         json!([{ "id": "intro", "file": "help/intro.md", "title": "Intro" }]),
     );
-    assert_has(&install_errors(&packed(value.clone()), Tier::T3), "manifest.file-missing");
+    assert_has(
+        &install_errors(&packed(value.clone()), Tier::T3),
+        "manifest.file-missing",
+    );
     assert_lacks(
         &install_errors(&packed_with(value, &["help/intro.md"]), Tier::T3),
         "manifest.file-missing",
@@ -319,7 +412,11 @@ fn pkg_571_catalogue_rows_have_a_stage_number_or_letter_and_an_exit_code() {
     assert!(rows.len() > 50, "catalogue rows: {}", rows.len());
     for row in &rows {
         assert!(!row.stage.is_empty(), "{}", row.code);
-        assert!(row.exit.chars().all(|c| c.is_ascii_digit()) && !row.exit.is_empty(), "{}", row.code);
+        assert!(
+            row.exit.chars().all(|c| c.is_ascii_digit()) && !row.exit.is_empty(),
+            "{}",
+            row.code
+        );
     }
 }
 
@@ -339,7 +436,11 @@ fn pkg_572_a_message_has_no_unreplaced_placeholder() {
     let samples = [
         set(client(), "/id", json!("Bad Id")),
         set(client(), "/version", json!("v1")),
-        set(client(), "/requires", json!({ "plugins": [{ "id": "example.demo" }] })),
+        set(
+            client(),
+            "/requires",
+            json!({ "plugins": [{ "id": "example.demo" }] }),
+        ),
         set(client(), "/data_version", json!(0)),
     ];
     for sample in samples {
@@ -357,7 +458,9 @@ fn pkg_572_a_message_has_no_unreplaced_placeholder() {
 #[test]
 fn pkg_572_the_value_of_the_failing_key_appears_in_the_message() {
     let found = error_diagnostics(&set(client(), "/version", json!("v9.9.9")));
-    assert!(first_with(&found, "manifest.version-invalid").message.contains("v9.9.9"));
+    assert!(first_with(&found, "manifest.version-invalid")
+        .message
+        .contains("v9.9.9"));
 }
 
 /// REQ: PKG-572
@@ -406,7 +509,10 @@ fn pkg_575_codes_printed_for_a_batch_of_defects_are_all_in_the_catalogue() {
     ];
     for defect in defects {
         for code in errors(&defect) {
-            assert!(known.contains(&code), "{code} printed but not in the catalogue");
+            assert!(
+                known.contains(&code),
+                "{code} printed but not in the catalogue"
+            );
         }
     }
 }
@@ -425,9 +531,13 @@ fn pkg_575_catalogue_codes_are_unique_and_namespaced() {
 /// REQ: PKG-576
 #[test]
 fn pkg_576_doc_every_manifest_code_has_a_stage_in_the_catalogue() {
-    for row in catalogue().into_iter().filter(|row| row.code.starts_with("manifest.")) {
+    for row in catalogue()
+        .into_iter()
+        .filter(|row| row.code.starts_with("manifest."))
+    {
         assert!(
-            stage_number(&row.stage).is_some() || row.stage.chars().all(|c| c.is_ascii_alphabetic()),
+            stage_number(&row.stage).is_some()
+                || row.stage.chars().all(|c| c.is_ascii_alphabetic()),
             "{} stage {}",
             row.code,
             row.stage
@@ -439,7 +549,11 @@ fn pkg_576_doc_every_manifest_code_has_a_stage_in_the_catalogue() {
 #[test]
 fn pkg_576_stage_three_codes_have_the_stage_shown_in_the_catalogue() {
     let rows = catalogue();
-    for code in ["manifest.schema", "manifest.unknown-key", "manifest.key-missing"] {
+    for code in [
+        "manifest.schema",
+        "manifest.unknown-key",
+        "manifest.key-missing",
+    ] {
         let row = rows.iter().find(|row| row.code == code).expect(code);
         assert_eq!(row.stage, "3", "{code}");
     }
@@ -460,7 +574,11 @@ fn pkg_577_retired_codes_are_never_printed() {
         set(client(), "/id", json!("Bad")),
         set(client(), "/api", json!("ilium:plugin@9.9.9")),
         client_with_grants(&["fs.pick"]),
-        set(client(), "/requires", json!({ "plugins": [{ "id": "example.demo" }] })),
+        set(
+            client(),
+            "/requires",
+            json!({ "plugins": [{ "id": "example.demo" }] }),
+        ),
     ];
     for defect in defects {
         for code in errors(&defect) {

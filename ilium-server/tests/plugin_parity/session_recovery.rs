@@ -33,7 +33,11 @@ fn f_073_bursts_of_changes_are_debounced_into_one_write_per_750_ms() {
         }
         kernel.advance_clock_ms(749);
         kernel.settle();
-        assert_eq!(kernel.snapshot_write_count(), 0, "nothing is written before 750 ms");
+        assert_eq!(
+            kernel.snapshot_write_count(),
+            0,
+            "nothing is written before 750 ms"
+        );
         kernel.advance_clock_ms(1);
         kernel.settle();
         assert_eq!(kernel.snapshot_write_count(), 1);
@@ -47,7 +51,9 @@ fn f_073_snapshot_is_json_and_holds_the_titles_of_every_node() {
         small_tree(kernel);
         kernel.advance_clock_ms(750);
         kernel.settle();
-        let text = kernel.read_project_file(".ilium/sessions/default.json").expect("snapshot");
+        let text = kernel
+            .read_project_file(".ilium/sessions/default.json")
+            .expect("snapshot");
         let json: serde_json::Value = serde_json::from_str(&text).expect("valid JSON");
         assert!(json.is_object(), "snapshot root is a JSON object: {json}");
         let mut strings = Vec::new();
@@ -64,14 +70,21 @@ fn f_073_snapshot_file_is_owner_only() {
         small_tree(kernel);
         kernel.advance_clock_ms(750);
         kernel.settle();
-        assert_eq!(kernel.project_file_mode(".ilium/sessions/default.json"), Some(0o600));
+        assert_eq!(
+            kernel.project_file_mode(".ilium/sessions/default.json"),
+            Some(0o600)
+        );
     });
 }
 
 /// REQ: F-073, COR-001
 #[test]
 fn f_073_a_named_session_uses_its_own_snapshot_file() {
-    let kernel = ilium_server::plugin_host::ServerKernel::for_parity_world_named(StartMode::Normal, "", "review");
+    let kernel = ilium_server::plugin_host::ServerKernel::for_parity_world_named(
+        StartMode::Normal,
+        "",
+        "review",
+    );
     small_tree(&kernel);
     kernel.advance_clock_ms(750);
     kernel.settle();
@@ -101,7 +114,10 @@ fn f_074_copy_names_are_milliseconds_dash_uuid_json() {
         let name = kernel.restart_from_disk().backup_files().remove(0);
         let (millis, rest) = name.split_once('-').expect("dash");
         assert!(millis.chars().all(|c| c.is_ascii_digit()), "{name}");
-        assert!(rest.ends_with(".json") && rest.len() > ".json".len(), "{name}");
+        assert!(
+            rest.ends_with(".json") && rest.len() > ".json".len(),
+            "{name}"
+        );
     });
 }
 
@@ -116,11 +132,19 @@ fn f_074_at_most_one_copy_per_half_hour() {
         kernel.advance_clock_ms(HALF_HOUR_MS - 1);
         kernel.touch_tree();
         kernel.settle();
-        assert_eq!(kernel.backup_files().len(), before, "29 min 59 s later no new copy");
+        assert_eq!(
+            kernel.backup_files().len(),
+            before,
+            "29 min 59 s later no new copy"
+        );
         kernel.advance_clock_ms(1);
         kernel.touch_tree();
         kernel.settle();
-        assert_eq!(kernel.backup_files().len(), before + 1, "after 30 min a copy is taken");
+        assert_eq!(
+            kernel.backup_files().len(),
+            before + 1,
+            "after 30 min a copy is taken"
+        );
     });
 }
 
@@ -146,7 +170,10 @@ fn f_074_turning_backups_off_stops_new_copies_and_keeps_existing_ones() {
         kernel.advance_clock_ms(750);
         kernel.settle();
         let existing = kernel.restart_from_disk().backup_files().len();
-        assert_eq!(kernel.apply_setting("session", "backups_enabled", "false"), Ok(()));
+        assert_eq!(
+            kernel.apply_setting("session", "backups_enabled", "false"),
+            Ok(())
+        );
         kernel.advance_clock_ms(HALF_HOUR_MS);
         kernel.touch_tree();
         kernel.settle();
@@ -159,11 +186,15 @@ fn f_074_turning_backups_off_stops_new_copies_and_keeps_existing_ones() {
 fn f_074_turning_backups_on_again_takes_a_fresh_copy_at_once() {
     in_both_modes(|kernel| {
         small_tree(kernel);
-        kernel.apply_setting("session", "backups_enabled", "false").expect("off");
+        kernel
+            .apply_setting("session", "backups_enabled", "false")
+            .expect("off");
         kernel.advance_clock_ms(750);
         kernel.settle();
         let before = kernel.backup_files().len();
-        kernel.apply_setting("session", "backups_enabled", "true").expect("on");
+        kernel
+            .apply_setting("session", "backups_enabled", "true")
+            .expect("on");
         kernel.settle();
         assert_eq!(kernel.backup_files().len(), before + 1);
     });
@@ -173,7 +204,10 @@ fn f_074_turning_backups_on_again_takes_a_fresh_copy_at_once() {
 #[test]
 fn f_075_default_recovery_policy_restores_the_tree_automatically() {
     in_both_modes(|kernel| {
-        assert_eq!(kernel.setting("session", "recovery_policy").as_deref(), Some("restore_automatically"));
+        assert_eq!(
+            kernel.setting("session", "recovery_policy").as_deref(),
+            Some("restore_automatically")
+        );
         small_tree(kernel);
         kernel.advance_clock_ms(750);
         kernel.settle();
@@ -186,7 +220,9 @@ fn f_075_default_recovery_policy_restores_the_tree_automatically() {
 #[test]
 fn f_075_start_fresh_ignores_the_snapshot_and_backs_it_up_first() {
     in_both_modes(|kernel| {
-        kernel.apply_setting("session", "recovery_policy", "start_fresh").expect("policy");
+        kernel
+            .apply_setting("session", "recovery_policy", "start_fresh")
+            .expect("policy");
         small_tree(kernel);
         kernel.advance_clock_ms(750);
         kernel.settle();
@@ -200,7 +236,9 @@ fn f_075_start_fresh_ignores_the_snapshot_and_backs_it_up_first() {
 #[test]
 fn f_075_ask_before_restore_starts_empty_and_asks_with_the_pane_count() {
     in_both_modes(|kernel| {
-        kernel.apply_setting("session", "recovery_policy", "ask_before_restore").expect("policy");
+        kernel
+            .apply_setting("session", "recovery_policy", "ask_before_restore")
+            .expect("policy");
         small_tree(kernel);
         kernel.advance_clock_ms(750);
         kernel.settle();
@@ -214,8 +252,13 @@ fn f_075_ask_before_restore_starts_empty_and_asks_with_the_pane_count() {
 #[test]
 fn f_075_an_unknown_recovery_policy_value_is_rejected() {
     in_both_modes(|kernel| {
-        assert!(kernel.apply_setting("session", "recovery_policy", "sometimes").is_err());
-        assert_eq!(kernel.setting("session", "recovery_policy").as_deref(), Some("restore_automatically"));
+        assert!(kernel
+            .apply_setting("session", "recovery_policy", "sometimes")
+            .is_err());
+        assert_eq!(
+            kernel.setting("session", "recovery_policy").as_deref(),
+            Some("restore_automatically")
+        );
     });
 }
 
@@ -251,16 +294,23 @@ fn f_075_unsaved_editor_buffers_are_not_part_of_the_snapshot() {
         kernel.write_project_file("notes.txt", "one\n");
         let pane = created(apply(
             kernel,
-            ilium_plugin_api::generated::types::Intent::EditorOpen(ilium_plugin_api::generated::types::EditorOpenSpec {
-                path: ilium_plugin_api::generated::types::FsPath { scope: "project".to_owned(), path: "notes.txt".to_owned() },
-                line: None,
-                placement: ilium_plugin_api::generated::types::EditorPlacement::NewPane,
-            }),
+            ilium_plugin_api::generated::types::Intent::EditorOpen(
+                ilium_plugin_api::generated::types::EditorOpenSpec {
+                    path: ilium_plugin_api::generated::types::FsPath {
+                        scope: "project".to_owned(),
+                        path: "notes.txt".to_owned(),
+                    },
+                    line: None,
+                    placement: ilium_plugin_api::generated::types::EditorPlacement::NewPane,
+                },
+            ),
         ));
         kernel.editor_type(pane, "unsaved ");
         kernel.advance_clock_ms(750);
         kernel.settle();
-        let text = kernel.read_project_file(".ilium/sessions/default.json").expect("snapshot");
+        let text = kernel
+            .read_project_file(".ilium/sessions/default.json")
+            .expect("snapshot");
         assert!(!text.contains("unsaved"), "{text}");
     });
 }

@@ -8,23 +8,33 @@ use ilium_plugin_host::testing::boot::{BootHarness, BootRun, PluginSpec};
 
 /// The workspace root.
 pub fn workspace_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).parent().expect("workspace root").to_path_buf()
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("workspace root")
+        .to_path_buf()
 }
 
 /// The text of one manual page.
 pub fn manual_page(name: &str) -> String {
-    let path = workspace_root().join("docs/plugins-manual/pages").join(format!("{name}.md"));
-    std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
+    let path = workspace_root()
+        .join("docs/plugins-manual/pages")
+        .join(format!("{name}.md"));
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
 }
 
 /// A core plugin that starts at boot on its server side.
 pub fn startup(id: &str) -> PluginSpec {
-    PluginSpec::new(id, Tier::T1).core().activation(&["startup"])
+    PluginSpec::new(id, Tier::T1)
+        .core()
+        .activation(&["startup"])
 }
 
 /// A core plugin that waits for a command.
 pub fn lazy(id: &str) -> PluginSpec {
-    PluginSpec::new(id, Tier::T1).core().activation(&["command:open"])
+    PluginSpec::new(id, Tier::T1)
+        .core()
+        .activation(&["command:open"])
 }
 
 /// A started server run with the given plugins.
@@ -51,10 +61,35 @@ pub fn started_in(mode: StartMode, plugins: Vec<PluginSpec>) -> BootRun {
 
 /// The 30 core plugin names (directory names under `plugins/core`).
 pub const CORE_PLUGINS: [&str; 30] = [
-    "agent-detect", "agent-setup", "agent-toolbar", "ambient", "chatroom", "compaction", "cost",
-    "diagnostics", "editor", "fleet", "inference", "kanban", "keys-and-help", "layout",
-    "notifications", "progress", "recap", "scenes", "scheduler", "search", "session-convert",
-    "sessions", "settings", "smart-copy", "terminal", "text-triggers", "titles", "tree", "voice",
+    "agent-detect",
+    "agent-setup",
+    "agent-toolbar",
+    "ambient",
+    "chatroom",
+    "compaction",
+    "cost",
+    "diagnostics",
+    "editor",
+    "fleet",
+    "inference",
+    "kanban",
+    "keys-and-help",
+    "layout",
+    "notifications",
+    "progress",
+    "recap",
+    "scenes",
+    "scheduler",
+    "search",
+    "session-convert",
+    "sessions",
+    "settings",
+    "smart-copy",
+    "terminal",
+    "text-triggers",
+    "titles",
+    "tree",
+    "voice",
     "worktrees",
 ];
 

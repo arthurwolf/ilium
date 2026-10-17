@@ -25,9 +25,18 @@ fn f_079_events_of_one_pane_keep_the_order_of_the_actions_that_caused_them() {
         kernel.settle();
         close(kernel, pane);
         let names = kernel.event_names_for(pane);
-        let created = names.iter().position(|n| n == "pane-created").expect("pane-created");
-        let exited = names.iter().position(|n| n == "pane-exited").expect("pane-exited");
-        let removed = names.iter().position(|n| n == "node-removed").expect("node-removed");
+        let created = names
+            .iter()
+            .position(|n| n == "pane-created")
+            .expect("pane-created");
+        let exited = names
+            .iter()
+            .position(|n| n == "pane-exited")
+            .expect("pane-exited");
+        let removed = names
+            .iter()
+            .position(|n| n == "node-removed")
+            .expect("node-removed");
         assert!(created < exited && exited < removed, "{names:?}");
     });
 }
@@ -59,7 +68,9 @@ fn f_087_a_finite_job_runs_to_completion_and_reports_its_result() {
 fn f_087_jobs_beyond_the_bank_size_wait_and_never_exceed_the_worker_count() {
     in_both_modes(|kernel| {
         let workers = kernel.bank_worker_count("bank-a");
-        let tickets: Vec<_> = (0..workers * 3).map(|n| kernel.run_finite_job("bank-a", Box::new(move || n as u64))).collect();
+        let tickets: Vec<_> = (0..workers * 3)
+            .map(|n| kernel.run_finite_job("bank-a", Box::new(move || n as u64)))
+            .collect();
         kernel.settle();
         assert!(kernel.bank_peak_concurrency("bank-a") <= workers);
         assert!(tickets.iter().all(|t| kernel.job_result(*t).is_some()));

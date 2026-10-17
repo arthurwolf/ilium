@@ -26,8 +26,20 @@ fn port_menu_copy_is_enabled_only_when_the_pane_has_a_selection() {
     let pane = add_terminal_pane(&mut host, "api");
     let before = host.menu_items(context(pane));
     assert_eq!(before[0].id, "copy");
-    assert_eq!(before[0].disabled_reason.as_deref(), Some("nothing selected"));
-    host.terminal().set_selection(pane, Selection { first_row: 0, first_column: 0, last_row: 0, last_column: 4, text: "hello".to_string() });
+    assert_eq!(
+        before[0].disabled_reason.as_deref(),
+        Some("nothing selected")
+    );
+    host.terminal().set_selection(
+        pane,
+        Selection {
+            first_row: 0,
+            first_column: 0,
+            last_row: 0,
+            last_column: 4,
+            text: "hello".to_string(),
+        },
+    );
     let after = host.menu_items(context(pane));
     assert_eq!(after[0].id, "copy");
     assert_eq!(after[0].disabled_reason, None);
@@ -38,6 +50,10 @@ fn port_menu_copy_is_enabled_only_when_the_pane_has_a_selection() {
 fn port_menu_is_offered_for_a_terminal_pane_regardless_of_mouse_tracking() {
     let mut host = client_host();
     let pane = add_terminal_pane(&mut host, "agent");
-    let ids: Vec<String> = host.menu_items(context(pane)).into_iter().map(|e| e.id).collect();
+    let ids: Vec<String> = host
+        .menu_items(context(pane))
+        .into_iter()
+        .map(|e| e.id)
+        .collect();
     assert_eq!(ids, ["copy", "copy-path", "smart-copy", "transfer"]);
 }

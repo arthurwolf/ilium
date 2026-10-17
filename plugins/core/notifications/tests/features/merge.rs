@@ -8,7 +8,11 @@ use serde_json::json;
 
 use crate::common::*;
 
-fn failed_alerts(host: &mut ilium_plugin_sdk::testing::FakeHost, pane: ilium_plugin_sdk::types::NodeId, job: &str) -> usize {
+fn failed_alerts(
+    host: &mut ilium_plugin_sdk::testing::FakeHost,
+    pane: ilium_plugin_sdk::types::NodeId,
+    job: &str,
+) -> usize {
     let submissions = task_outcome(host, pane, job, "error");
     notices(&submissions).len() + sounds(&submissions).len()
 }
@@ -70,7 +74,11 @@ fn merge_049_a_dropped_repeat_does_not_extend_the_window() {
     host.advance_clock(20_000);
     assert_eq!(failed_alerts(&mut host, pane, "job-2"), 0);
     host.advance_clock(10_000);
-    assert_eq!(failed_alerts(&mut host, pane, "job-3"), 2, "30 s after the first admitted alert");
+    assert_eq!(
+        failed_alerts(&mut host, pane, "job-3"),
+        2,
+        "30 s after the first admitted alert"
+    );
 }
 
 /// REQ: F-049
@@ -89,9 +97,15 @@ fn merge_049_a_success_and_a_failure_on_one_pane_do_not_merge() {
     let mut host = server_host();
     set_setting(&mut host, "notifications.task_succeeded", json!(true));
     let pane = add_pane(&mut host, "build-shell", None);
-    assert_eq!(notices(&task_outcome(&mut host, pane, "job-1", "done")).len(), 1);
+    assert_eq!(
+        notices(&task_outcome(&mut host, pane, "job-1", "done")).len(),
+        1
+    );
     host.advance_clock(1_000);
-    assert_eq!(notices(&task_outcome(&mut host, pane, "job-2", "error")).len(), 1);
+    assert_eq!(
+        notices(&task_outcome(&mut host, pane, "job-2", "error")).len(),
+        1
+    );
 }
 
 /// REQ: F-049
@@ -102,7 +116,10 @@ fn merge_049_a_failure_is_never_swallowed_by_an_earlier_success() {
     let pane = add_pane(&mut host, "build-shell", None);
     task_outcome(&mut host, pane, "job-1", "done");
     host.advance_clock(1);
-    assert_eq!(notices(&task_outcome(&mut host, pane, "job-2", "lost")).len(), 1);
+    assert_eq!(
+        notices(&task_outcome(&mut host, pane, "job-2", "lost")).len(),
+        1
+    );
 }
 
 /// REQ: F-049
@@ -111,7 +128,10 @@ fn merge_049_two_successes_on_one_pane_merge() {
     let mut host = server_host();
     set_setting(&mut host, "notifications.task_succeeded", json!(true));
     let pane = add_pane(&mut host, "build-shell", None);
-    assert_eq!(notices(&task_outcome(&mut host, pane, "job-1", "done")).len(), 1);
+    assert_eq!(
+        notices(&task_outcome(&mut host, pane, "job-1", "done")).len(),
+        1
+    );
     host.advance_clock(1_000);
     assert!(notices(&task_outcome(&mut host, pane, "job-2", "done")).is_empty());
 }
@@ -121,7 +141,10 @@ fn merge_049_two_successes_on_one_pane_merge() {
 fn merge_049_a_failed_task_and_a_lost_monitor_count_as_the_same_kind() {
     let mut host = server_host();
     let pane = add_pane(&mut host, "build-shell", None);
-    assert_eq!(notices(&task_outcome(&mut host, pane, "job-1", "error")).len(), 1);
+    assert_eq!(
+        notices(&task_outcome(&mut host, pane, "job-1", "error")).len(),
+        1
+    );
     host.advance_clock(1_000);
     assert!(notices(&task_outcome(&mut host, pane, "job-2", "lost")).is_empty());
 }
@@ -190,7 +213,11 @@ fn merge_049_the_merge_applies_to_sounds_and_notices_alike() {
 #[test]
 fn merge_049_agent_finished_alerts_are_not_task_alerts_and_never_merge() {
     let mut host = server_host();
-    let node = add_pane(&mut host, "claude-api", Some(ilium_plugin_sdk::types::AgentActivity::Working));
+    let node = add_pane(
+        &mut host,
+        "claude-api",
+        Some(ilium_plugin_sdk::types::AgentActivity::Working),
+    );
     assert_eq!(notices(&finish_turn(&mut host, node, 1)).len(), 1);
     host.advance_clock(1_000);
     let again = transition(

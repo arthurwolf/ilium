@@ -130,7 +130,12 @@ impl WidgetRig {
     }
 
     /// Shows this widget (WID-009).
-    pub fn show_text_area_with_initial(&mut self, _key: &str, _debounce_ms: Option<u32>, _initial: &str) {
+    pub fn show_text_area_with_initial(
+        &mut self,
+        _key: &str,
+        _debounce_ms: Option<u32>,
+        _initial: &str,
+    ) {
         unimplemented!("client::plugin_host::widget_rig::WidgetRig::show_text_area_with_initial")
     }
 
@@ -141,7 +146,9 @@ impl WidgetRig {
 
     /// Shows this widget (WID-016).
     pub fn show_paragraph_with_action_span(&mut self, _key: &str, _text: &str) {
-        unimplemented!("client::plugin_host::widget_rig::WidgetRig::show_paragraph_with_action_span")
+        unimplemented!(
+            "client::plugin_host::widget_rig::WidgetRig::show_paragraph_with_action_span"
+        )
     }
 
     /// Shows this widget (WID-023).
@@ -235,7 +242,11 @@ impl WidgetRig {
     }
 
     /// Shows a layout row; `Err` carries the diagnostic code (WID-005).
-    pub fn show_layout(&mut self, _children: usize, _constraints: &[Constraint]) -> Result<(), String> {
+    pub fn show_layout(
+        &mut self,
+        _children: usize,
+        _constraints: &[Constraint],
+    ) -> Result<(), String> {
         unimplemented!("client::plugin_host::widget_rig::WidgetRig::show_layout")
     }
 

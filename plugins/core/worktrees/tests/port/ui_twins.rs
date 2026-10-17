@@ -18,11 +18,16 @@ fn publish(host: &mut FakeHost, path: &str, state: &str) {
 
 fn lines(host: &mut FakeHost, columns: u16, rows: u16) -> Vec<String> {
     let screen = host.render(ViewTarget::Panel(PANEL.to_string()), columns, rows);
-    (0..screen.rows).map(|row| screen.row(row).trim_end().to_string()).collect()
+    (0..screen.rows)
+        .map(|row| screen.row(row).trim_end().to_string())
+        .collect()
 }
 
 fn branch_lines(host: &mut FakeHost, columns: u16, rows: u16) -> Vec<String> {
-    lines(host, columns, rows).into_iter().filter(|row| row.contains('🌿')).collect()
+    lines(host, columns, rows)
+        .into_iter()
+        .filter(|row| row.contains('🌿'))
+        .collect()
 }
 
 fn two(host: &mut FakeHost) {
@@ -38,7 +43,11 @@ fn port_069_a_state_change_updates_label_and_state_of_the_same_branch_line() {
     publish(&mut host, "/work/ilium.worktrees/fix-auth", "2 changed");
     let rows = branch_lines(&mut host, 48, 12);
     assert_eq!(rows.len(), 1, "one line per worktree: {rows:?}");
-    assert!(rows[0].contains("🌿 fix-auth") && rows[0].ends_with("2 changed"), "{}", rows[0]);
+    assert!(
+        rows[0].contains("🌿 fix-auth") && rows[0].ends_with("2 changed"),
+        "{}",
+        rows[0]
+    );
 }
 
 /// REQ: F-069, PORT:ilium-client/src/tree_ui.rs::mixed_tree_rows_hit_both_worktree_lines_and_select_both
@@ -48,8 +57,16 @@ fn port_069_two_worktrees_render_two_branch_lines_in_publication_order() {
     two(&mut host);
     let rows = branch_lines(&mut host, 48, 12);
     assert_eq!(rows.len(), 2, "{rows:?}");
-    assert!(rows[0].contains("fix-auth") && rows[0].ends_with("clean"), "{}", rows[0]);
-    assert!(rows[1].contains("docs-sweep") && rows[1].ends_with("2 changed"), "{}", rows[1]);
+    assert!(
+        rows[0].contains("fix-auth") && rows[0].ends_with("clean"),
+        "{}",
+        rows[0]
+    );
+    assert!(
+        rows[1].contains("docs-sweep") && rows[1].ends_with("2 changed"),
+        "{}",
+        rows[1]
+    );
 }
 
 /// REQ: F-069, PORT:ilium-client/src/tree_ui.rs::separator_client_hits_exclude_unpainted_rows_and_keep_clipped_worktree_lines
@@ -82,8 +99,14 @@ fn port_072_choosing_a_default_where_keeps_the_authored_branch_prefix() {
     let mut host = client_host();
     set_git(&mut host, "branch_prefix", json!("team/")).expect("valid");
     set_git(&mut host, "default_where", json!("new_worktree")).expect("valid");
-    assert_eq!(host.kernel_settings().get("git", "branch_prefix"), Some(json!("team/")));
-    assert_eq!(host.kernel_settings().get("git", "default_where"), Some(json!("new_worktree")));
+    assert_eq!(
+        host.kernel_settings().get("git", "branch_prefix"),
+        Some(json!("team/"))
+    );
+    assert_eq!(
+        host.kernel_settings().get("git", "default_where"),
+        Some(json!("new_worktree"))
+    );
 }
 
 /// REQ: F-072, PORT:ilium-client/src/value_worktree.rs::catalogs_preserve_authored_fields_and_reject_reopened_drafts
@@ -92,7 +115,10 @@ fn port_072_an_unknown_default_where_is_refused_and_the_old_value_stays() {
     let mut host = client_host();
     set_git(&mut host, "default_where", json!("existing_worktree")).expect("valid");
     assert!(set_git(&mut host, "default_where", json!("elsewhere")).is_err());
-    assert_eq!(host.kernel_settings().get("git", "default_where"), Some(json!("existing_worktree")));
+    assert_eq!(
+        host.kernel_settings().get("git", "default_where"),
+        Some(json!("existing_worktree"))
+    );
 }
 
 /// REQ: F-072, PORT:ilium-client/src/value_worktree.rs::choice_buttons_paint_and_hit_on_responsive_rows
@@ -101,10 +127,22 @@ fn port_072_the_git_tab_paints_the_same_rows_at_every_width_inside_its_frame() {
     for columns in [40u16, 80, 120] {
         let mut host = client_host();
         let screen = host.render(ViewTarget::SettingsPage("git".to_string()), columns, 8);
-        let rows: Vec<String> = (0..screen.rows).map(|row| screen.row(row).trim_end().to_string()).collect();
-        assert!(rows.iter().any(|row| row.contains("Worktree folder")), "{columns}: {rows:?}");
-        assert!(rows.iter().any(|row| row.contains("Post-create command")), "{columns}: {rows:?}");
-        assert!(rows.iter().all(|row| row.chars().count() <= columns as usize), "{columns}");
+        let rows: Vec<String> = (0..screen.rows)
+            .map(|row| screen.row(row).trim_end().to_string())
+            .collect();
+        assert!(
+            rows.iter().any(|row| row.contains("Worktree folder")),
+            "{columns}: {rows:?}"
+        );
+        assert!(
+            rows.iter().any(|row| row.contains("Post-create command")),
+            "{columns}: {rows:?}"
+        );
+        assert!(
+            rows.iter()
+                .all(|row| row.chars().count() <= columns as usize),
+            "{columns}"
+        );
     }
 }
 
@@ -117,7 +155,11 @@ fn port_067_a_request_sent_while_settings_change_uses_the_value_valid_at_creatio
     set_git(&mut host, "branch_prefix", json!("two/")).expect("valid");
     host.settle();
     let arguments = add_arguments(&mut host);
-    assert!(arguments[3].starts_with("one/") || arguments[3].starts_with("two/"), "{}", arguments[3]);
+    assert!(
+        arguments[3].starts_with("one/") || arguments[3].starts_with("two/"),
+        "{}",
+        arguments[3]
+    );
     assert_eq!(worktree_add_calls(&host.process().calls()).len(), 1);
 }
 
@@ -140,8 +182,15 @@ fn port_067_a_new_worktree_is_created_from_the_checked_out_commit_without_copyin
     with_repository_facts(&mut host);
     create_worktree(&mut host, &request("fix-auth"));
     let arguments = add_arguments(&mut host);
-    assert_eq!(arguments[5], "topic", "the base is the checked-out branch; uncommitted files are not part of it");
-    assert!(host.process().calls().iter().all(|call| call.program != "cp"));
+    assert_eq!(
+        arguments[5], "topic",
+        "the base is the checked-out branch; uncommitted files are not part of it"
+    );
+    assert!(host
+        .process()
+        .calls()
+        .iter()
+        .all(|call| call.program != "cp"));
 }
 
 /// REQ: F-070, PORT:ilium-client/src/worktree_manager.rs::action_hits_follow_the_rendered_ascii_labels
@@ -149,10 +198,15 @@ fn port_067_a_new_worktree_is_created_from_the_checked_out_commit_without_copyin
 fn port_070_removal_acts_on_exactly_the_path_the_request_names() {
     let mut host = server_host_at("/projects/acme");
     create_worktree(&mut host, &request("fix-auth"));
-    remove_request(&mut host, json!({"path": "/projects/acme.worktrees/fix-auth", "branch": "fix-auth"}));
+    remove_request(
+        &mut host,
+        json!({"path": "/projects/acme.worktrees/fix-auth", "branch": "fix-auth"}),
+    );
     let removed = removal_calls(&mut host);
     assert_eq!(removed.len(), 1);
-    assert!(removed[0].iter().any(|argument| argument == "/projects/acme.worktrees/fix-auth"));
+    assert!(removed[0]
+        .iter()
+        .any(|argument| argument == "/projects/acme.worktrees/fix-auth"));
 }
 
 /// REQ: F-069, PORT:ilium-client/src/worktree_manager.rs::branch_chrome_matches_actual_render_without_reducing_path_detail
@@ -181,7 +235,11 @@ fn port_069_the_compact_tree_keeps_its_frame_rows_within_the_requested_size() {
 fn port_070_a_long_inventory_selects_and_removes_nothing_by_itself() {
     let mut host = client_host();
     for index in 0..30 {
-        publish(&mut host, &format!("/work/ilium.worktrees/branch-{index}"), "clean");
+        publish(
+            &mut host,
+            &format!("/work/ilium.worktrees/branch-{index}"),
+            "clean",
+        );
     }
     assert!(branch_lines(&mut host, 48, 8).len() <= 8);
     assert!(host.process().calls().is_empty());
@@ -210,21 +268,33 @@ fn port_067_the_agent_pane_cwd_is_the_worktree_folder_and_the_registration_names
     let submitted = create_worktree(&mut host, &request("fix-auth"));
     let panes = create_panes(&submitted);
     assert_eq!(panes.len(), 1);
-    assert!(cwd_text(&panes[0]).contains("/projects/acme.worktrees/fix-auth"), "{}", cwd_text(&panes[0]));
+    assert!(
+        cwd_text(&panes[0]).contains("/projects/acme.worktrees/fix-auth"),
+        "{}",
+        cwd_text(&panes[0])
+    );
     let workspaces = registered(&mut host);
     assert_eq!(workspaces.len(), 1);
     assert_eq!(workspaces[0].branch, "fix-auth");
     host.deliver_one(pane_created(14, "fix-auth"));
     host.deliver_one(Event::NodeRemoved(NodeId(14)));
     host.settle();
-    assert_eq!(registered(&mut host).len(), 1, "closing the pane keeps the registration by default");
+    assert_eq!(
+        registered(&mut host).len(),
+        1,
+        "closing the pane keeps the registration by default"
+    );
 }
 
 /// REQ: F-067, PORT:ilium/tests/pty_tui_smoke.rs::worktree_launcher_dialog_menu_and_footer_popover_render_and_accept_input
 #[test]
 fn port_067_the_command_from_the_client_creates_one_worktree_pane_on_the_server() {
     let mut client = client_host();
-    let submitted = client.deliver_one(command_invoked(COMMAND, r#"{"branch":"fix-auth"}"#, ilium_plugin_sdk::types::CommandOrigin::Keybinding));
+    let submitted = client.deliver_one(command_invoked(
+        COMMAND,
+        r#"{"branch":"fix-auth"}"#,
+        ilium_plugin_sdk::types::CommandOrigin::Keybinding,
+    ));
     let messages = server_messages(&submitted);
     assert_eq!(messages.len(), 1);
     let mut server = server_host_at("/projects/acme");

@@ -11,13 +11,13 @@ use std::time::Duration;
 
 use ilium_plugin_api::generated::primitives::terminal::{Cell, CellRows};
 use ilium_plugin_api::generated::types::events::Event;
+use ilium_plugin_api::generated::types::ids::NodeId;
 use ilium_plugin_api::generated::types::intents::{Intent, Submission};
 use ilium_plugin_api::generated::types::requests::{Outcome, RequestRef};
 use ilium_plugin_api::generated::types::tree::{AgentActivity, AgentView, NodeClass};
 use ilium_plugin_api::ids::PluginId;
 use ilium_plugin_api::kernel::TreeNode;
 use ilium_plugin_api::{ErrorCode, PluginError, ProcessKind, Side, Tier};
-use ilium_plugin_api::generated::types::ids::NodeId;
 use ilium_plugin_host::calls::Trap;
 use ilium_plugin_host::testing::fake_kernel::FakePaneScreen;
 use ilium_plugin_host::testing::{FakeKernel, HarnessHandle, HostHarness, NativeGuest};
@@ -78,11 +78,14 @@ impl Rig {
     pub fn submit_keyed(&mut self, intent: Intent, dedup_key: Option<&str>) -> Outcome {
         self.next_correlation += 1;
         let correlation = self.next_correlation;
-        self.queue.lock().expect("queue lock").push_back(Submission {
-            intent,
-            correlation,
-            dedup_key: dedup_key.map(str::to_owned),
-        });
+        self.queue
+            .lock()
+            .expect("queue lock")
+            .push_back(Submission {
+                intent,
+                correlation,
+                dedup_key: dedup_key.map(str::to_owned),
+            });
         self.host.deliver(one_event());
         self.host.pump(8);
         self.host
@@ -96,7 +99,12 @@ impl Rig {
 
     /// Events the guest received so far, as kebab-case names.
     pub fn seen_names(&self) -> Vec<String> {
-        self.seen.lock().expect("seen lock").iter().map(|event| event.case_name().to_owned()).collect()
+        self.seen
+            .lock()
+            .expect("seen lock")
+            .iter()
+            .map(|event| event.case_name().to_owned())
+            .collect()
     }
 }
 
@@ -153,10 +161,19 @@ pub fn rig_on(side: Side, grants: &[&str]) -> Rig {
         .side(side)
         .grants(grants)
         .kernel(kernel.clone())
-        .with_native_guest(Box::new(ScriptGuest { queue: queue.clone(), seen: seen.clone() }))
+        .with_native_guest(Box::new(ScriptGuest {
+            queue: queue.clone(),
+            seen: seen.clone(),
+        }))
         .build()
         .expect("the harness builds a host for a native guest");
-    Rig { kernel, host, queue, seen, next_correlation: 0 }
+    Rig {
+        kernel,
+        host,
+        queue,
+        seen,
+        next_correlation: 0,
+    }
 }
 
 /// A client-side rig (terminal, editor and basic primitives live on the client).
@@ -172,7 +189,9 @@ pub fn server_rig(grants: &[&str]) -> Rig {
 /// A screen of `rows` rows of `columns` characters, row n holding `row-<n>` padded with dots.
 pub fn screen_of(rows: usize, columns: usize) -> FakePaneScreen {
     FakePaneScreen {
-        rows: (0..rows).map(|row| padded(&format!("row-{row}"), columns)).collect(),
+        rows: (0..rows)
+            .map(|row| padded(&format!("row-{row}"), columns))
+            .collect(),
         history: Vec::new(),
     }
 }
@@ -198,7 +217,10 @@ fn padded(text: &str, width: usize) -> String {
 
 /// True for the accepted outcomes.
 pub fn accepted(outcome: &Outcome) -> bool {
-    matches!(outcome, Outcome::Ok | Outcome::OkNode(_) | Outcome::OkEpoch(_))
+    matches!(
+        outcome,
+        Outcome::Ok | Outcome::OkNode(_) | Outcome::OkEpoch(_)
+    )
 }
 
 /// The refusal code of an outcome, if it is refused.
@@ -229,7 +251,10 @@ pub fn cell_rows_len(rows: &Option<CellRows>) -> Option<usize> {
 
 /// A plain cell.
 pub fn cell(text: &str) -> Cell {
-    Cell { text: text.to_owned(), ..Cell::default() }
+    Cell {
+        text: text.to_owned(),
+        ..Cell::default()
+    }
 }
 
 /// All captured log text joined with newlines.
@@ -243,7 +268,10 @@ pub fn log_text(host: &HarnessHandle) -> String {
 
 /// Number of log lines whose message contains the needle.
 pub fn log_count(host: &HarnessHandle, needle: &str) -> usize {
-    host.logs().iter().filter(|line| line.message.contains(needle)).count()
+    host.logs()
+        .iter()
+        .filter(|line| line.message.contains(needle))
+        .count()
 }
 
 /// Moves the manual clock by whole milliseconds.
@@ -270,10 +298,16 @@ pub fn fixture_wasm(name: &str) -> Vec<u8> {
 /// Compares `actual` with `tests/primitives/golden/<name>`; a missing golden file fails red with
 /// `golden.missing`.
 pub fn assert_golden(name: &str, actual: &str) {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/primitives/golden").join(name);
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/primitives/golden")
+        .join(name);
     let expected = std::fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("golden.missing: {}: {error}", path.display()));
-    assert_eq!(expected.replace("\r\n", "\n"), actual.replace("\r\n", "\n"), "golden {name}");
+    assert_eq!(
+        expected.replace("\r\n", "\n"),
+        actual.replace("\r\n", "\n"),
+        "golden {name}"
+    );
 }
 
 /// A client-side rig whose plugin is a built wasm fixture (the gap `HostHarness::with_wasm_bytes`).

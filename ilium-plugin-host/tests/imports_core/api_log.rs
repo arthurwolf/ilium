@@ -9,7 +9,9 @@ use crate::support::*;
 const CAP: usize = 16_384;
 const MARKER: &str = "…[truncated]";
 
-fn lines_of(fixture: &ilium_plugin_host::testing::imports_fixture::ImportsFixture) -> Vec<(String, String)> {
+fn lines_of(
+    fixture: &ilium_plugin_host::testing::imports_fixture::ImportsFixture,
+) -> Vec<(String, String)> {
     fixture
         .logs()
         .into_iter()
@@ -34,7 +36,10 @@ fn log_log_each_level_arrives_with_its_name() {
     }
     let lines = lines_of(&fixture);
     for name in ["trace", "debug", "info", "warn", "error"] {
-        assert!(lines.contains(&(name.to_owned(), format!("message {name}"))), "{name}: {lines:?}");
+        assert!(
+            lines.contains(&(name.to_owned(), format!("message {name}"))),
+            "{name}: {lines:?}"
+        );
     }
 }
 
@@ -94,7 +99,10 @@ fn log_log_line_201_in_one_second_is_dropped_for_a_t2_instance() {
     for index in 0..201 {
         fixture.log().log(Level::Info, format!("line {index}"));
     }
-    let kept = lines_of(&fixture).iter().filter(|(_, m)| m.starts_with("line ")).count();
+    let kept = lines_of(&fixture)
+        .iter()
+        .filter(|(_, m)| m.starts_with("line "))
+        .count();
     assert_eq!(kept, 200);
 }
 

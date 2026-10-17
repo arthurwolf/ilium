@@ -8,7 +8,10 @@ use crate::common::*;
 /// REQ: COR-050, F-059
 #[test]
 fn manifest_050_equals_the_complete_manifest_of_the_page() {
-    assert_eq!(manifest_value(), json_block_after(&page_text(), "### Complete manifest"));
+    assert_eq!(
+        manifest_value(),
+        json_block_after(&page_text(), "### Complete manifest")
+    );
 }
 
 /// REQ: COR-050
@@ -27,7 +30,10 @@ fn manifest_050_fragment_cli_entry_equals_the_complete_manifest() {
     let page = page_text();
     let fragment = json_block_after(&page, "### Manifest");
     let complete = json_block_after(&page, "### Complete manifest");
-    assert_eq!(fragment["contributes"]["cli"], complete["contributes"]["cli"]);
+    assert_eq!(
+        fragment["contributes"]["cli"],
+        complete["contributes"]["cli"]
+    );
 }
 
 /// REQ: COR-040, F-060
@@ -52,7 +58,11 @@ fn manifest_040_declares_wait_as_the_only_alias() {
 fn manifest_050_contributes_only_a_cli_entry() {
     // The plugin owns no tab, no command, no keybinding and no route (page: "The plugin owns no tab").
     let manifest = manifest_value();
-    let keys: Vec<&String> = manifest["contributes"].as_object().expect("contributes").keys().collect();
+    let keys: Vec<&String> = manifest["contributes"]
+        .as_object()
+        .expect("contributes")
+        .keys()
+        .collect();
     assert_eq!(keys, ["cli"]);
 }
 
@@ -61,7 +71,12 @@ fn manifest_050_contributes_only_a_cli_entry() {
 fn manifest_050_server_grants_are_exactly_the_four_of_the_page() {
     assert_eq!(
         strings(&manifest_value()["capabilities"]["server"]),
-        ["cli.contribute", "process.run:sh", "process.long-lived", "settings.read-kernel:agent-monitoring"]
+        [
+            "cli.contribute",
+            "process.run:sh",
+            "process.long-lived",
+            "settings.read-kernel:agent-monitoring"
+        ]
     );
 }
 
@@ -81,7 +96,10 @@ fn manifest_050_has_no_write_grant_for_the_kernel_tab() {
     let manifest = manifest_value();
     for side in ["server", "client"] {
         for grant in strings(&manifest["capabilities"][side]) {
-            assert!(!grant.starts_with("settings.write-kernel"), "{side}: {grant}");
+            assert!(
+                !grant.starts_with("settings.write-kernel"),
+                "{side}: {grant}"
+            );
         }
     }
 }
@@ -96,8 +114,14 @@ fn manifest_050_identity_worlds_activation_and_tier() {
     assert_eq!(manifest["version"], "0.1.0");
     assert_eq!(manifest["publisher"], "Ilium");
     assert_eq!(manifest["license"], "MIT");
-    assert_eq!(manifest["server"], json!({"entry": "server.wasm", "world": "ilium:server/base@0.1.0"}));
-    assert_eq!(manifest["client"], json!({"entry": "client.wasm", "world": "ilium:client/base@0.1.0"}));
+    assert_eq!(
+        manifest["server"],
+        json!({"entry": "server.wasm", "world": "ilium:server/base@0.1.0"})
+    );
+    assert_eq!(
+        manifest["client"],
+        json!({"entry": "client.wasm", "world": "ilium:client/base@0.1.0"})
+    );
     assert_eq!(manifest["activation"], json!(["startup"]));
     assert_eq!(manifest["limits_tier"], "first-party");
 }
@@ -106,7 +130,10 @@ fn manifest_050_identity_worlds_activation_and_tier() {
 #[test]
 fn manifest_050_description_is_the_first_sentence_of_the_page() {
     let manifest = manifest_value();
-    assert_eq!(manifest["description"], "Progress monitors let a long task show how far it is.");
+    assert_eq!(
+        manifest["description"],
+        "Progress monitors let a long task show how far it is."
+    );
     assert!(page_text().contains("Progress monitors let a long task show how far it is."));
 }
 

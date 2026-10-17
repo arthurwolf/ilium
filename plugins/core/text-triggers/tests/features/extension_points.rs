@@ -13,7 +13,10 @@ fn point_rows() -> Vec<Vec<String>> {
 /// REQ: F-056
 #[test]
 fn feature_056_the_page_lists_exactly_two_points_in_order() {
-    let names: Vec<String> = point_rows().into_iter().map(|row| row[0].trim_matches('`').to_string()).collect();
+    let names: Vec<String> = point_rows()
+        .into_iter()
+        .map(|row| row[0].trim_matches('`').to_string())
+        .collect();
     assert_eq!(names, ["rule-packs", "before-fire"]);
 }
 
@@ -21,17 +24,29 @@ fn feature_056_the_page_lists_exactly_two_points_in_order() {
 #[test]
 fn feature_056_rule_packs_is_a_collect_point_with_the_documented_entry() {
     let rows = point_rows();
-    let row = rows.iter().find(|row| row[0] == "`rule-packs`").expect("row");
+    let row = rows
+        .iter()
+        .find(|row| row[0] == "`rule-packs`")
+        .expect("row");
     assert_eq!(row[1], "collect");
-    assert_eq!(row[2], "Ship a group of rules the user can enable as a set.");
-    assert_eq!(row[3], "entry: id, title, rules (list of pattern, reply, enabled)");
+    assert_eq!(
+        row[2],
+        "Ship a group of rules the user can enable as a set."
+    );
+    assert_eq!(
+        row[3],
+        "entry: id, title, rules (list of pattern, reply, enabled)"
+    );
 }
 
 /// REQ: F-056
 #[test]
 fn feature_056_before_fire_is_a_veto_hook_with_rule_pane_match_and_reply_length() {
     let rows = point_rows();
-    let row = rows.iter().find(|row| row[0] == "`before-fire`").expect("row");
+    let row = rows
+        .iter()
+        .find(|row| row[0] == "`before-fire`")
+        .expect("row");
     assert_eq!(row[1], "hook (veto)");
     assert_eq!(row[2], "Refuse or end a rule that is about to send text.");
     assert_eq!(row[3], "rule, pane, match, reply_length");
@@ -50,7 +65,9 @@ fn feature_056_the_page_names_the_provide_and_contribute_grants() {
 #[test]
 fn feature_056_the_test_rule_service_runs_a_pattern_against_sample_text() {
     let page = page_text();
-    assert!(page.contains("- `ilium.core.text-triggers/test-rule`: test: run a pattern against sample text"));
+    assert!(page.contains(
+        "- `ilium.core.text-triggers/test-rule`: test: run a pattern against sample text"
+    ));
     assert!(page.contains("(grant `services.use:<name>`)"));
 }
 
@@ -63,7 +80,9 @@ fn feature_056_the_fired_topic_payload_is_rule_and_pane() {
 /// REQ: F-056
 #[test]
 fn feature_056_the_plugin_is_replaceable() {
-    assert!(page_text().contains("**Replaceable:** yes. A replacement lists `\"replaces\": [\"ilium.core.text-triggers\"]`"));
+    assert!(page_text().contains(
+        "**Replaceable:** yes. A replacement lists `\"replaces\": [\"ilium.core.text-triggers\"]`"
+    ));
 }
 
 /// REQ: F-056
@@ -82,7 +101,10 @@ fn feature_056_a_refusing_before_fire_contributor_stops_the_send_input() {
     let mut host = server_host();
     let pane = add_agent_pane(&mut host, "claude");
     set_rules(&mut host, &["\\(y/n\\)\\s*$"], &["y"]);
-    host.set_hook_reply("before-fire", HookReply::Refuse("outside working hours".to_string()));
+    host.set_hook_reply(
+        "before-fire",
+        HookReply::Refuse("outside working hours".to_string()),
+    );
     let submissions = host.deliver_one(matched(pane, &rule_id(0), "Continue? (y/n)", 1));
     host.settle();
     assert!(send_inputs(&submissions).is_empty(), "{submissions:?}");
@@ -121,7 +143,8 @@ fn feature_056_the_before_fire_payload_carries_rule_pane_match_and_reply_length(
     host.deliver_one(matched(pane, &rule_id(0), "go", 1));
     let calls = host.hook_calls("before-fire");
     assert_eq!(calls.len(), 1, "{calls:?}");
-    let payload: serde_json::Value = serde_json::from_str(&calls[0].payload_json).expect("json payload");
+    let payload: serde_json::Value =
+        serde_json::from_str(&calls[0].payload_json).expect("json payload");
     assert_eq!(payload["rule"], json!(rule_id(0)));
     assert_eq!(payload["pane"], json!(pane));
     assert_eq!(payload["match"], json!("go"));
@@ -193,7 +216,10 @@ fn feature_056_a_fired_rule_publishes_the_fired_topic_with_rule_and_pane() {
     host.deliver_one(matched(pane, &rule_id(0), "go", 1));
     host.settle();
     let published = host.published("ilium.core.text-triggers/fired");
-    assert_eq!(published, [json!({ "rule": rule_id(0), "pane": pane }).to_string()]);
+    assert_eq!(
+        published,
+        [json!({ "rule": rule_id(0), "pane": pane }).to_string()]
+    );
 }
 
 /// REQ: F-056

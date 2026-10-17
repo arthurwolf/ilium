@@ -17,7 +17,10 @@ fn run(args: &[&str]) -> (String, String, Option<u8>) {
 fn f_112_length_medium_is_refused_exit_two_with_the_documented_message() {
     let (stdout, stderr, code) = run(&["--length", "medium"]);
     assert_eq!(code, Some(2));
-    assert_eq!(stderr.trim_end(), "recap: --length must be short, long or both");
+    assert_eq!(
+        stderr.trim_end(),
+        "recap: --length must be short, long or both"
+    );
     assert!(stdout.is_empty());
 }
 
@@ -27,7 +30,11 @@ fn f_112_length_values_are_case_sensitive_and_the_empty_value_is_refused_exit_tw
     for value in ["", "SHORT", "Long", "both ", "all"] {
         let (_, stderr, code) = run(&["--length", value]);
         assert_eq!(code, Some(2), "value {value:?}");
-        assert_eq!(stderr.trim_end(), "recap: --length must be short, long or both", "value {value:?}");
+        assert_eq!(
+            stderr.trim_end(),
+            "recap: --length must be short, long or both",
+            "value {value:?}"
+        );
     }
 }
 
@@ -57,7 +64,10 @@ fn f_112_length_short_leaves_the_long_value_null() {
     let recaps = of_type(&records, "recap");
     assert!(!recaps.is_empty());
     for record in recaps {
-        assert!(record["long"].is_null(), "long must be null for --length short: {record}");
+        assert!(
+            record["long"].is_null(),
+            "long must be null for --length short: {record}"
+        );
     }
 }
 
@@ -84,7 +94,10 @@ fn f_112_markdown_prints_one_section_per_pane_with_the_state_and_is_not_jsonl() 
     assert!(stdout.contains("refactor parser"));
     assert!(stdout.contains("build shell"));
     assert!(stdout.contains("denied"));
-    assert!(stdout.lines().filter(|line| !line.trim().is_empty()).any(|line| serde_json::from_str::<serde_json::Value>(line).is_err()));
+    assert!(stdout
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .any(|line| serde_json::from_str::<serde_json::Value>(line).is_err()));
 }
 
 /// Checks the boundaries of a numeric option: the two valid edges pass, the values just outside are refused.
@@ -230,7 +243,10 @@ fn f_112_the_pane_that_runs_the_command_is_skipped() {
     host.cli().set_env("ILIUM_PANE_ID", &own.to_string());
     let (stdout, _, _) = run_cli(&mut host, &["recap"]);
     let records = jsonl(&stdout);
-    let ids: Vec<String> = of_type(&records, "recap").iter().map(|r| r["pane_id"].as_str().expect("string").to_string()).collect();
+    let ids: Vec<String> = of_type(&records, "recap")
+        .iter()
+        .map(|r| r["pane_id"].as_str().expect("string").to_string())
+        .collect();
     assert!(!ids.contains(&own.to_string()));
     assert_eq!(ids.len(), 1);
 }
@@ -297,8 +313,16 @@ fn f_112_recap_records_come_in_ascending_pane_id_order_before_the_summary() {
     let (stdout, _, _) = run_cli(&mut host, &["recap"]);
     let records = jsonl(&stdout);
     assert_eq!(records.last().expect("last")["type"], "summary");
-    let ids: Vec<u64> =
-        of_type(&records, "recap").iter().map(|r| r["pane_id"].as_str().expect("string").parse().expect("number")).collect();
+    let ids: Vec<u64> = of_type(&records, "recap")
+        .iter()
+        .map(|r| {
+            r["pane_id"]
+                .as_str()
+                .expect("string")
+                .parse()
+                .expect("number")
+        })
+        .collect();
     let mut sorted = ids.clone();
     sorted.sort_unstable();
     assert_eq!(ids, sorted);

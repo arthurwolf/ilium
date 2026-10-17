@@ -1,16 +1,19 @@
 //! reference-test-harness.md "Property tests and fuzz hooks": DEV-520 to DEV-523.
 
 use ilium_plugin_sdk_core::types::Event;
-use ilium_plugin_testkit::FakeHost;
 use ilium_plugin_testkit::fuzz::{arbitrary_event, fuzz_events, fuzz_run};
+use ilium_plugin_testkit::FakeHost;
 use proptest::prelude::*;
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 
-use crate::common::{Spy, spy, spy_reset, with_clean_env, with_env};
+use crate::common::{spy, spy_reset, with_clean_env, with_env, Spy};
 
 fn as_json(events: &[Event]) -> Vec<serde_json::Value> {
-    events.iter().map(|event| serde_json::to_value(event).expect("event serializes")).collect()
+    events
+        .iter()
+        .map(|event| serde_json::to_value(event).expect("event serializes"))
+        .collect()
 }
 
 /// A plugin that panics on its first event batch, which the harness reports as a trap.
@@ -79,7 +82,10 @@ fn dev_520_the_same_seed_gives_the_same_batch() {
 fn dev_520_different_seeds_give_different_batches() {
     with_clean_env(|| {
         let host = FakeHost::new().grants(&["tree.read", "agent.read"]);
-        assert_ne!(as_json(&host.fuzz_events(1, 32)), as_json(&host.fuzz_events(2, 32)));
+        assert_ne!(
+            as_json(&host.fuzz_events(1, 32)),
+            as_json(&host.fuzz_events(2, 32))
+        );
     });
 }
 
@@ -111,7 +117,10 @@ fn dev_520_a_batch_survives_a_json_round_trip_so_every_event_is_valid() {
 fn dev_520_free_function_and_host_method_agree() {
     with_clean_env(|| {
         let host = FakeHost::new();
-        assert_eq!(as_json(&fuzz_events(3, 8)), as_json(&host.fuzz_events(3, 8)));
+        assert_eq!(
+            as_json(&fuzz_events(3, 8)),
+            as_json(&host.fuzz_events(3, 8))
+        );
     });
 }
 
@@ -156,7 +165,11 @@ fn dev_521_a_trap_fails_the_run_with_the_seed() {
         let failure = fuzz_run::<Exploding>(31, 5).expect_err("a panicking plugin traps");
         assert_eq!(failure.seed, 31);
         assert!(failure.round < 5);
-        assert!(failure.code.starts_with("trap."), "code was {}", failure.code);
+        assert!(
+            failure.code.starts_with("trap."),
+            "code was {}",
+            failure.code
+        );
     });
 }
 
@@ -167,7 +180,10 @@ fn dev_521_the_failure_message_names_seed_and_round() {
         let failure = fuzz_run::<Exploding>(31, 5).expect_err("trap");
         let text = failure.to_string();
         assert!(text.contains("31"), "message was {text}");
-        assert!(text.contains(&failure.round.to_string()), "message was {text}");
+        assert!(
+            text.contains(&failure.round.to_string()),
+            "message was {text}"
+        );
     });
 }
 
@@ -191,7 +207,11 @@ fn dev_521_an_expected_trap_does_not_fail_the_run_through_the_host_method() {
         host.expect_trap("trap.deadline");
         host.inject_trap("trap.deadline");
         let result = host.fuzz_run(2, 1);
-        assert_eq!(result.as_ref().err().map(|failure| format!("{failure:?}")), None, "an expected trap is not a fuzz failure");
+        assert_eq!(
+            result.as_ref().err().map(|failure| format!("{failure:?}")),
+            None,
+            "an expected trap is not a fuzz failure"
+        );
     });
 }
 

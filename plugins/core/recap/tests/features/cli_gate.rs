@@ -18,17 +18,28 @@ fn answer(short_words: usize, long_words: usize) -> Vec<u8> {
 }
 
 /// One shell pane with this screen, gate open; returns the host, the pane id and the invocation.
-fn start_shell_run(screen: &[&str]) -> (FakeHost, u64, ilium_plugin_sdk::testing::fakes::cli::Invocation) {
+fn start_shell_run(
+    screen: &[&str],
+) -> (
+    FakeHost,
+    u64,
+    ilium_plugin_sdk::testing::fakes::cli::Invocation,
+) {
     let mut host = activated_server();
     open_gate(&mut host);
     let pane = host.tree().add(shell_pane("build shell"));
-    host.tree().set_screen(pane, screen.iter().map(|row| row.to_string()).collect());
+    host.tree()
+        .set_screen(pane, screen.iter().map(|row| row.to_string()).collect());
     let invocation = host.cli().invoke(&["recap"], b"");
     (host, pane, invocation)
 }
 
 /// Finishes the only job with `result`, lets the run end and returns the output records.
-fn finish_run(host: &mut FakeHost, invocation: &ilium_plugin_sdk::testing::fakes::cli::Invocation, result: Vec<u8>) -> Vec<Value> {
+fn finish_run(
+    host: &mut FakeHost,
+    invocation: &ilium_plugin_sdk::testing::fakes::cli::Invocation,
+    result: Vec<u8>,
+) -> Vec<Value> {
     let request = host.jobs().list()[0].request;
     host.jobs().finish(request, Ok(result));
     host.settle();
@@ -71,7 +82,8 @@ fn f_112_closed_gate_reads_nothing_and_starts_no_job() {
     let mut host = activated_server();
     close_gate(&mut host);
     let pane = host.tree().add(shell_pane("s"));
-    host.tree().set_screen(pane, vec!["secret screen".to_string()]);
+    host.tree()
+        .set_screen(pane, vec!["secret screen".to_string()]);
     run_cli(&mut host, &["recap"]);
     assert!(host.jobs().list().is_empty());
     assert_eq!(host.screen_reads(), 0);
@@ -95,11 +107,16 @@ fn f_112_unreadable_kernel_setting_means_closed() {
 fn f_112_automatic_ai_that_is_not_a_boolean_means_closed() {
     for value in [json!("true"), json!(1), json!(null)] {
         let mut host = activated_server();
-        host.kernel_settings().set_tab("inference", json!({"automatic_ai": value}));
+        host.kernel_settings()
+            .set_tab("inference", json!({"automatic_ai": value}));
         host.set_onboarding_finished(true);
         host.tree().add(shell_pane("s"));
         let (stdout, _, _) = run_cli(&mut host, &["recap"]);
-        assert_eq!(of_type(&jsonl(&stdout), "recap")[0]["state"], "denied", "value {value}");
+        assert_eq!(
+            of_type(&jsonl(&stdout), "recap")[0]["state"],
+            "denied",
+            "value {value}"
+        );
     }
 }
 
@@ -107,7 +124,8 @@ fn f_112_automatic_ai_that_is_not_a_boolean_means_closed() {
 #[test]
 fn f_112_open_ai_with_unfinished_onboarding_gives_denied_records() {
     let mut host = activated_server();
-    host.kernel_settings().set_tab("inference", json!({"automatic_ai": true}));
+    host.kernel_settings()
+        .set_tab("inference", json!({"automatic_ai": true}));
     host.set_onboarding_finished(false);
     host.tree().add(shell_pane("s"));
     let (stdout, _, _) = run_cli(&mut host, &["recap"]);
@@ -119,7 +137,8 @@ fn f_112_open_ai_with_unfinished_onboarding_gives_denied_records() {
 #[test]
 fn f_112_server_asks_the_client_the_onboarding_state_request_with_empty_object_payload() {
     let mut host = activated_server();
-    host.kernel_settings().set_tab("inference", json!({"automatic_ai": true}));
+    host.kernel_settings()
+        .set_tab("inference", json!({"automatic_ai": true}));
     host.tree().add(shell_pane("s"));
     run_cli(&mut host, &["recap"]);
     let requests = host.client_requests().sent();
@@ -145,7 +164,8 @@ fn f_112_client_answers_onboarding_state_with_the_finished_flag() {
 #[test]
 fn f_112_unanswered_onboarding_request_within_two_seconds_means_closed() {
     let mut host = activated_server();
-    host.kernel_settings().set_tab("inference", json!({"automatic_ai": true}));
+    host.kernel_settings()
+        .set_tab("inference", json!({"automatic_ai": true}));
     host.leave_client_requests_unanswered();
     host.tree().add(shell_pane("s"));
     let invocation = host.cli().invoke(&["recap"], b"");
@@ -173,7 +193,8 @@ fn f_112_agent_pane_never_falls_back_to_the_screen() {
     let mut host = activated_server();
     open_gate(&mut host);
     let pane = host.tree().add(agent_pane("worker", "claude"));
-    host.tree().set_screen(pane, vec!["the agent is fixing the parser".to_string()]);
+    host.tree()
+        .set_screen(pane, vec!["the agent is fixing the parser".to_string()]);
     let (stdout, _, _) = run_cli(&mut host, &["recap"]);
     assert_eq!(of_type(&jsonl(&stdout), "recap")[0]["state"], "unavailable");
     assert_eq!(host.screen_reads(), 0);
@@ -185,7 +206,14 @@ fn f_112_agent_with_a_verified_session_reads_a_bounded_transcript_and_starts_one
     let mut host = activated_server();
     open_gate(&mut host);
     let pane = host.tree().add(agent_pane("worker", "claude"));
-    host.tree().set_agent_session(pane, "session-1", vec!["user: fix the parser".to_string(), "assistant: done".to_string()]);
+    host.tree().set_agent_session(
+        pane,
+        "session-1",
+        vec![
+            "user: fix the parser".to_string(),
+            "assistant: done".to_string(),
+        ],
+    );
     run_cli(&mut host, &["recap"]);
     let query = host.transcript_queries().pop().expect("a transcript query");
     assert_eq!(query.last_turns, 40);
@@ -199,10 +227,17 @@ fn f_112_goal_lines_come_from_the_transcript_goal_not_from_the_model() {
     let mut host = activated_server();
     open_gate(&mut host);
     let pane = host.tree().add(agent_pane("worker", "claude"));
-    host.tree().set_agent_session(pane, "session-1", vec!["user: /goal Finish the parser refactor".to_string()]);
+    host.tree().set_agent_session(
+        pane,
+        "session-1",
+        vec!["user: /goal Finish the parser refactor".to_string()],
+    );
     let invocation = host.cli().invoke(&["recap"], b"");
     let records = finish_run(&mut host, &invocation, answer(5, 20));
-    assert_eq!(of_type(&records, "recap")[0]["goals"], json!(["Goal active: Finish the parser refactor"]));
+    assert_eq!(
+        of_type(&records, "recap")[0]["goals"],
+        json!(["Goal active: Finish the parser refactor"])
+    );
 }
 
 /// REQ: F-112
@@ -211,7 +246,8 @@ fn f_112_empty_shell_screen_is_idle_not_failed_and_starts_no_job() {
     let mut host = activated_server();
     open_gate(&mut host);
     let pane = host.tree().add(shell_pane("s"));
-    host.tree().set_screen(pane, vec!["   ".to_string(), String::new()]);
+    host.tree()
+        .set_screen(pane, vec!["   ".to_string(), String::new()]);
     let (stdout, _, _) = run_cli(&mut host, &["recap"]);
     assert_eq!(of_type(&jsonl(&stdout), "recap")[0]["state"], "idle");
     assert!(host.jobs().list().is_empty());
@@ -254,7 +290,10 @@ fn f_112_shell_evidence_just_under_the_cap_is_sent_whole() {
     let (mut host, _, _) = start_shell_run(&[&rows]);
     let job = host.jobs().list().pop().expect("a job");
     let input: Value = serde_json::from_slice(&job.input).expect("job input is JSON");
-    assert!(input["evidence"].as_str().expect("evidence").contains(&rows));
+    assert!(input["evidence"]
+        .as_str()
+        .expect("evidence")
+        .contains(&rows));
 }
 
 /// REQ: F-112
@@ -269,7 +308,10 @@ fn f_112_gate_open_shell_with_text_starts_exactly_one_recap_pane_job() {
 /// REQ: F-112
 #[test]
 fn f_112_secret_values_are_redacted_before_the_text_reaches_a_job_but_key_names_stay() {
-    let (mut host, _, _) = start_shell_run(&["export API_KEY=sk-live-0123456789abcdef", "password=hunter2"]);
+    let (mut host, _, _) = start_shell_run(&[
+        "export API_KEY=sk-live-0123456789abcdef",
+        "password=hunter2",
+    ]);
     let job = host.jobs().list().pop().expect("a job");
     let text = String::from_utf8(job.input).expect("UTF-8");
     assert!(!text.contains("sk-live-0123456789abcdef"));
@@ -355,7 +397,9 @@ fn f_112_model_answer_that_is_not_json_fails_the_pane() {
 #[test]
 fn f_112_model_answer_missing_the_long_text_fails_the_pane() {
     let (mut host, _, invocation) = start_shell_run(&["$ ls"]);
-    let missing = json!({"short": {"text": "only short"}}).to_string().into_bytes();
+    let missing = json!({"short": {"text": "only short"}})
+        .to_string()
+        .into_bytes();
     let records = finish_run(&mut host, &invocation, missing);
     assert_eq!(of_type(&records, "recap")[0]["state"], "failed");
 }
@@ -364,7 +408,10 @@ fn f_112_model_answer_missing_the_long_text_fails_the_pane() {
 #[test]
 fn f_112_model_answer_inside_a_code_fence_is_still_parsed() {
     let (mut host, _, invocation) = start_shell_run(&["$ ls"]);
-    let fenced = format!("```json\n{}\n```", String::from_utf8(answer(4, 8)).expect("UTF-8"));
+    let fenced = format!(
+        "```json\n{}\n```",
+        String::from_utf8(answer(4, 8)).expect("UTF-8")
+    );
     let records = finish_run(&mut host, &invocation, fenced.into_bytes());
     assert_eq!(of_type(&records, "recap")[0]["state"], "summarized");
 }
@@ -385,11 +432,14 @@ fn f_112_failed_pane_also_writes_a_warning_record_naming_the_pane_and_state() {
 fn f_112_provider_error_fails_the_pane_and_the_run_still_exits_zero() {
     let (mut host, _, invocation) = start_shell_run(&["$ ls"]);
     let request = host.jobs().list()[0].request;
-    host.jobs().finish(request, Err(ilium_plugin_sdk::types::PluginError {
-        code: ilium_plugin_sdk::types::ErrorCode::Network,
-        message: "provider timed out".to_string(),
-        retry_after_ms: None,
-    }));
+    host.jobs().finish(
+        request,
+        Err(ilium_plugin_sdk::types::PluginError {
+            code: ilium_plugin_sdk::types::ErrorCode::Network,
+            message: "provider timed out".to_string(),
+            retry_after_ms: None,
+        }),
+    );
     host.settle();
     let done = host.cli().refresh(&invocation);
     assert_eq!(done.exit_code(), Some(0));
@@ -432,7 +482,10 @@ fn f_112_pointer_in_the_evidence_that_exists_under_the_project_is_kept() {
     });
     let records = finish_run(&mut host, &invocation, body.to_string().into_bytes());
     let short = &of_type(&records, "recap")[0]["short"];
-    assert_eq!(short["pointers"], json!([{"path": "src/parser.rs", "note": "parser entry point"}]));
+    assert_eq!(
+        short["pointers"],
+        json!([{"path": "src/parser.rs", "note": "parser entry point"}])
+    );
     assert_eq!(short["rejected_pointers"], 0);
 }
 
@@ -445,7 +498,10 @@ fn f_112_pointer_named_in_the_evidence_but_missing_on_disk_is_dropped() {
         "long": {"text": "see file", "pointers": []}
     });
     let records = finish_run(&mut host, &invocation, body.to_string().into_bytes());
-    assert_eq!(of_type(&records, "recap")[0]["short"]["rejected_pointers"], 1);
+    assert_eq!(
+        of_type(&records, "recap")[0]["short"]["rejected_pointers"],
+        1
+    );
 }
 
 /// REQ: F-112
@@ -458,7 +514,10 @@ fn f_112_pointer_into_a_denied_credential_folder_is_dropped_even_when_named_and_
         "long": {"text": "read a key", "pointers": []}
     });
     let records = finish_run(&mut host, &invocation, body.to_string().into_bytes());
-    assert_eq!(of_type(&records, "recap")[0]["short"]["rejected_pointers"], 1);
+    assert_eq!(
+        of_type(&records, "recap")[0]["short"]["rejected_pointers"],
+        1
+    );
 }
 
 /// REQ: F-112
@@ -471,7 +530,20 @@ fn f_112_summary_record_has_exactly_the_documented_keys() {
     let record = summary(&jsonl(&stdout));
     let mut keys: Vec<&String> = record.as_object().expect("object").keys().collect();
     keys.sort();
-    assert_eq!(keys, ["cancelled", "denied", "failed", "idle", "panes", "stale", "summarized", "type", "unavailable"]);
+    assert_eq!(
+        keys,
+        [
+            "cancelled",
+            "denied",
+            "failed",
+            "idle",
+            "panes",
+            "stale",
+            "summarized",
+            "type",
+            "unavailable"
+        ]
+    );
 }
 
 /// REQ: F-112
@@ -502,7 +574,10 @@ fn f_112_run_timeout_reports_panes_still_running_as_failed_and_keeps_finished_te
     host.advance_clock(1_001);
     host.settle();
     let records = jsonl(&host.cli().refresh(&invocation).stdout());
-    let states: Vec<&str> = of_type(&records, "recap").iter().map(|r| r["state"].as_str().expect("state")).collect();
+    let states: Vec<&str> = of_type(&records, "recap")
+        .iter()
+        .map(|r| r["state"].as_str().expect("state"))
+        .collect();
     assert_eq!(states, ["summarized", "failed"]);
 }
 
@@ -516,6 +591,10 @@ fn f_112_max_concurrency_limits_the_jobs_running_at_the_same_time() {
         host.tree().set_screen(pane, vec![format!("$ job {index}")]);
     }
     host.cli().invoke(&["recap", "--max-concurrency", "2"], b"");
-    assert_eq!(host.jobs().list().len(), 6, "every pane is one job; extra jobs wait in the queue");
+    assert_eq!(
+        host.jobs().list().len(),
+        6,
+        "every pane is one job; extra jobs wait in the queue"
+    );
     assert_eq!(host.running_job_limit(), 2);
 }

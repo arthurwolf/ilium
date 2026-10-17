@@ -26,8 +26,14 @@ fn lif_277_data_version_above_u32_max_is_refused_manifest_schema() {
 fn lif_277_data_version_zero_and_u32_max_are_accepted() {
     for value in ["0", "4294967295"] {
         let rig = rig();
-        let output = install(&rig, &pkg(NOTES, "1.0.0").raw_data_version(value).migrator_both());
-        assert!(!error_codes(&output).contains(&"manifest.schema".to_owned()), "{value}");
+        let output = install(
+            &rig,
+            &pkg(NOTES, "1.0.0").raw_data_version(value).migrator_both(),
+        );
+        assert!(
+            !error_codes(&output).contains(&"manifest.schema".to_owned()),
+            "{value}"
+        );
     }
 }
 
@@ -37,7 +43,10 @@ fn lif_277_fractional_or_string_data_version_is_refused() {
     for value in ["1.5", "\"2\""] {
         let rig = rig();
         let output = install(&rig, &pkg(NOTES, "1.0.0").raw_data_version(value));
-        assert!(error_codes(&output).contains(&"manifest.schema".to_owned()), "{value}");
+        assert!(
+            error_codes(&output).contains(&"manifest.schema".to_owned()),
+            "{value}"
+        );
     }
 }
 
@@ -49,9 +58,18 @@ fn lif_277_stored_version_above_the_manifest_value_is_handled_as_a_downgrade() {
     rig.plant_data(NOTES, 3);
     let path = rig.write_package(&pkg(NOTES, "0.9.0").data_version(2).migrator_both());
     let text = path.to_string_lossy().into_owned();
-    let output = rig.cli(&["install", &text, "--yes", "--allow-unsigned", "--allow-downgrade"]);
+    let output = rig.cli(&[
+        "install",
+        &text,
+        "--yes",
+        "--allow-unsigned",
+        "--allow-downgrade",
+    ]);
     assert_eq!(output.exit_code, 1);
-    assert_eq!(error_codes(&output), vec!["migration.data-newer".to_owned()]);
+    assert_eq!(
+        error_codes(&output),
+        vec!["migration.data-newer".to_owned()]
+    );
 }
 
 proptest! {
@@ -70,7 +88,13 @@ proptest! {
 #[test]
 fn lif_278_data_version_2_without_migrator_in_one_component_exports_is_refused() {
     let rig = rig();
-    let output = install(&rig, &pkg(NOTES, "1.0.0").client_side().data_version(2).migrator_server_only());
+    let output = install(
+        &rig,
+        &pkg(NOTES, "1.0.0")
+            .client_side()
+            .data_version(2)
+            .migrator_server_only(),
+    );
     assert_eq!(output.exit_code, 1);
     assert!(error_codes(&output).contains(&"manifest.exports-mismatch".to_owned()));
 }
@@ -79,7 +103,12 @@ fn lif_278_data_version_2_without_migrator_in_one_component_exports_is_refused()
 #[test]
 fn lif_278_component_that_does_not_export_migrator_although_listed_is_refused() {
     let rig = rig();
-    let output = install(&rig, &pkg(NOTES, "1.0.0").data_version(2).migrator_listed_but_not_exported());
+    let output = install(
+        &rig,
+        &pkg(NOTES, "1.0.0")
+            .data_version(2)
+            .migrator_listed_but_not_exported(),
+    );
     assert!(error_codes(&output).contains(&"manifest.exports-mismatch".to_owned()));
 }
 
@@ -87,7 +116,13 @@ fn lif_278_component_that_does_not_export_migrator_although_listed_is_refused() 
 #[test]
 fn lif_278_data_version_2_with_migrator_in_both_components_is_accepted() {
     let rig = rig();
-    let output = install(&rig, &pkg(NOTES, "1.0.0").client_side().data_version(2).migrator_both());
+    let output = install(
+        &rig,
+        &pkg(NOTES, "1.0.0")
+            .client_side()
+            .data_version(2)
+            .migrator_both(),
+    );
     assert!(!error_codes(&output).contains(&"manifest.exports-mismatch".to_owned()));
 }
 
@@ -103,7 +138,13 @@ fn lif_278_data_version_1_needs_no_migrator() {
 #[test]
 fn lif_278_mismatch_is_reported_at_stage_6_and_leaves_nothing_installed() {
     let rig = rig();
-    let output = install(&rig, &pkg(NOTES, "1.0.0").data_version(2).migrator_server_only().client_side());
+    let output = install(
+        &rig,
+        &pkg(NOTES, "1.0.0")
+            .data_version(2)
+            .migrator_server_only()
+            .client_side(),
+    );
     let line = output
         .stdout_jsonl
         .iter()

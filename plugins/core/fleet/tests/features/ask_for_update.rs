@@ -2,8 +2,10 @@
 //! or typed message to the agents. Dialog shape from the page figure; payload channel
 //! "ask-for-update" is an assumption listed in API_GAPS.md.
 
-use ilium_plugin_sdk::testing::{FakeHost, assert_golden};
-use ilium_plugin_sdk::types::{ActionKind, ActionValue, AgentActivity, Delivery, Event, Intent, ViewTarget};
+use ilium_plugin_sdk::testing::{assert_golden, FakeHost};
+use ilium_plugin_sdk::types::{
+    ActionKind, ActionValue, AgentActivity, Delivery, Event, Intent, ViewTarget,
+};
 
 use crate::common::*;
 
@@ -31,7 +33,12 @@ fn open_dialog() -> FakeHost {
 
 fn three_agents() -> FakeHost {
     let mut host = server_host();
-    add_agent(&mut host, "refactor parser", "claude", AgentActivity::Working);
+    add_agent(
+        &mut host,
+        "refactor parser",
+        "claude",
+        AgentActivity::Working,
+    );
     add_agent(&mut host, "tests", "codex", AgentActivity::Idle);
     add_agent(&mut host, "docs", "claude", AgentActivity::Idle);
     host
@@ -70,9 +77,15 @@ fn ask_036_the_dialog_fits_every_documented_width() {
         let mut host = open_dialog();
         let text = host.render(popup(), columns, 24).text();
         for line in text.lines() {
-            assert!(line.chars().count() <= usize::from(columns), "{columns}: {line:?}");
+            assert!(
+                line.chars().count() <= usize::from(columns),
+                "{columns}: {line:?}"
+            );
         }
-        assert!(text.contains("Send") && text.contains("Cancel"), "{columns}");
+        assert!(
+            text.contains("Send") && text.contains("Cancel"),
+            "{columns}"
+        );
     }
 }
 
@@ -80,32 +93,64 @@ fn ask_036_the_dialog_fits_every_documented_width() {
 #[test]
 fn ask_036_send_does_nothing_while_the_text_is_empty() {
     let mut host = open_dialog();
-    host.deliver_one(dialog_action("update-send", ActionKind::Activated, Some(ActionValue::None)));
+    host.deliver_one(dialog_action(
+        "update-send",
+        ActionKind::Activated,
+        Some(ActionValue::None),
+    ));
     host.settle();
-    assert!(host.submitted().iter().all(|s| !matches!(s.intent, Intent::Message(_))));
+    assert!(host
+        .submitted()
+        .iter()
+        .all(|s| !matches!(s.intent, Intent::Message(_))));
 }
 
 /// REQ: F-036
 #[test]
 fn ask_036_send_does_nothing_while_the_text_is_only_whitespace() {
     let mut host = open_dialog();
-    host.deliver_one(dialog_action("update-text", ActionKind::Changed, Some(ActionValue::Text("  \n ".to_string()))));
-    host.deliver_one(dialog_action("update-send", ActionKind::Activated, Some(ActionValue::None)));
+    host.deliver_one(dialog_action(
+        "update-text",
+        ActionKind::Changed,
+        Some(ActionValue::Text("  \n ".to_string())),
+    ));
+    host.deliver_one(dialog_action(
+        "update-send",
+        ActionKind::Activated,
+        Some(ActionValue::None),
+    ));
     host.settle();
-    assert!(host.submitted().iter().all(|s| !matches!(s.intent, Intent::Message(_))));
+    assert!(host
+        .submitted()
+        .iter()
+        .all(|s| !matches!(s.intent, Intent::Message(_))));
 }
 
 /// REQ: F-036
 #[test]
 fn ask_036_send_submits_one_message_to_the_server_side_of_the_plugin() {
     let mut host = open_dialog();
-    host.deliver_one(dialog_action("update-text", ActionKind::Changed, Some(ActionValue::Text("status?".to_string()))));
-    host.deliver_one(dialog_action("update-send", ActionKind::Activated, Some(ActionValue::None)));
+    host.deliver_one(dialog_action(
+        "update-text",
+        ActionKind::Changed,
+        Some(ActionValue::Text("status?".to_string())),
+    ));
+    host.deliver_one(dialog_action(
+        "update-send",
+        ActionKind::Activated,
+        Some(ActionValue::None),
+    ));
     host.settle();
     let messages: Vec<_> = host
         .submitted()
         .into_iter()
-        .filter_map(|s| if let Intent::Message(m) = s.intent { Some(m) } else { None })
+        .filter_map(|s| {
+            if let Intent::Message(m) = s.intent {
+                Some(m)
+            } else {
+                None
+            }
+        })
         .collect();
     assert_eq!(messages.len(), 1);
     assert_eq!(messages[0].channel, "ask-for-update");
@@ -116,10 +161,21 @@ fn ask_036_send_submits_one_message_to_the_server_side_of_the_plugin() {
 #[test]
 fn ask_036_cancel_sends_nothing() {
     let mut host = open_dialog();
-    host.deliver_one(dialog_action("update-text", ActionKind::Changed, Some(ActionValue::Text("status?".to_string()))));
-    host.deliver_one(dialog_action("update-cancel", ActionKind::Activated, Some(ActionValue::None)));
+    host.deliver_one(dialog_action(
+        "update-text",
+        ActionKind::Changed,
+        Some(ActionValue::Text("status?".to_string())),
+    ));
+    host.deliver_one(dialog_action(
+        "update-cancel",
+        ActionKind::Activated,
+        Some(ActionValue::None),
+    ));
     host.settle();
-    assert!(host.submitted().iter().all(|s| !matches!(s.intent, Intent::Message(_))));
+    assert!(host
+        .submitted()
+        .iter()
+        .all(|s| !matches!(s.intent, Intent::Message(_))));
 }
 
 /// REQ: F-036
@@ -130,7 +186,9 @@ fn ask_036_the_server_sends_the_text_to_the_idle_agents() {
     host.settle();
     let inputs = sent_inputs(&host);
     assert!(!inputs.is_empty());
-    assert!(inputs.iter().all(|spec| spec.text == "status?" && spec.delivery == Delivery::Submitted));
+    assert!(inputs
+        .iter()
+        .all(|spec| spec.text == "status?" && spec.delivery == Delivery::Submitted));
 }
 
 /// REQ: F-036
@@ -164,7 +222,9 @@ fn ask_113_the_fixed_prompt_asks_every_idle_agent() {
     let mut host = three_agents();
     host.deliver_one(message("ask-for-update", FIXED_PROMPT.as_bytes().to_vec()));
     host.settle();
-    assert!(sent_inputs(&host).iter().all(|spec| spec.text == FIXED_PROMPT));
+    assert!(sent_inputs(&host)
+        .iter()
+        .all(|spec| spec.text == FIXED_PROMPT));
 }
 
 /// REQ: F-113
@@ -182,13 +242,15 @@ fn ask_113_a_multi_line_text_is_delivered_pasted() {
 #[test]
 fn ask_023_a_message_from_another_plugin_is_accepted_on_the_same_channel() {
     let mut host = three_agents();
-    host.deliver_one(ilium_plugin_sdk::types::Event::Message(ilium_plugin_sdk::types::MessageEvent {
-        from: ilium_plugin_sdk::types::PluginId("ilium.core.editor".to_string()),
-        from_side: ilium_plugin_sdk::types::PluginSide::Server,
-        from_client: None,
-        channel: "ask-for-update".to_string(),
-        payload: b"status?".to_vec(),
-    }));
+    host.deliver_one(ilium_plugin_sdk::types::Event::Message(
+        ilium_plugin_sdk::types::MessageEvent {
+            from: ilium_plugin_sdk::types::PluginId("ilium.core.editor".to_string()),
+            from_side: ilium_plugin_sdk::types::PluginSide::Server,
+            from_client: None,
+            channel: "ask-for-update".to_string(),
+            payload: b"status?".to_vec(),
+        },
+    ));
     host.settle();
     assert!(!sent_inputs(&host).is_empty());
 }
@@ -202,7 +264,13 @@ fn ask_023_the_notifications_hand_off_goes_to_the_notifications_plugin() {
     let sent: Vec<_> = host
         .submitted()
         .into_iter()
-        .filter_map(|s| if let Intent::Message(m) = s.intent { Some(m) } else { None })
+        .filter_map(|s| {
+            if let Intent::Message(m) = s.intent {
+                Some(m)
+            } else {
+                None
+            }
+        })
         .collect();
     assert!(sent.iter().all(|m| m.channel == "agent-question"));
 }

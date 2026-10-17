@@ -10,11 +10,21 @@ use crate::support::*;
 fn usr_087_footer_shows_a_clipboard_indicator_for_three_seconds() {
     let mut rig = ScreensRig::new(80, 24);
     rig.plugin_reads_clipboard("com.example.clip");
-    assert!(rig.footer_text().to_lowercase().contains("clipboard"), "{}", rig.footer_text());
+    assert!(
+        rig.footer_text().to_lowercase().contains("clipboard"),
+        "{}",
+        rig.footer_text()
+    );
     rig.advance_ms(2_999);
-    assert!(rig.footer_text().to_lowercase().contains("clipboard"), "n-1");
+    assert!(
+        rig.footer_text().to_lowercase().contains("clipboard"),
+        "n-1"
+    );
     rig.advance_ms(2);
-    assert!(!rig.footer_text().to_lowercase().contains("clipboard"), "n+1");
+    assert!(
+        !rig.footer_text().to_lowercase().contains("clipboard"),
+        "n+1"
+    );
 }
 
 /// REQ: USR-087
@@ -71,9 +81,17 @@ fn usr_130_footer_and_settings_row_show_the_same_n14_text() {
     let expected = "Plugin Cursor keeper stopped after 3 failures in 10 minutes: activate trap. Turn it on again in Settings > Plugins.";
     let footer = rig.footer_text();
     let normalised: String = footer.split_whitespace().collect::<Vec<_>>().join(" ");
-    assert!(normalised.contains(expected.trim_start_matches("Plugin ")) || normalised.contains(expected), "footer: {footer}");
+    assert!(
+        normalised.contains(expected.trim_start_matches("Plugin "))
+            || normalised.contains(expected),
+        "footer: {footer}"
+    );
     rig.open_plugins_tab();
-    let tab: String = rig.screen_text().split_whitespace().collect::<Vec<_>>().join(" ");
+    let tab: String = rig
+        .screen_text()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
     assert!(tab.contains("stopped after 3 failures in 10 minutes: activate trap. Turn it on again in Settings > Plugins."), "tab: {tab}");
 }
 
@@ -105,8 +123,15 @@ fn usr_130_view_name_appears_for_a_render_trap() {
     let mut rig = ScreensRig::new(60, 30);
     rig.install_plugin_that_traps_in_render("com.example.view", "Viewer", "sidebar");
     rig.advance_ms(7_000);
-    let normalised: String = rig.footer_text().split_whitespace().collect::<Vec<_>>().join(" ");
-    assert!(normalised.contains("views.render trap (sidebar)"), "{normalised}");
+    let normalised: String = rig
+        .footer_text()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(
+        normalised.contains("views.render trap (sidebar)"),
+        "{normalised}"
+    );
 }
 
 // ---- USR-211 ----
@@ -120,7 +145,10 @@ fn usr_211_a_world_writable_policy_shows_a_persistent_notice_on_every_start() {
     let first = rig.screen_text();
     assert!(first.to_lowercase().contains("policy"), "{first}");
     rig.advance_ms(600_000);
-    assert!(rig.screen_text().to_lowercase().contains("policy"), "persistent, not a toast");
+    assert!(
+        rig.screen_text().to_lowercase().contains("policy"),
+        "persistent, not a toast"
+    );
     rig.restart_client();
     assert!(rig.screen_text().to_lowercase().contains("policy"));
 }
@@ -140,7 +168,10 @@ fn usr_211_a_policy_with_mode_0644_shows_no_notice() {
 #[test]
 fn usr_212_the_notice_names_the_line_and_the_key_of_the_first_error() {
     let mut rig = ScreensRig::new(80, 24);
-    rig.write_system_policy_with_mode("version = 1\n\n[packages]\nallow_thirdparty = true\n", 0o644);
+    rig.write_system_policy_with_mode(
+        "version = 1\n\n[packages]\nallow_thirdparty = true\n",
+        0o644,
+    );
     rig.start_client();
     let screen = rig.screen_text();
     assert!(screen.contains("allow_thirdparty"), "{screen}");
@@ -151,7 +182,10 @@ fn usr_212_the_notice_names_the_line_and_the_key_of_the_first_error() {
 #[test]
 fn usr_212_only_the_first_error_is_named() {
     let mut rig = ScreensRig::new(80, 24);
-    rig.write_system_policy_with_mode("version = 1\n[packages]\nfirst_bad = 1\nsecond_bad = 2\n", 0o644);
+    rig.write_system_policy_with_mode(
+        "version = 1\n[packages]\nfirst_bad = 1\nsecond_bad = 2\n",
+        0o644,
+    );
     rig.start_client();
     let screen = rig.screen_text();
     assert!(screen.contains("first_bad"));

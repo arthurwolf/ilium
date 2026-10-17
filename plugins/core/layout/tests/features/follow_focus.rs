@@ -13,7 +13,11 @@ fn panel() -> ViewTarget {
 fn f_003_pane_resized_event_updates_the_size_row_of_the_panel() {
     let mut host = activated_client();
     let pane = host.tree().add(pane_node("api", "ilium.terminal", None));
-    host.deliver_one(Event::PaneResized(PaneResizedEvent { node: NodeId(pane), columns: 80, rows: 24 }));
+    host.deliver_one(Event::PaneResized(PaneResizedEvent {
+        node: NodeId(pane),
+        columns: 80,
+        rows: 24,
+    }));
     host.settle();
     let screen = host.render(panel(), 48, 7);
     assert!(screen.text().contains("80x24"));
@@ -24,8 +28,16 @@ fn f_003_pane_resized_event_updates_the_size_row_of_the_panel() {
 fn f_003_a_second_resize_of_the_same_pane_replaces_its_size() {
     let mut host = activated_client();
     let pane = host.tree().add(pane_node("api", "ilium.terminal", None));
-    host.deliver_one(Event::PaneResized(PaneResizedEvent { node: NodeId(pane), columns: 80, rows: 24 }));
-    host.deliver_one(Event::PaneResized(PaneResizedEvent { node: NodeId(pane), columns: 61, rows: 12 }));
+    host.deliver_one(Event::PaneResized(PaneResizedEvent {
+        node: NodeId(pane),
+        columns: 80,
+        rows: 24,
+    }));
+    host.deliver_one(Event::PaneResized(PaneResizedEvent {
+        node: NodeId(pane),
+        columns: 61,
+        rows: 12,
+    }));
     host.settle();
     let text = host.render(panel(), 48, 7).text();
     assert!(text.contains("61x12"));
@@ -70,7 +82,11 @@ fn f_003_events_for_the_tracker_produce_no_submissions() {
     let mut host = activated_client();
     let pane = host.tree().add(pane_node("api", "ilium.terminal", None));
     let submissions = host.deliver(vec![
-        Event::PaneResized(PaneResizedEvent { node: NodeId(pane), columns: 80, rows: 24 }),
+        Event::PaneResized(PaneResizedEvent {
+            node: NodeId(pane),
+            columns: 80,
+            rows: 24,
+        }),
         Event::PaneFocused(Some(NodeId(pane))),
     ]);
     assert!(submissions.is_empty());

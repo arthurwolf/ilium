@@ -20,12 +20,23 @@ fn onboarding_053_the_step_lists_eleven_configuration_rows_in_order() {
     let mut host = client_host();
     let rendered = text(&mut host);
     let labels = [
-        "Enable voice after setup", "OpenAI API key", "Realtime model", "Speaking voice", "Turn detection",
-        "Microphone", "Speaker", "Output volume", "Reasoning", "VAD responsiveness", "Pause other media",
+        "Enable voice after setup",
+        "OpenAI API key",
+        "Realtime model",
+        "Speaking voice",
+        "Turn detection",
+        "Microphone",
+        "Speaker",
+        "Output volume",
+        "Reasoning",
+        "VAD responsiveness",
+        "Pause other media",
     ];
     let mut last = 0;
     for label in labels {
-        let at = rendered[last..].find(label).unwrap_or_else(|| panic!("row {label} in {rendered}"));
+        let at = rendered[last..]
+            .find(label)
+            .unwrap_or_else(|| panic!("row {label} in {rendered}"));
         last += at + label.len();
     }
 }
@@ -52,8 +63,14 @@ fn onboarding_053_the_idle_connection_label_is_ready_to_test() {
 fn onboarding_053_the_model_and_voice_rows_show_the_default_labels() {
     let mut host = client_host();
     let rendered = text(&mut host);
-    for (label, expected) in [("Realtime model", "GPT Realtime 2.1"), ("Speaking voice", "Marin")] {
-        let row = rendered.lines().find(|line| line.contains(label)).unwrap_or_else(|| panic!("row {label}"));
+    for (label, expected) in [
+        ("Realtime model", "GPT Realtime 2.1"),
+        ("Speaking voice", "Marin"),
+    ] {
+        let row = rendered
+            .lines()
+            .find(|line| line.contains(label))
+            .unwrap_or_else(|| panic!("row {label}"));
         let value = row.rsplit('\u{2026}').next().unwrap_or("");
         let value = value.trim_matches(|c: char| c.is_whitespace() || "<>[]".contains(c));
         assert_eq!(value, expected, "{label}");

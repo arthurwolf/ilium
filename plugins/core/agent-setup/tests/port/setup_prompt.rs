@@ -25,10 +25,16 @@ fn row(block: &str) -> String {
 #[test]
 fn port_sp_01_missing_features_start_focused_and_set_up_rows_cannot_be_activated() {
     let mut host = host_with_progress_missing();
-    assert_eq!(host.focused_row_id(SURFACE).as_deref(), Some(row("progress").as_str()));
+    assert_eq!(
+        host.focused_row_id(SURFACE).as_deref(),
+        Some(row("progress").as_str())
+    );
     let chatroom_before = get(&mut host, claude_file());
     host.press_row(SURFACE, &row("chatroom"));
-    assert!(host.render_popup(80).trim().is_empty(), "a set-up row opens no dialog");
+    assert!(
+        host.render_popup(80).trim().is_empty(),
+        "a set-up row opens no dialog"
+    );
     assert_eq!(get(&mut host, claude_file()), chatroom_before);
     host.press_row(SURFACE, &row("progress"));
     assert!(host.render_popup(80).contains("Install Progress block"));
@@ -41,7 +47,11 @@ fn port_sp_02_focus_skips_already_configured_feature_rows() {
     for key in ["up", "down", "up", "down", "down", "up"] {
         host.key_on_tab(SURFACE, key);
         let focused = host.focused_row_id(SURFACE).expect("a row stays focused");
-        assert_ne!(focused, row("chatroom"), "focus landed on a set-up row after {key}");
+        assert_ne!(
+            focused,
+            row("chatroom"),
+            "focus landed on a set-up row after {key}"
+        );
     }
 }
 
@@ -58,7 +68,10 @@ fn port_sp_03_unavailable_mouse_feature_row_is_inert() {
         .expect("chatroom row for the global Claude file");
     host.click_kernel_tab(SURFACE, 2, u16::try_from(line).expect("row index"));
     assert!(host.render_popup(80).trim().is_empty());
-    assert_eq!(host.focused_row_id(SURFACE).as_deref(), Some(row("progress").as_str()));
+    assert_eq!(
+        host.focused_row_id(SURFACE).as_deref(),
+        Some(row("progress").as_str())
+    );
     assert_eq!(get(&mut host, claude_file()), before);
 }
 
@@ -71,8 +84,14 @@ fn port_sp_04_apply_writes_only_the_feature_that_was_confirmed() {
     host.settle();
     let text = get(&mut host, claude_file()).expect("file written");
     assert!(text.contains("ilium-agent-feature: progress"));
-    assert!(!text.contains("ilium-agent-feature: chatroom"), "the unconfirmed feature is not written");
-    assert_eq!(status_ok(&mut host, "chatroom", CLAUDE_GLOBAL), "not-set-up");
+    assert!(
+        !text.contains("ilium-agent-feature: chatroom"),
+        "the unconfirmed feature is not written"
+    );
+    assert_eq!(
+        status_ok(&mut host, "chatroom", CLAUDE_GLOBAL),
+        "not-set-up"
+    );
 }
 
 /// REQ: PORT:ilium-client/src/setup_prompt.rs::keyboard_shortcuts_return_non_mutating_decisions
@@ -83,7 +102,10 @@ fn port_sp_05_keyboard_shortcuts_close_the_dialog_without_mutating() {
         host.press_row(SURFACE, &row("progress"));
         host.key_on_popup(key);
         host.settle();
-        assert!(host.render_popup(80).trim().is_empty(), "{key} closes the dialog");
+        assert!(
+            host.render_popup(80).trim().is_empty(),
+            "{key} closes the dialog"
+        );
         assert_eq!(get(&mut host, claude_file()), None, "{key} writes nothing");
     }
 }
@@ -96,12 +118,21 @@ fn port_sp_06_hit_test_tracks_each_visible_control_row() {
     let rendered = screen.lines();
     let lines: Vec<&str> = rendered.iter().map(String::as_str).collect();
     for (block, label) in [("chatroom", "Chatroom"), ("progress", "Progress")] {
-        let index = lines.iter().position(|line| line.contains(label)).expect("row is visible");
+        let index = lines
+            .iter()
+            .position(|line| line.contains(label))
+            .expect("row is visible");
         host.click_kernel_tab(SURFACE, 2, u16::try_from(index).expect("row index"));
         let dialog = host.render_popup(80);
-        assert!(dialog.contains(&format!("Install {label} block")), "{block}\n{dialog}");
+        assert!(
+            dialog.contains(&format!("Install {label} block")),
+            "{block}\n{dialog}"
+        );
         host.press_popup_button("Cancel");
     }
     host.click_kernel_tab(SURFACE, 0, 0);
-    assert!(host.render_popup(80).trim().is_empty(), "a click outside every row hits nothing");
+    assert!(
+        host.render_popup(80).trim().is_empty(),
+        "a click outside every row hits nothing"
+    );
 }

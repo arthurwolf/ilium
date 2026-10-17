@@ -6,7 +6,8 @@ use ilium_plugin_sdk::types::ViewTarget;
 use serde_json::json;
 
 use crate::common::{
-    CONFIRM_POPUP, add_pane, contribute_phrase, enabled_client, hear, invoked_commands, popup_button,
+    add_pane, contribute_phrase, enabled_client, hear, invoked_commands, popup_button,
+    CONFIRM_POPUP,
 };
 
 fn host_with_docs_pane() -> ilium_plugin_sdk::testing::FakeHost {
@@ -107,7 +108,13 @@ fn confirm_051_enter_confirms_and_escape_cancels() {
 #[test]
 fn confirm_051_a_contributed_phrase_without_confirm_runs_at_once_with_empty_arguments() {
     let mut host = enabled_client("push_to_talk");
-    contribute_phrase(&mut host, "open-board", "open the board", "open-board", false);
+    contribute_phrase(
+        &mut host,
+        "open-board",
+        "open the board",
+        "open-board",
+        false,
+    );
     hear(&mut host, "open the board");
     let submitted = host.submitted();
     assert_eq!(invoked_commands(&submitted), ["open-board"]);
@@ -131,7 +138,13 @@ fn confirm_051_a_contributed_phrase_with_confirm_waits_for_the_dialog() {
 #[test]
 fn confirm_051_the_phrase_match_ignores_case_and_surrounding_space() {
     let mut host = enabled_client("push_to_talk");
-    contribute_phrase(&mut host, "open-board", "open the board", "open-board", false);
+    contribute_phrase(
+        &mut host,
+        "open-board",
+        "open the board",
+        "open-board",
+        false,
+    );
     hear(&mut host, "  Open The Board \n");
     assert_eq!(invoked_commands(&host.submitted()), ["open-board"]);
 }
@@ -160,7 +173,13 @@ fn confirm_051_the_higher_priority_entry_wins_for_the_same_phrase() {
 #[test]
 fn confirm_051_the_transcript_hook_corrects_the_text_before_phrases_are_matched() {
     let mut host = enabled_client("push_to_talk");
-    contribute_phrase(&mut host, "open-board", "open the board", "open-board", false);
+    contribute_phrase(
+        &mut host,
+        "open-board",
+        "open the board",
+        "open-board",
+        false,
+    );
     host.set_hook_reply(
         "ilium.core.voice/transcript",
         HookReply::Replace(json!({ "text": "open the board" }).to_string()),
@@ -173,7 +192,13 @@ fn confirm_051_the_transcript_hook_corrects_the_text_before_phrases_are_matched(
 #[test]
 fn confirm_051_without_a_hook_contributor_the_transcript_is_matched_unchanged() {
     let mut host = enabled_client("push_to_talk");
-    contribute_phrase(&mut host, "open-board", "open the board", "open-board", false);
+    contribute_phrase(
+        &mut host,
+        "open-board",
+        "open the board",
+        "open-board",
+        false,
+    );
     hear(&mut host, "open the boredom");
     assert!(invoked_commands(&host.submitted()).is_empty());
 }

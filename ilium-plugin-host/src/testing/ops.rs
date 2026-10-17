@@ -13,7 +13,11 @@ use ilium_plugin_api::{PluginError, Side};
 use crate::cli::CliOutput;
 
 /// The compiled-code cache key of one component: hash, wasmtime version and CPU features (LIF-176).
-pub fn compile_cache_key(component_hash: &str, wasmtime_version: &str, cpu_features: &str) -> String {
+pub fn compile_cache_key(
+    component_hash: &str,
+    wasmtime_version: &str,
+    cpu_features: &str,
+) -> String {
     unimplemented!("host::testing::ops::compile_cache_key")
 }
 
@@ -616,7 +620,12 @@ impl ServerHandle {
     }
 
     /// Calls a service method as a plugin.
-    pub fn call_service(&self, caller: &str, service: &str, method: &str) -> Result<(), PluginError> {
+    pub fn call_service(
+        &self,
+        caller: &str,
+        service: &str,
+        method: &str,
+    ) -> Result<(), PluginError> {
         unimplemented!("host::testing::ops::ServerHandle::call_service")
     }
 
@@ -646,7 +655,13 @@ impl ServerHandle {
     }
 
     /// Reads node metadata as another plugin.
-    pub fn node_metadata_as(&self, reader: &str, node: u64, owner: &str, key: &str) -> Option<Vec<u8>> {
+    pub fn node_metadata_as(
+        &self,
+        reader: &str,
+        node: u64,
+        owner: &str,
+        key: &str,
+    ) -> Option<Vec<u8>> {
         unimplemented!("host::testing::ops::ServerHandle::node_metadata_as")
     }
 
@@ -671,7 +686,13 @@ impl ServerHandle {
     }
 
     /// Writes a storage value, returning the refusal code.
-    pub fn write_storage_checked(&self, id: &str, bucket: &str, key: &str, bytes: &[u8]) -> Result<(), String> {
+    pub fn write_storage_checked(
+        &self,
+        id: &str,
+        bucket: &str,
+        key: &str,
+        bytes: &[u8],
+    ) -> Result<(), String> {
         unimplemented!("host::testing::ops::ServerHandle::write_storage_checked")
     }
 
@@ -691,7 +712,12 @@ impl ServerHandle {
     }
 
     /// Writes a data file, returning the refusal code.
-    pub fn write_data_file_checked(&self, id: &str, name: &str, bytes: &[u8]) -> Result<(), String> {
+    pub fn write_data_file_checked(
+        &self,
+        id: &str,
+        name: &str,
+        bytes: &[u8],
+    ) -> Result<(), String> {
         unimplemented!("host::testing::ops::ServerHandle::write_data_file_checked")
     }
 
@@ -781,7 +807,12 @@ impl ServerHandle {
     }
 
     /// Calls an extension.
-    pub fn call_extension(&self, id: &str, point: &str, extension: &str) -> Result<(), PluginError> {
+    pub fn call_extension(
+        &self,
+        id: &str,
+        point: &str,
+        extension: &str,
+    ) -> Result<(), PluginError> {
         unimplemented!("host::testing::ops::ServerHandle::call_extension")
     }
 
@@ -1069,7 +1100,14 @@ impl OpsRig {
     }
 
     /// Plants node metadata in a session snapshot.
-    pub fn plant_snapshot_metadata(&self, session: &str, node: u64, id: &str, key: &str, bytes: &[u8]) {
+    pub fn plant_snapshot_metadata(
+        &self,
+        session: &str,
+        node: u64,
+        id: &str,
+        key: &str,
+        bytes: &[u8],
+    ) {
         unimplemented!("host::testing::ops::OpsRig::plant_snapshot_metadata")
     }
 
@@ -1174,7 +1212,14 @@ impl OpsRig {
     }
 
     /// Sets the user, project and session enable levels of a plugin.
-    pub fn set_enabled_levels(&self, id: &str, session: &str, user: Option<bool>, project: Option<bool>, session_level: Option<bool>) {
+    pub fn set_enabled_levels(
+        &self,
+        id: &str,
+        session: &str,
+        user: Option<bool>,
+        project: Option<bool>,
+        session_level: Option<bool>,
+    ) {
         unimplemented!("host::testing::ops::OpsRig::set_enabled_levels")
     }
 

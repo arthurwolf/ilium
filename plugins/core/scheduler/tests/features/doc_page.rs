@@ -18,7 +18,8 @@ fn doc_b01_the_table_has_the_21_rows_in_order() {
 /// REQ: scheduler-B01, F-055
 #[test]
 fn doc_b01_menu_entry_text_is_on_page_and_in_user_docs() {
-    assert!(behaviour_value("scheduler-B01").starts_with("\"Hit key(s) X time from now\", on terminal panes only (shell or agent)"));
+    assert!(behaviour_value("scheduler-B01")
+        .starts_with("\"Hit key(s) X time from now\", on terminal panes only (shell or agent)"));
     assert!(automation().contains("Choose **Hit key(s) X time from now**."));
     assert!(automation().contains("Editors and boards do not have this entry."));
 }
@@ -53,14 +54,21 @@ fn doc_b03_dialog_keys() {
 /// REQ: scheduler-B04, F-055
 #[test]
 fn doc_b04_zero_delay_message() {
-    assert_eq!(behaviour_value("scheduler-B04"), "Refused: \"Choose a delay of at least one second\"");
-    assert!(automation().contains("| Total delay is 0 | Refused: \"Choose a delay of at least one second\". |"));
+    assert_eq!(
+        behaviour_value("scheduler-B04"),
+        "Refused: \"Choose a delay of at least one second\""
+    );
+    assert!(automation()
+        .contains("| Total delay is 0 | Refused: \"Choose a delay of at least one second\". |"));
 }
 
 /// REQ: scheduler-B05, F-055
 #[test]
 fn doc_b05_empty_payload_message() {
-    assert_eq!(behaviour_value("scheduler-B05"), "Refused: \"Enter text, enable Send Enter, or use both\"");
+    assert_eq!(
+        behaviour_value("scheduler-B05"),
+        "Refused: \"Enter text, enable Send Enter, or use both\""
+    );
     assert!(automation().contains("| Empty text and Send Enter off | Refused: \"Enter text, enable Send Enter, or use both\". |"));
 }
 
@@ -77,14 +85,19 @@ fn doc_b06_out_of_range_and_non_digit() {
 /// REQ: scheduler-B07, F-055
 #[test]
 fn doc_b07_one_pending_schedule_per_pane() {
-    assert_eq!(behaviour_value("scheduler-B07"), "One. A new schedule replaces the old one");
+    assert_eq!(
+        behaviour_value("scheduler-B07"),
+        "One. A new schedule replaces the old one"
+    );
     assert!(automation().contains("There is one pending schedule per pane."));
 }
 
 /// REQ: scheduler-B08, F-055
 #[test]
 fn doc_b08_text_then_enter_with_the_gate_held() {
-    assert!(behaviour_value("scheduler-B08").starts_with("The text is written, then Enter as a separate step, while the pane input gate is held"));
+    assert!(behaviour_value("scheduler-B08").starts_with(
+        "The text is written, then Enter as a separate step, while the pane input gate is held"
+    ));
     assert!(automation().contains("| Text only | The text is written to the pane without Enter. |"));
     assert!(automation().contains("| Enter only | A single Enter is sent. |"));
 }
@@ -92,14 +105,19 @@ fn doc_b08_text_then_enter_with_the_gate_held() {
 /// REQ: scheduler-B09, F-055
 #[test]
 fn doc_b09_deadline_does_not_check_idleness() {
-    assert!(behaviour_value("scheduler-B09").ends_with("It does not check whether the agent is idle"));
+    assert!(
+        behaviour_value("scheduler-B09").ends_with("It does not check whether the agent is idle")
+    );
     assert!(automation().contains("Scheduled input does not check whether the pane is idle."));
 }
 
 /// REQ: scheduler-B10, F-055
 #[test]
 fn doc_b10_restart_and_close() {
-    assert_eq!(behaviour_value("scheduler-B10"), "The deadline survives a restart. The pane closing discards the schedule");
+    assert_eq!(
+        behaviour_value("scheduler-B10"),
+        "The deadline survives a restart. The pane closing discards the schedule"
+    );
     assert!(automation().contains("| The pane is closed | The schedule is discarded with it. |"));
 }
 
@@ -126,7 +144,8 @@ fn doc_b12_delivery_modes() {
 /// REQ: scheduler-B13, F-057
 #[test]
 fn doc_b13_forever_warning_text() {
-    let text = "DANGER: this will re-send forever whenever the agent finishes. Do not run it unmonitored.";
+    let text =
+        "DANGER: this will re-send forever whenever the agent finishes. Do not run it unmonitored.";
     assert_eq!(behaviour_value("scheduler-B13"), format!("\"{text}\""));
     assert!(automation().contains(text));
 }
@@ -134,21 +153,32 @@ fn doc_b13_forever_warning_text() {
 /// REQ: scheduler-B14, F-057
 #[test]
 fn doc_b14_empty_prompt_message() {
-    assert_eq!(behaviour_value("scheduler-B14"), "Refused: \"Write a prompt before enqueueing it\"");
-    assert!(automation().contains("An empty or whitespace-only prompt is refused (\"Write a prompt before enqueueing it\")."));
+    assert_eq!(
+        behaviour_value("scheduler-B14"),
+        "Refused: \"Write a prompt before enqueueing it\""
+    );
+    assert!(automation().contains(
+        "An empty or whitespace-only prompt is refused (\"Write a prompt before enqueueing it\")."
+    ));
 }
 
 /// REQ: scheduler-B15, F-057
 #[test]
 fn doc_b15_clear_entry_only_while_not_empty() {
-    assert_eq!(behaviour_value("scheduler-B15"), "Menu entry \"Clear prompt queue\", shown only while the queue is not empty");
+    assert_eq!(
+        behaviour_value("scheduler-B15"),
+        "Menu entry \"Clear prompt queue\", shown only while the queue is not empty"
+    );
     assert!(automation().contains("That entry appears only while the queue is not empty."));
 }
 
 /// REQ: scheduler-B16, F-057
 #[test]
 fn doc_b16_delivery_trigger_is_a_finished_turn() {
-    assert_eq!(behaviour_value("scheduler-B16"), "One prompt per finished turn (Working to Idle or Done), not a timer");
+    assert_eq!(
+        behaviour_value("scheduler-B16"),
+        "One prompt per finished turn (Working to Idle or Done), not a timer"
+    );
 }
 
 /// REQ: scheduler-B17, F-057
@@ -164,20 +194,27 @@ fn doc_b17_fifo_and_rotation() {
 /// REQ: scheduler-B18, F-057
 #[test]
 fn doc_b18_capacity_is_100() {
-    assert_eq!(behaviour_value("scheduler-B18"), "At most 100 entries per pane");
+    assert_eq!(
+        behaviour_value("scheduler-B18"),
+        "At most 100 entries per pane"
+    );
     assert!(automation().contains("The queue holds at most **100** entries per pane."));
 }
 
 /// REQ: scheduler-B19, F-057
 #[test]
 fn doc_b19_fenced_delivery() {
-    assert!(behaviour_value("scheduler-B19").ends_with("A prompt that may have reached the PTY is not replayed after a crash"));
+    assert!(behaviour_value("scheduler-B19")
+        .ends_with("A prompt that may have reached the PTY is not replayed after a crash"));
 }
 
 /// REQ: scheduler-B20, F-057
 #[test]
 fn doc_b20_delivery_is_recorded_as_queued_prompt() {
-    assert_eq!(behaviour_value("scheduler-B20"), "Each delivery is recorded in the agent debug log as a queued prompt");
+    assert_eq!(
+        behaviour_value("scheduler-B20"),
+        "Each delivery is recorded in the agent debug log as a queued prompt"
+    );
     assert!(automation().contains("A queued prompt is recorded as such in the agent debug log."));
 }
 
@@ -203,7 +240,9 @@ fn doc_f055_f057_traceability_rows() {
 fn doc_f055_the_page_covers_scheduled_input_with_the_menu_entry() {
     let page = page_text();
     assert!(page.contains("The menu entry is \"Hit key(s) X time from now\". A countdown of hours, minutes and seconds ends in a send of the text, then Enter."));
-    assert!(page.contains("A pane has at most one pending schedule; a new one replaces the old one."));
+    assert!(
+        page.contains("A pane has at most one pending schedule; a new one replaces the old one.")
+    );
 }
 
 /// REQ: F-057
@@ -216,5 +255,6 @@ fn doc_f057_the_page_covers_the_prompt_queue_with_the_menu_entry() {
 /// REQ: F-055, F-057
 #[test]
 fn doc_baseline_has_no_calendar_mode_and_no_queue_panel() {
-    assert!(page_text().contains("A calendar mode or a queue panel with edit and move keys is not parity"));
+    assert!(page_text()
+        .contains("A calendar mode or a queue panel with edit and move keys is not parity"));
 }

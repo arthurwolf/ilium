@@ -2,12 +2,12 @@
 
 use ilium_plugin_sdk_core::host::InstanceState;
 use ilium_plugin_sdk_core::types::{DeactivationReason, ErrorCode, Outcome};
-use ilium_plugin_testkit::FakeHost;
 use ilium_plugin_testkit::errors::codes;
+use ilium_plugin_testkit::FakeHost;
 
 use crate::common::{
-    Spy, assert_fails_with, client_batch, outcome_code, sound, spy, spy_edit, spy_reset,
-    spy_script, strings, with_clean_env,
+    assert_fails_with, client_batch, outcome_code, sound, spy, spy_edit, spy_reset, spy_script,
+    strings, with_clean_env, Spy,
 };
 
 fn host_with(grants: &[&str]) -> FakeHost {
@@ -63,7 +63,10 @@ fn dev_564_a_list_that_only_adds_grants_deactivates_with_granted() {
         host.grants_changed(&["tree.read", "sound.play", "agent.read"]);
         let log = spy();
         assert_eq!(log.deactivations, vec![DeactivationReason::Granted]);
-        assert_eq!(log.activations[1].granted, strings(&["tree.read", "sound.play", "agent.read"]));
+        assert_eq!(
+            log.activations[1].granted,
+            strings(&["tree.read", "sound.play", "agent.read"])
+        );
     });
 }
 
@@ -129,7 +132,9 @@ fn dev_564_an_intent_that_needs_the_removed_grant_is_refused_afterwards() {
 fn dev_564_an_unknown_grant_name_is_refused_with_grant_unknown() {
     with_clean_env(|| {
         let mut host = host_with(&["tree.read"]);
-        assert_fails_with(codes::GRANT_UNKNOWN, || host.grants_changed(&["no.such.grant"]));
+        assert_fails_with(codes::GRANT_UNKNOWN, || {
+            host.grants_changed(&["no.such.grant"])
+        });
     });
 }
 
@@ -214,7 +219,10 @@ fn dev_565_a_deactivate_without_a_breach_keeps_the_restore_bytes() {
     with_clean_env(|| {
         let mut host = host_with(&["tree.read"]);
         spy_edit(|state| state.restore = Some(vec![1, 2, 3]));
-        assert_eq!(host.deactivate(DeactivationReason::Shutdown), Some(vec![1, 2, 3]));
+        assert_eq!(
+            host.deactivate(DeactivationReason::Shutdown),
+            Some(vec![1, 2, 3])
+        );
     });
 }
 

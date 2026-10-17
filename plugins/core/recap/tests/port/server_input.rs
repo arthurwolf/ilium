@@ -10,9 +10,14 @@ fn port_server_agent_display_names_map_to_transcript_classes() {
         let mut host = activated_server();
         open_gate(&mut host);
         let pane = host.tree().add(agent_pane("worker", signature));
-        host.tree().set_agent_session(pane, "session-1", rows(&["user: hello"]));
+        host.tree()
+            .set_agent_session(pane, "session-1", rows(&["user: hello"]));
         host.cli().invoke(&["recap"], b"");
-        assert_eq!(host.jobs().list().len(), 1, "{signature} resolves a transcript");
+        assert_eq!(
+            host.jobs().list().len(),
+            1,
+            "{signature} resolves a transcript"
+        );
         assert!(host.transcript_reads() >= 1, "{signature}");
     }
 }
@@ -56,5 +61,8 @@ fn port_server_shell_pane_without_current_frame_has_no_screen_text() {
     host.tree().set_screen_unavailable(pane);
     let invocation = host.cli().invoke(&["recap"], b"");
     assert!(host.jobs().list().is_empty());
-    assert_eq!(first_recap(&jsonl(&host.cli().refresh(&invocation).stdout()))["state"], "unavailable");
+    assert_eq!(
+        first_recap(&jsonl(&host.cli().refresh(&invocation).stdout()))["state"],
+        "unavailable"
+    );
 }

@@ -8,7 +8,13 @@ use ilium_plugin_api::Side;
 use crate::common::*;
 
 fn client_setup() -> Setup {
-    Setup::new(&["tree.read", "tree.write", "terminal.write", "panes.lifecycle"]).side(Side::Client)
+    Setup::new(&[
+        "tree.read",
+        "tree.write",
+        "terminal.write",
+        "panes.lifecycle",
+    ])
+    .side(Side::Client)
 }
 
 /// REQ: HST-490
@@ -19,7 +25,10 @@ fn hst_490_every_intent_kind_is_applied_by_exactly_the_listed_side() {
         let env = Setup::new(&["tree.write"]).tree(flat_tree(1)).build();
         let sides = env.kernel.sides_that_applied(case);
         assert!(sides.len() <= 1, "intent {case} applied on {sides:?}");
-        assert!(matches!(side, Side::Server | Side::Client), "intent {case} has a listed side");
+        assert!(
+            matches!(side, Side::Server | Side::Client),
+            "intent {case} has a listed side"
+        );
     }
 }
 
@@ -113,8 +122,14 @@ fn hst_493_the_mirror_is_updated_before_tree_changed_is_delivered() {
     env.host.deliver(vec![tree_changed(&[2])]);
     let sequence = lock(&env.probe.sequence).clone();
     let mirror = env.host.mirror_update_index();
-    let delivered = sequence.iter().rposition(|s| s == "on-events").expect("delivery");
-    assert!(mirror <= delivered as u64, "mirror update {mirror} before delivery {delivered}");
+    let delivered = sequence
+        .iter()
+        .rposition(|s| s == "on-events")
+        .expect("delivery");
+    assert!(
+        mirror <= delivered as u64,
+        "mirror update {mirror} before delivery {delivered}"
+    );
 }
 
 /// REQ: HST-494
@@ -124,7 +139,10 @@ fn hst_494_the_tree_change_reaches_the_mirror_before_request_completed() {
     env.run(vec![sub(1, close(2))]);
     let mirror_at = env.host.mirror_update_index();
     let completed_at = env.host.request_completed_index(1);
-    assert!(mirror_at < completed_at, "mirror {mirror_at} before completion {completed_at}");
+    assert!(
+        mirror_at < completed_at,
+        "mirror {mirror_at} before completion {completed_at}"
+    );
 }
 
 /// REQ: HST-494
@@ -133,7 +151,11 @@ fn hst_494_after_the_completion_the_mirror_no_longer_holds_the_closed_node() {
     let env = client_setup().tree(flat_tree(2)).build();
     env.run(vec![sub(1, close(2))]);
     assert!(is_ok(&env.outcome(1)));
-    assert!(!env.host.client_tree_read().iter().any(|view| view.id.0 == 2));
+    assert!(!env
+        .host
+        .client_tree_read()
+        .iter()
+        .any(|view| view.id.0 == 2));
 }
 
 #[allow(dead_code)]

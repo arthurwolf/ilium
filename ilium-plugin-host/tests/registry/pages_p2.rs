@@ -10,7 +10,10 @@ use std::path::Path;
 pub fn row(page: &str, id: &str) -> String {
     let text = page_text(page);
     let tag = format!("[{id}]");
-    text.lines().find(|line| line.contains(&tag)).unwrap_or_else(|| panic!("row {id} is missing on {page}")).to_owned()
+    text.lines()
+        .find(|line| line.contains(&tag))
+        .unwrap_or_else(|| panic!("row {id} is missing on {page}"))
+        .to_owned()
 }
 
 /// Asserts that the page row of `id` contains every part.
@@ -44,7 +47,10 @@ pub fn traced_row(id: &str) -> String {
 /// Asserts that the requirement table cites the page `slug` and the keyword for `id`.
 pub fn assert_traced(id: &str, slug: &str, keyword: &str) {
     let line = traced_row(id);
-    assert!(line.contains(&format!("/pages/{slug}/")), "{id} must cite {slug}: {line}");
+    assert!(
+        line.contains(&format!("/pages/{slug}/")),
+        "{id} must cite {slug}: {line}"
+    );
     assert!(line.contains(keyword), "{id} must use {keyword}: {line}");
 }
 
@@ -56,22 +62,39 @@ pub fn write_policy(sandbox: &Sandbox, text: &str) {
 /// A policy refusal: exit 7 and the detail code in the records (policy page, "Errors").
 pub fn assert_policy_block(output: &CliOutput, detail: &str) {
     assert_eq!(output.exit_code, 7, "policy refusals exit 7: {output:?}");
-    assert!(output_contains(output, detail), "expected detail {detail}: {output:?}");
+    assert!(
+        output_contains(output, detail),
+        "expected detail {detail}: {output:?}"
+    );
 }
 
 /// `install com.acme.notes --yes --trust <publisher key> <extra...>`.
 pub fn install_notes(sandbox: &Sandbox, extra: &[&str]) -> CliOutput {
     let key = publisher_key_id();
-    let mut args = vec!["install", "com.acme.notes", "--yes", "--trust", key.as_str()];
+    let mut args = vec![
+        "install",
+        "com.acme.notes",
+        "--yes",
+        "--trust",
+        key.as_str(),
+    ];
     args.extend_from_slice(extra);
     sandbox.run(&args)
 }
 
 /// A package signed by `seed` as `publisher_id` that lists `extra` entries in `files`.
-pub fn package_with_entries(plugin_id: &str, version: &str, extra: &[(&str, Vec<u8>)], seed: u8, publisher_id: &str) -> Vec<u8> {
+pub fn package_with_entries(
+    plugin_id: &str,
+    version: &str,
+    extra: &[(&str, Vec<u8>)],
+    seed: u8,
+    publisher_id: &str,
+) -> Vec<u8> {
     let mut manifest = manifest_text(plugin_id, version);
     let tail = "\n  ]\n}\n";
-    let cut = manifest.rfind(tail).expect("files array tail of the fixture manifest");
+    let cut = manifest
+        .rfind(tail)
+        .expect("files array tail of the fixture manifest");
     let mut entries = String::new();
     for (path, bytes) in extra {
         entries.push_str(&format!(

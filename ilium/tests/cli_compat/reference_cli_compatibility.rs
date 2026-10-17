@@ -4,16 +4,25 @@ use crate::common::*;
 
 const OWNERS: [(&str, &str, &[&str]); 5] = [
     ("chatroom", "ilium.core.chatroom", &["chat"]),
-    ("fleet", "ilium.core.fleet", &["panes", "broadcast", "new-pane"]),
+    (
+        "fleet",
+        "ilium.core.fleet",
+        &["panes", "broadcast", "new-pane"],
+    ),
     ("progress", "ilium.core.progress", &["progress"]),
     ("recap", "ilium.core.recap", &["recap"]),
     ("voice", "ilium.core.voice", &["voice"]),
 ];
 
 fn manifest(dir: &str) -> serde_json::Value {
-    let path = workspace_root().join("plugins/core").join(dir).join("manifest.json");
-    serde_json::from_str(&std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display())))
-        .expect("manifest json")
+    let path = workspace_root()
+        .join("plugins/core")
+        .join(dir)
+        .join("manifest.json");
+    serde_json::from_str(
+        &std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display())),
+    )
+    .expect("manifest json")
 }
 
 fn declared_cli_names(manifest: &serde_json::Value) -> Vec<String> {
@@ -23,7 +32,10 @@ fn declared_cli_names(manifest: &serde_json::Value) -> Vec<String> {
         serde_json::Value::Null => vec![],
         single => vec![single],
     };
-    items.iter().filter_map(|item| item["name"].as_str().map(str::to_owned)).collect()
+    items
+        .iter()
+        .filter_map(|item| item["name"].as_str().map(str::to_owned))
+        .collect()
 }
 
 /// REQ: COR-040
@@ -34,7 +46,10 @@ fn cor_040_each_owner_manifest_declares_its_baseline_commands() {
         assert_eq!(m["id"], id);
         let names = declared_cli_names(&m);
         for command in commands {
-            assert!(names.iter().any(|n| n == command), "{id} must declare {command}: {names:?}");
+            assert!(
+                names.iter().any(|n| n == command),
+                "{id} must declare {command}: {names:?}"
+            );
         }
     }
 }
@@ -53,7 +68,10 @@ fn cor_040_wait_is_declared_as_an_alias_of_progress() {
 fn cor_040_no_owner_declares_a_kernel_command_name() {
     for (dir, id, _) in OWNERS {
         for name in declared_cli_names(&manifest(dir)) {
-            assert!(!["new-session", "ls", "kill-session", "help"].contains(&name.as_str()), "{id} declares kernel name {name}");
+            assert!(
+                !["new-session", "ls", "kill-session", "help"].contains(&name.as_str()),
+                "{id} declares kernel name {name}"
+            );
         }
     }
 }
@@ -75,14 +93,29 @@ fn cor_040_each_command_is_declared_by_exactly_one_owner() {
 /// REQ: COR-040
 #[test]
 fn cor_040_declared_output_modes_match_the_baseline_formats() {
-    let expected = [("chat", "text"), ("panes", "jsonl"), ("broadcast", "jsonl"), ("new-pane", "mixed"), ("progress", "jsonl"), ("recap", "jsonl"), ("voice", "jsonl")];
+    let expected = [
+        ("chat", "text"),
+        ("panes", "jsonl"),
+        ("broadcast", "jsonl"),
+        ("new-pane", "mixed"),
+        ("progress", "jsonl"),
+        ("recap", "jsonl"),
+        ("voice", "jsonl"),
+    ];
     for (dir, _, _) in OWNERS {
         let m = manifest(dir);
         let cli = &m["contributes"]["cli"];
-        let items: Vec<&serde_json::Value> = cli.as_array().map(|a| a.iter().collect()).unwrap_or_else(|| vec![cli]);
+        let items: Vec<&serde_json::Value> = cli
+            .as_array()
+            .map(|a| a.iter().collect())
+            .unwrap_or_else(|| vec![cli]);
         for item in items {
             let name = item["name"].as_str().expect("name");
-            let want = expected.iter().find(|(n, _)| *n == name).expect("known command").1;
+            let want = expected
+                .iter()
+                .find(|(n, _)| *n == name)
+                .expect("known command")
+                .1;
             assert_eq!(item["output"], want, "{name}");
         }
     }
@@ -105,7 +138,12 @@ fn cor_042_disabled_owner_makes_its_command_exit_one_with_cli_owner_disabled() {
 #[test]
 fn cor_042_disabling_the_fleet_owner_fails_new_pane_but_not_chat() {
     let sandbox = Sandbox::new();
-    assert_eq!(sandbox.ilium(&["plugin", "disable", "ilium.core.fleet"]).code, 0);
+    assert_eq!(
+        sandbox
+            .ilium(&["plugin", "disable", "ilium.core.fleet"])
+            .code,
+        0
+    );
     let pane = sandbox.ilium(&["new-pane", "--", "sh"]);
     assert_eq!(pane.code, 1);
     assert!(format!("{}{}", pane.stdout, pane.stderr).contains("cli.owner-disabled"));
@@ -131,9 +169,15 @@ fn cor_042_help_marks_commands_of_disabled_owners() {
     let sandbox = Sandbox::new();
     sandbox.ilium(&["plugin", "disable", "ilium.core.voice"]);
     let help = sandbox.ilium(&["--help"]).stdout;
-    let voice_line = help.lines().find(|l| l.trim_start().starts_with("voice")).expect("voice listed");
+    let voice_line = help
+        .lines()
+        .find(|l| l.trim_start().starts_with("voice"))
+        .expect("voice listed");
     assert!(voice_line.contains("(disabled)"), "{voice_line}");
-    let chat_line = help.lines().find(|l| l.trim_start().starts_with("chat")).expect("chat listed");
+    let chat_line = help
+        .lines()
+        .find(|l| l.trim_start().starts_with("chat"))
+        .expect("chat listed");
     assert!(!chat_line.contains("(disabled)"), "{chat_line}");
 }
 
@@ -151,7 +195,10 @@ fn cor_042_re_enabling_the_owner_restores_the_command() {
 #[test]
 fn cor_042_a_failed_owner_reports_cli_owner_failed() {
     let sandbox = Sandbox::new();
-    let run = sandbox.ilium_env(&["chat", "tail"], &[("ILIUM_TEST_FAIL_PLUGIN", "ilium.core.chatroom")]);
+    let run = sandbox.ilium_env(
+        &["chat", "tail"],
+        &[("ILIUM_TEST_FAIL_PLUGIN", "ilium.core.chatroom")],
+    );
     assert_eq!(run.code, 1);
     assert!(format!("{}{}", run.stdout, run.stderr).contains("cli.owner-failed"));
 }

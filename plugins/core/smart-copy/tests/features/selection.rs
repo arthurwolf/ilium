@@ -12,7 +12,11 @@ use ilium_plugin_core_smart_copy::SmartCopyClient;
 
 /// Whole-pane claims of a pane: the entries without a modifier set.
 fn whole_claims(host: &mut ilium_plugin_sdk::testing::FakeHost, pane: u64) -> usize {
-    host.terminal().pointer_claims(pane).into_iter().filter(Option::is_none).count()
+    host.terminal()
+        .pointer_claims(pane)
+        .into_iter()
+        .filter(Option::is_none)
+        .count()
 }
 
 /// REQ: F-016
@@ -20,7 +24,11 @@ fn whole_claims(host: &mut ilium_plugin_sdk::testing::FakeHost, pane: u64) -> us
 fn feature_016_a_new_terminal_pane_gets_a_whole_pointer_claim_while_selection_is_on() {
     let mut host = client_host();
     let pane = add_terminal_pane(&mut host, "api");
-    host.deliver_one(pane_created(pane, "ilium.terminal", PrimitiveKind::Terminal));
+    host.deliver_one(pane_created(
+        pane,
+        "ilium.terminal",
+        PrimitiveKind::Terminal,
+    ));
     assert_eq!(whole_claims(&mut host, pane), 1);
 }
 
@@ -28,9 +36,15 @@ fn feature_016_a_new_terminal_pane_gets_a_whole_pointer_claim_while_selection_is
 #[test]
 fn feature_016_no_whole_claim_when_terminal_text_selection_is_off() {
     let mut host = client_host();
-    host.settings().set("ui.terminal_text_selection_enabled", json!(false)).expect("boolean");
+    host.settings()
+        .set("ui.terminal_text_selection_enabled", json!(false))
+        .expect("boolean");
     let pane = add_terminal_pane(&mut host, "api");
-    host.deliver_one(pane_created(pane, "ilium.terminal", PrimitiveKind::Terminal));
+    host.deliver_one(pane_created(
+        pane,
+        "ilium.terminal",
+        PrimitiveKind::Terminal,
+    ));
     assert_eq!(whole_claims(&mut host, pane), 0);
 }
 
@@ -69,8 +83,14 @@ fn feature_016_a_pane_is_claimed_once_when_the_created_event_repeats() {
 fn feature_016_turning_selection_off_releases_the_whole_claim() {
     let mut host = client_host();
     let pane = add_terminal_pane(&mut host, "api");
-    host.deliver_one(pane_created(pane, "ilium.terminal", PrimitiveKind::Terminal));
-    host.settings().set("ui.terminal_text_selection_enabled", json!(false)).expect("boolean");
+    host.deliver_one(pane_created(
+        pane,
+        "ilium.terminal",
+        PrimitiveKind::Terminal,
+    ));
+    host.settings()
+        .set("ui.terminal_text_selection_enabled", json!(false))
+        .expect("boolean");
     host.deliver_one(ilium_plugin_sdk::types::Event::KernelSettingsChanged(
         ilium_plugin_sdk::types::KernelSettingsEvent {
             tab: "ui".to_string(),
@@ -84,10 +104,18 @@ fn feature_016_turning_selection_off_releases_the_whole_claim() {
 #[test]
 fn feature_016_turning_selection_on_claims_existing_terminal_panes() {
     let mut host = client_host();
-    host.settings().set("ui.terminal_text_selection_enabled", json!(false)).expect("boolean");
+    host.settings()
+        .set("ui.terminal_text_selection_enabled", json!(false))
+        .expect("boolean");
     let pane = add_terminal_pane(&mut host, "api");
-    host.deliver_one(pane_created(pane, "ilium.terminal", PrimitiveKind::Terminal));
-    host.settings().set("ui.terminal_text_selection_enabled", json!(true)).expect("boolean");
+    host.deliver_one(pane_created(
+        pane,
+        "ilium.terminal",
+        PrimitiveKind::Terminal,
+    ));
+    host.settings()
+        .set("ui.terminal_text_selection_enabled", json!(true))
+        .expect("boolean");
     host.deliver_one(ilium_plugin_sdk::types::Event::KernelSettingsChanged(
         ilium_plugin_sdk::types::KernelSettingsEvent {
             tab: "ui".to_string(),
@@ -103,10 +131,23 @@ fn feature_016_down_drag_up_produce_no_submissions() {
     // Page sample: on_events returns an empty list for every pointer kind it tracks.
     let mut host = client_host();
     let pane = add_terminal_pane(&mut host, "api");
-    host.deliver_one(pane_created(pane, "ilium.terminal", PrimitiveKind::Terminal));
-    host.terminal().set_rows(pane, &["$ git status", "  modified: src/lib.rs"]);
-    for (kind, row, column) in [(PointerKind::Down, 1, 2), (PointerKind::Drag, 1, 9), (PointerKind::Up, 1, 9)] {
-        assert!(host.deliver_one(pointer(pane, kind, row, column)).is_empty(), "{kind:?}");
+    host.deliver_one(pane_created(
+        pane,
+        "ilium.terminal",
+        PrimitiveKind::Terminal,
+    ));
+    host.terminal()
+        .set_rows(pane, &["$ git status", "  modified: src/lib.rs"]);
+    for (kind, row, column) in [
+        (PointerKind::Down, 1, 2),
+        (PointerKind::Drag, 1, 9),
+        (PointerKind::Up, 1, 9),
+    ] {
+        assert!(
+            host.deliver_one(pointer(pane, kind, row, column))
+                .is_empty(),
+            "{kind:?}"
+        );
     }
 }
 
@@ -115,7 +156,11 @@ fn feature_016_down_drag_up_produce_no_submissions() {
 fn feature_016_other_pointer_kinds_are_ignored_without_failure() {
     let mut host = client_host();
     let pane = add_terminal_pane(&mut host, "api");
-    host.deliver_one(pane_created(pane, "ilium.terminal", PrimitiveKind::Terminal));
+    host.deliver_one(pane_created(
+        pane,
+        "ilium.terminal",
+        PrimitiveKind::Terminal,
+    ));
     for kind in [
         PointerKind::Move,
         PointerKind::WheelUp,
@@ -123,7 +168,10 @@ fn feature_016_other_pointer_kinds_are_ignored_without_failure() {
         PointerKind::WheelLeft,
         PointerKind::WheelRight,
     ] {
-        assert!(host.deliver_one(pointer(pane, kind, 0, 0)).is_empty(), "{kind:?}");
+        assert!(
+            host.deliver_one(pointer(pane, kind, 0, 0)).is_empty(),
+            "{kind:?}"
+        );
     }
     assert!(host.failures().is_empty());
 }
@@ -133,9 +181,17 @@ fn feature_016_other_pointer_kinds_are_ignored_without_failure() {
 fn feature_016_a_drag_without_a_press_is_ignored_without_failure() {
     let mut host = client_host();
     let pane = add_terminal_pane(&mut host, "api");
-    host.deliver_one(pane_created(pane, "ilium.terminal", PrimitiveKind::Terminal));
-    assert!(host.deliver_one(pointer(pane, PointerKind::Drag, 3, 3)).is_empty());
-    assert!(host.deliver_one(pointer(pane, PointerKind::Up, 3, 3)).is_empty());
+    host.deliver_one(pane_created(
+        pane,
+        "ilium.terminal",
+        PrimitiveKind::Terminal,
+    ));
+    assert!(host
+        .deliver_one(pointer(pane, PointerKind::Drag, 3, 3))
+        .is_empty());
+    assert!(host
+        .deliver_one(pointer(pane, PointerKind::Up, 3, 3))
+        .is_empty());
     assert!(host.failures().is_empty());
 }
 
@@ -146,7 +202,11 @@ fn feature_016_the_selection_claim_does_not_use_a_modifier_set() {
     // light claim is a gesture claim (smart-copy.md "Mouse text selection", "Rules").
     let mut host = client_host();
     let pane = add_terminal_pane(&mut host, "api");
-    host.deliver_one(pane_created(pane, "ilium.terminal", PrimitiveKind::Terminal));
+    host.deliver_one(pane_created(
+        pane,
+        "ilium.terminal",
+        PrimitiveKind::Terminal,
+    ));
     let claims = host.terminal().pointer_claims(pane);
     assert!(claims.contains(&None));
     assert!(claims.contains(&Some(PointerModifiers::CONTROL)));

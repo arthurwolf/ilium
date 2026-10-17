@@ -4,22 +4,36 @@
 use ilium_plugin_core_inference::InferenceServer;
 use ilium_plugin_sdk::exports::ProviderCall;
 use ilium_plugin_sdk::host::HttpResponse;
-use ilium_plugin_sdk::types::Event;
 use ilium_plugin_sdk::testing::FakeHost;
+use ilium_plugin_sdk::types::Event;
 use ilium_plugin_sdk::InferenceProvider;
 use proptest::prelude::*;
 use serde_json::{json, Value};
 
-use crate::common::{ollama_settings, openai_body, request, row_command, server_host, server_host_with};
+use crate::common::{
+    ollama_settings, openai_body, request, row_command, server_host, server_host_with,
+};
 
 const CHAT_URL: &str = "https://api.openai.com/v1/chat/completions";
 
 fn ok_response(body: Vec<u8>) -> HttpResponse {
-    HttpResponse { status: 200, headers: vec![], body }
+    HttpResponse {
+        status: 200,
+        headers: vec![],
+        body,
+    }
 }
 
-fn call(host: &mut FakeHost, number: u64, text: &str) -> Result<(), ilium_plugin_sdk::types::PluginError> {
-    host.instance_mut::<InferenceServer>().complete(ProviderCall { call: number, request: request("title", text) })
+fn call(
+    host: &mut FakeHost,
+    number: u64,
+    text: &str,
+) -> Result<(), ilium_plugin_sdk::types::PluginError> {
+    host.instance_mut::<InferenceServer>()
+        .complete(ProviderCall {
+            call: number,
+            request: request("title", text),
+        })
 }
 
 fn first_body(host: &mut FakeHost) -> Value {
@@ -31,7 +45,11 @@ fn first_body(host: &mut FakeHost) -> Value {
 #[test]
 fn provider_084_complete_accepts_the_call_and_returns_ok_at_once() {
     let mut host = server_host();
-    host.http().expect("POST", CHAT_URL, ok_response(openai_body("ok", "gpt-5.6-terra", 3, 1)));
+    host.http().expect(
+        "POST",
+        CHAT_URL,
+        ok_response(openai_body("ok", "gpt-5.6-terra", 3, 1)),
+    );
     assert!(call(&mut host, 7, "hello").is_ok());
 }
 
@@ -39,7 +57,11 @@ fn provider_084_complete_accepts_the_call_and_returns_ok_at_once() {
 #[test]
 fn provider_084_no_reply_exists_before_the_task_has_run() {
     let mut host = server_host();
-    host.http().expect("POST", CHAT_URL, ok_response(openai_body("ok", "gpt-5.6-terra", 3, 1)));
+    host.http().expect(
+        "POST",
+        CHAT_URL,
+        ok_response(openai_body("ok", "gpt-5.6-terra", 3, 1)),
+    );
     call(&mut host, 7, "hello").expect("accepted");
     assert!(host.inference().provider_replies().is_empty());
 }
@@ -48,7 +70,11 @@ fn provider_084_no_reply_exists_before_the_task_has_run() {
 #[test]
 fn provider_084_a_task_answers_with_the_same_call_number() {
     let mut host = server_host();
-    host.http().expect("POST", CHAT_URL, ok_response(openai_body("ok", "gpt-5.6-terra", 3, 1)));
+    host.http().expect(
+        "POST",
+        CHAT_URL,
+        ok_response(openai_body("ok", "gpt-5.6-terra", 3, 1)),
+    );
     call(&mut host, 7, "hello").expect("accepted");
     host.settle();
     let replies = host.inference().provider_replies();
@@ -60,24 +86,39 @@ fn provider_084_a_task_answers_with_the_same_call_number() {
 #[test]
 fn provider_084_the_reply_carries_text_model_and_token_counts_of_the_response() {
     let mut host = server_host();
-    host.http().expect("POST", CHAT_URL, ok_response(openai_body("ok", "gpt-5.6-terra", 11, 2)));
+    host.http().expect(
+        "POST",
+        CHAT_URL,
+        ok_response(openai_body("ok", "gpt-5.6-terra", 11, 2)),
+    );
     call(&mut host, 1, "hello").expect("accepted");
     host.settle();
     let (_, outcome) = host.inference().provider_replies().remove(0);
-    assert_eq!(outcome.expect("reply ok"), ilium_plugin_sdk::host::Completion {
-        text: "ok".to_string(),
-        model: "gpt-5.6-terra".to_string(),
-        input_tokens: 11,
-        output_tokens: 2,
-    });
+    assert_eq!(
+        outcome.expect("reply ok"),
+        ilium_plugin_sdk::host::Completion {
+            text: "ok".to_string(),
+            model: "gpt-5.6-terra".to_string(),
+            input_tokens: 11,
+            output_tokens: 2,
+        }
+    );
 }
 
 /// REQ: F-084
 #[test]
 fn provider_084_two_calls_are_answered_under_their_own_numbers() {
     let mut host = server_host();
-    host.http().expect("POST", CHAT_URL, ok_response(openai_body("first", "gpt-5.6-terra", 1, 1)));
-    host.http().expect("POST", CHAT_URL, ok_response(openai_body("second", "gpt-5.6-terra", 1, 1)));
+    host.http().expect(
+        "POST",
+        CHAT_URL,
+        ok_response(openai_body("first", "gpt-5.6-terra", 1, 1)),
+    );
+    host.http().expect(
+        "POST",
+        CHAT_URL,
+        ok_response(openai_body("second", "gpt-5.6-terra", 1, 1)),
+    );
     call(&mut host, 10, "a").expect("accepted");
     call(&mut host, 11, "b").expect("accepted");
     host.settle();
@@ -88,14 +129,25 @@ fn provider_084_two_calls_are_answered_under_their_own_numbers() {
         .map(|(number, outcome)| (number, outcome.expect("ok").text))
         .collect();
     replies.sort();
-    assert_eq!(replies, [(10, "first".to_string()), (11, "second".to_string())]);
+    assert_eq!(
+        replies,
+        [(10, "first".to_string()), (11, "second".to_string())]
+    );
 }
 
 /// REQ: F-084
 #[test]
 fn provider_084_a_server_error_status_fails_the_call_with_an_err_reply() {
     let mut host = server_host();
-    host.http().expect("POST", CHAT_URL, HttpResponse { status: 500, headers: vec![], body: b"{}".to_vec() });
+    host.http().expect(
+        "POST",
+        CHAT_URL,
+        HttpResponse {
+            status: 500,
+            headers: vec![],
+            body: b"{}".to_vec(),
+        },
+    );
     call(&mut host, 3, "hello").expect("accepted");
     host.settle();
     let replies = host.inference().provider_replies();
@@ -107,7 +159,11 @@ fn provider_084_a_server_error_status_fails_the_call_with_an_err_reply() {
 #[test]
 fn provider_084_exactly_one_reply_is_made_per_call() {
     let mut host = server_host();
-    host.http().expect("POST", CHAT_URL, ok_response(openai_body("ok", "gpt-5.6-terra", 1, 1)));
+    host.http().expect(
+        "POST",
+        CHAT_URL,
+        ok_response(openai_body("ok", "gpt-5.6-terra", 1, 1)),
+    );
     call(&mut host, 4, "hello").expect("accepted");
     host.settle();
     host.settle();
@@ -118,7 +174,11 @@ fn provider_084_exactly_one_reply_is_made_per_call() {
 #[test]
 fn provider_084_openai_requests_post_to_the_chat_completions_endpoint() {
     let mut host = server_host();
-    host.http().expect("POST", CHAT_URL, ok_response(openai_body("ok", "gpt-5.6-terra", 1, 1)));
+    host.http().expect(
+        "POST",
+        CHAT_URL,
+        ok_response(openai_body("ok", "gpt-5.6-terra", 1, 1)),
+    );
     call(&mut host, 1, "hello").expect("accepted");
     host.settle();
     let calls = host.http().calls();
@@ -131,33 +191,56 @@ fn provider_084_openai_requests_post_to_the_chat_completions_endpoint() {
 #[test]
 fn provider_084_openai_requests_send_the_key_as_a_bearer_header() {
     let mut host = server_host();
-    host.http().expect("POST", CHAT_URL, ok_response(openai_body("ok", "gpt-5.6-terra", 1, 1)));
+    host.http().expect(
+        "POST",
+        CHAT_URL,
+        ok_response(openai_body("ok", "gpt-5.6-terra", 1, 1)),
+    );
     call(&mut host, 1, "hello").expect("accepted");
     host.settle();
     let calls = host.http().calls();
-    assert!(calls[0].headers.iter().any(|h| h.name.eq_ignore_ascii_case("authorization") && h.value == "Bearer sk-test-key"));
+    assert!(calls[0]
+        .headers
+        .iter()
+        .any(|h| h.name.eq_ignore_ascii_case("authorization") && h.value == "Bearer sk-test-key"));
 }
 
 /// REQ: F-084
 #[test]
 fn provider_084_openai_body_names_the_selected_model_and_carries_the_messages() {
     let mut host = server_host();
-    host.http().expect("POST", CHAT_URL, ok_response(openai_body("ok", "gpt-5.6-terra", 1, 1)));
+    host.http().expect(
+        "POST",
+        CHAT_URL,
+        ok_response(openai_body("ok", "gpt-5.6-terra", 1, 1)),
+    );
     call(&mut host, 1, "hello").expect("accepted");
     host.settle();
     let body = first_body(&mut host);
     assert_eq!(body["model"], "gpt-5.6-terra");
-    assert_eq!(body["messages"], json!([{"role": "user", "content": "hello"}]));
+    assert_eq!(
+        body["messages"],
+        json!([{"role": "user", "content": "hello"}])
+    );
 }
 
 /// REQ: F-084
 #[test]
 fn provider_084_the_output_limit_uses_max_completion_tokens_for_official_openai() {
     let mut host = server_host();
-    host.http().expect("POST", CHAT_URL, ok_response(openai_body("ok", "gpt-5.6-terra", 1, 1)));
+    host.http().expect(
+        "POST",
+        CHAT_URL,
+        ok_response(openai_body("ok", "gpt-5.6-terra", 1, 1)),
+    );
     let mut limited = request("title", "Reply with the word ok.");
     limited.max_output_tokens = Some(16);
-    host.instance_mut::<InferenceServer>().complete(ProviderCall { call: 1, request: limited }).expect("accepted");
+    host.instance_mut::<InferenceServer>()
+        .complete(ProviderCall {
+            call: 1,
+            request: limited,
+        })
+        .expect("accepted");
     host.settle();
     assert_eq!(first_body(&mut host)["max_completion_tokens"], 16);
 }
@@ -166,7 +249,11 @@ fn provider_084_the_output_limit_uses_max_completion_tokens_for_official_openai(
 #[test]
 fn provider_084_each_request_has_a_45_second_timeout() {
     let mut host = server_host();
-    host.http().expect("POST", CHAT_URL, ok_response(openai_body("ok", "gpt-5.6-terra", 1, 1)));
+    host.http().expect(
+        "POST",
+        CHAT_URL,
+        ok_response(openai_body("ok", "gpt-5.6-terra", 1, 1)),
+    );
     call(&mut host, 1, "hello").expect("accepted");
     host.settle();
     assert_eq!(host.http().calls()[0].timeout_millis, 45_000);
@@ -180,10 +267,17 @@ fn provider_084_a_custom_openai_compatible_url_is_used_as_the_base() {
         "openai": { "base_url": "http://localhost:8080/v1", "api_key": "k", "model": "local" }
     });
     let mut host = server_host_with(settings);
-    host.http().expect("POST", "http://localhost:8080/v1/chat/completions", ok_response(openai_body("ok", "local", 1, 1)));
+    host.http().expect(
+        "POST",
+        "http://localhost:8080/v1/chat/completions",
+        ok_response(openai_body("ok", "local", 1, 1)),
+    );
     call(&mut host, 1, "hello").expect("accepted");
     host.settle();
-    assert_eq!(host.http().calls()[0].url, "http://localhost:8080/v1/chat/completions");
+    assert_eq!(
+        host.http().calls()[0].url,
+        "http://localhost:8080/v1/chat/completions"
+    );
 }
 
 /// REQ: F-084
@@ -194,7 +288,11 @@ fn provider_084_a_blank_base_url_resolves_to_the_openai_default() {
         "openai": { "base_url": "", "api_key": "k", "model": "gpt-5.6-terra" }
     });
     let mut host = server_host_with(settings);
-    host.http().expect("POST", CHAT_URL, ok_response(openai_body("ok", "gpt-5.6-terra", 1, 1)));
+    host.http().expect(
+        "POST",
+        CHAT_URL,
+        ok_response(openai_body("ok", "gpt-5.6-terra", 1, 1)),
+    );
     call(&mut host, 1, "hello").expect("accepted");
     host.settle();
     assert_eq!(host.http().calls()[0].url, CHAT_URL);
@@ -207,7 +305,11 @@ fn provider_084_ollama_requests_post_to_api_chat_on_the_local_server() {
     host.http().expect(
         "POST",
         "http://127.0.0.1:11434/api/chat",
-        ok_response(json!({"model": "llama3", "message": {"role": "assistant", "content": "ok"}}).to_string().into_bytes()),
+        ok_response(
+            json!({"model": "llama3", "message": {"role": "assistant", "content": "ok"}})
+                .to_string()
+                .into_bytes(),
+        ),
     );
     call(&mut host, 1, "hello").expect("accepted");
     host.settle();
@@ -224,12 +326,19 @@ fn provider_084_ollama_needs_no_credential_header() {
     host.http().expect(
         "POST",
         "http://127.0.0.1:11434/api/chat",
-        ok_response(json!({"model": "llama3", "message": {"role": "assistant", "content": "ok"}}).to_string().into_bytes()),
+        ok_response(
+            json!({"model": "llama3", "message": {"role": "assistant", "content": "ok"}})
+                .to_string()
+                .into_bytes(),
+        ),
     );
     call(&mut host, 1, "hello").expect("accepted");
     host.settle();
     let calls = host.http().calls();
-    assert!(!calls[0].headers.iter().any(|h| h.name.eq_ignore_ascii_case("authorization")));
+    assert!(!calls[0]
+        .headers
+        .iter()
+        .any(|h| h.name.eq_ignore_ascii_case("authorization")));
 }
 
 /// REQ: F-084
@@ -239,7 +348,11 @@ fn provider_084_ollama_body_names_the_model_and_is_not_streaming() {
     host.http().expect(
         "POST",
         "http://127.0.0.1:11434/api/chat",
-        ok_response(json!({"message": {"role": "assistant", "content": "ok"}}).to_string().into_bytes()),
+        ok_response(
+            json!({"message": {"role": "assistant", "content": "ok"}})
+                .to_string()
+                .into_bytes(),
+        ),
     );
     call(&mut host, 1, "hello").expect("accepted");
     host.settle();
@@ -269,7 +382,10 @@ fn provider_084_activation_with_a_provider_still_sends_nothing_until_a_call_arri
 fn provider_084_models_offers_the_saved_model_of_the_selected_provider() {
     let mut host = server_host();
     let models = host.instance_mut::<InferenceServer>().models();
-    assert!(models.iter().any(|name| name == "gpt-5.6-terra"), "{models:?}");
+    assert!(
+        models.iter().any(|name| name == "gpt-5.6-terra"),
+        "{models:?}"
+    );
 }
 
 /// REQ: F-084
@@ -298,13 +414,23 @@ fn provider_084_load_models_reads_models_from_the_provider_and_sorts_the_ids() {
     host.http().expect(
         "GET",
         "https://api.openai.com/v1/models",
-        ok_response(json!({"data": [{"id": "gpt-b"}, {"id": "gpt-a"}]}).to_string().into_bytes()),
+        ok_response(
+            json!({"data": [{"id": "gpt-b"}, {"id": "gpt-a"}]})
+                .to_string()
+                .into_bytes(),
+        ),
     );
     host.deliver_one(row_command("ilium.core.inference/load-models"));
     host.settle();
     let models = host.instance_mut::<InferenceServer>().models();
-    let a = models.iter().position(|name| name == "gpt-a").expect("gpt-a");
-    let b = models.iter().position(|name| name == "gpt-b").expect("gpt-b");
+    let a = models
+        .iter()
+        .position(|name| name == "gpt-a")
+        .expect("gpt-a");
+    let b = models
+        .iter()
+        .position(|name| name == "gpt-b")
+        .expect("gpt-b");
     assert!(a < b);
 }
 
@@ -320,7 +446,10 @@ fn provider_084_load_models_keeps_the_saved_model_when_it_is_missing_from_the_li
     host.deliver_one(row_command("ilium.core.inference/load-models"));
     host.settle();
     let models = host.instance_mut::<InferenceServer>().models();
-    assert!(models.iter().any(|name| name == "gpt-5.6-terra"), "{models:?}");
+    assert!(
+        models.iter().any(|name| name == "gpt-5.6-terra"),
+        "{models:?}"
+    );
 }
 
 /// REQ: F-084
@@ -334,7 +463,15 @@ fn provider_084_a_failed_load_keeps_the_last_good_catalogue() {
     );
     host.deliver_one(row_command("ilium.core.inference/load-models"));
     host.settle();
-    host.http().expect("GET", "https://api.openai.com/v1/models", HttpResponse { status: 401, headers: vec![], body: b"{}".to_vec() });
+    host.http().expect(
+        "GET",
+        "https://api.openai.com/v1/models",
+        HttpResponse {
+            status: 401,
+            headers: vec![],
+            body: b"{}".to_vec(),
+        },
+    );
     host.deliver_one(row_command("ilium.core.inference/load-models"));
     host.settle();
     let models = host.instance_mut::<InferenceServer>().models();
@@ -353,7 +490,11 @@ fn provider_084_unrelated_events_make_no_submissions() {
 #[test]
 fn provider_084_the_streaming_flag_is_not_set_for_plain_completions() {
     let mut host = server_host();
-    host.http().expect("POST", CHAT_URL, ok_response(openai_body("ok", "gpt-5.6-terra", 1, 1)));
+    host.http().expect(
+        "POST",
+        CHAT_URL,
+        ok_response(openai_body("ok", "gpt-5.6-terra", 1, 1)),
+    );
     call(&mut host, 1, "hello").expect("accepted");
     host.settle();
     assert!(host.http().streams().is_empty());

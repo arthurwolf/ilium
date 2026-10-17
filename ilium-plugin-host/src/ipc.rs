@@ -43,7 +43,9 @@ pub struct IpcFault {
 impl IpcFault {
     /// A fault with the given error id, such as `ipc.sequence-gap`.
     pub fn new(code: &str) -> IpcFault {
-        IpcFault { code: code.to_owned() }
+        IpcFault {
+            code: code.to_owned(),
+        }
     }
 
     /// The error id (`ipc.sequence-gap`, `ipc.payload-too-large`, `ipc.client-too-slow`,
@@ -104,7 +106,10 @@ pub struct ReceiverConnection {
 impl ReceiverConnection {
     /// An open connection expecting sequence 1.
     pub fn new() -> ReceiverConnection {
-        ReceiverConnection { next_seq: 1, closed_with: None }
+        ReceiverConnection {
+            next_seq: 1,
+            closed_with: None,
+        }
     }
 
     /// Accepts one envelope; the fault closes the connection.
@@ -146,7 +151,13 @@ impl ForwardedDedup {
 
     /// Admits a request once per window; a key is free again at exactly `DEDUP_WINDOW_MS` after
     /// it was accepted.
-    pub fn admit(&mut self, plugin: &str, client_id: &str, dedup_key: &str, now_ms: u64) -> DedupVerdict {
+    pub fn admit(
+        &mut self,
+        plugin: &str,
+        client_id: &str,
+        dedup_key: &str,
+        now_ms: u64,
+    ) -> DedupVerdict {
         unimplemented!("host::ipc::ForwardedDedup::admit")
     }
 }
@@ -185,7 +196,12 @@ impl OutcomeStore {
 
     /// The outcomes after `last_seen_seq` for a reattaching client, in order; empty once the
     /// grace period has elapsed.
-    pub fn replay(&mut self, client_id: &str, last_seen_seq: u64, now_ms: u64) -> Vec<StoredOutcome> {
+    pub fn replay(
+        &mut self,
+        client_id: &str,
+        last_seen_seq: u64,
+        now_ms: u64,
+    ) -> Vec<StoredOutcome> {
         unimplemented!("host::ipc::OutcomeStore::replay")
     }
 

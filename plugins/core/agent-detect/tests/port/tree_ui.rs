@@ -2,20 +2,31 @@
 //! decorations and filter its panel by display mode. Client-core icon targets are not plugin surface (API_GAPS.md).
 
 use ilium_plugin_sdk::testing::FakeHost;
-use ilium_plugin_sdk::types::{AgentActivity, AgentActivityEvent, AgentGoalEvent, Event, NodeId, ViewTarget};
+use ilium_plugin_sdk::types::{
+    AgentActivity, AgentActivityEvent, AgentGoalEvent, Event, NodeId, ViewTarget,
+};
 
-use crate::common::{SPINNER_FRAMES, add_agent_pane, cleared, decorations, plain, server_host};
+use crate::common::{add_agent_pane, cleared, decorations, plain, server_host, SPINNER_FRAMES};
 
 fn changed(node: u64, previous: AgentActivity, current: AgentActivity) -> Event {
-    Event::AgentActivityChanged(AgentActivityEvent { node: NodeId(node), previous, current, revision: 2 })
+    Event::AgentActivityChanged(AgentActivityEvent {
+        node: NodeId(node),
+        previous,
+        current,
+        revision: 2,
+    })
 }
 
 fn goal_event(node: u64, goal: Option<&str>) -> Event {
-    Event::AgentGoalChanged(AgentGoalEvent { node: NodeId(node), goal: goal.map(str::to_string) })
+    Event::AgentGoalChanged(AgentGoalEvent {
+        node: NodeId(node),
+        goal: goal.map(str::to_string),
+    })
 }
 
 fn panel_text(host: &mut FakeHost) -> String {
-    host.render(ViewTarget::Panel("agent-detect.panel".into()), 80, 20).text()
+    host.render(ViewTarget::Panel("agent-detect.panel".into()), 80, 20)
+        .text()
 }
 
 /// REQ: PORT:ilium-client/src/tree_ui.rs::plain_terminal_uses_exact_angular_frames_at_both_activity_cadences
@@ -39,7 +50,10 @@ fn port_030_every_activity_keeps_its_indicator() {
         (AgentActivity::Idle, "●"),
     ] {
         let submissions = host.deliver_one(changed(7, AgentActivity::None, current));
-        assert_eq!(decorations(&submissions, "activity")[0].icon.as_deref(), Some(icon));
+        assert_eq!(
+            decorations(&submissions, "activity")[0].icon.as_deref(),
+            Some(icon)
+        );
     }
 }
 
@@ -47,8 +61,14 @@ fn port_030_every_activity_keeps_its_indicator() {
 #[test]
 fn port_030_the_goal_has_its_own_slot_apart_from_the_activity() {
     let mut host = server_host();
-    let activity_specs = decorations(&host.deliver_one(changed(7, AgentActivity::Idle, AgentActivity::Working)), "activity");
-    let goal_specs = decorations(&host.deliver_one(goal_event(7, Some("ship the plugin"))), "goal");
+    let activity_specs = decorations(
+        &host.deliver_one(changed(7, AgentActivity::Idle, AgentActivity::Working)),
+        "activity",
+    );
+    let goal_specs = decorations(
+        &host.deliver_one(goal_event(7, Some("ship the plugin"))),
+        "goal",
+    );
     assert_eq!(activity_specs.len(), 1);
     assert_eq!(goal_specs.len(), 1);
     assert_ne!(activity_specs[0].slot, goal_specs[0].slot);
@@ -58,7 +78,10 @@ fn port_030_the_goal_has_its_own_slot_apart_from_the_activity() {
 #[test]
 fn port_030_a_goal_change_sets_a_badge_and_no_goal_clears_it() {
     let mut host = server_host();
-    let set = decorations(&host.deliver_one(goal_event(7, Some("ship the plugin"))), "goal");
+    let set = decorations(
+        &host.deliver_one(goal_event(7, Some("ship the plugin"))),
+        "goal",
+    );
     assert_eq!(set.len(), 1);
     assert!(plain(&set[0].content).contains("ship the plugin"));
     let removed = host.deliver_one(goal_event(7, None));
@@ -69,16 +92,34 @@ fn port_030_a_goal_change_sets_a_badge_and_no_goal_clears_it() {
 #[test]
 fn port_030_activity_changes_to_the_same_value_replace_the_decoration() {
     let mut host = server_host();
-    let first = decorations(&host.deliver_one(changed(7, AgentActivity::Idle, AgentActivity::Working)), "activity");
-    let second = decorations(&host.deliver_one(changed(7, AgentActivity::Working, AgentActivity::Working)), "activity");
-    assert_eq!(first[0].icon, second.first().and_then(|spec| spec.icon.clone()).or(first[0].icon.clone()));
+    let first = decorations(
+        &host.deliver_one(changed(7, AgentActivity::Idle, AgentActivity::Working)),
+        "activity",
+    );
+    let second = decorations(
+        &host.deliver_one(changed(7, AgentActivity::Working, AgentActivity::Working)),
+        "activity",
+    );
+    assert_eq!(
+        first[0].icon,
+        second
+            .first()
+            .and_then(|spec| spec.icon.clone())
+            .or(first[0].icon.clone())
+    );
 }
 
 /// REQ: PORT:ilium-client/src/tree_ui.rs::agent_identifier_modes_render_full_names_letters_icons_or_nothing
 #[test]
 fn port_030_the_panel_lists_each_agent_by_its_pane_name() {
     let mut host = server_host();
-    add_agent_pane(&mut host, "Fix auth", "claude", AgentActivity::Working, None);
+    add_agent_pane(
+        &mut host,
+        "Fix auth",
+        "claude",
+        AgentActivity::Working,
+        None,
+    );
     add_agent_pane(&mut host, "Write docs", "codex", AgentActivity::Idle, None);
     let text = panel_text(&mut host);
     assert!(text.contains("Fix auth"), "{text}");
@@ -90,7 +131,13 @@ fn port_030_the_panel_lists_each_agent_by_its_pane_name() {
 fn port_030_attention_mode_shows_approval_and_hides_running_agents() {
     let mut host = server_host();
     add_agent_pane(&mut host, "runner", "codex", AgentActivity::Working, None);
-    add_agent_pane(&mut host, "asker", "codex", AgentActivity::AwaitingApproval, None);
+    add_agent_pane(
+        &mut host,
+        "asker",
+        "codex",
+        AgentActivity::AwaitingApproval,
+        None,
+    );
     host.deliver_one(Event::DisplayModeChanged(Some("attention".to_string())));
     let text = panel_text(&mut host);
     assert!(text.contains("asker"), "{text}");
@@ -113,7 +160,13 @@ fn port_030_attention_mode_retains_a_finished_agent() {
 #[test]
 fn port_030_attention_mode_hides_healthy_activity() {
     let mut host = server_host();
-    add_agent_pane(&mut host, "healthy", "codex", AgentActivity::Working, Some("keep going"));
+    add_agent_pane(
+        &mut host,
+        "healthy",
+        "codex",
+        AgentActivity::Working,
+        Some("keep going"),
+    );
     add_agent_pane(&mut host, "quiet", "codex", AgentActivity::Idle, None);
     host.deliver_one(Event::DisplayModeChanged(Some("attention".to_string())));
     let text = panel_text(&mut host);

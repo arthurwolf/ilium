@@ -3,7 +3,9 @@
 
 use proptest::prelude::*;
 
-use crate::common::{SAMPLE_BOARD, board_file, board_host, draw, press, sections, select_first_header};
+use crate::common::{
+    board_file, board_host, draw, press, sections, select_first_header, SAMPLE_BOARD,
+};
 
 fn text_of(source: &str) -> String {
     let (mut host, node) = board_host(source);
@@ -14,14 +16,20 @@ fn text_of(source: &str) -> String {
 #[test]
 fn file_024_every_heading_that_owns_content_becomes_a_column() {
     let text = text_of("# Board\n\n## Alpha\n- one\n\n## Beta\n- two\n");
-    assert!(text.contains("Alpha (1)") && text.contains("Beta (1)"), "{text}");
+    assert!(
+        text.contains("Alpha (1)") && text.contains("Beta (1)"),
+        "{text}"
+    );
 }
 
 /// REQ: F-024
 #[test]
 fn file_024_deeper_atx_headings_are_columns_too() {
     let text = text_of("### Alpha\n- one\n\n#### Beta\n- two\n");
-    assert!(text.contains("Alpha (1)") && text.contains("Beta (1)"), "{text}");
+    assert!(
+        text.contains("Alpha (1)") && text.contains("Beta (1)"),
+        "{text}"
+    );
 }
 
 /// REQ: F-024
@@ -46,7 +54,10 @@ fn file_024_dash_star_and_plus_items_are_cards() {
 #[test]
 fn file_024_nested_task_lists_are_cards() {
     let text = text_of("## L\n- parent\n  - [ ] child one\n  - [x] child two\n");
-    assert!(text.contains("child one") && text.contains("child two"), "{text}");
+    assert!(
+        text.contains("child one") && text.contains("child two"),
+        "{text}"
+    );
 }
 
 /// REQ: F-024
@@ -68,7 +79,10 @@ fn file_024_top_level_prose_between_lists_is_not_part_of_the_board() {
 #[test]
 fn file_024_indented_lines_under_a_card_are_its_notes() {
     let text = text_of("## L\n- title\n  note line one\n  note line two\n");
-    assert!(text.contains("title") && text.contains("note line one"), "{text}");
+    assert!(
+        text.contains("title") && text.contains("note line one"),
+        "{text}"
+    );
     assert!(text.contains("L (1)"), "notes do not become cards:\n{text}");
 }
 
@@ -76,14 +90,20 @@ fn file_024_indented_lines_under_a_card_are_its_notes() {
 #[test]
 fn file_024_task_markers_stay_in_the_card_title() {
     let text = text_of("## L\n- [ ] open task\n- [x] done task\n");
-    assert!(text.contains("[ ] open task") && text.contains("[x] done task"), "{text}");
+    assert!(
+        text.contains("[ ] open task") && text.contains("[x] done task"),
+        "{text}"
+    );
 }
 
 /// REQ: F-024
 #[test]
 fn file_024_the_sample_of_the_docs_has_the_documented_columns() {
     assert_eq!(
-        sections(SAMPLE_BOARD).iter().map(|(title, cards)| (title.as_str(), cards.len())).collect::<Vec<_>>(),
+        sections(SAMPLE_BOARD)
+            .iter()
+            .map(|(title, cards)| (title.as_str(), cards.len()))
+            .collect::<Vec<_>>(),
         [("To do", 2), ("Doing", 1), ("Done", 1)]
     );
 }
@@ -98,9 +118,18 @@ fn file_024_saving_rewrites_the_file_in_canonical_form() {
     press(&mut host, node, "shift+right");
     let saved = board_file(&mut host);
     assert!(saved.starts_with("# Board\n"), "{saved}");
-    assert!(!saved.contains("Intro prose."), "extra prose is normalised away:\n{saved}");
+    assert!(
+        !saved.contains("Intro prose."),
+        "extra prose is normalised away:\n{saved}"
+    );
     assert!(!saved.contains("* star card"), "{saved}");
-    assert_eq!(sections(&saved), [("To do".to_string(), vec![]), ("Doing".to_string(), vec!["star card".to_string()])]);
+    assert_eq!(
+        sections(&saved),
+        [
+            ("To do".to_string(), vec![]),
+            ("Doing".to_string(), vec!["star card".to_string()])
+        ]
+    );
 }
 
 /// REQ: F-024
@@ -110,8 +139,14 @@ fn file_024_canonical_form_is_title_headings_and_dash_items_only() {
     select_first_header(&mut host, node);
     press(&mut host, node, "j");
     press(&mut host, node, "shift+down");
-    for line in board_file(&mut host).lines().filter(|line| !line.is_empty()) {
-        assert!(line == "# Board" || line.starts_with("## ") || line.starts_with("- "), "line {line:?}");
+    for line in board_file(&mut host)
+        .lines()
+        .filter(|line| !line.is_empty())
+    {
+        assert!(
+            line == "# Board" || line.starts_with("## ") || line.starts_with("- "),
+            "line {line:?}"
+        );
     }
 }
 
@@ -123,7 +158,10 @@ fn file_024_a_save_ends_with_one_newline() {
     press(&mut host, node, "j");
     press(&mut host, node, "shift+down");
     let saved = board_file(&mut host);
-    assert!(saved.ends_with('\n') && !saved.ends_with("\n\n"), "{saved:?}");
+    assert!(
+        saved.ends_with('\n') && !saved.ends_with("\n\n"),
+        "{saved:?}"
+    );
 }
 
 /// REQ: F-024

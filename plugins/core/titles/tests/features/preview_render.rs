@@ -1,14 +1,20 @@
 //! The client preview panel: the diff of the proposed tree (page figure 1) at widths 40, 80, 120 and the 48 column golden.
 
+use ilium_plugin_core_titles::TitlesClient;
 use ilium_plugin_sdk::testing::{assert_golden, FakeHost};
 use ilium_plugin_sdk::types::{ClientId, Event, MessageEvent, PluginId, PluginSide, ViewTarget};
-use ilium_plugin_core_titles::TitlesClient;
 use serde_json::json;
 
 use crate::common::*;
 
-const GOLDEN_PREVIEW_48: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/features/golden/titles_preview_48.txt");
-const GOLDEN_SETTINGS_48: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/features/golden/titles_settings_48.txt");
+const GOLDEN_PREVIEW_48: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/features/golden/titles_preview_48.txt"
+);
+const GOLDEN_SETTINGS_48: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/features/golden/titles_settings_48.txt"
+);
 const PANEL: &str = "titles.preview";
 const PREVIEW_ROWS: u16 = 12;
 
@@ -18,7 +24,9 @@ fn panel() -> ViewTarget {
 
 /// The client with the proposal of the page figure delivered by the server side.
 fn host_with_proposal() -> FakeHost {
-    let mut host = FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("client");
+    let mut host = FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("client");
     host.activate::<TitlesClient>();
     let payload = json!({
         "old_outline": ["shell-1", "shell-2"],
@@ -83,7 +91,9 @@ fn doc_f_043_preview_figure_marks_removed_rows_with_minus_and_added_rows_with_pl
 #[test]
 fn doc_f_043_preview_figure_uses_danger_for_removed_and_success_for_added_rows() {
     let page = page_text();
-    assert!(page.contains("removed rows use <code>danger</code>, added rows use <code>success</code>"));
+    assert!(
+        page.contains("removed rows use <code>danger</code>, added rows use <code>success</code>")
+    );
     assert!(page.contains("<span class=\"t-err\">- shell-1</span>"));
     assert!(page.contains("<span class=\"t-ok\">+ Billing API</span>"));
 }
@@ -135,7 +145,10 @@ fn f_043_preview_has_a_rounded_border_with_the_title_at_every_width() {
         let mut host = host_with_proposal();
         let screen = host.render(panel(), columns, PREVIEW_ROWS);
         let first = screen.row(0);
-        assert!(first.starts_with("╭─ Preview of the change"), "{columns}: {first}");
+        assert!(
+            first.starts_with("╭─ Preview of the change"),
+            "{columns}: {first}"
+        );
         assert!(first.ends_with('╮'), "{columns}: {first}");
     }
 }
@@ -143,14 +156,19 @@ fn f_043_preview_has_a_rounded_border_with_the_title_at_every_width() {
 /// REQ: F-043
 #[test]
 fn f_043_preview_summary_counts_follow_the_proposal() {
-    let mut host = FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("client");
+    let mut host = FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("client");
     host.activate::<TitlesClient>();
     host.deliver_one(Event::Message(MessageEvent {
         from: PluginId(PLUGIN_ID.to_string()),
         from_side: PluginSide::Server,
         from_client: Some(ClientId(1)),
         channel: "titles.preview".to_string(),
-        payload: json!({"old_outline": ["a"], "new_outline": ["G", "  a"], "moves": 1, "groups": 1}).to_string().into_bytes(),
+        payload:
+            json!({"old_outline": ["a"], "new_outline": ["G", "  a"], "moves": 1, "groups": 1})
+                .to_string()
+                .into_bytes(),
     }));
     host.settle();
     let screen = host.render(panel(), 80, PREVIEW_ROWS);
@@ -170,6 +188,8 @@ fn f_043_preview_rendering_the_same_proposal_twice_is_identical() {
 #[test]
 fn f_043_the_client_panel_needs_only_the_ui_panels_grant_for_its_view() {
     let manifest = manifest_value();
-    let grants = manifest["capabilities"]["client"].as_array().expect("grants");
+    let grants = manifest["capabilities"]["client"]
+        .as_array()
+        .expect("grants");
     assert!(grants.iter().any(|grant| grant == "ui.panels"));
 }

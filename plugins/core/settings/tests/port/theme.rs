@@ -12,7 +12,10 @@ fn port_092_the_settings_title_is_inset_by_two_cells_in_the_panel_border() {
     let mut host = client_host();
     let screen = host.render(tab("user-interface"), 120, 4);
     let first = screen.row(0);
-    assert!(first.starts_with("\u{256d}"), "rounded corner first: {first:?}");
+    assert!(
+        first.starts_with("\u{256d}"),
+        "rounded corner first: {first:?}"
+    );
     assert_eq!(first.chars().count(), 120);
 }
 
@@ -35,9 +38,14 @@ fn port_092_the_colour_scheme_defaults_to_dark() {
 #[test]
 fn port_092_the_colour_scheme_accepts_light_and_refuses_other_names() {
     let mut host = client_host();
-    host.settings().set("ui.color_scheme", json!("light")).expect("accepted");
+    host.settings()
+        .set("ui.color_scheme", json!("light"))
+        .expect("accepted");
     assert_eq!(value_of(&mut host, "ui.color_scheme"), Some(json!("light")));
-    let error = host.settings().set("ui.color_scheme", json!("sepia")).expect_err("refused");
+    let error = host
+        .settings()
+        .set("ui.color_scheme", json!("sepia"))
+        .expect_err("refused");
     assert_eq!(error.code, ErrorCode::InvalidArgument);
 }
 
@@ -45,7 +53,12 @@ fn port_092_the_colour_scheme_accepts_light_and_refuses_other_names() {
 #[test]
 fn port_092_the_four_colour_overrides_are_unset_by_default() {
     let mut host = client_host();
-    for key in ["theme.accent_bg", "theme.accent_fg", "theme.border_focused", "theme.border_unfocused"] {
+    for key in [
+        "theme.accent_bg",
+        "theme.accent_fg",
+        "theme.border_focused",
+        "theme.border_unfocused",
+    ] {
         assert!(is_unset(value_of(&mut host, key)), "{key}");
     }
 }
@@ -102,10 +115,15 @@ fn port_092_the_foreground_accent_is_shared_by_both_schemes() {
 #[test]
 fn port_092_an_accent_override_is_kept_and_the_scheme_still_applies() {
     let mut host = client_host();
-    host.settings().set("theme.accent_bg", json!("#9d7cd8")).expect("accepted");
+    host.settings()
+        .set("theme.accent_bg", json!("#9d7cd8"))
+        .expect("accepted");
     for scheme in ["dark", "light"] {
         choose(&mut host, "user-interface", "ui.color_scheme", scheme);
-        assert_eq!(value_of(&mut host, "theme.accent_bg"), Some(json!("#9d7cd8")));
+        assert_eq!(
+            value_of(&mut host, "theme.accent_bg"),
+            Some(json!("#9d7cd8"))
+        );
     }
 }
 
@@ -115,5 +133,8 @@ fn port_092_the_two_schemes_render_the_muted_accent_differently() {
     let mut dark = client_host();
     let mut light = client_host();
     choose(&mut light, "user-interface", "ui.color_scheme", "light");
-    assert_ne!(dark.render(tab("user-interface"), 100, 30), light.render(tab("user-interface"), 100, 30));
+    assert_ne!(
+        dark.render(tab("user-interface"), 100, 30),
+        light.render(tab("user-interface"), 100, 30)
+    );
 }

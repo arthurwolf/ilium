@@ -11,7 +11,13 @@ use crate::common::*;
 fn attention_048_an_approval_prompt_marks_the_node() {
     let mut host = server_host();
     let node = add_pane(&mut host, "claude-api", Some(AgentActivity::Working));
-    let submissions = transition(&mut host, node, AgentActivity::Working, AgentActivity::AwaitingApproval, 1);
+    let submissions = transition(
+        &mut host,
+        node,
+        AgentActivity::Working,
+        AgentActivity::AwaitingApproval,
+        1,
+    );
     let found = marks(&submissions);
     assert_eq!(found.len(), 1);
     assert_eq!(found[0].node, node);
@@ -22,7 +28,13 @@ fn attention_048_an_approval_prompt_marks_the_node() {
 fn attention_048_the_mark_reason_is_not_empty() {
     let mut host = server_host();
     let node = add_pane(&mut host, "claude-api", Some(AgentActivity::Working));
-    let submissions = transition(&mut host, node, AgentActivity::Working, AgentActivity::AwaitingApproval, 1);
+    let submissions = transition(
+        &mut host,
+        node,
+        AgentActivity::Working,
+        AgentActivity::AwaitingApproval,
+        1,
+    );
     assert!(!marks(&submissions)[0].reason.trim().is_empty());
 }
 
@@ -32,7 +44,13 @@ fn attention_048_the_mark_reason_is_at_most_80_characters_even_for_a_very_long_p
     let mut host = server_host();
     let long_name = "x".repeat(300);
     let node = add_pane(&mut host, &long_name, Some(AgentActivity::Working));
-    let submissions = transition(&mut host, node, AgentActivity::Working, AgentActivity::AwaitingApproval, 1);
+    let submissions = transition(
+        &mut host,
+        node,
+        AgentActivity::Working,
+        AgentActivity::AwaitingApproval,
+        1,
+    );
     assert!(marks(&submissions)[0].reason.chars().count() <= 80);
 }
 
@@ -41,7 +59,13 @@ fn attention_048_the_mark_reason_is_at_most_80_characters_even_for_a_very_long_p
 fn attention_048_a_working_agent_is_not_marked() {
     let mut host = server_host();
     let node = add_pane(&mut host, "claude-api", Some(AgentActivity::Idle));
-    let submissions = transition(&mut host, node, AgentActivity::Idle, AgentActivity::Working, 1);
+    let submissions = transition(
+        &mut host,
+        node,
+        AgentActivity::Idle,
+        AgentActivity::Working,
+        1,
+    );
     assert!(marks(&submissions).is_empty());
 }
 
@@ -50,7 +74,13 @@ fn attention_048_a_working_agent_is_not_marked() {
 fn attention_048_the_first_classification_as_working_is_not_marked() {
     let mut host = server_host();
     let node = add_pane(&mut host, "claude-api", Some(AgentActivity::Working));
-    let submissions = transition(&mut host, node, AgentActivity::None, AgentActivity::Working, 1);
+    let submissions = transition(
+        &mut host,
+        node,
+        AgentActivity::None,
+        AgentActivity::Working,
+        1,
+    );
     assert!(marks(&submissions).is_empty());
 }
 
@@ -60,7 +90,13 @@ fn attention_048_the_mark_is_independent_of_the_desktop_master_switch() {
     let mut host = server_host();
     crate::common::set_setting(&mut host, "notifications.enabled", serde_json::json!(false));
     let node = add_pane(&mut host, "claude-api", Some(AgentActivity::Working));
-    let submissions = transition(&mut host, node, AgentActivity::Working, AgentActivity::AwaitingApproval, 1);
+    let submissions = transition(
+        &mut host,
+        node,
+        AgentActivity::Working,
+        AgentActivity::AwaitingApproval,
+        1,
+    );
     assert_eq!(marks(&submissions).len(), 1);
 }
 
@@ -68,7 +104,11 @@ fn attention_048_the_mark_is_independent_of_the_desktop_master_switch() {
 #[test]
 fn attention_048_a_marked_node_that_the_user_looks_at_is_acknowledged() {
     let mut host = server_host();
-    let node = add_pane(&mut host, "claude-api", Some(AgentActivity::AwaitingApproval));
+    let node = add_pane(
+        &mut host,
+        "claude-api",
+        Some(AgentActivity::AwaitingApproval),
+    );
     host.deliver_one(Event::PaneFocused(Some(node)));
     let submissions = host.deliver_one(attention_event(node, true));
     assert_eq!(acks(&submissions), [node]);
@@ -78,7 +118,11 @@ fn attention_048_a_marked_node_that_the_user_looks_at_is_acknowledged() {
 #[test]
 fn attention_048_a_marked_node_the_user_has_not_seen_stays_marked() {
     let mut host = server_host();
-    let node = add_pane(&mut host, "claude-api", Some(AgentActivity::AwaitingApproval));
+    let node = add_pane(
+        &mut host,
+        "claude-api",
+        Some(AgentActivity::AwaitingApproval),
+    );
     let other = add_pane(&mut host, "other", None);
     host.deliver_one(Event::PaneFocused(Some(other)));
     let submissions = host.deliver_one(attention_event(node, true));

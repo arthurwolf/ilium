@@ -18,7 +18,10 @@ fn example() -> Value {
 fn doc_f_040_page_lists_price_sources_as_a_standard_collect_point() {
     let row = table_row(&page_text(), "`price-sources`");
     assert_eq!(row[1], "collect");
-    assert_eq!(row[2], "Supply a price table for models the built-in table does not know.");
+    assert_eq!(
+        row[2],
+        "Supply a price table for models the built-in table does not know."
+    );
     assert_eq!(row[4], "standard");
 }
 
@@ -37,8 +40,14 @@ fn doc_f_040_price_sources_payload_has_the_six_entry_fields_in_order() {
 fn doc_f_038_page_lists_quota_sources_as_a_standard_collect_point() {
     let row = table_row(&page_text(), "`quota-sources`");
     assert_eq!(row[1], "collect");
-    assert_eq!(row[2], "Supply a plan quota or remaining allowance for a provider.");
-    assert_eq!(row[3], "entry: id, provider, service (a service the plugin provides)");
+    assert_eq!(
+        row[2],
+        "Supply a plan quota or remaining allowance for a provider."
+    );
+    assert_eq!(
+        row[3],
+        "entry: id, provider, service (a service the plugin provides)"
+    );
     assert_eq!(row[4], "standard");
 }
 
@@ -46,7 +55,12 @@ fn doc_f_038_page_lists_quota_sources_as_a_standard_collect_point() {
 #[test]
 fn doc_f_040_the_plugin_owns_exactly_two_points() {
     let page = page_text();
-    let table_rows = page.lines().filter(|line| line.starts_with("| `price-sources`") || line.starts_with("| `quota-sources`")).count();
+    let table_rows = page
+        .lines()
+        .filter(|line| {
+            line.starts_with("| `price-sources`") || line.starts_with("| `quota-sources`")
+        })
+        .count();
     assert_eq!(table_rows, 2);
     let row = table_row(&points_page(), "[Cost](/pages/core-plugin-cost/)");
     assert_eq!(&row[1..], ["`ilium.core.cost`", "2", "1", "1", "yes"]);
@@ -67,22 +81,30 @@ fn doc_f_040_core_extension_points_page_agrees_on_both_points() {
 /// REQ: F-038
 #[test]
 fn doc_f_038_page_states_the_usage_service_and_core_page_agrees() {
-    assert!(page_text().contains("- `ilium.core.cost/usage`: get: spend and tokens per pane, session or day"));
-    assert!(points_page().contains("| `ilium.core.cost/usage` | get: spend and tokens per pane, session or day |"));
+    assert!(page_text()
+        .contains("- `ilium.core.cost/usage`: get: spend and tokens per pane, session or day"));
+    assert!(points_page()
+        .contains("| `ilium.core.cost/usage` | get: spend and tokens per pane, session or day |"));
 }
 
 /// REQ: F-038
 #[test]
 fn doc_f_038_page_states_the_usage_changed_topic_and_core_page_agrees() {
-    assert!(page_text().contains("- `ilium.core.cost/usage-changed`: { pane, total } when the total of a pane changes"));
-    assert!(points_page().contains("| `ilium.core.cost/usage-changed` | { pane, total } when the total of a pane changes |"));
+    assert!(page_text().contains(
+        "- `ilium.core.cost/usage-changed`: { pane, total } when the total of a pane changes"
+    ));
+    assert!(points_page().contains(
+        "| `ilium.core.cost/usage-changed` | { pane, total } when the total of a pane changes |"
+    ));
 }
 
 /// REQ: F-040
 #[test]
 fn doc_f_040_page_says_cost_is_replaceable_and_how() {
     let page = page_text();
-    assert!(page.contains("**Replaceable:** yes. A replacement lists `\"replaces\": [\"ilium.core.cost\"]`"));
+    assert!(page.contains(
+        "**Replaceable:** yes. A replacement lists `\"replaces\": [\"ilium.core.cost\"]`"
+    ));
 }
 
 /// REQ: F-040
@@ -118,8 +140,18 @@ fn doc_f_040_local_model_example_contributes_one_zero_price_entry() {
 #[test]
 fn doc_f_040_example_entry_uses_only_fields_of_the_price_sources_payload() {
     let example = example();
-    let entry = example["contributes"]["extensions"][0]["entry"].as_object().expect("entry").clone();
-    let allowed = ["id", "model_pattern", "input_per_mtok", "output_per_mtok", "cache_read_per_mtok", "currency"];
+    let entry = example["contributes"]["extensions"][0]["entry"]
+        .as_object()
+        .expect("entry")
+        .clone();
+    let allowed = [
+        "id",
+        "model_pattern",
+        "input_per_mtok",
+        "output_per_mtok",
+        "cache_read_per_mtok",
+        "currency",
+    ];
     for key in entry.keys() {
         assert!(allowed.contains(&key.as_str()), "unexpected field {key}");
     }
@@ -137,7 +169,10 @@ fn doc_f_040_page_says_the_example_needs_no_code() {
 #[test]
 fn doc_f_040_harness_core_stub_row_lists_the_same_points_and_service() {
     let row = table_row(&page("reference-test-harness"), "`ilium.core.cost`");
-    assert_eq!(row[1], "`price-sources` (collect), `quota-sources` (collect)");
+    assert_eq!(
+        row[1],
+        "`price-sources` (collect), `quota-sources` (collect)"
+    );
     assert_eq!(row[2], "`usage`");
 }
 

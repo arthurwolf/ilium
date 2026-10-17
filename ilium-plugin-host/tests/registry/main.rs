@@ -4,12 +4,12 @@
 //! Later parts of the lane add modules here and reuse `common`.
 
 mod common;
-mod reference_plugin_distribution_cli;
-mod reference_registry;
-mod reference_registry_search;
 mod guide_plugin_administration;
 mod guide_publishing;
 mod pages_p2;
+mod reference_plugin_distribution_cli;
 mod reference_plugin_distribution_cli_p2;
+mod reference_registry;
 mod reference_registry_p2;
+mod reference_registry_search;
 mod user_plugin_store;

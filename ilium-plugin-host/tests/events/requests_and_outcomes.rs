@@ -27,7 +27,11 @@ fn rqo_001_ten_submissions_complete_once_each() {
 #[test]
 fn rqo_001_a_refused_batch_still_completes_every_submission_once() {
     let env = writer().tree(flat_tree(2)).build();
-    env.run(vec![sub(1, rename(2, "a")), sub(2, send_input(2, "x")), sub(3, rename(3, "b"))]);
+    env.run(vec![
+        sub(1, rename(2, "a")),
+        sub(2, send_input(2, "x")),
+        sub(3, rename(3, "b")),
+    ]);
     let results = env.outcomes();
     for n in 1..=3 {
         assert_eq!(count_for(&results, n), 1);
@@ -60,12 +64,18 @@ proptest! {
 #[test]
 fn rqo_002_a_returned_request_id_completes_once_with_the_matching_id() {
     let env = writer().tree(flat_tree(1)).build();
-    let request = env.host.submit_directly(sub(1, rename(2, "a"))).expect("submit returns a request id");
+    let request = env
+        .host
+        .submit_directly(sub(1, rename(2, "a")))
+        .expect("submit returns a request id");
     env.settle();
     let completed = env.probe.events_of("request-completed");
     assert_eq!(completed.len(), 1);
     match &completed[0] {
-        Event::RequestCompleted(result) => assert_eq!(result.request, ilium_plugin_api::generated::types::RequestRef::Call(request)),
+        Event::RequestCompleted(result) => assert_eq!(
+            result.request,
+            ilium_plugin_api::generated::types::RequestRef::Call(request)
+        ),
         other => panic!("unexpected {other:?}"),
     }
 }
@@ -74,8 +84,14 @@ fn rqo_002_a_returned_request_id_completes_once_with_the_matching_id() {
 #[test]
 fn rqo_002_two_calls_give_two_distinct_ids_and_two_results() {
     let env = writer().tree(flat_tree(1)).build();
-    let first = env.host.submit_directly(sub(1, rename(2, "a"))).expect("first");
-    let second = env.host.submit_directly(sub(2, rename(2, "b"))).expect("second");
+    let first = env
+        .host
+        .submit_directly(sub(1, rename(2, "a")))
+        .expect("first");
+    let second = env
+        .host
+        .submit_directly(sub(2, rename(2, "b")))
+        .expect("second");
     env.settle();
     assert_ne!(first, second);
     assert_eq!(env.probe.count_of("request-completed"), 2);
@@ -95,7 +111,11 @@ fn rqo_003_rename_after_close_in_one_batch_is_failed_not_found() {
     let env = writer().tree(flat_tree(2)).build();
     env.run(vec![sub(1, close(2)), sub(2, rename(2, "x"))]);
     assert!(is_ok(&env.outcome(1)), "{:?}", env.outcome(1));
-    assert!(is_failed(&env.outcome(2), ErrorCode::NotFound), "{:?}", env.outcome(2));
+    assert!(
+        is_failed(&env.outcome(2), ErrorCode::NotFound),
+        "{:?}",
+        env.outcome(2)
+    );
 }
 
 /// REQ: RQO-003
@@ -111,12 +131,18 @@ fn rqo_003_rename_before_close_succeeds_for_both() {
 #[test]
 fn rqo_003_applied_order_equals_submission_order() {
     let env = writer().tree(flat_tree(3)).build();
-    env.run(vec![sub(1, rename(2, "a")), sub(2, rename(3, "b")), sub(3, rename(4, "c"))]);
+    env.run(vec![
+        sub(1, rename(2, "a")),
+        sub(2, rename(3, "b")),
+        sub(3, rename(4, "c")),
+    ]);
     let titles: Vec<String> = env
         .applied()
         .iter()
         .filter_map(|intent| match intent {
-            ilium_plugin_api::generated::types::Intent::RenameNode(spec) => Some(spec.title.clone()),
+            ilium_plugin_api::generated::types::Intent::RenameNode(spec) => {
+                Some(spec.title.clone())
+            }
             _ => None,
         })
         .collect();
@@ -168,20 +194,42 @@ fn rqo_004_at_600_001_ms_the_key_is_free() {
 #[test]
 fn rqo_005_send_input_to_an_idle_agent_pane_gives_ok_epoch() {
     let nodes = vec![
-        node(1, None, ilium_plugin_api::generated::types::NodeClass::Container, "root"),
-        agent_pane(2, Some(1), ilium_plugin_api::generated::types::AgentActivity::Idle),
+        node(
+            1,
+            None,
+            ilium_plugin_api::generated::types::NodeClass::Container,
+            "root",
+        ),
+        agent_pane(
+            2,
+            Some(1),
+            ilium_plugin_api::generated::types::AgentActivity::Idle,
+        ),
     ];
     let env = writer().tree(nodes).build();
     env.run(vec![keyed(1, "e:1", send_input(2, "a"))]);
-    assert!(matches!(env.outcome(1), Some(Outcome::OkEpoch(_))), "{:?}", env.outcome(1));
+    assert!(
+        matches!(env.outcome(1), Some(Outcome::OkEpoch(_))),
+        "{:?}",
+        env.outcome(1)
+    );
 }
 
 /// REQ: RQO-005
 #[test]
 fn rqo_005_the_epoch_increases_with_each_prompt() {
     let nodes = vec![
-        node(1, None, ilium_plugin_api::generated::types::NodeClass::Container, "root"),
-        agent_pane(2, Some(1), ilium_plugin_api::generated::types::AgentActivity::Idle),
+        node(
+            1,
+            None,
+            ilium_plugin_api::generated::types::NodeClass::Container,
+            "root",
+        ),
+        agent_pane(
+            2,
+            Some(1),
+            ilium_plugin_api::generated::types::AgentActivity::Idle,
+        ),
     ];
     let env = writer().tree(nodes).build();
     env.run(vec![keyed(1, "e:1", send_input(2, "a"))]);
@@ -197,7 +245,11 @@ fn rqo_005_the_epoch_increases_with_each_prompt() {
 fn rqo_005_send_input_to_a_plain_terminal_is_plain_ok() {
     let env = writer().tree(flat_tree(1)).build();
     env.run(vec![keyed(1, "e:1", send_input(2, "a"))]);
-    assert!(matches!(env.outcome(1), Some(Outcome::Ok)), "{:?}", env.outcome(1));
+    assert!(
+        matches!(env.outcome(1), Some(Outcome::Ok)),
+        "{:?}",
+        env.outcome(1)
+    );
 }
 
 /// REQ: RQO-006
@@ -208,7 +260,11 @@ fn rqo_006_deactivating_the_plugin_cancels_a_slow_request() {
     env.run(vec![sub(1, rename(2, "a"))]);
     env.host.deactivate_plugin();
     env.settle();
-    assert!(matches!(env.outcome(1), Some(Outcome::Cancelled)), "{:?}", env.outcome(1));
+    assert!(
+        matches!(env.outcome(1), Some(Outcome::Cancelled)),
+        "{:?}",
+        env.outcome(1)
+    );
 }
 
 /// REQ: RQO-006
@@ -234,7 +290,11 @@ fn rqo_006_a_completed_request_is_not_cancelled_by_a_later_stop() {
 #[test]
 fn rqo_007_batch_of_three_refused_siblings_carry_refused_cancelled() {
     let env = writer().tree(flat_tree(2)).build();
-    env.run(vec![sub(1, rename(2, "a")), sub(2, send_input(2, "x")), sub(3, rename(3, "b"))]);
+    env.run(vec![
+        sub(1, rename(2, "a")),
+        sub(2, send_input(2, "x")),
+        sub(3, rename(3, "b")),
+    ]);
     for n in [1u64, 3] {
         assert!(is_refused(&env.outcome(n), ErrorCode::Cancelled));
         assert!(!matches!(env.outcome(n), Some(Outcome::Cancelled)));
@@ -254,7 +314,10 @@ fn rqo_007_a_single_submission_batch_has_no_siblings() {
 #[test]
 fn rqo_008_take_after_31_s_is_not_found() {
     let env = writer().tree(flat_tree(1)).build();
-    let request = env.host.submit_directly(sub(1, rename(2, "a"))).expect("id");
+    let request = env
+        .host
+        .submit_directly(sub(1, rename(2, "a")))
+        .expect("id");
     env.settle();
     env.host.advance_clock(Duration::from_secs(31));
     assert_eq!(env.host.take_result(request), Err(ErrorCode::NotFound));
@@ -264,7 +327,10 @@ fn rqo_008_take_after_31_s_is_not_found() {
 #[test]
 fn rqo_008_second_take_is_not_found() {
     let env = writer().tree(flat_tree(1)).build();
-    let request = env.host.submit_directly(sub(1, rename(2, "a"))).expect("id");
+    let request = env
+        .host
+        .submit_directly(sub(1, rename(2, "a")))
+        .expect("id");
     env.settle();
     assert!(env.host.take_result(request).is_ok());
     assert_eq!(env.host.take_result(request), Err(ErrorCode::NotFound));
@@ -275,20 +341,33 @@ fn rqo_008_second_take_is_not_found() {
 fn rqo_008_take_at_29_999_ms_still_works_and_at_30_000_ms_is_gone() {
     for (millis, expect_found) in [(29_999u64, true), (30_000, false)] {
         let env = writer().tree(flat_tree(1)).build();
-        let request = env.host.submit_directly(sub(1, rename(2, "a"))).expect("id");
+        let request = env
+            .host
+            .submit_directly(sub(1, rename(2, "a")))
+            .expect("id");
         env.settle();
         env.host.advance_clock(Duration::from_millis(millis));
-        assert_eq!(env.host.take_result(request).is_ok(), expect_found, "at {millis} ms");
+        assert_eq!(
+            env.host.take_result(request).is_ok(),
+            expect_found,
+            "at {millis} ms"
+        );
     }
 }
 
 /// REQ: RQO-009
 #[test]
 fn rqo_009_both_defects_report_the_malformed_one_with_its_index() {
-    let env = Setup::new(&["tree.write", "terminal.write"]).tree(flat_tree(2)).build();
+    let env = Setup::new(&["tree.write", "terminal.write"])
+        .tree(flat_tree(2))
+        .build();
     env.run(vec![sub(1, freeze(2)), sub(2, send_input(2, "x"))]);
     assert!(is_refused(&env.outcome(2), ErrorCode::InvalidArgument));
-    assert!(message_of(&env.outcome(2)).contains("submission 1"), "{}", message_of(&env.outcome(2)));
+    assert!(
+        message_of(&env.outcome(2)).contains("submission 1"),
+        "{}",
+        message_of(&env.outcome(2))
+    );
     assert!(is_refused(&env.outcome(1), ErrorCode::Cancelled));
 }
 
@@ -340,7 +419,11 @@ fn rqo_010_255_submissions_are_accepted() {
 #[test]
 fn rqo_011_a_refused_batch_applies_nothing_and_logs_the_zero_based_index() {
     let env = writer().tree(flat_tree(2)).build();
-    env.run(vec![sub(1, rename(2, "a")), sub(2, rename(3, "b")), sub(3, send_input(2, "x"))]);
+    env.run(vec![
+        sub(1, rename(2, "a")),
+        sub(2, rename(3, "b")),
+        sub(3, send_input(2, "x")),
+    ]);
     assert!(env.applied().is_empty());
     assert!(!log_lines_containing(&env, "batch refused: submission 2").is_empty());
 }
@@ -349,7 +432,10 @@ fn rqo_011_a_refused_batch_applies_nothing_and_logs_the_zero_based_index() {
 #[test]
 fn rqo_011_no_dedup_key_of_a_refused_batch_is_reserved() {
     let env = writer().tree(flat_tree(1)).build();
-    env.run(vec![keyed(1, "k:1", send_input(2, "a")), sub(2, send_input(2, "bad"))]);
+    env.run(vec![
+        keyed(1, "k:1", send_input(2, "a")),
+        sub(2, send_input(2, "bad")),
+    ]);
     env.run(vec![keyed(3, "k:1", send_input(2, "a"))]);
     assert!(is_ok(&env.outcome(3)), "{:?}", env.outcome(3));
 }
@@ -394,7 +480,10 @@ fn rqo_020_a_space_or_non_ascii_character_is_refused() {
     let env = writer().tree(flat_tree(1)).build();
     for (n, key) in [(1u64, "a b"), (2, "caf\u{e9}"), (3, "a*b")] {
         env.run(vec![keyed(n, key, send_input(2, "x"))]);
-        assert!(is_refused(&env.outcome(n), ErrorCode::InvalidArgument), "key {key:?}");
+        assert!(
+            is_refused(&env.outcome(n), ErrorCode::InvalidArgument),
+            "key {key:?}"
+        );
     }
 }
 
@@ -446,7 +535,11 @@ fn rqo_022_failed_then_retry_with_the_same_key_is_duplicate() {
     let env = writer().tree(flat_tree(1)).build();
     env.kernel.fail_next_write(ErrorCode::Io);
     env.run(vec![keyed(1, "k", send_input(2, "a"))]);
-    assert!(is_failed(&env.outcome(1), ErrorCode::Io), "{:?}", env.outcome(1));
+    assert!(
+        is_failed(&env.outcome(1), ErrorCode::Io),
+        "{:?}",
+        env.outcome(1)
+    );
     env.run(vec![keyed(2, "k", send_input(2, "a"))]);
     assert!(is_duplicate_of(&env.outcome(2), 1));
 }
@@ -490,7 +583,12 @@ fn rqo_030_after_a_restart_a_resubmit_after_10_minutes_is_accepted_and_input_is_
     env.run(vec![keyed(1, "k", send_input_journaled(2, "a"))]);
     env.host.restart_server();
     env.host.advance_clock(Duration::from_secs(601));
-    let writes_before = env.kernel.step_log().iter().filter(|s| s.starts_with("pane-write")).count();
+    let writes_before = env
+        .kernel
+        .step_log()
+        .iter()
+        .filter(|s| s.starts_with("pane-write"))
+        .count();
     assert_eq!(writes_before, 1, "no replay on restart");
     env.run(vec![keyed(2, "k", send_input_journaled(2, "a"))]);
     assert!(is_ok(&env.outcome(2)));
@@ -502,8 +600,14 @@ fn rqo_030_the_journal_entry_precedes_the_terminal_write() {
     let env = writer().tree(flat_tree(1)).build();
     env.run(vec![keyed(1, "k", send_input_journaled(2, "a"))]);
     let steps = env.kernel.step_log();
-    let journal = steps.iter().position(|s| s == "journal:k").expect("journal");
-    let write = steps.iter().position(|s| s.starts_with("pane-write")).expect("write");
+    let journal = steps
+        .iter()
+        .position(|s| s == "journal:k")
+        .expect("journal");
+    let write = steps
+        .iter()
+        .position(|s| s.starts_with("pane-write"))
+        .expect("write");
     assert!(journal < write);
 }
 
@@ -529,7 +633,12 @@ fn rqo_031_a_second_restart_does_not_repeat_input_uncertain_and_never_replays() 
     env.host.restart_server();
     env.settle();
     assert_eq!(env.probe.count_of("input-uncertain"), 1);
-    let writes = env.kernel.step_log().iter().filter(|s| s.starts_with("pane-write")).count();
+    let writes = env
+        .kernel
+        .step_log()
+        .iter()
+        .filter(|s| s.starts_with("pane-write"))
+        .count();
     assert_eq!(writes, 0);
 }
 
@@ -549,7 +658,11 @@ fn rqo_040_a_veto_becomes_refused_conflict_with_extension_vetoed_prefix() {
     let env = writer().tree(flat_tree(1)).build();
     env.kernel.veto_next_hook("no way");
     env.run(vec![sub(1, rename(2, "a"))]);
-    assert!(is_refused(&env.outcome(1), ErrorCode::Conflict), "{:?}", env.outcome(1));
+    assert!(
+        is_refused(&env.outcome(1), ErrorCode::Conflict),
+        "{:?}",
+        env.outcome(1)
+    );
     assert!(message_of(&env.outcome(1)).starts_with("extension.vetoed: "));
 }
 

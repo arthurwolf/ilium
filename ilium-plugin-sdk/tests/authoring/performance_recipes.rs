@@ -10,7 +10,9 @@ use crate::support::{SizedRestore, MIB};
 fn aut_101_restore_bytes_of_exactly_1_mib_are_kept() {
     let mut host = FakeHost::new();
     host.activate::<SizedRestore<{ MIB }>>();
-    let bytes = host.deactivate(DeactivationReason::Upgrade).expect("restore bytes");
+    let bytes = host
+        .deactivate(DeactivationReason::Upgrade)
+        .expect("restore bytes");
     host.restart_with(bytes.clone());
     assert_eq!(host.restored().map(|kept| kept.len()), Some(MIB));
 }
@@ -23,7 +25,11 @@ fn aut_101_restore_bytes_of_1_mib_plus_one_are_dropped_with_a_warn_line() {
     let bytes = host.deactivate(DeactivationReason::Upgrade);
     host.restart_with(bytes.unwrap_or_default());
     assert_eq!(host.restored(), None);
-    let warns = host.logs().into_iter().filter(|line| line.level == "warn").count();
+    let warns = host
+        .logs()
+        .into_iter()
+        .filter(|line| line.level == "warn")
+        .count();
     assert_eq!(warns, 1, "one warn line");
 }
 
@@ -32,7 +38,9 @@ fn aut_101_restore_bytes_of_1_mib_plus_one_are_dropped_with_a_warn_line() {
 fn aut_102_normal_use_stays_under_half_of_the_restore_budget() {
     let mut host = FakeHost::new();
     host.activate::<SizedRestore<{ MIB / 2 - 1 }>>();
-    let bytes = host.deactivate(DeactivationReason::Shutdown).expect("restore bytes");
+    let bytes = host
+        .deactivate(DeactivationReason::Shutdown)
+        .expect("restore bytes");
     assert!(bytes.len() < MIB / 2);
     host.restart_with(bytes);
     assert_eq!(host.restored().map(|kept| kept.len()), Some(MIB / 2 - 1));
@@ -45,7 +53,11 @@ fn aut_111_exceeding_the_restore_limit_loses_the_data_not_just_a_warning() {
     host.activate::<SizedRestore<{ MIB + 1 }>>();
     let bytes = host.deactivate(DeactivationReason::Upgrade);
     host.restart_with(bytes.unwrap_or_default());
-    assert_eq!(host.restored(), None, "the bytes are gone, the plugin keeps running with defaults");
+    assert_eq!(
+        host.restored(),
+        None,
+        "the bytes are gone, the plugin keeps running with defaults"
+    );
     assert!(!host.is_disabled());
 }
 

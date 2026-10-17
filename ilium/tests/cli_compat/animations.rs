@@ -32,7 +32,8 @@ fn f_102_an_old_format_iliumanim_package_is_refused_with_package_old_format() {
     let dir = tempfile::tempdir().expect("tmp");
     let path = dir.path().join("legacy.iliumanim");
     std::fs::write(&path, b"ILIUMANIM\x01legacy").expect("write");
-    let error = ilium_plugin_host::package::read_package(&std::fs::read(&path).expect("read")).expect_err("must refuse");
+    let error = ilium_plugin_host::package::read_package(&std::fs::read(&path).expect("read"))
+        .expect_err("must refuse");
     assert!(format!("{error:?}").contains("old-format"), "{error:?}");
 }
 
@@ -46,6 +47,9 @@ fn f_104_the_animation_probe_is_hidden_but_parses() {
 /// REQ: F-104
 #[test]
 fn f_104_gpu_is_optional_the_probe_does_not_require_a_device() {
-    let run = Sandbox::new().ilium_env(&["release-animation-probe", "--help"], &[("WGPU_BACKEND", "none")]);
+    let run = Sandbox::new().ilium_env(
+        &["release-animation-probe", "--help"],
+        &[("WGPU_BACKEND", "none")],
+    );
     assert_eq!(run.code, 0, "{}", run.stderr);
 }

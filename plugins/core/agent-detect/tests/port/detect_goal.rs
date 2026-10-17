@@ -4,7 +4,8 @@
 
 use crate::common::{fixture, goal};
 
-const CODEX_FOOTER_PREFIX: &str = "• Done\n\n› Ask Codex to do anything\n\n  model · workspace · Ready · Conte… ";
+const CODEX_FOOTER_PREFIX: &str =
+    "• Done\n\n› Ask Codex to do anything\n\n  model · workspace · Ready · Conte… ";
 const CODEX_FOOTER_SUFFIX: &str = "    ⚠ 1 warning · f2 to view";
 
 fn codex_footer(segment: &str) -> String {
@@ -28,7 +29,10 @@ fn port_028_captured_codex_footers_report_a_goal_or_none() {
     ] {
         assert!(goal("codex", &fixture(name)).is_some(), "{name}");
     }
-    for name in ["codex_goal_cleared.txt", "codex_no_goal_metadata_footer.txt"] {
+    for name in [
+        "codex_goal_cleared.txt",
+        "codex_no_goal_metadata_footer.txt",
+    ] {
         assert_eq!(goal("codex", &fixture(name)), None, "{name}");
     }
 }
@@ -52,7 +56,8 @@ fn port_028_every_codex_footer_phase_is_recognized() {
 /// REQ: PORT:ilium-detect/src/lib.rs::codex_goal_wording_outside_the_footer_is_ignored
 #[test]
 fn port_028_codex_goal_wording_outside_the_footer_is_ignored() {
-    let text = "• Done\n\nThe goal was Pursuing goal (1h 5m) earlier.\n\n› Ask Codex to do anything";
+    let text =
+        "• Done\n\nThe goal was Pursuing goal (1h 5m) earlier.\n\n› Ask Codex to do anything";
     assert_eq!(goal("codex", text), None);
 }
 
@@ -60,7 +65,11 @@ fn port_028_codex_goal_wording_outside_the_footer_is_ignored() {
 #[test]
 fn port_028_overlays_replacing_the_footer_report_no_goal() {
     for overlay in ["/goal", "? for shortcuts"] {
-        assert_eq!(goal("codex", &format!("• Done\n\n{overlay}")), None, "{overlay}");
+        assert_eq!(
+            goal("codex", &format!("• Done\n\n{overlay}")),
+            None,
+            "{overlay}"
+        );
     }
 }
 
@@ -86,7 +95,11 @@ fn port_028_captured_claude_goal_screens_report_a_goal_or_none() {
 fn port_028_claude_goal_notices_count_only_in_the_current_turn() {
     let composer = "────────────────────────────────────────\n❯\n────────────────────────────────────────\n  ⏵⏵ auto mode on (shift+tab to cycle)";
     assert!(goal("claude", &format!("◎ /goal active (4m)\n\n{composer}")).is_some());
-    assert!(goal("claude", &format!("✗ Goal could not be achieved\n\n{composer}")).is_some());
+    assert!(goal(
+        "claude",
+        &format!("✗ Goal could not be achieved\n\n{composer}")
+    )
+    .is_some());
     assert_eq!(goal("claude", "◎ /goal active (4m)"), None);
 }
 
@@ -94,7 +107,13 @@ fn port_028_claude_goal_notices_count_only_in_the_current_turn() {
 #[test]
 fn port_028_claude_goal_wording_outside_the_indicator_row_is_ignored() {
     let composer = "────────────────────────────────────────\n❯\n────────────────────────────────────────\n  ⏵⏵ auto mode on (shift+tab to cycle)";
-    assert_eq!(goal("claude", &format!("We discussed /goal active (4m) yesterday.\n\n{composer}")), None);
+    assert_eq!(
+        goal(
+            "claude",
+            &format!("We discussed /goal active (4m) yesterday.\n\n{composer}")
+        ),
+        None
+    );
 }
 
 /// REQ: PORT:ilium-detect/src/lib.rs::claude_code_without_a_visible_composer_is_inconclusive

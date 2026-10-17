@@ -87,7 +87,11 @@ pub fn sign(package: &[u8], key: &SigningKey, signed_at: SignedAt) -> Result<Vec
 }
 
 /// Verifies a package against a trust store at a time (reference-packaging.md PKG-210).
-pub fn verify(package: &PackageArchive, trust: &TrustStore, now: SystemTime) -> Result<Verified, Diagnostic> {
+pub fn verify(
+    package: &PackageArchive,
+    trust: &TrustStore,
+    now: SystemTime,
+) -> Result<Verified, Diagnostic> {
     unimplemented!("host::signing::verify")
 }
 

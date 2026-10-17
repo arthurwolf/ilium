@@ -15,11 +15,22 @@ const MS: u64 = 1_000_000;
 /// Advances the manual clock in `step_micros` steps and records `(true elapsed nanos, reading)`.
 fn sample_clock(rig: &mut Rig, step_micros: u64, steps: u64, wasi: bool) -> Vec<(u64, u64)> {
     let mut samples = Vec::new();
-    let origin = if wasi { rig.host.guest_wasi_clock_nanos() } else { rig.host.guest_clock_nanos() };
+    let origin = if wasi {
+        rig.host.guest_wasi_clock_nanos()
+    } else {
+        rig.host.guest_clock_nanos()
+    };
     for step in 0..steps {
         rig.host.advance_clock(Duration::from_micros(step_micros));
-        let reading = if wasi { rig.host.guest_wasi_clock_nanos() } else { rig.host.guest_clock_nanos() };
-        samples.push(((step + 1) * step_micros * 1000, reading.saturating_sub(origin)));
+        let reading = if wasi {
+            rig.host.guest_wasi_clock_nanos()
+        } else {
+            rig.host.guest_clock_nanos()
+        };
+        samples.push((
+            (step + 1) * step_micros * 1000,
+            reading.saturating_sub(origin),
+        ));
     }
     samples
 }
@@ -29,20 +40,34 @@ fn assert_coarse_and_jittered(samples: &[(u64, u64)]) {
     let readings: Vec<u64> = samples.iter().map(|(_, reading)| *reading).collect();
     let distinct: BTreeSet<u64> = readings.iter().copied().collect();
     for pair in distinct.iter().collect::<Vec<_>>().windows(2) {
-        assert!(pair[1] - pair[0] >= MS, "steps are 1 ms or more: {} -> {}", pair[0], pair[1]);
+        assert!(
+            pair[1] - pair[0] >= MS,
+            "steps are 1 ms or more: {} -> {}",
+            pair[0],
+            pair[1]
+        );
         assert_eq!((pair[1] - pair[0]) % MS, 0);
     }
-    assert!(readings.windows(2).all(|pair| pair[0] <= pair[1]), "the guest clock never goes back");
+    assert!(
+        readings.windows(2).all(|pair| pair[0] <= pair[1]),
+        "the guest clock never goes back"
+    );
     // Jittered: the true time at which the reading steps varies by up to 1 ms around the boundary.
     let step_times: BTreeSet<u64> = samples
         .windows(2)
         .filter(|pair| pair[0].1 != pair[1].1)
         .map(|pair| pair[1].0 % MS)
         .collect();
-    assert!(step_times.len() > 1, "the step instants show jitter: {step_times:?}");
+    assert!(
+        step_times.len() > 1,
+        "the step instants show jitter: {step_times:?}"
+    );
     // Error against the true time stays within coarsening plus jitter.
     for (truth, reading) in samples {
-        assert!(truth.abs_diff(*reading) <= 2 * MS, "reading {reading} too far from {truth}");
+        assert!(
+            truth.abs_diff(*reading) <= 2 * MS,
+            "reading {reading} too far from {truth}"
+        );
     }
 }
 
@@ -77,7 +102,11 @@ fn sec_370_a_sub_millisecond_interval_is_not_measurable() {
     let first = rig.host.guest_clock_nanos();
     rig.host.advance_clock(Duration::from_micros(10));
     let second = rig.host.guest_clock_nanos();
-    assert!(second - first == 0 || second - first >= MS, "a 10 us interval shows as {} ns", second - first);
+    assert!(
+        second - first == 0 || second - first >= MS,
+        "a 10 us interval shows as {} ns",
+        second - first
+    );
 }
 
 /// REQ: SEC-370
@@ -94,7 +123,10 @@ fn sec_370_a_t1_plugin_gets_the_same_resolution_by_default() {
 /// REQ: SEC-370
 #[test]
 fn sec_370_a_t1_plugin_that_requests_a_finer_clock_gets_one() {
-    let mut rig = setup(&[]).tier(Tier::T1).option("fine-clock", json!(true)).start();
+    let mut rig = setup(&[])
+        .tier(Tier::T1)
+        .option("fine-clock", json!(true))
+        .start();
     let samples = sample_clock(&mut rig, 10, 200, false);
     let distinct: BTreeSet<u64> = samples.iter().map(|(_, reading)| *reading).collect();
     assert!(distinct.len() > 2, "a fine clock resolves 10 us steps");
@@ -199,7 +231,11 @@ fn sec_371_output_written_in_no_echo_mode_is_not_delivered_after_echo_returns_as
     rig.host.set_pane_echo(true);
     rig.host.advance_clock(Duration::from_millis(500));
     rig.host.pump(8);
-    assert_eq!(rig.host.screen_changed_count(), 0, "the password prompt period leaves no event");
+    assert_eq!(
+        rig.host.screen_changed_count(),
+        0,
+        "the password prompt period leaves no event"
+    );
 }
 
 proptest! {
@@ -231,7 +267,10 @@ fn sec_372_a_t2_or_t3_side_runs_in_a_helper_process() {
 fn sec_372_the_server_and_client_sides_of_one_plugin_run_in_different_helpers() {
     let server = rig(Tier::T3, Side::Server, &[]);
     let client = rig(Tier::T3, Side::Client, &[]);
-    assert_ne!(server.host.guest_process_id(), client.host.guest_process_id());
+    assert_ne!(
+        server.host.guest_process_id(),
+        client.host.guest_process_id()
+    );
 }
 
 /// REQ: SEC-372
@@ -239,7 +278,10 @@ fn sec_372_the_server_and_client_sides_of_one_plugin_run_in_different_helpers() 
 fn sec_372_two_plugins_do_not_share_a_helper() {
     let first = t3(&[]);
     let second = t3(&[]);
-    assert_ne!(first.host.guest_process_id(), second.host.guest_process_id());
+    assert_ne!(
+        first.host.guest_process_id(),
+        second.host.guest_process_id()
+    );
 }
 
 /// REQ: SEC-372
@@ -252,11 +294,16 @@ fn sec_372_a_t1_plugin_shares_the_server_address_space() {
 // ---- SEC-373 ----
 
 fn unavailable_rig() -> Rig {
-    setup(&[]).option("installed-plugins", json!(["other.installed"])).start()
+    setup(&[])
+        .option("installed-plugins", json!(["other.installed"]))
+        .start()
 }
 
 fn list_extensions(rig: &Rig, owner: &str) -> ilium_plugin_api::PluginError {
-    match rig.value("ilium:host/extensions.list", json!({ "point": format!("{owner}/point") })) {
+    match rig.value(
+        "ilium:host/extensions.list",
+        json!({ "point": format!("{owner}/point") }),
+    ) {
         Err(error) => error,
         Ok(value) => panic!("expected a refusal, got {value}"),
     }
@@ -303,19 +350,40 @@ fn sec_373_neither_error_names_the_plugin_id() {
 #[test]
 fn sec_373_peer_calls_do_not_reveal_installed_plugin_ids_either() {
     let rig = unavailable_rig();
-    let installed = rig.value("ilium:host/plugins.set-enabled", json!({ "plugin": "other.installed", "enabled": true, "scope": "user" }));
-    let missing = rig.value("ilium:host/plugins.set-enabled", json!({ "plugin": "other.missing", "enabled": true, "scope": "user" }));
-    let (installed, missing) = (installed.expect_err("refused"), missing.expect_err("refused"));
-    assert_eq!((installed.code, installed.message), (missing.code, missing.message));
+    let installed = rig.value(
+        "ilium:host/plugins.set-enabled",
+        json!({ "plugin": "other.installed", "enabled": true, "scope": "user" }),
+    );
+    let missing = rig.value(
+        "ilium:host/plugins.set-enabled",
+        json!({ "plugin": "other.missing", "enabled": true, "scope": "user" }),
+    );
+    let (installed, missing) = (
+        installed.expect_err("refused"),
+        missing.expect_err("refused"),
+    );
+    assert_eq!(
+        (installed.code, installed.message),
+        (missing.code, missing.message)
+    );
 }
 
 /// REQ: SEC-373
 #[test]
 fn sec_373_run_hook_on_an_unavailable_owner_gives_the_same_answer_for_both_cases() {
     let rig = unavailable_rig();
-    let call = |owner: &str| rig.value("ilium:host/extensions.run-hook", json!({ "point": format!("{owner}/point"), "payload-json": "{}" })).expect_err("refused");
+    let call = |owner: &str| {
+        rig.value(
+            "ilium:host/extensions.run-hook",
+            json!({ "point": format!("{owner}/point"), "payload-json": "{}" }),
+        )
+        .expect_err("refused")
+    };
     let (installed, missing) = (call("other.installed"), call("other.missing"));
-    assert_eq!((installed.code, installed.message), (missing.code, missing.message));
+    assert_eq!(
+        (installed.code, installed.message),
+        (missing.code, missing.message)
+    );
 }
 
 // ---- SEC-374 ----
@@ -323,12 +391,30 @@ fn sec_373_run_hook_on_an_unavailable_owner_gives_the_same_answer_for_both_cases
 /// Error texts of calls that fail for different reasons.
 fn failing_error_texts(rig: &Rig) -> Vec<String> {
     let calls = [
-        ("ilium:host/storage.put", json!({ "bucket": "data", "key": "../escape", "value": [1] })),
-        ("ilium:host/fs.read", json!({ "path": { "scope": "project", "path": "/etc/passwd" }, "offset": 0, "max-bytes": 10 })),
-        ("ilium:host/fs.read", json!({ "path": { "scope": "data", "path": "../../../etc/passwd" }, "offset": 0, "max-bytes": 10 })),
-        ("ilium:host/fs.metadata", json!({ "path": { "scope": "data", "path": "missing/file" } })),
-        ("ilium:host/extensions.list", json!({ "point": "other.installed/point" })),
-        ("ilium:host/plugins.set-enabled", json!({ "plugin": "other.installed", "enabled": true, "scope": "user" })),
+        (
+            "ilium:host/storage.put",
+            json!({ "bucket": "data", "key": "../escape", "value": [1] }),
+        ),
+        (
+            "ilium:host/fs.read",
+            json!({ "path": { "scope": "project", "path": "/etc/passwd" }, "offset": 0, "max-bytes": 10 }),
+        ),
+        (
+            "ilium:host/fs.read",
+            json!({ "path": { "scope": "data", "path": "../../../etc/passwd" }, "offset": 0, "max-bytes": 10 }),
+        ),
+        (
+            "ilium:host/fs.metadata",
+            json!({ "path": { "scope": "data", "path": "missing/file" } }),
+        ),
+        (
+            "ilium:host/extensions.list",
+            json!({ "point": "other.installed/point" }),
+        ),
+        (
+            "ilium:host/plugins.set-enabled",
+            json!({ "plugin": "other.installed", "enabled": true, "scope": "user" }),
+        ),
     ];
     calls
         .iter()
@@ -340,7 +426,9 @@ fn failing_error_texts(rig: &Rig) -> Vec<String> {
 /// REQ: SEC-374
 #[test]
 fn sec_374_errors_do_not_contain_the_scratch_state_directory() {
-    let rig = setup(&[]).option("installed-plugins", json!(["other.installed"])).start();
+    let rig = setup(&[])
+        .option("installed-plugins", json!(["other.installed"]))
+        .start();
     let state = rig.state.path().to_string_lossy().into_owned();
     let texts = failing_error_texts(&rig);
     assert!(!texts.is_empty(), "the calls fail");
@@ -352,11 +440,15 @@ fn sec_374_errors_do_not_contain_the_scratch_state_directory() {
 /// REQ: SEC-374
 #[test]
 fn sec_374_errors_do_not_contain_absolute_paths() {
-    let rig = setup(&[]).option("installed-plugins", json!(["other.installed"])).start();
+    let rig = setup(&[])
+        .option("installed-plugins", json!(["other.installed"]))
+        .start();
     let texts = failing_error_texts(&rig);
     assert!(!texts.is_empty());
     for text in texts {
-        for root in ["/home/", "/tmp/", "/media/", "/var/", "/etc/", "/usr/", "/run/", "C:\\", "/Users/"] {
+        for root in [
+            "/home/", "/tmp/", "/media/", "/var/", "/etc/", "/usr/", "/run/", "C:\\", "/Users/",
+        ] {
             assert!(!text.contains(root), "{root} in {text}");
         }
     }
@@ -365,7 +457,9 @@ fn sec_374_errors_do_not_contain_absolute_paths() {
 /// REQ: SEC-374
 #[test]
 fn sec_374_errors_do_not_contain_ids_of_other_plugins() {
-    let rig = setup(&[]).option("installed-plugins", json!(["other.installed"])).start();
+    let rig = setup(&[])
+        .option("installed-plugins", json!(["other.installed"]))
+        .start();
     for text in failing_error_texts(&rig) {
         assert!(!text.contains("other.installed"), "{text}");
     }
@@ -386,7 +480,10 @@ fn sec_374_trap_messages_do_not_contain_absolute_paths() {
 fn sec_374_the_error_string_helper_gives_no_path_for_an_outside_scope_read() {
     let rig = t3(&[]);
     let text = rig.host.error_string_for("fs.read ../../../etc/passwd");
-    assert!(!text.contains("/etc/passwd") || text.contains("not-permitted"), "{text}");
+    assert!(
+        !text.contains("/etc/passwd") || text.contains("not-permitted"),
+        "{text}"
+    );
     assert!(!text.starts_with('/'));
 }
 
@@ -409,10 +506,14 @@ fn fill_until_quota(rig: &Rig) -> (u32, String) {
 fn sec_375_the_quota_error_is_the_same_whatever_other_plugins_store() {
     let empty = setup(&[]).start();
     let busy = setup(&[]).start();
-    busy.host.write_other_plugin_data("other.installed", "blob", &vec![7u8; 64 * 1024 * 1024]);
+    busy.host
+        .write_other_plugin_data("other.installed", "blob", &vec![7u8; 64 * 1024 * 1024]);
     let (accepted_empty, message_empty) = fill_until_quota(&empty);
     let (accepted_busy, message_busy) = fill_until_quota(&busy);
-    assert_eq!(accepted_empty, accepted_busy, "neighbour data must not change the plugin's own quota");
+    assert_eq!(
+        accepted_empty, accepted_busy,
+        "neighbour data must not change the plugin's own quota"
+    );
     assert_eq!(message_empty, message_busy);
 }
 
@@ -420,7 +521,8 @@ fn sec_375_the_quota_error_is_the_same_whatever_other_plugins_store() {
 #[test]
 fn sec_375_the_quota_message_does_not_mention_other_plugins() {
     let rig = setup(&[]).start();
-    rig.host.write_other_plugin_data("other.installed", "blob", &[1, 2, 3]);
+    rig.host
+        .write_other_plugin_data("other.installed", "blob", &[1, 2, 3]);
     let (_, message) = fill_until_quota(&rig);
     assert!(!message.contains("other.installed"), "{message}");
 }
@@ -429,8 +531,11 @@ fn sec_375_the_quota_message_does_not_mention_other_plugins() {
 #[test]
 fn sec_375_a_plugin_sees_only_its_own_usage() {
     let rig = setup(&[]).start();
-    rig.host.write_other_plugin_data("other.installed", "blob", &vec![1u8; 4 * 1024 * 1024]);
-    let usage = rig.value("ilium:host/storage.usage", json!({})).expect("usage");
+    rig.host
+        .write_other_plugin_data("other.installed", "blob", &vec![1u8; 4 * 1024 * 1024]);
+    let usage = rig
+        .value("ilium:host/storage.usage", json!({}))
+        .expect("usage");
     assert_eq!(usage["data-bytes"].as_u64(), Some(0), "{usage}");
 }
 
@@ -470,10 +575,18 @@ fn sec_376_the_http_api_rejects_tokens_wrong_at_the_first_or_last_byte_alike() {
     last[end] ^= 1;
     for wrong in [first, last] {
         let header = format!("Bearer {}", String::from_utf8_lossy(&wrong));
-        assert_eq!(rig.host.http_api_request("/", &[("Authorization", header.as_str())]), 401);
+        assert_eq!(
+            rig.host
+                .http_api_request("/", &[("Authorization", header.as_str())]),
+            401
+        );
     }
     let good = format!("Bearer {token}");
-    assert_ne!(rig.host.http_api_request("/", &[("Authorization", good.as_str())]), 401);
+    assert_ne!(
+        rig.host
+            .http_api_request("/", &[("Authorization", good.as_str())]),
+        401
+    );
 }
 
 /// REQ: SEC-376
@@ -488,14 +601,24 @@ fn sec_376_no_source_file_compares_a_token_with_plain_equality() {
             if path.is_dir() {
                 stack.push(path);
             } else if path.extension().is_some_and(|ext| ext == "rs") {
-                for (number, line) in std::fs::read_to_string(&path).unwrap_or_default().lines().enumerate() {
+                for (number, line) in std::fs::read_to_string(&path)
+                    .unwrap_or_default()
+                    .lines()
+                    .enumerate()
+                {
                     let lowered = line.to_lowercase();
-                    if lowered.contains("token") && (line.contains(" == ") || line.contains(" != ")) && !lowered.trim_start().starts_with("//") {
+                    if lowered.contains("token")
+                        && (line.contains(" == ") || line.contains(" != "))
+                        && !lowered.trim_start().starts_with("//")
+                    {
                         offenders.push(format!("{}:{}", path.display(), number + 1));
                     }
                 }
             }
         }
     }
-    assert!(offenders.is_empty(), "token comparisons that are not constant-time: {offenders:?}");
+    assert!(
+        offenders.is_empty(),
+        "token comparisons that are not constant-time: {offenders:?}"
+    );
 }

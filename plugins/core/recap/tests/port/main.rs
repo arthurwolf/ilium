@@ -2,10 +2,10 @@
 //! Each twin asserts the same observable behaviour through the plugin's channels: the `recap`
 //! command output, the job input, the model answer and the host snapshot.
 
-#[path = "../host_ext.rs"]
-mod host_ext;
 #[path = "../features/common.rs"]
 mod common;
+#[path = "../host_ext.rs"]
+mod host_ext;
 mod support;
 
 mod client_pipeline;

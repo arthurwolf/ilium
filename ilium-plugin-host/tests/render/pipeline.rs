@@ -115,9 +115,12 @@ fn hst_253_decoration_cap_refusal_keeps_previous_list() {
     let mut rig = rig_t2();
     let cap = rig.contribution_cap("decoration");
     for i in 0..cap {
-        rig.server_contribute("decoration", &format!("n{i}"), "x").unwrap();
+        rig.server_contribute("decoration", &format!("n{i}"), "x")
+            .unwrap();
     }
-    let refused = rig.server_contribute("decoration", "over", "x").unwrap_err();
+    let refused = rig
+        .server_contribute("decoration", "over", "x")
+        .unwrap_err();
     assert_eq!(refused, "quota-exceeded");
     assert_eq!(rig.server_registry_len("decoration"), cap as usize);
 }
@@ -414,7 +417,10 @@ fn hst_262_ui_thread_reads_only_complete_front_buffer() {
     let mut rig = rig_scene();
     rig.scene_begin_frame();
     rig.scene_write_row(0, 0xAA);
-    assert_eq!(rig.front_buffer_rows(), vec![0x00; rig.scene_rows() as usize]);
+    assert_eq!(
+        rig.front_buffer_rows(),
+        vec![0x00; rig.scene_rows() as usize]
+    );
     rig.scene_present();
     assert_eq!(rig.front_buffer_row(0), 0xAA);
 }
@@ -578,7 +584,10 @@ fn hst_268_contributions_recoloured_without_calling_plugin() {
     rig.change_theme();
     rig.advance_ms(50);
     assert!(rig.mirror_recoloured("decoration", "n0"));
-    assert_eq!(rig.plugin_calls_received(), calls + rig.theme_changed_events() as u32 + rig.open_view_count() as u32);
+    assert_eq!(
+        rig.plugin_calls_received(),
+        calls + rig.theme_changed_events() as u32 + rig.open_view_count() as u32
+    );
 }
 
 /// REQ: HST-268
@@ -624,7 +633,8 @@ fn hst_269_reconcile_matches_across_the_whole_view() {
     let view = rig.open_view("a");
     rig.deliver_tree(view, keyed_chain(&["x", "list"])).unwrap();
     rig.scroll_node(view, "list", 4);
-    rig.deliver_tree(view, keyed_chain(&["y", "z", "list"])).unwrap();
+    rig.deliver_tree(view, keyed_chain(&["y", "z", "list"]))
+        .unwrap();
     assert_eq!(rig.node_scroll(view, "list"), 4);
 }
 
@@ -671,10 +681,12 @@ fn wid_009_scroll_offset_survives_rerender_with_same_key() {
 fn wid_009_text_cursor_and_selected_tab_survive_rerender() {
     let mut rig = rig_t2();
     let view = rig.open_view("a");
-    rig.deliver_tree(view, keyed_chain(&["tabs", "input"])).unwrap();
+    rig.deliver_tree(view, keyed_chain(&["tabs", "input"]))
+        .unwrap();
     rig.select_tab(view, "tabs", 2);
     rig.set_cursor(view, "input", 3);
-    rig.deliver_tree(view, keyed_chain(&["tabs", "input"])).unwrap();
+    rig.deliver_tree(view, keyed_chain(&["tabs", "input"]))
+        .unwrap();
     assert_eq!(rig.selected_tab(view, "tabs"), 2);
     assert_eq!(rig.cursor(view, "input"), 3);
 }

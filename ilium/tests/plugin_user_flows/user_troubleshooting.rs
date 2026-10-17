@@ -4,7 +4,10 @@ use crate::support::*;
 
 fn rig_with_core_and_two_third_party() -> UserRig {
     let mut rig = UserRig::new();
-    install_ok(&mut rig, &spec("com.example.notes", "1.0.0", &["tree.read"]));
+    install_ok(
+        &mut rig,
+        &spec("com.example.notes", "1.0.0", &["tree.read"]),
+    );
     install_ok(&mut rig, &spec("com.example.old", "1.0.0", &[]));
     rig
 }
@@ -67,7 +70,10 @@ fn usr_030_a_user_disabled_plugin_stays_disabled_by_user_after_safe_mode() {
 #[test]
 fn usr_033_forget_settings_deletes_only_the_settings_values() {
     let mut rig = UserRig::new();
-    install_ok(&mut rig, &spec("com.example.keeper", "1.0.0", &["tree.read"]).start_writes_file("kept.txt"));
+    install_ok(
+        &mut rig,
+        &spec("com.example.keeper", "1.0.0", &["tree.read"]).start_writes_file("kept.txt"),
+    );
     rig.start_server();
     rig.advance_ms(1_000);
     rig.set_plugin_setting("com.example.keeper", "density", "compact");
@@ -76,8 +82,14 @@ fn usr_033_forget_settings_deletes_only_the_settings_values() {
     let output = rig.cli(&["forget-settings", "com.example.keeper", "--yes"]);
     assert_eq!(result_exit_code(&output), 0);
     assert_eq!(rig.plugin_setting("com.example.keeper", "density"), None);
-    assert_eq!(std::fs::read(rig.grants_path()).expect("grants"), grants_before);
-    assert_eq!(tree_snapshot(&rig.data_dir().join("plugins/data/com.example.keeper")), data_before);
+    assert_eq!(
+        std::fs::read(rig.grants_path()).expect("grants"),
+        grants_before
+    );
+    assert_eq!(
+        tree_snapshot(&rig.data_dir().join("plugins/data/com.example.keeper")),
+        data_before
+    );
 }
 
 /// REQ: USR-033
@@ -89,14 +101,21 @@ fn usr_033_forget_settings_leaves_another_plugins_settings() {
     rig.set_plugin_setting("com.example.keeper", "density", "compact");
     rig.set_plugin_setting("com.example.other", "density", "wide");
     let _ = rig.cli(&["forget-settings", "com.example.keeper", "--yes"]);
-    assert_eq!(rig.plugin_setting("com.example.other", "density").as_deref(), Some("wide"));
+    assert_eq!(
+        rig.plugin_setting("com.example.other", "density")
+            .as_deref(),
+        Some("wide")
+    );
 }
 
 // ---- USR-100 ----
 
 fn failing_rig() -> UserRig {
     let mut rig = UserRig::new();
-    install_ok(&mut rig, &spec("com.example.crash", "1.0.0", &[]).activation_traps());
+    install_ok(
+        &mut rig,
+        &spec("com.example.crash", "1.0.0", &[]).activation_traps(),
+    );
     rig
 }
 
@@ -165,7 +184,11 @@ fn usr_101_turning_on_after_the_stop_clears_the_count() {
     rig.advance_ms(10);
     let starts = rig.instance_starts("com.example.crash");
     rig.advance_ms(1_001);
-    assert_eq!(rig.instance_starts("com.example.crash"), starts + 1, "first failure restarts after 1 s again");
+    assert_eq!(
+        rig.instance_starts("com.example.crash"),
+        starts + 1,
+        "first failure restarts after 1 s again"
+    );
 }
 
 /// REQ: USR-101

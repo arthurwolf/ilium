@@ -4,11 +4,11 @@
 //! F-115 (Optimization tab), the page samples, the manifest, the kernel tabs, the extension points, the
 //! service, the topic and the renders.
 
-#[path = "../host_ext.rs"]
-mod host_ext;
 mod common;
 mod doc_page;
 mod extension_points;
+#[path = "../host_ext.rs"]
+mod host_ext;
 mod kernel_tabs;
 mod manifest;
 mod optimizer;

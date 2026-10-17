@@ -8,7 +8,11 @@ use proptest::prelude::*;
 
 use crate::common::*;
 
-fn restored_agent(signature_id: &str, template: Option<Vec<String>>, session: &str) -> (ilium_plugin_sdk::testing::FakeHost, u64) {
+fn restored_agent(
+    signature_id: &str,
+    template: Option<Vec<String>>,
+    session: &str,
+) -> (ilium_plugin_sdk::testing::FakeHost, u64) {
     let mut host = activated_server();
     let pane = add_agent(&mut host, "agent", signature_id);
     verify_agent(&mut host, pane, signature(signature_id, template), session);
@@ -68,7 +72,12 @@ fn resume_076_correlation_numbers_start_at_two_to_the_63() {
     let submitted = restore_panes(&mut host, &[pane]);
     let resume = submitted
         .iter()
-        .find(|submission| matches!(submission.intent, ilium_plugin_sdk::types::Intent::ReplacePaneCommand(_)))
+        .find(|submission| {
+            matches!(
+                submission.intent,
+                ilium_plugin_sdk::types::Intent::ReplacePaneCommand(_)
+            )
+        })
         .expect("a resume submission");
     assert!(resume.correlation >= 1u64 << 63);
 }
@@ -108,7 +117,11 @@ fn resume_076_pane_created_live_is_not_resumed() {
 /// REQ: F-076
 #[test]
 fn resume_076_every_session_token_of_the_template_is_replaced() {
-    let template = vec!["tool".to_string(), "--a={session}".to_string(), "{session}".to_string()];
+    let template = vec![
+        "tool".to_string(),
+        "--a={session}".to_string(),
+        "{session}".to_string(),
+    ];
     let (mut host, pane) = restored_agent("tool", Some(template), "s-1");
     let commands = replace_commands(&restore_panes(&mut host, &[pane]));
     assert_eq!(commands[0].0.command, ["tool", "--a=s-1", "s-1"]);
@@ -117,7 +130,12 @@ fn resume_076_every_session_token_of_the_template_is_replaced() {
 /// REQ: F-076
 #[test]
 fn resume_076_template_parts_without_a_token_are_kept_verbatim() {
-    let template = vec!["tool".to_string(), "--flag".to_string(), "{session}".to_string(), "--tail".to_string()];
+    let template = vec![
+        "tool".to_string(),
+        "--flag".to_string(),
+        "{session}".to_string(),
+        "--tail".to_string(),
+    ];
     let (mut host, pane) = restored_agent("tool", Some(template), "s-2");
     let commands = replace_commands(&restore_panes(&mut host, &[pane]));
     assert_eq!(commands[0].0.command, ["tool", "--flag", "s-2", "--tail"]);
@@ -129,8 +147,18 @@ fn resume_076_two_agent_panes_each_get_their_own_command_and_key() {
     let mut host = activated_server();
     let first = add_agent(&mut host, "one", "claude");
     let second = add_agent(&mut host, "two", "codex");
-    verify_agent(&mut host, first, signature("claude", Some(claude_template())), "id-one");
-    verify_agent(&mut host, second, signature("codex", Some(codex_template())), "id-two");
+    verify_agent(
+        &mut host,
+        first,
+        signature("claude", Some(claude_template())),
+        "id-one",
+    );
+    verify_agent(
+        &mut host,
+        second,
+        signature("codex", Some(codex_template())),
+        "id-two",
+    );
     let commands = replace_commands(&restore_panes(&mut host, &[first, second]));
     assert_eq!(commands.len(), 2);
     assert_eq!(commands[0].0.pane, NodeId(first));
@@ -147,7 +175,12 @@ fn resume_076_only_the_verified_pane_of_two_is_resumed() {
     let mut host = activated_server();
     let verified = add_agent(&mut host, "verified", "claude");
     let unverified = add_agent(&mut host, "unverified", "claude");
-    verify_agent(&mut host, verified, signature("claude", Some(claude_template())), "only-me");
+    verify_agent(
+        &mut host,
+        verified,
+        signature("claude", Some(claude_template())),
+        "only-me",
+    );
     let commands = replace_commands(&restore_panes(&mut host, &[verified, unverified]));
     assert_eq!(commands.len(), 1);
     assert_eq!(commands[0].0.pane, NodeId(verified));

@@ -90,6 +90,9 @@ pub struct HarnessError {
 impl HarnessError {
     /// Builds an error from a code and a message.
     pub fn new(code: &str, message: impl Into<String>) -> HarnessError {
-        HarnessError { code: code.to_string(), message: message.into() }
+        HarnessError {
+            code: code.to_string(),
+            message: message.into(),
+        }
     }
 }

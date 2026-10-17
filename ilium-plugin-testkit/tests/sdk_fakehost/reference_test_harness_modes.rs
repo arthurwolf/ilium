@@ -4,7 +4,7 @@ use ilium_plugin_sdk_core::host::InstanceState;
 use ilium_plugin_testkit::{FakeHost, Mode};
 
 use crate::common::{
-    Spy, assert_fails_with, client_batch, panic_text, spy, spy_reset, with_clean_env, with_env,
+    assert_fails_with, client_batch, panic_text, spy, spy_reset, with_clean_env, with_env, Spy,
 };
 
 /// Runs one fixed scenario through the public API and returns what a test would assert on.
@@ -30,8 +30,14 @@ fn dev_400_default_and_explicit_native_mode_give_the_same_results() {
 #[test]
 fn dev_400_the_builder_accepts_both_modes_and_reports_the_chosen_one() {
     with_clean_env(|| {
-        assert_eq!(FakeHost::new().mode(Mode::Native).current_mode(), Mode::Native);
-        assert_eq!(FakeHost::new().mode(Mode::Component).current_mode(), Mode::Component);
+        assert_eq!(
+            FakeHost::new().mode(Mode::Native).current_mode(),
+            Mode::Native
+        );
+        assert_eq!(
+            FakeHost::new().mode(Mode::Component).current_mode(),
+            Mode::Component
+        );
         // The native host is also usable, so the check is not satisfied by the reader alone.
         let mut host = FakeHost::new().mode(Mode::Native);
         spy_reset();

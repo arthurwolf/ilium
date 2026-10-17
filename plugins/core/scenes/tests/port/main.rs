@@ -1,7 +1,4 @@
 //! Ported-test twins of the Scenes plugin (tests-first lane core-ui, part ports).
-#[path = "../features/common.rs"]
-mod common;
-mod examples_wind_client_performance;
 mod app;
 mod background_animation_cache;
 mod background_animation_carpet_tests;
@@ -32,9 +29,12 @@ mod background_animation_wikipedia_runtime;
 mod background_animation_wikipedia_scroll;
 mod background_animation_wikipedia_settings_tests;
 mod background_animation_worker;
+mod bin_tests_semantic_animation_tui;
+#[path = "../features/common.rs"]
+mod common;
+mod core_animation_recommendation;
+mod examples_wind_client_performance;
 mod execution;
 mod mouse;
-mod tree_ui;
-mod core_animation_recommendation;
 mod server_ipc_handlers;
-mod bin_tests_semantic_animation_tui;
+mod tree_ui;

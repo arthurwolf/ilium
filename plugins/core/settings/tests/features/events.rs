@@ -3,7 +3,8 @@
 //! submissions: the host writes values, the plugin only redraws.
 
 use ilium_plugin_sdk::types::{
-    ActionKind, ActionValue, Event, NodeId, PluginSide, SettingsChange, SettingsOrigin, UiAction, ViewTarget,
+    ActionKind, ActionValue, Event, NodeId, PluginSide, SettingsChange, SettingsOrigin, UiAction,
+    ViewTarget,
 };
 use serde_json::json;
 
@@ -45,7 +46,9 @@ fn events_090_settings_changed_for_density_returns_no_submissions() {
 #[test]
 fn events_090_a_density_change_shows_in_the_overview_panel() {
     let mut host = client_host();
-    host.settings().set("density", json!("compact")).expect("accepted");
+    host.settings()
+        .set("density", json!("compact"))
+        .expect("accepted");
     host.deliver_one(settings_changed(&["density"], SettingsOrigin::User));
     host.settle();
     let screen = host.render(overview(), 120, 24);
@@ -56,10 +59,14 @@ fn events_090_a_density_change_shows_in_the_overview_panel() {
 #[test]
 fn events_090_the_overview_panel_follows_a_second_density_change() {
     let mut host = client_host();
-    host.settings().set("density", json!("compact")).expect("accepted");
+    host.settings()
+        .set("density", json!("compact"))
+        .expect("accepted");
     host.deliver_one(settings_changed(&["density"], SettingsOrigin::User));
     host.settle();
-    host.settings().set("density", json!("comfortable")).expect("accepted");
+    host.settings()
+        .set("density", json!("comfortable"))
+        .expect("accepted");
     host.deliver_one(settings_changed(&["density"], SettingsOrigin::Plugin));
     host.settle();
     let text = host.render(overview(), 120, 24).text();
@@ -71,7 +78,10 @@ fn events_090_the_overview_panel_follows_a_second_density_change() {
 #[test]
 fn events_090_settings_changed_for_other_keys_returns_no_submissions() {
     let mut host = client_host();
-    let submissions = host.deliver_one(settings_changed(&["accent", "unrelated"], SettingsOrigin::File));
+    let submissions = host.deliver_one(settings_changed(
+        &["accent", "unrelated"],
+        SettingsOrigin::File,
+    ));
     host.settle();
     assert!(submissions.is_empty());
     assert!(host.failures().is_empty());
@@ -129,7 +139,12 @@ fn events_092_the_overview_panel_still_renders_after_theme_changed() {
 #[test]
 fn events_092_a_changed_accent_action_updates_the_colour_picker_value() {
     let mut host = client_host();
-    host.deliver_one(accent_action(overview(), "accent", ActionKind::Changed, "#ff8800"));
+    host.deliver_one(accent_action(
+        overview(),
+        "accent",
+        ActionKind::Changed,
+        "#ff8800",
+    ));
     host.settle();
     let text = host.render(overview(), 120, 24).text();
     assert!(text.contains("#ff8800"), "{text}");
@@ -139,7 +154,12 @@ fn events_092_a_changed_accent_action_updates_the_colour_picker_value() {
 #[test]
 fn events_092_an_action_for_another_key_leaves_the_accent_alone() {
     let mut host = client_host();
-    host.deliver_one(accent_action(overview(), "other", ActionKind::Changed, "#ff8800"));
+    host.deliver_one(accent_action(
+        overview(),
+        "other",
+        ActionKind::Changed,
+        "#ff8800",
+    ));
     host.settle();
     let text = host.render(overview(), 120, 24).text();
     assert!(!text.contains("#ff8800"), "{text}");
@@ -149,7 +169,12 @@ fn events_092_an_action_for_another_key_leaves_the_accent_alone() {
 #[test]
 fn events_092_an_accent_action_of_another_kind_leaves_the_accent_alone() {
     let mut host = client_host();
-    host.deliver_one(accent_action(overview(), "accent", ActionKind::HoverEnter, "#ff8800"));
+    host.deliver_one(accent_action(
+        overview(),
+        "accent",
+        ActionKind::HoverEnter,
+        "#ff8800",
+    ));
     host.settle();
     let text = host.render(overview(), 120, 24).text();
     assert!(!text.contains("#ff8800"), "{text}");
@@ -191,7 +216,9 @@ fn events_090_unrelated_events_are_ignored_without_failure() {
 #[test]
 fn events_090_a_mixed_batch_is_handled_in_order() {
     let mut host = client_host();
-    host.settings().set("density", json!("compact")).expect("accepted");
+    host.settings()
+        .set("density", json!("compact"))
+        .expect("accepted");
     let submissions = host.deliver(vec![
         settings_changed(&["density"], SettingsOrigin::User),
         Event::ThemeChanged,
@@ -200,7 +227,10 @@ fn events_090_a_mixed_batch_is_handled_in_order() {
     host.settle();
     assert!(submissions.is_empty());
     let text = host.render(overview(), 120, 24).text();
-    assert!(text.contains("compact") && text.contains("#102030"), "{text}");
+    assert!(
+        text.contains("compact") && text.contains("#102030"),
+        "{text}"
+    );
 }
 
 /// REQ: F-090

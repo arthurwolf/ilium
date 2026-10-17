@@ -9,8 +9,8 @@ use std::time::Duration;
 
 use ilium_plugin_host::cli::CliOutput;
 pub use ilium_plugin_host::testing::ops::{
-    DevSession, Fault, LifeEvent, LockHold, Marker, OpsRig, PackageSpec, RegistryStep, ServerHandle,
-    UninstallStep, UpdateStage,
+    DevSession, Fault, LifeEvent, LockHold, Marker, OpsRig, PackageSpec, RegistryStep,
+    ServerHandle, UninstallStep, UpdateStage,
 };
 use serde_json::Value;
 
@@ -50,7 +50,11 @@ pub fn install(rig: &OpsRig, spec: &PackageSpec) -> CliOutput {
 /// Installs a spec and asserts exit code 0.
 pub fn install_ok(rig: &OpsRig, spec: &PackageSpec) -> CliOutput {
     let output = install(rig, spec);
-    assert_eq!(output.exit_code, 0, "install failed: {:?}", output.stdout_jsonl);
+    assert_eq!(
+        output.exit_code, 0,
+        "install failed: {:?}",
+        output.stdout_jsonl
+    );
     output
 }
 

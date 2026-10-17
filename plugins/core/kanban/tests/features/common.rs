@@ -47,7 +47,9 @@ pub fn manifest() -> Value {
 
 /// The first json code block after the heading text `heading`.
 pub fn json_block_after(page: &str, heading: &str) -> Value {
-    let start = page.find(heading).unwrap_or_else(|| panic!("heading {heading} missing"));
+    let start = page
+        .find(heading)
+        .unwrap_or_else(|| panic!("heading {heading} missing"));
     let rest = &page[start..];
     let open = rest.find("```json\n").expect("json block") + "```json\n".len();
     let close = rest[open..].find("```").expect("block end");
@@ -57,7 +59,10 @@ pub fn json_block_after(page: &str, heading: &str) -> Value {
 /// A client-side host with the manifest grants; the file system holds `board_text` at `BOARD_PATH`
 /// (when given) before the plugin activates.
 pub fn client_host_with(board_text: Option<&str>) -> FakeHost {
-    let mut host = FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("client").build();
+    let mut host = FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("client")
+        .build();
     if let Some(text) = board_text {
         host.fs().write(BOARD_PATH, text.as_bytes());
     }

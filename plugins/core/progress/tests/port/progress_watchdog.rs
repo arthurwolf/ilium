@@ -39,7 +39,10 @@ fn port_059_failed_health_is_sticky_and_carries_the_reason() {
     tick(&mut host, 120);
     let record = status(&mut host, pane);
     assert_eq!(health_of(&record, id), "failed");
-    assert!(!record["monitors"][0]["monitor_health"]["last_error"].as_str().unwrap_or_default().is_empty());
+    assert!(!record["monitors"][0]["monitor_health"]["last_error"]
+        .as_str()
+        .unwrap_or_default()
+        .is_empty());
 }
 
 /// REQ: PORT:ilium-server/src/progress_watchdog.rs::outcome_with_live_delivery_task_is_left_alone
@@ -47,7 +50,11 @@ fn port_059_failed_health_is_sticky_and_carries_the_reason() {
 fn port_060_an_outcome_whose_delivery_is_still_in_flight_is_not_typed_twice() {
     let mut host = activated_server();
     let pane = settled(&mut host);
-    assert_eq!(host.pending_requests().len(), 1, "the delivery request is still pending");
+    assert_eq!(
+        host.pending_requests().len(),
+        1,
+        "the delivery request is still pending"
+    );
     host.process().allow_unexpected();
     pass(&mut host, 19_000);
     assert_eq!(typed_texts(&host, pane).len(), 1);
@@ -70,10 +77,18 @@ fn port_060_an_outcome_is_typed_into_the_pane_that_registered_it_and_no_other() 
 fn port_059_a_monitor_whose_observation_stopped_reports_failed_health_with_its_reason() {
     let (mut host, pane) = host_with_pane();
     let id = register(&mut host, pane, PROBE, &running(JOB, 10, "W"), &[]);
-    set_kernel_setting(&mut host, "ui.progress_monitor_enabled", serde_json::json!(false)).expect("accepted");
+    set_kernel_setting(
+        &mut host,
+        "ui.progress_monitor_enabled",
+        serde_json::json!(false),
+    )
+    .expect("accepted");
     let record = status(&mut host, pane);
     assert_eq!(health_of(&record, id), "failed");
-    assert!(record.to_string().contains("the task outcome is unknown"), "{record}");
+    assert!(
+        record.to_string().contains("the task outcome is unknown"),
+        "{record}"
+    );
 }
 
 /// REQ: PORT:ilium-server/src/progress_watchdog.rs::running_monitor_with_live_observation_task_is_left_alone
@@ -93,7 +108,12 @@ fn port_059_a_running_monitor_with_a_live_probe_loop_stays_healthy() {
 fn port_059_a_monitor_that_is_no_longer_observed_makes_no_further_probe_runs() {
     let (mut host, pane) = host_with_pane();
     register(&mut host, pane, PROBE, &running(JOB, 10, "W"), &[]);
-    set_kernel_setting(&mut host, "ui.progress_monitor_enabled", serde_json::json!(false)).expect("accepted");
+    set_kernel_setting(
+        &mut host,
+        "ui.progress_monitor_enabled",
+        serde_json::json!(false),
+    )
+    .expect("accepted");
     let runs = probe_runs(&mut host);
     host.process().allow_unexpected();
     tick(&mut host, 60);

@@ -22,7 +22,11 @@ fn figures(page: &str) -> Vec<String> {
                 _ => {}
             }
         }
-        found.push(text.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">"));
+        found.push(
+            text.replace("&amp;", "&")
+                .replace("&lt;", "<")
+                .replace("&gt;", ">"),
+        );
         rest = &after[end..];
     }
     found
@@ -30,14 +34,21 @@ fn figures(page: &str) -> Vec<String> {
 
 /// Table rows (cells trimmed) of the first table after `heading`.
 fn table_after(page: &str, heading: &str) -> Vec<Vec<String>> {
-    let start = page.find(heading).unwrap_or_else(|| panic!("{heading} missing"));
+    let start = page
+        .find(heading)
+        .unwrap_or_else(|| panic!("{heading} missing"));
     page[start..]
         .lines()
         .skip(1)
         .skip_while(|line| !line.starts_with('|'))
         .take_while(|line| line.starts_with('|'))
         .skip(2)
-        .map(|line| line.trim_matches('|').split('|').map(|cell| cell.trim().to_string()).collect())
+        .map(|line| {
+            line.trim_matches('|')
+                .split('|')
+                .map(|cell| cell.trim().to_string())
+                .collect()
+        })
         .collect()
 }
 
@@ -63,7 +74,8 @@ fn doc_109_the_panes_figure_lists_two_sessions_with_cost_only_on_agents() {
 /// REQ: F-036, F-113
 #[test]
 fn doc_113_the_dialog_golden_equals_the_page_figure() {
-    let golden = std::fs::read_to_string(golden_path("ask_for_update_48.txt")).expect("golden exists");
+    let golden =
+        std::fs::read_to_string(golden_path("ask_for_update_48.txt")).expect("golden exists");
     let figures = figures(&page_text());
     assert_eq!(golden.trim_end_matches('\n'), figures[1]);
 }
@@ -111,7 +123,8 @@ fn doc_110_reference_extension_table_agrees_with_the_page() {
 #[test]
 fn doc_110_reference_counts_for_fleet_are_two_points_two_services_one_topic_replaceable() {
     let reference = page("reference-core-extension-points");
-    assert!(reference.contains("| [Fleet](/pages/core-plugin-fleet/) | `ilium.core.fleet` | 2 | 2 | 1 | yes |"));
+    assert!(reference
+        .contains("| [Fleet](/pages/core-plugin-fleet/) | `ilium.core.fleet` | 2 | 2 | 1 | yes |"));
 }
 
 /// REQ: F-110, F-109
@@ -141,7 +154,9 @@ fn doc_110_the_page_states_the_plugin_is_replaceable() {
 #[test]
 fn doc_110_the_selectors_example_is_valid_and_targets_the_selectors_point() {
     let page = page_text();
-    let start = page.find("#### Example: Lets `ilium broadcast --select reviewers`").expect("example heading");
+    let start = page
+        .find("#### Example: Lets `ilium broadcast --select reviewers`")
+        .expect("example heading");
     let rest = &page[start..];
     let open = rest.find("```json\n").expect("block") + 8;
     let close = rest[open..].find("```").expect("end");
@@ -152,7 +167,10 @@ fn doc_110_the_selectors_example_is_valid_and_targets_the_selectors_point() {
     assert_eq!(entry["priority"], 50);
     assert_eq!(entry["entry"]["title"], "Reviewers");
     assert_eq!(entry["entry"]["rule"]["tag"], "review");
-    assert_eq!(example["capabilities"]["server"][0], "extensions.contribute:ilium.core.fleet/selectors");
+    assert_eq!(
+        example["capabilities"]["server"][0],
+        "extensions.contribute:ilium.core.fleet/selectors"
+    );
 }
 
 /// REQ: COR-022
@@ -168,10 +186,16 @@ fn doc_022_the_disabled_effect_row_lists_the_commands_the_manifest_declares() {
     // the manifest contributes must be among the failing ones (a plugin-owned command cannot
     // stay alive when its owner is off).
     let boot = page("reference-kernel-and-boot");
-    let row = boot.lines().find(|line| line.starts_with("| Fleet | `ilium panes`")).expect("effect row");
+    let row = boot
+        .lines()
+        .find(|line| line.starts_with("| Fleet | `ilium panes`"))
+        .expect("effect row");
     for command in ["ilium panes", "ilium broadcast", "ilium new-pane"] {
         let failing = row.split("| ").nth(2).unwrap_or("");
-        assert!(failing.contains(command), "{command} not listed as failing in: {row}");
+        assert!(
+            failing.contains(command),
+            "{command} not listed as failing in: {row}"
+        );
     }
 }
 
@@ -187,13 +211,17 @@ fn doc_010_the_kernel_answers_404_for_the_route_while_the_plugin_is_off() {
 #[test]
 fn doc_011_the_api_tab_keeps_the_config_table_and_has_no_readers() {
     assert!(page_text().contains("| `api` | API | `[api]` | none |"));
-    assert!(page_text().contains("The values stay in the same `config.toml` tables as before, so no user setting moves."));
+    assert!(page_text().contains(
+        "The values stay in the same `config.toml` tables as before, so no user setting moves."
+    ));
 }
 
 /// REQ: F-058
 #[test]
 fn doc_058_the_page_says_the_kernel_owns_the_listener_port_and_switch() {
-    assert!(page_text().contains("The kernel owns the HTTP listener, its port and its on/off setting (Settings, API tab)."));
+    assert!(page_text().contains(
+        "The kernel owns the HTTP listener, its port and its on/off setting (Settings, API tab)."
+    ));
 }
 
 /// REQ: F-036
@@ -215,7 +243,9 @@ fn doc_036_the_notifications_handoff_sample_uses_the_agent_question_channel() {
 /// REQ: F-058
 #[test]
 fn doc_058_the_automation_doc_lists_the_four_request_fields() {
-    let automation = std::fs::read_to_string(crate::common::workspace_root().join("src/docs/automation.md")).expect("doc");
+    let automation =
+        std::fs::read_to_string(crate::common::workspace_root().join("src/docs/automation.md"))
+            .expect("doc");
     for field in ["`agent_type`", "`project`", "`prompt`", "`workspace`"] {
         assert!(automation.contains(field), "{field}");
     }

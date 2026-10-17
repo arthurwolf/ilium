@@ -25,7 +25,12 @@ fn port_090_moving_from_the_button_onto_the_popover_keeps_the_preview() {
     hover(&mut host, ActionKind::HoverEnter);
     host.advance_clock(200);
     host.settle();
-    host.send_action(launcher(), "surface", ActionKind::HoverEnter, ActionValue::None);
+    host.send_action(
+        launcher(),
+        "surface",
+        ActionKind::HoverEnter,
+        ActionValue::None,
+    );
     hover(&mut host, ActionKind::HoverLeave);
     host.advance_clock(250);
     host.settle();
@@ -84,7 +89,10 @@ fn port_090_a_24_column_sidebar_shows_the_choices_on_one_row() {
     host.advance_clock(200);
     host.settle();
     let screen = host.render(launcher(), 24, 24);
-    let lines: Vec<String> = (0..24).map(|row| screen.row(row)).filter(|line| !line.trim().is_empty()).collect();
+    let lines: Vec<String> = (0..24)
+        .map(|row| screen.row(row))
+        .filter(|line| !line.trim().is_empty())
+        .collect();
     assert_eq!(lines.len(), 1, "{lines:?}");
 }
 
@@ -96,8 +104,14 @@ fn port_090_clicking_a_choice_on_the_narrow_row_is_handled() {
     host.advance_clock(200);
     host.settle();
     let screen = host.render(launcher(), 24, 24);
-    let row = (0..24).find(|row| !screen.row(*row).trim().is_empty()).expect("one row");
-    let column = screen.row(row).chars().position(|c| !c.is_whitespace()).expect("a choice") as u16;
+    let row = (0..24)
+        .find(|row| !screen.row(*row).trim().is_empty())
+        .expect("one row");
+    let column = screen
+        .row(row)
+        .chars()
+        .position(|c| !c.is_whitespace())
+        .expect("a choice") as u16;
     assert!(host.click(launcher(), column, row));
 }
 
@@ -105,7 +119,12 @@ fn port_090_clicking_a_choice_on_the_narrow_row_is_handled() {
 #[test]
 fn port_090_pinning_shows_the_menu_at_once_and_it_does_not_expire() {
     let mut host = client_host();
-    host.send_action(launcher(), "anchor", ActionKind::Activated, ActionValue::None);
+    host.send_action(
+        launcher(),
+        "anchor",
+        ActionKind::Activated,
+        ActionValue::None,
+    );
     host.settle();
     assert!(visible(&mut host));
     hover(&mut host, ActionKind::HoverLeave);
@@ -158,7 +177,10 @@ fn port_089_every_dialog_row_has_the_same_width() {
             .map(|row| screen.row(row).trim().chars().count())
             .filter(|count| *count > 0)
             .collect();
-        assert!(widths.windows(2).all(|pair| pair[0] == pair[1]), "{width}: {widths:?}");
+        assert!(
+            widths.windows(2).all(|pair| pair[0] == pair[1]),
+            "{width}: {widths:?}"
+        );
     }
 }
 
@@ -166,14 +188,25 @@ fn port_089_every_dialog_row_has_the_same_width() {
 #[test]
 fn port_089_half_progress_labels_fifty_percent_and_fills_half_the_bar() {
     let mut host = client_host();
-    host.send_action(startup(), "progress", ActionKind::Changed, ActionValue::Number(0.5));
+    host.send_action(
+        startup(),
+        "progress",
+        ActionKind::Changed,
+        ActionValue::Number(0.5),
+    );
     host.settle();
     let text = host.render(startup(), 100, 30).text();
     assert!(text.contains(" 50%"), "{text}");
-    let line = text.lines().find(|line| line.contains('\u{2588}')).expect("bar row");
+    let line = text
+        .lines()
+        .find(|line| line.contains('\u{2588}'))
+        .expect("bar row");
     let filled = line.chars().filter(|c| *c == '\u{2588}').count();
     let empty = line.chars().filter(|c| *c == '\u{2591}').count();
-    assert!(filled > 0 && empty > 0 && filled.abs_diff(empty) <= 1, "{line}");
+    assert!(
+        filled > 0 && empty > 0 && filled.abs_diff(empty) <= 1,
+        "{line}"
+    );
 }
 
 /// REQ: PORT:ilium-client/src/startup_dialog.rs::small_terminals_get_no_dialog_and_large_ones_get_it_centred, F-089
@@ -189,7 +222,9 @@ fn port_089_a_terminal_below_24_columns_or_7_rows_gets_no_dialog() {
 fn port_089_a_100_column_terminal_centres_a_64_column_dialog() {
     let mut host = client_host();
     let screen = host.render(startup(), 100, 30);
-    let row = (0..30).find(|row| screen.row(*row).contains('\u{256d}')).expect("top border");
+    let row = (0..30)
+        .find(|row| screen.row(*row).contains('\u{256d}'))
+        .expect("top border");
     let line = screen.row(row);
     assert_eq!(line.chars().position(|c| c == '\u{256d}'), Some(18));
     assert_eq!(line.trim().chars().count(), 64);
@@ -201,9 +236,15 @@ fn port_089_the_top_border_carries_the_shared_chrome_title() {
     for width in [24u16, 40, 64] {
         let mut host = client_host();
         let screen = host.render(startup(), width + 4, 7);
-        let line = (0..7).map(|row| screen.row(row)).find(|line| line.contains('\u{256d}')).expect("top");
+        let line = (0..7)
+            .map(|row| screen.row(row))
+            .find(|line| line.contains('\u{256d}'))
+            .expect("top");
         let line = line.trim();
-        assert!(line.starts_with("\u{256d}  \u{2261} \u{25cf} \u{b7} Ilium \u{2500}"), "{line:?}");
+        assert!(
+            line.starts_with("\u{256d}  \u{2261} \u{25cf} \u{b7} Ilium \u{2500}"),
+            "{line:?}"
+        );
         assert!(line.ends_with('\u{256e}'));
         assert_eq!(line.chars().count(), usize::from(width));
     }
@@ -229,7 +270,9 @@ fn confirm() -> ViewTarget {
 fn port_090_the_create_button_keeps_its_label_and_shows_enter_only_from_18_columns() {
     for width in [16u16, 24] {
         let mut host = client_host();
-        let text = host.render(ViewTarget::Popup("form-actions".to_string()), width, 1).text();
+        let text = host
+            .render(ViewTarget::Popup("form-actions".to_string()), width, 1)
+            .text();
         assert!(text.contains("Create board"), "{width}: {text:?}");
         assert_eq!(text.contains("Enter"), width >= 18, "{width}: {text:?}");
     }
@@ -240,7 +283,10 @@ fn port_090_the_create_button_keeps_its_label_and_shows_enter_only_from_18_colum
 fn port_090_the_compact_prompt_hint_is_complete_and_fits_the_row() {
     let mut host = client_host();
     let screen = host.render(ViewTarget::Popup("text-prompt".to_string()), 40, 12);
-    let hint = (0..12).map(|row| screen.row(row)).find(|line| line.contains("Esc cancel")).expect("hint row");
+    let hint = (0..12)
+        .map(|row| screen.row(row))
+        .find(|line| line.contains("Esc cancel"))
+        .expect("hint row");
     assert!(hint.contains("Enter Apply"), "{hint:?}");
     assert!(hint.trim().chars().count() <= 40);
 }
@@ -251,9 +297,15 @@ fn port_090_the_confirmation_hint_adapts_to_the_width() {
     for width in [24u16, 30, 40, 60, 80] {
         let mut host = client_host();
         let text = host.render(confirm(), width, 12).text();
-        assert!(text.replace(' ', "").contains("Y/N"), "width {width}: {text}");
+        assert!(
+            text.replace(' ', "").contains("Y/N"),
+            "width {width}: {text}"
+        );
         if width >= 60 {
-            assert!(text.contains("Enter confirm") && text.contains("Esc cancel"), "{width}");
+            assert!(
+                text.contains("Enter confirm") && text.contains("Esc cancel"),
+                "{width}"
+            );
         }
         if width >= 80 {
             assert!(text.contains("Click either button"), "{width}");
@@ -266,10 +318,15 @@ fn port_090_the_confirmation_hint_adapts_to_the_width() {
 fn port_090_a_32_by_8_confirmation_has_two_separate_clickable_buttons() {
     let mut host = client_host();
     let screen = host.render(confirm(), 32, 8);
-    let row = (0..8).find(|row| screen.row(*row).contains("Cancel")).expect("button row");
+    let row = (0..8)
+        .find(|row| screen.row(*row).contains("Cancel"))
+        .expect("button row");
     let line = screen.row(row);
     let cancel = line.find("Cancel").expect("cancel") as u16;
-    let ok = line.rfind("Close").or_else(|| line.rfind("Confirm")).expect("confirm") as u16;
+    let ok = line
+        .rfind("Close")
+        .or_else(|| line.rfind("Confirm"))
+        .expect("confirm") as u16;
     assert!(cancel + 6 <= ok);
     assert!(host.click(confirm(), cancel, row));
     assert!(host.click(confirm(), ok, row));
@@ -293,7 +350,10 @@ fn port_090_the_destructive_button_tone_differs_from_the_neutral_cancel_tone() {
     let (keep_row, keep_column) = screen.find("Keep open").expect("keep button");
     let danger = screen.cell(row, column).background;
     let neutral = screen.cell(keep_row, keep_column).background;
-    assert_ne!(danger, neutral, "tones differ: the destructive button is red, the neutral one dark grey");
+    assert_ne!(
+        danger, neutral,
+        "tones differ: the destructive button is red, the neutral one dark grey"
+    );
 }
 
 /// REQ: PORT:ilium-client/src/modal.rs::text_prompt_renders_clickable_cancel_and_primary_actions, F-090
@@ -304,5 +364,8 @@ fn port_090_the_text_prompt_shows_cancel_and_a_distinct_primary_action() {
     assert!(screen.text().contains("Cancel"));
     let (row, column) = screen.find("Rename").expect("primary");
     let (cancel_row, cancel_column) = screen.find("Cancel").expect("cancel");
-    assert_ne!(screen.cell(row, column).background, screen.cell(cancel_row, cancel_column).background);
+    assert_ne!(
+        screen.cell(row, column).background,
+        screen.cell(cancel_row, cancel_column).background
+    );
 }

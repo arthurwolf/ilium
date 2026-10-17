@@ -8,7 +8,12 @@ use crate::common::{
 };
 
 fn key(name: &str) -> Event {
-    Event::KeyPressed(KeyEvent { grab: GrabId(0), pane: None, chord: name.to_string(), repeat: false })
+    Event::KeyPressed(KeyEvent {
+        grab: GrabId(0),
+        pane: None,
+        chord: name.to_string(),
+        repeat: false,
+    })
 }
 
 fn open_picker(lines: &[&str]) -> ilium_plugin_sdk::testing::FakeHost {
@@ -22,7 +27,11 @@ fn open_picker(lines: &[&str]) -> ilium_plugin_sdk::testing::FakeHost {
 fn feature_065_candidates_message_opens_the_popup_view() {
     let mut host = client_host();
     let out = intents(&host.deliver_one(candidates_message(&["src/a.rs"])));
-    assert!(out.iter().any(|intent| matches!(intent, Intent::OpenView(view) if view.view == picker_target())), "{out:?}");
+    assert!(
+        out.iter()
+            .any(|intent| matches!(intent, Intent::OpenView(view) if view.view == picker_target())),
+        "{out:?}"
+    );
 }
 
 /// REQ: F-065
@@ -30,7 +39,11 @@ fn feature_065_candidates_message_opens_the_popup_view() {
 fn feature_065_an_empty_candidates_message_opens_nothing() {
     let mut host = client_host();
     let out = intents(&host.deliver_one(candidates_message(&[])));
-    assert!(!out.iter().any(|intent| matches!(intent, Intent::OpenView(_))), "{out:?}");
+    assert!(
+        !out.iter()
+            .any(|intent| matches!(intent, Intent::OpenView(_))),
+        "{out:?}"
+    );
 }
 
 /// REQ: F-065
@@ -64,7 +77,11 @@ fn feature_065_out_of_range_numbers_copy_nothing() {
 fn feature_065_escape_closes_the_popup_without_copying() {
     let mut host = open_picker(&["a"]);
     let out = intents(&host.deliver_one(key("esc")));
-    assert!(out.iter().any(|intent| matches!(intent, Intent::CloseView(_))), "{out:?}");
+    assert!(
+        out.iter()
+            .any(|intent| matches!(intent, Intent::CloseView(_))),
+        "{out:?}"
+    );
     assert_eq!(host.clipboard().last_text(), None);
 }
 

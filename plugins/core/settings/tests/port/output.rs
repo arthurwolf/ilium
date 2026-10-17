@@ -33,9 +33,18 @@ fn port_089_an_identical_scene_renders_identical_cells() {
     let second = host.render(tab("icons"), 80, 24);
     for row in 0..24 {
         for column in 0..80 {
-            assert_eq!(first.cell(row, column).symbol, second.cell(row, column).symbol);
-            assert_eq!(first.cell(row, column).foreground, second.cell(row, column).foreground);
-            assert_eq!(first.cell(row, column).background, second.cell(row, column).background);
+            assert_eq!(
+                first.cell(row, column).symbol,
+                second.cell(row, column).symbol
+            );
+            assert_eq!(
+                first.cell(row, column).foreground,
+                second.cell(row, column).foreground
+            );
+            assert_eq!(
+                first.cell(row, column).background,
+                second.cell(row, column).background
+            );
         }
     }
 }
@@ -44,12 +53,23 @@ fn port_089_an_identical_scene_renders_identical_cells() {
 #[test]
 fn port_089_a_blocked_or_failed_write_leaves_the_plugin_views_usable() {
     let mut host = client_host();
-    host.inject_failure("settings.set", PluginError::new(ErrorCode::Io, "write failed"));
+    host.inject_failure(
+        "settings.set",
+        PluginError::new(ErrorCode::Io, "write failed"),
+    );
     toggle(&mut host, "user-interface", "ui.use_stable_glyphs", true);
-    assert_eq!(value_of(&mut host, "ui.use_stable_glyphs"), Some(json!(false)), "a failed write is never reported as stored");
+    assert_eq!(
+        value_of(&mut host, "ui.use_stable_glyphs"),
+        Some(json!(false)),
+        "a failed write is never reported as stored"
+    );
     let _ = render_checked(&mut host, tab("user-interface"), 80, 24);
     toggle(&mut host, "user-interface", "ui.use_stable_glyphs", true);
-    assert_eq!(value_of(&mut host, "ui.use_stable_glyphs"), Some(json!(true)), "the failed write is not retried behind the user's back");
+    assert_eq!(
+        value_of(&mut host, "ui.use_stable_glyphs"),
+        Some(json!(true)),
+        "the failed write is not retried behind the user's back"
+    );
 }
 
 /// REQ: PORT:ilium-client/src/presentation.rs::reservations_cannot_cross_output_owners, PORT:ilium-client/src/presentation.rs::output_worker_requests_its_admitted_native_stack, PORT:ilium-client/src/presentation.rs::storage_refusal_precedes_spawn_and_drops_original_cleanup_capture_once, PORT:ilium-client/src/presentation.rs::thread_refusal_precedes_spawn_and_initial_output_has_no_buffer_allocation, PORT:ilium-client/src/presentation.rs::output_panic_restores_on_output_thread_and_reports_failure, PORT:ilium-client/src/presentation.rs::restoration_waits_for_blocked_output_and_drain, PORT:ilium-client/src/presentation.rs::shutdown_waits_for_original_thread_local_cleanup_after_body_completion, F-089, F-090
@@ -57,10 +77,22 @@ fn port_089_a_blocked_or_failed_write_leaves_the_plugin_views_usable() {
 fn port_089_each_view_keeps_its_own_frame_and_no_view_borrows_anothers_cells() {
     let mut host = client_host();
     let settings = host.render(tab("user-interface"), 60, 12).text();
-    let panel = host.render(ViewTarget::Panel("overview".to_string()), 60, 12).text();
-    let step = host.render(ViewTarget::OnboardingStep("first-run".to_string()), 60, 12).text();
+    let panel = host
+        .render(ViewTarget::Panel("overview".to_string()), 60, 12)
+        .text();
+    let step = host
+        .render(ViewTarget::OnboardingStep("first-run".to_string()), 60, 12)
+        .text();
     assert_eq!(host.render(tab("user-interface"), 60, 12).text(), settings);
-    assert_eq!(host.render(ViewTarget::Panel("overview".to_string()), 60, 12).text(), panel);
-    assert_eq!(host.render(ViewTarget::OnboardingStep("first-run".to_string()), 60, 12).text(), step);
+    assert_eq!(
+        host.render(ViewTarget::Panel("overview".to_string()), 60, 12)
+            .text(),
+        panel
+    );
+    assert_eq!(
+        host.render(ViewTarget::OnboardingStep("first-run".to_string()), 60, 12)
+            .text(),
+        step
+    );
     assert!(host.failures().is_empty());
 }

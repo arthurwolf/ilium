@@ -4,7 +4,6 @@
 //! implementing the lifecycle, the handler and the exports its manifest lists. Every body is
 //! `unimplemented!` until the implementation phase moves the feature here.
 
-use ilium_plugin_sdk::{Handler, JobRunner, Lifecycle, MenuProvider, ServiceProvider, Views, ilium_plugin};
 use ilium_plugin_sdk::generated::exports::menu_provider::MenuContext;
 use ilium_plugin_sdk::generated::exports::menu_provider::MenuEntry;
 use ilium_plugin_sdk::generated::exports::service_provider::ServiceCall;
@@ -16,6 +15,9 @@ use ilium_plugin_sdk::generated::types::ui::UiTree;
 use ilium_plugin_sdk::generated::types::ui::ViewTarget;
 use ilium_plugin_sdk::types::Activation;
 use ilium_plugin_sdk::types::PluginError;
+use ilium_plugin_sdk::{
+    ilium_plugin, Handler, JobRunner, Lifecycle, MenuProvider, ServiceProvider, Views,
+};
 
 /// The server side of `ilium.core.session-convert` (core-plugin-session-convert.md, world `ilium:server/base@0.1.0`).
 #[ilium_plugin(side = "server", exports = ["job-runner", "service-provider"])]

@@ -4,7 +4,10 @@ use crate::support::page;
 
 fn row_of(text: &str, code: &str) -> String {
     let prefix = format!("| `{code}` |");
-    text.lines().find(|line| line.starts_with(&prefix)).unwrap_or_else(|| panic!("row {code} missing")).to_string()
+    text.lines()
+        .find(|line| line.starts_with(&prefix))
+        .unwrap_or_else(|| panic!("row {code} missing"))
+        .to_string()
 }
 
 /// REQ: AUT-110, AUT-319
@@ -13,10 +16,19 @@ fn doc_aut_110_version_reused_cause_matches_the_defining_page() {
     let defining = page("reference-errors-and-limits");
     let row = row_of(&defining, "package.version-reused");
     assert!(row.contains("The version is already installed with different content"));
-    for guide in ["guide-publishing-and-support", "guide-compatibility-and-upgrades"] {
+    for guide in [
+        "guide-publishing-and-support",
+        "guide-compatibility-and-upgrades",
+    ] {
         let text = page(guide);
-        assert!(text.contains("`package.version-reused`"), "{guide} cites the code");
-        assert!(text.contains("different content"), "{guide} gives the same cause");
+        assert!(
+            text.contains("`package.version-reused`"),
+            "{guide} cites the code"
+        );
+        assert!(
+            text.contains("different content"),
+            "{guide} gives the same cause"
+        );
     }
 }
 
@@ -38,7 +50,8 @@ fn doc_aut_110_unknown_key_code_is_defined_and_cited() {
 #[test]
 fn doc_aut_110_platform_code_is_defined_in_the_package_format() {
     assert!(page("reference-package-format").contains("`package.platform-unsupported`"));
-    assert!(page("guide-publishing-and-support").contains("refused on Windows and macOS with `package.platform-unsupported`"));
+    assert!(page("guide-publishing-and-support")
+        .contains("refused on Windows and macOS with `package.platform-unsupported`"));
 }
 
 /// REQ: AUT-311 WARN

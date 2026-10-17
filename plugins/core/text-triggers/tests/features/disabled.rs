@@ -12,8 +12,14 @@ const NOTICE: &str = "Text triggers is disabled. Values are kept.";
 #[test]
 fn disabled_022_the_kernel_boot_table_says_no_output_filtering() {
     let page = manual_page("reference-kernel-and-boot.md");
-    let row = page.lines().find(|line| line.starts_with("| Text triggers | No output filtering")).expect("row");
-    assert_eq!(row, "| Text triggers | No output filtering | Output reaches the screen unchanged |");
+    let row = page
+        .lines()
+        .find(|line| line.starts_with("| Text triggers | No output filtering"))
+        .expect("row");
+    assert_eq!(
+        row,
+        "| Text triggers | No output filtering | Output reaches the screen unchanged |"
+    );
 }
 
 /// REQ: COR-022
@@ -34,7 +40,10 @@ fn disabled_022_a_matched_line_after_disable_sends_nothing() {
     let submissions = host.deliver_one(matched(pane, &rule_id(0), "Continue? (y/n)", 3));
     host.settle();
     assert!(send_inputs(&submissions).is_empty(), "{submissions:?}");
-    assert!(host.submitted().iter().all(|s| send_inputs(std::slice::from_ref(s)).is_empty()));
+    assert!(host
+        .submitted()
+        .iter()
+        .all(|s| send_inputs(std::slice::from_ref(s)).is_empty()));
 }
 
 /// REQ: COR-022, COR-033
@@ -53,7 +62,13 @@ fn disabled_022_the_tab_shows_the_notice_and_the_stored_pattern_read_only() {
     let mut host = client_host();
     set_rules(&mut host, &["\\(y/n\\)\\s*$"], &["y"]);
     host.deactivate(DeactivationReason::Disabled);
-    let text = host.render(ViewTarget::SettingsPage("text-triggers".to_string()), 80, 12).text();
+    let text = host
+        .render(
+            ViewTarget::SettingsPage("text-triggers".to_string()),
+            80,
+            12,
+        )
+        .text();
     assert!(text.contains(NOTICE), "{text}");
     assert!(text.contains("\\(y/n\\)\\s*$"), "{text}");
 }

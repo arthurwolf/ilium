@@ -44,7 +44,10 @@ fn feature_026_aider_is_identified_with_its_own_name_as_class_other() {
 /// REQ: F-026
 #[test]
 fn feature_026_the_manifest_signature_example_agent_is_identified() {
-    assert_eq!(identify_name("example-agent").as_deref(), Some("example-agent"));
+    assert_eq!(
+        identify_name("example-agent").as_deref(),
+        Some("example-agent")
+    );
 }
 
 /// REQ: F-026
@@ -84,7 +87,10 @@ fn feature_026_a_name_that_contains_the_signature_keeps_the_registry_signature()
 /// REQ: F-026
 #[test]
 fn feature_026_an_agent_below_a_shell_is_found_in_the_list() {
-    let processes = vec![process("bash", &["bash"]), process("claude", &["claude", "--resume"])];
+    let processes = vec![
+        process("bash", &["bash"]),
+        process("claude", &["claude", "--resume"]),
+    ];
     assert_eq!(identify(processes).as_deref(), Some("claude"));
 }
 
@@ -99,8 +105,21 @@ fn feature_026_an_interpreter_wrapper_is_unwrapped_through_its_argument_vector()
 #[test]
 fn feature_026_the_option_terminator_keeps_the_next_operand_literal() {
     for interpreter in ["sh", "bash", "fish", "node", "bun", "env", "python3"] {
-        let processes = vec![process(interpreter, &[interpreter, "--", "/tmp/path with spaces/codex", "-c", "ignored config"])];
-        assert_eq!(identify(processes).as_deref(), Some("codex"), "{interpreter}");
+        let processes = vec![process(
+            interpreter,
+            &[
+                interpreter,
+                "--",
+                "/tmp/path with spaces/codex",
+                "-c",
+                "ignored config",
+            ],
+        )];
+        assert_eq!(
+            identify(processes).as_deref(),
+            Some("codex"),
+            "{interpreter}"
+        );
     }
 }
 
@@ -124,7 +143,10 @@ fn feature_026_a_shell_option_operand_cannot_impersonate_an_agent() {
 /// REQ: F-026
 #[test]
 fn feature_026_a_simple_quoted_fish_command_names_the_agent() {
-    let processes = vec![process("fish", &["fish", "--command", "'/tmp/codex' --prompt 'literal ;'"])];
+    let processes = vec![process(
+        "fish",
+        &["fish", "--command", "'/tmp/codex' --prompt 'literal ;'"],
+    )];
     assert_eq!(identify(processes).as_deref(), Some("codex"));
 }
 
@@ -138,7 +160,10 @@ fn feature_026_a_dash_c_operand_after_the_terminator_is_not_an_agent() {
 /// REQ: F-026
 #[test]
 fn feature_026_a_missing_argument_vector_still_matches_by_process_name() {
-    assert_eq!(identify(vec![process("codex", &[])]).as_deref(), Some("codex"));
+    assert_eq!(
+        identify(vec![process("codex", &[])]).as_deref(),
+        Some("codex")
+    );
 }
 
 /// REQ: F-026

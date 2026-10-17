@@ -128,7 +128,10 @@ fn feature_029_the_goal_badge_submission_is_keyed_per_node() {
 #[test]
 fn feature_029_an_ended_goal_clears_the_goal_slot() {
     let mut host = server_host();
-    let submissions = host.deliver_one(Event::AgentGoalChanged(AgentGoalEvent { node: NodeId(7), goal: None }));
+    let submissions = host.deliver_one(Event::AgentGoalChanged(AgentGoalEvent {
+        node: NodeId(7),
+        goal: None,
+    }));
     assert_eq!(cleared(&submissions, "goal"), [NodeId(7)]);
     assert!(decorations(&submissions, "goal").is_empty());
 }
@@ -137,7 +140,10 @@ fn feature_029_an_ended_goal_clears_the_goal_slot() {
 #[test]
 fn feature_029_the_clear_submission_is_keyed_per_node() {
     let mut host = server_host();
-    let submissions = host.deliver_one(Event::AgentGoalChanged(AgentGoalEvent { node: NodeId(7), goal: None }));
+    let submissions = host.deliver_one(Event::AgentGoalChanged(AgentGoalEvent {
+        node: NodeId(7),
+        goal: None,
+    }));
     assert_eq!(submissions[0].dedup_key.as_deref(), Some("goal-clear-7"));
 }
 
@@ -145,7 +151,10 @@ fn feature_029_the_clear_submission_is_keyed_per_node() {
 #[test]
 fn feature_029_clear_decoration_targets_the_goal_slot_of_the_node() {
     let mut host = server_host();
-    let submissions = host.deliver_one(Event::AgentGoalChanged(AgentGoalEvent { node: NodeId(3), goal: None }));
+    let submissions = host.deliver_one(Event::AgentGoalChanged(AgentGoalEvent {
+        node: NodeId(3),
+        goal: None,
+    }));
     match &submissions[0].intent {
         Intent::ClearDecoration(key) => {
             assert_eq!(key.node, NodeId(3));
@@ -160,8 +169,14 @@ fn feature_029_clear_decoration_targets_the_goal_slot_of_the_node() {
 fn feature_029_a_goal_then_its_end_submits_set_then_clear_in_order() {
     let mut host = server_host();
     let batch = vec![
-        Event::AgentGoalChanged(AgentGoalEvent { node: NodeId(5), goal: Some("a".to_string()) }),
-        Event::AgentGoalChanged(AgentGoalEvent { node: NodeId(5), goal: None }),
+        Event::AgentGoalChanged(AgentGoalEvent {
+            node: NodeId(5),
+            goal: Some("a".to_string()),
+        }),
+        Event::AgentGoalChanged(AgentGoalEvent {
+            node: NodeId(5),
+            goal: None,
+        }),
     ];
     let submissions = host.deliver(batch);
     assert_eq!(submissions.len(), 2);
@@ -174,11 +189,23 @@ fn feature_029_a_goal_then_its_end_submits_set_then_clear_in_order() {
 fn feature_029_goals_of_two_nodes_use_distinct_keys() {
     let mut host = server_host();
     let submissions = host.deliver(vec![
-        Event::AgentGoalChanged(AgentGoalEvent { node: NodeId(1), goal: Some("one".to_string()) }),
-        Event::AgentGoalChanged(AgentGoalEvent { node: NodeId(2), goal: Some("two".to_string()) }),
+        Event::AgentGoalChanged(AgentGoalEvent {
+            node: NodeId(1),
+            goal: Some("one".to_string()),
+        }),
+        Event::AgentGoalChanged(AgentGoalEvent {
+            node: NodeId(2),
+            goal: Some("two".to_string()),
+        }),
     ]);
-    let keys: Vec<_> = submissions.iter().map(|submission| submission.dedup_key.clone()).collect();
-    assert_eq!(keys, [Some("goal-1".to_string()), Some("goal-2".to_string())]);
+    let keys: Vec<_> = submissions
+        .iter()
+        .map(|submission| submission.dedup_key.clone())
+        .collect();
+    assert_eq!(
+        keys,
+        [Some("goal-1".to_string()), Some("goal-2".to_string())]
+    );
 }
 
 /// REQ: F-029

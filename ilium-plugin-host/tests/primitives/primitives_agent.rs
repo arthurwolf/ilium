@@ -3,7 +3,8 @@
 //! `ilium:primitives/agent`.
 
 use ilium_plugin_api::generated::primitives::agent::{
-    HostAgent, SessionRef, SignatureAction, SignatureSpec, TranscriptQuery, TranscriptTurn, TurnRole,
+    HostAgent, SessionRef, SignatureAction, SignatureSpec, TranscriptQuery, TranscriptTurn,
+    TurnRole,
 };
 use ilium_plugin_api::generated::types::ids::{NodeId, RequestId};
 use ilium_plugin_api::generated::types::tree::{AgentActivity, AgentModel};
@@ -14,7 +15,13 @@ use crate::common::*;
 
 const AGENT_PANE: NodeId = NodeId(20);
 const READ: &[&str] = &["agent.read"];
-const ALL: &[&str] = &["agent.read", "agent.read-prompts", "agent.signatures", "agent.control", "agent.transcript"];
+const ALL: &[&str] = &[
+    "agent.read",
+    "agent.read-prompts",
+    "agent.signatures",
+    "agent.control",
+    "agent.transcript",
+];
 
 fn agent_rig(grants: &[&str]) -> Rig {
     let rig = server_rig(grants);
@@ -35,7 +42,11 @@ fn signature(id: &str) -> SignatureSpec {
 fn turns(count: usize) -> Vec<TranscriptTurn> {
     (0..count)
         .map(|index| TranscriptTurn {
-            role: if index % 2 == 0 { TurnRole::User } else { TurnRole::Assistant },
+            role: if index % 2 == 0 {
+                TurnRole::User
+            } else {
+                TurnRole::Assistant
+            },
             text: format!("turn-{index}"),
             tool: None,
             at: None,
@@ -45,7 +56,11 @@ fn turns(count: usize) -> Vec<TranscriptTurn> {
 }
 
 fn query(last_turns: u32, max_bytes: u32) -> TranscriptQuery {
-    TranscriptQuery { pane: AGENT_PANE, last_turns, max_bytes }
+    TranscriptQuery {
+        pane: AGENT_PANE,
+        last_turns,
+        max_bytes,
+    }
 }
 
 // ---------------------------------------------------------------- PRI-010
@@ -54,28 +69,42 @@ fn query(last_turns: u32, max_bytes: u32) -> TranscriptQuery {
 #[test]
 fn pri_010_valid_signature_accepted() {
     let rig = agent_rig(ALL);
-    assert!(rig.host.agent().register_signature(signature("mytool")).is_ok());
+    assert!(rig
+        .host
+        .agent()
+        .register_signature(signature("mytool"))
+        .is_ok());
 }
 
 /// REQ: PRI-010
 #[test]
 fn pri_010_empty_id_invalid_argument() {
     let rig = agent_rig(ALL);
-    assert_eq!(error_of(rig.host.agent().register_signature(signature(""))), Some(ErrorCode::InvalidArgument));
+    assert_eq!(
+        error_of(rig.host.agent().register_signature(signature(""))),
+        Some(ErrorCode::InvalidArgument)
+    );
 }
 
 /// REQ: PRI-010
 #[test]
 fn pri_010_id_of_64_chars_accepted() {
     let rig = agent_rig(ALL);
-    assert!(rig.host.agent().register_signature(signature(&"a".repeat(64))).is_ok());
+    assert!(rig
+        .host
+        .agent()
+        .register_signature(signature(&"a".repeat(64)))
+        .is_ok());
 }
 
 /// REQ: PRI-010
 #[test]
 fn pri_010_id_of_65_chars_invalid_argument() {
     let rig = agent_rig(ALL);
-    let result = rig.host.agent().register_signature(signature(&"a".repeat(65)));
+    let result = rig
+        .host
+        .agent()
+        .register_signature(signature(&"a".repeat(65)));
     assert_eq!(error_of(result), Some(ErrorCode::InvalidArgument));
 }
 
@@ -85,7 +114,11 @@ fn pri_010_id_with_forbidden_characters_invalid_argument() {
     let rig = agent_rig(ALL);
     for id in ["Upper", "under_score", "dot.ted", "sp ace"] {
         let result = rig.host.agent().register_signature(signature(id));
-        assert_eq!(error_of(result), Some(ErrorCode::InvalidArgument), "id {id:?}");
+        assert_eq!(
+            error_of(result),
+            Some(ErrorCode::InvalidArgument),
+            "id {id:?}"
+        );
     }
 }
 
@@ -95,7 +128,10 @@ fn pri_010_no_process_names_invalid_argument() {
     let rig = agent_rig(ALL);
     let mut spec = signature("x");
     spec.process_names.clear();
-    assert_eq!(error_of(rig.host.agent().register_signature(spec)), Some(ErrorCode::InvalidArgument));
+    assert_eq!(
+        error_of(rig.host.agent().register_signature(spec)),
+        Some(ErrorCode::InvalidArgument)
+    );
 }
 
 /// REQ: PRI-010
@@ -113,7 +149,10 @@ fn pri_010_33_process_names_invalid_argument() {
     let rig = agent_rig(ALL);
     let mut spec = signature("x");
     spec.process_names = (0..33).map(|index| format!("tool{index}")).collect();
-    assert_eq!(error_of(rig.host.agent().register_signature(spec)), Some(ErrorCode::InvalidArgument));
+    assert_eq!(
+        error_of(rig.host.agent().register_signature(spec)),
+        Some(ErrorCode::InvalidArgument)
+    );
 }
 
 /// REQ: PRI-010
@@ -122,7 +161,10 @@ fn pri_010_empty_process_name_invalid_argument() {
     let rig = agent_rig(ALL);
     let mut spec = signature("x");
     spec.process_names = vec![String::new()];
-    assert_eq!(error_of(rig.host.agent().register_signature(spec)), Some(ErrorCode::InvalidArgument));
+    assert_eq!(
+        error_of(rig.host.agent().register_signature(spec)),
+        Some(ErrorCode::InvalidArgument)
+    );
 }
 
 /// REQ: PRI-010
@@ -134,7 +176,10 @@ fn pri_010_process_name_of_255_bytes_accepted_256_invalid_argument() {
     assert!(rig.host.agent().register_signature(spec).is_ok());
     let mut spec = signature("y");
     spec.process_names = vec!["n".repeat(256)];
-    assert_eq!(error_of(rig.host.agent().register_signature(spec)), Some(ErrorCode::InvalidArgument));
+    assert_eq!(
+        error_of(rig.host.agent().register_signature(spec)),
+        Some(ErrorCode::InvalidArgument)
+    );
 }
 
 /// REQ: PRI-010
@@ -143,7 +188,10 @@ fn pri_010_relative_process_name_with_slash_invalid_argument() {
     let rig = agent_rig(ALL);
     let mut spec = signature("x");
     spec.process_names = vec!["bin/tool".to_owned()];
-    assert_eq!(error_of(rig.host.agent().register_signature(spec)), Some(ErrorCode::InvalidArgument));
+    assert_eq!(
+        error_of(rig.host.agent().register_signature(spec)),
+        Some(ErrorCode::InvalidArgument)
+    );
 }
 
 /// REQ: PRI-010
@@ -164,7 +212,10 @@ fn pri_010_32_aliases_accepted_33_invalid_argument() {
     assert!(rig.host.agent().register_signature(spec).is_ok());
     let mut spec = signature("y");
     spec.aliases = (0..33).map(|index| format!("a{index}")).collect();
-    assert_eq!(error_of(rig.host.agent().register_signature(spec)), Some(ErrorCode::InvalidArgument));
+    assert_eq!(
+        error_of(rig.host.agent().register_signature(spec)),
+        Some(ErrorCode::InvalidArgument)
+    );
 }
 
 /// REQ: PRI-010
@@ -173,11 +224,18 @@ fn pri_010_unknown_icon_invalid_argument() {
     let rig = agent_rig(ALL);
     let mut spec = signature("x");
     spec.icon = Some("no-such-tabler-icon-name".to_owned());
-    assert_eq!(error_of(rig.host.agent().register_signature(spec)), Some(ErrorCode::InvalidArgument));
+    assert_eq!(
+        error_of(rig.host.agent().register_signature(spec)),
+        Some(ErrorCode::InvalidArgument)
+    );
 }
 
 fn action(index: usize, keys: String) -> SignatureAction {
-    SignatureAction { id: format!("act-{index}"), keys, allowed_when: None }
+    SignatureAction {
+        id: format!("act-{index}"),
+        keys,
+        allowed_when: None,
+    }
 }
 
 /// REQ: PRI-010
@@ -189,7 +247,10 @@ fn pri_010_32_actions_accepted_33_invalid_argument() {
     assert!(rig.host.agent().register_signature(spec).is_ok());
     let mut spec = signature("y");
     spec.actions = (0..33).map(|index| action(index, "k".into())).collect();
-    assert_eq!(error_of(rig.host.agent().register_signature(spec)), Some(ErrorCode::InvalidArgument));
+    assert_eq!(
+        error_of(rig.host.agent().register_signature(spec)),
+        Some(ErrorCode::InvalidArgument)
+    );
 }
 
 /// REQ: PRI-010
@@ -201,7 +262,10 @@ fn pri_010_action_keys_1_kib_accepted_over_invalid_argument() {
     assert!(rig.host.agent().register_signature(spec).is_ok());
     let mut spec = signature("y");
     spec.actions = vec![action(0, "k".repeat(KIB + 1))];
-    assert_eq!(error_of(rig.host.agent().register_signature(spec)), Some(ErrorCode::InvalidArgument));
+    assert_eq!(
+        error_of(rig.host.agent().register_signature(spec)),
+        Some(ErrorCode::InvalidArgument)
+    );
 }
 
 /// REQ: PRI-010
@@ -209,7 +273,10 @@ fn pri_010_action_keys_1_kib_accepted_over_invalid_argument() {
 fn pri_010_id_the_manifest_contributes_conflict() {
     let rig = agent_rig(ALL);
     rig.kernel.contribute_signature_in_manifest("from-manifest");
-    let result = rig.host.agent().register_signature(signature("from-manifest"));
+    let result = rig
+        .host
+        .agent()
+        .register_signature(signature("from-manifest"));
     assert_eq!(error_of(result), Some(ErrorCode::Conflict));
 }
 
@@ -217,15 +284,25 @@ fn pri_010_id_the_manifest_contributes_conflict() {
 #[test]
 fn pri_010_reregistering_an_own_runtime_signature_replaces_it() {
     let rig = agent_rig(ALL);
-    rig.host.agent().register_signature(signature("again")).expect("first");
-    assert!(rig.host.agent().register_signature(signature("again")).is_ok());
+    rig.host
+        .agent()
+        .register_signature(signature("again"))
+        .expect("first");
+    assert!(rig
+        .host
+        .agent()
+        .register_signature(signature("again"))
+        .is_ok());
 }
 
 /// REQ: PRI-010, WIT:ilium:primitives/agent.register-signature
 #[test]
 fn pri_010_register_without_grant_not_permitted() {
     let rig = agent_rig(READ);
-    assert_eq!(error_of(rig.host.agent().register_signature(signature("x"))), Some(ErrorCode::NotPermitted));
+    assert_eq!(
+        error_of(rig.host.agent().register_signature(signature("x"))),
+        Some(ErrorCode::NotPermitted)
+    );
 }
 
 proptest! {
@@ -246,7 +323,10 @@ fn overlap_rig() -> Rig {
     let mut user = signature("user-rule");
     user.process_names = vec!["mytool".to_owned()];
     rig.kernel.set_user_signature(user);
-    rig.host.agent().register_signature(signature("plugin-rule")).expect("plugin rule");
+    rig.host
+        .agent()
+        .register_signature(signature("plugin-rule"))
+        .expect("plugin rule");
     rig
 }
 
@@ -254,7 +334,10 @@ fn overlap_rig() -> Rig {
 #[test]
 fn pri_011_user_signature_wins_over_plugin_signature() {
     let rig = overlap_rig();
-    assert_eq!(rig.kernel.identify_process_name("mytool").as_deref(), Some("user-rule"));
+    assert_eq!(
+        rig.kernel.identify_process_name("mytool").as_deref(),
+        Some("user-rule")
+    );
 }
 
 /// REQ: PRI-011
@@ -263,8 +346,14 @@ fn pri_011_plugin_signature_wins_over_built_in() {
     let rig = agent_rig(ALL);
     let mut spec = signature("my-claude");
     spec.process_names = vec!["claude".to_owned()];
-    rig.host.agent().register_signature(spec).expect("plugin rule");
-    let winner = rig.kernel.identify_process_name("claude").expect("a signature");
+    rig.host
+        .agent()
+        .register_signature(spec)
+        .expect("plugin rule");
+    let winner = rig
+        .kernel
+        .identify_process_name("claude")
+        .expect("a signature");
     assert!(winner.ends_with("my-claude"), "winner {winner}");
 }
 
@@ -273,7 +362,12 @@ fn pri_011_plugin_signature_wins_over_built_in() {
 fn pri_011_overlap_is_logged_once_as_a_warning() {
     let rig = overlap_rig();
     let _ = rig.kernel.identify_process_name("mytool");
-    let warnings: Vec<_> = rig.host.logs().into_iter().filter(|line| line.level == "warn" && line.message.contains("mytool")).collect();
+    let warnings: Vec<_> = rig
+        .host
+        .logs()
+        .into_iter()
+        .filter(|line| line.level == "warn" && line.message.contains("mytool"))
+        .collect();
     assert_eq!(warnings.len(), 1, "{}", log_text(&rig.host));
 }
 
@@ -281,7 +375,10 @@ fn pri_011_overlap_is_logged_once_as_a_warning() {
 #[test]
 fn pri_011_no_overlap_logs_no_warning() {
     let rig = agent_rig(ALL);
-    rig.host.agent().register_signature(signature("solo")).expect("rule");
+    rig.host
+        .agent()
+        .register_signature(signature("solo"))
+        .expect("rule");
     let _ = rig.kernel.identify_process_name("mytool");
     assert_eq!(log_count(&rig.host, "overlap"), 0);
 }
@@ -293,7 +390,10 @@ fn pri_011_no_overlap_logs_no_warning() {
 fn pri_012_own_button_on_existing_pane_accepted() {
     let rig = agent_rig(ALL);
     rig.kernel.contribute_toolbar_button("mine");
-    let result = rig.host.agent().set_toolbar_state("mine".into(), Some(AGENT_PANE), true, None);
+    let result = rig
+        .host
+        .agent()
+        .set_toolbar_state("mine".into(), Some(AGENT_PANE), true, None);
     assert!(result.is_ok());
 }
 
@@ -301,8 +401,12 @@ fn pri_012_own_button_on_existing_pane_accepted() {
 #[test]
 fn pri_012_button_of_another_plugin_not_found() {
     let rig = agent_rig(ALL);
-    rig.kernel.contribute_toolbar_button_for("other.plugin", "theirs");
-    let result = rig.host.agent().set_toolbar_state("theirs".into(), None, true, None);
+    rig.kernel
+        .contribute_toolbar_button_for("other.plugin", "theirs");
+    let result = rig
+        .host
+        .agent()
+        .set_toolbar_state("theirs".into(), None, true, None);
     assert_eq!(error_of(result), Some(ErrorCode::NotFound));
 }
 
@@ -311,7 +415,10 @@ fn pri_012_button_of_another_plugin_not_found() {
 fn pri_012_missing_pane_not_found() {
     let rig = agent_rig(ALL);
     rig.kernel.contribute_toolbar_button("mine");
-    let result = rig.host.agent().set_toolbar_state("mine".into(), Some(MISSING_PANE), true, None);
+    let result = rig
+        .host
+        .agent()
+        .set_toolbar_state("mine".into(), Some(MISSING_PANE), true, None);
     assert_eq!(error_of(result), Some(ErrorCode::NotFound));
 }
 
@@ -320,7 +427,10 @@ fn pri_012_missing_pane_not_found() {
 fn pri_012_without_grant_not_permitted() {
     let rig = agent_rig(READ);
     rig.kernel.contribute_toolbar_button("mine");
-    let result = rig.host.agent().set_toolbar_state("mine".into(), None, true, None);
+    let result = rig
+        .host
+        .agent()
+        .set_toolbar_state("mine".into(), None, true, None);
     assert_eq!(error_of(result), Some(ErrorCode::NotPermitted));
 }
 
@@ -329,9 +439,15 @@ fn pri_012_without_grant_not_permitted() {
 fn pri_012_label_of_32_cells_accepted_33_invalid_argument() {
     let rig = agent_rig(ALL);
     rig.kernel.contribute_toolbar_button("mine");
-    let ok = rig.host.agent().set_toolbar_state("mine".into(), None, true, Some("l".repeat(32)));
+    let ok = rig
+        .host
+        .agent()
+        .set_toolbar_state("mine".into(), None, true, Some("l".repeat(32)));
     assert!(ok.is_ok());
-    let bad = rig.host.agent().set_toolbar_state("mine".into(), None, true, Some("l".repeat(33)));
+    let bad = rig
+        .host
+        .agent()
+        .set_toolbar_state("mine".into(), None, true, Some("l".repeat(33)));
     assert_eq!(error_of(bad), Some(ErrorCode::InvalidArgument));
 }
 
@@ -340,7 +456,10 @@ fn pri_012_label_of_32_cells_accepted_33_invalid_argument() {
 fn pri_012_pane_state_is_dropped_when_the_pane_closes() {
     let rig = agent_rig(ALL);
     rig.kernel.contribute_toolbar_button("mine");
-    rig.host.agent().set_toolbar_state("mine".into(), Some(AGENT_PANE), false, None).expect("state");
+    rig.host
+        .agent()
+        .set_toolbar_state("mine".into(), Some(AGENT_PANE), false, None)
+        .expect("state");
     rig.kernel.remove_node(AGENT_PANE);
     assert!(rig.kernel.toolbar_state("mine", Some(AGENT_PANE)).is_none());
 }
@@ -352,7 +471,11 @@ fn pri_012_pane_state_is_dropped_when_the_pane_closes() {
 fn pri_013_agents_without_grant_is_empty() {
     let rig = agent_rig(&[]);
     assert!(rig.host.agent().agents().is_empty());
-    assert!(log_count(&rig.host, "agent.read") >= 1, "{}", log_text(&rig.host));
+    assert!(
+        log_count(&rig.host, "agent.read") >= 1,
+        "{}",
+        log_text(&rig.host)
+    );
 }
 
 /// REQ: PRI-013, WIT:ilium:primitives/agent.agents
@@ -392,7 +515,14 @@ fn wit_agent_view_of_a_plain_terminal_is_none() {
 #[test]
 fn pri_013_session_without_grant_is_none() {
     let rig = agent_rig(&[]);
-    rig.kernel.set_agent_session(AGENT_PANE, SessionRef { scope: "agent-sessions:claude".into(), path: "p".into(), session_id: "s".into() });
+    rig.kernel.set_agent_session(
+        AGENT_PANE,
+        SessionRef {
+            scope: "agent-sessions:claude".into(),
+            path: "p".into(),
+            session_id: "s".into(),
+        },
+    );
     assert!(rig.host.agent().session(AGENT_PANE).is_none());
 }
 
@@ -400,7 +530,11 @@ fn pri_013_session_without_grant_is_none() {
 #[test]
 fn wit_agent_session_returns_the_reference_for_a_scoped_signature() {
     let rig = agent_rig(READ);
-    let reference = SessionRef { scope: "agent-sessions:claude".into(), path: "p".into(), session_id: "s-1".into() };
+    let reference = SessionRef {
+        scope: "agent-sessions:claude".into(),
+        path: "p".into(),
+        session_id: "s-1".into(),
+    };
     rig.kernel.set_agent_session(AGENT_PANE, reference.clone());
     assert_eq!(rig.host.agent().session(AGENT_PANE), Some(reference));
 }
@@ -425,14 +559,22 @@ fn pri_013_last_prompt_without_the_prompts_grant_is_none() {
 fn wit_agent_last_prompt_with_the_prompts_grant_returns_the_text() {
     let rig = agent_rig(&["agent.read", "agent.read-prompts"]);
     rig.kernel.set_last_prompt(AGENT_PANE, "fix the bug");
-    assert_eq!(rig.host.agent().last_prompt(AGENT_PANE).as_deref(), Some("fix the bug"));
+    assert_eq!(
+        rig.host.agent().last_prompt(AGENT_PANE).as_deref(),
+        Some("fix the bug")
+    );
 }
 
 /// REQ: WIT:ilium:primitives/agent.model
 #[test]
 fn wit_agent_model_returns_the_model_record() {
     let rig = agent_rig(READ);
-    let model = AgentModel { model: "opus".into(), provider: Some("anthropic".into()), context_window: Some(200_000), source: "screen".into() };
+    let model = AgentModel {
+        model: "opus".into(),
+        provider: Some("anthropic".into()),
+        context_window: Some(200_000),
+        source: "screen".into(),
+    };
     rig.kernel.set_agent_model(AGENT_PANE, model.clone());
     assert_eq!(rig.host.agent().model(AGENT_PANE), Some(model));
 }
@@ -478,9 +620,16 @@ fn wit_agent_prompt_epoch_returns_the_counter_of_an_identified_pane() {
 // ---------------------------------------------------------------- PRI-014 and transcripts
 
 fn read_turns(rig: &mut Rig, query: TranscriptQuery) -> Vec<TranscriptTurn> {
-    let request = rig.host.agent().transcript(query).expect("request accepted");
+    let request = rig
+        .host
+        .agent()
+        .transcript(query)
+        .expect("request accepted");
     rig.host.pump(8);
-    rig.host.agent().take_transcript(request).expect("transcript completed")
+    rig.host
+        .agent()
+        .take_transcript(request)
+        .expect("transcript completed")
 }
 
 /// REQ: PRI-014, WIT:ilium:primitives/agent.transcript, WIT:ilium:primitives/agent.take-transcript
@@ -499,7 +648,10 @@ fn pri_014_600_turns_return_the_newest_512() {
 fn pri_014_exactly_512_turns_are_all_returned() {
     let mut rig = agent_rig(ALL);
     rig.kernel.set_agent_transcript(AGENT_PANE, turns(512));
-    assert_eq!(read_turns(&mut rig, query(512, (4 * MIB) as u32)).len(), 512);
+    assert_eq!(
+        read_turns(&mut rig, query(512, (4 * MIB) as u32)).len(),
+        512
+    );
 }
 
 /// REQ: PRI-014
@@ -516,7 +668,13 @@ fn pri_014_513_turns_drop_the_oldest_one() {
 fn pri_014_byte_cap_drops_the_oldest_turns() {
     let mut rig = agent_rig(ALL);
     let big: Vec<TranscriptTurn> = (0..10)
-        .map(|index| TranscriptTurn { role: TurnRole::Assistant, text: format!("{index}{}", "x".repeat(MIB)), tool: None, at: None, tokens: None })
+        .map(|index| TranscriptTurn {
+            role: TurnRole::Assistant,
+            text: format!("{index}{}", "x".repeat(MIB)),
+            tool: None,
+            at: None,
+            tokens: None,
+        })
         .collect();
     rig.kernel.set_agent_transcript(AGENT_PANE, big);
     let got = read_turns(&mut rig, query(512, (4 * MIB) as u32));
@@ -530,7 +688,10 @@ fn pri_014_byte_cap_drops_the_oldest_turns() {
 #[test]
 fn pri_014_last_turns_over_512_invalid_argument() {
     let rig = agent_rig(ALL);
-    assert_eq!(error_of(rig.host.agent().transcript(query(513, 1_024))), Some(ErrorCode::InvalidArgument));
+    assert_eq!(
+        error_of(rig.host.agent().transcript(query(513, 1_024))),
+        Some(ErrorCode::InvalidArgument)
+    );
 }
 
 /// REQ: PRI-014
@@ -545,7 +706,11 @@ fn pri_014_max_bytes_over_4_mib_invalid_argument() {
 #[test]
 fn pri_014_max_bytes_exactly_4_mib_accepted() {
     let rig = agent_rig(ALL);
-    assert!(rig.host.agent().transcript(query(10, (4 * MIB) as u32)).is_ok());
+    assert!(rig
+        .host
+        .agent()
+        .transcript(query(10, (4 * MIB) as u32))
+        .is_ok());
 }
 
 /// REQ: PRI-014
@@ -573,7 +738,10 @@ proptest! {
 #[test]
 fn wit_agent_transcript_without_grant_not_permitted() {
     let rig = agent_rig(READ);
-    assert_eq!(error_of(rig.host.agent().transcript(query(5, 1_024))), Some(ErrorCode::NotPermitted));
+    assert_eq!(
+        error_of(rig.host.agent().transcript(query(5, 1_024))),
+        Some(ErrorCode::NotPermitted)
+    );
 }
 
 /// REQ: WIT:ilium:primitives/agent.transcript
@@ -581,7 +749,10 @@ fn wit_agent_transcript_without_grant_not_permitted() {
 fn wit_agent_transcript_signature_without_session_format_unsupported() {
     let rig = agent_rig(ALL);
     rig.kernel.set_agent_session_format(AGENT_PANE, false);
-    assert_eq!(error_of(rig.host.agent().transcript(query(5, 1_024))), Some(ErrorCode::Unsupported));
+    assert_eq!(
+        error_of(rig.host.agent().transcript(query(5, 1_024))),
+        Some(ErrorCode::Unsupported)
+    );
 }
 
 /// REQ: WIT:ilium:primitives/agent.transcript
@@ -589,14 +760,21 @@ fn wit_agent_transcript_signature_without_session_format_unsupported() {
 fn wit_agent_transcript_pane_without_session_yet_not_found() {
     let rig = agent_rig(ALL);
     rig.kernel.set_agent_session_format(AGENT_PANE, true);
-    assert_eq!(error_of(rig.host.agent().transcript(query(5, 1_024))), Some(ErrorCode::NotFound));
+    assert_eq!(
+        error_of(rig.host.agent().transcript(query(5, 1_024))),
+        Some(ErrorCode::NotFound)
+    );
 }
 
 /// REQ: WIT:ilium:primitives/agent.take-transcript
 #[test]
 fn wit_agent_take_transcript_unknown_request_is_none() {
     let rig = agent_rig(ALL);
-    assert!(rig.host.agent().take_transcript(RequestId(31_337)).is_none());
+    assert!(rig
+        .host
+        .agent()
+        .take_transcript(RequestId(31_337))
+        .is_none());
 }
 
 /// REQ: WIT:ilium:primitives/agent.take-transcript
@@ -604,7 +782,11 @@ fn wit_agent_take_transcript_unknown_request_is_none() {
 fn wit_agent_take_transcript_second_take_is_none() {
     let mut rig = agent_rig(ALL);
     rig.kernel.set_agent_transcript(AGENT_PANE, turns(3));
-    let request = rig.host.agent().transcript(query(3, 4_096)).expect("request");
+    let request = rig
+        .host
+        .agent()
+        .transcript(query(3, 4_096))
+        .expect("request");
     rig.host.pump(8);
     assert!(rig.host.agent().take_transcript(request).is_some());
     assert!(rig.host.agent().take_transcript(request).is_none());

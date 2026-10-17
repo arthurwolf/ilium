@@ -1,16 +1,25 @@
 //! Baseline scenarios of src/docs/editors-and-boards.md and panes-and-layout.md: F-019 editor
 //! panes and F-024 Kanban boards stay in the kernel until the phase-7 plugins (COR-050).
 
-use ilium_plugin_api::generated::types::{EditorOpenSpec, EditorPlacement, FsPath, Intent, NodeClass, Outcome};
+use ilium_plugin_api::generated::types::{
+    EditorOpenSpec, EditorPlacement, FsPath, Intent, NodeClass, Outcome,
+};
 use ilium_plugin_api::kernel::KernelFacade;
 
 use crate::common::*;
 
-fn open_editor(kernel: &ilium_server::plugin_host::ServerKernel, path: &str, line: Option<u32>) -> Outcome {
+fn open_editor(
+    kernel: &ilium_server::plugin_host::ServerKernel,
+    path: &str,
+    line: Option<u32>,
+) -> Outcome {
     apply(
         kernel,
         Intent::EditorOpen(EditorOpenSpec {
-            path: FsPath { scope: "project".to_owned(), path: path.to_owned() },
+            path: FsPath {
+                scope: "project".to_owned(),
+                path: path.to_owned(),
+            },
             line,
             placement: EditorPlacement::NewPane,
         }),
@@ -38,7 +47,10 @@ fn f_019_typed_text_is_saved_to_the_file_on_save() {
         let pane = created(open_editor(kernel, "notes.txt", None));
         kernel.editor_type(pane, "zero ");
         kernel.editor_save(pane);
-        assert_eq!(kernel.read_project_file("notes.txt").as_deref(), Some("zero one\n"));
+        assert_eq!(
+            kernel.read_project_file("notes.txt").as_deref(),
+            Some("zero one\n")
+        );
     });
 }
 
@@ -49,7 +61,10 @@ fn f_019_unsaved_edits_do_not_touch_the_file() {
         kernel.write_project_file("notes.txt", "one\n");
         let pane = created(open_editor(kernel, "notes.txt", None));
         kernel.editor_type(pane, "zero ");
-        assert_eq!(kernel.read_project_file("notes.txt").as_deref(), Some("one\n"));
+        assert_eq!(
+            kernel.read_project_file("notes.txt").as_deref(),
+            Some("one\n")
+        );
     });
 }
 
@@ -81,7 +96,10 @@ fn f_019_two_editor_panes_on_one_tree_are_independent_nodes() {
 fn f_024_a_markdown_board_is_a_pane_and_its_file_exists() {
     in_both_modes(|kernel| {
         let pane = kernel.create_board("markdown", "board.md");
-        assert_eq!(node(kernel, pane).content_kind.as_deref(), Some("ilium.board"));
+        assert_eq!(
+            node(kernel, pane).content_kind.as_deref(),
+            Some("ilium.board")
+        );
         assert!(kernel.read_project_file("board.md").is_some());
     });
 }
@@ -91,7 +109,10 @@ fn f_024_a_markdown_board_is_a_pane_and_its_file_exists() {
 fn f_024_a_folder_board_creates_a_directory_of_card_files() {
     in_both_modes(|kernel| {
         let pane = kernel.create_board("folder", "cards");
-        assert_eq!(node(kernel, pane).content_kind.as_deref(), Some("ilium.board"));
+        assert_eq!(
+            node(kernel, pane).content_kind.as_deref(),
+            Some("ilium.board")
+        );
         assert!(kernel.project_dir_exists("cards"));
     });
 }
@@ -103,7 +124,9 @@ fn f_024_cards_survive_closing_the_board_pane() {
         let pane = kernel.create_board("markdown", "board.md");
         kernel.board_add_card(pane, "To do", "write parity tests");
         close(kernel, pane);
-        let file = kernel.read_project_file("board.md").expect("board file stays");
+        let file = kernel
+            .read_project_file("board.md")
+            .expect("board file stays");
         assert!(file.contains("write parity tests"), "{file:?}");
     });
 }

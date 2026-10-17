@@ -1,7 +1,7 @@
 //! Server request handling for the monitor (original ilium-server/src/ipc/handlers.rs).
 
-use ilium_plugin_sdk::types::DeactivationReason;
 use ilium_plugin_sdk::testing::TreeNode;
+use ilium_plugin_sdk::types::DeactivationReason;
 use ilium_plugin_sdk::types::NodeClass;
 use serde_json::json;
 
@@ -32,7 +32,12 @@ fn port_059_disabling_the_setting_fails_running_monitors_and_rejects_new_request
     let record = status(&mut host, pane);
     assert_eq!(health_of(&record, id), "failed");
     let text = record.to_string();
-    assert!(text.contains("progress monitoring was disabled in Ilium settings; the task outcome is unknown"), "{text}");
+    assert!(
+        text.contains(
+            "progress monitoring was disabled in Ilium settings; the task outcome is unknown"
+        ),
+        "{text}"
+    );
     let run = progress(&mut host, pane, &["set", "--command", "/opt/other.sh"]);
     assert_eq!(code(&run), "disabled");
 }
@@ -42,13 +47,24 @@ fn port_059_disabling_the_setting_fails_running_monitors_and_rejects_new_request
 fn port_060_a_held_wait_takes_the_outcome_and_a_dead_waiter_leaves_it_to_the_composer() {
     let (mut host, pane) = host_with_pane();
     expect_probe(&mut host, PROBE, &running(JOB, 10, "W"));
-    let open = start_in_pane(&mut host, pane, &["progress", "set", "--command", PROBE, "--wait"]);
+    let open = start_in_pane(
+        &mut host,
+        pane,
+        &["progress", "set", "--command", PROBE, "--wait"],
+    );
     settle_with(&mut host, &done(JOB, "Finished"));
-    assert_eq!(record_of(&open.read().stdout, "progress_wait")["composer_notice"], "suppressed");
+    assert_eq!(
+        record_of(&open.read().stdout, "progress_wait")["composer_notice"],
+        "suppressed"
+    );
     assert!(typed_texts(&host, pane).is_empty());
     let (mut other, other_pane) = host_with_pane();
     expect_probe(&mut other, PROBE, &running(JOB, 10, "W"));
-    let waiting = start_in_pane(&mut other, other_pane, &["progress", "set", "--command", PROBE, "--wait"]);
+    let waiting = start_in_pane(
+        &mut other,
+        other_pane,
+        &["progress", "set", "--command", PROBE, "--wait"],
+    );
     waiting.cancel(&mut other);
     settle_with(&mut other, &done(JOB, "Finished"));
     assert_eq!(typed_texts(&other, other_pane).len(), 1);
@@ -59,7 +75,9 @@ fn port_060_a_held_wait_takes_the_outcome_and_a_dead_waiter_leaves_it_to_the_com
 fn port_059_an_acknowledged_set_is_already_in_the_state_a_restart_restores() {
     let (mut host, pane) = host_with_pane();
     register(&mut host, pane, PROBE, &running(JOB, 10, "W"), &[]);
-    let state = host.deactivate(DeactivationReason::CrashRestart).expect("state");
+    let state = host
+        .deactivate(DeactivationReason::CrashRestart)
+        .expect("state");
     host.restart_with(state);
     expect_probe(&mut host, PROBE, &running(JOB, 20, "W"));
     host.settle();
@@ -101,7 +119,13 @@ fn port_060_set_rejects_a_blank_command_and_a_non_terminal_pane_invalid_request(
 #[test]
 fn port_060_set_runs_the_command_and_reports_its_progress() {
     let (mut host, pane) = host_with_pane();
-    let id = register(&mut host, pane, PROBE, &running("render-job", 10, "frame 10/100"), &[]);
+    let id = register(
+        &mut host,
+        pane,
+        PROBE,
+        &running("render-job", 10, "frame 10/100"),
+        &[],
+    );
     let calls = host.process().calls();
     assert_eq!(calls[0].program, "sh");
     assert_eq!(calls[0].arguments, ["-c", PROBE]);

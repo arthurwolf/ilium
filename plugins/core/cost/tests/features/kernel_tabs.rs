@@ -13,7 +13,10 @@ fn doc_cor_030_page_lists_agent_cost_tab_with_cost_table_and_readers() {
 #[test]
 fn doc_cor_030_page_lists_reset_planning_tab_with_its_table_and_reader() {
     let row = table_row(&page_text(), "`reset-planning`");
-    assert_eq!(&row[1..], ["Reset planning", "`[reset_planning]`", "Notifications"]);
+    assert_eq!(
+        &row[1..],
+        ["Reset planning", "`[reset_planning]`", "Notifications"]
+    );
 }
 
 /// REQ: COR-030, F-040
@@ -21,18 +24,41 @@ fn doc_cor_030_page_lists_reset_planning_tab_with_its_table_and_reader() {
 fn doc_cor_030_migration_page_names_cost_as_holder_of_both_tabs() {
     let migration = page("reference-config-and-data-migration");
     let cost = table_row(&migration, "`agent-cost`");
-    assert_eq!(&cost[1..], ["Agent Cost", "`[cost]`", "Cost", "Fleet, Tree", "`[cost]`"]);
+    assert_eq!(
+        &cost[1..],
+        ["Agent Cost", "`[cost]`", "Cost", "Fleet, Tree", "`[cost]`"]
+    );
     let reset = table_row(&migration, "`reset-planning`");
-    assert_eq!(&reset[1..], ["Reset planning", "`[reset_planning]`", "Cost", "Notifications", "`[reset_planning]`"]);
+    assert_eq!(
+        &reset[1..],
+        [
+            "Reset planning",
+            "`[reset_planning]`",
+            "Cost",
+            "Notifications",
+            "`[reset_planning]`"
+        ]
+    );
 }
 
 /// REQ: COR-033, F-040
 #[test]
 fn doc_cor_033_cost_table_keeps_the_twenty_two_keys_of_the_original() {
     let row = table_row(&page("reference-config-and-data-migration"), "`[cost]`");
-    let keys: Vec<&str> = row[1].split(", ").map(|key| key.trim_matches('`')).collect();
+    let keys: Vec<&str> = row[1]
+        .split(", ")
+        .map(|key| key.trim_matches('`'))
+        .collect();
     assert_eq!(keys.len(), 22);
-    for key in ["metric", "quota_window", "budget_usd", "history_days", "level_glyph", "sort_by_cost", "prices"] {
+    for key in [
+        "metric",
+        "quota_window",
+        "budget_usd",
+        "history_days",
+        "level_glyph",
+        "sort_by_cost",
+        "prices",
+    ] {
         assert!(keys.contains(&key), "{key}");
     }
 }
@@ -40,7 +66,10 @@ fn doc_cor_033_cost_table_keeps_the_twenty_two_keys_of_the_original() {
 /// REQ: COR-033, F-116
 #[test]
 fn doc_cor_033_reset_planning_table_keeps_three_keys() {
-    let row = table_row(&page("reference-config-and-data-migration"), "`[reset_planning]`");
+    let row = table_row(
+        &page("reference-config-and-data-migration"),
+        "`[reset_planning]`",
+    );
     assert_eq!(row[1], "`monitor_claude`, `monitor_codex`, `time_style`");
     assert_eq!(row[2], "Cost");
 }
@@ -71,7 +100,11 @@ fn doc_cor_011_page_says_the_settings_keep_their_defaults_and_keys() {
 #[test]
 fn cor_030_server_reading_the_cost_tab_issues_no_write_on_activation() {
     let mut host = server_host();
-    set_kernel_tab(&mut host, "agent-cost", serde_json::json!({"metric": "dollars"}));
+    set_kernel_tab(
+        &mut host,
+        "agent-cost",
+        serde_json::json!({"metric": "dollars"}),
+    );
     host.activate::<ilium_plugin_core_cost::CostServer>();
     assert!(kernel_writes(&mut host).is_empty());
 }
@@ -80,7 +113,9 @@ fn cor_030_server_reading_the_cost_tab_issues_no_write_on_activation() {
 #[test]
 fn cor_033_changing_unit_writes_only_keys_of_the_cost_table() {
     let mut host = activated_server();
-    host.settings().set("unit", serde_json::json!("quota")).expect("valid unit");
+    host.settings()
+        .set("unit", serde_json::json!("quota"))
+        .expect("valid unit");
     host.settle();
     for (tab, key, _) in kernel_writes(&mut host) {
         assert_eq!(tab, "agent-cost");
@@ -92,10 +127,17 @@ fn cor_033_changing_unit_writes_only_keys_of_the_cost_table() {
 #[test]
 fn cor_033_unit_change_writes_the_metric_key_of_the_agent_cost_tab() {
     let mut host = activated_server();
-    host.settings().set("unit", serde_json::json!("quota")).expect("valid unit");
+    host.settings()
+        .set("unit", serde_json::json!("quota"))
+        .expect("valid unit");
     host.settle();
     let writes = kernel_writes(&mut host);
-    assert!(writes.iter().any(|(tab, key, _)| tab == "agent-cost" && key == "metric"), "{writes:?}");
+    assert!(
+        writes
+            .iter()
+            .any(|(tab, key, _)| tab == "agent-cost" && key == "metric"),
+        "{writes:?}"
+    );
 }
 
 /// REQ: COR-030, F-116
@@ -103,5 +145,7 @@ fn cor_033_unit_change_writes_the_metric_key_of_the_agent_cost_tab() {
 fn cor_030_client_never_writes_the_agent_cost_tab() {
     let mut host = activated_client();
     host.settle();
-    assert!(kernel_writes(&mut host).iter().all(|(tab, _, _)| tab != "agent-cost"));
+    assert!(kernel_writes(&mut host)
+        .iter()
+        .all(|(tab, _, _)| tab != "agent-cost"));
 }

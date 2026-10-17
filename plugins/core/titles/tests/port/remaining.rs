@@ -58,13 +58,22 @@ fn port_041_remaining_ilium_client_src_icon_search_workers_owner_behaviour_is_ke
 #[test]
 fn port_044_remaining_ilium_client_src_instruction_settings_behaviour_is_kept() {
     let mut host = activated_server();
-    host.settings().set("inference.instructions.entry_naming", json!("Shared vocabulary")).expect("setting accepted");
+    host.settings()
+        .set(
+            "inference.instructions.entry_naming",
+            json!("Shared vocabulary"),
+        )
+        .expect("setting accepted");
     host.settle();
     host.deliver_one(prompt_event(3, "Fix the login bug"));
     host.settle();
     let requests = host.inference_requests();
     assert_eq!(requests.len(), 1);
-    assert!(requests[0].1.messages.iter().any(|message| message.content.contains("Shared vocabulary")));
+    assert!(requests[0]
+        .1
+        .messages
+        .iter()
+        .any(|message| message.content.contains("Shared vocabulary")));
     assert!(host.failures().is_empty());
 }
 
@@ -186,13 +195,22 @@ fn port_041_remaining_ilium_client_src_pane_title_behaviour_is_kept() {
 #[test]
 fn port_044_remaining_ilium_client_src_proxy_database_behaviour_is_kept() {
     let mut host = activated_server();
-    host.settings().set("inference.instructions.entry_naming", json!("Shared vocabulary")).expect("setting accepted");
+    host.settings()
+        .set(
+            "inference.instructions.entry_naming",
+            json!("Shared vocabulary"),
+        )
+        .expect("setting accepted");
     host.settle();
     host.deliver_one(prompt_event(3, "Fix the login bug"));
     host.settle();
     let requests = host.inference_requests();
     assert_eq!(requests.len(), 1);
-    assert!(requests[0].1.messages.iter().any(|message| message.content.contains("Shared vocabulary")));
+    assert!(requests[0]
+        .1
+        .messages
+        .iter()
+        .any(|message| message.content.contains("Shared vocabulary")));
     assert!(host.failures().is_empty());
 }
 
@@ -216,7 +234,11 @@ fn port_043_remaining_ilium_client_src_restructure_behaviour_is_kept() {
     assert_eq!(specs.len(), 1);
     assert!(!specs[0].label.is_empty());
     assert!(specs[0].operations.len() <= 256);
-    for reply in [plan_without_pane_two(), plan_with_duplicate_pane(), plan_with_empty_title()] {
+    for reply in [
+        plan_without_pane_two(),
+        plan_with_duplicate_pane(),
+        plan_with_empty_title(),
+    ] {
         let rejected = rejected_host(&reply);
         assert!(restructures(&rejected.submitted()).is_empty());
         assert!(restructure_requests(&rejected).len() <= MAX_ATTEMPTS);
@@ -231,7 +253,11 @@ fn port_043_remaining_ilium_client_src_restructure_semantic_tests_behaviour_is_k
     assert_eq!(specs.len(), 1);
     assert!(!specs[0].label.is_empty());
     assert!(specs[0].operations.len() <= 256);
-    for reply in [plan_without_pane_two(), plan_with_duplicate_pane(), plan_with_empty_title()] {
+    for reply in [
+        plan_without_pane_two(),
+        plan_with_duplicate_pane(),
+        plan_with_empty_title(),
+    ] {
         let rejected = rejected_host(&reply);
         assert!(restructures(&rejected.submitted()).is_empty());
         assert!(restructure_requests(&rejected).len() <= MAX_ATTEMPTS);
@@ -242,13 +268,22 @@ fn port_043_remaining_ilium_client_src_restructure_semantic_tests_behaviour_is_k
 #[test]
 fn port_044_remaining_ilium_client_src_session_models_behaviour_is_kept() {
     let mut host = activated_server();
-    host.settings().set("inference.instructions.entry_naming", json!("Shared vocabulary")).expect("setting accepted");
+    host.settings()
+        .set(
+            "inference.instructions.entry_naming",
+            json!("Shared vocabulary"),
+        )
+        .expect("setting accepted");
     host.settle();
     host.deliver_one(prompt_event(3, "Fix the login bug"));
     host.settle();
     let requests = host.inference_requests();
     assert_eq!(requests.len(), 1);
-    assert!(requests[0].1.messages.iter().any(|message| message.content.contains("Shared vocabulary")));
+    assert!(requests[0]
+        .1
+        .messages
+        .iter()
+        .any(|message| message.content.contains("Shared vocabulary")));
     assert!(host.failures().is_empty());
 }
 
@@ -256,13 +291,22 @@ fn port_044_remaining_ilium_client_src_session_models_behaviour_is_kept() {
 #[test]
 fn port_044_remaining_ilium_client_src_tick_behaviour_is_kept() {
     let mut host = activated_server();
-    host.settings().set("inference.instructions.entry_naming", json!("Shared vocabulary")).expect("setting accepted");
+    host.settings()
+        .set(
+            "inference.instructions.entry_naming",
+            json!("Shared vocabulary"),
+        )
+        .expect("setting accepted");
     host.settle();
     host.deliver_one(prompt_event(3, "Fix the login bug"));
     host.settle();
     let requests = host.inference_requests();
     assert_eq!(requests.len(), 1);
-    assert!(requests[0].1.messages.iter().any(|message| message.content.contains("Shared vocabulary")));
+    assert!(requests[0]
+        .1
+        .messages
+        .iter()
+        .any(|message| message.content.contains("Shared vocabulary")));
     assert!(host.failures().is_empty());
 }
 
@@ -294,13 +338,22 @@ fn port_041_remaining_ilium_client_src_ui_behaviour_is_kept() {
 #[test]
 fn port_044_remaining_ilium_client_src_value_inference_behaviour_is_kept() {
     let mut host = activated_server();
-    host.settings().set("inference.instructions.entry_naming", json!("Shared vocabulary")).expect("setting accepted");
+    host.settings()
+        .set(
+            "inference.instructions.entry_naming",
+            json!("Shared vocabulary"),
+        )
+        .expect("setting accepted");
     host.settle();
     host.deliver_one(prompt_event(3, "Fix the login bug"));
     host.settle();
     let requests = host.inference_requests();
     assert_eq!(requests.len(), 1);
-    assert!(requests[0].1.messages.iter().any(|message| message.content.contains("Shared vocabulary")));
+    assert!(requests[0]
+        .1
+        .messages
+        .iter()
+        .any(|message| message.content.contains("Shared vocabulary")));
     assert!(host.failures().is_empty());
 }
 

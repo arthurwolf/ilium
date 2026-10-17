@@ -4,7 +4,11 @@ use crate::support::assert_rule;
 /// REQ: AUT-505 WARN
 #[test]
 fn doc_aut_505_views_tested_at_40_by_12() {
-    assert_rule("AUT-505", "SHOULD", &["40 columns by 12 rows", "`lint.widget-missing-key`"]);
+    assert_rule(
+        "AUT-505",
+        "SHOULD",
+        &["40 columns by 12 rows", "`lint.widget-missing-key`"],
+    );
 }
 
 /// REQ: AUT-506 WARN

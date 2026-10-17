@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use ilium_plugin_api::generated::types::{
     Activation, AgentActionSpec, AgentActivity, AgentActivityEvent, AgentView, DeactivationReason,
     Delivery, DroppedCount, ErrorCode, Event, FreezePaneSpec, Intent, NodeClass, NodeId, NodeView,
-    OutputMatchedEvent, Outcome, PaneExitedEvent, PaneResizedEvent, PluginError, PluginId,
+    Outcome, OutputMatchedEvent, PaneExitedEvent, PaneResizedEvent, PluginError, PluginId,
     RenameNodeSpec, RequestRef, RequestResult, ScreenChangedEvent, SendInputSpec,
     SetNodeLockedSpec, Submission, TimerId, TitleSource,
 };
@@ -22,7 +22,9 @@ use ilium_plugin_host::testing::{FakeKernel, HarnessHandle, HostHarness, NativeG
 
 /// Poison-proof lock.
 pub fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 /// What the scripted guest saw and what it is told to do.
@@ -56,7 +58,10 @@ impl Shared {
 
     /// Events of one case received.
     pub fn events_of(&self, case: &str) -> Vec<Event> {
-        self.events().into_iter().filter(|event| event.case_name() == case).collect()
+        self.events()
+            .into_iter()
+            .filter(|event| event.case_name() == case)
+            .collect()
     }
 
     /// Number of events of one case received.
@@ -180,7 +185,13 @@ impl Setup {
     }
 
     /// Builds and activates; keeps the build result for activation-failure tests.
-    pub fn try_build(self) -> (Result<HarnessHandle, HostError>, Arc<Shared>, Arc<FakeKernel>) {
+    pub fn try_build(
+        self,
+    ) -> (
+        Result<HarnessHandle, HostError>,
+        Arc<Shared>,
+        Arc<FakeKernel>,
+    ) {
         self.kernel.set_tree(self.nodes.clone());
         let mut harness = HostHarness::new()
             .tier(self.tier)
@@ -202,7 +213,11 @@ impl Setup {
             Ok(host) => host,
             Err(error) => panic!("harness build failed: {error}"),
         };
-        Env { host, probe, kernel }
+        Env {
+            host,
+            probe,
+            kernel,
+        }
     }
 }
 
@@ -247,7 +262,11 @@ impl Env {
 
     /// Intents the kernel applied, in order.
     pub fn applied(&self) -> Vec<Intent> {
-        self.kernel.applied_intents().into_iter().map(|(_, intent)| intent).collect()
+        self.kernel
+            .applied_intents()
+            .into_iter()
+            .map(|(_, intent)| intent)
+            .collect()
     }
 }
 
@@ -261,7 +280,10 @@ pub fn outcome_in(results: &[RequestResult], correlation: u64) -> Option<Outcome
 
 /// How many results carry this correlation.
 pub fn count_for(results: &[RequestResult], correlation: u64) -> usize {
-    results.iter().filter(|result| result.request == RequestRef::Submission(correlation)).count()
+    results
+        .iter()
+        .filter(|result| result.request == RequestRef::Submission(correlation))
+        .count()
 }
 
 /// The error code of a refused or failed outcome.
@@ -289,7 +311,10 @@ pub fn is_failed(outcome: &Option<Outcome>, code: ErrorCode) -> bool {
 }
 
 pub fn is_ok(outcome: &Option<Outcome>) -> bool {
-    matches!(outcome, Some(Outcome::Ok) | Some(Outcome::OkNode(_)) | Some(Outcome::OkEpoch(_)))
+    matches!(
+        outcome,
+        Some(Outcome::Ok) | Some(Outcome::OkNode(_)) | Some(Outcome::OkEpoch(_))
+    )
 }
 
 pub fn is_duplicate_of(outcome: &Option<Outcome>, correlation: u64) -> bool {
@@ -367,7 +392,11 @@ pub fn outputs(count: u32) -> Vec<Event> {
 }
 
 pub fn pane_exited(node: u64) -> Event {
-    Event::PaneExited(PaneExitedEvent { node: NodeId(node), status: Some(0), signal: None })
+    Event::PaneExited(PaneExitedEvent {
+        node: NodeId(node),
+        status: Some(0),
+        signal: None,
+    })
 }
 
 pub fn exits(count: u64) -> Vec<Event> {
@@ -384,7 +413,11 @@ pub fn screen_changed(pane: u64, revision: u64) -> Event {
 }
 
 pub fn pane_resized(node: u64, columns: u16) -> Event {
-    Event::PaneResized(PaneResizedEvent { node: NodeId(node), columns, rows: 24 })
+    Event::PaneResized(PaneResizedEvent {
+        node: NodeId(node),
+        columns,
+        rows: 24,
+    })
 }
 
 pub fn activity_changed(node: u64, revision: u64) -> Event {
@@ -430,11 +463,19 @@ pub fn dropped_records(events: &[Event]) -> Vec<DroppedCount> {
 // ---- intents -----------------------------------------------------------------------------
 
 pub fn sub(correlation: u64, intent: Intent) -> Submission {
-    Submission { intent, correlation, dedup_key: None }
+    Submission {
+        intent,
+        correlation,
+        dedup_key: None,
+    }
 }
 
 pub fn keyed(correlation: u64, key: &str, intent: Intent) -> Submission {
-    Submission { intent, correlation, dedup_key: Some(key.to_owned()) }
+    Submission {
+        intent,
+        correlation,
+        dedup_key: Some(key.to_owned()),
+    }
 }
 
 pub fn rename(node: u64, title: &str) -> Intent {
@@ -451,7 +492,10 @@ pub fn close(node: u64) -> Intent {
 }
 
 pub fn set_locked(node: u64, locked: bool) -> Intent {
-    Intent::SetNodeLocked(SetNodeLockedSpec { node: NodeId(node), locked })
+    Intent::SetNodeLocked(SetNodeLockedSpec {
+        node: NodeId(node),
+        locked,
+    })
 }
 
 pub fn freeze(pane: u64) -> Intent {
@@ -484,7 +528,10 @@ pub fn send_input_journaled(pane: u64, text: &str) -> Intent {
 }
 
 pub fn agent_action(pane: u64, action: &str) -> Intent {
-    Intent::AgentAction(AgentActionSpec { pane: NodeId(pane), action_id: action.to_owned() })
+    Intent::AgentAction(AgentActionSpec {
+        pane: NodeId(pane),
+        action_id: action.to_owned(),
+    })
 }
 
 // ---- manual and fixtures -------------------------------------------------------------------
@@ -495,7 +542,9 @@ pub fn workspace_root() -> PathBuf {
 
 /// Text of a manual page (without extension).
 pub fn manual_page(name: &str) -> String {
-    let path = workspace_root().join("docs/plugins-manual/pages").join(format!("{name}.md"));
+    let path = workspace_root()
+        .join("docs/plugins-manual/pages")
+        .join(format!("{name}.md"));
     match std::fs::read_to_string(&path) {
         Ok(text) => text,
         Err(error) => panic!("manual page {} unreadable: {error}", path.display()),
@@ -513,7 +562,9 @@ pub fn wit_file(relative: &str) -> String {
 
 /// A built guest component. Fails red with `fixture.missing` until the toolchain builds it.
 pub fn fixture_component(name: &str) -> Vec<u8> {
-    let path = workspace_root().join("target/plugin-fixtures").join(format!("{name}.wasm"));
+    let path = workspace_root()
+        .join("target/plugin-fixtures")
+        .join(format!("{name}.wasm"));
     assert!(path.exists(), "fixture.missing: {}", path.display());
     match std::fs::read(&path) {
         Ok(bytes) => bytes,

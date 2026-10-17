@@ -10,14 +10,26 @@ use crate::common::page_text;
 /// Rows of the Extension points table: `(point, kind, what, payload, risk)`.
 fn point_rows() -> Vec<[String; 5]> {
     let page = page_text();
-    let start = page.find("| Point | Kind |").expect("extension point table");
+    let start = page
+        .find("| Point | Kind |")
+        .expect("extension point table");
     page[start..]
         .lines()
         .skip(2)
         .take_while(|line| line.starts_with('|'))
         .map(|line| {
-            let cells: Vec<String> = line.trim_matches('|').split('|').map(|cell| cell.trim().to_string()).collect();
-            [cells[0].clone(), cells[1].clone(), cells[2].clone(), cells[3].clone(), cells[4].clone()]
+            let cells: Vec<String> = line
+                .trim_matches('|')
+                .split('|')
+                .map(|cell| cell.trim().to_string())
+                .collect();
+            [
+                cells[0].clone(),
+                cells[1].clone(),
+                cells[2].clone(),
+                cells[3].clone(),
+                cells[4].clone(),
+            ]
         })
         .collect()
 }
@@ -25,7 +37,10 @@ fn point_rows() -> Vec<[String; 5]> {
 /// REQ: F-004
 #[test]
 fn feature_004_the_page_lists_exactly_three_points() {
-    let names: Vec<String> = point_rows().into_iter().map(|row| row[0].trim_matches('`').to_string()).collect();
+    let names: Vec<String> = point_rows()
+        .into_iter()
+        .map(|row| row[0].trim_matches('`').to_string())
+        .collect();
     assert_eq!(names, ["before-move", "before-close", "node-sorts"]);
 }
 
@@ -33,9 +48,15 @@ fn feature_004_the_page_lists_exactly_three_points() {
 #[test]
 fn feature_004_before_move_is_a_veto_hook_with_the_documented_payload() {
     let rows = point_rows();
-    let row = rows.iter().find(|row| row[0] == "`before-move`").expect("row");
+    let row = rows
+        .iter()
+        .find(|row| row[0] == "`before-move`")
+        .expect("row");
     assert_eq!(row[1], "hook (veto)");
-    assert_eq!(row[3], "node, from_parent, to_parent, index, source (mouse, keys, command, plugin)");
+    assert_eq!(
+        row[3],
+        "node, from_parent, to_parent, index, source (mouse, keys, command, plugin)"
+    );
     assert_eq!(row[4], "standard");
 }
 
@@ -43,7 +64,10 @@ fn feature_004_before_move_is_a_veto_hook_with_the_documented_payload() {
 #[test]
 fn feature_004_before_close_is_a_veto_hook_with_the_documented_payload() {
     let rows = point_rows();
-    let row = rows.iter().find(|row| row[0] == "`before-close`").expect("row");
+    let row = rows
+        .iter()
+        .find(|row| row[0] == "`before-close`")
+        .expect("row");
     assert_eq!(row[1], "hook (veto)");
     assert_eq!(row[3], "node, kind, has_children");
     assert_eq!(row[4], "standard");
@@ -53,9 +77,16 @@ fn feature_004_before_close_is_a_veto_hook_with_the_documented_payload() {
 #[test]
 fn feature_005_node_sorts_is_a_collect_point_with_entry_id_title_slot() {
     let rows = point_rows();
-    let row = rows.iter().find(|row| row[0] == "`node-sorts`").expect("row");
+    let row = rows
+        .iter()
+        .find(|row| row[0] == "`node-sorts`")
+        .expect("row");
     assert_eq!(row[1], "collect");
-    assert!(row[3].starts_with("entry: id, title, slot"), "payload {}", row[3]);
+    assert!(
+        row[3].starts_with("entry: id, title, slot"),
+        "payload {}",
+        row[3]
+    );
     assert_eq!(row[4], "standard");
 }
 
@@ -63,7 +94,10 @@ fn feature_005_node_sorts_is_a_collect_point_with_entry_id_title_slot() {
 #[test]
 fn feature_005_node_sorts_adds_to_the_order_by_choice() {
     let rows = point_rows();
-    let row = rows.iter().find(|row| row[0] == "`node-sorts`").expect("row");
+    let row = rows
+        .iter()
+        .find(|row| row[0] == "`node-sorts`")
+        .expect("row");
     assert!(row[2].contains("Order By"), "what: {}", row[2]);
 }
 
@@ -77,7 +111,9 @@ fn feature_004_every_point_is_standard_risk() {
 #[test]
 fn feature_004_the_veto_example_manifest_contributes_to_before_close() {
     let page = page_text();
-    let start = page.find("#### Example: Refuses to close").expect("example heading");
+    let start = page
+        .find("#### Example: Refuses to close")
+        .expect("example heading");
     let rest = &page[start..];
     let open = rest.find("```json\n").expect("json") + "```json\n".len();
     let close = rest[open..].find("```").expect("end");
@@ -110,7 +146,9 @@ fn feature_004_the_page_states_that_a_late_or_trapping_handler_counts_as_pass() 
 #[test]
 fn feature_004_the_page_states_that_the_plugin_is_replaceable() {
     let page = page_text();
-    assert!(page.contains("**Replaceable:** yes. A replacement lists `\"replaces\": [\"ilium.core.tree\"]`"));
+    assert!(page.contains(
+        "**Replaceable:** yes. A replacement lists `\"replaces\": [\"ilium.core.tree\"]`"
+    ));
 }
 
 /// REQ: SEC-293

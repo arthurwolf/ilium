@@ -36,7 +36,10 @@ fn program_number(file_name: &str) -> Option<u32> {
 }
 
 fn quick_spec(warmup: u32, measured: u32) -> RunSpec {
-    RunSpec { warmup_iterations: warmup, measured_iterations: measured }
+    RunSpec {
+        warmup_iterations: warmup,
+        measured_iterations: measured,
+    }
 }
 
 /// REQ: HST-300
@@ -103,7 +106,10 @@ fn hst_301_result_records_environment_fields() {
 #[test]
 fn hst_301_result_records_the_runtime_config_output() {
     let result = run_with("B1", &quick_spec(100, 1000)).expect("run accepted");
-    assert_eq!(result.wasmtime_config, ilium_plugin_host::engine::runtime_config());
+    assert_eq!(
+        result.wasmtime_config,
+        ilium_plugin_host::engine::runtime_config()
+    );
 }
 
 /// REQ: HST-301
@@ -112,8 +118,14 @@ fn hst_301_json_output_schema_has_every_required_key() {
     let result = run_with("B1", &quick_spec(100, 1000)).expect("run accepted");
     let json = result.to_json();
     for key in [
-        "median_ns", "p99_ns", "wasmtime_version", "wasmtime_config", "cpu_model", "core_count",
-        "os", "commit",
+        "median_ns",
+        "p99_ns",
+        "wasmtime_version",
+        "wasmtime_config",
+        "cpu_model",
+        "core_count",
+        "os",
+        "commit",
     ] {
         assert!(json.get(key).is_some(), "missing key {key}");
     }
@@ -166,8 +178,18 @@ fn hst_303_debug_build_run_is_refused() {
 fn hst_303_result_records_target_features_of_the_build() {
     let result = run_with("B1", &quick_spec(100, 1000)).expect("run accepted");
     #[cfg(target_arch = "x86_64")]
-    assert!(result.target_features.split(',').any(|feature| feature.trim() == "sse2"), "{}", result.target_features);
-    assert_eq!(result.to_json()["target_features"], serde_json::Value::String(result.target_features.clone()));
+    assert!(
+        result
+            .target_features
+            .split(',')
+            .any(|feature| feature.trim() == "sse2"),
+        "{}",
+        result.target_features
+    );
+    assert_eq!(
+        result.to_json()["target_features"],
+        serde_json::Value::String(result.target_features.clone())
+    );
 }
 
 /// REQ: HST-304
@@ -204,7 +226,10 @@ fn hst_304_other_benchmarks_never_plan_stop() {
 /// REQ: HST-305
 #[test]
 fn hst_305_one_program_file_exists_for_each_of_b1_to_b24() {
-    let numbers: Vec<u32> = program_file_names().iter().filter_map(|n| program_number(n)).collect();
+    let numbers: Vec<u32> = program_file_names()
+        .iter()
+        .filter_map(|n| program_number(n))
+        .collect();
     for expected in 1..=24u32 {
         assert!(numbers.contains(&expected), "no program for B{expected}");
     }
@@ -213,7 +238,10 @@ fn hst_305_one_program_file_exists_for_each_of_b1_to_b24() {
 /// REQ: HST-305
 #[test]
 fn hst_305_no_two_programs_share_an_id() {
-    let mut numbers: Vec<u32> = program_file_names().iter().filter_map(|n| program_number(n)).collect();
+    let mut numbers: Vec<u32> = program_file_names()
+        .iter()
+        .filter_map(|n| program_number(n))
+        .collect();
     let total = numbers.len();
     numbers.sort_unstable();
     numbers.dedup();
@@ -224,7 +252,10 @@ fn hst_305_no_two_programs_share_an_id() {
 /// REQ: HST-305
 #[test]
 fn hst_305_no_program_outside_b1_to_b24() {
-    let numbers: Vec<u32> = program_file_names().iter().filter_map(|n| program_number(n)).collect();
+    let numbers: Vec<u32> = program_file_names()
+        .iter()
+        .filter_map(|n| program_number(n))
+        .collect();
     assert_eq!(numbers.len(), 24);
     assert!(numbers.iter().all(|n| (1..=24).contains(n)));
 }
@@ -249,8 +280,13 @@ fn hst_306_gate_fails_when_any_gated_budget_is_missed() {
 /// REQ: HST-306
 #[test]
 fn hst_306_gate_excludes_b10_to_b15_and_b21_to_b24() {
-    for id in ["B10", "B11", "B12", "B13", "B14", "B15", "B21", "B22", "B23", "B24"] {
-        assert!(!RELEASE_GATE_IDS.contains(&id), "{id} must not be in the gate");
+    for id in [
+        "B10", "B11", "B12", "B13", "B14", "B15", "B21", "B22", "B23", "B24",
+    ] {
+        assert!(
+            !RELEASE_GATE_IDS.contains(&id),
+            "{id} must not be in the gate"
+        );
     }
 }
 
@@ -267,7 +303,10 @@ fn hst_307_host_start_150ms_boundary() {
 #[ignore = "budget: run on the reference machine"]
 fn hst_307_host_start_with_40_bundled_plugins_measured() {
     let result = run_benchmark("B6").expect("benchmark runs");
-    let value = *result.metrics.get("host_start_ms").expect("metric recorded");
+    let value = *result
+        .metrics
+        .get("host_start_ms")
+        .expect("metric recorded");
     assert!(value <= 150.0, "host_start_ms={value}");
 }
 
@@ -285,7 +324,10 @@ fn hst_308_cli_cold_60ms_boundary() {
 fn hst_308_cli_cold_starts_no_server_and_no_unrelated_plugin() {
     let result = run_benchmark("B23").expect("benchmark runs");
     assert_eq!(result.metrics.get("servers_started").copied(), Some(0.0));
-    assert_eq!(result.metrics.get("unrelated_plugins_started").copied(), Some(0.0));
+    assert_eq!(
+        result.metrics.get("unrelated_plugins_started").copied(),
+        Some(0.0)
+    );
 }
 
 /// REQ: HST-309
@@ -331,11 +373,20 @@ fn hst_311_epoch_overhead_boundary_5_percent() {
 #[ignore = "budget: run on the reference machine"]
 fn hst_311_epoch_overhead_with_10ms_ticker_measured() {
     let result = run_benchmark("B7").expect("benchmark runs");
-    let overhead = *result.metrics.get("overhead_percent").expect("metric recorded");
+    let overhead = *result
+        .metrics
+        .get("overhead_percent")
+        .expect("metric recorded");
     assert!(overhead <= 5.0, "overhead_percent={overhead}");
 }
 
-fn evidence(on_demand_start: f64, on_demand_b2: f64, pool_start: f64, pool_b2: f64, extra: f64) -> PoolingEvidence {
+fn evidence(
+    on_demand_start: f64,
+    on_demand_b2: f64,
+    pool_start: f64,
+    pool_b2: f64,
+    extra: f64,
+) -> PoolingEvidence {
     PoolingEvidence {
         on_demand_host_start_ms: on_demand_start,
         on_demand_b2_wall_ms: on_demand_b2,
@@ -354,9 +405,18 @@ fn hst_312_pooling_enabled_when_on_demand_misses_start_and_pooling_meets_both() 
 /// REQ: HST-312
 #[test]
 fn hst_312_pooling_enabled_when_on_demand_misses_b2_only() {
-    assert_eq!(pooling_allowed(&evidence(100.0, 6.0, 100.0, 4.0, 10.0)), true);
-    assert_eq!(pooling_allowed(&evidence(100.0, 6.0, 100.0, 4.0, 16.0)), true);
-    assert_eq!(pooling_allowed(&evidence(100.0, 6.0, 100.0, 4.0, 16.5)), false);
+    assert_eq!(
+        pooling_allowed(&evidence(100.0, 6.0, 100.0, 4.0, 10.0)),
+        true
+    );
+    assert_eq!(
+        pooling_allowed(&evidence(100.0, 6.0, 100.0, 4.0, 16.0)),
+        true
+    );
+    assert_eq!(
+        pooling_allowed(&evidence(100.0, 6.0, 100.0, 4.0, 16.5)),
+        false
+    );
 }
 
 /// REQ: HST-312

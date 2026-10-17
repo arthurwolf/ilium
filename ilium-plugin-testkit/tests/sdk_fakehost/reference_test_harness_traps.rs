@@ -3,12 +3,12 @@
 
 use ilium_plugin_sdk_core::host::InstanceState;
 use ilium_plugin_sdk_core::types::{ErrorCode, Event, PluginError};
-use ilium_plugin_testkit::FakeHost;
 use ilium_plugin_testkit::errors::codes;
+use ilium_plugin_testkit::FakeHost;
 
 use crate::common::{
-    DEFAULT_CLOCK_MS, Spy, assert_fails_with, client_batch, spy, spy_reset, temp_dir, with_clean_env,
-    write_file,
+    assert_fails_with, client_batch, spy, spy_reset, temp_dir, with_clean_env, write_file, Spy,
+    DEFAULT_CLOCK_MS,
 };
 
 const MINUTE: u64 = 60_000;
@@ -77,7 +77,8 @@ fn dev_490_third_failure_inside_the_window_disables_the_side() {
 
 /// REQ: DEV-490
 #[test]
-fn dev_490_a_failure_expires_after_ten_minutes_so_two_failures_eleven_minutes_apart_both_restart_after_one_second() {
+fn dev_490_a_failure_expires_after_ten_minutes_so_two_failures_eleven_minutes_apart_both_restart_after_one_second(
+) {
     with_clean_env(|| {
         let mut host = active();
         fail_at(&mut host, 0);
@@ -142,7 +143,11 @@ fn dev_491_a_restarted_instance_gets_a_new_plugin_object_and_tree_changed() {
         host.advance_clock(1_000);
         host.settle();
         assert_eq!(spy().constructed, before + 1, "fresh in-memory state");
-        let tree_changed = spy().batches.iter().flatten().any(|event| matches!(event, Event::TreeChanged(_)));
+        let tree_changed = spy()
+            .batches
+            .iter()
+            .flatten()
+            .any(|event| matches!(event, Event::TreeChanged(_)));
         assert!(tree_changed, "restart replays tree-changed for every node");
     });
 }
@@ -183,7 +188,10 @@ fn dev_493_inject_failure_with_a_code_outside_the_import_catalogue_fails_with_er
     with_clean_env(|| {
         let mut host = active();
         assert_fails_with(codes::ERROR_UNKNOWN, || {
-            host.inject_failure("clock.now-unix-millis", PluginError::new(ErrorCode::QuotaExceeded, "x"))
+            host.inject_failure(
+                "clock.now-unix-millis",
+                PluginError::new(ErrorCode::QuotaExceeded, "x"),
+            )
         });
     });
 }
@@ -193,8 +201,14 @@ fn dev_493_inject_failure_with_a_code_outside_the_import_catalogue_fails_with_er
 fn dev_493_inject_failure_with_a_catalogue_code_is_accepted() {
     with_clean_env(|| {
         let mut host = active();
-        host.inject_failure("storage.put", PluginError::new(ErrorCode::QuotaExceeded, "full"));
-        assert!(host.failures().is_empty(), "an import failure is not a plugin failure");
+        host.inject_failure(
+            "storage.put",
+            PluginError::new(ErrorCode::QuotaExceeded, "full"),
+        );
+        assert!(
+            host.failures().is_empty(),
+            "an import failure is not a plugin failure"
+        );
     });
 }
 
@@ -207,9 +221,15 @@ fn dev_494_restart_with_deactivates_for_upgrade_and_activates_with_the_bytes() {
         let mut host = active();
         host.restart_with(vec![4, 5]);
         let log = spy();
-        assert_eq!(log.deactivations.last().map(|r| format!("{r:?}")), Some("Upgrade".to_string()));
+        assert_eq!(
+            log.deactivations.last().map(|r| format!("{r:?}")),
+            Some("Upgrade".to_string())
+        );
         assert_eq!(log.activations.last().expect("activation").instance, 2);
-        assert_eq!(log.activations.last().expect("activation").restored, Some(vec![4, 5]));
+        assert_eq!(
+            log.activations.last().expect("activation").restored,
+            Some(vec![4, 5])
+        );
         assert_eq!(host.restored(), Some(vec![4, 5]));
     });
 }
@@ -290,7 +310,10 @@ fn dev_496_a_journal_entry_written_before_the_crash_is_visible_to_the_next_activ
         assert_eq!(host.failures().len(), 1);
         host.advance_clock(1_000);
         host.settle();
-        assert!(spy().activations.len() >= 2, "the plugin reactivates after the crash");
+        assert!(
+            spy().activations.len() >= 2,
+            "the plugin reactivates after the crash"
+        );
     });
 }
 

@@ -1,7 +1,9 @@
 //! Shared helpers: a `ServerKernel` test world (gap constructors, see API_GAPS.md) and outcome readers.
 #![allow(dead_code)]
 
-use ilium_plugin_api::generated::types::{ErrorCode, Intent, NodeId, Outcome, PaneLifecycleState, PluginId};
+use ilium_plugin_api::generated::types::{
+    ErrorCode, Intent, NodeId, Outcome, PaneLifecycleState, PluginId,
+};
 use ilium_plugin_api::kernel::{KernelFacade, Origin};
 use ilium_plugin_api::Side;
 use ilium_server::plugin_host::ServerKernel;
@@ -13,7 +15,11 @@ pub const NEIGHBOUR_PANE: NodeId = NodeId(13);
 pub const PLUGIN: &str = "test.plugin";
 
 pub fn origin() -> Origin {
-    Origin::Plugin { plugin: PluginId(PLUGIN.to_owned()), side: Side::Server, instance: 1 }
+    Origin::Plugin {
+        plugin: PluginId(PLUGIN.to_owned()),
+        side: Side::Server,
+        instance: 1,
+    }
 }
 
 /// A kernel whose tree holds RUNNING_PANE (running), RESTORED_PANE (restored, no process),

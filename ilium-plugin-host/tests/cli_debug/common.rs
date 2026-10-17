@@ -45,7 +45,11 @@ impl Default for FakeProbe {
         let mut versions = HashMap::new();
         versions.insert("rustc".to_owned(), "1.96.1".to_owned());
         versions.insert("bun".to_owned(), "1.2.5".to_owned());
-        FakeProbe { versions, rust_target: true, free_bytes: 10 * 1024 * 1024 * 1024 }
+        FakeProbe {
+            versions,
+            rust_target: true,
+            free_bytes: 10 * 1024 * 1024 * 1024,
+        }
     }
 }
 
@@ -96,15 +100,26 @@ impl FakeBackend {
 
 impl SessionBackend for FakeBackend {
     fn plugin(&self, id: &str) -> Option<SessionPlugin> {
-        (id == self.plugin_id).then(|| SessionPlugin { dev: self.dev, running: self.running })
+        (id == self.plugin_id).then(|| SessionPlugin {
+            dev: self.dev,
+            running: self.running,
+        })
     }
 
     fn trace_records(&self, id: &str) -> Vec<TraceRecord> {
-        if id == self.plugin_id { self.trace.clone() } else { Vec::new() }
+        if id == self.plugin_id {
+            self.trace.clone()
+        } else {
+            Vec::new()
+        }
     }
 
     fn last_tree(&self, id: &str, _target: &str) -> Option<InspectNode> {
-        if id == self.plugin_id { self.tree.clone() } else { None }
+        if id == self.plugin_id {
+            self.tree.clone()
+        } else {
+            None
+        }
     }
 
     fn profile_exports(&self, _id: &str) -> Vec<String> {
@@ -117,11 +132,19 @@ impl SessionBackend for FakeBackend {
     }
 
     fn memory_views(&self, id: &str) -> Vec<MemoryView> {
-        if id == self.plugin_id { self.memory.clone() } else { Vec::new() }
+        if id == self.plugin_id {
+            self.memory.clone()
+        } else {
+            Vec::new()
+        }
     }
 
     fn counters(&self, id: &str) -> Vec<(Side, Vec<HourBucket>)> {
-        if id == self.plugin_id { self.counters.clone() } else { Vec::new() }
+        if id == self.plugin_id {
+            self.counters.clone()
+        } else {
+            Vec::new()
+        }
     }
 }
 
@@ -175,7 +198,13 @@ pub fn record_types(output: &CliOutput) -> Vec<String> {
     output
         .stdout_jsonl
         .iter()
-        .map(|record| record.get("type").and_then(Value::as_str).unwrap_or("").to_owned())
+        .map(|record| {
+            record
+                .get("type")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_owned()
+        })
         .collect()
 }
 

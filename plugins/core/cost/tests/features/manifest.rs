@@ -15,7 +15,10 @@ fn fragment() -> Value {
 }
 
 fn rows() -> Vec<Value> {
-    manifest_value()["contributes"]["settings"][0]["rows"].as_array().expect("rows").clone()
+    manifest_value()["contributes"]["settings"][0]["rows"]
+        .as_array()
+        .expect("rows")
+        .clone()
 }
 
 /// REQ: COR-050, F-038
@@ -28,7 +31,11 @@ fn doc_cor_050_manifest_file_equals_complete_manifest_on_page() {
 #[test]
 fn doc_cor_050_page_has_fragment_complete_manifest_and_example_blocks() {
     let blocks = json_blocks(&page_text());
-    assert_eq!(blocks.len(), 3, "fragment, complete manifest and the price-sources example");
+    assert_eq!(
+        blocks.len(),
+        3,
+        "fragment, complete manifest and the price-sources example"
+    );
 }
 
 /// REQ: COR-050, F-038
@@ -56,7 +63,10 @@ fn doc_cor_050_fragment_client_grants_are_a_prefix_of_the_complete_manifest() {
 /// REQ: COR-050, F-038
 #[test]
 fn doc_cor_050_fragment_server_grants_equal_the_complete_manifest() {
-    assert_eq!(fragment()["capabilities"]["server"], page_manifest()["capabilities"]["server"]);
+    assert_eq!(
+        fragment()["capabilities"]["server"],
+        page_manifest()["capabilities"]["server"]
+    );
 }
 
 /// REQ: COR-050, F-038
@@ -95,7 +105,10 @@ fn doc_cor_050_server_side_has_entry_world_and_the_service_provider_export() {
 #[test]
 fn doc_cor_050_client_side_has_entry_and_world_and_no_exports_key() {
     let manifest = manifest_value();
-    assert_eq!(manifest["client"], json!({"entry": "client.wasm", "world": "ilium:client/base@0.1.0"}));
+    assert_eq!(
+        manifest["client"],
+        json!({"entry": "client.wasm", "world": "ilium:client/base@0.1.0"})
+    );
 }
 
 /// REQ: COR-050, F-038
@@ -131,7 +144,11 @@ fn doc_cor_050_client_grants_are_ui_panels_and_the_reset_planning_tab() {
 #[test]
 fn doc_cor_050_capabilities_have_only_the_server_and_client_sides() {
     let manifest = manifest_value();
-    let mut sides: Vec<&String> = manifest["capabilities"].as_object().expect("object").keys().collect();
+    let mut sides: Vec<&String> = manifest["capabilities"]
+        .as_object()
+        .expect("object")
+        .keys()
+        .collect();
     sides.sort();
     assert_eq!(sides, ["client", "server"]);
 }
@@ -144,13 +161,19 @@ fn doc_cor_050_http_grants_name_exactly_the_two_status_hosts() {
         .into_iter()
         .filter(|grant| grant.starts_with("http"))
         .collect();
-    assert_eq!(http, ["http:status.anthropic.com", "http:status.openai.com"]);
+    assert_eq!(
+        http,
+        ["http:status.anthropic.com", "http:status.openai.com"]
+    );
 }
 
 /// REQ: COR-050, F-031
 #[test]
 fn doc_cor_050_activation_is_startup_and_the_cost_panel_view() {
-    assert_eq!(strings(&manifest_value()["activation"]), ["startup", "view:cost.panel"]);
+    assert_eq!(
+        strings(&manifest_value()["activation"]),
+        ["startup", "view:cost.panel"]
+    );
 }
 
 /// REQ: COR-050, F-031
@@ -165,9 +188,16 @@ fn doc_cor_050_activation_matches_the_kernel_and_boot_table_row() {
 #[test]
 fn doc_cor_050_contributes_has_exactly_four_keys() {
     let manifest = manifest_value();
-    let mut keys: Vec<&String> = manifest["contributes"].as_object().expect("object").keys().collect();
+    let mut keys: Vec<&String> = manifest["contributes"]
+        .as_object()
+        .expect("object")
+        .keys()
+        .collect();
     keys.sort();
-    assert_eq!(keys, ["decoration_slots", "services", "settings", "tree_orderings"]);
+    assert_eq!(
+        keys,
+        ["decoration_slots", "services", "settings", "tree_orderings"]
+    );
 }
 
 /// The plugin declares no tab of its own; it adds a section to the kernel tab (config migration page).
@@ -206,7 +236,9 @@ fn doc_cor_050_tree_ordering_by_cost_sorts_on_the_cost_slot() {
 #[test]
 fn doc_cor_050_tree_ordering_slot_is_a_declared_decoration_slot() {
     let manifest = manifest_value();
-    let slot = manifest["contributes"]["tree_orderings"][0]["slot"].as_str().expect("slot");
+    let slot = manifest["contributes"]["tree_orderings"][0]["slot"]
+        .as_str()
+        .expect("slot");
     let declared: Vec<&str> = manifest["contributes"]["decoration_slots"]
         .as_array()
         .expect("slots")
@@ -227,7 +259,9 @@ fn doc_cor_050_tree_decorate_grant_backs_the_slot_and_the_ordering() {
 #[test]
 fn doc_cor_050_usage_service_has_one_method_usage() {
     let manifest = manifest_value();
-    let service = manifest["contributes"]["services"][USAGE_SERVICE].as_object().expect("service");
+    let service = manifest["contributes"]["services"][USAGE_SERVICE]
+        .as_object()
+        .expect("service");
     assert_eq!(service.keys().collect::<Vec<_>>(), ["usage"]);
 }
 
@@ -236,7 +270,10 @@ fn doc_cor_050_usage_service_has_one_method_usage() {
 fn doc_cor_050_usage_params_take_an_optional_string_window() {
     let manifest = manifest_value();
     let params = &manifest["contributes"]["services"][USAGE_SERVICE]["usage"]["params"];
-    assert_eq!(params, &json!({"type": "object", "properties": {"window": {"type": "string"}}}));
+    assert_eq!(
+        params,
+        &json!({"type": "object", "properties": {"window": {"type": "string"}}})
+    );
     assert!(params.get("required").is_none(), "window is optional");
 }
 
@@ -257,7 +294,9 @@ fn doc_cor_050_provided_service_grant_names_the_declared_service() {
     let manifest = manifest_value();
     let grant = format!("services.provide:{USAGE_SERVICE}");
     assert!(strings(&manifest["capabilities"]["server"]).contains(&grant));
-    assert!(manifest["contributes"]["services"].get(USAGE_SERVICE).is_some());
+    assert!(manifest["contributes"]["services"]
+        .get(USAGE_SERVICE)
+        .is_some());
 }
 
 /// REQ: COR-050, F-040
@@ -265,7 +304,13 @@ fn doc_cor_050_provided_service_grant_names_the_declared_service() {
 fn doc_cor_050_settings_section_is_cost_display_on_the_agent_cost_tab() {
     let manifest = manifest_value();
     let section = &manifest["contributes"]["settings"][0];
-    assert_eq!(manifest["contributes"]["settings"].as_array().expect("array").len(), 1);
+    assert_eq!(
+        manifest["contributes"]["settings"]
+            .as_array()
+            .expect("array")
+            .len(),
+        1
+    );
     assert_eq!(section["kind"], "section");
     assert_eq!(section["id"], "cost-display");
     assert_eq!(section["tab"], "agent-cost");
@@ -278,8 +323,11 @@ fn doc_cor_050_settings_section_is_cost_display_on_the_agent_cost_tab() {
 #[test]
 fn doc_cor_050_settings_section_tab_matches_the_contribute_grant() {
     let manifest = manifest_value();
-    let tab = manifest["contributes"]["settings"][0]["tab"].as_str().expect("tab");
-    assert!(strings(&manifest["capabilities"]["server"]).contains(&format!("settings.contribute:{tab}")));
+    let tab = manifest["contributes"]["settings"][0]["tab"]
+        .as_str()
+        .expect("tab");
+    assert!(strings(&manifest["capabilities"]["server"])
+        .contains(&format!("settings.contribute:{tab}")));
 }
 
 /// REQ: COR-050, F-038
@@ -317,7 +365,10 @@ fn doc_cor_050_display_row_is_a_multi_choice_defaulting_to_tree_and_status() {
 /// REQ: COR-050, F-038
 #[test]
 fn doc_cor_050_the_section_has_exactly_two_rows_unit_then_display() {
-    let keys: Vec<String> = rows().iter().map(|row| row["key"].as_str().expect("key").to_string()).collect();
+    let keys: Vec<String> = rows()
+        .iter()
+        .map(|row| row["key"].as_str().expect("key").to_string())
+        .collect();
     assert_eq!(keys, ["unit", "display"]);
 }
 
@@ -326,9 +377,15 @@ fn doc_cor_050_the_section_has_exactly_two_rows_unit_then_display() {
 fn doc_cor_050_row_defaults_are_among_their_options() {
     let rows = rows();
     let option_values = |row: &Value| -> Vec<String> {
-        row["options"].as_array().expect("options").iter().map(|o| o["value"].as_str().expect("value").to_string()).collect()
+        row["options"]
+            .as_array()
+            .expect("options")
+            .iter()
+            .map(|o| o["value"].as_str().expect("value").to_string())
+            .collect()
     };
-    assert!(option_values(&rows[0]).contains(&rows[0]["default"].as_str().expect("default").to_string()));
+    assert!(option_values(&rows[0])
+        .contains(&rows[0]["default"].as_str().expect("default").to_string()));
     for item in strings(&rows[1]["default"]) {
         assert!(option_values(&rows[1]).contains(&item), "default {item}");
     }
@@ -338,14 +395,16 @@ fn doc_cor_050_row_defaults_are_among_their_options() {
 #[test]
 fn doc_cor_030_server_holds_the_agent_cost_kernel_tab_grant() {
     let manifest = manifest_value();
-    assert!(strings(&manifest["capabilities"]["server"]).contains(&"settings.write-kernel:agent-cost".to_string()));
+    assert!(strings(&manifest["capabilities"]["server"])
+        .contains(&"settings.write-kernel:agent-cost".to_string()));
 }
 
 /// REQ: COR-030, COR-050, F-116
 #[test]
 fn doc_cor_030_client_holds_the_reset_planning_kernel_tab_grant() {
     let manifest = manifest_value();
-    assert!(strings(&manifest["capabilities"]["client"]).contains(&"settings.write-kernel:reset-planning".to_string()));
+    assert!(strings(&manifest["capabilities"]["client"])
+        .contains(&"settings.write-kernel:reset-planning".to_string()));
 }
 
 /// Kernel tabs are T1 only (api-kernel-settings-and-keymap.md), so the tier is first-party.

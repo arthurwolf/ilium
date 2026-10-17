@@ -20,7 +20,10 @@ fn reference_page() -> String {
 /// REQ: F-048
 #[test]
 fn points_048_the_page_lists_exactly_two_points() {
-    let names: Vec<String> = point_rows().into_iter().map(|row| row[0].trim_matches('`').to_string()).collect();
+    let names: Vec<String> = point_rows()
+        .into_iter()
+        .map(|row| row[0].trim_matches('`').to_string())
+        .collect();
     assert_eq!(names, ["before-notify", "channels"]);
 }
 
@@ -28,9 +31,15 @@ fn points_048_the_page_lists_exactly_two_points() {
 #[test]
 fn points_048_before_notify_is_a_veto_hook_with_the_documented_payload() {
     let rows = point_rows();
-    let row = rows.iter().find(|row| row[0] == "`before-notify`").expect("row");
+    let row = rows
+        .iter()
+        .find(|row| row[0] == "`before-notify`")
+        .expect("row");
     assert_eq!(row[1], "hook (veto)");
-    assert_eq!(row[2], "Mute or refuse a notification, for example at night.");
+    assert_eq!(
+        row[2],
+        "Mute or refuse a notification, for example at night."
+    );
     assert_eq!(row[3], "event, pane, title, urgency, channels");
     assert_eq!(row[4], "standard");
 }
@@ -76,7 +85,10 @@ fn points_048_the_plugin_is_replaceable_and_a_replacement_provides_the_whole_sur
 #[test]
 fn points_048_the_veto_example_contribution_is_a_valid_manifest_fragment() {
     let page = page_text();
-    let fragment = json_block_after(&page, "#### Example: Refuses every notice with urgency `low`");
+    let fragment = json_block_after(
+        &page,
+        "#### Example: Refuses every notice with urgency `low`",
+    );
     assert_eq!(fragment["api"], "ilium:plugin@0.1.0");
     assert_eq!(fragment["exports"], serde_json::json!(["hook-handler"]));
     assert_eq!(
@@ -84,7 +96,10 @@ fn points_048_the_veto_example_contribution_is_a_valid_manifest_fragment() {
         serde_json::json!(["extensions.contribute:ilium.core.notifications/before-notify"])
     );
     let contribution = &fragment["contributes"]["extensions"][0];
-    assert_eq!(contribution["point"], "ilium.core.notifications/before-notify");
+    assert_eq!(
+        contribution["point"],
+        "ilium.core.notifications/before-notify"
+    );
     assert_eq!(contribution["priority"], 50);
 }
 
@@ -123,7 +138,12 @@ fn service_048_notify_raises_a_notice_with_the_given_title_body_and_urgency() {
     let mut session = started_session();
     let request = r#"{"title":"Tasks finished","body":"3 tasks are done.","urgency":"normal"}"#;
     let reply = session
-        .call_service(PLUGIN_ID, "ilium.core.notifications/notify", "^0.1", request)
+        .call_service(
+            PLUGIN_ID,
+            "ilium.core.notifications/notify",
+            "^0.1",
+            request,
+        )
         .expect("service answers");
     assert!(matches!(reply, ServiceReply::Done(_)));
     session.pump().expect("pump");
@@ -137,16 +157,28 @@ fn service_048_notify_raises_a_notice_with_the_given_title_body_and_urgency() {
 /// REQ: F-048
 #[test]
 fn service_048_notify_maps_each_urgency_word() {
-    for (word, expected) in [("low", Urgency::Low), ("normal", Urgency::Normal), ("high", Urgency::High)] {
+    for (word, expected) in [
+        ("low", Urgency::Low),
+        ("normal", Urgency::Normal),
+        ("high", Urgency::High),
+    ] {
         let mut session = started_session();
         let request = format!(r#"{{"title":"t","body":"b","urgency":"{word}"}}"#);
         session
-            .call_service(PLUGIN_ID, "ilium.core.notifications/notify", "^0.1", &request)
+            .call_service(
+                PLUGIN_ID,
+                "ilium.core.notifications/notify",
+                "^0.1",
+                &request,
+            )
             .expect("service answers");
         session.pump().expect("pump");
         let found = notices(&session.server(PLUGIN_ID).submitted());
         assert_eq!(found.len(), 1, "{word}");
-        assert!(std::mem::discriminant(&found[0].urgency) == std::mem::discriminant(&expected), "{word}");
+        assert!(
+            std::mem::discriminant(&found[0].urgency) == std::mem::discriminant(&expected),
+            "{word}"
+        );
     }
 }
 
@@ -156,9 +188,17 @@ fn service_048_notify_with_an_unknown_urgency_is_refused_with_invalid_argument()
     let mut session = started_session();
     let request = r#"{"title":"t","body":"b","urgency":"shouting"}"#;
     let error = session
-        .call_service(PLUGIN_ID, "ilium.core.notifications/notify", "^0.1", request)
+        .call_service(
+            PLUGIN_ID,
+            "ilium.core.notifications/notify",
+            "^0.1",
+            request,
+        )
         .expect_err("refused");
-    assert_eq!(error.code, ilium_plugin_sdk::types::ErrorCode::InvalidArgument);
+    assert_eq!(
+        error.code,
+        ilium_plugin_sdk::types::ErrorCode::InvalidArgument
+    );
     session.pump().expect("pump");
     assert!(notices(&session.server(PLUGIN_ID).submitted()).is_empty());
 }
@@ -168,9 +208,17 @@ fn service_048_notify_with_an_unknown_urgency_is_refused_with_invalid_argument()
 fn service_048_notify_without_a_title_is_refused_with_invalid_argument() {
     let mut session = started_session();
     let error = session
-        .call_service(PLUGIN_ID, "ilium.core.notifications/notify", "^0.1", r#"{"body":"b","urgency":"low"}"#)
+        .call_service(
+            PLUGIN_ID,
+            "ilium.core.notifications/notify",
+            "^0.1",
+            r#"{"body":"b","urgency":"low"}"#,
+        )
         .expect_err("refused");
-    assert_eq!(error.code, ilium_plugin_sdk::types::ErrorCode::InvalidArgument);
+    assert_eq!(
+        error.code,
+        ilium_plugin_sdk::types::ErrorCode::InvalidArgument
+    );
 }
 
 /// REQ: F-048
@@ -178,9 +226,17 @@ fn service_048_notify_without_a_title_is_refused_with_invalid_argument() {
 fn service_048_notify_with_malformed_json_is_refused_with_invalid_argument() {
     let mut session = started_session();
     let error = session
-        .call_service(PLUGIN_ID, "ilium.core.notifications/notify", "^0.1", "{not json")
+        .call_service(
+            PLUGIN_ID,
+            "ilium.core.notifications/notify",
+            "^0.1",
+            "{not json",
+        )
         .expect_err("refused");
-    assert_eq!(error.code, ilium_plugin_sdk::types::ErrorCode::InvalidArgument);
+    assert_eq!(
+        error.code,
+        ilium_plugin_sdk::types::ErrorCode::InvalidArgument
+    );
 }
 
 /// REQ: F-048

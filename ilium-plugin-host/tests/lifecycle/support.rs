@@ -1,11 +1,13 @@
 //! Shared helpers over the `testing::life` gap harness (see API_GAPS.md).
 #![allow(dead_code)]
 
-pub use ilium_plugin_api::generated::host::plugins::{HealthState, InstanceState, PackageState, SideState};
+pub use ilium_plugin_api::generated::host::plugins::{
+    HealthState, InstanceState, PackageState, SideState,
+};
 pub use ilium_plugin_api::generated::types::PluginError;
+pub use ilium_plugin_api::lifecycle::DeactivationReason;
 pub use ilium_plugin_api::{Side, Tier};
 pub use ilium_plugin_host::lifecycle::StartMode;
-pub use ilium_plugin_api::lifecycle::DeactivationReason;
 pub use ilium_plugin_host::testing::life::{FailureKind, LifeHost, PluginSpec, SafeMode};
 
 pub const A: &str = "com.test.alpha";
@@ -24,7 +26,11 @@ pub fn one_plugin() -> LifeHost {
 /// A host with one plugin that has a server and a client side, one client attached.
 pub fn two_sided() -> (LifeHost, String) {
     let mut host = LifeHost::new();
-    host.install(PluginSpec::new(A).sides(&[Side::Server, Side::Client]).startup());
+    host.install(
+        PluginSpec::new(A)
+            .sides(&[Side::Server, Side::Client])
+            .startup(),
+    );
     host.start(StartMode::Normal);
     let scope = host.attach_client("client-1");
     (host, scope)

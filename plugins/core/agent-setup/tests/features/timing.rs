@@ -21,7 +21,8 @@ fn fire_late(host: &mut FakeHost, name: &str, late_by_millis: u64) {
 }
 
 fn has_block(host: &mut FakeHost, path: ilium_plugin_sdk::types::FsPath, feature: &str) -> bool {
-    get(host, path).is_some_and(|text| text.contains(&format!("<!-- ilium-agent-feature: {feature}")))
+    get(host, path)
+        .is_some_and(|text| text.contains(&format!("<!-- ilium-agent-feature: {feature}")))
 }
 
 /// REQ: F-063
@@ -56,10 +57,16 @@ fn timing_063_a_second_attach_moves_the_timer_to_two_seconds_after_it() {
     attach(&mut host, 2);
     host.advance_clock(1_500);
     host.settle();
-    assert!(!has_block(&mut host, claude_file(), "progress"), "2.5 s after the first, 1.5 s after the second attach");
+    assert!(
+        !has_block(&mut host, claude_file(), "progress"),
+        "2.5 s after the first, 1.5 s after the second attach"
+    );
     host.advance_clock(500);
     host.settle();
-    assert!(has_block(&mut host, claude_file(), "progress"), "2 s after the second attach");
+    assert!(
+        has_block(&mut host, claude_file(), "progress"),
+        "2 s after the second attach"
+    );
 }
 
 /// REQ: F-063
@@ -96,7 +103,11 @@ fn timing_063_a_timer_with_another_name_does_nothing() {
 #[test]
 fn timing_063_the_refresh_upgrades_an_older_global_block_automatically() {
     let mut host = server_host();
-    put(&mut host, claude_file(), &format!("# Mine\n\n{}", old_progress_block(12)));
+    put(
+        &mut host,
+        claude_file(),
+        &format!("# Mine\n\n{}", old_progress_block(12)),
+    );
     fire_late(&mut host, "refresh", 0);
     let text = get(&mut host, claude_file()).expect("file");
     assert!(text.contains(PROGRESS_OPEN) && !text.contains("version=12"));
@@ -110,7 +121,10 @@ fn timing_063_the_refresh_leaves_a_newer_block_untouched() {
     let text = old_progress_block(99);
     put(&mut host, claude_file(), &text);
     fire_late(&mut host, "refresh", 0);
-    assert_eq!(get(&mut host, claude_file()).as_deref(), Some(text.as_str()));
+    assert_eq!(
+        get(&mut host, claude_file()).as_deref(),
+        Some(text.as_str())
+    );
 }
 
 /// REQ: F-063
@@ -119,7 +133,10 @@ fn timing_063_the_refresh_leaves_look_alike_text_untouched() {
     let mut host = server_host();
     put(&mut host, claude_file(), PROGRESS_LOOK_ALIKE);
     fire_late(&mut host, "refresh", 0);
-    assert_eq!(get(&mut host, claude_file()).as_deref(), Some(PROGRESS_LOOK_ALIKE));
+    assert_eq!(
+        get(&mut host, claude_file()).as_deref(),
+        Some(PROGRESS_LOOK_ALIKE)
+    );
 }
 
 /// REQ: F-063
@@ -176,7 +193,10 @@ fn timing_063_an_existing_project_file_is_not_changed_by_the_automatic_refresh()
     attach(&mut host, 1);
     host.advance_clock(2_000);
     host.settle();
-    assert_eq!(get(&mut host, project_claude_file()).as_deref(), Some("# Project rules\n"));
+    assert_eq!(
+        get(&mut host, project_claude_file()).as_deref(),
+        Some("# Project rules\n")
+    );
 }
 
 /// REQ: F-063, F-037
@@ -184,9 +204,15 @@ fn timing_063_an_existing_project_file_is_not_changed_by_the_automatic_refresh()
 fn timing_063_the_refresh_follows_a_custom_global_claude_path() {
     let mut host = server_host();
     host.settings()
-        .set("agent_setup.progress_global_file", serde_json::json!("~/.claude/ALT.md"))
+        .set(
+            "agent_setup.progress_global_file",
+            serde_json::json!("~/.claude/ALT.md"),
+        )
         .expect("custom path");
     fire_late(&mut host, "refresh", 0);
     assert!(has_block(&mut host, claude_alt_file(), "progress"));
-    assert!(!has_block(&mut host, claude_file(), "progress"), "the default file is not used for Progress");
+    assert!(
+        !has_block(&mut host, claude_file(), "progress"),
+        "the default file is not used for Progress"
+    );
 }

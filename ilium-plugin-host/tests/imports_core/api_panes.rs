@@ -57,8 +57,14 @@ fn panes_info_an_exited_pane_keeps_its_last_title_and_size() {
     let mut fixture = fixture(Tier::T2, &[READ]);
     let pane = fixture.add_terminal_pane("job", 100, 30);
     fixture.exit_pane(pane);
-    let info = fixture.panes().info(pane).expect("an exited pane is still described");
-    assert_eq!((info.columns, info.rows, info.title.as_str()), (100, 30, "job"));
+    let info = fixture
+        .panes()
+        .info(pane)
+        .expect("an exited pane is still described");
+    assert_eq!(
+        (info.columns, info.rows, info.title.as_str()),
+        (100, 30, "job")
+    );
     assert!(!info.is_restored);
 }
 
@@ -106,7 +112,10 @@ fn panes_focused_without_the_grant_is_none_and_logs_a_warning() {
     let pane = fixture.add_terminal_pane("a", 80, 24);
     fixture.focus_pane(pane);
     assert_eq!(fixture.panes().focused(), None);
-    assert!(fixture.logs().iter().any(|line| line.level == "warn" && line.message.contains(READ)));
+    assert!(fixture
+        .logs()
+        .iter()
+        .any(|line| line.level == "warn" && line.message.contains(READ)));
 }
 
 /// REQ: WIT:ilium:host/panes.focused

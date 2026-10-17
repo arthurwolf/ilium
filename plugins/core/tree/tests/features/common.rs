@@ -48,12 +48,22 @@ pub fn add_node(host: &mut FakeHost, parent: Option<u64>, name: &str, class: Nod
         NodeClass::Pane => Some("ilium.terminal".to_string()),
         _ => None,
     };
-    host.tree().add(TreeNode { id: 0, parent, name: name.to_string(), class, content_kind, agent: None })
+    host.tree().add(TreeNode {
+        id: 0,
+        parent,
+        name: name.to_string(),
+        class,
+        content_kind,
+        agent: None,
+    })
 }
 
 /// The intents of a submission list, in order.
 pub fn intents(submissions: &[Submission]) -> Vec<Intent> {
-    submissions.iter().map(|submission| submission.intent.clone()).collect()
+    submissions
+        .iter()
+        .map(|submission| submission.intent.clone())
+        .collect()
 }
 
 /// Node ids named by every `close-node` intent in the list.
@@ -69,7 +79,11 @@ pub fn closed_nodes(submissions: &[Submission]) -> Vec<NodeId> {
 
 /// The sort key the page's "Order the tree" sample computes: the first four bytes of the lower-case title, base 256.
 pub fn expected_sort_key(title: &str) -> i64 {
-    title.to_lowercase().bytes().take(4).fold(0i64, |key, byte| key * 256 + i64::from(byte))
+    title
+        .to_lowercase()
+        .bytes()
+        .take(4)
+        .fold(0i64, |key, byte| key * 256 + i64::from(byte))
 }
 
 /// Decoration specs with slot `order`, as `(node, sort_key)` pairs in submission order.

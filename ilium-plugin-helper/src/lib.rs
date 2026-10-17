@@ -39,6 +39,10 @@ pub struct HelperConfig {
 }
 
 /// Serves requests from `input` and answers on `output` until the host closes the channel.
-pub fn serve(input: impl Read, output: impl Write, config: HelperConfig) -> Result<(), HelperError> {
+pub fn serve(
+    input: impl Read,
+    output: impl Write,
+    config: HelperConfig,
+) -> Result<(), HelperError> {
     unimplemented!("helper::serve")
 }

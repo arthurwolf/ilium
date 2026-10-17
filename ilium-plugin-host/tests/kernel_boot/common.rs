@@ -243,7 +243,10 @@ pub fn synthetic_crate(dir: &str, name: &str, dependencies: &[&str]) -> CrateMan
     CrateManifest {
         dir: dir.to_owned(),
         name: name.to_owned(),
-        dependencies: dependencies.iter().map(|value| (*value).to_owned()).collect(),
+        dependencies: dependencies
+            .iter()
+            .map(|value| (*value).to_owned())
+            .collect(),
     }
 }
 
@@ -264,18 +267,31 @@ impl RecordingGuest {
     /// A guest and the shared log it writes to.
     pub fn new() -> (RecordingGuest, Arc<Mutex<GuestLog>>) {
         let log = Arc::new(Mutex::new(GuestLog::default()));
-        (RecordingGuest { log: Arc::clone(&log) }, log)
+        (
+            RecordingGuest {
+                log: Arc::clone(&log),
+            },
+            log,
+        )
     }
 }
 
 impl NativeGuest for RecordingGuest {
     fn activate(&mut self, activation: Activation) -> Result<(), PluginError> {
-        self.log.lock().expect("log lock").activations.push(activation);
+        self.log
+            .lock()
+            .expect("log lock")
+            .activations
+            .push(activation);
         Ok(())
     }
 
     fn deactivate(&mut self, reason: DeactivationReason) -> Option<Vec<u8>> {
-        self.log.lock().expect("log lock").deactivations.push(reason);
+        self.log
+            .lock()
+            .expect("log lock")
+            .deactivations
+            .push(reason);
         None
     }
 

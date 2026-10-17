@@ -6,9 +6,9 @@ use std::fmt::Debug;
 use std::path::{Path, PathBuf};
 
 use ilium_plugin_api::generated::types::{
-    CreateFolderSpec, CreateGroupSpec, CreatePaneSpec, CreateProjectSpec, CreateSplitSpec, Delivery,
-    ErrorCode, FsPath, Intent, MoveNodeSpec, NodeClass, NodeId, Outcome, Placement, RenameNodeSpec,
-    SendInputSpec, SplitDirection, TitleSource,
+    CreateFolderSpec, CreateGroupSpec, CreatePaneSpec, CreateProjectSpec, CreateSplitSpec,
+    Delivery, ErrorCode, FsPath, Intent, MoveNodeSpec, NodeClass, NodeId, Outcome, Placement,
+    RenameNodeSpec, SendInputSpec, SplitDirection, TitleSource,
 };
 use ilium_plugin_api::kernel::{KernelFacade, Origin, TreeNode};
 use ilium_plugin_host::lifecycle::StartMode;
@@ -31,7 +31,10 @@ pub fn world_with_config(mode: StartMode, config_toml: &str) -> ServerKernel {
 pub fn in_both_modes<T: PartialEq + Debug>(scenario: impl Fn(&ServerKernel) -> T) -> T {
     let with_plugins = scenario(&world(StartMode::Normal));
     let kernel_only = scenario(&world(StartMode::NoPlugins));
-    assert_eq!(with_plugins, kernel_only, "plugin build differs from the kernel-only baseline");
+    assert_eq!(
+        with_plugins, kernel_only,
+        "plugin build differs from the kernel-only baseline"
+    );
     with_plugins
 }
 
@@ -63,7 +66,10 @@ pub fn project(kernel: &ServerKernel, title: &str) -> NodeId {
         kernel,
         Intent::CreateProject(CreateProjectSpec {
             title: title.to_owned(),
-            root: FsPath { scope: "project".to_owned(), path: ".".to_owned() },
+            root: FsPath {
+                scope: "project".to_owned(),
+                path: ".".to_owned(),
+            },
         }),
     ))
 }
@@ -83,12 +89,21 @@ pub fn group(kernel: &ServerKernel, parent: Option<NodeId>, title: &str) -> Node
 pub fn folder(kernel: &ServerKernel, parent: Option<NodeId>, title: &str) -> NodeId {
     created(apply(
         kernel,
-        Intent::CreateFolder(CreateFolderSpec { parent, title: title.to_owned(), path: None }),
+        Intent::CreateFolder(CreateFolderSpec {
+            parent,
+            title: title.to_owned(),
+            path: None,
+        }),
     ))
 }
 
 /// A terminal pane running `command` under `parent`.
-pub fn terminal(kernel: &ServerKernel, parent: Option<NodeId>, title: &str, command: &[&str]) -> NodeId {
+pub fn terminal(
+    kernel: &ServerKernel,
+    parent: Option<NodeId>,
+    title: &str,
+    command: &[&str],
+) -> NodeId {
     created(apply(
         kernel,
         Intent::CreatePane(CreatePaneSpec {
@@ -103,7 +118,12 @@ pub fn terminal(kernel: &ServerKernel, parent: Option<NodeId>, title: &str, comm
 }
 
 /// A pane of an arbitrary content kind ("ilium.editor", "ilium.board").
-pub fn pane_of_kind(kernel: &ServerKernel, parent: Option<NodeId>, title: &str, kind: &str) -> NodeId {
+pub fn pane_of_kind(
+    kernel: &ServerKernel,
+    parent: Option<NodeId>,
+    title: &str,
+    kind: &str,
+) -> NodeId {
     created(apply(
         kernel,
         Intent::CreatePane(CreatePaneSpec {
@@ -118,7 +138,13 @@ pub fn pane_of_kind(kernel: &ServerKernel, parent: Option<NodeId>, title: &str, 
 }
 
 pub fn split(kernel: &ServerKernel, panes: &[NodeId], direction: SplitDirection) -> Outcome {
-    apply(kernel, Intent::CreateSplit(CreateSplitSpec { panes: panes.to_vec(), direction }))
+    apply(
+        kernel,
+        Intent::CreateSplit(CreateSplitSpec {
+            panes: panes.to_vec(),
+            direction,
+        }),
+    )
 }
 
 pub fn rename(kernel: &ServerKernel, node: NodeId, title: &str) -> Outcome {
@@ -133,8 +159,20 @@ pub fn rename(kernel: &ServerKernel, node: NodeId, title: &str) -> Outcome {
     )
 }
 
-pub fn move_node(kernel: &ServerKernel, node: NodeId, target: NodeId, placement: Placement) -> Outcome {
-    apply(kernel, Intent::MoveNode(MoveNodeSpec { node, target, placement }))
+pub fn move_node(
+    kernel: &ServerKernel,
+    node: NodeId,
+    target: NodeId,
+    placement: Placement,
+) -> Outcome {
+    apply(
+        kernel,
+        Intent::MoveNode(MoveNodeSpec {
+            node,
+            target,
+            placement,
+        }),
+    )
 }
 
 pub fn close(kernel: &ServerKernel, node: NodeId) -> Outcome {
@@ -162,11 +200,19 @@ pub fn type_text(kernel: &ServerKernel, pane: NodeId, text: &str) -> Outcome {
 
 /// Titles of every node in pre-order.
 pub fn titles(kernel: &ServerKernel) -> Vec<String> {
-    kernel.tree().nodes().into_iter().map(|node| node.title).collect()
+    kernel
+        .tree()
+        .nodes()
+        .into_iter()
+        .map(|node| node.title)
+        .collect()
 }
 
 pub fn node(kernel: &ServerKernel, id: NodeId) -> TreeNode {
-    kernel.tree().node(id).unwrap_or_else(|| panic!("node {id:?} is not in the tree"))
+    kernel
+        .tree()
+        .node(id)
+        .unwrap_or_else(|| panic!("node {id:?} is not in the tree"))
 }
 
 pub fn class_of(kernel: &ServerKernel, id: NodeId) -> NodeClass {
@@ -175,19 +221,26 @@ pub fn class_of(kernel: &ServerKernel, id: NodeId) -> NodeClass {
 
 /// The workspace root.
 pub fn workspace_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).parent().expect("workspace root").to_path_buf()
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("workspace root")
+        .to_path_buf()
 }
 
 /// The text of one plugin-manual page.
 pub fn manual_page(name: &str) -> String {
-    let path = workspace_root().join("docs/plugins-manual/pages").join(format!("{name}.md"));
-    std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
+    let path = workspace_root()
+        .join("docs/plugins-manual/pages")
+        .join(format!("{name}.md"));
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
 }
 
 /// The text of one user-documentation page (`src/docs`).
 pub fn user_doc(name: &str) -> String {
     let path = workspace_root().join("src/docs").join(format!("{name}.md"));
-    std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
 }
 
 /// One row of the feature table in reference-feature-traceability.md, cells trimmed.
@@ -198,7 +251,11 @@ pub fn feature_row(id: &str) -> Vec<String> {
         .lines()
         .find(|line| line.starts_with(&prefix))
         .unwrap_or_else(|| panic!("no row {id} in reference-feature-traceability.md"));
-    line.trim().trim_matches('|').split('|').map(|cell| cell.trim().to_owned()).collect()
+    line.trim()
+        .trim_matches('|')
+        .split('|')
+        .map(|cell| cell.trim().to_owned())
+        .collect()
 }
 
 /// Runs a scenario on the plugin build only (for behaviour a core plugin completes, such as the

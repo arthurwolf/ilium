@@ -32,21 +32,21 @@ fn expected(event: LifeEvent) -> Vec<(Marker, bool)> {
     rows.push((GlobalBucket, !purged));
     rows.push((ProjectBucket, !purged));
     rows.push((DataFolder, !purged));
-    rows.push((
-        CacheFolder,
-        !matches!(event, Uninstall | UninstallPurge),
-    ));
+    rows.push((CacheFolder, !matches!(event, Uninstall | UninstallPurge)));
     rows.push((Grants, !removed));
-    rows.push((
-        NodeMetadata,
-        !matches!(event, SessionDelete),
-    ));
+    rows.push((NodeMetadata, !matches!(event, SessionDelete)));
     rows.push((
         DurableTimers,
-        matches!(event, PluginRestart | Update | ServerRestart | ClientReconnect),
+        matches!(
+            event,
+            PluginRestart | Update | ServerRestart | ClientReconnect
+        ),
     ));
     if !matches!(event, ServerRestart) {
-        rows.push((SessionBucket, !matches!(event, SessionDelete | Uninstall | UninstallPurge)));
+        rows.push((
+            SessionBucket,
+            !matches!(event, SessionDelete | Uninstall | UninstallPurge),
+        ));
     }
     rows
 }
@@ -135,7 +135,11 @@ fn pending_request_cancelled_at(event: LifeEvent) {
     assert_eq!(request.outcome(), Some("cancelled".to_owned()), "{event:?}");
     let restarted = rig.start_server_or_same(&server);
     rig.advance(secs(10));
-    assert_eq!(restarted.deliveries_of(request.id()), 0, "replayed after {event:?}");
+    assert_eq!(
+        restarted.deliveries_of(request.id()),
+        0,
+        "replayed after {event:?}"
+    );
 }
 
 /// REQ: LIF-151
@@ -293,7 +297,9 @@ fn lif_154_failed_snapshot_write_keeps_the_server_running_and_logs_it() {
     rig.make_snapshot_dir_read_only("s1");
     server.snapshot_now();
     assert!(server.is_running());
-    assert!(server.log_codes().contains(&"snapshot.write-failed".to_owned()));
+    assert!(server
+        .log_codes()
+        .contains(&"snapshot.write-failed".to_owned()));
     assert_eq!(rig.snapshot_bytes("s1"), good);
 }
 
@@ -309,7 +315,9 @@ fn lif_154_next_snapshot_after_the_folder_is_writable_again_succeeds() {
     server.snapshot_now();
     rig.make_snapshot_dir_writable("s1");
     server.snapshot_now();
-    assert!(rig.snapshot_metadata_keys("s1", NOTES).contains(&"k".to_owned()));
+    assert!(rig
+        .snapshot_metadata_keys("s1", NOTES)
+        .contains(&"k".to_owned()));
 }
 
 /// REQ: LIF-154
@@ -334,7 +342,10 @@ fn lif_155_node_metadata_survives_a_plugin_restart() {
     rig.advance(secs(3));
     server.set_node_metadata(7, NOTES, "mark", b"x");
     rig.apply_event(&server, NOTES, LifeEvent::PluginRestart);
-    assert_eq!(server.node_metadata_as(NOTES, 7, NOTES, "mark"), Some(b"x".to_vec()));
+    assert_eq!(
+        server.node_metadata_as(NOTES, 7, NOTES, "mark"),
+        Some(b"x".to_vec())
+    );
 }
 
 /// REQ: LIF-155
@@ -346,7 +357,10 @@ fn lif_155_node_metadata_survives_an_update() {
     rig.advance(secs(3));
     server.set_node_metadata(7, NOTES, "mark", b"x");
     rig.apply_event(&server, NOTES, LifeEvent::Update);
-    assert_eq!(server.node_metadata_as(NOTES, 7, NOTES, "mark"), Some(b"x".to_vec()));
+    assert_eq!(
+        server.node_metadata_as(NOTES, 7, NOTES, "mark"),
+        Some(b"x".to_vec())
+    );
 }
 
 /// REQ: LIF-155
@@ -361,7 +375,10 @@ fn lif_155_node_metadata_survives_a_server_restart() {
     server.shutdown();
     let fresh = rig.start_server("s1");
     rig.advance(secs(3));
-    assert_eq!(fresh.node_metadata_as(NOTES, 7, NOTES, "mark"), Some(b"x".to_vec()));
+    assert_eq!(
+        fresh.node_metadata_as(NOTES, 7, NOTES, "mark"),
+        Some(b"x".to_vec())
+    );
 }
 
 /// REQ: LIF-155
@@ -374,7 +391,9 @@ fn lif_155_node_metadata_survives_an_uninstall_in_the_snapshot() {
     rig.cli(&["uninstall", NOTES]);
     rig.advance(secs(3));
     server.snapshot_now();
-    assert!(rig.snapshot_metadata_keys("s1", NOTES).contains(&"mark".to_owned()));
+    assert!(rig
+        .snapshot_metadata_keys("s1", NOTES)
+        .contains(&"mark".to_owned()));
 }
 
 /// REQ: LIF-155
@@ -418,10 +437,15 @@ fn lif_156_full_order_is_restore_then_start_then_stop_then_drain() {
     let server = rig.start_server("s1");
     server.shutdown();
     let calls = server.kernel_call_log();
-    let order: Vec<usize> = ["restore_snapshot", "plugin_host.start", "plugin_host.stop", "drain_session_work"]
-        .iter()
-        .map(|name| position_of(&calls, name))
-        .collect();
+    let order: Vec<usize> = [
+        "restore_snapshot",
+        "plugin_host.start",
+        "plugin_host.stop",
+        "drain_session_work",
+    ]
+    .iter()
+    .map(|name| position_of(&calls, name))
+    .collect();
     assert!(order.windows(2).all(|pair| pair[0] < pair[1]), "{calls:?}");
 }
 
@@ -440,8 +464,14 @@ fn lif_157_server_crash_between_two_writes_loses_memory_and_server_restore_bytes
     server.crash();
     let fresh = rig.start_server("s1");
     rig.advance(secs(3));
-    assert_eq!(fresh.read_storage(NOTES, "global", "a"), Some(b"1".to_vec()));
-    assert_eq!(fresh.read_storage(NOTES, "global", "b"), Some(b"2".to_vec()));
+    assert_eq!(
+        fresh.read_storage(NOTES, "global", "a"),
+        Some(b"1".to_vec())
+    );
+    assert_eq!(
+        fresh.read_storage(NOTES, "global", "b"),
+        Some(b"2".to_vec())
+    );
     assert_eq!(rig.setting(NOTES, "theme").as_deref(), Some("dark"));
     assert_eq!(fresh.last_restored_len(NOTES), None);
 }
@@ -457,7 +487,10 @@ fn lif_157_metadata_written_after_the_last_snapshot_is_lost_in_a_crash() {
     server.set_node_metadata(7, NOTES, "new", b"2");
     server.crash();
     let fresh = rig.start_server("s1");
-    assert_eq!(fresh.node_metadata_as(NOTES, 7, NOTES, "old"), Some(b"1".to_vec()));
+    assert_eq!(
+        fresh.node_metadata_as(NOTES, 7, NOTES, "old"),
+        Some(b"1".to_vec())
+    );
     assert_eq!(fresh.node_metadata_as(NOTES, 7, NOTES, "new"), None);
 }
 
@@ -470,5 +503,8 @@ fn lif_157_data_folder_files_written_before_the_crash_are_still_there() {
     server.write_data_file(NOTES, "note.txt", b"kept");
     server.crash();
     let _fresh = rig.start_server("s1");
-    assert_eq!(std::fs::read(rig.data_dir(NOTES).join("note.txt")).ok(), Some(b"kept".to_vec()));
+    assert_eq!(
+        std::fs::read(rig.data_dir(NOTES).join("note.txt")).ok(),
+        Some(b"kept".to_vec())
+    );
 }

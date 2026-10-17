@@ -8,7 +8,8 @@ use crate::common::*;
 fn server_with_used_tokens(used_tokens: u32) -> (ilium_plugin_sdk::testing::FakeHost, u64) {
     let mut host = server_host();
     let pane = add_agent_pane(&mut host, "claude", "claude", AgentActivity::Working);
-    host.agents().set_context_used_tokens(pane, u64::from(used_tokens));
+    host.agents()
+        .set_context_used_tokens(pane, u64::from(used_tokens));
     (host, pane)
 }
 
@@ -17,7 +18,10 @@ fn model_payload(used_tokens: u32, window: Option<u32>, model: &str) -> (u64, St
     let submissions = host.deliver_one(model_changed(pane, model, window));
     let sent = messages(&submissions);
     assert_eq!(sent.len(), 1, "{sent:?}");
-    (pane, String::from_utf8(sent[0].3.clone()).expect("utf8 payload"))
+    (
+        pane,
+        String::from_utf8(sent[0].3.clone()).expect("utf8 payload"),
+    )
 }
 
 /// REQ: F-035
@@ -95,8 +99,15 @@ fn f_035_message_arrives_on_the_client_and_fills_the_model_slot() {
     let mut host = client_host();
     let pane = add_agent_pane(&mut host, "claude", "claude", AgentActivity::Working);
     let payload = format!("{pane}|opus · 41% context");
-    let submissions = host.deliver_one(message_from(PluginSide::Server, "model", payload.as_bytes()));
-    assert_eq!(set_slots(&submissions), vec![(pane, "model".to_string(), "opus · 41% context".to_string())]);
+    let submissions = host.deliver_one(message_from(
+        PluginSide::Server,
+        "model",
+        payload.as_bytes(),
+    ));
+    assert_eq!(
+        set_slots(&submissions),
+        vec![(pane, "model".to_string(), "opus · 41% context".to_string())]
+    );
 }
 
 /// REQ: F-035
@@ -121,6 +132,10 @@ fn f_035_model_text_may_itself_contain_a_pipe() {
     let mut host = client_host();
     let pane = add_agent_pane(&mut host, "claude", "claude", AgentActivity::Working);
     let payload = format!("{pane}|a|b");
-    let submissions = host.deliver_one(message_from(PluginSide::Server, "model", payload.as_bytes()));
+    let submissions = host.deliver_one(message_from(
+        PluginSide::Server,
+        "model",
+        payload.as_bytes(),
+    ));
     assert_eq!(set_slots(&submissions)[0].2, "a|b");
 }

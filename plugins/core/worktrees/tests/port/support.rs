@@ -11,12 +11,21 @@ use serde_json::{json, Value};
 use crate::common::*;
 
 pub fn stdout_exit(text: &str) -> ProcessExit {
-    ProcessExit { status: Some(0), signal: None, stdout: text.as_bytes().to_vec(), stderr: Vec::new() }
+    ProcessExit {
+        status: Some(0),
+        signal: None,
+        stdout: text.as_bytes().to_vec(),
+        stderr: Vec::new(),
+    }
 }
 
 /// A server host whose project (main checkout) is `root`; every git run succeeds with empty output.
 pub fn server_host_at(root: &str) -> FakeHost {
-    let mut host = FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("server").with_project_root(PathBuf::from(root)).build();
+    let mut host = FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("server")
+        .with_project_root(PathBuf::from(root))
+        .build();
     host.process().default_exit(ok_exit());
     host.activate::<WorktreesServer>();
     host
@@ -24,9 +33,18 @@ pub fn server_host_at(root: &str) -> FakeHost {
 
 /// The repository facts of the original dialog tests: branches `main` and `agent/task`, checked out `topic`.
 pub fn with_repository_facts(host: &mut FakeHost) {
-    host.process().on_args(&["branch", "--format=%(refname:short)"], stdout_exit("main\nagent/task\n"));
-    host.process().on_args(&["rev-parse", "--abbrev-ref", "HEAD"], stdout_exit("topic\n"));
-    host.process().on_args(&["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], stdout_exit("origin/main\n"));
+    host.process().on_args(
+        &["branch", "--format=%(refname:short)"],
+        stdout_exit("main\nagent/task\n"),
+    );
+    host.process().on_args(
+        &["rev-parse", "--abbrev-ref", "HEAD"],
+        stdout_exit("topic\n"),
+    );
+    host.process().on_args(
+        &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+        stdout_exit("origin/main\n"),
+    );
 }
 
 pub fn add_arguments(host: &mut FakeHost) -> Vec<String> {
@@ -42,7 +60,12 @@ pub fn last_changed(host: &mut FakeHost) -> Value {
 }
 
 pub fn removal_calls(host: &mut FakeHost) -> Vec<Vec<String>> {
-    host.process().calls().into_iter().filter(|c| c.program == "git" && c.arguments.get(1).map(String::as_str) == Some("remove")).map(|c| c.arguments).collect()
+    host.process()
+        .calls()
+        .into_iter()
+        .filter(|c| c.program == "git" && c.arguments.get(1).map(String::as_str) == Some("remove"))
+        .map(|c| c.arguments)
+        .collect()
 }
 
 pub fn remove_request(host: &mut FakeHost, payload: Value) {

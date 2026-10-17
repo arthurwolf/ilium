@@ -18,16 +18,30 @@ pub fn server_with_pane(signature: &str, with_transcript: bool) -> (FakeHost, u6
     let pane = add_agent_pane(&mut host, "agent", signature);
     let scope = format!("agent-sessions:{signature}");
     let path = format!("projects/p/{SOURCE_SESSION}.jsonl");
-    host.agents().set_session(pane, Some(SessionRef { scope: scope.clone(), path: path.clone(), session_id: SOURCE_SESSION.to_string() }));
+    host.agents().set_session(
+        pane,
+        Some(SessionRef {
+            scope: scope.clone(),
+            path: path.clone(),
+            session_id: SOURCE_SESSION.to_string(),
+        }),
+    );
     if with_transcript {
-        host.fs().write(FsPath { scope, path }, b"{\"type\":\"user\"}\n");
+        host.fs()
+            .write(FsPath { scope, path }, b"{\"type\":\"user\"}\n");
     }
     (host, pane)
 }
 
 /// The `start` message the client side sends.
 pub fn start_message(pane: u64, target: &str) -> Event {
-    message_from(PluginSide::Client, "start", json!({"pane": pane, "target": target}).to_string().as_bytes())
+    message_from(
+        PluginSide::Client,
+        "start",
+        json!({"pane": pane, "target": target})
+            .to_string()
+            .as_bytes(),
+    )
 }
 
 /// Starts a conversion of a Claude pane to Codex and returns what the plugin submitted.
@@ -36,15 +50,24 @@ pub fn start_claude(host: &mut FakeHost, pane: u64) -> Vec<Submission> {
 }
 
 fn state(host: &FakeHost, pane: u64) -> Option<Value> {
-    host.storage().get(Bucket::Session, &format!("convert/{pane}")).map(|bytes| serde_json::from_slice(&bytes).expect("JSON state"))
+    host.storage()
+        .get(Bucket::Session, &format!("convert/{pane}"))
+        .map(|bytes| serde_json::from_slice(&bytes).expect("JSON state"))
 }
 
 fn timer_fired(name: &str) -> Event {
-    Event::DurableTimerFired(DurableTimerEvent { timer: TimerId(1), name: name.to_string(), late_by_millis: 0 })
+    Event::DurableTimerFired(DurableTimerEvent {
+        timer: TimerId(1),
+        name: name.to_string(),
+        late_by_millis: 0,
+    })
 }
 
 fn toasts(submissions: &[Submission]) -> usize {
-    submissions.iter().filter(|submission| matches!(submission.intent, Intent::Toast(_))).count()
+    submissions
+        .iter()
+        .filter(|submission| matches!(submission.intent, Intent::Toast(_)))
+        .count()
 }
 
 /// REQ: F-077
@@ -53,7 +76,10 @@ fn f_077_start_freezes_the_pane_under_the_dedup_key_freeze_pane() {
     let (mut host, pane) = server_with_pane("claude", true);
     let submissions = start_claude(&mut host, pane);
     assert_eq!(frozen(&submissions), [pane]);
-    let freeze = submissions.iter().find(|s| matches!(s.intent, Intent::FreezePane(_))).unwrap();
+    let freeze = submissions
+        .iter()
+        .find(|s| matches!(s.intent, Intent::FreezePane(_)))
+        .unwrap();
     assert_eq!(freeze.dedup_key, Some(format!("freeze-{pane}")));
 }
 
@@ -78,7 +104,10 @@ fn f_077_start_stops_the_agent_process_after_the_freeze() {
 fn f_077_start_writes_the_state_to_the_session_bucket() {
     let (mut host, pane) = server_with_pane("claude", true);
     start_claude(&mut host, pane);
-    assert_eq!(state(&host, pane), Some(json!({"pane": pane, "target": "codex", "phase": "frozen"})));
+    assert_eq!(
+        state(&host, pane),
+        Some(json!({"pane": pane, "target": "codex", "phase": "frozen"}))
+    );
 }
 
 /// REQ: F-077
@@ -86,7 +115,10 @@ fn f_077_start_writes_the_state_to_the_session_bucket() {
 fn f_077_start_for_a_codex_pane_records_target_claude() {
     let (mut host, pane) = server_with_pane("codex", true);
     host.deliver_one(start_message(pane, "claude"));
-    assert_eq!(state(&host, pane), Some(json!({"pane": pane, "target": "claude", "phase": "frozen"})));
+    assert_eq!(
+        state(&host, pane),
+        Some(json!({"pane": pane, "target": "claude", "phase": "frozen"}))
+    );
 }
 
 /// REQ: F-077
@@ -98,7 +130,10 @@ fn f_077_start_adds_the_journal_entry_convert_started_with_the_target() {
     assert_eq!(entries.len(), 1, "{entries:?}");
     assert_eq!(entries[0].0, Some(pane));
     assert_eq!(entries[0].1, "convert-started");
-    assert_eq!(serde_json::from_str::<Value>(&entries[0].2).unwrap(), json!({"target": "codex"}));
+    assert_eq!(
+        serde_json::from_str::<Value>(&entries[0].2).unwrap(),
+        json!({"target": "codex"})
+    );
 }
 
 /// REQ: F-077
@@ -106,7 +141,13 @@ fn f_077_start_adds_the_journal_entry_convert_started_with_the_target() {
 fn f_077_start_arms_a_durable_watchdog_ten_minutes_ahead() {
     let (mut host, pane) = server_with_pane("claude", true);
     start_claude(&mut host, pane);
-    assert_eq!(host.durable_timers(), [(format!("convert-watchdog/{pane}"), CLOCK_START_MS + WATCHDOG_MILLIS)]);
+    assert_eq!(
+        host.durable_timers(),
+        [(
+            format!("convert-watchdog/{pane}"),
+            CLOCK_START_MS + WATCHDOG_MILLIS
+        )]
+    );
 }
 
 /// REQ: F-077
@@ -122,7 +163,9 @@ fn f_077_a_missing_source_transcript_refuses_the_start_and_leaves_the_pane_runni
     let (mut host, pane) = server_with_pane("claude", false);
     let submissions = start_claude(&mut host, pane);
     assert!(frozen(&submissions).is_empty());
-    assert!(submissions.iter().all(|s| !matches!(s.intent, Intent::TerminatePaneProcess(_))));
+    assert!(submissions
+        .iter()
+        .all(|s| !matches!(s.intent, Intent::TerminatePaneProcess(_))));
     assert_eq!(state(&host, pane), None);
     assert!(host.durable_timers().is_empty());
     assert!(host.journal().entries().is_empty());
@@ -217,9 +260,19 @@ fn f_077_only_one_conversion_runs_at_a_time() {
     let other = add_agent_pane(&mut host, "other", "codex");
     host.agents().set_session(
         other,
-        Some(SessionRef { scope: "agent-sessions:codex".into(), path: "rollout.jsonl".into(), session_id: "abc".into() }),
+        Some(SessionRef {
+            scope: "agent-sessions:codex".into(),
+            path: "rollout.jsonl".into(),
+            session_id: "abc".into(),
+        }),
     );
-    host.fs().write(FsPath { scope: "agent-sessions:codex".into(), path: "rollout.jsonl".into() }, b"{}\n");
+    host.fs().write(
+        FsPath {
+            scope: "agent-sessions:codex".into(),
+            path: "rollout.jsonl".into(),
+        },
+        b"{}\n",
+    );
     start_claude(&mut host, pane);
     let second = host.deliver_one(start_message(other, "claude"));
     assert!(frozen(&second).is_empty());
@@ -292,5 +345,9 @@ fn f_077_the_watchdog_tells_the_client_the_conversion_ended() {
     start_claude(&mut host, pane);
     let submissions = host.deliver_one(timer_fired(&format!("convert-watchdog/{pane}")));
     let sent = messages(&submissions);
-    assert!(sent.iter().any(|m| m.1 == PluginSide::Client && m.2 == "finished"), "{sent:?}");
+    assert!(
+        sent.iter()
+            .any(|m| m.1 == PluginSide::Client && m.2 == "finished"),
+        "{sent:?}"
+    );
 }

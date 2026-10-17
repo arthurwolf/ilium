@@ -10,9 +10,7 @@ use ilium_plugin_api::lifecycle::{RestartDecision, RestartPolicy};
 use ilium_plugin_testkit::{FakeHost, Mode};
 use proptest::prelude::*;
 
-use crate::common::{
-    deliver_and_pump, harness_with, manifest_path, trap, ScriptedGuest,
-};
+use crate::common::{deliver_and_pump, harness_with, manifest_path, trap, ScriptedGuest};
 use crate::gap;
 
 fn fake_delays(at_times_ms: &[u64]) -> (Vec<u32>, bool) {
@@ -21,7 +19,13 @@ fn fake_delays(at_times_ms: &[u64]) -> (Vec<u32>, bool) {
         host.set_clock(*at);
         host.inject_trap("trap.deadline");
     }
-    (host.restarts().iter().map(|restart| restart.delay_ms).collect(), host.is_disabled())
+    (
+        host.restarts()
+            .iter()
+            .map(|restart| restart.delay_ms)
+            .collect(),
+        host.is_disabled(),
+    )
 }
 
 fn real_delays(at_times_ms: &[u64]) -> (Vec<u32>, bool) {

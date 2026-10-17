@@ -13,8 +13,12 @@ const SECRET: &str = "hunter2-secret-value";
 /// REQ: SEC-240
 #[test]
 fn sec_240_a_row_declared_secret_is_a_secret_and_a_plain_row_is_not() {
-    let rig = setup(&[]).secret("token", SECRET).setting("plain", json!("visible-value")).start();
-    rig.host.log_from_plugin(&format!("a {SECRET} b visible-value"));
+    let rig = setup(&[])
+        .secret("token", SECRET)
+        .setting("plain", json!("visible-value"))
+        .start();
+    rig.host
+        .log_from_plugin(&format!("a {SECRET} b visible-value"));
     let line = rig.log_messages().pop().expect("a log line");
     assert!(!line.contains(SECRET));
     assert!(line.contains("visible-value"));
@@ -23,8 +27,12 @@ fn sec_240_a_row_declared_secret_is_a_secret_and_a_plain_row_is_not() {
 /// REQ: SEC-240
 #[test]
 fn sec_240_provider_keys_and_webhook_tokens_are_secrets() {
-    let rig = setup(&[]).kernel_secret("api.provider_key", "provider-key-123456").kernel_secret("notify.webhook", "https://h.example/t/tok-abcdef").start();
-    rig.host.log_from_plugin("key provider-key-123456 hook https://h.example/t/tok-abcdef");
+    let rig = setup(&[])
+        .kernel_secret("api.provider_key", "provider-key-123456")
+        .kernel_secret("notify.webhook", "https://h.example/t/tok-abcdef")
+        .start();
+    rig.host
+        .log_from_plugin("key provider-key-123456 hook https://h.example/t/tok-abcdef");
     let line = rig.log_messages().pop().expect("a log line");
     assert!(!line.contains("provider-key-123456") && !line.contains("tok-abcdef"));
 }
@@ -34,7 +42,14 @@ fn sec_240_provider_keys_and_webhook_tokens_are_secrets() {
 fn sec_241_secret_values_are_not_written_to_config_snapshots_exports_or_the_journal() {
     let rig = setup(&[]).secret("token", SECRET).start();
     rig.host.persist_all_stores();
-    for artefact in rig.host.config_text().into_iter().chain(rig.host.snapshot_text()).chain(rig.host.export_text()).chain(rig.host.journal_text()) {
+    for artefact in rig
+        .host
+        .config_text()
+        .into_iter()
+        .chain(rig.host.snapshot_text())
+        .chain(rig.host.export_text())
+        .chain(rig.host.journal_text())
+    {
         assert!(!artefact.contains(SECRET));
     }
 }
@@ -46,8 +61,12 @@ fn sec_241_without_a_keyring_secrets_json_has_the_documented_form_and_mode_0600(
     let rig = setup(&[]).no_keyring().secret("token", SECRET).start();
     rig.host.persist_all_stores();
     let path = rig.state.path().join("secrets.json");
-    assert_eq!(std::fs::metadata(&path).expect("file").permissions().mode() & 0o777, 0o600);
-    let parsed: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).expect("read")).expect("json");
+    assert_eq!(
+        std::fs::metadata(&path).expect("file").permissions().mode() & 0o777,
+        0o600
+    );
+    let parsed: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).expect("read")).expect("json");
     assert_eq!(parsed["version"], 1);
     assert_eq!(parsed["plugins"]["test.plugin"]["token"], SECRET);
     assert!(parsed["kernel"].is_object());
@@ -60,16 +79,28 @@ fn sec_241_with_a_keyring_the_store_holds_only_an_index() {
     rig.host.persist_all_stores();
     let text = std::fs::read_to_string(rig.state.path().join("secrets.json")).unwrap_or_default();
     assert!(!text.contains(SECRET));
-    assert_eq!(rig.host.keyring_value("test.plugin", "token").as_deref(), Some(SECRET));
+    assert_eq!(
+        rig.host.keyring_value("test.plugin", "token").as_deref(),
+        Some(SECRET)
+    );
 }
 
 /// REQ: SEC-241
 #[test]
 fn sec_241_secrets_json_is_not_reachable_through_any_scope() {
-    let rig = setup(&["fs.read:data"]).no_keyring().secret("token", SECRET).start();
+    let rig = setup(&["fs.read:data"])
+        .no_keyring()
+        .secret("token", SECRET)
+        .start();
     rig.host.persist_all_stores();
     let path = rig.state.path().join("secrets.json");
-    assert_code(&rig.value("ilium:host/fs.read", json!({ "scope": "data", "path": path.to_string_lossy() })), ErrorCode::NotPermitted);
+    assert_code(
+        &rig.value(
+            "ilium:host/fs.read",
+            json!({ "scope": "data", "path": path.to_string_lossy() }),
+        ),
+        ErrorCode::NotPermitted,
+    );
 }
 
 /// REQ: SEC-242
@@ -82,7 +113,10 @@ fn sec_242_a_secret_row_with_project_scope_is_refused_with_manifest_secret_scope
         }]}]}
     }));
     let codes = manifest_error_codes(&manifest);
-    assert!(codes.iter().any(|code| code == "manifest.secret-scope"), "{codes:?}");
+    assert!(
+        codes.iter().any(|code| code == "manifest.secret-scope"),
+        "{codes:?}"
+    );
 }
 
 /// REQ: SEC-242
@@ -90,8 +124,16 @@ fn sec_242_a_secret_row_with_project_scope_is_refused_with_manifest_secret_scope
 fn sec_242_a_secret_value_found_in_a_project_file_is_ignored_and_audited() {
     let rig = setup(&[]).secret("token", SECRET).start();
     rig.host.trust_project("/work/project");
-    rig.host.write_project_value("/work/project", "test.plugin", "token", json!("from-project-file"));
-    assert_ne!(rig.host.effective_setting("token"), Some(json!("from-project-file")));
+    rig.host.write_project_value(
+        "/work/project",
+        "test.plugin",
+        "token",
+        json!("from-project-file"),
+    );
+    assert_ne!(
+        rig.host.effective_setting("token"),
+        Some(json!("from-project-file"))
+    );
     assert!(!rig.audit_lines().is_empty());
 }
 
@@ -105,7 +147,12 @@ fn sec_242_secret_rows_with_client_or_server_scope_are_accepted() {
                 "rows": [{ "type": "text", "key": "token", "label": "Token", "secret": true }]
             }]}]}
         }));
-        assert!(!manifest_error_codes(&manifest).iter().any(|code| code == "manifest.secret-scope"), "{scope}");
+        assert!(
+            !manifest_error_codes(&manifest)
+                .iter()
+                .any(|code| code == "manifest.secret-scope"),
+            "{scope}"
+        );
     }
 }
 
@@ -115,14 +162,20 @@ fn sec_243_every_variant_of_a_secret_is_replaced() {
     let variants = [
         SECRET.to_owned(),
         base64_standard(SECRET.as_bytes()),
-        base64_standard(SECRET.as_bytes()).trim_end_matches('=').to_owned(),
+        base64_standard(SECRET.as_bytes())
+            .trim_end_matches('=')
+            .to_owned(),
         base64_url(SECRET.as_bytes()),
         percent_encode(SECRET),
         hex_lower(SECRET.as_bytes()),
     ];
     for variant in variants {
         let text = format!("before {variant} after");
-        assert_eq!(redact(&text, &[SECRET.to_owned()]), "before <redacted> after", "{variant}");
+        assert_eq!(
+            redact(&text, &[SECRET.to_owned()]),
+            "before <redacted> after",
+            "{variant}"
+        );
     }
 }
 
@@ -157,7 +210,10 @@ fn sec_243_log_lines_trap_messages_and_error_strings_are_redacted() {
     assert!(rig.log_messages().iter().all(|line| !line.contains(SECRET)));
     let error = rig.host.error_string_for(&format!("failed with {SECRET}"));
     assert!(!error.contains(SECRET));
-    assert!(!rig.host.trap_message_for(&format!("boom {SECRET}")).contains(SECRET));
+    assert!(!rig
+        .host
+        .trap_message_for(&format!("boom {SECRET}"))
+        .contains(SECRET));
 }
 
 proptest! {
@@ -188,18 +244,31 @@ proptest! {
 /// REQ: SEC-244
 #[test]
 fn sec_244_the_owning_side_reads_its_secret_and_read_all_returns_an_empty_string() {
-    let rig = setup(&["settings.read-all"]).secret("token", SECRET).start();
-    let own = rig.value("ilium:host/settings.get-json", json!({})).expect("own");
+    let rig = setup(&["settings.read-all"])
+        .secret("token", SECRET)
+        .start();
+    let own = rig
+        .value("ilium:host/settings.get-json", json!({}))
+        .expect("own");
     assert!(own.to_string().contains(SECRET));
-    let all = rig.value("ilium:host/settings.get-plugin-json", json!({ "plugin": "test.plugin" })).expect("read all");
+    let all = rig
+        .value(
+            "ilium:host/settings.get-plugin-json",
+            json!({ "plugin": "test.plugin" }),
+        )
+        .expect("read all");
     assert!(!all.to_string().contains(SECRET));
 }
 
 /// REQ: SEC-244
 #[test]
 fn sec_244_read_kernel_returns_redacted_for_a_kernel_secret() {
-    let rig = setup(&["settings.read-kernel"]).kernel_secret("api.provider_key", "provider-key-123456").start();
-    let kernel = rig.value("ilium:host/settings.get-kernel-json", json!({})).expect("kernel");
+    let rig = setup(&["settings.read-kernel"])
+        .kernel_secret("api.provider_key", "provider-key-123456")
+        .start();
+    let kernel = rig
+        .value("ilium:host/settings.get-kernel-json", json!({}))
+        .expect("kernel");
     assert!(kernel.to_string().contains("<redacted>"));
     assert!(!kernel.to_string().contains("provider-key-123456"));
 }
@@ -227,7 +296,10 @@ fn sec_244_the_review_dialog_and_json_output_never_hold_a_secret() {
 fn sec_245_a_secret_is_not_forwarded_through_any_inter_plugin_channel() {
     let rig = setup(&[]).secret("token", SECRET).start();
     for channel in ["messages.peer", "services", "topics", "extension-points"] {
-        assert!(!rig.host.channel_payload_text(channel).contains(SECRET), "{channel}");
+        assert!(
+            !rig.host.channel_payload_text(channel).contains(SECRET),
+            "{channel}"
+        );
     }
 }
 
@@ -242,35 +314,55 @@ fn sec_245_the_manual_names_the_residual_risk() {
 fn sec_246_old_value_is_overwritten_and_still_redacted_for_60_seconds() {
     let mut rig = setup(&[]).secret("token", SECRET).start();
     rig.host.set_secret_now("token", "rotated-secret-value");
-    assert!(!rig.host.stored_secret_text().contains(SECRET), "no copy of the old value is kept");
+    assert!(
+        !rig.host.stored_secret_text().contains(SECRET),
+        "no copy of the old value is kept"
+    );
     rig.host.log_from_plugin(&format!("late {SECRET}"));
     assert!(!rig.log_messages().last().expect("line").contains(SECRET));
     rig.host.advance_clock(std::time::Duration::from_secs(59));
     rig.host.log_from_plugin(&format!("late {SECRET}"));
-    assert!(!rig.log_messages().last().expect("line").contains(SECRET), "59 s");
+    assert!(
+        !rig.log_messages().last().expect("line").contains(SECRET),
+        "59 s"
+    );
     rig.host.advance_clock(std::time::Duration::from_secs(2));
     rig.host.log_from_plugin(&format!("later {SECRET}"));
-    assert!(rig.log_messages().last().expect("line").contains(SECRET), "61 s: forgotten");
+    assert!(
+        rig.log_messages().last().expect("line").contains(SECRET),
+        "61 s: forgotten"
+    );
 }
 
 /// REQ: SEC-247 WARN
 #[test]
 fn sec_247_the_guidance_names_the_four_practices() {
-    assert_page_has("reference-secrets.md", &["never log a secret", "headers, not in query strings", "overwrite buffers it controls", "command line"]);
+    assert_page_has(
+        "reference-secrets.md",
+        &[
+            "never log a secret",
+            "headers, not in query strings",
+            "overwrite buffers it controls",
+            "command line",
+        ],
+    );
 }
 
 /// REQ: SEC-247 WARN
 #[test]
 fn sec_247_a_url_with_a_secret_in_the_query_is_redacted_in_the_consent_prompt() {
     let rig = setup(&["http:example.com"]).secret("token", SECRET).start();
-    let shown = rig.host.consent_prompt_text_for_url(&format!("https://example.com/p?k={SECRET}"));
+    let shown = rig
+        .host
+        .consent_prompt_text_for_url(&format!("https://example.com/p?k={SECRET}"));
     assert!(!shown.contains(SECRET));
 }
 
 /// REQ: SEC-248
 #[test]
 fn sec_248_reveal_last_shows_at_most_8_trailing_characters() {
-    for (reveal, expect) in [(0_u8, "••••"), (4, "••••t3rn"), (8, "••••3-pattern")] {
+    for (reveal, expect) in [(0_u8, "••••"), (4, "••••t3rn"), (8, "••••3-pattern")]
+    {
         let _ = expect;
         let rows = ilium_plugin_host::secrets::masked_row("secret-pattern", reveal);
         assert!(rows.starts_with("••••"));
@@ -287,7 +379,10 @@ fn sec_248_forget_secrets_empties_the_store_and_sends_settings_changed() {
     rig.host.forget_secrets(Some("test.plugin"));
     let text = std::fs::read_to_string(rig.state.path().join("secrets.json")).unwrap_or_default();
     assert!(!text.contains(SECRET));
-    assert!(rig.host.delivered_events_text().contains("settings-changed"));
+    assert!(rig
+        .host
+        .delivered_events_text()
+        .contains("settings-changed"));
 }
 
 /// REQ: SEC-248
@@ -302,7 +397,9 @@ fn sec_248_the_secrets_screen_lists_names_only() {
 #[test]
 fn sec_249_diagnostics_report_sections_are_redacted_before_they_are_shown_or_saved() {
     let rig = setup(&[]).secret("token", SECRET).start();
-    let section = rig.host.diagnostics_report_with_section(&format!("endpoint key {SECRET}"));
+    let section = rig
+        .host
+        .diagnostics_report_with_section(&format!("endpoint key {SECRET}"));
     assert!(!section.shown.contains(SECRET) && !section.saved.contains(SECRET));
 }
 
@@ -314,5 +411,8 @@ fn sec_250_snapshots_and_exports_exclude_secrets_and_a_restore_leaves_the_rows_e
     assert!(!snapshot.contains(SECRET));
     rig.host.restore_snapshot(&snapshot);
     assert_eq!(rig.host.secret_value("token"), None);
-    assert!(rig.host.delivered_events_text().contains("settings-changed"));
+    assert!(rig
+        .host
+        .delivered_events_text()
+        .contains("settings-changed"));
 }

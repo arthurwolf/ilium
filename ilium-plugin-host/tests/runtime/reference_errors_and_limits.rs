@@ -106,7 +106,14 @@ proptest::proptest! {
 #[test]
 fn hst_400_failures_at_0_2_and_4_minutes_restart_1_s_5_s_then_disable() {
     let (host, states) = trapped_host_at(&[0, minutes(2), minutes(4)]);
-    assert_eq!(states, vec![InstanceState::RestartScheduled, InstanceState::RestartScheduled, InstanceState::StoppedByFailure]);
+    assert_eq!(
+        states,
+        vec![
+            InstanceState::RestartScheduled,
+            InstanceState::RestartScheduled,
+            InstanceState::StoppedByFailure
+        ]
+    );
     assert_eq!(host.restart_delay_ms(), None);
 }
 
@@ -146,7 +153,11 @@ fn api_015_second_restart_waits_5_s() {
 /// REQ: HST-411
 #[test]
 fn hst_411_client_and_server_keep_independent_failure_counts() {
-    let mut host = HostHarness::new().both_sides().with_native_guest(Box::new(TrapGuest("trap.panic"))).build().expect("host");
+    let mut host = HostHarness::new()
+        .both_sides()
+        .with_native_guest(Box::new(TrapGuest("trap.panic")))
+        .build()
+        .expect("host");
     host.fail_side(Side::Server);
     host.fail_side(Side::Server);
     assert_eq!(host.failure_count_of(Side::Server), 2);
@@ -158,7 +169,11 @@ fn hst_411_client_and_server_keep_independent_failure_counts() {
 /// REQ: HST-411
 #[test]
 fn hst_411_disabling_one_side_leaves_the_other_running() {
-    let mut host = HostHarness::new().both_sides().with_native_guest(Box::new(TrapGuest("trap.panic"))).build().expect("host");
+    let mut host = HostHarness::new()
+        .both_sides()
+        .with_native_guest(Box::new(TrapGuest("trap.panic")))
+        .build()
+        .expect("host");
     for _ in 0..3 {
         host.fail_side(Side::Server);
     }
@@ -214,7 +229,11 @@ fn hst_401_trap_deadline_and_activate_error_count_as_failures() {
     let mut host = host_with(TrapGuest("trap.deadline"));
     fail_once(&mut host);
     assert_eq!(host.failure_count(), 1);
-    let mut activate = HostHarness::new().activate_error("io").with_native_guest(Box::new(QuietGuest)).build().expect("host");
+    let mut activate = HostHarness::new()
+        .activate_error("io")
+        .with_native_guest(Box::new(QuietGuest))
+        .build()
+        .expect("host");
     activate.pump(8);
     assert_eq!(activate.failure_count(), 1);
 }
@@ -268,7 +287,11 @@ fn api_044_a_trapping_view_restarts_the_plugin_not_only_the_view() {
 /// REQ: API-045
 #[test]
 fn api_045_a_scene_frame_trap_restarts_the_client_side_after_1_s() {
-    let mut host = HostHarness::new().both_sides().with_native_guest(Box::new(QuietGuest)).build().expect("host");
+    let mut host = HostHarness::new()
+        .both_sides()
+        .with_native_guest(Box::new(QuietGuest))
+        .build()
+        .expect("host");
     host.fail_scene_frame();
     assert_eq!(host.state_of(Side::Client), InstanceState::RestartScheduled);
     assert_eq!(host.state_of(Side::Server), InstanceState::Active);
@@ -277,10 +300,17 @@ fn api_045_a_scene_frame_trap_restarts_the_client_side_after_1_s() {
 /// REQ: API-046, HST-407
 #[test]
 fn api_046_session_memory_budget_refuses_the_instance_and_the_side_stays_inactive() {
-    let mut host = HostHarness::new().session_memory_mib(32).with_native_guest(Box::new(QuietGuest)).build().expect("host");
+    let mut host = HostHarness::new()
+        .session_memory_mib(32)
+        .with_native_guest(Box::new(QuietGuest))
+        .build()
+        .expect("host");
     host.activate_second_plugin_with_memory(33);
     assert_eq!(host.second_plugin_state(), InstanceState::Inactive);
-    assert_eq!(host.second_plugin_reason(), Some("host-capacity".to_owned()));
+    assert_eq!(
+        host.second_plugin_reason(),
+        Some("host-capacity".to_owned())
+    );
     assert_eq!(host.second_plugin_failure_count(), 0);
     assert!(log_text(&host).contains("host-capacity"));
 }
@@ -288,7 +318,11 @@ fn api_046_session_memory_budget_refuses_the_instance_and_the_side_stays_inactiv
 /// REQ: HST-407
 #[test]
 fn hst_407_refused_activation_retries_when_capacity_returns() {
-    let mut host = HostHarness::new().session_memory_mib(32).with_native_guest(Box::new(QuietGuest)).build().expect("host");
+    let mut host = HostHarness::new()
+        .session_memory_mib(32)
+        .with_native_guest(Box::new(QuietGuest))
+        .build()
+        .expect("host");
     host.activate_second_plugin_with_memory(33);
     host.free_session_memory_mib(32);
     host.pump(8);
@@ -298,16 +332,27 @@ fn hst_407_refused_activation_retries_when_capacity_returns() {
 /// REQ: HST-407
 #[test]
 fn hst_407_session_helpers_limit_gives_the_same_refusal() {
-    let mut host = HostHarness::new().session_helpers(1).with_native_guest(Box::new(QuietGuest)).build().expect("host");
+    let mut host = HostHarness::new()
+        .session_helpers(1)
+        .with_native_guest(Box::new(QuietGuest))
+        .build()
+        .expect("host");
     host.activate_second_plugin_with_helper();
     host.activate_second_plugin_with_helper();
-    assert_eq!(host.second_plugin_reason(), Some("host-capacity".to_owned()));
+    assert_eq!(
+        host.second_plugin_reason(),
+        Some("host-capacity".to_owned())
+    );
 }
 
 /// REQ: HST-407, API-046
 #[test]
 fn hst_407_exactly_at_the_budget_is_accepted() {
-    let mut host = HostHarness::new().session_memory_mib(32).with_native_guest(Box::new(QuietGuest)).build().expect("host");
+    let mut host = HostHarness::new()
+        .session_memory_mib(32)
+        .with_native_guest(Box::new(QuietGuest))
+        .build()
+        .expect("host");
     host.activate_second_plugin_with_memory(32);
     assert_eq!(host.second_plugin_state(), InstanceState::Active);
 }
@@ -325,18 +370,35 @@ fn hst_404_http_streams_99_as_t2_clamps_to_4_and_does_not_fail() {
 #[test]
 fn hst_404_a_value_at_the_ceiling_is_kept_and_one_over_is_cut() {
     let ceil = ceiling(LimitKey::HttpStreams, Tier::T2);
-    assert_eq!(clamp(&requested("http_streams", ceil), Tier::T2).unwrap()[&LimitKey::HttpStreams], ceil);
-    assert_eq!(clamp(&requested("http_streams", ceil + 1), Tier::T2).unwrap()[&LimitKey::HttpStreams], ceil);
-    assert_eq!(clamp(&requested("http_streams", ceil - 1), Tier::T2).unwrap()[&LimitKey::HttpStreams], ceil - 1);
+    assert_eq!(
+        clamp(&requested("http_streams", ceil), Tier::T2).unwrap()[&LimitKey::HttpStreams],
+        ceil
+    );
+    assert_eq!(
+        clamp(&requested("http_streams", ceil + 1), Tier::T2).unwrap()[&LimitKey::HttpStreams],
+        ceil
+    );
+    assert_eq!(
+        clamp(&requested("http_streams", ceil - 1), Tier::T2).unwrap()[&LimitKey::HttpStreams],
+        ceil - 1
+    );
 }
 
 /// REQ: HST-404, API-043
 #[test]
 fn hst_404_install_logs_the_clamp_once_naming_the_key_and_the_value() {
     let dir = tempfile::tempdir().unwrap();
-    let report = ilium_plugin_host::install::install_with_limits(dir.path(), Tier::T2, &requested("http_streams", 99));
+    let report = ilium_plugin_host::install::install_with_limits(
+        dir.path(),
+        Tier::T2,
+        &requested("http_streams", 99),
+    );
     assert!(report.installed);
-    let lines: Vec<_> = report.log.iter().filter(|l| l.contains("http_streams")).collect();
+    let lines: Vec<_> = report
+        .log
+        .iter()
+        .filter(|l| l.contains("http_streams"))
+        .collect();
     assert_eq!(lines.len(), 1);
     assert!(lines[0].contains('4'));
 }
@@ -360,8 +422,17 @@ fn hst_405_defaults_do_not_depend_on_the_tier() {
         let value = default_of(key);
         for tier in [Tier::T1, Tier::T2, Tier::T3] {
             let clamped = clamp(&Limits::default(), tier).expect("clamp");
-            assert_eq!(clamped[&key], value.min(ceiling(key, tier)).max(value.min(ceiling(key, tier))), "{key:?}");
-            assert!(ceiling(key, tier) >= value, "ceiling of {key:?} for {tier:?} is below the default");
+            assert_eq!(
+                clamped[&key],
+                value
+                    .min(ceiling(key, tier))
+                    .max(value.min(ceiling(key, tier))),
+                "{key:?}"
+            );
+            assert!(
+                ceiling(key, tier) >= value,
+                "ceiling of {key:?} for {tier:?} is below the default"
+            );
         }
     }
 }
@@ -378,9 +449,18 @@ fn hst_408_event_queue_default_is_1024_with_ceilings_4096_1024_1024() {
 /// REQ: HST-408
 #[test]
 fn hst_408_request_of_5000_is_cut_to_the_tier_ceiling() {
-    assert_eq!(clamp(&requested("event_queue", 5_000), Tier::T1).unwrap()[&LimitKey::EventQueue], 4_096);
-    assert_eq!(clamp(&requested("event_queue", 5_000), Tier::T2).unwrap()[&LimitKey::EventQueue], 1_024);
-    assert_eq!(clamp(&requested("event_queue", 4_097), Tier::T1).unwrap()[&LimitKey::EventQueue], 4_096);
+    assert_eq!(
+        clamp(&requested("event_queue", 5_000), Tier::T1).unwrap()[&LimitKey::EventQueue],
+        4_096
+    );
+    assert_eq!(
+        clamp(&requested("event_queue", 5_000), Tier::T2).unwrap()[&LimitKey::EventQueue],
+        1_024
+    );
+    assert_eq!(
+        clamp(&requested("event_queue", 4_097), Tier::T1).unwrap()[&LimitKey::EventQueue],
+        4_096
+    );
 }
 
 /// REQ: HST-409
@@ -396,14 +476,19 @@ fn hst_409_detector_deadline_default_20_ms_ceilings_50_20_20() {
 #[test]
 fn hst_409_requests_around_the_t1_ceiling() {
     for (asked, expected) in [(49, 49), (50, 50), (51, 50)] {
-        assert_eq!(clamp(&requested("detector_deadline_ms", asked), Tier::T1).unwrap()[&LimitKey::DetectorDeadlineMs], expected);
+        assert_eq!(
+            clamp(&requested("detector_deadline_ms", asked), Tier::T1).unwrap()
+                [&LimitKey::DetectorDeadlineMs],
+            expected
+        );
     }
 }
 
 /// REQ: HST-406
 #[test]
 fn hst_406_user_session_value_lower_than_the_default_is_applied() {
-    let settings = ilium_plugin_host::session::SessionLimits::from_user(&[("session_memory_mib", 512)]);
+    let settings =
+        ilium_plugin_host::session::SessionLimits::from_user(&[("session_memory_mib", 512)]);
     assert_eq!(settings.session_memory_mib, 512);
 }
 
@@ -412,8 +497,10 @@ fn hst_406_user_session_value_lower_than_the_default_is_applied() {
 fn hst_406_user_session_value_equal_or_higher_than_the_default_is_ignored() {
     let defaults = ilium_plugin_host::session::SessionLimits::default();
     assert_eq!(defaults.session_memory_mib, 1_024);
-    let same = ilium_plugin_host::session::SessionLimits::from_user(&[("session_memory_mib", 1_024)]);
-    let higher = ilium_plugin_host::session::SessionLimits::from_user(&[("session_memory_mib", 4_096)]);
+    let same =
+        ilium_plugin_host::session::SessionLimits::from_user(&[("session_memory_mib", 1_024)]);
+    let higher =
+        ilium_plugin_host::session::SessionLimits::from_user(&[("session_memory_mib", 4_096)]);
     assert_eq!(same.session_memory_mib, 1_024);
     assert_eq!(higher.session_memory_mib, 1_024);
 }
@@ -423,7 +510,13 @@ fn hst_406_user_session_value_equal_or_higher_than_the_default_is_ignored() {
 fn hst_406_all_five_session_keys_have_the_documented_defaults() {
     let d = ilium_plugin_host::session::SessionLimits::default();
     assert_eq!(
-        (d.session_memory_mib, d.session_helpers, d.session_processes, d.session_http_streams, d.session_decorations),
+        (
+            d.session_memory_mib,
+            d.session_helpers,
+            d.session_processes,
+            d.session_http_streams,
+            d.session_decorations
+        ),
         (1_024, 16, 16, 64, 65_536)
     );
 }
@@ -433,17 +526,30 @@ fn hst_406_all_five_session_keys_have_the_documented_defaults() {
 /// REQ: HST-410, API-010, API-016
 #[test]
 fn hst_410_unrequested_capability_traps_and_the_log_names_interface_and_function() {
-    let mut host = HostHarness::new().grants(&["fs.read:project"]).with_native_guest(Box::new(QuietGuest)).build().expect("host");
+    let mut host = HostHarness::new()
+        .grants(&["fs.read:project"])
+        .with_native_guest(Box::new(QuietGuest))
+        .build()
+        .expect("host");
     let reply = host.call_import_json("ilium:host/fs", "write", "{}");
-    assert_eq!(reply.trap_code(), Some("host.capability-not-requested".to_owned()));
+    assert_eq!(
+        reply.trap_code(),
+        Some("host.capability-not-requested".to_owned())
+    );
     let text = log_text(&host);
-    assert!(text.contains("test.plugin") && text.contains("ilium:host/fs") && text.contains("write"));
+    assert!(
+        text.contains("test.plugin") && text.contains("ilium:host/fs") && text.contains("write")
+    );
 }
 
 /// REQ: HST-410, API-016
 #[test]
 fn hst_410_declined_grant_returns_not_permitted_and_logs_one_line_with_three_fields() {
-    let mut host = HostHarness::new().grants(&[]).with_native_guest(Box::new(QuietGuest)).build().expect("host");
+    let mut host = HostHarness::new()
+        .grants(&[])
+        .with_native_guest(Box::new(QuietGuest))
+        .build()
+        .expect("host");
     host.decline("tree.write");
     let reply = host.call_import_json("ilium:host/tree", "set-name", "{}");
     assert_eq!(reply.error_code(), Some("not-permitted"));
@@ -454,7 +560,11 @@ fn hst_410_declined_grant_returns_not_permitted_and_logs_one_line_with_three_fie
 /// REQ: API-010
 #[test]
 fn api_010_import_whose_capability_was_never_requested_traps_and_restarts() {
-    let mut host = HostHarness::new().grants(&[]).with_native_guest(Box::new(QuietGuest)).build().expect("host");
+    let mut host = HostHarness::new()
+        .grants(&[])
+        .with_native_guest(Box::new(QuietGuest))
+        .build()
+        .expect("host");
     let reply = host.call_import_json("ilium:host/fs", "read", "{}");
     assert!(reply.trap_code().is_some());
     assert_eq!(host.state(), InstanceState::RestartScheduled);
@@ -473,7 +583,10 @@ fn trap_code_of_fixture(name: &str) -> String {
 /// REQ: API-011, API-081
 #[test]
 fn api_011_tree_with_4097_nodes_traps_invalid_ui_tree() {
-    assert_eq!(trap_code_of_fixture("tree-4097-nodes"), "trap.invalid-ui-tree");
+    assert_eq!(
+        trap_code_of_fixture("tree-4097-nodes"),
+        "trap.invalid-ui-tree"
+    );
 }
 
 /// REQ: API-011
@@ -487,9 +600,18 @@ fn api_011_tree_with_4096_nodes_is_accepted() {
 /// REQ: API-011, API-081
 #[test]
 fn api_011_duplicate_key_and_bad_index_trap() {
-    assert_eq!(trap_code_of_fixture("tree-duplicate-key"), "trap.invalid-ui-tree");
-    assert_eq!(trap_code_of_fixture("tree-bad-index"), "trap.invalid-ui-tree");
-    assert_eq!(trap_code_of_fixture("tree-layout-count-mismatch"), "trap.invalid-ui-tree");
+    assert_eq!(
+        trap_code_of_fixture("tree-duplicate-key"),
+        "trap.invalid-ui-tree"
+    );
+    assert_eq!(
+        trap_code_of_fixture("tree-bad-index"),
+        "trap.invalid-ui-tree"
+    );
+    assert_eq!(
+        trap_code_of_fixture("tree-layout-count-mismatch"),
+        "trap.invalid-ui-tree"
+    );
 }
 
 /// REQ: API-012, API-081
@@ -529,8 +651,14 @@ fn api_081_batch_over_256_submissions_traps_submission_batch_and_256_does_not() 
 #[test]
 fn api_081_the_eight_codes_are_exactly_the_documented_set_and_each_is_logged() {
     let codes = [
-        "trap.deadline", "trap.memory", "trap.table", "trap.submission-batch",
-        "trap.invalid-ui-tree", "trap.import-not-requested", "trap.abi", "trap.panic",
+        "trap.deadline",
+        "trap.memory",
+        "trap.table",
+        "trap.submission-batch",
+        "trap.invalid-ui-tree",
+        "trap.import-not-requested",
+        "trap.abi",
+        "trap.panic",
     ];
     for code in codes {
         let mut host = host_with(TrapGuest(code));
@@ -554,7 +682,11 @@ fn api_081_a_trap_with_an_unknown_code_is_recorded_as_trap_abi_never_invented() 
 #[test]
 fn api_060_65_kib_raw_input_is_refused_invalid_argument_and_sends_no_bytes() {
     let mut host = host_with(QuietGuest);
-    let reply = host.call_import_json("ilium:host/panes", "send-raw", &format!("{{\"pane\":1,\"bytes\":{}}}", 65 * 1024));
+    let reply = host.call_import_json(
+        "ilium:host/panes",
+        "send-raw",
+        &format!("{{\"pane\":1,\"bytes\":{}}}", 65 * 1024),
+    );
     assert_eq!(reply.error_code(), Some("invalid-argument"));
     assert_eq!(host.kernel().raw_bytes_sent(), 0);
 }
@@ -563,7 +695,11 @@ fn api_060_65_kib_raw_input_is_refused_invalid_argument_and_sends_no_bytes() {
 #[test]
 fn api_060_64_kib_raw_input_is_accepted() {
     let mut host = host_with(QuietGuest);
-    let reply = host.call_import_json("ilium:host/panes", "send-raw", &format!("{{\"pane\":1,\"bytes\":{}}}", 64 * 1024));
+    let reply = host.call_import_json(
+        "ilium:host/panes",
+        "send-raw",
+        &format!("{{\"pane\":1,\"bytes\":{}}}", 64 * 1024),
+    );
     assert_ne!(reply.error_code(), Some("invalid-argument"));
 }
 
@@ -571,9 +707,17 @@ fn api_060_64_kib_raw_input_is_accepted() {
 #[test]
 fn api_061_state_dependent_cap_returns_quota_exceeded_and_precheckable_cap_invalid_argument() {
     let mut host = host_with(QuietGuest);
-    let rows = host.call_import_json("ilium:host/panes", "read-cells", "{\"pane\":1,\"rows\":1001}");
+    let rows = host.call_import_json(
+        "ilium:host/panes",
+        "read-cells",
+        "{\"pane\":1,\"rows\":1001}",
+    );
     assert_eq!(rows.error_code(), Some("quota-exceeded"));
-    let stages = host.call_import_json("ilium:host/panes", "send-input", "{\"pane\":1,\"stages\":17}");
+    let stages = host.call_import_json(
+        "ilium:host/panes",
+        "send-input",
+        "{\"pane\":1,\"stages\":17}",
+    );
     assert_eq!(stages.error_code(), Some("invalid-argument"));
 }
 
@@ -581,9 +725,17 @@ fn api_061_state_dependent_cap_returns_quota_exceeded_and_precheckable_cap_inval
 #[test]
 fn api_061_the_boundary_values_1000_rows_and_16_stages_pass_the_cap_check() {
     let mut host = host_with(QuietGuest);
-    let rows = host.call_import_json("ilium:host/panes", "read-cells", "{\"pane\":1,\"rows\":1000}");
+    let rows = host.call_import_json(
+        "ilium:host/panes",
+        "read-cells",
+        "{\"pane\":1,\"rows\":1000}",
+    );
     assert_ne!(rows.error_code(), Some("quota-exceeded"));
-    let stages = host.call_import_json("ilium:host/panes", "send-input", "{\"pane\":1,\"stages\":16}");
+    let stages = host.call_import_json(
+        "ilium:host/panes",
+        "send-input",
+        "{\"pane\":1,\"stages\":16}",
+    );
     assert_ne!(stages.error_code(), Some("invalid-argument"));
 }
 
@@ -591,17 +743,59 @@ fn api_061_the_boundary_values_1000_rows_and_16_stages_pass_the_cap_check() {
 #[test]
 fn api_062_timer_of_10_ms_is_invalid_argument_and_50_ms_is_accepted() {
     let mut host = host_with(QuietGuest);
-    assert_eq!(host.call_import_json("ilium:host/timers", "set", "{\"delay-ms\":10,\"repeat\":true}").error_code(), Some("invalid-argument"));
-    assert_eq!(host.call_import_json("ilium:host/timers", "set", "{\"delay-ms\":49,\"repeat\":true}").error_code(), Some("invalid-argument"));
-    assert_eq!(host.call_import_json("ilium:host/timers", "set", "{\"delay-ms\":50,\"repeat\":true}").error_code(), None);
+    assert_eq!(
+        host.call_import_json(
+            "ilium:host/timers",
+            "set",
+            "{\"delay-ms\":10,\"repeat\":true}"
+        )
+        .error_code(),
+        Some("invalid-argument")
+    );
+    assert_eq!(
+        host.call_import_json(
+            "ilium:host/timers",
+            "set",
+            "{\"delay-ms\":49,\"repeat\":true}"
+        )
+        .error_code(),
+        Some("invalid-argument")
+    );
+    assert_eq!(
+        host.call_import_json(
+            "ilium:host/timers",
+            "set",
+            "{\"delay-ms\":50,\"repeat\":true}"
+        )
+        .error_code(),
+        None
+    );
 }
 
 /// REQ: API-062
 #[test]
 fn api_062_sync_fs_read_over_1_mib_is_invalid_argument_and_1_mib_is_accepted() {
-    let mut host = HostHarness::new().grants(&["fs.read:project"]).with_native_guest(Box::new(QuietGuest)).build().expect("host");
-    let over = host.call_import_json("ilium:host/fs", "read", &format!("{{\"path\":\"a\",\"offset\":0,\"max-bytes\":{}}}", 1_048_577));
-    let at = host.call_import_json("ilium:host/fs", "read", &format!("{{\"path\":\"a\",\"offset\":0,\"max-bytes\":{}}}", 1_048_576));
+    let mut host = HostHarness::new()
+        .grants(&["fs.read:project"])
+        .with_native_guest(Box::new(QuietGuest))
+        .build()
+        .expect("host");
+    let over = host.call_import_json(
+        "ilium:host/fs",
+        "read",
+        &format!(
+            "{{\"path\":\"a\",\"offset\":0,\"max-bytes\":{}}}",
+            1_048_577
+        ),
+    );
+    let at = host.call_import_json(
+        "ilium:host/fs",
+        "read",
+        &format!(
+            "{{\"path\":\"a\",\"offset\":0,\"max-bytes\":{}}}",
+            1_048_576
+        ),
+    );
     assert_eq!(over.error_code(), Some("invalid-argument"));
     assert_ne!(at.error_code(), Some("invalid-argument"));
 }
@@ -611,7 +805,12 @@ fn api_062_sync_fs_read_over_1_mib_is_invalid_argument_and_1_mib_is_accepted() {
 /// REQ: API-070
 #[test]
 fn api_070_two_plugins_open_32_streams_each_and_a_65th_is_quota_exceeded() {
-    let mut host = HostHarness::new().two_plugins().grants(&["http:example.com"]).with_native_guest(Box::new(QuietGuest)).build().expect("host");
+    let mut host = HostHarness::new()
+        .two_plugins()
+        .grants(&["http:example.com"])
+        .with_native_guest(Box::new(QuietGuest))
+        .build()
+        .expect("host");
     for _ in 0..32 {
         assert!(host.open_stream_as(0).error_code().is_none());
         assert!(host.open_stream_as(1).error_code().is_none());
@@ -623,8 +822,22 @@ fn api_070_two_plugins_open_32_streams_each_and_a_65th_is_quota_exceeded() {
 #[test]
 fn api_070_session_caps_are_the_documented_numbers() {
     let d = ilium_plugin_host::session::SessionLimits::default();
-    assert_eq!((d.session_http_streams, d.session_processes, d.session_decorations), (64, 16, 65_536));
-    assert_eq!((d.session_pending_requests, d.session_key_grabs, d.session_children), (4_096, 32, 16));
+    assert_eq!(
+        (
+            d.session_http_streams,
+            d.session_processes,
+            d.session_decorations
+        ),
+        (64, 16, 65_536)
+    );
+    assert_eq!(
+        (
+            d.session_pending_requests,
+            d.session_key_grabs,
+            d.session_children
+        ),
+        (4_096, 32, 16)
+    );
 }
 
 // ---------------------------------------------------------------- rates (API-071, API-003)
@@ -638,7 +851,10 @@ fn sound_host() -> ilium_plugin_host::testing::HarnessHandle {
 fn api_071_play_sound_allows_4_per_second_and_refuses_the_fifth() {
     let mut host = sound_host();
     for _ in 0..4 {
-        assert!(host.call_import_json("ilium:host/sounds", "play", "{\"name\":\"bell\"}").error_code().is_none());
+        assert!(host
+            .call_import_json("ilium:host/sounds", "play", "{\"name\":\"bell\"}")
+            .error_code()
+            .is_none());
     }
     let fifth = host.call_import_json("ilium:host/sounds", "play", "{\"name\":\"bell\"}");
     assert_eq!(fifth.error_code(), Some("rate-limited"));
@@ -653,9 +869,16 @@ fn api_071_window_slides_the_fifth_call_passes_exactly_1000_ms_after_the_first()
         host.call_import_json("ilium:host/sounds", "play", "{\"name\":\"bell\"}");
     }
     advance_ms(&mut host, 999);
-    assert_eq!(host.call_import_json("ilium:host/sounds", "play", "{\"name\":\"bell\"}").error_code(), Some("rate-limited"));
+    assert_eq!(
+        host.call_import_json("ilium:host/sounds", "play", "{\"name\":\"bell\"}")
+            .error_code(),
+        Some("rate-limited")
+    );
     advance_ms(&mut host, 1);
-    assert!(host.call_import_json("ilium:host/sounds", "play", "{\"name\":\"bell\"}").error_code().is_none());
+    assert!(host
+        .call_import_json("ilium:host/sounds", "play", "{\"name\":\"bell\"}")
+        .error_code()
+        .is_none());
 }
 
 /// REQ: API-071
@@ -682,7 +905,10 @@ fn api_071_refused_calls_do_not_enter_the_window() {
     }
     advance_ms(&mut host, 1_000);
     for _ in 0..4 {
-        assert!(host.call_import_json("ilium:host/sounds", "play", "{\"name\":\"bell\"}").error_code().is_none());
+        assert!(host
+            .call_import_json("ilium:host/sounds", "play", "{\"name\":\"bell\"}")
+            .error_code()
+            .is_none());
     }
 }
 
@@ -696,17 +922,42 @@ fn api_071_window_survives_a_restart_of_the_plugin_side() {
     host.set_guest(Box::new(TrapGuest("trap.panic")));
     fail_once(&mut host);
     advance_ms(&mut host, 100);
-    assert_eq!(host.call_import_json("ilium:host/sounds", "play", "{\"name\":\"bell\"}").error_code(), Some("rate-limited"));
+    assert_eq!(
+        host.call_import_json("ilium:host/sounds", "play", "{\"name\":\"bell\"}")
+            .error_code(),
+        Some("rate-limited")
+    );
 }
 
 /// REQ: API-071
 #[test]
 fn api_071_topics_publish_allows_100_per_second_and_refuses_the_101st() {
-    let mut host = HostHarness::new().grants(&["topics.publish:demo"]).with_native_guest(Box::new(QuietGuest)).build().expect("host");
+    let mut host = HostHarness::new()
+        .grants(&["topics.publish:demo"])
+        .with_native_guest(Box::new(QuietGuest))
+        .build()
+        .expect("host");
     for index in 0..100 {
-        assert!(host.call_import_json("ilium:host/topics", "publish", "{\"topic\":\"demo\",\"payload\":\"x\"}").error_code().is_none(), "call {index}");
+        assert!(
+            host.call_import_json(
+                "ilium:host/topics",
+                "publish",
+                "{\"topic\":\"demo\",\"payload\":\"x\"}"
+            )
+            .error_code()
+            .is_none(),
+            "call {index}"
+        );
     }
-    assert_eq!(host.call_import_json("ilium:host/topics", "publish", "{\"topic\":\"demo\",\"payload\":\"x\"}").error_code(), Some("rate-limited"));
+    assert_eq!(
+        host.call_import_json(
+            "ilium:host/topics",
+            "publish",
+            "{\"topic\":\"demo\",\"payload\":\"x\"}"
+        )
+        .error_code(),
+        Some("rate-limited")
+    );
 }
 
 /// REQ: API-071
@@ -714,29 +965,65 @@ fn api_071_topics_publish_allows_100_per_second_and_refuses_the_101st() {
 fn api_071_journal_log_event_allows_20_per_second_and_refuses_the_21st() {
     let mut host = host_with(QuietGuest);
     for _ in 0..20 {
-        assert!(host.call_import_json("ilium:host/journal", "log-event", "{\"kind\":\"k\",\"detail\":\"d\"}").error_code().is_none());
+        assert!(host
+            .call_import_json(
+                "ilium:host/journal",
+                "log-event",
+                "{\"kind\":\"k\",\"detail\":\"d\"}"
+            )
+            .error_code()
+            .is_none());
     }
-    assert_eq!(host.call_import_json("ilium:host/journal", "log-event", "{\"kind\":\"k\",\"detail\":\"d\"}").error_code(), Some("rate-limited"));
+    assert_eq!(
+        host.call_import_json(
+            "ilium:host/journal",
+            "log-event",
+            "{\"kind\":\"k\",\"detail\":\"d\"}"
+        )
+        .error_code(),
+        Some("rate-limited")
+    );
 }
 
 /// REQ: API-071
 #[test]
 fn api_071_geocode_allows_one_per_second() {
-    let mut host = HostHarness::new().grants(&["geocode"]).with_native_guest(Box::new(QuietGuest)).build().expect("host");
-    assert!(host.call_import_json("ilium:host/geocode", "search", "{\"query\":\"Oslo\"}").error_code().is_none());
-    assert_eq!(host.call_import_json("ilium:host/geocode", "search", "{\"query\":\"Oslo\"}").error_code(), Some("rate-limited"));
+    let mut host = HostHarness::new()
+        .grants(&["geocode"])
+        .with_native_guest(Box::new(QuietGuest))
+        .build()
+        .expect("host");
+    assert!(host
+        .call_import_json("ilium:host/geocode", "search", "{\"query\":\"Oslo\"}")
+        .error_code()
+        .is_none());
+    assert_eq!(
+        host.call_import_json("ilium:host/geocode", "search", "{\"query\":\"Oslo\"}")
+            .error_code(),
+        Some("rate-limited")
+    );
     advance_ms(&mut host, 1_000);
-    assert!(host.call_import_json("ilium:host/geocode", "search", "{\"query\":\"Oslo\"}").error_code().is_none());
+    assert!(host
+        .call_import_json("ilium:host/geocode", "search", "{\"query\":\"Oslo\"}")
+        .error_code()
+        .is_none());
 }
 
 /// REQ: API-071
 #[test]
 fn api_071_rates_are_per_plugin_not_shared_between_plugins() {
-    let mut host = HostHarness::new().two_plugins().with_native_guest(Box::new(QuietGuest)).build().expect("host");
+    let mut host = HostHarness::new()
+        .two_plugins()
+        .with_native_guest(Box::new(QuietGuest))
+        .build()
+        .expect("host");
     for _ in 0..4 {
         host.call_import_as(0, "ilium:host/sounds", "play", "{\"name\":\"bell\"}");
     }
-    assert!(host.call_import_as(1, "ilium:host/sounds", "play", "{\"name\":\"bell\"}").error_code().is_none());
+    assert!(host
+        .call_import_as(1, "ilium:host/sounds", "play", "{\"name\":\"bell\"}")
+        .error_code()
+        .is_none());
 }
 
 // ---------------------------------------------------------------- quota (API-072, API-003)
@@ -765,7 +1052,11 @@ fn api_072_balance_never_refills_above_2000_ms() {
 fn api_072_empty_bucket_refuses_with_quota_exceeded_and_the_documented_retry_after() {
     let mut host = host_with(QuietGuest);
     host.charge_cpu_ms(2_000);
-    assert_eq!(host.call_import_json("ilium:host/sounds", "play", "{\"name\":\"bell\"}").error_code(), Some("quota-exceeded"));
+    assert_eq!(
+        host.call_import_json("ilium:host/sounds", "play", "{\"name\":\"bell\"}")
+            .error_code(),
+        Some("quota-exceeded")
+    );
     let reply = host.call_import_json("ilium:host/sounds", "play", "{\"name\":\"bell\"}");
     assert_eq!(reply.retry_after_ms(), Some(100));
 }
@@ -773,7 +1064,12 @@ fn api_072_empty_bucket_refuses_with_quota_exceeded_and_the_documented_retry_aft
 /// REQ: API-072
 #[test]
 fn api_072_negative_balance_retry_after_is_max_100_ceil10_of_double_the_deficit() {
-    for (charge, expected) in [(2_000 + 1, 100), (2_000 + 50, 100), (2_000 + 51, 110), (2_000 + 500, 1_000)] {
+    for (charge, expected) in [
+        (2_000 + 1, 100),
+        (2_000 + 50, 100),
+        (2_000 + 51, 110),
+        (2_000 + 500, 1_000),
+    ] {
         let mut host = host_with(QuietGuest);
         host.charge_cpu_ms(charge);
         let reply = host.call_import_json("ilium:host/sounds", "play", "{\"name\":\"bell\"}");
@@ -786,7 +1082,10 @@ fn api_072_negative_balance_retry_after_is_max_100_ceil10_of_double_the_deficit(
 fn api_072_a_balance_of_exactly_one_ms_is_not_empty() {
     let mut host = host_with(QuietGuest);
     host.charge_cpu_ms(1_999);
-    assert!(host.call_import_json("ilium:host/sounds", "play", "{\"name\":\"bell\"}").error_code().is_none());
+    assert!(host
+        .call_import_json("ilium:host/sounds", "play", "{\"name\":\"bell\"}")
+        .error_code()
+        .is_none());
 }
 
 // ---------------------------------------------------------------- pending requests and timers
@@ -794,9 +1093,16 @@ fn api_072_a_balance_of_exactly_one_ms_is_not_empty() {
 /// REQ: API-073
 #[test]
 fn api_073_the_65th_pending_request_returns_busy() {
-    let mut host = HostHarness::new().grants(&["http:example.com"]).with_native_guest(Box::new(QuietGuest)).build().expect("host");
+    let mut host = HostHarness::new()
+        .grants(&["http:example.com"])
+        .with_native_guest(Box::new(QuietGuest))
+        .build()
+        .expect("host");
     for index in 0..64 {
-        assert!(host.start_slow_request().error_code().is_none(), "request {index}");
+        assert!(
+            host.start_slow_request().error_code().is_none(),
+            "request {index}"
+        );
     }
     assert_eq!(host.start_slow_request().error_code(), Some("busy"));
 }
@@ -804,7 +1110,11 @@ fn api_073_the_65th_pending_request_returns_busy() {
 /// REQ: API-073
 #[test]
 fn api_073_a_completed_request_frees_its_slot_when_the_completion_is_enqueued() {
-    let mut host = HostHarness::new().grants(&["http:example.com"]).with_native_guest(Box::new(QuietGuest)).build().expect("host");
+    let mut host = HostHarness::new()
+        .grants(&["http:example.com"])
+        .with_native_guest(Box::new(QuietGuest))
+        .build()
+        .expect("host");
     for _ in 0..64 {
         host.start_slow_request();
     }
@@ -832,7 +1142,11 @@ fn api_073_default_is_64_and_limit_key_is_pending_requests() {
 #[test]
 fn api_074_timer_never_fires_inside_the_call_that_set_it() {
     let mut host = host_with(QuietGuest);
-    host.call_import_json("ilium:host/timers", "set", "{\"delay-ms\":50,\"repeat\":false}");
+    host.call_import_json(
+        "ilium:host/timers",
+        "set",
+        "{\"delay-ms\":50,\"repeat\":false}",
+    );
     assert!(host.queued_events().is_empty());
 }
 
@@ -840,7 +1154,11 @@ fn api_074_timer_never_fires_inside_the_call_that_set_it() {
 #[test]
 fn api_074_first_tick_is_queued_after_the_delay_counted_from_the_return_of_set() {
     let mut host = host_with(QuietGuest);
-    host.call_import_json("ilium:host/timers", "set", "{\"delay-ms\":50,\"repeat\":false}");
+    host.call_import_json(
+        "ilium:host/timers",
+        "set",
+        "{\"delay-ms\":50,\"repeat\":false}",
+    );
     advance_ms(&mut host, 49);
     assert!(host.queued_timer_ticks().is_empty());
     advance_ms(&mut host, 1);
@@ -851,7 +1169,13 @@ fn api_074_first_tick_is_queued_after_the_delay_counted_from_the_return_of_set()
 #[test]
 fn api_074_cancel_removes_a_queued_undelivered_tick() {
     let mut host = host_with(QuietGuest);
-    let id = host.call_import_json("ilium:host/timers", "set", "{\"delay-ms\":50,\"repeat\":false}").timer_id();
+    let id = host
+        .call_import_json(
+            "ilium:host/timers",
+            "set",
+            "{\"delay-ms\":50,\"repeat\":false}",
+        )
+        .timer_id();
     advance_ms(&mut host, 40);
     host.queue_timer_tick(id);
     host.call_import_json("ilium:host/timers", "cancel", &format!("{{\"id\":{id}}}"));

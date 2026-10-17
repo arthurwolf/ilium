@@ -11,7 +11,10 @@ fn port_session_conversion_server_terminate_keeps_the_pane_and_replace_swaps_it(
     let (mut host, pane) = server_with_pane("codex", true);
     let start = host.deliver_one(start_message(pane, "claude"));
     assert_eq!(terminated(&start), [pane]);
-    assert!(closed(&start).is_empty(), "stopping the process keeps the pane");
+    assert!(
+        closed(&start).is_empty(),
+        "stopping the process keeps the pane"
+    );
     answer_terminate(&mut host, &start, Outcome::Ok);
     let request = host.jobs().list().first().expect("job").request;
     host.jobs().finish(request, Ok(job_output(3, 3)));
@@ -55,7 +58,11 @@ fn port_session_conversion_server_an_unknown_pane_is_refused_without_a_stop() {
 fn port_session_conversion_server_a_failed_stop_is_reported_to_the_client() {
     let (mut host, pane) = server_with_pane("codex", true);
     let start = host.deliver_one(start_message(pane, "claude"));
-    let error = PluginError { code: ErrorCode::NotFound, message: "no such pane".into(), retry_after_ms: None };
+    let error = PluginError {
+        code: ErrorCode::NotFound,
+        message: "no such pane".into(),
+        retry_after_ms: None,
+    };
     let reply = answer_terminate(&mut host, &start, Outcome::Failed(error));
     assert!(failed_payload(&reply).is_some(), "{reply:?}");
 }

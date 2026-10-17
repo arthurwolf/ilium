@@ -40,7 +40,9 @@ fn doc_033_session_table_keeps_exactly_the_two_documented_keys() {
 /// REQ: COR-033
 #[test]
 fn doc_033_page_states_that_no_user_setting_moves() {
-    assert!(page_text().contains("The values stay in the same `config.toml` tables as before, so no user setting moves."));
+    assert!(page_text().contains(
+        "The values stay in the same `config.toml` tables as before, so no user setting moves."
+    ));
 }
 
 /// REQ: COR-022
@@ -52,7 +54,9 @@ fn doc_022_disabled_notice_text_is_exact() {
 /// REQ: COR-022
 #[test]
 fn doc_022_disabled_tab_stays_in_the_rail_with_stored_values_read_only() {
-    assert!(page_text().contains("the tab stays in the rail with its stored values shown read-only"));
+    assert!(
+        page_text().contains("the tab stays in the rail with its stored values shown read-only")
+    );
 }
 
 /// REQ: COR-022
@@ -69,7 +73,10 @@ fn doc_022_kernel_and_boot_row_keeps_the_snapshot_writer_running() {
 /// REQ: COR-022
 #[test]
 fn doc_022_kernel_fallback_when_off_is_the_snapshot_writer() {
-    let row = table_row(&page("reference-kernel-and-boot"), "Kernel fallback when off");
+    let row = table_row(
+        &page("reference-kernel-and-boot"),
+        "Kernel fallback when off",
+    );
     assert_eq!(row[1], "snapshot writer");
 }
 
@@ -78,8 +85,14 @@ fn doc_022_kernel_fallback_when_off_is_the_snapshot_writer() {
 fn doc_076_snapshot_sections_is_a_standard_collect_point() {
     let row = table_row(&page_text(), "`snapshot-sections`");
     assert_eq!(row[1], "collect");
-    assert_eq!(row[2], "Store extra JSON in the session snapshot and receive it back on restore.");
-    assert_eq!(row[3], "entry: id, max_bytes (the plugin answers `snapshot` and `restore` messages)");
+    assert_eq!(
+        row[2],
+        "Store extra JSON in the session snapshot and receive it back on restore."
+    );
+    assert_eq!(
+        row[3],
+        "entry: id, max_bytes (the plugin answers `snapshot` and `restore` messages)"
+    );
     assert_eq!(row[4], "standard");
 }
 
@@ -115,8 +128,10 @@ fn doc_076_the_plugin_owns_two_points_one_service_one_topic_and_is_not_replaceab
 /// REQ: F-076
 #[test]
 fn doc_076_page_states_the_snapshots_service_and_core_page_agrees() {
-    assert!(page_text().contains("- `ilium.core.sessions/snapshots`: list, save, restore: manage snapshots"));
-    assert!(points_page().contains("| `ilium.core.sessions/snapshots` | list, save, restore: manage snapshots |"));
+    assert!(page_text()
+        .contains("- `ilium.core.sessions/snapshots`: list, save, restore: manage snapshots"));
+    assert!(points_page()
+        .contains("| `ilium.core.sessions/snapshots` | list, save, restore: manage snapshots |"));
 }
 
 /// REQ: F-076
@@ -163,7 +178,9 @@ fn doc_076_example_contribution_targets_the_snapshot_sections_point() {
 #[test]
 fn doc_032_example_max_bytes_is_within_the_256_kib_ceiling() {
     let example = example();
-    let max_bytes = example["contributes"]["extensions"][0]["entry"]["max_bytes"].as_u64().expect("number");
+    let max_bytes = example["contributes"]["extensions"][0]["entry"]["max_bytes"]
+        .as_u64()
+        .expect("number");
     assert!(max_bytes <= 262_144);
 }
 
@@ -213,7 +230,10 @@ fn doc_076_restore_summary_figure_shows_panes_agents_and_one_frozen_pane() {
 fn doc_076_restore_summary_figure_has_uniform_line_width() {
     let blocks = term_blocks(&page_text());
     let widths: Vec<usize> = blocks[0].lines().map(|line| line.chars().count()).collect();
-    assert!(widths.windows(2).all(|pair| pair[0] == pair[1]), "widths differ: {widths:?}");
+    assert!(
+        widths.windows(2).all(|pair| pair[0] == pair[1]),
+        "widths differ: {widths:?}"
+    );
 }
 
 /// REQ: F-076
@@ -229,12 +249,18 @@ fn doc_076_ilium_ls_figure_prints_one_json_line_per_session_then_a_summary() {
     let blocks = term_blocks(&page_text());
     let lines: Vec<&str> = blocks[1].lines().collect();
     assert_eq!(lines[0], "$ ilium ls");
-    let records: Vec<Value> = lines[1..].iter().map(|line| serde_json::from_str(line).expect("JSON line")).collect();
+    let records: Vec<Value> = lines[1..]
+        .iter()
+        .map(|line| serde_json::from_str(line).expect("JSON line"))
+        .collect();
     let (summary, sessions) = records.split_last().expect("records");
     for session in sessions {
         assert_eq!(session["type"], "session");
         assert!(session["name"].is_string());
-        assert!(matches!(session["state"].as_str(), Some("attached" | "detached")));
+        assert!(matches!(
+            session["state"].as_str(),
+            Some("attached" | "detached")
+        ));
         assert!(session["panes"].is_u64());
     }
     assert_eq!(summary["type"], "summary");

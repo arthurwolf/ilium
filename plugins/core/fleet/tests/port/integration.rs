@@ -28,7 +28,9 @@ fn broadcast_e2e_reaches_selected_agents_and_never_shells() {
     let (_, _, exit) = run_cli(&mut host, &["broadcast", "--agent", "claude", "hello"], b"");
     assert_eq!(exit, Some(0));
     assert_eq!(sent_panes(&host), [NodeId(claude)]);
-    assert!(!sent_panes(&host).contains(&NodeId(codex)) && !sent_panes(&host).contains(&NodeId(shell)));
+    assert!(
+        !sent_panes(&host).contains(&NodeId(codex)) && !sent_panes(&host).contains(&NodeId(shell))
+    );
     let (_, _, _) = run_cli(&mut host, &["broadcast", "all"], b"");
     assert!(!sent_panes(&host).contains(&NodeId(shell)));
 }

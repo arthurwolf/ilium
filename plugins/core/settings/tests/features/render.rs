@@ -52,7 +52,10 @@ fn render_090_no_row_of_the_overview_exceeds_the_width() {
         let mut host = client_host();
         let screen = host.render(overview(), width, 24);
         for row in 0..screen.rows {
-            assert!(screen.row(row).chars().count() <= usize::from(width), "width {width} row {row}");
+            assert!(
+                screen.row(row).chars().count() <= usize::from(width),
+                "width {width} row {row}"
+            );
         }
     }
 }
@@ -81,7 +84,10 @@ fn render_090_the_density_row_joins_label_and_value_with_leader_dots() {
         assert!(line.contains('…'), "{line}");
         assert!(line.contains("‹ Comfortable ›"), "{line}");
         let label_end = line.find("Density").expect("label") + "Density".len();
-        assert!(line[label_end..].starts_with(" …"), "one blank cell before the dots: {line}");
+        assert!(
+            line[label_end..].starts_with(" …"),
+            "one blank cell before the dots: {line}"
+        );
     }
 }
 
@@ -100,7 +106,9 @@ fn render_090_leader_dots_never_overwrite_the_label() {
 #[test]
 fn render_090_the_density_value_follows_the_stored_setting() {
     let mut host = client_host();
-    host.settings().set("density", serde_json::json!("compact")).expect("accepted");
+    host.settings()
+        .set("density", serde_json::json!("compact"))
+        .expect("accepted");
     host.settle();
     let text = host.render(ui_tab(), 80, 24).text();
     assert!(text.contains("‹ Compact ›"), "{text}");
@@ -111,7 +119,9 @@ fn render_090_the_density_value_follows_the_stored_setting() {
 #[test]
 fn render_092_the_accent_row_shows_the_stored_colour() {
     let mut host = client_host();
-    host.settings().set("accent", serde_json::json!("#102030")).expect("accepted");
+    host.settings()
+        .set("accent", serde_json::json!("#102030"))
+        .expect("accepted");
     host.settle();
     let text = host.render(ui_tab(), 80, 24).text();
     assert!(text.contains("#102030"), "{text}");

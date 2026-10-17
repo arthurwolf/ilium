@@ -9,8 +9,14 @@ const OWNER: &str = "com.example.owner";
 const CONTRIBUTOR: &str = "com.example.contrib";
 
 fn owner_and_contributor(rig: &OpsRig) {
-    install_ok(rig, &pkg(OWNER, "1.0.0").extension_point("acme.points/source"));
-    install_ok(rig, &pkg(CONTRIBUTOR, "1.0.0").extension_contribution("acme.points/source"));
+    install_ok(
+        rig,
+        &pkg(OWNER, "1.0.0").extension_point("acme.points/source"),
+    );
+    install_ok(
+        rig,
+        &pkg(CONTRIBUTOR, "1.0.0").extension_contribution("acme.points/source"),
+    );
 }
 
 /// REQ: LIF-270
@@ -27,7 +33,9 @@ fn lif_270_extension_stopped_after_three_breaches_is_usable_again_after_a_contri
     rig.cli(&["restart", CONTRIBUTOR]);
     rig.advance(secs(3));
     assert!(!server.extension_stopped(OWNER, "acme.points/source", CONTRIBUTOR));
-    assert!(server.call_extension(OWNER, "acme.points/source", CONTRIBUTOR).is_ok());
+    assert!(server
+        .call_extension(OWNER, "acme.points/source", CONTRIBUTOR)
+        .is_ok());
 }
 
 /// REQ: LIF-270
@@ -82,7 +90,10 @@ fn lif_274_inactive_contributors_of_an_active_owner_are_activated_without_a_call
     let server = rig.start_server("s1");
     rig.advance(secs(5));
     assert_eq!(server.state_of(OWNER, Side::Server), InstanceState::Active);
-    assert_eq!(server.state_of(CONTRIBUTOR, Side::Server), InstanceState::Active);
+    assert_eq!(
+        server.state_of(CONTRIBUTOR, Side::Server),
+        InstanceState::Active
+    );
 }
 
 /// REQ: LIF-274
@@ -93,7 +104,10 @@ fn lif_274_contributors_are_activated_in_the_background_not_inside_the_owner_act
     let server = rig.start_server_manual("s1");
     server.apply_pending();
     let trace = rig.trace();
-    assert!(position_of(&trace, &format!("activate.end {OWNER}")) < position_of(&trace, &format!("activate.begin {CONTRIBUTOR}")));
+    assert!(
+        position_of(&trace, &format!("activate.end {OWNER}"))
+            < position_of(&trace, &format!("activate.begin {CONTRIBUTOR}"))
+    );
 }
 
 /// REQ: LIF-274
@@ -104,5 +118,8 @@ fn lif_274_a_disabled_contributor_stays_inactive() {
     rig.cli(&["disable", CONTRIBUTOR]);
     let server = rig.start_server("s1");
     rig.advance(secs(5));
-    assert_eq!(server.state_of(CONTRIBUTOR, Side::Server), InstanceState::Inactive);
+    assert_eq!(
+        server.state_of(CONTRIBUTOR, Side::Server),
+        InstanceState::Inactive
+    );
 }

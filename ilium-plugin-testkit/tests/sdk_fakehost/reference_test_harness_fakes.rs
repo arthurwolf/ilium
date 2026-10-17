@@ -12,8 +12,8 @@ use ilium_plugin_testkit::fakes::fs::parse_shorthand;
 use ilium_plugin_testkit::{FakeHost, TreeNode};
 
 use crate::common::{
-    DEFAULT_CLOCK_MS, Spy, assert_fails_with, manifest_text, panic_text, spy, spy_reset, temp_dir,
-    with_clean_env, write_file,
+    assert_fails_with, manifest_text, panic_text, spy, spy_reset, temp_dir, with_clean_env,
+    write_file, Spy, DEFAULT_CLOCK_MS,
 };
 
 fn active_host_with(grants: &[&str]) -> FakeHost {
@@ -72,7 +72,11 @@ fn dev_451_the_clock_has_no_daylight_saving_over_200_days() {
             host.advance_clock(day);
         }
         assert_eq!(host.clock().now(), DEFAULT_CLOCK_MS + 200 * day);
-        assert_eq!(host.clock().now() % day, 0, "every day starts at 00:00:00 UTC");
+        assert_eq!(
+            host.clock().now() % day,
+            0,
+            "every day starts at 00:00:00 UTC"
+        );
     });
 }
 
@@ -82,7 +86,11 @@ fn dev_451_the_default_instant_is_midnight_utc() {
     with_clean_env(|| {
         let host = active_host_with(&[]);
         assert_eq!(host.clock().now() % 86_400_000, 0);
-        assert_eq!(host.clock().now() / 86_400_000, 21_915, "2030-01-01 is day 21915 after 1970-01-01");
+        assert_eq!(
+            host.clock().now() / 86_400_000,
+            21_915,
+            "2030-01-01 is day 21915 after 1970-01-01"
+        );
     });
 }
 
@@ -93,7 +101,9 @@ fn dev_451_set_clock_forward_moves_time_and_backward_fails_with_clock_backwards(
         let mut host = active_host_with(&[]);
         host.set_clock(DEFAULT_CLOCK_MS + 5_000);
         assert_eq!(host.clock().now(), DEFAULT_CLOCK_MS + 5_000);
-        assert_fails_with(codes::CLOCK_BACKWARDS, || host.set_clock(DEFAULT_CLOCK_MS + 4_999));
+        assert_fails_with(codes::CLOCK_BACKWARDS, || {
+            host.set_clock(DEFAULT_CLOCK_MS + 4_999)
+        });
         assert_eq!(host.clock().now(), DEFAULT_CLOCK_MS + 5_000);
     });
 }
@@ -148,7 +158,10 @@ fn dev_456_the_shorthand_and_the_record_form_name_the_same_file() {
     with_clean_env(|| {
         let mut host = active_host_with(&[]);
         host.fs().write("project:dir/b.txt", b"x");
-        let record = FsPath { scope: "project".to_string(), path: "dir/b.txt".to_string() };
+        let record = FsPath {
+            scope: "project".to_string(),
+            path: "dir/b.txt".to_string(),
+        };
         assert_eq!(host.fs().read(record), Some(b"x".to_vec()));
     });
 }
@@ -159,8 +172,12 @@ fn dev_457_the_fake_file_system_creates_no_file_on_the_real_disk() {
     with_clean_env(|| {
         let mut host = active_host_with(&[]);
         let name = "sdk_fakehost_457_marker.txt";
-        host.fs().write(format!("project:{name}").as_str(), b"memory only");
-        assert_eq!(host.fs().read(format!("project:{name}").as_str()), Some(b"memory only".to_vec()));
+        host.fs()
+            .write(format!("project:{name}").as_str(), b"memory only");
+        assert_eq!(
+            host.fs().read(format!("project:{name}").as_str()),
+            Some(b"memory only".to_vec())
+        );
         let candidates = [
             std::path::PathBuf::from(name),
             std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(name),
@@ -177,7 +194,9 @@ fn dev_457_the_fake_file_system_creates_no_file_on_the_real_disk() {
 fn dev_458_an_absolute_path_fails_with_fs_path_invalid() {
     with_clean_env(|| {
         let mut host = active_host_with(&[]);
-        assert_fails_with(codes::FS_PATH_INVALID, || host.fs().write("project:/etc/passwd", b"x"));
+        assert_fails_with(codes::FS_PATH_INVALID, || {
+            host.fs().write("project:/etc/passwd", b"x")
+        });
     });
 }
 
@@ -186,8 +205,12 @@ fn dev_458_an_absolute_path_fails_with_fs_path_invalid() {
 fn dev_458_a_path_with_a_parent_segment_fails_with_fs_path_invalid() {
     with_clean_env(|| {
         let mut host = active_host_with(&[]);
-        assert_fails_with(codes::FS_PATH_INVALID, || host.fs().write("project:../escape.txt", b"x"));
-        assert_fails_with(codes::FS_PATH_INVALID, || host.fs().write("project:a/../b.txt", b"x"));
+        assert_fails_with(codes::FS_PATH_INVALID, || {
+            host.fs().write("project:../escape.txt", b"x")
+        });
+        assert_fails_with(codes::FS_PATH_INVALID, || {
+            host.fs().write("project:a/../b.txt", b"x")
+        });
     });
 }
 
@@ -219,12 +242,14 @@ fn dev_458_parse_shorthand_splits_scope_and_path() {
 fn dev_460_a_registered_process_expectation_starts_no_run() {
     with_clean_env(|| {
         let mut host = active_host_with(&["process.run:git"]);
-        host.process().expect("git", &["status"]).returns(ProcessExit {
-            status: Some(0),
-            signal: None,
-            stdout: b"clean".to_vec(),
-            stderr: Vec::new(),
-        });
+        host.process()
+            .expect("git", &["status"])
+            .returns(ProcessExit {
+                status: Some(0),
+                signal: None,
+                stdout: b"clean".to_vec(),
+                stderr: Vec::new(),
+            });
         assert!(host.process().calls().is_empty());
     });
 }
@@ -247,7 +272,11 @@ fn dev_462_a_registered_http_entry_makes_no_network_call() {
         host.http().expect(
             "GET",
             "https://api.example.com/v1/items",
-            ilium_plugin_sdk_core::host::HttpResponse { status: 200, headers: Vec::new(), body: b"[]".to_vec() },
+            ilium_plugin_sdk_core::host::HttpResponse {
+                status: 200,
+                headers: Vec::new(),
+                body: b"[]".to_vec(),
+            },
         );
         assert!(host.http().calls().is_empty());
     });
@@ -258,9 +287,9 @@ fn dev_462_a_registered_http_entry_makes_no_network_call() {
 fn dev_464_a_process_expectation_that_returns_a_failure_registers_without_a_call() {
     with_clean_env(|| {
         let mut host = active_host_with(&["process.run:git"]);
-        host.process()
-            .expect("git", &["push"])
-            .fails(ilium_plugin_sdk_core::types::PluginError::new(ErrorCode::Io, "disk full"));
+        host.process().expect("git", &["push"]).fails(
+            ilium_plugin_sdk_core::types::PluginError::new(ErrorCode::Io, "disk full"),
+        );
         assert!(host.process().calls().is_empty());
     });
 }
@@ -303,7 +332,10 @@ fn dev_465_values_survive_deactivate_then_activate_on_the_same_host() {
 fn dev_466_dump_returns_one_bucket_as_a_map() {
     with_clean_env(|| {
         spy_reset();
-        let path = snapshot_file("s466", r#"{ "global": { "a": "AQ==", "b": "Ag==" }, "session": { "c": "Aw==" } }"#);
+        let path = snapshot_file(
+            "s466",
+            r#"{ "global": { "a": "AQ==", "b": "Ag==" }, "session": { "c": "Aw==" } }"#,
+        );
         let mut host = FakeHost::new().with_storage_snapshot(&path);
         host.activate::<Spy>();
         let global = host.storage().dump(Bucket::Global);
@@ -355,10 +387,17 @@ fn dev_467_a_valid_value_is_stored_and_settings_changed_reaches_the_plugin() {
     with_clean_env(|| {
         spy_reset();
         let path = settings_manifest("set467a");
-        let mut host = FakeHost::for_manifest(&path).expect("manifest loads").side("client");
+        let mut host = FakeHost::for_manifest(&path)
+            .expect("manifest loads")
+            .side("client");
         host.activate::<Spy>();
-        host.settings().set("show_badges", serde_json::json!(false)).expect("valid toggle value");
-        assert_eq!(host.settings().get("show_badges"), Some(serde_json::json!(false)));
+        host.settings()
+            .set("show_badges", serde_json::json!(false))
+            .expect("valid toggle value");
+        assert_eq!(
+            host.settings().get("show_badges"),
+            Some(serde_json::json!(false))
+        );
         host.settle();
         let changed: Vec<_> = all_events()
             .into_iter()
@@ -377,7 +416,9 @@ fn dev_467_a_value_of_the_wrong_type_returns_invalid_argument_and_changes_nothin
     with_clean_env(|| {
         spy_reset();
         let path = settings_manifest("set467b");
-        let mut host = FakeHost::for_manifest(&path).expect("manifest loads").side("client");
+        let mut host = FakeHost::for_manifest(&path)
+            .expect("manifest loads")
+            .side("client");
         host.activate::<Spy>();
         let error = host
             .settings()
@@ -385,7 +426,9 @@ fn dev_467_a_value_of_the_wrong_type_returns_invalid_argument_and_changes_nothin
             .expect_err("a toggle takes a boolean");
         assert_eq!(error.code, ErrorCode::InvalidArgument);
         host.settle();
-        assert!(all_events().iter().all(|event| !matches!(event, Event::SettingsChanged(_))));
+        assert!(all_events()
+            .iter()
+            .all(|event| !matches!(event, Event::SettingsChanged(_))));
     });
 }
 
@@ -395,9 +438,14 @@ fn dev_467_the_default_of_a_row_reads_back_before_any_set() {
     with_clean_env(|| {
         spy_reset();
         let path = settings_manifest("set467c");
-        let mut host = FakeHost::for_manifest(&path).expect("manifest loads").side("client");
+        let mut host = FakeHost::for_manifest(&path)
+            .expect("manifest loads")
+            .side("client");
         host.activate::<Spy>();
-        assert_eq!(host.settings().get("show_badges"), Some(serde_json::json!(true)));
+        assert_eq!(
+            host.settings().get("show_badges"),
+            Some(serde_json::json!(true))
+        );
     });
 }
 
@@ -455,8 +503,14 @@ fn dev_470_rename_changes_the_name_and_queues_tree_changed() {
         assert_eq!(host.tree().get(id).expect("node").name, "new");
         host.settle();
         let batches = spy().batches;
-        assert!(batches.len() >= 2, "one batch per settle with queued events");
-        assert!(matches!(batches.last().expect("batch")[0], Event::TreeChanged(_)));
+        assert!(
+            batches.len() >= 2,
+            "one batch per settle with queued events"
+        );
+        assert!(matches!(
+            batches.last().expect("batch")[0],
+            Event::TreeChanged(_)
+        ));
     });
 }
 
@@ -476,7 +530,10 @@ fn dev_470_set_activity_delivers_agent_activity_changed_with_the_next_revision()
                 _ => None,
             })
             .collect();
-        assert_eq!(revisions, vec![(AgentActivity::Working, 1), (AgentActivity::Idle, 2)]);
+        assert_eq!(
+            revisions,
+            vec![(AgentActivity::Working, 1), (AgentActivity::Idle, 2)]
+        );
     });
 }
 
@@ -491,7 +548,9 @@ fn dev_470_remove_deletes_the_node_and_its_children_and_delivers_node_removed() 
         assert_eq!(host.tree().get(parent), None);
         assert_eq!(host.tree().get(child), None);
         host.settle();
-        let removed = all_events().iter().any(|event| matches!(event, Event::NodeRemoved(id) if *id == NodeId(parent)));
+        let removed = all_events()
+            .iter()
+            .any(|event| matches!(event, Event::NodeRemoved(id) if *id == NodeId(parent)));
         assert!(removed);
     });
 }
@@ -527,7 +586,10 @@ fn dev_473_invoke_splits_the_command_name_from_its_arguments() {
         let mut host = active_host_with(&["cli.contribute"]);
         let invocation = host.cli().invoke(&["notes", "list", "--json"], b"");
         assert_eq!(invocation.name, "notes");
-        assert_eq!(invocation.arguments, vec!["list".to_string(), "--json".to_string()]);
+        assert_eq!(
+            invocation.arguments,
+            vec!["list".to_string(), "--json".to_string()]
+        );
     });
 }
 
@@ -554,7 +616,9 @@ fn dev_473_without_the_cli_contribute_grant_no_event_reaches_the_plugin() {
     with_clean_env(|| {
         let mut host = active_host_with(&[]);
         host.cli().invoke(&["notes"], b"");
-        assert!(all_events().iter().all(|event| !matches!(event, Event::CliInvoked(_))));
+        assert!(all_events()
+            .iter()
+            .all(|event| !matches!(event, Event::CliInvoked(_))));
         assert_eq!(panic_text(|| host.snapshot().instance), None);
     });
 }

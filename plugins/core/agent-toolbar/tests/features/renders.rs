@@ -29,9 +29,17 @@ fn labels_for(signature: &str) -> String {
 fn f_035_header_shows_the_model_and_context_text_of_the_page_figure() {
     let (mut host, pane) = host_with_pane("claude");
     let payload = format!("{pane}|opus · 41% context");
-    host.deliver_one(message_from(PluginSide::Server, "model", payload.as_bytes()));
+    host.deliver_one(message_from(
+        PluginSide::Server,
+        "model",
+        payload.as_bytes(),
+    ));
     let screen = host.render(pane_view(pane), 48, 7);
-    assert!(screen.row(0).contains("opus · 41% context"), "{}", screen.row(0));
+    assert!(
+        screen.row(0).contains("opus · 41% context"),
+        "{}",
+        screen.row(0)
+    );
 }
 
 /// REQ: F-033
@@ -40,14 +48,21 @@ fn f_033_banner_is_the_first_row_inside_the_frame() {
     let (mut host, pane) = host_with_pane("claude");
     host.deliver_one(user_line(pane, "refactor the parser to use a lexer"));
     let screen = host.render(pane_view(pane), 48, 7);
-    assert_eq!(screen.row(1), "│ > refactor the parser to use a lexer         │");
+    assert_eq!(
+        screen.row(1),
+        "│ > refactor the parser to use a lexer         │"
+    );
 }
 
 /// REQ: F-033
 #[test]
 fn f_033_page_figure_first_two_rows_match_at_48_columns() {
     let (mut host, pane) = host_with_pane("claude");
-    host.deliver_one(message_from(PluginSide::Server, "model", format!("{pane}|opus · 41% context").as_bytes()));
+    host.deliver_one(message_from(
+        PluginSide::Server,
+        "model",
+        format!("{pane}|opus · 41% context").as_bytes(),
+    ));
     host.deliver_one(user_line(pane, "refactor the parser to use a lexer"));
     let screen = host.render(pane_view(pane), 48, 7);
     let figure = term_blocks(&page_text())[0].clone();
@@ -84,7 +99,12 @@ fn f_033_default_budget_keeps_the_first_two_and_last_two_rows_of_a_long_prompt()
     let (mut host, pane) = host_with_pane("claude");
     host.deliver_one(user_line(pane, "row1\nrow2\nrow3\nrow4\nrow5\nrow6"));
     let text = host.render(pane_view(pane), 80, 10).text();
-    assert!(text.contains("> row1") && text.contains("row2") && text.contains("row5") && text.contains("row6"));
+    assert!(
+        text.contains("> row1")
+            && text.contains("row2")
+            && text.contains("row5")
+            && text.contains("row6")
+    );
     assert!(!text.contains("row3") && !text.contains("row4"), "{text}");
 }
 
@@ -103,7 +123,9 @@ fn f_033_a_prompt_within_the_budget_keeps_every_row() {
 #[test]
 fn f_033_a_budget_of_one_keeps_only_the_first_row() {
     let (mut host, pane) = host_with_pane("claude");
-    host.settings().set("ui.last_prompt_max_lines", json!(1)).expect("accepted");
+    host.settings()
+        .set("ui.last_prompt_max_lines", json!(1))
+        .expect("accepted");
     host.deliver_one(user_line(pane, "row1\nrow2\nrow3"));
     let text = host.render(pane_view(pane), 80, 10).text();
     assert!(text.contains("> row1"));
@@ -114,18 +136,26 @@ fn f_033_a_budget_of_one_keeps_only_the_first_row() {
 #[test]
 fn f_033_an_odd_budget_gives_the_extra_row_to_the_head() {
     let (mut host, pane) = host_with_pane("claude");
-    host.settings().set("ui.last_prompt_max_lines", json!(3)).expect("accepted");
+    host.settings()
+        .set("ui.last_prompt_max_lines", json!(3))
+        .expect("accepted");
     host.deliver_one(user_line(pane, "row1\nrow2\nrow3\nrow4\nrow5\nrow6"));
     let text = host.render(pane_view(pane), 80, 10).text();
     assert!(text.contains("> row1") && text.contains("row2") && text.contains("row6"));
-    assert!(!text.contains("row3") && !text.contains("row4") && !text.contains("row5"), "{text}");
+    assert!(
+        !text.contains("row3") && !text.contains("row4") && !text.contains("row5"),
+        "{text}"
+    );
 }
 
 /// REQ: F-033
 #[test]
 fn f_033_a_long_single_line_wraps_instead_of_being_clipped() {
     let (mut host, pane) = host_with_pane("claude");
-    host.deliver_one(user_line(pane, "alpha beta gamma delta epsilon zeta eta theta iota kappa"));
+    host.deliver_one(user_line(
+        pane,
+        "alpha beta gamma delta epsilon zeta eta theta iota kappa",
+    ));
     let screen = host.render(pane_view(pane), 30, 10);
     assert!(screen.text().contains("kappa"), "{}", screen.text());
 }
@@ -138,7 +168,10 @@ fn f_033_the_banner_never_widens_the_frame() {
         host.deliver_one(user_line(pane, &"w".repeat(300)));
         let screen = host.render(pane_view(pane), width, 10);
         for line in screen.text().lines() {
-            assert!(line.chars().count() <= usize::from(width), "row wider than {width}: {line}");
+            assert!(
+                line.chars().count() <= usize::from(width),
+                "row wider than {width}: {line}"
+            );
         }
     }
 }
@@ -148,15 +181,32 @@ fn f_033_the_banner_never_widens_the_frame() {
 fn f_033_disabling_the_banner_removes_it_from_the_frame() {
     let (mut host, pane) = host_with_pane("claude");
     host.deliver_one(user_line(pane, "visible"));
-    host.settings().set("ui.last_prompt_enabled", json!(false)).expect("accepted");
-    assert!(!host.render(pane_view(pane), 80, 8).text().contains("> visible"));
+    host.settings()
+        .set("ui.last_prompt_enabled", json!(false))
+        .expect("accepted");
+    assert!(!host
+        .render(pane_view(pane), 80, 8)
+        .text()
+        .contains("> visible"));
 }
 
 /// REQ: F-035
 #[test]
 fn f_035_claude_toolbar_shows_the_claude_and_universal_buttons_with_labels() {
     let text = labels_for("claude");
-    for label in ["Compact", "Clear", "Configure", "Stop", "Copy screen", "Smart Copy", "Copy last message", "Effort", "Model", "Exit", "Text selection"] {
+    for label in [
+        "Compact",
+        "Clear",
+        "Configure",
+        "Stop",
+        "Copy screen",
+        "Smart Copy",
+        "Copy last message",
+        "Effort",
+        "Model",
+        "Exit",
+        "Text selection",
+    ] {
         assert!(text.contains(label), "{label} missing in\n{text}");
     }
 }
@@ -165,7 +215,19 @@ fn f_035_claude_toolbar_shows_the_claude_and_universal_buttons_with_labels() {
 #[test]
 fn f_035_codex_toolbar_shows_the_same_buttons_as_claude() {
     let text = labels_for("codex");
-    for label in ["Compact", "Clear", "Configure", "Stop", "Copy screen", "Smart Copy", "Copy last message", "Effort", "Model", "Exit", "Text selection"] {
+    for label in [
+        "Compact",
+        "Clear",
+        "Configure",
+        "Stop",
+        "Copy screen",
+        "Smart Copy",
+        "Copy last message",
+        "Effort",
+        "Model",
+        "Exit",
+        "Text selection",
+    ] {
         assert!(text.contains(label), "{label} missing in\n{text}");
     }
 }
@@ -174,10 +236,23 @@ fn f_035_codex_toolbar_shows_the_same_buttons_as_claude() {
 #[test]
 fn f_035_an_unknown_agent_gets_only_the_buttons_for_all_agents() {
     let text = labels_for("someagent");
-    for label in ["Stop", "Copy screen", "Smart Copy", "Exit", "Text selection"] {
+    for label in [
+        "Stop",
+        "Copy screen",
+        "Smart Copy",
+        "Exit",
+        "Text selection",
+    ] {
         assert!(text.contains(label), "{label} missing in\n{text}");
     }
-    for label in ["Compact", "Clear", "Configure", "Copy last message", "Effort", "Model"] {
+    for label in [
+        "Compact",
+        "Clear",
+        "Configure",
+        "Copy last message",
+        "Effort",
+        "Model",
+    ] {
         assert!(!text.contains(label), "{label} must be hidden in\n{text}");
     }
 }
@@ -195,9 +270,27 @@ fn f_035_antigravity_hides_compact_and_fast_mode() {
 #[test]
 fn f_035_labels_follow_the_row_order_of_the_action_table() {
     let text = labels_for("claude");
-    let order = ["Compact", "Clear", "Configure", "Stop", "Copy screen", "Smart Copy", "Copy last message", "Effort", "Model", "Exit", "Text selection"];
-    let positions: Vec<usize> = order.iter().map(|label| text.find(label).unwrap_or(usize::MAX)).collect();
-    assert!(positions.iter().all(|position| *position != usize::MAX), "{text}");
+    let order = [
+        "Compact",
+        "Clear",
+        "Configure",
+        "Stop",
+        "Copy screen",
+        "Smart Copy",
+        "Copy last message",
+        "Effort",
+        "Model",
+        "Exit",
+        "Text selection",
+    ];
+    let positions: Vec<usize> = order
+        .iter()
+        .map(|label| text.find(label).unwrap_or(usize::MAX))
+        .collect();
+    assert!(
+        positions.iter().all(|position| *position != usize::MAX),
+        "{text}"
+    );
     let mut sorted = positions.clone();
     sorted.sort_unstable();
     assert_eq!(positions, sorted, "{text}");
@@ -207,7 +300,9 @@ fn f_035_labels_follow_the_row_order_of_the_action_table() {
 #[test]
 fn f_035_without_labels_the_toolbar_shows_icons_only() {
     let (mut host, pane) = host_with_pane("claude");
-    host.settings().set("ui.show_toolbar_labels", json!(false)).expect("accepted");
+    host.settings()
+        .set("ui.show_toolbar_labels", json!(false))
+        .expect("accepted");
     let text = host.render(pane_view(pane), WIDE, 6).text();
     for label in ["Compact", "Clear", "Copy screen", "Smart Copy"] {
         assert!(!text.contains(label), "{label} must be hidden in\n{text}");
@@ -218,7 +313,9 @@ fn f_035_without_labels_the_toolbar_shows_icons_only() {
 #[test]
 fn f_035_disabling_the_toolbar_hides_every_button() {
     let (mut host, pane) = host_with_pane("claude");
-    host.settings().set("ui.agent_toolbar_enabled", json!(false)).expect("accepted");
+    host.settings()
+        .set("ui.agent_toolbar_enabled", json!(false))
+        .expect("accepted");
     let text = host.render(pane_view(pane), WIDE, 6).text();
     for label in ["Compact", "Stop", "Exit", "Text selection"] {
         assert!(!text.contains(label), "{label} must be hidden in\n{text}");
@@ -229,9 +326,16 @@ fn f_035_disabling_the_toolbar_hides_every_button() {
 #[test]
 fn f_035_reenabling_the_toolbar_brings_the_buttons_back() {
     let (mut host, pane) = host_with_pane("claude");
-    host.settings().set("ui.agent_toolbar_enabled", json!(false)).expect("accepted");
-    host.settings().set("ui.agent_toolbar_enabled", json!(true)).expect("accepted");
-    assert!(host.render(pane_view(pane), WIDE, 6).text().contains("Stop"));
+    host.settings()
+        .set("ui.agent_toolbar_enabled", json!(false))
+        .expect("accepted");
+    host.settings()
+        .set("ui.agent_toolbar_enabled", json!(true))
+        .expect("accepted");
+    assert!(host
+        .render(pane_view(pane), WIDE, 6)
+        .text()
+        .contains("Stop"));
 }
 
 /// REQ: F-035
@@ -247,7 +351,10 @@ fn f_035_a_pane_without_an_agent_has_no_toolbar() {
         agent: None,
     });
     let text = host.render(pane_view(shell), WIDE, 6).text();
-    assert!(!text.contains("Stop") && !text.contains("Compact"), "{text}");
+    assert!(
+        !text.contains("Stop") && !text.contains("Compact"),
+        "{text}"
+    );
 }
 
 /// REQ: F-035
@@ -257,7 +364,10 @@ fn f_035_the_toolbar_fits_the_width_at_40_80_and_120_columns() {
         let (mut host, pane) = host_with_pane("claude");
         let screen = host.render(pane_view(pane), width, 8);
         for line in screen.text().lines() {
-            assert!(line.chars().count() <= usize::from(width), "row wider than {width}: {line}");
+            assert!(
+                line.chars().count() <= usize::from(width),
+                "row wider than {width}: {line}"
+            );
         }
     }
 }
@@ -267,7 +377,10 @@ fn f_035_the_toolbar_fits_the_width_at_40_80_and_120_columns() {
 fn f_035_a_narrow_toolbar_keeps_the_exit_button() {
     let (mut host, pane) = host_with_pane("claude");
     let text = host.render(pane_view(pane), 40, 8).text();
-    assert!(text.contains("Exit") || text.contains("×") || text.contains("✕"), "{text}");
+    assert!(
+        text.contains("Exit") || text.contains("×") || text.contains("✕"),
+        "{text}"
+    );
 }
 
 /// REQ: F-035
@@ -278,7 +391,11 @@ fn f_035_clicking_the_compact_label_invokes_the_compact_command() {
     let (row, column) = screen.find("Compact").expect("Compact button");
     assert!(host.click(pane_view(pane), column, row));
     let sent = messages(&host.submitted());
-    assert!(sent.iter().any(|message| message.2 == "compact" && message.3 == pane.to_string().into_bytes()), "{sent:?}");
+    assert!(
+        sent.iter()
+            .any(|message| message.2 == "compact" && message.3 == pane.to_string().into_bytes()),
+        "{sent:?}"
+    );
 }
 
 /// REQ: F-035

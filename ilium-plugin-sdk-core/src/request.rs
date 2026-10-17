@@ -11,7 +11,10 @@ pub struct PendingRequest {
 
 impl PendingRequest {
     /// Removes the completion for this request from the batch and returns its outcome, if present.
-    pub fn take_from(&self, _batch: &mut Vec<crate::generated::types::RequestResult>) -> Option<Outcome> {
+    pub fn take_from(
+        &self,
+        _batch: &mut Vec<crate::generated::types::RequestResult>,
+    ) -> Option<Outcome> {
         unimplemented!("rust-sdk.request-await")
     }
 }

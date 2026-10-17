@@ -19,7 +19,8 @@ pub fn manual_dir() -> PathBuf {
 /// Reads one manual page by file name.
 pub fn manual_page(name: &str) -> String {
     let path = manual_dir().join(name);
-    std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
 }
 
 /// A validation context for `ilium plugin check` on Linux with nothing installed.
@@ -73,7 +74,9 @@ pub fn codes_for(tier: Tier, side: Side, grants: &[&str]) -> Vec<String> {
 
 /// Whether the check reports `code` for these grants.
 pub fn reports(tier: Tier, side: Side, grants: &[&str], code: &str) -> bool {
-    codes_for(tier, side, grants).iter().any(|found| found == code)
+    codes_for(tier, side, grants)
+        .iter()
+        .any(|found| found == code)
 }
 
 /// Whether the check reports any `manifest.grant-*` code for these grants.

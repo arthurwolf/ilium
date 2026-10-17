@@ -2,12 +2,12 @@
 //! before a voice command closes a pane (popup `confirm-voice`, kind danger-confirm). Goldens at 48 columns are
 //! the page figures; other widths are checked structurally.
 
-use ilium_plugin_sdk::testing::{FakeHost, assert_golden};
+use ilium_plugin_sdk::testing::{assert_golden, FakeHost};
 use ilium_plugin_sdk::types::{AudioFramesEvent, Event, ViewTarget};
 use proptest::prelude::*;
 
 use crate::common::{
-    CONFIRM_POPUP, add_pane, enabled_client, f8_grab, golden, hear, invoked_commands, key_pressed,
+    add_pane, enabled_client, f8_grab, golden, hear, invoked_commands, key_pressed, CONFIRM_POPUP,
 };
 
 const STRIP_ROWS: u16 = 5;
@@ -42,7 +42,13 @@ fn confirming_host(pane: &str) -> FakeHost {
 fn render_050_the_strip_title_and_listening_state() {
     let (mut host, _capture) = listening_host();
     let text = host.render(strip(), 48, STRIP_ROWS).text();
-    assert!(text.lines().next().expect("row").starts_with("\u{256d}\u{2500} Voice "), "{text}");
+    assert!(
+        text.lines()
+            .next()
+            .expect("row")
+            .starts_with("\u{256d}\u{2500} Voice "),
+        "{text}"
+    );
     assert!(text.contains("\u{25cf} Listening"), "{text}");
 }
 
@@ -51,7 +57,10 @@ fn render_050_the_strip_title_and_listening_state() {
 fn render_050_the_strip_hint_row_names_release_and_escape() {
     let (mut host, _capture) = listening_host();
     let text = host.render(strip(), 48, STRIP_ROWS).text();
-    assert!(text.contains("F8 release to send \u{b7} Esc cancel"), "{text}");
+    assert!(
+        text.contains("F8 release to send \u{b7} Esc cancel"),
+        "{text}"
+    );
 }
 
 /// REQ: F-050
@@ -61,28 +70,47 @@ fn render_050_the_strip_has_five_rows_inside_a_rounded_border() {
     let screen = host.render(strip(), 48, STRIP_ROWS);
     assert_eq!(screen.rows, STRIP_ROWS);
     assert!(screen.row(0).starts_with('\u{256d}') && screen.row(0).ends_with('\u{256e}'));
-    assert!(screen.row(STRIP_ROWS - 1).starts_with('\u{2570}') && screen.row(STRIP_ROWS - 1).ends_with('\u{256f}'));
+    assert!(
+        screen.row(STRIP_ROWS - 1).starts_with('\u{2570}')
+            && screen.row(STRIP_ROWS - 1).ends_with('\u{256f}')
+    );
 }
 
 /// REQ: F-050
 #[test]
 fn render_050_the_level_meter_shows_bar_glyphs_once_frames_arrive() {
     let (mut host, capture) = listening_host();
-    host.deliver_one(Event::AudioFrames(AudioFramesEvent { capture, samples: vec![12_000, -12_000, 9_000, -9_000] }));
+    host.deliver_one(Event::AudioFrames(AudioFramesEvent {
+        capture,
+        samples: vec![12_000, -12_000, 9_000, -9_000],
+    }));
     host.settle();
     let meter_row = host.render(strip(), 48, STRIP_ROWS).row(1);
-    assert!(meter_row.chars().any(|glyph| "\u{2581}\u{2582}\u{2583}\u{2584}\u{2585}\u{2586}\u{2587}".contains(glyph)), "{meter_row}");
+    assert!(
+        meter_row.chars().any(
+            |glyph| "\u{2581}\u{2582}\u{2583}\u{2584}\u{2585}\u{2586}\u{2587}".contains(glyph)
+        ),
+        "{meter_row}"
+    );
 }
 
 /// REQ: F-050
 #[test]
 fn render_050_silence_shows_no_taller_bar_than_the_lowest() {
     let (mut host, capture) = listening_host();
-    host.deliver_one(Event::AudioFrames(AudioFramesEvent { capture, samples: vec![0; 64] }));
+    host.deliver_one(Event::AudioFrames(AudioFramesEvent {
+        capture,
+        samples: vec![0; 64],
+    }));
     host.settle();
     let meter_row = host.render(strip(), 48, STRIP_ROWS).row(1);
     assert!(
-        meter_row.chars().filter(|glyph| "\u{2581}\u{2582}\u{2583}\u{2584}\u{2585}\u{2586}\u{2587}".contains(*glyph)).all(|glyph| glyph == '\u{2581}'),
+        meter_row
+            .chars()
+            .filter(
+                |glyph| "\u{2581}\u{2582}\u{2583}\u{2584}\u{2585}\u{2586}\u{2587}".contains(*glyph)
+            )
+            .all(|glyph| glyph == '\u{2581}'),
         "{meter_row}"
     );
 }
@@ -138,7 +166,11 @@ fn render_051_the_buttons_are_escape_cancel_and_enter_close_pane() {
 fn render_051_the_confirmation_title_is_close_pane_question() {
     let mut host = confirming_host("docs");
     let screen = host.render(confirm(), 48, CONFIRM_ROWS);
-    assert!(screen.row(0).starts_with("\u{256d}\u{2500} Close pane? "), "{}", screen.row(0));
+    assert!(
+        screen.row(0).starts_with("\u{256d}\u{2500} Close pane? "),
+        "{}",
+        screen.row(0)
+    );
 }
 
 /// REQ: F-051
@@ -149,9 +181,15 @@ fn render_051_the_dialog_is_structurally_the_same_at_40_80_and_120_columns() {
         let screen = host.render(confirm(), columns, CONFIRM_ROWS);
         let text = screen.text();
         assert!(text.contains("Close pane?"), "{columns}: {text}");
-        assert!(text.contains("Esc Cancel") && text.contains("Enter Close pane"), "{columns}: {text}");
+        assert!(
+            text.contains("Esc Cancel") && text.contains("Enter Close pane"),
+            "{columns}: {text}"
+        );
         assert!(screen.row(0).starts_with('\u{256d}'), "{columns}");
-        assert!(screen.row(CONFIRM_ROWS - 1).starts_with('\u{2570}'), "{columns}");
+        assert!(
+            screen.row(CONFIRM_ROWS - 1).starts_with('\u{2570}'),
+            "{columns}"
+        );
     }
 }
 

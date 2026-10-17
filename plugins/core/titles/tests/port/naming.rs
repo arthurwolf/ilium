@@ -22,7 +22,10 @@ fn port_043_command_hint_prefixes_pane_titles() {
 /// REQ: PORT:ilium-client/src/naming.rs::normalize_command_hint_rejects_blank_and_placeholder_values, PORT:ilium-client/src/naming.rs::normalize_command_hint_rejects_overlong_or_multiline_values, PORT:ilium-client/src/naming.rs::normalize_word_bounded_rejects_out_of_range_word_counts_and_control_characters, PORT:ilium-client/src/naming.rs::parse_bounded_word_json_normalizes_whitespace_and_enforces_bounds, PORT:ilium-client/src/naming.rs::parse_dual_bounded_word_json_fails_when_either_field_is_out_of_bounds, PORT:ilium-client/src/naming.rs::structured_json_parser_rejects_multiple_objects_and_truncated_output
 #[test]
 fn port_041_out_of_bounds_titles_are_not_applied() {
-    for reply in ["", "one two three four five six seven eight nine ten eleven twelve thirteen"] {
+    for reply in [
+        "",
+        "one two three four five six seven eight nine ten eleven twelve thirteen",
+    ] {
         let mut host = activated_server();
         title_for_prompt(&mut host, 3, "Fix the login bug", reply);
         assert!(renames(&host.submitted()).is_empty());
@@ -37,7 +40,11 @@ fn port_041_prompt_carries_the_user_text() {
     host.settle();
     let requests = host.inference_requests();
     assert_eq!(requests.len(), 1);
-    assert!(requests[0].1.messages.iter().any(|message| message.content.contains("login bug")));
+    assert!(requests[0]
+        .1
+        .messages
+        .iter()
+        .any(|message| message.content.contains("login bug")));
     assert!(renames(&host.submitted()).is_empty());
 }
 

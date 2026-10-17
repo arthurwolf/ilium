@@ -12,10 +12,13 @@ fn run_split(channel: &str) -> (FakeHost, u64, Option<u64>) {
     let focused = host.tree().add(pane_node("api", "ilium.terminal", None));
     host.deliver_one(message_from_client(channel, id_bytes(focused)));
     host.settle();
-    let created = host.outcomes().into_iter().find_map(|outcome| match outcome {
-        Outcome::OkNode(node) => Some(node.0),
-        _ => None,
-    });
+    let created = host
+        .outcomes()
+        .into_iter()
+        .find_map(|outcome| match outcome {
+            Outcome::OkNode(node) => Some(node.0),
+            _ => None,
+        });
     (host, focused, created)
 }
 
@@ -24,7 +27,11 @@ fn check_split(channel: &str, focused_first: bool, direction: SplitDirection) {
     let created = created.expect("create-pane completed with ok-node");
     let splits = create_splits(&host.submitted());
     assert_eq!(splits.len(), 1);
-    let expected = if focused_first { vec![focused, created] } else { vec![created, focused] };
+    let expected = if focused_first {
+        vec![focused, created]
+    } else {
+        vec![created, focused]
+    };
     let actual: Vec<u64> = splits[0].panes.iter().map(|node| node.0).collect();
     assert_eq!(actual, expected);
     assert_eq!(splits[0].direction, direction);

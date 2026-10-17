@@ -11,11 +11,18 @@ fn usr_032_recovery_page_opens_while_the_settings_plugin_is_off_and_settings_can
     let mut rig = ScreensRig::new(60, 30);
     rig.set_plugin_state_off("ilium.core.settings");
     rig.press_prefix_then(':');
-    assert!(rig.screen_text().contains("Recovery"), "{}", rig.screen_text());
+    assert!(
+        rig.screen_text().contains("Recovery"),
+        "{}",
+        rig.screen_text()
+    );
     rig.press_key('e');
     rig.select_plugin("ilium.core.settings");
     rig.press_key('e');
-    assert!(rig.plugin_is_running("ilium.core.settings"), "re-enabled from the recovery page");
+    assert!(
+        rig.plugin_is_running("ilium.core.settings"),
+        "re-enabled from the recovery page"
+    );
 }
 
 /// REQ: USR-032
@@ -87,7 +94,11 @@ fn usr_160_each_key_runs_its_action_on_the_selected_plugin() {
     rig.put_plugin_in_state("com.example.target", RowState::Failed);
     rig.press_key('r');
     assert_eq!(rig.failure_count("com.example.target"), 0);
-    assert_eq!(rig.plugin_state_word("com.example.target"), "Failed", "reset clears the count without activating (LIF-272)");
+    assert_eq!(
+        rig.plugin_state_word("com.example.target"),
+        "Failed",
+        "reset clears the count without activating (LIF-272)"
+    );
 }
 
 /// REQ: USR-160

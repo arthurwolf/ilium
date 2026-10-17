@@ -12,7 +12,9 @@ fn manifest() -> Value {
 
 /// The first json code block after the heading line `heading`.
 fn json_block_after(page: &str, heading: &str) -> Value {
-    let start = page.find(heading).unwrap_or_else(|| panic!("heading {heading} missing"));
+    let start = page
+        .find(heading)
+        .unwrap_or_else(|| panic!("heading {heading} missing"));
     let rest = &page[start..];
     let open = rest.find("```json\n").expect("json block") + "```json\n".len();
     let close = rest[open..].find("```").expect("block end");
@@ -69,14 +71,26 @@ fn manifest_050_server_grants_are_the_five_tree_grants_in_order() {
         .iter()
         .map(|grant| grant.as_str().expect("grant string"))
         .collect();
-    assert_eq!(server, ["tree.read", "tree.write", "tree.metadata", "tree.decorate", "tree.restructure"]);
+    assert_eq!(
+        server,
+        [
+            "tree.read",
+            "tree.write",
+            "tree.metadata",
+            "tree.decorate",
+            "tree.restructure"
+        ]
+    );
 }
 
 /// REQ: COR-050
 #[test]
 fn manifest_050_client_holds_only_tree_read() {
     let manifest = manifest();
-    assert_eq!(manifest["capabilities"]["client"], serde_json::json!(["tree.read"]));
+    assert_eq!(
+        manifest["capabilities"]["client"],
+        serde_json::json!(["tree.read"])
+    );
 }
 
 /// REQ: COR-050
@@ -92,7 +106,8 @@ fn manifest_050_activates_at_startup_with_first_party_limits() {
 fn manifest_050_description_is_the_first_sentence_prefix_of_the_page() {
     let manifest = manifest();
     let description = manifest["description"].as_str().expect("description");
-    assert!(description.starts_with("The Tree plugin (ilium.core.tree, side both) owns the project tree"));
+    assert!(description
+        .starts_with("The Tree plugin (ilium.core.tree, side both) owns the project tree"));
     assert!(page_text().contains(&description[..80]));
 }
 
@@ -100,7 +115,13 @@ fn manifest_050_description_is_the_first_sentence_prefix_of_the_page() {
 #[test]
 fn manifest_050_host_takes_grants_from_the_manifest_for_each_side() {
     // for_manifest reads id, side, grants and tier (DEV-411); building must not fail for either side.
-    let server = FakeHost::for_manifest(manifest_path()).expect("loads").side("server").build();
-    let client = FakeHost::for_manifest(manifest_path()).expect("loads").side("client").build();
+    let server = FakeHost::for_manifest(manifest_path())
+        .expect("loads")
+        .side("server")
+        .build();
+    let client = FakeHost::for_manifest(manifest_path())
+        .expect("loads")
+        .side("client")
+        .build();
     drop((server, client));
 }

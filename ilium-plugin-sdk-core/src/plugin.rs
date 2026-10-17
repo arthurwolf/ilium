@@ -1,8 +1,8 @@
 //! Plugin traits and the host handle (manual: rust-sdk.md "Traits", "Calling the host").
 
+use crate::generated::anim::FrameInput;
 use crate::generated::exports::ExportLifecycle;
 use crate::generated::host::InstanceState;
-use crate::generated::anim::FrameInput;
 use crate::generated::types::{Activation, DeactivationReason, Event, PluginError, Submission};
 
 /// The lifecycle state of an instance, as `host::plugins` reports it (reference-wit.md section 5.31).
@@ -26,36 +26,36 @@ impl<T: Lifecycle> ExportLifecycle for T {
         Lifecycle::deactivate(self, reason)
     }
 }
-/// Page trait `Handler`: `on_events` (rust-sdk.md "Traits").
-pub use crate::generated::exports::ExportHandler as Handler;
-/// Page trait `Views`: `render` and `on_action` (rust-sdk.md "Traits").
-pub use crate::generated::exports::ExportViews as Views;
-/// Page trait `Detector` (rust-sdk.md "Traits").
-pub use crate::generated::exports::ExportDetector as Detector;
-/// Page trait `JobRunner` (rust-sdk.md "Traits").
-pub use crate::generated::exports::ExportJobRunner as JobRunner;
-/// Page trait `ServiceProvider` (rust-sdk.md "Traits").
-pub use crate::generated::exports::ExportServiceProvider as ServiceProvider;
-/// Page trait `InferenceProvider` (rust-sdk.md "Traits").
-pub use crate::generated::exports::ExportInferenceProvider as InferenceProvider;
 /// Page trait `Annotator` (rust-sdk.md "Traits").
 pub use crate::generated::exports::ExportAnnotator as Annotator;
 /// Page trait `CatalogProvider` (rust-sdk.md "Traits").
 pub use crate::generated::exports::ExportCatalogProvider as CatalogProvider;
-/// Page trait `MenuProvider` (rust-sdk.md "Traits").
-pub use crate::generated::exports::ExportMenuProvider as MenuProvider;
-/// Page trait `VirtualRowsProvider` (rust-sdk.md "Traits").
-pub use crate::generated::exports::ExportVirtualRowsProvider as VirtualRowsProvider;
-/// Page trait `TokenProvider` (rust-sdk.md "Traits").
-pub use crate::generated::exports::ExportTokenProvider as TokenProvider;
+/// Page trait `Detector` (rust-sdk.md "Traits").
+pub use crate::generated::exports::ExportDetector as Detector;
+/// Page trait `Handler`: `on_events` (rust-sdk.md "Traits").
+pub use crate::generated::exports::ExportHandler as Handler;
 /// Page trait `HookHandler` (rust-sdk.md "Traits").
 pub use crate::generated::exports::ExportHookHandler as HookHandler;
-/// Page trait `Renderer` for scene renderers in component mode (rust-sdk.md "Traits").
-pub use crate::generated::exports::ExportRenderer as Renderer;
-/// Page trait `SettingsValidate` (rust-sdk.md "Traits").
-pub use crate::generated::exports::ExportSettingsValidate as SettingsValidate;
+/// Page trait `InferenceProvider` (rust-sdk.md "Traits").
+pub use crate::generated::exports::ExportInferenceProvider as InferenceProvider;
+/// Page trait `JobRunner` (rust-sdk.md "Traits").
+pub use crate::generated::exports::ExportJobRunner as JobRunner;
+/// Page trait `MenuProvider` (rust-sdk.md "Traits").
+pub use crate::generated::exports::ExportMenuProvider as MenuProvider;
 /// Page trait `Migrator` (rust-sdk.md "Traits").
 pub use crate::generated::exports::ExportMigrator as Migrator;
+/// Page trait `Renderer` for scene renderers in component mode (rust-sdk.md "Traits").
+pub use crate::generated::exports::ExportRenderer as Renderer;
+/// Page trait `ServiceProvider` (rust-sdk.md "Traits").
+pub use crate::generated::exports::ExportServiceProvider as ServiceProvider;
+/// Page trait `SettingsValidate` (rust-sdk.md "Traits").
+pub use crate::generated::exports::ExportSettingsValidate as SettingsValidate;
+/// Page trait `TokenProvider` (rust-sdk.md "Traits").
+pub use crate::generated::exports::ExportTokenProvider as TokenProvider;
+/// Page trait `Views`: `render` and `on_action` (rust-sdk.md "Traits").
+pub use crate::generated::exports::ExportViews as Views;
+/// Page trait `VirtualRowsProvider` (rust-sdk.md "Traits").
+pub use crate::generated::exports::ExportVirtualRowsProvider as VirtualRowsProvider;
 
 /// Every plugin struct implements `Default` and the lifecycle trait (rust-sdk.md "Plugin structure").
 pub trait Plugin: Default + Lifecycle {}

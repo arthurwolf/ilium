@@ -127,12 +127,22 @@ impl ConfigRig {
     }
 
     /// A handle on a snapshot section of a plugin (COR-032).
-    pub fn section(&mut self, plugin: &str, name: &str, schema_version: u32, max_bytes: usize) -> SectionHandle {
+    pub fn section(
+        &mut self,
+        plugin: &str,
+        name: &str,
+        schema_version: u32,
+        max_bytes: usize,
+    ) -> SectionHandle {
         unimplemented!("host::testing::config::ConfigRig::section")
     }
 
     /// Writes a snapshot section.
-    pub fn write_section(&mut self, section: &SectionHandle, bytes: &[u8]) -> Result<(), PluginError> {
+    pub fn write_section(
+        &mut self,
+        section: &SectionHandle,
+        bytes: &[u8],
+    ) -> Result<(), PluginError> {
         unimplemented!("host::testing::config::ConfigRig::write_section")
     }
 

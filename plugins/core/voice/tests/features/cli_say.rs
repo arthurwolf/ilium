@@ -2,10 +2,10 @@
 //! `client-request` of kind `voice-say`, copies the client's JSONL answer to standard output and sets the exit
 //! code. The client side runs the typed voice input and answers with the JSONL result or error record.
 
-use ilium_plugin_sdk::testing::FakeHost;
 use ilium_plugin_sdk::testing::fakes::cli::Invocation;
+use ilium_plugin_sdk::testing::FakeHost;
 use ilium_plugin_sdk::types::{ErrorCode, Outcome, PluginError, RequestRef};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::common::{client_attached, client_host, client_request, jsonl, server_host};
 
@@ -24,7 +24,9 @@ fn last_error_code(records: &[Value]) -> String {
 }
 
 fn many(count: usize) -> Vec<String> {
-    (0..count).map(|index| format!("sentence {index}")).collect()
+    (0..count)
+        .map(|index| format!("sentence {index}"))
+        .collect()
 }
 
 fn say_args(sentences: &[String]) -> Vec<&str> {
@@ -147,8 +149,20 @@ fn say_052_without_an_attached_client_the_error_is_no_voice_client_with_the_atta
 #[test]
 fn say_052_an_error_run_ends_with_exactly_one_error_record_and_no_result() {
     let (records, _) = run_without_client(&["say", "hello"], b"");
-    assert_eq!(records.iter().filter(|record| record["type"] == "error").count(), 1);
-    assert_eq!(records.iter().filter(|record| record["type"] == "result").count(), 0);
+    assert_eq!(
+        records
+            .iter()
+            .filter(|record| record["type"] == "error")
+            .count(),
+        1
+    );
+    assert_eq!(
+        records
+            .iter()
+            .filter(|record| record["type"] == "result")
+            .count(),
+        0
+    );
     assert!(records.iter().all(|record| record.get("type").is_some()));
 }
 
@@ -195,7 +209,11 @@ fn say_052_timeout_of_601_seconds_is_rejected_with_a_nonzero_exit() {
 fn say_052_timeouts_of_1_and_600_seconds_pass_the_argument_check() {
     for seconds in ["1", "600"] {
         let (records, _) = run_without_client(&["say", "--timeout-s", seconds, "hello"], b"");
-        assert_ne!(last_error_code(&records), "invalid-request", "timeout {seconds}");
+        assert_ne!(
+            last_error_code(&records),
+            "invalid-request",
+            "timeout {seconds}"
+        );
     }
 }
 
@@ -205,7 +223,11 @@ fn run_with_client(args: &[&str]) -> (FakeHost, Invocation, RequestRef) {
     host.deliver_one(client_attached(1));
     let run = host.cli().invoke(args, b"");
     host.settle();
-    let request = host.pending_requests().first().cloned().expect("the server asked the client");
+    let request = host
+        .pending_requests()
+        .first()
+        .cloned()
+        .expect("the server asked the client");
     (host, run, request)
 }
 
@@ -230,8 +252,10 @@ fn say_052_the_client_request_waits_at_most_5000_milliseconds() {
 /// REQ: F-052
 #[test]
 fn say_052_the_client_request_payload_carries_the_trimmed_sentences_in_order() {
-    let (mut host, _run, _request) = run_with_client(&["say", "  focus the first agent ", "say hello to it"]);
-    let payload: Value = serde_json::from_str(&host.client_requests().sent()[0].payload_json).expect("JSON payload");
+    let (mut host, _run, _request) =
+        run_with_client(&["say", "  focus the first agent ", "say hello to it"]);
+    let payload: Value =
+        serde_json::from_str(&host.client_requests().sent()[0].payload_json).expect("JSON payload");
     let text = payload.to_string();
     let first = text.find("focus the first agent").expect("first sentence");
     let second = text.find("say hello to it").expect("second sentence");
@@ -243,7 +267,8 @@ fn say_052_the_client_request_payload_carries_the_trimmed_sentences_in_order() {
 #[test]
 fn say_052_the_start_flag_reaches_the_client_in_the_payload() {
     let (mut host, _run, _request) = run_with_client(&["say", "--start", "hello"]);
-    let payload: Value = serde_json::from_str(&host.client_requests().sent()[0].payload_json).expect("JSON payload");
+    let payload: Value =
+        serde_json::from_str(&host.client_requests().sent()[0].payload_json).expect("JSON payload");
     assert_eq!(payload["start"], true);
 }
 
@@ -251,7 +276,8 @@ fn say_052_the_start_flag_reaches_the_client_in_the_payload() {
 #[test]
 fn say_052_without_the_start_flag_the_payload_says_start_false() {
     let (mut host, _run, _request) = run_with_client(&["say", "hello"]);
-    let payload: Value = serde_json::from_str(&host.client_requests().sent()[0].payload_json).expect("JSON payload");
+    let payload: Value =
+        serde_json::from_str(&host.client_requests().sent()[0].payload_json).expect("JSON payload");
     assert_eq!(payload["start"], false);
 }
 
@@ -281,7 +307,8 @@ fn say_052_the_client_answer_line_is_copied_to_stdout_and_the_exit_code_is_zero(
         "sentence_count": 1, "accepted_sentences": 1, "voice_phase": "listening", "started_voice": false,
         "delivery": "queued-to-voice-session"
     });
-    host.client_requests().answer(request, Ok(result.to_string()));
+    host.client_requests()
+        .answer(request, Ok(result.to_string()));
     host.settle();
     let records = jsonl(&run.stdout());
     assert_eq!(records.last().expect("record"), &result);
@@ -294,7 +321,11 @@ fn say_052_a_failed_client_request_ends_with_exit_code_one() {
     let (mut host, run, request) = run_with_client(&["say", "hello"]);
     host.complete(
         request,
-        Outcome::Failed(PluginError { code: ErrorCode::TimedOut, message: "no answer".to_string(), retry_after_ms: None }),
+        Outcome::Failed(PluginError {
+            code: ErrorCode::TimedOut,
+            message: "no answer".to_string(),
+            retry_after_ms: None,
+        }),
     );
     host.settle();
     assert_eq!(run.exit_code(), Some(1));
@@ -306,19 +337,31 @@ fn say_052_a_failed_client_request_still_ends_with_one_error_record() {
     let (mut host, run, request) = run_with_client(&["say", "hello"]);
     host.complete(
         request,
-        Outcome::Failed(PluginError { code: ErrorCode::TimedOut, message: "no answer".to_string(), retry_after_ms: None }),
+        Outcome::Failed(PluginError {
+            code: ErrorCode::TimedOut,
+            message: "no answer".to_string(),
+            retry_after_ms: None,
+        }),
     );
     host.settle();
     let records = jsonl(&run.stdout());
     assert_eq!(records.last().expect("record")["type"], "error");
-    assert_eq!(records.iter().filter(|record| record["type"] == "error").count(), 1);
+    assert_eq!(
+        records
+            .iter()
+            .filter(|record| record["type"] == "error")
+            .count(),
+        1
+    );
 }
 
 /// REQ: F-052
 #[test]
 fn say_052_a_detached_client_before_the_answer_does_not_leave_the_run_hanging() {
     let (mut host, run, _request) = run_with_client(&["say", "hello"]);
-    host.deliver_one(ilium_plugin_sdk::types::Event::ClientDetached(ilium_plugin_sdk::types::ClientId(1)));
+    host.deliver_one(ilium_plugin_sdk::types::Event::ClientDetached(
+        ilium_plugin_sdk::types::ClientId(1),
+    ));
     host.advance_clock(5_001);
     host.settle();
     assert!(run.exit_code().is_some());
@@ -341,7 +384,10 @@ fn client_answer(host: &mut FakeHost, payload: Value) -> String {
 #[test]
 fn say_052_client_with_voice_on_accepts_and_reports_a_result_record() {
     let mut host = crate::common::enabled_client("semantic_vad");
-    let line = client_answer(&mut host, json!({ "sentences": ["what agents are running?"], "start": false }));
+    let line = client_answer(
+        &mut host,
+        json!({ "sentences": ["what agents are running?"], "start": false }),
+    );
     let record: Value = serde_json::from_str(&line).expect("one JSON object");
     assert_eq!(record["type"], "result");
     assert_eq!(record["command"], "voice say");
@@ -367,7 +413,10 @@ fn say_052_the_result_voice_phase_is_connecting_right_after_voice_is_enabled() {
 #[test]
 fn say_052_the_result_counts_every_sentence_of_the_request() {
     let mut host = crate::common::enabled_client("semantic_vad");
-    let line = client_answer(&mut host, json!({ "sentences": ["one", "two", "three"], "start": false }));
+    let line = client_answer(
+        &mut host,
+        json!({ "sentences": ["one", "two", "three"], "start": false }),
+    );
     let record: Value = serde_json::from_str(&line).expect("one JSON object");
     assert_eq!(record["sentence_count"], 3);
     assert_eq!(record["accepted_sentences"], 3);
@@ -379,7 +428,10 @@ fn say_052_voice_off_without_start_is_the_voice_off_error_with_the_start_hint() 
     let mut host = client_host();
     let line = client_answer(&mut host, json!({ "sentences": ["hello"], "start": false }));
     assert!(line.contains("voice-off"), "{line}");
-    assert!(line.contains("pass --start to switch voice control on, or press F8 in the Ilium client"), "{line}");
+    assert!(
+        line.contains("pass --start to switch voice control on, or press F8 in the Ilium client"),
+        "{line}"
+    );
 }
 
 /// REQ: F-052
@@ -390,7 +442,10 @@ fn say_052_voice_off_with_start_switches_voice_on_and_saves_the_setting() {
     let record: Value = serde_json::from_str(&line).expect("one JSON object");
     assert_eq!(record["ok"], true);
     assert_eq!(record["started_voice"], true);
-    assert_eq!(host.kernel_settings().get("voice-control", "enabled"), Some(json!(true)));
+    assert_eq!(
+        host.kernel_settings().get("voice-control", "enabled"),
+        Some(json!(true))
+    );
 }
 
 /// REQ: F-052

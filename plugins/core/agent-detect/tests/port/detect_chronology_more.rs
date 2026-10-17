@@ -14,7 +14,10 @@ const COMPOSER: &str = "──────────────────�
 /// REQ: PORT:ilium-detect/src/lib.rs::quoted_question_dialog_above_live_work_stays_working
 #[test]
 fn port_026_a_quoted_question_dialog_above_live_work_stays_working() {
-    let quoted = format!("{}\n✻ Herding… (3m 2s · esc to interrupt)\n", fixture("claude_ask_user_question_with_goal_history.txt"));
+    let quoted = format!(
+        "{}\n✻ Herding… (3m 2s · esc to interrupt)\n",
+        fixture("claude_ask_user_question_with_goal_history.txt")
+    );
     assert_eq!(activity("claude", &quoted), AgentActivity::Working);
 }
 
@@ -94,7 +97,11 @@ fn port_026_summary_durations_do_not_depend_on_the_verb() {
         "✻ Cogitated for 1h",
     ] {
         let screen = format!("{OLD_WAIT}\n{summary}");
-        assert_eq!(activity("claude", &screen), AgentActivity::Idle, "{summary}");
+        assert_eq!(
+            activity("claude", &screen),
+            AgentActivity::Idle,
+            "{summary}"
+        );
     }
 }
 
@@ -131,10 +138,28 @@ fn port_026_prose_and_incomplete_summaries_do_not_erase_a_current_wait() {
 #[test]
 fn port_030_running_indicator_keys_are_accepted_and_unknown_keys_refused() {
     let mut host = client_host();
-    for key in ["off", "icon", "spinner", "pulsing_dot", "steady_dot", "title_accent"] {
-        host.settings().set("ui.attention_running_indicator", json!(key)).expect("known key");
-        assert_eq!(host.settings().get("ui.attention_running_indicator"), Some(json!(key)));
+    for key in [
+        "off",
+        "icon",
+        "spinner",
+        "pulsing_dot",
+        "steady_dot",
+        "title_accent",
+    ] {
+        host.settings()
+            .set("ui.attention_running_indicator", json!(key))
+            .expect("known key");
+        assert_eq!(
+            host.settings().get("ui.attention_running_indicator"),
+            Some(json!(key))
+        );
     }
-    assert!(host.settings().set("ui.attention_running_indicator", json!("blink")).is_err());
-    assert_eq!(host.settings().get("ui.attention_running_indicator"), Some(json!("title_accent")));
+    assert!(host
+        .settings()
+        .set("ui.attention_running_indicator", json!("blink"))
+        .is_err());
+    assert_eq!(
+        host.settings().get("ui.attention_running_indicator"),
+        Some(json!("title_accent"))
+    );
 }

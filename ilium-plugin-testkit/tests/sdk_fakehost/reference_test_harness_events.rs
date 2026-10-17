@@ -4,13 +4,13 @@ use ilium_plugin_sdk_core::events;
 use ilium_plugin_sdk_core::types::{
     AgentActivity, CommandOrigin, ErrorCode, Event, NodeId, Outcome, RequestRef,
 };
-use ilium_plugin_testkit::FakeHost;
 use ilium_plugin_testkit::errors::codes;
+use ilium_plugin_testkit::FakeHost;
 use proptest::prelude::*;
 
 use crate::common::{
-    DEFAULT_CLOCK_MS, Spy, assert_fails_with, client_batch, close_node, outcome_code, sound,
-    sound_keyed, spy, spy_edit, spy_reset, spy_script, with_clean_env,
+    assert_fails_with, client_batch, close_node, outcome_code, sound, sound_keyed, spy, spy_edit,
+    spy_reset, spy_script, with_clean_env, Spy, DEFAULT_CLOCK_MS,
 };
 
 fn sound_host() -> FakeHost {
@@ -289,7 +289,10 @@ fn dev_434_a_malformed_submission_is_reported_before_a_missing_grant_inside_one_
         spy_script(vec![vec![offender]]);
         host.deliver(client_batch(1));
         host.settle();
-        assert_eq!(outcome_code(&host.outcomes()[0]), Some(ErrorCode::InvalidArgument));
+        assert_eq!(
+            outcome_code(&host.outcomes()[0]),
+            Some(ErrorCode::InvalidArgument)
+        );
     });
 }
 
@@ -338,42 +341,48 @@ fn dev_435_a_key_of_127_characters_is_accepted() {
 /// REQ: DEV-435
 #[test]
 fn dev_435_a_key_of_129_characters_is_refused_with_dedup_key_invalid() {
-    with_clean_env(|| {
-        match run_with_key(&"k".repeat(129)) {
-            Outcome::Refused(error) => {
-                assert_eq!(error.code, ErrorCode::InvalidArgument);
-                assert!(error.message.starts_with("dedup-key-invalid:"), "{}", error.message);
-            }
-            other => panic!("expected refused(invalid-argument), got {other:?}"),
+    with_clean_env(|| match run_with_key(&"k".repeat(129)) {
+        Outcome::Refused(error) => {
+            assert_eq!(error.code, ErrorCode::InvalidArgument);
+            assert!(
+                error.message.starts_with("dedup-key-invalid:"),
+                "{}",
+                error.message
+            );
         }
+        other => panic!("expected refused(invalid-argument), got {other:?}"),
     });
 }
 
 /// REQ: DEV-435
 #[test]
 fn dev_435_an_empty_key_is_refused_with_dedup_key_invalid() {
-    with_clean_env(|| {
-        match run_with_key("") {
-            Outcome::Refused(error) => {
-                assert_eq!(error.code, ErrorCode::InvalidArgument);
-                assert!(error.message.starts_with("dedup-key-invalid:"), "{}", error.message);
-            }
-            other => panic!("expected refused(invalid-argument), got {other:?}"),
+    with_clean_env(|| match run_with_key("") {
+        Outcome::Refused(error) => {
+            assert_eq!(error.code, ErrorCode::InvalidArgument);
+            assert!(
+                error.message.starts_with("dedup-key-invalid:"),
+                "{}",
+                error.message
+            );
         }
+        other => panic!("expected refused(invalid-argument), got {other:?}"),
     });
 }
 
 /// REQ: DEV-435
 #[test]
 fn dev_435_a_key_with_a_space_is_refused_with_dedup_key_invalid() {
-    with_clean_env(|| {
-        match run_with_key("two words") {
-            Outcome::Refused(error) => {
-                assert_eq!(error.code, ErrorCode::InvalidArgument);
-                assert!(error.message.starts_with("dedup-key-invalid:"), "{}", error.message);
-            }
-            other => panic!("expected refused(invalid-argument), got {other:?}"),
+    with_clean_env(|| match run_with_key("two words") {
+        Outcome::Refused(error) => {
+            assert_eq!(error.code, ErrorCode::InvalidArgument);
+            assert!(
+                error.message.starts_with("dedup-key-invalid:"),
+                "{}",
+                error.message
+            );
         }
+        other => panic!("expected refused(invalid-argument), got {other:?}"),
     });
 }
 
@@ -382,7 +391,10 @@ fn dev_435_a_key_with_a_space_is_refused_with_dedup_key_invalid() {
 fn dev_435_a_second_submission_with_the_same_key_inside_ten_minutes_is_a_duplicate() {
     with_clean_env(|| {
         let mut host = sound_host();
-        spy_script(vec![vec![sound_keyed(1, "same")], vec![sound_keyed(2, "same")]]);
+        spy_script(vec![
+            vec![sound_keyed(1, "same")],
+            vec![sound_keyed(2, "same")],
+        ]);
         host.deliver(client_batch(1));
         host.settle();
         host.advance_clock(599_000);
@@ -390,7 +402,11 @@ fn dev_435_a_second_submission_with_the_same_key_inside_ten_minutes_is_a_duplica
         host.settle();
         let outcomes = host.outcomes();
         assert_eq!(outcomes[0], Outcome::Ok);
-        assert!(matches!(outcomes[1], Outcome::Duplicate(_)), "{:?}", outcomes[1]);
+        assert!(
+            matches!(outcomes[1], Outcome::Duplicate(_)),
+            "{:?}",
+            outcomes[1]
+        );
     });
 }
 
@@ -399,7 +415,10 @@ fn dev_435_a_second_submission_with_the_same_key_inside_ten_minutes_is_a_duplica
 fn dev_435_after_ten_minutes_the_same_key_is_accepted_again() {
     with_clean_env(|| {
         let mut host = sound_host();
-        spy_script(vec![vec![sound_keyed(1, "same")], vec![sound_keyed(2, "same")]]);
+        spy_script(vec![
+            vec![sound_keyed(1, "same")],
+            vec![sound_keyed(2, "same")],
+        ]);
         host.deliver(client_batch(1));
         host.settle();
         host.advance_clock(601_000);

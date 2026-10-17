@@ -95,7 +95,11 @@ fn hst_258_trapped_render_logs_one_error_with_widget_path() {
     let mut rig = rig_t2();
     let view = rig.open_view("main");
     let _ = rig.deliver_tree(view, duplicate_key_tree());
-    let errors: Vec<_> = rig.log_lines().into_iter().filter(|(level, _)| level == "error").collect();
+    let errors: Vec<_> = rig
+        .log_lines()
+        .into_iter()
+        .filter(|(level, _)| level == "error")
+        .collect();
     assert_eq!(errors.len(), 1);
     assert!(errors[0].1.contains("save"));
 }
@@ -143,7 +147,10 @@ fn hst_272_sibling_duplicate_key_traps_duplicate_key() {
 fn hst_272_duplicate_key_trap_counts_one_failure() {
     let mut rig = rig_t2();
     let view = rig.open_view("main");
-    assert_eq!(rig.deliver_tree(view, duplicate_key_tree()).unwrap_err(), "ui.duplicate-key");
+    assert_eq!(
+        rig.deliver_tree(view, duplicate_key_tree()).unwrap_err(),
+        "ui.duplicate-key"
+    );
     assert_eq!(rig.failures(), 1);
 }
 
@@ -162,9 +169,18 @@ fn wid_004_4097_nodes_trap_too_large() {
 /// REQ: WID-004
 #[test]
 fn wid_004_node_limit_follows_the_effective_limit() {
-    let caps = ilium_plugin_api::uitree::UiCaps { max_nodes: 10, max_kib: 1024, max_depth: 32 };
+    let caps = ilium_plugin_api::uitree::UiCaps {
+        max_nodes: 10,
+        max_kib: 1024,
+        max_depth: 32,
+    };
     assert!(ilium_plugin_api::uitree::check_ui_tree(&chain_flat(10), caps).is_ok());
-    assert_eq!(ilium_plugin_api::uitree::check_ui_tree(&chain_flat(11), caps).unwrap_err().as_str(), "ui.too-large");
+    assert_eq!(
+        ilium_plugin_api::uitree::check_ui_tree(&chain_flat(11), caps)
+            .unwrap_err()
+            .as_str(),
+        "ui.too-large"
+    );
 }
 
 /// REQ: WID-004, HST-258
@@ -172,8 +188,17 @@ fn wid_004_node_limit_follows_the_effective_limit() {
 fn wid_004_over_one_mebibyte_traps_too_large() {
     let mut tree = chain_flat(8);
     tree.nodes[1].key = Some("x".repeat(64));
-    let caps = ilium_plugin_api::uitree::UiCaps { max_nodes: 4096, max_kib: 0, max_depth: 32 };
-    assert_eq!(ilium_plugin_api::uitree::check_ui_tree(&tree, caps).unwrap_err().as_str(), "ui.too-large");
+    let caps = ilium_plugin_api::uitree::UiCaps {
+        max_nodes: 4096,
+        max_kib: 0,
+        max_depth: 32,
+    };
+    assert_eq!(
+        ilium_plugin_api::uitree::check_ui_tree(&tree, caps)
+            .unwrap_err()
+            .as_str(),
+        "ui.too-large"
+    );
 }
 
 /// REQ: WID-017, RND-020
@@ -201,7 +226,10 @@ fn rnd_020_depth_trap_keeps_previous_tree() {
     let mut rig = rig_t2();
     let view = rig.open_view("main");
     rig.deliver_tree(view, chain(2)).unwrap();
-    assert_eq!(rig.deliver_tree(view, chain(33)).unwrap_err(), "ui.too-deep");
+    assert_eq!(
+        rig.deliver_tree(view, chain(33)).unwrap_err(),
+        "ui.too-deep"
+    );
     assert_eq!(rig.shown_tree(view), Some(chain(2)));
 }
 
@@ -210,7 +238,10 @@ fn rnd_020_depth_trap_keeps_previous_tree() {
 fn wid_016_settings_view_rejects_terminal_view_widget_not_allowed() {
     let mut rig = rig_t2();
     let view = rig.open_settings_view("settings");
-    assert_eq!(rig.deliver_widget(view, "terminal-view").unwrap_err(), "ui.widget-not-allowed");
+    assert_eq!(
+        rig.deliver_widget(view, "terminal-view").unwrap_err(),
+        "ui.widget-not-allowed"
+    );
     assert_eq!(rig.failures(), 1);
 }
 
@@ -238,9 +269,16 @@ fn wid_016_settings_view_allows_toggle() {
 fn wid_020_check_list_256_items_accepted_257_traps() {
     let mut rig = rig_t2();
     let view = rig.open_view("main");
-    assert!(rig.deliver_widget_with_items(view, "check-list", 256).is_ok());
-    assert!(rig.deliver_widget_with_items(view, "check-list", 257).is_err());
-    assert!(rig.log_lines().iter().any(|(_, m)| m.contains("invalid-argument")));
+    assert!(rig
+        .deliver_widget_with_items(view, "check-list", 256)
+        .is_ok());
+    assert!(rig
+        .deliver_widget_with_items(view, "check-list", 257)
+        .is_err());
+    assert!(rig
+        .log_lines()
+        .iter()
+        .any(|(_, m)| m.contains("invalid-argument")));
 }
 
 /// REQ: WID-020
@@ -248,9 +286,16 @@ fn wid_020_check_list_256_items_accepted_257_traps() {
 fn wid_020_list_editor_64_items_for_third_party_tier() {
     let mut rig = rig_t2();
     let view = rig.open_view("main");
-    assert!(rig.deliver_widget_with_items(view, "list-editor", 64).is_ok());
-    assert!(rig.deliver_widget_with_items(view, "list-editor", 65).is_err());
-    assert!(rig.log_lines().iter().any(|(_, m)| m.contains("invalid-argument")));
+    assert!(rig
+        .deliver_widget_with_items(view, "list-editor", 64)
+        .is_ok());
+    assert!(rig
+        .deliver_widget_with_items(view, "list-editor", 65)
+        .is_err());
+    assert!(rig
+        .log_lines()
+        .iter()
+        .any(|(_, m)| m.contains("invalid-argument")));
 }
 
 /// REQ: WID-020
@@ -258,8 +303,12 @@ fn wid_020_list_editor_64_items_for_third_party_tier() {
 fn wid_020_list_editor_1024_items_for_first_party_tier() {
     let mut rig = rig_t1();
     let view = rig.open_view("main");
-    assert!(rig.deliver_widget_with_items(view, "list-editor", 1024).is_ok());
-    assert!(rig.deliver_widget_with_items(view, "list-editor", 1025).is_err());
+    assert!(rig
+        .deliver_widget_with_items(view, "list-editor", 1024)
+        .is_ok());
+    assert!(rig
+        .deliver_widget_with_items(view, "list-editor", 1025)
+        .is_err());
 }
 
 /// REQ: WID-021
@@ -269,7 +318,10 @@ fn wid_021_meter_8_segments_accepted_9_traps() {
     let view = rig.open_view("main");
     assert!(rig.deliver_widget_with_items(view, "meter", 8).is_ok());
     assert!(rig.deliver_widget_with_items(view, "meter", 9).is_err());
-    assert!(rig.log_lines().iter().any(|(_, m)| m.contains("invalid-argument")));
+    assert!(rig
+        .log_lines()
+        .iter()
+        .any(|(_, m)| m.contains("invalid-argument")));
 }
 
 /// REQ: WID-021
@@ -278,7 +330,9 @@ fn wid_021_minimap_4096_marks_accepted_4097_traps() {
     let mut rig = rig_t2();
     let view = rig.open_view("main");
     assert!(rig.deliver_widget_with_items(view, "minimap", 4096).is_ok());
-    assert!(rig.deliver_widget_with_items(view, "minimap", 4097).is_err());
+    assert!(rig
+        .deliver_widget_with_items(view, "minimap", 4097)
+        .is_err());
 }
 
 /// REQ: WID-021
@@ -302,7 +356,10 @@ fn wid_001_catalogue_holds_51_distinct_widgets() {
 #[test]
 fn wid_001_catalogue_has_seven_families() {
     assert_eq!(widget_families().len(), 7);
-    assert_eq!(widget_families().values().map(|v| v.len()).sum::<usize>(), 51);
+    assert_eq!(
+        widget_families().values().map(|v| v.len()).sum::<usize>(),
+        51
+    );
 }
 
 /// REQ: WID-019
@@ -342,7 +399,11 @@ fn rnd_019_at_most_one_text_sanitized_warning_per_view() {
     for _ in 0..5 {
         rig.deliver_tree(view, tree_with_text("a\u{1b}b")).unwrap();
     }
-    let warnings = rig.log_lines().into_iter().filter(|(_, m)| m.contains("ui.text-sanitized")).count();
+    let warnings = rig
+        .log_lines()
+        .into_iter()
+        .filter(|(_, m)| m.contains("ui.text-sanitized"))
+        .count();
     assert_eq!(warnings, 1);
 }
 
@@ -366,14 +427,21 @@ fn wid_015_tooltip_of_200_scalars_is_not_cut() {
 fn wid_015_long_tooltip_is_not_an_error() {
     let mut rig = rig_t2();
     let view = rig.open_view("main");
-    assert!(rig.deliver_tree(view, tree_with_tooltip(&"x".repeat(300))).is_ok());
+    assert!(rig
+        .deliver_tree(view, tree_with_tooltip(&"x".repeat(300)))
+        .is_ok());
     assert_eq!(rig.failures(), 0);
 }
 
 /// REQ: WID-018
 #[test]
 fn wid_018_tab_order_positive_ascending_then_preorder() {
-    let order = tab_order(&[(Some(2), false), (Some(1), false), (None, false), (Some(0), false)]);
+    let order = tab_order(&[
+        (Some(2), false),
+        (Some(1), false),
+        (None, false),
+        (Some(0), false),
+    ]);
     assert_eq!(order, vec![2, 1, 3, 4]);
 }
 

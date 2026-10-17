@@ -39,15 +39,24 @@ fn doc_f_060_the_example_probe_kind_is_valid_json_with_the_documented_entry() {
     assert_eq!(entry["id"], "ci-run");
     assert_eq!(entry["priority"], 50);
     assert_eq!(entry["entry"]["interval_seconds"], 30);
-    assert_eq!(entry["entry"]["command_template"], "/usr/local/bin/ci-probe {run}");
+    assert_eq!(
+        entry["entry"]["command_template"],
+        "/usr/local/bin/ci-probe {run}"
+    );
 }
 
 /// REQ: F-060
 #[test]
 fn f_060_a_contributed_probe_kind_is_accepted_without_failures() {
     let mut host = activated_server();
-    contribute(&mut host, "ilium.core.progress/probe-kinds", "ci-run", 50, json!({
-        "title": "CI run", "command_template": "/usr/local/bin/ci-probe {run}", "interval_seconds": 30}));
+    contribute(
+        &mut host,
+        "ilium.core.progress/probe-kinds",
+        "ci-run",
+        50,
+        json!({
+        "title": "CI run", "command_template": "/usr/local/bin/ci-probe {run}", "interval_seconds": 30}),
+    );
     assert!(host.failures().is_empty());
 }
 
@@ -55,7 +64,13 @@ fn f_060_a_contributed_probe_kind_is_accepted_without_failures() {
 #[test]
 fn f_060_a_contributed_footer_segment_is_accepted_on_the_client_without_failures() {
     let mut host = activated_client();
-    contribute(&mut host, "ilium.core.progress/footer-segments", "eta", 10, json!({"max_width": 12}));
+    contribute(
+        &mut host,
+        "ilium.core.progress/footer-segments",
+        "eta",
+        10,
+        json!({"max_width": 12}),
+    );
     assert!(host.failures().is_empty());
     // The page lists the entry fields id, priority, max_width; the accepted entry reads back unchanged.
     let entries = host.extension_entries("ilium.core.progress/footer-segments");
@@ -69,10 +84,17 @@ fn f_060_a_contributed_footer_segment_is_accepted_on_the_client_without_failures
 #[test]
 fn f_060_the_report_service_start_registers_a_monitor_and_finish_settles_it() {
     let (mut host, pane) = host_with_pane();
-    let started = call_report(&mut host, &json!({"op": "start", "pane": pane, "job_id": "svc-job", "message": "Starting"}).to_string());
+    let started = call_report(
+        &mut host,
+        &json!({"op": "start", "pane": pane, "job_id": "svc-job", "message": "Starting"})
+            .to_string(),
+    );
     assert!(started.is_ok());
     assert_eq!(status(&mut host, pane)["monitor_count"], 1);
-    let finished = call_report(&mut host, &json!({"op": "finish", "pane": pane, "job_id": "svc-job", "message": "Done"}).to_string());
+    let finished = call_report(
+        &mut host,
+        &json!({"op": "finish", "pane": pane, "job_id": "svc-job", "message": "Done"}).to_string(),
+    );
     assert!(finished.is_ok());
     assert_eq!(status(&mut host, pane)["running"], 0);
 }
@@ -81,11 +103,21 @@ fn f_060_the_report_service_start_registers_a_monitor_and_finish_settles_it() {
 #[test]
 fn f_060_a_changed_monitor_publishes_the_changed_topic_with_monitor_status_and_percent() {
     let (mut host, pane) = host_with_pane();
-    register(&mut host, pane, "/opt/probe.sh", &running("job", 10, "W"), &[]);
+    register(
+        &mut host,
+        pane,
+        "/opt/probe.sh",
+        &running("job", 10, "W"),
+        &[],
+    );
     expect_probe(&mut host, "/opt/probe.sh", &running("job", 55, "W"));
     tick(&mut host, 1);
     let topics = published_topics(&host);
-    let (_, payload) = topics.iter().rev().find(|(topic, _)| topic == "ilium.core.progress/changed").expect("topic published");
+    let (_, payload) = topics
+        .iter()
+        .rev()
+        .find(|(topic, _)| topic == "ilium.core.progress/changed")
+        .expect("topic published");
     let value: serde_json::Value = serde_json::from_str(payload).expect("json");
     assert!(value.get("monitor").is_some());
     assert_eq!(value["status"], "running");

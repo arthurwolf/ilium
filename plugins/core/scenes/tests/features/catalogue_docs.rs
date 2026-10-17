@@ -6,14 +6,21 @@ fn catalogue() -> Vec<Vec<String>> {
 }
 
 fn scene_names(cell: &str) -> Vec<String> {
-    cell.split([',', '(', ')']).flat_map(|p| p.split(" and ")).map(|p| p.trim().to_string()).filter(|p| !p.is_empty()).collect()
+    cell.split([',', '(', ')'])
+        .flat_map(|p| p.split(" and "))
+        .map(|p| p.trim().to_string())
+        .filter(|p| !p.is_empty())
+        .collect()
 }
 
 /// REQ: F-095
 #[test]
 fn catalogue_095_natural_cached_loops_lists_ten_scenes() {
     let rows = catalogue();
-    let row = rows.iter().find(|r| r[0] == "Natural cached loops").expect("row");
+    let row = rows
+        .iter()
+        .find(|r| r[0] == "Natural cached loops")
+        .expect("row");
     assert_eq!(scene_names(&row[1]).len(), 10);
     assert!(row[1].contains("Shoreline") && row[1].contains("Lily pads"));
 }
@@ -22,24 +29,46 @@ fn catalogue_095_natural_cached_loops_lists_ten_scenes() {
 #[test]
 fn catalogue_096_quiet_procedural_and_machines_rows_exist() {
     let rows = catalogue();
-    assert_eq!(scene_names(&rows.iter().find(|r| r[0] == "Quiet procedural").unwrap()[1]).len(), 6);
-    assert!(rows.iter().any(|r| r[0] == "Machines and clocks" && r[1].contains("Cube clock")));
+    assert_eq!(
+        scene_names(&rows.iter().find(|r| r[0] == "Quiet procedural").unwrap()[1]).len(),
+        6
+    );
+    assert!(rows
+        .iter()
+        .any(|r| r[0] == "Machines and clocks" && r[1].contains("Cube clock")));
 }
 
 /// REQ: F-097
 #[test]
 fn catalogue_097_geometry_pipes_wind_growth_rows_exist() {
     let rows = catalogue();
-    assert_eq!(scene_names(&rows.iter().find(|r| r[0] == "Geometry and mathematics").unwrap()[1]).len(), 11);
-    assert!(rows.iter().any(|r| r[0] == "Pipes, wind, growth" && r[1].contains("3D pipes") && r[1].contains("Wind") && r[1].contains("Growth")));
+    assert_eq!(
+        scene_names(
+            &rows
+                .iter()
+                .find(|r| r[0] == "Geometry and mathematics")
+                .unwrap()[1]
+        )
+        .len(),
+        11
+    );
+    assert!(rows.iter().any(|r| r[0] == "Pipes, wind, growth"
+        && r[1].contains("3D pipes")
+        && r[1].contains("Wind")
+        && r[1].contains("Growth")));
 }
 
 /// REQ: F-098
 #[test]
 fn catalogue_098_simulations_and_games_rows_exist() {
     let rows = catalogue();
-    assert!(rows.iter().any(|r| r[0] == "Games" && r[1].contains("Galactic empires") && r[1].contains("Hex expedition") && r[1].contains("Vector TD")));
-    assert!(rows.iter().any(|r| r[0] == "Carpet simulations" && r[1].contains("Slow Life")));
+    assert!(rows.iter().any(|r| r[0] == "Games"
+        && r[1].contains("Galactic empires")
+        && r[1].contains("Hex expedition")
+        && r[1].contains("Vector TD")));
+    assert!(rows
+        .iter()
+        .any(|r| r[0] == "Carpet simulations" && r[1].contains("Slow Life")));
 }
 
 /// REQ: F-099
@@ -79,7 +108,11 @@ fn catalogue_095_every_listed_scene_name_is_documented_for_users() {
             if name.contains("chess") || name.contains("Lichess") || name.starts_with("automated") {
                 continue;
             }
-            assert!(doc.contains(&name.to_lowercase()), "{name} missing in src/docs/{}.md", row[2]);
+            assert!(
+                doc.contains(&name.to_lowercase()),
+                "{name} missing in src/docs/{}.md",
+                row[2]
+            );
         }
     }
 }
@@ -89,7 +122,12 @@ fn catalogue_095_every_listed_scene_name_is_documented_for_users() {
 fn catalogue_095_boundary_rows_have_nonempty_family_and_phase() {
     for row in catalogue() {
         assert!(!row[0].is_empty() && !row[1].is_empty());
-        assert!(["4c", "4d", "4e"].contains(&row[3].as_str()), "{} phase {}", row[0], row[3]);
+        assert!(
+            ["4c", "4d", "4e"].contains(&row[3].as_str()),
+            "{} phase {}",
+            row[0],
+            row[3]
+        );
     }
 }
 

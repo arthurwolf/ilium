@@ -30,7 +30,10 @@ impl Parse for PluginArgs {
                 "side" => {
                     let value: LitStr = input.parse()?;
                     if !SIDES.contains(&value.value().as_str()) {
-                        return Err(syn::Error::new(value.span(), "side must be \"server\", \"client\" or \"scene\""));
+                        return Err(syn::Error::new(
+                            value.span(),
+                            "side must be \"server\", \"client\" or \"scene\"",
+                        ));
                     }
                     side = Some(value.value());
                 }
@@ -38,8 +41,16 @@ impl Parse for PluginArgs {
                     let array: ExprArray = input.parse()?;
                     for element in array.elems {
                         match element {
-                            Expr::Lit(ExprLit { lit: Lit::Str(text), .. }) => exports.push(text.value()),
-                            other => return Err(syn::Error::new_spanned(other, "exports must be string literals")),
+                            Expr::Lit(ExprLit {
+                                lit: Lit::Str(text),
+                                ..
+                            }) => exports.push(text.value()),
+                            other => {
+                                return Err(syn::Error::new_spanned(
+                                    other,
+                                    "exports must be string literals",
+                                ))
+                            }
                         }
                     }
                 }
@@ -48,15 +59,24 @@ impl Parse for PluginArgs {
                     krate = value.parse()?;
                 }
                 other => {
-                    return Err(syn::Error::new(name.span(), format!("unknown ilium_plugin argument `{other}`")));
+                    return Err(syn::Error::new(
+                        name.span(),
+                        format!("unknown ilium_plugin argument `{other}`"),
+                    ));
                 }
             }
             if !input.is_empty() {
                 input.parse::<Token![,]>()?;
             }
         }
-        let side = side.ok_or_else(|| syn::Error::new(Span::call_site(), "ilium_plugin requires side = \"...\""))?;
-        Ok(PluginArgs { side, exports, krate })
+        let side = side.ok_or_else(|| {
+            syn::Error::new(Span::call_site(), "ilium_plugin requires side = \"...\"")
+        })?;
+        Ok(PluginArgs {
+            side,
+            exports,
+            krate,
+        })
     }
 }
 

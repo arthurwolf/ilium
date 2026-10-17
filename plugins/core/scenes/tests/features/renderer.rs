@@ -23,16 +23,29 @@ fn renderer_011_boundary_minimum_and_maximum_sizes_render() {
 /// REQ: COR-011, F-096
 #[test]
 fn renderer_011_size_outside_the_harness_range_is_refused_with_render_size() {
-    let result = std::panic::catch_unwind(|| fake_scene("waves", 9, 1).frame(braille_frame(9, 1, 0)));
-    let message = format!("{:?}", result.err().and_then(|e| e.downcast_ref::<String>().cloned()));
+    let result =
+        std::panic::catch_unwind(|| fake_scene("waves", 9, 1).frame(braille_frame(9, 1, 0)));
+    let message = format!(
+        "{:?}",
+        result
+            .err()
+            .and_then(|e| e.downcast_ref::<String>().cloned())
+    );
     assert!(message.contains("harness.render-size"), "{message}");
 }
 
 /// REQ: COR-011
 #[test]
 fn renderer_011_unknown_scene_id_is_refused_with_not_found() {
-    let result = std::panic::catch_unwind(|| fake_scene("no-such-scene", 40, 10).frame(braille_frame(40, 10, 0)));
-    let message = format!("{:?}", result.err().and_then(|e| e.downcast_ref::<String>().cloned()));
+    let result = std::panic::catch_unwind(|| {
+        fake_scene("no-such-scene", 40, 10).frame(braille_frame(40, 10, 0))
+    });
+    let message = format!(
+        "{:?}",
+        result
+            .err()
+            .and_then(|e| e.downcast_ref::<String>().cloned())
+    );
     assert!(message.contains("not-found"), "{message}");
 }
 
@@ -51,7 +64,11 @@ fn renderer_011_palette_change_keeps_the_tone_cells() {
     let before = scene.frame(braille_frame(40, 10, 1000));
     scene.set_palette(vec![0x112233, 0x445566, 0xffeedd]);
     let after = scene.frame(braille_frame(40, 10, 1000));
-    assert_eq!(before.text(), after.text(), "the host colours tones; the scene draws the same cells");
+    assert_eq!(
+        before.text(),
+        after.text(),
+        "the host colours tones; the scene draws the same cells"
+    );
 }
 
 /// REQ: COR-011
@@ -75,7 +92,8 @@ fn renderer_011_settings_object_with_unknown_keys_does_not_break_the_scene() {
 /// REQ: COR-011
 #[test]
 fn renderer_011_spec_helper_matches_the_documented_fields() {
-    let value: serde_json::Value = serde_json::from_str(&spec("waves", json!({}), &[1, 2], "live")).unwrap();
+    let value: serde_json::Value =
+        serde_json::from_str(&spec("waves", json!({}), &[1, 2], "live")).unwrap();
     assert_eq!(value["scene"], "waves");
     assert_eq!(value["palette"], json!([1, 2]));
 }

@@ -9,11 +9,17 @@ fn s(op: &str, request: Value) -> Value {
 }
 
 fn usd(value: f64, lower_bound: bool) -> Value {
-    s("format-usd", json!({ "usd": value, "lower_bound": lower_bound }))
+    s(
+        "format-usd",
+        json!({ "usd": value, "lower_bound": lower_bound }),
+    )
 }
 
 fn amount(metric: &str, value: f64, lower_bound: bool) -> Value {
-    s("format-amount", json!({ "metric": metric, "value": value, "lower_bound": lower_bound }))
+    s(
+        "format-amount",
+        json!({ "metric": metric, "value": value, "lower_bound": lower_bound }),
+    )
 }
 
 fn tokens(input: u64, cache_read: u64, cache_write: u64, output: u64) -> Value {
@@ -39,11 +45,17 @@ fn level(cuts: &Value, value: f64) -> Value {
 }
 
 fn lookup(overrides: Value, model: &str) -> Value {
-    s("price-lookup", json!({ "overrides": overrides, "model": model }))
+    s(
+        "price-lookup",
+        json!({ "overrides": overrides, "model": model }),
+    )
 }
 
 fn points(items: &[(i64, f64)]) -> Value {
-    json!(items.iter().map(|(at_ms, usd)| json!({ "at_ms": at_ms, "usd": usd })).collect::<Vec<_>>())
+    json!(items
+        .iter()
+        .map(|(at_ms, usd)| json!({ "at_ms": at_ms, "usd": usd }))
+        .collect::<Vec<_>>())
 }
 
 /// REQ: PORT:ilium-client/src/cost_model.rs::amounts_format_in_the_unit_of_their_metric
@@ -53,10 +65,22 @@ fn port_cost_model_amounts_format_in_the_unit_of_their_metric() {
     assert_eq!(amount("dollars", 4.3, true), json!("~$4.30"));
     assert_eq!(amount("quota", 0.43, true), json!("0.4%"));
     assert_eq!(amount("quota", 12.4, false), json!("12%"));
-    assert_eq!(s("format-rate", json!({ "metric": "dollars", "value": 3.0 })), json!("$3.00/h"));
-    assert_eq!(s("format-rate", json!({ "metric": "quota", "value": 1.5 })), json!("1.5%/h"));
-    assert_eq!(s("quota-window-key", json!({ "window": "primary" })), json!("primary"));
-    assert_eq!(s("quota-window-key", json!({ "window": "secondary" })), json!("secondary"));
+    assert_eq!(
+        s("format-rate", json!({ "metric": "dollars", "value": 3.0 })),
+        json!("$3.00/h")
+    );
+    assert_eq!(
+        s("format-rate", json!({ "metric": "quota", "value": 1.5 })),
+        json!("1.5%/h")
+    );
+    assert_eq!(
+        s("quota-window-key", json!({ "window": "primary" })),
+        json!("primary")
+    );
+    assert_eq!(
+        s("quota-window-key", json!({ "window": "secondary" })),
+        json!("secondary")
+    );
 }
 
 /// REQ: PORT:ilium-client/src/cost_model.rs::budget_and_burn_calibrations_use_their_own_basis
@@ -68,7 +92,10 @@ fn port_cost_model_budget_and_burn_calibrations_use_their_own_basis() {
     let burn = calibrate("burn_rate", &[], None);
     assert_eq!(burn["basis"], json!("burn_usd_per_hour"));
     assert_eq!(burn["cuts"], json!([0.5, 2.0, 5.0, 15.0]));
-    assert!(near(&s("budget-fill", json!({ "total": 12.5, "budget": 10.0 })), 1.25));
+    assert!(near(
+        &s("budget-fill", json!({ "total": 12.5, "budget": 10.0 })),
+        1.25
+    ));
 }
 
 /// REQ: PORT:ilium-client/src/cost_model.rs::burn_rate_and_spike_detection
@@ -78,7 +105,10 @@ fn port_cost_model_burn_rate_and_spike_detection() {
     let now = 1_000 * minute;
     let recent_ms = 10 * minute;
     let hot: Vec<(i64, f64)> = (0..10).map(|offset| (now - offset * minute, 0.5)).collect();
-    let burn = s("burn_usd_per_hour", json!({ "points": points(&hot), "now_ms": now, "window_ms": recent_ms }));
+    let burn = s(
+        "burn_usd_per_hour",
+        json!({ "points": points(&hot), "now_ms": now, "window_ms": recent_ms }),
+    );
     assert!(near(&burn, 30.0), "{burn}");
     let spike = |list: &[(i64, f64)]| {
         s(
@@ -87,7 +117,9 @@ fn port_cost_model_burn_rate_and_spike_detection() {
         )
     };
     assert_eq!(spike(&hot), json!(true));
-    let steady: Vec<(i64, f64)> = (0..360).map(|offset| (now - offset * minute, 0.5)).collect();
+    let steady: Vec<(i64, f64)> = (0..360)
+        .map(|offset| (now - offset * minute, 0.5))
+        .collect();
     assert_eq!(spike(&steady), json!(false));
     assert_eq!(spike(&[(now, 0.01)]), json!(false));
 }
@@ -95,8 +127,14 @@ fn port_cost_model_burn_rate_and_spike_detection() {
 /// REQ: PORT:ilium-client/src/cost_model.rs::cache_reads_cost_a_fraction_of_fresh_input
 #[test]
 fn port_cost_model_cache_reads_cost_a_fraction_of_fresh_input() {
-    let cached = s("price-cost", json!({ "model": "claude-sonnet-5-5", "tokens": tokens(0, 1_000_000, 0, 0) }));
-    let fresh = s("price-cost", json!({ "model": "claude-sonnet-5-5", "tokens": tokens(1_000_000, 0, 0, 0) }));
+    let cached = s(
+        "price-cost",
+        json!({ "model": "claude-sonnet-5-5", "tokens": tokens(0, 1_000_000, 0, 0) }),
+    );
+    let fresh = s(
+        "price-cost",
+        json!({ "model": "claude-sonnet-5-5", "tokens": tokens(1_000_000, 0, 0, 0) }),
+    );
     assert!(near(&cached, 0.20), "{cached}");
     assert!(near(&fresh, 2.0), "{fresh}");
 }
@@ -110,7 +148,10 @@ fn port_cost_model_dollar_and_token_formatting_is_compact() {
     assert_eq!(usd(412.6, false), json!("$413"));
     assert_eq!(usd(1234.0, false), json!("$1.2k"));
     assert_eq!(usd(1.0, true), json!("~$1.00"));
-    assert_eq!(s("format-usd-per-hour", json!({ "usd": 3.1 })), json!("$3.10/h"));
+    assert_eq!(
+        s("format-usd-per-hour", json!({ "usd": 3.1 })),
+        json!("$3.10/h")
+    );
     let tok = |count: u64| s("format-tokens", json!({ "tokens": count }));
     assert_eq!(tok(842), json!("842"));
     assert_eq!(tok(12_400), json!("12.4k"));
@@ -139,7 +180,10 @@ fn port_cost_model_longest_prefix_wins_and_dated_snapshots_match_their_family() 
     let none = json!({});
     assert_eq!(lookup(none.clone(), "claude-opus-5-5")["input"], json!(4.0));
     assert_eq!(lookup(none.clone(), "claude-opus-5")["input"], json!(5.0));
-    assert_eq!(lookup(none.clone(), "claude-haiku-4-5-20251001")["input"], json!(1.0));
+    assert_eq!(
+        lookup(none.clone(), "claude-haiku-4-5-20251001")["input"],
+        json!(1.0)
+    );
     assert_eq!(lookup(none.clone(), "gpt-reserve"), Value::Null);
     assert_eq!(lookup(none, "unknown"), Value::Null);
 }
@@ -159,19 +203,29 @@ fn port_cost_model_meter_fills_one_cell_per_level_and_empty_without_data() {
 /// REQ: PORT:ilium-client/src/cost_model.rs::overrides_beat_built_in_prices
 #[test]
 fn port_cost_model_overrides_beat_built_in_prices() {
-    let price = |input: f64, output: f64, cache_read: f64, cache_write: f64| {
-        json!({ "input": input, "output": output, "cache_read": cache_read, "cache_write": cache_write })
-    };
+    let price = |input: f64, output: f64, cache_read: f64, cache_write: f64| json!({ "input": input, "output": output, "cache_read": cache_read, "cache_write": cache_write });
     let overrides = json!({
         "GPT-Reserve": price(1.0, 2.0, 0.1, 0.0),
         "claude-sonnet-5": price(9.0, 9.0, 9.0, 9.0),
         "claude-haiku-4-5": price(7.0, 7.0, 7.0, 7.0),
     });
-    assert_eq!(lookup(overrides.clone(), "gpt-reserve")["output"], json!(2.0));
+    assert_eq!(
+        lookup(overrides.clone(), "gpt-reserve")["output"],
+        json!(2.0)
+    );
     // A longer built-in prefix beats a shorter override; equal length goes to the override.
-    assert_eq!(lookup(overrides.clone(), "claude-sonnet-5-5")["input"], json!(2.0));
-    assert_eq!(lookup(overrides.clone(), "claude-sonnet-5")["input"], json!(9.0));
-    assert_eq!(lookup(overrides, "claude-haiku-4-5-20251001")["input"], json!(7.0));
+    assert_eq!(
+        lookup(overrides.clone(), "claude-sonnet-5-5")["input"],
+        json!(2.0)
+    );
+    assert_eq!(
+        lookup(overrides.clone(), "claude-sonnet-5")["input"],
+        json!(9.0)
+    );
+    assert_eq!(
+        lookup(overrides, "claude-haiku-4-5-20251001")["input"],
+        json!(7.0)
+    );
 }
 
 /// REQ: PORT:ilium-client/src/cost_model.rs::peer_calibration_scales_with_the_median_open_agent
@@ -186,7 +240,8 @@ fn port_cost_model_peer_calibration_scales_with_the_median_open_agent() {
 /// REQ: PORT:ilium-client/src/cost_model.rs::percent_rank_counts_sessions_at_or_below
 #[test]
 fn port_cost_model_percent_rank_counts_sessions_at_or_below() {
-    let rank = |sorted: &[f64], value: f64| s("percent-rank", json!({ "sorted": sorted, "value": value }));
+    let rank =
+        |sorted: &[f64], value: f64| s("percent-rank", json!({ "sorted": sorted, "value": value }));
     let sorted = [1.0, 2.0, 3.0, 4.0];
     assert_eq!(rank(&sorted, 0.5), json!(0.0));
     assert_eq!(rank(&sorted, 2.0), json!(50.0));
@@ -197,7 +252,12 @@ fn port_cost_model_percent_rank_counts_sessions_at_or_below() {
 /// REQ: PORT:ilium-client/src/cost_model.rs::percentile_interpolates
 #[test]
 fn port_cost_model_percentile_interpolates() {
-    let pct = |sorted: &[f64], fraction: f64| s("percentile", json!({ "sorted": sorted, "fraction": fraction }));
+    let pct = |sorted: &[f64], fraction: f64| {
+        s(
+            "percentile",
+            json!({ "sorted": sorted, "fraction": fraction }),
+        )
+    };
     let sorted = [1.0, 2.0, 3.0, 4.0, 5.0];
     assert_eq!(pct(&sorted, 0.0), json!(1.0));
     assert_eq!(pct(&sorted, 0.5), json!(3.0));
@@ -234,9 +294,16 @@ fn port_cost_model_sparkline_scales_to_the_series_peak() {
 fn port_cost_model_spend_cells_bucket_the_window_and_ignore_outside_points() {
     let hour: i64 = 3_600_000;
     let now = 10 * hour;
-    let list = points(&[(now - 30 * 60_000, 1.0), (now - 5 * 60_000, 2.0), (now - 5 * hour, 99.0)]);
+    let list = points(&[
+        (now - 30 * 60_000, 1.0),
+        (now - 5 * 60_000, 2.0),
+        (now - 5 * hour, 99.0),
+    ]);
     let cells = |window_ms: i64, count: u64| {
-        s("spend-cells", json!({ "points": list, "now_ms": now, "window_ms": window_ms, "cells": count }))
+        s(
+            "spend-cells",
+            json!({ "points": list, "now_ms": now, "window_ms": window_ms, "cells": count }),
+        )
     };
     assert_eq!(cells(hour, 4), json!([0.0, 0.0, 1.0, 2.0]));
     assert_eq!(cells(0, 4), json!([0.0, 0.0, 0.0, 0.0]));

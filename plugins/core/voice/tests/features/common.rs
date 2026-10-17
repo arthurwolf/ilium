@@ -6,10 +6,11 @@ use std::path::PathBuf;
 use ilium_plugin_core_voice::{VoiceClient, VoiceServer};
 use ilium_plugin_sdk::testing::FakeHost;
 use ilium_plugin_sdk::types::{
-    ActionKind, ClientId, ClientRequestEvent, CliInvokedEvent, CommandContext, CommandInvokedEvent, CommandOrigin,
-    Event, GrabId, Intent, KernelSettingsEvent, KeyEvent, Submission, UiAction, ViewTarget,
+    ActionKind, CliInvokedEvent, ClientId, ClientRequestEvent, CommandContext, CommandInvokedEvent,
+    CommandOrigin, Event, GrabId, Intent, KernelSettingsEvent, KeyEvent, Submission, UiAction,
+    ViewTarget,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 /// Path of the plugin manifest (the skeleton file, exact per the manual).
 pub fn manifest_path() -> PathBuf {
@@ -23,7 +24,9 @@ pub fn workspace_root() -> PathBuf {
 
 /// A page of the manual.
 pub fn manual_page(name: &str) -> String {
-    let path = workspace_root().join("docs/plugins-manual/pages").join(name);
+    let path = workspace_root()
+        .join("docs/plugins-manual/pages")
+        .join(name);
     std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("page {path:?}: {error}"))
 }
 
@@ -40,26 +43,37 @@ pub fn user_guide() -> String {
 
 /// Path of a golden file of this suite.
 pub fn golden(name: &str) -> String {
-    format!("{}/tests/features/golden/{name}", env!("CARGO_MANIFEST_DIR"))
+    format!(
+        "{}/tests/features/golden/{name}",
+        env!("CARGO_MANIFEST_DIR")
+    )
 }
 
 /// A server-side host with the manifest grants and the plugin activated.
 pub fn server_host() -> FakeHost {
-    let mut host = FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("server").build();
+    let mut host = FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("server")
+        .build();
     host.activate::<VoiceServer>();
     host
 }
 
 /// A client-side host with the manifest grants and the plugin activated; voice control is still off.
 pub fn client_host() -> FakeHost {
-    let mut host = FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("client").build();
+    let mut host = FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("client")
+        .build();
     host.activate::<VoiceClient>();
     host
 }
 
 /// Writes one key of the `voice-control` kernel tab and tells the plugin it changed.
 pub fn configure(host: &mut FakeHost, key: &str, value: Value) {
-    host.kernel_settings().set("voice-control", key, value).expect("kernel setting accepted");
+    host.kernel_settings()
+        .set("voice-control", key, value)
+        .expect("kernel setting accepted");
     host.deliver_one(Event::KernelSettingsChanged(KernelSettingsEvent {
         tab: "voice-control".to_string(),
         keys: vec![key.to_string()],
@@ -77,17 +91,31 @@ pub fn enabled_client(input_mode: &str) -> FakeHost {
 
 /// Id of the first F8 grab the plugin holds.
 pub fn f8_grab(host: &mut FakeHost) -> u64 {
-    host.keys().grabs().first().expect("the plugin holds an F8 grab").id
+    host.keys()
+        .grabs()
+        .first()
+        .expect("the plugin holds an F8 grab")
+        .id
 }
 
 /// `key-pressed` of grab `grab`.
 pub fn key_pressed(grab: u64, repeat: bool) -> Event {
-    Event::KeyPressed(KeyEvent { grab: GrabId(grab), pane: None, chord: "F8".to_string(), repeat })
+    Event::KeyPressed(KeyEvent {
+        grab: GrabId(grab),
+        pane: None,
+        chord: "F8".to_string(),
+        repeat,
+    })
 }
 
 /// `key-released` of grab `grab`.
 pub fn key_released(grab: u64) -> Event {
-    Event::KeyReleased(KeyEvent { grab: GrabId(grab), pane: None, chord: "F8".to_string(), repeat: false })
+    Event::KeyReleased(KeyEvent {
+        grab: GrabId(grab),
+        pane: None,
+        chord: "F8".to_string(),
+        repeat: false,
+    })
 }
 
 /// The command event the kernel sends when the user runs `command`.
@@ -96,7 +124,14 @@ pub fn command_invoked(command: &str) -> Event {
         command: command.to_string(),
         arguments_json: "{}".to_string(),
         origin: CommandOrigin::Keybinding,
-        context: CommandContext { pane: None, view: None, buffer: None, line: None, virtual_row: None, menu_item: None },
+        context: CommandContext {
+            pane: None,
+            view: None,
+            buffer: None,
+            line: None,
+            virtual_row: None,
+            menu_item: None,
+        },
     })
 }
 
@@ -112,7 +147,11 @@ pub fn cli_invoked(invocation: u64, argv: &[&str]) -> Event {
 
 /// `client-request` of kind `kind` with a JSON payload.
 pub fn client_request(call: u64, kind: &str, payload: Value) -> Event {
-    Event::ClientRequest(ClientRequestEvent { call, kind: kind.to_string(), payload_json: payload.to_string() })
+    Event::ClientRequest(ClientRequestEvent {
+        call,
+        kind: kind.to_string(),
+        payload_json: payload.to_string(),
+    })
 }
 
 /// A button of the popup `popup` activated by the user.
@@ -136,7 +175,8 @@ pub fn jsonl(text: &str) -> Vec<Value> {
     text.lines()
         .filter(|line| !line.trim().is_empty())
         .map(|line| {
-            let value: Value = serde_json::from_str(line).unwrap_or_else(|error| panic!("line {line:?}: {error}"));
+            let value: Value =
+                serde_json::from_str(line).unwrap_or_else(|error| panic!("line {line:?}: {error}"));
             assert!(value.is_object(), "every JSONL line is an object: {line}");
             value
         })
@@ -156,19 +196,28 @@ pub fn invoked_commands(submissions: &[Submission]) -> Vec<String> {
 
 /// Rows of the first table that follows `anchor`: cells of every row after the separator.
 pub fn table_after(page: &str, anchor: &str) -> Vec<Vec<String>> {
-    let start = page.find(anchor).unwrap_or_else(|| panic!("anchor {anchor} missing"));
+    let start = page
+        .find(anchor)
+        .unwrap_or_else(|| panic!("anchor {anchor} missing"));
     page[start..]
         .lines()
         .skip_while(|line| !line.starts_with('|'))
         .skip(2)
         .take_while(|line| line.starts_with('|'))
-        .map(|line| line.trim_matches('|').split('|').map(|cell| cell.trim().to_string()).collect())
+        .map(|line| {
+            line.trim_matches('|')
+                .split('|')
+                .map(|cell| cell.trim().to_string())
+                .collect()
+        })
         .collect()
 }
 
 /// The first json code block after `heading`.
 pub fn json_block_after(page: &str, heading: &str) -> Value {
-    let start = page.find(heading).unwrap_or_else(|| panic!("heading {heading} missing"));
+    let start = page
+        .find(heading)
+        .unwrap_or_else(|| panic!("heading {heading} missing"));
     let rest = &page[start..];
     let open = rest.find("```json\n").expect("json block") + "```json\n".len();
     let close = rest[open..].find("```").expect("block end");
@@ -182,7 +231,12 @@ pub fn hear(host: &mut FakeHost, text: &str) {
     host.deliver_one(key_pressed(grab, false));
     host.settle();
     let capture = host.audio().captures().last().expect("capture opened").id;
-    host.deliver_one(Event::AudioFrames(ilium_plugin_sdk::types::AudioFramesEvent { capture, samples: vec![100, -100, 200] }));
+    host.deliver_one(Event::AudioFrames(
+        ilium_plugin_sdk::types::AudioFramesEvent {
+            capture,
+            samples: vec![100, -100, 200],
+        },
+    ));
     host.deliver_one(key_released(grab));
     host.settle();
     let request = host.jobs().list().last().expect("transcribe job").request;
@@ -203,7 +257,13 @@ pub fn add_pane(host: &mut FakeHost, name: &str) -> u64 {
 }
 
 /// Contributes a spoken phrase to the `voice-intents` collect point.
-pub fn contribute_phrase(host: &mut FakeHost, id: &str, phrase: &str, command: &str, confirm: bool) {
+pub fn contribute_phrase(
+    host: &mut FakeHost,
+    id: &str,
+    phrase: &str,
+    command: &str,
+    confirm: bool,
+) {
     host.contribute_extension(
         "ilium.core.voice/voice-intents",
         id,

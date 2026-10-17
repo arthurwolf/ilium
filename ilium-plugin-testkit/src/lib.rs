@@ -16,17 +16,17 @@ pub mod replay;
 pub mod scene;
 pub mod session;
 
-pub use errors::{HarnessError, codes};
+pub use errors::{codes, HarnessError};
 pub use fakes::tree::TreeNode;
 pub use fuzz::FuzzFailure;
 pub use golden::{assert_golden, assert_snapshot};
 pub use host::{
     AudioCapture, CallOrder, Cell, ClientResponse, CollectPoint, Diagnostic, ExtensionEntry,
     FailureRecord, FakeAgents, FakeAudio, FakeClientRequests, FakeClipboard, FakeExtensions,
-    FakeHelp, FakeHost, FakeHostBuilder, FakeInference, FakeJournal, FakeKernelSettings, FakeKeymap,
-    FakeKeys, FakePanes, FakePlugins, FakeSessions, FakeTerminal, FakeTranscript, FakeVector,
-    FakeWorkspace, HookChain, HostSnapshot, IntoJsonText, KeyGrab, LogLine, Mode, PluginHandle,
-    Restart, Screen, ScreenCell, SentClientRequest,
+    FakeHelp, FakeHost, FakeHostBuilder, FakeInference, FakeJournal, FakeKernelSettings,
+    FakeKeymap, FakeKeys, FakePanes, FakePlugins, FakeSessions, FakeTerminal, FakeTranscript,
+    FakeVector, FakeWorkspace, HookChain, HostSnapshot, IntoJsonText, KeyGrab, LogLine, Mode,
+    PluginHandle, Restart, Screen, ScreenCell, SentClientRequest,
 };
 pub use replay::ReplayMismatch;
 pub use scene::FakeScene;

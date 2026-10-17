@@ -10,9 +10,18 @@ use ilium_plugin_sdk::prelude::*;
 fn keys_port_changing_the_shortcut_base_updates_dispatch_immediately() {
     let mut host = column_host(Column::Tmux);
     assert!(render_text(&mut host, keys_panel(), 100, 20).contains("Prefix is Ctrl+B."));
-    host.send_action(keyboard_page(), "shortcut_base", ActionKind::Changed, ActionValue::Text("ctrl+a".to_string()));
+    host.send_action(
+        keyboard_page(),
+        "shortcut_base",
+        ActionKind::Changed,
+        ActionValue::Text("ctrl+a".to_string()),
+    );
     host.settle();
-    assert!(host.kernel_settings().writes().iter().any(|(_, k, v)| k == "shortcut_base" && v == "\"ctrl+a\""));
+    assert!(host
+        .kernel_settings()
+        .writes()
+        .iter()
+        .any(|(_, k, v)| k == "shortcut_base" && v == "\"ctrl+a\""));
     set_tab(
         &mut host,
         json!({"shortcut_base": "ctrl+a", "navigation_shortcut_base": "ctrl+b", "preset": "custom"}),
@@ -20,9 +29,18 @@ fn keys_port_changing_the_shortcut_base_updates_dispatch_immediately() {
     );
     let text = render_text(&mut host, keys_panel(), 100, 20);
     assert!(text.contains("Prefix is Ctrl+A."), "{text}");
-    host.send_action(keyboard_page(), "navigation_shortcut_base", ActionKind::Changed, ActionValue::Text("ctrl+a".to_string()));
+    host.send_action(
+        keyboard_page(),
+        "navigation_shortcut_base",
+        ActionKind::Changed,
+        ActionValue::Text("ctrl+a".to_string()),
+    );
     host.settle();
-    assert!(host.kernel_settings().writes().iter().any(|(_, k, v)| k == "navigation_shortcut_base" && v == "\"ctrl+a\""));
+    assert!(host
+        .kernel_settings()
+        .writes()
+        .iter()
+        .any(|(_, k, v)| k == "navigation_shortcut_base" && v == "\"ctrl+a\""));
 }
 
 /// REQ: PORT:ilium-client/src/keys.rs::ctrl_b_tmux_defaults_dispatch_group_navigation_actions

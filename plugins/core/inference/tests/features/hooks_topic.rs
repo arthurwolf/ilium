@@ -21,13 +21,21 @@ fn answer_ok(host: &mut FakeHost) {
     host.http().expect(
         "POST",
         CHAT_URL,
-        HttpResponse { status: 200, headers: vec![], body: openai_body("ok", "gpt-5.6-terra", 11, 2) },
+        HttpResponse {
+            status: 200,
+            headers: vec![],
+            body: openai_body("ok", "gpt-5.6-terra", 11, 2),
+        },
     );
 }
 
 fn run_call(host: &mut FakeHost, number: u64, purpose: &str, text: &str) {
-    let accepted =
-        host.instance_mut::<InferenceServer>().complete(ProviderCall { call: number, request: request(purpose, text) });
+    let accepted = host
+        .instance_mut::<InferenceServer>()
+        .complete(ProviderCall {
+            call: number,
+            request: request(purpose, text),
+        });
     assert!(accepted.is_ok());
     host.settle();
 }
@@ -42,8 +50,12 @@ fn payloads(host: &mut FakeHost, point: &str) -> Vec<Value> {
 
 fn sent_text(host: &mut FakeHost) -> String {
     let calls = host.http().calls();
-    let body: Value = serde_json::from_slice(calls[0].body.as_ref().expect("body")).expect("JSON body");
-    body["messages"][0]["content"].as_str().expect("content").to_string()
+    let body: Value =
+        serde_json::from_slice(calls[0].body.as_ref().expect("body")).expect("JSON body");
+    body["messages"][0]["content"]
+        .as_str()
+        .expect("content")
+        .to_string()
 }
 
 /// REQ: F-084, SEC-293
@@ -62,9 +74,17 @@ fn hook_084_before_request_payload_has_exactly_the_five_documented_fields() {
     answer_ok(&mut host);
     run_call(&mut host, 1, "title", "hello");
     let payload = payloads(&mut host, BEFORE).remove(0);
-    let mut keys: Vec<&str> = payload.as_object().expect("object").keys().map(String::as_str).collect();
+    let mut keys: Vec<&str> = payload
+        .as_object()
+        .expect("object")
+        .keys()
+        .map(String::as_str)
+        .collect();
     keys.sort();
-    assert_eq!(keys, ["messages_length", "model", "provider", "purpose", "text"]);
+    assert_eq!(
+        keys,
+        ["messages_length", "model", "provider", "purpose", "text"]
+    );
 }
 
 /// REQ: F-084
@@ -85,7 +105,10 @@ fn hook_084_before_request_payload_names_purpose_provider_model_and_text() {
 #[test]
 fn hook_084_replace_rewrites_the_text_that_is_sent() {
     let mut host = server_host();
-    host.extensions().on_hook(BEFORE, HookReply::Replace(json!({"text": "[redacted]"}).to_string()));
+    host.extensions().on_hook(
+        BEFORE,
+        HookReply::Replace(json!({"text": "[redacted]"}).to_string()),
+    );
     answer_ok(&mut host);
     run_call(&mut host, 1, "title", "path /home/arthur/secret");
     assert_eq!(sent_text(&mut host), "[redacted]");
@@ -105,7 +128,8 @@ fn hook_084_pass_sends_the_text_unchanged() {
 #[test]
 fn hook_084_refuse_sends_nothing_and_fails_the_call() {
     let mut host = server_host();
-    host.extensions().on_hook(BEFORE, HookReply::Refuse("private text".to_string()));
+    host.extensions()
+        .on_hook(BEFORE, HookReply::Refuse("private text".to_string()));
     answer_ok(&mut host);
     run_call(&mut host, 1, "title", "hello");
     assert!(host.http().calls().is_empty());
@@ -118,7 +142,8 @@ fn hook_084_refuse_sends_nothing_and_fails_the_call() {
 #[test]
 fn hook_084_an_answer_reply_is_not_allowed_in_transform_mode_and_counts_as_pass() {
     let mut host = server_host();
-    host.extensions().on_hook(BEFORE, HookReply::Answer("{}".to_string()));
+    host.extensions()
+        .on_hook(BEFORE, HookReply::Answer("{}".to_string()));
     answer_ok(&mut host);
     run_call(&mut host, 1, "title", "hello");
     assert_eq!(sent_text(&mut host), "hello");
@@ -139,8 +164,14 @@ fn hook_084_a_trapping_handler_counts_as_pass() {
 #[test]
 fn hook_084_each_handler_gets_the_previous_output() {
     let mut host = server_host();
-    host.extensions().on_hook(BEFORE, HookReply::Replace(json!({"text": "step one"}).to_string()));
-    host.extensions().on_hook(BEFORE, HookReply::Replace(json!({"text": "step two"}).to_string()));
+    host.extensions().on_hook(
+        BEFORE,
+        HookReply::Replace(json!({"text": "step one"}).to_string()),
+    );
+    host.extensions().on_hook(
+        BEFORE,
+        HookReply::Replace(json!({"text": "step two"}).to_string()),
+    );
     answer_ok(&mut host);
     run_call(&mut host, 1, "title", "start");
     let seen = payloads(&mut host, BEFORE);
@@ -158,9 +189,24 @@ fn hook_084_after_response_runs_once_with_the_six_documented_fields() {
     run_call(&mut host, 1, "title", "hello");
     let seen = payloads(&mut host, AFTER);
     assert_eq!(seen.len(), 1);
-    let mut keys: Vec<&str> = seen[0].as_object().expect("object").keys().map(String::as_str).collect();
+    let mut keys: Vec<&str> = seen[0]
+        .as_object()
+        .expect("object")
+        .keys()
+        .map(String::as_str)
+        .collect();
     keys.sort();
-    assert_eq!(keys, ["input_tokens", "millis", "model", "output_tokens", "provider", "purpose"]);
+    assert_eq!(
+        keys,
+        [
+            "input_tokens",
+            "millis",
+            "model",
+            "output_tokens",
+            "provider",
+            "purpose"
+        ]
+    );
 }
 
 /// REQ: F-084
@@ -181,7 +227,10 @@ fn hook_084_after_response_reports_the_token_counts_of_the_response() {
 #[test]
 fn hook_084_after_response_is_observe_only_so_a_replacement_changes_nothing() {
     let mut host = server_host();
-    host.extensions().on_hook(AFTER, HookReply::Replace(json!({"purpose": "other"}).to_string()));
+    host.extensions().on_hook(
+        AFTER,
+        HookReply::Replace(json!({"purpose": "other"}).to_string()),
+    );
     answer_ok(&mut host);
     run_call(&mut host, 1, "title", "hello");
     let replies = host.inference().provider_replies();
@@ -204,7 +253,11 @@ fn topic_084_request_finished_is_published_once_per_finished_request() {
     let mut host = server_host();
     answer_ok(&mut host);
     run_call(&mut host, 1, "title", "hello");
-    let published: Vec<_> = host.published_topics().into_iter().filter(|(topic, _)| topic == TOPIC).collect();
+    let published: Vec<_> = host
+        .published_topics()
+        .into_iter()
+        .filter(|(topic, _)| topic == TOPIC)
+        .collect();
     assert_eq!(published.len(), 1);
 }
 
@@ -214,9 +267,18 @@ fn topic_084_request_finished_payload_is_purpose_provider_and_millis() {
     let mut host = server_host();
     answer_ok(&mut host);
     run_call(&mut host, 1, "title", "hello");
-    let (_, payload) = host.published_topics().into_iter().find(|(topic, _)| topic == TOPIC).expect("published");
+    let (_, payload) = host
+        .published_topics()
+        .into_iter()
+        .find(|(topic, _)| topic == TOPIC)
+        .expect("published");
     let payload: Value = serde_json::from_str(&payload).expect("JSON");
-    let mut keys: Vec<&str> = payload.as_object().expect("object").keys().map(String::as_str).collect();
+    let mut keys: Vec<&str> = payload
+        .as_object()
+        .expect("object")
+        .keys()
+        .map(String::as_str)
+        .collect();
     keys.sort();
     assert_eq!(keys, ["millis", "provider", "purpose"]);
     assert_eq!(payload["purpose"], "title");
@@ -259,7 +321,11 @@ fn profiles_084_a_contributed_profile_appears_in_the_provider_chooser() {
     let mut shown = false;
     for _ in 0..8 {
         host.key(target.clone(), "right");
-        if host.render(target.clone(), 80, 12).text().contains("LM Studio") {
+        if host
+            .render(target.clone(), 80, 12)
+            .text()
+            .contains("LM Studio")
+        {
             shown = true;
             break;
         }
@@ -277,7 +343,10 @@ fn profiles_084_an_entry_without_a_base_url_is_not_offered() {
     let target = ilium_plugin_sdk::types::ViewTarget::SettingsPage("inference".to_string());
     for _ in 0..8 {
         host.key(target.clone(), "right");
-        assert!(!host.render(target.clone(), 80, 12).text().contains("Broken Profile"));
+        assert!(!host
+            .render(target.clone(), 80, 12)
+            .text()
+            .contains("Broken Profile"));
     }
 }
 

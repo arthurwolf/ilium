@@ -18,7 +18,10 @@ fn port_043_fenced_replies_are_tolerated() {
 /// REQ: PORT:ilium-client/src/inference_test.rs::normalization_bounds_labels
 #[test]
 fn port_041_out_of_bounds_titles_are_not_applied() {
-    for reply in ["", "one two three four five six seven eight nine ten eleven twelve thirteen"] {
+    for reply in [
+        "",
+        "one two three four five six seven eight nine ten eleven twelve thirteen",
+    ] {
         let mut host = activated_server();
         title_for_prompt(&mut host, 3, "Fix the login bug", reply);
         assert!(renames(&host.submitted()).is_empty());

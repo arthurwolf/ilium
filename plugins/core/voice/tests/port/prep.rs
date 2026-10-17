@@ -11,7 +11,11 @@ use crate::common::{configure, enabled_client, f8_grab, key_pressed, key_release
 use crate::host_ext::*;
 
 fn busy() -> PluginError {
-    PluginError { code: ErrorCode::Busy, message: "bank busy".to_string(), retry_after_ms: Some(50) }
+    PluginError {
+        code: ErrorCode::Busy,
+        message: "bank busy".to_string(),
+        retry_after_ms: Some(50),
+    }
 }
 
 fn press_and_release(host: &mut FakeHost) {
@@ -25,11 +29,23 @@ fn press_and_release(host: &mut FakeHost) {
 #[test]
 fn port_024_the_prepared_context_carries_the_original_prompt() {
     let mut host = enabled_client("push_to_talk");
-    configure(&mut host, "custom_prompt", json!("Always answer in French."));
-    assert!(host.realtime().system_prompt().contains("Always answer in French."));
+    configure(
+        &mut host,
+        "custom_prompt",
+        json!("Always answer in French."),
+    );
+    assert!(host
+        .realtime()
+        .system_prompt()
+        .contains("Always answer in French."));
     configure(&mut host, "enabled", json!(false));
     configure(&mut host, "enabled", json!(true));
-    assert!(host.realtime().system_prompt().contains("Always answer in French."), "the prompt survives a restart");
+    assert!(
+        host.realtime()
+            .system_prompt()
+            .contains("Always answer in French."),
+        "the prompt survives a restart"
+    );
 }
 
 /// REQ: PORT:ilium-client/src/voice_preparation.rs::busy_bank_retries_exact_capture_without_recloning_settings_or_recharging_source
@@ -71,7 +87,10 @@ fn port_027_a_deferred_result_is_retried_and_stopping_releases_the_capture() {
     host.settle();
     assert_eq!(host.jobs().list().len(), 2, "one retry of the same request");
     configure(&mut host, "enabled", json!(false));
-    assert!(host.audio().captures().iter().all(|capture| !capture.open) && !host.audio().captures().is_empty());
+    assert!(
+        host.audio().captures().iter().all(|capture| !capture.open)
+            && !host.audio().captures().is_empty()
+    );
 }
 
 /// REQ: PORT:ilium-client/src/voice_preparation.rs::newer_capture_fences_deferred_actual_cpu_original
@@ -97,7 +116,14 @@ fn port_029_a_newer_start_wins_and_nothing_starts_before_the_audio_arrives() {
     let mut host = enabled_client("push_to_talk");
     configure(&mut host, "model", json!("gpt-realtime-mini"));
     configure(&mut host, "model", json!("gpt-realtime"));
-    assert_eq!(host.jobs().list().len(), 0, "preparing a context starts no provider work");
+    assert_eq!(
+        host.jobs().list().len(),
+        0,
+        "preparing a context starts no provider work"
+    );
     assert_eq!(host.audio().captures().len(), 0);
-    assert_eq!(host.kernel_settings().get("voice-control", "model"), Some(json!("gpt-realtime")));
+    assert_eq!(
+        host.kernel_settings().get("voice-control", "model"),
+        Some(json!("gpt-realtime"))
+    );
 }

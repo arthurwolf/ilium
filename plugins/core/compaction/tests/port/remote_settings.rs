@@ -46,12 +46,15 @@ fn rset_defaults_match_the_specification() {
 fn rset_sanitize_clamps_every_range_and_bounds_the_prompt() {
     let host = host();
     let max = host.custom_prompt_max_chars();
-    let high = sanitize(&host, json!({
-        "threshold_percent": 99, "tail_tokens": u64::MAX, "protected_recent_tool_tokens": u64::MAX,
-        "tool_result_chars": u64::MAX, "summarizer_context_tokens": u64::MAX,
-        "pause_timeout_seconds": u64::MAX, "cooldown_minutes": u64::MAX, "keep_backups": u64::MAX,
-        "custom_prompt": "x".repeat(max + 50),
-    }));
+    let high = sanitize(
+        &host,
+        json!({
+            "threshold_percent": 99, "tail_tokens": u64::MAX, "protected_recent_tool_tokens": u64::MAX,
+            "tool_result_chars": u64::MAX, "summarizer_context_tokens": u64::MAX,
+            "pause_timeout_seconds": u64::MAX, "cooldown_minutes": u64::MAX, "keep_backups": u64::MAX,
+            "custom_prompt": "x".repeat(max + 50),
+        }),
+    );
     assert_eq!(high["threshold_percent"], 88);
     assert_eq!(high["tail_tokens"], 100_000);
     assert_eq!(high["protected_recent_tool_tokens"], 200_000);
@@ -61,11 +64,14 @@ fn rset_sanitize_clamps_every_range_and_bounds_the_prompt() {
     assert_eq!(high["cooldown_minutes"], 240);
     assert_eq!(high["keep_backups"], 20);
     assert_eq!(high["custom_prompt"].as_str().unwrap().chars().count(), max);
-    let low = sanitize(&host, json!({
-        "threshold_percent": 0, "tail_tokens": 0, "protected_recent_tool_tokens": 0,
-        "tool_result_chars": 0, "summarizer_context_tokens": 0, "pause_timeout_seconds": 0,
-        "cooldown_minutes": 0, "keep_backups": 0,
-    }));
+    let low = sanitize(
+        &host,
+        json!({
+            "threshold_percent": 0, "tail_tokens": 0, "protected_recent_tool_tokens": 0,
+            "tool_result_chars": 0, "summarizer_context_tokens": 0, "pause_timeout_seconds": 0,
+            "cooldown_minutes": 0, "keep_backups": 0,
+        }),
+    );
     assert_eq!(low["threshold_percent"], 30);
     assert_eq!(low["tail_tokens"], 2_000);
     assert_eq!(low["protected_recent_tool_tokens"], 0);
@@ -80,7 +86,10 @@ fn rset_sanitize_clamps_every_range_and_bounds_the_prompt() {
 #[test]
 fn rset_a_multibyte_prompt_is_cut_on_a_character_boundary_inside_the_transport_bound() {
     let host = host();
-    let cleaned = sanitize(&host, json!({"custom_prompt": "\u{1F980}".repeat(host.custom_prompt_max_chars())}));
+    let cleaned = sanitize(
+        &host,
+        json!({"custom_prompt": "\u{1F980}".repeat(host.custom_prompt_max_chars())}),
+    );
     let prompt = cleaned["custom_prompt"].as_str().unwrap();
     assert!(prompt.len() <= host.custom_prompt_max_serialized_bytes());
     assert!(prompt.chars().all(|c| c == '\u{1F980}'));
@@ -101,9 +110,16 @@ fn rset_an_escape_heavy_prompt_still_fits_the_configuration_transport() {
 #[test]
 fn rset_toggles_flip_and_report_the_change() {
     let mut host = host();
-    for (row, field, start) in [("enabled", "enabled", false), ("automatic", "automatic", false), ("redact_secrets", "redact_secrets", true)] {
+    for (row, field, start) in [
+        ("enabled", "enabled", false),
+        ("automatic", "automatic", false),
+        ("redact_secrets", "redact_secrets", true),
+    ] {
         assert_eq!(host.remote_settings_defaults()[field], start);
-        assert!(host.remote_settings_adjust(row, 0), "{row} reports a change");
+        assert!(
+            host.remote_settings_adjust(row, 0),
+            "{row} reports a change"
+        );
         assert_eq!(host.remote_settings_current()[field], !start);
         assert!(host.remote_settings_adjust(row, -1), "{row} flips back");
         assert_eq!(host.remote_settings_current()[field], start);
@@ -122,12 +138,18 @@ fn rset_threshold_steps_by_one_and_stops_at_its_limits() {
         host.remote_settings_adjust("threshold", 1);
     }
     assert_eq!(host.remote_settings_current()["threshold_percent"], 88);
-    assert!(!host.remote_settings_adjust("threshold", 1), "no change at the top");
+    assert!(
+        !host.remote_settings_adjust("threshold", 1),
+        "no change at the top"
+    );
     for _ in 0..100 {
         host.remote_settings_adjust("threshold", -1);
     }
     assert_eq!(host.remote_settings_current()["threshold_percent"], 30);
-    assert!(!host.remote_settings_adjust("threshold", -1), "no change at the bottom");
+    assert!(
+        !host.remote_settings_adjust("threshold", -1),
+        "no change at the bottom"
+    );
 }
 
 /// REQ: PORT:ilium-client/src/remote_compaction_settings.rs::numeric_rows_walk_their_ladders_and_stop_at_the_ends
@@ -138,9 +160,19 @@ fn rset_numeric_rows_walk_their_ladders_and_stop_at_the_ends() {
         ("pause_timeout", "pause_timeout_seconds", 10u64, 1_800u64),
         ("cooldown", "cooldown_minutes", 1, 240),
         ("tail_tokens", "tail_tokens", 2_000, 100_000),
-        ("protected_tool_tokens", "protected_recent_tool_tokens", 0, 200_000),
+        (
+            "protected_tool_tokens",
+            "protected_recent_tool_tokens",
+            0,
+            200_000,
+        ),
         ("tool_result_chars", "tool_result_chars", 200, 20_000),
-        ("summarizer_context_tokens", "summarizer_context_tokens", 8_000, 900_000),
+        (
+            "summarizer_context_tokens",
+            "summarizer_context_tokens",
+            8_000,
+            900_000,
+        ),
         ("keep_backups", "keep_backups", 1, 20),
     ] {
         let start = host.remote_settings_current()[field].as_u64().unwrap();
@@ -148,17 +180,35 @@ fn rset_numeric_rows_walk_their_ladders_and_stop_at_the_ends() {
         let up = host.remote_settings_current()[field].as_u64().unwrap();
         assert!(up > start, "{row}");
         assert!(host.remote_settings_adjust(row, -1), "{row} shrinks");
-        assert_eq!(host.remote_settings_current()[field].as_u64().unwrap(), start, "{row}");
+        assert_eq!(
+            host.remote_settings_current()[field].as_u64().unwrap(),
+            start,
+            "{row}"
+        );
         for _ in 0..200 {
             host.remote_settings_adjust(row, 1);
         }
-        assert_eq!(host.remote_settings_current()[field].as_u64().unwrap(), high, "{row} top");
-        assert!(!host.remote_settings_adjust(row, 1), "{row} stops at the top");
+        assert_eq!(
+            host.remote_settings_current()[field].as_u64().unwrap(),
+            high,
+            "{row} top"
+        );
+        assert!(
+            !host.remote_settings_adjust(row, 1),
+            "{row} stops at the top"
+        );
         for _ in 0..200 {
             host.remote_settings_adjust(row, -1);
         }
-        assert_eq!(host.remote_settings_current()[field].as_u64().unwrap(), low, "{row} bottom");
-        assert!(!host.remote_settings_adjust(row, -1), "{row} stops at the bottom");
+        assert_eq!(
+            host.remote_settings_current()[field].as_u64().unwrap(),
+            low,
+            "{row} bottom"
+        );
+        assert!(
+            !host.remote_settings_adjust(row, -1),
+            "{row} stops at the bottom"
+        );
     }
 }
 
@@ -179,23 +229,50 @@ fn rset_an_off_ladder_value_snaps_in_the_requested_direction() {
 fn rset_technique_rows_cycle_through_every_technique_independently() {
     let mut host = host();
     let all = host.technique_ids();
-    for (row, field) in [("technique:claude", "claude_technique"), ("technique:codex", "codex_technique"), ("technique:other", "other_technique")] {
-        let others: Vec<(String, Value)> = ["claude_technique", "codex_technique", "other_technique"]
+    for (row, field) in [
+        ("technique:claude", "claude_technique"),
+        ("technique:codex", "codex_technique"),
+        ("technique:other", "other_technique"),
+    ] {
+        let others: Vec<(String, Value)> =
+            ["claude_technique", "codex_technique", "other_technique"]
+                .iter()
+                .filter(|name| **name != field)
+                .map(|name| {
+                    (
+                        name.to_string(),
+                        host.remote_settings_current()[*name].clone(),
+                    )
+                })
+                .collect();
+        let start = host.remote_settings_current()[field]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let start_index = all
             .iter()
-            .filter(|name| **name != field)
-            .map(|name| (name.to_string(), host.remote_settings_current()[*name].clone()))
-            .collect();
-        let start = host.remote_settings_current()[field].as_str().unwrap().to_string();
-        let start_index = all.iter().position(|id| *id == start).expect("known technique");
+            .position(|id| *id == start)
+            .expect("known technique");
         for step in 1..=all.len() {
             assert!(host.remote_settings_adjust(row, 1));
             let expected = &all[(start_index + step) % all.len()];
-            assert_eq!(host.remote_settings_current()[field], json!(expected), "{row} step {step}");
+            assert_eq!(
+                host.remote_settings_current()[field],
+                json!(expected),
+                "{row} step {step}"
+            );
         }
         assert!(host.remote_settings_adjust(row, -1));
-        assert_eq!(host.remote_settings_current()[field], json!(all[(start_index + all.len() - 1) % all.len()]));
+        assert_eq!(
+            host.remote_settings_current()[field],
+            json!(all[(start_index + all.len() - 1) % all.len()])
+        );
         for (name, value) in others {
-            assert_eq!(host.remote_settings_current()[&name], value, "{row} left {name} alone");
+            assert_eq!(
+                host.remote_settings_current()[&name],
+                value,
+                "{row} left {name} alone"
+            );
         }
         host.remote_settings_set(json!({ field: start }));
     }
@@ -206,22 +283,52 @@ fn rset_technique_rows_cycle_through_every_technique_independently() {
 fn rset_technique_for_routes_each_agent_class_to_its_row() {
     let host = host();
     let settings = json!({"claude_technique": "opencode", "codex_technique": "custom", "other_technique": "ilium"});
-    assert_eq!(host.remote_settings_technique_for(&settings, "claude"), "opencode");
-    assert_eq!(host.remote_settings_technique_for(&settings, "codex"), "custom");
-    assert_eq!(host.remote_settings_technique_for(&settings, "antigravity"), "ilium");
-    assert_eq!(host.remote_settings_technique_for(&settings, "other"), "ilium");
+    assert_eq!(
+        host.remote_settings_technique_for(&settings, "claude"),
+        "opencode"
+    );
+    assert_eq!(
+        host.remote_settings_technique_for(&settings, "codex"),
+        "custom"
+    );
+    assert_eq!(
+        host.remote_settings_technique_for(&settings, "antigravity"),
+        "ilium"
+    );
+    assert_eq!(
+        host.remote_settings_technique_for(&settings, "other"),
+        "ilium"
+    );
 }
 
 /// REQ: PORT:ilium-client/src/remote_compaction_settings.rs::the_banner_row_dismisses_once_and_never_returns
 #[test]
 fn rset_the_banner_row_dismisses_once_and_never_returns() {
     let mut host = host();
-    assert_eq!(host.remote_settings_row_ids().first().map(String::as_str), Some("privacy_banner"));
-    assert!(host.remote_settings_adjust("privacy_banner", 0), "dismissing reports a change");
-    assert_eq!(host.remote_settings_current()["privacy_banner_dismissed"], true);
-    assert_eq!(host.remote_settings_row_ids().first().map(String::as_str), Some("enabled"));
-    assert!(!host.remote_settings_row_ids().iter().any(|id| id == "privacy_banner"));
-    assert!(!host.remote_settings_adjust("privacy_banner", 0), "never returns");
+    assert_eq!(
+        host.remote_settings_row_ids().first().map(String::as_str),
+        Some("privacy_banner")
+    );
+    assert!(
+        host.remote_settings_adjust("privacy_banner", 0),
+        "dismissing reports a change"
+    );
+    assert_eq!(
+        host.remote_settings_current()["privacy_banner_dismissed"],
+        true
+    );
+    assert_eq!(
+        host.remote_settings_row_ids().first().map(String::as_str),
+        Some("enabled")
+    );
+    assert!(!host
+        .remote_settings_row_ids()
+        .iter()
+        .any(|id| id == "privacy_banner"));
+    assert!(
+        !host.remote_settings_adjust("privacy_banner", 0),
+        "never returns"
+    );
 }
 
 /// REQ: PORT:ilium-client/src/remote_compaction_settings.rs::rows_cover_every_help_topic_exactly_once
@@ -268,9 +375,15 @@ fn rset_options_for_maps_every_field_per_agent() {
     assert_eq!(claude["tool_result_chars"], 500);
     assert_eq!(claude["redact_secrets"], false);
     assert_eq!(claude["summarizer_context_tokens"], 64000);
-    assert_eq!(claude["summarizer_max_output_tokens"], host.default_summarizer_max_output_tokens());
+    assert_eq!(
+        claude["summarizer_max_output_tokens"],
+        host.default_summarizer_max_output_tokens()
+    );
     assert_eq!(claude["keep_backups"], 7);
-    assert_eq!(host.remote_settings_options_for(&settings, "codex")["technique"], "custom");
+    assert_eq!(
+        host.remote_settings_options_for(&settings, "codex")["technique"],
+        "custom"
+    );
     let defaults = host.remote_settings_options_for(&host.remote_settings_defaults(), "claude");
     assert!(defaults["custom_prompt"].is_null());
 }
@@ -280,7 +393,13 @@ fn rset_options_for_maps_every_field_per_agent() {
 fn rset_every_technique_has_a_description_and_provenance() {
     let host = host();
     for technique in host.technique_ids() {
-        assert!(!host.technique_description(&technique).is_empty(), "{technique}");
-        assert!(host.technique_fidelity(&technique).starts_with("Prompt:"), "{technique}");
+        assert!(
+            !host.technique_description(&technique).is_empty(),
+            "{technique}"
+        );
+        assert!(
+            host.technique_fidelity(&technique).starts_with("Prompt:"),
+            "{technique}"
+        );
     }
 }

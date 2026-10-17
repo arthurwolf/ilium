@@ -150,7 +150,11 @@ impl StorageHandle {
     }
 
     /// `storage.write-batch`; `None` removes a key.
-    pub fn write_batch(&self, bucket: Bucket, entries: &[(String, Option<Vec<u8>>)]) -> Result<(), PluginError> {
+    pub fn write_batch(
+        &self,
+        bucket: Bucket,
+        entries: &[(String, Option<Vec<u8>>)],
+    ) -> Result<(), PluginError> {
         unimplemented!("host::testing::migration::StorageHandle::write_batch")
     }
 

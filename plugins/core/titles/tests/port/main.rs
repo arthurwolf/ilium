@@ -1,12 +1,13 @@
 //! Port twins of the original titles tests (lane core-agents, part ports).
 
-mod common;
 mod app;
+mod common;
 mod handlers;
 mod inference_test;
 mod naming;
 mod naming_title_tmux;
 mod project_naming;
+mod remaining;
 mod restructure;
 mod restructure_semantic_tests;
 mod session_naming;
@@ -20,4 +21,3 @@ mod title_eligibility;
 mod title_inference;
 mod title_safety;
 mod title_safety_tests;
-mod remaining;

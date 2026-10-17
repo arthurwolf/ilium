@@ -3,10 +3,14 @@
 
 use ilium_plugin_sdk::types::{ErrorCode, PluginError, ViewTarget};
 
-use crate::common::{BOARD_PATH, SAMPLE_BOARD, board_file, board_host, press, sections};
+use crate::common::{board_file, board_host, press, sections, BOARD_PATH, SAMPLE_BOARD};
 
 fn conflict() -> PluginError {
-    PluginError { code: ErrorCode::Conflict, message: "revision changed".to_string(), retry_after_ms: None }
+    PluginError {
+        code: ErrorCode::Conflict,
+        message: "revision changed".to_string(),
+        retry_after_ms: None,
+    }
 }
 
 /// REQ: PORT:ilium-client/src/filesystem/app.rs::filesystem_shutdown_keeps_accepted_board_write_until_disk_readback
@@ -28,7 +32,11 @@ fn port_fs_a_conflict_keeps_the_foreign_file_and_a_later_edit_still_works() {
     }
     press(&mut host, node, "j");
     press(&mut host, node, "shift+right");
-    assert_eq!(board_file(&mut host), SAMPLE_BOARD, "three conflicts leave the file untouched");
+    assert_eq!(
+        board_file(&mut host),
+        SAMPLE_BOARD,
+        "three conflicts leave the file untouched"
+    );
     press(&mut host, node, "shift+right");
     assert_eq!(sections(&board_file(&mut host))[1].1[1], "Write docs");
 }
@@ -42,7 +50,10 @@ fn port_fs_repeated_reloads_show_the_file_as_it_is_and_never_rewrite_it() {
     }
     assert_eq!(board_file(&mut host), SAMPLE_BOARD);
     let text = crate::common::draw(&mut host, node, 100, 20).text();
-    assert!(text.contains("To do (2)") && text.contains("Doing (1)"), "{text}");
+    assert!(
+        text.contains("To do (2)") && text.contains("Doing (1)"),
+        "{text}"
+    );
 }
 
 /// REQ: PORT:ilium-client/src/mouse.rs::close_confirmation_buttons_preserve_cancel_and_confirm_keyboard_behavior
@@ -51,7 +62,11 @@ fn port_mouse_delete_asks_for_confirmation_and_escape_cancels_it() {
     let (mut host, node) = board_host(SAMPLE_BOARD);
     press(&mut host, node, "j");
     press(&mut host, node, "d");
-    assert_eq!(board_file(&mut host), SAMPLE_BOARD, "nothing changes before the confirmation");
+    assert_eq!(
+        board_file(&mut host),
+        SAMPLE_BOARD,
+        "nothing changes before the confirmation"
+    );
     press(&mut host, node, "escape");
     assert_eq!(board_file(&mut host), SAMPLE_BOARD);
 }
@@ -60,7 +75,8 @@ fn port_mouse_delete_asks_for_confirmation_and_escape_cancels_it() {
 #[test]
 fn port_server_an_external_file_change_redraws_the_board_without_any_key_input() {
     let (mut host, node) = board_host(SAMPLE_BOARD);
-    host.fs().write(BOARD_PATH, b"# Board\n\n## To do\n- Brand new card\n");
+    host.fs()
+        .write(BOARD_PATH, b"# Board\n\n## To do\n- Brand new card\n");
     host.settle();
     let text = crate::common::draw(&mut host, node, 80, 20).text();
     assert!(text.contains("Brand new card"), "{text}");

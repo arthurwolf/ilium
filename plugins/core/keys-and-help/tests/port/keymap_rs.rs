@@ -8,14 +8,25 @@ use crate::common::*;
 
 fn accepted_prefix(text: &str) -> bool {
     let mut host = column_host(Column::Tmux);
-    host.send_action(keyboard_page(), "shortcut_base", ilium_plugin_sdk::prelude::ActionKind::Changed, ilium_plugin_sdk::prelude::ActionValue::Text(text.to_string()));
+    host.send_action(
+        keyboard_page(),
+        "shortcut_base",
+        ilium_plugin_sdk::prelude::ActionKind::Changed,
+        ilium_plugin_sdk::prelude::ActionValue::Text(text.to_string()),
+    );
     host.settle();
     host.kernel_settings().writes().len() == 1
 }
 
 fn prefix_footer(base: &str) -> String {
-    let mut host = host_with_tab(json!({"shortcut_base": base, "navigation_shortcut_base": "ctrl+b", "preset": "custom"}));
-    set_keymap(&mut host, vec![binding("Panes", "Split vertically", "prefix+%", true)], &[("prefix+%", "Prefix  %")]);
+    let mut host = host_with_tab(
+        json!({"shortcut_base": base, "navigation_shortcut_base": "ctrl+b", "preset": "custom"}),
+    );
+    set_keymap(
+        &mut host,
+        vec![binding("Panes", "Split vertically", "prefix+%", true)],
+        &[("prefix+%", "Prefix  %")],
+    );
     render_text(&mut host, keys_panel(), 120, 14)
 }
 
@@ -72,9 +83,14 @@ fn keymap_port_shortcut_base_covers_all_26_letters_and_both_ends_display() {
 #[test]
 fn keymap_port_every_allowed_letter_has_specific_advice_on_the_keyboard_tab() {
     for (letter, advice) in ADVICE {
-        let mut host = host_with_tab(json!({"shortcut_base": format!("ctrl+{letter}"), "navigation_shortcut_base": "ctrl+b", "preset": "custom"}));
+        let mut host = host_with_tab(
+            json!({"shortcut_base": format!("ctrl+{letter}"), "navigation_shortcut_base": "ctrl+b", "preset": "custom"}),
+        );
         let text = render_text(&mut host, keyboard_page(), 160, 60);
-        assert!(text.contains(advice), "advice of Ctrl+{letter} missing: {text}");
+        assert!(
+            text.contains(advice),
+            "advice of Ctrl+{letter} missing: {text}"
+        );
     }
 }
 
@@ -117,7 +133,11 @@ fn keymap_port_known_letters_are_rows_of_their_actions() {
     for (name, key) in [("detach", "d"), ("new_terminal", "c"), ("run_command", "!")] {
         let (row, _) = screen.find(name).unwrap_or_else(|| panic!("{name} row"));
         let line = screen.row(row);
-        assert!(line.trim_end_matches(|c: char| c == ' ' || c == '│').contains(key), "{name}: {line}");
+        assert!(
+            line.trim_end_matches(|c: char| c == ' ' || c == '│')
+                .contains(key),
+            "{name}: {line}"
+        );
     }
 }
 
@@ -160,7 +180,10 @@ fn keymap_port_a_key_owned_by_another_action_is_refused_and_the_owner_is_named()
     let mut host = tmux_host();
     set_keymap(
         &mut host,
-        vec![binding("Keyboard", "New terminal", "prefix+c", true), binding("Keyboard", "Quit", "prefix+&", true)],
+        vec![
+            binding("Keyboard", "New terminal", "prefix+c", true),
+            binding("Keyboard", "Quit", "prefix+&", true),
+        ],
         &[("prefix+c", "c"), ("prefix+&", "&")],
     );
     activate(&mut host, "Quit");
@@ -193,7 +216,11 @@ fn keymap_port_default_keys_follow_tmux_for_navigation() {
     ] {
         let (row, _) = screen.find(name).unwrap_or_else(|| panic!("{name} row"));
         let line = screen.row(row);
-        assert!(line.trim_end_matches(|c: char| c == ' ' || c == '│').ends_with(key), "{name}: {line}");
+        assert!(
+            line.trim_end_matches(|c: char| c == ' ' || c == '│')
+                .ends_with(key),
+            "{name}: {line}"
+        );
     }
 }
 
@@ -226,14 +253,24 @@ fn keymap_port_presets_have_their_documented_prefixes_and_no_collisions() {
     assert!(render_text(&mut screen, keyboard_page(), 80, 60).contains("Ctrl+A"));
     let mut tmux = column_host(Column::Tmux);
     assert!(render_text(&mut tmux, keyboard_page(), 80, 60).contains("Ctrl+B"));
-    let close = action_rows().into_iter().find(|row| row.name == "close_pane").expect("close_pane");
+    let close = action_rows()
+        .into_iter()
+        .find(|row| row.name == "close_pane")
+        .expect("close_pane");
     assert_eq!(close.tmux, "x");
 }
 
 fn mnemonic_words_of_row(text: &str, name: &str, key: &str) -> Vec<String> {
-    let line = text.lines().find(|line| line.contains(name)).unwrap_or("").replace(name, "");
+    let line = text
+        .lines()
+        .find(|line| line.contains(name))
+        .unwrap_or("")
+        .replace(name, "");
     let _ = key;
-    line.split(|c: char| !c.is_alphabetic()).filter(|word| word.len() >= 2).map(str::to_string).collect()
+    line.split(|c: char| !c.is_alphabetic())
+        .filter(|word| word.len() >= 2)
+        .map(str::to_string)
+        .collect()
 }
 
 /// REQ: PORT:ilium-client/src/keymap.rs::mnemonic_words_start_with_their_registered_letters
@@ -242,10 +279,19 @@ fn keymap_port_mnemonic_words_start_with_the_key_they_explain() {
     let mut host = column_host(Column::Tmux);
     let text = render_text(&mut host, keyboard_page(), 160, 80);
     for row in action_rows() {
-        let Some(letter) = row.tmux.chars().next().filter(|c| row.tmux.len() == 1 && c.is_ascii_alphabetic()) else { continue };
+        let Some(letter) = row
+            .tmux
+            .chars()
+            .next()
+            .filter(|c| row.tmux.len() == 1 && c.is_ascii_alphabetic())
+        else {
+            continue;
+        };
         let words = mnemonic_words_of_row(&text, &row.name, &row.tmux);
         assert!(
-            words.iter().any(|word| word.to_ascii_lowercase().starts_with(letter.to_ascii_lowercase())),
+            words.iter().any(|word| word
+                .to_ascii_lowercase()
+                .starts_with(letter.to_ascii_lowercase())),
             "{}: no mnemonic word for {letter} in {words:?}",
             row.name
         );
@@ -260,13 +306,21 @@ fn keymap_port_documented_preset_letters_have_mnemonics_except_the_unmnemonicabl
         let text = render_text(&mut host, keyboard_page(), 160, 80);
         for row in action_rows() {
             let key = column.key(&row).to_string();
-            let Some(letter) = key.chars().next().filter(|c| key.len() == 1 && c.is_ascii_alphabetic()) else { continue };
+            let Some(letter) = key
+                .chars()
+                .next()
+                .filter(|c| key.len() == 1 && c.is_ascii_alphabetic())
+            else {
+                continue;
+            };
             if row.name == "focus_pane_up" && letter.eq_ignore_ascii_case(&'k') {
                 continue;
             }
             let words = mnemonic_words_of_row(&text, &row.name, &key);
             assert!(
-                words.iter().any(|word| word.to_ascii_lowercase().starts_with(letter.to_ascii_lowercase())),
+                words.iter().any(|word| word
+                    .to_ascii_lowercase()
+                    .starts_with(letter.to_ascii_lowercase())),
                 "{} on {letter} needs a mnemonic: {words:?}",
                 row.name
             );

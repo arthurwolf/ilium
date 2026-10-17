@@ -31,5 +31,8 @@ pub fn real_cli_env() -> CliEnv {
 /// Runs `ilium plugin <args...>`, prints JSONL to stdout and text to stderr, returns the exit code.
 pub fn run_plugin_command(args: &[String]) -> i32 {
     let output = ilium_plugin_host::cli::run(args, &real_cli_env());
-    unimplemented!("cli::plugin_cmd::run_plugin_command: print output ({})", output.exit_code)
+    unimplemented!(
+        "cli::plugin_cmd::run_plugin_command: print output ({})",
+        output.exit_code
+    )
 }

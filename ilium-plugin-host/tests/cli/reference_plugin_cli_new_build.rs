@@ -19,7 +19,17 @@ fn dev_040_missing_id_is_a_usage_error() {
     let root = scratch();
     let env = env(root.path());
     let dir = root.path().join("p");
-    let output = run(&env, &["new", dir.to_str().expect("utf8"), "--lang", "rust", "--template", "server"]);
+    let output = run(
+        &env,
+        &[
+            "new",
+            dir.to_str().expect("utf8"),
+            "--lang",
+            "rust",
+            "--template",
+            "server",
+        ],
+    );
     assert_eq!(code(&output).as_deref(), Some("usage.missing-argument"));
     assert_eq!(output.exit_code, 2);
 }
@@ -30,7 +40,17 @@ fn dev_040_missing_lang_is_a_usage_error() {
     let root = scratch();
     let env = env(root.path());
     let dir = root.path().join("p");
-    let output = run(&env, &["new", dir.to_str().expect("utf8"), "--id", "acme.p", "--template", "server"]);
+    let output = run(
+        &env,
+        &[
+            "new",
+            dir.to_str().expect("utf8"),
+            "--id",
+            "acme.p",
+            "--template",
+            "server",
+        ],
+    );
     assert_eq!(code(&output).as_deref(), Some("usage.missing-argument"));
 }
 
@@ -40,7 +60,10 @@ fn dev_040_template_or_side_is_required() {
     let root = scratch();
     let env = env(root.path());
     let dir = root.path().join("p");
-    let output = run(&env, &new_args(dir.to_str().expect("utf8"), "acme.p", "rust", &[]));
+    let output = run(
+        &env,
+        &new_args(dir.to_str().expect("utf8"), "acme.p", "rust", &[]),
+    );
     assert_eq!(code(&output).as_deref(), Some("usage.missing-argument"));
     assert!(!dir.exists());
 }
@@ -51,7 +74,15 @@ fn dev_040_side_alone_names_the_template() {
     let root = scratch();
     let env = env(root.path());
     let dir = root.path().join("p");
-    let output = run(&env, &new_args(dir.to_str().expect("utf8"), "acme.p", "rust", &["--side", "client"]));
+    let output = run(
+        &env,
+        &new_args(
+            dir.to_str().expect("utf8"),
+            "acme.p",
+            "rust",
+            &["--side", "client"],
+        ),
+    );
     assert_eq!(output.exit_code, 0);
     assert_eq!(read_json(&dir.join("manifest.json"))["id"], "acme.p");
 }
@@ -62,7 +93,15 @@ fn dev_040_template_and_side_naming_the_same_template_are_accepted() {
     let root = scratch();
     let env = env(root.path());
     let dir = root.path().join("p");
-    let output = run(&env, &new_args(dir.to_str().expect("utf8"), "acme.p", "rust", &["--template", "server", "--side", "server"]));
+    let output = run(
+        &env,
+        &new_args(
+            dir.to_str().expect("utf8"),
+            "acme.p",
+            "rust",
+            &["--template", "server", "--side", "server"],
+        ),
+    );
     assert_eq!(output.exit_code, 0);
 }
 
@@ -72,7 +111,15 @@ fn dev_040_template_and_side_naming_different_templates_conflict() {
     let root = scratch();
     let env = env(root.path());
     let dir = root.path().join("p");
-    let output = run(&env, &new_args(dir.to_str().expect("utf8"), "acme.p", "rust", &["--template", "server", "--side", "client"]));
+    let output = run(
+        &env,
+        &new_args(
+            dir.to_str().expect("utf8"),
+            "acme.p",
+            "rust",
+            &["--template", "server", "--side", "client"],
+        ),
+    );
     assert_eq!(code(&output).as_deref(), Some("usage.conflict"));
     assert_eq!(output.exit_code, 2);
 }
@@ -85,7 +132,15 @@ fn dev_041_non_empty_dir_fails_dir_not_empty() {
     let dir = root.path().join("p");
     std::fs::create_dir_all(&dir).expect("create");
     std::fs::write(dir.join("keep.txt"), "x").expect("write");
-    let output = run(&env, &new_args(dir.to_str().expect("utf8"), "acme.p", "rust", &["--template", "server"]));
+    let output = run(
+        &env,
+        &new_args(
+            dir.to_str().expect("utf8"),
+            "acme.p",
+            "rust",
+            &["--template", "server"],
+        ),
+    );
     assert_eq!(code(&output).as_deref(), Some("new.dir-not-empty"));
     assert_eq!(tree_listing(&dir), ["keep.txt"]);
 }
@@ -97,7 +152,15 @@ fn dev_041_an_existing_empty_dir_is_fine() {
     let env = env(root.path());
     let dir = root.path().join("p");
     std::fs::create_dir_all(&dir).expect("create");
-    let output = run(&env, &new_args(dir.to_str().expect("utf8"), "acme.p", "rust", &["--template", "server"]));
+    let output = run(
+        &env,
+        &new_args(
+            dir.to_str().expect("utf8"),
+            "acme.p",
+            "rust",
+            &["--template", "server"],
+        ),
+    );
     assert_eq!(output.exit_code, 0);
 }
 
@@ -110,10 +173,24 @@ fn dev_041_force_overwrites_template_files_and_keeps_others() {
     std::fs::create_dir_all(&dir).expect("create");
     std::fs::write(dir.join("README.md"), "mine").expect("write");
     std::fs::write(dir.join("notes.txt"), "mine too").expect("write");
-    let output = run(&env, &new_args(dir.to_str().expect("utf8"), "acme.p", "rust", &["--template", "server", "--force"]));
+    let output = run(
+        &env,
+        &new_args(
+            dir.to_str().expect("utf8"),
+            "acme.p",
+            "rust",
+            &["--template", "server", "--force"],
+        ),
+    );
     assert_eq!(output.exit_code, 0);
-    assert_ne!(std::fs::read_to_string(dir.join("README.md")).expect("read"), "mine");
-    assert_eq!(std::fs::read_to_string(dir.join("notes.txt")).expect("read"), "mine too");
+    assert_ne!(
+        std::fs::read_to_string(dir.join("README.md")).expect("read"),
+        "mine"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.join("notes.txt")).expect("read"),
+        "mine too"
+    );
 }
 
 /// REQ: DEV-042
@@ -121,9 +198,19 @@ fn dev_041_force_overwrites_template_files_and_keeps_others() {
 fn dev_042_ids_that_do_not_match_the_pattern_are_invalid() {
     let root = scratch();
     let env = env(root.path());
-    for bad in ["Acme.p", "acme", "acme..p", "acme.p_q", ".acme.p", "acme.p.", "acme. p"] {
+    for bad in [
+        "Acme.p", "acme", "acme..p", "acme.p_q", ".acme.p", "acme.p.", "acme. p",
+    ] {
         let dir = root.path().join("p");
-        let output = run(&env, &new_args(dir.to_str().expect("utf8"), bad, "rust", &["--template", "server"]));
+        let output = run(
+            &env,
+            &new_args(
+                dir.to_str().expect("utf8"),
+                bad,
+                "rust",
+                &["--template", "server"],
+            ),
+        );
         assert_eq!(code(&output).as_deref(), Some("new.id-invalid"), "{bad}");
         assert!(!dir.exists(), "{bad}");
     }
@@ -136,7 +223,15 @@ fn dev_042_ids_that_match_the_pattern_are_accepted() {
     let env = env(root.path());
     for (index, good) in ["acme.p", "a-b.c-d.e9", "x1.y2"].iter().enumerate() {
         let dir = root.path().join(format!("p{index}"));
-        let output = run(&env, &new_args(dir.to_str().expect("utf8"), good, "rust", &["--template", "server"]));
+        let output = run(
+            &env,
+            &new_args(
+                dir.to_str().expect("utf8"),
+                good,
+                "rust",
+                &["--template", "server"],
+            ),
+        );
         assert_eq!(output.exit_code, 0, "{good}");
     }
 }
@@ -147,7 +242,15 @@ fn dev_042_ilium_ids_are_reserved_without_first_party() {
     let root = scratch();
     let env = env(root.path());
     let dir = root.path().join("p");
-    let output = run(&env, &new_args(dir.to_str().expect("utf8"), "ilium.badges", "rust", &["--template", "server"]));
+    let output = run(
+        &env,
+        &new_args(
+            dir.to_str().expect("utf8"),
+            "ilium.badges",
+            "rust",
+            &["--template", "server"],
+        ),
+    );
     assert_eq!(code(&output).as_deref(), Some("new.id-reserved"));
 }
 
@@ -157,7 +260,15 @@ fn dev_042_first_party_allows_an_ilium_id() {
     let root = scratch();
     let env = env(root.path());
     let dir = root.path().join("p");
-    let output = run(&env, &new_args(dir.to_str().expect("utf8"), "ilium.badges", "rust", &["--template", "core-style", "--first-party"]));
+    let output = run(
+        &env,
+        &new_args(
+            dir.to_str().expect("utf8"),
+            "ilium.badges",
+            "rust",
+            &["--template", "core-style", "--first-party"],
+        ),
+    );
     assert_eq!(output.exit_code, 0);
 }
 
@@ -167,7 +278,15 @@ fn dev_043_unknown_template_fails_before_writing_any_file() {
     let root = scratch();
     let env = env(root.path());
     let dir = root.path().join("p");
-    let output = run(&env, &new_args(dir.to_str().expect("utf8"), "acme.p", "rust", &["--template", "banana"]));
+    let output = run(
+        &env,
+        &new_args(
+            dir.to_str().expect("utf8"),
+            "acme.p",
+            "rust",
+            &["--template", "banana"],
+        ),
+    );
     assert_eq!(code(&output).as_deref(), Some("new.template-unknown"));
     assert!(!dir.exists());
 }
@@ -177,10 +296,33 @@ fn dev_043_unknown_template_fails_before_writing_any_file() {
 fn dev_043_every_listed_template_is_known() {
     let root = scratch();
     let env = env(root.path());
-    for (index, template) in ["server", "client", "both", "scene", "pane-kind", "service-provider", "extension"].iter().enumerate() {
+    for (index, template) in [
+        "server",
+        "client",
+        "both",
+        "scene",
+        "pane-kind",
+        "service-provider",
+        "extension",
+    ]
+    .iter()
+    .enumerate()
+    {
         let dir = root.path().join(format!("t{index}"));
-        let output = run(&env, &new_args(dir.to_str().expect("utf8"), "acme.t", "rust", &["--template", template]));
-        assert_ne!(code(&output).as_deref(), Some("new.template-unknown"), "{template}");
+        let output = run(
+            &env,
+            &new_args(
+                dir.to_str().expect("utf8"),
+                "acme.t",
+                "rust",
+                &["--template", template],
+            ),
+        );
+        assert_ne!(
+            code(&output).as_deref(),
+            Some("new.template-unknown"),
+            "{template}"
+        );
     }
 }
 
@@ -190,7 +332,15 @@ fn dev_044_one_inventory_progress_per_written_file_with_the_relative_path() {
     let root = scratch();
     let env = env(root.path());
     let dir = root.path().join("p");
-    let output = run(&env, &new_args(dir.to_str().expect("utf8"), "acme.p", "rust", &["--template", "server"]));
+    let output = run(
+        &env,
+        &new_args(
+            dir.to_str().expect("utf8"),
+            "acme.p",
+            "rust",
+            &["--template", "server"],
+        ),
+    );
     let mut announced: Vec<String> = recs(&output, "progress")
         .iter()
         .filter(|r| r["step"] == "inventory")
@@ -206,7 +356,15 @@ fn dev_044_no_artifact_record() {
     let root = scratch();
     let env = env(root.path());
     let dir = root.path().join("p");
-    let output = run(&env, &new_args(dir.to_str().expect("utf8"), "acme.p", "rust", &["--template", "server"]));
+    let output = run(
+        &env,
+        &new_args(
+            dir.to_str().expect("utf8"),
+            "acme.p",
+            "rust",
+            &["--template", "server"],
+        ),
+    );
     assert!(recs(&output, "artifact").is_empty());
 }
 
@@ -221,7 +379,15 @@ fn dev_044_needs_no_network_and_no_toolchain() {
     let mut env = env(root.path()).with_probe(Arc::new(probe));
     env.fetcher = fetcher.clone();
     let dir = root.path().join("p");
-    let output = run(&env, &new_args(dir.to_str().expect("utf8"), "acme.p", "rust", &["--template", "server"]));
+    let output = run(
+        &env,
+        &new_args(
+            dir.to_str().expect("utf8"),
+            "acme.p",
+            "rust",
+            &["--template", "server"],
+        ),
+    );
     assert_eq!(output.exit_code, 0);
     assert_eq!(fetcher.calls.load(Ordering::SeqCst), 0);
 }
@@ -232,7 +398,12 @@ fn dev_045_fresh_rust_project_passes_every_gate_without_warnings() {
     let root = scratch();
     let env = env(root.path()).with_runner(ScriptedRunner::passing());
     let dir = server_project(&env, root.path());
-    for args in [&["build"][..], &["check", "--json"], &["lint", "--json", "--deny", "warnings"], &["test"]] {
+    for args in [
+        &["build"][..],
+        &["check", "--json"],
+        &["lint", "--json", "--deny", "warnings"],
+        &["test"],
+    ] {
         let output = run_in(&env, &dir, args);
         assert_eq!(output.exit_code, 0, "{args:?}: {:?}", output.stdout_jsonl);
         assert_eq!(recs(&output, "summary")[0]["warnings"], 0, "{args:?}");
@@ -245,7 +416,12 @@ fn dev_045_fresh_typescript_project_passes_every_gate_without_warnings() {
     let root = scratch();
     let env = env(root.path()).with_runner(ScriptedRunner::passing());
     let dir = new_project(&env, root.path(), "tsdemo", "server", "typescript");
-    for args in [&["build"][..], &["check", "--json"], &["lint", "--json", "--deny", "warnings"], &["test"]] {
+    for args in [
+        &["build"][..],
+        &["check", "--json"],
+        &["lint", "--json", "--deny", "warnings"],
+        &["test"],
+    ] {
         let output = run_in(&env, &dir, args);
         assert_eq!(output.exit_code, 0, "{args:?}: {:?}", output.stdout_jsonl);
         assert_eq!(recs(&output, "summary")[0]["warnings"], 0, "{args:?}");
@@ -260,7 +436,13 @@ fn dev_050_builds_every_declared_side() {
     let dir = new_project(&env, root.path(), "both", "both", "rust");
     let output = run_in(&env, &dir, &["build"]);
     assert_eq!(output.exit_code, 0);
-    assert_eq!(tree_listing(&dir.join("dist")).into_iter().filter(|f| f.ends_with(".wasm")).collect::<Vec<_>>(), ["client.wasm", "server.wasm"]);
+    assert_eq!(
+        tree_listing(&dir.join("dist"))
+            .into_iter()
+            .filter(|f| f.ends_with(".wasm"))
+            .collect::<Vec<_>>(),
+        ["client.wasm", "server.wasm"]
+    );
 }
 
 /// REQ: DEV-050
@@ -294,7 +476,10 @@ fn dev_051_one_component_artifact_per_side_and_one_build_info() {
     let env = env(root.path());
     let dir = new_project(&env, root.path(), "both", "both", "rust");
     let output = run_in(&env, &dir, &["build"]);
-    let mut paths: Vec<&str> = artifacts(&output, "component").iter().map(|r| r["path"].as_str().expect("path")).collect();
+    let mut paths: Vec<&str> = artifacts(&output, "component")
+        .iter()
+        .map(|r| r["path"].as_str().expect("path"))
+        .collect();
     paths.sort();
     assert_eq!(paths, ["dist/client.wasm", "dist/server.wasm"]);
     let info = artifacts(&output, "build-info");
@@ -353,20 +538,48 @@ fn dev_052_rebuilds_300_ms_after_the_last_change() {
     let env = env(root.path()).with_builder(builder.clone());
     let dir = server_project(&env, root.path());
     let script = vec![
-        DevEvent::Change { at_ms: 1000, path: "src/lib.rs".to_owned() },
-        DevEvent::Change { at_ms: 1200, path: "src/lib.rs".to_owned() },
+        DevEvent::Change {
+            at_ms: 1000,
+            path: "src/lib.rs".to_owned(),
+        },
+        DevEvent::Change {
+            at_ms: 1200,
+            path: "src/lib.rs".to_owned(),
+        },
         DevEvent::Interrupt { at_ms: 1499 },
     ];
-    run_in(&env.clone().with_dev_script(script), &dir, &["build", "--watch"]);
-    assert_eq!(builder.builds.load(Ordering::SeqCst), 1, "no rebuild before 300 ms after the last change (1500)");
+    run_in(
+        &env.clone().with_dev_script(script),
+        &dir,
+        &["build", "--watch"],
+    );
+    assert_eq!(
+        builder.builds.load(Ordering::SeqCst),
+        1,
+        "no rebuild before 300 ms after the last change (1500)"
+    );
     let builder = FakeBuilder::ok();
     let script = vec![
-        DevEvent::Change { at_ms: 1000, path: "src/lib.rs".to_owned() },
-        DevEvent::Change { at_ms: 1200, path: "src/lib.rs".to_owned() },
+        DevEvent::Change {
+            at_ms: 1000,
+            path: "src/lib.rs".to_owned(),
+        },
+        DevEvent::Change {
+            at_ms: 1200,
+            path: "src/lib.rs".to_owned(),
+        },
         DevEvent::Interrupt { at_ms: 1501 },
     ];
-    run_in(&env.with_builder(builder.clone()).with_dev_script(script), &dir, &["build", "--watch"]);
-    assert_eq!(builder.builds.load(Ordering::SeqCst), 2, "one rebuild at 1500 for both changes");
+    run_in(
+        &env.with_builder(builder.clone()).with_dev_script(script),
+        &dir,
+        &["build", "--watch"],
+    );
+    assert_eq!(
+        builder.builds.load(Ordering::SeqCst),
+        2,
+        "one rebuild at 1500 for both changes"
+    );
 }
 
 /// REQ: DEV-052
@@ -390,13 +603,26 @@ fn dev_052_a_failed_rebuild_prints_errors_and_keeps_watching() {
     let env = env(root.path()).with_builder(builder.clone());
     let dir = server_project(&env, root.path());
     let script = vec![
-        DevEvent::Change { at_ms: 1000, path: "src/lib.rs".to_owned() },
-        DevEvent::Change { at_ms: 2000, path: "src/lib.rs".to_owned() },
+        DevEvent::Change {
+            at_ms: 1000,
+            path: "src/lib.rs".to_owned(),
+        },
+        DevEvent::Change {
+            at_ms: 2000,
+            path: "src/lib.rs".to_owned(),
+        },
         DevEvent::Interrupt { at_ms: 3000 },
     ];
     let output = run_in(&env.with_dev_script(script), &dir, &["build", "--watch"]);
-    assert!(!recs(&output, "error").is_empty(), "the failed rebuild printed its errors");
-    assert_eq!(builder.builds.load(Ordering::SeqCst), 3, "the third build ran after the failure");
+    assert!(
+        !recs(&output, "error").is_empty(),
+        "the failed rebuild printed its errors"
+    );
+    assert_eq!(
+        builder.builds.load(Ordering::SeqCst),
+        3,
+        "the third build ran after the failure"
+    );
     assert_eq!(output.exit_code, 130);
 }
 

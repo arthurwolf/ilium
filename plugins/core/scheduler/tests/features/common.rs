@@ -5,9 +5,9 @@ use std::path::PathBuf;
 use ilium_plugin_sdk::exports::ServiceReply;
 use ilium_plugin_sdk::testing::{FakeHost, FakeSession, Screen, TreeNode};
 use ilium_plugin_sdk::types::{
-    ActionKind, ActionValue, AgentActivity, AgentActivityEvent, CommandContext, CommandInvokedEvent,
-    CommandOrigin, Delivery, Event, Intent, NodeClass, NodeId, PluginError, SendInputSpec, Submission,
-    ViewTarget,
+    ActionKind, ActionValue, AgentActivity, AgentActivityEvent, CommandContext,
+    CommandInvokedEvent, CommandOrigin, Delivery, Event, Intent, NodeClass, NodeId, PluginError,
+    SendInputSpec, Submission, ViewTarget,
 };
 use serde_json::Value;
 
@@ -49,7 +49,9 @@ pub fn page_text() -> String {
 }
 
 pub fn manual_page(name: &str) -> String {
-    let path = workspace_root().join("docs/plugins-manual/pages").join(name);
+    let path = workspace_root()
+        .join("docs/plugins-manual/pages")
+        .join(name);
     std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("page {path:?}: {error}"))
 }
 
@@ -65,7 +67,9 @@ pub fn manifest() -> Value {
 
 /// The first json code block after the heading text `heading`.
 pub fn json_block_after(page: &str, heading: &str) -> Value {
-    let start = page.find(heading).unwrap_or_else(|| panic!("heading {heading} missing"));
+    let start = page
+        .find(heading)
+        .unwrap_or_else(|| panic!("heading {heading} missing"));
     let rest = &page[start..];
     let open = rest.find("```json\n").expect("json block") + "```json\n".len();
     let close = rest[open..].find("```").expect("block end");
@@ -78,14 +82,22 @@ pub fn behaviour_rows() -> Vec<(String, String, String)> {
         .lines()
         .filter(|line| line.starts_with("| scheduler-B"))
         .map(|line| {
-            let cells: Vec<String> = line.trim_matches('|').split('|').map(|c| c.trim().to_string()).collect();
+            let cells: Vec<String> = line
+                .trim_matches('|')
+                .split('|')
+                .map(|c| c.trim().to_string())
+                .collect();
             (cells[0].clone(), cells[1].clone(), cells[2].clone())
         })
         .collect()
 }
 
 pub fn behaviour_value(id: &str) -> String {
-    behaviour_rows().into_iter().find(|row| row.0 == id).unwrap_or_else(|| panic!("row {id}")).2
+    behaviour_rows()
+        .into_iter()
+        .find(|row| row.0 == id)
+        .unwrap_or_else(|| panic!("row {id}"))
+        .2
 }
 
 /// A session with the scheduler installed on both sides and started.
@@ -107,7 +119,10 @@ pub fn add_pane(session: &mut FakeSession, name: &str, content_kind: &str) -> No
     };
     let server_id = session.server(PLUGIN).tree().add(node(name, content_kind));
     let client_id = session.client(PLUGIN).tree().add(node(name, content_kind));
-    assert_eq!(server_id, client_id, "the two fake trees assign the same ids");
+    assert_eq!(
+        server_id, client_id,
+        "the two fake trees assign the same ids"
+    );
     NodeId(server_id)
 }
 
@@ -124,13 +139,28 @@ pub fn client(session: &mut FakeSession) -> &mut FakeHost {
 }
 
 /// One agent-activity-changed event.
-pub fn activity_event(pane: NodeId, previous: AgentActivity, current: AgentActivity, revision: u64) -> Event {
-    Event::AgentActivityChanged(AgentActivityEvent { node: pane, previous, current, revision })
+pub fn activity_event(
+    pane: NodeId,
+    previous: AgentActivity,
+    current: AgentActivity,
+    revision: u64,
+) -> Event {
+    Event::AgentActivityChanged(AgentActivityEvent {
+        node: pane,
+        previous,
+        current,
+        revision,
+    })
 }
 
 /// Delivers a finished turn (Working to Idle) on the server and returns the submissions.
 pub fn finish_turn(session: &mut FakeSession, pane: NodeId, revision: u64) -> Vec<Submission> {
-    server(session).deliver_one(activity_event(pane, AgentActivity::Working, AgentActivity::Idle, revision))
+    server(session).deliver_one(activity_event(
+        pane,
+        AgentActivity::Working,
+        AgentActivity::Idle,
+        revision,
+    ))
 }
 
 /// A call of the queue service (assumed JSON, API_GAPS.md).
@@ -142,7 +172,13 @@ pub fn call_queue(session: &mut FakeSession, request: Value) -> Result<Value, Pl
 }
 
 /// Enqueues a prompt through the service; `mode` is once, times or forever.
-pub fn enqueue(session: &mut FakeSession, pane: NodeId, text: &str, mode: &str, times: u32) -> Result<Value, PluginError> {
+pub fn enqueue(
+    session: &mut FakeSession,
+    pane: NodeId,
+    text: &str,
+    mode: &str,
+    times: u32,
+) -> Result<Value, PluginError> {
     call_queue(
         session,
         serde_json::json!({"method": "enqueue", "pane": pane.0, "text": text, "mode": mode, "times": times}),
@@ -150,7 +186,11 @@ pub fn enqueue(session: &mut FakeSession, pane: NodeId, text: &str, mode: &str, 
 }
 
 pub fn list_queue(session: &mut FakeSession, pane: NodeId) -> Vec<Value> {
-    let reply = call_queue(session, serde_json::json!({"method": "list", "pane": pane.0})).expect("list answers");
+    let reply = call_queue(
+        session,
+        serde_json::json!({"method": "list", "pane": pane.0}),
+    )
+    .expect("list answers");
     reply["entries"].as_array().cloned().unwrap_or_default()
 }
 
@@ -207,7 +247,10 @@ pub fn invoke_menu(session: &mut FakeSession, command: &str, pane: NodeId) {
         command: command.to_string(),
         arguments_json: "{}".to_string(),
         origin: CommandOrigin::Menu,
-        context: CommandContext { pane: Some(pane), ..Default::default() },
+        context: CommandContext {
+            pane: Some(pane),
+            ..Default::default()
+        },
     }));
     host.settle();
 }
@@ -229,19 +272,34 @@ pub fn press(session: &mut FakeSession, view: &str, chord: &str) {
 /// Types text into the field with the given key (page sample field keys: hours, minutes, seconds, payload, prompt, times).
 pub fn set_text(session: &mut FakeSession, view: &str, key: &str, text: &str) {
     let host = client(session);
-    host.send_action(popup(view), key, ActionKind::Changed, ActionValue::Text(text.to_string()));
+    host.send_action(
+        popup(view),
+        key,
+        ActionKind::Changed,
+        ActionValue::Text(text.to_string()),
+    );
     host.settle();
 }
 
 pub fn set_number(session: &mut FakeSession, view: &str, key: &str, value: f64) {
     let host = client(session);
-    host.send_action(popup(view), key, ActionKind::Changed, ActionValue::Number(value));
+    host.send_action(
+        popup(view),
+        key,
+        ActionKind::Changed,
+        ActionValue::Number(value),
+    );
     host.settle();
 }
 
 pub fn set_flag(session: &mut FakeSession, view: &str, key: &str, value: bool) {
     let host = client(session);
-    host.send_action(popup(view), key, ActionKind::Toggled, ActionValue::Flag(value));
+    host.send_action(
+        popup(view),
+        key,
+        ActionKind::Toggled,
+        ActionValue::Flag(value),
+    );
     host.settle();
 }
 

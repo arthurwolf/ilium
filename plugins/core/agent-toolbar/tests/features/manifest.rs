@@ -12,7 +12,9 @@ fn manifest() -> Value {
 
 /// The first json code block after the heading line `heading`.
 fn json_block_after(page: &str, heading: &str) -> Value {
-    let start = page.find(heading).unwrap_or_else(|| panic!("heading {heading} missing"));
+    let start = page
+        .find(heading)
+        .unwrap_or_else(|| panic!("heading {heading} missing"));
     let rest = &page[start..];
     let open = rest.find("```json\n").expect("json block") + "```json\n".len();
     let close = rest[open..].find("```").expect("block end");
@@ -20,13 +22,21 @@ fn json_block_after(page: &str, heading: &str) -> Value {
 }
 
 fn strings(value: &Value) -> Vec<String> {
-    value.as_array().expect("array").iter().map(|item| item.as_str().expect("string").to_string()).collect()
+    value
+        .as_array()
+        .expect("array")
+        .iter()
+        .map(|item| item.as_str().expect("string").to_string())
+        .collect()
 }
 
 /// REQ: COR-050
 #[test]
 fn manifest_050_equals_the_complete_manifest_of_the_page() {
-    assert_eq!(manifest(), json_block_after(&page_text(), "### Complete manifest"));
+    assert_eq!(
+        manifest(),
+        json_block_after(&page_text(), "### Complete manifest")
+    );
 }
 
 /// REQ: COR-050
@@ -57,8 +67,14 @@ fn manifest_050_identity_and_api_version() {
 #[test]
 fn manifest_050_declares_both_sides_with_their_worlds() {
     let manifest = manifest();
-    assert_eq!(manifest["server"], json!({"entry": "server.wasm", "world": "ilium:server/base@0.1.0"}));
-    assert_eq!(manifest["client"], json!({"entry": "client.wasm", "world": "ilium:client/base@0.1.0"}));
+    assert_eq!(
+        manifest["server"],
+        json!({"entry": "server.wasm", "world": "ilium:server/base@0.1.0"})
+    );
+    assert_eq!(
+        manifest["client"],
+        json!({"entry": "client.wasm", "world": "ilium:client/base@0.1.0"})
+    );
 }
 
 /// REQ: COR-050
@@ -67,7 +83,13 @@ fn manifest_050_server_grants_are_the_five_agent_grants_in_order() {
     let manifest = manifest();
     assert_eq!(
         strings(&manifest["capabilities"]["server"]),
-        ["agent.read", "agent.read-prompts", "agent.transcript", "agent.control", "journal.read"]
+        [
+            "agent.read",
+            "agent.read-prompts",
+            "agent.transcript",
+            "agent.control",
+            "journal.read"
+        ]
     );
 }
 
@@ -75,13 +97,19 @@ fn manifest_050_server_grants_are_the_five_agent_grants_in_order() {
 #[test]
 fn manifest_050_client_grants_are_read_read_prompts_and_ui_chrome() {
     let manifest = manifest();
-    assert_eq!(strings(&manifest["capabilities"]["client"]), ["agent.read", "agent.read-prompts", "ui.chrome"]);
+    assert_eq!(
+        strings(&manifest["capabilities"]["client"]),
+        ["agent.read", "agent.read-prompts", "ui.chrome"]
+    );
 }
 
 /// REQ: COR-050
 #[test]
 fn manifest_050_activation_triggers_are_agent_state_event_then_startup() {
-    assert_eq!(strings(&manifest()["activation"]), ["event:agent-state-changed", "startup"]);
+    assert_eq!(
+        strings(&manifest()["activation"]),
+        ["event:agent-state-changed", "startup"]
+    );
 }
 
 /// REQ: COR-050
@@ -137,11 +165,18 @@ fn manifest_050_frame_slots_are_prompt_banner_model_header_text_and_recover_foot
 #[test]
 fn manifest_050_every_toolbar_and_row_command_is_a_declared_command() {
     let manifest = manifest();
-    let declared: Vec<String> =
-        manifest["contributes"]["commands"].as_array().unwrap().iter().map(|c| c["id"].as_str().unwrap().to_string()).collect();
+    let declared: Vec<String> = manifest["contributes"]["commands"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["id"].as_str().unwrap().to_string())
+        .collect();
     for group in ["tree_toolbar", "row_actions"] {
         for entry in manifest["contributes"][group].as_array().unwrap() {
-            assert!(declared.contains(&entry["command"].as_str().unwrap().to_string()), "{group}: {entry}");
+            assert!(
+                declared.contains(&entry["command"].as_str().unwrap().to_string()),
+                "{group}: {entry}"
+            );
         }
     }
 }
@@ -150,9 +185,21 @@ fn manifest_050_every_toolbar_and_row_command_is_a_declared_command() {
 #[test]
 fn manifest_050_the_set_of_contribution_kinds_is_exactly_the_four_of_the_page() {
     let manifest = manifest();
-    let mut kinds: Vec<&String> = manifest["contributes"].as_object().unwrap().keys().collect();
+    let mut kinds: Vec<&String> = manifest["contributes"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .collect();
     kinds.sort();
-    assert_eq!(kinds, ["commands", "pane_frame_slots", "row_actions", "tree_toolbar"]);
+    assert_eq!(
+        kinds,
+        [
+            "commands",
+            "pane_frame_slots",
+            "row_actions",
+            "tree_toolbar"
+        ]
+    );
 }
 
 /// REQ: COR-050
@@ -166,16 +213,31 @@ fn manifest_050_description_is_the_first_sentence_of_the_page() {
 /// REQ: COR-050
 #[test]
 fn manifest_050_host_takes_grants_from_the_manifest_for_each_side() {
-    let server = FakeHost::for_manifest(manifest_path()).expect("loads").side("server").build();
-    let client = FakeHost::for_manifest(manifest_path()).expect("loads").side("client").build();
+    let server = FakeHost::for_manifest(manifest_path())
+        .expect("loads")
+        .side("server")
+        .build();
+    let client = FakeHost::for_manifest(manifest_path())
+        .expect("loads")
+        .side("client")
+        .build();
     drop((server, client));
     let page = json_block_after(&page_text(), "### Complete manifest");
     let manifest = manifest();
     assert_eq!(
         strings(&manifest["capabilities"]["server"]),
-        ["agent.read", "agent.read-prompts", "agent.transcript", "agent.control", "journal.read"]
+        [
+            "agent.read",
+            "agent.read-prompts",
+            "agent.transcript",
+            "agent.control",
+            "journal.read"
+        ]
     );
-    assert_eq!(strings(&manifest["capabilities"]["client"]), ["agent.read", "agent.read-prompts", "ui.chrome"]);
+    assert_eq!(
+        strings(&manifest["capabilities"]["client"]),
+        ["agent.read", "agent.read-prompts", "ui.chrome"]
+    );
     assert_eq!(manifest["capabilities"], page["capabilities"]);
 }
 

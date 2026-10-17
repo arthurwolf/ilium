@@ -6,11 +6,16 @@ const F: &str = "ilium-client/src/markdown/document.rs";
 
 fn rows(text: &str) -> Vec<String> {
     let screen = rendered_screen(text);
-    (0..16).map(|row| screen.row(row).trim_end().to_string()).collect()
+    (0..16)
+        .map(|row| screen.row(row).trim_end().to_string())
+        .collect()
 }
 
 fn has_row(rows: &[String], wanted: &str) -> bool {
-    rows.iter().any(|row| row.trim_start_matches(' ').trim_end() == wanted.trim_start_matches(' ') || row.contains(wanted))
+    rows.iter().any(|row| {
+        row.trim_start_matches(' ').trim_end() == wanted.trim_start_matches(' ')
+            || row.contains(wanted)
+    })
 }
 
 /// REQ: PORT:ilium-client/src/markdown/document.rs::tight_list_remains_compact_without_synthetic_spacing
@@ -81,7 +86,9 @@ fn port_document_soft_break_joins_with_a_space() {
 fn port_document_fenced_code_keeps_internal_blank_rows() {
     let screen = rendered_screen("```\nfirst\n\nsecond\n```\n");
     assert_eq!(row_of(&screen, "second") - row_of(&screen, "first"), 2);
-    assert!(screen.row(row_of(&screen, "first") as u16).starts_with(" first"));
+    assert!(screen
+        .row(row_of(&screen, "first") as u16)
+        .starts_with(" first"));
 }
 
 /// REQ: PORT:ilium-client/src/markdown/document.rs::crlf_code_block_lines_carry_no_carriage_returns
@@ -102,7 +109,10 @@ fn port_document_blank_lines_between_paragraphs_are_preserved() {
 /// REQ: PORT:ilium-client/src/markdown/document.rs::inline_image_stays_in_text
 #[test]
 fn port_document_inline_image_is_a_placeholder_in_text() {
-    assert!(has_row(&rows("see ![a](a.png) here\n"), "see [image: a] here"));
+    assert!(has_row(
+        &rows("see ![a](a.png) here\n"),
+        "see [image: a] here"
+    ));
 }
 
 /// REQ: PORT:ilium-client/src/markdown/document.rs::two_adjacent_images_in_one_paragraph_keep_both_alt_texts
@@ -115,13 +125,18 @@ fn port_document_adjacent_images_keep_both_alt_texts() {
 /// REQ: PORT:ilium-client/src/markdown/document.rs::image_with_trailing_text_in_the_same_paragraph_stays_inline
 #[test]
 fn port_document_image_with_trailing_text_stays_inline() {
-    assert!(has_row(&rows("![a](a.png) caption\n"), "[image: a] caption"));
+    assert!(has_row(
+        &rows("![a](a.png) caption\n"),
+        "[image: a] caption"
+    ));
 }
 
 /// REQ: PORT:ilium-client/src/markdown/document.rs::image_inside_table_cell_does_not_become_a_block_image
 #[test]
 fn port_document_image_in_a_table_cell_stays_a_placeholder() {
-    assert!(rendered_screen("| a |\n|---|\n| ![x](x.png) |\n").text().contains("[image: x]"));
+    assert!(rendered_screen("| a |\n|---|\n| ![x](x.png) |\n")
+        .text()
+        .contains("[image: x]"));
 }
 
 /// REQ: PORT:ilium-client/src/markdown/document.rs::remote_image_is_unsupported_not_fetched
@@ -129,7 +144,10 @@ fn port_document_image_in_a_table_cell_stays_a_placeholder() {
 fn port_document_remote_image_is_not_fetched() {
     let text = rendered_screen("![r](https://example.com/r.png)\n").text();
     assert!(text.contains("r"), "{text}");
-    assert!(text.contains("unsupported") || text.contains("[image: r]"), "{text}");
+    assert!(
+        text.contains("unsupported") || text.contains("[image: r]"),
+        "{text}"
+    );
 }
 
 /// REQ: PORT:ilium-client/src/markdown/document.rs::lone_image_paragraph_becomes_image_block
@@ -142,17 +160,25 @@ fn port_document_lone_image_paragraph_is_its_own_block() {
 /// REQ: PORT:ilium-client/src/markdown/document.rs::loose_task_list_item_with_a_lone_image_keeps_its_checkbox
 #[test]
 fn port_document_loose_task_item_with_an_image_keeps_its_checkbox() {
-    assert!(rendered_screen("- [ ] ![a](a.png)\n\n- [x] two\n").text().contains("[ ]"));
+    assert!(rendered_screen("- [ ] ![a](a.png)\n\n- [x] two\n")
+        .text()
+        .contains("[ ]"));
 }
 
 /// REQ: PORT:ilium-client/src/markdown/document.rs::table_renders_aligned_rows
 #[test]
 fn port_document_table_rows_have_equal_width() {
     let r = rows("| a | bb |\n|---|----|\n| ccc | d |\n");
-    let table: Vec<&String> = r.iter().filter(|row| row.contains('|') || row.contains('│')).collect();
+    let table: Vec<&String> = r
+        .iter()
+        .filter(|row| row.contains('|') || row.contains('│'))
+        .collect();
     assert_eq!(table.len(), 3, "{r:?}");
     let width = table[0].chars().count();
-    assert!(table.iter().all(|row| row.chars().count() == width), "{table:?}");
+    assert!(
+        table.iter().all(|row| row.chars().count() == width),
+        "{table:?}"
+    );
 }
 
 /// REQ: PORT:ilium-client/src/markdown/document.rs::table_cell_longer_than_the_width_cap_stays_aligned
@@ -160,16 +186,27 @@ fn port_document_table_rows_have_equal_width() {
 fn port_document_overlong_table_cell_stays_aligned() {
     let long = "x".repeat(80);
     let r = rows(&format!("| a | b |\n|---|---|\n| {long} | d |\n"));
-    let table: Vec<&String> = r.iter().filter(|row| row.contains('|') || row.contains('│')).collect();
+    let table: Vec<&String> = r
+        .iter()
+        .filter(|row| row.contains('|') || row.contains('│'))
+        .collect();
     assert_eq!(table.len(), 3, "{r:?}");
-    assert!(table.iter().all(|row| row.chars().count() == table[0].chars().count()), "{table:?}");
+    assert!(
+        table
+            .iter()
+            .all(|row| row.chars().count() == table[0].chars().count()),
+        "{table:?}"
+    );
 }
 
 /// REQ: PORT:ilium-client/src/markdown/document.rs::unicode_table_cell_aligns_with_ascii_cell
 #[test]
 fn port_document_wide_unicode_cell_aligns_with_ascii_cell() {
     let r = rows("| a |\n|---|\n| 漢字 |\n| ab |\n");
-    let table: Vec<&String> = r.iter().filter(|row| row.contains('|') || row.contains('│')).collect();
+    let table: Vec<&String> = r
+        .iter()
+        .filter(|row| row.contains('|') || row.contains('│'))
+        .collect();
     assert_eq!(table.len(), 4, "{r:?}");
 }
 

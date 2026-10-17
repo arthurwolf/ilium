@@ -16,9 +16,16 @@ fn port_app_01_fully_configured_targets_do_not_queue_setup_prompts() {
     host.settle();
     for target in [CLAUDE_GLOBAL, CODEX_GLOBAL, CLAUDE_PROJECT, CODEX_PROJECT] {
         for block in ["chatroom", "progress"] {
-            assert_eq!(status_ok(&mut host, block, target), "set-up", "{block} {target}");
+            assert_eq!(
+                status_ok(&mut host, block, target),
+                "set-up",
+                "{block} {target}"
+            );
         }
     }
-    assert!(host.render_popup(80).trim().is_empty(), "no dialog may be pending");
+    assert!(
+        host.render_popup(80).trim().is_empty(),
+        "no dialog may be pending"
+    );
     assert!(host.submitted().is_empty(), "no offer may be submitted");
 }

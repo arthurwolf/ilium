@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use ilium_plugin_core_agent_setup::{AgentSetupClient, AgentSetupServer};
 use ilium_plugin_sdk::testing::FakeHost;
 use ilium_plugin_sdk::types::{FsPath, PluginError};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 pub const SERVICE: &str = "ilium.core.agent-setup/install";
 pub const CLAUDE_GLOBAL: &str = "claude-global";
@@ -23,7 +23,10 @@ pub fn manifest_path() -> PathBuf {
 }
 
 pub fn server_host() -> FakeHost {
-    let mut host = FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("server").build();
+    let mut host = FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("server")
+        .build();
     host.activate::<AgentSetupServer>();
     host
 }
@@ -37,13 +40,19 @@ pub fn project_host() -> FakeHost {
 }
 
 pub fn client_host() -> FakeHost {
-    let mut host = FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("client").build();
+    let mut host = FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("client")
+        .build();
     host.activate::<AgentSetupClient>();
     host
 }
 
 fn path_of(scope: &str, path: &str) -> FsPath {
-    FsPath { scope: scope.to_string(), path: path.to_string() }
+    FsPath {
+        scope: scope.to_string(),
+        path: path.to_string(),
+    }
 }
 
 pub fn claude_file() -> FsPath {
@@ -72,7 +81,9 @@ pub fn put(host: &mut FakeHost, path: FsPath, text: &str) {
 }
 
 pub fn get(host: &mut FakeHost, path: FsPath) -> Option<String> {
-    host.fs().read(path).map(|bytes| String::from_utf8(bytes).expect("utf-8 file"))
+    host.fs()
+        .read(path)
+        .map(|bytes| String::from_utf8(bytes).expect("utf-8 file"))
 }
 
 fn service_call(host: &mut FakeHost, method: &str, payload: Value) -> Result<Value, PluginError> {
@@ -107,7 +118,9 @@ pub fn status_ok(host: &mut FakeHost, block: &str, target: &str) -> String {
 pub fn block_of(text: &str, feature: &str) -> String {
     let open = format!("<!-- ilium-agent-feature: {feature}");
     let close = format!("<!-- /ilium-agent-feature: {feature} -->");
-    let start = text.find(&open).unwrap_or_else(|| panic!("no {feature} block in\n{text}"));
+    let start = text
+        .find(&open)
+        .unwrap_or_else(|| panic!("no {feature} block in\n{text}"));
     let end = text.find(&close).expect("closing marker") + close.len();
     text[start..end].to_string()
 }
@@ -140,8 +153,13 @@ pub fn revert_record(host: &mut FakeHost, record: &Value) -> Result<Value, Plugi
 }
 
 pub fn load_record(host: &mut FakeHost, target: &str) -> Option<Value> {
-    let reply = configure(host, "load-record", json!({ "target": target })).expect("load-record answers");
-    if reply["record"].is_null() { None } else { Some(reply["record"].clone()) }
+    let reply =
+        configure(host, "load-record", json!({ "target": target })).expect("load-record answers");
+    if reply["record"].is_null() {
+        None
+    } else {
+        Some(reply["record"].clone())
+    }
 }
 
 pub fn text_of(host: &mut FakeHost, path: FsPath) -> String {

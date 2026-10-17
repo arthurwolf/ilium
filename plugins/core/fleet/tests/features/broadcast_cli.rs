@@ -13,7 +13,12 @@ use crate::common::*;
 /// Returns (host, working agent, idle agent, shell).
 fn fleet() -> (FakeHost, u64, u64, u64) {
     let mut host = server_host();
-    let working = add_agent(&mut host, "refactor parser", "claude", AgentActivity::Working);
+    let working = add_agent(
+        &mut host,
+        "refactor parser",
+        "claude",
+        AgentActivity::Working,
+    );
     let idle = add_agent(&mut host, "tests", "codex", AgentActivity::Idle);
     let shell = add_shell(&mut host, "shell");
     add_session(&mut host, "default", true, &[]);
@@ -23,7 +28,12 @@ fn fleet() -> (FakeHost, u64, u64, u64) {
 fn results(all: &[Value]) -> Vec<(u64, String)> {
     of_type(all, "result")
         .iter()
-        .map(|record| (record["pane_id"].as_u64().unwrap(), record["outcome"].as_str().unwrap().to_string()))
+        .map(|record| {
+            (
+                record["pane_id"].as_u64().unwrap(),
+                record["outcome"].as_str().unwrap().to_string(),
+            )
+        })
         .collect()
 }
 
@@ -62,16 +72,29 @@ fn broadcast_110_never_types_into_a_shell_pane() {
 fn broadcast_110_the_dedup_key_is_broadcast_pane_and_message_length() {
     let (mut host, working, _, _) = fleet();
     run_cli(&mut host, &["broadcast", "hello"], b"");
-    let keys: Vec<Option<String>> = host.submitted().into_iter().map(|submission| submission.dedup_key).collect();
-    assert!(keys.contains(&Some(format!("broadcast-{working}-5"))), "{keys:?}");
+    let keys: Vec<Option<String>> = host
+        .submitted()
+        .into_iter()
+        .map(|submission| submission.dedup_key)
+        .collect();
+    assert!(
+        keys.contains(&Some(format!("broadcast-{working}-5"))),
+        "{keys:?}"
+    );
 }
 
 /// REQ: F-110
 #[test]
 fn broadcast_110_message_words_are_joined_with_single_spaces() {
     let (mut host, _, _, _) = fleet();
-    run_cli(&mut host, &["broadcast", "re-read", "CLAUDE.md", "now"], b"");
-    assert!(sent_inputs(&host).iter().all(|spec| spec.text == "re-read CLAUDE.md now"));
+    run_cli(
+        &mut host,
+        &["broadcast", "re-read", "CLAUDE.md", "now"],
+        b"",
+    );
+    assert!(sent_inputs(&host)
+        .iter()
+        .all(|spec| spec.text == "re-read CLAUDE.md now"));
 }
 
 /// REQ: F-110
@@ -80,7 +103,9 @@ fn broadcast_110_a_lone_dash_reads_the_message_from_standard_input() {
     let (mut host, _, _, _) = fleet();
     run_cli(&mut host, &["broadcast", "-"], b"from stdin");
     assert!(!sent_inputs(&host).is_empty());
-    assert!(sent_inputs(&host).iter().all(|spec| spec.text == "from stdin"));
+    assert!(sent_inputs(&host)
+        .iter()
+        .all(|spec| spec.text == "from stdin"));
 }
 
 /// REQ: F-110
@@ -96,7 +121,9 @@ fn broadcast_110_a_trailing_newline_is_removed() {
 fn broadcast_110_only_one_trailing_newline_is_removed() {
     let (mut host, _, _, _) = fleet();
     run_cli(&mut host, &["broadcast", "-"], b"notice\n\n");
-    assert!(sent_inputs(&host).iter().all(|spec| spec.text == "notice\n"));
+    assert!(sent_inputs(&host)
+        .iter()
+        .all(|spec| spec.text == "notice\n"));
 }
 
 /// REQ: F-110
@@ -104,7 +131,9 @@ fn broadcast_110_only_one_trailing_newline_is_removed() {
 fn broadcast_110_crlf_line_endings_are_normalised_to_lf() {
     let (mut host, _, _, _) = fleet();
     run_cli(&mut host, &["broadcast", "-"], b"one\r\ntwo\r\n");
-    assert!(sent_inputs(&host).iter().all(|spec| spec.text == "one\ntwo"));
+    assert!(sent_inputs(&host)
+        .iter()
+        .all(|spec| spec.text == "one\ntwo"));
 }
 
 /// REQ: F-110
@@ -114,7 +143,9 @@ fn broadcast_110_a_multi_line_message_is_sent_as_one_bracketed_paste() {
     run_cli(&mut host, &["broadcast", "-"], b"one\ntwo");
     let inputs = sent_inputs(&host);
     assert!(!inputs.is_empty());
-    assert!(inputs.iter().all(|spec| spec.delivery == Delivery::Pasted && spec.text == "one\ntwo"));
+    assert!(inputs
+        .iter()
+        .all(|spec| spec.delivery == Delivery::Pasted && spec.text == "one\ntwo"));
 }
 
 /// REQ: F-110
@@ -123,7 +154,9 @@ fn broadcast_110_file_reads_the_message_from_a_file() {
     let (mut host, _, _, _) = fleet();
     host.fs().write("/work/notice.md", b"from a file\n");
     run_cli(&mut host, &["broadcast", "--file", "/work/notice.md"], b"");
-    assert!(sent_inputs(&host).iter().all(|spec| spec.text == "from a file"));
+    assert!(sent_inputs(&host)
+        .iter()
+        .all(|spec| spec.text == "from a file"));
 }
 
 /// REQ: F-110
@@ -131,7 +164,10 @@ fn broadcast_110_file_reads_the_message_from_a_file() {
 fn broadcast_110_a_missing_message_is_an_invalid_request_with_exit_two() {
     let (mut host, _, _, _) = fleet();
     let (stdout, _, exit) = run_cli(&mut host, &["broadcast"], b"");
-    assert_eq!(of_type(&records(&stdout), "error")[0]["code"], "invalid-request");
+    assert_eq!(
+        of_type(&records(&stdout), "error")[0]["code"],
+        "invalid-request"
+    );
     assert_eq!(exit, Some(2));
     assert!(sent_inputs(&host).is_empty());
 }
@@ -141,7 +177,10 @@ fn broadcast_110_a_missing_message_is_an_invalid_request_with_exit_two() {
 fn broadcast_110_an_empty_standard_input_message_is_an_invalid_request_with_exit_two() {
     let (mut host, _, _, _) = fleet();
     let (stdout, _, exit) = run_cli(&mut host, &["broadcast", "-"], b"\n");
-    assert_eq!(of_type(&records(&stdout), "error")[0]["code"], "invalid-request");
+    assert_eq!(
+        of_type(&records(&stdout), "error")[0]["code"],
+        "invalid-request"
+    );
     assert_eq!(exit, Some(2));
 }
 
@@ -149,8 +188,14 @@ fn broadcast_110_an_empty_standard_input_message_is_an_invalid_request_with_exit
 #[test]
 fn broadcast_110_a_message_starting_with_a_hyphen_follows_a_double_dash() {
     let (mut host, _, _, _) = fleet();
-    run_cli(&mut host, &["broadcast", "--", "-v", "is", "not", "a", "flag"], b"");
-    assert!(sent_inputs(&host).iter().all(|spec| spec.text == "-v is not a flag"));
+    run_cli(
+        &mut host,
+        &["broadcast", "--", "-v", "is", "not", "a", "flag"],
+        b"",
+    );
+    assert!(sent_inputs(&host)
+        .iter()
+        .all(|spec| spec.text == "-v is not a flag"));
 }
 
 /// REQ: F-110
@@ -181,7 +226,11 @@ fn broadcast_110_a_result_record_carries_the_documented_fields() {
     let (mut host, working, _, _) = fleet();
     let (stdout, _, _) = run_cli(&mut host, &["broadcast", "hello"], b"");
     let all = records(&stdout);
-    let record = of_type(&all, "result").into_iter().find(|r| r["pane_id"] == working).expect("result").clone();
+    let record = of_type(&all, "result")
+        .into_iter()
+        .find(|r| r["pane_id"] == working)
+        .expect("result")
+        .clone();
     assert_eq!(record["command"], "broadcast");
     assert_eq!(record["outcome"], "delivered");
     assert_eq!(record["session"], "default");
@@ -223,7 +272,11 @@ fn broadcast_110_exit_zero_when_at_least_one_agent_was_reached_and_nothing_faile
 #[test]
 fn broadcast_110_exit_one_when_nothing_was_selected() {
     let (mut host, _, _, _) = fleet();
-    let (stdout, _, exit) = run_cli(&mut host, &["broadcast", "--match", "no-such-pane-anywhere", "hello"], b"");
+    let (stdout, _, exit) = run_cli(
+        &mut host,
+        &["broadcast", "--match", "no-such-pane-anywhere", "hello"],
+        b"",
+    );
     assert_eq!(exit, Some(1));
     assert_eq!(summary(&records(&stdout))["recipients"], 0);
     assert!(sent_inputs(&host).is_empty());
@@ -233,12 +286,21 @@ fn broadcast_110_exit_one_when_nothing_was_selected() {
 #[test]
 fn broadcast_110_exit_one_when_a_delivery_failed() {
     let (mut host, _, _, _) = fleet();
-    auto_outcome(&mut host, Outcome::Failed(PluginError { code: ErrorCode::Io, message: "pane gone".to_string(), retry_after_ms: None }));
+    auto_outcome(
+        &mut host,
+        Outcome::Failed(PluginError {
+            code: ErrorCode::Io,
+            message: "pane gone".to_string(),
+            retry_after_ms: None,
+        }),
+    );
     let (stdout, _, exit) = run_cli(&mut host, &["broadcast", "hello"], b"");
     let all = records(&stdout);
     assert_eq!(exit, Some(1));
     assert_eq!(summary(&all)["failed"], 2);
-    assert!(of_type(&all, "result").iter().all(|r| r["outcome"] == "failed" && r["reason"].is_string()));
+    assert!(of_type(&all, "result")
+        .iter()
+        .all(|r| r["outcome"] == "failed" && r["reason"].is_string()));
 }
 
 /// REQ: F-110
@@ -261,7 +323,10 @@ fn broadcast_110_the_pane_running_the_command_is_skipped_by_default() {
     let (stdout, _, _) = run_cli_in_pane(&mut host, working, &["broadcast", "hello"]);
     let all = records(&stdout);
     assert_eq!(sent_panes(&host), [NodeId(idle)]);
-    let skipped: Vec<&Value> = of_type(&all, "result").into_iter().filter(|r| r["outcome"] == "skipped").collect();
+    let skipped: Vec<&Value> = of_type(&all, "result")
+        .into_iter()
+        .filter(|r| r["outcome"] == "skipped")
+        .collect();
     assert_eq!(skipped.len(), 1);
     assert_eq!(skipped[0]["pane_id"], working);
     assert_eq!(skipped[0]["is_self"], true);
@@ -273,7 +338,11 @@ fn broadcast_110_the_pane_running_the_command_is_skipped_by_default() {
 #[test]
 fn broadcast_110_include_self_also_sends_to_the_calling_pane() {
     let (mut host, working, _, _) = fleet();
-    let (stdout, _, _) = run_cli_in_pane(&mut host, working, &["broadcast", "--include-self", "hello"]);
+    let (stdout, _, _) = run_cli_in_pane(
+        &mut host,
+        working,
+        &["broadcast", "--include-self", "hello"],
+    );
     assert!(sent_panes(&host).contains(&NodeId(working)));
     assert_eq!(summary(&records(&stdout))["skipped"], 0);
 }
@@ -286,12 +355,17 @@ fn broadcast_110_when_idle_sends_now_only_to_idle_agents() {
     let all = records(&stdout);
     let mut outcomes = results(&all);
     outcomes.sort();
-    let mut expected = vec![(working, "queued".to_string()), (idle, "delivered".to_string())];
+    let mut expected = vec![
+        (working, "queued".to_string()),
+        (idle, "delivered".to_string()),
+    ];
     expected.sort();
     assert_eq!(outcomes, expected);
     assert_eq!(summary(&all)["queued"], 1);
     assert_eq!(summary(&all)["delivered"], 1);
-    assert!(!sent_inputs(&host).iter().any(|spec| spec.pane == NodeId(working) && spec.delivery == Delivery::Submitted));
+    assert!(!sent_inputs(&host)
+        .iter()
+        .any(|spec| spec.pane == NodeId(working) && spec.delivery == Delivery::Submitted));
 }
 
 /// REQ: F-110
@@ -304,7 +378,10 @@ fn broadcast_110_dry_run_plans_each_recipient_and_sends_nothing() {
     assert_eq!(exit, Some(0));
     let mut outcomes = results(&all);
     outcomes.sort();
-    let mut expected = vec![(working, "would-send".to_string()), (idle, "would-send".to_string())];
+    let mut expected = vec![
+        (working, "would-send".to_string()),
+        (idle, "would-send".to_string()),
+    ];
     expected.sort();
     assert_eq!(outcomes, expected);
     let summary = summary(&all);
@@ -317,8 +394,13 @@ fn broadcast_110_dry_run_plans_each_recipient_and_sends_nothing() {
 #[test]
 fn broadcast_110_dry_run_with_when_idle_reports_would_queue_for_busy_agents() {
     let (mut host, working, idle, _) = fleet();
-    let (stdout, _, _) = run_cli(&mut host, &["broadcast", "--dry-run", "--when-idle", "hello"], b"");
-    let by_pane: std::collections::BTreeMap<u64, String> = results(&records(&stdout)).into_iter().collect();
+    let (stdout, _, _) = run_cli(
+        &mut host,
+        &["broadcast", "--dry-run", "--when-idle", "hello"],
+        b"",
+    );
+    let by_pane: std::collections::BTreeMap<u64, String> =
+        results(&records(&stdout)).into_iter().collect();
     assert_eq!(by_pane[&working], "would-queue");
     assert_eq!(by_pane[&idle], "would-send");
 }
@@ -335,7 +417,11 @@ fn broadcast_110_selection_by_agent_narrows_the_recipients() {
 #[test]
 fn broadcast_110_selection_by_state_narrows_the_recipients() {
     let (mut host, working, _, _) = fleet();
-    run_cli(&mut host, &["broadcast", "--state", "working", "hello"], b"");
+    run_cli(
+        &mut host,
+        &["broadcast", "--state", "working", "hello"],
+        b"",
+    );
     assert_eq!(sent_panes(&host), [NodeId(working)]);
 }
 
@@ -352,7 +438,10 @@ fn broadcast_110_a_shell_is_never_a_recipient_whatever_the_selection() {
 fn broadcast_110_an_invalid_selection_is_an_invalid_request_with_exit_two() {
     let (mut host, _, _, _) = fleet();
     let (stdout, _, exit) = run_cli(&mut host, &["broadcast", "--regex", "(", "hello"], b"");
-    assert_eq!(of_type(&records(&stdout), "error")[0]["code"], "invalid-request");
+    assert_eq!(
+        of_type(&records(&stdout), "error")[0]["code"],
+        "invalid-request"
+    );
     assert_eq!(exit, Some(2));
     assert!(sent_inputs(&host).is_empty());
 }
@@ -362,7 +451,10 @@ fn broadcast_110_an_invalid_selection_is_an_invalid_request_with_exit_two() {
 fn broadcast_110_invert_without_a_pattern_is_an_invalid_request() {
     let (mut host, _, _, _) = fleet();
     let (stdout, _, exit) = run_cli(&mut host, &["broadcast", "--invert", "hello"], b"");
-    assert_eq!(of_type(&records(&stdout), "error")[0]["code"], "invalid-request");
+    assert_eq!(
+        of_type(&records(&stdout), "error")[0]["code"],
+        "invalid-request"
+    );
     assert_eq!(exit, Some(2));
 }
 
@@ -373,7 +465,10 @@ fn broadcast_110_other_sessions_get_a_broadcast_request_with_the_text() {
     add_session(&mut host, "review", false, &[]);
     run_cli(&mut host, &["broadcast", "hello"], b"");
     let requests = host.sessions().requests();
-    let sent: Vec<&(String, String, String)> = requests.iter().filter(|(session, _, _)| session == "review").collect();
+    let sent: Vec<&(String, String, String)> = requests
+        .iter()
+        .filter(|(session, _, _)| session == "review")
+        .collect();
     assert_eq!(sent.len(), 1);
     assert_eq!(sent[0].1, "broadcast");
     let arguments: Value = serde_json::from_str(&sent[0].2).expect("arguments are JSON");
@@ -386,7 +481,11 @@ fn broadcast_110_the_own_session_is_not_asked_through_sessions_send() {
     let (mut host, _, _, _) = fleet();
     add_session(&mut host, "review", false, &[]);
     run_cli(&mut host, &["broadcast", "hello"], b"");
-    assert!(host.sessions().requests().iter().all(|(session, _, _)| session != "default"));
+    assert!(host
+        .sessions()
+        .requests()
+        .iter()
+        .all(|(session, _, _)| session != "default"));
 }
 
 /// REQ: F-110
@@ -408,14 +507,19 @@ fn broadcast_110_a_before_broadcast_replace_changes_the_text_that_is_sent() {
     );
     run_cli(&mut host, &["broadcast", "original"], b"");
     assert!(!sent_inputs(&host).is_empty());
-    assert!(sent_inputs(&host).iter().all(|spec| spec.text == "rewritten"));
+    assert!(sent_inputs(&host)
+        .iter()
+        .all(|spec| spec.text == "rewritten"));
 }
 
 /// REQ: F-110
 #[test]
 fn broadcast_110_the_before_broadcast_payload_has_message_targets_and_source() {
     let (mut host, _, _, _) = fleet();
-    host.set_hook_reply("ilium.core.fleet/before-broadcast", ilium_plugin_sdk::exports::HookReply::Pass);
+    host.set_hook_reply(
+        "ilium.core.fleet/before-broadcast",
+        ilium_plugin_sdk::exports::HookReply::Pass,
+    );
     run_cli(&mut host, &["broadcast", "original"], b"");
     let calls = host.hook_payloads("ilium.core.fleet/before-broadcast");
     assert_eq!(calls.len(), 1);
@@ -429,9 +533,14 @@ fn broadcast_110_the_before_broadcast_payload_has_message_targets_and_source() {
 #[test]
 fn broadcast_110_a_pass_leaves_the_text_unchanged() {
     let (mut host, _, _, _) = fleet();
-    host.set_hook_reply("ilium.core.fleet/before-broadcast", ilium_plugin_sdk::exports::HookReply::Pass);
+    host.set_hook_reply(
+        "ilium.core.fleet/before-broadcast",
+        ilium_plugin_sdk::exports::HookReply::Pass,
+    );
     run_cli(&mut host, &["broadcast", "original"], b"");
-    assert!(sent_inputs(&host).iter().all(|spec| spec.text == "original"));
+    assert!(sent_inputs(&host)
+        .iter()
+        .all(|spec| spec.text == "original"));
 }
 
 /// REQ: F-110
@@ -440,7 +549,9 @@ fn broadcast_110_a_before_broadcast_replace_with_an_empty_message_ends_the_broad
     let (mut host, _, _, _) = fleet();
     host.set_hook_reply(
         "ilium.core.fleet/before-broadcast",
-        ilium_plugin_sdk::exports::HookReply::Replace(serde_json::json!({"message": "", "targets": [], "source": "cli"}).to_string()),
+        ilium_plugin_sdk::exports::HookReply::Replace(
+            serde_json::json!({"message": "", "targets": [], "source": "cli"}).to_string(),
+        ),
     );
     run_cli(&mut host, &["broadcast", "original"], b"");
     assert!(sent_inputs(&host).is_empty());
@@ -452,7 +563,10 @@ fn broadcast_110_the_broadcast_sent_topic_carries_targets_and_length() {
     let (mut host, _, _, _) = fleet();
     run_cli(&mut host, &["broadcast", "hello"], b"");
     let topics = host.published_topics();
-    let sent: Vec<&(String, String)> = topics.iter().filter(|(topic, _)| topic == "ilium.core.fleet/broadcast-sent").collect();
+    let sent: Vec<&(String, String)> = topics
+        .iter()
+        .filter(|(topic, _)| topic == "ilium.core.fleet/broadcast-sent")
+        .collect();
     assert_eq!(sent.len(), 1);
     let payload: Value = serde_json::from_str(&sent[0].1).expect("payload is JSON");
     assert_eq!(payload["length"], 5);
@@ -464,7 +578,10 @@ fn broadcast_110_the_broadcast_sent_topic_carries_targets_and_length() {
 fn broadcast_110_no_topic_is_published_when_nothing_was_sent() {
     let (mut host, _, _, _) = fleet();
     run_cli(&mut host, &["broadcast", "--dry-run", "hello"], b"");
-    assert!(host.published_topics().iter().all(|(topic, _)| topic != "ilium.core.fleet/broadcast-sent"));
+    assert!(host
+        .published_topics()
+        .iter()
+        .all(|(topic, _)| topic != "ilium.core.fleet/broadcast-sent"));
 }
 
 proptest! {
@@ -487,5 +604,8 @@ fn broadcast_110_the_dedup_key_length_counts_bytes() {
     let (mut host, working, _, _) = fleet();
     run_cli(&mut host, &["broadcast", "h\u{e9}llo"], b"");
     let keys: Vec<Option<String>> = host.submitted().into_iter().map(|s| s.dedup_key).collect();
-    assert!(keys.contains(&Some(format!("broadcast-{working}-6"))), "{keys:?}");
+    assert!(
+        keys.contains(&Some(format!("broadcast-{working}-6"))),
+        "{keys:?}"
+    );
 }

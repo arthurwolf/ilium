@@ -34,7 +34,12 @@ fn wheel(kind: PointerKind) -> Event {
 }
 
 fn scrolling_host() -> FakeHost {
-    plain_host("scroll.txt", None, &ten_lines(), &[("show_line_numbers", json!(false))])
+    plain_host(
+        "scroll.txt",
+        None,
+        &ten_lines(),
+        &[("show_line_numbers", json!(false))],
+    )
 }
 
 /// REQ: PORT:ilium-client/tests/editor_navigation.rs::source_pane_wheel_event_routes_to_the_editor_viewport
@@ -77,7 +82,14 @@ fn port_navigation_wheel_position_survives_a_second_render() {
 /// REQ: PORT:ilium-client/src/editor_pane.rs::wheel_scroll_does_not_move_the_cursor_in_highlighted_files
 #[test]
 fn port_navigation_wheel_in_a_highlighted_file_scrolls_and_leaves_the_text_unchanged() {
-    let mut host = plain_host("scroll.rs", Some("rust"), &(0..10).map(|r| format!("let line_{r} = {r};\n")).collect::<String>(), &[("show_line_numbers", json!(false))]);
+    let mut host = plain_host(
+        "scroll.rs",
+        Some("rust"),
+        &(0..10)
+            .map(|r| format!("let line_{r} = {r};\n"))
+            .collect::<String>(),
+        &[("show_line_numbers", json!(false))],
+    );
     host.deliver_one(wheel(PointerKind::WheelDown));
     let screen = render_pane(&mut host, 40, 6);
     assert!(screen.find("line_3").is_some(), "{}", screen.text());
@@ -100,7 +112,9 @@ fn port_navigation_cursor_navigation_reveals_the_cursor_after_a_wheel_scroll() {
 #[test]
 fn port_pane_save_of_a_pathless_buffer_submits_nothing() {
     let mut host = crate::support::active_host(&[]);
-    host.deliver_one(Event::EditorOpened(crate::support::buffer_ref(1, None, None, 1)));
+    host.deliver_one(Event::EditorOpened(crate::support::buffer_ref(
+        1, None, None, 1,
+    )));
     host.send_action(
         ViewTarget::Pane(NodeId(7)),
         "save",

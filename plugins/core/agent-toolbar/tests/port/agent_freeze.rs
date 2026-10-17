@@ -4,7 +4,11 @@ use serde_json::json;
 
 use crate::common::{ask, Place};
 
-fn should_freeze(settings: serde_json::Value, activity: &str, inactive_secs: u64) -> serde_json::Value {
+fn should_freeze(
+    settings: serde_json::Value,
+    activity: &str,
+    inactive_secs: u64,
+) -> serde_json::Value {
     let reply = ask(
         Place::Server,
         "freeze.should-freeze",
@@ -17,9 +21,18 @@ fn should_freeze(settings: serde_json::Value, activity: &str, inactive_secs: u64
 #[test]
 fn port_agent_freeze_defaults_only_freeze_finished_agents_after_six_hours() {
     let settings = json!({ "enabled": true });
-    assert_eq!(should_freeze(settings.clone(), "done", 6 * 60 * 60), json!(true));
-    assert_eq!(should_freeze(settings.clone(), "idle", 99 * 60 * 60), json!(false));
-    assert_eq!(should_freeze(settings, "working", 99 * 60 * 60), json!(false));
+    assert_eq!(
+        should_freeze(settings.clone(), "done", 6 * 60 * 60),
+        json!(true)
+    );
+    assert_eq!(
+        should_freeze(settings.clone(), "idle", 99 * 60 * 60),
+        json!(false)
+    );
+    assert_eq!(
+        should_freeze(settings, "working", 99 * 60 * 60),
+        json!(false)
+    );
 }
 
 /// REQ: PORT:ilium-client/src/agent_freeze.rs::unfreeze_resets_even_if_the_agent_stays_done
@@ -45,8 +58,14 @@ fn port_agent_freeze_waiting_state_options_are_independent() {
         "freeze_waiting_for_background": true
     });
     assert_eq!(should_freeze(settings.clone(), "idle", 10), json!(true));
-    assert_eq!(should_freeze(settings.clone(), "waiting-approval", 10), json!(false));
-    assert_eq!(should_freeze(settings, "waiting-background", 10), json!(true));
+    assert_eq!(
+        should_freeze(settings.clone(), "waiting-approval", 10),
+        json!(false)
+    );
+    assert_eq!(
+        should_freeze(settings, "waiting-background", 10),
+        json!(true)
+    );
 }
 
 /// REQ: PORT:ilium-client/src/agent_freeze.rs::working_activity_clears_elapsed_time

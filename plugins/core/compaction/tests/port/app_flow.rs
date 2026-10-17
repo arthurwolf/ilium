@@ -6,7 +6,8 @@ use crate::fixtures::*;
 
 const CODEX_CURRENT: u64 = 123_456;
 const CLAUDE_CURRENT: u64 = 777_000;
-const CODEX_CONFIG: &str = "# my settings\nmodel_auto_compact_token_limit = 123456\n\n[projects.x]\ntrust = true\n";
+const CODEX_CONFIG: &str =
+    "# my settings\nmodel_auto_compact_token_limit = 123456\n\n[projects.x]\ntrust = true\n";
 
 /// An opened panel with the Codex config in place and one Codex scan finished.
 fn scanned_codex() -> ilium_plugin_sdk::testing::FakeHost {
@@ -27,7 +28,10 @@ fn app_opening_the_tab_reads_the_current_settings_and_never_starts_a_scan() {
     write_text(&mut host, CLAUDE_FILE, "{\"other\": 1}");
     host.open_view(panel());
     let text = screen_text(&mut host, 160, 50);
-    assert!(text.contains("Current model_auto_compact_token_limit: 123,456"), "{text}");
+    assert!(
+        text.contains("Current model_auto_compact_token_limit: 123,456"),
+        "{text}"
+    );
     assert!(host.scans_started().is_empty());
     keys(&mut host, &["Right"]);
     assert!(screen_text(&mut host, 160, 50).contains("not set"));
@@ -47,7 +51,11 @@ fn app_the_current_values_are_read_again_each_time_the_tab_becomes_visible() {
     let mut host = client_host();
     write_text(&mut host, CODEX_FILE, CODEX_CONFIG);
     host.open_view(panel());
-    write_text(&mut host, CODEX_FILE, "model_auto_compact_token_limit = 150000\n");
+    write_text(
+        &mut host,
+        CODEX_FILE,
+        "model_auto_compact_token_limit = 150000\n",
+    );
     // Still visible: no re-read.
     assert!(screen_text(&mut host, 160, 50).contains("123,456"));
     // Leave and come back: the new value is read.
@@ -62,7 +70,10 @@ fn app_scan_settings_carry_the_current_value_and_the_cost_tab_price_overrides() 
     let mut host = client_host();
     write_text(&mut host, CODEX_FILE, CODEX_CONFIG);
     host.settings()
-        .set("cost.prices.gpt-test", serde_json::json!({"input": 1.0, "output": 2.0, "cache_read": 3.0, "cache_write": 4.0}))
+        .set(
+            "cost.prices.gpt-test",
+            serde_json::json!({"input": 1.0, "output": 2.0, "cache_read": 3.0, "cache_write": 4.0}),
+        )
         .expect("price override stored");
     host.open_view(panel());
     host.key(panel(), "s");
@@ -85,7 +96,10 @@ fn app_left_right_and_clicks_switch_the_agent_and_reset_the_scroll() {
     keys(&mut host, &["Right"]);
     assert!(screen_text(&mut host, 160, 50).contains("COMPACTION OPTIMIZER - CLAUDE CODE"));
     keys(&mut host, &["Right"]);
-    assert!(screen_text(&mut host, 160, 50).contains("COMPACTION OPTIMIZER - CODEX"), "wraps");
+    assert!(
+        screen_text(&mut host, 160, 50).contains("COMPACTION OPTIMIZER - CODEX"),
+        "wraps"
+    );
     keys(&mut host, &["]"]);
     assert!(screen_text(&mut host, 160, 50).contains("CLAUDE CODE"));
     keys(&mut host, &["["]);
@@ -133,13 +147,20 @@ fn app_enter_scans_then_the_page_shows_the_report_with_the_apply_button_on_top()
     write_text(&mut host, CODEX_FILE, CODEX_CONFIG);
     write_codex_corpus(&mut host, 8);
     keys(&mut host, &["Enter"]);
-    assert_eq!(host.scans_started().len(), 1, "Enter on the idle page scans");
+    assert_eq!(
+        host.scans_started().len(),
+        1,
+        "Enter on the idle page scans"
+    );
     host.finish_scans();
     let text = screen_text(&mut host, 160, 50);
     assert!(text.contains("RECOMMENDATION"));
     assert!(text.contains("Apply to Codex"));
     assert!(text.contains("Re-scan"));
-    assert!(!host.is_scanning("codex"), "no polling once the report is ready");
+    assert!(
+        !host.is_scanning("codex"),
+        "no polling once the report is ready"
+    );
 }
 
 /// REQ: PORT:ilium-client/src/compaction_app/tests.rs::escape_cancels_a_running_scan_instead_of_closing_settings_and_keeps_the_report
@@ -148,11 +169,20 @@ fn app_escape_cancels_a_running_scan_instead_of_closing_settings_and_keeps_the_r
     let mut host = scanned_codex();
     keys(&mut host, &["s"]);
     keys(&mut host, &["Esc"]);
-    assert!(!host.view_closed(panel()), "Esc cancelled the scan, it did not close the panel");
+    assert!(
+        !host.view_closed(panel()),
+        "Esc cancelled the scan, it did not close the panel"
+    );
     host.finish_scans();
-    assert!(screen_text(&mut host, 160, 50).contains("RECOMMENDATION"), "the previous report survives");
+    assert!(
+        screen_text(&mut host, 160, 50).contains("RECOMMENDATION"),
+        "the previous report survives"
+    );
     keys(&mut host, &["Esc"]);
-    assert!(host.view_closed(panel()), "with nothing running, Esc closes the panel");
+    assert!(
+        host.view_closed(panel()),
+        "with nothing running, Esc closes the panel"
+    );
 }
 
 /// REQ: PORT:ilium-client/src/compaction_app/tests.rs::a_second_scan_cannot_start_while_one_runs
@@ -183,7 +213,10 @@ fn app_apply_confirm_writes_one_key_keeps_a_record_and_revert_restores_it() {
     let recommended = host.recommended_tokens();
     assert_ne!(recommended, CODEX_CURRENT);
     keys(&mut host, &["Enter"]);
-    assert!(host.agent_file_writes().is_empty(), "nothing is written before the confirmation");
+    assert!(
+        host.agent_file_writes().is_empty(),
+        "nothing is written before the confirmation"
+    );
     let text = screen_text(&mut host, 160, 50);
     assert!(text.contains("Apply to Codex?"));
     assert!(text.contains(CODEX_KEY));
@@ -199,7 +232,8 @@ fn app_apply_confirm_writes_one_key_keeps_a_record_and_revert_restores_it() {
     assert!(after.contains(&format!("{CODEX_KEY} = {recommended}")));
     assert!(after.starts_with("# my settings\n"), "comments are kept");
     assert!(after.contains("[projects.x]\ntrust = true"));
-    assert!(screen_text(&mut host, 160, 50).contains("Revert model_auto_compact_token_limit to 123,456"));
+    assert!(screen_text(&mut host, 160, 50)
+        .contains("Revert model_auto_compact_token_limit to 123,456"));
     keys(&mut host, &["r"]);
     assert!(screen_text(&mut host, 160, 50).contains("Reverted"));
     assert_eq!(read_text(&mut host, CODEX_FILE), CODEX_CONFIG);
@@ -239,10 +273,17 @@ fn app_the_e_key_applies_the_extrapolated_alternative_through_the_same_confirmat
 fn app_revert_restores_the_previous_value_and_refuses_after_an_outside_edit() {
     let mut host = scanned_codex();
     keys(&mut host, &["a", "Enter"]);
-    write_text(&mut host, CODEX_FILE, "model_auto_compact_token_limit = 99999\n");
+    write_text(
+        &mut host,
+        CODEX_FILE,
+        "model_auto_compact_token_limit = 99999\n",
+    );
     keys(&mut host, &["r"]);
     assert!(screen_text(&mut host, 160, 50).contains("Not reverted"));
-    assert_eq!(read_text(&mut host, CODEX_FILE), "model_auto_compact_token_limit = 99999\n");
+    assert_eq!(
+        read_text(&mut host, CODEX_FILE),
+        "model_auto_compact_token_limit = 99999\n"
+    );
 }
 
 /// REQ: PORT:ilium-client/src/compaction_app/tests.rs::a_stale_file_is_reported_in_the_tab_and_nothing_is_written
@@ -268,7 +309,10 @@ fn app_applying_without_a_configuration_file_is_a_clear_error_not_a_created_file
     host.finish_scans();
     keys(&mut host, &["Enter"]);
     assert!(screen_text(&mut host, 160, 50).contains("does not exist"));
-    assert!(host.fs().read(CODEX_FILE).is_none(), "the file is not created");
+    assert!(
+        host.fs().read(CODEX_FILE).is_none(),
+        "the file is not created"
+    );
 }
 
 /// REQ: PORT:ilium-client/src/compaction_app/tests.rs::claude_apply_targets_settings_json_and_reports_environment_overrides
@@ -290,12 +334,18 @@ fn app_claude_apply_targets_settings_json_and_reports_environment_overrides() {
     let text = screen_text(&mut host, 160, 50);
     assert!(text.contains("autoCompactWindow"));
     assert!(text.contains("settings.json"));
-    assert!(text.contains("CLAUDE_CODE_AUTO_COMPACT_WINDOW=300000"), "{text}");
+    assert!(
+        text.contains("CLAUDE_CODE_AUTO_COMPACT_WINDOW=300000"),
+        "{text}"
+    );
     assert!(text.contains("Warnings"));
     assert!(text.contains(&format!("777,000 -> {}", group_thousands(recommended))));
     keys(&mut host, &["Enter"]);
     let after = read_text(&mut host, CLAUDE_FILE);
-    assert!(after.contains(&format!("\"autoCompactWindow\": {recommended}")), "{after}");
+    assert!(
+        after.contains(&format!("\"autoCompactWindow\": {recommended}")),
+        "{after}"
+    );
     assert!(after.contains("\"theme\": \"dark\""));
 }
 
@@ -308,18 +358,28 @@ fn app_the_confirmation_buttons_and_wheel_work_with_the_mouse() {
     let small = host.render(panel(), 80, 14);
     let before = small.text();
     host.scroll_wheel(panel(), 1);
-    assert_ne!(host.render(panel(), 80, 14).text(), before, "the wheel scrolls the overflowing confirmation");
+    assert_ne!(
+        host.render(panel(), 80, 14).text(),
+        before,
+        "the wheel scrolls the overflowing confirmation"
+    );
     host.scroll_wheel(panel(), -1);
     assert_eq!(host.render(panel(), 80, 14).text(), before);
     // A click outside the buttons is inert.
     host.click(panel(), 0, 0);
-    assert!(host.render(panel(), 80, 14).text().contains("Apply to Codex?"));
+    assert!(host
+        .render(panel(), 80, 14)
+        .text()
+        .contains("Apply to Codex?"));
     assert!(!host.view_closed(panel()));
     let (cancel_row, cancel_column) = small.find("Cancel").expect("cancel button");
     host.click(panel(), cancel_column, cancel_row);
     assert!(read_text(&mut host, CODEX_FILE).contains("123456"));
     keys(&mut host, &["a"]);
-    let (apply_row, apply_column) = host.render(panel(), 80, 14).find("Apply").expect("apply button");
+    let (apply_row, apply_column) = host
+        .render(panel(), 80, 14)
+        .find("Apply")
+        .expect("apply button");
     host.click(panel(), apply_column, apply_row);
     assert!(read_text(&mut host, CODEX_FILE).contains(&format!("= {recommended}")));
 }
@@ -330,14 +390,23 @@ fn app_clicking_the_page_buttons_runs_scan_apply_and_revert() {
     let mut host = opened();
     write_text(&mut host, CODEX_FILE, CODEX_CONFIG);
     write_codex_corpus(&mut host, 8);
-    let (row, column) = host.render(panel(), 160, 50).find("Scan").expect("scan button");
+    let (row, column) = host
+        .render(panel(), 160, 50)
+        .find("Scan")
+        .expect("scan button");
     host.click(panel(), column + 2, row);
     assert_eq!(host.scans_started().len(), 1);
     host.finish_scans();
-    let (row, column) = host.render(panel(), 160, 50).find("Apply to Codex").expect("apply button");
+    let (row, column) = host
+        .render(panel(), 160, 50)
+        .find("Apply to Codex")
+        .expect("apply button");
     host.click(panel(), column + 2, row);
     keys(&mut host, &["Enter"]);
-    let (row, column) = host.render(panel(), 160, 50).find("Revert").expect("revert button");
+    let (row, column) = host
+        .render(panel(), 160, 50)
+        .find("Revert")
+        .expect("revert button");
     host.click(panel(), column + 2, row);
     assert!(screen_text(&mut host, 160, 50).contains("Reverted"));
     assert!(read_text(&mut host, CODEX_FILE).contains("123456"));
@@ -348,7 +417,10 @@ fn app_clicking_the_page_buttons_runs_scan_apply_and_revert() {
 fn app_help_icons_open_the_help_topics_of_the_tab() {
     let mut host = opened();
     let topics = host.help_anchor_topics(panel());
-    assert!(topics.contains(&"OPT-01".to_string()) && topics.contains(&"OPT-02".to_string()), "{topics:?}");
+    assert!(
+        topics.contains(&"OPT-01".to_string()) && topics.contains(&"OPT-02".to_string()),
+        "{topics:?}"
+    );
     host.click_help_anchor(panel(), "OPT-02");
     assert_eq!(host.open_help_topic(), Some("OPT-02".to_string()));
 }
@@ -359,7 +431,11 @@ fn app_write_errors_get_actionable_wording() {
     // Stale file: the wording names the path and ends with the instruction to apply again.
     let mut host = scanned_codex();
     keys(&mut host, &["Enter"]);
-    write_text(&mut host, CODEX_FILE, "model_auto_compact_token_limit = 1\n");
+    write_text(
+        &mut host,
+        CODEX_FILE,
+        "model_auto_compact_token_limit = 1\n",
+    );
     keys(&mut host, &["Enter"]);
     let text = screen_text(&mut host, 200, 50);
     assert!(text.contains("Nothing was written:") && text.contains("changed since it was read"));

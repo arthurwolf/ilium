@@ -13,7 +13,9 @@ fn manifest() -> Value {
 
 /// The first json code block after the heading line `heading`.
 fn json_block_after(page: &str, heading: &str) -> Value {
-    let start = page.find(heading).unwrap_or_else(|| panic!("heading {heading} missing"));
+    let start = page
+        .find(heading)
+        .unwrap_or_else(|| panic!("heading {heading} missing"));
     let rest = &page[start..];
     let open = rest.find("```json\n").expect("json block") + "```json\n".len();
     let close = rest[open..].find("```").expect("block end");
@@ -32,7 +34,10 @@ fn grants(side: &str) -> Vec<String> {
 /// REQ: COR-050
 #[test]
 fn manifest_050_equals_the_complete_manifest_of_the_page() {
-    assert_eq!(manifest(), json_block_after(&page_text(), "### Complete manifest"));
+    assert_eq!(
+        manifest(),
+        json_block_after(&page_text(), "### Complete manifest")
+    );
 }
 
 /// REQ: COR-050
@@ -63,14 +68,23 @@ fn manifest_050_identity_and_api_version() {
 #[test]
 fn manifest_050_declares_both_sides_with_their_worlds() {
     let manifest = manifest();
-    assert_eq!(manifest["server"], json!({"entry": "server.wasm", "world": "ilium:server/base@0.1.0"}));
-    assert_eq!(manifest["client"], json!({"entry": "client.wasm", "world": "ilium:client/base@0.1.0"}));
+    assert_eq!(
+        manifest["server"],
+        json!({"entry": "server.wasm", "world": "ilium:server/base@0.1.0"})
+    );
+    assert_eq!(
+        manifest["client"],
+        json!({"entry": "client.wasm", "world": "ilium:client/base@0.1.0"})
+    );
 }
 
 /// REQ: COR-050, F-065
 #[test]
 fn manifest_050_server_reads_cells_and_the_screen_and_may_infer() {
-    assert_eq!(grants("server"), ["terminal.read-cells", "terminal.read-screen", "inference"]);
+    assert_eq!(
+        grants("server"),
+        ["terminal.read-cells", "terminal.read-screen", "inference"]
+    );
 }
 
 /// REQ: COR-050, F-016, F-066
@@ -78,7 +92,12 @@ fn manifest_050_server_reads_cells_and_the_screen_and_may_infer() {
 fn manifest_050_client_reads_the_screen_claims_the_pointer_writes_the_clipboard_and_may_infer() {
     assert_eq!(
         grants("client"),
-        ["terminal.read-screen", "terminal.pointer", "clipboard.write", "inference"]
+        [
+            "terminal.read-screen",
+            "terminal.pointer",
+            "clipboard.write",
+            "inference"
+        ]
     );
 }
 
@@ -93,7 +112,9 @@ fn manifest_050_server_has_no_pointer_or_clipboard_grant() {
 /// REQ: COR-050
 #[test]
 fn manifest_050_client_has_no_cell_grant() {
-    assert!(!grants("client").iter().any(|grant| grant == "terminal.read-cells"));
+    assert!(!grants("client")
+        .iter()
+        .any(|grant| grant == "terminal.read-cells"));
 }
 
 /// REQ: COR-050, F-016
@@ -110,9 +131,15 @@ fn manifest_050_context_menu_contributes_one_terminal_entry_for_the_smart_copy_c
 #[test]
 fn manifest_050_activation_is_the_service_and_the_command_trigger_of_the_boot_table() {
     let manifest = manifest();
-    assert_eq!(manifest["activation"], json!(["service:copy", "command:smart-copy"]));
+    assert_eq!(
+        manifest["activation"],
+        json!(["service:copy", "command:smart-copy"])
+    );
     let boot = manual_page("reference-kernel-and-boot.md");
-    let row = boot.lines().find(|line| line.starts_with("| Smart copy |")).expect("boot table row");
+    let row = boot
+        .lines()
+        .find(|line| line.starts_with("| Smart copy |"))
+        .expect("boot table row");
     assert!(row.contains("`service:copy`"));
     assert!(row.contains("`command:smart-copy`"));
 }
@@ -128,7 +155,9 @@ fn manifest_050_limits_tier_is_first_party() {
 fn manifest_050_description_is_a_prefix_of_the_first_sentence_of_the_page() {
     let manifest = manifest();
     let description = manifest["description"].as_str().expect("description");
-    assert!(description.starts_with("The Smart Copy plugin (ilium.core.smart-copy, side both) owns selection and copying"));
+    assert!(description.starts_with(
+        "The Smart Copy plugin (ilium.core.smart-copy, side both) owns selection and copying"
+    ));
     assert!(page_text().contains(&description[..80]));
 }
 
@@ -144,7 +173,13 @@ fn parity_011_settings_stay_kernel_settings_so_the_manifest_declares_none() {
 /// REQ: COR-050
 #[test]
 fn manifest_050_host_takes_grants_from_the_manifest_for_each_side() {
-    let server = FakeHost::for_manifest(manifest_path()).expect("loads").side("server").build();
-    let client = FakeHost::for_manifest(manifest_path()).expect("loads").side("client").build();
+    let server = FakeHost::for_manifest(manifest_path())
+        .expect("loads")
+        .side("server")
+        .build();
+    let client = FakeHost::for_manifest(manifest_path())
+        .expect("loads")
+        .side("client")
+        .build();
     drop((server, client));
 }

@@ -17,22 +17,21 @@ use std::thread::ThreadId;
 
 use ilium_plugin_api::generated::types::events::{
     CliInvokedEvent, ClientRequestEvent, CommandContext, CommandInvokedEvent, CommandOrigin,
-    DurableTimerEvent, HttpCalledEvent, InputUncertainEvent, KeyEvent, MessageEvent,
-    PointerEvent,
+    DurableTimerEvent, HttpCalledEvent, InputUncertainEvent, KeyEvent, MessageEvent, PointerEvent,
 };
 use ilium_plugin_api::generated::types::ids::TimerId;
 use ilium_plugin_api::generated::types::intents::{Intent, PluginSide, Submission};
-use ilium_plugin_api::generated::types::tree::{NodeClass, NodeView};
-use ilium_plugin_host::testing::FakeKernel;
-use ilium_plugin_api::ProcessKind;
 use ilium_plugin_api::generated::types::lifecycle::{Activation, DeactivationReason};
 use ilium_plugin_api::generated::types::requests::{Outcome, RequestRef, RequestResult};
+use ilium_plugin_api::generated::types::tree::{NodeClass, NodeView};
 use ilium_plugin_api::generated::types::ui::{
     ActionKind, PointerButton, PointerKind, PointerModifiers, UiAction, ViewTarget,
 };
 use ilium_plugin_api::limits::LimitKey;
+use ilium_plugin_api::ProcessKind;
 use ilium_plugin_api::{Code, PluginError};
 use ilium_plugin_host::calls::Trap;
+use ilium_plugin_host::testing::FakeKernel;
 use ilium_plugin_host::testing::NativeGuest;
 
 pub fn plugin(name: &str) -> PluginId {
@@ -319,7 +318,11 @@ impl NativeGuest for ScriptedGuest {
 
     fn on_events(&mut self, batch: Vec<Event>) -> Result<Vec<Submission>, Trap> {
         self.shared.note("on-events");
-        self.shared.starts.lock().expect("starts lock").push(Instant::now());
+        self.shared
+            .starts
+            .lock()
+            .expect("starts lock")
+            .push(Instant::now());
         let call_number = {
             let mut batches = self.shared.batches.lock().expect("batches lock");
             batches.push(batch.clone());

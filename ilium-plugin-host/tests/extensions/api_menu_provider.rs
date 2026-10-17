@@ -4,11 +4,18 @@
 use crate::support::menu::*;
 
 fn entry(id: &str) -> MenuEntry {
-    MenuEntry { id: id.to_owned(), label: id.to_owned(), ..MenuEntry::default() }
+    MenuEntry {
+        id: id.to_owned(),
+        label: id.to_owned(),
+        ..MenuEntry::default()
+    }
 }
 
 fn context() -> MenuContext {
-    MenuContext { menu: "tree.row".to_owned(), ..MenuContext::default() }
+    MenuContext {
+        menu: "tree.row".to_owned(),
+        ..MenuContext::default()
+    }
 }
 
 /// REQ: HST-476
@@ -19,7 +26,11 @@ fn hst_476_all_providers_of_one_opening_are_called_at_once() {
     harness.add_provider("com.example.b", 5, vec![entry("b1")]);
     harness.add_provider("com.example.c", 5, vec![entry("c1")]);
     let opening = harness.open(context());
-    let starts: Vec<u64> = opening.provider_calls.iter().map(|(_, start)| *start).collect();
+    let starts: Vec<u64> = opening
+        .provider_calls
+        .iter()
+        .map(|(_, start)| *start)
+        .collect();
     assert_eq!(starts.len(), 3);
     assert!(starts.iter().all(|start| *start == starts[0]), "{starts:?}");
 }
@@ -71,7 +82,10 @@ fn hst_476_late_entries_never_appear_in_a_later_frame_of_the_same_opening() {
     let mut harness = MenuHarness::new();
     harness.add_provider("com.example.late", 40, vec![entry("late1")]);
     let opening = harness.open(context());
-    assert!(opening.frames.iter().all(|frame| !frame.contains(&"late1".to_owned())));
+    assert!(opening
+        .frames
+        .iter()
+        .all(|frame| !frame.contains(&"late1".to_owned())));
 }
 
 /// REQ: HST-477
@@ -101,7 +115,11 @@ fn hst_477_menu_does_not_change_after_its_first_frame() {
     harness.static_entries(vec![entry("copy")]);
     harness.add_provider("com.example.late", 80, vec![entry("late1")]);
     let opening = harness.open(context());
-    assert_eq!(opening.frames.len(), 1, "exactly one frame is drawn for one opening");
+    assert_eq!(
+        opening.frames.len(),
+        1,
+        "exactly one frame is drawn for one opening"
+    );
 }
 
 /// REQ: HST-478
@@ -132,7 +150,15 @@ fn hst_478_a_stopped_provider_is_still_activated_for_a_later_opening() {
 #[test]
 fn wit_menu_items_returns_at_most_64_entries_in_the_menu() {
     let mut harness = MenuHarness::new();
-    harness.add_provider("com.example.many", 1, (0..70).map(|index| entry(&format!("e{index}"))).collect());
+    harness.add_provider(
+        "com.example.many",
+        1,
+        (0..70).map(|index| entry(&format!("e{index}"))).collect(),
+    );
     let opening = harness.open(context());
-    assert!(opening.frames[0].len() <= 64 + 1, "64 entries and at most one more-row: {}", opening.frames[0].len());
+    assert!(
+        opening.frames[0].len() <= 64 + 1,
+        "64 entries and at most one more-row: {}",
+        opening.frames[0].len()
+    );
 }

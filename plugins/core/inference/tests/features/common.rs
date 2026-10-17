@@ -31,7 +31,9 @@ pub fn workspace_root() -> PathBuf {
 
 /// A page of the manual by file name.
 pub fn manual_page(name: &str) -> String {
-    let path = workspace_root().join("docs/plugins-manual/pages").join(name);
+    let path = workspace_root()
+        .join("docs/plugins-manual/pages")
+        .join(name);
     std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("page {path:?}: {error}"))
 }
 
@@ -57,7 +59,9 @@ pub fn manifest() -> Value {
 
 /// The first json code block after the heading line `heading`.
 pub fn json_block_after(page: &str, heading: &str) -> Value {
-    let start = page.find(heading).unwrap_or_else(|| panic!("heading {heading} missing"));
+    let start = page
+        .find(heading)
+        .unwrap_or_else(|| panic!("heading {heading} missing"));
     let rest = &page[start..];
     let open = rest.find("```json\n").expect("json block") + "```json\n".len();
     let close = rest[open..].find("```").expect("block end");
@@ -67,7 +71,9 @@ pub fn json_block_after(page: &str, heading: &str) -> Value {
 /// The text of the section that starts at the heading line `heading` and ends at the next heading of the same or a higher level.
 pub fn section(page: &str, heading: &str) -> String {
     let level = heading.chars().take_while(|c| *c == '#').count();
-    let start = page.find(&format!("{heading}\n")).unwrap_or_else(|| panic!("heading {heading} missing"));
+    let start = page
+        .find(&format!("{heading}\n"))
+        .unwrap_or_else(|| panic!("heading {heading} missing"));
     let rest = &page[start + heading.len()..];
     let mut end = rest.len();
     let mut offset = 0;
@@ -99,12 +105,18 @@ pub fn table_rows(text: &str) -> Vec<Vec<String>> {
 
 /// A server-side host with the manifest grants, not yet activated.
 pub fn server_host_unactivated() -> FakeHost {
-    FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("server").build()
+    FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("server")
+        .build()
 }
 
 /// A client-side host with the manifest grants, not yet activated.
 pub fn client_host_unactivated() -> FakeHost {
-    FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("client").build()
+    FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("client")
+        .build()
 }
 
 /// A server-side host with the plugin activated and the given plugin settings.
@@ -149,7 +161,10 @@ pub fn client_host() -> FakeHost {
 /// A one-message request with the given purpose.
 pub fn request(purpose: &str, text: &str) -> CompletionRequest {
     CompletionRequest {
-        messages: vec![ChatMessage { role: "user".to_string(), content: text.to_string() }],
+        messages: vec![ChatMessage {
+            role: "user".to_string(),
+            content: text.to_string(),
+        }],
         max_output_tokens: None,
         json_schema: None,
         purpose: purpose.to_string(),
@@ -158,12 +173,21 @@ pub fn request(purpose: &str, text: &str) -> CompletionRequest {
 
 /// A completion of the model `model`.
 pub fn completion(text: &str, model: &str) -> Completion {
-    Completion { text: text.to_string(), model: model.to_string(), input_tokens: 3, output_tokens: 1 }
+    Completion {
+        text: text.to_string(),
+        model: model.to_string(),
+        input_tokens: 3,
+        output_tokens: 1,
+    }
 }
 
 /// A plugin error of the given code with an empty message.
 pub fn error(code: ErrorCode) -> PluginError {
-    PluginError { code, message: String::new(), retry_after_ms: None }
+    PluginError {
+        code,
+        message: String::new(),
+        retry_after_ms: None,
+    }
 }
 
 /// A command invocation from a settings row.
@@ -178,7 +202,9 @@ pub fn row_command(command: &str) -> Event {
 
 /// An OpenAI-style streaming payload carrying `delta`.
 pub fn sse_delta(delta: &str) -> Vec<u8> {
-    serde_json::json!({"choices": [{"delta": {"content": delta}}]}).to_string().into_bytes()
+    serde_json::json!({"choices": [{"delta": {"content": delta}}]})
+        .to_string()
+        .into_bytes()
 }
 
 /// A non-streaming OpenAI-style response body carrying `text` for `model`.

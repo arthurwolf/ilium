@@ -41,7 +41,10 @@ fn manifest_050_fragment_matches_the_complete_manifest_where_it_overlaps() {
     let complete = complete_manifest();
     assert_eq!(fragment["id"], complete["id"]);
     assert_eq!(fragment["contributes"], complete["contributes"]);
-    assert_eq!(fragment["capabilities"]["server"], complete["capabilities"]["server"]);
+    assert_eq!(
+        fragment["capabilities"]["server"],
+        complete["capabilities"]["server"]
+    );
 }
 
 /// REQ: COR-050
@@ -49,8 +52,14 @@ fn manifest_050_fragment_matches_the_complete_manifest_where_it_overlaps() {
 fn manifest_050_the_fragment_client_grants_are_a_prefix_of_the_complete_client_grants() {
     let fragment = fragment_manifest();
     let complete = complete_manifest();
-    let short = fragment["capabilities"]["client"].as_array().expect("fragment client grants").clone();
-    let long = complete["capabilities"]["client"].as_array().expect("complete client grants").clone();
+    let short = fragment["capabilities"]["client"]
+        .as_array()
+        .expect("fragment client grants")
+        .clone();
+    let long = complete["capabilities"]["client"]
+        .as_array()
+        .expect("complete client grants")
+        .clone();
     assert_eq!(&long[..short.len()], &short[..]);
 }
 
@@ -70,7 +79,10 @@ fn manifest_050_identity_and_api_version() {
 /// REQ: COR-050
 #[test]
 fn manifest_050_server_component_and_world() {
-    assert_eq!(manifest_value()["server"], json!({"entry": "server.wasm", "world": "ilium:server/base@0.1.0"}));
+    assert_eq!(
+        manifest_value()["server"],
+        json!({"entry": "server.wasm", "world": "ilium:server/base@0.1.0"})
+    );
 }
 
 /// REQ: COR-050, PKG-025
@@ -79,7 +91,10 @@ fn manifest_050_every_side_with_grants_has_a_component_pkg_025_grant_side() {
     let manifest = manifest_value();
     for side in ["server", "client", "scene"] {
         if manifest["capabilities"].get(side).is_some() {
-            assert!(manifest.get(side).is_some(), "capabilities.{side} is listed but the manifest has no {side} component");
+            assert!(
+                manifest.get(side).is_some(),
+                "capabilities.{side} is listed but the manifest has no {side} component"
+            );
         }
     }
 }
@@ -110,7 +125,10 @@ fn manifest_050_client_grants_are_panels_and_the_git_kernel_tab() {
 /// REQ: COR-050, F-071
 #[test]
 fn manifest_050_the_only_programs_the_server_may_run_are_git_and_sh() {
-    let programs: Vec<String> = grants("server").into_iter().filter_map(|grant| grant.strip_prefix("process.run:").map(str::to_string)).collect();
+    let programs: Vec<String> = grants("server")
+        .into_iter()
+        .filter_map(|grant| grant.strip_prefix("process.run:").map(str::to_string))
+        .collect();
     assert_eq!(programs, ["git", "sh"]);
 }
 
@@ -118,8 +136,20 @@ fn manifest_050_the_only_programs_the_server_may_run_are_git_and_sh() {
 #[test]
 fn manifest_050_the_server_writes_only_the_worktrees_scope_and_reads_only_the_project_scope() {
     let server = grants("server");
-    assert_eq!(server.iter().filter(|grant| grant.starts_with("fs.write")).collect::<Vec<_>>(), ["fs.write:worktrees"]);
-    assert_eq!(server.iter().filter(|grant| grant.starts_with("fs.read")).collect::<Vec<_>>(), ["fs.read:project"]);
+    assert_eq!(
+        server
+            .iter()
+            .filter(|grant| grant.starts_with("fs.write"))
+            .collect::<Vec<_>>(),
+        ["fs.write:worktrees"]
+    );
+    assert_eq!(
+        server
+            .iter()
+            .filter(|grant| grant.starts_with("fs.read"))
+            .collect::<Vec<_>>(),
+        ["fs.read:project"]
+    );
 }
 
 /// REQ: COR-050
@@ -127,7 +157,10 @@ fn manifest_050_the_server_writes_only_the_worktrees_scope_and_reads_only_the_pr
 fn manifest_050_the_client_has_no_server_only_grant() {
     let client = grants("client");
     for forbidden in ["workspace.manage", "panes.create", "panes.read"] {
-        assert!(!client.iter().any(|grant| grant == forbidden), "{forbidden} on the client side");
+        assert!(
+            !client.iter().any(|grant| grant == forbidden),
+            "{forbidden} on the client side"
+        );
     }
 }
 
@@ -158,18 +191,28 @@ fn manifest_050_the_page_title_of_the_sample_names_ctrl_b_w() {
 /// REQ: COR-050
 #[test]
 fn manifest_050_activation_is_the_command_and_the_create_service() {
-    assert_eq!(manifest_value()["activation"], json!(["command:new-agent", "service:create"]));
+    assert_eq!(
+        manifest_value()["activation"],
+        json!(["command:new-agent", "service:create"])
+    );
 }
 
 /// REQ: COR-050
 #[test]
 fn manifest_050_activation_matches_the_kernel_and_boot_table_and_is_not_startup() {
     let boot = page("reference-kernel-and-boot");
-    let row = boot.lines().find(|line| line.starts_with("| Worktrees | `command:new-agent`")).expect("boot row");
+    let row = boot
+        .lines()
+        .find(|line| line.starts_with("| Worktrees | `command:new-agent`"))
+        .expect("boot row");
     let cells: Vec<&str> = row.trim_matches('|').split('|').map(str::trim).collect();
     assert_eq!(cells[1], "`command:new-agent`, `service:create`");
     assert_eq!(cells[2], "none");
-    assert!(!manifest_value()["activation"].as_array().expect("activation").iter().any(|item| item == "startup"));
+    assert!(!manifest_value()["activation"]
+        .as_array()
+        .expect("activation")
+        .iter()
+        .any(|item| item == "startup"));
 }
 
 /// REQ: COR-050
@@ -182,7 +225,11 @@ fn manifest_050_contributes_no_settings_the_git_tab_is_a_kernel_tab() {
 #[test]
 fn manifest_050_contributes_nothing_but_commands_and_keybindings() {
     let manifest = manifest_value();
-    let keys: Vec<&String> = manifest["contributes"].as_object().expect("contributes").keys().collect();
+    let keys: Vec<&String> = manifest["contributes"]
+        .as_object()
+        .expect("contributes")
+        .keys()
+        .collect();
     assert_eq!(keys, ["commands", "keybindings"]);
 }
 
@@ -198,7 +245,10 @@ fn manifest_050_the_manifest_file_is_where_the_testkit_reads_it() {
 fn manifest_050_the_ability_grant_table_lists_every_server_grant_on_the_workspace_page() {
     let workspace = page("api-workspace");
     for grant in ["workspace.manage", "process.run:git", "fs.write:worktrees"] {
-        assert!(workspace.contains(&format!("`{grant}`")), "{grant} missing on api-workspace");
+        assert!(
+            workspace.contains(&format!("`{grant}`")),
+            "{grant} missing on api-workspace"
+        );
     }
     let _ = table_after;
 }

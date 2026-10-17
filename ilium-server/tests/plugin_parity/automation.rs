@@ -17,7 +17,9 @@ fn f_058_default_api_port_is_8872() {
 #[test]
 fn f_058_a_port_of_zero_is_rejected() {
     on_plugin_build(|kernel| {
-        let error = kernel.apply_setting("api", "port", "0").expect_err("a port of 0 is rejected");
+        let error = kernel
+            .apply_setting("api", "port", "0")
+            .expect_err("a port of 0 is rejected");
         assert!(error.contains("invalid-argument"), "{error}");
         assert_eq!(kernel.setting("api", "port").as_deref(), Some("8872"));
     });
@@ -47,9 +49,15 @@ fn f_058_an_empty_prompt_is_a_400_with_an_error_body() {
             json!({"agent_type": "codex", "project": kernel.project_root(), "prompt": "   "}),
         );
         assert_eq!(status, 400);
-        let message = body["error"].as_str().expect("error body is {\"error\": \"...\"}");
+        let message = body["error"]
+            .as_str()
+            .expect("error body is {\"error\": \"...\"}");
         assert!(!message.is_empty(), "{body}");
-        assert_eq!(body.as_object().map(|object| object.len()), Some(1), "{body}");
+        assert_eq!(
+            body.as_object().map(|object| object.len()),
+            Some(1),
+            "{body}"
+        );
     });
 }
 
@@ -76,7 +84,12 @@ fn f_058_an_agent_type_other_than_claude_or_codex_is_rejected() {
         );
         // automation.md lists only 400/500/503; a bad request field is a client error, so 400.
         assert_eq!(status, 400, "{body}");
-        assert!(body["error"].as_str().is_some_and(|message| !message.is_empty()), "{body}");
+        assert!(
+            body["error"]
+                .as_str()
+                .is_some_and(|message| !message.is_empty()),
+            "{body}"
+        );
     });
 }
 
@@ -98,7 +111,12 @@ fn f_058_a_workspace_object_with_a_path_key_is_rejected_with_400() {
 #[test]
 fn f_058_the_listener_binds_loopback_only() {
     on_plugin_build(|kernel| {
-        assert_eq!(kernel.http_listener_address().map(|address| address.ip().to_string()), Some("127.0.0.1".to_owned()));
+        assert_eq!(
+            kernel
+                .http_listener_address()
+                .map(|address| address.ip().to_string()),
+            Some("127.0.0.1".to_owned())
+        );
     });
 }
 

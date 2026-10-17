@@ -11,14 +11,18 @@ fn evidence_of(screen: &[&str]) -> String {
 #[test]
 fn port_custody_redacts_token_value_suffix_without_hiding_the_key_name() {
     let evidence = evidence_of(&["export TOKEN_VALUE=supersecretvalue123"]);
-    assert!(evidence.contains("export TOKEN_VALUE=[redacted]"), "{evidence}");
+    assert!(
+        evidence.contains("export TOKEN_VALUE=[redacted]"),
+        "{evidence}"
+    );
     assert!(!evidence.contains("supersecretvalue123"));
 }
 
 /// REQ: PORT:ilium-client/src/recap/custody.rs::redacts_key_values_but_keeps_key_names
 #[test]
 fn port_custody_redacts_key_values_but_keeps_key_names() {
-    let evidence = evidence_of(&["export ANTHROPIC_API_KEY=abcd1234efgh5678 and api_key: \"zzzz9999\""]);
+    let evidence =
+        evidence_of(&["export ANTHROPIC_API_KEY=abcd1234efgh5678 and api_key: \"zzzz9999\""]);
     assert!(!evidence.contains("abcd1234efgh5678"));
     assert!(!evidence.contains("zzzz9999"));
     assert!(evidence.contains("ANTHROPIC_API_KEY"));
@@ -51,7 +55,11 @@ fn port_custody_leaves_ordinary_prose_untouched() {
 
 fn pointer_outcome(path: &str) -> serde_json::Value {
     let screen = format!("wrote {path}");
-    short_after_answer(&[screen.as_str()], &[(path, "x")], pointer_answer(path, "note"))
+    short_after_answer(
+        &[screen.as_str()],
+        &[(path, "x")],
+        pointer_answer(path, "note"),
+    )
 }
 
 /// REQ: PORT:ilium-client/src/recap/custody.rs::denies_credential_stores_and_key_files
@@ -76,7 +84,11 @@ fn port_custody_denies_credential_stores_and_key_files() {
 fn port_custody_allows_ordinary_project_files() {
     for path in ["src/lib.rs", "docs/TODO.md"] {
         let short = pointer_outcome(path);
-        assert_eq!(short["pointers"].as_array().map(Vec::len), Some(1), "{path}");
+        assert_eq!(
+            short["pointers"].as_array().map(Vec::len),
+            Some(1),
+            "{path}"
+        );
         assert_eq!(short["rejected_pointers"], 0, "{path}");
     }
 }

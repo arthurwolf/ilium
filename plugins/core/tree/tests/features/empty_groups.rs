@@ -35,8 +35,15 @@ fn feature_006_a_group_with_a_remaining_child_stays_open() {
     host.tree().remove(pane);
     host.settle();
     assert!(closed_nodes(&host.submitted()).is_empty());
-    assert!(host.tree().get(group).is_some(), "the group is still open in the tree");
-    assert!(host.submitted().is_empty(), "nothing submitted: {:?}", host.submitted());
+    assert!(
+        host.tree().get(group).is_some(),
+        "the group is still open in the tree"
+    );
+    assert!(
+        host.submitted().is_empty(),
+        "nothing submitted: {:?}",
+        host.submitted()
+    );
 }
 
 /// REQ: F-006
@@ -115,7 +122,10 @@ fn feature_006_the_cascade_closes_ancestors_that_become_empty() {
     // The kernel executes close-node and reports the removal of the inner group.
     host.tree().remove(inner);
     host.settle();
-    assert_eq!(closed_nodes(&host.submitted()), vec![NodeId(inner), NodeId(outer)]);
+    assert_eq!(
+        closed_nodes(&host.submitted()),
+        vec![NodeId(inner), NodeId(outer)]
+    );
 }
 
 /// REQ: F-006
@@ -151,8 +161,15 @@ fn feature_006_a_removal_of_a_node_never_seen_closes_nothing() {
     let mut host = server_host();
     let direct = host.deliver_one(Event::NodeRemoved(NodeId(9_999)));
     host.settle();
-    assert!(direct.is_empty(), "no submission for an unknown node: {direct:?}");
-    assert!(host.submitted().is_empty(), "nothing submitted at all: {:?}", host.submitted());
+    assert!(
+        direct.is_empty(),
+        "no submission for an unknown node: {direct:?}"
+    );
+    assert!(
+        host.submitted().is_empty(),
+        "nothing submitted at all: {:?}",
+        host.submitted()
+    );
 }
 
 /// REQ: F-006
@@ -183,7 +200,9 @@ fn feature_006_a_group_whose_parent_is_gone_from_the_tree_is_not_closed() {
 #[test]
 fn feature_006_with_the_setting_off_empty_groups_stay() {
     let mut host = server_host();
-    host.settings().set("ui.auto_remove_empty_groups", serde_json::json!(false)).expect("setting accepted");
+    host.settings()
+        .set("ui.auto_remove_empty_groups", serde_json::json!(false))
+        .expect("setting accepted");
     let (_group, pane) = group_with_pane(&mut host);
     host.tree().remove(pane);
     host.settle();
@@ -194,7 +213,9 @@ fn feature_006_with_the_setting_off_empty_groups_stay() {
 #[test]
 fn feature_006_with_the_setting_on_empty_groups_close() {
     let mut host = server_host();
-    host.settings().set("ui.auto_remove_empty_groups", serde_json::json!(true)).expect("setting accepted");
+    host.settings()
+        .set("ui.auto_remove_empty_groups", serde_json::json!(true))
+        .expect("setting accepted");
     let (group, pane) = group_with_pane(&mut host);
     host.tree().remove(pane);
     host.settle();
@@ -205,7 +226,10 @@ fn feature_006_with_the_setting_on_empty_groups_close() {
 #[test]
 fn feature_006_the_default_of_the_setting_is_on() {
     let mut host = server_host();
-    assert_eq!(host.settings().get("ui.auto_remove_empty_groups"), Some(serde_json::json!(true)));
+    assert_eq!(
+        host.settings().get("ui.auto_remove_empty_groups"),
+        Some(serde_json::json!(true))
+    );
 }
 
 /// REQ: F-006

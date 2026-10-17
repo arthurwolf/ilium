@@ -9,12 +9,32 @@ use serde_json::json;
 const PAGE: &str = "user-plugin-store.md";
 const NOTES: &str = "com.acme.notes";
 
-const CATEGORIES: [&str; 11] = ["agents", "appearance", "scenes", "editors", "git", "inference", "notifications", "search", "terminal", "tools", "voice"];
+const CATEGORIES: [&str; 11] = [
+    "agents",
+    "appearance",
+    "scenes",
+    "editors",
+    "git",
+    "inference",
+    "notifications",
+    "search",
+    "terminal",
+    "tools",
+    "voice",
+];
 
 /// REQ: PKG-530
 #[test]
 fn doc_pkg_530_one_row_per_plugin_with_name_publisher_version_tier_description() {
-    assert_row(PAGE, "PKG-530", &["one row per plugin id", "name, publisher, latest version, tier badge", "short description"]);
+    assert_row(
+        PAGE,
+        "PKG-530",
+        &[
+            "one row per plugin id",
+            "name, publisher, latest version, tier badge",
+            "short description",
+        ],
+    );
 }
 
 /// REQ: PKG-530
@@ -25,9 +45,16 @@ fn pkg_530_search_lists_each_plugin_id_once_with_its_latest_version() {
     assert_ok(&output);
     let ids = plugin_ids(&output);
     for id in [NOTES, "com.acme.git-tools", "org.zeta.cafe-timer"] {
-        assert_eq!(ids.iter().filter(|found| found.as_str() == id).count(), 1, "{id} once: {ids:?}");
+        assert_eq!(
+            ids.iter().filter(|found| found.as_str() == id).count(),
+            1,
+            "{id} once: {ids:?}"
+        );
     }
-    assert!(output_contains(&output, "1.1.0"), "latest version of notes: {output:?}");
+    assert!(
+        output_contains(&output, "1.1.0"),
+        "latest version of notes: {output:?}"
+    );
 }
 
 /// REQ: PKG-530
@@ -55,7 +82,10 @@ fn doc_pkg_531_the_filter_offers_only_the_closed_category_list() {
     assert_row(PAGE, "PKG-531", &["closed category list"]);
     let registry = page_text("reference-registry.md");
     for category in CATEGORIES {
-        assert!(registry.contains(category), "category {category} is missing from the registry page");
+        assert!(
+            registry.contains(category),
+            "category {category} is missing from the registry page"
+        );
     }
 }
 
@@ -73,13 +103,21 @@ fn pkg_531_a_known_category_filter_is_accepted() {
 #[test]
 fn pkg_531_a_category_outside_the_closed_list_is_refused_invalid_value() {
     let sandbox = Sandbox::standard();
-    assert_failed(&sandbox.run(&["search", "--category", "games"]), "usage.invalid-value", 2);
+    assert_failed(
+        &sandbox.run(&["search", "--category", "games"]),
+        "usage.invalid-value",
+        2,
+    );
 }
 
 /// REQ: PKG-532
 #[test]
 fn doc_pkg_532_empty_state_names_the_add_command_and_no_network() {
-    assert_row(PAGE, "PKG-532", &["No registry is set up", "MUST NOT contact the network"]);
+    assert_row(
+        PAGE,
+        "PKG-532",
+        &["No registry is set up", "MUST NOT contact the network"],
+    );
 }
 
 /// REQ: PKG-532
@@ -102,7 +140,11 @@ fn pkg_532_without_a_registry_no_request_leaves_the_machine() {
 /// REQ: PKG-533
 #[test]
 fn doc_pkg_533_yanked_versions_are_hidden_and_deprecation_shows_the_successor() {
-    assert_row(PAGE, "PKG-533", &["Yanked versions MUST NOT appear", "badge", "successor"]);
+    assert_row(
+        PAGE,
+        "PKG-533",
+        &["Yanked versions MUST NOT appear", "badge", "successor"],
+    );
 }
 
 /// REQ: PKG-533
@@ -113,7 +155,10 @@ fn pkg_533_a_yanked_latest_version_is_not_offered_and_the_previous_one_is() {
     let sandbox = Sandbox::with_registry(&builder);
     let output = sandbox.run(&["search", "notes"]);
     assert_ok(&output);
-    assert!(!output_contains(&output, "1.1.0"), "yanked version shown: {output:?}");
+    assert!(
+        !output_contains(&output, "1.1.0"),
+        "yanked version shown: {output:?}"
+    );
     assert!(output_contains(&output, "1.0.0"), "{output:?}");
 }
 
@@ -121,7 +166,10 @@ fn pkg_533_a_yanked_latest_version_is_not_offered_and_the_previous_one_is() {
 #[test]
 fn pkg_533_a_deprecated_plugin_shows_its_message_and_successor() {
     let mut builder = RegistryBuilder::standard();
-    builder.plugins[0].deprecated = Some(("Use the new plugin".to_owned(), "com.acme.notes2".to_owned()));
+    builder.plugins[0].deprecated = Some((
+        "Use the new plugin".to_owned(),
+        "com.acme.notes2".to_owned(),
+    ));
     let sandbox = Sandbox::with_registry(&builder);
     let output = sandbox.run(&["info", NOTES, "--json"]);
     assert_ok(&output);
@@ -132,7 +180,17 @@ fn pkg_533_a_deprecated_plugin_shows_its_message_and_successor() {
 /// REQ: PKG-534
 #[test]
 fn doc_pkg_534_ratings_are_not_shown() {
-    assert_row(PAGE, "PKG-534", &["ratings are not shown", "not in 0.1"].map(|s| if s == "ratings are not shown" { "User ratings are not shown" } else { s }));
+    assert_row(
+        PAGE,
+        "PKG-534",
+        &["ratings are not shown", "not in 0.1"].map(|s| {
+            if s == "ratings are not shown" {
+                "User ratings are not shown"
+            } else {
+                s
+            }
+        }),
+    );
 }
 
 /// REQ: PKG-534
@@ -142,8 +200,14 @@ fn pkg_534_search_and_info_output_has_no_rating_field() {
     for args in [vec!["search"], vec!["info", NOTES, "--json"]] {
         let output = sandbox.run(&args);
         assert_ok(&output);
-        assert!(!output_contains(&output, "\"rating\""), "{args:?}: {output:?}");
-        assert!(!output_contains(&output, "\"stars\""), "{args:?}: {output:?}");
+        assert!(
+            !output_contains(&output, "\"rating\""),
+            "{args:?}: {output:?}"
+        );
+        assert!(
+            !output_contains(&output, "\"stars\""),
+            "{args:?}: {output:?}"
+        );
     }
 }
 
@@ -165,7 +229,11 @@ fn pkg_535_info_lists_the_grants_of_the_latest_version() {
 /// REQ: PKG-536
 #[test]
 fn doc_pkg_536_detail_shows_publisher_id_and_key_status() {
-    assert_row(PAGE, "PKG-536", &["publisher id", "`trusted`", "`unknown`", "`revoked`"]);
+    assert_row(
+        PAGE,
+        "PKG-536",
+        &["publisher id", "`trusted`", "`unknown`", "`revoked`"],
+    );
 }
 
 /// REQ: PKG-536
@@ -191,7 +259,9 @@ fn pkg_536_info_shows_trusted_after_the_key_was_trusted() {
 #[test]
 fn pkg_536_info_shows_revoked_for_a_revoked_key() {
     let mut builder = RegistryBuilder::standard();
-    builder.revoked_keys = vec![json!({ "publisher_id": PUBLISHER_ID, "key_id": publisher_key_id(), "reason": "compromised", "effective": at(-3600) })];
+    builder.revoked_keys = vec![
+        json!({ "publisher_id": PUBLISHER_ID, "key_id": publisher_key_id(), "reason": "compromised", "effective": at(-3600) }),
+    ];
     let sandbox = Sandbox::with_registry(&builder);
     let output = sandbox.run(&["info", NOTES, "--json"]);
     assert!(output_contains(&output, "revoked"), "{output:?}");
@@ -200,7 +270,11 @@ fn pkg_536_info_shows_revoked_for_a_revoked_key() {
 /// REQ: PKG-537
 #[test]
 fn doc_pkg_537_revoked_key_or_blocked_id_has_no_install_button() {
-    assert_row(PAGE, "PKG-537", &["revoked key or a blocked id", "Install button", "reason"]);
+    assert_row(
+        PAGE,
+        "PKG-537",
+        &["revoked key or a blocked id", "Install button", "reason"],
+    );
 }
 
 /// REQ: PKG-537
@@ -219,7 +293,9 @@ fn pkg_537_a_blocked_id_cannot_be_installed_and_the_reason_is_shown() {
 #[test]
 fn pkg_537_a_revoked_key_cannot_be_installed() {
     let mut builder = RegistryBuilder::standard();
-    builder.revoked_keys = vec![json!({ "publisher_id": PUBLISHER_ID, "key_id": publisher_key_id(), "reason": "compromised", "effective": at(-3600) })];
+    builder.revoked_keys = vec![
+        json!({ "publisher_id": PUBLISHER_ID, "key_id": publisher_key_id(), "reason": "compromised", "effective": at(-3600) }),
+    ];
     let sandbox = Sandbox::with_registry(&builder);
     assert_code(&install_notes(&sandbox, &[]), "trust.key-revoked");
     assert_eq!(sandbox.installed_version(NOTES), None);
@@ -237,7 +313,11 @@ fn pkg_537_a_block_of_another_id_does_not_affect_this_plugin() {
 /// REQ: PKG-538
 #[test]
 fn doc_pkg_538_store_install_uses_the_file_install_pipeline() {
-    assert_row(PAGE, "PKG-538", &["same pipeline and dialog as a file install"]);
+    assert_row(
+        PAGE,
+        "PKG-538",
+        &["same pipeline and dialog as a file install"],
+    );
 }
 
 /// REQ: PKG-538
@@ -248,8 +328,17 @@ fn pkg_538_a_registry_install_and_a_file_install_leave_the_same_installed_files(
     assert_ok(&install_notes(&from_registry, &[]));
     let from_file = Sandbox::new();
     let path = from_file.project_file("notes.iliumpkg", &signed_package(NOTES, "1.1.0"));
-    assert_ok(&from_file.run(&["install", path.to_str().expect("utf-8 path"), "--yes", "--trust", key.as_str()]));
-    assert_eq!(from_registry.installed_version(NOTES), from_file.installed_version(NOTES));
+    assert_ok(&from_file.run(&[
+        "install",
+        path.to_str().expect("utf-8 path"),
+        "--yes",
+        "--trust",
+        key.as_str(),
+    ]));
+    assert_eq!(
+        from_registry.installed_version(NOTES),
+        from_file.installed_version(NOTES)
+    );
 }
 
 /// REQ: PKG-538
@@ -259,14 +348,25 @@ fn pkg_538_a_registry_install_without_trust_needs_the_same_decision_as_a_file() 
     let registry = sandbox.run(&["install", NOTES, "--yes"]);
     let path = sandbox.project_file("notes.iliumpkg", &signed_package(NOTES, "1.1.0"));
     let file = sandbox.run(&["install", path.to_str().expect("utf-8 path"), "--yes"]);
-    assert_eq!(registry.exit_code, file.exit_code, "{registry:?} / {file:?}");
+    assert_eq!(
+        registry.exit_code, file.exit_code,
+        "{registry:?} / {file:?}"
+    );
     assert_eq!(error_codes(&registry), error_codes(&file));
 }
 
 /// REQ: PKG-539
 #[test]
 fn doc_pkg_539_update_badge_and_no_install_without_a_choice() {
-    assert_row(PAGE, "PKG-539", &["update badge", "MUST NOT install it unless the user chooses", "`auto_update = install`"]);
+    assert_row(
+        PAGE,
+        "PKG-539",
+        &[
+            "update badge",
+            "MUST NOT install it unless the user chooses",
+            "`auto_update = install`",
+        ],
+    );
 }
 
 /// REQ: PKG-539
@@ -274,7 +374,13 @@ fn doc_pkg_539_update_badge_and_no_install_without_a_choice() {
 fn pkg_539_search_and_info_never_install_a_newer_version() {
     let sandbox = Sandbox::standard();
     let key = publisher_key_id();
-    assert_ok(&sandbox.run(&["install", "com.acme.notes@1.0.0", "--yes", "--trust", key.as_str()]));
+    assert_ok(&sandbox.run(&[
+        "install",
+        "com.acme.notes@1.0.0",
+        "--yes",
+        "--trust",
+        key.as_str(),
+    ]));
     let _ = sandbox.run(&["search"]);
     let _ = sandbox.run(&["info", NOTES]);
     assert_eq!(sandbox.installed_version(NOTES).as_deref(), Some("1.0.0"));
@@ -285,7 +391,13 @@ fn pkg_539_search_and_info_never_install_a_newer_version() {
 fn pkg_539_an_explicit_update_installs_the_newer_version() {
     let sandbox = Sandbox::standard();
     let key = publisher_key_id();
-    assert_ok(&sandbox.run(&["install", "com.acme.notes@1.0.0", "--yes", "--trust", key.as_str()]));
+    assert_ok(&sandbox.run(&[
+        "install",
+        "com.acme.notes@1.0.0",
+        "--yes",
+        "--trust",
+        key.as_str(),
+    ]));
     assert_ok(&sandbox.run(&["update", NOTES, "--yes"]));
     assert_eq!(sandbox.installed_version(NOTES).as_deref(), Some("1.1.0"));
 }
@@ -302,7 +414,11 @@ fn pkg_539_an_already_latest_plugin_has_nothing_to_update() {
 /// REQ: PKG-540
 #[test]
 fn doc_pkg_540_offline_shows_cache_age_and_marks_stale() {
-    assert_row(PAGE, "PKG-540", &["offline", "cache age", "stale"].map(|s| if s == "offline" { "When offline" } else { s }));
+    assert_row(
+        PAGE,
+        "PKG-540",
+        &["offline", "cache age", "stale"].map(|s| if s == "offline" { "When offline" } else { s }),
+    );
 }
 
 /// REQ: PKG-540
@@ -312,7 +428,10 @@ fn pkg_540_offline_search_after_a_refresh_succeeds_with_a_warning() {
     assert_ok(&sandbox.run(&["search"]));
     let output = sandbox.run_at(now_plus(3600), &["search", "--offline"]);
     assert_ok(&output);
-    assert!(!warning_codes(&output).is_empty(), "stale marker expected: {output:?}");
+    assert!(
+        !warning_codes(&output).is_empty(),
+        "stale marker expected: {output:?}"
+    );
     assert!(!plugin_ids(&output).is_empty());
 }
 
@@ -327,7 +446,11 @@ fn pkg_540_offline_without_any_cache_has_no_rows() {
 /// REQ: PKG-541
 #[test]
 fn doc_pkg_541_expired_metadata_is_refused_with_metadata_expired() {
-    assert_row(PAGE, "PKG-541", &["older than the expiry rule", "`registry.metadata-expired`"]);
+    assert_row(
+        PAGE,
+        "PKG-541",
+        &["older than the expiry rule", "`registry.metadata-expired`"],
+    );
 }
 
 /// REQ: PKG-541
@@ -337,7 +460,10 @@ fn pkg_541_metadata_past_the_expiry_is_refused_exit_8() {
     sandbox.net.set_down(true);
     let output = sandbox.run_at(now_plus(86_400 + 1), &["search"]);
     assert_eq!(output.exit_code, 8, "{output:?}");
-    assert!(has_error(&output, "registry.metadata-expired") || has_error(&output, "registry.stale"), "{output:?}");
+    assert!(
+        has_error(&output, "registry.metadata-expired") || has_error(&output, "registry.stale"),
+        "{output:?}"
+    );
     assert!(plugin_ids(&output).is_empty());
 }
 

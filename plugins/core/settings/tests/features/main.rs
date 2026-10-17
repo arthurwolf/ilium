@@ -16,5 +16,5 @@ mod onboarding;
 mod plugins_tab;
 mod render;
 mod rows;
-mod tabs;
 mod tab_values;
+mod tabs;

@@ -31,7 +31,10 @@ fn doc_f_112_fact_sources_entry_requires_id_title_and_service_strings() {
     let schema = &point("fact-sources")["entry_schema"];
     assert_eq!(schema["required"], json!(["id", "title", "service"]));
     for key in ["id", "title", "service"] {
-        assert_eq!(schema["properties"][key]["type"], "string", "property {key}");
+        assert_eq!(
+            schema["properties"][key]["type"], "string",
+            "property {key}"
+        );
     }
 }
 
@@ -52,10 +55,22 @@ fn doc_f_112_before_recap_is_a_transform_hook_with_20_ms_deadline_and_8_handlers
 #[test]
 fn doc_f_112_before_recap_payload_and_reply_cap_the_text_at_65536_characters() {
     let entry = point("before-recap");
-    assert_eq!(entry["payload_schema"]["properties"]["text"]["maxLength"], 65536);
-    assert_eq!(entry["reply_schema"]["properties"]["text"]["maxLength"], 65536);
-    assert_eq!(entry["payload_schema"]["properties"]["pane"]["type"], "integer");
-    assert_eq!(entry["payload_schema"]["properties"]["kind"]["enum"], json!(["short", "long"]));
+    assert_eq!(
+        entry["payload_schema"]["properties"]["text"]["maxLength"],
+        65536
+    );
+    assert_eq!(
+        entry["reply_schema"]["properties"]["text"]["maxLength"],
+        65536
+    );
+    assert_eq!(
+        entry["payload_schema"]["properties"]["pane"]["type"],
+        "integer"
+    );
+    assert_eq!(
+        entry["payload_schema"]["properties"]["kind"]["enum"],
+        json!(["short", "long"])
+    );
 }
 
 /// REQ: F-112
@@ -87,8 +102,14 @@ fn doc_f_112_core_points_page_agrees_with_the_plugin_page() {
 fn doc_f_112_service_get_takes_panes_and_a_length_of_short_long_or_both() {
     let get = &manifest_value()["contributes"]["services"]["ilium.core.recap/recap"]["get"];
     assert_eq!(get["params"]["required"], json!(["panes"]));
-    assert_eq!(get["params"]["properties"]["panes"], json!({"type": "array", "items": {"type": "integer"}}));
-    assert_eq!(get["params"]["properties"]["length"]["enum"], json!(["short", "long", "both"]));
+    assert_eq!(
+        get["params"]["properties"]["panes"],
+        json!({"type": "array", "items": {"type": "integer"}})
+    );
+    assert_eq!(
+        get["params"]["properties"]["length"]["enum"],
+        json!(["short", "long", "both"])
+    );
     assert_eq!(get["result"]["required"], json!(["recaps"]));
 }
 
@@ -106,12 +127,18 @@ fn doc_f_112_page_states_the_service_and_replacement_rule() {
 fn doc_f_112_contribution_example_targets_fact_sources_with_title_and_service() {
     let blocks = json_blocks(&page_text());
     let example: Value = serde_json::from_str(blocks.last().expect("example block")).expect("JSON");
-    assert_eq!(example["capabilities"]["server"], json!(["extensions.contribute:ilium.core.recap/fact-sources"]));
+    assert_eq!(
+        example["capabilities"]["server"],
+        json!(["extensions.contribute:ilium.core.recap/fact-sources"])
+    );
     let entry = &example["contributes"]["extensions"][0];
     assert_eq!(entry["point"], "ilium.core.recap/fact-sources");
     assert_eq!(entry["id"], "branch-ticket");
     assert_eq!(entry["priority"], 50);
-    assert_eq!(entry["entry"], json!({"title": "Branch ticket", "service": "example.tickets/for-pane"}));
+    assert_eq!(
+        entry["entry"],
+        json!({"title": "Branch ticket", "service": "example.tickets/for-pane"})
+    );
 }
 
 /// REQ: F-112

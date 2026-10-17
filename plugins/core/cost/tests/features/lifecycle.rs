@@ -51,5 +51,8 @@ fn lifecycle_031_client_try_activate_succeeds() {
 #[test]
 fn lifecycle_038_server_activation_logs_no_error() {
     let host = activated_server();
-    assert!(host.logs().iter().all(|line| line.message.is_empty() || !line.message.contains("error")));
+    assert!(host
+        .logs()
+        .iter()
+        .all(|line| line.message.is_empty() || !line.message.contains("error")));
 }

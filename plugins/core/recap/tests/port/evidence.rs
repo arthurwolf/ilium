@@ -10,7 +10,9 @@ const GOAL_OBJECTIVE_CLIP_CHARACTERS: usize = 2_000;
 const PROMPT_CLIP_CHARACTERS: usize = 400;
 
 fn objective_of(line: &str, state_word: &str) -> String {
-    line.strip_prefix(&format!("Goal {state_word}: ")).unwrap_or_else(|| panic!("goal line {line:.60}")).to_string()
+    line.strip_prefix(&format!("Goal {state_word}: "))
+        .unwrap_or_else(|| panic!("goal line {line:.60}"))
+        .to_string()
 }
 
 /// REQ: PORT:ilium-client/src/recap/evidence.rs::parses_goal_command_arguments_only_from_goal_records
@@ -33,9 +35,18 @@ fn port_evidence_parses_goal_command_arguments_only_from_goal_records() {
 fn port_evidence_claude_goal_state_comes_from_the_met_flag_and_a_newer_goal_supersedes() {
     let lines = goal_lines(
         &["user: hello"],
-        &[("first objective".to_string(), "unknown"), ("second objective".to_string(), "done")],
+        &[
+            ("first objective".to_string(), "unknown"),
+            ("second objective".to_string(), "done"),
+        ],
     );
-    assert_eq!(lines, ["Goal state unknown: first objective", "Goal done: second objective"]);
+    assert_eq!(
+        lines,
+        [
+            "Goal state unknown: first objective",
+            "Goal done: second objective"
+        ]
+    );
 }
 
 /// REQ: PORT:ilium-client/src/recap/evidence.rs::codex_goal_status_maps_recorded_phases
@@ -43,26 +54,40 @@ fn port_evidence_claude_goal_state_comes_from_the_met_flag_and_a_newer_goal_supe
 fn port_evidence_codex_goal_status_maps_recorded_phases() {
     let lines = goal_lines(
         &["user: hello"],
-        &[("objective a".to_string(), "paused"), ("objective b".to_string(), "done")],
+        &[
+            ("objective a".to_string(), "paused"),
+            ("objective b".to_string(), "done"),
+        ],
     );
-    assert_eq!(lines, ["Goal paused: objective a", "Goal done: objective b"]);
+    assert_eq!(
+        lines,
+        ["Goal paused: objective a", "Goal done: objective b"]
+    );
 }
 
 /// REQ: PORT:ilium-client/src/recap/evidence.rs::oversize_goal_list_keeps_first_and_newest_and_counts_omitted
 #[test]
 fn port_evidence_oversize_goal_list_keeps_first_and_newest() {
-    let goals: Vec<(String, &str)> = (0..40).map(|index| (format!("objective {index} {}", "x".repeat(400)), "active")).collect();
+    let goals: Vec<(String, &str)> = (0..40)
+        .map(|index| (format!("objective {index} {}", "x".repeat(400)), "active"))
+        .collect();
     let lines = goal_lines(&["user: hello"], &goals);
     assert_eq!(lines.len(), 2, "38 goals are omitted from the middle");
     assert!(objective_of(&lines[0], "active").starts_with("objective 0 "));
     assert!(objective_of(&lines[1], "active").starts_with("objective 39 "));
-    assert!(lines.iter().all(|line| objective_of(line, "active").chars().count() <= GOAL_OBJECTIVE_CLIP_CHARACTERS + 64));
+    assert!(lines
+        .iter()
+        .all(|line| objective_of(line, "active").chars().count()
+            <= GOAL_OBJECTIVE_CLIP_CHARACTERS + 64));
 }
 
 /// REQ: PORT:ilium-client/src/recap/evidence.rs::oversized_individual_goal_is_clipped_even_below_aggregate_budget
 #[test]
 fn port_evidence_oversized_individual_goal_is_clipped_below_the_aggregate_budget() {
-    let objective = format!("first {} last", "x".repeat(GOAL_OBJECTIVE_CLIP_CHARACTERS + 100));
+    let objective = format!(
+        "first {} last",
+        "x".repeat(GOAL_OBJECTIVE_CLIP_CHARACTERS + 100)
+    );
     let lines = goal_lines(&["user: hello"], &[(objective, "active")]);
     assert_eq!(lines.len(), 1);
     let kept = objective_of(&lines[0], "active");
@@ -96,10 +121,19 @@ fn port_evidence_clipping_markers_count_towards_the_aggregate_goal_budget() {
     ];
     let lines = goal_lines(&["user: hello"], &goals);
     assert_eq!(lines.len(), 2);
-    let objectives: Vec<String> = lines.iter().map(|line| objective_of(line, "active")).collect();
+    let objectives: Vec<String> = lines
+        .iter()
+        .map(|line| objective_of(line, "active"))
+        .collect();
     assert!(objectives[0].starts_with('a'));
     assert!(objectives[1].starts_with('z'));
-    assert!(objectives.iter().map(|objective| objective.chars().count()).sum::<usize>() <= GOAL_BUDGET_CHARACTERS);
+    assert!(
+        objectives
+            .iter()
+            .map(|objective| objective.chars().count())
+            .sum::<usize>()
+            <= GOAL_BUDGET_CHARACTERS
+    );
 }
 
 /// REQ: PORT:ilium-client/src/recap/evidence.rs::injected_notifications_are_not_prompts
@@ -117,13 +151,23 @@ fn port_evidence_injected_notifications_are_not_prompts() {
 /// REQ: PORT:ilium-client/src/recap/evidence.rs::prompts_are_bounded_and_secrets_are_redacted_before_leaving
 #[test]
 fn port_evidence_prompts_are_bounded_and_secrets_are_redacted_before_leaving() {
-    let long = format!("user: api_key=abcd1234efgh5678 {} {}", "p".repeat(900), "q".repeat(900));
+    let long = format!(
+        "user: api_key=abcd1234efgh5678 {} {}",
+        "p".repeat(900),
+        "q".repeat(900)
+    );
     let (mut host, _, _) = start_agent_run(&[long.as_str()]);
     let evidence = job_evidence(&mut host);
     assert!(!evidence.contains("abcd1234efgh5678"));
     assert!(evidence.contains("[redacted]"));
-    assert!(!evidence.contains(&"p".repeat(PROMPT_CLIP_CHARACTERS + 64)), "the prompt is clipped");
-    assert!(!evidence.contains(&"q".repeat(PROMPT_CLIP_CHARACTERS + 64)), "the prompt is clipped");
+    assert!(
+        !evidence.contains(&"p".repeat(PROMPT_CLIP_CHARACTERS + 64)),
+        "the prompt is clipped"
+    );
+    assert!(
+        !evidence.contains(&"q".repeat(PROMPT_CLIP_CHARACTERS + 64)),
+        "the prompt is clipped"
+    );
 }
 
 /// REQ: PORT:ilium-client/src/recap/evidence.rs::screen_tail_keeps_newest_lines_within_budget
@@ -134,7 +178,10 @@ fn port_evidence_screen_tail_keeps_newest_lines_within_budget() {
     let (mut host, _, _) = start_shell_run(&refs);
     let evidence = job_evidence(&mut host);
     assert!(evidence.contains("line 099"));
-    assert!(evidence.contains("line 060"), "the newest 40 lines are kept");
+    assert!(
+        evidence.contains("line 060"),
+        "the newest 40 lines are kept"
+    );
     assert!(!evidence.contains("line 059"));
     assert!(!evidence.contains("line 000"));
 }
@@ -167,13 +214,18 @@ fn port_evidence_small_transcript_is_read_whole_and_in_order() {
 /// REQ: PORT:ilium-client/src/recap/evidence.rs::window_reader_drops_partial_edge_lines_when_middle_is_skipped
 #[test]
 fn port_evidence_long_transcript_never_contains_a_partial_turn() {
-    let turns: Vec<String> = (0..200).map(|index| format!("user: line-{index:04}-padding-padding")).collect();
+    let turns: Vec<String> = (0..200)
+        .map(|index| format!("user: line-{index:04}-padding-padding"))
+        .collect();
     let refs: Vec<&str> = turns.iter().map(String::as_str).collect();
     let (mut host, _, _) = start_agent_run(&refs);
     let evidence = job_evidence(&mut host);
     assert!(evidence.contains("line-0199"), "the newest turn is kept");
     for (position, _) in evidence.match_indices("line-") {
-        let word: String = evidence[position..].chars().take_while(|symbol| !symbol.is_whitespace()).collect();
+        let word: String = evidence[position..]
+            .chars()
+            .take_while(|symbol| !symbol.is_whitespace())
+            .collect();
         assert!(word.ends_with("padding-padding"), "partial turn {word}");
     }
 }

@@ -2,7 +2,7 @@
 //! contribution it lists is the one the page describes.
 
 use ilium_plugin_sdk::testing::FakeHost;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::common::{json_block_after, manifest, manifest_path, page_text};
 
@@ -18,7 +18,10 @@ fn client_grants() -> Vec<String> {
 /// REQ: COR-050
 #[test]
 fn manifest_050_equals_the_complete_manifest_of_the_page() {
-    assert_eq!(manifest(), json_block_after(&page_text(), "### Complete manifest"));
+    assert_eq!(
+        manifest(),
+        json_block_after(&page_text(), "### Complete manifest")
+    );
 }
 
 /// REQ: COR-050
@@ -48,8 +51,14 @@ fn manifest_050_identity_and_api_version() {
 #[test]
 fn manifest_050_runs_on_the_client_side_only() {
     let manifest = manifest();
-    assert_eq!(manifest["client"], json!({"entry": "client.wasm", "world": "ilium:client/base@0.1.0"}));
-    assert!(manifest.get("server").is_none(), "the page says the plugin runs on the client side");
+    assert_eq!(
+        manifest["client"],
+        json!({"entry": "client.wasm", "world": "ilium:client/base@0.1.0"})
+    );
+    assert!(
+        manifest.get("server").is_none(),
+        "the page says the plugin runs on the client side"
+    );
     assert!(manifest["capabilities"].get("server").is_none());
 }
 
@@ -76,7 +85,10 @@ fn manifest_050_client_grants_are_the_eight_kanban_grants_in_order() {
 fn manifest_050_holds_no_grant_the_page_does_not_name() {
     let page = page_text();
     for grant in client_grants() {
-        assert!(page.contains(&format!("\"{grant}\"")), "grant {grant} is not on the page");
+        assert!(
+            page.contains(&format!("\"{grant}\"")),
+            "grant {grant} is not on the page"
+        );
     }
 }
 
@@ -93,7 +105,10 @@ fn manifest_050_activates_on_the_pane_kind_and_has_first_party_limits() {
 fn manifest_050_description_is_the_first_sentence_of_the_page() {
     let manifest = manifest();
     let description = manifest["description"].as_str().expect("description");
-    assert_eq!(description, "The Kanban plugin has the id ilium.core.kanban and runs on the client side.");
+    assert_eq!(
+        description,
+        "The Kanban plugin has the id ilium.core.kanban and runs on the client side."
+    );
     assert!(page_text().contains(description));
 }
 
@@ -101,7 +116,9 @@ fn manifest_050_description_is_the_first_sentence_of_the_page() {
 #[test]
 fn feature_024_declares_one_basic_board_pane_kind() {
     let manifest = manifest();
-    let kinds = manifest["contributes"]["pane_kinds"].as_array().expect("pane kinds");
+    let kinds = manifest["contributes"]["pane_kinds"]
+        .as_array()
+        .expect("pane kinds");
     assert_eq!(kinds.len(), 1);
     assert_eq!(
         kinds[0],
@@ -123,14 +140,21 @@ fn feature_024_the_board_pane_wants_keys_for_the_keyboard_table() {
 #[test]
 fn feature_024_the_board_pane_keeps_only_metadata_in_the_snapshot() {
     let manifest = manifest();
-    assert_eq!(manifest["contributes"]["pane_kinds"][0]["persist"], "metadata");
+    assert_eq!(
+        manifest["contributes"]["pane_kinds"][0]["persist"],
+        "metadata"
+    );
 }
 
 /// REQ: F-024
 #[test]
 fn feature_024_contributes_only_pane_kinds_and_settings() {
     let manifest = manifest();
-    let mut keys: Vec<&String> = manifest["contributes"].as_object().expect("contributes").keys().collect();
+    let mut keys: Vec<&String> = manifest["contributes"]
+        .as_object()
+        .expect("contributes")
+        .keys()
+        .collect();
     keys.sort();
     assert_eq!(keys, ["pane_kinds", "settings"]);
 }
@@ -145,7 +169,14 @@ fn feature_024_provides_a_pane_kind_so_the_kind_grant_is_held() {
 #[test]
 fn feature_025_holds_the_picker_and_file_grants_for_boards_from_files() {
     let grants = client_grants();
-    for needed in ["fs.pick", "fs.read:picked", "fs.read:project", "fs.write:project", "fs.watch", "editor.read"] {
+    for needed in [
+        "fs.pick",
+        "fs.read:picked",
+        "fs.read:project",
+        "fs.write:project",
+        "fs.watch",
+        "editor.read",
+    ] {
         assert!(grants.contains(&needed.to_string()), "missing {needed}");
     }
 }
@@ -153,7 +184,10 @@ fn feature_025_holds_the_picker_and_file_grants_for_boards_from_files() {
 /// REQ: COR-030, COR-033
 #[test]
 fn manifest_033_holds_the_write_grant_of_its_one_kernel_tab() {
-    let kernel: Vec<String> = client_grants().into_iter().filter(|grant| grant.starts_with("settings.write-kernel:")).collect();
+    let kernel: Vec<String> = client_grants()
+        .into_iter()
+        .filter(|grant| grant.starts_with("settings.write-kernel:"))
+        .collect();
     assert_eq!(kernel, ["settings.write-kernel:kanban-board"]);
 }
 
@@ -168,7 +202,9 @@ fn manifest_030_the_kernel_tab_table_names_tab_label_and_config_table() {
 #[test]
 fn manifest_033_the_kernel_tab_is_held_by_this_plugin_only_on_the_t1_tier() {
     let page = page_text();
-    assert!(page.contains("It holds `settings.write-kernel:<tab>` for each one (T1 only, one holder per tab"));
+    assert!(page.contains(
+        "It holds `settings.write-kernel:<tab>` for each one (T1 only, one holder per tab"
+    ));
     assert_eq!(manifest()["limits_tier"], "first-party");
 }
 
@@ -183,7 +219,8 @@ fn manifest_022_the_disabled_notice_is_the_documented_sentence() {
 /// REQ: COR-022
 #[test]
 fn manifest_022_disabled_kanban_shows_a_placeholder_and_keeps_board_files() {
-    let path = crate::common::workspace_root().join("docs/plugins-manual/pages/reference-kernel-and-boot.md");
+    let path = crate::common::workspace_root()
+        .join("docs/plugins-manual/pages/reference-kernel-and-boot.md");
     let boot = std::fs::read_to_string(path).expect("kernel and boot page");
     let row = boot
         .lines()
@@ -196,16 +233,23 @@ fn manifest_022_disabled_kanban_shows_a_placeholder_and_keeps_board_files() {
 /// REQ: COR-050
 #[test]
 fn manifest_050_the_boot_table_activates_kanban_on_the_pane_kind() {
-    let path = crate::common::workspace_root().join("docs/plugins-manual/pages/reference-kernel-and-boot.md");
+    let path = crate::common::workspace_root()
+        .join("docs/plugins-manual/pages/reference-kernel-and-boot.md");
     let boot = std::fs::read_to_string(path).expect("kernel and boot page");
-    let row = boot.lines().find(|line| line.starts_with("| Kanban | none | `pane-kind:kanban` |")).expect("row");
+    let row = boot
+        .lines()
+        .find(|line| line.starts_with("| Kanban | none | `pane-kind:kanban` |"))
+        .expect("row");
     assert!(row.contains("In plugin form it starts with a board pane"));
 }
 
 /// REQ: COR-050
 #[test]
 fn manifest_050_host_takes_grants_from_the_manifest_for_the_client_side() {
-    let client = FakeHost::for_manifest(manifest_path()).expect("loads").side("client").build();
+    let client = FakeHost::for_manifest(manifest_path())
+        .expect("loads")
+        .side("client")
+        .build();
     drop(client);
 }
 
@@ -214,8 +258,18 @@ fn manifest_050_host_takes_grants_from_the_manifest_for_the_client_side() {
 fn manifest_050_the_manifest_is_valid_json_with_no_unknown_top_level_key() {
     let manifest = manifest();
     let allowed = [
-        "api", "id", "name", "version", "publisher", "description", "license", "client", "capabilities",
-        "activation", "contributes", "limits_tier",
+        "api",
+        "id",
+        "name",
+        "version",
+        "publisher",
+        "description",
+        "license",
+        "client",
+        "capabilities",
+        "activation",
+        "contributes",
+        "limits_tier",
     ];
     let object: &serde_json::Map<String, Value> = manifest.as_object().expect("object");
     for key in object.keys() {

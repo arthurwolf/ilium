@@ -67,7 +67,11 @@ fn progress_b14_a_cleared_monitor_whose_task_never_settled_reports_it_stopped() 
 fn progress_b14_a_running_wait_that_collected_the_outcome_means_nothing_is_typed() {
     let (mut host, pane) = host_with_pane();
     expect_probe(&mut host, PROBE, &running(JOB, 10, "Working"));
-    let open = start_in_pane(&mut host, pane, &["progress", "set", "--command", PROBE, "--wait"]);
+    let open = start_in_pane(
+        &mut host,
+        pane,
+        &["progress", "set", "--command", PROBE, "--wait"],
+    );
     settle_with(&mut host, &done(JOB, "Finished"));
     assert!(open.read().stdout.contains("progress_wait"));
     assert!(typed_texts(&host, pane).is_empty());
@@ -78,7 +82,11 @@ fn progress_b14_a_running_wait_that_collected_the_outcome_means_nothing_is_typed
 fn progress_b14_a_cancelled_wait_falls_back_to_typing_the_message() {
     let (mut host, pane) = host_with_pane();
     expect_probe(&mut host, PROBE, &running(JOB, 10, "Working"));
-    let open = start_in_pane(&mut host, pane, &["progress", "set", "--command", PROBE, "--wait"]);
+    let open = start_in_pane(
+        &mut host,
+        pane,
+        &["progress", "set", "--command", PROBE, "--wait"],
+    );
     open.cancel(&mut host);
     settle_with(&mut host, &done(JOB, "Finished"));
     assert_eq!(typed_texts(&host, pane).len(), 1);

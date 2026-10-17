@@ -68,9 +68,15 @@ fn plugins_161_no_two_states_share_a_row_word() {
 #[test]
 fn plugins_161_the_failed_state_means_three_failures_in_ten_minutes() {
     let rows = state_rows();
-    let failed = rows.iter().find(|row| row[0] == "Failed").expect("Failed row");
+    let failed = rows
+        .iter()
+        .find(|row| row[0] == "Failed")
+        .expect("Failed row");
     assert_eq!(failed[1], "Stopped after 3 failures in 10 minutes");
-    assert_eq!(failed[3], "Turn on (clears the count), reset failures, remove");
+    assert_eq!(
+        failed[3],
+        "Turn on (clears the count), reset failures, remove"
+    );
 }
 
 /// REQ: USR-161, F-090
@@ -114,7 +120,10 @@ fn plugins_162_the_golden_file_equals_the_page_figure() {
 fn plugins_162_the_plugins_tab_renders_like_the_page_figure_at_58_columns() {
     let mut host = client_host();
     let screen = host.render(plugins_tab(), 58, 10);
-    assert_golden(&golden_path("plugins_tab_58.txt"), &format!("{}\n", screen.text()));
+    assert_golden(
+        &golden_path("plugins_tab_58.txt"),
+        &format!("{}\n", screen.text()),
+    );
 }
 
 /// REQ: USR-162, F-090
@@ -122,7 +131,9 @@ fn plugins_162_the_plugins_tab_renders_like_the_page_figure_at_58_columns() {
 fn plugins_162_a_row_shows_id_tier_badge_and_state_word() {
     let mut host = client_host();
     let screen = host.render(plugins_tab(), 80, 12);
-    let (row, _) = screen.find("ilium.core.settings").expect("core plugins are listed too");
+    let (row, _) = screen
+        .find("ilium.core.settings")
+        .expect("core plugins are listed too");
     let line = screen.row(row);
     assert!(line.contains("T1"), "{line}");
     assert!(line.contains("On"), "{line}");
@@ -140,11 +151,20 @@ fn plugins_164_every_rendered_state_starts_with_a_word_of_the_state_table() {
     let mut checked = 0;
     for row in 0..screen.rows {
         let line = screen.row(row);
-        let Some(position) = ["  T1  ", "  T2  ", "  T3  "].iter().find_map(|badge| line.find(badge)) else {
+        let Some(position) = ["  T1  ", "  T2  ", "  T3  "]
+            .iter()
+            .find_map(|badge| line.find(badge))
+        else {
             continue;
         };
-        let state = line[position + 6..].trim_start().trim_end_matches('│').trim();
-        assert!(words.iter().any(|word| state.starts_with(word.as_str())), "{line}");
+        let state = line[position + 6..]
+            .trim_start()
+            .trim_end_matches('│')
+            .trim();
+        assert!(
+            words.iter().any(|word| state.starts_with(word.as_str())),
+            "{line}"
+        );
         checked += 1;
     }
     assert!(checked >= 1, "no plugin row was drawn");
@@ -157,7 +177,10 @@ fn plugins_162_the_tab_ends_with_the_key_hints() {
     assert!(figure.contains("Enter open  Space on or off  i install file"));
     let mut host = client_host();
     let text = host.render(plugins_tab(), 58, 10).text();
-    assert!(text.contains("Enter open  Space on or off  i install file"), "{text}");
+    assert!(
+        text.contains("Enter open  Space on or off  i install file"),
+        "{text}"
+    );
 }
 
 /// REQ: USR-163, F-090
@@ -165,7 +188,9 @@ fn plugins_162_the_tab_ends_with_the_key_hints() {
 fn plugins_163_the_page_states_the_forget_settings_rule() {
     let text = manual_page("reference-requirements-user-admin.md");
     assert!(text.contains("The tab MUST offer Forget settings on a plugin's Details page."));
-    assert!(page_text().contains("The tab MUST offer **Forget settings** on a plugin's Details page."));
+    assert!(
+        page_text().contains("The tab MUST offer **Forget settings** on a plugin's Details page.")
+    );
 }
 
 /// REQ: USR-164, F-090
@@ -177,7 +202,9 @@ fn plugins_164_the_page_ties_the_state_words_to_footer_notice_n14() {
 /// REQ: F-090
 #[test]
 fn plugins_090_the_plugin_page_has_six_tabs() {
-    assert!(page_text().contains("tabs Overview, Capabilities, Extensions, Log, Details and Settings."));
+    assert!(
+        page_text().contains("tabs Overview, Capabilities, Extensions, Log, Details and Settings.")
+    );
 }
 
 /// REQ: F-090

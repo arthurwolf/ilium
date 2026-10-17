@@ -139,7 +139,10 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
         // Hover feedback reads only live layout, so it stays responsive.
         if matches!(mouse.kind, MouseEventKind::Moved)
             && matches!(app.mode, Mode::Normal)
-            && app.layout.tree_area.contains(Position::new(mouse.column, mouse.row))
+            && app
+                .layout
+                .tree_area
+                .contains(Position::new(mouse.column, mouse.row))
         {
             update_tree_hover(app, Position::new(mouse.column, mouse.row));
         }
@@ -6711,7 +6714,9 @@ mod frozen_agent_context_mouse_tests {
             claude.pending_bit() | TreeToolbarAction::Shell.pending_bit()
         );
         app.finish_pending_toolbar_action(claude);
-        assert_eq!(app.pending_toolbar_mask(), TreeToolbarAction::Shell.pending_bit());
+        assert_eq!(
+            app.pending_toolbar_mask(),
+            TreeToolbarAction::Shell.pending_bit()
+        );
     }
-
 }

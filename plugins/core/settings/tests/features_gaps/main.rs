@@ -2,7 +2,7 @@
 //! ../API_GAPS.md): the topic publications of a host and the invocation of a collect point.
 
 use ilium_plugin_sdk::testing::FakeSession;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 const PLUGIN_ID: &str = "ilium.core.settings";
 
@@ -17,7 +17,12 @@ fn started_session() -> FakeSession {
 fn topic_090_set_publishes_changed_with_the_key() {
     let mut session = started_session();
     session
-        .call_service(PLUGIN_ID, "ilium.core.settings/set", "^0.1", r#"{"key":"density","value":"compact"}"#)
+        .call_service(
+            PLUGIN_ID,
+            "ilium.core.settings/set",
+            "^0.1",
+            r#"{"key":"density","value":"compact"}"#,
+        )
         .expect("set answers");
     session.pump().expect("pump");
     let published = session.plugin(PLUGIN_ID).published_topics();
@@ -33,10 +38,17 @@ fn topic_090_set_publishes_changed_with_the_key() {
 #[test]
 fn topic_090_a_refused_set_publishes_nothing() {
     let mut session = started_session();
-    let _ = session.call_service(PLUGIN_ID, "ilium.core.settings/set", "^0.1", r#"{"key":"density","value":"x"}"#);
+    let _ = session.call_service(
+        PLUGIN_ID,
+        "ilium.core.settings/set",
+        "^0.1",
+        r#"{"key":"density","value":"x"}"#,
+    );
     session.pump().expect("pump");
     let published = session.plugin(PLUGIN_ID).published_topics();
-    assert!(published.iter().all(|(topic, _)| topic != "ilium.core.settings/changed"));
+    assert!(published
+        .iter()
+        .all(|(topic, _)| topic != "ilium.core.settings/changed"));
 }
 
 /// REQ: F-090

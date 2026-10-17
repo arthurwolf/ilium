@@ -8,20 +8,32 @@ fn point_rows() -> Vec<Vec<String>> {
 }
 
 fn row_of(point: &str) -> Vec<String> {
-    point_rows().into_iter().find(|row| row[0] == point).unwrap_or_else(|| panic!("row {point}"))
+    point_rows()
+        .into_iter()
+        .find(|row| row[0] == point)
+        .unwrap_or_else(|| panic!("row {point}"))
 }
 
 fn traceability_row(id: &str) -> Vec<String> {
     let page = manual_page("reference-feature-traceability.md");
-    let line = page.lines().find(|line| line.starts_with(&format!("| {id} |"))).expect("row");
-    line.trim_matches('|').split('|').map(|cell| cell.trim().replace('`', "")).collect()
+    let line = page
+        .lines()
+        .find(|line| line.starts_with(&format!("| {id} |")))
+        .expect("row");
+    line.trim_matches('|')
+        .split('|')
+        .map(|cell| cell.trim().replace('`', ""))
+        .collect()
 }
 
 /// REQ: F-084
 #[test]
 fn doc_084_the_page_names_exactly_three_extension_points() {
     let names: Vec<String> = point_rows().into_iter().map(|row| row[0].clone()).collect();
-    assert_eq!(names, ["before-request", "after-response", "provider-profiles"]);
+    assert_eq!(
+        names,
+        ["before-request", "after-response", "provider-profiles"]
+    );
 }
 
 /// REQ: F-084
@@ -36,7 +48,10 @@ fn doc_084_before_request_is_a_transform_hook_that_rewrites_or_refuses() {
 #[test]
 fn doc_084_before_request_payload_and_reply_fields() {
     let row = row_of("before-request");
-    assert_eq!(row[3], "purpose, provider, model, messages_length, text; reply: text");
+    assert_eq!(
+        row[3],
+        "purpose, provider, model, messages_length, text; reply: text"
+    );
 }
 
 /// REQ: F-084
@@ -44,7 +59,10 @@ fn doc_084_before_request_payload_and_reply_fields() {
 fn doc_084_after_response_is_an_observe_hook_with_token_counts() {
     let row = row_of("after-response");
     assert_eq!(row[1], "hook (observe)");
-    assert_eq!(row[3], "purpose, provider, model, input_tokens, output_tokens, millis");
+    assert_eq!(
+        row[3],
+        "purpose, provider, model, input_tokens, output_tokens, millis"
+    );
 }
 
 /// REQ: F-084
@@ -117,14 +135,24 @@ fn doc_030_the_page_lists_the_two_kernel_tabs_with_their_config_tables() {
     let rows = table_rows(&section(&page_text(), "### Kernel tabs this plugin owns"));
     assert_eq!(rows.len(), 2);
     assert_eq!(rows[0][..3], ["inference", "Inference", "[inference]"]);
-    assert_eq!(rows[1][..3], ["llm-instructions", "LLM Instructions", "[inference.instructions], [voice]"]);
+    assert_eq!(
+        rows[1][..3],
+        [
+            "llm-instructions",
+            "LLM Instructions",
+            "[inference.instructions], [voice]"
+        ]
+    );
 }
 
 /// REQ: COR-030, F-085
 #[test]
 fn doc_030_the_readers_of_the_inference_tab_are_the_six_consumers() {
     let rows = table_rows(&section(&page_text(), "### Kernel tabs this plugin owns"));
-    assert_eq!(rows[0][3], "Titles, Recap, Search, Smart copy, Compaction, Voice");
+    assert_eq!(
+        rows[0][3],
+        "Titles, Recap, Search, Smart copy, Compaction, Voice"
+    );
     assert_eq!(rows[1][3], "Titles, Recap, Smart copy, Voice");
 }
 
@@ -132,7 +160,10 @@ fn doc_030_the_readers_of_the_inference_tab_are_the_six_consumers() {
 #[test]
 fn doc_034_keys_written_by_the_inference_tab_exclude_title_style_and_instructions() {
     let migration = manual_page("reference-config-and-data-migration.md");
-    let line = migration.lines().find(|line| line.starts_with("| `inference` | Inference |")).expect("row");
+    let line = migration
+        .lines()
+        .find(|line| line.starts_with("| `inference` | Inference |"))
+        .expect("row");
     assert!(line.ends_with("Every `[inference]` key except `title_style` and `instructions` |"));
 }
 
@@ -140,7 +171,10 @@ fn doc_034_keys_written_by_the_inference_tab_exclude_title_style_and_instruction
 #[test]
 fn doc_034_keys_written_by_the_llm_instructions_tab_are_the_table_and_the_voice_prompt() {
     let migration = manual_page("reference-config-and-data-migration.md");
-    let line = migration.lines().find(|line| line.starts_with("| `llm-instructions` |")).expect("row");
+    let line = migration
+        .lines()
+        .find(|line| line.starts_with("| `llm-instructions` |"))
+        .expect("row");
     assert!(line.ends_with("`[inference.instructions]` and `[voice] custom_prompt` |"));
 }
 
@@ -154,7 +188,10 @@ fn doc_022_the_disabled_notice_keeps_the_values_and_names_the_plugin() {
 #[test]
 fn doc_022_the_boot_page_says_ai_features_fall_back_and_provider_settings_stay() {
     let boot = manual_page("reference-kernel-and-boot.md");
-    let line = boot.lines().find(|line| line.starts_with("| Inference | AI features report")).expect("row");
+    let line = boot
+        .lines()
+        .find(|line| line.starts_with("| Inference | AI features report"))
+        .expect("row");
     assert!(line.contains("`inference.unavailable`"));
     assert!(line.contains("non-AI path"));
     assert!(line.contains("Provider settings stay"));
@@ -201,6 +238,9 @@ fn doc_084_the_five_samples_of_the_page_are_present_with_both_languages() {
         "#### 5. Provider picker panel",
     ] {
         let text = section(&page, heading);
-        assert!(text.contains("**Rust**") && text.contains("**TypeScript**"), "{heading}");
+        assert!(
+            text.contains("**Rust**") && text.contains("**TypeScript**"),
+            "{heading}"
+        );
     }
 }

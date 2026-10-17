@@ -4,8 +4,8 @@
 use ilium_plugin_api::Side;
 use ilium_plugin_host::cli::ProfileCall;
 use ilium_plugin_host::telemetry::{
-    check_unredacted, format_binary, redact_detail, render_inspector, render_memory_view, InspectNode,
-    MemoryView, Profiler, TraceKind, TraceRing, TRACE_RING_CAPACITY,
+    check_unredacted, format_binary, redact_detail, render_inspector, render_memory_view,
+    InspectNode, MemoryView, Profiler, TraceKind, TraceRing, TRACE_RING_CAPACITY,
 };
 use proptest::prelude::*;
 use serde_json::{json, Value};
@@ -120,7 +120,8 @@ fn dev_672_tags_names_counts_and_durations_are_never_redacted() {
 /// REQ: DEV-672
 #[test]
 fn dev_672_nested_payloads_are_redacted_too() {
-    let detail = json!({"events": [{"tag": "node-renamed", "payload": "abc"}, {"tag": "x", "payload": ""}]});
+    let detail =
+        json!({"events": [{"tag": "node-renamed", "payload": "abc"}, {"tag": "x", "payload": ""}]});
     let expected = json!({"events": [{"tag": "node-renamed", "payload": "<redacted 3 bytes>"}, {"tag": "x", "payload": "<redacted 0 bytes>"}]});
     assert_eq!(redact_detail(&detail), expected);
 }
@@ -191,7 +192,18 @@ fn dev_674_kind_names_are_the_seven_documented_kinds() {
         TraceKind::Lifecycle,
     ];
     let names: Vec<&str> = kinds.iter().map(|kind| kind.as_str()).collect();
-    assert_eq!(names, ["event", "submission", "outcome", "host-call", "render", "trap", "lifecycle"]);
+    assert_eq!(
+        names,
+        [
+            "event",
+            "submission",
+            "outcome",
+            "host-call",
+            "render",
+            "trap",
+            "lifecycle"
+        ]
+    );
 }
 
 // ---------------------------------------------------------------- DEV-676
@@ -223,7 +235,14 @@ fn dev_676_instance_numbers_count_up_from_one() {
 
 // ---------------------------------------------------------------- inspector fixtures
 
-fn node(kind: &str, key: Option<&str>, text: Option<&str>, style: Option<&str>, selected: bool, children: Vec<InspectNode>) -> InspectNode {
+fn node(
+    kind: &str,
+    key: Option<&str>,
+    text: Option<&str>,
+    style: Option<&str>,
+    selected: bool,
+    children: Vec<InspectNode>,
+) -> InspectNode {
     InspectNode {
         kind: kind.to_owned(),
         key: key.map(str::to_owned),
@@ -243,7 +262,14 @@ fn figure_tree() -> InspectNode {
         None,
         false,
         vec![
-            node("text", None, Some("Open notes: 3"), Some("title"), false, vec![]),
+            node(
+                "text",
+                None,
+                Some("Open notes: 3"),
+                Some("title"),
+                false,
+                vec![],
+            ),
             node(
                 "list",
                 None,
@@ -261,7 +287,10 @@ fn figure_tree() -> InspectNode {
 }
 
 fn line_with<'a>(rendered: &'a str, needle: &str) -> &'a str {
-    rendered.lines().find(|line| line.contains(needle)).unwrap_or_else(|| panic!("no line with {needle:?} in\n{rendered}"))
+    rendered
+        .lines()
+        .find(|line| line.contains(needle))
+        .unwrap_or_else(|| panic!("no line with {needle:?} in\n{rendered}"))
 }
 
 // ---------------------------------------------------------------- DEV-681
@@ -271,7 +300,11 @@ fn line_with<'a>(rendered: &'a str, needle: &str) -> &'a str {
 fn dev_681_node_shows_kind_key_text_and_style() {
     let rendered = render_inspector("panel main", &figure_tree(), 4_096, 16);
     let text_line = line_with(&rendered, "Open notes: 3");
-    assert!(text_line.contains("text") && text_line.contains("\"Open notes: 3\"") && text_line.contains("style=title"));
+    assert!(
+        text_line.contains("text")
+            && text_line.contains("\"Open notes: 3\"")
+            && text_line.contains("style=title")
+    );
     let button_line = line_with(&rendered, "Add note");
     assert!(button_line.contains("button") && button_line.contains("key=add"));
 }
@@ -295,7 +328,13 @@ fn dev_681_selected_rows_are_marked() {
 #[test]
 fn dev_681_children_are_indented_below_their_parent() {
     let rendered = render_inspector("panel main", &figure_tree(), 4_096, 16);
-    let indent = |needle: &str| line_with(&rendered, needle).chars().skip(1).take_while(|c| *c == ' ').count();
+    let indent = |needle: &str| {
+        line_with(&rendered, needle)
+            .chars()
+            .skip(1)
+            .take_while(|c| *c == ' ')
+            .count()
+    };
     assert!(indent("Inbox") > indent("list"), "{rendered}");
     assert!(indent("list") > indent("stack"), "{rendered}");
 }
@@ -324,7 +363,10 @@ fn dev_682_footer_shows_node_count_and_depth_against_the_limits() {
 fn dev_682_footer_follows_the_given_limits() {
     let rendered = render_inspector("panel main", &figure_tree(), 2_000, 8);
     let footer = line_with(&rendered, "nodes ");
-    assert!(footer.contains("nodes 6 of 2000") && footer.contains("depth 3 of 8"), "{footer}");
+    assert!(
+        footer.contains("nodes 6 of 2000") && footer.contains("depth 3 of 8"),
+        "{footer}"
+    );
 }
 
 /// REQ: DEV-682
@@ -333,7 +375,10 @@ fn dev_682_single_node_tree_has_depth_1() {
     let single = node("text", None, Some("x"), None, false, vec![]);
     let rendered = render_inspector("panel main", &single, 4_096, 16);
     let footer = line_with(&rendered, "nodes ");
-    assert!(footer.contains("nodes 1 of 4096") && footer.contains("depth 1 of 16"), "{footer}");
+    assert!(
+        footer.contains("nodes 1 of 4096") && footer.contains("depth 1 of 16"),
+        "{footer}"
+    );
 }
 
 // ---------------------------------------------------------------- DEV-684
@@ -383,7 +428,11 @@ fn dev_690_total_is_the_sum_of_all_calls_and_max_is_the_longest() {
     profiler.record("on-events", ms_f(31.2));
     let timing = profiler.timing("on-events");
     assert_eq!(timing.calls, 100);
-    assert!((timing.total_ms - 526.2).abs() < 0.001, "total {}", timing.total_ms);
+    assert!(
+        (timing.total_ms - 526.2).abs() < 0.001,
+        "total {}",
+        timing.total_ms
+    );
     assert_eq!(timing.max_ms, Some(31.2));
     assert_eq!(timing.p50_ms, Some(5.0));
     assert_eq!(timing.p95_ms, Some(5.0));
@@ -453,41 +502,77 @@ fn sample_memory() -> MemoryView {
 #[test]
 fn dev_700_view_shows_the_six_values() {
     let rendered = render_memory_view("example.notes", &sample_memory());
-    assert!(line_with(&rendered, "linear memory").contains("6.2 MiB of 32 MiB"), "{rendered}");
-    assert!(line_with(&rendered, "peak").contains("9.8 MiB"), "{rendered}");
-    assert!(line_with(&rendered, "storage").contains("14 KiB of 1 MiB"), "{rendered}");
+    assert!(
+        line_with(&rendered, "linear memory").contains("6.2 MiB of 32 MiB"),
+        "{rendered}"
+    );
+    assert!(
+        line_with(&rendered, "peak").contains("9.8 MiB"),
+        "{rendered}"
+    );
+    assert!(
+        line_with(&rendered, "storage").contains("14 KiB of 1 MiB"),
+        "{rendered}"
+    );
     let instances = line_with(&rendered, "instances");
-    assert!(instances.contains('1') && instances.contains("restarts 0"), "{rendered}");
+    assert!(
+        instances.contains('1') && instances.contains("restarts 0"),
+        "{rendered}"
+    );
 }
 
 /// REQ: DEV-700
 #[test]
 fn dev_700_title_names_the_plugin_and_side() {
     let rendered = render_memory_view("example.notes", &sample_memory());
-    assert!(rendered.lines().next().expect("title").starts_with("╭ Memory: example.notes (server) "));
+    assert!(rendered
+        .lines()
+        .next()
+        .expect("title")
+        .starts_with("╭ Memory: example.notes (server) "));
 }
 
 /// REQ: DEV-700
 #[test]
 fn dev_700_restart_and_instance_counts_follow_the_data() {
-    let view = MemoryView { instances: 3, restarts: 2, ..sample_memory() };
+    let view = MemoryView {
+        instances: 3,
+        restarts: 2,
+        ..sample_memory()
+    };
     let rendered = render_memory_view("example.notes", &view);
     let instances = line_with(&rendered, "instances");
-    assert!(instances.contains('3') && instances.contains("restarts 2"), "{instances}");
+    assert!(
+        instances.contains('3') && instances.contains("restarts 2"),
+        "{instances}"
+    );
 }
 
 /// REQ: DEV-701
 #[test]
 fn dev_701_peak_above_80_percent_adds_the_warning_line() {
-    let view = MemoryView { peak_bytes: 8_388_609, limit_bytes: 10 * 1_048_576, ..sample_memory() };
+    let view = MemoryView {
+        peak_bytes: 8_388_609,
+        limit_bytes: 10 * 1_048_576,
+        ..sample_memory()
+    };
     let rendered = render_memory_view("example.notes", &view);
-    assert!(rendered.lines().any(|line| line.trim() == "warning: peak above 80 percent of memory_mib"), "{rendered}");
+    assert!(
+        rendered
+            .lines()
+            .any(|line| line.trim() == "warning: peak above 80 percent of memory_mib"),
+        "{rendered}"
+    );
 }
 
 /// REQ: DEV-701
 #[test]
 fn dev_701_peak_at_exactly_80_percent_adds_no_warning() {
-    let view = MemoryView { peak_bytes: 8_388_608, limit_bytes: 10 * 1_048_576, ..sample_memory() };
+    let view = MemoryView {
+        peak_bytes: 8_388_608,
+        limit_bytes: 10 * 1_048_576,
+        ..sample_memory()
+    };
     assert!(!render_memory_view("example.notes", &view).contains("warning:"));
 }
 
@@ -524,14 +609,31 @@ fn backend_with_data() -> FakeBackend {
     let mut ring = TraceRing::new();
     ring.begin_instance();
     ring.push(120, TraceKind::Event, json!({"count": 2, "payload": "abc"}));
-    ring.push(121, TraceKind::Submission, json!({"intent": "set-decoration", "corr": 17}));
-    ring.push(900, TraceKind::HostCall, json!({"name": "storage.put", "duration_ms": 0.2}));
+    ring.push(
+        121,
+        TraceKind::Submission,
+        json!({"intent": "set-decoration", "corr": 17}),
+    );
+    ring.push(
+        900,
+        TraceKind::HostCall,
+        json!({"name": "storage.put", "duration_ms": 0.2}),
+    );
     backend.trace = ring.records();
     backend.tree = Some(figure_tree());
     backend.calls = vec![
-        ProfileCall { export: "on-events".to_owned(), duration_ms: 4.5678 },
-        ProfileCall { export: "on-events".to_owned(), duration_ms: 31.2 },
-        ProfileCall { export: "render".to_owned(), duration_ms: 3.1 },
+        ProfileCall {
+            export: "on-events".to_owned(),
+            duration_ms: 4.5678,
+        },
+        ProfileCall {
+            export: "on-events".to_owned(),
+            duration_ms: 31.2,
+        },
+        ProfileCall {
+            export: "render".to_owned(),
+            duration_ms: 3.1,
+        },
     ];
     backend.memory = vec![sample_memory()];
     backend
@@ -540,7 +642,9 @@ fn backend_with_data() -> FakeBackend {
 fn snake_case(name: &str) -> bool {
     !name.is_empty()
         && name.chars().next().is_some_and(|c| c.is_ascii_lowercase())
-        && name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
 }
 
 fn collect_keys(value: &Value, keys: &mut Vec<String>) {
@@ -580,14 +684,38 @@ fn dev_720_records_carry_the_documented_fields() {
     let outputs = all_outputs();
     let trace = records_of(&outputs[0], "trace");
     assert_eq!(trace.len(), 3);
-    assert!(trace.iter().all(|r| has_keys(r, &["seq", "time_ms", "kind", "instance", "detail"])));
+    assert!(trace
+        .iter()
+        .all(|r| has_keys(r, &["seq", "time_ms", "kind", "instance", "detail"])));
     let timing = records_of(&outputs[1], "timing");
-    assert!(timing.iter().all(|r| has_keys(r, &["export", "calls", "total_ms", "p50_ms", "p95_ms", "max_ms", "over_budget"])));
+    assert!(timing.iter().all(|r| has_keys(
+        r,
+        &[
+            "export",
+            "calls",
+            "total_ms",
+            "p50_ms",
+            "p95_ms",
+            "max_ms",
+            "over_budget"
+        ]
+    )));
     let tree = records_of(&outputs[2], "tree");
     assert_eq!(tree.len(), 1);
     assert!(has_keys(tree[0], &["target", "nodes", "depth", "root"]));
     let memory = records_of(&outputs[3], "memory");
-    assert!(memory.iter().all(|r| has_keys(r, &["side", "linear_bytes", "peak_bytes", "limit_bytes", "storage_bytes", "instances", "restarts"])));
+    assert!(memory.iter().all(|r| has_keys(
+        r,
+        &[
+            "side",
+            "linear_bytes",
+            "peak_bytes",
+            "limit_bytes",
+            "storage_bytes",
+            "instances",
+            "restarts"
+        ]
+    )));
 }
 
 /// REQ: DEV-720
@@ -623,9 +751,14 @@ fn dev_721_durations_are_numbers_with_at_most_three_decimals() {
     assert!(!timings.is_empty());
     for record in timings {
         for field in ["total_ms", "p50_ms", "p95_ms", "max_ms"] {
-            let value = record[field].as_f64().unwrap_or_else(|| panic!("{field} is not a number: {record}"));
+            let value = record[field]
+                .as_f64()
+                .unwrap_or_else(|| panic!("{field} is not a number: {record}"));
             let scaled = value * 1000.0;
-            assert!((scaled - scaled.round()).abs() < 1e-6, "{field} = {value} has more than 3 decimals");
+            assert!(
+                (scaled - scaled.round()).abs() < 1e-6,
+                "{field} = {value} has more than 3 decimals"
+            );
         }
     }
 }
@@ -637,7 +770,11 @@ fn dev_721_sizes_are_integers_in_bytes() {
     let memory = records_of(&outputs[3], "memory");
     assert_eq!(memory.len(), 1);
     for field in ["linear_bytes", "peak_bytes", "limit_bytes", "storage_bytes"] {
-        assert!(memory[0][field].as_u64().is_some(), "{field} must be an integer: {}", memory[0]);
+        assert!(
+            memory[0][field].as_u64().is_some(),
+            "{field} must be an integer: {}",
+            memory[0]
+        );
     }
     assert_eq!(memory[0]["limit_bytes"].as_u64(), Some(32 * 1_048_576));
     assert_eq!(memory[0]["storage_bytes"].as_u64(), Some(14 * 1024));
@@ -659,9 +796,15 @@ fn dev_722_summary_and_result_come_last() {
 #[test]
 fn dev_722_trace_records_are_in_time_order() {
     let outputs = all_outputs();
-    let times: Vec<u64> = records_of(&outputs[0], "trace").iter().map(|r| r["time_ms"].as_u64().unwrap_or(u64::MAX)).collect();
+    let times: Vec<u64> = records_of(&outputs[0], "trace")
+        .iter()
+        .map(|r| r["time_ms"].as_u64().unwrap_or(u64::MAX))
+        .collect();
     assert_eq!(times, vec![120, 121, 900]);
-    let seqs: Vec<u64> = records_of(&outputs[0], "trace").iter().map(|r| r["seq"].as_u64().unwrap_or(0)).collect();
+    let seqs: Vec<u64> = records_of(&outputs[0], "trace")
+        .iter()
+        .map(|r| r["seq"].as_u64().unwrap_or(0))
+        .collect();
     assert!(seqs.windows(2).all(|pair| pair[1] == pair[0] + 1));
 }
 
@@ -670,7 +813,10 @@ fn dev_722_trace_records_are_in_time_order() {
 fn dev_722_result_exit_code_equals_the_process_exit_code() {
     for output in all_outputs() {
         let result = records_of(&output, "result");
-        assert_eq!(result[0]["exit_code"].as_i64(), Some(i64::from(output.exit_code)));
+        assert_eq!(
+            result[0]["exit_code"].as_i64(),
+            Some(i64::from(output.exit_code))
+        );
         assert_eq!(result[0]["ok"].as_bool(), Some(output.exit_code == 0));
     }
 }
@@ -694,7 +840,16 @@ fn dev_675_record_writes_the_replay_file_and_prints_an_artifact_record() {
     let scratch = scratch();
     let env = env_with_session(scratch.path(), backend_with_data());
     let file = scratch.path().join("trace.replay");
-    let output = run(&env, &["trace", PLUGIN, "--record", file.to_str().expect("utf8"), "--json"]);
+    let output = run(
+        &env,
+        &[
+            "trace",
+            PLUGIN,
+            "--record",
+            file.to_str().expect("utf8"),
+            "--json",
+        ],
+    );
     assert!(file.exists());
     let artifacts = records_of(&output, "artifact");
     assert_eq!(artifacts[0]["kind"], json!("replay"));
@@ -706,8 +861,19 @@ fn dev_675_replay_file_is_not_empty_for_a_trace_with_events() {
     let scratch = scratch();
     let env = env_with_session(scratch.path(), backend_with_data());
     let file = scratch.path().join("trace.replay");
-    run(&env, &["trace", PLUGIN, "--record", file.to_str().expect("utf8"), "--json"]);
-    assert!(std::fs::metadata(&file).map(|m| m.len() > 0).unwrap_or(false));
+    run(
+        &env,
+        &[
+            "trace",
+            PLUGIN,
+            "--record",
+            file.to_str().expect("utf8"),
+            "--json",
+        ],
+    );
+    assert!(std::fs::metadata(&file)
+        .map(|m| m.len() > 0)
+        .unwrap_or(false));
 }
 
 /// REQ: DEV-680
@@ -739,7 +905,10 @@ fn dev_683_json_prints_one_tree_record_with_nested_children() {
     let output = run(&env, &["inspect", PLUGIN, "--view", "main", "--json"]);
     let trees = records_of(&output, "tree");
     assert_eq!(trees.len(), 1);
-    assert_eq!(trees[0]["root"]["children"][1]["children"][1]["key"], json!("n2"));
+    assert_eq!(
+        trees[0]["root"]["children"][1]["children"][1]["key"],
+        json!("n2")
+    );
 }
 
 /// REQ: DEV-693
@@ -758,7 +927,21 @@ fn dev_725_replay_reproduces_the_recorded_deadline_trap() {
     let scratch = scratch();
     let env = env_with_session(scratch.path(), backend_with_data());
     let file = scratch.path().join("slow.replay");
-    std::fs::write(&file, r#"{"call":"on-events","host_call_ms":[600],"deadline_ms":500}"#).expect("replay");
-    let output = run(&env, &["test", "--replay", file.to_str().expect("utf8"), "--json"]);
-    assert!(output.stdout_jsonl.iter().any(|r| r.to_string().contains("trap.deadline")), "{:?}", output.stdout_jsonl);
+    std::fs::write(
+        &file,
+        r#"{"call":"on-events","host_call_ms":[600],"deadline_ms":500}"#,
+    )
+    .expect("replay");
+    let output = run(
+        &env,
+        &["test", "--replay", file.to_str().expect("utf8"), "--json"],
+    );
+    assert!(
+        output
+            .stdout_jsonl
+            .iter()
+            .any(|r| r.to_string().contains("trap.deadline")),
+        "{:?}",
+        output.stdout_jsonl
+    );
 }

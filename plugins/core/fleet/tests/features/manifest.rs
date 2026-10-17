@@ -2,7 +2,7 @@
 //! contributed command, route and CLI subcommand is declared (COR-040, F-107, F-109, F-110).
 
 use ilium_plugin_sdk::testing::FakeHost;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::common::{manifest_path, page, page_text};
 
@@ -13,7 +13,9 @@ fn manifest() -> Value {
 
 /// The first json code block after the heading line `heading`.
 fn json_block_after(page: &str, heading: &str) -> Value {
-    let start = page.find(heading).unwrap_or_else(|| panic!("heading {heading} missing"));
+    let start = page
+        .find(heading)
+        .unwrap_or_else(|| panic!("heading {heading} missing"));
     let rest = &page[start..];
     let open = rest.find("```json\n").expect("json block") + "```json\n".len();
     let close = rest[open..].find("```").expect("block end");
@@ -21,7 +23,12 @@ fn json_block_after(page: &str, heading: &str) -> Value {
 }
 
 fn strings(value: &Value) -> Vec<String> {
-    value.as_array().expect("array").iter().map(|item| item.as_str().expect("string").to_string()).collect()
+    value
+        .as_array()
+        .expect("array")
+        .iter()
+        .map(|item| item.as_str().expect("string").to_string())
+        .collect()
 }
 
 fn cli_entry(name: &str) -> Value {
@@ -37,7 +44,10 @@ fn cli_entry(name: &str) -> Value {
 /// REQ: COR-050
 #[test]
 fn manifest_050_equals_the_complete_manifest_of_the_page() {
-    assert_eq!(manifest(), json_block_after(&page_text(), "### Complete manifest"));
+    assert_eq!(
+        manifest(),
+        json_block_after(&page_text(), "### Complete manifest")
+    );
 }
 
 /// REQ: COR-050
@@ -46,7 +56,10 @@ fn manifest_050_fragment_capabilities_server_equal_the_complete_manifest() {
     let page = page_text();
     let fragment = json_block_after(&page, "### Manifest");
     let complete = json_block_after(&page, "### Complete manifest");
-    assert_eq!(fragment["capabilities"]["server"], complete["capabilities"]["server"]);
+    assert_eq!(
+        fragment["capabilities"]["server"],
+        complete["capabilities"]["server"]
+    );
     assert_eq!(fragment["id"], complete["id"]);
     assert_eq!(fragment["api"], complete["api"]);
 }
@@ -58,7 +71,10 @@ fn manifest_050_fragment_cli_entries_equal_the_complete_manifest() {
     let page = page_text();
     let fragment = json_block_after(&page, "### Manifest");
     let complete = json_block_after(&page, "### Complete manifest");
-    assert_eq!(fragment["contributes"]["cli"], complete["contributes"]["cli"]);
+    assert_eq!(
+        fragment["contributes"]["cli"],
+        complete["contributes"]["cli"]
+    );
 }
 
 /// REQ: COR-050
@@ -67,8 +83,14 @@ fn manifest_050_fragment_http_routes_and_commands_equal_the_complete_manifest() 
     let page = page_text();
     let fragment = json_block_after(&page, "### Manifest");
     let complete = json_block_after(&page, "### Complete manifest");
-    assert_eq!(fragment["contributes"]["http_routes"], complete["contributes"]["http_routes"]);
-    assert_eq!(fragment["contributes"]["commands"], complete["contributes"]["commands"]);
+    assert_eq!(
+        fragment["contributes"]["http_routes"],
+        complete["contributes"]["http_routes"]
+    );
+    assert_eq!(
+        fragment["contributes"]["commands"],
+        complete["contributes"]["commands"]
+    );
 }
 
 /// REQ: COR-050
@@ -101,8 +123,14 @@ fn manifest_050_identity_and_api_version() {
 #[test]
 fn manifest_050_declares_both_sides_with_their_worlds() {
     let manifest = manifest();
-    assert_eq!(manifest["server"], json!({"entry": "server.wasm", "world": "ilium:server/base@0.1.0"}));
-    assert_eq!(manifest["client"], json!({"entry": "client.wasm", "world": "ilium:client/base@0.1.0"}));
+    assert_eq!(
+        manifest["server"],
+        json!({"entry": "server.wasm", "world": "ilium:server/base@0.1.0"})
+    );
+    assert_eq!(
+        manifest["client"],
+        json!({"entry": "client.wasm", "world": "ilium:client/base@0.1.0"})
+    );
 }
 
 /// REQ: COR-050
@@ -127,15 +155,24 @@ fn manifest_050_server_grants_are_the_nine_fleet_grants_in_order() {
 /// REQ: COR-050, COR-030
 #[test]
 fn manifest_030_client_holds_ui_panels_and_the_api_tab_grant() {
-    assert_eq!(strings(&manifest()["capabilities"]["client"]), ["ui.panels", "settings.write-kernel:api"]);
+    assert_eq!(
+        strings(&manifest()["capabilities"]["client"]),
+        ["ui.panels", "settings.write-kernel:api"]
+    );
 }
 
 /// REQ: COR-030, COR-033
 #[test]
 fn manifest_030_the_page_names_api_as_the_only_owned_kernel_tab() {
     let page = page_text();
-    assert!(page.contains("| `api` | API | `[api]` | none |"), "kernel tab table row missing");
-    let tabs: Vec<&str> = page.lines().filter(|line| line.starts_with("| `") && line.contains("| `[")).collect();
+    assert!(
+        page.contains("| `api` | API | `[api]` | none |"),
+        "kernel tab table row missing"
+    );
+    let tabs: Vec<&str> = page
+        .lines()
+        .filter(|line| line.starts_with("| `") && line.contains("| `["))
+        .collect();
     assert_eq!(tabs.len(), 1, "exactly one kernel tab row: {tabs:?}");
 }
 
@@ -144,7 +181,10 @@ fn manifest_030_the_page_names_api_as_the_only_owned_kernel_tab() {
 fn manifest_030_no_other_core_page_lists_the_api_tab_as_owned() {
     // One holder per tab: the migration table names Fleet as the only owner of `api`.
     let table = page("reference-config-and-data-migration");
-    let owners: Vec<&str> = table.lines().filter(|line| line.starts_with("| `api` |")).collect();
+    let owners: Vec<&str> = table
+        .lines()
+        .filter(|line| line.starts_with("| `api` |"))
+        .collect();
     assert_eq!(owners.len(), 1, "{owners:?}");
     assert!(owners[0].contains("Fleet"));
 }
@@ -154,7 +194,13 @@ fn manifest_030_no_other_core_page_lists_the_api_tab_as_owned() {
 fn manifest_050_activation_triggers_are_the_five_lazy_ones() {
     assert_eq!(
         strings(&manifest()["activation"]),
-        ["cli:panes", "cli:broadcast", "http:/create_agent", "service:broadcast", "command:ask-for-update"]
+        [
+            "cli:panes",
+            "cli:broadcast",
+            "http:/create_agent",
+            "service:broadcast",
+            "command:ask-for-update"
+        ]
     );
 }
 
@@ -162,16 +208,24 @@ fn manifest_050_activation_triggers_are_the_five_lazy_ones() {
 #[test]
 fn manifest_050_activation_matches_the_kernel_and_boot_table() {
     let boot = page("reference-kernel-and-boot");
-    let row = boot.lines().find(|line| line.starts_with("| Fleet |")).expect("Fleet row");
+    let row = boot
+        .lines()
+        .find(|line| line.starts_with("| Fleet |"))
+        .expect("Fleet row");
     for trigger in strings(&manifest()["activation"]) {
-        assert!(row.contains(&format!("`{trigger}`")), "{trigger} missing in {row}");
+        assert!(
+            row.contains(&format!("`{trigger}`")),
+            "{trigger} missing in {row}"
+        );
     }
 }
 
 /// REQ: COR-050
 #[test]
 fn manifest_050_has_no_startup_activation() {
-    assert!(!strings(&manifest()["activation"]).iter().any(|trigger| trigger == "startup"));
+    assert!(!strings(&manifest()["activation"])
+        .iter()
+        .any(|trigger| trigger == "startup"));
 }
 
 /// REQ: COR-040, F-109
@@ -212,7 +266,10 @@ fn manifest_040_new_pane_needs_a_server_and_has_mixed_output() {
 fn manifest_040_the_cli_compatibility_table_names_fleet_as_owner_of_all_three() {
     let table = page("reference-cli-compatibility");
     for command in ["ilium new-pane", "ilium panes", "ilium broadcast"] {
-        let row = table.lines().find(|line| line.starts_with(&format!("| `{command}` |"))).expect(command);
+        let row = table
+            .lines()
+            .find(|line| line.starts_with(&format!("| `{command}` |")))
+            .expect(command);
         assert!(row.contains("| fleet |"), "{row}");
     }
 }
@@ -220,22 +277,33 @@ fn manifest_040_the_cli_compatibility_table_names_fleet_as_owner_of_all_three() 
 /// REQ: COR-040
 #[test]
 fn manifest_040_exactly_three_subcommands_are_declared() {
-    let names: Vec<String> =
-        manifest()["contributes"]["cli"].as_array().expect("cli").iter().map(|e| e["name"].as_str().unwrap().to_string()).collect();
+    let names: Vec<String> = manifest()["contributes"]["cli"]
+        .as_array()
+        .expect("cli")
+        .iter()
+        .map(|e| e["name"].as_str().unwrap().to_string())
+        .collect();
     assert_eq!(names, ["panes", "broadcast", "new-pane"]);
 }
 
 /// REQ: COR-010
 #[test]
 fn manifest_010_the_plugin_registers_only_the_create_agent_route() {
-    assert_eq!(manifest()["contributes"]["http_routes"], json!([{"method": "POST", "path": "/create_agent"}]));
-    assert!(strings(&manifest()["capabilities"]["server"]).contains(&"http-api.route:/create_agent".to_string()));
+    assert_eq!(
+        manifest()["contributes"]["http_routes"],
+        json!([{"method": "POST", "path": "/create_agent"}])
+    );
+    assert!(strings(&manifest()["capabilities"]["server"])
+        .contains(&"http-api.route:/create_agent".to_string()));
 }
 
 /// REQ: F-113, F-036
 #[test]
 fn manifest_113_ask_for_update_is_a_declared_command() {
-    assert_eq!(manifest()["contributes"]["commands"], json!([{"id": "ask-for-update", "title": "Ask for update"}]));
+    assert_eq!(
+        manifest()["contributes"]["commands"],
+        json!([{"id": "ask-for-update", "title": "Ask for update"}])
+    );
 }
 
 /// REQ: F-036, F-113, F-023
@@ -250,13 +318,20 @@ fn manifest_036_the_terminal_and_pane_grants_for_messaging_are_held() {
 /// REQ: F-109
 #[test]
 fn manifest_109_the_cost_column_needs_the_cost_usage_service_grant() {
-    assert!(strings(&manifest()["capabilities"]["server"]).contains(&"services.use:ilium.core.cost/usage".to_string()));
+    assert!(strings(&manifest()["capabilities"]["server"])
+        .contains(&"services.use:ilium.core.cost/usage".to_string()));
 }
 
 /// REQ: COR-050
 #[test]
 fn manifest_050_host_takes_grants_from_the_manifest_for_each_side() {
-    let server = FakeHost::for_manifest(manifest_path()).expect("loads").side("server").build();
-    let client = FakeHost::for_manifest(manifest_path()).expect("loads").side("client").build();
+    let server = FakeHost::for_manifest(manifest_path())
+        .expect("loads")
+        .side("server")
+        .build();
+    let client = FakeHost::for_manifest(manifest_path())
+        .expect("loads")
+        .side("client")
+        .build();
     drop((server, client));
 }

@@ -14,7 +14,15 @@ fn manifest_050_file_equals_the_complete_manifest_of_the_page() {
 #[test]
 fn manifest_050_required_keys_are_present() {
     let manifest = manifest_value();
-    for key in ["api", "id", "name", "version", "publisher", "description", "license"] {
+    for key in [
+        "api",
+        "id",
+        "name",
+        "version",
+        "publisher",
+        "description",
+        "license",
+    ] {
         assert!(manifest.get(key).is_some(), "missing key {key}");
     }
 }
@@ -46,14 +54,20 @@ fn manifest_050_description_is_the_first_sentence_of_the_page() {
 #[test]
 fn manifest_050_server_side_world_and_entry() {
     let manifest = manifest_value();
-    assert_eq!(manifest["server"], json!({"entry": "server.wasm", "world": "ilium:server/base@0.1.0"}));
+    assert_eq!(
+        manifest["server"],
+        json!({"entry": "server.wasm", "world": "ilium:server/base@0.1.0"})
+    );
 }
 
 /// REQ: COR-050
 #[test]
 fn manifest_050_client_side_world_and_entry() {
     let manifest = manifest_value();
-    assert_eq!(manifest["client"], json!({"entry": "client.wasm", "world": "ilium:client/base@0.1.0"}));
+    assert_eq!(
+        manifest["client"],
+        json!({"entry": "client.wasm", "world": "ilium:client/base@0.1.0"})
+    );
 }
 
 /// REQ: COR-050
@@ -62,7 +76,12 @@ fn manifest_050_server_grants_in_page_order() {
     let manifest = manifest_value();
     assert_eq!(
         strings(&manifest["capabilities"]["server"]),
-        ["panes.read", "panes.lifecycle", "tree.restructure", "agent.read"]
+        [
+            "panes.read",
+            "panes.lifecycle",
+            "tree.restructure",
+            "agent.read"
+        ]
     );
 }
 
@@ -72,14 +91,20 @@ fn manifest_050_fragment_grants_equal_the_complete_manifest_grants() {
     let blocks = json_blocks(&page_text());
     let fragment: serde_json::Value = serde_json::from_str(&blocks[0]).expect("fragment is JSON");
     assert_eq!(fragment["id"], PLUGIN_ID);
-    assert_eq!(fragment["capabilities"]["server"], manifest_value()["capabilities"]["server"]);
+    assert_eq!(
+        fragment["capabilities"]["server"],
+        manifest_value()["capabilities"]["server"]
+    );
 }
 
 /// REQ: COR-050
 #[test]
 fn manifest_050_activation_is_startup_and_the_list_view() {
     let manifest = manifest_value();
-    assert_eq!(strings(&manifest["activation"]), ["startup", "view:sessions.list"]);
+    assert_eq!(
+        strings(&manifest["activation"]),
+        ["startup", "view:sessions.list"]
+    );
 }
 
 /// REQ: COR-050
@@ -100,17 +125,26 @@ fn manifest_050_limits_tier_is_first_party() {
 /// REQ: COR-050
 #[test]
 fn manifest_050_core_plugins_index_lists_sessions_as_server_side() {
-    let row = table_row(&page("core-plugins"), "[Sessions](/pages/core-plugin-sessions/)");
+    let row = table_row(
+        &page("core-plugins"),
+        "[Sessions](/pages/core-plugin-sessions/)",
+    );
     assert_eq!(row[1], "`ilium.core.sessions`");
     assert_eq!(row[2], "server");
-    assert_eq!(row[3], "Snapshots, restore, recovery and detach and reattach.");
+    assert_eq!(
+        row[3],
+        "Snapshots, restore, recovery and detach and reattach."
+    );
 }
 
 /// REQ: COR-030
 #[test]
 fn manifest_030_client_holds_the_session_kernel_tab_grant() {
     let manifest = manifest_value();
-    assert_eq!(strings(&manifest["capabilities"]["client"]), ["settings.write-kernel:session"]);
+    assert_eq!(
+        strings(&manifest["capabilities"]["client"]),
+        ["settings.write-kernel:session"]
+    );
 }
 
 /// REQ: COR-030

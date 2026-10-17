@@ -4,7 +4,8 @@
 
 use ilium_plugin_sdk::testing::FakeHost;
 use ilium_plugin_sdk::types::{
-    CommandContext, CommandInvokedEvent, CommandOrigin, Event, Intent, MoveNodeSpec, NodeClass, NodeId, Placement,
+    CommandContext, CommandInvokedEvent, CommandOrigin, Event, Intent, MoveNodeSpec, NodeClass,
+    NodeId, Placement,
 };
 
 use crate::common::{add_node, server_host};
@@ -14,7 +15,10 @@ fn invoke(host: &mut FakeHost, command: &str, node: u64) -> Vec<MoveNodeSpec> {
         command: command.to_string(),
         arguments_json: "{}".to_string(),
         origin: CommandOrigin::Palette,
-        context: CommandContext { pane: Some(NodeId(node)), ..CommandContext::default() },
+        context: CommandContext {
+            pane: Some(NodeId(node)),
+            ..CommandContext::default()
+        },
     }));
     submissions
         .iter()
@@ -33,7 +37,14 @@ fn port_001_indent_moves_into_the_nearest_preceding_sibling_group() {
     let sibling = add_node(&mut host, Some(top), "sibling", NodeClass::Container);
     let pane = add_node(&mut host, Some(top), "pane", NodeClass::Pane);
     let moves = invoke(&mut host, "tree.indent", pane);
-    assert_eq!(moves, vec![MoveNodeSpec { node: NodeId(pane), target: NodeId(sibling), placement: Placement::InsideLast }]);
+    assert_eq!(
+        moves,
+        vec![MoveNodeSpec {
+            node: NodeId(pane),
+            target: NodeId(sibling),
+            placement: Placement::InsideLast
+        }]
+    );
 }
 
 /// REQ: PORT:ilium-client/src/keys.rs::outdent_moves_out_into_the_parent_group_right_after_the_current_group
@@ -45,7 +56,14 @@ fn port_002_outdent_moves_out_into_the_parent_group_right_after_the_current_grou
     let pane = add_node(&mut host, Some(inner), "pane", NodeClass::Pane);
     add_node(&mut host, Some(top), "other", NodeClass::Pane);
     let moves = invoke(&mut host, "tree.outdent", pane);
-    assert_eq!(moves, vec![MoveNodeSpec { node: NodeId(pane), target: NodeId(inner), placement: Placement::After }]);
+    assert_eq!(
+        moves,
+        vec![MoveNodeSpec {
+            node: NodeId(pane),
+            target: NodeId(inner),
+            placement: Placement::After
+        }]
+    );
 }
 
 /// REQ: PORT:ilium-client/src/keys.rs::outdent_at_the_top_level_is_a_no_op
@@ -53,7 +71,10 @@ fn port_002_outdent_moves_out_into_the_parent_group_right_after_the_current_grou
 fn port_003_outdent_at_the_top_level_is_a_no_op() {
     let mut host = server_host();
     let top = add_node(&mut host, None, "top", NodeClass::Container);
-    assert_eq!(invoke(&mut host, "tree.outdent", top), Vec::<MoveNodeSpec>::new());
+    assert_eq!(
+        invoke(&mut host, "tree.outdent", top),
+        Vec::<MoveNodeSpec>::new()
+    );
 }
 
 /// REQ: PORT:ilium-client/src/keys.rs::outdent_rejects_leaving_a_pane_parentless_at_the_top_level
@@ -62,5 +83,8 @@ fn port_004_outdent_rejects_leaving_a_pane_parentless_at_the_top_level() {
     let mut host = server_host();
     let top = add_node(&mut host, None, "top", NodeClass::Container);
     let pane = add_node(&mut host, Some(top), "pane", NodeClass::Pane);
-    assert_eq!(invoke(&mut host, "tree.outdent", pane), Vec::<MoveNodeSpec>::new());
+    assert_eq!(
+        invoke(&mut host, "tree.outdent", pane),
+        Vec::<MoveNodeSpec>::new()
+    );
 }

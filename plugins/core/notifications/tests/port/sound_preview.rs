@@ -13,8 +13,14 @@ fn port_004_the_generated_source_and_its_design_are_kept_and_play_one_sound() {
     let mut host = server_host();
     set_setting(&mut host, "sound.source", json!("generated"));
     set_setting(&mut host, "sound.design.waveform", json!("square"));
-    assert_eq!(host.settings().get("sound.source"), Some(json!("generated")));
-    assert_eq!(host.settings().get("sound.design.waveform"), Some(json!("square")));
+    assert_eq!(
+        host.settings().get("sound.source"),
+        Some(json!("generated"))
+    );
+    assert_eq!(
+        host.settings().get("sound.design.waveform"),
+        Some(json!("square"))
+    );
     let node = add_pane(&mut host, "claude-api", Some(AgentActivity::Working));
     assert_eq!(sounds(&finish_turn(&mut host, node, 1)).len(), 1);
 }
@@ -24,7 +30,11 @@ fn port_004_the_generated_source_and_its_design_are_kept_and_play_one_sound() {
 fn port_006_a_sound_file_that_does_not_exist_is_still_passed_on_to_play() {
     let mut host = server_host();
     set_setting(&mut host, "sound.source", json!("sound_file"));
-    set_setting(&mut host, "sound.file", json!("/nonexistent/ilium-missing.oga"));
+    set_setting(
+        &mut host,
+        "sound.file",
+        json!("/nonexistent/ilium-missing.oga"),
+    );
     let node = add_pane(&mut host, "claude-api", Some(AgentActivity::Working));
     assert_eq!(sounds(&finish_turn(&mut host, node, 1)), ["finished"]);
 }

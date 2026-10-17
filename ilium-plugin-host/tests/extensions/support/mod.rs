@@ -6,18 +6,18 @@
 
 use std::path::PathBuf;
 
-pub use ilium_plugin_api::generated::exports::hook_handler::HookReply;
-pub use ilium_plugin_api::generated::host::extensions::ExtensionEntry;
-pub use ilium_plugin_api::generated::types::ids::RequestId;
-pub use ilium_plugin_api::generated::types::requests::Outcome;
-pub use ilium_plugin_api::{Diagnostic, ErrorCode, PluginError, Side, Tier};
-pub use ilium_plugin_host::telemetry::LogLine;
 pub use ilium_plugin_api::generated::exports::hook_handler::HookCall;
+pub use ilium_plugin_api::generated::exports::hook_handler::HookReply;
 pub use ilium_plugin_api::generated::exports::menu_provider::MenuContext;
 pub use ilium_plugin_api::generated::exports::service_provider::{ServiceCall, ServiceReply};
 pub use ilium_plugin_api::generated::host::catalogs::CatalogQuery;
+pub use ilium_plugin_api::generated::host::extensions::ExtensionEntry;
 pub use ilium_plugin_api::generated::types::ids::BufferId;
+pub use ilium_plugin_api::generated::types::ids::RequestId;
+pub use ilium_plugin_api::generated::types::requests::Outcome;
+pub use ilium_plugin_api::{Diagnostic, ErrorCode, PluginError, Side, Tier};
 pub use ilium_plugin_host::instance::{ExportCall, ExportReply};
+pub use ilium_plugin_host::telemetry::LogLine;
 pub use ilium_plugin_host::testing::{ExtWorld, HandlerAction, HandlerRun, HandlerScript};
 pub use proptest::prelude::*;
 pub use serde_json::{json, Value};
@@ -39,7 +39,11 @@ pub const MIB1: usize = 1024 * 1024;
 
 /// A `plugin-error` as a guest returns it.
 pub fn perr(code: ErrorCode, message: &str) -> PluginError {
-    PluginError { code, message: message.to_owned(), retry_after_ms: None }
+    PluginError {
+        code,
+        message: message.to_owned(),
+        retry_after_ms: None,
+    }
 }
 
 /// The base code of a failed call.
@@ -88,15 +92,24 @@ pub fn pass(ms: u32) -> HandlerScript {
 }
 
 pub fn replace(ms: u32, payload_json: &str) -> HandlerScript {
-    script(ms, HandlerAction::Reply(HookReply::Replace(payload_json.to_owned())))
+    script(
+        ms,
+        HandlerAction::Reply(HookReply::Replace(payload_json.to_owned())),
+    )
 }
 
 pub fn refuse(ms: u32, reason: &str) -> HandlerScript {
-    script(ms, HandlerAction::Reply(HookReply::Refuse(reason.to_owned())))
+    script(
+        ms,
+        HandlerAction::Reply(HookReply::Refuse(reason.to_owned())),
+    )
 }
 
 pub fn answer(ms: u32, payload_json: &str) -> HandlerScript {
-    script(ms, HandlerAction::Reply(HookReply::Answer(payload_json.to_owned())))
+    script(
+        ms,
+        HandlerAction::Reply(HookReply::Answer(payload_json.to_owned())),
+    )
 }
 
 pub fn trap(ms: u32) -> HandlerScript {
@@ -104,11 +117,20 @@ pub fn trap(ms: u32) -> HandlerScript {
 }
 
 pub fn error_return(ms: u32) -> HandlerScript {
-    script(ms, HandlerAction::Fail(perr(ErrorCode::Internal, "handler failed")))
+    script(
+        ms,
+        HandlerAction::Fail(perr(ErrorCode::Internal, "handler failed")),
+    )
 }
 
 pub fn runs_hook(ms: u32, point: &str, payload_json: &str) -> HandlerScript {
-    script(ms, HandlerAction::RunHook { point: point.to_owned(), payload_json: payload_json.to_owned() })
+    script(
+        ms,
+        HandlerAction::RunHook {
+            point: point.to_owned(),
+            payload_json: payload_json.to_owned(),
+        },
+    )
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -177,7 +199,12 @@ pub fn owner_manifest(owner: &str, points: Vec<Value>) -> Value {
 pub fn owner_manifest_on(owner: &str, side: &str, points: Vec<Value>) -> Value {
     let grants: Vec<String> = points
         .iter()
-        .map(|point| format!("extensions.provide:{owner}/{}", point["id"].as_str().unwrap_or("")))
+        .map(|point| {
+            format!(
+                "extensions.provide:{owner}/{}",
+                point["id"].as_str().unwrap_or("")
+            )
+        })
         .collect();
     json!({
         "id": owner,
@@ -246,11 +273,21 @@ impl Contrib {
     /// A T3 contributor with the given full plugin id; its extension id is `e-<last segment>`.
     pub fn new(plugin: &str, priority: u8, script: HandlerScript) -> Contrib {
         let last = plugin.rsplit('.').next().unwrap_or(plugin);
-        Contrib { plugin: plugin.to_owned(), extension: format!("e-{last}"), priority, tier: Tier::T3, script, guard: false }
+        Contrib {
+            plugin: plugin.to_owned(),
+            extension: format!("e-{last}"),
+            priority,
+            tier: Tier::T3,
+            script,
+            guard: false,
+        }
     }
 
     pub fn guard(plugin: &str, priority: u8, script: HandlerScript) -> Contrib {
-        Contrib { guard: true, ..Contrib::new(plugin, priority, script) }
+        Contrib {
+            guard: true,
+            ..Contrib::new(plugin, priority, script)
+        }
     }
 }
 
@@ -267,12 +304,19 @@ pub fn contrib(name: &str, priority: u8, script: HandlerScript) -> Contrib {
 }
 
 pub fn contrib_tier(name: &str, priority: u8, tier: Tier, script: HandlerScript) -> Contrib {
-    Contrib { tier, ..contrib(name, priority, script) }
+    Contrib {
+        tier,
+        ..contrib(name, priority, script)
+    }
 }
 
 /// Installs a contributor of the standard point into a world.
 pub fn install_contrib(world: &mut ExtWorld, point: &str, c: &Contrib) -> Result<(), Diagnostic> {
-    let entry = if c.guard { ext_guard(point, &c.extension, c.priority, "h") } else { ext_handler(point, &c.extension, c.priority, "h") };
+    let entry = if c.guard {
+        ext_guard(point, &c.extension, c.priority, "h")
+    } else {
+        ext_handler(point, &c.extension, c.priority, "h")
+    };
     let manifest = contributor_manifest(&c.plugin, vec![entry]);
     world.install(c.tier, manifest, vec![("h".to_owned(), c.script.clone())])
 }
@@ -289,7 +333,11 @@ pub fn hook_world_with(point: Value, contribs: Vec<Contrib>) -> ExtWorld {
     assert!(installed.is_ok(), "owner install failed: {installed:?}");
     for c in &contribs {
         let installed = install_contrib(&mut world, POINT, c);
-        assert!(installed.is_ok(), "contributor {} install failed: {installed:?}", c.plugin);
+        assert!(
+            installed.is_ok(),
+            "contributor {} install failed: {installed:?}",
+            c.plugin
+        );
     }
     world.settle();
     world
@@ -321,24 +369,38 @@ pub fn run_chain_on(
 
 /// The plugin ids of the handler runs of the world, in start order.
 pub fn run_order(world: &ExtWorld) -> Vec<String> {
-    world.handler_runs().into_iter().map(|run| run.plugin).collect()
+    world
+        .handler_runs()
+        .into_iter()
+        .map(|run| run.plugin)
+        .collect()
 }
 
 /// True when any captured log line contains the code.
 pub fn has_log(world: &ExtWorld, code: &str) -> bool {
-    world.all_logs().iter().any(|line| line.message.contains(code))
+    world
+        .all_logs()
+        .iter()
+        .any(|line| line.message.contains(code))
 }
 
 /// The number of captured log lines that contain the code.
 pub fn count_logs(world: &ExtWorld, code: &str) -> usize {
-    world.all_logs().iter().filter(|line| line.message.contains(code)).count()
+    world
+        .all_logs()
+        .iter()
+        .filter(|line| line.message.contains(code))
+        .count()
 }
 
 /// A JSON string of the given byte length inside `{"text": ...}`: the whole payload has `total`
 /// bytes.
 pub fn payload_of_size(total: usize) -> String {
     let overhead = r#"{"text":""}"#.len();
-    format!(r#"{{"text":"{}"}}"#, "a".repeat(total.saturating_sub(overhead)))
+    format!(
+        r#"{{"text":"{}"}}"#,
+        "a".repeat(total.saturating_sub(overhead))
+    )
 }
 
 /// The code of an install refusal.
@@ -387,9 +449,16 @@ pub fn table_after(text: &str, heading: &str) -> Vec<Vec<String>> {
         }
         if line.starts_with('|') {
             in_table = true;
-            let cells: Vec<String> =
-                line.trim().trim_matches('|').split('|').map(|cell| cell.trim().to_owned()).collect();
-            if cells.iter().all(|cell| cell.chars().all(|ch| ch == '-' || ch == ':')) {
+            let cells: Vec<String> = line
+                .trim()
+                .trim_matches('|')
+                .split('|')
+                .map(|cell| cell.trim().to_owned())
+                .collect();
+            if cells
+                .iter()
+                .all(|cell| cell.chars().all(|ch| ch == '-' || ch == ':'))
+            {
                 continue;
             }
             rows.push(cells);
@@ -408,7 +477,13 @@ pub fn core_points() -> Vec<(String, String, String)> {
     let text = page("reference-core-extension-points.md");
     table_after(&text, "### All points")
         .into_iter()
-        .map(|row| (row[0].trim_matches('`').to_owned(), row[1].clone(), row[2].clone()))
+        .map(|row| {
+            (
+                row[0].trim_matches('`').to_owned(),
+                row[1].clone(),
+                row[2].clone(),
+            )
+        })
         .collect()
 }
 
@@ -470,10 +545,17 @@ pub fn service_world(version: &str, echo: HandlerScript) -> ExtWorld {
     let installed = world.install(
         Tier::T3,
         provider_manifest("com.example.prov", SERVICE, version),
-        vec![(method_key(SERVICE, "echo"), echo), (method_key(SERVICE, "query"), done(1, "[]"))],
+        vec![
+            (method_key(SERVICE, "echo"), echo),
+            (method_key(SERVICE, "query"), done(1, "[]")),
+        ],
     );
     assert!(installed.is_ok(), "provider install failed: {installed:?}");
-    let installed = world.install(Tier::T3, consumer_manifest("com.example.cons", SERVICE, None), Vec::new());
+    let installed = world.install(
+        Tier::T3,
+        consumer_manifest("com.example.cons", SERVICE, None),
+        Vec::new(),
+    );
     assert!(installed.is_ok(), "consumer install failed: {installed:?}");
     world.settle();
     world
@@ -487,7 +569,10 @@ pub fn call_echo(world: &mut ExtWorld, payload_json: &str) -> Result<RequestId, 
 /// A payload of `echo` whose JSON text has exactly `total` bytes.
 pub fn echo_payload_of_size(total: usize) -> String {
     let overhead = r#"{"text":""}"#.len();
-    format!(r#"{{"text":"{}"}}"#, "a".repeat(total.saturating_sub(overhead)))
+    format!(
+        r#"{{"text":"{}"}}"#,
+        "a".repeat(total.saturating_sub(overhead))
+    )
 }
 
 /// Menu-provider harness (gap: MenuHarness, see API_GAPS.md).

@@ -5,14 +5,14 @@
 //! kernel settings the plugin reads, the extension points, the service, the topic, the manifest
 //! and the page itself. Lane core-automation, part features.
 
-#[path = "../host_ext.rs"]
-mod host_ext;
 mod cli_exit;
 mod common;
 mod delivery;
 mod doc_page;
 mod extension_points;
 mod footer_client;
+#[path = "../host_ext.rs"]
+mod host_ext;
 mod http_route;
 mod manifest;
 mod probe_contract;

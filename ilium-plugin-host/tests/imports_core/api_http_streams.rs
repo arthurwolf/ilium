@@ -37,7 +37,11 @@ fn listener() -> (std::net::TcpListener, u16) {
 fn http_open_stream_returns_a_stream_id_and_delivers_chunks_to_events() {
     let (port, _heads) = loopback_server(http_response("200 OK", &[], b"line one\nline two\n"), 1);
     let mut fixture = granted(Tier::T2, port);
-    let stream = expect_ok(fixture.http().open_stream(stream_request(port, StreamFraming::Lines, 1024)));
+    let stream = expect_ok(fixture.http().open_stream(stream_request(
+        port,
+        StreamFraming::Lines,
+        1024,
+    )));
     let chunks = fixture.wait_stream_chunks(stream, 2, WAIT);
     assert_eq!(chunks, vec![b"line one".to_vec(), b"line two".to_vec()]);
 }
@@ -47,9 +51,16 @@ fn http_open_stream_returns_a_stream_id_and_delivers_chunks_to_events() {
 fn http_open_stream_max_chunk_bytes_of_exactly_1_mib_accepted_and_one_more_invalid_argument() {
     let (_listener, port) = listener();
     let mut fixture = granted(Tier::T2, port);
-    assert!(fixture.http().open_stream(stream_request(port, StreamFraming::Raw, MIB as u32)).is_ok());
+    assert!(fixture
+        .http()
+        .open_stream(stream_request(port, StreamFraming::Raw, MIB as u32))
+        .is_ok());
     assert_eq!(
-        expect_code(fixture.http().open_stream(stream_request(port, StreamFraming::Raw, MIB as u32 + 1))),
+        expect_code(fixture.http().open_stream(stream_request(
+            port,
+            StreamFraming::Raw,
+            MIB as u32 + 1
+        ))),
         ErrorCode::InvalidArgument
     );
 }
@@ -60,7 +71,11 @@ fn http_open_stream_zero_max_chunk_bytes_invalid_argument() {
     let (_listener, port) = listener();
     let mut fixture = granted(Tier::T2, port);
     assert_eq!(
-        expect_code(fixture.http().open_stream(stream_request(port, StreamFraming::Raw, 0))),
+        expect_code(
+            fixture
+                .http()
+                .open_stream(stream_request(port, StreamFraming::Raw, 0))
+        ),
         ErrorCode::InvalidArgument
     );
 }
@@ -71,7 +86,11 @@ fn http_open_stream_without_a_grant_not_permitted() {
     let (_listener, port) = listener();
     let mut fixture = fixture(Tier::T2, &[]);
     assert_eq!(
-        expect_code(fixture.http().open_stream(stream_request(port, StreamFraming::Raw, 1024))),
+        expect_code(
+            fixture
+                .http()
+                .open_stream(stream_request(port, StreamFraming::Raw, 1024))
+        ),
         ErrorCode::NotPermitted
     );
 }
@@ -82,10 +101,18 @@ fn http_open_stream_5th_stream_of_a_t2_plugin_quota_exceeded() {
     let (_listener, port) = listener();
     let mut fixture = granted(Tier::T2, port);
     for _ in 0..4 {
-        expect_ok(fixture.http().open_stream(stream_request(port, StreamFraming::Raw, 1024)));
+        expect_ok(
+            fixture
+                .http()
+                .open_stream(stream_request(port, StreamFraming::Raw, 1024)),
+        );
     }
     assert_eq!(
-        expect_code(fixture.http().open_stream(stream_request(port, StreamFraming::Raw, 1024))),
+        expect_code(
+            fixture
+                .http()
+                .open_stream(stream_request(port, StreamFraming::Raw, 1024))
+        ),
         ErrorCode::QuotaExceeded
     );
 }
@@ -96,10 +123,18 @@ fn http_open_stream_t1_plugin_may_hold_16_streams_and_not_17() {
     let (_listener, port) = listener();
     let mut fixture = granted(Tier::T1, port);
     for _ in 0..16 {
-        expect_ok(fixture.http().open_stream(stream_request(port, StreamFraming::Raw, 1024)));
+        expect_ok(
+            fixture
+                .http()
+                .open_stream(stream_request(port, StreamFraming::Raw, 1024)),
+        );
     }
     assert_eq!(
-        expect_code(fixture.http().open_stream(stream_request(port, StreamFraming::Raw, 1024))),
+        expect_code(
+            fixture
+                .http()
+                .open_stream(stream_request(port, StreamFraming::Raw, 1024))
+        ),
         ErrorCode::QuotaExceeded
     );
 }
@@ -111,10 +146,17 @@ fn http_close_stream_frees_a_slot_under_the_stream_limit() {
     let mut fixture = granted(Tier::T2, port);
     let mut streams = Vec::new();
     for _ in 0..4 {
-        streams.push(expect_ok(fixture.http().open_stream(stream_request(port, StreamFraming::Raw, 1024))));
+        streams.push(expect_ok(fixture.http().open_stream(stream_request(
+            port,
+            StreamFraming::Raw,
+            1024,
+        ))));
     }
     fixture.http().close_stream(streams[0]);
-    assert!(fixture.http().open_stream(stream_request(port, StreamFraming::Raw, 1024)).is_ok());
+    assert!(fixture
+        .http()
+        .open_stream(stream_request(port, StreamFraming::Raw, 1024))
+        .is_ok());
 }
 
 /// REQ: WIT:ilium:host/http.close-stream
@@ -131,7 +173,9 @@ fn http_open_websocket_is_unsupported_when_the_websocket_feature_is_off() {
     let mut fixture = builder_in(std::path::Path::new("."), Tier::T2, &["http:127.0.0.1"])
         .websocket_feature(false)
         .build();
-    let result = fixture.http().open_websocket("ws://127.0.0.1:9/".to_owned(), Vec::new());
+    let result = fixture
+        .http()
+        .open_websocket("ws://127.0.0.1:9/".to_owned(), Vec::new());
     assert_eq!(expect_code(result), ErrorCode::Unsupported);
 }
 
@@ -139,25 +183,44 @@ fn http_open_websocket_is_unsupported_when_the_websocket_feature_is_off() {
 #[test]
 fn http_open_websocket_without_a_grant_not_permitted() {
     let mut fixture = fixture(Tier::T2, &[]);
-    let result = fixture.http().open_websocket("ws://127.0.0.1:9/".to_owned(), Vec::new());
+    let result = fixture
+        .http()
+        .open_websocket("ws://127.0.0.1:9/".to_owned(), Vec::new());
     let code = expect_code(result);
-    assert!(matches!(code, ErrorCode::NotPermitted | ErrorCode::Unsupported), "{code:?}");
+    assert!(
+        matches!(code, ErrorCode::NotPermitted | ErrorCode::Unsupported),
+        "{code:?}"
+    );
 }
 
 /// REQ: WIT:ilium:host/http.open-websocket
 #[test]
 fn http_open_websocket_malformed_url_invalid_argument() {
     let mut fixture = fixture(Tier::T2, &["http:127.0.0.1"]);
-    let code = expect_code(fixture.http().open_websocket("not a url".to_owned(), Vec::new()));
-    assert!(matches!(code, ErrorCode::InvalidArgument | ErrorCode::Unsupported), "{code:?}");
+    let code = expect_code(
+        fixture
+            .http()
+            .open_websocket("not a url".to_owned(), Vec::new()),
+    );
+    assert!(
+        matches!(code, ErrorCode::InvalidArgument | ErrorCode::Unsupported),
+        "{code:?}"
+    );
 }
 
 /// REQ: WIT:ilium:host/http.send-websocket
 #[test]
 fn http_send_websocket_on_an_unknown_stream_not_found() {
     let mut fixture = fixture(Tier::T2, &[]);
-    let code = expect_code(fixture.http().send_websocket(StreamId(31_415), "hi".to_owned()));
-    assert!(matches!(code, ErrorCode::NotFound | ErrorCode::Unsupported), "{code:?}");
+    let code = expect_code(
+        fixture
+            .http()
+            .send_websocket(StreamId(31_415), "hi".to_owned()),
+    );
+    assert!(
+        matches!(code, ErrorCode::NotFound | ErrorCode::Unsupported),
+        "{code:?}"
+    );
 }
 
 /// REQ: WIT:ilium:host/http.send-websocket
@@ -165,7 +228,14 @@ fn http_send_websocket_on_an_unknown_stream_not_found() {
 fn http_send_websocket_on_a_plain_http_stream_invalid_argument() {
     let (_listener, port) = listener();
     let mut fixture = granted(Tier::T2, port);
-    let stream = expect_ok(fixture.http().open_stream(stream_request(port, StreamFraming::Raw, 1024)));
+    let stream = expect_ok(fixture.http().open_stream(stream_request(
+        port,
+        StreamFraming::Raw,
+        1024,
+    )));
     let code = expect_code(fixture.http().send_websocket(stream, "hi".to_owned()));
-    assert!(matches!(code, ErrorCode::InvalidArgument | ErrorCode::Unsupported), "{code:?}");
+    assert!(
+        matches!(code, ErrorCode::InvalidArgument | ErrorCode::Unsupported),
+        "{code:?}"
+    );
 }

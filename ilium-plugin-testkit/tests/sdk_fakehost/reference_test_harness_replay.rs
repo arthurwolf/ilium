@@ -2,11 +2,11 @@
 
 use std::path::PathBuf;
 
-use ilium_plugin_testkit::FakeHost;
 use ilium_plugin_testkit::replay::ReplayHeader;
+use ilium_plugin_testkit::FakeHost;
 
 use crate::cli_support::{project, run_test};
-use crate::common::{Spy, client_batch, spy_reset, temp_dir, with_clean_env};
+use crate::common::{client_batch, spy_reset, temp_dir, with_clean_env, Spy};
 
 /// Records one session of the spy plugin and returns the replay file path.
 fn record_session(label: &str, advance_ms: u64) -> PathBuf {
@@ -24,7 +24,11 @@ fn record_session(label: &str, advance_ms: u64) -> PathBuf {
 }
 
 fn lines_of(path: &PathBuf) -> Vec<String> {
-    std::fs::read_to_string(path).expect("replay file").lines().map(str::to_string).collect()
+    std::fs::read_to_string(path)
+        .expect("replay file")
+        .lines()
+        .map(str::to_string)
+        .collect()
 }
 
 fn replay_on_fresh_host(path: &PathBuf) -> Result<(), ilium_plugin_testkit::ReplayMismatch> {
@@ -141,7 +145,9 @@ fn dev_541_the_message_carries_the_code_and_the_line() {
         let line = lines.len() + 1;
         lines.push(r#"{"type":"host-call","at":0,"import":"storage.get","key":"k","result":{"tag":"none"}}"#.to_string());
         std::fs::write(&path, lines.join("\n") + "\n").expect("rewrite");
-        let text = replay_on_fresh_host(&path).expect_err("diverges").to_string();
+        let text = replay_on_fresh_host(&path)
+            .expect_err("diverges")
+            .to_string();
         assert!(text.starts_with("replay.diverged"), "message was {text}");
         assert!(text.contains(&format!("line {line}")), "message was {text}");
     });
@@ -160,7 +166,10 @@ fn dev_541_the_first_difference_is_reported_not_a_later_one() {
             ));
         }
         std::fs::write(&path, lines.join("\n") + "\n").expect("rewrite");
-        assert_eq!(replay_on_fresh_host(&path).expect_err("diverges").line, first_bad);
+        assert_eq!(
+            replay_on_fresh_host(&path).expect_err("diverges").line,
+            first_bad
+        );
     });
 }
 
@@ -171,11 +180,18 @@ fn dev_541_the_first_difference_is_reported_not_a_later_one() {
 fn dev_542_version_2_is_refused() {
     with_clean_env(|| {
         let path = record_session("r542a", 0);
-        let text = std::fs::read_to_string(&path).expect("read").replacen("\"version\":1", "\"version\":2", 1);
+        let text = std::fs::read_to_string(&path).expect("read").replacen(
+            "\"version\":1",
+            "\"version\":2",
+            1,
+        );
         std::fs::write(&path, text).expect("rewrite");
         let error = replay_on_fresh_host(&path).expect_err("version 2");
         let shown = format!("{error} {error:?}");
-        assert!(shown.contains("replay.version-unsupported"), "error was {shown}");
+        assert!(
+            shown.contains("replay.version-unsupported"),
+            "error was {shown}"
+        );
     });
 }
 
@@ -184,7 +200,11 @@ fn dev_542_version_2_is_refused() {
 fn dev_542_version_0_is_refused() {
     with_clean_env(|| {
         let path = record_session("r542b", 0);
-        let text = std::fs::read_to_string(&path).expect("read").replacen("\"version\":1", "\"version\":0", 1);
+        let text = std::fs::read_to_string(&path).expect("read").replacen(
+            "\"version\":1",
+            "\"version\":0",
+            1,
+        );
         std::fs::write(&path, text).expect("rewrite");
         let error = replay_on_fresh_host(&path).expect_err("version 0");
         assert!(format!("{error} {error:?}").contains("replay.version-unsupported"));
@@ -197,7 +217,10 @@ fn dev_542_version_1_is_accepted() {
     with_clean_env(|| {
         let path = record_session("r542c", 0);
         let first_line = lines_of(&path).into_iter().next().expect("header line");
-        assert!(first_line.contains("\"version\":1"), "header was {first_line}");
+        assert!(
+            first_line.contains("\"version\":1"),
+            "header was {first_line}"
+        );
         replay_on_fresh_host(&path).expect("version 1 replays with no mismatch");
     });
 }
@@ -238,7 +261,10 @@ fn dev_543_the_header_start_is_the_zero_point() {
     with_clean_env(|| {
         let path = record_session("r543c", 250);
         let header: ReplayHeader = serde_json::from_str(&lines_of(&path)[0]).expect("header");
-        assert_eq!(header.start, "2030-01-01 00:00:00", "the start does not move with the clock");
+        assert_eq!(
+            header.start, "2030-01-01 00:00:00",
+            "the start does not move with the clock"
+        );
     });
 }
 
@@ -247,7 +273,15 @@ fn dev_543_the_header_start_is_the_zero_point() {
 fn recorded_by_cli(label: &str) -> (PathBuf, PathBuf) {
     let dir = project(label, &[("a.json", r#"{ "schema": 1 }"#)]);
     let out = dir.join("run.replay.jsonl");
-    let run = run_test(&dir, &["--fixture", "tests/fixtures/a.json", "--record", out.to_str().expect("utf8")]);
+    let run = run_test(
+        &dir,
+        &[
+            "--fixture",
+            "tests/fixtures/a.json",
+            "--record",
+            out.to_str().expect("utf8"),
+        ],
+    );
     assert_eq!(run.code, 0, "stdout: {}", run.stdout);
     (dir, out)
 }
@@ -265,7 +299,10 @@ fn dev_544_replay_of_a_matching_file_exits_0() {
 fn dev_544_replay_of_a_diverging_file_exits_3() {
     let (dir, out) = recorded_by_cli("r544b");
     let mut lines = lines_of(&out);
-    lines.push(r#"{"type":"host-call","at":0,"import":"storage.get","key":"k","result":{"tag":"none"}}"#.to_string());
+    lines.push(
+        r#"{"type":"host-call","at":0,"import":"storage.get","key":"k","result":{"tag":"none"}}"#
+            .to_string(),
+    );
     std::fs::write(&out, lines.join("\n") + "\n").expect("rewrite");
     let run = run_test(&dir, &["--replay", out.to_str().expect("utf8")]);
     assert_eq!(run.code, 3, "stdout: {}", run.stdout);
@@ -276,6 +313,14 @@ fn dev_544_replay_of_a_diverging_file_exits_3() {
 #[test]
 fn dev_544_replay_conflicts_with_fixture() {
     let (dir, out) = recorded_by_cli("r544c");
-    let run = run_test(&dir, &["--replay", out.to_str().expect("utf8"), "--fixture", "tests/fixtures/a.json"]);
+    let run = run_test(
+        &dir,
+        &[
+            "--replay",
+            out.to_str().expect("utf8"),
+            "--fixture",
+            "tests/fixtures/a.json",
+        ],
+    );
     assert_ne!(run.code, 0);
 }

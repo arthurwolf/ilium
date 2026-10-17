@@ -2,8 +2,8 @@
 
 use std::time::Duration;
 
-use ilium_plugin_api::generated::host::HostJobs;
 use ilium_plugin_api::generated::host::FieldError;
+use ilium_plugin_api::generated::host::HostJobs;
 use ilium_plugin_api::generated::types::{ErrorCode, PluginError};
 use ilium_plugin_api::Tier;
 use ilium_plugin_host::testing::imports_fixture::{ImportsFixture, UserInput, UserSave};
@@ -47,7 +47,10 @@ fn job_runner_run_receives_the_kind_and_the_input_bytes() {
         .build();
     let job = expect_ok(fixture.jobs().start("work".to_owned(), b"payload".to_vec()));
     complete(&mut fixture, job);
-    assert_eq!(*seen.lock().unwrap(), vec![("work".to_owned(), b"payload".to_vec())]);
+    assert_eq!(
+        *seen.lock().unwrap(),
+        vec![("work".to_owned(), b"payload".to_vec())]
+    );
 }
 
 /// REQ: WIT:ilium:exports/job-runner.run
@@ -81,11 +84,19 @@ fn job_runner_run_every_error_code_becomes_the_request_failure_code() {
             .grants(&["jobs.run"])
             .manifest_json(&job_manifest())
             .job_runner(Box::new(move |_, _| {
-                Err(PluginError { code, message: "x".to_owned(), retry_after_ms: None })
+                Err(PluginError {
+                    code,
+                    message: "x".to_owned(),
+                    retry_after_ms: None,
+                })
             }))
             .build();
         let job = expect_ok(fixture.jobs().start("work".to_owned(), Vec::new()));
-        assert_eq!(outcome_code(&complete(&mut fixture, job)), Some(code), "{code:?}");
+        assert_eq!(
+            outcome_code(&complete(&mut fixture, job)),
+            Some(code),
+            "{code:?}"
+        );
     }
 }
 
@@ -97,12 +108,18 @@ fn job_runner_run_error_message_is_kept() {
         .grants(&["jobs.run"])
         .manifest_json(&job_manifest())
         .job_runner(Box::new(|_, _| {
-            Err(PluginError { code: ErrorCode::Io, message: "disk gone".to_owned(), retry_after_ms: None })
+            Err(PluginError {
+                code: ErrorCode::Io,
+                message: "disk gone".to_owned(),
+                retry_after_ms: None,
+            })
         }))
         .build();
     let job = expect_ok(fixture.jobs().start("work".to_owned(), Vec::new()));
     match complete(&mut fixture, job) {
-        ilium_plugin_api::generated::types::Outcome::Failed(error) => assert_eq!(error.message, "disk gone"),
+        ilium_plugin_api::generated::types::Outcome::Failed(error) => {
+            assert_eq!(error.message, "disk gone")
+        }
         other => panic!("expected failed, got {other:?}"),
     }
 }
@@ -120,9 +137,15 @@ fn settings_validate_ok_lets_the_save_through() {
 #[test]
 fn settings_validate_field_error_refuses_the_save_with_its_message() {
     let mut fixture = validating(Box::new(|_patch, _merged| {
-        Err(vec![FieldError { key: "label".to_owned(), message: "Label is taken.".to_owned() }])
+        Err(vec![FieldError {
+            key: "label".to_owned(),
+            message: "Label is taken.".to_owned(),
+        }])
     }));
-    assert_eq!(fixture.user_save(r#"{"label": "x"}"#), UserSave::Refused("Label is taken.".to_owned()));
+    assert_eq!(
+        fixture.user_save(r#"{"label": "x"}"#),
+        UserSave::Refused("Label is taken.".to_owned())
+    );
     assert_eq!(fixture.settings_value("label"), json!("work"));
 }
 
@@ -132,7 +155,9 @@ fn settings_validate_receives_the_patch_and_the_merged_object() {
     let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let sink = seen.clone();
     let mut fixture = validating(Box::new(move |patch, merged| {
-        sink.lock().unwrap().push((patch.to_owned(), merged.to_owned()));
+        sink.lock()
+            .unwrap()
+            .push((patch.to_owned(), merged.to_owned()));
         Ok(())
     }));
     fixture.user_save(r#"{"count": 7}"#);
@@ -166,7 +191,10 @@ fn settings_validate_answering_after_100_ms_refuses_with_the_did_not_answer_mess
         .settings_validate(Box::new(|_, _| Ok(())))
         .settings_validate_latency(Duration::from_millis(101))
         .build();
-    assert_eq!(fixture.user_save(r#"{"label": "slow"}"#), UserSave::Refused(DEADLINE_MESSAGE.to_owned()));
+    assert_eq!(
+        fixture.user_save(r#"{"label": "slow"}"#),
+        UserSave::Refused(DEADLINE_MESSAGE.to_owned())
+    );
     assert_eq!(fixture.settings_value("label"), json!("work"));
 }
 
@@ -175,7 +203,10 @@ fn settings_validate_answering_after_100_ms_refuses_with_the_did_not_answer_mess
 fn settings_validate_a_trap_refuses_with_the_did_not_answer_message() {
     let mut fixture = validating(Box::new(|_, _| Ok(())));
     fixture.make_next_validate_trap();
-    assert_eq!(fixture.user_save(r#"{"label": "x"}"#), UserSave::Refused(DEADLINE_MESSAGE.to_owned()));
+    assert_eq!(
+        fixture.user_save(r#"{"label": "x"}"#),
+        UserSave::Refused(DEADLINE_MESSAGE.to_owned())
+    );
 }
 
 /// REQ: WIT:ilium:exports/settings-validate.settings-validate
@@ -183,7 +214,10 @@ fn settings_validate_a_trap_refuses_with_the_did_not_answer_message() {
 fn settings_validate_a_stopped_plugin_refuses_with_the_did_not_answer_message() {
     let mut fixture = validating(Box::new(|_, _| Ok(())));
     fixture.stop_plugin();
-    assert_eq!(fixture.user_save(r#"{"label": "x"}"#), UserSave::Refused(DEADLINE_MESSAGE.to_owned()));
+    assert_eq!(
+        fixture.user_save(r#"{"label": "x"}"#),
+        UserSave::Refused(DEADLINE_MESSAGE.to_owned())
+    );
 }
 
 /// REQ: WIT:ilium:exports/settings-validate.settings-validate

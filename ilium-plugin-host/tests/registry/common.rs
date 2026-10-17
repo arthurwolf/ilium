@@ -17,8 +17,8 @@ use base64::Engine as _;
 use ed25519_dalek::{Signer, SigningKey as DalekKey};
 use ilium_plugin_host::cli::{self, CliEnv, CliOutput};
 use ilium_plugin_host::package::write_package;
-use ilium_plugin_host::registry::InstalledRegistry;
 use ilium_plugin_host::registry::InstalledRecord;
+use ilium_plugin_host::registry::InstalledRegistry;
 use ilium_plugin_host::registry_client::{FetchError, Fetcher};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -49,13 +49,23 @@ pub fn format_utc(epoch_seconds: u64) -> String {
     let shifted = days + 719_468;
     let era = shifted.div_euclid(146_097);
     let day_of_era = shifted.rem_euclid(146_097);
-    let year_of_era = (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
     let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
     let month_part = (5 * day_of_year + 2) / 153;
     let day = day_of_year - (153 * month_part + 2) / 5 + 1;
-    let month = if month_part < 10 { month_part + 3 } else { month_part - 9 };
+    let month = if month_part < 10 {
+        month_part + 3
+    } else {
+        month_part - 9
+    };
     let year = year_of_era + era * 400 + i64::from(month <= 2);
-    format!("{year:04}-{month:02}-{day:02} {:02}:{:02}:{:02}", rest / 3600, (rest % 3600) / 60, rest % 60)
+    format!(
+        "{year:04}-{month:02}-{day:02} {:02}:{:02}:{:02}",
+        rest / 3600,
+        (rest % 3600) / 60,
+        rest % 60
+    )
 }
 
 /// The text of `now` shifted by seconds, in the metadata time form.
@@ -74,7 +84,9 @@ pub fn hex(bytes: &[u8]) -> String {
 
 /// Bytes of a hexadecimal string.
 pub fn unhex(text: &str) -> Vec<u8> {
-    (0..text.len() / 2).map(|index| u8::from_str_radix(&text[index * 2..index * 2 + 2], 16).expect("hex digit")).collect()
+    (0..text.len() / 2)
+        .map(|index| u8::from_str_radix(&text[index * 2..index * 2 + 2], 16).expect("hex digit"))
+        .collect()
 }
 
 /// Lowercase hexadecimal SHA-256.
@@ -91,7 +103,13 @@ pub fn jcs(value: &Value) -> String {
             pairs.sort_by(|left, right| left.0.encode_utf16().cmp(right.0.encode_utf16()));
             let parts: Vec<String> = pairs
                 .iter()
-                .map(|(key, inner)| format!("{}:{}", serde_json::to_string(key).expect("key"), jcs(inner)))
+                .map(|(key, inner)| {
+                    format!(
+                        "{}:{}",
+                        serde_json::to_string(key).expect("key"),
+                        jcs(inner)
+                    )
+                })
                 .collect();
             format!("{{{}}}", parts.join(","))
         }
@@ -152,7 +170,8 @@ pub const PUBLISHER_SEED: u8 = 50;
 /// The publisher id of the fixture packages.
 pub const PUBLISHER_ID: &str = "com.acme";
 /// The 34-byte minimal server component of reference-package-format.md.
-pub const COMPONENT_HEX: &str = "0061736d0d000100001811696c69756d3a6170692d76657273696f6e000000010000";
+pub const COMPONENT_HEX: &str =
+    "0061736d0d000100001811696c69756d3a6170692d76657273696f6e000000010000";
 
 /// The key id of the fixture publisher.
 pub fn publisher_key_id() -> String {
@@ -203,7 +222,10 @@ pub fn signed_package(plugin_id: &str, version: &str) -> Vec<u8> {
 /// A package without a `signature` entry.
 pub fn unsigned_package(plugin_id: &str, version: &str) -> Vec<u8> {
     write_package(&[
-        ("manifest.json".to_owned(), manifest_text(plugin_id, version).into_bytes()),
+        (
+            "manifest.json".to_owned(),
+            manifest_text(plugin_id, version).into_bytes(),
+        ),
         ("server.wasm".to_owned(), unhex(COMPONENT_HEX)),
     ])
     .expect("write unsigned package")
@@ -245,16 +267,34 @@ pub struct VersionSpec {
 
 impl VersionSpec {
     pub fn stable(plugin_id: &str, version: &str) -> VersionSpec {
-        VersionSpec { version: version.to_owned(), channel: "stable".to_owned(), yanked: None, package: dummy_package(plugin_id, version), extra: json!({}) }
+        VersionSpec {
+            version: version.to_owned(),
+            channel: "stable".to_owned(),
+            yanked: None,
+            package: dummy_package(plugin_id, version),
+            extra: json!({}),
+        }
     }
 
     pub fn beta(plugin_id: &str, version: &str) -> VersionSpec {
-        VersionSpec { version: version.to_owned(), channel: "beta".to_owned(), yanked: None, package: dummy_package(plugin_id, version), extra: json!({}) }
+        VersionSpec {
+            version: version.to_owned(),
+            channel: "beta".to_owned(),
+            yanked: None,
+            package: dummy_package(plugin_id, version),
+            extra: json!({}),
+        }
     }
 
     /// A stable version whose package is a real signed package of the fixture publisher.
     pub fn signed(plugin_id: &str, version: &str) -> VersionSpec {
-        VersionSpec { version: version.to_owned(), channel: "stable".to_owned(), yanked: None, package: signed_package(plugin_id, version), extra: json!({}) }
+        VersionSpec {
+            version: version.to_owned(),
+            channel: "stable".to_owned(),
+            yanked: None,
+            package: signed_package(plugin_id, version),
+            extra: json!({}),
+        }
     }
 
     /// Declares a dependency (`dependencies` map of id to range in the version object).
@@ -290,7 +330,10 @@ pub struct PluginSpec {
 
 impl PluginSpec {
     pub fn new(id: &str) -> PluginSpec {
-        let publisher_id = id.rsplit_once('.').map(|(head, _)| head.to_owned()).unwrap_or_else(|| id.to_owned());
+        let publisher_id = id
+            .rsplit_once('.')
+            .map(|(head, _)| head.to_owned())
+            .unwrap_or_else(|| id.to_owned());
         PluginSpec {
             id: id.to_owned(),
             publisher_id,
@@ -449,16 +492,24 @@ impl RegistryBuilder {
     }
 
     fn signers(&self, name: &str) -> Vec<u8> {
-        self.overrides.get(name).cloned().unwrap_or_else(|| self.role_keys[..self.signer_count.min(self.role_keys.len())].to_vec())
+        self.overrides.get(name).cloned().unwrap_or_else(|| {
+            self.role_keys[..self.signer_count.min(self.role_keys.len())].to_vec()
+        })
     }
 
     /// Signs a document, padding it with an ignored `pad` member to the wanted total length.
     fn sign_doc(&self, name: &str, signed: &Value) -> Vec<u8> {
         let seeds = self.signers(name);
         let plain = sign_metadata(signed, &seeds);
-        let Some(target) = self.target_len.get(name) else { return plain };
+        let Some(target) = self.target_len.get(name) else {
+            return plain;
+        };
         let overhead = 9; // the bytes of `,"pad":""`
-        assert!(*target >= plain.len() + overhead, "target length {target} is below the document size {}", plain.len() + overhead);
+        assert!(
+            *target >= plain.len() + overhead,
+            "target length {target} is below the document size {}",
+            plain.len() + overhead
+        );
         let mut padded = signed.clone();
         padded["pad"] = Value::String("x".repeat(target - plain.len() - overhead));
         let bytes = sign_metadata(&padded, &seeds);
@@ -469,7 +520,11 @@ impl RegistryBuilder {
     fn version_key(version: &str) -> (u64, u64, u64) {
         let core = version.split(['-', '+']).next().unwrap_or(version);
         let mut parts = core.split('.').map(|part| part.parse::<u64>().unwrap_or(0));
-        (parts.next().unwrap_or(0), parts.next().unwrap_or(0), parts.next().unwrap_or(0))
+        (
+            parts.next().unwrap_or(0),
+            parts.next().unwrap_or(0),
+            parts.next().unwrap_or(0),
+        )
     }
 
     fn latest(plugin: &PluginSpec, channel: &str) -> Value {
@@ -509,7 +564,9 @@ impl RegistryBuilder {
                     "yanked": version.yanked.as_ref().map(|reason| json!({ "reason": reason, "at": "2030-01-01 11:00:00" })).unwrap_or(Value::Null),
                     "deprecated": Value::Null,
                 });
-                if let (Some(target), Some(extra)) = (entry.as_object_mut(), version.extra.as_object()) {
+                if let (Some(target), Some(extra)) =
+                    (entry.as_object_mut(), version.extra.as_object())
+                {
                     for (key, value) in extra {
                         target.insert(key.clone(), value.clone());
                     }
@@ -599,13 +656,21 @@ impl RegistryBuilder {
             "expires": self.timestamp_expires,
             "snapshot": { "version": self.snapshot_version, "sha256": sha256_hex(&snapshot_bytes), "length": snapshot_bytes.len() },
         });
-        tree.insert("timestamp.json".to_owned(), self.sign_doc("timestamp", &timestamp_signed));
+        tree.insert(
+            "timestamp.json".to_owned(),
+            self.sign_doc("timestamp", &timestamp_signed),
+        );
         tree.insert("snapshot.json".to_owned(), snapshot_bytes);
 
         let keys: serde_json::Map<String, Value> = self
             .role_keys
             .iter()
-            .map(|seed| (key_id_of(*seed), json!({ "algorithm": "ed25519", "public_key": public_key_b64(*seed) })))
+            .map(|seed| {
+                (
+                    key_id_of(*seed),
+                    json!({ "algorithm": "ed25519", "public_key": public_key_b64(*seed) }),
+                )
+            })
             .collect();
         let key_ids: Vec<String> = self.role_keys.iter().map(|seed| key_id_of(*seed)).collect();
         let role = json!({ "key_ids": key_ids, "threshold": self.threshold });
@@ -623,8 +688,16 @@ impl RegistryBuilder {
 
     /// The path of the blob of a published version.
     pub fn blob_path(&self, plugin_id: &str, version: &str) -> String {
-        let plugin = self.plugins.iter().find(|plugin| plugin.id == plugin_id).expect("plugin in builder");
-        let spec = plugin.versions.iter().find(|spec| spec.version == version).expect("version in builder");
+        let plugin = self
+            .plugins
+            .iter()
+            .find(|plugin| plugin.id == plugin_id)
+            .expect("plugin in builder");
+        let spec = plugin
+            .versions
+            .iter()
+            .find(|spec| spec.version == version)
+            .expect("version in builder");
         format!("blobs/{}.iliumpkg", sha256_hex(&spec.package))
     }
 }
@@ -641,13 +714,19 @@ pub fn write_tree(root: &Path, tree: &Tree) {
 /// Reads every file below a directory into a tree (paths with `/`).
 pub fn read_tree(root: &Path) -> Tree {
     fn walk(base: &Path, folder: &Path, tree: &mut Tree) {
-        let Ok(entries) = std::fs::read_dir(folder) else { return };
+        let Ok(entries) = std::fs::read_dir(folder) else {
+            return;
+        };
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
                 walk(base, &path, tree);
             } else if let Ok(bytes) = std::fs::read(&path) {
-                let relative = path.strip_prefix(base).expect("below base").to_string_lossy().replace('\\', "/");
+                let relative = path
+                    .strip_prefix(base)
+                    .expect("below base")
+                    .to_string_lossy()
+                    .replace('\\', "/");
                 tree.insert(relative, bytes);
             }
         }
@@ -681,7 +760,11 @@ pub struct FakeNet {
 
 impl FakeNet {
     pub fn put_file(&self, url: &str, bytes: Vec<u8>) {
-        self.state.lock().expect("net lock").files.insert(url.to_owned(), bytes);
+        self.state
+            .lock()
+            .expect("net lock")
+            .files
+            .insert(url.to_owned(), bytes);
     }
 
     pub fn remove_file(&self, url: &str) {
@@ -697,7 +780,11 @@ impl FakeNet {
 
     /// The next requests of `url` fail with these errors, in order.
     pub fn script(&self, url: &str, failures: Vec<Scripted>) {
-        self.state.lock().expect("net lock").scripted.insert(url.to_owned(), failures.into());
+        self.state
+            .lock()
+            .expect("net lock")
+            .scripted
+            .insert(url.to_owned(), failures.into());
     }
 
     /// Every requested URL, in order.
@@ -715,12 +802,18 @@ impl FakeNet {
 
     /// Requested URLs that end with the suffix.
     pub fn requests_to(&self, suffix: &str) -> Vec<String> {
-        self.log().into_iter().filter(|url| url.ends_with(suffix)).collect()
+        self.log()
+            .into_iter()
+            .filter(|url| url.ends_with(suffix))
+            .collect()
     }
 
     /// The request paths relative to `base`, in order.
     pub fn paths(&self, base: &str) -> Vec<String> {
-        self.log().into_iter().filter_map(|url| url.strip_prefix(base).map(str::to_owned)).collect()
+        self.log()
+            .into_iter()
+            .filter_map(|url| url.strip_prefix(base).map(str::to_owned))
+            .collect()
     }
 }
 
@@ -779,7 +872,10 @@ impl Sandbox {
         let sandbox = Sandbox::new();
         sandbox.net.serve(BASE, &builder.build());
         let added = sandbox.pin(BASE, &builder.pinned_key_id());
-        assert_eq!(added.exit_code, 0, "registry add must succeed in the fixture: {added:?}");
+        assert_eq!(
+            added.exit_code, 0,
+            "registry add must succeed in the fixture: {added:?}"
+        );
         sandbox
     }
 
@@ -818,8 +914,13 @@ impl Sandbox {
 
     /// Runs with extra process environment variables (set, run, restored under a lock).
     pub fn run_with_vars(&self, vars: &[(&str, &str)], args: &[&str]) -> CliOutput {
-        let _guard = ENV_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        let previous: Vec<(String, Option<String>)> = vars.iter().map(|(name, _)| ((*name).to_owned(), std::env::var(name).ok())).collect();
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let previous: Vec<(String, Option<String>)> = vars
+            .iter()
+            .map(|(name, _)| ((*name).to_owned(), std::env::var(name).ok()))
+            .collect();
         for (name, value) in vars {
             std::env::set_var(name, value);
         }
@@ -841,7 +942,10 @@ impl Sandbox {
     /// Sets a key in `[plugins.registry]` of `<config>/config.toml`.
     pub fn set_registry_setting(&self, key: &str, value: toml::Value) {
         let path = self.config_dir().join("config.toml");
-        let mut document: toml::Table = std::fs::read_to_string(&path).ok().and_then(|text| text.parse::<toml::Table>().ok()).unwrap_or_default();
+        let mut document: toml::Table = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|text| text.parse::<toml::Table>().ok())
+            .unwrap_or_default();
         let plugins = document
             .entry("plugins".to_owned())
             .or_insert_with(|| toml::Value::Table(toml::Table::new()))
@@ -853,7 +957,8 @@ impl Sandbox {
             .as_table_mut()
             .expect("registry is a table");
         registry.insert(key.to_owned(), value);
-        std::fs::write(&path, toml::to_string(&document).expect("serialize config")).expect("write config");
+        std::fs::write(&path, toml::to_string(&document).expect("serialize config"))
+            .expect("write config");
     }
 
     /// Writes a file in the project folder and returns its path.
@@ -874,12 +979,25 @@ impl Sandbox {
     }
 
     /// Seeds one installed record.
-    pub fn seed_installed(&self, id: &str, version: &str, source: &str, channel: &str, pinned: bool) {
+    pub fn seed_installed(
+        &self,
+        id: &str,
+        version: &str,
+        source: &str,
+        channel: &str,
+        pinned: bool,
+    ) {
         let path = self.data_dir().join("plugins").join("installed.json");
         std::fs::create_dir_all(path.parent().expect("parent")).expect("create plugin root");
         let mut registry = InstalledRegistry::open(&path).expect("open installed registry");
         registry
-            .put(InstalledRecord { id: id.to_owned(), version: version.to_owned(), source: source.to_owned(), channel: channel.to_owned(), pinned })
+            .put(InstalledRecord {
+                id: id.to_owned(),
+                version: version.to_owned(),
+                source: source.to_owned(),
+                channel: channel.to_owned(),
+                pinned,
+            })
             .expect("seed installed record");
     }
 
@@ -895,7 +1013,10 @@ impl Sandbox {
 
     /// The version installed for a plugin id, if any.
     pub fn installed_version(&self, id: &str) -> Option<String> {
-        self.installed().into_iter().find(|record| record.id == id).map(|record| record.version)
+        self.installed()
+            .into_iter()
+            .find(|record| record.id == id)
+            .map(|record| record.version)
     }
 }
 
@@ -911,17 +1032,29 @@ pub fn run_in(env: &CliEnv, args: &[&str]) -> CliOutput {
 
 /// Records of one `type`.
 pub fn records<'a>(output: &'a CliOutput, kind: &str) -> Vec<&'a Value> {
-    output.stdout_jsonl.iter().filter(|record| record.get("type").and_then(Value::as_str) == Some(kind)).collect()
+    output
+        .stdout_jsonl
+        .iter()
+        .filter(|record| record.get("type").and_then(Value::as_str) == Some(kind))
+        .collect()
 }
 
 /// The `code` of every `error` record, in order.
 pub fn error_codes(output: &CliOutput) -> Vec<String> {
-    records(output, "error").iter().filter_map(|record| record.get("code").and_then(Value::as_str)).map(str::to_owned).collect()
+    records(output, "error")
+        .iter()
+        .filter_map(|record| record.get("code").and_then(Value::as_str))
+        .map(str::to_owned)
+        .collect()
 }
 
 /// The `code` of every `warning` record, in order.
 pub fn warning_codes(output: &CliOutput) -> Vec<String> {
-    records(output, "warning").iter().filter_map(|record| record.get("code").and_then(Value::as_str)).map(str::to_owned).collect()
+    records(output, "warning")
+        .iter()
+        .filter_map(|record| record.get("code").and_then(Value::as_str))
+        .map(str::to_owned)
+        .collect()
 }
 
 /// The first error code.
@@ -941,45 +1074,76 @@ pub fn error_message(output: &CliOutput, code: &str) -> String {
 
 /// The `id` of every `plugin` record, in order.
 pub fn plugin_ids(output: &CliOutput) -> Vec<String> {
-    records(output, "plugin").iter().filter_map(|record| record.get("id").and_then(Value::as_str)).map(str::to_owned).collect()
+    records(output, "plugin")
+        .iter()
+        .filter_map(|record| record.get("id").and_then(Value::as_str))
+        .map(str::to_owned)
+        .collect()
 }
 
 /// The last record, which must be `result`.
 pub fn result_record(output: &CliOutput) -> Option<&Value> {
-    output.stdout_jsonl.last().filter(|record| record.get("type").and_then(Value::as_str) == Some("result"))
+    output
+        .stdout_jsonl
+        .last()
+        .filter(|record| record.get("type").and_then(Value::as_str) == Some("result"))
 }
 
 /// Asserts the command failed with `code` and exit code `exit`, and that the `result` record agrees.
 pub fn assert_failed(output: &CliOutput, code: &str, exit: i32) {
-    assert!(error_codes(output).iter().any(|found| found == code), "expected error {code}, got {:?} in {output:?}", error_codes(output));
+    assert!(
+        error_codes(output).iter().any(|found| found == code),
+        "expected error {code}, got {:?} in {output:?}",
+        error_codes(output)
+    );
     assert_eq!(output.exit_code, exit, "exit code of {code}: {output:?}");
-    let result = result_record(output).unwrap_or_else(|| panic!("last record must be result: {output:?}"));
-    assert_eq!(result["exit_code"].as_i64(), Some(i64::from(exit)), "result exit_code: {output:?}");
+    let result =
+        result_record(output).unwrap_or_else(|| panic!("last record must be result: {output:?}"));
+    assert_eq!(
+        result["exit_code"].as_i64(),
+        Some(i64::from(exit)),
+        "result exit_code: {output:?}"
+    );
     assert_eq!(result["ok"].as_bool(), Some(false), "result ok: {output:?}");
 }
 
 /// Asserts the command succeeded and the `result` record agrees.
 pub fn assert_ok(output: &CliOutput) {
     assert_eq!(output.exit_code, 0, "expected success: {output:?}");
-    let result = result_record(output).unwrap_or_else(|| panic!("last record must be result: {output:?}"));
+    let result =
+        result_record(output).unwrap_or_else(|| panic!("last record must be result: {output:?}"));
     assert_eq!(result["ok"].as_bool(), Some(true), "result ok: {output:?}");
-    assert_eq!(result["exit_code"].as_i64(), Some(0), "result exit_code: {output:?}");
+    assert_eq!(
+        result["exit_code"].as_i64(),
+        Some(0),
+        "result exit_code: {output:?}"
+    );
 }
 
 /// Asserts that no plugin record and no value of the registry data reached the output.
 pub fn assert_no_plugin_records(output: &CliOutput) {
-    assert!(plugin_ids(output).is_empty(), "no registry value may be used: {output:?}");
+    assert!(
+        plugin_ids(output).is_empty(),
+        "no registry value may be used: {output:?}"
+    );
 }
 
 /// True when any string anywhere in the records contains the needle.
 pub fn output_contains(output: &CliOutput, needle: &str) -> bool {
-    output.stdout_jsonl.iter().any(|record| record.to_string().contains(needle)) || output.stderr.contains(needle)
+    output
+        .stdout_jsonl
+        .iter()
+        .any(|record| record.to_string().contains(needle))
+        || output.stderr.contains(needle)
 }
 
 /// The text of a manual page.
 pub fn page_text(name: &str) -> String {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs/plugins-manual/pages").join(name);
-    std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("read manual page {}: {error}", path.display()))
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../docs/plugins-manual/pages")
+        .join(name);
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("read manual page {}: {error}", path.display()))
 }
 
 /// Relative request paths below `BASE` in order.
@@ -989,13 +1153,23 @@ pub fn base_paths(net: &FakeNet) -> Vec<String> {
 
 /// Asserts an error code without checking the exit code.
 pub fn assert_code(output: &CliOutput, code: &str) {
-    assert!(error_codes(output).iter().any(|found| found == code), "expected error {code}, got {:?} in {output:?}", error_codes(output));
-    assert_ne!(output.exit_code, 0, "a failed command exits non-zero: {output:?}");
+    assert!(
+        error_codes(output).iter().any(|found| found == code),
+        "expected error {code}, got {:?} in {output:?}",
+        error_codes(output)
+    );
+    assert_ne!(
+        output.exit_code, 0,
+        "a failed command exits non-zero: {output:?}"
+    );
 }
 
 /// Asserts a failure whose first code is in the `registry.` family.
 pub fn assert_registry_failure(output: &CliOutput) {
     let first = first_error(output).unwrap_or_default();
-    assert!(first.starts_with("registry."), "expected a registry.* error, got {first:?} in {output:?}");
+    assert!(
+        first.starts_with("registry."),
+        "expected a registry.* error, got {first:?} in {output:?}"
+    );
     assert_ne!(output.exit_code, 0, "{output:?}");
 }

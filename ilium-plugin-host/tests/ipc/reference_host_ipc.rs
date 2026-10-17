@@ -7,8 +7,8 @@ use ilium_plugin_host::ipc::{
     check_payload, encode_checked, DedupVerdict, DetachedQueue, ForwardedDedup, OutcomeStore,
     PayloadKind, PluginRecord, PushOutcome, QueueVerdict, ReceiverConnection, WriterQueues,
     Written, CLIENT_TOO_SLOW_BYTES, DEDUP_WINDOW_MS, DETACHED_QUEUE_LIMIT, ENVELOPE_MAX_BYTES,
-    EXIT_CODE_PROTOCOL_MISMATCH, OUTCOME_GRACE_MS, OUTCOME_RECORD_LIMIT,
-    PLUGIN_QUEUE_MAX_BYTES, PLUGIN_QUEUE_MAX_RECORDS, PTY_FRAMES_PER_PLUGIN_ENVELOPE,
+    EXIT_CODE_PROTOCOL_MISMATCH, OUTCOME_GRACE_MS, OUTCOME_RECORD_LIMIT, PLUGIN_QUEUE_MAX_BYTES,
+    PLUGIN_QUEUE_MAX_RECORDS, PTY_FRAMES_PER_PLUGIN_ENVELOPE,
 };
 use ilium_plugin_host::testing::ipc_harness::{ClientDelivery, IpcHarness, WireItem};
 use proptest::prelude::*;
@@ -54,7 +54,9 @@ fn doc_hst_100_page_names_the_four_variants_and_unchanged_framing() {
 #[test]
 fn doc_hst_101_envelope_body_listing_has_seven_variants_and_no_hook_call() {
     let text = page_text();
-    let start = text.find("pub enum EnvelopeBody {").expect("EnvelopeBody listing");
+    let start = text
+        .find("pub enum EnvelopeBody {")
+        .expect("EnvelopeBody listing");
     let block = &text[start..];
     let block = &block[..block.find("\n}").expect("end of listing")];
     let variants: Vec<&str> = block
@@ -65,7 +67,15 @@ fn doc_hst_101_envelope_body_listing_has_seven_variants_and_no_hook_call() {
         .collect();
     assert_eq!(
         variants,
-        ["Submit", "Outcome", "Message", "ClientRequest", "ClientReply", "Event", "Control"]
+        [
+            "Submit",
+            "Outcome",
+            "Message",
+            "ClientRequest",
+            "ClientReply",
+            "Event",
+            "Control"
+        ]
     );
     assert!(variants.iter().all(|name| !name.contains("Hook")));
 }
@@ -98,7 +108,9 @@ fn hst_102_gap_closes_connection_with_sequence_gap() {
 #[test]
 fn hst_102_first_envelope_with_seq_two_is_a_gap() {
     let mut receiver = ReceiverConnection::new();
-    let fault = receiver.on_envelope(2, 10).expect_err("first seq must be 1");
+    let fault = receiver
+        .on_envelope(2, 10)
+        .expect_err("first seq must be 1");
     assert_eq!(fault.code(), "ipc.sequence-gap");
 }
 
@@ -127,7 +139,9 @@ fn hst_102_each_direction_counts_on_its_own() {
     let mut toward_server = ReceiverConnection::new();
     let mut toward_client = ReceiverConnection::new();
     for seq in 1..=3u64 {
-        toward_server.on_envelope(seq, 10).expect("client to server");
+        toward_server
+            .on_envelope(seq, 10)
+            .expect("client to server");
     }
     assert!(toward_client.on_envelope(1, 10).is_ok());
 }
@@ -140,7 +154,10 @@ fn hst_102_server_closes_a_connection_whose_client_skips_a_seq() {
     harness.send_client_envelope(conn, 3);
     harness.pump(ROUNDS);
     assert!(!harness.is_open(conn));
-    assert_eq!(harness.close_code(conn).as_deref(), Some("ipc.sequence-gap"));
+    assert_eq!(
+        harness.close_code(conn).as_deref(),
+        Some("ipc.sequence-gap")
+    );
 }
 
 proptest! {
@@ -176,7 +193,9 @@ fn hst_103_matching_hello_is_attached_with_snapshot_and_no_rejection() {
     let wire = harness.wire(conn);
     assert!(matches!(wire.first(), Some(WireItem::Attached { .. })));
     assert!(wire.iter().any(is_snapshot));
-    assert!(!wire.iter().any(|item| matches!(item, WireItem::Rejected { .. })));
+    assert!(!wire
+        .iter()
+        .any(|item| matches!(item, WireItem::Rejected { .. })));
     assert!(harness.is_open(conn));
 }
 
@@ -190,7 +209,9 @@ fn hst_103_plugin_protocol_mismatch_is_rejected_and_closed() {
     harness.pump(ROUNDS);
     assert_eq!(
         harness.wire(conn),
-        vec![WireItem::Rejected { code: "ipc.protocol-mismatch".to_owned() }]
+        vec![WireItem::Rejected {
+            code: "ipc.protocol-mismatch".to_owned()
+        }]
     );
     assert!(!harness.is_open(conn));
 }
@@ -205,7 +226,9 @@ fn hst_103_contract_mismatch_is_rejected_and_closed() {
     harness.pump(ROUNDS);
     assert_eq!(
         harness.wire(conn),
-        vec![WireItem::Rejected { code: "ipc.protocol-mismatch".to_owned() }]
+        vec![WireItem::Rejected {
+            code: "ipc.protocol-mismatch".to_owned()
+        }]
     );
     assert!(!harness.is_open(conn));
 }
@@ -220,7 +243,9 @@ fn hst_103_plain_attach_with_mismatch_is_rejected_like_attach_interactive() {
     harness.pump(ROUNDS);
     assert_eq!(
         harness.wire(conn),
-        vec![WireItem::Rejected { code: "ipc.protocol-mismatch".to_owned() }]
+        vec![WireItem::Rejected {
+            code: "ipc.protocol-mismatch".to_owned()
+        }]
     );
 }
 
@@ -234,7 +259,9 @@ fn hst_103_mismatch_sends_no_snapshot_and_no_attached() {
     harness.pump(ROUNDS);
     let wire = harness.wire(conn);
     assert!(!wire.iter().any(is_snapshot));
-    assert!(!wire.iter().any(|item| matches!(item, WireItem::Attached { .. })));
+    assert!(!wire
+        .iter()
+        .any(|item| matches!(item, WireItem::Attached { .. })));
 }
 
 /// REQ: HST-104
@@ -308,11 +335,13 @@ fn hst_105_content_hash_difference_is_a_version_skew() {
 fn hst_105_plugin_missing_on_the_server_disables_the_client_half() {
     let mut harness = server_with_demo();
     let mut hello = harness.matching_hello();
-    hello.installed.push(ilium_plugin_host::testing::ipc_harness::InstalledSpec {
-        id: OTHER_PLUGIN.to_owned(),
-        version: "1.0.0".to_owned(),
-        content_hash: [5; 32],
-    });
+    hello
+        .installed
+        .push(ilium_plugin_host::testing::ipc_harness::InstalledSpec {
+            id: OTHER_PLUGIN.to_owned(),
+            version: "1.0.0".to_owned(),
+            content_hash: [5; 32],
+        });
     let conn = harness.connect("client-1", true, hello);
     harness.pump(ROUNDS);
     let half = harness.client_half(conn, OTHER_PLUGIN);
@@ -327,7 +356,9 @@ fn hst_105_plugin_missing_on_the_client_keeps_the_server_half_running() {
     let mut harness = server_with_demo();
     harness.install_server_plugin(OTHER_PLUGIN, "1.0.0", [2; 32]);
     let mut hello = harness.matching_hello();
-    hello.installed.retain(|installed| installed.id != OTHER_PLUGIN);
+    hello
+        .installed
+        .retain(|installed| installed.id != OTHER_PLUGIN);
     let conn = harness.connect("client-1", true, hello);
     harness.pump(ROUNDS);
     assert!(harness.server_half_running(OTHER_PLUGIN));
@@ -394,7 +425,11 @@ fn hst_108_sequence_gap_makes_the_client_resync_and_the_server_send_a_snapshot()
     harness.put_contribution(PLUGIN, "status.c", 8);
     harness.pump(ROUNDS);
     assert_eq!(harness.resync_requests(conn), 1);
-    let snapshots = harness.wire(conn).iter().filter(|item| is_snapshot(item)).count();
+    let snapshots = harness
+        .wire(conn)
+        .iter()
+        .filter(|item| is_snapshot(item))
+        .count();
     assert_eq!(snapshots, 2);
     let mut mirror = harness.client_mirror(conn);
     let mut server = harness.server_contributions();
@@ -551,7 +586,10 @@ fn hst_112_only_the_server_applies_after_it_resumes() {
 fn hst_113_same_key_twice_in_one_scope_is_a_duplicate() {
     let mut table = ForwardedDedup::new();
     assert_eq!(table.admit(PLUGIN, "c1", "k", 0), DedupVerdict::Fresh);
-    assert_eq!(table.admit(PLUGIN, "c1", "k", 1_000), DedupVerdict::Duplicate);
+    assert_eq!(
+        table.admit(PLUGIN, "c1", "k", 1_000),
+        DedupVerdict::Duplicate
+    );
 }
 
 /// REQ: HST-113
@@ -576,10 +614,16 @@ fn hst_113_window_is_ten_minutes_and_a_key_is_free_at_exactly_600000_ms() {
     assert_eq!(DEDUP_WINDOW_MS, 600_000);
     let mut table = ForwardedDedup::new();
     assert_eq!(table.admit(PLUGIN, "c1", "k", 1_000), DedupVerdict::Fresh);
-    assert_eq!(table.admit(PLUGIN, "c1", "k", 1_000 + 599_999), DedupVerdict::Duplicate);
+    assert_eq!(
+        table.admit(PLUGIN, "c1", "k", 1_000 + 599_999),
+        DedupVerdict::Duplicate
+    );
     let mut other = ForwardedDedup::new();
     assert_eq!(other.admit(PLUGIN, "c1", "k", 1_000), DedupVerdict::Fresh);
-    assert_eq!(other.admit(PLUGIN, "c1", "k", 1_000 + 600_000), DedupVerdict::Fresh);
+    assert_eq!(
+        other.admit(PLUGIN, "c1", "k", 1_000 + 600_000),
+        DedupVerdict::Fresh
+    );
 }
 
 /// REQ: HST-113
@@ -685,7 +729,11 @@ fn hst_115_a_refused_submit_still_gets_one_outcome() {
     harness.revoke(PLUGIN, "panes.create");
     harness.submit(conn, PLUGIN, "k1", "create-pane");
     harness.pump(ROUNDS);
-    let count = harness.wire(conn).iter().filter(|item| is_outcome(item)).count();
+    let count = harness
+        .wire(conn)
+        .iter()
+        .filter(|item| is_outcome(item))
+        .count();
     assert_eq!(count, 1);
 }
 
@@ -773,7 +821,11 @@ fn hst_117_replay_returns_only_outcomes_with_a_higher_seq() {
         store.record("c1", seq, "ok-node", 0);
     }
     store.on_disconnect("c1", 0);
-    let seqs: Vec<u64> = store.replay("c1", 3, 5_000).iter().map(|record| record.seq).collect();
+    let seqs: Vec<u64> = store
+        .replay("c1", 3, 5_000)
+        .iter()
+        .map(|record| record.seq)
+        .collect();
     assert_eq!(seqs, [4, 5]);
 }
 
@@ -835,7 +887,10 @@ fn hst_118_unapplied_submission_completes_as_cancelled_after_the_grace_period() 
     assert_eq!(harness.final_outcome("client-1", PLUGIN, "k1"), None);
     harness.advance(seconds(2));
     harness.pump(ROUNDS);
-    assert_eq!(harness.final_outcome("client-1", PLUGIN, "k1").as_deref(), Some("cancelled"));
+    assert_eq!(
+        harness.final_outcome("client-1", PLUGIN, "k1").as_deref(),
+        Some("cancelled")
+    );
 }
 
 /// REQ: HST-118
@@ -863,7 +918,11 @@ fn hst_119_the_257th_detached_submission_is_refused_busy_at_once() {
     assert_eq!(DETACHED_QUEUE_LIMIT, 256);
     let mut queue = DetachedQueue::new();
     for index in 0..256 {
-        assert_eq!(queue.push(&format!("k{index}")), QueueVerdict::Queued, "submission {index}");
+        assert_eq!(
+            queue.push(&format!("k{index}")),
+            QueueVerdict::Queued,
+            "submission {index}"
+        );
     }
     assert_eq!(queue.len(), 256);
     assert_eq!(queue.push("k256"), QueueVerdict::RefusedBusy);
@@ -907,7 +966,11 @@ fn hst_119_a_refused_busy_submission_is_not_cancelled_at_exit() {
 // ---------------------------------------------------------------- HST-120 .. HST-123
 
 fn plugin_record(id: u32, bytes: usize, key: Option<&str>) -> PluginRecord {
-    PluginRecord { id, bytes, coalesce_key: key.map(str::to_owned) }
+    PluginRecord {
+        id,
+        bytes,
+        coalesce_key: key.map(str::to_owned),
+    }
 }
 
 /// REQ: HST-120
@@ -1009,7 +1072,10 @@ fn hst_121_record_4096_fits_and_record_4097_flags_a_resync() {
         assert_eq!(outcome, PushOutcome::Queued, "record {id}");
     }
     assert!(!queues.resync_flagged());
-    assert_eq!(queues.push_plugin(plugin_record(4_096, 1, None)), PushOutcome::ResyncFlagged);
+    assert_eq!(
+        queues.push_plugin(plugin_record(4_096, 1, None)),
+        PushOutcome::ResyncFlagged
+    );
     assert!(queues.resync_flagged());
 }
 
@@ -1018,12 +1084,21 @@ fn hst_121_record_4096_fits_and_record_4097_flags_a_resync() {
 fn hst_121_exactly_4_mib_fits_and_one_byte_more_flags_a_resync() {
     let mut queues = WriterQueues::new();
     for id in 0..3u32 {
-        assert_eq!(queues.push_plugin(plugin_record(id, MIB, None)), PushOutcome::Queued);
+        assert_eq!(
+            queues.push_plugin(plugin_record(id, MIB, None)),
+            PushOutcome::Queued
+        );
     }
-    assert_eq!(queues.push_plugin(plugin_record(3, MIB, None)), PushOutcome::Queued);
+    assert_eq!(
+        queues.push_plugin(plugin_record(3, MIB, None)),
+        PushOutcome::Queued
+    );
     assert!(!queues.resync_flagged());
     assert_eq!(queues.plugin_queued_bytes(), 4 * MIB);
-    assert_eq!(queues.push_plugin(plugin_record(4, 1, None)), PushOutcome::ResyncFlagged);
+    assert_eq!(
+        queues.push_plugin(plugin_record(4, 1, None)),
+        PushOutcome::ResyncFlagged
+    );
 }
 
 /// REQ: HST-121
@@ -1046,9 +1121,15 @@ fn hst_121_a_full_queue_merges_a_known_id_instead_of_flagging_a_resync() {
     for id in 0..4_096u32 {
         queues.push_plugin(plugin_record(id, 1, Some(&format!("id.{id}"))));
     }
-    assert_eq!(queues.push_plugin(plugin_record(9_000, 1, Some("id.0"))), PushOutcome::Merged);
+    assert_eq!(
+        queues.push_plugin(plugin_record(9_000, 1, Some("id.0"))),
+        PushOutcome::Merged
+    );
     assert!(!queues.resync_flagged());
-    assert_eq!(queues.push_plugin(plugin_record(9_001, 1, Some("id.new"))), PushOutcome::ResyncFlagged);
+    assert_eq!(
+        queues.push_plugin(plugin_record(9_001, 1, Some("id.new"))),
+        PushOutcome::ResyncFlagged
+    );
 }
 
 /// REQ: HST-122
@@ -1058,7 +1139,10 @@ fn hst_122_exactly_16_mib_queued_does_not_disconnect_and_one_record_more_does() 
     let mut queues = WriterQueues::new();
     for id in 0..16u32 {
         let outcome = queues.push_plugin(plugin_record(id, MIB, None));
-        assert!(!matches!(outcome, PushOutcome::Disconnect(_)), "record {id}");
+        assert!(
+            !matches!(outcome, PushOutcome::Disconnect(_)),
+            "record {id}"
+        );
     }
     match queues.push_plugin(plugin_record(16, MIB, None)) {
         PushOutcome::Disconnect(fault) => assert_eq!(fault.code(), "ipc.client-too-slow"),
@@ -1073,7 +1157,10 @@ fn hst_122_a_stalled_client_is_disconnected_with_client_too_slow_and_gets_a_snap
     harness.flood_plugin_data(conn, MIB, 20);
     harness.pump(ROUNDS);
     assert!(!harness.is_open(conn));
-    assert_eq!(harness.close_code(conn).as_deref(), Some("ipc.client-too-slow"));
+    assert_eq!(
+        harness.close_code(conn).as_deref(),
+        Some("ipc.client-too-slow")
+    );
     let hello = harness.matching_hello();
     let again = harness.reattach("client-1", 0, hello);
     harness.pump(ROUNDS);
@@ -1100,8 +1187,13 @@ fn hst_123_a_pty_frame_waits_for_at_most_one_plugin_envelope() {
     queues.push_pty_frame(1);
     let first = queues.next().expect("data queued");
     let second = queues.next().expect("data queued");
-    let frame_at = [first, second].iter().position(|written| *written == Written::Pty(1));
-    assert!(frame_at.is_some(), "the frame was not written within one envelope time");
+    let frame_at = [first, second]
+        .iter()
+        .position(|written| *written == Written::Pty(1));
+    assert!(
+        frame_at.is_some(),
+        "the frame was not written within one envelope time"
+    );
 }
 
 /// REQ: HST-123
@@ -1224,7 +1316,9 @@ fn hst_125_envelope_of_17_mib_is_accepted() {
 fn hst_125_envelope_above_17_mib_is_dropped_and_the_connection_closed() {
     let mut receiver = ReceiverConnection::new();
     receiver.on_envelope(1, 100).expect("seq 1");
-    let fault = receiver.on_envelope(2, 17 * MIB + 1).expect_err("oversized");
+    let fault = receiver
+        .on_envelope(2, 17 * MIB + 1)
+        .expect_err("oversized");
     assert_eq!(fault.code(), SLASH_ERR);
     assert!(!receiver.is_open());
     assert_eq!(receiver.closed_with().as_deref(), Some(SLASH_ERR));
@@ -1234,6 +1328,8 @@ fn hst_125_envelope_above_17_mib_is_dropped_and_the_connection_closed() {
 #[test]
 fn hst_125_nothing_is_accepted_after_an_oversized_envelope() {
     let mut receiver = ReceiverConnection::new();
-    receiver.on_envelope(1, 17 * MIB + 1).expect_err("oversized first envelope");
+    receiver
+        .on_envelope(1, 17 * MIB + 1)
+        .expect_err("oversized first envelope");
     assert!(receiver.on_envelope(2, 10).is_err());
 }

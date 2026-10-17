@@ -32,7 +32,10 @@ fn port_003_a_running_server_reconciles_durable_trigger_edits_without_client_rep
     let mut host = server_host();
     let pane = add_agent_pane(&mut host, "claude");
     set_rules(&mut host, &["old"], &["r"]);
-    host.kernel_settings().set_tab("text_triggers", json!({"patterns": ["new"], "replies": ["r"]}));
+    host.kernel_settings().set_tab(
+        "text_triggers",
+        json!({"patterns": ["new"], "replies": ["r"]}),
+    );
     host.settle();
     assert_eq!(filter_regexes(&host, pane), ["new"]);
 }
@@ -43,7 +46,10 @@ fn port_004_a_second_attach_receives_accepted_text_triggers_without_replacing_th
     let mut host = server_host();
     set_rules(&mut host, &["go"], &["yes"]);
     let mut second = client_host();
-    second.kernel_settings().set_tab("text_triggers", host.kernel_settings().tab("text_triggers").expect("table"));
+    second.kernel_settings().set_tab(
+        "text_triggers",
+        host.kernel_settings().tab("text_triggers").expect("table"),
+    );
     second.settle();
     assert_eq!(second.settings().get("patterns"), Some(json!(["go"])));
     assert_eq!(host.settings().get("patterns"), Some(json!(["go"])));
@@ -69,7 +75,10 @@ fn port_006_client_semantic_submission_reaches_the_pty_after_a_separate_enter() 
     let submissions = host.deliver_one(hit(pane, 1));
     let specs = send_inputs(&submissions);
     assert_eq!(specs, [expected_spec(pane, "text")]);
-    assert_eq!(specs[0].delivery, ilium_plugin_sdk::types::Delivery::Submitted);
+    assert_eq!(
+        specs[0].delivery,
+        ilium_plugin_sdk::types::Delivery::Submitted
+    );
 }
 
 /// REQ: PORT:ilium-server/tests/text_triggers.rs::matched_terminal_output_submits_the_literal_reply_with_enter
@@ -91,7 +100,9 @@ fn port_008_repainting_one_matching_screen_line_submits_only_once() {
 #[test]
 fn port_009_the_reply_waits_for_the_rules_delay_after_detection() {
     let (mut host, pane) = armed("go", "yes");
-    host.settings().set("delays", json!([3])).expect("delay accepted");
+    host.settings()
+        .set("delays", json!([3]))
+        .expect("delay accepted");
     host.settle();
     host.deliver_one(hit(pane, 1));
     host.settle();
@@ -103,4 +114,3 @@ fn port_009_the_reply_waits_for_the_rules_delay_after_detection() {
     host.settle();
     assert_eq!(texts(&host.submitted()), ["yes"]);
 }
-

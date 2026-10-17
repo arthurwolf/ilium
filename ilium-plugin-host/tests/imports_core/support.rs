@@ -8,8 +8,8 @@ use std::path::Path;
 use std::time::Duration;
 
 use ilium_plugin_api::generated::host::{
-    HostClock, HostCodec, HostFs, HostHttp, HostJobs, HostJournal, HostLog, HostPanes,
-    HostProcess, HostSettings,
+    HostClock, HostCodec, HostFs, HostHttp, HostJobs, HostJournal, HostLog, HostPanes, HostProcess,
+    HostSettings,
 };
 use ilium_plugin_api::generated::types::{ErrorCode, FsPath, Outcome, PluginError, RequestId};
 use ilium_plugin_api::manifest::{CheckMode, Diagnostic, ValidationContext};
@@ -31,10 +31,7 @@ pub const MIB: usize = 1024 * 1024;
 
 /// A fixture for the given tier, side and grants, with no project folder.
 pub fn fixture(tier: Tier, grants: &[&str]) -> ImportsFixture {
-    ImportsFixture::builder()
-        .tier(tier)
-        .grants(grants)
-        .build()
+    ImportsFixture::builder().tier(tier).grants(grants).build()
 }
 
 /// A T1 fixture with the given grants.
@@ -96,7 +93,11 @@ pub fn expect_error<T: std::fmt::Debug>(result: Result<T, PluginError>) -> Plugi
 pub fn expect_ok<T>(result: Result<T, PluginError>) -> T {
     match result {
         Ok(value) => value,
-        Err(error) => panic!("expected success, got {} ({})", error.code.as_str(), error.message),
+        Err(error) => panic!(
+            "expected success, got {} ({})",
+            error.code.as_str(),
+            error.message
+        ),
     }
 }
 
@@ -119,7 +120,10 @@ pub fn complete(fixture: &mut ImportsFixture, request: RequestId) -> Outcome {
 
 /// True when the outcome is a plain success.
 pub fn is_ok(outcome: &Outcome) -> bool {
-    matches!(outcome, Outcome::Ok | Outcome::OkNode(_) | Outcome::OkEpoch(_))
+    matches!(
+        outcome,
+        Outcome::Ok | Outcome::OkNode(_) | Outcome::OkEpoch(_)
+    )
 }
 
 /// A validation context for `ilium plugin check` on Linux with nothing installed.
@@ -171,7 +175,9 @@ pub fn manifest_with_tab(sections: Vec<Value>) -> Value {
 
 /// A manifest with one tab and one section holding the given rows.
 pub fn manifest_with_rows(rows: Vec<Value>) -> Value {
-    manifest_with_tab(vec![json!({ "id": "general", "title": "General", "rows": rows })])
+    manifest_with_tab(vec![
+        json!({ "id": "general", "title": "General", "rows": rows }),
+    ])
 }
 
 /// A manifest with the given `contributes.settings` entries and nothing else.
@@ -184,7 +190,10 @@ pub fn manifest_with_settings_entries(entries: Vec<Value>) -> Value {
 /// The diagnostic codes `validate_json` gives a manifest for the tier.
 pub fn install_codes(manifest: &Value, tier: Tier) -> Vec<String> {
     let text = manifest.to_string();
-    codes(&ilium_plugin_api::manifest::validate_json(&text, &context(tier)))
+    codes(&ilium_plugin_api::manifest::validate_json(
+        &text,
+        &context(tier),
+    ))
 }
 
 /// A toggle row.
@@ -322,7 +331,9 @@ pub fn loopback_server(
     let (sender, receiver) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         for _ in 0..connections {
-            let Ok((mut stream, _)) = listener.accept() else { return };
+            let Ok((mut stream, _)) = listener.accept() else {
+                return;
+            };
             let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
             let mut buffer = vec![0u8; 16 * 1024];
             let read = stream.read(&mut buffer).unwrap_or(0);
@@ -336,7 +347,10 @@ pub fn loopback_server(
 
 /// A canned `HTTP/1.1` response with the given status line and body.
 pub fn http_response(status: &str, headers: &[(&str, &str)], body: &[u8]) -> Vec<u8> {
-    let mut head = format!("HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n", body.len());
+    let mut head = format!(
+        "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n",
+        body.len()
+    );
     for (name, value) in headers {
         head.push_str(&format!("{name}: {value}\r\n"));
     }

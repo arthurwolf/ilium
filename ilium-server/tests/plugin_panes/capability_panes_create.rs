@@ -21,21 +21,30 @@ fn create(cwd: Option<&str>, command: Option<Vec<&str>>) -> Intent {
 #[test]
 fn pan_030_missing_cwd_folder_refused_not_found() {
     let kernel = world(CREATE);
-    assert_eq!(refusal(&submit(&kernel, create(Some("project/missing"), None))), Some(ErrorCode::NotFound));
+    assert_eq!(
+        refusal(&submit(&kernel, create(Some("project/missing"), None))),
+        Some(ErrorCode::NotFound)
+    );
 }
 
 /// REQ: PAN-030
 #[test]
 fn pan_030_cwd_scope_not_granted_refused_not_permitted() {
     let kernel = world(&["panes.create"]);
-    assert_eq!(refusal(&submit(&kernel, create(Some("project/src"), None))), Some(ErrorCode::NotPermitted));
+    assert_eq!(
+        refusal(&submit(&kernel, create(Some("project/src"), None))),
+        Some(ErrorCode::NotPermitted)
+    );
 }
 
 /// REQ: PAN-030
 #[test]
 fn pan_030_existing_cwd_accepted() {
     let kernel = world(CREATE);
-    assert!(matches!(submit(&kernel, create(Some("project/src"), None)), Outcome::OkNode(_)));
+    assert!(matches!(
+        submit(&kernel, create(Some("project/src"), None)),
+        Outcome::OkNode(_)
+    ));
 }
 
 /// REQ: PAN-030

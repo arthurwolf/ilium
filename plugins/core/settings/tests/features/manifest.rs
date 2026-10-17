@@ -8,7 +8,10 @@ use crate::common::*;
 /// REQ: COR-050
 #[test]
 fn manifest_050_equals_the_complete_manifest_of_the_page() {
-    assert_eq!(manifest(), json_block_after(&page_text(), "### Complete manifest"));
+    assert_eq!(
+        manifest(),
+        json_block_after(&page_text(), "### Complete manifest")
+    );
 }
 
 /// REQ: COR-050
@@ -28,8 +31,12 @@ fn manifest_050_fragment_grants_are_a_prefix_of_the_complete_grants() {
     let page = page_text();
     let fragment = json_block_after(&page, "### Manifest");
     let complete = json_block_after(&page, "### Complete manifest");
-    let short = fragment["capabilities"]["client"].as_array().expect("fragment grants");
-    let full = complete["capabilities"]["client"].as_array().expect("complete grants");
+    let short = fragment["capabilities"]["client"]
+        .as_array()
+        .expect("fragment grants");
+    let full = complete["capabilities"]["client"]
+        .as_array()
+        .expect("complete grants");
     assert_eq!(short.len(), 4);
     assert_eq!(&full[..short.len()], short.as_slice());
 }
@@ -97,7 +104,10 @@ fn manifest_050_client_grants_are_the_eight_settings_grants_in_order() {
 fn manifest_050_holds_no_grant_the_page_does_not_name() {
     let page = page_text();
     for grant in client_grants() {
-        assert!(page.contains(&format!("\"{grant}\"")), "grant {grant} is not on the page");
+        assert!(
+            page.contains(&format!("\"{grant}\"")),
+            "grant {grant} is not on the page"
+        );
     }
 }
 
@@ -113,7 +123,13 @@ fn manifest_050_activates_at_startup_with_first_party_limits() {
 #[test]
 fn manifest_090_appearance_section_is_placed_at_the_end_of_the_user_interface_tab() {
     let section = &manifest()["contributes"]["settings"][0];
-    assert_eq!(manifest()["contributes"]["settings"].as_array().expect("settings").len(), 1);
+    assert_eq!(
+        manifest()["contributes"]["settings"]
+            .as_array()
+            .expect("settings")
+            .len(),
+        1
+    );
     assert_eq!(section["kind"], "section");
     assert_eq!(section["id"], "appearance");
     assert_eq!(section["tab"], "user-interface");
@@ -148,7 +164,13 @@ fn manifest_092_accent_row_is_a_theme_swatch_colour_defaulting_to_4a9eff() {
     assert_eq!(row["title"], "Accent colour");
     assert_eq!(row["swatches"], "theme");
     assert_eq!(row["default"], "#4a9eff");
-    assert_eq!(manifest()["contributes"]["settings"][0]["rows"].as_array().expect("rows").len(), 2);
+    assert_eq!(
+        manifest()["contributes"]["settings"][0]["rows"]
+            .as_array()
+            .expect("rows")
+            .len(),
+        2
+    );
 }
 
 /// REQ: COR-050, F-089
@@ -174,7 +196,11 @@ fn manifest_090_declares_the_non_modal_overview_panel_and_holds_ui_panels() {
 #[test]
 fn manifest_050_contributes_nothing_beyond_settings_onboarding_steps_and_panels() {
     let manifest = manifest();
-    let mut keys: Vec<&String> = manifest["contributes"].as_object().expect("contributes").keys().collect();
+    let mut keys: Vec<&String> = manifest["contributes"]
+        .as_object()
+        .expect("contributes")
+        .keys()
+        .collect();
     keys.sort();
     assert_eq!(keys, ["onboarding_steps", "panels", "settings"]);
 }

@@ -3,7 +3,9 @@
 use crate::common::*;
 
 fn field_after(text: &str, marker: &str) -> String {
-    let at = text.find(marker).unwrap_or_else(|| panic!("{marker} missing"));
+    let at = text
+        .find(marker)
+        .unwrap_or_else(|| panic!("{marker} missing"));
     text[at..].lines().next().unwrap().to_string()
 }
 
@@ -30,7 +32,10 @@ fn page_077_figures_are_48_columns_wide_on_every_row() {
 #[test]
 fn page_077_golden_files_equal_the_figures() {
     let blocks = term_blocks(&page_text());
-    for (name, block) in [("dialog_progress_48.txt", &blocks[0]), ("dialog_failed_48.txt", &blocks[1])] {
+    for (name, block) in [
+        ("dialog_progress_48.txt", &blocks[0]),
+        ("dialog_failed_48.txt", &blocks[1]),
+    ] {
         let golden_text = std::fs::read_to_string(golden(name)).expect("golden");
         assert_eq!(golden_text.trim_end(), block.trim_end(), "{name}");
     }
@@ -51,7 +56,10 @@ fn page_077_the_traceability_row_names_the_session_convert_plugin() {
 #[test]
 fn page_077_states_the_plugin_has_no_settings() {
     let page = page_text();
-    assert!(!page.contains("\"settings\": ["), "the complete manifest has no settings");
+    assert!(
+        !page.contains("\"settings\": ["),
+        "the complete manifest has no settings"
+    );
 }
 
 /// REQ: F-077

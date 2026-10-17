@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use ilium_plugin_api::{Platform, Tier};
 use ilium_plugin_host::platform_rules::{
-    check_sandbox, normalize_plugin_path, select_precompiled, shipped_triples, tick_gap_ignored,
-    termination_plan, TerminationKind, WasmArtifact,
+    check_sandbox, normalize_plugin_path, select_precompiled, shipped_triples, termination_plan,
+    tick_gap_ignored, TerminationKind, WasmArtifact,
 };
 use proptest::prelude::*;
 
@@ -79,16 +79,25 @@ fn hst_382_the_page_marks_unshipped_rows_as_not_shipped() {
 /// REQ: HST-383
 #[test]
 fn hst_383_a_matching_cwasm_is_selected() {
-    let available = [WasmArtifact::cwasm("x86_64-unknown-linux-gnu"), WasmArtifact::wasm()];
+    let available = [
+        WasmArtifact::cwasm("x86_64-unknown-linux-gnu"),
+        WasmArtifact::wasm(),
+    ];
     let chosen = select_precompiled("x86_64-unknown-linux-gnu", &available);
-    assert_eq!(chosen.artifact, WasmArtifact::cwasm("x86_64-unknown-linux-gnu"));
+    assert_eq!(
+        chosen.artifact,
+        WasmArtifact::cwasm("x86_64-unknown-linux-gnu")
+    );
     assert!(!chosen.logged_fallback);
 }
 
 /// REQ: HST-383
 #[test]
 fn hst_383_without_a_matching_cwasm_the_host_compiles_the_wasm_and_logs_the_fallback() {
-    let available = [WasmArtifact::cwasm("aarch64-apple-darwin"), WasmArtifact::wasm()];
+    let available = [
+        WasmArtifact::cwasm("aarch64-apple-darwin"),
+        WasmArtifact::wasm(),
+    ];
     let chosen = select_precompiled("x86_64-unknown-linux-gnu", &available);
     assert_eq!(chosen.artifact, WasmArtifact::wasm());
     assert!(chosen.logged_fallback);
@@ -104,13 +113,19 @@ fn hst_383_every_shipped_triple_has_exactly_one_cwasm_per_release_plugin() {
 /// REQ: HST-384
 #[test]
 fn hst_384_windows_paths_are_presented_with_forward_slashes() {
-    assert_eq!(normalize_plugin_path(Platform::Windows, r"C:\Users\a\b.txt"), "C:/Users/a/b.txt");
+    assert_eq!(
+        normalize_plugin_path(Platform::Windows, r"C:\Users\a\b.txt"),
+        "C:/Users/a/b.txt"
+    );
 }
 
 /// REQ: HST-384
 #[test]
 fn hst_384_unix_paths_are_unchanged() {
-    assert_eq!(normalize_plugin_path(Platform::Linux, "/home/a/b.txt"), "/home/a/b.txt");
+    assert_eq!(
+        normalize_plugin_path(Platform::Linux, "/home/a/b.txt"),
+        "/home/a/b.txt"
+    );
 }
 
 /// REQ: HST-384
@@ -197,7 +212,9 @@ fn hst_387_the_page_requires_conformance_on_every_shipped_platform() {
 /// REQ: HST-387
 #[test]
 fn hst_387_the_conformance_crate_is_a_workspace_member() {
-    assert!(workspace_crates().iter().any(|krate| krate.name == "ilium-plugin-conformance"));
+    assert!(workspace_crates()
+        .iter()
+        .any(|krate| krate.name == "ilium-plugin-conformance"));
 }
 
 /// REQ: HST-388
@@ -211,5 +228,7 @@ fn hst_388_the_page_gates_performance_on_linux_x86_64_only() {
 /// REQ: HST-388
 #[test]
 fn hst_388_the_bench_crate_is_a_workspace_member() {
-    assert!(workspace_crates().iter().any(|krate| krate.name == "ilium-plugin-bench"));
+    assert!(workspace_crates()
+        .iter()
+        .any(|krate| krate.name == "ilium-plugin-bench"));
 }

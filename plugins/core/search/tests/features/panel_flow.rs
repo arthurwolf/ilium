@@ -63,7 +63,11 @@ fn search_009_open_command_twice_submits_two_open_views() {
 #[test]
 fn search_009_activating_a_hit_in_the_list_closes_the_panel_with_correlation_2() {
     let mut host = client_showing("deploy", hits_json());
-    let submissions = host.deliver(vec![action("hits", ActionKind::Activated, ActionValue::Index(0))]);
+    let submissions = host.deliver(vec![action(
+        "hits",
+        ActionKind::Activated,
+        ActionValue::Index(0),
+    )]);
     let closed = close_views(&submissions);
     assert_eq!(closed.len(), 1);
     assert_eq!(closed[0].correlation, 2);
@@ -73,7 +77,11 @@ fn search_009_activating_a_hit_in_the_list_closes_the_panel_with_correlation_2()
 #[test]
 fn search_009_activating_a_result_row_by_id_closes_the_panel() {
     let mut host = client_showing("deploy", hits_json());
-    let submissions = host.deliver(vec![action("results", ActionKind::Activated, ActionValue::Text("8".to_string()))]);
+    let submissions = host.deliver(vec![action(
+        "results",
+        ActionKind::Activated,
+        ActionValue::Text("8".to_string()),
+    )]);
     assert_eq!(close_views(&submissions).len(), 1);
 }
 
@@ -81,7 +89,11 @@ fn search_009_activating_a_result_row_by_id_closes_the_panel() {
 #[test]
 fn search_009_selecting_a_result_row_previews_without_closing_the_panel() {
     let mut host = client_showing("deploy", hits_json());
-    let submissions = host.deliver(vec![action("results", ActionKind::Selected, ActionValue::Text("8".to_string()))]);
+    let submissions = host.deliver(vec![action(
+        "results",
+        ActionKind::Selected,
+        ActionValue::Text("8".to_string()),
+    )]);
     assert!(close_views(&submissions).is_empty());
 }
 
@@ -90,7 +102,11 @@ fn search_009_selecting_a_result_row_previews_without_closing_the_panel() {
 fn search_009_typing_in_the_query_field_runs_no_query() {
     let mut host = activated_client();
     host.deliver(vec![open_command_event()]);
-    let submissions = host.deliver(vec![text_changed("dep"), text_changed("depl"), text_changed("deploy")]);
+    let submissions = host.deliver(vec![
+        text_changed("dep"),
+        text_changed("depl"),
+        text_changed("deploy"),
+    ]);
     assert!(query_messages(&submissions).is_empty());
 }
 
@@ -115,7 +131,10 @@ fn port_app_debounce_is_150_ms_by_the_kernel_and_the_plugin_sets_no_timer() {
     host.deliver(vec![open_command_event()]);
     host.deliver(vec![text_changed("needle")]);
     host.advance_clock(149);
-    assert!(query_messages(&host.submitted()).is_empty(), "the plugin never queries on its own timer");
+    assert!(
+        query_messages(&host.submitted()).is_empty(),
+        "the plugin never queries on its own timer"
+    );
     assert!(page_text().contains("debounced to 150 ms by the kernel"));
     let after = host.deliver(vec![filter_changed("needle")]);
     assert_eq!(query_messages(&after).len(), 1);
@@ -163,11 +182,17 @@ fn port_search_ui_stale_answer_cannot_replace_a_newer_query() {
     host.deliver(vec![open_command_event()]);
     host.deliver(vec![filter_changed("first")]);
     host.deliver(vec![filter_changed("second")]);
-    host.deliver(vec![results_event(1, json!([{ "id": "1", "kind": "terminal", "title": "stale shell" }]))]);
+    host.deliver(vec![results_event(
+        1,
+        json!([{ "id": "1", "kind": "terminal", "title": "stale shell" }]),
+    )]);
     host.settle();
     let screen = host.render(panel(), 80, 20).text();
     assert!(!screen.contains("stale shell"), "{screen}");
-    host.deliver(vec![results_event(2, json!([{ "id": "2", "kind": "terminal", "title": "fresh shell" }]))]);
+    host.deliver(vec![results_event(
+        2,
+        json!([{ "id": "2", "kind": "terminal", "title": "fresh shell" }]),
+    )]);
     host.settle();
     let screen = host.render(panel(), 80, 20).text();
     assert!(screen.contains("fresh shell"), "{screen}");
@@ -181,7 +206,10 @@ fn port_app_waits_then_applies_the_answer_for_the_current_query() {
     let before = host.render(panel(), 80, 20).text();
     assert!(!before.contains("build shell"));
     host.deliver(vec![filter_changed("workspace_debounce_needle")]);
-    host.deliver(vec![results_event(1, json!([{ "id": "8", "kind": "terminal", "title": "build shell" }]))]);
+    host.deliver(vec![results_event(
+        1,
+        json!([{ "id": "8", "kind": "terminal", "title": "build shell" }]),
+    )]);
     host.settle();
     let after = host.render(panel(), 80, 20).text();
     assert!(after.contains("build shell"), "{after}");
@@ -193,7 +221,10 @@ fn port_app_waits_then_applies_the_answer_for_the_current_query() {
 fn search_009_an_answer_for_a_revision_never_asked_is_ignored() {
     let mut host = activated_client();
     host.deliver(vec![open_command_event()]);
-    host.deliver(vec![results_event(99, json!([{ "id": "1", "kind": "terminal", "title": "ghost shell" }]))]);
+    host.deliver(vec![results_event(
+        99,
+        json!([{ "id": "1", "kind": "terminal", "title": "ghost shell" }]),
+    )]);
     host.settle();
     assert!(!host.render(panel(), 80, 20).text().contains("ghost shell"));
 }
@@ -219,7 +250,11 @@ fn port_search_ui_cancelled_scan_job_publishes_no_partial_matches() {
     for record in host.jobs().list() {
         host.jobs().finish(
             record.request,
-            Err(PluginError { code: ErrorCode::Cancelled, message: "cancelled".to_string(), retry_after_ms: None }),
+            Err(PluginError {
+                code: ErrorCode::Cancelled,
+                message: "cancelled".to_string(),
+                retry_after_ms: None,
+            }),
         );
     }
     host.settle();
@@ -249,6 +284,7 @@ fn port_app_the_open_command_is_titled_for_the_tree_context_menu_and_palette() {
     let command = &manifest["contributes"]["commands"][0];
     assert_eq!(command["title"], "Search the workspace");
     assert_eq!(command["category"], "Search");
-    let user_doc = std::fs::read_to_string(workspace_root().join("src/docs/panes-and-layout.md")).expect("user doc");
+    let user_doc = std::fs::read_to_string(workspace_root().join("src/docs/panes-and-layout.md"))
+        .expect("user doc");
     assert!(user_doc.contains("right-click and choose **Search workspace**"));
 }

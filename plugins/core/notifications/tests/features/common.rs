@@ -5,10 +5,11 @@ use std::path::PathBuf;
 use ilium_plugin_core_notifications::NotificationsServer;
 use ilium_plugin_sdk::testing::{FakeHost, TreeNode};
 use ilium_plugin_sdk::types::{
-    AgentActivity, AgentActivityEvent, AgentView, AttentionEvent, Event, Intent, KernelSettingsEvent,
-    MarkAttentionSpec, NodeClass, NodeId, NotifySpec, PluginId, Submission, TopicPublishedEvent,
+    AgentActivity, AgentActivityEvent, AgentView, AttentionEvent, Event, Intent,
+    KernelSettingsEvent, MarkAttentionSpec, NodeClass, NodeId, NotifySpec, PluginId, Submission,
+    TopicPublishedEvent,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 /// The plugin id (manifest `id`).
 pub const PLUGIN_ID: &str = "ilium.core.notifications";
@@ -35,7 +36,9 @@ pub fn page_text() -> String {
 
 /// Any page of the manual by file name.
 pub fn manual_page(name: &str) -> String {
-    let path = workspace_root().join("docs/plugins-manual/pages").join(name);
+    let path = workspace_root()
+        .join("docs/plugins-manual/pages")
+        .join(name);
     std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("{path:?}: {error}"))
 }
 
@@ -53,7 +56,9 @@ pub fn manifest() -> Value {
 
 /// The first json code block after the heading text `heading`.
 pub fn json_block_after(page: &str, heading: &str) -> Value {
-    let start = page.find(heading).unwrap_or_else(|| panic!("heading {heading} missing"));
+    let start = page
+        .find(heading)
+        .unwrap_or_else(|| panic!("heading {heading} missing"));
     let rest = &page[start..];
     let open = rest.find("```json\n").expect("json block") + "```json\n".len();
     let close = rest[open..].find("```").expect("block end");
@@ -72,7 +77,10 @@ pub fn server_grants() -> Vec<String> {
 
 /// A server-side host with the manifest grants and the plugin activated.
 pub fn server_host() -> FakeHost {
-    let mut host = FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("server").build();
+    let mut host = FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("server")
+        .build();
     host.activate::<NotificationsServer>();
     host
 }
@@ -126,7 +134,13 @@ pub fn transition(
 
 /// A pane with an agent that is working, and the submissions of its finishing.
 pub fn finish_turn(host: &mut FakeHost, node: NodeId, revision: u64) -> Vec<Submission> {
-    transition(host, node, AgentActivity::Working, AgentActivity::Done, revision)
+    transition(
+        host,
+        node,
+        AgentActivity::Working,
+        AgentActivity::Done,
+        revision,
+    )
 }
 
 /// The progress topic event of a monitored task.
@@ -146,7 +160,12 @@ pub fn task_event(pane: NodeId, job_id: &str, status: &str) -> Event {
 }
 
 /// Delivers one task outcome and returns the submissions.
-pub fn task_outcome(host: &mut FakeHost, pane: NodeId, job_id: &str, status: &str) -> Vec<Submission> {
+pub fn task_outcome(
+    host: &mut FakeHost,
+    pane: NodeId,
+    job_id: &str,
+    status: &str,
+) -> Vec<Submission> {
     let submissions = host.deliver_one(task_event(pane, job_id, status));
     host.settle();
     submissions
@@ -157,7 +176,11 @@ pub fn attention_event(node: NodeId, marked: bool) -> Event {
     Event::AttentionChanged(AttentionEvent {
         node,
         marked,
-        reason: if marked { Some("waiting for you".to_string()) } else { None },
+        reason: if marked {
+            Some("waiting for you".to_string())
+        } else {
+            None
+        },
         by: Some(PluginId(PLUGIN_ID.to_string())),
     })
 }
@@ -210,16 +233,25 @@ pub fn acks(submissions: &[Submission]) -> Vec<NodeId> {
 pub fn is_valid_dedup_key(key: &str) -> bool {
     !key.is_empty()
         && key.chars().count() <= 128
-        && key.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | ':' | '/' | '-'))
+        && key
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | ':' | '/' | '-'))
 }
 
 /// Rows of the first markdown table that starts with `header_prefix`: the cells of each body row.
 pub fn table_rows(text: &str, header_prefix: &str) -> Vec<Vec<String>> {
-    let start = text.find(header_prefix).unwrap_or_else(|| panic!("table {header_prefix} missing"));
+    let start = text
+        .find(header_prefix)
+        .unwrap_or_else(|| panic!("table {header_prefix} missing"));
     text[start..]
         .lines()
         .skip(2)
         .take_while(|line| line.starts_with('|'))
-        .map(|line| line.trim_matches('|').split('|').map(|cell| cell.trim().to_string()).collect())
+        .map(|line| {
+            line.trim_matches('|')
+                .split('|')
+                .map(|cell| cell.trim().to_string())
+                .collect()
+        })
         .collect()
 }

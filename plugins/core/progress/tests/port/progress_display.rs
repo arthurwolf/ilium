@@ -1,12 +1,20 @@
 //! Footer visibility rules (original ilium-client/src/progress_display.rs).
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::common::*;
 use crate::support::*;
 
 fn retained(status: &str, message: &str) -> Value {
-    monitor_with(17, "expiry-regression", status, 100.0, message, "", Value::Null)
+    monitor_with(
+        17,
+        "expiry-regression",
+        status,
+        100.0,
+        message,
+        "",
+        Value::Null,
+    )
 }
 
 /// REQ: PORT:ilium-client/src/progress_display.rs::absent_report_is_hidden_and_future_timestamp_does_not_underflow
@@ -58,15 +66,40 @@ fn port_061_a_running_monitor_at_100_percent_is_never_hidden_even_when_its_probe
 #[test]
 fn port_061_a_task_error_expires_from_the_footer_but_the_error_stays_in_the_status() {
     let mut host = activated_client();
-    set_kernel_setting(&mut host, "ui.completed_progress_hide_after_seconds", json!(2)).expect("accepted");
-    show(&mut host, vec![monitor_with(17, "expiry-regression", "error", 100.0, "failed row", "", json!("task failed"))]);
+    set_kernel_setting(
+        &mut host,
+        "ui.completed_progress_hide_after_seconds",
+        json!(2),
+    )
+    .expect("accepted");
+    show(
+        &mut host,
+        vec![monitor_with(
+            17,
+            "expiry-regression",
+            "error",
+            100.0,
+            "failed row",
+            "",
+            json!("task failed"),
+        )],
+    );
     pass(&mut host, 1_999);
     assert!(footer(&mut host, 80, 12).contains("failed row"));
     pass(&mut host, 1);
     assert!(!footer(&mut host, 80, 12).contains("failed row"));
     let (mut server, pane) = host_with_pane();
-    register(&mut server, pane, PROBE, &running("expiry-regression", 10, "W"), &[]);
-    settle_with(&mut server, &failed("expiry-regression", 100, "failed row", "task failed"));
+    register(
+        &mut server,
+        pane,
+        PROBE,
+        &running("expiry-regression", 10, "W"),
+        &[],
+    );
+    settle_with(
+        &mut server,
+        &failed("expiry-regression", 100, "failed row", "task failed"),
+    );
     tick(&mut server, 120);
     let record = status(&mut server, pane);
     assert_eq!(record["monitors"][0]["report"]["error"], "task failed");
@@ -76,12 +109,23 @@ fn port_061_a_task_error_expires_from_the_footer_but_the_error_stays_in_the_stat
 #[test]
 fn port_061_a_hide_delay_of_zero_keeps_a_done_and_an_error_row_visible() {
     let mut host = activated_client();
-    set_kernel_setting(&mut host, "ui.completed_progress_hide_after_seconds", json!(0)).expect("accepted");
-    show(&mut host, vec![
-        retained("done", "kept done"),
-        monitor_with(18, "other", "error", 100.0, "kept error", "", json!("boom")),
-    ]);
+    set_kernel_setting(
+        &mut host,
+        "ui.completed_progress_hide_after_seconds",
+        json!(0),
+    )
+    .expect("accepted");
+    show(
+        &mut host,
+        vec![
+            retained("done", "kept done"),
+            monitor_with(18, "other", "error", 100.0, "kept error", "", json!("boom")),
+        ],
+    );
     pass(&mut host, 86_400_000);
     let text = footer(&mut host, 80, 12);
-    assert!(text.contains("kept done") && text.contains("kept error"), "{text}");
+    assert!(
+        text.contains("kept done") && text.contains("kept error"),
+        "{text}"
+    );
 }

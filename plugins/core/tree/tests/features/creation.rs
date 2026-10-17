@@ -2,8 +2,8 @@
 
 use ilium_plugin_sdk::testing::FakeHost;
 use ilium_plugin_sdk::types::{
-    CreateFolderSpec, CreateGroupSpec, Event, Intent, MessageEvent, NodeId, Placement, PluginId, PluginSide,
-    Submission,
+    CreateFolderSpec, CreateGroupSpec, Event, Intent, MessageEvent, NodeId, Placement, PluginId,
+    PluginSide, Submission,
 };
 use proptest::prelude::*;
 
@@ -48,7 +48,11 @@ fn feature_002_new_folder_message_submits_create_folder_without_a_path() {
     assert_eq!(submissions.len(), 1);
     assert_eq!(
         submissions[0].intent,
-        Intent::CreateFolder(CreateFolderSpec { parent: Some(NodeId(7)), title: "New folder".to_string(), path: None })
+        Intent::CreateFolder(CreateFolderSpec {
+            parent: Some(NodeId(7)),
+            title: "New folder".to_string(),
+            path: None
+        })
     );
 }
 

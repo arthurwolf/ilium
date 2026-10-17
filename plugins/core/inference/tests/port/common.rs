@@ -49,11 +49,19 @@ pub fn openai_settings(model: &str) -> Value {
 }
 
 pub fn ok(body: Value) -> HttpResponse {
-    HttpResponse { status: 200, headers: vec![], body: body.to_string().into_bytes() }
+    HttpResponse {
+        status: 200,
+        headers: vec![],
+        body: body.to_string().into_bytes(),
+    }
 }
 
 pub fn status(code: u16) -> HttpResponse {
-    HttpResponse { status: code, headers: vec![], body: b"{}".to_vec() }
+    HttpResponse {
+        status: code,
+        headers: vec![],
+        body: b"{}".to_vec(),
+    }
 }
 
 pub fn row_command(command: &str) -> Event {

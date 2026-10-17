@@ -2,7 +2,9 @@
 #![allow(dead_code)]
 use ilium_plugin_core_ambient::AmbientClient;
 use ilium_plugin_sdk::testing::FakeHost;
-use ilium_plugin_sdk::types::{Event, PluginSide, SettingsChange, SettingsOrigin, Submission, ViewTarget, ErrorCode};
+use ilium_plugin_sdk::types::{
+    ErrorCode, Event, PluginSide, SettingsChange, SettingsOrigin, Submission, ViewTarget,
+};
 use serde_json::{json, Value};
 
 pub fn manifest_path() -> std::path::PathBuf {
@@ -10,7 +12,10 @@ pub fn manifest_path() -> std::path::PathBuf {
 }
 
 pub fn activated_client() -> FakeHost {
-    let mut host = FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("client").build();
+    let mut host = FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("client")
+        .build();
     host.activate::<AmbientClient>();
     host
 }
@@ -24,13 +29,20 @@ pub fn changed(keys: &[&str]) -> Event {
 }
 
 pub fn refused(key: &str, value: Value) -> ErrorCode {
-    activated_client().settings().set(key, value).expect_err("refused").code
+    activated_client()
+        .settings()
+        .set(key, value)
+        .expect_err("refused")
+        .code
 }
 
 pub fn places(count: usize) -> Value {
     let mut map = serde_json::Map::new();
     for index in 0..count {
-        map.insert(format!("place-{}", (b'a' + index as u8) as char), json!("Somewhere"));
+        map.insert(
+            format!("place-{}", (b'a' + index as u8) as char),
+            json!("Somewhere"),
+        );
     }
     Value::Object(map)
 }
@@ -55,7 +67,10 @@ pub fn semantic_holds() {
     assert_eq!(host.settings().get("semantic"), Some(json!(false)));
     assert!(host.settings().set("semantic", json!(true)).is_ok());
     assert!(no_submissions(&mut host, &["semantic"]).is_empty());
-    assert_eq!(refused("semantic", json!("yes")), ErrorCode::InvalidArgument);
+    assert_eq!(
+        refused("semantic", json!("yes")),
+        ErrorCode::InvalidArgument
+    );
     assert!(host.settings().set("semantic", json!(false)).is_ok());
     assert_eq!(host.settings().get("semantic"), Some(json!(false)));
 }
@@ -64,7 +79,10 @@ pub fn places_hold() {
     let mut host = activated_client();
     assert!(host.settings().set("saved_places", places(7)).is_ok());
     assert!(host.settings().set("saved_places", places(8)).is_ok());
-    assert_eq!(refused("saved_places", places(9)), ErrorCode::InvalidArgument);
+    assert_eq!(
+        refused("saved_places", places(9)),
+        ErrorCode::InvalidArgument
+    );
     assert_eq!(host.settings().get("saved_places"), Some(places(8)));
 }
 
@@ -73,7 +91,10 @@ pub fn observer_holds() {
     let ok = json!({ "lat": 90.0, "lon": -180.0 });
     assert!(host.settings().set("observer", ok.clone()).is_ok());
     assert_eq!(host.settings().get("observer"), Some(ok));
-    assert_eq!(refused("observer", json!({ "lat": 90.0001, "lon": 0.0 })), ErrorCode::InvalidArgument);
+    assert_eq!(
+        refused("observer", json!({ "lat": 90.0001, "lon": 0.0 })),
+        ErrorCode::InvalidArgument
+    );
 }
 
 pub fn render_holds(columns: u16, rows: u16) {
@@ -85,7 +106,8 @@ pub fn render_holds(columns: u16, rows: u16) {
 // --- manual-derived checks (manifest and views of core-plugin-ambient.md) -----------------------
 
 pub fn manifest_json() -> Value {
-    serde_json::from_str(&std::fs::read_to_string(manifest_path()).expect("manifest file")).expect("manifest json")
+    serde_json::from_str(&std::fs::read_to_string(manifest_path()).expect("manifest file"))
+        .expect("manifest json")
 }
 
 pub fn manifest_row(key: &str) -> Value {
@@ -110,14 +132,21 @@ pub fn manifest_capabilities() -> Vec<String> {
 pub fn direct_tree(view: &str, columns: u16, rows: u16) -> ilium_plugin_sdk::types::UiTree {
     use ilium_plugin_sdk::Views;
     let mut client = AmbientClient::default();
-    client.render(ViewTarget::Panel(view.to_string()), ilium_plugin_sdk::types::Area { columns, rows })
+    client.render(
+        ViewTarget::Panel(view.to_string()),
+        ilium_plugin_sdk::types::Area { columns, rows },
+    )
 }
 
 /// The preview panel is one keyed Rgb8 surface asking for 40 columns and 4 rows at any size.
 pub fn preview_surface_holds(columns: u16, rows: u16) {
     use ilium_plugin_sdk::types::{PixelFormat, Widget};
     let tree = direct_tree("scene-preview", columns, rows);
-    let node = tree.nodes.iter().find(|node| node.key.as_deref() == Some("frame")).expect("frame surface");
+    let node = tree
+        .nodes
+        .iter()
+        .find(|node| node.key.as_deref() == Some("frame"))
+        .expect("frame surface");
     match &node.widget {
         Widget::Surface(spec) => {
             assert_eq!(spec.format, PixelFormat::Rgb8);

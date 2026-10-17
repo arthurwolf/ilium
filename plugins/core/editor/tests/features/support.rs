@@ -3,11 +3,11 @@
 
 use ilium_plugin_core_editor::EditorClient;
 use ilium_plugin_sdk::generated::exports::service_provider::{ServiceCall, ServiceReply};
+use ilium_plugin_sdk::generated::types::BufferId;
 use ilium_plugin_sdk::generated::types::{
     Activation, Area, BufferRef, Event, FsPath, NodeId, PluginId, UiNode, UiTree, ViewTarget,
     Widget,
 };
-use ilium_plugin_sdk::generated::types::BufferId;
 use ilium_plugin_sdk::testing::host::FakeHost;
 use ilium_plugin_sdk::{Handler, Lifecycle, ServiceProvider, Views};
 
@@ -40,11 +40,19 @@ pub fn manifest_json() -> serde_json::Value {
 
 /// A project-scope path.
 pub fn project_path(path: &str) -> FsPath {
-    FsPath { scope: "project".to_string(), path: path.to_string() }
+    FsPath {
+        scope: "project".to_string(),
+        path: path.to_string(),
+    }
 }
 
 /// A buffer reference as the kernel sends it with `editor-opened`.
-pub fn buffer_ref(id: u64, path: Option<&str>, language: Option<&str>, line_count: u32) -> BufferRef {
+pub fn buffer_ref(
+    id: u64,
+    path: Option<&str>,
+    language: Option<&str>,
+    line_count: u32,
+) -> BufferRef {
     BufferRef {
         buffer: BufferId(id),
         pane: Some(NodeId(7)),
@@ -90,17 +98,28 @@ pub fn activation(settings_json: &str) -> Activation {
 /// An activated plugin instance driven directly (no host context).
 pub fn direct(settings_json: &str) -> EditorClient {
     let mut editor = EditorClient::default();
-    Lifecycle::activate(&mut editor, activation(settings_json)).ok().expect("activate");
+    Lifecycle::activate(&mut editor, activation(settings_json))
+        .ok()
+        .expect("activate");
     editor
 }
 
 /// Opens a buffer without a file on a directly driven instance.
 pub fn direct_open(editor: &mut EditorClient, id: u64, language: Option<&str>, line_count: u32) {
-    Handler::on_events(editor, vec![Event::EditorOpened(buffer_ref(id, None, language, line_count))]);
+    Handler::on_events(
+        editor,
+        vec![Event::EditorOpened(buffer_ref(
+            id, None, language, line_count,
+        ))],
+    );
 }
 
 /// Calls the buffers service of a directly driven instance.
-pub fn call_buffers(editor: &mut EditorClient, method: &str, payload: serde_json::Value) -> ServiceReply {
+pub fn call_buffers(
+    editor: &mut EditorClient,
+    method: &str,
+    payload: serde_json::Value,
+) -> ServiceReply {
     ServiceProvider::handle(
         editor,
         ServiceCall {
@@ -138,7 +157,12 @@ pub fn seed_text(editor: &mut EditorClient, id: u64, text: &str) {
 }
 
 /// Reads `count` lines from `first_line` through the buffers service.
-pub fn read_lines(editor: &mut EditorClient, id: u64, first_line: u32, count: u32) -> serde_json::Value {
+pub fn read_lines(
+    editor: &mut EditorClient,
+    id: u64,
+    first_line: u32,
+    count: u32,
+) -> serde_json::Value {
     done_json(call_buffers(
         editor,
         "read",
@@ -148,7 +172,10 @@ pub fn read_lines(editor: &mut EditorClient, id: u64, first_line: u32, count: u3
 
 /// A FakeHost built from the plugin manifest (client side, the manifest grants).
 pub fn host() -> FakeHost {
-    FakeHost::for_manifest(MANIFEST_PATH).ok().expect("manifest").build()
+    FakeHost::for_manifest(MANIFEST_PATH)
+        .ok()
+        .expect("manifest")
+        .build()
 }
 
 /// A host whose plugin settings are set before activation, then activated.
@@ -164,11 +191,20 @@ pub fn active_host(settings: &[(&str, serde_json::Value)]) -> FakeHost {
 /// Writes `text` to `project:<path>` in the fake file system and delivers `editor-opened`.
 pub fn open_file(host: &mut FakeHost, id: u64, path: &str, language: Option<&str>, text: &str) {
     host.fs().write(format!("project:{path}"), text.as_bytes());
-    host.deliver_one(Event::EditorOpened(buffer_ref(id, Some(path), language, line_count_of(text))));
+    host.deliver_one(Event::EditorOpened(buffer_ref(
+        id,
+        Some(path),
+        language,
+        line_count_of(text),
+    )));
 }
 
 /// Renders the editor pane (node 7) at the given size.
-pub fn render_pane(host: &mut FakeHost, columns: u16, rows: u16) -> ilium_plugin_sdk::testing::host::Screen {
+pub fn render_pane(
+    host: &mut FakeHost,
+    columns: u16,
+    rows: u16,
+) -> ilium_plugin_sdk::testing::host::Screen {
     host.render(ViewTarget::Pane(NodeId(7)), columns, rows)
 }
 
@@ -179,10 +215,15 @@ pub fn pane_tree(editor: &mut EditorClient, columns: u16, rows: u16) -> UiTree {
 
 /// All nodes of a tree whose widget matches.
 pub fn nodes_where<'a>(tree: &'a UiTree, matches: impl Fn(&Widget) -> bool) -> Vec<&'a UiNode> {
-    tree.nodes.iter().filter(|node| matches(&node.widget)).collect()
+    tree.nodes
+        .iter()
+        .filter(|node| matches(&node.widget))
+        .collect()
 }
 
 /// Number of characters equal to `needle` in `text`.
 pub fn count_char(text: &str, needle: char) -> usize {
-    text.chars().filter(|character| *character == needle).count()
+    text.chars()
+        .filter(|character| *character == needle)
+        .count()
 }

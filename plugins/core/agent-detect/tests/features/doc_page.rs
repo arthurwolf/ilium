@@ -7,19 +7,29 @@ use crate::common::{page_text, traceability_text};
 
 /// Rows of the first table that follows the line `anchor`: cells of every row after the separator.
 fn table_after(page: &str, anchor: &str) -> Vec<Vec<String>> {
-    let start = page.find(anchor).unwrap_or_else(|| panic!("anchor {anchor} missing"));
+    let start = page
+        .find(anchor)
+        .unwrap_or_else(|| panic!("anchor {anchor} missing"));
     page[start..]
         .lines()
         .skip_while(|line| !line.starts_with('|'))
         .skip(2)
         .take_while(|line| line.starts_with('|'))
-        .map(|line| line.trim_matches('|').split('|').map(|cell| cell.trim().to_string()).collect())
+        .map(|line| {
+            line.trim_matches('|')
+                .split('|')
+                .map(|cell| cell.trim().to_string())
+                .collect()
+        })
         .collect()
 }
 
 fn enum_row(name: &str) -> String {
     let rows = table_after(&page_text(), "**Enums the plugin reports.**");
-    rows.into_iter().find(|row| row[0] == name).unwrap_or_else(|| panic!("enum row {name}"))[1].clone()
+    rows.into_iter()
+        .find(|row| row[0] == name)
+        .unwrap_or_else(|| panic!("enum row {name}"))[1]
+        .clone()
 }
 
 /// REQ: COR-011, F-026
@@ -43,19 +53,28 @@ fn doc_027_activity_enum_lists_six_values_in_order() {
 /// REQ: F-027
 #[test]
 fn doc_027_turn_enum_lists_five_values_in_order() {
-    assert_eq!(enum_row("Turn"), "`working`, `waiting-approval`, `waiting-subagents`, `settling`, `idle`");
+    assert_eq!(
+        enum_row("Turn"),
+        "`working`, `waiting-approval`, `waiting-subagents`, `settling`, `idle`"
+    );
 }
 
 /// REQ: F-029
 #[test]
 fn doc_029_goal_state_enum_lists_five_values_in_order() {
-    assert_eq!(enum_row("Goal state"), "`active`, `paused`, `blocked`, `usage-limited`, `reached`");
+    assert_eq!(
+        enum_row("Goal state"),
+        "`active`, `paused`, `blocked`, `usage-limited`, `reached`"
+    );
 }
 
 /// REQ: F-028
 #[test]
 fn doc_028_pane_kind_enum_lists_five_values_in_order() {
-    assert_eq!(enum_row("Pane kind"), "`plain-shell`, `agent`, `editor`, `board`, `agent-unavailable`");
+    assert_eq!(
+        enum_row("Pane kind"),
+        "`plain-shell`, `agent`, `editor`, `board`, `agent-unavailable`"
+    );
 }
 
 /// REQ: COR-030, COR-033
@@ -63,7 +82,15 @@ fn doc_028_pane_kind_enum_lists_five_values_in_order() {
 fn doc_030_the_plugin_owns_exactly_the_agent_monitoring_tab() {
     let rows = table_after(&page_text(), "| Tab id | Label | Config table | Readers |");
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0], ["`agent-monitoring`", "Agent Monitoring", "`[ui]`, `[detection]`", "Progress, Agent toolbar, Notifications"]);
+    assert_eq!(
+        rows[0],
+        [
+            "`agent-monitoring`",
+            "Agent Monitoring",
+            "`[ui]`, `[detection]`",
+            "Progress, Agent toolbar, Notifications"
+        ]
+    );
 }
 
 /// REQ: COR-022
@@ -77,7 +104,9 @@ fn doc_022_disabled_notice_keeps_the_values_read_only() {
 #[test]
 fn doc_030_polling_defaults_are_ten_and_forty_five_seconds() {
     let page = page_text();
-    assert!(page.contains("`working_poll_seconds` (default 10) and `idle_poll_seconds` (default 45) in `[detection]`"));
+    assert!(page.contains(
+        "`working_poll_seconds` (default 10) and `idle_poll_seconds` (default 45) in `[detection]`"
+    ));
 }
 
 /// REQ: F-027
@@ -129,7 +158,10 @@ fn doc_011_auto_answer_key_is_in_the_detection_table_and_on_by_default() {
 fn doc_026_traceability_rows_name_the_agent_detect_plugin_as_owner() {
     let traceability = traceability_text();
     for id in ["F-026", "F-027", "F-028", "F-029", "F-030", "F-034"] {
-        let row = traceability.lines().find(|line| line.starts_with(&format!("| {id} |"))).unwrap_or_else(|| panic!("row {id}"));
+        let row = traceability
+            .lines()
+            .find(|line| line.starts_with(&format!("| {id} |")))
+            .unwrap_or_else(|| panic!("row {id}"));
         assert!(row.contains("agent-detect plugin"), "{row}");
         assert!(row.contains("`agent-monitoring`"), "{row}");
         assert!(row.contains("primitive-extended"), "{row}");
@@ -140,21 +172,38 @@ fn doc_026_traceability_rows_name_the_agent_detect_plugin_as_owner() {
 #[test]
 fn doc_034_traceability_names_the_icon_and_mode_config_keys() {
     let traceability = traceability_text();
-    let row30 = traceability.lines().find(|line| line.starts_with("| F-030 |")).expect("row");
+    let row30 = traceability
+        .lines()
+        .find(|line| line.starts_with("| F-030 |"))
+        .expect("row");
     assert!(row30.contains("[ui] agent_monitoring_mode; [detection] custom_signatures"));
-    let row34 = traceability.lines().find(|line| line.starts_with("| F-034 |")).expect("row");
-    assert!(row34.contains("[ui] claude_agent_icon, codex_agent_icon, antigravity_agent_icon, agent_identifier_mode"));
+    let row34 = traceability
+        .lines()
+        .find(|line| line.starts_with("| F-034 |"))
+        .expect("row");
+    assert!(row34.contains(
+        "[ui] claude_agent_icon, codex_agent_icon, antigravity_agent_icon, agent_identifier_mode"
+    ));
 }
 
 /// REQ: F-026
 #[test]
 fn doc_026_traceability_sides_server_for_identity_and_both_for_goals() {
     let traceability = traceability_text();
-    let row26 = traceability.lines().find(|line| line.starts_with("| F-026 |")).expect("row");
+    let row26 = traceability
+        .lines()
+        .find(|line| line.starts_with("| F-026 |"))
+        .expect("row");
     assert!(row26.contains("| server |"));
-    let row29 = traceability.lines().find(|line| line.starts_with("| F-029 |")).expect("row");
+    let row29 = traceability
+        .lines()
+        .find(|line| line.starts_with("| F-029 |"))
+        .expect("row");
     assert!(row29.contains("| both |"));
-    let row34 = traceability.lines().find(|line| line.starts_with("| F-034 |")).expect("row");
+    let row34 = traceability
+        .lines()
+        .find(|line| line.starts_with("| F-034 |"))
+        .expect("row");
     assert!(row34.contains("| client |"));
 }
 
@@ -162,7 +211,9 @@ fn doc_026_traceability_sides_server_for_identity_and_both_for_goals() {
 #[test]
 fn doc_027_example_package_manifest_is_valid_json_with_the_activity_rule_entry() {
     let page = page_text();
-    let start = page.find("#### Example: Marks a pane").expect("example heading");
+    let start = page
+        .find("#### Example: Marks a pane")
+        .expect("example heading");
     let rest = &page[start..];
     let open = rest.find("```json\n").expect("json block") + "```json\n".len();
     let close = rest[open..].find("```").expect("end");

@@ -24,7 +24,6 @@ mod voice_text;
 
 pub use bounded_decode::{deserialize_allocation_checked, AllocationDecodeError, BoundedMessage};
 pub use error::IpcError;
-pub use plugin::PLUGIN_PROTOCOL_VERSION;
 pub use framing::{
     decode_bounded_frame, decode_frame, encode_frame, encoded_capacity_bound, read_frame,
     write_frame, EncodedFrame, FrameReader, FrameWriter, MAX_FRAME_LEN,
@@ -34,6 +33,7 @@ pub use ilium_agent_debug::{
     AgentDebugEventMetadata, AgentDebugField, AgentDebugFieldPresentation, AgentDebugSeverity,
     AgentDebugSource, PaneDebugLog, PaneResizeCause,
 };
+pub use plugin::PLUGIN_PROTOCOL_VERSION;
 pub use protocol::{
     AgentDetectionSettings, AgentDetectionSettingsError, AntigravityStatuslineAction,
     ClientRequest, CustomAgentSignature, DetectionReason, MouseButton, MouseEventKind,

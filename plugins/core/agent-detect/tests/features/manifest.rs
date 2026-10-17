@@ -2,7 +2,7 @@
 //! (signature, decoration slots, display mode) matches the Manifest fragment.
 
 use ilium_plugin_sdk::testing::FakeHost;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::common::{manifest_path, page_text};
 
@@ -13,7 +13,9 @@ fn manifest() -> Value {
 
 /// The first json code block after the heading line `heading`.
 fn json_block_after(page: &str, heading: &str) -> Value {
-    let start = page.find(heading).unwrap_or_else(|| panic!("heading {heading} missing"));
+    let start = page
+        .find(heading)
+        .unwrap_or_else(|| panic!("heading {heading} missing"));
     let rest = &page[start..];
     let open = rest.find("```json\n").expect("json block") + "```json\n".len();
     let close = rest[open..].find("```").expect("block end");
@@ -21,7 +23,12 @@ fn json_block_after(page: &str, heading: &str) -> Value {
 }
 
 fn strings(value: &Value) -> Vec<String> {
-    value.as_array().expect("array").iter().map(|item| item.as_str().expect("string").to_string()).collect()
+    value
+        .as_array()
+        .expect("array")
+        .iter()
+        .map(|item| item.as_str().expect("string").to_string())
+        .collect()
 }
 
 /// REQ: COR-050
@@ -41,7 +48,10 @@ fn manifest_050_fragment_contributions_equal_the_complete_manifest() {
     assert_eq!(fragment["server"], complete["server"]);
     assert_eq!(fragment["client"], complete["client"]);
     assert_eq!(fragment["id"], complete["id"]);
-    assert_eq!(fragment["capabilities"]["server"], complete["capabilities"]["server"]);
+    assert_eq!(
+        fragment["capabilities"]["server"],
+        complete["capabilities"]["server"]
+    );
 }
 
 /// REQ: COR-050
@@ -65,7 +75,10 @@ fn manifest_050_declares_both_sides_and_the_detector_export() {
     assert_eq!(manifest["server"]["exports"], json!(["detector"]));
     assert_eq!(manifest["client"]["entry"], "client.wasm");
     assert_eq!(manifest["client"]["world"], "ilium:client/base@0.1.0");
-    assert!(manifest["client"].get("exports").is_none(), "the client side exports nothing");
+    assert!(
+        manifest["client"].get("exports").is_none(),
+        "the client side exports nothing"
+    );
 }
 
 /// REQ: COR-050, F-026
@@ -74,7 +87,12 @@ fn manifest_050_server_grants_are_the_four_detection_grants_in_order() {
     let manifest = manifest();
     assert_eq!(
         strings(&manifest["capabilities"]["server"]),
-        ["agent.read", "agent.signatures", "tree.decorate", "panes.read"]
+        [
+            "agent.read",
+            "agent.signatures",
+            "tree.decorate",
+            "panes.read"
+        ]
     );
 }
 
@@ -84,7 +102,11 @@ fn manifest_050_client_grants_include_the_kernel_tab_write() {
     let manifest = manifest();
     assert_eq!(
         strings(&manifest["capabilities"]["client"]),
-        ["agent.read", "ui.panels", "settings.write-kernel:agent-monitoring"]
+        [
+            "agent.read",
+            "ui.panels",
+            "settings.write-kernel:agent-monitoring"
+        ]
     );
 }
 
@@ -92,7 +114,10 @@ fn manifest_050_client_grants_include_the_kernel_tab_write() {
 #[test]
 fn manifest_050_activates_at_startup_and_on_the_panel_view() {
     let manifest = manifest();
-    assert_eq!(manifest["activation"], json!(["startup", "view:agent-detect.panel"]));
+    assert_eq!(
+        manifest["activation"],
+        json!(["startup", "view:agent-detect.panel"])
+    );
     assert_eq!(manifest["limits_tier"], "first-party");
 }
 
@@ -100,7 +125,11 @@ fn manifest_050_activates_at_startup_and_on_the_panel_view() {
 #[test]
 fn manifest_050_contributes_exactly_signatures_slots_and_display_modes() {
     let manifest = manifest();
-    let mut keys: Vec<&String> = manifest["contributes"].as_object().expect("contributes").keys().collect();
+    let mut keys: Vec<&String> = manifest["contributes"]
+        .as_object()
+        .expect("contributes")
+        .keys()
+        .collect();
     keys.sort();
     assert_eq!(keys, ["decoration_slots", "display_modes", "signatures"]);
 }
@@ -142,7 +171,9 @@ fn manifest_050_declares_the_attention_display_mode_that_hides_unmarked_rows() {
 #[test]
 fn manifest_050_decoration_slot_priority_orders_activity_above_goal() {
     let manifest = manifest();
-    let slots = manifest["contributes"]["decoration_slots"].as_array().expect("slots");
+    let slots = manifest["contributes"]["decoration_slots"]
+        .as_array()
+        .expect("slots");
     let activity = slots[0]["priority"].as_i64().expect("priority");
     let goal = slots[1]["priority"].as_i64().expect("priority");
     assert!(activity > goal);
@@ -152,7 +183,13 @@ fn manifest_050_decoration_slot_priority_orders_activity_above_goal() {
 #[test]
 fn manifest_050_host_takes_grants_from_the_manifest_for_each_side() {
     // for_manifest reads id, side, grants and tier (DEV-411); building must not fail for either side.
-    let server = FakeHost::for_manifest(manifest_path()).expect("loads").side("server").build();
-    let client = FakeHost::for_manifest(manifest_path()).expect("loads").side("client").build();
+    let server = FakeHost::for_manifest(manifest_path())
+        .expect("loads")
+        .side("server")
+        .build();
+    let client = FakeHost::for_manifest(manifest_path())
+        .expect("loads")
+        .side("client")
+        .build();
     drop((server, client));
 }

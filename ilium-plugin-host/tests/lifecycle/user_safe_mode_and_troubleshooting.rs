@@ -2,7 +2,12 @@
 
 use crate::support::*;
 
-const ESSENTIAL: [&str; 4] = ["ilium.core.tree", "ilium.core.layout", "ilium.core.settings", "ilium.core.sessions"];
+const ESSENTIAL: [&str; 4] = [
+    "ilium.core.tree",
+    "ilium.core.layout",
+    "ilium.core.settings",
+    "ilium.core.sessions",
+];
 
 fn mixed_host() -> LifeHost {
     let mut host = LifeHost::new();
@@ -29,9 +34,16 @@ fn lif_180_third_party_mode_loads_no_t2_or_t3() {
 #[test]
 fn lif_180_third_party_mode_ignores_replaces() {
     let mut host = mixed_host();
-    host.install(PluginSpec::new(C).tier(Tier::T2).replaces("ilium.core.extra").startup());
+    host.install(
+        PluginSpec::new(C)
+            .tier(Tier::T2)
+            .replaces("ilium.core.extra")
+            .startup(),
+    );
     host.start_safe(SafeMode::ThirdParty, None, None);
-    assert!(host.running_plugins().contains(&"ilium.core.extra".to_owned()));
+    assert!(host
+        .running_plugins()
+        .contains(&"ilium.core.extra".to_owned()));
 }
 
 /// REQ: LIF-180
@@ -81,7 +93,9 @@ fn lif_181_flag_wins_over_the_environment_variable() {
 fn lif_182_footer_shows_the_safe_mode_indicator() {
     let mut host = mixed_host();
     host.start_safe(SafeMode::ThirdParty, None, None);
-    assert!(host.footer().contains("Safe mode: third-party plugins are off."));
+    assert!(host
+        .footer()
+        .contains("Safe mode: third-party plugins are off."));
 }
 
 /// REQ: LIF-182
@@ -108,7 +122,9 @@ fn lif_183_the_essential_set_is_exactly_four_plugins_and_loads_in_all_optional()
 fn lif_183_a_fifth_core_plugin_is_not_essential() {
     let mut host = mixed_host();
     host.start_safe(SafeMode::AllOptional, None, None);
-    assert!(!host.running_plugins().contains(&"ilium.core.extra".to_owned()));
+    assert!(!host
+        .running_plugins()
+        .contains(&"ilium.core.extra".to_owned()));
 }
 
 /// REQ: LIF-184
@@ -120,7 +136,11 @@ fn lif_184_bisect_to_the_end_leaves_installed_json_unchanged() {
     host.cli(&["plugin", "bisect", "start"]);
     for _ in 0..8 {
         let out = host.cli(&["plugin", "bisect", "good"]);
-        if out.stdout_jsonl.iter().any(|l| l["type"] == "bisect" && l["found"].is_string()) {
+        if out
+            .stdout_jsonl
+            .iter()
+            .any(|l| l["type"] == "bisect" && l["found"].is_string())
+        {
             break;
         }
     }

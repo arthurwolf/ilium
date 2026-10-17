@@ -9,8 +9,21 @@ use serde_json::json;
 use crate::support::*;
 
 const KERNEL_DIALOGS: [&str; 5] = ["review", "trust", "consent", "breach", "recovery"];
-const PLUGIN_CHROME: [&str; 5] = ["toast", "tree-chrome", "palette-entry", "help-page", "intent-chrome"];
-const TEXT_FIELDS: [&str; 6] = ["label", "title", "toast", "reason", "status-segment", "help-text"];
+const PLUGIN_CHROME: [&str; 5] = [
+    "toast",
+    "tree-chrome",
+    "palette-entry",
+    "help-page",
+    "intent-chrome",
+];
+const TEXT_FIELDS: [&str; 6] = [
+    "label",
+    "title",
+    "toast",
+    "reason",
+    "status-segment",
+    "help-text",
+];
 
 fn forbidden(character: char) -> bool {
     let code = character as u32;
@@ -28,11 +41,19 @@ fn forbidden(character: char) -> bool {
 fn sec_377_every_kernel_security_dialog_is_drawn_on_top_of_plugin_ui() {
     for kind in KERNEL_DIALOGS {
         let rig = t3(&[]);
-        rig.host.plugin_draw_rows(&["PLUGIN ROW ONE", "PLUGIN ROW TWO"]).ok();
+        rig.host
+            .plugin_draw_rows(&["PLUGIN ROW ONE", "PLUGIN ROW TWO"])
+            .ok();
         rig.host.open_kernel_dialog(kind);
         let screen = rig.host.composited_screen().join("\n");
-        assert!(rig.host.visible_dialogs().contains(&kind.to_owned()), "{kind}");
-        assert!(!screen.contains("PLUGIN ROW ONE") || rig.host.dialog_is_topmost(kind), "{kind}");
+        assert!(
+            rig.host.visible_dialogs().contains(&kind.to_owned()),
+            "{kind}"
+        );
+        assert!(
+            !screen.contains("PLUGIN ROW ONE") || rig.host.dialog_is_topmost(kind),
+            "{kind}"
+        );
         assert!(rig.host.dialog_is_topmost(kind), "{kind}");
     }
 }
@@ -41,7 +62,9 @@ fn sec_377_every_kernel_security_dialog_is_drawn_on_top_of_plugin_ui() {
 #[test]
 fn sec_377_the_safe_mode_badge_is_drawn_on_top_of_plugin_status_segments() {
     let rig = setup(&[]).safe_mode().start();
-    rig.host.plugin_status_segment("A very long plugin segment that tries to push the badge out of the bar");
+    rig.host.plugin_status_segment(
+        "A very long plugin segment that tries to push the badge out of the bar",
+    );
     assert!(rig.host.status_bar_text().contains("SAFE"));
 }
 
@@ -53,7 +76,10 @@ fn sec_377_no_kernel_dialog_opens_while_the_user_types_in_a_terminal_pane() {
         rig.host.set_user_typing_in_terminal(true);
         rig.host.open_kernel_dialog(kind);
         assert!(rig.host.visible_dialogs().is_empty(), "{kind}");
-        assert!(rig.host.queued_dialogs().contains(&kind.to_owned()), "{kind}");
+        assert!(
+            rig.host.queued_dialogs().contains(&kind.to_owned()),
+            "{kind}"
+        );
     }
 }
 
@@ -87,7 +113,10 @@ fn sec_377_keystrokes_typed_before_a_dialog_appears_never_reach_it() {
     rig.host.set_user_typing_in_terminal(false);
     rig.host.open_kernel_dialog("consent");
     assert_eq!(rig.host.dialog_received_keys(), "");
-    assert!(rig.host.visible_dialogs().contains(&"consent".to_owned()), "a typed Enter must not accept the dialog");
+    assert!(
+        rig.host.visible_dialogs().contains(&"consent".to_owned()),
+        "a typed Enter must not accept the dialog"
+    );
 }
 
 /// REQ: SEC-377
@@ -95,9 +124,14 @@ fn sec_377_keystrokes_typed_before_a_dialog_appears_never_reach_it() {
 fn sec_377_a_plugin_cannot_imitate_a_kernel_dialog_while_the_user_types() {
     let rig = t3(&[]);
     rig.host.set_user_typing_in_terminal(true);
-    let drawn = rig.host.plugin_draw_rows(&["\u{256d}\u{2500}\u{2500} Install plugin \u{256e}"]);
+    let drawn = rig
+        .host
+        .plugin_draw_rows(&["\u{256d}\u{2500}\u{2500} Install plugin \u{256e}"]);
     let screen = rig.host.composited_screen().join("\n");
-    assert!(drawn.is_err() || !screen.contains("Install plugin"), "{screen}");
+    assert!(
+        drawn.is_err() || !screen.contains("Install plugin"),
+        "{screen}"
+    );
 }
 
 // ---- SEC-378 ----
@@ -109,7 +143,10 @@ fn sec_378_plugin_chrome_carries_the_display_name_as_a_prefix() {
     let name = rig.host.plugin_display_name();
     for kind in PLUGIN_CHROME {
         let text = rig.host.render_plugin_chrome(kind, "hello");
-        assert!(text.starts_with(&name) || text.contains(&format!("{name}:")), "{kind}: {text}");
+        assert!(
+            text.starts_with(&name) || text.contains(&format!("{name}:")),
+            "{kind}: {text}"
+        );
     }
 }
 
@@ -119,8 +156,17 @@ fn sec_378_the_plugin_cannot_remove_the_prefix() {
     let rig = t3(&[]);
     let name = rig.host.plugin_display_name();
     for kind in PLUGIN_CHROME {
-        for text in ["", " ", "\u{8}\u{8}\u{8}\u{8}\u{8}\u{8}\u{8}\u{8}", "\r", "\x1b[2K\x1b[1G"] {
-            assert!(rig.host.render_plugin_chrome(kind, text).contains(&name), "{kind} {text:?}");
+        for text in [
+            "",
+            " ",
+            "\u{8}\u{8}\u{8}\u{8}\u{8}\u{8}\u{8}\u{8}",
+            "\r",
+            "\x1b[2K\x1b[1G",
+        ] {
+            assert!(
+                rig.host.render_plugin_chrome(kind, text).contains(&name),
+                "{kind} {text:?}"
+            );
         }
     }
 }
@@ -130,8 +176,13 @@ fn sec_378_the_plugin_cannot_remove_the_prefix() {
 fn sec_378_plugin_chrome_never_uses_the_rounded_border_of_security_dialogs() {
     let rig = t3(&[]);
     for kind in PLUGIN_CHROME {
-        let text = rig.host.render_plugin_chrome(kind, "\u{256d}\u{2570} \u{256e}\u{256f}");
-        assert!(!text.contains(['\u{256d}', '\u{256e}', '\u{2570}', '\u{256f}']), "{kind}: {text}");
+        let text = rig
+            .host
+            .render_plugin_chrome(kind, "\u{256d}\u{2570} \u{256e}\u{256f}");
+        assert!(
+            !text.contains(['\u{256d}', '\u{256e}', '\u{2570}', '\u{256f}']),
+            "{kind}: {text}"
+        );
     }
 }
 
@@ -141,8 +192,18 @@ fn sec_378_kernel_dialogs_use_the_rounded_border() {
     let rig = t3(&[]);
     for kind in KERNEL_DIALOGS {
         let lines = rig.host.render_dialog(kind, 48, true);
-        assert!(lines.first().is_some_and(|line| line.starts_with('\u{256d}')), "{kind}");
-        assert!(lines.last().is_some_and(|line| line.starts_with('\u{2570}')), "{kind}");
+        assert!(
+            lines
+                .first()
+                .is_some_and(|line| line.starts_with('\u{256d}')),
+            "{kind}"
+        );
+        assert!(
+            lines
+                .last()
+                .is_some_and(|line| line.starts_with('\u{2570}')),
+            "{kind}"
+        );
     }
 }
 
@@ -150,7 +211,10 @@ fn sec_378_kernel_dialogs_use_the_rounded_border() {
 #[test]
 fn sec_378_a_plugin_name_that_imitates_the_kernel_cannot_be_installed() {
     let codes = manifest_error_codes(&server_manifest(json!({ "name": "Ilium Security" })));
-    assert!(codes.iter().any(|code| code == "manifest.display-name"), "{codes:?}");
+    assert!(
+        codes.iter().any(|code| code == "manifest.display-name"),
+        "{codes:?}"
+    );
 }
 
 // ---- SEC-379 ----
@@ -161,9 +225,15 @@ fn sec_379_a_plugin_draw_call_does_not_change_the_cells_of_a_kernel_dialog() {
     let rig = t3(&[]);
     rig.host.open_kernel_dialog("consent");
     let before = rig.host.dialog_cells("consent");
-    let _ = rig.host.plugin_draw_rows(&["XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"; 30]);
+    let _ = rig
+        .host
+        .plugin_draw_rows(&["XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"; 30]);
     assert_eq!(rig.host.dialog_cells("consent"), before);
-    assert!(!rig.host.composited_screen().join("\n").contains("XXXXXXXXXX\u{0}"));
+    assert!(!rig
+        .host
+        .composited_screen()
+        .join("\n")
+        .contains("XXXXXXXXXX\u{0}"));
 }
 
 /// REQ: SEC-379
@@ -174,7 +244,12 @@ fn sec_379_screen_changed_payloads_never_contain_dialog_text() {
     rig.host.pane_output("shell output\n");
     rig.host.pump(8);
     let dialog_text = rig.host.render_dialog("review", 48, true).join("\n");
-    let marker = dialog_text.lines().find(|line| line.chars().filter(|c| c.is_alphabetic()).count() > 8).unwrap_or("Install").trim_matches(|c: char| !c.is_alphanumeric()).to_owned();
+    let marker = dialog_text
+        .lines()
+        .find(|line| line.chars().filter(|c| c.is_alphabetic()).count() > 8)
+        .unwrap_or("Install")
+        .trim_matches(|c: char| !c.is_alphanumeric())
+        .to_owned();
     for payload in rig.host.screen_changed_payloads() {
         assert!(!payload.contains(&marker), "{payload}");
     }
@@ -189,7 +264,10 @@ fn sec_379_no_capture_call_returns_dialog_text() {
     for line in rig.host.render_dialog("trust", 48, true) {
         let trimmed = line.trim_matches(|c: char| !c.is_alphanumeric());
         if trimmed.chars().count() > 8 {
-            assert!(!capture.iter().any(|line| line.contains(trimmed)), "{trimmed}");
+            assert!(
+                !capture.iter().any(|line| line.contains(trimmed)),
+                "{trimmed}"
+            );
         }
     }
 }
@@ -202,8 +280,14 @@ fn sec_380_c0_controls_are_removed_or_replaced() {
     for code in 0u32..0x20 {
         let character = char::from_u32(code).expect("control");
         let cleaned = sanitize_plugin_text(&format!("a{character}b"), 120);
-        assert!(!cleaned.chars().any(forbidden), "U+{code:04X} left in {cleaned:?}");
-        assert!(cleaned.starts_with('a') && cleaned.ends_with('b'), "{cleaned:?}");
+        assert!(
+            !cleaned.chars().any(forbidden),
+            "U+{code:04X} left in {cleaned:?}"
+        );
+        assert!(
+            cleaned.starts_with('a') && cleaned.ends_with('b'),
+            "{cleaned:?}"
+        );
     }
 }
 
@@ -213,7 +297,10 @@ fn sec_380_c1_controls_are_removed_or_replaced() {
     for code in 0x7fu32..=0x9f {
         let character = char::from_u32(code).expect("control");
         let cleaned = sanitize_plugin_text(&format!("a{character}b"), 120);
-        assert!(!cleaned.chars().any(forbidden), "U+{code:04X} left in {cleaned:?}");
+        assert!(
+            !cleaned.chars().any(forbidden),
+            "U+{code:04X} left in {cleaned:?}"
+        );
     }
 }
 
@@ -221,14 +308,20 @@ fn sec_380_c1_controls_are_removed_or_replaced() {
 #[test]
 fn sec_380_escape_sequences_are_removed() {
     let cleaned = sanitize_plugin_text("\x1b[31mred\x1b[0m \x1b]0;title\x07done", 120);
-    assert!(!cleaned.contains('\x1b') && !cleaned.contains("[31m") && !cleaned.contains("[0m"), "{cleaned:?}");
+    assert!(
+        !cleaned.contains('\x1b') && !cleaned.contains("[31m") && !cleaned.contains("[0m"),
+        "{cleaned:?}"
+    );
     assert!(cleaned.contains("red") && cleaned.contains("done"));
 }
 
 /// REQ: SEC-380
 #[test]
 fn sec_380_bidirectional_overrides_are_removed() {
-    let marks: Vec<char> = (0x202au32..=0x202e).chain(0x2066..=0x2069).filter_map(char::from_u32).collect();
+    let marks: Vec<char> = (0x202au32..=0x202e)
+        .chain(0x2066..=0x2069)
+        .filter_map(char::from_u32)
+        .collect();
     assert_eq!(marks.len(), 9);
     for mark in marks {
         let cleaned = sanitize_plugin_text(&format!("safe{mark}txt.exe"), 120);
@@ -254,21 +347,33 @@ fn sec_380_box_drawing_runs_of_three_or_more_are_removed_or_replaced() {
         assert!(!cleaned.contains('\u{2500}'), "run of {run}: {cleaned:?}");
     }
     let mixed = sanitize_plugin_text("x\u{2500}\u{2502}\u{256d}y", 120);
-    assert!(!mixed.contains(['\u{2500}', '\u{2502}', '\u{256d}']), "{mixed:?}");
+    assert!(
+        !mixed.contains(['\u{2500}', '\u{2502}', '\u{256d}']),
+        "{mixed:?}"
+    );
 }
 
 /// REQ: SEC-380
 #[test]
 fn sec_380_box_drawing_runs_shorter_than_three_are_kept() {
     assert_eq!(sanitize_plugin_text("a\u{2500}b", 120), "a\u{2500}b");
-    assert_eq!(sanitize_plugin_text("a\u{2500}\u{2500}b", 120), "a\u{2500}\u{2500}b");
+    assert_eq!(
+        sanitize_plugin_text("a\u{2500}\u{2500}b", 120),
+        "a\u{2500}\u{2500}b"
+    );
 }
 
 /// REQ: SEC-380
 #[test]
 fn sec_380_plain_text_passes_unchanged() {
-    assert_eq!(sanitize_plugin_text("Build finished: 3 tests passed", 120), "Build finished: 3 tests passed");
-    assert_eq!(sanitize_plugin_text("caf\u{e9} \u{65e5}\u{672c}", 120), "caf\u{e9} \u{65e5}\u{672c}");
+    assert_eq!(
+        sanitize_plugin_text("Build finished: 3 tests passed", 120),
+        "Build finished: 3 tests passed"
+    );
+    assert_eq!(
+        sanitize_plugin_text("caf\u{e9} \u{65e5}\u{672c}", 120),
+        "caf\u{e9} \u{65e5}\u{672c}"
+    );
 }
 
 /// REQ: SEC-380
@@ -293,12 +398,22 @@ fn sec_380_text_at_the_limit_is_not_clipped_and_one_over_is() {
 #[test]
 fn sec_380_every_ui_text_field_is_sanitised_before_it_is_shown() {
     let rig = t3(&[]);
-    let corpus = ["\x1b[2Jclear", "evil\u{202e}gnp.exe", "Il\u{200b}ium", "\u{250c}\u{2500}\u{2500}\u{2500}\u{2510}", "bell\x07\x08\x7f", "\u{85}next"];
+    let corpus = [
+        "\x1b[2Jclear",
+        "evil\u{202e}gnp.exe",
+        "Il\u{200b}ium",
+        "\u{250c}\u{2500}\u{2500}\u{2500}\u{2510}",
+        "bell\x07\x08\x7f",
+        "\u{85}next",
+    ];
     for field in TEXT_FIELDS {
         for text in corpus {
             let shown = rig.host.render_plugin_text(field, text);
             assert!(!shown.chars().any(forbidden), "{field}: {shown:?}");
-            assert!(!shown.contains("\u{2500}\u{2500}\u{2500}"), "{field}: {shown:?}");
+            assert!(
+                !shown.contains("\u{2500}\u{2500}\u{2500}"),
+                "{field}: {shown:?}"
+            );
         }
     }
 }
@@ -344,7 +459,9 @@ fn name_codes(name: &str, id: &str) -> Vec<String> {
 }
 
 fn rejects(name: &str, id: &str) -> bool {
-    name_codes(name, id).iter().any(|code| code == "manifest.display-name")
+    name_codes(name, id)
+        .iter()
+        .any(|code| code == "manifest.display-name")
 }
 
 /// REQ: SEC-381
@@ -387,7 +504,12 @@ fn sec_381_a_name_equal_to_ilium_or_kernel_is_refused_for_a_third_party() {
 /// REQ: SEC-381
 #[test]
 fn sec_381_a_name_starting_with_ilium_or_kernel_is_refused_for_a_third_party() {
-    for name in ["Ilium Tools", "Iliumx", "Kernel Panic", "Kernel Security Center"] {
+    for name in [
+        "Ilium Tools",
+        "Iliumx",
+        "Kernel Panic",
+        "Kernel Security Center",
+    ] {
         assert!(rejects(name, "example.demo"), "{name}");
     }
 }
@@ -419,8 +541,16 @@ fn sec_381_an_id_that_merely_resembles_ilium_does_not_unlock_the_names() {
 #[test]
 fn sec_381_the_install_check_refuses_with_the_display_name_code() {
     let rig = t3(&[]);
-    assert_eq!(rig.host.install_check_with_name("example.demo", Tier::T3, "Ilium Tools"), Err("manifest.display-name".to_owned()));
-    assert_eq!(rig.host.install_check_with_name("example.demo", Tier::T3, "Demo Tools"), Ok(()));
+    assert_eq!(
+        rig.host
+            .install_check_with_name("example.demo", Tier::T3, "Ilium Tools"),
+        Err("manifest.display-name".to_owned())
+    );
+    assert_eq!(
+        rig.host
+            .install_check_with_name("example.demo", Tier::T3, "Demo Tools"),
+        Ok(())
+    );
 }
 
 proptest! {

@@ -6,11 +6,16 @@ use serde_json::{json, Value};
 use crate::support::*;
 
 fn ids(count: usize) -> Vec<String> {
-    (0..count).map(|index| format!("example.peer{index}")).collect()
+    (0..count)
+        .map(|index| format!("example.peer{index}"))
+        .collect()
 }
 
 fn error_pointers(found: &[Diagnostic]) -> Vec<String> {
-    found.iter().map(|diagnostic| diagnostic.pointer.clone()).collect()
+    found
+        .iter()
+        .map(|diagnostic| diagnostic.pointer.clone())
+        .collect()
 }
 
 fn point(risk: Value) -> Value {
@@ -49,7 +54,14 @@ fn pkg_578_three_errors_print_in_pointer_order_not_declaration_order() {
 #[test]
 fn pkg_578_the_same_manifest_always_prints_the_same_order() {
     let value = set(set(client(), "/version", json!("x")), "/id", json!("Bad"));
-    assert_eq!(error_codes(&diagnostics(&value, ilium_plugin_api::Tier::T3, ilium_plugin_api::manifest::CheckMode::Check)), errors(&value));
+    assert_eq!(
+        error_codes(&diagnostics(
+            &value,
+            ilium_plugin_api::Tier::T3,
+            ilium_plugin_api::manifest::CheckMode::Check
+        )),
+        errors(&value)
+    );
     assert_eq!(errors(&value), errors(&value));
 }
 
@@ -83,7 +95,14 @@ fn pkg_579_duplicate_ids_are_refused() {
 /// REQ: PKG-579
 #[test]
 fn pkg_579_service_requirement_with_a_range_refused_service_version() {
-    for text in ["svc@^1.0.0", "svc@~1.0.0", "svc@1.0", "svc@>=1.0.0", "svc", "svc@1.0.0-rc1x.y"] {
+    for text in [
+        "svc@^1.0.0",
+        "svc@~1.0.0",
+        "svc@1.0",
+        "svc@>=1.0.0",
+        "svc",
+        "svc@1.0.0-rc1x.y",
+    ] {
         let value = set(client(), "/requires/services", json!([text]));
         let found = errors(&value);
         assert!(
@@ -153,8 +172,21 @@ fn doc_pkg_581_the_page_maps_the_old_code_to_source_denied() {
 /// REQ: PKG-582
 #[test]
 fn pkg_582_every_kernel_subcommand_refused_cli_name_reserved() {
-    for name in ["plugin", "session", "recap", "progress", "chat", "kill-session", "help", "version"] {
-        let value = set(client(), "/contributes/cli", json!([{ "name": name, "summary": "S" }]));
+    for name in [
+        "plugin",
+        "session",
+        "recap",
+        "progress",
+        "chat",
+        "kill-session",
+        "help",
+        "version",
+    ] {
+        let value = set(
+            client(),
+            "/contributes/cli",
+            json!([{ "name": name, "summary": "S" }]),
+        );
         let found = errors(&value);
         assert_has(&found, "manifest.cli-name-reserved");
         assert_lacks(&found, "manifest.cli-name-taken");
@@ -165,7 +197,11 @@ fn pkg_582_every_kernel_subcommand_refused_cli_name_reserved() {
 #[test]
 fn pkg_582_a_non_reserved_name_is_not_reserved() {
     for name in ["plugins", "sessions", "tool", "versions"] {
-        let value = set(client(), "/contributes/cli", json!([{ "name": name, "summary": "S" }]));
+        let value = set(
+            client(),
+            "/contributes/cli",
+            json!([{ "name": name, "summary": "S" }]),
+        );
         assert_lacks(&errors(&value), "manifest.cli-name-reserved");
     }
 }
@@ -200,7 +236,11 @@ fn pkg_582_taken_is_used_for_a_name_of_another_plugin_only() {
 #[test]
 fn pkg_583_an_unknown_risk_refused_point_risk() {
     for risk in ["low", "medium", "HIGH", ""] {
-        let value = set(client(), "/contributes/extension_points", point(json!(risk)));
+        let value = set(
+            client(),
+            "/contributes/extension_points",
+            point(json!(risk)),
+        );
         assert_has(&errors(&value), "manifest.point-risk");
     }
 }
@@ -209,7 +249,11 @@ fn pkg_583_an_unknown_risk_refused_point_risk() {
 #[test]
 fn pkg_583_known_risks_are_not_point_risk() {
     for risk in ["standard", "high"] {
-        let value = set(client(), "/contributes/extension_points", point(json!(risk)));
+        let value = set(
+            client(),
+            "/contributes/extension_points",
+            point(json!(risk)),
+        );
         assert_lacks(&errors(&value), "manifest.point-risk");
     }
 }
@@ -221,7 +265,11 @@ fn pkg_583_a_missing_risk_defaults_to_standard_and_is_not_point_risk() {
     entry[0].as_object_mut().unwrap().remove("risk");
     let value = set(client(), "/contributes/extension_points", entry);
     assert_clean(&value);
-    let unknown = set(client(), "/contributes/extension_points", point(json!("critical")));
+    let unknown = set(
+        client(),
+        "/contributes/extension_points",
+        point(json!("critical")),
+    );
     assert_has(&errors(&unknown), "manifest.point-risk");
 }
 

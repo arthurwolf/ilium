@@ -39,7 +39,9 @@ struct Digits {
 
 impl SceneRenderer for Digits {
     fn new(_spec_json: &str) -> Self {
-        Digits { palette: Vec::new() }
+        Digits {
+            palette: Vec::new(),
+        }
     }
 
     fn render(&mut self, frame: &FrameInput, surface: &mut NativeSurface) {
@@ -72,7 +74,10 @@ impl SceneRenderer for Digits {
 }
 
 fn input_at(time_millis: u64) -> FrameInput {
-    FrameInput { time_millis, ..FrameInput::default() }
+    FrameInput {
+        time_millis,
+        ..FrameInput::default()
+    }
 }
 
 // ---- DEV-560 ---------------------------------------------------------------------------------
@@ -137,7 +142,14 @@ fn dev_560_the_smallest_scene_is_one_cell() {
 fn dev_560_the_renderer_receives_the_given_frame_input() {
     seen_reset();
     let mut scene = FakeScene::new::<Digits>("example.scene", 4, 2);
-    let input = FrameInput { time_millis: 40, wall_millis: 41, now_unix_millis: 42, width: 4, height: 2, palette_rgb: vec![1, 2] };
+    let input = FrameInput {
+        time_millis: 40,
+        wall_millis: 41,
+        now_unix_millis: 42,
+        width: 4,
+        height: 2,
+        palette_rgb: vec![1, 2],
+    };
     scene.frame(input.clone());
     assert_eq!(seen().frames, vec![input]);
 }

@@ -56,7 +56,14 @@ fn optimizer_082_the_panel_shows_threshold_recommended_and_both_buttons() {
     let mut host = opened();
     host.set_recommendation(72, 65);
     let text = host.render(panel(), 80, 24).text();
-    for needle in ["Auto-compact threshold", "72 %", "Recommended", "65 %", "[ Apply ]", "[ Revert ]"] {
+    for needle in [
+        "Auto-compact threshold",
+        "72 %",
+        "Recommended",
+        "65 %",
+        "[ Apply ]",
+        "[ Revert ]",
+    ] {
         assert!(text.contains(needle), "missing {needle}");
     }
 }
@@ -91,8 +98,12 @@ fn optimizer_082_confirming_changes_only_the_one_key_and_keeps_comments_byte_for
     host.set_recommendation(72, 65);
     host.key(panel(), "a");
     host.key(panel(), "Enter");
-    let after = String::from_utf8(host.agent_files().read(CODEX_FILE).expect("file")).expect("utf-8");
-    assert_eq!(after, original.replace("123456", &host.recommended_tokens().to_string()));
+    let after =
+        String::from_utf8(host.agent_files().read(CODEX_FILE).expect("file")).expect("utf-8");
+    assert_eq!(
+        after,
+        original.replace("123456", &host.recommended_tokens().to_string())
+    );
 }
 
 /// REQ: F-082
@@ -106,7 +117,10 @@ fn optimizer_082_revert_restores_the_previous_value_and_shows_a_reverted_note() 
     host.key(panel(), "Enter");
     host.key(panel(), "r");
     host.key(panel(), "Enter");
-    assert_eq!(host.agent_files().read(CODEX_FILE), Some(original.as_bytes().to_vec()));
+    assert_eq!(
+        host.agent_files().read(CODEX_FILE),
+        Some(original.as_bytes().to_vec())
+    );
     assert!(host.render(panel(), 100, 24).text().contains("Reverted"));
 }
 
@@ -114,15 +128,23 @@ fn optimizer_082_revert_restores_the_previous_value_and_shows_a_reverted_note() 
 #[test]
 fn optimizer_082_revert_after_an_outside_edit_is_refused_and_the_file_is_left_alone() {
     let mut host = opened();
-    host.agent_files().write(CODEX_FILE, b"model_auto_compact_token_limit = 123456\n");
+    host.agent_files()
+        .write(CODEX_FILE, b"model_auto_compact_token_limit = 123456\n");
     host.set_recommendation(72, 65);
     host.key(panel(), "a");
     host.key(panel(), "Enter");
-    host.agent_files().write(CODEX_FILE, b"model_auto_compact_token_limit = 999\n");
+    host.agent_files()
+        .write(CODEX_FILE, b"model_auto_compact_token_limit = 999\n");
     host.key(panel(), "r");
     host.key(panel(), "Enter");
-    assert_eq!(host.agent_files().read(CODEX_FILE), Some(b"model_auto_compact_token_limit = 999\n".to_vec()));
-    assert!(host.render(panel(), 100, 24).text().contains("changed since"));
+    assert_eq!(
+        host.agent_files().read(CODEX_FILE),
+        Some(b"model_auto_compact_token_limit = 999\n".to_vec())
+    );
+    assert!(host
+        .render(panel(), 100, 24)
+        .text()
+        .contains("changed since"));
 }
 
 /// REQ: F-082
@@ -182,7 +204,8 @@ fn optimizer_082_a_missing_agent_file_is_created_with_only_the_one_key_after_con
     host.set_recommendation(72, 65);
     host.key(panel(), "a");
     host.key(panel(), "Enter");
-    let after = String::from_utf8(host.agent_files().read(CODEX_FILE).expect("file created")).expect("utf-8");
+    let after = String::from_utf8(host.agent_files().read(CODEX_FILE).expect("file created"))
+        .expect("utf-8");
     assert_eq!(after.lines().count(), 1);
     assert!(after.starts_with("model_auto_compact_token_limit = "));
 }
@@ -190,7 +213,12 @@ fn optimizer_082_a_missing_agent_file_is_created_with_only_the_one_key_after_con
 /// REQ: F-082
 #[test]
 fn optimizer_082_the_panel_needs_the_client_ui_panels_grant() {
-    let client: Vec<String> = manifest_value()["capabilities"]["client"].as_array().expect("grants").iter().map(|grant| grant.as_str().unwrap_or_default().to_string()).collect();
+    let client: Vec<String> = manifest_value()["capabilities"]["client"]
+        .as_array()
+        .expect("grants")
+        .iter()
+        .map(|grant| grant.as_str().unwrap_or_default().to_string())
+        .collect();
     assert!(client.contains(&"ui.panels".to_string()));
 }
 
@@ -198,12 +226,17 @@ fn optimizer_082_the_panel_needs_the_client_ui_panels_grant() {
 #[test]
 fn convert_115_a_converted_session_is_opened_for_inspection_with_open_external() {
     let mut host = client_host();
-    let submissions = host.convert_session("claude", "codex", "/home/u/.codex/sessions/rollout-1.jsonl");
-    let target = intents(&submissions).into_iter().find_map(|intent| match intent {
-        Intent::OpenExternal(spec) => Some(spec.target),
-        _ => None,
-    });
-    assert!(matches!(target, Some(ExternalTarget::File(path)) if path.path == "/home/u/.codex/sessions/rollout-1.jsonl"));
+    let submissions =
+        host.convert_session("claude", "codex", "/home/u/.codex/sessions/rollout-1.jsonl");
+    let target = intents(&submissions)
+        .into_iter()
+        .find_map(|intent| match intent {
+            Intent::OpenExternal(spec) => Some(spec.target),
+            _ => None,
+        });
+    assert!(
+        matches!(target, Some(ExternalTarget::File(path)) if path.path == "/home/u/.codex/sessions/rollout-1.jsonl")
+    );
 }
 
 /// REQ: F-115
@@ -211,7 +244,10 @@ fn convert_115_a_converted_session_is_opened_for_inspection_with_open_external()
 fn convert_115_exactly_one_open_external_is_submitted_per_conversion() {
     let mut host = client_host();
     let submissions = host.convert_session("codex", "claude", "/home/u/.claude/projects/p/s.jsonl");
-    let count = intents(&submissions).iter().filter(|intent| matches!(intent, Intent::OpenExternal(_))).count();
+    let count = intents(&submissions)
+        .iter()
+        .filter(|intent| matches!(intent, Intent::OpenExternal(_)))
+        .count();
     assert_eq!(count, 1);
 }
 
@@ -220,14 +256,23 @@ fn convert_115_exactly_one_open_external_is_submitted_per_conversion() {
 fn convert_115_a_failed_conversion_opens_nothing() {
     let mut host = client_host();
     let submissions = host.convert_session_failing("claude", "codex");
-    assert!(!intents(&submissions).iter().any(|intent| matches!(intent, Intent::OpenExternal(_))));
+    assert!(!intents(&submissions)
+        .iter()
+        .any(|intent| matches!(intent, Intent::OpenExternal(_))));
 }
 
 /// REQ: F-115
 #[test]
 fn convert_115_the_open_external_grant_is_declared_on_the_client_only() {
     let manifest = manifest_value();
-    let grants = |side: &str| -> Vec<String> { manifest["capabilities"][side].as_array().expect("grants").iter().map(|grant| grant.as_str().unwrap_or_default().to_string()).collect() };
+    let grants = |side: &str| -> Vec<String> {
+        manifest["capabilities"][side]
+            .as_array()
+            .expect("grants")
+            .iter()
+            .map(|grant| grant.as_str().unwrap_or_default().to_string())
+            .collect()
+    };
     assert!(grants("client").contains(&"open-external".to_string()));
     assert!(!grants("server").contains(&"open-external".to_string()));
     let _ = json!(null);

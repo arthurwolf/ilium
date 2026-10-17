@@ -8,12 +8,14 @@ use crate::common::*;
 
 fn open() -> ilium_plugin_sdk::testing::FakeHost {
     let mut host = client_host();
-    host.deliver_one(ilium_plugin_sdk::types::Event::CommandInvoked(ilium_plugin_sdk::types::CommandInvokedEvent {
-        command: "ask-for-update".to_string(),
-        arguments_json: "{}".to_string(),
-        origin: ilium_plugin_sdk::types::CommandOrigin::Palette,
-        context: ilium_plugin_sdk::types::CommandContext::default(),
-    }));
+    host.deliver_one(ilium_plugin_sdk::types::Event::CommandInvoked(
+        ilium_plugin_sdk::types::CommandInvokedEvent {
+            command: "ask-for-update".to_string(),
+            arguments_json: "{}".to_string(),
+            origin: ilium_plugin_sdk::types::CommandOrigin::Palette,
+            context: ilium_plugin_sdk::types::CommandContext::default(),
+        },
+    ));
     host.settle();
     host
 }
@@ -22,7 +24,9 @@ fn open() -> ilium_plugin_sdk::testing::FakeHost {
 #[test]
 fn agent_message_dialog_all_recipients_start_selected_and_message_field_is_present() {
     let mut host = open();
-    let text = host.render(ViewTarget::Popup("ask-for-update".to_string()), 80, 24).text();
+    let text = host
+        .render(ViewTarget::Popup("ask-for-update".to_string()), 80, 24)
+        .text();
     assert!(text.contains("All agents"), "{text}");
     assert!(text.contains("Message"), "{text}");
 }

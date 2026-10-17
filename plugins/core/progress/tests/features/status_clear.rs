@@ -25,7 +25,14 @@ fn f_060_status_record_fields_come_in_the_documented_order() {
     let run = progress(&mut host, pane, &["status"]);
     assert_eq!(
         top_level_keys(&line_of(&run.stdout, "progress_status")),
-        ["type", "request_id", "pane_id", "monitor_count", "running", "monitors"]
+        [
+            "type",
+            "request_id",
+            "pane_id",
+            "monitor_count",
+            "running",
+            "monitors"
+        ]
     );
 }
 
@@ -33,8 +40,20 @@ fn f_060_status_record_fields_come_in_the_documented_order() {
 #[test]
 fn f_060_status_counts_running_monitors_separately_from_settled_ones() {
     let (mut host, pane) = host_with_pane();
-    register(&mut host, pane, "/opt/a.sh", &running("job-a", 10, "A"), &[]);
-    register(&mut host, pane, "/opt/b.sh", &running("job-b", 20, "B"), &[]);
+    register(
+        &mut host,
+        pane,
+        "/opt/a.sh",
+        &running("job-a", 10, "A"),
+        &[],
+    );
+    register(
+        &mut host,
+        pane,
+        "/opt/b.sh",
+        &running("job-b", 20, "B"),
+        &[],
+    );
     expect_probe(&mut host, "/opt/a.sh", &done("job-a", "A done"));
     host.process().allow_unexpected();
     tick(&mut host, 1);
@@ -48,10 +67,23 @@ fn f_060_status_counts_running_monitors_separately_from_settled_ones() {
 fn f_060_status_lists_monitors_in_registration_order() {
     let (mut host, pane) = host_with_pane();
     let ids: Vec<u64> = (0..3)
-        .map(|n| register(&mut host, pane, &format!("/opt/{n}.sh"), &running(&format!("job-{n}"), 0, "W"), &[]))
+        .map(|n| {
+            register(
+                &mut host,
+                pane,
+                &format!("/opt/{n}.sh"),
+                &running(&format!("job-{n}"), 0, "W"),
+                &[],
+            )
+        })
         .collect();
     let record = status(&mut host, pane);
-    let listed: Vec<u64> = record["monitors"].as_array().unwrap().iter().map(|m| m["monitor_id"].as_u64().unwrap()).collect();
+    let listed: Vec<u64> = record["monitors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["monitor_id"].as_u64().unwrap())
+        .collect();
     assert_eq!(listed, ids);
 }
 
@@ -88,7 +120,13 @@ fn f_060_check_record_fields_come_in_the_documented_order() {
     let run = progress(&mut host, pane, &["check", "--command", PROBE]);
     assert_eq!(
         top_level_keys(&line_of(&run.stdout, "progress_check")),
-        ["type", "request_id", "pane_id", "checked_at_unix_millis", "report"]
+        [
+            "type",
+            "request_id",
+            "pane_id",
+            "checked_at_unix_millis",
+            "report"
+        ]
     );
 }
 
@@ -99,7 +137,10 @@ fn f_060_check_of_a_bad_report_is_rejected_invalid_probe_report() {
     expect_probe(&mut host, PROBE, "not json");
     let run = progress(&mut host, pane, &["check", "--command", PROBE]);
     assert_eq!(run.exit, Some(2));
-    assert_eq!(record_of(&run.stdout, "progress_rejected")["code"], "invalid-probe-report");
+    assert_eq!(
+        record_of(&run.stdout, "progress_rejected")["code"],
+        "invalid-probe-report"
+    );
 }
 
 /// REQ: F-060, progress-B01
@@ -108,7 +149,11 @@ fn f_060_clear_with_a_monitor_id_removes_that_monitor_and_reports_it() {
     let (mut host, pane) = host_with_pane();
     let first = register(&mut host, pane, "/opt/a.sh", &running("job-a", 0, "A"), &[]);
     let second = register(&mut host, pane, "/opt/b.sh", &running("job-b", 0, "B"), &[]);
-    let run = progress(&mut host, pane, &["clear", "--monitor-id", &first.to_string()]);
+    let run = progress(
+        &mut host,
+        pane,
+        &["clear", "--monitor-id", &first.to_string()],
+    );
     assert_eq!(run.exit, Some(0));
     let record = record_of(&run.stdout, "progress_clear");
     assert_eq!(record["cleared"], 1);
@@ -124,7 +169,13 @@ fn f_060_clear_record_fields_come_in_the_documented_order() {
     let run = progress(&mut host, pane, &["clear", "--all"]);
     assert_eq!(
         top_level_keys(&line_of(&run.stdout, "progress_clear")),
-        ["type", "request_id", "pane_id", "cleared", "cleared_monitor_ids"]
+        [
+            "type",
+            "request_id",
+            "pane_id",
+            "cleared",
+            "cleared_monitor_ids"
+        ]
     );
 }
 
@@ -133,7 +184,13 @@ fn f_060_clear_record_fields_come_in_the_documented_order() {
 fn f_060_clear_all_removes_every_monitor_of_the_pane() {
     let (mut host, pane) = host_with_pane();
     for n in 0..3 {
-        register(&mut host, pane, &format!("/opt/{n}.sh"), &running(&format!("job-{n}"), 0, "W"), &[]);
+        register(
+            &mut host,
+            pane,
+            &format!("/opt/{n}.sh"),
+            &running(&format!("job-{n}"), 0, "W"),
+            &[],
+        );
     }
     let run = progress(&mut host, pane, &["clear", "--all"]);
     assert_eq!(record_of(&run.stdout, "progress_clear")["cleared"], 3);
@@ -146,7 +203,10 @@ fn f_060_clear_without_an_id_removes_the_only_monitor() {
     let (mut host, pane) = host_with_pane();
     let id = register(&mut host, pane, PROBE, &running("job", 0, "W"), &[]);
     let run = progress(&mut host, pane, &["clear"]);
-    assert_eq!(record_of(&run.stdout, "progress_clear")["cleared_monitor_ids"], json!([id]));
+    assert_eq!(
+        record_of(&run.stdout, "progress_clear")["cleared_monitor_ids"],
+        json!([id])
+    );
 }
 
 /// REQ: F-060, progress-B15
@@ -169,7 +229,10 @@ fn progress_b15_clearing_an_unknown_monitor_is_rejected_stale_monitor() {
     let (mut host, pane) = host_with_pane();
     let run = progress(&mut host, pane, &["clear", "--monitor-id", "424242"]);
     assert_eq!(run.exit, Some(2));
-    assert_eq!(record_of(&run.stdout, "progress_rejected")["code"], "stale-monitor");
+    assert_eq!(
+        record_of(&run.stdout, "progress_rejected")["code"],
+        "stale-monitor"
+    );
 }
 
 /// REQ: F-060
@@ -198,5 +261,8 @@ fn f_060_clear_all_on_an_empty_pane_clears_zero_and_exits_zero() {
 fn progress_b15_a_request_for_an_unknown_pane_is_rejected_pane_not_found() {
     let (mut host, _pane) = host_with_pane();
     let run = progress(&mut host, 999, &["status"]);
-    assert_eq!(record_of(&run.stdout, "progress_rejected")["code"], "pane-not-found");
+    assert_eq!(
+        record_of(&run.stdout, "progress_rejected")["code"],
+        "pane-not-found"
+    );
 }

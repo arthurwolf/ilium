@@ -24,38 +24,59 @@ fn failed_code(outcome: &Outcome) -> Option<&str> {
 /// REQ: HST-209
 #[test]
 fn hst_209_side_stopped_completes_cancelled() {
-    assert_eq!(cancellation_outcome(CancelCause::SideStopped), Outcome::Cancelled);
+    assert_eq!(
+        cancellation_outcome(CancelCause::SideStopped),
+        Outcome::Cancelled
+    );
 }
 
 /// REQ: HST-209
 #[test]
 fn hst_209_plugin_asked_and_shutdown_complete_cancelled() {
-    assert_eq!(cancellation_outcome(CancelCause::PluginAsked), Outcome::Cancelled);
-    assert_eq!(cancellation_outcome(CancelCause::Shutdown), Outcome::Cancelled);
+    assert_eq!(
+        cancellation_outcome(CancelCause::PluginAsked),
+        Outcome::Cancelled
+    );
+    assert_eq!(
+        cancellation_outcome(CancelCause::Shutdown),
+        Outcome::Cancelled
+    );
 }
 
 /// REQ: HST-209
 #[test]
 fn hst_209_grant_revoked_completes_failed_revoked() {
-    assert_eq!(failed_code(&cancellation_outcome(CancelCause::GrantRevoked)), Some("revoked"));
+    assert_eq!(
+        failed_code(&cancellation_outcome(CancelCause::GrantRevoked)),
+        Some("revoked")
+    );
 }
 
 /// REQ: HST-209
 #[test]
 fn hst_209_deadline_passed_completes_failed_timed_out() {
-    assert_eq!(failed_code(&cancellation_outcome(CancelCause::DeadlinePassed)), Some("timed-out"));
+    assert_eq!(
+        failed_code(&cancellation_outcome(CancelCause::DeadlinePassed)),
+        Some("timed-out")
+    );
 }
 
 /// REQ: HST-209
 #[test]
 fn hst_209_provider_trap_completes_waiting_callers_failed_cancelled() {
-    assert_eq!(failed_code(&cancellation_outcome(CancelCause::ProviderTrapped)), Some("cancelled"));
+    assert_eq!(
+        failed_code(&cancellation_outcome(CancelCause::ProviderTrapped)),
+        Some("cancelled")
+    );
 }
 
 /// REQ: HST-209
 #[test]
 fn hst_209_provider_breach_completes_the_breaching_call_failed_timed_out() {
-    assert_eq!(failed_code(&cancellation_outcome(CancelCause::ProviderBreach)), Some("timed-out"));
+    assert_eq!(
+        failed_code(&cancellation_outcome(CancelCause::ProviderBreach)),
+        Some("timed-out")
+    );
 }
 
 /// REQ: HST-209
@@ -64,7 +85,10 @@ fn hst_209_cancel_of_an_open_request_completes_it_cancelled() {
     let mut ledger = RequestLedger::new();
     ledger.open(RequestRef::Submission(1));
     ledger.cancel(RequestRef::Submission(1));
-    assert_eq!(ledger.outcome_of(RequestRef::Submission(1)), Some(Outcome::Cancelled));
+    assert_eq!(
+        ledger.outcome_of(RequestRef::Submission(1)),
+        Some(Outcome::Cancelled)
+    );
 }
 
 /// REQ: HST-209
@@ -74,7 +98,10 @@ fn hst_209_a_completed_request_is_not_changed_by_a_later_cancel() {
     ledger.open(RequestRef::Submission(1));
     ledger.complete(RequestRef::Submission(1), Outcome::Ok);
     ledger.cancel(RequestRef::Submission(1));
-    assert_eq!(ledger.outcome_of(RequestRef::Submission(1)), Some(Outcome::Ok));
+    assert_eq!(
+        ledger.outcome_of(RequestRef::Submission(1)),
+        Some(Outcome::Ok)
+    );
     assert_eq!(ledger.completion_count(RequestRef::Submission(1)), 1);
 }
 
@@ -149,13 +176,19 @@ fn hst_210_job_is_still_running_at_999_ms_after_the_flag() {
 #[test]
 fn hst_210_job_ignoring_the_flag_is_trapped_after_1000_ms() {
     assert_eq!(job_cancel_verdict(0, 1_001, false), JobCancelVerdict::Trap);
-    assert_eq!(job_cancel_verdict(500, 1_501, false), JobCancelVerdict::Trap);
+    assert_eq!(
+        job_cancel_verdict(500, 1_501, false),
+        JobCancelVerdict::Trap
+    );
 }
 
 /// REQ: HST-210
 #[test]
 fn hst_210_job_that_returned_in_time_is_never_trapped() {
-    assert_eq!(job_cancel_verdict(0, 5_000, true), JobCancelVerdict::Running);
+    assert_eq!(
+        job_cancel_verdict(0, 5_000, true),
+        JobCancelVerdict::Running
+    );
 }
 
 proptest! {
@@ -168,8 +201,20 @@ proptest! {
 
 // ---- HST-211..213 -------------------------------------------------------------------------
 
-fn handler(name: &str, process: ProcessKind, deadline_ms: u64, busy_until_ms: u64, run_ms: u64) -> HandlerSpec {
-    HandlerSpec { plugin: plugin(name), process, deadline_ms, busy_until_ms, run_ms }
+fn handler(
+    name: &str,
+    process: ProcessKind,
+    deadline_ms: u64,
+    busy_until_ms: u64,
+    run_ms: u64,
+) -> HandlerSpec {
+    HandlerSpec {
+        plugin: plugin(name),
+        process,
+        deadline_ms,
+        busy_until_ms,
+        run_ms,
+    }
 }
 
 fn server_handler(name: &str, run_ms: u64) -> HandlerSpec {
@@ -179,7 +224,11 @@ fn server_handler(name: &str, run_ms: u64) -> HandlerSpec {
 /// REQ: HST-211
 #[test]
 fn hst_211_run_hook_does_not_block_the_owner() {
-    let hook = run_hook(ProcessKind::Server, vec![server_handler("a", 40), server_handler("b", 40)], 0);
+    let hook = run_hook(
+        ProcessKind::Server,
+        vec![server_handler("a", 40), server_handler("b", 40)],
+        0,
+    );
     assert_eq!(hook.owner_blocked_ms, 0);
 }
 
@@ -188,7 +237,11 @@ fn hst_211_run_hook_does_not_block_the_owner() {
 fn hst_211_handlers_run_strictly_one_after_another() {
     let hook = run_hook(
         ProcessKind::Server,
-        vec![server_handler("a", 10), server_handler("b", 10), server_handler("c", 10)],
+        vec![
+            server_handler("a", 10),
+            server_handler("b", 10),
+            server_handler("c", 10),
+        ],
         0,
     );
     let mut previous_end = 0;
@@ -202,7 +255,15 @@ fn hst_211_handlers_run_strictly_one_after_another() {
 /// REQ: HST-211
 #[test]
 fn hst_211_chain_cap_is_measured_from_the_first_handlers_start() {
-    let hook = run_hook(ProcessKind::Server, vec![server_handler("a", 60), server_handler("b", 39), server_handler("c", 10)], 1_000);
+    let hook = run_hook(
+        ProcessKind::Server,
+        vec![
+            server_handler("a", 60),
+            server_handler("b", 39),
+            server_handler("c", 10),
+        ],
+        1_000,
+    );
     assert!(!hook.runs[2].skipped_by_chain_cap || hook.runs[2].started_ms.is_none());
     assert!(hook.runs[1].started_ms.is_some());
 }
@@ -212,7 +273,11 @@ fn hst_211_chain_cap_is_measured_from_the_first_handlers_start() {
 fn hst_211_handlers_not_started_when_the_100_ms_cap_expires_are_skipped_and_logged() {
     let hook = run_hook(
         ProcessKind::Server,
-        vec![server_handler("a", 60), server_handler("b", 50), server_handler("c", 10)],
+        vec![
+            server_handler("a", 60),
+            server_handler("b", 50),
+            server_handler("c", 10),
+        ],
         1_000,
     );
     assert!(hook.runs[2].skipped_by_chain_cap);
@@ -222,7 +287,11 @@ fn hst_211_handlers_not_started_when_the_100_ms_cap_expires_are_skipped_and_logg
 /// REQ: HST-211
 #[test]
 fn hst_211_chain_finishing_inside_the_cap_logs_nothing() {
-    let hook = run_hook(ProcessKind::Server, vec![server_handler("a", 20), server_handler("b", 20)], 0);
+    let hook = run_hook(
+        ProcessKind::Server,
+        vec![server_handler("a", 20), server_handler("b", 20)],
+        0,
+    );
     assert!(hook.log_ids.is_empty());
     assert!(hook.runs.iter().all(|run| !run.skipped_by_chain_cap));
 }
@@ -230,7 +299,11 @@ fn hst_211_chain_finishing_inside_the_cap_logs_nothing() {
 /// REQ: HST-212
 #[test]
 fn hst_212_handler_that_cannot_start_within_its_deadline_is_skipped_as_pass() {
-    let hook = run_hook(ProcessKind::Server, vec![handler("busy", ProcessKind::Server, 5, 6, 1)], 0);
+    let hook = run_hook(
+        ProcessKind::Server,
+        vec![handler("busy", ProcessKind::Server, 5, 6, 1)],
+        0,
+    );
     assert!(hook.runs[0].skipped_as_pass);
     assert!(hook.runs[0].breach);
     assert!(hook.runs[0].started_ms.is_none());
@@ -239,7 +312,11 @@ fn hst_212_handler_that_cannot_start_within_its_deadline_is_skipped_as_pass() {
 /// REQ: HST-212
 #[test]
 fn hst_212_handler_that_can_start_just_inside_its_deadline_runs() {
-    let hook = run_hook(ProcessKind::Server, vec![handler("busy", ProcessKind::Server, 5, 4, 1)], 0);
+    let hook = run_hook(
+        ProcessKind::Server,
+        vec![handler("busy", ProcessKind::Server, 5, 4, 1)],
+        0,
+    );
     assert!(!hook.runs[0].skipped_as_pass);
     assert_eq!(hook.runs[0].started_ms, Some(4));
 }
@@ -247,14 +324,22 @@ fn hst_212_handler_that_can_start_just_inside_its_deadline_runs() {
 /// REQ: HST-212
 #[test]
 fn hst_212_late_handler_counts_a_breach() {
-    let hook = run_hook(ProcessKind::Server, vec![handler("slow", ProcessKind::Server, 5, 0, 9)], 0);
+    let hook = run_hook(
+        ProcessKind::Server,
+        vec![handler("slow", ProcessKind::Server, 5, 0, 9)],
+        0,
+    );
     assert!(hook.runs[0].breach);
 }
 
 /// REQ: HST-212
 #[test]
 fn hst_212_timely_handler_counts_no_breach() {
-    let hook = run_hook(ProcessKind::Server, vec![handler("fast", ProcessKind::Server, 5, 0, 4)], 0);
+    let hook = run_hook(
+        ProcessKind::Server,
+        vec![handler("fast", ProcessKind::Server, 5, 0, 4)],
+        0,
+    );
     assert!(!hook.runs[0].breach);
 }
 
@@ -263,7 +348,10 @@ fn hst_212_timely_handler_counts_no_breach() {
 fn hst_212_a_skipped_handler_does_not_stop_the_chain() {
     let hook = run_hook(
         ProcessKind::Server,
-        vec![handler("busy", ProcessKind::Server, 5, 50, 1), server_handler("next", 1)],
+        vec![
+            handler("busy", ProcessKind::Server, 5, 50, 1),
+            server_handler("next", 1),
+        ],
         0,
     );
     assert!(hook.runs[0].skipped_as_pass);
@@ -275,7 +363,10 @@ fn hst_212_a_skipped_handler_does_not_stop_the_chain() {
 fn hst_213_server_owned_point_runs_only_server_handlers() {
     let hook = run_hook(
         ProcessKind::Server,
-        vec![server_handler("s", 1), handler("c", ProcessKind::Client, 5, 0, 1)],
+        vec![
+            server_handler("s", 1),
+            handler("c", ProcessKind::Client, 5, 0, 1),
+        ],
         0,
     );
     let ran: Vec<_> = hook.runs.iter().map(|run| run.plugin.clone()).collect();
@@ -287,7 +378,10 @@ fn hst_213_server_owned_point_runs_only_server_handlers() {
 fn hst_213_client_owned_point_runs_only_client_handlers() {
     let hook = run_hook(
         ProcessKind::Client,
-        vec![server_handler("s", 1), handler("c", ProcessKind::Client, 5, 0, 1)],
+        vec![
+            server_handler("s", 1),
+            handler("c", ProcessKind::Client, 5, 0, 1),
+        ],
         0,
     );
     let ran: Vec<_> = hook.runs.iter().map(|run| run.plugin.clone()).collect();
@@ -297,6 +391,10 @@ fn hst_213_client_owned_point_runs_only_client_handlers() {
 /// REQ: HST-213
 #[test]
 fn hst_213_chain_with_only_foreign_handlers_runs_nothing() {
-    let hook = run_hook(ProcessKind::Server, vec![handler("c", ProcessKind::Client, 5, 0, 1)], 0);
+    let hook = run_hook(
+        ProcessKind::Server,
+        vec![handler("c", ProcessKind::Client, 5, 0, 1)],
+        0,
+    );
     assert!(hook.runs.is_empty());
 }

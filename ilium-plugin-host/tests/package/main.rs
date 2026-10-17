@@ -1,8 +1,8 @@
 //! Package format and signing lane (reference-package-format.md and
 //! reference-signing-and-trust.md). One module per manual page, plus shared helpers.
 
-mod support;
 mod signing_support;
+mod support;
 
 mod reference_package_format;
 mod reference_package_format_matrix;

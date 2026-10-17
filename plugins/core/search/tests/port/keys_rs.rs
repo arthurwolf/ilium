@@ -10,7 +10,10 @@ fn port_001_typing_updates_the_field_and_runs_no_query_until_filter_changed() {
     let typing = host.deliver(vec![text_changed("n")]);
     assert_eq!(query_messages(&typing), Vec::<serde_json::Value>::new());
     let screen = host.render(panel(), 48, 12).text();
-    assert!(!screen.contains("deploy"), "no result rows before a query answers");
+    assert!(
+        !screen.contains("deploy"),
+        "no result rows before a query answers"
+    );
     let settled = host.deliver(vec![filter_changed("n")]);
     let messages = query_messages(&settled);
     assert_eq!(messages.len(), 1);

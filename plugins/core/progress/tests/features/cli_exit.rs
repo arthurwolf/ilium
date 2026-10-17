@@ -14,7 +14,15 @@ const JOB: &str = "export-412";
 /// Registers `PROBE` with `--wait` and an interval of 5 s; returns the open command line.
 fn wait_open(host: &mut FakeHost, pane: u64, extra: &[&str]) -> Open {
     expect_probe(host, PROBE, &running(JOB, 0, "Exporting 412 sessions"));
-    let mut args = vec!["progress", "set", "--command", PROBE, "--interval-seconds", "5", "--wait"];
+    let mut args = vec![
+        "progress",
+        "set",
+        "--command",
+        PROBE,
+        "--interval-seconds",
+        "5",
+        "--wait",
+    ];
     args.extend_from_slice(extra);
     start_in_pane(host, pane, &args)
 }
@@ -28,7 +36,11 @@ fn wait_record(run: &Run) -> Value {
 fn progress_b01_done_exits_zero_with_outcome_done() {
     let (mut host, pane) = host_with_pane();
     let open = wait_open(&mut host, pane, &[]);
-    expect_probe(&mut host, PROBE, &done(JOB, "Export of 412 sessions finished"));
+    expect_probe(
+        &mut host,
+        PROBE,
+        &done(JOB, "Export of 412 sessions finished"),
+    );
     tick(&mut host, 5);
     let run = open.read();
     assert_eq!(run.exit, Some(0));
@@ -42,7 +54,11 @@ fn progress_b01_done_exits_zero_with_outcome_done() {
 fn progress_b01_task_error_exits_three_with_outcome_error() {
     let (mut host, pane) = host_with_pane();
     let open = wait_open(&mut host, pane, &[]);
-    expect_probe(&mut host, PROBE, &failed(JOB, 40, "Export stopped", "disk full"));
+    expect_probe(
+        &mut host,
+        PROBE,
+        &failed(JOB, 40, "Export stopped", "disk full"),
+    );
     tick(&mut host, 5);
     let run = open.read();
     assert_eq!(run.exit, Some(3));
@@ -86,8 +102,16 @@ fn progress_b01_clearing_the_monitor_ends_the_wait_with_exit_five_and_outcome_cl
 fn progress_b01_replace_ends_the_wait_of_the_replaced_monitor_with_exit_five() {
     let (mut host, pane) = host_with_pane();
     let open = wait_open(&mut host, pane, &[]);
-    expect_probe(&mut host, "/opt/other.sh", &running("other-1", 0, "Other task"));
-    let replaced = progress(&mut host, pane, &["set", "--command", "/opt/other.sh", "--replace"]);
+    expect_probe(
+        &mut host,
+        "/opt/other.sh",
+        &running("other-1", 0, "Other task"),
+    );
+    let replaced = progress(
+        &mut host,
+        pane,
+        &["set", "--command", "/opt/other.sh", "--replace"],
+    );
     host.settle();
     assert_eq!(replaced.exit, Some(0));
     let run = open.read();
@@ -112,7 +136,11 @@ fn progress_b01_wait_on_a_pane_without_monitor_exits_five_with_outcome_no_monito
 fn progress_b01_timeout_exits_six_with_outcome_still_running_and_keeps_the_monitor() {
     let (mut host, pane) = host_with_pane();
     let open = wait_open(&mut host, pane, &["--timeout-seconds", "3"]);
-    expect_probe(&mut host, PROBE, &running(JOB, 10, "Exporting 412 sessions"));
+    expect_probe(
+        &mut host,
+        PROBE,
+        &running(JOB, 10, "Exporting 412 sessions"),
+    );
     tick(&mut host, 3);
     let run = open.read();
     assert_eq!(run.exit, Some(6));
@@ -130,7 +158,11 @@ fn progress_b01_timeout_boundary_is_one_second_before_open_and_at_the_second_clo
     let (mut host, pane) = host_with_pane();
     let open = wait_open(&mut host, pane, &["--timeout-seconds", "4"]);
     tick(&mut host, 3);
-    assert_eq!(open.read().exit, None, "still waiting one second before the timeout");
+    assert_eq!(
+        open.read().exit,
+        None,
+        "still waiting one second before the timeout"
+    );
     tick(&mut host, 1);
     assert_eq!(open.read().exit, Some(6));
 }
@@ -168,14 +200,27 @@ fn progress_b01_several_monitors_without_an_id_exit_two_monitor_ambiguous() {
 fn progress_b01_a_wait_without_an_id_picks_the_only_unsettled_monitor() {
     let (mut host, pane) = host_with_pane();
     let settled = register(&mut host, pane, "/opt/a.sh", &running("job-a", 0, "A"), &[]);
-    let _unsettled = register(&mut host, pane, "/opt/b.sh", &running("job-b", 0, "B"), &["--interval-seconds", "5"]);
+    let _unsettled = register(
+        &mut host,
+        pane,
+        "/opt/b.sh",
+        &running("job-b", 0, "B"),
+        &["--interval-seconds", "5"],
+    );
     expect_probe(&mut host, "/opt/a.sh", &done("job-a", "A finished"));
     tick(&mut host, 1);
-    let open = start_in_pane(&mut host, pane, &["progress", "wait", "--timeout-seconds", "1"]);
+    let open = start_in_pane(
+        &mut host,
+        pane,
+        &["progress", "wait", "--timeout-seconds", "1"],
+    );
     host.process().allow_unexpected();
     tick(&mut host, 1);
     let record = wait_record(&open.read());
-    assert_ne!(record["monitor_id"], settled, "the settled monitor is skipped");
+    assert_ne!(
+        record["monitor_id"], settled,
+        "the settled monitor is skipped"
+    );
     assert_eq!(record["outcome"], "still-running");
 }
 
@@ -184,9 +229,19 @@ fn progress_b01_a_wait_without_an_id_picks_the_only_unsettled_monitor() {
 fn progress_b01_an_explicit_id_waits_for_that_monitor_among_several() {
     let (mut host, pane) = host_with_pane();
     let first = register(&mut host, pane, "/opt/a.sh", &running("job-a", 0, "A"), &[]);
-    let _second = register(&mut host, pane, "/opt/b.sh", &done("job-b", "B finished"), &[]);
+    let _second = register(
+        &mut host,
+        pane,
+        "/opt/b.sh",
+        &done("job-b", "B finished"),
+        &[],
+    );
     let id_text = first.to_string();
-    let open = start_in_pane(&mut host, pane, &["progress", "wait", &id_text, "--timeout-seconds", "1"]);
+    let open = start_in_pane(
+        &mut host,
+        pane,
+        &["progress", "wait", &id_text, "--timeout-seconds", "1"],
+    );
     host.process().allow_unexpected();
     tick(&mut host, 1);
     let record = wait_record(&open.read());
@@ -198,7 +253,13 @@ fn progress_b01_an_explicit_id_waits_for_that_monitor_among_several() {
 #[test]
 fn progress_b01_waiting_on_an_already_settled_monitor_returns_its_outcome_at_once() {
     let (mut host, pane) = host_with_pane();
-    let id = register(&mut host, pane, PROBE, &running(JOB, 0, "Exporting"), &["--interval-seconds", "5"]);
+    let id = register(
+        &mut host,
+        pane,
+        PROBE,
+        &running(JOB, 0, "Exporting"),
+        &["--interval-seconds", "5"],
+    );
     expect_probe(&mut host, PROBE, &done(JOB, "Finished"));
     tick(&mut host, 5);
     let run = progress(&mut host, pane, &["wait", &id.to_string()]);

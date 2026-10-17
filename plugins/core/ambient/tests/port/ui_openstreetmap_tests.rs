@@ -36,5 +36,8 @@ fn too_small_to_credit_suppresses_the_map_twin() {
     let mut host = activated_client();
     let _ = host.render(ViewTarget::Panel("gallery".to_string()), 12, 2);
     assert!(host.failures().is_empty());
-    assert_eq!(refused("observer", json!({ "lat": 0.0, "lon": 180.0001 })), ErrorCode::InvalidArgument);
+    assert_eq!(
+        refused("observer", json!({ "lat": 0.0, "lon": 180.0001 })),
+        ErrorCode::InvalidArgument
+    );
 }

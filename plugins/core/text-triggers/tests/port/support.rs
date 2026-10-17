@@ -5,7 +5,7 @@
 use ilium_plugin_core_text_triggers::TextTriggersServer;
 use ilium_plugin_sdk::testing::{FakeHost, TreeNode};
 use ilium_plugin_sdk::types::{Event, NodeClass, Outcome, Submission};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::common::*;
 
@@ -22,7 +22,9 @@ pub fn armed(pattern: &str, reply: &str) -> (FakeHost, u64) {
     let mut host = server_host();
     let pane = add_agent_pane(&mut host, "claude");
     set_rules(&mut host, &[pattern], &[reply]);
-    host.settings().set("delays", json!([0])).expect("delays accepted");
+    host.settings()
+        .set("delays", json!([0]))
+        .expect("delays accepted");
     host.settle();
     (host, pane)
 }
@@ -46,19 +48,36 @@ pub fn hit(pane: u64, row: u32) -> Event {
 
 /// Texts of the send-input submissions, in order.
 pub fn texts(submissions: &[Submission]) -> Vec<String> {
-    send_inputs(submissions).into_iter().map(|spec| spec.text).collect()
+    send_inputs(submissions)
+        .into_iter()
+        .map(|spec| spec.text)
+        .collect()
 }
 
 /// Number of send-inputs the kernel applied (not deduplicated, not refused) after settling.
 pub fn applied(host: &mut FakeHost) -> usize {
     host.settle();
-    host.outcomes().iter().filter(|o| !matches!(o, Outcome::Duplicate(_) | Outcome::Refused(_) | Outcome::Failed(_) | Outcome::Cancelled)).count()
+    host.outcomes()
+        .iter()
+        .filter(|o| {
+            !matches!(
+                o,
+                Outcome::Duplicate(_)
+                    | Outcome::Refused(_)
+                    | Outcome::Failed(_)
+                    | Outcome::Cancelled
+            )
+        })
+        .count()
 }
 
 /// Number of send-inputs the kernel dropped as duplicates after settling.
 pub fn duplicates(host: &mut FakeHost) -> usize {
     host.settle();
-    host.outcomes().iter().filter(|o| matches!(o, Outcome::Duplicate(_))).count()
+    host.outcomes()
+        .iter()
+        .filter(|o| matches!(o, Outcome::Duplicate(_)))
+        .count()
 }
 
 /// Delivers one event per entry of `rows` for rule 0 of `pane` and returns (applied, duplicates).
@@ -71,22 +90,34 @@ pub fn deliver_rows(host: &mut FakeHost, pane: u64, rows: &[u32]) -> (usize, usi
 
 /// Filter ids installed on `pane`, sorted.
 pub fn filter_ids(host: &FakeHost, pane: u64) -> Vec<String> {
-    let mut ids: Vec<String> = host.output_filters().into_iter().filter(|(node, _)| *node == pane).map(|(_, f)| f.id).collect();
+    let mut ids: Vec<String> = host
+        .output_filters()
+        .into_iter()
+        .filter(|(node, _)| *node == pane)
+        .map(|(_, f)| f.id)
+        .collect();
     ids.sort();
     ids
 }
 
 /// Regexes installed on `pane`, in filter id order.
 pub fn filter_regexes(host: &FakeHost, pane: u64) -> Vec<String> {
-    let mut all: Vec<(String, String)> =
-        host.output_filters().into_iter().filter(|(node, _)| *node == pane).map(|(_, f)| (f.id, f.regex)).collect();
+    let mut all: Vec<(String, String)> = host
+        .output_filters()
+        .into_iter()
+        .filter(|(node, _)| *node == pane)
+        .map(|(_, f)| (f.id, f.regex))
+        .collect();
     all.sort();
     all.into_iter().map(|(_, regex)| regex).collect()
 }
 
 /// A server host built from a seeded `[text_triggers]` table before the plugin activates.
 pub fn host_with_table(table: Value) -> FakeHost {
-    let mut host = FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("server").build();
+    let mut host = FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("server")
+        .build();
     host.kernel_settings().set_tab("text_triggers", table);
     host.activate::<TextTriggersServer>();
     host
@@ -94,12 +125,22 @@ pub fn host_with_table(table: Value) -> FakeHost {
 
 /// `count` simple patterns and replies.
 pub fn many_patterns(count: usize) -> (Vec<String>, Vec<String>) {
-    ((0..count).map(|i| format!("p{i}")).collect(), (0..count).map(|i| format!("r{i}")).collect())
+    (
+        (0..count).map(|i| format!("p{i}")).collect(),
+        (0..count).map(|i| format!("r{i}")).collect(),
+    )
 }
 
 /// The error code of a refused settings write.
-pub fn settings_error(host: &mut FakeHost, key: &str, value: Value) -> ilium_plugin_sdk::types::ErrorCode {
-    host.settings().set(key, value).expect_err("the write is refused").code
+pub fn settings_error(
+    host: &mut FakeHost,
+    key: &str,
+    value: Value,
+) -> ilium_plugin_sdk::types::ErrorCode {
+    host.settings()
+        .set(key, value)
+        .expect_err("the write is refused")
+        .code
 }
 
 /// The Text Triggers tab (assumed view target, see API_GAPS.md).

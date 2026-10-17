@@ -35,7 +35,10 @@ fn wit_clipboard_read_text_declined_grant_is_none() {
 #[test]
 fn wit_clipboard_write_text_sets_the_clipboard() {
     let mut rig = rig(GRANTS);
-    rig.host.clipboard().write_text("copied".to_owned()).expect("writes");
+    rig.host
+        .clipboard()
+        .write_text("copied".to_owned())
+        .expect("writes");
     assert_eq!(rig.kernel.clipboard(), Some("copied".to_owned()));
 }
 
@@ -45,12 +48,18 @@ fn wit_clipboard_write_text_one_mib_boundary_invalid_argument() {
     let mut rig = rig(GRANTS);
     assert!(rig.host.clipboard().write_text(text_of(MIB - 1)).is_ok());
     assert!(rig.host.clipboard().write_text(text_of(MIB)).is_ok());
-    assert_eq!(code_of(rig.host.clipboard().write_text(text_of(MIB + 1))), ErrorCode::InvalidArgument);
+    assert_eq!(
+        code_of(rig.host.clipboard().write_text(text_of(MIB + 1))),
+        ErrorCode::InvalidArgument
+    );
 }
 
 /// REQ: WIT:ilium:host/clipboard.write-text
 #[test]
 fn wit_clipboard_write_text_declined_grant_not_permitted() {
     let mut rig = declined_rig(&["clipboard.write"]);
-    assert_eq!(code_of(rig.host.clipboard().write_text("x".to_owned())), ErrorCode::NotPermitted);
+    assert_eq!(
+        code_of(rig.host.clipboard().write_text("x".to_owned())),
+        ErrorCode::NotPermitted
+    );
 }

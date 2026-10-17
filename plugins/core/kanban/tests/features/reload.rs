@@ -1,17 +1,27 @@
 //! Reload when the file changes, the guarded write and its retries (page samples "Reload when the
 //! file changes" and "Read and write the Markdown file safely").
 
-use ilium_plugin_sdk::types::{BufferId, Event, EditorSavedEvent, ErrorCode, FsPath, PluginError};
+use ilium_plugin_sdk::types::{BufferId, EditorSavedEvent, ErrorCode, Event, FsPath, PluginError};
 
-use crate::common::{BOARD_PATH, SAMPLE_BOARD, board_file, board_host, client_host_with, draw, press, sections, select_first_header};
+use crate::common::{
+    board_file, board_host, client_host_with, draw, press, sections, select_first_header,
+    BOARD_PATH, SAMPLE_BOARD,
+};
 
 const CHANGED: &str = "# Board\n\n## To do\n- Brand new card\n\n## Doing\n\n## Done\n";
 
 fn conflict() -> PluginError {
-    PluginError { code: ErrorCode::Conflict, message: "revision changed".to_string(), retry_after_ms: None }
+    PluginError {
+        code: ErrorCode::Conflict,
+        message: "revision changed".to_string(),
+        retry_after_ms: None,
+    }
 }
 
-fn move_first_card_right(host: &mut ilium_plugin_sdk::testing::FakeHost, node: ilium_plugin_sdk::types::NodeId) {
+fn move_first_card_right(
+    host: &mut ilium_plugin_sdk::testing::FakeHost,
+    node: ilium_plugin_sdk::types::NodeId,
+) {
     select_first_header(host, node);
     press(host, node, "j");
     press(host, node, "shift+right");
@@ -66,10 +76,15 @@ fn reload_024_editor_saved_for_the_board_path_reloads_the_board() {
     host.fs().write(BOARD_PATH, CHANGED.as_bytes());
     host.deliver_one(Event::EditorSaved(EditorSavedEvent {
         buffer: BufferId(7),
-        path: FsPath { scope: "project".to_string(), path: "docs/plan.md".to_string() },
+        path: FsPath {
+            scope: "project".to_string(),
+            path: "docs/plan.md".to_string(),
+        },
     }));
     host.settle();
-    assert!(draw(&mut host, node, 80, 20).text().contains("Brand new card"));
+    assert!(draw(&mut host, node, 80, 20)
+        .text()
+        .contains("Brand new card"));
 }
 
 /// REQ: F-024
@@ -79,7 +94,10 @@ fn reload_024_editor_saved_for_another_path_does_not_reload() {
     let before = draw(&mut host, node, 80, 20).text();
     host.deliver_one(Event::EditorSaved(EditorSavedEvent {
         buffer: BufferId(8),
-        path: FsPath { scope: "project".to_string(), path: "docs/other.md".to_string() },
+        path: FsPath {
+            scope: "project".to_string(),
+            path: "docs/other.md".to_string(),
+        },
     }));
     host.settle();
     assert_eq!(draw(&mut host, node, 80, 20).text(), before);
@@ -100,7 +118,9 @@ fn guard_024_one_conflict_is_retried_and_the_move_is_written() {
     let (mut host, node) = board_host(SAMPLE_BOARD);
     host.inject_failure("fs.write-atomic", conflict());
     move_first_card_right(&mut host, node);
-    assert!(sections(&board_file(&mut host))[1].1.contains(&"Write docs".to_string()));
+    assert!(sections(&board_file(&mut host))[1]
+        .1
+        .contains(&"Write docs".to_string()));
 }
 
 /// REQ: F-024
@@ -110,7 +130,9 @@ fn guard_024_two_conflicts_are_retried_and_the_third_attempt_writes() {
     host.inject_failure("fs.write-atomic", conflict());
     host.inject_failure("fs.write-atomic", conflict());
     move_first_card_right(&mut host, node);
-    assert!(sections(&board_file(&mut host))[1].1.contains(&"Write docs".to_string()));
+    assert!(sections(&board_file(&mut host))[1]
+        .1
+        .contains(&"Write docs".to_string()));
 }
 
 /// REQ: F-024
@@ -133,7 +155,13 @@ fn guard_024_after_exhausted_retries_the_next_move_works_again() {
     }
     move_first_card_right(&mut host, node);
     press(&mut host, node, "shift+right");
-    assert_eq!(sections(&board_file(&mut host)).iter().map(|(_, cards)| cards.len()).sum::<usize>(), 4);
+    assert_eq!(
+        sections(&board_file(&mut host))
+            .iter()
+            .map(|(_, cards)| cards.len())
+            .sum::<usize>(),
+        4
+    );
 }
 
 /// REQ: F-024

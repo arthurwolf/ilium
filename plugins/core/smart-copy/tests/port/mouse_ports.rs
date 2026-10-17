@@ -11,7 +11,10 @@ fn port_mouse_picking_after_pointer_activity_still_copies() {
     let mut host = open_picker(&["hovered"]);
     let out = host.deliver_one(key("1"));
     assert!(status_contains(&out, "Copied 7 characters"));
-    assert!(!status_contains(&out, "Move over a highlighted Smart Copy selection"));
+    assert!(!status_contains(
+        &out,
+        "Move over a highlighted Smart Copy selection"
+    ));
     assert_eq!(host.clipboard().last_text().as_deref(), Some("hovered"));
 }
 
@@ -30,7 +33,11 @@ fn port_ui_the_picker_view_renders_at_narrow_widths() {
         let mut host = open_picker(&["first", "second"]);
         let text = host.render(picker_target(), width, 9).text();
         assert!(text.lines().count() <= 9, "{width}");
-        assert!(text.lines().all(|line| line.chars().count() <= width as usize), "{width}");
+        assert!(
+            text.lines()
+                .all(|line| line.chars().count() <= width as usize),
+            "{width}"
+        );
     }
     let _ = (PointerKind::Down, pointer(0, PointerKind::Down, 0, 0));
 }

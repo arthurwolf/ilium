@@ -1,8 +1,13 @@
 //! Keyboard use of the board (src/docs/editors-and-boards.md "Use a board") and the changes it saves.
 
-use crate::common::{SAMPLE_BOARD, board_file, board_host, draw, press, sections, select_first_header};
+use crate::common::{
+    board_file, board_host, draw, press, sections, select_first_header, SAMPLE_BOARD,
+};
 
-fn selected_text(host: &mut ilium_plugin_sdk::testing::FakeHost, node: ilium_plugin_sdk::types::NodeId) -> String {
+fn selected_text(
+    host: &mut ilium_plugin_sdk::testing::FakeHost,
+    node: ilium_plugin_sdk::types::NodeId,
+) -> String {
     draw(host, node, 80, 20).text()
 }
 
@@ -32,7 +37,10 @@ fn keys_024_down_twice_selects_the_second_card() {
     press(&mut host, node, "j");
     press(&mut host, node, "j");
     let text = selected_text(&mut host, node);
-    assert!(text.contains("> Add tests") && !text.contains("> Write docs"), "{text}");
+    assert!(
+        text.contains("> Add tests") && !text.contains("> Write docs"),
+        "{text}"
+    );
 }
 
 /// REQ: F-024
@@ -141,7 +149,10 @@ fn keys_024_shift_right_moves_the_selected_card_to_the_next_column_and_saves() {
     press(&mut host, node, "j");
     press(&mut host, node, "shift+right");
     let saved = sections(&board_file(&mut host));
-    assert_eq!(saved[0], ("To do".to_string(), vec!["Add tests".to_string()]));
+    assert_eq!(
+        saved[0],
+        ("To do".to_string(), vec!["Add tests".to_string()])
+    );
     assert!(saved[1].1.contains(&"Write docs".to_string()), "{saved:?}");
     assert_eq!(saved[1].1.len(), 2);
 }
@@ -189,7 +200,10 @@ fn keys_024_shift_up_on_the_first_card_changes_nothing() {
     select_first_header(&mut host, node);
     press(&mut host, node, "j");
     press(&mut host, node, "shift+up");
-    assert_eq!(sections(&board_file(&mut host))[0].1, ["Write docs", "Add tests"]);
+    assert_eq!(
+        sections(&board_file(&mut host))[0].1,
+        ["Write docs", "Add tests"]
+    );
 }
 
 /// REQ: F-024
@@ -223,7 +237,10 @@ fn keys_024_moving_a_card_keeps_the_total_number_of_cards() {
     press(&mut host, node, "j");
     press(&mut host, node, "shift+right");
     press(&mut host, node, "shift+right");
-    let total: usize = sections(&board_file(&mut host)).iter().map(|(_, cards)| cards.len()).sum();
+    let total: usize = sections(&board_file(&mut host))
+        .iter()
+        .map(|(_, cards)| cards.len())
+        .sum();
     assert_eq!(total, 4);
 }
 
@@ -264,7 +281,11 @@ fn keys_024_a_failed_write_leaves_the_file_untouched() {
     let (mut host, node) = board_host(SAMPLE_BOARD);
     host.inject_failure(
         "fs.write-atomic",
-        PluginError { code: ErrorCode::Io, message: "disk full".to_string(), retry_after_ms: None },
+        PluginError {
+            code: ErrorCode::Io,
+            message: "disk full".to_string(),
+            retry_after_ms: None,
+        },
     );
     select_first_header(&mut host, node);
     press(&mut host, node, "j");

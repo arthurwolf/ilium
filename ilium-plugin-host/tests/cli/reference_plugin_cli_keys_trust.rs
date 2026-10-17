@@ -35,7 +35,12 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 fn display_form(key_id: &str) -> String {
-    key_id.as_bytes().chunks(4).map(|chunk| std::str::from_utf8(chunk).expect("ascii")).collect::<Vec<_>>().join(" ")
+    key_id
+        .as_bytes()
+        .chunks(4)
+        .map(|chunk| std::str::from_utf8(chunk).expect("ascii"))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn short_form(key_id: &str) -> String {
@@ -71,7 +76,10 @@ fn dev_110_secret_key_has_mode_0600() {
     let root = scratch();
     let env = env(root.path());
     let (key, _) = make_key(&env, root.path(), "acme");
-    assert_eq!(std::fs::metadata(key).expect("stat").permissions().mode() & 0o777, 0o600);
+    assert_eq!(
+        std::fs::metadata(key).expect("stat").permissions().mode() & 0o777,
+        0o600
+    );
 }
 
 /// REQ: DEV-110
@@ -80,10 +88,27 @@ fn dev_110_prints_a_key_artifact_and_a_public_key_artifact() {
     let root = scratch();
     let env = env(root.path());
     let out = root.path().join("k");
-    let output = run(&env, &["keygen", "--publisher-id", "acme", "--publisher", "Acme Labs", "--out", s(&out)]);
-    let paths: Vec<&str> = recs(&output, "artifact").iter().map(|r| r["path"].as_str().expect("path")).collect();
+    let output = run(
+        &env,
+        &[
+            "keygen",
+            "--publisher-id",
+            "acme",
+            "--publisher",
+            "Acme Labs",
+            "--out",
+            s(&out),
+        ],
+    );
+    let paths: Vec<&str> = recs(&output, "artifact")
+        .iter()
+        .map(|r| r["path"].as_str().expect("path"))
+        .collect();
     assert_eq!(paths.len(), 2);
-    assert!(paths.iter().any(|p| p.ends_with("publisher.key")) && paths.iter().any(|p| p.ends_with("publisher.pub")));
+    assert!(
+        paths.iter().any(|p| p.ends_with("publisher.key"))
+            && paths.iter().any(|p| p.ends_with("publisher.pub"))
+    );
 }
 
 /// REQ: DEV-110
@@ -93,14 +118,26 @@ fn dev_110_refuses_to_overwrite_either_file() {
     let env = env(root.path());
     let (key, public) = make_key(&env, root.path(), "acme");
     let out = key.parent().expect("dir").to_path_buf();
-    let args = ["keygen", "--publisher-id", "acme", "--publisher", "Acme Labs", "--out", s(&out)];
+    let args = [
+        "keygen",
+        "--publisher-id",
+        "acme",
+        "--publisher",
+        "Acme Labs",
+        "--out",
+        s(&out),
+    ];
     let before = std::fs::read(&key).expect("read");
     let output = run(&env, &args);
     assert_eq!(code(&output).as_deref(), Some("trust.key-exists"));
     assert_eq!(std::fs::read(&key).expect("read"), before);
     std::fs::remove_file(&key).expect("remove");
     let output = run(&env, &args);
-    assert_eq!(code(&output).as_deref(), Some("trust.key-exists"), "the public file alone also blocks");
+    assert_eq!(
+        code(&output).as_deref(),
+        Some("trust.key-exists"),
+        "the public file alone also blocks"
+    );
     assert!(public.is_file());
 }
 
@@ -113,7 +150,10 @@ fn dev_111_public_file_follows_the_signing_and_trust_page() {
     let document = read_json(&public);
     let raw = base64url_decode(document["public_key"].as_str().expect("public_key"));
     assert_eq!(raw.len(), 32, "32 raw bytes, base64url without padding");
-    assert!(!document["public_key"].as_str().expect("public_key").contains('='));
+    assert!(!document["public_key"]
+        .as_str()
+        .expect("public_key")
+        .contains('='));
     assert_eq!(document["key_id"], hex(&Sha256::digest(&raw)));
     assert!(document["created"].as_str().expect("created").len() == 19);
 }
@@ -134,7 +174,9 @@ fn dev_112_key_id_is_64_lowercase_hex_characters() {
     let root = scratch();
     let env = env(root.path());
     let (_, public) = make_key(&env, root.path(), "acme");
-    assert!(is_sha256_hex(read_json(&public)["key_id"].as_str().expect("key_id")));
+    assert!(is_sha256_hex(
+        read_json(&public)["key_id"].as_str().expect("key_id")
+    ));
 }
 
 /// REQ: DEV-112
@@ -143,7 +185,10 @@ fn dev_112_trust_add_prints_the_display_form_of_sixteen_groups() {
     let root = scratch();
     let env = env(root.path());
     let (_, public) = make_key(&env, root.path(), "acme");
-    let key_id = read_json(&public)["key_id"].as_str().expect("key_id").to_owned();
+    let key_id = read_json(&public)["key_id"]
+        .as_str()
+        .expect("key_id")
+        .to_owned();
     let output = run(&env, &["trust", "add", s(&public)]);
     let all = output.stdout_raw.clone() + &output.stdout_text + &output.stderr;
     assert!(all.contains(&display_form(&key_id)), "{all}");
@@ -156,10 +201,17 @@ fn dev_112_trust_list_shows_the_short_form_with_an_ellipsis() {
     let root = scratch();
     let env = env(root.path());
     let (_, public) = make_key(&env, root.path(), "acme");
-    let key_id = read_json(&public)["key_id"].as_str().expect("key_id").to_owned();
+    let key_id = read_json(&public)["key_id"]
+        .as_str()
+        .expect("key_id")
+        .to_owned();
     run(&env, &["trust", "add", s(&public)]);
     let output = run(&env, &["trust", "list"]);
-    assert!(output.stdout_text.contains(&short_form(&key_id)), "{}", output.stdout_text);
+    assert!(
+        output.stdout_text.contains(&short_form(&key_id)),
+        "{}",
+        output.stdout_text
+    );
 }
 
 // ---------------------------------------------------------------- sign
@@ -182,7 +234,10 @@ fn dev_115_key_flag_signs() {
     let env = env(root.path());
     let (_, package) = packed_project(&env, root.path());
     let (key, _) = make_key(&env, root.path(), "acme");
-    assert_eq!(run(&env, &["sign", s(&package), "--key", s(&key)]).exit_code, 0);
+    assert_eq!(
+        run(&env, &["sign", s(&package), "--key", s(&key)]).exit_code,
+        0
+    );
 }
 
 /// REQ: DEV-115
@@ -208,10 +263,17 @@ fn dev_116_a_key_readable_by_group_or_others_is_refused() {
     for mode in [0o640, 0o604, 0o644] {
         std::fs::set_permissions(&key, std::fs::Permissions::from_mode(mode)).expect("chmod");
         let output = run(&env, &["sign", s(&package), "--key", s(&key)]);
-        assert_eq!(code(&output).as_deref(), Some("sign.key-permissions"), "{mode:o}");
+        assert_eq!(
+            code(&output).as_deref(),
+            Some("sign.key-permissions"),
+            "{mode:o}"
+        );
     }
     std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o600)).expect("chmod");
-    assert_eq!(run(&env, &["sign", s(&package), "--key", s(&key)]).exit_code, 0);
+    assert_eq!(
+        run(&env, &["sign", s(&package), "--key", s(&key)]).exit_code,
+        0
+    );
 }
 
 /// REQ: DEV-116
@@ -242,7 +304,10 @@ fn dev_117_sign_adds_a_signature_entry_for_the_key() {
     assert_eq!(artifacts(&output, "signature").len(), 1);
     let archive = read_package(&std::fs::read(&package).expect("read")).expect("valid package");
     let signature = archive.signature.expect("signed");
-    assert_eq!(signature.key_id, read_json(&public)["key_id"].as_str().expect("key_id"));
+    assert_eq!(
+        signature.key_id,
+        read_json(&public)["key_id"].as_str().expect("key_id")
+    );
 }
 
 /// REQ: DEV-117
@@ -256,9 +321,15 @@ fn dev_117_signing_twice_with_the_same_key_gives_the_same_bytes() {
     std::fs::copy(&package, &copy).expect("copy");
     run(&env, &["sign", s(&package), "--key", s(&key)]);
     run(&env, &["sign", s(&copy), "--key", s(&key)]);
-    assert_eq!(std::fs::read(&package).expect("read"), std::fs::read(&copy).expect("read"));
+    assert_eq!(
+        std::fs::read(&package).expect("read"),
+        std::fs::read(&copy).expect("read")
+    );
     run(&env, &["sign", s(&package), "--key", s(&key), "--replace"]);
-    assert_eq!(std::fs::read(&package).expect("read"), std::fs::read(&copy).expect("read"));
+    assert_eq!(
+        std::fs::read(&package).expect("read"),
+        std::fs::read(&copy).expect("read")
+    );
     let _ = dir;
 }
 
@@ -285,7 +356,10 @@ fn dev_118_publisher_mismatch_is_refused() {
     let (key, _) = make_key(&env, root.path(), "someoneelse");
     let output = run(&env, &["sign", s(&package), "--key", s(&key)]);
     assert_eq!(code(&output).as_deref(), Some("sign.publisher-mismatch"));
-    assert!(read_package(&std::fs::read(&package).expect("read")).expect("valid").signature.is_none());
+    assert!(read_package(&std::fs::read(&package).expect("read"))
+        .expect("valid")
+        .signature
+        .is_none());
 }
 
 /// REQ: DEV-118
@@ -298,7 +372,10 @@ fn dev_118_already_signed_needs_replace() {
     run(&env, &["sign", s(&package), "--key", s(&key)]);
     let output = run(&env, &["sign", s(&package), "--key", s(&key)]);
     assert_eq!(code(&output).as_deref(), Some("sign.already-signed"));
-    assert_eq!(run(&env, &["sign", s(&package), "--key", s(&key), "--replace"]).exit_code, 0);
+    assert_eq!(
+        run(&env, &["sign", s(&package), "--key", s(&key), "--replace"]).exit_code,
+        0
+    );
 }
 
 /// REQ: DEV-119
@@ -309,7 +386,10 @@ fn dev_119_the_secret_key_is_never_printed() {
     let (_, package) = packed_project(&env, root.path());
     let (key, _) = make_key(&env, root.path(), "acme");
     let pem = std::fs::read_to_string(&key).expect("read");
-    let body: String = pem.lines().filter(|line| !line.starts_with("-----")).collect();
+    let body: String = pem
+        .lines()
+        .filter(|line| !line.starts_with("-----"))
+        .collect();
     let output = run(&env, &["sign", s(&package), "--key", s(&key)]);
     let all = output.stdout_raw.clone() + &output.stdout_text + &output.stderr;
     assert!(!all.contains(&body) && !all.contains("PRIVATE KEY"));
@@ -321,8 +401,23 @@ fn dev_119_keygen_does_not_print_the_secret_key_either() {
     let root = scratch();
     let env = env(root.path());
     let out = root.path().join("k");
-    let output = run(&env, &["keygen", "--publisher-id", "acme", "--publisher", "Acme", "--out", s(&out)]);
-    let body: String = std::fs::read_to_string(out.join("publisher.key")).expect("read").lines().filter(|l| !l.starts_with("-----")).collect();
+    let output = run(
+        &env,
+        &[
+            "keygen",
+            "--publisher-id",
+            "acme",
+            "--publisher",
+            "Acme",
+            "--out",
+            s(&out),
+        ],
+    );
+    let body: String = std::fs::read_to_string(out.join("publisher.key"))
+        .expect("read")
+        .lines()
+        .filter(|l| !l.starts_with("-----"))
+        .collect();
     assert!(!(output.stdout_raw + &output.stderr).contains(&body));
 }
 
@@ -362,7 +457,10 @@ fn dev_125_the_store_lists_the_added_key() {
     let env = env(root.path());
     let (_, public) = make_key(&env, root.path(), "acme");
     run(&env, &["trust", "add", s(&public)]);
-    let keys = trust_document(&env)["keys"].as_array().expect("keys").clone();
+    let keys = trust_document(&env)["keys"]
+        .as_array()
+        .expect("keys")
+        .clone();
     assert_eq!(keys.len(), 1);
     assert_eq!(keys[0]["key_id"], read_json(&public)["key_id"]);
 }
@@ -373,10 +471,15 @@ fn dev_126_trust_add_prints_the_fingerprint_and_succeeds() {
     let root = scratch();
     let env = env(root.path());
     let (_, public) = make_key(&env, root.path(), "acme");
-    let key_id = read_json(&public)["key_id"].as_str().expect("key_id").to_owned();
+    let key_id = read_json(&public)["key_id"]
+        .as_str()
+        .expect("key_id")
+        .to_owned();
     let output = run(&env, &["trust", "add", s(&public)]);
     assert_eq!(output.exit_code, 0);
-    assert!(output.stdout_raw.contains(&key_id) || output.stdout_raw.contains(&display_form(&key_id)));
+    assert!(
+        output.stdout_raw.contains(&key_id) || output.stdout_raw.contains(&display_form(&key_id))
+    );
 }
 
 /// REQ: DEV-126
@@ -399,7 +502,10 @@ fn dev_126_a_key_id_that_does_not_match_the_key_is_malformed() {
     let mut document = read_json(&public);
     document["key_id"] = Value::String("0".repeat(64));
     write_json(&public, &document);
-    assert_eq!(code(&run(&env, &["trust", "add", s(&public)])).as_deref(), Some("trust.key-malformed"));
+    assert_eq!(
+        code(&run(&env, &["trust", "add", s(&public)])).as_deref(),
+        Some("trust.key-malformed")
+    );
 }
 
 /// REQ: DEV-126
@@ -431,10 +537,16 @@ fn dev_127_removing_a_listed_key_without_dependents_works() {
     let session = MemorySession::new();
     let env = env_session(root.path(), &session);
     let (_, public) = make_key(&env, root.path(), "acme");
-    let key_id = read_json(&public)["key_id"].as_str().expect("key_id").to_owned();
+    let key_id = read_json(&public)["key_id"]
+        .as_str()
+        .expect("key_id")
+        .to_owned();
     run(&env, &["trust", "add", s(&public)]);
     assert_eq!(run(&env, &["trust", "remove", &key_id]).exit_code, 0);
-    assert!(trust_document(&env)["keys"].as_array().expect("keys").is_empty());
+    assert!(trust_document(&env)["keys"]
+        .as_array()
+        .expect("keys")
+        .is_empty());
 }
 
 /// REQ: DEV-127
@@ -444,13 +556,19 @@ fn dev_127_a_key_in_use_needs_force() {
     let session = MemorySession::new();
     let env = env_session(root.path(), &session);
     let (_, public) = make_key(&env, root.path(), "acme");
-    let key_id = read_json(&public)["key_id"].as_str().expect("key_id").to_owned();
+    let key_id = read_json(&public)["key_id"]
+        .as_str()
+        .expect("key_id")
+        .to_owned();
     run(&env, &["trust", "add", s(&public)]);
     session.add_plugin("acme.demo", "0.1.0", "T3", "running", false, &[]);
     session.set_signed_by("acme.demo", &key_id);
     let output = run(&env, &["trust", "remove", &key_id]);
     assert_eq!(code(&output).as_deref(), Some("trust.in-use"));
-    assert_eq!(run(&env, &["trust", "remove", &key_id, "--force"]).exit_code, 0);
+    assert_eq!(
+        run(&env, &["trust", "remove", &key_id, "--force"]).exit_code,
+        0
+    );
 }
 
 /// REQ: DEV-127
@@ -460,12 +578,18 @@ fn dev_127_forced_removal_keeps_the_plugin_installed_but_untrusted() {
     let session = MemorySession::new();
     let env = env_session(root.path(), &session);
     let (_, public) = make_key(&env, root.path(), "acme");
-    let key_id = read_json(&public)["key_id"].as_str().expect("key_id").to_owned();
+    let key_id = read_json(&public)["key_id"]
+        .as_str()
+        .expect("key_id")
+        .to_owned();
     run(&env, &["trust", "add", s(&public)]);
     session.add_plugin("acme.demo", "0.1.0", "T3", "running", false, &[]);
     session.set_signed_by("acme.demo", &key_id);
     run(&env, &["trust", "remove", &key_id, "--force"]);
-    assert_eq!(session.plugin_state("acme.demo").as_deref(), Some("untrusted"));
+    assert_eq!(
+        session.plugin_state("acme.demo").as_deref(),
+        Some("untrusted")
+    );
     let list = run(&env, &["list"]);
     assert!(list.stdout_text.contains("acme.demo") && list.stdout_text.contains("untrusted"));
 }
@@ -478,14 +602,27 @@ fn dev_128_trust_list_prints_publisher_short_fingerprint_and_date_per_line() {
     let mut ids = Vec::new();
     for publisher_id in ["acme", "beta"] {
         let (_, public) = make_key(&env, root.path(), publisher_id);
-        ids.push(read_json(&public)["key_id"].as_str().expect("key_id").to_owned());
+        ids.push(
+            read_json(&public)["key_id"]
+                .as_str()
+                .expect("key_id")
+                .to_owned(),
+        );
         run(&env, &["trust", "add", s(&public)]);
     }
     let text = run(&env, &["trust", "list"]).stdout_text;
-    let lines: Vec<&str> = text.lines().filter(|line| !line.trim().is_empty()).collect();
+    let lines: Vec<&str> = text
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .collect();
     assert_eq!(lines.len(), 2, "{text}");
     for (line, id) in lines.iter().zip(&ids) {
-        assert!(line.contains("Acme Labs") && line.contains(&short_form(id)) && line.contains("2030-01-01"), "{line}");
+        assert!(
+            line.contains("Acme Labs")
+                && line.contains(&short_form(id))
+                && line.contains("2030-01-01"),
+            "{line}"
+        );
     }
 }
 
@@ -496,7 +633,14 @@ fn dev_128_an_empty_store_lists_no_keys() {
     let env = env(root.path());
     let output = run(&env, &["trust", "list"]);
     assert_eq!(output.exit_code, 0);
-    assert!(output.stdout_text.lines().filter(|l| l.contains('…')).count() == 0);
+    assert!(
+        output
+            .stdout_text
+            .lines()
+            .filter(|l| l.contains('…'))
+            .count()
+            == 0
+    );
 }
 
 // ---------------------------------------------------------------- publish
@@ -518,7 +662,15 @@ fn dev_135_publish_with_registry_does_not_fail_on_usage() {
     let root = scratch();
     let env = env(root.path());
     let (_, package) = packed_project(&env, root.path());
-    let output = run(&env, &["publish", s(&package), "--registry", "https://registry.example.test/"]);
+    let output = run(
+        &env,
+        &[
+            "publish",
+            s(&package),
+            "--registry",
+            "https://registry.example.test/",
+        ],
+    );
     assert_ne!(code(&output).as_deref(), Some("usage.missing-argument"));
 }
 
@@ -530,7 +682,10 @@ fn dev_136_a_higher_version_from_a_file_updates_the_installed_plugin() {
     session.set_client_attached(true);
     let env = env_session(root.path(), &session);
     let (dir, first) = packed_project(&env, root.path());
-    assert_eq!(run(&env, &["install", s(&first), "--allow-unsigned", "--yes"]).exit_code, 0);
+    assert_eq!(
+        run(&env, &["install", s(&first), "--allow-unsigned", "--yes"]).exit_code,
+        0
+    );
     let mut manifest = read_json(&dir.join("manifest.json"));
     manifest["version"] = Value::String("0.2.0".to_owned());
     write_json(&dir.join("manifest.json"), &manifest);

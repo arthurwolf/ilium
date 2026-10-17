@@ -11,9 +11,22 @@ fn user_doc(name: &str) -> String {
 #[test]
 fn doc_005_the_user_docs_list_the_six_tree_orders() {
     let settings = user_doc("settings.md");
-    let row = settings.lines().find(|line| line.contains("`ui.tree_order`")).expect("ui.tree_order row");
-    for value in ["manual", "type", "age_ascending", "age_descending", "name_ascending", "name_descending"] {
-        assert!(row.contains(&format!("`{value}`")), "row {row} lacks {value}");
+    let row = settings
+        .lines()
+        .find(|line| line.contains("`ui.tree_order`"))
+        .expect("ui.tree_order row");
+    for value in [
+        "manual",
+        "type",
+        "age_ascending",
+        "age_descending",
+        "name_ascending",
+        "name_descending",
+    ] {
+        assert!(
+            row.contains(&format!("`{value}`")),
+            "row {row} lacks {value}"
+        );
     }
 }
 
@@ -29,7 +42,9 @@ fn doc_005_manual_order_is_the_default_and_the_stored_order_is_unchanged() {
 #[test]
 fn doc_005_the_cost_order_is_driven_by_the_agent_cost_settings() {
     let doc = user_doc("panes-and-layout.md");
-    assert!(doc.contains("An additional cost order (most expensive first) is driven by the Agent Cost settings"));
+    assert!(doc.contains(
+        "An additional cost order (most expensive first) is driven by the Agent Cost settings"
+    ));
 }
 
 /// REQ: F-006
@@ -44,7 +59,9 @@ fn doc_006_the_user_docs_describe_auto_removal_and_its_exceptions() {
 #[test]
 fn doc_006_unlock_stays_available_when_the_lock_option_is_off() {
     let doc = user_doc("panes-and-layout.md");
-    assert!(doc.contains("**Unlock** stays available even when the lock option is switched off in Settings."));
+    assert!(doc.contains(
+        "**Unlock** stays available even when the lock option is switched off in Settings."
+    ));
 }
 
 /// REQ: F-005, F-006
@@ -76,10 +93,17 @@ fn doc_006_the_page_prints_every_sample_in_rust_and_typescript() {
         "#### Remove empty groups",
         "#### Right-click menu for a node",
     ] {
-        let start = page.find(heading).unwrap_or_else(|| panic!("{heading} missing"));
-        let end = page[start + 5..].find("\n#### ").map_or(page.len(), |at| start + 5 + at);
+        let start = page
+            .find(heading)
+            .unwrap_or_else(|| panic!("{heading} missing"));
+        let end = page[start + 5..]
+            .find("\n#### ")
+            .map_or(page.len(), |at| start + 5 + at);
         let section = &page[start..end];
-        assert!(section.contains("**Rust**") && section.contains("**TypeScript**"), "{heading}");
+        assert!(
+            section.contains("**Rust**") && section.contains("**TypeScript**"),
+            "{heading}"
+        );
     }
 }
 
@@ -92,5 +116,7 @@ fn doc_006_the_page_says_a_locked_close_is_refused_with_conflict() {
 /// REQ: F-005
 #[test]
 fn doc_005_the_order_sample_sorts_by_the_first_four_bytes_of_the_lowercase_title() {
-    assert!(page_text().contains("// Alphabetical by the first four bytes of the lower-case title."));
+    assert!(
+        page_text().contains("// Alphabetical by the first four bytes of the lower-case title.")
+    );
 }

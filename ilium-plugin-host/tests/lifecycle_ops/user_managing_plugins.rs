@@ -106,7 +106,10 @@ fn lif_192_replacement_disabled_by_failure_re_enables_the_built_in_with_a_notice
     }
     assert!(server.is_disabled_by_failure("com.example.replace"));
     assert!(server.is_enabled("ilium.core.tree"));
-    assert!(server.notices().iter().any(|text| text.contains("ilium.core.tree")));
+    assert!(server
+        .notices()
+        .iter()
+        .any(|text| text.contains("ilium.core.tree")));
 }
 
 /// REQ: LIF-192

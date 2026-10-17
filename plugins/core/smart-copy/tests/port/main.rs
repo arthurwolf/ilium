@@ -4,15 +4,15 @@
 //! the same observable behaviour on the plugin channels: candidate lines, picker keys, clipboard
 //! text, status lines, menu entries and pointer claims.
 
+mod clipboard_ports;
+mod common;
 #[path = "../host_ext.rs"]
 mod host_ext;
-mod common;
-mod clipboard_ports;
+mod host_internal_ports;
+mod layout_ports;
+mod light_ports;
 mod menu_ports;
 mod mouse_ports;
 mod selection_ports;
 mod smart_copy_ports;
-mod light_ports;
-mod layout_ports;
 mod tokens_ports;
-mod host_internal_ports;

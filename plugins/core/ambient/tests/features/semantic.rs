@@ -178,7 +178,10 @@ fn semantic_103_turning_semantic_off_does_not_write_global_storage() {
     host.settings().set("semantic", json!(false)).expect("set");
     host.deliver(vec![settings_changed(&["semantic"])]);
     host.settle();
-    assert_eq!(host.storage().get(Bucket::Global, LAST_SCENE), Some(b"clouds".to_vec()));
+    assert_eq!(
+        host.storage().get(Bucket::Global, LAST_SCENE),
+        Some(b"clouds".to_vec())
+    );
 }
 
 /// Reading the suggestion never changes the stored value.
@@ -192,7 +195,10 @@ fn semantic_103_turning_semantic_on_keeps_the_stored_suggestion_unchanged() {
     host.settings().set("semantic", json!(true)).expect("set");
     host.deliver(vec![settings_changed(&["semantic"])]);
     host.settle();
-    assert_eq!(host.storage().get(Bucket::Global, LAST_SCENE), Some(b"clouds".to_vec()));
+    assert_eq!(
+        host.storage().get(Bucket::Global, LAST_SCENE),
+        Some(b"clouds".to_vec())
+    );
 }
 
 /// REQ: F-103

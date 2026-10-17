@@ -5,5 +5,5 @@
 mod support;
 
 mod reference_dependency_resolution;
-mod reference_install_and_update;
 mod reference_dependency_resolution_p2;
+mod reference_install_and_update;

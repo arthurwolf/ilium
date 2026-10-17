@@ -3,10 +3,10 @@
 
 #![allow(dead_code)]
 
-#[path = "../host_ext.rs"]
-mod host_ext;
 #[path = "../features/common.rs"]
 mod common;
+#[path = "../host_ext.rs"]
+mod host_ext;
 
 mod cli_args;
 mod client_start;

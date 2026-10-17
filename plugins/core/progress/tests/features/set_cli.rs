@@ -5,7 +5,7 @@
 use ilium_plugin_sdk::testing::{FakeHost, TreeNode};
 use ilium_plugin_sdk::types::{NodeClass, Outcome};
 use proptest::prelude::*;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::common::*;
 
@@ -27,7 +27,12 @@ fn set_run(host: &mut FakeHost, pane: u64, command: &str, extra: &[&str]) -> Run
 }
 
 fn key_set(record: &Value) -> Vec<String> {
-    let mut keys: Vec<String> = record.as_object().expect("object").keys().cloned().collect();
+    let mut keys: Vec<String> = record
+        .as_object()
+        .expect("object")
+        .keys()
+        .cloned()
+        .collect();
     keys.sort();
     keys
 }
@@ -72,7 +77,10 @@ fn f_060_set_record_carries_the_pane_the_monitor_and_the_first_accepted_report()
     assert_eq!(report["message"], "Exporting 412 sessions");
     assert_eq!(report["details"], "");
     assert!(report["error"].is_null());
-    assert_eq!(record["progress"]["monitor_health"], json!({"state": "healthy"}));
+    assert_eq!(
+        record["progress"]["monitor_health"],
+        json!({"state": "healthy"})
+    );
     assert!(record["progress"]["last_observed_unix_millis"].is_u64());
 }
 
@@ -116,7 +124,13 @@ fn progress_b06_the_default_interval_is_one_second() {
 #[test]
 fn progress_b06_an_interval_of_five_seconds_runs_the_probe_every_five_seconds() {
     let (mut host, pane) = host_with_pane();
-    register(&mut host, pane, PROBE, &first_report(), &["--interval-seconds", "5"]);
+    register(
+        &mut host,
+        pane,
+        PROBE,
+        &first_report(),
+        &["--interval-seconds", "5"],
+    );
     let before = probe_runs(&mut host);
     host.process().allow_unexpected();
     tick(&mut host, 4);
@@ -192,7 +206,13 @@ fn progress_b05_eight_monitors_are_accepted() {
     let (mut host, pane) = host_with_pane();
     for index in 0..8 {
         let command = format!("/opt/probe-{index}.sh");
-        register(&mut host, pane, &command, &running(&format!("job-{index}"), 0, "Working"), &[]);
+        register(
+            &mut host,
+            pane,
+            &command,
+            &running(&format!("job-{index}"), 0, "Working"),
+            &[],
+        );
     }
     let snapshot = status(&mut host, pane);
     assert_eq!(snapshot["monitor_count"], 8);
@@ -205,7 +225,13 @@ fn progress_b05_the_ninth_live_monitor_is_rejected_too_many_monitors() {
     let (mut host, pane) = host_with_pane();
     for index in 0..8 {
         let command = format!("/opt/probe-{index}.sh");
-        register(&mut host, pane, &command, &running(&format!("job-{index}"), 0, "Working"), &[]);
+        register(
+            &mut host,
+            pane,
+            &command,
+            &running(&format!("job-{index}"), 0, "Working"),
+            &[],
+        );
     }
     expect_probe(&mut host, "/opt/ninth.sh", &running("job-9", 0, "Working"));
     let run = set_run(&mut host, pane, "/opt/ninth.sh", &[]);
@@ -220,7 +246,13 @@ fn progress_b05_a_settled_monitor_with_a_delivered_outcome_makes_room() {
     let (mut host, pane) = host_with_pane();
     for index in 0..8 {
         let command = format!("/opt/probe-{index}.sh");
-        register(&mut host, pane, &command, &running(&format!("job-{index}"), 0, "Working"), &[]);
+        register(
+            &mut host,
+            pane,
+            &command,
+            &running(&format!("job-{index}"), 0, "Working"),
+            &[],
+        );
     }
     expect_probe(&mut host, "/opt/probe-0.sh", &done("job-0", "Finished"));
     tick(&mut host, 1);
@@ -239,7 +271,13 @@ fn progress_b05_a_settled_monitor_whose_outcome_is_not_delivered_does_not_make_r
     let (mut host, pane) = host_with_pane();
     for index in 0..8 {
         let command = format!("/opt/probe-{index}.sh");
-        register(&mut host, pane, &command, &running(&format!("job-{index}"), 0, "Working"), &[]);
+        register(
+            &mut host,
+            pane,
+            &command,
+            &running(&format!("job-{index}"), 0, "Working"),
+            &[],
+        );
     }
     expect_probe(&mut host, "/opt/probe-0.sh", &done("job-0", "Finished"));
     tick(&mut host, 1);
@@ -255,7 +293,13 @@ fn progress_b05_the_limit_is_per_pane() {
     let other = add_shell(&mut host, "other");
     for index in 0..8 {
         let command = format!("/opt/probe-{index}.sh");
-        register(&mut host, pane, &command, &running(&format!("job-{index}"), 0, "Working"), &[]);
+        register(
+            &mut host,
+            pane,
+            &command,
+            &running(&format!("job-{index}"), 0, "Working"),
+            &[],
+        );
     }
     expect_probe(&mut host, "/opt/other.sh", &running("job-o", 0, "Working"));
     let run = set_run(&mut host, other, "/opt/other.sh", &[]);
@@ -279,7 +323,13 @@ fn progress_b11_the_same_command_while_running_returns_the_existing_monitor_id()
 fn progress_b11_a_different_command_adds_a_second_monitor() {
     let (mut host, pane) = host_with_pane();
     let first = register(&mut host, pane, PROBE, &first_report(), &[]);
-    let second = register(&mut host, pane, "/opt/probe.sh --other", &first_report(), &[]);
+    let second = register(
+        &mut host,
+        pane,
+        "/opt/probe.sh --other",
+        &first_report(),
+        &[],
+    );
     assert_ne!(first, second);
     assert_eq!(status(&mut host, pane)["monitor_count"], 2);
 }
@@ -312,7 +362,13 @@ fn f_060_replace_clears_every_other_monitor_of_the_pane_first() {
     let (mut host, pane) = host_with_pane();
     register(&mut host, pane, "/opt/a.sh", &running("job-a", 0, "A"), &[]);
     register(&mut host, pane, "/opt/b.sh", &running("job-b", 0, "B"), &[]);
-    let id = register(&mut host, pane, "/opt/c.sh", &running("job-c", 0, "C"), &["--replace"]);
+    let id = register(
+        &mut host,
+        pane,
+        "/opt/c.sh",
+        &running("job-c", 0, "C"),
+        &["--replace"],
+    );
     let snapshot = status(&mut host, pane);
     assert_eq!(snapshot["monitor_count"], 1);
     assert_eq!(snapshot["monitors"][0]["monitor_id"], id);
@@ -325,7 +381,12 @@ fn f_060_without_replace_the_other_monitors_keep_running() {
     let first = register(&mut host, pane, "/opt/a.sh", &running("job-a", 0, "A"), &[]);
     let second = register(&mut host, pane, "/opt/b.sh", &running("job-b", 0, "B"), &[]);
     let snapshot = status(&mut host, pane);
-    let ids: Vec<u64> = snapshot["monitors"].as_array().expect("monitors").iter().map(|m| m["monitor_id"].as_u64().unwrap()).collect();
+    let ids: Vec<u64> = snapshot["monitors"]
+        .as_array()
+        .expect("monitors")
+        .iter()
+        .map(|m| m["monitor_id"].as_u64().unwrap())
+        .collect();
     assert_eq!(ids, [first, second]);
 }
 
@@ -333,7 +394,8 @@ fn f_060_without_replace_the_other_monitors_keep_running() {
 #[test]
 fn progress_b15_set_is_rejected_disabled_while_the_setting_is_off() {
     let (mut host, pane) = host_with_pane();
-    set_kernel_setting(&mut host, "ui.progress_monitor_enabled", json!(false)).expect("setting accepted");
+    set_kernel_setting(&mut host, "ui.progress_monitor_enabled", json!(false))
+        .expect("setting accepted");
     let run = set_run(&mut host, pane, PROBE, &[]);
     assert_eq!(run.exit, Some(2));
     assert_eq!(rejection(&run)["code"], "disabled");
@@ -344,7 +406,8 @@ fn progress_b15_set_is_rejected_disabled_while_the_setting_is_off() {
 #[test]
 fn progress_b15_check_is_rejected_disabled_while_the_setting_is_off() {
     let (mut host, pane) = host_with_pane();
-    set_kernel_setting(&mut host, "ui.progress_monitor_enabled", json!(false)).expect("setting accepted");
+    set_kernel_setting(&mut host, "ui.progress_monitor_enabled", json!(false))
+        .expect("setting accepted");
     let run = progress(&mut host, pane, &["check", "--command", PROBE]);
     assert_eq!(rejection(&run)["code"], "disabled");
 }
@@ -353,8 +416,10 @@ fn progress_b15_check_is_rejected_disabled_while_the_setting_is_off() {
 #[test]
 fn progress_b15_registration_works_again_after_the_setting_is_turned_back_on() {
     let (mut host, pane) = host_with_pane();
-    set_kernel_setting(&mut host, "ui.progress_monitor_enabled", json!(false)).expect("setting accepted");
-    set_kernel_setting(&mut host, "ui.progress_monitor_enabled", json!(true)).expect("setting accepted");
+    set_kernel_setting(&mut host, "ui.progress_monitor_enabled", json!(false))
+        .expect("setting accepted");
+    set_kernel_setting(&mut host, "ui.progress_monitor_enabled", json!(true))
+        .expect("setting accepted");
     expect_probe(&mut host, PROBE, &first_report());
     assert_eq!(set_run(&mut host, pane, PROBE, &[]).exit, Some(0));
 }
@@ -365,10 +430,15 @@ fn f_059_turning_the_setting_off_stops_observation_and_keeps_the_recorded_result
     let (mut host, pane) = host_with_pane();
     register(&mut host, pane, PROBE, &first_report(), &[]);
     let before = probe_runs(&mut host);
-    set_kernel_setting(&mut host, "ui.progress_monitor_enabled", json!(false)).expect("setting accepted");
+    set_kernel_setting(&mut host, "ui.progress_monitor_enabled", json!(false))
+        .expect("setting accepted");
     host.process().allow_unexpected();
     tick(&mut host, 10);
-    assert_eq!(probe_runs(&mut host), before, "no probe runs while monitoring is off");
+    assert_eq!(
+        probe_runs(&mut host),
+        before,
+        "no probe runs while monitoring is off"
+    );
     let snapshot = status(&mut host, pane);
     assert_eq!(snapshot["monitors"][0]["report"]["job_id"], JOB);
 }
@@ -383,9 +453,22 @@ fn progress_b15_outside_a_pane_the_request_fails_with_pane_identity_unavailable(
     assert_ne!(invocation.exit_code(), Some(0));
     let record = record_of(&stdout, "progress_request_failed");
     assert_eq!(record["code"], "pane-identity-unavailable");
-    assert_eq!(record["message"], "not running inside an ilium-managed pane: ILIUM_PANE_ID is not set");
+    assert_eq!(
+        record["message"],
+        "not running inside an ilium-managed pane: ILIUM_PANE_ID is not set"
+    );
     assert!(record["pane_id"].is_null());
-    assert_eq!(key_set(&record), ["code", "message", "operation", "pane_id", "request_id", "type"]);
+    assert_eq!(
+        key_set(&record),
+        [
+            "code",
+            "message",
+            "operation",
+            "pane_id",
+            "request_id",
+            "type"
+        ]
+    );
 }
 
 /// REQ: progress-B15
@@ -449,7 +532,17 @@ fn progress_b15_a_rejection_record_has_operation_request_id_pane_id_code_and_mes
     let (mut host, pane) = host_with_pane();
     let run = set_run(&mut host, pane, PROBE, &["--interval-seconds", "0"]);
     let record = rejection(&run);
-    assert_eq!(key_set(&record), ["code", "message", "operation", "pane_id", "request_id", "type"]);
+    assert_eq!(
+        key_set(&record),
+        [
+            "code",
+            "message",
+            "operation",
+            "pane_id",
+            "request_id",
+            "type"
+        ]
+    );
     assert_eq!(record["operation"], "set");
     assert_eq!(record["pane_id"], pane);
 }

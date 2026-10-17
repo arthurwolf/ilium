@@ -38,7 +38,9 @@ pub fn traceability_text() -> String {
 
 /// A prompt template of the baseline (`ilium-prompts/templates/agent/<name>.hbs`), byte for byte.
 pub fn template(name: &str) -> String {
-    let path = workspace_root().join("ilium-prompts/templates/agent").join(format!("{name}.hbs"));
+    let path = workspace_root()
+        .join("ilium-prompts/templates/agent")
+        .join(format!("{name}.hbs"));
     std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("template {path:?}: {error}"))
 }
 
@@ -66,21 +68,32 @@ pub fn initial_room() -> String {
 
 /// A server-side host with the manifest grants and the plugin activated.
 pub fn server_host() -> FakeHost {
-    let mut host = FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("server").build();
+    let mut host = FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("server")
+        .build();
     host.activate::<ChatroomServer>();
     host
 }
 
 /// A client-side host with the manifest grants and the plugin activated.
 pub fn client_host() -> FakeHost {
-    let mut host = FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("client").build();
+    let mut host = FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("client")
+        .build();
     host.activate::<ChatroomClient>();
     host
 }
 
 /// Timestamp of the n-th test record, in the format of chatroom-B01.
 pub fn stamp(n: usize) -> String {
-    format!("2026-10-12 {:02}:{:02}:{:02} +02:00", (n / 3600) % 24, (n / 60) % 60, n % 60)
+    format!(
+        "2026-10-12 {:02}:{:02}:{:02} +02:00",
+        (n / 3600) % 24,
+        (n / 60) % 60,
+        n % 60
+    )
 }
 
 /// One record line of chatroom-B01 with the given (already escaped) fields.
@@ -124,7 +137,11 @@ pub fn room_text(host: &mut FakeHost) -> String {
 
 /// The record lines (starting with `- `) of the room file.
 pub fn room_records(host: &mut FakeHost) -> Vec<String> {
-    room_text(host).lines().filter(|line| line.starts_with("- ")).map(str::to_string).collect()
+    room_text(host)
+        .lines()
+        .filter(|line| line.starts_with("- "))
+        .map(str::to_string)
+        .collect()
 }
 
 /// The result of one `ilium chat` invocation.
@@ -145,7 +162,11 @@ pub fn chat_stdin(host: &mut FakeHost, args: &[&str], stdin: &[u8]) -> Run {
     let mut full = vec!["chat"];
     full.extend_from_slice(args);
     let invocation = host.cli().invoke(&full, stdin);
-    Run { out: invocation.stdout(), err: invocation.stderr(), code: invocation.exit_code() }
+    Run {
+        out: invocation.stdout(),
+        err: invocation.stderr(),
+        code: invocation.exit_code(),
+    }
 }
 
 /// Posts through `ilium chat send --message <text>` and returns the run.
@@ -160,19 +181,37 @@ pub fn is_record_timestamp(text: &str) -> bool {
         return false;
     }
     let digits = [0, 1, 2, 3, 5, 6, 8, 9, 11, 12, 14, 15, 17, 18, 21, 22, 24];
-    let separators = [(4, b'-'), (7, b'-'), (10, b' '), (13, b':'), (16, b':'), (19, b' '), (23, b':')];
+    let separators = [
+        (4, b'-'),
+        (7, b'-'),
+        (10, b' '),
+        (13, b':'),
+        (16, b':'),
+        (19, b' '),
+        (23, b':'),
+    ];
     digits.iter().all(|&index| bytes[index].is_ascii_digit())
-        && separators.iter().all(|&(index, expected)| bytes[index] == expected)
+        && separators
+            .iter()
+            .all(|&(index, expected)| bytes[index] == expected)
         && (bytes[20] == b'+' || bytes[20] == b'-')
 }
 
 /// Splits a record line `- <timestamp> | <author> | <content>` into its three fields.
 pub fn split_record(line: &str) -> (String, String, String) {
-    let body = line.strip_prefix("- ").unwrap_or_else(|| panic!("not a record line: {line:?}"));
+    let body = line
+        .strip_prefix("- ")
+        .unwrap_or_else(|| panic!("not a record line: {line:?}"));
     let mut fields = body.splitn(3, " | ");
     let timestamp = fields.next().expect("timestamp").to_string();
-    let author = fields.next().unwrap_or_else(|| panic!("no author in {line:?}")).to_string();
-    let content = fields.next().unwrap_or_else(|| panic!("no content in {line:?}")).to_string();
+    let author = fields
+        .next()
+        .unwrap_or_else(|| panic!("no author in {line:?}"))
+        .to_string();
+    let content = fields
+        .next()
+        .unwrap_or_else(|| panic!("no content in {line:?}"))
+        .to_string();
     (timestamp, author, content)
 }
 
@@ -216,7 +255,12 @@ pub fn row_titles(submissions: &[Submission]) -> Vec<String> {
                 continue;
             }
             for row in &spec.rows {
-                titles.push(row.label.iter().map(|span| span.text.as_str()).collect::<String>());
+                titles.push(
+                    row.label
+                        .iter()
+                        .map(|span| span.text.as_str())
+                        .collect::<String>(),
+                );
             }
         }
     }
@@ -234,13 +278,18 @@ pub fn published(host: &FakeHost, topic: &str) -> Vec<serde_json::Value> {
 
 /// The `text` fields of the `chatroom` topic publications, in order.
 pub fn published_texts(host: &FakeHost) -> Vec<String> {
-    published(host, "chatroom").iter().map(|value| value["text"].as_str().expect("text field").to_string()).collect()
+    published(host, "chatroom")
+        .iter()
+        .map(|value| value["text"].as_str().expect("text field").to_string())
+        .collect()
 }
 
 /// The `<pre class="term">` figure that precedes `caption`, as plain screen text.
 pub fn page_art(caption: &str) -> String {
     let page = page_text();
-    let caption_at = page.find(caption).unwrap_or_else(|| panic!("figcaption {caption:?} missing"));
+    let caption_at = page
+        .find(caption)
+        .unwrap_or_else(|| panic!("figcaption {caption:?} missing"));
     let before = &page[..caption_at];
     let open = before.rfind("<pre class=\"term\">").expect("pre") + "<pre class=\"term\">".len();
     let close = before[open..].find("</pre>").expect("pre end");
@@ -254,6 +303,13 @@ pub fn page_art(caption: &str) -> String {
             _ => {}
         }
     }
-    let text = out.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&");
-    text.lines().map(|line| line.trim_end().to_string()).collect::<Vec<_>>().join("\n") + "\n"
+    let text = out
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&");
+    text.lines()
+        .map(|line| line.trim_end().to_string())
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n"
 }

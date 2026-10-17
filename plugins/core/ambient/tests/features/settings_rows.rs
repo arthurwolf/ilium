@@ -9,7 +9,10 @@ use crate::common::*;
 
 fn rejected(key: &str, value: Value) -> ErrorCode {
     let mut host = activated_client();
-    let error = host.settings().set(key, value).expect_err("the value must be refused");
+    let error = host
+        .settings()
+        .set(key, value)
+        .expect_err("the value must be refused");
     error.code
 }
 
@@ -41,7 +44,10 @@ fn places(count: usize) -> Value {
 /// The key grammar of the manifest, `^[a-z-]{1,24}$`, written out for the oracle.
 fn is_place_name(text: &str) -> bool {
     let count = text.chars().count();
-    (1..=24).contains(&count) && text.chars().all(|symbol| symbol.is_ascii_lowercase() || symbol == '-')
+    (1..=24).contains(&count)
+        && text
+            .chars()
+            .all(|symbol| symbol.is_ascii_lowercase() || symbol == '-')
 }
 
 // --- defaults ---------------------------------------------------------------------------------
@@ -50,7 +56,9 @@ fn is_place_name(text: &str) -> bool {
 #[test]
 fn settings_011_activation_succeeds_for_the_client_side() {
     let mut host = client_host();
-    assert!(host.try_activate::<ilium_plugin_core_ambient::AmbientClient>().is_ok());
+    assert!(host
+        .try_activate::<ilium_plugin_core_ambient::AmbientClient>()
+        .is_ok());
 }
 
 /// REQ: COR-011, F-093
@@ -71,7 +79,10 @@ fn settings_011_semantic_defaults_to_off() {
 #[test]
 fn settings_011_observer_defaults_to_lisbon() {
     let mut host = activated_client();
-    assert_eq!(host.settings().get("observer"), Some(json!({ "lat": 38.7223, "lon": -9.1393, "label": "Lisbon" })));
+    assert_eq!(
+        host.settings().get("observer"),
+        Some(json!({ "lat": 38.7223, "lon": -9.1393, "label": "Lisbon" }))
+    );
 }
 
 /// REQ: COR-011, F-093
@@ -105,13 +116,19 @@ fn settings_093_scene_accepts_stars_again() {
 /// REQ: F-093
 #[test]
 fn settings_093_scene_outside_the_options_is_invalid_argument() {
-    assert_eq!(rejected("scene", json!("pipes")), ErrorCode::InvalidArgument);
+    assert_eq!(
+        rejected("scene", json!("pipes")),
+        ErrorCode::InvalidArgument
+    );
 }
 
 /// REQ: F-093
 #[test]
 fn settings_093_scene_option_titles_are_not_values_invalid_argument() {
-    assert_eq!(rejected("scene", json!("Stars")), ErrorCode::InvalidArgument);
+    assert_eq!(
+        rejected("scene", json!("Stars")),
+        ErrorCode::InvalidArgument
+    );
 }
 
 /// REQ: F-093
@@ -151,7 +168,10 @@ fn settings_103_semantic_accepts_false() {
 /// REQ: F-103
 #[test]
 fn settings_103_semantic_string_is_invalid_argument() {
-    assert_eq!(rejected("semantic", json!("yes")), ErrorCode::InvalidArgument);
+    assert_eq!(
+        rejected("semantic", json!("yes")),
+        ErrorCode::InvalidArgument
+    );
 }
 
 /// REQ: F-103
@@ -163,7 +183,10 @@ fn settings_103_semantic_integer_is_invalid_argument() {
 /// REQ: F-103
 #[test]
 fn settings_103_semantic_null_is_invalid_argument() {
-    assert_eq!(rejected("semantic", Value::Null), ErrorCode::InvalidArgument);
+    assert_eq!(
+        rejected("semantic", Value::Null),
+        ErrorCode::InvalidArgument
+    );
 }
 
 // --- observer location ------------------------------------------------------------------------
@@ -171,7 +194,10 @@ fn settings_103_semantic_null_is_invalid_argument() {
 /// REQ: F-093
 #[test]
 fn settings_093_observer_accepts_a_place_with_a_label() {
-    accepted("observer", json!({ "lat": 48.8566, "lon": 2.3522, "label": "Paris" }));
+    accepted(
+        "observer",
+        json!({ "lat": 48.8566, "lon": 2.3522, "label": "Paris" }),
+    );
 }
 
 /// The label is optional (`{ lat, lon, label? }`).
@@ -199,25 +225,37 @@ fn settings_093_observer_accepts_both_longitude_extremes() {
 /// REQ: F-093
 #[test]
 fn settings_093_observer_latitude_above_ninety_is_invalid_argument() {
-    assert_eq!(rejected("observer", place(90.0001, 0.0)), ErrorCode::InvalidArgument);
+    assert_eq!(
+        rejected("observer", place(90.0001, 0.0)),
+        ErrorCode::InvalidArgument
+    );
 }
 
 /// REQ: F-093
 #[test]
 fn settings_093_observer_latitude_below_minus_ninety_is_invalid_argument() {
-    assert_eq!(rejected("observer", place(-90.0001, 0.0)), ErrorCode::InvalidArgument);
+    assert_eq!(
+        rejected("observer", place(-90.0001, 0.0)),
+        ErrorCode::InvalidArgument
+    );
 }
 
 /// REQ: F-093
 #[test]
 fn settings_093_observer_longitude_above_one_eighty_is_invalid_argument() {
-    assert_eq!(rejected("observer", place(0.0, 180.0001)), ErrorCode::InvalidArgument);
+    assert_eq!(
+        rejected("observer", place(0.0, 180.0001)),
+        ErrorCode::InvalidArgument
+    );
 }
 
 /// REQ: F-093
 #[test]
 fn settings_093_observer_longitude_below_minus_one_eighty_is_invalid_argument() {
-    assert_eq!(rejected("observer", place(0.0, -180.0001)), ErrorCode::InvalidArgument);
+    assert_eq!(
+        rejected("observer", place(0.0, -180.0001)),
+        ErrorCode::InvalidArgument
+    );
 }
 
 /// Both `lat` and `lon` are required.
@@ -225,26 +263,38 @@ fn settings_093_observer_longitude_below_minus_one_eighty_is_invalid_argument() 
 /// REQ: F-093
 #[test]
 fn settings_093_observer_without_longitude_is_invalid_argument() {
-    assert_eq!(rejected("observer", json!({ "lat": 10.0 })), ErrorCode::InvalidArgument);
+    assert_eq!(
+        rejected("observer", json!({ "lat": 10.0 })),
+        ErrorCode::InvalidArgument
+    );
 }
 
 /// REQ: F-093
 #[test]
 fn settings_093_observer_without_latitude_is_invalid_argument() {
-    assert_eq!(rejected("observer", json!({ "lon": 10.0 })), ErrorCode::InvalidArgument);
+    assert_eq!(
+        rejected("observer", json!({ "lon": 10.0 })),
+        ErrorCode::InvalidArgument
+    );
 }
 
 /// REQ: F-093
 #[test]
 fn settings_093_observer_label_of_one_hundred_twenty_characters_is_accepted() {
-    accepted("observer", json!({ "lat": 1.0, "lon": 2.0, "label": "x".repeat(120) }));
+    accepted(
+        "observer",
+        json!({ "lat": 1.0, "lon": 2.0, "label": "x".repeat(120) }),
+    );
 }
 
 /// REQ: F-093
 #[test]
 fn settings_093_observer_label_of_one_hundred_twenty_one_characters_is_invalid_argument() {
     assert_eq!(
-        rejected("observer", json!({ "lat": 1.0, "lon": 2.0, "label": "x".repeat(121) })),
+        rejected(
+            "observer",
+            json!({ "lat": 1.0, "lon": 2.0, "label": "x".repeat(121) })
+        ),
         ErrorCode::InvalidArgument
     );
 }
@@ -252,13 +302,19 @@ fn settings_093_observer_label_of_one_hundred_twenty_one_characters_is_invalid_a
 /// REQ: F-093
 #[test]
 fn settings_093_observer_text_instead_of_an_object_is_invalid_argument() {
-    assert_eq!(rejected("observer", json!("Lisbon")), ErrorCode::InvalidArgument);
+    assert_eq!(
+        rejected("observer", json!("Lisbon")),
+        ErrorCode::InvalidArgument
+    );
 }
 
 /// REQ: F-093
 #[test]
 fn settings_093_observer_text_coordinates_are_invalid_argument() {
-    assert_eq!(rejected("observer", json!({ "lat": "38.7", "lon": "-9.1" })), ErrorCode::InvalidArgument);
+    assert_eq!(
+        rejected("observer", json!({ "lat": "38.7", "lon": "-9.1" })),
+        ErrorCode::InvalidArgument
+    );
 }
 
 // --- saved places map -------------------------------------------------------------------------
@@ -284,7 +340,10 @@ fn settings_093_saved_places_seven_entries_are_accepted() {
 /// REQ: F-093
 #[test]
 fn settings_093_saved_places_nine_entries_are_invalid_argument() {
-    assert_eq!(rejected("saved_places", places(9)), ErrorCode::InvalidArgument);
+    assert_eq!(
+        rejected("saved_places", places(9)),
+        ErrorCode::InvalidArgument
+    );
 }
 
 /// REQ: F-093
@@ -296,13 +355,19 @@ fn settings_093_saved_places_name_of_twenty_four_characters_is_accepted() {
 /// REQ: F-093
 #[test]
 fn settings_093_saved_places_name_of_twenty_five_characters_is_invalid_argument() {
-    assert_eq!(rejected("saved_places", one("a".repeat(25), "Label")), ErrorCode::InvalidArgument);
+    assert_eq!(
+        rejected("saved_places", one("a".repeat(25), "Label")),
+        ErrorCode::InvalidArgument
+    );
 }
 
 /// REQ: F-093
 #[test]
 fn settings_093_saved_places_empty_name_is_invalid_argument() {
-    assert_eq!(rejected("saved_places", json!({ "": "Label" })), ErrorCode::InvalidArgument);
+    assert_eq!(
+        rejected("saved_places", json!({ "": "Label" })),
+        ErrorCode::InvalidArgument
+    );
 }
 
 /// REQ: F-093
@@ -314,45 +379,67 @@ fn settings_093_saved_places_hyphen_is_allowed_in_a_name() {
 /// REQ: F-093
 #[test]
 fn settings_093_saved_places_upper_case_name_is_invalid_argument() {
-    assert_eq!(rejected("saved_places", json!({ "Home": "Label" })), ErrorCode::InvalidArgument);
+    assert_eq!(
+        rejected("saved_places", json!({ "Home": "Label" })),
+        ErrorCode::InvalidArgument
+    );
 }
 
 /// REQ: F-093
 #[test]
 fn settings_093_saved_places_digit_in_a_name_is_invalid_argument() {
-    assert_eq!(rejected("saved_places", json!({ "home1": "Label" })), ErrorCode::InvalidArgument);
+    assert_eq!(
+        rejected("saved_places", json!({ "home1": "Label" })),
+        ErrorCode::InvalidArgument
+    );
 }
 
 /// REQ: F-093
 #[test]
 fn settings_093_saved_places_underscore_in_a_name_is_invalid_argument() {
-    assert_eq!(rejected("saved_places", json!({ "my_home": "Label" })), ErrorCode::InvalidArgument);
+    assert_eq!(
+        rejected("saved_places", json!({ "my_home": "Label" })),
+        ErrorCode::InvalidArgument
+    );
 }
 
 /// REQ: F-093
 #[test]
 fn settings_093_saved_places_space_in_a_name_is_invalid_argument() {
-    assert_eq!(rejected("saved_places", json!({ "my home": "Label" })), ErrorCode::InvalidArgument);
+    assert_eq!(
+        rejected("saved_places", json!({ "my home": "Label" })),
+        ErrorCode::InvalidArgument
+    );
 }
 
 /// REQ: F-093
 #[test]
 fn settings_093_saved_places_integer_value_is_invalid_argument() {
-    assert_eq!(rejected("saved_places", json!({ "home": 3 })), ErrorCode::InvalidArgument);
+    assert_eq!(
+        rejected("saved_places", json!({ "home": 3 })),
+        ErrorCode::InvalidArgument
+    );
 }
 
 /// REQ: F-093
 #[test]
 fn settings_093_saved_places_array_instead_of_an_object_is_invalid_argument() {
-    assert_eq!(rejected("saved_places", json!(["home"])), ErrorCode::InvalidArgument);
+    assert_eq!(
+        rejected("saved_places", json!(["home"])),
+        ErrorCode::InvalidArgument
+    );
 }
 
 /// REQ: F-093
 #[test]
 fn settings_093_saved_places_can_be_emptied_again() {
     let mut host = activated_client();
-    host.settings().set("saved_places", json!({ "home": "Home" })).expect("set");
-    host.settings().set("saved_places", json!({})).expect("clear");
+    host.settings()
+        .set("saved_places", json!({ "home": "Home" }))
+        .expect("set");
+    host.settings()
+        .set("saved_places", json!({}))
+        .expect("clear");
     assert_eq!(host.settings().get("saved_places"), Some(json!({})));
 }
 

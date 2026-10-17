@@ -15,10 +15,17 @@ fn port_tree_ordering_cost_descending_ties_keep_manual_order() {
     host.settle();
     let submitted = host.submitted();
     let keys = order_keys(&submitted);
-    let key_of = |id: u64| keys.iter().find(|(node, _)| node.0 == id).and_then(|(_, key)| *key);
+    let key_of = |id: u64| {
+        keys.iter()
+            .find(|(node, _)| node.0 == id)
+            .and_then(|(_, key)| *key)
+    };
     // Unranked siblings tie on the key, so the kernel falls back to the manual (creation) order.
     assert_eq!(key_of(free_first), key_of(free_second));
-    assert_eq!(sorted_by_key(&submitted, &[free_second, free_first]), vec![free_first, free_second]);
+    assert_eq!(
+        sorted_by_key(&submitted, &[free_second, free_first]),
+        vec![free_first, free_second]
+    );
 }
 
 /// REQ: PORT:ilium-client/src/tree_ordering.rs::manual_and_age_modes_preserve_or_reverse_creation_order
@@ -32,7 +39,10 @@ fn port_tree_ordering_keys_do_not_depend_on_creation_order() {
     host.settle();
     let submitted = host.submitted();
     // Manual and age modes use the creation order, which the plugin must not disturb: the keys follow titles only.
-    assert_eq!(sorted_by_key(&submitted, &[old, middle, new]), vec![middle, new, old]);
+    assert_eq!(
+        sorted_by_key(&submitted, &[old, middle, new]),
+        vec![middle, new, old]
+    );
 }
 
 /// REQ: PORT:ilium-client/src/tree_ordering.rs::name_modes_apply_inside_each_group_but_never_reorder_split_members
@@ -45,7 +55,10 @@ fn port_tree_ordering_name_keys_ignore_case() {
     host.settle();
     let submitted = host.submitted();
     // Ascending name order puts alpha before Zebra; descending is the reverse of the same keys.
-    assert_eq!(sorted_by_key(&submitted, &[zebra, alpha]), vec![alpha, zebra]);
+    assert_eq!(
+        sorted_by_key(&submitted, &[zebra, alpha]),
+        vec![alpha, zebra]
+    );
 }
 
 /// REQ: PORT:ilium-client/src/tree_ordering.rs::type_mode_groups_every_visible_node_kind_then_orders_names
@@ -76,5 +89,8 @@ fn port_tree_ordering_direct_children_of_a_top_level_node_get_keys() {
     let nested = add_node(&mut host, Some(project), "nested", NodeClass::Container);
     host.settle();
     let submitted = host.submitted();
-    assert_eq!(sorted_by_key(&submitted, &[shell, nested]), vec![nested, shell]);
+    assert_eq!(
+        sorted_by_key(&submitted, &[shell, nested]),
+        vec![nested, shell]
+    );
 }

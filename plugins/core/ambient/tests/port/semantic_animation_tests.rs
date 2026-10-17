@@ -76,7 +76,12 @@ fn pointer_table_is_required_total_and_round_trips_durable_values_twin() {
 fn provider_cadence_is_excluded_but_cloud_playback_and_conditional_controls_work_twin() {
     semantic_holds();
     let capabilities = manifest_capabilities();
-    for expected in ["location.geocode", "media.video", "ui.panels", "settings.write-kernel:animations"] {
+    for expected in [
+        "location.geocode",
+        "media.video",
+        "ui.panels",
+        "settings.write-kernel:animations",
+    ] {
         assert!(capabilities.contains(&expected.to_string()), "{expected}");
     }
     assert_eq!(manifest_row("semantic")["type"], json!("toggle"));

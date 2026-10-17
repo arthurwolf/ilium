@@ -17,21 +17,34 @@ use crate::common::{error, request, server_host, sse_delta};
 fn open_stream(host: &mut FakeHost, number: u64) -> StreamId {
     let accepted = host
         .instance_mut::<InferenceServer>()
-        .complete(ProviderCall { call: number, request: request("provider-test", "Reply with the word ok.") });
+        .complete(ProviderCall {
+            call: number,
+            request: request("provider-test", "Reply with the word ok."),
+        });
     assert!(accepted.is_ok());
     host.settle();
     host.http().streams().last().expect("a stream was opened").0
 }
 
 fn data(stream: StreamId, chunk: Vec<u8>) -> Event {
-    Event::HttpStreamData(HttpStreamDataEvent { stream, status: None, headers: None, chunk })
+    Event::HttpStreamData(HttpStreamDataEvent {
+        stream,
+        status: None,
+        headers: None,
+        chunk,
+    })
 }
 
 fn closed(stream: StreamId, outcome: StreamOutcome) -> Event {
     Event::HttpStreamClosed(HttpStreamClosedEvent { stream, outcome })
 }
 
-fn replies(host: &mut FakeHost) -> Vec<(u64, Result<Completion, ilium_plugin_sdk::types::PluginError>)> {
+fn replies(
+    host: &mut FakeHost,
+) -> Vec<(
+    u64,
+    Result<Completion, ilium_plugin_sdk::types::PluginError>,
+)> {
     host.inference().provider_replies()
 }
 
@@ -52,7 +65,10 @@ fn stream_084_the_stream_posts_to_the_chat_completions_url_with_a_16_kib_chunk_l
     open_stream(&mut host, 1);
     let request = host.http().streams().remove(0).1;
     assert_eq!(request.request.method, "POST");
-    assert_eq!(request.request.url, "https://api.openai.com/v1/chat/completions");
+    assert_eq!(
+        request.request.url,
+        "https://api.openai.com/v1/chat/completions"
+    );
     assert_eq!(request.max_chunk_bytes, 16_384);
 }
 
@@ -61,7 +77,10 @@ fn stream_084_the_stream_posts_to_the_chat_completions_url_with_a_16_kib_chunk_l
 fn stream_084_the_stream_request_allows_120_seconds() {
     let mut host = server_host();
     open_stream(&mut host, 1);
-    assert_eq!(host.http().streams().remove(0).1.request.timeout_millis, 120_000);
+    assert_eq!(
+        host.http().streams().remove(0).1.request.timeout_millis,
+        120_000
+    );
 }
 
 /// REQ: F-084
@@ -70,7 +89,8 @@ fn stream_084_the_stream_body_asks_for_streaming() {
     let mut host = server_host();
     open_stream(&mut host, 1);
     let request = host.http().streams().remove(0).1;
-    let body: serde_json::Value = serde_json::from_slice(request.request.body.as_ref().expect("body")).expect("JSON");
+    let body: serde_json::Value =
+        serde_json::from_slice(request.request.body.as_ref().expect("body")).expect("JSON");
     assert_eq!(body["stream"], true);
     assert_eq!(body["model"], "gpt-5.6-terra");
 }
@@ -117,7 +137,10 @@ fn stream_084_the_done_marker_adds_no_text() {
 fn stream_084_a_chunk_without_content_adds_no_text() {
     let mut host = server_host();
     let stream = open_stream(&mut host, 1);
-    host.deliver_one(data(stream, br#"{"choices":[{"delta":{"role":"assistant"}}]}"#.to_vec()));
+    host.deliver_one(data(
+        stream,
+        br#"{"choices":[{"delta":{"role":"assistant"}}]}"#.to_vec(),
+    ));
     host.deliver_one(data(stream, sse_delta("ok")));
     host.deliver_one(closed(stream, StreamOutcome::Ended));
     assert_eq!(replies(&mut host)[0].1.clone().expect("ok").text, "ok");
@@ -129,10 +152,16 @@ fn stream_084_a_failed_stream_answers_with_the_error_of_the_stream() {
     let mut host = server_host();
     let stream = open_stream(&mut host, 2);
     host.deliver_one(data(stream, sse_delta("par")));
-    host.deliver_one(closed(stream, StreamOutcome::Failed(error(ErrorCode::Network))));
+    host.deliver_one(closed(
+        stream,
+        StreamOutcome::Failed(error(ErrorCode::Network)),
+    ));
     let replies = replies(&mut host);
     assert_eq!(replies.len(), 1);
-    assert_eq!(replies[0].1.clone().expect_err("err").code, ErrorCode::Network);
+    assert_eq!(
+        replies[0].1.clone().expect_err("err").code,
+        ErrorCode::Network
+    );
 }
 
 /// REQ: F-084
@@ -151,8 +180,14 @@ fn stream_084_a_cancelled_stream_answers_with_an_error() {
 fn stream_084_a_timed_out_stream_keeps_the_timed_out_code() {
     let mut host = server_host();
     let stream = open_stream(&mut host, 2);
-    host.deliver_one(closed(stream, StreamOutcome::Failed(error(ErrorCode::TimedOut))));
-    assert_eq!(replies(&mut host)[0].1.clone().expect_err("err").code, ErrorCode::TimedOut);
+    host.deliver_one(closed(
+        stream,
+        StreamOutcome::Failed(error(ErrorCode::TimedOut)),
+    ));
+    assert_eq!(
+        replies(&mut host)[0].1.clone().expect_err("err").code,
+        ErrorCode::TimedOut
+    );
 }
 
 /// REQ: F-084
@@ -187,8 +222,10 @@ fn stream_084_two_open_streams_keep_their_texts_apart() {
     host.deliver_one(data(second, sse_delta("beta")));
     host.deliver_one(closed(second, StreamOutcome::Ended));
     host.deliver_one(closed(first, StreamOutcome::Ended));
-    let mut texts: Vec<(u64, String)> =
-        replies(&mut host).into_iter().map(|(number, outcome)| (number, outcome.expect("ok").text)).collect();
+    let mut texts: Vec<(u64, String)> = replies(&mut host)
+        .into_iter()
+        .map(|(number, outcome)| (number, outcome.expect("ok").text))
+        .collect();
     texts.sort();
     assert_eq!(texts, [(1, "alpha".to_string()), (2, "beta".to_string())]);
 }

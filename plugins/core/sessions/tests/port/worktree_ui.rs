@@ -14,7 +14,12 @@ fn port_wt_00_entering_worktree_moves_and_dims_both_lines_together() {
     let mut agents = Vec::new();
     for index in 0..1 {
         let pane = add_agent(&mut host, &format!("worktree agent {index}"), "claude");
-        verify_agent(&mut host, pane, signature("claude", Some(claude_template())), SESSION_ID);
+        verify_agent(
+            &mut host,
+            pane,
+            signature("claude", Some(claude_template())),
+            SESSION_ID,
+        );
         agents.push(pane);
     }
     let shell = add_shell(&mut host, "workspace shell");
@@ -37,7 +42,12 @@ fn port_wt_01_mixed_tree_rows_hit_both_worktree_lines_and_select_both() {
     let mut agents = Vec::new();
     for index in 0..2 {
         let pane = add_agent(&mut host, &format!("worktree agent {index}"), "claude");
-        verify_agent(&mut host, pane, signature("claude", Some(claude_template())), SESSION_ID);
+        verify_agent(
+            &mut host,
+            pane,
+            signature("claude", Some(claude_template())),
+            SESSION_ID,
+        );
         agents.push(pane);
     }
     let shell = add_shell(&mut host, "workspace shell");
@@ -60,7 +70,12 @@ fn port_wt_02_separator_client_hits_exclude_unpainted_rows_and_keep_clipped_work
     let mut agents = Vec::new();
     for index in 0..3 {
         let pane = add_agent(&mut host, &format!("worktree agent {index}"), "claude");
-        verify_agent(&mut host, pane, signature("claude", Some(claude_template())), SESSION_ID);
+        verify_agent(
+            &mut host,
+            pane,
+            signature("claude", Some(claude_template())),
+            SESSION_ID,
+        );
         agents.push(pane);
     }
     let shell = add_shell(&mut host, "workspace shell");
@@ -83,7 +98,12 @@ fn port_wt_03_actual_mouse_and_keyboard_open_catalog_without_submitting() {
     let mut agents = Vec::new();
     for index in 0..1 {
         let pane = add_agent(&mut host, &format!("worktree agent {index}"), "claude");
-        verify_agent(&mut host, pane, signature("claude", Some(claude_template())), SESSION_ID);
+        verify_agent(
+            &mut host,
+            pane,
+            signature("claude", Some(claude_template())),
+            SESSION_ID,
+        );
         agents.push(pane);
     }
     let shell = add_shell(&mut host, "workspace shell");
@@ -106,7 +126,12 @@ fn port_wt_04_catalogs_preserve_authored_fields_and_reject_reopened_drafts() {
     let mut agents = Vec::new();
     for index in 0..2 {
         let pane = add_agent(&mut host, &format!("worktree agent {index}"), "claude");
-        verify_agent(&mut host, pane, signature("claude", Some(claude_template())), SESSION_ID);
+        verify_agent(
+            &mut host,
+            pane,
+            signature("claude", Some(claude_template())),
+            SESSION_ID,
+        );
         agents.push(pane);
     }
     let shell = add_shell(&mut host, "workspace shell");
@@ -129,7 +154,12 @@ fn port_wt_05_choice_buttons_paint_and_hit_on_responsive_rows() {
     let mut agents = Vec::new();
     for index in 0..3 {
         let pane = add_agent(&mut host, &format!("worktree agent {index}"), "claude");
-        verify_agent(&mut host, pane, signature("claude", Some(claude_template())), SESSION_ID);
+        verify_agent(
+            &mut host,
+            pane,
+            signature("claude", Some(claude_template())),
+            SESSION_ID,
+        );
         agents.push(pane);
     }
     let shell = add_shell(&mut host, "workspace shell");
@@ -152,7 +182,12 @@ fn port_wt_06_loading_parent_retains_correlated_reply_and_allocations_under_cata
     let mut agents = Vec::new();
     for index in 0..1 {
         let pane = add_agent(&mut host, &format!("worktree agent {index}"), "claude");
-        verify_agent(&mut host, pane, signature("claude", Some(claude_template())), SESSION_ID);
+        verify_agent(
+            &mut host,
+            pane,
+            signature("claude", Some(claude_template())),
+            SESSION_ID,
+        );
         agents.push(pane);
     }
     let shell = add_shell(&mut host, "workspace shell");
@@ -175,7 +210,12 @@ fn port_wt_07_geometry_is_shared_for_draw_and_mouse_on_small_terminal() {
     let mut agents = Vec::new();
     for index in 0..2 {
         let pane = add_agent(&mut host, &format!("worktree agent {index}"), "claude");
-        verify_agent(&mut host, pane, signature("claude", Some(claude_template())), SESSION_ID);
+        verify_agent(
+            &mut host,
+            pane,
+            signature("claude", Some(claude_template())),
+            SESSION_ID,
+        );
         agents.push(pane);
     }
     let shell = add_shell(&mut host, "workspace shell");
@@ -198,7 +238,12 @@ fn port_wt_08_new_worktree_preview_warns_about_submodules_and_uncopied_changes()
     let mut agents = Vec::new();
     for index in 0..3 {
         let pane = add_agent(&mut host, &format!("worktree agent {index}"), "claude");
-        verify_agent(&mut host, pane, signature("claude", Some(claude_template())), SESSION_ID);
+        verify_agent(
+            &mut host,
+            pane,
+            signature("claude", Some(claude_template())),
+            SESSION_ID,
+        );
         agents.push(pane);
     }
     let shell = add_shell(&mut host, "workspace shell");
@@ -221,7 +266,12 @@ fn port_wt_09_action_hits_follow_the_rendered_ascii_labels() {
     let mut agents = Vec::new();
     for index in 0..1 {
         let pane = add_agent(&mut host, &format!("worktree agent {index}"), "claude");
-        verify_agent(&mut host, pane, signature("claude", Some(claude_template())), SESSION_ID);
+        verify_agent(
+            &mut host,
+            pane,
+            signature("claude", Some(claude_template())),
+            SESSION_ID,
+        );
         agents.push(pane);
     }
     let shell = add_shell(&mut host, "workspace shell");
@@ -244,7 +294,12 @@ fn port_wt_10_branch_chrome_matches_actual_render_without_reducing_path_detail()
     let mut agents = Vec::new();
     for index in 0..2 {
         let pane = add_agent(&mut host, &format!("worktree agent {index}"), "claude");
-        verify_agent(&mut host, pane, signature("claude", Some(claude_template())), SESSION_ID);
+        verify_agent(
+            &mut host,
+            pane,
+            signature("claude", Some(claude_template())),
+            SESSION_ID,
+        );
         agents.push(pane);
     }
     let shell = add_shell(&mut host, "workspace shell");
@@ -267,7 +322,12 @@ fn port_wt_11_compact_layout_keeps_header_details_and_actions_inside_the_frame()
     let mut agents = Vec::new();
     for index in 0..3 {
         let pane = add_agent(&mut host, &format!("worktree agent {index}"), "claude");
-        verify_agent(&mut host, pane, signature("claude", Some(claude_template())), SESSION_ID);
+        verify_agent(
+            &mut host,
+            pane,
+            signature("claude", Some(claude_template())),
+            SESSION_ID,
+        );
         agents.push(pane);
     }
     let shell = add_shell(&mut host, "workspace shell");
@@ -290,7 +350,12 @@ fn port_wt_12_inventory_overflow_track_is_visible_and_does_not_select_a_worktree
     let mut agents = Vec::new();
     for index in 0..1 {
         let pane = add_agent(&mut host, &format!("worktree agent {index}"), "claude");
-        verify_agent(&mut host, pane, signature("claude", Some(claude_template())), SESSION_ID);
+        verify_agent(
+            &mut host,
+            pane,
+            signature("claude", Some(claude_template())),
+            SESSION_ID,
+        );
         agents.push(pane);
     }
     let shell = add_shell(&mut host, "workspace shell");
@@ -313,7 +378,12 @@ fn port_wt_13_measure_live_git_status_with_49_workspace_panes() {
     let mut agents = Vec::new();
     for index in 0..2 {
         let pane = add_agent(&mut host, &format!("worktree agent {index}"), "claude");
-        verify_agent(&mut host, pane, signature("claude", Some(claude_template())), SESSION_ID);
+        verify_agent(
+            &mut host,
+            pane,
+            signature("claude", Some(claude_template())),
+            SESSION_ID,
+        );
         agents.push(pane);
     }
     let shell = add_shell(&mut host, "workspace shell");
@@ -336,7 +406,12 @@ fn port_wt_14_focused_subdirectory_agent_resolves_session_and_persists_its_cwd()
     let mut agents = Vec::new();
     for index in 0..3 {
         let pane = add_agent(&mut host, &format!("worktree agent {index}"), "claude");
-        verify_agent(&mut host, pane, signature("claude", Some(claude_template())), SESSION_ID);
+        verify_agent(
+            &mut host,
+            pane,
+            signature("claude", Some(claude_template())),
+            SESSION_ID,
+        );
         agents.push(pane);
     }
     let shell = add_shell(&mut host, "workspace shell");
@@ -359,7 +434,12 @@ fn port_wt_15_worktree_launcher_dialog_menu_and_footer_popover_render_and_accept
     let mut agents = Vec::new();
     for index in 0..1 {
         let pane = add_agent(&mut host, &format!("worktree agent {index}"), "claude");
-        verify_agent(&mut host, pane, signature("claude", Some(claude_template())), SESSION_ID);
+        verify_agent(
+            &mut host,
+            pane,
+            signature("claude", Some(claude_template())),
+            SESSION_ID,
+        );
         agents.push(pane);
     }
     let shell = add_shell(&mut host, "workspace shell");
@@ -374,4 +454,3 @@ fn port_wt_15_worktree_launcher_dialog_menu_and_footer_popover_render_and_accept
     }
     assert_eq!(freezes(&submitted).len(), 1);
 }
-

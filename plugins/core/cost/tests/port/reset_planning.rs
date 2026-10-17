@@ -37,15 +37,24 @@ fn v1_with_watch(event: Value, watch: Value) -> Value {
 }
 
 fn parse_codex(feed: Value, now: &str, max_age_secs: u64) -> Value {
-    ask("parse-codex-status", json!({ "feed": feed.to_string(), "now": now, "max_age_secs": max_age_secs }))
+    ask(
+        "parse-codex-status",
+        json!({ "feed": feed.to_string(), "now": now, "max_age_secs": max_age_secs }),
+    )
 }
 
 fn parse_scheduled(feed: Value) -> Value {
-    ask("parse-scheduled", json!({ "feed": feed.to_string(), "now": NOW }))
+    ask(
+        "parse-scheduled",
+        json!({ "feed": feed.to_string(), "now": NOW }),
+    )
 }
 
 fn countdown(scheduled: Value, style: &str, now: &str) -> Value {
-    ask("countdown-text", json!({ "provider": "codex", "scheduled": scheduled, "style": style, "now": now }))
+    ask(
+        "countdown-text",
+        json!({ "provider": "codex", "scheduled": scheduled, "style": style, "now": now }),
+    )
 }
 
 fn claude_feed() -> Value {
@@ -56,7 +65,10 @@ fn claude_feed() -> Value {
 }
 
 fn parse_claude(feed: Value) -> Value {
-    ask("parse-claude-feed", json!({ "feed": feed.to_string(), "now": NOW, "max_age_secs": 0 }))
+    ask(
+        "parse-claude-feed",
+        json!({ "feed": feed.to_string(), "now": NOW, "max_age_secs": 0 }),
+    )
 }
 
 fn is_err(reply: &Value) -> bool {
@@ -64,7 +76,10 @@ fn is_err(reply: &Value) -> bool {
 }
 
 fn apply(events: Value, settings: Value, initial: Value) -> Value {
-    ask("monitor-apply", json!({ "settings": settings, "initial": initial, "events": events }))
+    ask(
+        "monitor-apply",
+        json!({ "settings": settings, "initial": initial, "events": events }),
+    )
 }
 
 /// REQ: PORT:ilium-client/src/reset_planning.rs::active_watch_survives_legacy_fallback_and_clears_on_primary_null
@@ -79,7 +94,9 @@ fn port_reset_planning_active_watch_survives_legacy_fallback_and_clears_on_prima
     let reply = apply(events, json!({}), json!({}));
     let steps = reply["steps"].as_array().cloned().unwrap_or_default();
     assert_eq!(steps[0]["codex"]["active_watch"], watch);
-    assert!(steps[0]["display_tick_interval_secs"].as_u64().is_some_and(|secs| secs <= 60));
+    assert!(steps[0]["display_tick_interval_secs"]
+        .as_u64()
+        .is_some_and(|secs| secs <= 60));
     assert_eq!(steps[1]["codex"]["active_watch"], watch);
     assert_eq!(steps[2]["codex"]["active_watch"], Value::Null);
 }
@@ -108,10 +125,20 @@ fn port_reset_planning_claude_stale_detector_or_new_schedule_contract_is_not_hea
 #[test]
 fn port_reset_planning_codex_active_watch_is_a_separate_possible_reset_window() {
     let expires_at = "2026-09-29T04:00:00Z";
-    let status = parse_codex(v1_with_watch(Value::Null, json!({ "expires_at": expires_at })), NOW, 0);
+    let status = parse_codex(
+        v1_with_watch(Value::Null, json!({ "expires_at": expires_at })),
+        NOW,
+        0,
+    );
     assert_eq!(status["ok"]["scheduled"], Value::Null);
-    assert_eq!(status["ok"]["active_watch"]["expires_at"], json!(expires_at));
-    let label = ask("active-watch-text", json!({ "provider": "codex", "watch": { "expires_at": expires_at }, "style": "human", "now": NOW }));
+    assert_eq!(
+        status["ok"]["active_watch"]["expires_at"],
+        json!(expires_at)
+    );
+    let label = ask(
+        "active-watch-text",
+        json!({ "provider": "codex", "watch": { "expires_at": expires_at }, "style": "human", "now": NOW }),
+    );
     let label = label.as_str().unwrap_or("");
     assert!(label.contains("Possible Codex reset"), "{label}");
     assert!(label.contains("watch window ends"), "{label}");
@@ -132,7 +159,11 @@ fn port_reset_planning_codex_active_watch_may_be_missing_or_null() {
 /// REQ: PORT:ilium-client/src/reset_planning.rs::codex_expired_active_watch_is_not_reported_as_a_future_watch
 #[test]
 fn port_reset_planning_codex_expired_active_watch_is_not_reported_as_a_future_watch() {
-    let status = parse_codex(v1_with_watch(Value::Null, json!({ "expires_at": "2026-09-27T03:59:59Z" })), NOW, 0);
+    let status = parse_codex(
+        v1_with_watch(Value::Null, json!({ "expires_at": "2026-09-27T03:59:59Z" })),
+        NOW,
+        0,
+    );
     assert_eq!(status["ok"]["scheduled"], Value::Null);
     assert_eq!(status["ok"]["active_watch"], Value::Null);
 }
@@ -143,7 +174,10 @@ fn port_reset_planning_codex_explicit_target_offset_and_due_are_not_completion()
     let mut event = pending();
     event["scheduled_for"] = json!("2026-09-28T02:00:00+02:00");
     let scheduled = parse_scheduled(v1(event));
-    assert_eq!(scheduled["ok"]["scheduled_for"], json!("2026-09-28T00:00:00Z"));
+    assert_eq!(
+        scheduled["ok"]["scheduled_for"],
+        json!("2026-09-28T00:00:00Z")
+    );
     assert_eq!(
         countdown(scheduled["ok"].clone(), "exact", "2026-09-28T00:00:00Z"),
         json!("Codex reset due · awaiting confirmation")
@@ -164,7 +198,10 @@ fn port_reset_planning_codex_observed_source_uses_status_page_without_url() {
 fn port_reset_planning_codex_scheduled_without_time_is_not_a_countdown() {
     let scheduled = parse_scheduled(v1(pending()));
     assert_eq!(scheduled["ok"]["scheduled_for"], Value::Null);
-    assert_eq!(countdown(scheduled["ok"].clone(), "exact", NOW), json!("Codex reset scheduled · time TBD"));
+    assert_eq!(
+        countdown(scheduled["ok"].clone(), "exact", NOW),
+        json!("Codex reset scheduled · time TBD")
+    );
 }
 
 /// REQ: PORT:ilium-client/src/reset_planning.rs::codex_v1_rejects_unknown_type_missing_target_and_stale_metadata
@@ -174,9 +211,15 @@ fn port_reset_planning_codex_v1_rejects_unknown_type_missing_target_and_stale_me
     event["reset_type"] = json!("unknown");
     assert!(is_err(&parse_scheduled(v1(event))));
     let mut event = pending();
-    event.as_object_mut().map(|object| object.remove("scheduled_for"));
+    event
+        .as_object_mut()
+        .map(|object| object.remove("scheduled_for"));
     assert!(is_err(&parse_scheduled(v1(event))));
-    assert!(is_err(&parse_codex(v1(Value::Null), "2026-09-28T04:00:00Z", 0)));
+    assert!(is_err(&parse_codex(
+        v1(Value::Null),
+        "2026-09-28T04:00:00Z",
+        0
+    )));
     assert!(is_err(&parse_codex(v1(Value::Null), NOW, 7 * 3600)));
 }
 
@@ -202,7 +245,11 @@ fn port_reset_planning_degraded_legacy_cannot_retract_or_roll_back_retained_anno
         { "provider": "codex", "ok": { "scheduled": older, "active_watch": null }, "source_warning": "legacy used" },
         { "provider": "codex", "ok": { "scheduled": null, "active_watch": null }, "source_warning": null },
     ]);
-    let reply = apply(events, json!({}), json!({ "codex": { "scheduled": retained.clone() } }));
+    let reply = apply(
+        events,
+        json!({}),
+        json!({ "codex": { "scheduled": retained.clone() } }),
+    );
     let steps = reply["steps"].as_array().cloned().unwrap_or_default();
     assert_eq!(steps[0]["codex"]["scheduled"], retained);
     assert_eq!(steps[1]["codex"]["scheduled"], retained);
@@ -228,15 +275,24 @@ fn port_reset_planning_exact_countdown_has_seconds_and_due_waits_for_confirmatio
         "announced_at": "2026-09-27T00:00:00Z", "scheduled_for": "2026-09-28T04:07:32Z",
         "source_url": "https://x.com/thsottiaux/status/1", "is_banked": false,
     });
-    assert_eq!(countdown(scheduled.clone(), "exact", "2026-09-27T00:00:00Z"), json!("Codex reset in 1d 4h 7m 32s"));
-    assert_eq!(countdown(scheduled, "exact", "2026-09-28T04:07:32Z"), json!("Codex reset due · awaiting confirmation"));
+    assert_eq!(
+        countdown(scheduled.clone(), "exact", "2026-09-27T00:00:00Z"),
+        json!("Codex reset in 1d 4h 7m 32s")
+    );
+    assert_eq!(
+        countdown(scheduled, "exact", "2026-09-28T04:07:32Z"),
+        json!("Codex reset due · awaiting confirmation")
+    );
 }
 
 /// REQ: PORT:ilium-client/src/reset_planning.rs::legacy_watch_does_not_schedule_and_banked_pending_has_unknown_time
 #[test]
 fn port_reset_planning_legacy_watch_does_not_schedule_and_banked_pending_has_unknown_time() {
     let legacy = |text: &str| ask("parse-codex-legacy", json!({ "feed": text }));
-    assert_eq!(legacy(r#"{"scheduled":null,"watch":{"reset_chance_percent":60}}"#), json!({ "ok": null }));
+    assert_eq!(
+        legacy(r#"{"scheduled":null,"watch":{"reset_chance_percent":60}}"#),
+        json!({ "ok": null })
+    );
     assert!(is_err(&legacy(r#"{"events":[],"watch":null}"#)));
     let scheduled = legacy(
         r#"{"scheduled":{
@@ -247,13 +303,20 @@ fn port_reset_planning_legacy_watch_does_not_schedule_and_banked_pending_has_unk
     );
     assert_eq!(scheduled["ok"]["is_banked"], json!(true));
     assert_eq!(scheduled["ok"]["scheduled_for"], Value::Null);
-    assert_eq!(countdown(scheduled["ok"].clone(), "exact", NOW), json!("Codex banked reset scheduled · time TBD"));
+    assert_eq!(
+        countdown(scheduled["ok"].clone(), "exact", NOW),
+        json!("Codex banked reset scheduled · time TBD")
+    );
 }
 
 /// REQ: PORT:ilium-client/src/reset_planning.rs::primary_success_avoids_fallback_and_malformed_primary_uses_one_legacy_request
 #[test]
-fn port_reset_planning_primary_success_avoids_fallback_and_malformed_primary_uses_one_legacy_request() {
-    let healthy = ask("fetch-provider", json!({ "provider": "codex", "now": NOW, "responses": { CODEX_STATUS_URL: v1(Value::Null).to_string() } }));
+fn port_reset_planning_primary_success_avoids_fallback_and_malformed_primary_uses_one_legacy_request(
+) {
+    let healthy = ask(
+        "fetch-provider",
+        json!({ "provider": "codex", "now": NOW, "responses": { CODEX_STATUS_URL: v1(Value::Null).to_string() } }),
+    );
     assert_eq!(healthy["ok"]["scheduled"], Value::Null);
     assert_eq!(healthy["urls"], json!([CODEX_STATUS_URL]));
     let degraded = ask(
@@ -264,8 +327,14 @@ fn port_reset_planning_primary_success_avoids_fallback_and_malformed_primary_use
         }),
     );
     assert_eq!(degraded["ok"]["scheduled"], Value::Null);
-    assert!(degraded["source_warning"].as_str().unwrap_or("").contains("unknown upstream freshness"));
-    assert_eq!(degraded["urls"], json!([CODEX_STATUS_URL, CODEX_LEGACY_URL]));
+    assert!(degraded["source_warning"]
+        .as_str()
+        .unwrap_or("")
+        .contains("unknown upstream freshness"));
+    assert_eq!(
+        degraded["urls"],
+        json!([CODEX_STATUS_URL, CODEX_LEGACY_URL])
+    );
 }
 
 /// REQ: PORT:ilium-client/src/reset_planning.rs::rate_limit_and_transport_failure_do_not_cascade
@@ -278,11 +347,17 @@ fn port_reset_planning_rate_limit_and_transport_failure_do_not_cascade() {
     assert!(is_err(&limited));
     assert_eq!(limited["retry_after_secs"], json!(7200));
     assert_eq!(limited["requests"], json!(1));
-    let unavailable = ask("fetch-provider", json!({ "provider": "codex", "now": NOW, "failure": { "transport": "network unavailable" } }));
+    let unavailable = ask(
+        "fetch-provider",
+        json!({ "provider": "codex", "now": NOW, "failure": { "transport": "network unavailable" } }),
+    );
     assert!(is_err(&unavailable));
     assert_eq!(unavailable["requests"], json!(1));
     let may_use_legacy = |retry_after: Value| {
-        ask("failure-may-use-legacy", json!({ "http": { "url": CODEX_STATUS_URL, "status": 503, "retry_after_secs": retry_after } }))
+        ask(
+            "failure-may-use-legacy",
+            json!({ "http": { "url": CODEX_STATUS_URL, "status": 503, "retry_after_secs": retry_after } }),
+        )
     };
     assert_eq!(may_use_legacy(json!(0)), json!(false));
     assert_eq!(may_use_legacy(Value::Null), json!(true));
@@ -291,7 +366,10 @@ fn port_reset_planning_rate_limit_and_transport_failure_do_not_cascade() {
 /// REQ: PORT:ilium-client/src/reset_planning.rs::reset_fetch_runs_on_bounded_io_worker_and_drop_requests_cancellation
 #[test]
 fn port_reset_planning_reset_fetch_runs_on_bounded_io_worker_and_drop_requests_cancellation() {
-    let reply = ask("fetch-on-io-worker", json!({ "io_threads": 1, "queue_slots": 1, "abort_after_start": true, "join_deadline_secs": 5 }));
+    let reply = ask(
+        "fetch-on-io-worker",
+        json!({ "io_threads": 1, "queue_slots": 1, "abort_after_start": true, "join_deadline_secs": 5 }),
+    );
     // The blocking fetch callback runs on a dedicated OS thread, not the event loop.
     assert_eq!(reply["started"], json!(true));
     assert_eq!(reply["ran_on_event_loop_thread"], json!(false));
@@ -309,7 +387,15 @@ fn port_reset_planning_retry_after_and_poll_deadline_preserve_hourly_floor() {
     assert_eq!(retry("Sun, 06 Nov 1994 08:49:37 GMT"), json!(60));
     assert_eq!(retry("Sun, 06 Nov 1994 08:47:37 GMT"), json!(0));
     assert_eq!(retry("invalid"), Value::Null);
-    let deadline = |retry_after: Value| ask("next-poll-deadline", json!({ "retry_after_secs": retry_after }));
-    assert_eq!(deadline(Value::Null)["delay_secs"], deadline(Value::Null)["poll_interval_secs"]);
+    let deadline = |retry_after: Value| {
+        ask(
+            "next-poll-deadline",
+            json!({ "retry_after_secs": retry_after }),
+        )
+    };
+    assert_eq!(
+        deadline(Value::Null)["delay_secs"],
+        deadline(Value::Null)["poll_interval_secs"]
+    );
     assert_eq!(deadline(json!(7200))["delay_secs"], json!(7200));
 }

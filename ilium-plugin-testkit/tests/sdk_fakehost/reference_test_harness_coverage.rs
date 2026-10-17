@@ -1,14 +1,18 @@
 //! reference-test-harness.md "Coverage": DEV-530 to DEV-532.
 
 use ilium_plugin_testkit::codes;
-use ilium_plugin_testkit::coverage::{CoverageSummary, check_minimum, collect};
+use ilium_plugin_testkit::coverage::{check_minimum, collect, CoverageSummary};
 use proptest::prelude::*;
 
 use crate::cli_support::run_with_env;
 use crate::common::{temp_dir, with_clean_env, write_file};
 
 fn summary(percent: f64) -> CoverageSummary {
-    CoverageSummary { lines_total: 1000, lines_covered: (percent * 10.0) as u64, percent }
+    CoverageSummary {
+        lines_total: 1000,
+        lines_covered: (percent * 10.0) as u64,
+        percent,
+    }
 }
 
 fn minimal_rust_project(label: &str) -> std::path::PathBuf {
@@ -18,7 +22,11 @@ fn minimal_rust_project(label: &str) -> std::path::PathBuf {
         "Cargo.toml",
         "[package]\nname = \"cov-demo\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
     );
-    write_file(&dir, "src/lib.rs", "pub fn one() -> u32 { 1 }\n#[test]\nfn t() { assert_eq!(one(), 1); }\n");
+    write_file(
+        &dir,
+        "src/lib.rs",
+        "pub fn one() -> u32 { 1 }\n#[test]\nfn t() { assert_eq!(one(), 1); }\n",
+    );
     dir
 }
 
@@ -57,7 +65,11 @@ fn dev_530_collect_returns_line_coverage_for_a_rust_project() {
 #[test]
 fn dev_530_the_command_exits_4_when_the_tool_is_missing() {
     let dir = crate::cli_support::project("c530c", &[("a.json", r#"{ "schema": 1 }"#)]);
-    let run = run_with_env(&dir, &["--coverage"], &[("PATH", "/nonexistent-ilium-test-path")]);
+    let run = run_with_env(
+        &dir,
+        &["--coverage"],
+        &[("PATH", "/nonexistent-ilium-test-path")],
+    );
     assert_eq!(run.code, 4, "stdout: {}", run.stdout);
     assert!(run.stdout.contains("toolchain.coverage-tool-missing"));
 }

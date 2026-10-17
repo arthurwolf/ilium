@@ -56,7 +56,10 @@ impl Seen {
 
     /// Deactivation reasons in order.
     pub fn reasons(&self) -> Vec<DeactivationReason> {
-        self.deactivations.lock().expect("deactivations lock").clone()
+        self.deactivations
+            .lock()
+            .expect("deactivations lock")
+            .clone()
     }
 }
 
@@ -65,12 +68,20 @@ pub struct RecordingGuest(pub Seen);
 
 impl NativeGuest for RecordingGuest {
     fn activate(&mut self, activation: Activation) -> Result<(), PluginError> {
-        self.0.activations.lock().expect("activations lock").push(activation);
+        self.0
+            .activations
+            .lock()
+            .expect("activations lock")
+            .push(activation);
         Ok(())
     }
 
     fn deactivate(&mut self, reason: DeactivationReason) -> Option<Vec<u8>> {
-        self.0.deactivations.lock().expect("deactivations lock").push(reason);
+        self.0
+            .deactivations
+            .lock()
+            .expect("deactivations lock")
+            .push(reason);
         None
     }
 
@@ -96,7 +107,12 @@ pub fn rig_from(builder: HostHarness) -> Rig {
         .with_native_guest(Box::new(RecordingGuest(seen.clone())))
         .build()
         .expect("the harness builds");
-    Rig { host, seen, kernel, next_correlation: 0 }
+    Rig {
+        host,
+        seen,
+        kernel,
+        next_correlation: 0,
+    }
 }
 
 /// A rig for `side` at `tier` holding `granted`.
@@ -109,11 +125,15 @@ impl Rig {
     pub fn submit(&mut self, intent: Intent) -> Option<Outcome> {
         self.next_correlation += 1;
         let correlation = self.next_correlation;
-        self.seen.queue.lock().expect("queue lock").push_back(Submission {
-            intent,
-            correlation,
-            dedup_key: None,
-        });
+        self.seen
+            .queue
+            .lock()
+            .expect("queue lock")
+            .push_back(Submission {
+                intent,
+                correlation,
+                dedup_key: None,
+            });
         self.host.deliver(one_event());
         self.host.pump(8);
         self.outcome_of(correlation)
@@ -131,7 +151,11 @@ impl Rig {
 
     /// Log lines of the plugin as plain messages.
     pub fn log_messages(&self) -> Vec<String> {
-        self.host.logs().into_iter().map(|line| line.message).collect()
+        self.host
+            .logs()
+            .into_iter()
+            .map(|line| line.message)
+            .collect()
     }
 }
 
@@ -172,7 +196,10 @@ pub fn args(words: &[&str]) -> Vec<String> {
 
 /// Lower-case hex SHA-256.
 pub fn sha256_hex(bytes: &[u8]) -> String {
-    Sha256::digest(bytes).iter().map(|byte| format!("{byte:02x}")).collect()
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 /// The smallest component bytes the inventory can list.
@@ -189,13 +216,21 @@ pub struct PackageSpec<'a> {
 impl<'a> PackageSpec<'a> {
     /// A valid package that asks for these server grants.
     pub fn with_grants(grants: &'a [&'a str]) -> PackageSpec<'a> {
-        PackageSpec { api: "ilium:plugin@0.1.0", grants, corrupt_hash: false }
+        PackageSpec {
+            api: "ilium:plugin@0.1.0",
+            grants,
+            corrupt_hash: false,
+        }
     }
 }
 
 /// The bytes of an unsigned `.ilp` package with `manifest.json` and `server.wasm`.
 pub fn package_bytes(spec: &PackageSpec<'_>) -> Vec<u8> {
-    let hash = if spec.corrupt_hash { "0".repeat(64) } else { sha256_hex(&WASM_HEADER) };
+    let hash = if spec.corrupt_hash {
+        "0".repeat(64)
+    } else {
+        sha256_hex(&WASM_HEADER)
+    };
     let manifest = serde_json::json!({
         "api": spec.api,
         "id": "example.grants",
@@ -207,7 +242,10 @@ pub fn package_bytes(spec: &PackageSpec<'_>) -> Vec<u8> {
         "files": [{ "path": "server.wasm", "length": WASM_HEADER.len(), "sha256": hash }],
     });
     ilium_plugin_host::package::write_package(&[
-        ("manifest.json".to_owned(), manifest.to_string().into_bytes()),
+        (
+            "manifest.json".to_owned(),
+            manifest.to_string().into_bytes(),
+        ),
         ("server.wasm".to_owned(), WASM_HEADER.to_vec()),
     ])
     .expect("the package archive is written")
@@ -239,5 +277,6 @@ pub fn manual_page(name: &str) -> String {
         None => PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../docs/plugins-manual/pages"),
     };
     let path = directory.join(name);
-    std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
 }

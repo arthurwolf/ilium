@@ -80,7 +80,11 @@ fn redundant_049_the_rule_applies_to_a_succeeded_task_too() {
 #[test]
 fn redundant_049_turning_the_rule_off_keeps_the_alert_on_an_idle_agent() {
     let mut host = server_host();
-    set_setting(&mut host, "notifications.suppress_redundant_task_outcomes", json!(false));
+    set_setting(
+        &mut host,
+        "notifications.suppress_redundant_task_outcomes",
+        json!(false),
+    );
     let node = add_pane(&mut host, "claude-api", Some(AgentActivity::Idle));
     let submissions = task_outcome(&mut host, node, "job-3", "error");
     assert_eq!(sounds(&submissions).len(), 1);
@@ -91,17 +95,32 @@ fn redundant_049_turning_the_rule_off_keeps_the_alert_on_an_idle_agent() {
 #[test]
 fn redundant_049_turning_the_rule_off_keeps_the_alert_on_a_finished_agent() {
     let mut host = server_host();
-    set_setting(&mut host, "notifications.suppress_redundant_task_outcomes", json!(false));
+    set_setting(
+        &mut host,
+        "notifications.suppress_redundant_task_outcomes",
+        json!(false),
+    );
     let node = add_pane(&mut host, "claude-api", Some(AgentActivity::Done));
-    assert_eq!(notices(&task_outcome(&mut host, node, "job-3", "error")).len(), 1);
+    assert_eq!(
+        notices(&task_outcome(&mut host, node, "job-3", "error")).len(),
+        1
+    );
 }
 
 /// REQ: F-049
 #[test]
 fn redundant_049_turning_the_rule_back_on_skips_again() {
     let mut host = server_host();
-    set_setting(&mut host, "notifications.suppress_redundant_task_outcomes", json!(false));
-    set_setting(&mut host, "notifications.suppress_redundant_task_outcomes", json!(true));
+    set_setting(
+        &mut host,
+        "notifications.suppress_redundant_task_outcomes",
+        json!(false),
+    );
+    set_setting(
+        &mut host,
+        "notifications.suppress_redundant_task_outcomes",
+        json!(true),
+    );
     let node = add_pane(&mut host, "claude-api", Some(AgentActivity::Idle));
     assert!(notices(&task_outcome(&mut host, node, "job-3", "error")).is_empty());
 }
@@ -114,7 +133,10 @@ fn redundant_049_a_skipped_outcome_does_not_start_a_merge_window() {
     assert!(notices(&task_outcome(&mut host, node, "job-3", "error")).is_empty());
     host.tree().set_activity(node.0, AgentActivity::Working);
     host.advance_clock(1_000);
-    assert_eq!(notices(&task_outcome(&mut host, node, "job-4", "error")).len(), 1);
+    assert_eq!(
+        notices(&task_outcome(&mut host, node, "job-4", "error")).len(),
+        1
+    );
 }
 
 /// REQ: F-049
@@ -122,7 +144,10 @@ fn redundant_049_a_skipped_outcome_does_not_start_a_merge_window() {
 fn redundant_049_the_agent_state_is_read_when_the_outcome_arrives() {
     let mut host = server_host();
     let node = add_pane(&mut host, "claude-api", Some(AgentActivity::Working));
-    assert_eq!(notices(&task_outcome(&mut host, node, "job-3", "error")).len(), 1);
+    assert_eq!(
+        notices(&task_outcome(&mut host, node, "job-3", "error")).len(),
+        1
+    );
     host.tree().set_activity(node.0, AgentActivity::Idle);
     host.advance_clock(31_000);
     assert!(notices(&task_outcome(&mut host, node, "job-4", "error")).is_empty());

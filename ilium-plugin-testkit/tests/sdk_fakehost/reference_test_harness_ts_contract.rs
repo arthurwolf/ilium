@@ -7,24 +7,36 @@
 use ilium_plugin_testkit::errors::codes;
 use ilium_plugin_testkit::FakeHost;
 
-use crate::common::{Spy, spy, spy_reset, with_clean_env};
+use crate::common::{spy, spy_reset, with_clean_env, Spy};
 
 fn page_text() -> String {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs/plugins-manual/pages/reference-test-harness.md");
-    std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("manual page {}: {error}", path.display()))
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../docs/plugins-manual/pages/reference-test-harness.md");
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("manual page {}: {error}", path.display()))
 }
 
 fn rule_line(id: &str) -> String {
     let marker = format!("**[{id}]**");
-    page_text().lines().find(|line| line.contains(&marker)).unwrap_or_else(|| panic!("{id} missing on the page")).to_string()
+    page_text()
+        .lines()
+        .find(|line| line.contains(&marker))
+        .unwrap_or_else(|| panic!("{id} missing on the page"))
+        .to_string()
 }
 
 /// REQ: DEV-422
 #[test]
 fn doc_422_the_page_requires_a_fresh_import_and_forbids_a_cached_module() {
     let line = rule_line("DEV-422");
-    assert!(line.contains("`activateModule` MUST import a fresh copy of the module on each call"), "{line}");
-    assert!(line.contains("A module cached by the runtime MUST NOT be reused."), "{line}");
+    assert!(
+        line.contains("`activateModule` MUST import a fresh copy of the module on each call"),
+        "{line}"
+    );
+    assert!(
+        line.contains("A module cached by the runtime MUST NOT be reused."),
+        "{line}"
+    );
     assert!(page_text().contains("| none | `host.activateModule(path): Promise<PluginHandle>` | A `PluginHandle`. Imports a fresh copy of the module. |"));
 }
 
@@ -47,8 +59,16 @@ fn dev_422_each_activation_builds_a_fresh_plugin_so_state_never_leaks_between_ho
 #[test]
 fn doc_427_the_page_names_the_preload_file_and_the_activate_module_advice() {
     let line = rule_line("DEV-427");
-    assert!(line.contains("`@ilium/plugin-sdk/testing/setup` MUST reset the harness registry before each test"), "{line}");
-    assert!(line.contains("Import the plugin with `activateModule`, not with a top-level `import`"), "{line}");
+    assert!(
+        line.contains(
+            "`@ilium/plugin-sdk/testing/setup` MUST reset the harness registry before each test"
+        ),
+        "{line}"
+    );
+    assert!(
+        line.contains("Import the plugin with `activateModule`, not with a top-level `import`"),
+        "{line}"
+    );
 }
 
 /// REQ: DEV-427
@@ -61,7 +81,11 @@ fn dev_427_a_second_host_in_the_same_process_starts_from_a_clean_registry() {
         spy_reset();
         let mut second = FakeHost::new();
         second.activate::<Spy>();
-        assert_eq!(spy().activations.len(), 1, "nothing from the first host is visible after the reset");
+        assert_eq!(
+            spy().activations.len(),
+            1,
+            "nothing from the first host is visible after the reset"
+        );
     });
 }
 
@@ -69,7 +93,13 @@ fn dev_427_a_second_host_in_the_same_process_starts_from_a_clean_registry() {
 #[test]
 fn doc_429_the_page_lists_the_promise_returning_calls_and_the_synchronous_deliver() {
     let line = rule_line("DEV-429");
-    for call in ["`activate({ lifecycle, handler })`", "`tryActivate`", "`activateModule(path)`", "`deactivate`", "`settle()`"] {
+    for call in [
+        "`activate({ lifecycle, handler })`",
+        "`tryActivate`",
+        "`activateModule(path)`",
+        "`deactivate`",
+        "`settle()`",
+    ] {
         assert!(line.contains(call), "{call} missing in {line}");
     }
     assert!(line.contains("MUST return promises"));
@@ -86,7 +116,8 @@ fn dev_429_rust_deliver_is_synchronous_and_returns_the_submissions() {
         spy_reset();
         let mut host = FakeHost::new();
         host.activate::<Spy>();
-        let submissions: Vec<ilium_plugin_sdk_core::types::Submission> = host.deliver(crate::common::client_batch(1));
+        let submissions: Vec<ilium_plugin_sdk_core::types::Submission> =
+            host.deliver(crate::common::client_batch(1));
         assert!(submissions.is_empty(), "the spy script is empty");
         assert_eq!(spy().batches.len(), 1);
     });

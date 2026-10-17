@@ -5,8 +5,6 @@
 //! the interstitial prompt rule (COR-011), the kernel tab settings, the manifest, the extension points,
 //! the services and topics, and the Agents panel renders.
 
-#[path = "../host_ext.rs"]
-mod host_ext;
 mod classify;
 mod common;
 mod decorations;
@@ -14,6 +12,8 @@ mod display_modes;
 mod doc_page;
 mod extension_points;
 mod goal;
+#[path = "../host_ext.rs"]
+mod host_ext;
 mod identify;
 mod interstitial;
 mod manifest;

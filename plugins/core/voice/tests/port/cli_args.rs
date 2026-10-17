@@ -21,7 +21,11 @@ fn last_code(records: &[Value]) -> String {
 /// REQ: PORT:ilium-ipc/src/voice_text.rs::malformed_requests_are_rejected_with_the_invalid_request_code
 #[test]
 fn say_052_nothing_to_say_and_oversized_input_are_invalid_request() {
-    for (args, stdin) in [(vec!["say"], ""), (vec!["say", "  "], ""), (vec!["say", "-"], "\n\n")] {
+    for (args, stdin) in [
+        (vec!["say"], ""),
+        (vec!["say", "  "], ""),
+        (vec!["say", "-"], "\n\n"),
+    ] {
         let (records, exit) = run(&args, stdin.as_bytes());
         assert_eq!(last_code(&records), "invalid-request", "{args:?}");
         assert_eq!(exit, Some(1));
@@ -38,7 +42,10 @@ fn say_052_nothing_to_say_and_oversized_input_are_invalid_request() {
 #[test]
 fn say_052_the_length_limit_counts_characters_not_bytes() {
     let at_limit = "\u{e9}".repeat(4000);
-    assert_ne!(last_code(&run(&["say", &at_limit], b"").0), "invalid-request");
+    assert_ne!(
+        last_code(&run(&["say", &at_limit], b"").0),
+        "invalid-request"
+    );
     let over = "\u{e9}".repeat(4001);
     assert_eq!(last_code(&run(&["say", &over], b"").0), "invalid-request");
 }
@@ -52,7 +59,10 @@ fn say_052_timeout_outside_one_to_600_seconds_is_invalid_request() {
         assert_eq!(exit, Some(1));
     }
     for seconds in ["1", "600"] {
-        assert_ne!(last_code(&run(&["say", "--timeout-s", seconds, "hello"], b"").0), "invalid-request");
+        assert_ne!(
+            last_code(&run(&["say", "--timeout-s", seconds, "hello"], b"").0),
+            "invalid-request"
+        );
     }
 }
 
@@ -62,10 +72,17 @@ fn say_052_timeout_outside_one_to_600_seconds_is_invalid_request() {
 fn say_052_a_lone_hyphen_expands_to_the_non_empty_lines_of_stdin_in_place() {
     let mut host = server_host();
     host.deliver_one(crate::common::client_attached(1));
-    host.cli().invoke(&["say", "--start", "before", "-", "after"], b"first\n\n  second  \n");
+    host.cli().invoke(
+        &["say", "--start", "before", "-", "after"],
+        b"first\n\n  second  \n",
+    );
     host.settle();
-    let payload: Value = serde_json::from_str(&host.client_requests().sent()[0].payload_json).expect("payload");
-    assert_eq!(payload["sentences"], serde_json::json!(["before", "first", "second", "after"]));
+    let payload: Value =
+        serde_json::from_str(&host.client_requests().sent()[0].payload_json).expect("payload");
+    assert_eq!(
+        payload["sentences"],
+        serde_json::json!(["before", "first", "second", "after"])
+    );
     assert_eq!(payload["start"], true);
 }
 
@@ -75,10 +92,15 @@ fn say_052_a_lone_hyphen_expands_to_the_non_empty_lines_of_stdin_in_place() {
 fn say_052_positional_sentences_keep_order_and_are_trimmed() {
     let mut host = server_host();
     host.deliver_one(crate::common::client_attached(1));
-    host.cli().invoke(&["say", "  one ", "two", "--", "-three"], b"");
+    host.cli()
+        .invoke(&["say", "  one ", "two", "--", "-three"], b"");
     host.settle();
-    let payload: Value = serde_json::from_str(&host.client_requests().sent()[0].payload_json).expect("payload");
-    assert_eq!(payload["sentences"], serde_json::json!(["one", "two", "-three"]));
+    let payload: Value =
+        serde_json::from_str(&host.client_requests().sent()[0].payload_json).expect("payload");
+    assert_eq!(
+        payload["sentences"],
+        serde_json::json!(["one", "two", "-three"])
+    );
 }
 
 /// REQ: PORT:ilium/src/voice.rs::records_are_single_line_json_objects_with_a_type

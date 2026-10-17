@@ -184,7 +184,12 @@ impl Rig {
     }
 
     /// Delivers a tree of one widget with items.
-    pub fn deliver_widget_with_items(&mut self, view: u32, widget: &str, items: u32) -> Result<(), String> {
+    pub fn deliver_widget_with_items(
+        &mut self,
+        view: u32,
+        widget: &str,
+        items: u32,
+    ) -> Result<(), String> {
         unimplemented!("host::testing::render::Rig::deliver_widget_with_items")
     }
 
@@ -517,7 +522,12 @@ impl SceneRig {
     }
 
     /// The scene flags.
-    pub fn flags(self, uses_cell_colors: bool, wants_occupancy: bool, wants_pointer: bool) -> SceneRig {
+    pub fn flags(
+        self,
+        uses_cell_colors: bool,
+        wants_occupancy: bool,
+        wants_pointer: bool,
+    ) -> SceneRig {
         unimplemented!("host::testing::render::SceneRig::flags")
     }
 
@@ -775,7 +785,12 @@ impl SurfaceRig {
     }
 
     /// The scene flags.
-    pub fn flags(self, uses_cell_colors: bool, wants_occupancy: bool, wants_pointer: bool) -> SurfaceRig {
+    pub fn flags(
+        self,
+        uses_cell_colors: bool,
+        wants_occupancy: bool,
+        wants_pointer: bool,
+    ) -> SurfaceRig {
         unimplemented!("host::testing::render::SurfaceRig::flags")
     }
 

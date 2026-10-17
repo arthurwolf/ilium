@@ -36,9 +36,10 @@ fn grants_077_the_client_side_submits_no_pane_or_tree_intent_when_a_dialog_opens
         "begin",
         br#"{"pane":42,"source":"claude","target":"codex"}"#,
     ));
-    assert!(intents(&host.submitted())
-        .iter()
-        .all(|intent| !matches!(intent, Intent::CreatePane(_) | Intent::CloseNode(_) | Intent::TerminatePaneProcess(_))));
+    assert!(intents(&host.submitted()).iter().all(|intent| !matches!(
+        intent,
+        Intent::CreatePane(_) | Intent::CloseNode(_) | Intent::TerminatePaneProcess(_)
+    )));
 }
 
 /// REQ: F-077

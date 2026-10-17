@@ -29,7 +29,10 @@ fn qdelivery_b16_working_to_idle_delivers_the_head() {
     enqueue(&mut session, pane, "next task", "once", 1).expect("enqueue");
     let sent = sends(&finish_turn(&mut session, pane, 1));
     assert_eq!(sent.len(), 1);
-    assert_eq!(sent[0].0, plain_spec(pane, "next task", Delivery::Submitted));
+    assert_eq!(
+        sent[0].0,
+        plain_spec(pane, "next task", Delivery::Submitted)
+    );
 }
 
 /// REQ: scheduler-B16, F-057
@@ -37,7 +40,12 @@ fn qdelivery_b16_working_to_idle_delivers_the_head() {
 fn qdelivery_b16_working_to_done_delivers_the_head() {
     let (mut session, pane) = pane_session();
     enqueue(&mut session, pane, "next task", "once", 1).expect("enqueue");
-    let submissions = server(&mut session).deliver_one(activity_event(pane, AgentActivity::Working, AgentActivity::Done, 1));
+    let submissions = server(&mut session).deliver_one(activity_event(
+        pane,
+        AgentActivity::Working,
+        AgentActivity::Done,
+        1,
+    ));
     assert_eq!(sends(&submissions).len(), 1);
 }
 
@@ -61,8 +69,12 @@ fn qdelivery_b16_other_transitions_deliver_nothing() {
     for (previous, current) in transitions {
         let (mut session, pane) = pane_session();
         enqueue(&mut session, pane, "p", "once", 1).expect("enqueue");
-        let submissions = server(&mut session).deliver_one(activity_event(pane, previous, current, 1));
-        assert!(sends(&submissions).is_empty(), "{previous:?} -> {current:?}");
+        let submissions =
+            server(&mut session).deliver_one(activity_event(pane, previous, current, 1));
+        assert!(
+            sends(&submissions).is_empty(),
+            "{previous:?} -> {current:?}"
+        );
     }
 }
 
@@ -70,10 +82,15 @@ fn qdelivery_b16_other_transitions_deliver_nothing() {
 #[test]
 fn qdelivery_b16_an_idle_agent_alone_does_not_deliver_and_time_does_not_either() {
     let (mut session, pane) = pane_session();
-    server(&mut session).tree().set_activity(pane.0, AgentActivity::Idle);
+    server(&mut session)
+        .tree()
+        .set_activity(pane.0, AgentActivity::Idle);
     enqueue(&mut session, pane, "p", "once", 1).expect("enqueue");
     server(&mut session).advance_clock(24 * 3_600_000);
-    assert!(sends(&server(&mut session).submitted()).is_empty(), "a queue is not a timer");
+    assert!(
+        sends(&server(&mut session).submitted()).is_empty(),
+        "a queue is not a timer"
+    );
 }
 
 /// REQ: scheduler-B16, F-057
@@ -122,7 +139,10 @@ fn qdelivery_b16_the_same_revision_twice_carries_the_same_dedup_key() {
     enqueue(&mut session, pane, "a", "forever", 1).expect("enqueue");
     let first = sends(&finish_turn(&mut session, pane, 3));
     let second = sends(&finish_turn(&mut session, pane, 3));
-    assert_eq!(first[0].1, second[0].1, "the kernel dedups the repeat of one revision");
+    assert_eq!(
+        first[0].1, second[0].1,
+        "the kernel dedups the repeat of one revision"
+    );
 }
 
 /// REQ: scheduler-B17, F-057
@@ -205,7 +225,8 @@ proptest! {
 fn qdelivery_b18_the_hundredth_entry_is_accepted() {
     let (mut session, pane) = pane_session();
     for index in 0..100 {
-        enqueue(&mut session, pane, &format!("p{index}"), "once", 1).unwrap_or_else(|error| panic!("entry {index}: {error:?}"));
+        enqueue(&mut session, pane, &format!("p{index}"), "once", 1)
+            .unwrap_or_else(|error| panic!("entry {index}: {error:?}"));
     }
     assert_eq!(list_queue(&mut session, pane).len(), 100);
 }
@@ -217,7 +238,8 @@ fn qdelivery_b18_the_101st_entry_is_refused_with_quota_exceeded() {
     for index in 0..100 {
         enqueue(&mut session, pane, &format!("p{index}"), "once", 1).expect("within the limit");
     }
-    let error = enqueue(&mut session, pane, "one too many", "once", 1).expect_err("the queue is full");
+    let error =
+        enqueue(&mut session, pane, "one too many", "once", 1).expect_err("the queue is full");
     assert_eq!(error.code, ErrorCode::QuotaExceeded);
     assert_eq!(list_queue(&mut session, pane).len(), 100);
 }
@@ -275,10 +297,17 @@ fn qdelivery_b19_a_crash_during_delivery_does_not_replay_the_head() {
     enqueue(&mut session, pane, "authored-queue-message", "once", 1).expect("enqueue");
     server(&mut session).crash_after_journal_write();
     finish_turn(&mut session, pane, 1);
-    assert_eq!(server(&mut session).failures().len(), 1, "the injected crash is recorded");
+    assert_eq!(
+        server(&mut session).failures().len(),
+        1,
+        "the injected crash is recorded"
+    );
     server(&mut session).advance_clock(60_000);
     let again = sends(&finish_turn(&mut session, pane, 2));
-    assert!(again.is_empty(), "the head may have reached the PTY and is not replayed: {again:?}");
+    assert!(
+        again.is_empty(),
+        "the head may have reached the PTY and is not replayed: {again:?}"
+    );
 }
 
 /// REQ: scheduler-B19, F-057
@@ -337,7 +366,10 @@ fn qdelivery_b20_a_queue_delivery_is_told_apart_from_a_scheduled_send_by_its_key
     schedule(&mut session, pane, 0, 0, 5, "s", true).expect("schedule");
     let queued = sends(&finish_turn(&mut session, pane, 1));
     server(&mut session).advance_clock(5_000);
-    let scheduled: Vec<_> = sends(&server(&mut session).submitted()).into_iter().filter(|(spec, _)| spec.text == "s").collect();
+    let scheduled: Vec<_> = sends(&server(&mut session).submitted())
+        .into_iter()
+        .filter(|(spec, _)| spec.text == "s")
+        .collect();
     assert!(queued[0].1.as_deref().unwrap_or("").starts_with("queue:"));
     assert!(scheduled[0].1.as_deref().unwrap_or("").starts_with("send:"));
 }
@@ -348,7 +380,11 @@ fn qdelivery_b20_the_journal_entry_of_a_delivery_names_the_pane() {
     let (mut session, pane) = pane_session();
     enqueue(&mut session, pane, "authored-queue-message", "once", 1).expect("enqueue");
     finish_turn(&mut session, pane, 1);
-    let reply = call_queue(&mut session, serde_json::json!({"method": "journal", "pane": pane.0})).expect("journal answers");
+    let reply = call_queue(
+        &mut session,
+        serde_json::json!({"method": "journal", "pane": pane.0}),
+    )
+    .expect("journal answers");
     let entries = reply["entries"].as_array().cloned().unwrap_or_default();
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0]["kind"], "queued-prompt");

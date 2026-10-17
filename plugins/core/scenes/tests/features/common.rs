@@ -41,7 +41,9 @@ pub fn workspace_root() -> PathBuf {
 
 /// The text of a manual page by file stem, for example `core-plugin-scenes`.
 pub fn page(stem: &str) -> String {
-    let path = workspace_root().join("docs/plugins-manual/pages").join(format!("{stem}.md"));
+    let path = workspace_root()
+        .join("docs/plugins-manual/pages")
+        .join(format!("{stem}.md"));
     std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("page {path:?}: {error}"))
 }
 
@@ -58,18 +60,29 @@ pub fn user_doc(stem: &str) -> String {
 
 /// Cells of the markdown table whose header line starts with `header_start`, without header and separator.
 pub fn table_after(text: &str, header_start: &str) -> Vec<Vec<String>> {
-    let start = text.find(header_start).unwrap_or_else(|| panic!("table starting with {header_start:?}"));
+    let start = text
+        .find(header_start)
+        .unwrap_or_else(|| panic!("table starting with {header_start:?}"));
     text[start..]
         .lines()
         .skip(2)
         .take_while(|line| line.starts_with('|'))
-        .map(|line| line.trim().trim_start_matches('|').trim_end_matches('|').split('|').map(|cell| cell.trim().to_string()).collect())
+        .map(|line| {
+            line.trim()
+                .trim_start_matches('|')
+                .trim_end_matches('|')
+                .split('|')
+                .map(|cell| cell.trim().to_string())
+                .collect()
+        })
         .collect()
 }
 
 /// The first fenced json block that follows the heading `heading` on a page, parsed.
 pub fn json_block_after(text: &str, heading: &str) -> Value {
-    let start = text.find(heading).unwrap_or_else(|| panic!("heading {heading:?}"));
+    let start = text
+        .find(heading)
+        .unwrap_or_else(|| panic!("heading {heading:?}"));
     let rest = &text[start..];
     let open = rest.find("```json\n").expect("json block") + "```json\n".len();
     let close = rest[open..].find("```").expect("closing fence");
@@ -78,12 +91,18 @@ pub fn json_block_after(text: &str, heading: &str) -> Value {
 
 /// The contributed scene entries of the manifest.
 pub fn scene_entries() -> Vec<Value> {
-    manifest_value()["contributes"]["scenes"].as_array().expect("contributes.scenes is an array").clone()
+    manifest_value()["contributes"]["scenes"]
+        .as_array()
+        .expect("contributes.scenes is an array")
+        .clone()
 }
 
 /// One contributed scene entry by id.
 pub fn scene_entry(id: &str) -> Value {
-    scene_entries().into_iter().find(|entry| entry["id"] == id).unwrap_or_else(|| panic!("scene {id} in the manifest"))
+    scene_entries()
+        .into_iter()
+        .find(|entry| entry["id"] == id)
+        .unwrap_or_else(|| panic!("scene {id} in the manifest"))
 }
 
 /// The three scene ids of the manifest, in page order.
@@ -151,16 +170,23 @@ pub fn session_with_plugin() -> FakeSession {
 }
 
 /// Calls a method of the catalog service. The method travels as the `method` field of the request (see API_GAPS.md).
-pub fn catalog_call(session: &mut FakeSession, method: &str, extra: Value) -> Result<Value, ilium_plugin_sdk::types::PluginError> {
+pub fn catalog_call(
+    session: &mut FakeSession,
+    method: &str,
+    extra: Value,
+) -> Result<Value, ilium_plugin_sdk::types::PluginError> {
     let mut request = json!({ "method": method });
     if let (Some(target), Some(source)) = (request.as_object_mut(), extra.as_object()) {
         for (key, value) in source {
             target.insert(key.clone(), value.clone());
         }
     }
-    let reply = session.call_service("test.caller", CATALOG_SERVICE, "^0.1", &request.to_string())?;
+    let reply =
+        session.call_service("test.caller", CATALOG_SERVICE, "^0.1", &request.to_string())?;
     match reply {
-        ilium_plugin_sdk::exports::ServiceReply::Done(text) => Ok(serde_json::from_str(&text).expect("catalog reply is JSON")),
+        ilium_plugin_sdk::exports::ServiceReply::Done(text) => {
+            Ok(serde_json::from_str(&text).expect("catalog reply is JSON"))
+        }
         other => panic!("catalog answers synchronously, got {other:?}"),
     }
 }
@@ -168,7 +194,10 @@ pub fn catalog_call(session: &mut FakeSession, method: &str, extra: Value) -> Re
 /// The scenes the catalog lists, as JSON objects (`scenes` array of the `list` reply, see API_GAPS.md).
 pub fn catalog_scenes(session: &mut FakeSession) -> Vec<Value> {
     let reply = catalog_call(session, "list", json!({})).expect("catalog list answers");
-    reply["scenes"].as_array().unwrap_or_else(|| panic!("reply has a scenes array: {reply}")).clone()
+    reply["scenes"]
+        .as_array()
+        .unwrap_or_else(|| panic!("reply has a scenes array: {reply}"))
+        .clone()
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -181,7 +210,13 @@ pub fn fake_scene(scene_id: &str, columns: u16, rows: u16) -> FakeScene {
 }
 
 /// The same with the observer position the `location` import returns (needs `FakeScene::with_location`).
-pub fn fake_scene_at(scene_id: &str, columns: u16, rows: u16, latitude: f64, longitude: f64) -> FakeScene {
+pub fn fake_scene_at(
+    scene_id: &str,
+    columns: u16,
+    rows: u16,
+    latitude: f64,
+    longitude: f64,
+) -> FakeScene {
     fake_scene(scene_id, columns, rows).with_location(latitude, longitude)
 }
 
@@ -191,7 +226,14 @@ pub fn fake_scene_with(scene_id: &str, columns: u16, rows: u16, settings: &Value
 }
 
 /// The same with both observer and settings.
-pub fn fake_scene_at_with(scene_id: &str, columns: u16, rows: u16, latitude: f64, longitude: f64, settings: &Value) -> FakeScene {
+pub fn fake_scene_at_with(
+    scene_id: &str,
+    columns: u16,
+    rows: u16,
+    latitude: f64,
+    longitude: f64,
+    settings: &Value,
+) -> FakeScene {
     fake_scene_with(scene_id, columns, rows, settings).with_location(latitude, longitude)
 }
 
@@ -202,5 +244,8 @@ pub fn status_of(scene: &FakeScene) -> Option<String> {
 
 /// Adds a contribution of another plugin to a point of the plugin (needs `FakeHost::extensions`).
 pub fn contribute(session: &mut FakeSession, point: &str, id: &str, priority: u8, entry: &Value) {
-    session.plugin(PLUGIN_ID).extensions().contribute(point, id, priority, &entry.to_string());
+    session
+        .plugin(PLUGIN_ID)
+        .extensions()
+        .contribute(point, id, priority, &entry.to_string());
 }

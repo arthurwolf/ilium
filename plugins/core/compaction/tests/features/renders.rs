@@ -6,7 +6,10 @@ use crate::common::*;
 
 fn assert_fits(text: &str, width: usize) {
     for line in text.lines() {
-        assert!(line.chars().count() <= width, "row wider than {width}: {line:?}");
+        assert!(
+            line.chars().count() <= width,
+            "row wider than {width}: {line:?}"
+        );
     }
 }
 
@@ -17,7 +20,9 @@ fn render_082_the_optimizer_panel_fits_widths_40_80_120() {
         let mut host = client_host();
         host.open_view(ViewTarget::Panel("optimizer".to_string()));
         host.set_recommendation(72, 65);
-        let text = host.render(ViewTarget::Panel("optimizer".to_string()), width, 24).text();
+        let text = host
+            .render(ViewTarget::Panel("optimizer".to_string()), width, 24)
+            .text();
         assert_fits(&text, usize::from(width));
         assert!(text.contains("Recommended"));
         assert!(text.contains("Apply") && text.contains("Revert"));
@@ -30,8 +35,18 @@ fn render_082_at_48_columns_the_panel_matches_the_figure_rows() {
     let mut host = client_host();
     host.open_view(ViewTarget::Panel("optimizer".to_string()));
     host.set_recommendation(72, 65);
-    let text = host.render(ViewTarget::Panel("optimizer".to_string()), 48, 12).text();
-    for needle in ["Auto-compact threshold", "72 %", "Recommended", "65 %", "[ Apply ]", "[ Revert ]", "█"] {
+    let text = host
+        .render(ViewTarget::Panel("optimizer".to_string()), 48, 12)
+        .text();
+    for needle in [
+        "Auto-compact threshold",
+        "72 %",
+        "Recommended",
+        "65 %",
+        "[ Apply ]",
+        "[ Revert ]",
+        "█",
+    ] {
         assert!(text.contains(needle), "missing {needle}");
     }
 }
@@ -42,8 +57,13 @@ fn render_082_the_gauge_has_the_recommended_share_filled() {
     let mut host = client_host();
     host.open_view(ViewTarget::Panel("optimizer".to_string()));
     host.set_recommendation(72, 65);
-    let text = host.render(ViewTarget::Panel("optimizer".to_string()), 48, 12).text();
-    let gauge = text.lines().find(|line| line.contains('█')).expect("gauge row");
+    let text = host
+        .render(ViewTarget::Panel("optimizer".to_string()), 48, 12)
+        .text();
+    let gauge = text
+        .lines()
+        .find(|line| line.contains('█'))
+        .expect("gauge row");
     let filled = gauge.chars().filter(|c| *c == '█').count();
     let empty = gauge.chars().filter(|c| *c == '░').count();
     assert!(filled > 0 && empty > 0 && filled > empty / 2);
@@ -55,7 +75,9 @@ fn render_082_the_panel_shows_context_before_and_after_after_a_scan() {
     let mut host = client_host();
     host.open_view(ViewTarget::Panel("optimizer".to_string()));
     host.set_scan_result(200_000, 120_000);
-    let text = host.render(ViewTarget::Panel("optimizer".to_string()), 80, 24).text();
+    let text = host
+        .render(ViewTarget::Panel("optimizer".to_string()), 80, 24)
+        .text();
     assert!(text.contains("Context before") && text.contains("Context after"));
 }
 
@@ -64,7 +86,13 @@ fn render_082_the_panel_shows_context_before_and_after_after_a_scan() {
 fn render_083_the_remote_compaction_page_fits_widths_40_80_120() {
     for width in [40u16, 80, 120] {
         let mut host = client_host();
-        let text = host.render(ViewTarget::SettingsPage("remote-compaction".to_string()), width, 80).text();
+        let text = host
+            .render(
+                ViewTarget::SettingsPage("remote-compaction".to_string()),
+                width,
+                80,
+            )
+            .text();
         assert_fits(&text, usize::from(width));
         assert!(text.contains("Remote compaction") || text.contains("remote compaction"));
     }
@@ -74,7 +102,13 @@ fn render_083_the_remote_compaction_page_fits_widths_40_80_120() {
 #[test]
 fn render_080_the_remote_compaction_tab_shows_the_privacy_notice_until_dismissed() {
     let mut host = client_host();
-    let text = host.render(ViewTarget::SettingsPage("remote-compaction".to_string()), 120, 80).text();
+    let text = host
+        .render(
+            ViewTarget::SettingsPage("remote-compaction".to_string()),
+            120,
+            80,
+        )
+        .text();
     assert!(text.contains("sends your conversation"));
 }
 
@@ -83,7 +117,13 @@ fn render_080_the_remote_compaction_tab_shows_the_privacy_notice_until_dismissed
 fn render_082_the_optimization_page_fits_widths_40_80_120() {
     for width in [40u16, 80, 120] {
         let mut host = client_host();
-        let text = host.render(ViewTarget::SettingsPage("optimization".to_string()), width, 60).text();
+        let text = host
+            .render(
+                ViewTarget::SettingsPage("optimization".to_string()),
+                width,
+                60,
+            )
+            .text();
         assert_fits(&text, usize::from(width));
         assert!(text.contains("Optimization"));
     }

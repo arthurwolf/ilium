@@ -3,8 +3,8 @@
 //! one `move-node`, and the context menu items `order` (opens the submenu) and `order-type`; see API_GAPS.md.
 
 use ilium_plugin_sdk::types::{
-    ActionKind, ActionValue, CommandContext, CommandInvokedEvent, CommandOrigin, Event, Intent, MoveNodeSpec, NodeClass,
-    NodeId, Placement, UiAction, ViewTarget,
+    ActionKind, ActionValue, CommandContext, CommandInvokedEvent, CommandOrigin, Event, Intent,
+    MoveNodeSpec, NodeClass, NodeId, Placement, UiAction, ViewTarget,
 };
 
 use crate::common::*;
@@ -14,7 +14,10 @@ fn command(name: &str, node: u64) -> Event {
         command: name.to_string(),
         arguments_json: "{}".to_string(),
         origin: CommandOrigin::Keybinding,
-        context: CommandContext { pane: Some(NodeId(node)), ..CommandContext::default() },
+        context: CommandContext {
+            pane: Some(NodeId(node)),
+            ..CommandContext::default()
+        },
     })
 }
 
@@ -54,7 +57,11 @@ fn port_021_outdent_moves_a_split_view_out_of_a_top_level_group_to_the_root() {
     host.settle();
     assert_eq!(
         moves(&submissions),
-        vec![MoveNodeSpec { node: NodeId(split_view), target: NodeId(top), placement: Placement::After }]
+        vec![MoveNodeSpec {
+            node: NodeId(split_view),
+            target: NodeId(top),
+            placement: Placement::After
+        }]
     );
 }
 
@@ -64,7 +71,9 @@ fn port_022_context_menu_keyboard_opens_the_order_submenu_and_applies_the_select
     let mut host = client_host();
     let node = add_node(&mut host, None, "work", NodeClass::Container);
     let key = format!("row-{node}");
-    let send = |host: &mut ilium_plugin_sdk::testing::FakeHost, kind: ActionKind, value: Option<ActionValue>| {
+    let send = |host: &mut ilium_plugin_sdk::testing::FakeHost,
+                kind: ActionKind,
+                value: Option<ActionValue>| {
         host.deliver_one(Event::UiAction(UiAction {
             view: ViewTarget::Panel("tree".to_string()),
             key: key.clone(),
@@ -74,9 +83,20 @@ fn port_022_context_menu_keyboard_opens_the_order_submenu_and_applies_the_select
         }))
     };
     send(&mut host, ActionKind::ContextRequested, None);
-    let opened = send(&mut host, ActionKind::Activated, Some(ActionValue::Text("order".to_string())));
+    let opened = send(
+        &mut host,
+        ActionKind::Activated,
+        Some(ActionValue::Text("order".to_string())),
+    );
     assert_eq!(opened, Vec::new(), "opening the submenu submits nothing");
-    send(&mut host, ActionKind::Activated, Some(ActionValue::Text("order-type".to_string())));
+    send(
+        &mut host,
+        ActionKind::Activated,
+        Some(ActionValue::Text("order-type".to_string())),
+    );
     host.settle();
-    assert_eq!(host.settings().get("tree_order"), Some(serde_json::json!("type")));
+    assert_eq!(
+        host.settings().get("tree_order"),
+        Some(serde_json::json!("type"))
+    );
 }

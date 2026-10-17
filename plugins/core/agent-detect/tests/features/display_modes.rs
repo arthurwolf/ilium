@@ -10,15 +10,30 @@ fn host_with_four_agents() -> FakeHost {
     let mut host = client_host();
     add_agent_pane(&mut host, "alpha", "claude", AgentActivity::Working, None);
     add_agent_pane(&mut host, "bravo", "codex", AgentActivity::Idle, None);
-    add_agent_pane(&mut host, "charlie", "claude", AgentActivity::AwaitingApproval, None);
+    add_agent_pane(
+        &mut host,
+        "charlie",
+        "claude",
+        AgentActivity::AwaitingApproval,
+        None,
+    );
     add_agent_pane(&mut host, "delta", "claude", AgentActivity::Done, None);
     host.settle();
     host
 }
 
 fn shown(host: &mut FakeHost, columns: u16) -> Vec<&'static str> {
-    let text = host.render(ViewTarget::Panel("agent-detect.panel".to_string()), columns, 12).text();
-    ["alpha", "bravo", "charlie", "delta"].into_iter().filter(|name| text.contains(name)).collect()
+    let text = host
+        .render(
+            ViewTarget::Panel("agent-detect.panel".to_string()),
+            columns,
+            12,
+        )
+        .text();
+    ["alpha", "bravo", "charlie", "delta"]
+        .into_iter()
+        .filter(|name| text.contains(name))
+        .collect()
 }
 
 /// REQ: F-030
@@ -92,7 +107,11 @@ fn feature_030_attention_mode_filters_at_forty_and_one_hundred_twenty_columns() 
     for columns in [40u16, 120] {
         let mut host = host_with_four_agents();
         host.deliver_one(Event::DisplayModeChanged(Some("attention".to_string())));
-        assert_eq!(shown(&mut host, columns), ["charlie", "delta"], "{columns} columns");
+        assert_eq!(
+            shown(&mut host, columns),
+            ["charlie", "delta"],
+            "{columns} columns"
+        );
     }
 }
 

@@ -16,11 +16,17 @@ fn usage(model: &str, input: u64, output: u64) -> Value {
 }
 
 fn pane_cost(stats: Value, settings: Value, now_ms: i64) -> Value {
-    client("tracker.pane-cost", json!({ "stats": stats, "settings": settings, "now_ms": now_ms }))
+    client(
+        "tracker.pane-cost",
+        json!({ "stats": stats, "settings": settings, "now_ms": now_ms }),
+    )
 }
 
 fn quota_stats(points: &[(i64, f64)], window: &str) -> Value {
-    let quota: Vec<Value> = points.iter().map(|(ms, value)| json!({ "ms": ms, "points": value, "window": window })).collect();
+    let quota: Vec<Value> = points
+        .iter()
+        .map(|(ms, value)| json!({ "ms": ms, "points": value, "window": window }))
+        .collect();
     json!({ "usage": [], "quota": quota })
 }
 
@@ -29,11 +35,16 @@ fn quota_settings() -> Value {
 }
 
 fn overlay(settings: Value, panes: Value) -> Value {
-    client("tracker.overlay", json!({ "settings": settings, "panes": panes, "agents": ["first", "second"], "tree": "project/[first,second]" }))
+    client(
+        "tracker.overlay",
+        json!({ "settings": settings, "panes": panes, "agents": ["first", "second"], "tree": "project/[first,second]" }),
+    )
 }
 
 fn near(value: &Value, expected: f64) -> bool {
-    value.as_f64().is_some_and(|actual| (actual - expected).abs() < 1e-9)
+    value
+        .as_f64()
+        .is_some_and(|actual| (actual - expected).abs() < 1e-9)
 }
 
 /// REQ: PORT:ilium-client/src/cost_tracker.rs::a_reported_total_wins_when_larger_and_clears_the_lower_bound
@@ -65,10 +76,17 @@ fn port_cost_tracker_changing_the_metric_recomputes_panes_that_were_already_deri
         { "settings": { "calibration": "fixed_bands" }, "store": store.clone() },
         { "settings": { "calibration": "fixed_bands", "metric": "quota" }, "store": store },
     ]);
-    let reply = client("tracker.settle", json!({ "ticks": ticks, "agents": ["first"] }));
+    let reply = client(
+        "tracker.settle",
+        json!({ "ticks": ticks, "agents": ["first"] }),
+    );
     let overlays = reply["overlays"].as_array().cloned().unwrap_or_default();
     assert_eq!(overlays[0]["changed"], json!(true));
-    assert_eq!(overlays[0]["rows"]["first"]["amount"], json!(0.0), "no dollar spend");
+    assert_eq!(
+        overlays[0]["rows"]["first"]["amount"],
+        json!(0.0),
+        "no dollar spend"
+    );
     assert_eq!(overlays[1]["changed"], json!(true));
     assert_eq!(overlays[1]["rows"]["first"]["amount"], json!(9.0));
 }
@@ -87,12 +105,16 @@ fn port_cost_tracker_disabled_settings_track_nothing() {
 /// REQ: PORT:ilium-client/src/cost_tracker.rs::invalidated_transcript_cache_removes_previously_derived_costs
 #[test]
 fn port_cost_tracker_invalidated_transcript_cache_removes_previously_derived_costs() {
-    let settings = json!({ "calibration": "fixed_bands", "metric": "quota", "quota_window": "primary" });
+    let settings =
+        json!({ "calibration": "fixed_bands", "metric": "quota", "quota_window": "primary" });
     let ticks = json!([
         { "settings": settings.clone(), "store": { "first": quota_stats(&[(0, 9.0)], "primary") } },
         { "settings": settings, "store": {} },
     ]);
-    let reply = client("tracker.settle", json!({ "ticks": ticks, "agents": ["first"] }));
+    let reply = client(
+        "tracker.settle",
+        json!({ "ticks": ticks, "agents": ["first"] }),
+    );
     let overlays = reply["overlays"].as_array().cloned().unwrap_or_default();
     assert_eq!(overlays[0]["changed"], json!(true));
     assert!(!overlays[0]["pane_cost"]["first"].is_null());
@@ -105,7 +127,10 @@ fn port_cost_tracker_invalidated_transcript_cache_removes_previously_derived_cos
 #[test]
 fn port_cost_tracker_overlay_rolls_group_totals_up_and_keeps_loading_agents_unrated() {
     let settings = json!({ "calibration": "fixed_bands", "group_totals": { "enabled": true } });
-    let reply = overlay(settings, json!({ "first": { "usage": [usage("claude-haiku-4-5", 6_000_000, 0)] } }));
+    let reply = overlay(
+        settings,
+        json!({ "first": { "usage": [usage("claude-haiku-4-5", 6_000_000, 0)] } }),
+    );
     assert_eq!(reply["agent_count"], json!(2));
     assert!(near(&reply["total_amount"], 6.0));
     // $6 is in the $5..$20 band.
@@ -121,7 +146,8 @@ fn port_cost_tracker_overlay_rolls_group_totals_up_and_keeps_loading_agents_unra
 /// REQ: PORT:ilium-client/src/cost_tracker.rs::prices_models_and_marks_unknown_ones_as_a_lower_bound
 #[test]
 fn port_cost_tracker_prices_models_and_marks_unknown_ones_as_a_lower_bound() {
-    let stats = json!({ "usage": [usage("claude-haiku-4-5", 1_000_000, 0), usage("gpt-reserve", 10, 10)] });
+    let stats =
+        json!({ "usage": [usage("claude-haiku-4-5", 1_000_000, 0), usage("gpt-reserve", 10, 10)] });
     let cost = pane_cost(stats, json!({}), 0);
     assert!(near(&cost["usd"], 1.0));
     assert_eq!(cost["is_lower_bound"], json!(true));
@@ -134,7 +160,10 @@ fn port_cost_tracker_quota_budget_is_a_share_of_the_window() {
     let mut settings = quota_settings();
     settings["calibration"] = json!("budget");
     settings["quota_budget_percent"] = json!(5.0);
-    let reply = overlay(settings, json!({ "first": quota_stats(&[(0, 6.0)], "primary") }));
+    let reply = overlay(
+        settings,
+        json!({ "first": quota_stats(&[(0, 6.0)], "primary") }),
+    );
     assert_eq!(reply["rows"]["first"]["is_over_budget"], json!(true));
 }
 
@@ -142,7 +171,10 @@ fn port_cost_tracker_quota_budget_is_a_share_of_the_window() {
 #[test]
 fn port_cost_tracker_quota_metric_sums_the_chosen_window_and_drives_burn_and_sparkline() {
     let now = 1_000 * MINUTE;
-    let stats = quota_stats(&[(now - 5 * MINUTE, 3.0), (now - 50 * MINUTE, 1.5)], "primary");
+    let stats = quota_stats(
+        &[(now - 5 * MINUTE, 3.0), (now - 50 * MINUTE, 1.5)],
+        "primary",
+    );
     let mut settings = quota_settings();
     settings["sparkline_window_minutes"] = json!(60);
     settings["sparkline_cells"] = json!(4);
@@ -151,14 +183,21 @@ fn port_cost_tracker_quota_metric_sums_the_chosen_window_and_drives_burn_and_spa
     assert!(near(&cost["quota_points"], 4.5));
     // 3 points inside the last 15 minutes = 12 points an hour.
     assert!(near(&cost["quota_burn_per_hour"], 12.0));
-    let sparkline_total: f64 = cost["spark_cells"].as_array().map(|cells| cells.iter().filter_map(Value::as_f64).sum()).unwrap_or(0.0);
+    let sparkline_total: f64 = cost["spark_cells"]
+        .as_array()
+        .map(|cells| cells.iter().filter_map(Value::as_f64).sum())
+        .unwrap_or(0.0);
     assert!((sparkline_total - 4.5).abs() < 1e-9);
     assert_eq!(cost["amount_quota"], cost["quota_points"]);
     assert_eq!(cost["amount_dollars"], cost["usd"]);
 
     settings["quota_window"] = json!("secondary");
     let other = pane_cost(stats, settings, now);
-    assert_eq!(other["has_quota"], json!(false), "no secondary window was ever reported");
+    assert_eq!(
+        other["has_quota"],
+        json!(false),
+        "no secondary window was ever reported"
+    );
     assert_eq!(other["quota_points"], json!(0.0));
 }
 
@@ -180,7 +219,11 @@ fn port_cost_tracker_quota_overlay_rates_codex_agents_and_leaves_claude_agents_u
     assert_eq!(reply["rows"]["second"]["is_unavailable"], json!(true));
     assert!(reply["rows"]["second"]["level"].is_null());
     assert_eq!(reply["rows"]["second"]["is_loading"], json!(false));
-    assert_eq!(reply["agent_count"], json!(1), "only agents with a figure count");
+    assert_eq!(
+        reply["agent_count"],
+        json!(1),
+        "only agents with a figure count"
+    );
     assert!(near(&reply["total_amount"], 9.0));
     assert!(near(&reply["rows"]["project"]["amount"], 9.0));
     assert_eq!(reply["peer_totals"], json!([9.0]));
@@ -194,20 +237,30 @@ fn port_cost_tracker_quota_spike_needs_the_quota_floor_not_the_dollar_one() {
     let stats = quota_stats(&[(now - 2 * MINUTE, 1.0)], "primary");
     let mut settings = quota_settings();
     settings["sparkline_window_minutes"] = json!(360);
-    assert_eq!(pane_cost(stats.clone(), settings.clone(), now)["is_spike"], json!(true));
+    assert_eq!(
+        pane_cost(stats.clone(), settings.clone(), now)["is_spike"],
+        json!(true)
+    );
     settings["metric"] = json!("dollars");
-    assert_eq!(pane_cost(stats, settings, now)["is_spike"], json!(false), "no dollar spend, so nothing spikes");
+    assert_eq!(
+        pane_cost(stats, settings, now)["is_spike"],
+        json!(false),
+        "no dollar spend, so nothing spikes"
+    );
 }
 
 /// REQ: PORT:ilium-client/src/cost_tracker.rs::refresh_planning_respects_cadence_and_the_worker_cap
 #[test]
 fn port_cost_tracker_refresh_planning_respects_cadence_and_the_worker_cap() {
-    let reply = client("tracker.plan-refreshes", json!({ "panes": [10, 11, 12, 13, 14, 15], "script": [
+    let reply = client(
+        "tracker.plan-refreshes",
+        json!({ "panes": [10, 11, 12, 13, 14, 15], "script": [
         { "running_workers": 0, "at_secs": 0 },
         { "running_workers": "cap", "at_secs": 0 },
         { "running_workers": 0, "at_secs": 0 },
         { "panes": [10], "running_workers": 0, "at_secs": "interval_plus_one" },
-    ] }));
+    ] }),
+    );
     let plans = reply["plans"].as_array().cloned().unwrap_or_default();
     let cap = reply["max_concurrent_stats_workers"].as_u64().unwrap_or(0) as usize;
     let first = plans[0].as_array().cloned().unwrap_or_default();
@@ -230,9 +283,15 @@ fn port_cost_tracker_spend_points_feed_the_burn_rate_and_sparkline_window() {
             { "minute_ms": now - 50 * MINUTE, "model": "claude-haiku-4-5", "input": 500_000 },
         ],
     });
-    let cost = pane_cost(stats, json!({ "sparkline_window_minutes": 60, "sparkline_cells": 4 }), now);
+    let cost = pane_cost(
+        stats,
+        json!({ "sparkline_window_minutes": 60, "sparkline_cells": 4 }),
+        now,
+    );
     // $1 in the last 15 minutes = $4/h.
-    assert!(cost["burn_usd_per_hour"].as_f64().is_some_and(|burn| (burn - 4.0).abs() < 1e-6));
+    assert!(cost["burn_usd_per_hour"]
+        .as_f64()
+        .is_some_and(|burn| (burn - 4.0).abs() < 1e-6));
     let cells = cost["spark_cells"].as_array().cloned().unwrap_or_default();
     assert_eq!(cells.len(), 4);
     assert!((cells.iter().filter_map(Value::as_f64).sum::<f64>() - 1.5).abs() < 1e-9);

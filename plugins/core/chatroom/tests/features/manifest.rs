@@ -1,16 +1,19 @@
 //! The manifest is exact (COR-050): it equals the Complete manifest block of the page, and every contribution
 //! and grant matches the Manifest fragment.
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::common::{manifest_path, page_text};
 
 fn manifest() -> Value {
-    serde_json::from_str(&std::fs::read_to_string(manifest_path()).expect("manifest.json readable")).expect("JSON")
+    serde_json::from_str(&std::fs::read_to_string(manifest_path()).expect("manifest.json readable"))
+        .expect("JSON")
 }
 
 fn json_block_after(page: &str, heading: &str) -> Value {
-    let start = page.find(heading).unwrap_or_else(|| panic!("heading {heading} missing"));
+    let start = page
+        .find(heading)
+        .unwrap_or_else(|| panic!("heading {heading} missing"));
     let rest = &page[start..];
     let open = rest.find("```json\n").expect("json block") + "```json\n".len();
     let close = rest[open..].find("```").expect("block end");
@@ -18,13 +21,21 @@ fn json_block_after(page: &str, heading: &str) -> Value {
 }
 
 fn strings(value: &Value) -> Vec<String> {
-    value.as_array().expect("array").iter().map(|item| item.as_str().expect("string").to_string()).collect()
+    value
+        .as_array()
+        .expect("array")
+        .iter()
+        .map(|item| item.as_str().expect("string").to_string())
+        .collect()
 }
 
 /// REQ: COR-050
 #[test]
 fn manifest_050_equals_the_complete_manifest_of_the_page() {
-    assert_eq!(manifest(), json_block_after(&page_text(), "### Complete manifest"));
+    assert_eq!(
+        manifest(),
+        json_block_after(&page_text(), "### Complete manifest")
+    );
 }
 
 /// REQ: COR-050
@@ -59,8 +70,14 @@ fn manifest_050_identity_and_api_version() {
 #[test]
 fn manifest_050_both_sides_declare_their_entry_and_world() {
     let manifest = manifest();
-    assert_eq!(manifest["server"], json!({"entry": "server.wasm", "world": "ilium:server/base@0.1.0"}));
-    assert_eq!(manifest["client"], json!({"entry": "client.wasm", "world": "ilium:client/base@0.1.0"}));
+    assert_eq!(
+        manifest["server"],
+        json!({"entry": "server.wasm", "world": "ilium:server/base@0.1.0"})
+    );
+    assert_eq!(
+        manifest["client"],
+        json!({"entry": "client.wasm", "world": "ilium:client/base@0.1.0"})
+    );
 }
 
 /// REQ: COR-050
@@ -84,7 +101,10 @@ fn manifest_050_server_grants_are_exactly_the_eight_of_the_page() {
 /// REQ: COR-050
 #[test]
 fn manifest_050_client_grants_are_topics_subscribe_and_ui_panels() {
-    assert_eq!(strings(&manifest()["capabilities"]["client"]), ["topics.subscribe:chatroom", "ui.panels"]);
+    assert_eq!(
+        strings(&manifest()["capabilities"]["client"]),
+        ["topics.subscribe:chatroom", "ui.panels"]
+    );
 }
 
 /// REQ: COR-050, F-064
@@ -92,14 +112,19 @@ fn manifest_050_client_grants_are_topics_subscribe_and_ui_panels() {
 fn manifest_050_the_plugin_holds_no_agent_config_grant() {
     let manifest = manifest();
     for side in ["server", "client"] {
-        assert!(strings(&manifest["capabilities"][side]).iter().all(|grant| !grant.starts_with("agent-config")));
+        assert!(strings(&manifest["capabilities"][side])
+            .iter()
+            .all(|grant| !grant.starts_with("agent-config")));
     }
 }
 
 /// REQ: COR-050
 #[test]
 fn manifest_050_activation_triggers_are_startup_and_topic_chatroom() {
-    assert_eq!(strings(&manifest()["activation"]), ["startup", "topic:chatroom"]);
+    assert_eq!(
+        strings(&manifest()["activation"]),
+        ["startup", "topic:chatroom"]
+    );
 }
 
 /// REQ: COR-050, F-062
@@ -129,13 +154,17 @@ fn manifest_050_the_room_scope_is_project_for_read_write_and_watch() {
 /// REQ: COR-050
 #[test]
 fn manifest_050_the_description_is_the_first_sentence_of_the_page() {
-    let description = manifest()["description"].as_str().expect("description").to_string();
+    let description = manifest()["description"]
+        .as_str()
+        .expect("description")
+        .to_string();
     assert!(page_text().contains(&description));
 }
 
 /// REQ: COR-050
 #[test]
 fn manifest_050_the_cargo_package_is_the_core_chatroom_crate() {
-    let cargo = std::fs::read_to_string(manifest_path().parent().expect("dir").join("Cargo.toml")).expect("Cargo.toml");
+    let cargo = std::fs::read_to_string(manifest_path().parent().expect("dir").join("Cargo.toml"))
+        .expect("Cargo.toml");
     assert!(cargo.contains("name = \"ilium-plugin-core-chatroom\""));
 }

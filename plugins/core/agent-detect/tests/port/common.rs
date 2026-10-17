@@ -4,10 +4,12 @@ pub use crate::host_ext::*;
 use std::path::PathBuf;
 
 use ilium_plugin_core_agent_detect::{AgentDetectClient, AgentDetectServer};
-use ilium_plugin_sdk::Detector;
-use ilium_plugin_sdk::generated::exports::detector::{Classification, DetectorProcess, DetectorScreen};
+use ilium_plugin_sdk::generated::exports::detector::{
+    Classification, DetectorProcess, DetectorScreen,
+};
 use ilium_plugin_sdk::testing::{FakeHost, TreeNode};
 use ilium_plugin_sdk::types::{AgentActivity, AgentView, Intent, NodeClass, NodeId, Submission};
+use ilium_plugin_sdk::Detector;
 
 /// Path of the plugin manifest.
 pub fn manifest_path() -> PathBuf {
@@ -21,20 +23,28 @@ pub fn workspace_root() -> PathBuf {
 
 /// A captured screen of the existing detector suite (ilium-detect/tests/fixtures).
 pub fn fixture(name: &str) -> String {
-    let path = workspace_root().join("ilium-detect/tests/fixtures").join(name);
+    let path = workspace_root()
+        .join("ilium-detect/tests/fixtures")
+        .join(name);
     std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("fixture {path:?}: {error}"))
 }
 
 /// A server-side host with the manifest grants and the plugin activated.
 pub fn server_host() -> FakeHost {
-    let mut host = FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("server").build();
+    let mut host = FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("server")
+        .build();
     host.activate::<AgentDetectServer>();
     host
 }
 
 /// A client-side host with the manifest grants and the plugin activated.
 pub fn client_host() -> FakeHost {
-    let mut host = FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("client").build();
+    let mut host = FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("client")
+        .build();
     host.activate::<AgentDetectClient>();
     host
 }
@@ -42,9 +52,20 @@ pub fn client_host() -> FakeHost {
 /// Builds the detector screen the kernel hands to `classify` from plain screen text.
 pub fn screen_from_text(text: &str) -> DetectorScreen {
     let rows: Vec<String> = text.lines().map(str::to_string).collect();
-    let columns = rows.iter().map(|row| row.chars().count()).max().unwrap_or(0).max(80);
+    let columns = rows
+        .iter()
+        .map(|row| row.chars().count())
+        .max()
+        .unwrap_or(0)
+        .max(80);
     let cursor_row = u16::try_from(rows.len().saturating_sub(1)).unwrap_or(u16::MAX);
-    DetectorScreen { columns: u16::try_from(columns).unwrap_or(u16::MAX), rows, cursor_row, title: None, revision: 1 }
+    DetectorScreen {
+        columns: u16::try_from(columns).unwrap_or(u16::MAX),
+        rows,
+        cursor_row,
+        title: None,
+        revision: 1,
+    }
 }
 
 /// Runs `classify` of the server side on a screen text.
@@ -66,12 +87,18 @@ pub fn goal(signature: &str, text: &str) -> Option<String> {
 /// manual does not say how waiting-background, background-task-still-running and settling map; they must not be
 /// reported as idle, done or none.
 pub fn is_busy(activity: &AgentActivity) -> bool {
-    !matches!(activity, AgentActivity::Idle | AgentActivity::Done | AgentActivity::None)
+    !matches!(
+        activity,
+        AgentActivity::Idle | AgentActivity::Done | AgentActivity::None
+    )
 }
 
 /// A process of the pane's tree as the kernel lists it for `identify`.
 pub fn process(name: &str, argv: &[&str]) -> DetectorProcess {
-    DetectorProcess { name: name.to_string(), argv: argv.iter().map(|argument| argument.to_string()).collect() }
+    DetectorProcess {
+        name: name.to_string(),
+        argv: argv.iter().map(|argument| argument.to_string()).collect(),
+    }
 }
 
 /// A process whose name is the lowercase file name of `argv[0]`, like the kernel reports it.
@@ -96,14 +123,25 @@ pub fn identify_name(name: &str) -> Option<String> {
 }
 
 /// Adds a terminal pane carrying an agent to the fake tree of the host.
-pub fn add_agent_pane(host: &mut FakeHost, title: &str, signature: &str, activity: AgentActivity, goal: Option<&str>) -> u64 {
+pub fn add_agent_pane(
+    host: &mut FakeHost,
+    title: &str,
+    signature: &str,
+    activity: AgentActivity,
+    goal: Option<&str>,
+) -> u64 {
     host.tree().add(TreeNode {
         id: 0,
         parent: None,
         name: title.to_string(),
         class: NodeClass::Pane,
         content_kind: Some("ilium.terminal".to_string()),
-        agent: Some(AgentView { signature: signature.to_string(), activity, objective: None, goal: goal.map(str::to_string) }),
+        agent: Some(AgentView {
+            signature: signature.to_string(),
+            activity,
+            objective: None,
+            goal: goal.map(str::to_string),
+        }),
     })
 }
 
@@ -113,7 +151,10 @@ pub fn plain(content: &[ilium_plugin_sdk::types::Span]) -> String {
 }
 
 /// Decoration specs with slot `slot`, in submission order.
-pub fn decorations(submissions: &[Submission], slot: &str) -> Vec<ilium_plugin_sdk::types::SetDecorationSpec> {
+pub fn decorations(
+    submissions: &[Submission],
+    slot: &str,
+) -> Vec<ilium_plugin_sdk::types::SetDecorationSpec> {
     submissions
         .iter()
         .filter_map(|submission| match &submission.intent {

@@ -27,7 +27,10 @@ pub fn ask(place: Place, op: &str, request: Value) -> Value {
         Place::Client => ("client", PluginSide::Server),
         Place::Server => ("server", PluginSide::Client),
     };
-    let mut host = FakeHost::for_manifest(manifest_path()).expect("manifest loads").side(side_name).build();
+    let mut host = FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side(side_name)
+        .build();
     match place {
         Place::Client => host.activate::<AgentToolbarClient>(),
         Place::Server => host.activate::<AgentToolbarServer>(),

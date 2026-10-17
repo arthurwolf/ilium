@@ -18,7 +18,10 @@ fn port_001_a_clear_and_full_redraw_within_the_settle_window_does_not_refire() {
 #[test]
 fn port_002_a_counter_inside_the_match_does_not_create_new_instances() {
     let (mut host, pane) = armed("try \\d+ of \\d+", "yes");
-    for (n, line) in ["try 1 of 3", "try 2 of 3", "try 3 of 3"].into_iter().enumerate() {
+    for (n, line) in ["try 1 of 3", "try 2 of 3", "try 3 of 3"]
+        .into_iter()
+        .enumerate()
+    {
         host.deliver_one(matched(pane, &rule_id(0), line, 4));
         let _ = n;
     }
@@ -37,8 +40,14 @@ fn port_003_a_full_delivery_queue_preserves_matched_decisions_and_literal_fifo_m
     let specs = send_inputs(&all);
     assert_eq!(specs.len(), rows.len());
     assert!(specs.iter().all(|spec| spec.text == "literal  reply"));
-    let keys: Vec<Option<String>> = rows.iter().map(|row| Some(dedup_key(&rule_id(0), pane, *row))).collect();
-    assert_eq!(all.iter().map(|s| s.dedup_key.clone()).collect::<Vec<_>>(), keys);
+    let keys: Vec<Option<String>> = rows
+        .iter()
+        .map(|row| Some(dedup_key(&rule_id(0), pane, *row)))
+        .collect();
+    assert_eq!(
+        all.iter().map(|s| s.dedup_key.clone()).collect::<Vec<_>>(),
+        keys
+    );
 }
 
 /// REQ: PORT:ilium-server/src/text_triggers.rs::a_full_observed_absence_rearms_without_an_intermediate_rescan
@@ -162,8 +171,12 @@ fn port_016_an_admitted_instance_stays_answered_across_temporary_ineligibility()
     let (mut host, pane) = armed("go", "yes");
     host.deliver_one(hit(pane, 1));
     set_rules(&mut host, &["go"], &["yes"]);
-    host.settings().set("targets", json!(["terminals"])).expect("targets");
-    host.settings().set("targets", json!(["agents"])).expect("targets");
+    host.settings()
+        .set("targets", json!(["terminals"]))
+        .expect("targets");
+    host.settings()
+        .set("targets", json!(["agents"]))
+        .expect("targets");
     host.settle();
     host.deliver_one(hit(pane, 1));
     assert_eq!((applied(&mut host), duplicates(&mut host)), (1, 1));
@@ -247,7 +260,12 @@ fn port_024_explicit_matching_cache_preserves_string_regex_defaults() {
     let mut host = server_host();
     let pane = add_agent_pane(&mut host, "claude");
     set_rules(&mut host, &["(?i)hello\\s+world"], &["r"]);
-    let filter = host.output_filters().into_iter().find(|(node, _)| *node == pane).expect("filter").1;
+    let filter = host
+        .output_filters()
+        .into_iter()
+        .find(|(node, _)| *node == pane)
+        .expect("filter")
+        .1;
     assert_eq!(filter.regex, "(?i)hello\\s+world");
     assert_eq!(filter.rate_per_second, RATE_PER_SECOND);
 }
@@ -329,7 +347,10 @@ fn port_031_main_screen_missing_admissions_do_not_age_on_the_alternate_screen() 
 fn port_032_matches_split_across_a_soft_wrap_are_found_once_at_any_width() {
     let (mut host, pane) = armed("Do you want to proceed", "y");
     let line = "Do you want to proceed";
-    assert_eq!(texts(&host.deliver_one(matched(pane, &rule_id(0), line, 5))), ["y"]);
+    assert_eq!(
+        texts(&host.deliver_one(matched(pane, &rule_id(0), line, 5))),
+        ["y"]
+    );
     assert!(texts(&host.deliver_one(matched(pane, &rule_id(0), line, 5))).is_empty());
 }
 
@@ -386,7 +407,9 @@ fn port_038_scope_keeps_agents_and_plain_terminals_distinct() {
     let agent = add_agent_pane(&mut host, "claude");
     let shell = add_plain_pane(&mut host);
     set_rules(&mut host, &["a", "b", "c"], &["1", "2", "3"]);
-    host.settings().set("targets", json!(["agents", "terminals", "both"])).expect("targets");
+    host.settings()
+        .set("targets", json!(["agents", "terminals", "both"]))
+        .expect("targets");
     host.settle();
     assert_eq!(filter_ids(&host, agent), [rule_id(0), rule_id(2)]);
     assert_eq!(filter_ids(&host, shell), [rule_id(1), rule_id(2)]);
@@ -411,7 +434,12 @@ fn port_040_simultaneous_identical_instances_each_fire_and_scrolling_keeps_them_
 #[test]
 fn port_041_slice_boundaries_inside_escape_sequences_and_utf8_are_safe() {
     let (mut host, pane) = armed("caf", "r\u{e9}pondre \u{1f980}");
-    let submissions = host.deliver_one(matched(pane, &rule_id(0), "caf\u{e9} \u{1f980}\u{1b}[0m", 1));
+    let submissions = host.deliver_one(matched(
+        pane,
+        &rule_id(0),
+        "caf\u{e9} \u{1f980}\u{1b}[0m",
+        1,
+    ));
     assert_eq!(texts(&submissions), ["r\u{e9}pondre \u{1f980}"]);
 }
 
@@ -430,10 +458,21 @@ fn port_042_the_alternate_screen_round_trip_does_not_refire_main_screen_text() {
 fn port_043_validation_rejects_unstable_ids_multiline_messages_and_bad_regexps() {
     let mut host = server_host();
     set_rules(&mut host, &["a"], &["r"]);
-    assert_eq!(settings_error(&mut host, "replies", json!(["one\ntwo"])), ErrorCode::InvalidArgument);
-    assert_eq!(settings_error(&mut host, "patterns", json!(["["])), ErrorCode::InvalidArgument);
-    assert_eq!(settings_error(&mut host, "patterns", json!([""])), ErrorCode::InvalidArgument);
-    assert_eq!(settings_error(&mut host, "ids", json!(["x", "x"])), ErrorCode::InvalidArgument);
+    assert_eq!(
+        settings_error(&mut host, "replies", json!(["one\ntwo"])),
+        ErrorCode::InvalidArgument
+    );
+    assert_eq!(
+        settings_error(&mut host, "patterns", json!(["["])),
+        ErrorCode::InvalidArgument
+    );
+    assert_eq!(
+        settings_error(&mut host, "patterns", json!([""])),
+        ErrorCode::InvalidArgument
+    );
+    assert_eq!(
+        settings_error(&mut host, "ids", json!(["x", "x"])),
+        ErrorCode::InvalidArgument
+    );
     assert_eq!(host.settings().get("patterns"), Some(json!(["a"])));
 }
-

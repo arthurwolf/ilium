@@ -10,10 +10,20 @@ use crate::common::*;
 fn port_009_an_approval_prompt_is_marked_with_its_own_reason_and_not_a_stalled_goal_text() {
     let mut host = server_host();
     let node = add_pane(&mut host, "codex-api", Some(AgentActivity::Working));
-    let submissions = transition(&mut host, node, AgentActivity::Working, AgentActivity::AwaitingApproval, 1);
+    let submissions = transition(
+        &mut host,
+        node,
+        AgentActivity::Working,
+        AgentActivity::AwaitingApproval,
+        1,
+    );
     let found = marks(&submissions);
     assert_eq!(found.len(), 1, "{found:?}");
     assert_eq!(found[0].node, node);
     assert!(!found[0].reason.trim().is_empty());
-    assert!(!found[0].reason.contains("Goal stalled"), "{}", found[0].reason);
+    assert!(
+        !found[0].reason.contains("Goal stalled"),
+        "{}",
+        found[0].reason
+    );
 }

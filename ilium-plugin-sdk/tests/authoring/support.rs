@@ -17,7 +17,8 @@ use ilium_plugin_sdk::NativeEntry;
 /// Text of one manual page (`name` without `.md`).
 pub fn page(name: &str) -> String {
     let path: PathBuf = pages_dir().join(format!("{name}.md"));
-    std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("manual page {}: {error}", path.display()))
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("manual page {}: {error}", path.display()))
 }
 
 /// Every page of the manual with its name.
@@ -29,7 +30,11 @@ pub fn all_pages() -> Vec<(String, String)> {
         if path.extension().and_then(|extension| extension.to_str()) != Some("md") {
             continue;
         }
-        let name = path.file_stem().and_then(|stem| stem.to_str()).unwrap_or_default().to_string();
+        let name = path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .unwrap_or_default()
+            .to_string();
         if let Ok(text) = std::fs::read_to_string(&path) {
             pages.push((name, text));
         }
@@ -57,7 +62,11 @@ pub fn rule_lines(id: &str) -> Vec<String> {
         if name.starts_with("reference-requirements-") {
             continue;
         }
-        found.extend(text.lines().filter(|line| line.contains(&marker)).map(str::to_string));
+        found.extend(
+            text.lines()
+                .filter(|line| line.contains(&marker))
+                .map(str::to_string),
+        );
     }
     found
 }
@@ -65,12 +74,18 @@ pub fn rule_lines(id: &str) -> Vec<String> {
 /// Asserts that the table row and one page line of `id` contain every needle.
 pub fn assert_rule(id: &str, keyword: &str, needles: &[&str]) {
     let row = table_row(id);
-    assert!(row.contains(keyword), "{id}: row lacks keyword {keyword}: {row}");
+    assert!(
+        row.contains(keyword),
+        "{id}: row lacks keyword {keyword}: {row}"
+    );
     let lines = rule_lines(id);
     assert!(!lines.is_empty(), "{id}: no page line carries the marker");
     for needle in needles {
         assert!(row.contains(needle), "{id}: table row lacks {needle:?}");
-        assert!(lines.iter().any(|line| line.contains(needle)), "{id}: page line lacks {needle:?}");
+        assert!(
+            lines.iter().any(|line| line.contains(needle)),
+            "{id}: page line lacks {needle:?}"
+        );
     }
 }
 
@@ -151,8 +166,12 @@ impl Versioned {
 
     pub fn load(bytes: &[u8]) -> Versioned {
         match bytes {
-            [2, a, b, c, d] => Versioned { value: u32::from_le_bytes([*a, *b, *c, *d]) },
-            [1, a] => Versioned { value: u32::from(*a) },
+            [2, a, b, c, d] => Versioned {
+                value: u32::from_le_bytes([*a, *b, *c, *d]),
+            },
+            [1, a] => Versioned {
+                value: u32::from(*a),
+            },
             _ => Versioned::default(),
         }
     }
@@ -168,7 +187,11 @@ impl NativeEntry for Versioned {
     const SIDE: &'static str = "server";
     const EXPORTS: &'static [&'static str] = &["lifecycle"];
     fn native_activate(&mut self, context: Activation) -> Result<(), PluginError> {
-        self.value = context.restored.as_deref().map(|bytes| Versioned::load(bytes).value).unwrap_or(0);
+        self.value = context
+            .restored
+            .as_deref()
+            .map(|bytes| Versioned::load(bytes).value)
+            .unwrap_or(0);
         Ok(())
     }
     fn native_deactivate(&mut self, _reason: DeactivationReason) -> Option<Vec<u8>> {
@@ -268,7 +291,10 @@ impl NativeEntry for StaleGuard {
                     self.latest.start(submission.correlation);
                     out.push(submission);
                 }
-                Event::RequestCompleted(RequestResult { request: RequestRef::Submission(correlation), .. }) => {
+                Event::RequestCompleted(RequestResult {
+                    request: RequestRef::Submission(correlation),
+                    ..
+                }) => {
                     if self.latest.accept(correlation) {
                         out.push(Submission::new(Intent::DismissToast("apply".to_string())));
                     }
@@ -305,12 +331,17 @@ impl NativeEntry for OptionalGrant {
                     self.pending = Some(submission.correlation);
                     out.push(submission);
                 }
-                Event::RequestCompleted(RequestResult { request: RequestRef::Submission(correlation), outcome }) => {
+                Event::RequestCompleted(RequestResult {
+                    request: RequestRef::Submission(correlation),
+                    outcome,
+                }) => {
                     if self.pending == Some(correlation) {
                         self.pending = None;
                         if let Outcome::Refused(error) = outcome {
                             if error.code == ilium_plugin_sdk::types::ErrorCode::NotPermitted {
-                                out.push(Submission::new(Intent::DismissToast("fallback".to_string())));
+                                out.push(Submission::new(Intent::DismissToast(
+                                    "fallback".to_string(),
+                                )));
                             }
                         }
                     }

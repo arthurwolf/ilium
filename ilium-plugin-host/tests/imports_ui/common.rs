@@ -8,8 +8,8 @@ use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
 
 use ilium_plugin_api::generated::types::events::Event;
-use ilium_plugin_api::generated::types::intents::Submission;
 use ilium_plugin_api::generated::types::ids::NodeId;
+use ilium_plugin_api::generated::types::intents::Submission;
 use ilium_plugin_api::{ErrorCode, PluginError, ProcessKind, Side, Tier};
 use ilium_plugin_host::calls::Trap;
 use ilium_plugin_host::testing::{FakeKernel, HarnessHandle, HostHarness, NativeGuest};

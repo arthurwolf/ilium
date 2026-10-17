@@ -3,12 +3,14 @@
 
 use ilium_plugin_sdk::testing::FakeHost;
 use ilium_plugin_sdk::types::{
-    BufferId, BufferRef, CommandContext, CommandInvokedEvent, CommandOrigin, Event, FsPath, Intent, NodeId, Submission,
-    ViewTarget,
+    BufferId, BufferRef, CommandContext, CommandInvokedEvent, CommandOrigin, Event, FsPath, Intent,
+    NodeId, Submission, ViewTarget,
 };
 use serde_json::json;
 
-use crate::common::{BOARD_KIND, BOARD_PATH, SAMPLE_BOARD, board_file, board_host, client_host_with, draw, press};
+use crate::common::{
+    board_file, board_host, client_host_with, draw, press, BOARD_KIND, BOARD_PATH, SAMPLE_BOARD,
+};
 
 const COMMAND: &str = "ilium.core.kanban.create-board-from-markdown";
 
@@ -17,7 +19,10 @@ fn open_editor(host: &mut FakeHost, path: &str, language: &str) -> NodeId {
     host.deliver_one(Event::EditorOpened(BufferRef {
         buffer: BufferId(3),
         pane: Some(pane),
-        path: Some(FsPath { scope: "project".to_string(), path: path.to_string() }),
+        path: Some(FsPath {
+            scope: "project".to_string(),
+            path: path.to_string(),
+        }),
         language: Some(language.to_string()),
         revision: 1,
         line_count: 8,
@@ -91,12 +96,16 @@ fn port_app_asking_twice_for_the_same_file_opens_only_one_board() {
 #[test]
 fn port_app_layout_settings_persist_and_are_bounded() {
     let mut host = client_host_with(None);
-    host.settings().set("column_width", json!(30)).expect("30 valid");
+    host.settings()
+        .set("column_width", json!(30))
+        .expect("30 valid");
     assert_eq!(host.settings().get("column_width"), Some(json!(30)));
     assert!(host.settings().set("column_width", json!(61)).is_err());
     assert!(host.settings().set("column_width", json!(11)).is_err());
     assert_eq!(host.settings().get("column_width"), Some(json!(30)));
-    host.settings().set("card_preview", json!(false)).expect("toggle");
+    host.settings()
+        .set("card_preview", json!(false))
+        .expect("toggle");
     assert_eq!(host.settings().get("card_preview"), Some(json!(false)));
 }
 
@@ -107,7 +116,10 @@ fn port_app_a_board_pane_opens_on_its_file_and_a_removed_pane_leaves_no_ghost() 
     assert!(draw(&mut host, node, 80, 20).text().contains("To do (2)"));
     host.deliver_one(Event::NodeRemoved(node));
     host.settle();
-    assert_eq!(host.fs().read(BOARD_PATH), Some(SAMPLE_BOARD.as_bytes().to_vec()));
+    assert_eq!(
+        host.fs().read(BOARD_PATH),
+        Some(SAMPLE_BOARD.as_bytes().to_vec())
+    );
 }
 
 /// REQ: PORT:ilium-client/src/app.rs::clicking_a_board_card_opens_scrolls_and_closes_its_detail_panel
@@ -118,9 +130,13 @@ fn port_app_clicking_a_card_opens_and_escape_closes_its_detail_panel() {
     assert!(host.click(ViewTarget::Pane(node), column, row));
     host.settle();
     press(&mut host, node, "enter");
-    assert!(draw(&mut host, node, 120, 30).text().contains("complete body"));
+    assert!(draw(&mut host, node, 120, 30)
+        .text()
+        .contains("complete body"));
     press(&mut host, node, "escape");
-    assert!(!draw(&mut host, node, 120, 30).find("complete body").is_some_and(|(_, c)| c >= 80));
+    assert!(!draw(&mut host, node, 120, 30)
+        .find("complete body")
+        .is_some_and(|(_, c)| c >= 80));
 }
 
 /// REQ: PORT:ilium-client/src/app.rs::successful_editor_and_board_edits_report_node_activity, PORT:ilium-client/src/app.rs::shutdown_without_editor_drains_board_creation_and_reports_open_cancellation
@@ -145,5 +161,9 @@ fn port_app_a_cancelled_creation_keeps_the_completed_file_and_opens_nothing_late
     host.settle();
     assert_eq!(board_file(&mut host), SAMPLE_BOARD);
     let later = host.deliver_one(Event::NodeRemoved(NodeId(901)));
-    assert_eq!(boards(&later), 0, "no delayed open appears after the cancellation");
+    assert_eq!(
+        boards(&later),
+        0,
+        "no delayed open appears after the cancellation"
+    );
 }

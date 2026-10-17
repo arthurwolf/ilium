@@ -11,7 +11,12 @@ fn table_after(text: &str, anchor: &str) -> Vec<Vec<String>> {
         .skip_while(|line| !line.starts_with('|'))
         .take_while(|line| line.starts_with('|'))
         .skip(2)
-        .map(|line| line.trim_matches('|').split('|').map(|cell| cell.trim().to_string()).collect())
+        .map(|line| {
+            line.trim_matches('|')
+                .split('|')
+                .map(|cell| cell.trim().to_string())
+                .collect()
+        })
         .collect()
 }
 
@@ -49,7 +54,10 @@ fn extension_042_the_page_states_the_plugin_is_replaceable() {
 #[test]
 fn extension_042_summary_row_counts_two_points_no_service_one_topic_and_replaceable() {
     let summary = manual_page("reference-core-extension-points.md");
-    let row = summary.lines().find(|line| line.contains("`ilium.core.smart-copy` |")).expect("summary row");
+    let row = summary
+        .lines()
+        .find(|line| line.contains("`ilium.core.smart-copy` |"))
+        .expect("summary row");
     let cells: Vec<&str> = row.trim_matches('|').split('|').map(str::trim).collect();
     assert_eq!(&cells[2..], ["2", "0", "1", "yes"]);
 }
@@ -60,7 +68,9 @@ fn extension_042_core_points_page_repeats_both_points_and_the_topic() {
     let core = manual_page("reference-core-extension-points.md");
     assert!(core.contains("| `ilium.core.smart-copy/recognisers` | collect |"));
     assert!(core.contains("| `ilium.core.smart-copy/after-copy` | hook: transform |"));
-    assert!(core.contains("| `ilium.core.smart-copy/copied` | { kind, length } after text is copied |"));
+    assert!(
+        core.contains("| `ilium.core.smart-copy/copied` | { kind, length } after text is copied |")
+    );
 }
 
 /// REQ: EXT-042
@@ -78,9 +88,18 @@ fn security_293_page_risk_of_after_copy_equals_the_security_table() {
         .lines()
         .find(|line| line.starts_with("| `ilium.core.smart-copy/after-copy` |"))
         .expect("security row");
-    let expected = row.trim_matches('|').split('|').nth(1).expect("risk cell").trim().to_string();
+    let expected = row
+        .trim_matches('|')
+        .split('|')
+        .nth(1)
+        .expect("risk cell")
+        .trim()
+        .to_string();
     let rows = table_after(&page_text(), "### Extension points");
-    assert_eq!(rows[1][4], expected, "the corrected mark of after-copy is {expected}");
+    assert_eq!(
+        rows[1][4], expected,
+        "the corrected mark of after-copy is {expected}"
+    );
 }
 
 /// REQ: SEC-293
@@ -90,14 +109,25 @@ fn security_293_core_points_table_risk_of_after_copy_equals_the_security_table()
     let security_mark = security
         .lines()
         .find(|line| line.starts_with("| `ilium.core.smart-copy/after-copy` |"))
-        .and_then(|row| row.trim_matches('|').split('|').nth(1).map(|cell| cell.trim().to_string()))
+        .and_then(|row| {
+            row.trim_matches('|')
+                .split('|')
+                .nth(1)
+                .map(|cell| cell.trim().to_string())
+        })
         .expect("security mark");
     let core = manual_page("reference-core-extension-points.md");
     let core_row = core
         .lines()
         .find(|line| line.starts_with("| `ilium.core.smart-copy/after-copy` |"))
         .expect("core row");
-    let core_mark = core_row.trim_matches('|').split('|').nth(2).expect("risk cell").trim().to_string();
+    let core_mark = core_row
+        .trim_matches('|')
+        .split('|')
+        .nth(2)
+        .expect("risk cell")
+        .trim()
+        .to_string();
     assert_eq!(core_mark, security_mark);
 }
 
@@ -107,7 +137,10 @@ fn security_293_page_risk_of_recognisers_is_standard_and_not_listed_as_high() {
     let security = manual_page("reference-extension-security.md");
     assert!(!security.contains("| `ilium.core.smart-copy/recognisers` | high |"));
     let rows = table_after(&page_text(), "### Extension points");
-    let row = rows.iter().find(|row| row[0].contains("recognisers")).expect("recognisers row");
+    let row = rows
+        .iter()
+        .find(|row| row[0].contains("recognisers"))
+        .expect("recognisers row");
     assert_eq!(row[4], "standard");
 }
 

@@ -6,7 +6,9 @@ use crate::common::*;
 
 fn watcher_text() -> String {
     let text = page_text();
-    let start = text.find("A watcher is a child process").expect("watcher paragraph");
+    let start = text
+        .find("A watcher is a child process")
+        .expect("watcher paragraph");
     text[start..].lines().next().unwrap_or_default().to_string()
 }
 
@@ -14,7 +16,10 @@ fn watcher_text() -> String {
 #[test]
 fn doc_f_060_a_watcher_prints_one_probe_format_json_line_per_step() {
     let paragraph = watcher_text();
-    assert!(paragraph.contains("one JSON line per progress step"), "{paragraph}");
+    assert!(
+        paragraph.contains("one JSON line per progress step"),
+        "{paragraph}"
+    );
     for field in ["job_id", "status", "percent", "message", "details", "error"] {
         assert!(paragraph.contains(&format!("`{field}`")), "{field}");
     }

@@ -51,7 +51,10 @@ fn graceful_076_every_pane_the_policy_does_not_relaunch_is_stopped() {
     let first = add_shell(&mut host, "one");
     let second = add_shell(&mut host, "two");
     host.deactivate(DeactivationReason::Shutdown);
-    let stopped: Vec<NodeId> = terminations(&host.submitted()).into_iter().map(|(spec, _)| spec.pane).collect();
+    let stopped: Vec<NodeId> = terminations(&host.submitted())
+        .into_iter()
+        .map(|(spec, _)| spec.pane)
+        .collect();
     assert_eq!(stopped, [NodeId(first), NodeId(second)]);
 }
 

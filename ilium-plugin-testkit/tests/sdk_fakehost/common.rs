@@ -7,16 +7,16 @@
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
-use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::PathBuf;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
 
-use ilium_plugin_sdk_core::NativeEntry;
 use ilium_plugin_sdk_core::types::{
     Activation, ClientId, DeactivationReason, ErrorCode, Event, Intent, NodeId, PluginError,
     Submission,
 };
+use ilium_plugin_sdk_core::NativeEntry;
 
 /// The default fake clock: 2030-01-01 00:00:00 UTC in milliseconds since the Unix epoch.
 pub const DEFAULT_CLOCK_MS: u64 = 1_893_456_000_000;
@@ -92,9 +92,13 @@ pub const HARNESS_ENV: [&str; 4] = [
 /// Runs `f` with the harness variables set to `settings` and every other harness variable removed.
 /// The previous values come back afterwards, also when `f` panics.
 pub fn with_env<R>(settings: &[(&str, &str)], f: impl FnOnce() -> R) -> R {
-    let guard = ENV_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    let saved: Vec<(&str, Option<String>)> =
-        HARNESS_ENV.iter().map(|name| (*name, std::env::var(name).ok())).collect();
+    let guard = ENV_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let saved: Vec<(&str, Option<String>)> = HARNESS_ENV
+        .iter()
+        .map(|name| (*name, std::env::var(name).ok()))
+        .collect();
     for name in HARNESS_ENV {
         // SAFETY-free in edition 2021: set_var and remove_var are safe functions here.
         std::env::remove_var(name);
@@ -151,7 +155,11 @@ pub fn write_file(dir: &std::path::Path, name: &str, text: &str) -> PathBuf {
 /// A minimal valid manifest with a server and a client side and one grant list per side.
 pub fn manifest_text(id: &str, server_grants: &[&str], client_grants: &[&str]) -> String {
     let quote = |names: &[&str]| {
-        names.iter().map(|name| format!("\"{name}\"")).collect::<Vec<_>>().join(", ")
+        names
+            .iter()
+            .map(|name| format!("\"{name}\""))
+            .collect::<Vec<_>>()
+            .join(", ")
     };
     format!(
         r#"{{
@@ -293,12 +301,18 @@ impl NativeEntry for Failing {
 
 /// `count` distinct `client-attached` events. They need no grant, so they reach a server-side plugin.
 pub fn client_batch(count: usize) -> Vec<Event> {
-    (0..count).map(|index| Event::ClientAttached(ClientId(index as u64 + 1))).collect()
+    (0..count)
+        .map(|index| Event::ClientAttached(ClientId(index as u64 + 1)))
+        .collect()
 }
 
 /// A `play-sound` submission (needs the `sound.play` grant).
 pub fn sound(correlation: u64) -> Submission {
-    Submission { intent: Intent::PlaySound("ding".to_string()), correlation, dedup_key: None }
+    Submission {
+        intent: Intent::PlaySound("ding".to_string()),
+        correlation,
+        dedup_key: None,
+    }
 }
 
 /// A `play-sound` submission with a dedup key.
@@ -312,7 +326,11 @@ pub fn sound_keyed(correlation: u64, key: &str) -> Submission {
 
 /// A `close-node` submission (needs the `tree.write` grant).
 pub fn close_node(correlation: u64, node: u64) -> Submission {
-    Submission { intent: Intent::CloseNode(NodeId(node)), correlation, dedup_key: None }
+    Submission {
+        intent: Intent::CloseNode(NodeId(node)),
+        correlation,
+        dedup_key: None,
+    }
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -3,7 +3,7 @@
 
 use ilium_plugin_sdk::testing::FakeHost;
 use ilium_plugin_sdk::types::{Intent, ViewTarget};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::common::*;
 
@@ -11,14 +11,30 @@ pub const PROBE: &str = "/opt/probe.sh";
 pub const JOB: &str = "render-42";
 
 /// One monitor entry in the shape of `GET /progress.json`.
-pub fn monitor_with(id: u64, job: &str, status: &str, percent: f64, message: &str, details: &str, error: Value) -> Value {
+pub fn monitor_with(
+    id: u64,
+    job: &str,
+    status: &str,
+    percent: f64,
+    message: &str,
+    details: &str,
+    error: Value,
+) -> Value {
     json!({"monitor_id": id, "report": {"job_id": job, "status": status, "percent": percent,
         "message": message, "details": details, "error": error},
         "monitor_health": {"state": "healthy"}, "last_observed_unix_millis": 0})
 }
 
 pub fn monitor(id: u64, status: &str, percent: f64, message: &str) -> Value {
-    monitor_with(id, &format!("job-{id}"), status, percent, message, "", Value::Null)
+    monitor_with(
+        id,
+        &format!("job-{id}"),
+        status,
+        percent,
+        message,
+        "",
+        Value::Null,
+    )
 }
 
 pub fn show(host: &mut FakeHost, monitors: Vec<Value>) {
@@ -27,14 +43,20 @@ pub fn show(host: &mut FakeHost, monitors: Vec<Value>) {
 }
 
 pub fn footer(host: &mut FakeHost, cols: u16, rows: u16) -> String {
-    host.render(ViewTarget::Panel(FOOTER_VIEW.to_string()), cols, rows).text()
+    host.render(ViewTarget::Panel(FOOTER_VIEW.to_string()), cols, rows)
+        .text()
 }
 
 pub fn segments(host: &FakeHost) -> Vec<Intent> {
     host.submitted()
         .iter()
         .map(|s| s.intent.clone())
-        .filter(|i| matches!(i, Intent::SetStatusSegment(_) | Intent::ClearStatusSegment(_)))
+        .filter(|i| {
+            matches!(
+                i,
+                Intent::SetStatusSegment(_) | Intent::ClearStatusSegment(_)
+            )
+        })
         .collect()
 }
 
@@ -44,7 +66,10 @@ pub fn pass(host: &mut FakeHost, milliseconds: u64) {
 }
 
 pub fn code(run: &Run) -> String {
-    record_of(&run.stdout, "progress_rejected")["code"].as_str().unwrap_or_default().to_string()
+    record_of(&run.stdout, "progress_rejected")["code"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string()
 }
 
 /// Settles the monitor `PROBE` of a pane with `output` after one second.

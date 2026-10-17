@@ -8,10 +8,11 @@ use std::path::PathBuf;
 use ilium_plugin_core_fleet::{FleetClient, FleetServer};
 use ilium_plugin_sdk::testing::{FakeHost, TreeNode};
 use ilium_plugin_sdk::types::{
-    ActionKind, ActionValue, AgentActivity, AgentView, Delivery, Event, HttpCalledEvent, Intent, MessageEvent,
-    NodeClass, NodeId, Outcome, PluginId, PluginSide, SendInputSpec, Submission, UiAction, ViewTarget,
+    ActionKind, ActionValue, AgentActivity, AgentView, Delivery, Event, HttpCalledEvent, Intent,
+    MessageEvent, NodeClass, NodeId, Outcome, PluginId, PluginSide, SendInputSpec, Submission,
+    UiAction, ViewTarget,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 /// Path of the plugin manifest (the skeleton file, exact per the manual).
 pub fn manifest_path() -> PathBuf {
@@ -25,7 +26,9 @@ pub fn workspace_root() -> PathBuf {
 
 /// The text of a manual page by file stem, for example `core-plugin-fleet`.
 pub fn page(stem: &str) -> String {
-    let path = workspace_root().join("docs/plugins-manual/pages").join(format!("{stem}.md"));
+    let path = workspace_root()
+        .join("docs/plugins-manual/pages")
+        .join(format!("{stem}.md"));
     std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("page {path:?}: {error}"))
 }
 
@@ -36,19 +39,28 @@ pub fn page_text() -> String {
 
 /// Path of a golden file in this directory.
 pub fn golden_path(name: &str) -> String {
-    format!("{}/tests/features/golden/{name}", env!("CARGO_MANIFEST_DIR"))
+    format!(
+        "{}/tests/features/golden/{name}",
+        env!("CARGO_MANIFEST_DIR")
+    )
 }
 
 /// A server-side host with the manifest grants and the plugin activated.
 pub fn server_host() -> FakeHost {
-    let mut host = FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("server").build();
+    let mut host = FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("server")
+        .build();
     host.activate::<FleetServer>();
     host
 }
 
 /// A client-side host with the manifest grants and the plugin activated.
 pub fn client_host() -> FakeHost {
-    let mut host = FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("client").build();
+    let mut host = FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("client")
+        .build();
     host.activate::<FleetClient>();
     host
 }
@@ -61,7 +73,12 @@ pub fn add_agent(host: &mut FakeHost, name: &str, signature: &str, activity: Age
         name: name.to_string(),
         class: NodeClass::Pane,
         content_kind: Some("ilium.terminal".to_string()),
-        agent: Some(AgentView { signature: signature.to_string(), activity, objective: None, goal: None }),
+        agent: Some(AgentView {
+            signature: signature.to_string(),
+            activity,
+            objective: None,
+            goal: None,
+        }),
     })
 }
 
@@ -78,7 +95,13 @@ pub fn add_shell(host: &mut FakeHost, name: &str) -> u64 {
 }
 
 /// One pane record as the `list-panes` cross-session reply carries it (cli-reference.md, `ilium panes`).
-pub fn pane_json(pane_id: u64, name: &str, kind: &str, agent: Option<&str>, state: Option<&str>) -> Value {
+pub fn pane_json(
+    pane_id: u64,
+    name: &str,
+    kind: &str,
+    agent: Option<&str>,
+    state: Option<&str>,
+) -> Value {
     json!({
         "pane_id": pane_id,
         "name": name,
@@ -93,7 +116,12 @@ pub fn pane_json(pane_id: u64, name: &str, kind: &str, agent: Option<&str>, stat
 
 /// Registers a reachable live session whose `list-panes` reply is the given panes.
 pub fn add_session(host: &mut FakeHost, name: &str, is_self: bool, panes: &[Value]) {
-    host.sessions().add_live(name, "/home/me/dev/ilium", is_self, &Value::Array(panes.to_vec()).to_string());
+    host.sessions().add_live(
+        name,
+        "/home/me/dev/ilium",
+        is_self,
+        &Value::Array(panes.to_vec()).to_string(),
+    );
 }
 
 /// Registers a live session that cannot be read (`session-unreachable`).
@@ -105,7 +133,9 @@ pub fn add_unreachable_session(host: &mut FakeHost, name: &str) {
 pub fn records(text: &str) -> Vec<Value> {
     text.lines()
         .filter(|line| !line.trim().is_empty())
-        .map(|line| serde_json::from_str(line).unwrap_or_else(|error| panic!("not JSON: {line:?}: {error}")))
+        .map(|line| {
+            serde_json::from_str(line).unwrap_or_else(|error| panic!("not JSON: {line:?}: {error}"))
+        })
         .collect()
 }
 
@@ -124,11 +154,19 @@ pub fn summary(all: &[Value]) -> Value {
 /// Runs `ilium <args>` through the fake command line and returns (stdout, stderr, exit code).
 pub fn run_cli(host: &mut FakeHost, args: &[&str], stdin: &[u8]) -> (String, String, Option<u8>) {
     let invocation = host.cli().invoke(args, stdin);
-    (invocation.stdout(), invocation.stderr(), invocation.exit_code())
+    (
+        invocation.stdout(),
+        invocation.stderr(),
+        invocation.exit_code(),
+    )
 }
 
 /// Runs the command line as if typed in the given pane (`ILIUM_PANE_ID`).
-pub fn run_cli_in_pane(host: &mut FakeHost, pane: u64, args: &[&str]) -> (String, String, Option<u8>) {
+pub fn run_cli_in_pane(
+    host: &mut FakeHost,
+    pane: u64,
+    args: &[&str],
+) -> (String, String, Option<u8>) {
     host.cli().set_env("ILIUM_PANE_ID", &pane.to_string());
     run_cli(host, args, b"")
 }
@@ -184,7 +222,10 @@ pub fn sent_inputs(host: &FakeHost) -> Vec<SendInputSpec> {
 
 /// The pane ids that received a `send-input`, in order.
 pub fn sent_panes(host: &FakeHost) -> Vec<NodeId> {
-    sent_inputs(host).into_iter().map(|spec| spec.pane).collect()
+    sent_inputs(host)
+        .into_iter()
+        .map(|spec| spec.pane)
+        .collect()
 }
 
 /// Every `create-pane` spec the host has seen.

@@ -30,7 +30,9 @@ fn snapshot_b21_the_v3_pane_fields_move_to_the_scheduler_section() {
 #[test]
 fn snapshot_b21_the_kernel_keeps_the_pending_marker_while_the_scheduler_is_disabled() {
     let page = manual_page("reference-kernel-and-boot.md");
-    assert!(page.contains("The tree still shows \"scheduled input pending\" from the stored section"));
+    assert!(
+        page.contains("The tree still shows \"scheduled input pending\" from the stored section")
+    );
     assert!(page.contains("The section `ilium.core.scheduler` stays in the snapshot and fires on return, marked `late`"));
 }
 
@@ -108,8 +110,13 @@ fn snapshot_b21_the_session_storage_bucket_is_valid_json_when_the_plugin_stores_
     let mut session = session();
     let pane = terminal_pane(&mut session, "claude-api");
     enqueue(&mut session, pane, "a", "once", 1).expect("enqueue");
-    let dump = server(&mut session).storage().dump(ilium_plugin_sdk::host::Bucket::Session);
+    let dump = server(&mut session)
+        .storage()
+        .dump(ilium_plugin_sdk::host::Bucket::Session);
     for (key, bytes) in dump {
-        assert!(serde_json::from_slice::<Value>(&bytes).is_ok(), "{key} is JSON");
+        assert!(
+            serde_json::from_slice::<Value>(&bytes).is_ok(),
+            "{key} is JSON"
+        );
     }
 }

@@ -10,19 +10,31 @@ use crate::common::*;
 #[test]
 fn port_045_instructions_reach_the_request() {
     let mut host = activated_server();
-    host.settings().set("inference.instructions.entry_naming", json!("Shared vocabulary")).expect("setting accepted");
+    host.settings()
+        .set(
+            "inference.instructions.entry_naming",
+            json!("Shared vocabulary"),
+        )
+        .expect("setting accepted");
     host.settle();
     host.deliver_one(prompt_event(3, "Fix the login bug"));
     host.settle();
     let requests = host.inference_requests();
     assert_eq!(requests.len(), 1);
-    assert!(requests[0].1.messages.iter().any(|message| message.content.contains("Shared vocabulary")));
+    assert!(requests[0]
+        .1
+        .messages
+        .iter()
+        .any(|message| message.content.contains("Shared vocabulary")));
 }
 
 /// REQ: PORT:ilium-client/src/session_naming.rs::labeling_rejects_provider_name_as_session_title, PORT:ilium-client/src/session_naming.rs::response_still_requires_json_icon_and_bounded_title_lengths, PORT:ilium-client/src/session_naming.rs::transcript_from_another_project_is_rejected_before_provider_call, PORT:ilium-client/src/session_naming.rs::transcript_without_a_user_entry_never_calls_the_provider
 #[test]
 fn port_041_out_of_bounds_titles_are_not_applied() {
-    for reply in ["", "one two three four five six seven eight nine ten eleven twelve thirteen"] {
+    for reply in [
+        "",
+        "one two three four five six seven eight nine ten eleven twelve thirteen",
+    ] {
         let mut host = activated_server();
         title_for_prompt(&mut host, 3, "Fix the login bug", reply);
         assert!(renames(&host.submitted()).is_empty());
@@ -37,6 +49,10 @@ fn port_041_prompt_carries_the_user_text() {
     host.settle();
     let requests = host.inference_requests();
     assert_eq!(requests.len(), 1);
-    assert!(requests[0].1.messages.iter().any(|message| message.content.contains("login bug")));
+    assert!(requests[0]
+        .1
+        .messages
+        .iter()
+        .any(|message| message.content.contains("login bug")));
     assert!(renames(&host.submitted()).is_empty());
 }

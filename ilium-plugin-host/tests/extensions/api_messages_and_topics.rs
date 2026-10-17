@@ -12,7 +12,14 @@ fn publisher_manifest(topics: Vec<&str>) -> Value {
 }
 
 fn subscriber_manifest(id: &str, patterns: Vec<&str>, grant: bool) -> Value {
-    let grants: Vec<String> = if grant { patterns.iter().map(|pattern| format!("topics.subscribe:{pattern}")).collect() } else { Vec::new() };
+    let grants: Vec<String> = if grant {
+        patterns
+            .iter()
+            .map(|pattern| format!("topics.subscribe:{pattern}"))
+            .collect()
+    } else {
+        Vec::new()
+    };
     json!({
         "id": id,
         "capabilities": {"server": grants},
@@ -22,8 +29,22 @@ fn subscriber_manifest(id: &str, patterns: Vec<&str>, grant: bool) -> Value {
 
 fn topic_world() -> ExtWorld {
     let mut world = ExtWorld::new();
-    assert_eq!(diag_code(&world.install(Tier::T3, publisher_manifest(vec![TOPIC, "com.example.pub/other"]), Vec::new())), "ok");
-    assert_eq!(diag_code(&world.install(Tier::T3, subscriber_manifest(SUB, vec![TOPIC], true), Vec::new())), "ok");
+    assert_eq!(
+        diag_code(&world.install(
+            Tier::T3,
+            publisher_manifest(vec![TOPIC, "com.example.pub/other"]),
+            Vec::new()
+        )),
+        "ok"
+    );
+    assert_eq!(
+        diag_code(&world.install(
+            Tier::T3,
+            subscriber_manifest(SUB, vec![TOPIC], true),
+            Vec::new()
+        )),
+        "ok"
+    );
     world.settle();
     world
 }
@@ -119,7 +140,14 @@ fn svc_022_topic_name_of_128_characters_is_accepted_and_129_is_invalid() {
     let name_128 = format!("{prefix}{}", "n".repeat(128 - prefix.len()));
     let name_129 = format!("{name_128}n");
     let mut world = ExtWorld::new();
-    assert_eq!(diag_code(&world.install(Tier::T3, publisher_manifest(vec![&name_128, &name_129]), Vec::new())), "ok");
+    assert_eq!(
+        diag_code(&world.install(
+            Tier::T3,
+            publisher_manifest(vec![&name_128, &name_129]),
+            Vec::new()
+        )),
+        "ok"
+    );
     assert!(world.publish(PUB, &name_128, "{}").is_ok());
     let error = err_of(world.publish(PUB, &name_129, "{}"));
     assert_eq!(code_of(&error), ErrorCode::InvalidArgument);
@@ -162,11 +190,16 @@ fn svc_023_publishing_works_again_in_the_next_second() {
 fn svc_023_limit_is_per_plugin() {
     let mut world = topic_world();
     let second = json!({"id": "com.example.pub2", "contributes": {"topics": {"publishes": ["com.example.pub2/t"]}}});
-    assert_eq!(diag_code(&world.install(Tier::T3, second, Vec::new())), "ok");
+    assert_eq!(
+        diag_code(&world.install(Tier::T3, second, Vec::new())),
+        "ok"
+    );
     for _ in 0..101 {
         let _ = world.publish(PUB, TOPIC, "{}");
     }
-    assert!(world.publish("com.example.pub2", "com.example.pub2/t", "{}").is_ok());
+    assert!(world
+        .publish("com.example.pub2", "com.example.pub2/t", "{}")
+        .is_ok());
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -175,13 +208,20 @@ fn svc_023_limit_is_per_plugin() {
 
 fn install_subscriber(pattern: &str) -> Result<(), Diagnostic> {
     let mut world = ExtWorld::new();
-    world.install(Tier::T3, subscriber_manifest(SUB, vec![pattern], true), Vec::new())
+    world.install(
+        Tier::T3,
+        subscriber_manifest(SUB, vec![pattern], true),
+        Vec::new(),
+    )
 }
 
 /// REQ: SVC-024
 #[test]
 fn svc_024_exact_topic_pattern_installs() {
-    assert_eq!(diag_code(&install_subscriber("ilium.progress/finished")), "ok");
+    assert_eq!(
+        diag_code(&install_subscriber("ilium.progress/finished")),
+        "ok"
+    );
 }
 
 /// REQ: SVC-024
@@ -235,8 +275,18 @@ proptest! {
 #[test]
 fn svc_025_subscriber_without_the_grant_receives_nothing_and_no_error() {
     let mut world = ExtWorld::new();
-    assert_eq!(diag_code(&world.install(Tier::T3, publisher_manifest(vec![TOPIC]), Vec::new())), "ok");
-    assert_eq!(diag_code(&world.install(Tier::T3, subscriber_manifest(SUB, vec![TOPIC], false), Vec::new())), "ok");
+    assert_eq!(
+        diag_code(&world.install(Tier::T3, publisher_manifest(vec![TOPIC]), Vec::new())),
+        "ok"
+    );
+    assert_eq!(
+        diag_code(&world.install(
+            Tier::T3,
+            subscriber_manifest(SUB, vec![TOPIC], false),
+            Vec::new()
+        )),
+        "ok"
+    );
     assert!(world.publish(PUB, TOPIC, r#"{"a":1}"#).is_ok());
     world.settle();
     assert!(received(&world, SUB).is_empty());
@@ -249,15 +299,32 @@ fn svc_025_subscriber_with_the_grant_receives_the_event() {
     let mut world = topic_world();
     assert!(world.publish(PUB, TOPIC, r#"{"a":1}"#).is_ok());
     world.settle();
-    assert_eq!(received(&world, SUB), vec![(TOPIC.to_owned(), r#"{"a":1}"#.to_owned())]);
+    assert_eq!(
+        received(&world, SUB),
+        vec![(TOPIC.to_owned(), r#"{"a":1}"#.to_owned())]
+    );
 }
 
 /// REQ: SVC-025
 #[test]
 fn svc_025_prefix_pattern_matches_topics_at_any_depth() {
     let mut world = ExtWorld::new();
-    assert_eq!(diag_code(&world.install(Tier::T3, publisher_manifest(vec!["com.example.pub/a/b/c"]), Vec::new())), "ok");
-    assert_eq!(diag_code(&world.install(Tier::T3, subscriber_manifest(SUB, vec!["com.example.pub/*"], true), Vec::new())), "ok");
+    assert_eq!(
+        diag_code(&world.install(
+            Tier::T3,
+            publisher_manifest(vec!["com.example.pub/a/b/c"]),
+            Vec::new()
+        )),
+        "ok"
+    );
+    assert_eq!(
+        diag_code(&world.install(
+            Tier::T3,
+            subscriber_manifest(SUB, vec!["com.example.pub/*"], true),
+            Vec::new()
+        )),
+        "ok"
+    );
     assert!(world.publish(PUB, "com.example.pub/a/b/c", "{}").is_ok());
     world.settle();
     assert_eq!(received(&world, SUB).len(), 1);
@@ -297,8 +364,14 @@ fn svc_026_full_topic_queue_drops_the_oldest_and_counts_it() {
     }
     world.block_delivery(SUB, false);
     world.settle();
-    let first = received(&world, SUB).first().map(|(_, payload)| payload.clone()).unwrap_or_default();
-    assert!(!first.contains(r#""i":0"#), "the oldest events were dropped: {first}");
+    let first = received(&world, SUB)
+        .first()
+        .map(|(_, payload)| payload.clone())
+        .unwrap_or_default();
+    assert!(
+        !first.contains(r#""i":0"#),
+        "the oldest events were dropped: {first}"
+    );
     assert!(world.events_dropped(SUB).iter().sum::<u32>() >= 5);
 }
 
@@ -314,7 +387,10 @@ fn svc_026_next_batch_after_a_drop_starts_with_events_dropped() {
     }
     world.block_delivery(SUB, false);
     world.settle();
-    assert_eq!(world.first_event_of_next_batch(SUB), Some("events-dropped".to_owned()));
+    assert_eq!(
+        world.first_event_of_next_batch(SUB),
+        Some("events-dropped".to_owned())
+    );
 }
 
 /// REQ: SVC-026
@@ -334,7 +410,11 @@ fn svc_026_message_queue_never_drops_an_accepted_message() {
     }
     world.block_delivery(RECV, false);
     world.settle();
-    assert_eq!(world.messages_received(RECV).len(), accepted, "every accepted message arrives");
+    assert_eq!(
+        world.messages_received(RECV).len(),
+        accepted,
+        "every accepted message arrives"
+    );
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -346,11 +426,21 @@ const RECV: &str = "com.example.recv";
 
 fn message_world(grant: bool) -> ExtWorld {
     let mut world = ExtWorld::new();
-    let grants: Vec<String> = if grant { vec![format!("messages.peer:{RECV}")] } else { Vec::new() };
+    let grants: Vec<String> = if grant {
+        vec![format!("messages.peer:{RECV}")]
+    } else {
+        Vec::new()
+    };
     let sender = json!({"id": SENDER, "capabilities": {"server": grants}});
-    assert_eq!(diag_code(&world.install(Tier::T3, sender, Vec::new())), "ok");
+    assert_eq!(
+        diag_code(&world.install(Tier::T3, sender, Vec::new())),
+        "ok"
+    );
     let receiver = json!({"id": RECV, "accepts_messages_from": [SENDER]});
-    assert_eq!(diag_code(&world.install(Tier::T3, receiver, Vec::new())), "ok");
+    assert_eq!(
+        diag_code(&world.install(Tier::T3, receiver, Vec::new())),
+        "ok"
+    );
     world.settle();
     world
 }
@@ -471,7 +561,15 @@ fn svc_029_message_to_a_dormant_plugin_activates_it_then_delivers_after_activate
     let outcome = message_outcome(&mut world, "chan", b"hello");
     assert!(matches!(outcome, Some(Outcome::Ok)), "{outcome:?}");
     assert!(world.plugin_active(RECV));
-    assert_eq!(world.event_order(RECV).iter().take(2).cloned().collect::<Vec<_>>(), vec!["activate", "message"]);
+    assert_eq!(
+        world
+            .event_order(RECV)
+            .iter()
+            .take(2)
+            .cloned()
+            .collect::<Vec<_>>(),
+        vec!["activate", "message"]
+    );
     assert_eq!(world.messages_received(RECV).len(), 1);
 }
 
@@ -509,7 +607,11 @@ fn svc_030_a_message_accepted_earlier_is_still_delivered() {
     assert_eq!(refused_code(&second), ErrorCode::Busy);
     world.block_delivery(RECV, false);
     world.settle();
-    let payloads: Vec<Vec<u8>> = world.messages_received(RECV).into_iter().map(|(_, _, payload)| payload).collect();
+    let payloads: Vec<Vec<u8>> = world
+        .messages_received(RECV)
+        .into_iter()
+        .map(|(_, _, payload)| payload)
+        .collect();
     assert!(payloads.contains(&b"first".to_vec()));
     assert!(!payloads.contains(&b"second".to_vec()));
 }

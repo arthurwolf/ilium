@@ -35,13 +35,19 @@ fn clock_096_numerals_follow_the_size_at_three_widths() {
 #[test]
 fn clock_096_numerals_are_bold() {
     let screen = clock_screen(40, 20);
-    assert!(screen.cell(0, 19).bold, "glyph plane cells use Modifiers::BOLD");
+    assert!(
+        screen.cell(0, 19).bold,
+        "glyph plane cells use Modifiers::BOLD"
+    );
 }
 
 /// REQ: F-096
 #[test]
 fn clock_096_golden_at_three_widths() {
     for (columns, rows) in [(40u16, 10u16), (80, 24), (120, 30)] {
-        ilium_plugin_sdk::testing::assert_golden(&format!("tests/features/golden/clock_{columns}x{rows}.txt"), &clock_screen(columns, rows).text());
+        ilium_plugin_sdk::testing::assert_golden(
+            &format!("tests/features/golden/clock_{columns}x{rows}.txt"),
+            &clock_screen(columns, rows).text(),
+        );
     }
 }

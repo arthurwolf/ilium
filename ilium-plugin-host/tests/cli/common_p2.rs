@@ -21,7 +21,11 @@ pub fn s(path: &Path) -> &str {
 pub fn install_demo(env: &CliEnv, root: &Path) -> PathBuf {
     let (_, package) = packed_project(env, root);
     let output = run(env, &["install", s(&package), "--allow-unsigned", "--yes"]);
-    assert_eq!(output.exit_code, 0, "install failed: {:?}", output.stdout_jsonl);
+    assert_eq!(
+        output.exit_code, 0,
+        "install failed: {:?}",
+        output.stdout_jsonl
+    );
     package
 }
 
@@ -42,7 +46,12 @@ pub fn both_project(env: &CliEnv, root: &Path) -> PathBuf {
 pub fn error_messages(output: &CliOutput) -> Vec<String> {
     recs(output, "error")
         .iter()
-        .filter_map(|record| record.get("message").and_then(|m| m.as_str()).map(str::to_owned))
+        .filter_map(|record| {
+            record
+                .get("message")
+                .and_then(|m| m.as_str())
+                .map(str::to_owned)
+        })
         .collect()
 }
 

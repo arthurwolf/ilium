@@ -6,8 +6,8 @@ use std::path::PathBuf;
 use ilium_plugin_core_compaction::{CompactionClient, CompactionServer};
 use ilium_plugin_sdk::testing::{FakeHost, TreeNode};
 use ilium_plugin_sdk::types::{
-    AgentActivity, AgentView, NodeClass, CommandContext, CommandInvokedEvent, CommandOrigin, Event, Intent, MessageEvent, NodeId, PluginId, PluginSide,
-    Submission,
+    AgentActivity, AgentView, CommandContext, CommandInvokedEvent, CommandOrigin, Event, Intent,
+    MessageEvent, NodeClass, NodeId, PluginId, PluginSide, Submission,
 };
 
 pub const PLUGIN_ID: &str = "ilium.core.compaction";
@@ -49,7 +49,11 @@ pub fn term_blocks(page: &str) -> Vec<String> {
                 _ => {}
             }
         }
-        blocks.push(text.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&"));
+        blocks.push(
+            text.replace("&lt;", "<")
+                .replace("&gt;", ">")
+                .replace("&amp;", "&"),
+        );
         rest = &body[end..];
     }
     blocks
@@ -57,14 +61,20 @@ pub fn term_blocks(page: &str) -> Vec<String> {
 
 /// A server-side host with the manifest grants and the plugin activated.
 pub fn server_host() -> FakeHost {
-    let mut host = FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("server").build();
+    let mut host = FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("server")
+        .build();
     host.activate::<CompactionServer>();
     host
 }
 
 /// A client-side host with the manifest grants and the plugin activated.
 pub fn client_host() -> FakeHost {
-    let mut host = FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("client").build();
+    let mut host = FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("client")
+        .build();
     host.activate::<CompactionClient>();
     host
 }
@@ -99,7 +109,10 @@ pub fn message_from(side: PluginSide, channel: &str, payload: &[u8]) -> Event {
 
 /// The intents of a submission list, in order.
 pub fn intents(submissions: &[Submission]) -> Vec<Intent> {
-    submissions.iter().map(|submission| submission.intent.clone()).collect()
+    submissions
+        .iter()
+        .map(|submission| submission.intent.clone())
+        .collect()
 }
 
 /// `(target plugin, target side, channel, payload)` of every `message` intent, in order.
@@ -107,9 +120,12 @@ pub fn messages(submissions: &[Submission]) -> Vec<(String, PluginSide, String, 
     submissions
         .iter()
         .filter_map(|submission| match &submission.intent {
-            Intent::Message(spec) => {
-                Some((spec.to.plugin.0.clone(), spec.to.side, spec.channel.clone(), spec.payload.clone()))
-            }
+            Intent::Message(spec) => Some((
+                spec.to.plugin.0.clone(),
+                spec.to.side,
+                spec.channel.clone(),
+                spec.payload.clone(),
+            )),
             _ => None,
         })
         .collect()
@@ -122,14 +138,21 @@ pub fn transcript_of(bytes: usize) -> Vec<u8> {
 
 /// Text of another manual page.
 pub fn pages_text(file: &str) -> String {
-    let path = workspace_root().join("docs/plugins-manual/pages").join(file);
+    let path = workspace_root()
+        .join("docs/plugins-manual/pages")
+        .join(file);
     std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("page {path:?}: {error}"))
 }
 
 /// The cells of the first table row of `page` that starts with `prefix`; cell 0 is the empty text before the first bar.
 pub fn table_row(page: &str, prefix: &str) -> Vec<String> {
-    let line = page.lines().find(|line| line.starts_with(prefix)).unwrap_or_else(|| panic!("row {prefix} missing"));
-    line.split('|').map(|cell| cell.trim().to_string()).collect()
+    let line = page
+        .lines()
+        .find(|line| line.starts_with(prefix))
+        .unwrap_or_else(|| panic!("row {prefix} missing"));
+    line.split('|')
+        .map(|cell| cell.trim().to_string())
+        .collect()
 }
 
 /// The parsed manifest.
@@ -139,14 +162,24 @@ pub fn manifest_value() -> serde_json::Value {
 }
 
 /// Adds an agent pane with the given signature and activity to the fake tree.
-pub fn add_agent_pane(host: &mut FakeHost, name: &str, signature: &str, activity: AgentActivity) -> u64 {
+pub fn add_agent_pane(
+    host: &mut FakeHost,
+    name: &str,
+    signature: &str,
+    activity: AgentActivity,
+) -> u64 {
     host.tree().add(TreeNode {
         id: 0,
         parent: None,
         name: name.to_string(),
         class: NodeClass::Pane,
         content_kind: Some("ilium.terminal".to_string()),
-        agent: Some(AgentView { signature: signature.to_string(), activity, objective: None, goal: None }),
+        agent: Some(AgentView {
+            signature: signature.to_string(),
+            activity,
+            objective: None,
+            goal: None,
+        }),
     })
 }
 

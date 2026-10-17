@@ -9,13 +9,30 @@ use ilium_plugin_host::testing::HostHarness;
 use crate::support::*;
 
 const ALL_CODES: [&str; 15] = [
-    "not-permitted", "not-found", "invalid-argument", "conflict", "quota-exceeded", "rate-limited",
-    "busy", "timed-out", "cancelled", "unsupported", "pane-not-ready", "revoked", "io", "network", "internal",
+    "not-permitted",
+    "not-found",
+    "invalid-argument",
+    "conflict",
+    "quota-exceeded",
+    "rate-limited",
+    "busy",
+    "timed-out",
+    "cancelled",
+    "unsupported",
+    "pane-not-ready",
+    "revoked",
+    "io",
+    "network",
+    "internal",
 ];
 
 fn bad_argument_reply() -> ilium_plugin_host::testing::ImportReply {
     let mut host = host_with(QuietGuest);
-    host.call_import_json("ilium:host/timers", "set", "{\"delay-ms\":1,\"repeat\":false}")
+    host.call_import_json(
+        "ilium:host/timers",
+        "set",
+        "{\"delay-ms\":1,\"repeat\":false}",
+    )
 }
 
 /// REQ: API-001
@@ -32,7 +49,11 @@ fn api_001_fallible_function_returns_err_with_code_message_and_optional_retry_af
 #[test]
 fn api_001_a_successful_call_carries_no_error_record() {
     let mut host = host_with(QuietGuest);
-    let reply = host.call_import_json("ilium:host/timers", "set", "{\"delay-ms\":50,\"repeat\":false}");
+    let reply = host.call_import_json(
+        "ilium:host/timers",
+        "set",
+        "{\"delay-ms\":50,\"repeat\":false}",
+    );
     assert!(reply.error().is_none());
 }
 
@@ -43,7 +64,10 @@ fn api_001_rate_limited_error_carries_the_retry_after_field() {
     for _ in 0..5 {
         host.call_import_json("ilium:host/sounds", "play", "{\"name\":\"bell\"}");
     }
-    let error = host.call_import_json("ilium:host/sounds", "play", "{\"name\":\"bell\"}").error().expect("err");
+    let error = host
+        .call_import_json("ilium:host/sounds", "play", "{\"name\":\"bell\"}")
+        .error()
+        .expect("err");
     assert!(error.retry_after_ms.is_some());
 }
 
@@ -52,15 +76,34 @@ fn api_001_rate_limited_error_carries_the_retry_after_field() {
 fn api_002_every_provoked_failure_uses_a_code_from_the_list_of_15() {
     let mut host = host_with(QuietGuest);
     let calls = [
-        ("ilium:host/timers", "set", "{\"delay-ms\":1,\"repeat\":false}"),
-        ("ilium:host/panes", "read-cells", "{\"pane\":999999,\"rows\":1}"),
-        ("ilium:host/fs", "read", "{\"path\":\"/etc/passwd\",\"offset\":0,\"max-bytes\":1}"),
-        ("ilium:host/tree", "set-name", "{\"node\":999999,\"name\":\"x\"}"),
+        (
+            "ilium:host/timers",
+            "set",
+            "{\"delay-ms\":1,\"repeat\":false}",
+        ),
+        (
+            "ilium:host/panes",
+            "read-cells",
+            "{\"pane\":999999,\"rows\":1}",
+        ),
+        (
+            "ilium:host/fs",
+            "read",
+            "{\"path\":\"/etc/passwd\",\"offset\":0,\"max-bytes\":1}",
+        ),
+        (
+            "ilium:host/tree",
+            "set-name",
+            "{\"node\":999999,\"name\":\"x\"}",
+        ),
     ];
     for (interface, function, args) in calls {
         let reply = host.call_import_json(interface, function, args);
         if let Some(code) = reply.error_code() {
-            assert!(ALL_CODES.contains(&code), "{interface}.{function} gave {code}");
+            assert!(
+                ALL_CODES.contains(&code),
+                "{interface}.{function} gave {code}"
+            );
         }
     }
 }
@@ -87,7 +130,10 @@ fn api_003_toast_over_the_rate_is_rate_limited_with_positive_retry_after() {
     for _ in 0..3 {
         host.call_import_json("ilium:host/toasts", "show", "{\"text\":\"a\"}");
     }
-    let error = host.call_import_json("ilium:host/toasts", "show", "{\"text\":\"a\"}").error().expect("err");
+    let error = host
+        .call_import_json("ilium:host/toasts", "show", "{\"text\":\"a\"}")
+        .error()
+        .expect("err");
     assert_eq!(error.code, ErrorCode::RateLimited);
     assert!(error.retry_after_ms.unwrap() > 0);
 }
@@ -97,7 +143,10 @@ fn api_003_toast_over_the_rate_is_rate_limited_with_positive_retry_after() {
 fn api_003_cpu_budget_quota_exceeded_carries_retry_after() {
     let mut host = host_with(QuietGuest);
     host.charge_cpu_ms(2_500);
-    let error = host.call_import_json("ilium:host/sounds", "play", "{\"name\":\"bell\"}").error().expect("err");
+    let error = host
+        .call_import_json("ilium:host/sounds", "play", "{\"name\":\"bell\"}")
+        .error()
+        .expect("err");
     assert_eq!(error.code, ErrorCode::QuotaExceeded);
     assert!(error.retry_after_ms.is_some());
 }
@@ -106,7 +155,14 @@ fn api_003_cpu_budget_quota_exceeded_carries_retry_after() {
 #[test]
 fn api_003_other_quota_exceeded_and_invalid_argument_have_no_retry_after() {
     let mut host = host_with(QuietGuest);
-    let error = host.call_import_json("ilium:host/panes", "read-cells", "{\"pane\":1,\"rows\":1001}").error().expect("err");
+    let error = host
+        .call_import_json(
+            "ilium:host/panes",
+            "read-cells",
+            "{\"pane\":1,\"rows\":1001}",
+        )
+        .error()
+        .expect("err");
     assert_eq!(error.code, ErrorCode::QuotaExceeded);
     assert_eq!(error.retry_after_ms, None);
 }
@@ -122,19 +178,33 @@ fn api_003_message_text_is_not_a_contract_two_runs_may_differ_but_the_code_is_st
 /// REQ: API-004
 #[test]
 fn api_004_not_permitted_revoked_and_internal_are_allowed_from_any_result_function() {
-    let mut host = HostHarness::new().grants(&["tree.write"]).with_native_guest(Box::new(QuietGuest)).build().expect("host");
+    let mut host = HostHarness::new()
+        .grants(&["tree.write"])
+        .with_native_guest(Box::new(QuietGuest))
+        .build()
+        .expect("host");
     host.decline("tree.write");
-    let declined = host.call_import_json("ilium:host/tree", "set-name", "{\"node\":1,\"name\":\"x\"}");
+    let declined =
+        host.call_import_json("ilium:host/tree", "set-name", "{\"node\":1,\"name\":\"x\"}");
     assert_eq!(declined.error_code(), Some("not-permitted"));
     host.revoke_without_reactivation("tree.write");
-    let revoked = host.call_import_json("ilium:host/tree", "set-name", "{\"node\":1,\"name\":\"x\"}");
-    assert!(matches!(revoked.error_code(), Some("revoked") | Some("not-permitted")));
+    let revoked =
+        host.call_import_json("ilium:host/tree", "set-name", "{\"node\":1,\"name\":\"x\"}");
+    assert!(matches!(
+        revoked.error_code(),
+        Some("revoked") | Some("not-permitted")
+    ));
 }
 
 /// REQ: API-004
 #[test]
 fn api_004_request_id_function_with_4097_pending_in_the_session_returns_busy() {
-    let mut host = HostHarness::new().grants(&["http:example.com"]).session_pending_requests(4_096).with_native_guest(Box::new(QuietGuest)).build().expect("host");
+    let mut host = HostHarness::new()
+        .grants(&["http:example.com"])
+        .session_pending_requests(4_096)
+        .with_native_guest(Box::new(QuietGuest))
+        .build()
+        .expect("host");
     host.fill_session_pending(4_096);
     assert_eq!(host.start_slow_request().error_code(), Some("busy"));
 }
@@ -143,7 +213,11 @@ fn api_004_request_id_function_with_4097_pending_in_the_session_returns_busy() {
 #[test]
 fn api_004_a_function_without_a_request_id_may_omit_busy_or_return_it() {
     let mut host = host_with(QuietGuest);
-    let reply = host.call_import_json("ilium:host/timers", "set", "{\"delay-ms\":50,\"repeat\":false}");
+    let reply = host.call_import_json(
+        "ilium:host/timers",
+        "set",
+        "{\"delay-ms\":50,\"repeat\":false}",
+    );
     // Both allowed behaviours: success, or err busy under load; never another surprise code.
     assert!(matches!(reply.error_code(), None | Some("busy")));
 }
@@ -151,7 +225,11 @@ fn api_004_a_function_without_a_request_id_may_omit_busy_or_return_it() {
 /// REQ: API-005
 #[test]
 fn api_005_path_outside_the_scope_fails_in_the_call_not_in_the_completion() {
-    let mut host = HostHarness::new().grants(&["fs.read:project"]).with_native_guest(Box::new(QuietGuest)).build().expect("host");
+    let mut host = HostHarness::new()
+        .grants(&["fs.read:project"])
+        .with_native_guest(Box::new(QuietGuest))
+        .build()
+        .expect("host");
     let reply = host.call_import_json("ilium:host/fs", "read-async", "{\"path\":\"/etc/passwd\"}");
     assert!(reply.error().is_some());
     assert!(reply.request_id().is_none());
@@ -160,9 +238,15 @@ fn api_005_path_outside_the_scope_fails_in_the_call_not_in_the_completion() {
 /// REQ: API-005
 #[test]
 fn api_005_a_file_that_vanished_arrives_as_failed_not_found_in_the_completion() {
-    let mut host = HostHarness::new().grants(&["fs.read:project"]).with_native_guest(Box::new(QuietGuest)).build().expect("host");
+    let mut host = HostHarness::new()
+        .grants(&["fs.read:project"])
+        .with_native_guest(Box::new(QuietGuest))
+        .build()
+        .expect("host");
     let reply = host.call_import_json("ilium:host/fs", "read-async", "{\"path\":\"gone.txt\"}");
-    let id = reply.request_id().expect("accepted: syntax and scope are fine");
+    let id = reply
+        .request_id()
+        .expect("accepted: syntax and scope are fine");
     host.pump(8);
     let completion = host.completion_of(id).expect("a completion was enqueued");
     assert_eq!(completion.failed_code(), Some("not-found"));
@@ -171,8 +255,19 @@ fn api_005_a_file_that_vanished_arrives_as_failed_not_found_in_the_completion() 
 /// REQ: API-005
 #[test]
 fn api_005_a_per_call_cap_breach_fails_in_the_call() {
-    let mut host = HostHarness::new().grants(&["http:example.com"]).with_native_guest(Box::new(QuietGuest)).build().expect("host");
-    let reply = host.call_import_json("ilium:host/http", "request", &format!("{{\"url\":\"https://example.com/{}\"}}", "a".repeat(8 * 1024)));
+    let mut host = HostHarness::new()
+        .grants(&["http:example.com"])
+        .with_native_guest(Box::new(QuietGuest))
+        .build()
+        .expect("host");
+    let reply = host.call_import_json(
+        "ilium:host/http",
+        "request",
+        &format!(
+            "{{\"url\":\"https://example.com/{}\"}}",
+            "a".repeat(8 * 1024)
+        ),
+    );
     assert_eq!(reply.error_code(), Some("invalid-argument"));
     assert!(reply.request_id().is_none());
 }
@@ -181,7 +276,9 @@ fn api_005_a_per_call_cap_breach_fails_in_the_call() {
 
 fn install_codes(files: Vec<(String, Vec<u8>)>) -> Vec<String> {
     let dir = tempfile::tempdir().expect("temp dir");
-    let installer = Installer::new(PackageStore { root: dir.path().to_path_buf() });
+    let installer = Installer::new(PackageStore {
+        root: dir.path().to_path_buf(),
+    });
     let bytes = ilium_plugin_host::package::write_package(&files).expect("package writes");
     installer
         .check(&bytes, ilium_plugin_api::manifest::CheckMode::Install)
@@ -218,7 +315,10 @@ fn api_080_two_unknown_keys_report_both_codes_inside_the_step() {
 /// REQ: API-080
 #[test]
 fn api_080_one_unknown_key_reports_exactly_one_code() {
-    assert_eq!(install_codes(manifest_with("vendor.demo", ",\"zzz\":1")).len(), 1);
+    assert_eq!(
+        install_codes(manifest_with("vendor.demo", ",\"zzz\":1")).len(),
+        1
+    );
 }
 
 /// REQ: API-080
@@ -227,10 +327,17 @@ fn api_080_the_cli_exit_code_is_1_when_any_error_line_was_printed() {
     let dir = tempfile::tempdir().expect("temp dir");
     let package = dir.path().join("pkg");
     std::fs::create_dir_all(&package).unwrap();
-    std::fs::write(package.join("manifest.json"), manifest_with("Bad Id", "")[0].1.clone()).unwrap();
+    std::fs::write(
+        package.join("manifest.json"),
+        manifest_with("Bad Id", "")[0].1.clone(),
+    )
+    .unwrap();
     let output = ilium_plugin_host::cli::run_check_dir(&package);
     assert_eq!(output.exit_code, 1);
-    assert!(output.stdout_jsonl.iter().any(|line| line["severity"] == "error"));
+    assert!(output
+        .stdout_jsonl
+        .iter()
+        .any(|line| line["severity"] == "error"));
 }
 
 /// REQ: API-080
@@ -239,7 +346,17 @@ fn api_080_a_clean_package_exits_0() {
     let dir = tempfile::tempdir().expect("temp dir");
     let package = dir.path().join("pkg");
     std::fs::create_dir_all(&package).unwrap();
-    std::fs::write(package.join("manifest.json"), manifest_with("vendor.demo", "")[0].1.clone()).unwrap();
+    std::fs::write(
+        package.join("manifest.json"),
+        manifest_with("vendor.demo", "")[0].1.clone(),
+    )
+    .unwrap();
     let output = ilium_plugin_host::cli::run_check_dir(&package);
-    assert!(output.exit_code == 0 || output.stdout_jsonl.iter().all(|line| line["severity"] != "error"));
+    assert!(
+        output.exit_code == 0
+            || output
+                .stdout_jsonl
+                .iter()
+                .all(|line| line["severity"] != "error")
+    );
 }

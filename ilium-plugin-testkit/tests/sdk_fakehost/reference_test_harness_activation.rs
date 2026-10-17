@@ -9,8 +9,8 @@ use ilium_plugin_testkit::errors::codes;
 use ilium_plugin_testkit::FakeHost;
 
 use crate::common::{
-    DEFAULT_CLOCK_MS, Failing, Spy, assert_fails_with, client_batch, panic_text, sound, spy,
-    spy_edit, spy_reset, spy_script, strings, temp_dir, with_clean_env, write_file,
+    assert_fails_with, client_batch, panic_text, sound, spy, spy_edit, spy_reset, spy_script,
+    strings, temp_dir, with_clean_env, write_file, Failing, Spy, DEFAULT_CLOCK_MS,
 };
 
 fn fixture_with_settings(label: &str, body: &str) -> std::path::PathBuf {
@@ -121,7 +121,9 @@ fn dev_421_activate_panics_with_the_plugin_error_code_and_message() {
 fn dev_421_try_activate_returns_the_error_instead_of_panicking() {
     with_clean_env(|| {
         let mut host = FakeHost::new();
-        let error = host.try_activate::<Failing>().expect_err("the plugin refuses");
+        let error = host
+            .try_activate::<Failing>()
+            .expect_err("the plugin refuses");
         assert_eq!(error.code, ErrorCode::NotPermitted);
         assert_eq!(error.message, "denied");
     });
@@ -194,7 +196,10 @@ fn dev_424_deactivate_returns_the_restore_bytes_of_the_plugin() {
         spy_edit(|state| state.restore = Some(vec![1, 2, 3]));
         let mut host = FakeHost::new();
         host.activate::<Spy>();
-        assert_eq!(host.deactivate(DeactivationReason::Shutdown), Some(vec![1, 2, 3]));
+        assert_eq!(
+            host.deactivate(DeactivationReason::Shutdown),
+            Some(vec![1, 2, 3])
+        );
     });
 }
 
@@ -216,7 +221,9 @@ fn dev_424_the_reserved_crash_restart_reason_fails_with_reason_reserved() {
         spy_reset();
         let mut host = FakeHost::new();
         host.activate::<Spy>();
-        assert_fails_with(codes::REASON_RESERVED, || host.deactivate(DeactivationReason::CrashRestart));
+        assert_fails_with(codes::REASON_RESERVED, || {
+            host.deactivate(DeactivationReason::CrashRestart)
+        });
         assert!(spy().deactivations.is_empty());
     });
 }
@@ -250,7 +257,10 @@ fn dev_425_submissions_and_outcomes_of_one_host_are_invisible_to_another() {
         assert_eq!(first.submitted().len(), 1);
         assert!(second.submitted().is_empty());
         assert!(second.outcomes().is_empty());
-        assert!(second.storage().dump(ilium_plugin_sdk_core::host::Bucket::Global).is_empty());
+        assert!(second
+            .storage()
+            .dump(ilium_plugin_sdk_core::host::Bucket::Global)
+            .is_empty());
     });
 }
 
@@ -290,7 +300,9 @@ fn dev_428_hosts_on_parallel_threads_share_no_state() {
                     spy_reset();
                     let mut host = FakeHost::new().grant("sound.play").seed(count as u64);
                     host.activate::<Spy>();
-                    let replies = (0..count).map(|index| vec![sound(index as u64 + 1)]).collect();
+                    let replies = (0..count)
+                        .map(|index| vec![sound(index as u64 + 1)])
+                        .collect();
                     spy_script(replies);
                     for _ in 0..count {
                         host.deliver(client_batch(1));

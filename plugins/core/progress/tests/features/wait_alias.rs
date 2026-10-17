@@ -20,7 +20,13 @@ fn f_108_wait_without_a_monitor_prints_the_same_record_as_progress_wait() {
 #[test]
 fn f_108_wait_with_an_id_waits_for_that_monitor_and_exits_zero_on_done() {
     let (mut host, pane) = host_with_pane();
-    let id = register(&mut host, pane, PROBE, &running("export-1", 0, "Exporting"), &["--interval-seconds", "5"]);
+    let id = register(
+        &mut host,
+        pane,
+        PROBE,
+        &running("export-1", 0, "Exporting"),
+        &["--interval-seconds", "5"],
+    );
     expect_probe(&mut host, PROBE, &done("export-1", "Finished"));
     tick(&mut host, 5);
     let run = run_in_pane(&mut host, pane, &["wait", &id.to_string()]);
@@ -34,13 +40,22 @@ fn f_108_wait_with_an_id_waits_for_that_monitor_and_exits_zero_on_done() {
 #[test]
 fn f_108_wait_with_a_timeout_exits_six_when_it_elapses() {
     let (mut host, pane) = host_with_pane();
-    register(&mut host, pane, PROBE, &running("export-1", 0, "Exporting"), &["--interval-seconds", "5"]);
+    register(
+        &mut host,
+        pane,
+        PROBE,
+        &running("export-1", 0, "Exporting"),
+        &["--interval-seconds", "5"],
+    );
     host.process().allow_unexpected();
     let open = start_in_pane(&mut host, pane, &["wait", "--timeout-seconds", "2"]);
     tick(&mut host, 2);
     let run = open.read();
     assert_eq!(run.exit, Some(6));
-    assert_eq!(record_of(&run.stdout, "progress_wait")["outcome"], "still-running");
+    assert_eq!(
+        record_of(&run.stdout, "progress_wait")["outcome"],
+        "still-running"
+    );
 }
 
 /// REQ: F-108
@@ -51,14 +66,20 @@ fn f_108_wait_with_several_monitors_and_no_id_is_refused_with_monitor_ambiguous(
     register(&mut host, pane, "/opt/b.sh", &running("job-b", 0, "B"), &[]);
     let run = run_in_pane(&mut host, pane, &["wait"]);
     assert_eq!(run.exit, Some(2));
-    assert_eq!(record_of(&run.stdout, "progress_rejected")["code"], "monitor-ambiguous");
+    assert_eq!(
+        record_of(&run.stdout, "progress_rejected")["code"],
+        "monitor-ambiguous"
+    );
 }
 
 /// REQ: F-108, COR-040
 #[test]
 fn f_108_the_alias_is_declared_by_the_plugin_and_not_by_a_second_entry() {
     let manifest = manifest_value();
-    assert_eq!(manifest["contributes"]["cli"]["aliases"], serde_json::json!(["wait"]));
+    assert_eq!(
+        manifest["contributes"]["cli"]["aliases"],
+        serde_json::json!(["wait"])
+    );
     assert_eq!(manifest["contributes"]["cli"]["name"], "progress");
 }
 
@@ -84,5 +105,8 @@ fn f_108_wait_outside_a_pane_fails_like_progress_wait() {
     };
     assert_eq!(alias, full);
     assert_ne!(alias.1, Some(0));
-    assert_eq!(record_of(&alias.0, "progress_request_failed")["code"], "pane-identity-unavailable");
+    assert_eq!(
+        record_of(&alias.0, "progress_request_failed")["code"],
+        "pane-identity-unavailable"
+    );
 }

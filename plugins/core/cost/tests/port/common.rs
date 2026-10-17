@@ -33,7 +33,10 @@ pub fn ask(place: Place, op: &str, request: Value) -> Value {
         Place::Client => ("client", PluginSide::Server),
         Place::Server => ("server", PluginSide::Client),
     };
-    let mut host = FakeHost::for_manifest(manifest_path()).expect("manifest loads").side(side_name).build();
+    let mut host = FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side(side_name)
+        .build();
     match place {
         Place::Client => host.activate::<CostClient>(),
         Place::Server => host.activate::<CostServer>(),
@@ -66,7 +69,9 @@ pub fn client(op: &str, request: Value) -> Value {
 
 /// Rounds a JSON number to compare floats: true when `value` is within `1e-6` of `expected`.
 pub fn near(value: &Value, expected: f64) -> bool {
-    value.as_f64().is_some_and(|number| (number - expected).abs() < 1e-6)
+    value
+        .as_f64()
+        .is_some_and(|number| (number - expected).abs() < 1e-6)
 }
 
 /// JSON array of strings from string slices.

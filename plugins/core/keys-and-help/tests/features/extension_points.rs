@@ -15,7 +15,11 @@ const HELP_SOURCES: &str = "ilium.core.keys-and-help/help-sources";
 fn package(name: &str, manifest: &Value) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("keys-and-help-ext-{}-{name}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("package dir");
-    std::fs::write(dir.join("manifest.json"), serde_json::to_string_pretty(manifest).unwrap()).expect("manifest");
+    std::fs::write(
+        dir.join("manifest.json"),
+        serde_json::to_string_pretty(manifest).unwrap(),
+    )
+    .expect("manifest");
     dir
 }
 
@@ -54,9 +58,15 @@ fn session_with(packages: &[PathBuf]) -> FakeSession {
 #[test]
 fn points_010_the_page_example_matches_the_documented_entry_shape() {
     let page = page_text();
-    let example = json_block_after(&page, "#### Example: Shows a hint while a board pane has focus");
+    let example = json_block_after(
+        &page,
+        "#### Example: Shows a hint while a board pane has focus",
+    );
     let entry = &example["contributes"]["extensions"][0]["entry"];
-    assert_eq!(entry, &json!({"context": "pane:board", "chord": "n", "label": "New card"}));
+    assert_eq!(
+        entry,
+        &json!({"context": "pane:board", "chord": "n", "label": "New card"})
+    );
     assert_eq!(example["contributes"]["extensions"][0]["point"], KEY_HINTS);
     assert_eq!(example["contributes"]["extensions"][0]["priority"], 50);
 }
@@ -64,10 +74,16 @@ fn points_010_the_page_example_matches_the_documented_entry_shape() {
 /// REQ: F-010
 #[test]
 fn points_010_a_contributed_key_hint_is_collected_with_its_payload() {
-    let dir = package("one", &example_package("test.board-hints", 50, "n", "New card"));
+    let dir = package(
+        "one",
+        &example_package("test.board-hints", 50, "n", "New card"),
+    );
     let mut session = session_with(&[dir]);
     let entries = session.collected(KEY_HINTS);
-    assert_eq!(entries, vec![json!({"context": "pane:board", "chord": "n", "label": "New card"})]);
+    assert_eq!(
+        entries,
+        vec![json!({"context": "pane:board", "chord": "n", "label": "New card"})]
+    );
 }
 
 /// REQ: F-010
@@ -76,7 +92,11 @@ fn points_010_collected_entries_follow_priority_lowest_first() {
     let late = package("late", &example_package("test.late", 90, "x", "Late"));
     let early = package("early", &example_package("test.early", 10, "y", "Early"));
     let mut session = session_with(&[late, early]);
-    let labels: Vec<Value> = session.collected(KEY_HINTS).iter().map(|entry| entry["label"].clone()).collect();
+    let labels: Vec<Value> = session
+        .collected(KEY_HINTS)
+        .iter()
+        .map(|entry| entry["label"].clone())
+        .collect();
     assert_eq!(labels, vec![json!("Early"), json!("Late")]);
 }
 
@@ -86,7 +106,11 @@ fn points_010_equal_priorities_break_ties_by_plugin_id() {
     let b = package("tie-b", &example_package("test.b", 50, "b", "B"));
     let a = package("tie-a", &example_package("test.a", 50, "a", "A"));
     let mut session = session_with(&[b, a]);
-    let labels: Vec<Value> = session.collected(KEY_HINTS).iter().map(|entry| entry["label"].clone()).collect();
+    let labels: Vec<Value> = session
+        .collected(KEY_HINTS)
+        .iter()
+        .map(|entry| entry["label"].clone())
+        .collect();
     assert_eq!(labels, vec![json!("A"), json!("B")]);
 }
 
@@ -94,24 +118,34 @@ fn points_010_equal_priorities_break_ties_by_plugin_id() {
 #[test]
 fn points_010_an_entry_without_a_label_is_refused_at_install_with_manifest_schema() {
     let mut manifest = example_package("test.nolabel", 50, "n", "x");
-    manifest["contributes"]["extensions"][0]["entry"] = json!({"context": "pane:board", "chord": "n"});
+    manifest["contributes"]["extensions"][0]["entry"] =
+        json!({"context": "pane:board", "chord": "n"});
     let dir = package("nolabel", &manifest);
     let mut session = FakeSession::new();
     session.install_core("keys-and-help");
     let error = session.try_install(&dir).expect_err("refused");
-    assert!(error.to_string().contains("manifest.extension-entry"), "{error}");
+    assert!(
+        error.to_string().contains("manifest.extension-entry"),
+        "{error}"
+    );
 }
 
 /// REQ: F-010
 #[test]
-fn points_010_a_contributor_without_the_contribute_grant_is_refused_with_manifest_grant_missing_extension() {
+fn points_010_a_contributor_without_the_contribute_grant_is_refused_with_manifest_grant_missing_extension(
+) {
     let mut manifest = example_package("test.nogrant", 50, "n", "x");
     manifest["capabilities"] = json!({"client": []});
     let dir = package("nogrant", &manifest);
     let mut session = FakeSession::new();
     session.install_core("keys-and-help");
     let error = session.try_install(&dir).expect_err("refused");
-    assert!(error.to_string().contains("manifest.grant-missing-extension"), "{error}");
+    assert!(
+        error
+            .to_string()
+            .contains("manifest.grant-missing-extension"),
+        "{error}"
+    );
 }
 
 /// REQ: F-010
@@ -123,7 +157,10 @@ fn points_010_a_wildcard_contribute_grant_is_refused_with_manifest_grant_wildcar
     let mut session = FakeSession::new();
     session.install_core("keys-and-help");
     let error = session.try_install(&dir).expect_err("refused");
-    assert!(error.to_string().contains("manifest.grant-wildcard"), "{error}");
+    assert!(
+        error.to_string().contains("manifest.grant-wildcard"),
+        "{error}"
+    );
 }
 
 /// REQ: F-010
@@ -174,7 +211,10 @@ fn points_010_with_no_contributor_both_points_are_empty() {
 #[test]
 fn points_010_the_core_stub_declares_exactly_the_two_points_and_the_bindings_service() {
     let stub = ilium_plugin_sdk::testing::core_stubs::find("keys-and-help").expect("stub");
-    assert_eq!(stub.extension_points, vec!["key-hints".to_string(), "help-sources".to_string()]);
+    assert_eq!(
+        stub.extension_points,
+        vec!["key-hints".to_string(), "help-sources".to_string()]
+    );
     assert_eq!(stub.services, vec!["bindings".to_string()]);
 }
 
@@ -202,6 +242,11 @@ fn points_010_the_manifest_of_the_owner_declares_the_two_points_with_the_provide
 #[test]
 fn points_010_the_manifest_of_the_owner_lists_the_points_under_contributes_extension_points() {
     let points = manifest()["contributes"]["extensionPoints"].clone();
-    let ids: Vec<&str> = points.as_array().expect("points").iter().filter_map(|point| point["id"].as_str()).collect();
+    let ids: Vec<&str> = points
+        .as_array()
+        .expect("points")
+        .iter()
+        .filter_map(|point| point["id"].as_str())
+        .collect();
     assert_eq!(ids, vec!["key-hints", "help-sources"]);
 }

@@ -22,7 +22,11 @@ pub enum KeyChange {
 }
 
 /// Applies `change` to `target` inside `text`, keeping every other byte of the file.
-pub fn edit_config_text(_target: ConfigTarget, _text: &str, _change: KeyChange) -> Result<String, String> {
+pub fn edit_config_text(
+    _target: ConfigTarget,
+    _text: &str,
+    _change: KeyChange,
+) -> Result<String, String> {
     unimplemented!("ilium.core.agent-setup: config_writer::edit_config_text")
 }
 

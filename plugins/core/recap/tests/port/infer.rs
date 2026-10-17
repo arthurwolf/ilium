@@ -6,7 +6,10 @@ use crate::common::*;
 use crate::support::*;
 
 fn failure_of(records: &[serde_json::Value]) -> String {
-    first_recap(records)["failure"].as_str().unwrap_or_default().to_string()
+    first_recap(records)["failure"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string()
 }
 
 /// REQ: PORT:ilium-client/src/recap/infer.rs::returns_provider_text_on_success
@@ -27,13 +30,20 @@ fn port_infer_reports_provider_failure_without_panicking() {
     let request = host.jobs().list()[0].request;
     host.jobs().finish(
         request,
-        Err(PluginError { code: ErrorCode::Network, message: "no key".to_string(), retry_after_ms: None }),
+        Err(PluginError {
+            code: ErrorCode::Network,
+            message: "no key".to_string(),
+            retry_after_ms: None,
+        }),
     );
     host.settle();
     let output = host.cli().refresh(&invocation);
     let records = jsonl(&output.stdout());
     assert_eq!(first_recap(&records)["state"], "failed");
-    assert!(failure_of(&records).contains("model provider failed"), "{records:?}");
+    assert!(
+        failure_of(&records).contains("model provider failed"),
+        "{records:?}"
+    );
     assert!(failure_of(&records).contains("no key"));
     assert_eq!(output.exit_code(), Some(0));
 }
@@ -69,7 +79,8 @@ fn port_infer_cancellation_abandons_a_waiting_call() {
 fn many_shell_panes(host: &mut ilium_plugin_sdk::testing::FakeHost, count: usize) {
     for index in 0..count {
         let pane = host.tree().add(shell_pane(&format!("shell {index}")));
-        host.tree().set_screen(pane, rows(&[&format!("$ job {index}")]));
+        host.tree()
+            .set_screen(pane, rows(&[&format!("$ job {index}")]));
     }
 }
 
@@ -81,7 +92,10 @@ fn port_infer_concurrency_gate_bounds_parallel_calls() {
     many_shell_panes(&mut host, 6);
     host.cli().invoke(&["recap", "--max-concurrency", "2"], b"");
     assert_eq!(host.running_job_limit(), 2);
-    assert!(host.jobs().list().len() <= 6, "every pane queues at most one job");
+    assert!(
+        host.jobs().list().len() <= 6,
+        "every pane queues at most one job"
+    );
 }
 
 /// REQ: PORT:ilium-client/src/recap/infer.rs::outstanding_provider_calls_never_exceed_gate_after_timeouts_and_cancels
@@ -90,13 +104,19 @@ fn port_infer_outstanding_calls_never_exceed_the_gate_after_timeouts_and_cancels
     let mut host = activated_server();
     open_gate(&mut host);
     many_shell_panes(&mut host, 4);
-    let first = host.cli().invoke(&["recap", "--max-concurrency", "2", "--timeout-seconds", "1"], b"");
+    let first = host.cli().invoke(
+        &["recap", "--max-concurrency", "2", "--timeout-seconds", "1"],
+        b"",
+    );
     host.advance_clock(1_001);
     host.settle();
     assert!(host.running_job_limit() <= 2);
     let second = host.cli().invoke(&["recap", "--max-concurrency", "2"], b"");
     host.cli().cancel(&second);
     host.settle();
-    assert!(host.running_job_limit() <= 2, "the gate holds after timeouts and cancels");
+    assert!(
+        host.running_job_limit() <= 2,
+        "the gate holds after timeouts and cancels"
+    );
     let _ = host.cli().refresh(&first);
 }

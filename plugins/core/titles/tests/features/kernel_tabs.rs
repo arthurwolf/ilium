@@ -7,9 +7,15 @@ use crate::common::*;
 fn doc_cor_030_page_lists_exactly_the_titles_and_triggers_tabs() {
     let page = page_text();
     let titles = table_row(&page, "| `titles` |");
-    assert_eq!(&titles[1..5], ["`titles`", "Titles", "`[inference]`", "none"]);
+    assert_eq!(
+        &titles[1..5],
+        ["`titles`", "Titles", "`[inference]`", "none"]
+    );
     let triggers = table_row(&page, "| `triggers` |");
-    assert_eq!(&triggers[1..5], ["`triggers`", "Triggers", "`[triggers]`", "none"]);
+    assert_eq!(
+        &triggers[1..5],
+        ["`triggers`", "Triggers", "`[triggers]`", "none"]
+    );
 }
 
 /// REQ: COR-030, COR-033, F-044
@@ -23,7 +29,13 @@ fn doc_cor_033_tab_grants_in_the_manifest_match_the_tab_ids() {
         .map(|grant| grant.as_str().expect("string").to_string())
         .filter(|grant| grant.starts_with("settings.write-kernel:"))
         .collect();
-    assert_eq!(client, ["settings.write-kernel:titles", "settings.write-kernel:triggers"]);
+    assert_eq!(
+        client,
+        [
+            "settings.write-kernel:titles",
+            "settings.write-kernel:triggers"
+        ]
+    );
 }
 
 /// REQ: COR-030, F-041
@@ -81,12 +93,20 @@ fn doc_cor_022_boot_page_says_without_titles_there_is_no_automatic_naming() {
 #[test]
 fn doc_f_041_rail_order_places_titles_before_triggers() {
     let page = pages_text("reference-config-and-data-migration.md");
-    let at_titles = page.find("Inference, LLM Instructions, Titles, Triggers, Text Triggers").expect("rail order");
+    let at_titles = page
+        .find("Inference, LLM Instructions, Titles, Triggers, Text Triggers")
+        .expect("rail order");
     let order = "Inference, LLM Instructions, Titles, Triggers, Text Triggers";
     let slice = &page[at_titles..at_titles + order.len()];
     let names: Vec<&str> = slice.split(", ").collect();
-    let titles_at = names.iter().position(|name| *name == "Titles").expect("Titles in rail");
-    let triggers_at = names.iter().position(|name| *name == "Triggers").expect("Triggers in rail");
+    let titles_at = names
+        .iter()
+        .position(|name| *name == "Titles")
+        .expect("Titles in rail");
+    let triggers_at = names
+        .iter()
+        .position(|name| *name == "Triggers")
+        .expect("Triggers in rail");
     assert_eq!(titles_at + 1, triggers_at);
 }
 
@@ -124,7 +144,10 @@ fn doc_f_044_triggers_tab_maps_eight_events_with_the_documented_defaults() {
         ("Agent starts working", "Retitle element"),
         ("Agent waits on background work", "Retitle element"),
         ("Agent needs approval", "none"),
-        ("Agent finishes work", "Retitle element and Restructure project"),
+        (
+            "Agent finishes work",
+            "Retitle element and Restructure project",
+        ),
         ("Terminal activity checkpoint", "Retitle element"),
     ];
     for (event, actions) in expected {
@@ -137,7 +160,9 @@ fn doc_f_044_triggers_tab_maps_eight_events_with_the_documented_defaults() {
 #[test]
 fn doc_f_044_terminal_checkpoint_fires_after_every_second_plain_shell_command() {
     let doc = user_doc("settings.md");
-    assert!(doc.contains("The terminal checkpoint fires after every second submitted plain-shell command."));
+    assert!(doc.contains(
+        "The terminal checkpoint fires after every second submitted plain-shell command."
+    ));
 }
 
 /// REQ: F-044

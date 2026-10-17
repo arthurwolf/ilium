@@ -9,8 +9,8 @@ use std::sync::Arc;
 
 use ilium_plugin_api::generated::host::http::HttpResponse;
 use ilium_plugin_api::generated::types::events::Event;
-use ilium_plugin_api::generated::types::intents::Submission;
 use ilium_plugin_api::generated::types::ids::RequestId;
+use ilium_plugin_api::generated::types::intents::Submission;
 use ilium_plugin_api::generated::types::requests::{Outcome, RequestRef};
 use ilium_plugin_api::ids::PluginId;
 use ilium_plugin_api::{ErrorCode, PluginError, Side, Tier};
@@ -178,7 +178,12 @@ impl Setup {
         let state = tempfile::tempdir().expect("scratch state directory");
         let net = FakeNet::new();
         let host = Rig::build(&self, state.path(), &net).expect("the harness builds");
-        Rig { host, net, state, setup: self }
+        Rig {
+            host,
+            net,
+            state,
+            setup: self,
+        }
     }
 }
 
@@ -201,7 +206,11 @@ pub fn t3(granted: &[&str]) -> Rig {
 }
 
 impl Rig {
-    fn build(setup: &Setup, state: &Path, net: &FakeNet) -> Result<HarnessHandle, ilium_plugin_host::HostError> {
+    fn build(
+        setup: &Setup,
+        state: &Path,
+        net: &FakeNet,
+    ) -> Result<HarnessHandle, ilium_plugin_host::HostError> {
         let grant_refs: Vec<&str> = setup.grants.iter().map(String::as_str).collect();
         let mut harness = HostHarness::new()
             .tier(setup.tier)
@@ -235,10 +244,20 @@ impl Rig {
     /// Stops the server and starts it again on the same state directory and network (policy and
     /// stores are re-read).
     pub fn restart(self) -> Rig {
-        let Rig { host, net, state, setup } = self;
+        let Rig {
+            host,
+            net,
+            state,
+            setup,
+        } = self;
         drop(host);
         let host = Rig::build(&setup, state.path(), &net).expect("the harness builds again");
-        Rig { host, net, state, setup }
+        Rig {
+            host,
+            net,
+            state,
+            setup,
+        }
     }
 
     /// Calls an `ilium:host` import by its WIT name.
@@ -253,7 +272,11 @@ impl Rig {
 
     /// Log lines of the plugin as plain messages.
     pub fn log_messages(&self) -> Vec<String> {
-        self.host.logs().into_iter().map(|line| line.message).collect()
+        self.host
+            .logs()
+            .into_iter()
+            .map(|line| line.message)
+            .collect()
     }
 
     /// `ilium:host/http.fetch` of a GET with the given headers, driven to completion.
@@ -283,8 +306,12 @@ impl Rig {
                 return Err(error);
             }
         }
-        let taken = self.value("ilium:host/http.take-response", json!({ "request": request_id }))?;
-        let response: Option<HttpResponse> = serde_json::from_value(taken).expect("take-response value");
+        let taken = self.value(
+            "ilium:host/http.take-response",
+            json!({ "request": request_id }),
+        )?;
+        let response: Option<HttpResponse> =
+            serde_json::from_value(taken).expect("take-response value");
         Ok(response.expect("a completed request has a response"))
     }
 
@@ -295,7 +322,10 @@ impl Rig {
 
     /// The audit records of one event name.
     pub fn audit_events(&self, event: &str) -> Vec<Value> {
-        self.audit_lines().into_iter().filter(|line| line["event"] == event).collect()
+        self.audit_lines()
+            .into_iter()
+            .filter(|line| line["event"] == event)
+            .collect()
     }
 
     /// Persistent notices the server shows.
@@ -310,7 +340,12 @@ impl Rig {
 }
 
 /// An `http-request` value in its JSON form.
-pub fn request_json(method: &str, url: &str, headers: &[(&str, &str)], body: Option<Vec<u8>>) -> Value {
+pub fn request_json(
+    method: &str,
+    url: &str,
+    headers: &[(&str, &str)],
+    body: Option<Vec<u8>>,
+) -> Value {
     json!({
         "method": method,
         "url": url,
@@ -332,11 +367,20 @@ pub fn is_ok(result: &ImportResult) -> bool {
 
 /// The refusal reason word of an error: the text before the first `: ` of the message.
 pub fn reason_of(error: &PluginError) -> String {
-    error.message.split(": ").next().unwrap_or_default().to_owned()
+    error
+        .message
+        .split(": ")
+        .next()
+        .unwrap_or_default()
+        .to_owned()
 }
 
 /// Asserts `Err` with this code and reason word (`not-permitted`, `quota-exceeded`, `network`).
-pub fn assert_refused<T: std::fmt::Debug>(result: &Result<T, PluginError>, code: ErrorCode, reason: &str) {
+pub fn assert_refused<T: std::fmt::Debug>(
+    result: &Result<T, PluginError>,
+    code: ErrorCode,
+    reason: &str,
+) {
     match result {
         Err(error) => {
             assert_eq!(error.code, code, "{error:?}");
@@ -377,7 +421,10 @@ pub fn raw_lines(path: &Path) -> Vec<String> {
 
 /// Lower-case hex SHA-256.
 pub fn sha256_hex(bytes: &[u8]) -> String {
-    Sha256::digest(bytes).iter().map(|byte| format!("{byte:02x}")).collect()
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 /// 64 zeros: the `prev_hash` of the first audit record.
@@ -422,7 +469,8 @@ pub fn manual_page(name: &str) -> String {
     let dir = std::env::var_os("ILIUM_PLUGIN_MANUAL_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| workspace_root().join("docs/plugins-manual/pages"));
-    std::fs::read_to_string(dir.join(name)).unwrap_or_else(|error| panic!("manual page {name}: {error}"))
+    std::fs::read_to_string(dir.join(name))
+        .unwrap_or_else(|error| panic!("manual page {name}: {error}"))
 }
 
 /// Asserts that a page contains every needle.

@@ -216,9 +216,7 @@ pub fn set(mut root: Value, pointer: &str, new_value: Value) -> Value {
                 map.insert((*token).to_owned(), new_value);
                 return root;
             }
-            cursor = map
-                .entry((*token).to_owned())
-                .or_insert_with(|| json!({}));
+            cursor = map.entry((*token).to_owned()).or_insert_with(|| json!({}));
         }
     }
     root
@@ -305,7 +303,10 @@ pub fn page(name: &str) -> String {
 
 /// The text between a heading line and the next heading of the same or a higher level.
 pub fn section(text: &str, heading: &str) -> String {
-    let level = heading.chars().take_while(|character| *character == '#').count();
+    let level = heading
+        .chars()
+        .take_while(|character| *character == '#')
+        .count();
     let mut inside = false;
     let mut collected = Vec::new();
     for line in text.lines() {
@@ -314,7 +315,10 @@ pub fn section(text: &str, heading: &str) -> String {
             continue;
         }
         if inside {
-            let line_level = line.chars().take_while(|character| *character == '#').count();
+            let line_level = line
+                .chars()
+                .take_while(|character| *character == '#')
+                .count();
             if line_level > 0 && line_level <= level && line.starts_with('#') {
                 break;
             }
@@ -332,7 +336,10 @@ pub fn table_cells(line: &str) -> Option<Vec<String>> {
         return None;
     }
     let inner = trimmed.trim_start_matches('|').trim_end_matches('|');
-    let cells: Vec<String> = inner.split('|').map(|cell| cell.trim().to_owned()).collect();
+    let cells: Vec<String> = inner
+        .split('|')
+        .map(|cell| cell.trim().to_owned())
+        .collect();
     if cells
         .iter()
         .all(|cell| !cell.is_empty() && cell.chars().all(|c| c == '-' || c == ':'))
@@ -369,7 +376,9 @@ pub struct CatalogueRow {
 pub fn catalogue() -> Vec<CatalogueRow> {
     let text = page("reference-manifest-schema.md");
     let start = text.find("## Error catalogue").expect("catalogue heading");
-    let end = text.find("## Retired and orphan codes").expect("retired heading");
+    let end = text
+        .find("## Retired and orphan codes")
+        .expect("retired heading");
     rows_of(&text[start..end])
         .into_iter()
         .filter(|cells| cells.len() >= 4 && cells[0].starts_with('`'))
@@ -385,7 +394,9 @@ pub fn catalogue() -> Vec<CatalogueRow> {
 /// The retired codes and their replacement cell.
 pub fn retired_codes() -> Vec<(String, String)> {
     let text = page("reference-manifest-schema.md");
-    let start = text.find("## Retired and orphan codes").expect("retired heading");
+    let start = text
+        .find("## Retired and orphan codes")
+        .expect("retired heading");
     let end = text.find("## Edge cases").expect("edge cases heading");
     rows_of(&text[start..end])
         .into_iter()

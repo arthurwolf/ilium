@@ -13,16 +13,27 @@ use crate::common::{
 };
 
 fn gesture_claims(host: &mut FakeHost, pane: u64) -> Vec<PointerModifiers> {
-    host.terminal().pointer_claims(pane).into_iter().flatten().collect()
+    host.terminal()
+        .pointer_claims(pane)
+        .into_iter()
+        .flatten()
+        .collect()
 }
 
 fn light_setting_changed(key: &str) -> Event {
-    Event::KernelSettingsChanged(KernelSettingsEvent { tab: "terminal".to_string(), keys: vec![key.to_string()] })
+    Event::KernelSettingsChanged(KernelSettingsEvent {
+        tab: "terminal".to_string(),
+        keys: vec![key.to_string()],
+    })
 }
 
 fn new_terminal(host: &mut FakeHost) -> u64 {
     let pane = add_terminal_pane(host, "api");
-    host.deliver_one(pane_created(pane, "ilium.terminal", PrimitiveKind::Terminal));
+    host.deliver_one(pane_created(
+        pane,
+        "ilium.terminal",
+        PrimitiveKind::Terminal,
+    ));
     pane
 }
 
@@ -38,7 +49,9 @@ fn feature_065_default_key_claims_a_control_gesture() {
 #[test]
 fn feature_065_alt_key_claims_an_alt_gesture() {
     let mut host = client_host_unactivated();
-    host.settings().set("terminal.smart_copy_light_key", json!("alt")).expect("allowed");
+    host.settings()
+        .set("terminal.smart_copy_light_key", json!("alt"))
+        .expect("allowed");
     host.activate::<SmartCopyClient>();
     let pane = new_terminal(&mut host);
     assert_eq!(gesture_claims(&mut host, pane), [PointerModifiers::ALT]);
@@ -48,7 +61,9 @@ fn feature_065_alt_key_claims_an_alt_gesture() {
 #[test]
 fn feature_065_shift_key_claims_a_shift_gesture() {
     let mut host = client_host_unactivated();
-    host.settings().set("terminal.smart_copy_light_key", json!("shift")).expect("allowed");
+    host.settings()
+        .set("terminal.smart_copy_light_key", json!("shift"))
+        .expect("allowed");
     host.activate::<SmartCopyClient>();
     let pane = new_terminal(&mut host);
     assert_eq!(gesture_claims(&mut host, pane), [PointerModifiers::SHIFT]);
@@ -58,7 +73,9 @@ fn feature_065_shift_key_claims_a_shift_gesture() {
 #[test]
 fn feature_065_light_off_holds_no_gesture_claim() {
     let mut host = client_host_unactivated();
-    host.settings().set("terminal.smart_copy_light", json!(false)).expect("boolean");
+    host.settings()
+        .set("terminal.smart_copy_light", json!(false))
+        .expect("boolean");
     host.activate::<SmartCopyClient>();
     let pane = new_terminal(&mut host);
     assert!(gesture_claims(&mut host, pane).is_empty());
@@ -69,7 +86,9 @@ fn feature_065_light_off_holds_no_gesture_claim() {
 fn feature_065_changing_the_key_moves_the_claim_to_the_new_modifier() {
     let mut host = client_host();
     let pane = new_terminal(&mut host);
-    host.settings().set("terminal.smart_copy_light_key", json!("alt")).expect("allowed");
+    host.settings()
+        .set("terminal.smart_copy_light_key", json!("alt"))
+        .expect("allowed");
     host.deliver_one(light_setting_changed("smart_copy_light_key"));
     assert_eq!(gesture_claims(&mut host, pane), [PointerModifiers::ALT]);
 }
@@ -79,10 +98,14 @@ fn feature_065_changing_the_key_moves_the_claim_to_the_new_modifier() {
 fn feature_065_switching_light_off_releases_the_claim_and_on_restores_it() {
     let mut host = client_host();
     let pane = new_terminal(&mut host);
-    host.settings().set("terminal.smart_copy_light", json!(false)).expect("boolean");
+    host.settings()
+        .set("terminal.smart_copy_light", json!(false))
+        .expect("boolean");
     host.deliver_one(light_setting_changed("smart_copy_light"));
     assert!(gesture_claims(&mut host, pane).is_empty());
-    host.settings().set("terminal.smart_copy_light", json!(true)).expect("boolean");
+    host.settings()
+        .set("terminal.smart_copy_light", json!(true))
+        .expect("boolean");
     host.deliver_one(light_setting_changed("smart_copy_light"));
     assert_eq!(gesture_claims(&mut host, pane), [PointerModifiers::CONTROL]);
 }
@@ -92,7 +115,9 @@ fn feature_065_switching_light_off_releases_the_claim_and_on_restores_it() {
 fn feature_065_the_light_variant_is_independent_of_terminal_text_selection() {
     // smart-copy.md Settings: "Terminal text selection ... separate from Smart Copy".
     let mut host = client_host_unactivated();
-    host.settings().set("ui.terminal_text_selection_enabled", json!(false)).expect("boolean");
+    host.settings()
+        .set("ui.terminal_text_selection_enabled", json!(false))
+        .expect("boolean");
     host.activate::<SmartCopyClient>();
     let pane = new_terminal(&mut host);
     assert_eq!(gesture_claims(&mut host, pane), [PointerModifiers::CONTROL]);
@@ -114,8 +139,14 @@ fn feature_065_each_terminal_pane_gets_its_own_claim() {
     let first = new_terminal(&mut host);
     let second = new_terminal(&mut host);
     assert_ne!(first, second);
-    assert_eq!(gesture_claims(&mut host, first), [PointerModifiers::CONTROL]);
-    assert_eq!(gesture_claims(&mut host, second), [PointerModifiers::CONTROL]);
+    assert_eq!(
+        gesture_claims(&mut host, first),
+        [PointerModifiers::CONTROL]
+    );
+    assert_eq!(
+        gesture_claims(&mut host, second),
+        [PointerModifiers::CONTROL]
+    );
 }
 
 /// REQ: F-065
@@ -146,7 +177,8 @@ fn feature_065_a_wheel_event_with_the_modifier_does_not_start_light() {
         sub_y: 0,
     });
     let submissions = host.deliver_one(wheel);
-    assert!(!submissions
-        .iter()
-        .any(|submission| matches!(submission.intent, ilium_plugin_sdk::types::Intent::FreezePane(_))));
+    assert!(!submissions.iter().any(|submission| matches!(
+        submission.intent,
+        ilium_plugin_sdk::types::Intent::FreezePane(_)
+    )));
 }

@@ -11,7 +11,10 @@ fn hst_450_server_detector_call_thread_is_the_plugin_executor_not_the_loop() {
     kernel.run_detection_tick_with_fixture_detector("detector-thread-name");
     let names = kernel.detector_thread_names();
     assert!(!names.is_empty(), "fixture.missing or no call observed");
-    assert!(names.iter().all(|name| name.starts_with("plugin-executor") && *name != kernel.detection_loop_thread_name()));
+    assert!(names
+        .iter()
+        .all(|name| name.starts_with("plugin-executor")
+            && *name != kernel.detection_loop_thread_name()));
 }
 
 /// REQ: HST-451
@@ -21,7 +24,10 @@ fn hst_451_the_loop_tick_does_not_wait_for_a_detector_call() {
     kernel.set_detector_block_ms(5_000);
     let started = Instant::now();
     kernel.run_detection_tick();
-    assert!(started.elapsed() < Duration::from_millis(250), "the tick waited for the detector call");
+    assert!(
+        started.elapsed() < Duration::from_millis(250),
+        "the tick waited for the detector call"
+    );
 }
 
 /// REQ: HST-451

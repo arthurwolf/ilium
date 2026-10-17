@@ -15,7 +15,10 @@ fn logged_session() -> std::sync::Arc<MemorySession> {
 }
 
 fn messages(output: &ilium_plugin_host::cli::CliOutput) -> Vec<String> {
-    recs(output, "log").iter().map(|record| record["message"].as_str().expect("message").to_owned()).collect()
+    recs(output, "log")
+        .iter()
+        .map(|record| record["message"].as_str().expect("message").to_owned())
+        .collect()
 }
 
 /// REQ: DEV-190
@@ -38,11 +41,26 @@ fn dev_190_text_lines_use_the_fixed_log_format() {
     let text = run(&env, &["logs", "acme.demo"]).stdout_text;
     let lines: Vec<&str> = text.lines().collect();
     assert_eq!(lines.len(), 3, "{text}");
-    assert!(lines[0].ends_with("info  server acme.demo first"), "{}", lines[0]);
-    assert!(lines[1].ends_with("warn  host   acme.demo second"), "{}", lines[1]);
-    assert!(lines[2].ends_with("error client acme.demo third"), "{}", lines[2]);
+    assert!(
+        lines[0].ends_with("info  server acme.demo first"),
+        "{}",
+        lines[0]
+    );
+    assert!(
+        lines[1].ends_with("warn  host   acme.demo second"),
+        "{}",
+        lines[1]
+    );
+    assert!(
+        lines[2].ends_with("error client acme.demo third"),
+        "{}",
+        lines[2]
+    );
     let stamp: Vec<char> = lines[0].chars().take(19).collect();
-    assert_eq!((stamp[4], stamp[7], stamp[10], stamp[13], stamp[16]), ('-', '-', ' ', ':', ':'));
+    assert_eq!(
+        (stamp[4], stamp[7], stamp[10], stamp[13], stamp[16]),
+        ('-', '-', ' ', ':', ':')
+    );
 }
 
 /// REQ: DEV-190
@@ -51,12 +69,25 @@ fn dev_190_follow_prints_the_file_entries_then_new_ones_and_exits_130() {
     let root = scratch();
     let session = logged_session();
     let env = env_session(root.path(), &session).with_dev_script(vec![
-        DevEvent::Log { at_ms: 500, side: "server".to_owned(), level: "info".to_owned(), message: "fourth".to_owned() },
-        DevEvent::Log { at_ms: 900, side: "server".to_owned(), level: "info".to_owned(), message: "fifth".to_owned() },
+        DevEvent::Log {
+            at_ms: 500,
+            side: "server".to_owned(),
+            level: "info".to_owned(),
+            message: "fourth".to_owned(),
+        },
+        DevEvent::Log {
+            at_ms: 900,
+            side: "server".to_owned(),
+            level: "info".to_owned(),
+            message: "fifth".to_owned(),
+        },
         DevEvent::Interrupt { at_ms: 1000 },
     ]);
     let output = run(&env, &["logs", "acme.demo", "--follow", "--json"]);
-    assert_eq!(messages(&output), vec!["first", "second", "third", "fourth", "fifth"]);
+    assert_eq!(
+        messages(&output),
+        vec!["first", "second", "third", "fourth", "fifth"]
+    );
     assert_eq!(output.exit_code, 130);
     assert_eq!(result(&output)["exit_code"], 130);
 }
@@ -66,7 +97,12 @@ fn dev_190_follow_prints_the_file_entries_then_new_ones_and_exits_130() {
 fn dev_190_without_follow_it_ends_by_itself_with_exit_zero() {
     let root = scratch();
     let session = logged_session();
-    let env = env_session(root.path(), &session).with_dev_script(vec![DevEvent::Log { at_ms: 500, side: "server".to_owned(), level: "info".to_owned(), message: "late".to_owned() }]);
+    let env = env_session(root.path(), &session).with_dev_script(vec![DevEvent::Log {
+        at_ms: 500,
+        side: "server".to_owned(),
+        level: "info".to_owned(),
+        message: "late".to_owned(),
+    }]);
     let output = run(&env, &["logs", "acme.demo", "--json"]);
     assert_eq!(output.exit_code, 0);
     assert_eq!(messages(&output), vec!["first", "second", "third"]);
@@ -78,7 +114,8 @@ fn dev_190_follow_with_no_entry_yet_still_waits_for_the_interrupt() {
     let root = scratch();
     let session = MemorySession::new();
     session.add_plugin("acme.demo", "0.1.0", "T3", "running", false, &[]);
-    let env = env_session(root.path(), &session).with_dev_script(vec![DevEvent::Interrupt { at_ms: 1000 }]);
+    let env = env_session(root.path(), &session)
+        .with_dev_script(vec![DevEvent::Interrupt { at_ms: 1000 }]);
     let output = run(&env, &["logs", "acme.demo", "--follow", "--json"]);
     assert!(messages(&output).is_empty());
     assert_eq!(output.exit_code, 130);
@@ -145,7 +182,8 @@ fn dev_192_the_singular_log_is_not_a_command() {
 /// REQ: DEV-192
 #[test]
 fn doc_dev_192_no_manual_page_shows_ilium_plugin_log_as_a_command() {
-    let pages = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs/plugins-manual/pages");
+    let pages =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs/plugins-manual/pages");
     let entries = std::fs::read_dir(&pages).expect("manual pages directory");
     let mut offenders = Vec::new();
     for entry in entries.flatten() {
@@ -155,7 +193,10 @@ fn doc_dev_192_no_manual_page_shows_ilium_plugin_log_as_a_command() {
         }
         let text = std::fs::read_to_string(&path).expect("read page");
         for (number, line) in text.lines().enumerate() {
-            if line.contains("singular") || line.contains("not a command") || line.contains("is wrong") {
+            if line.contains("singular")
+                || line.contains("not a command")
+                || line.contains("is wrong")
+            {
                 continue;
             }
             let mut rest = line;
@@ -169,7 +210,10 @@ fn doc_dev_192_no_manual_page_shows_ilium_plugin_log_as_a_command() {
             }
         }
     }
-    assert!(offenders.is_empty(), "pages show the singular command: {offenders:?}");
+    assert!(
+        offenders.is_empty(),
+        "pages show the singular command: {offenders:?}"
+    );
 }
 
 /// REQ: DEV-195
@@ -180,7 +224,10 @@ fn dev_195_without_an_argument_it_prints_the_current_threshold() {
     let env = env_session(root.path(), &session);
     let output = run(&env, &["log-level", "acme.demo"]);
     assert_eq!(output.exit_code, 0);
-    let all = format!("{}{}{}", output.stdout_raw, output.stdout_text, output.stderr);
+    let all = format!(
+        "{}{}{}",
+        output.stdout_raw, output.stdout_text, output.stderr
+    );
     assert!(all.contains("info"), "{all}");
 }
 
@@ -194,7 +241,10 @@ fn dev_195_a_level_sets_the_threshold_for_the_plugin() {
     assert_eq!(session.log_level("acme.demo"), "debug");
     let all = {
         let output = run(&env, &["log-level", "acme.demo"]);
-        format!("{}{}{}", output.stdout_raw, output.stdout_text, output.stderr)
+        format!(
+            "{}{}{}",
+            output.stdout_raw, output.stdout_text, output.stderr
+        )
     };
     assert!(all.contains("debug"), "{all}");
 }
@@ -206,7 +256,11 @@ fn dev_195_every_level_is_accepted() {
     let session = logged_session();
     let env = env_session(root.path(), &session);
     for level in ["trace", "debug", "info", "warn", "error"] {
-        assert_eq!(run(&env, &["log-level", "acme.demo", level]).exit_code, 0, "{level}");
+        assert_eq!(
+            run(&env, &["log-level", "acme.demo", level]).exit_code,
+            0,
+            "{level}"
+        );
         assert_eq!(session.log_level("acme.demo"), level);
     }
 }

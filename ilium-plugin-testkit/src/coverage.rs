@@ -12,7 +12,9 @@ pub struct CoverageSummary {
 }
 
 /// Runs the language coverage tool and writes `lcov.info` and `summary.json`; fails with `toolchain.coverage-tool-missing`.
-pub fn collect(_project_dir: &std::path::Path) -> Result<CoverageSummary, crate::errors::HarnessError> {
+pub fn collect(
+    _project_dir: &std::path::Path,
+) -> Result<CoverageSummary, crate::errors::HarnessError> {
     unimplemented!("DEV-530")
 }
 

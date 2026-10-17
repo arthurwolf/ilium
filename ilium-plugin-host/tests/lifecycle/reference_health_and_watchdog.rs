@@ -26,7 +26,9 @@ fn lif_122_each_health_state_is_reported_for_its_condition() {
     host.advance_ms(5000);
     trap(&mut host, A);
     assert_eq!(host.health(A), HealthState::Failed);
-    host.plugins_api().set_enabled(id(A), false, String::new()).unwrap();
+    host.plugins_api()
+        .set_enabled(id(A), false, String::new())
+        .unwrap();
     assert_eq!(host.health(A), HealthState::Disabled);
 }
 
@@ -36,7 +38,12 @@ fn lif_122_refused_beats_every_other_row_and_the_plugins_api_agrees() {
     let mut host = LifeHost::new();
     host.install_refused(PluginSpec::new(A), "api.unsupported");
     assert_eq!(host.health(A), HealthState::Refused);
-    let info = host.plugins_api().list().into_iter().find(|i| i.id.0 == A).unwrap();
+    let info = host
+        .plugins_api()
+        .list()
+        .into_iter()
+        .find(|i| i.id.0 == A)
+        .unwrap();
     assert_eq!(info.health, HealthState::Refused);
     let status = records(&mut host, &["plugin", "status"], "plugin-status");
     assert_eq!(status[0]["health"], "refused");
@@ -99,7 +106,9 @@ fn lif_123_rate_limited_and_quota_exceeded_results_degrade() {
 fn lif_124_disabled_plugin_is_not_degraded() {
     let mut host = one_plugin();
     host.near_miss(A, 5);
-    host.plugins_api().set_enabled(id(A), false, String::new()).unwrap();
+    host.plugins_api()
+        .set_enabled(id(A), false, String::new())
+        .unwrap();
     assert_eq!(host.health(A), HealthState::Disabled);
 }
 
@@ -121,7 +130,11 @@ fn lif_125_loop_is_interrupted_within_deadline_plus_20_ms() {
     let mut host = one_plugin();
     let result = host.run_call(A, 20, 10_000, 0, 0);
     assert!(result.trapped);
-    assert!((20..=40).contains(&result.elapsed_ms), "{}", result.elapsed_ms);
+    assert!(
+        (20..=40).contains(&result.elapsed_ms),
+        "{}",
+        result.elapsed_ms
+    );
 }
 
 proptest! {
@@ -219,8 +232,13 @@ fn lif_130_pending_requests_of_a_dropped_instance_complete_cancelled() {
 fn lif_130_deactivated_instance_cancels_its_requests_too() {
     let mut host = one_plugin();
     host.pending_requests(A, 2);
-    host.plugins_api().set_enabled(id(A), false, String::new()).unwrap();
-    assert!(host.request_outcomes(A).iter().all(|o| *o == Outcome::Cancelled));
+    host.plugins_api()
+        .set_enabled(id(A), false, String::new())
+        .unwrap();
+    assert!(host
+        .request_outcomes(A)
+        .iter()
+        .all(|o| *o == Outcome::Cancelled));
 }
 
 /// REQ: LIF-131
@@ -230,7 +248,9 @@ fn lif_131_unanswered_request_completes_timed_out() {
     host.request_never_answered(A, 1000);
     host.advance_ms(1000);
     let outcomes = host.request_outcomes(A);
-    assert!(matches!(&outcomes[0], Outcome::Failed(e) | Outcome::Refused(e) if e.code == ilium_plugin_api::generated::types::ErrorCode::TimedOut));
+    assert!(
+        matches!(&outcomes[0], Outcome::Failed(e) | Outcome::Refused(e) if e.code == ilium_plugin_api::generated::types::ErrorCode::TimedOut)
+    );
 }
 
 /// REQ: LIF-131
@@ -284,7 +304,12 @@ fn lif_134_five_helper_restarts_in_ten_minutes_are_allowed_the_sixth_stops() {
     assert_ne!(state(&host, A), InstanceState::StoppedByFailure);
     host.helper_crash(B, &[A]);
     assert_eq!(state(&host, A), InstanceState::StoppedByFailure);
-    assert_eq!(host.side(A, Side::Server, SERVER).last_error_code.as_deref(), Some("helper.unstable"));
+    assert_eq!(
+        host.side(A, Side::Server, SERVER)
+            .last_error_code
+            .as_deref(),
+        Some("helper.unstable")
+    );
 }
 
 /// REQ: LIF-134
@@ -341,7 +366,9 @@ fn lif_137_status_prints_one_plugin_status_line_per_plugin() {
     host.install(PluginSpec::new(B));
     let lines = records(&mut host, &["plugin", "status"], "plugin-status");
     assert_eq!(lines.len(), 2);
-    assert!(lines.iter().all(|l| l["health"].is_string() && l["id"].is_string()));
+    assert!(lines
+        .iter()
+        .all(|l| l["health"].is_string() && l["id"].is_string()));
 }
 
 /// REQ: LIF-137

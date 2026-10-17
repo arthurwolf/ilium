@@ -41,9 +41,17 @@ const TAB_IDS: [&str; 25] = [
 #[test]
 fn wit_kernel_settings_read_returns_a_json_object() {
     let mut rig = rig(GRANTS);
-    rig.kernel.set_kernel_tab("terminal", "{\"scrollback\":5000}");
-    let json = rig.host.kernel_settings().read("terminal".to_owned()).expect("reads");
-    assert!(json.contains("\"scrollback\":5000") || json.contains("\"scrollback\": 5000"), "{json}");
+    rig.kernel
+        .set_kernel_tab("terminal", "{\"scrollback\":5000}");
+    let json = rig
+        .host
+        .kernel_settings()
+        .read("terminal".to_owned())
+        .expect("reads");
+    assert!(
+        json.contains("\"scrollback\":5000") || json.contains("\"scrollback\": 5000"),
+        "{json}"
+    );
 }
 
 /// REQ: WIT:ilium:host/kernel-settings.read
@@ -52,7 +60,11 @@ fn wit_kernel_settings_read_every_documented_tab_id_resolves() {
     let mut rig = rig(GRANTS);
     for tab in TAB_IDS {
         rig.kernel.set_kernel_tab(tab, "{}");
-        let json = rig.host.kernel_settings().read(tab.to_owned()).unwrap_or_else(|e| panic!("{tab}: {e:?}"));
+        let json = rig
+            .host
+            .kernel_settings()
+            .read(tab.to_owned())
+            .unwrap_or_else(|e| panic!("{tab}: {e:?}"));
         assert!(json.trim_start().starts_with('{'), "{tab}: {json}");
     }
 }
@@ -61,15 +73,23 @@ fn wit_kernel_settings_read_every_documented_tab_id_resolves() {
 #[test]
 fn wit_kernel_settings_read_unknown_tab_not_found() {
     let mut rig = rig(GRANTS);
-    assert_eq!(code_of(rig.host.kernel_settings().read("no-such-tab".to_owned())), ErrorCode::NotFound);
+    assert_eq!(
+        code_of(rig.host.kernel_settings().read("no-such-tab".to_owned())),
+        ErrorCode::NotFound
+    );
 }
 
 /// REQ: WIT:ilium:host/kernel-settings.read
 #[test]
 fn wit_kernel_settings_read_secrets_are_redacted() {
     let mut rig = rig(GRANTS);
-    rig.kernel.set_kernel_tab_secret("inference", "api_key", "sk-live-123");
-    let json = rig.host.kernel_settings().read("inference".to_owned()).expect("reads");
+    rig.kernel
+        .set_kernel_tab_secret("inference", "api_key", "sk-live-123");
+    let json = rig
+        .host
+        .kernel_settings()
+        .read("inference".to_owned())
+        .expect("reads");
     assert!(json.contains("<redacted>"), "{json}");
     assert!(!json.contains("sk-live-123"), "{json}");
 }
@@ -78,7 +98,10 @@ fn wit_kernel_settings_read_secrets_are_redacted() {
 #[test]
 fn wit_kernel_settings_read_declined_grant_not_permitted() {
     let mut rig = declined_rig(&["settings.read-kernel:*"]);
-    assert_eq!(code_of(rig.host.kernel_settings().read("terminal".to_owned())), ErrorCode::NotPermitted);
+    assert_eq!(
+        code_of(rig.host.kernel_settings().read("terminal".to_owned())),
+        ErrorCode::NotPermitted
+    );
 }
 
 /// REQ: WIT:ilium:host/keymap.bindings
@@ -117,7 +140,10 @@ fn wit_keymap_bindings_declined_grant_is_empty() {
 #[test]
 fn wit_keymap_chord_label_capitalises_modifiers_and_key() {
     let mut rig = rig(GRANTS);
-    assert_eq!(rig.host.keymap().chord_label("ctrl+shift+k".to_owned()), "Ctrl+Shift+K");
+    assert_eq!(
+        rig.host.keymap().chord_label("ctrl+shift+k".to_owned()),
+        "Ctrl+Shift+K"
+    );
 }
 
 /// REQ: WIT:ilium:host/keymap.chord-label

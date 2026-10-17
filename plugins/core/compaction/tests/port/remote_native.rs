@@ -49,7 +49,10 @@ fn native_codex_limit_above_the_clamp_is_reduced_to_ninety_percent() {
 /// REQ: PORT:ilium-client/src/remote_compaction_native.rs::percent_override_and_disable_resolve
 #[test]
 fn native_percent_override_and_disable_resolve() {
-    assert_eq!(evaluate(CLAUDE, json!({"PercentOfWindow": 50}), 200_000, 65)["is_remote_shadowed"], true);
+    assert_eq!(
+        evaluate(CLAUDE, json!({"PercentOfWindow": 50}), 200_000, 65)["is_remote_shadowed"],
+        true
+    );
     let off = evaluate(CLAUDE, json!("Disabled"), 200_000, 88);
     assert!(off["effective_trigger_tokens"].is_null());
     assert_eq!(off["is_remote_shadowed"], false);
@@ -59,7 +62,10 @@ fn native_percent_override_and_disable_resolve() {
 /// REQ: PORT:ilium-client/src/remote_compaction_native.rs::equal_triggers_count_as_shadowed
 #[test]
 fn native_equal_triggers_count_as_shadowed() {
-    assert_eq!(evaluate(CODEX, json!({"Setting": 130_000}), 200_000, 65)["is_remote_shadowed"], true);
+    assert_eq!(
+        evaluate(CODEX, json!({"Setting": 130_000}), 200_000, 65)["is_remote_shadowed"],
+        true
+    );
 }
 
 /// REQ: PORT:ilium-client/src/remote_compaction_native.rs::detect_prefers_environment_then_user_file
@@ -67,14 +73,27 @@ fn native_equal_triggers_count_as_shadowed() {
 fn native_detect_prefers_environment_then_user_file() {
     let mut host = server_host();
     write_text(&mut host, CLAUDE_FILE, "{\"autoCompactWindow\": 250000}");
-    write_text(&mut host, CODEX_FILE, "model_auto_compact_token_limit = 200000\n");
+    write_text(
+        &mut host,
+        CODEX_FILE,
+        "model_auto_compact_token_limit = 200000\n",
+    );
     let from_file = host.native_trigger_detect(CLAUDE);
     assert_eq!(from_file["limit"], json!({"Setting": 250_000}));
     assert!(from_file["source"].get("UserFile").is_some());
-    assert_eq!(host.native_trigger_detect(CODEX)["limit"], json!({"Setting": 200_000}));
+    assert_eq!(
+        host.native_trigger_detect(CODEX)["limit"],
+        json!({"Setting": 200_000})
+    );
     host.set_env("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE", "40");
-    assert_eq!(host.native_trigger_detect(CLAUDE)["limit"], json!({"PercentOfWindow": 40}));
+    assert_eq!(
+        host.native_trigger_detect(CLAUDE)["limit"],
+        json!({"PercentOfWindow": 40})
+    );
     host.set_env("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE", "");
     host.set_env("DISABLE_AUTO_COMPACT", "1");
-    assert_eq!(host.native_trigger_detect(CLAUDE)["limit"], json!("Disabled"));
+    assert_eq!(
+        host.native_trigger_detect(CLAUDE)["limit"],
+        json!("Disabled")
+    );
 }

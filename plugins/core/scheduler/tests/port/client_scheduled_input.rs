@@ -42,7 +42,10 @@ fn port_scheduled_input_rejects_zero_invalid_clock_fields_and_empty_payload() {
     }
     commit_schedule(&mut session);
     let text = draw(&mut session, SCHEDULE_VIEW, 80, 24).text();
-    assert!(text.contains("Choose a delay of at least one second"), "{text}");
+    assert!(
+        text.contains("Choose a delay of at least one second"),
+        "{text}"
+    );
 
     set_text(&mut session, SCHEDULE_VIEW, "minutes", "60");
     commit_schedule(&mut session);
@@ -54,7 +57,10 @@ fn port_scheduled_input_rejects_zero_invalid_clock_fields_and_empty_payload() {
     set_flag(&mut session, SCHEDULE_VIEW, "send-enter", false);
     commit_schedule(&mut session);
     let text = draw(&mut session, SCHEDULE_VIEW, 80, 24).text();
-    assert!(text.contains("Enter text, enable Send Enter, or use both"), "{text}");
+    assert!(
+        text.contains("Enter text, enable Send Enter, or use both"),
+        "{text}"
+    );
     assert_eq!(send_count(&mut session), 0);
 }
 
@@ -82,9 +88,16 @@ fn port_scheduled_input_dialog_layout_is_aerated_and_clamped_to_small_screens() 
         .iter()
         .map(|label| screen.find(label).unwrap_or((u16::MAX, 0)).0)
         .collect();
-    assert!(rows.windows(2).all(|pair| pair[0] < pair[1]), "fields keep their order on separate rows: {rows:?}");
+    assert!(
+        rows.windows(2).all(|pair| pair[0] < pair[1]),
+        "fields keep their order on separate rows: {rows:?}"
+    );
     let small = draw(&mut session, SCHEDULE_VIEW, 24, 10);
-    assert_eq!((small.columns, small.rows), (24, 10), "the popup never exceeds the screen");
+    assert_eq!(
+        (small.columns, small.rows),
+        (24, 10),
+        "the popup never exceeds the screen"
+    );
 }
 
 /// REQ: PORT:ilium-client/src/scheduled_input.rs::clock_steps_saturate_and_empty_is_zero, scheduler-B02, scheduler-B06
@@ -94,14 +107,22 @@ fn port_scheduled_input_clock_steps_saturate_and_empty_is_zero() {
     // Minutes starts empty (0): a decrement stays 0, an increment gives 1.
     press(&mut session, SCHEDULE_VIEW, "tab");
     press(&mut session, SCHEDULE_VIEW, "left");
-    assert!(form_row(&mut session, SCHEDULE_VIEW, "Minutes").contains('0'), "{}", form_row(&mut session, SCHEDULE_VIEW, "Minutes"));
+    assert!(
+        form_row(&mut session, SCHEDULE_VIEW, "Minutes").contains('0'),
+        "{}",
+        form_row(&mut session, SCHEDULE_VIEW, "Minutes")
+    );
     press(&mut session, SCHEDULE_VIEW, "right");
-    assert!(form_row(&mut session, SCHEDULE_VIEW, "Minutes").trim_end().ends_with("1 │"));
+    assert!(form_row(&mut session, SCHEDULE_VIEW, "Minutes")
+        .trim_end()
+        .ends_with("1 │"));
     // Seconds at 59 stays at 59 on an increment.
     set_text(&mut session, SCHEDULE_VIEW, "seconds", "59");
     press(&mut session, SCHEDULE_VIEW, "tab");
     press(&mut session, SCHEDULE_VIEW, "right");
-    assert!(form_row(&mut session, SCHEDULE_VIEW, "Seconds").trim_end().ends_with("59 │"));
+    assert!(form_row(&mut session, SCHEDULE_VIEW, "Seconds")
+        .trim_end()
+        .ends_with("59 │"));
 }
 
 /// REQ: PORT:ilium-client/src/scheduled_input.rs::star_keeps_invalid_draft_and_step_rejects_it, scheduler-B06
@@ -111,9 +132,16 @@ fn port_scheduled_input_star_keeps_invalid_draft_and_step_rejects_it() {
     set_text(&mut session, SCHEDULE_VIEW, "hours", "bad");
     // A step on the invalid draft changes nothing; the draft stays visible.
     press(&mut session, SCHEDULE_VIEW, "right");
-    assert!(form_row(&mut session, SCHEDULE_VIEW, "Hours").contains("bad"), "{}", form_row(&mut session, SCHEDULE_VIEW, "Hours"));
+    assert!(
+        form_row(&mut session, SCHEDULE_VIEW, "Hours").contains("bad"),
+        "{}",
+        form_row(&mut session, SCHEDULE_VIEW, "Hours")
+    );
     commit_schedule(&mut session);
-    assert!(schedule_dialog_open(&mut session), "an invalid hours draft is not scheduled");
+    assert!(
+        schedule_dialog_open(&mut session),
+        "an invalid hours draft is not scheduled"
+    );
     assert_eq!(send_count(&mut session), 0);
 }
 
@@ -126,13 +154,20 @@ fn port_scheduled_input_aggregate_overflow_does_not_mutate_any_draft() {
     set_text(&mut session, SCHEDULE_VIEW, "minutes", "0");
     set_text(&mut session, SCHEDULE_VIEW, "seconds", "0");
     press(&mut session, SCHEDULE_VIEW, "right");
-    assert!(form_row(&mut session, SCHEDULE_VIEW, "Hours").contains(&top), "the maximal hours do not grow");
+    assert!(
+        form_row(&mut session, SCHEDULE_VIEW, "Hours").contains(&top),
+        "the maximal hours do not grow"
+    );
     set_text(&mut session, SCHEDULE_VIEW, "minutes", "59");
     press(&mut session, SCHEDULE_VIEW, "tab");
     press(&mut session, SCHEDULE_VIEW, "tab");
     let before = form_row(&mut session, SCHEDULE_VIEW, "Seconds");
     press(&mut session, SCHEDULE_VIEW, "right");
-    assert_eq!(form_row(&mut session, SCHEDULE_VIEW, "Seconds"), before, "an overflowing step leaves every draft unchanged");
+    assert_eq!(
+        form_row(&mut session, SCHEDULE_VIEW, "Seconds"),
+        before,
+        "an overflowing step leaves every draft unchanged"
+    );
 }
 
 /// REQ: PORT:ilium-client/src/scheduled_input.rs::numeric_fields_share_inner_row_and_preserve_empty_keyboard_draft, scheduler-B02
@@ -147,7 +182,10 @@ fn port_scheduled_input_numeric_fields_share_inner_row_and_preserve_empty_keyboa
     press(&mut session, SCHEDULE_VIEW, "tab");
     press(&mut session, SCHEDULE_VIEW, "shift+tab");
     let row = form_row(&mut session, SCHEDULE_VIEW, "Hours");
-    assert!(!row.chars().any(|c| c.is_ascii_digit()), "an empty draft is not rewritten to 0: {row}");
+    assert!(
+        !row.chars().any(|c| c.is_ascii_digit()),
+        "an empty draft is not rewritten to 0: {row}"
+    );
 }
 
 /// REQ: PORT:ilium-client/src/keys.rs::scheduled_input_keyboard_edits_toggles_and_submits_the_form
@@ -159,7 +197,10 @@ fn port_002_scheduled_input_keyboard_edits_toggles_and_submits_the_form() {
     // The focused Send Enter checkbox is toggled off with Space.
     press(&mut session, SCHEDULE_VIEW, "space");
     commit_schedule(&mut session);
-    assert!(!schedule_dialog_open(&mut session), "Ctrl+Enter submits and closes the form");
+    assert!(
+        !schedule_dialog_open(&mut session),
+        "Ctrl+Enter submits and closes the form"
+    );
     server(&mut session).advance_clock(30_000);
     let sent = sends(&server(&mut session).submitted());
     assert_eq!(sent.len(), 1);

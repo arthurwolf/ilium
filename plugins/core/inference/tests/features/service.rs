@@ -7,7 +7,9 @@ use crate::common::{manifest_path, PLUGIN_ID};
 
 fn session() -> FakeSession {
     let mut session = FakeSession::new();
-    session.try_install(manifest_path().parent().expect("package dir")).expect("install");
+    session
+        .try_install(manifest_path().parent().expect("package dir"))
+        .expect("install");
     session
 }
 
@@ -15,7 +17,10 @@ fn session() -> FakeSession {
 #[test]
 fn service_084_the_service_is_listed_after_install() {
     let session = session();
-    assert!(session.services().iter().any(|name| name == "ilium.core.inference/complete"));
+    assert!(session
+        .services()
+        .iter()
+        .any(|name| name == "ilium.core.inference/complete"));
 }
 
 /// REQ: F-084
@@ -36,8 +41,16 @@ fn service_084_a_caller_with_the_use_grant_gets_a_completion() {
 #[test]
 fn service_293_a_caller_without_the_grant_is_refused_with_not_permitted() {
     let mut session = session();
-    let reply = session.call_service("ilium.test.caller", "ilium.core.inference/complete", "^0.1", "{}");
-    assert_eq!(reply.expect_err("refused").code, ilium_plugin_sdk::types::ErrorCode::NotPermitted);
+    let reply = session.call_service(
+        "ilium.test.caller",
+        "ilium.core.inference/complete",
+        "^0.1",
+        "{}",
+    );
+    assert_eq!(
+        reply.expect_err("refused").code,
+        ilium_plugin_sdk::types::ErrorCode::NotPermitted
+    );
 }
 
 /// REQ: F-084
@@ -45,8 +58,16 @@ fn service_293_a_caller_without_the_grant_is_refused_with_not_permitted() {
 fn service_084_malformed_arguments_are_refused_with_invalid_argument() {
     let mut session = session();
     session.grant_service("ilium.test.caller", "ilium.core.inference/complete");
-    let reply = session.call_service("ilium.test.caller", "ilium.core.inference/complete", "^0.1", "not json");
-    assert_eq!(reply.expect_err("refused").code, ilium_plugin_sdk::types::ErrorCode::InvalidArgument);
+    let reply = session.call_service(
+        "ilium.test.caller",
+        "ilium.core.inference/complete",
+        "^0.1",
+        "not json",
+    );
+    assert_eq!(
+        reply.expect_err("refused").code,
+        ilium_plugin_sdk::types::ErrorCode::InvalidArgument
+    );
 }
 
 /// REQ: COR-022
@@ -54,7 +75,10 @@ fn service_084_malformed_arguments_are_refused_with_invalid_argument() {
 fn service_022_disabling_the_plugin_removes_the_service_and_keeps_values() {
     let mut session = session();
     session.disable(PLUGIN_ID);
-    assert!(!session.services().iter().any(|name| name == "ilium.core.inference/complete"));
+    assert!(!session
+        .services()
+        .iter()
+        .any(|name| name == "ilium.core.inference/complete"));
     assert!(session.kernel_settings_value("inference").is_some());
 }
 
@@ -63,5 +87,7 @@ fn service_022_disabling_the_plugin_removes_the_service_and_keeps_values() {
 fn service_022_a_disabled_plugin_shows_the_page_notice() {
     let mut session = session();
     session.disable(PLUGIN_ID);
-    assert!(session.disabled_notice("inference").contains("Inference providers is disabled. Values are kept."));
+    assert!(session
+        .disabled_notice("inference")
+        .contains("Inference providers is disabled. Values are kept."));
 }

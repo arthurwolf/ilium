@@ -4,7 +4,11 @@ use crate::support::*;
 fn host_with(n: usize) -> LifeHost {
     let mut host = LifeHost::new();
     for i in 0..n {
-        host.install(PluginSpec::new(&format!("com.test.p{i:02}")).sides(&[Side::Server]).startup());
+        host.install(
+            PluginSpec::new(&format!("com.test.p{i:02}"))
+                .sides(&[Side::Server])
+                .startup(),
+        );
     }
     host.start(StartMode::Normal);
     host

@@ -36,6 +36,9 @@ fn typed_numbers_keep_intermediates_and_reject_bounds_before_domain_clamping_twi
     let mut host = activated_client();
     let ok = json!({ "lat": -90.0, "lon": 180.0 });
     assert!(host.settings().set("observer", ok.clone()).is_ok());
-    assert_eq!(refused("observer", json!({ "lat": -90.0001, "lon": 0.0 })), ErrorCode::InvalidArgument);
+    assert_eq!(
+        refused("observer", json!({ "lat": -90.0001, "lon": 0.0 })),
+        ErrorCode::InvalidArgument
+    );
     assert_eq!(host.settings().get("observer"), Some(ok));
 }

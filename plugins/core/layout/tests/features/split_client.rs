@@ -56,7 +56,10 @@ fn f_003_forwarded_message_targets_the_server_side_of_the_layout_plugin() {
 #[test]
 fn f_003_forwarded_payload_is_the_focused_node_id_as_8_little_endian_bytes() {
     let sent = forwarded("split-down", 0x0102_0304_0506_0708);
-    assert_eq!(sent[0].payload, vec![0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]);
+    assert_eq!(
+        sent[0].payload,
+        vec![0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]
+    );
 }
 
 /// REQ: F-003

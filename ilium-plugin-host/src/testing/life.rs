@@ -2,7 +2,9 @@
 //! `LifecycleManager` (test plan lane lifecycle, LIF-001..059, LIF-122..145, LIF-180..186).
 //! Test support only.
 
-use ilium_plugin_api::generated::host::plugins::{HealthState, HostPlugins, InstanceState, PackageState, SideState};
+use ilium_plugin_api::generated::host::plugins::{
+    HealthState, HostPlugins, InstanceState, PackageState, SideState,
+};
 use ilium_plugin_api::generated::types::{Outcome, RequestId};
 use ilium_plugin_api::lifecycle::DeactivationReason;
 use ilium_plugin_api::limits::LimitKey;
@@ -277,7 +279,12 @@ impl LifeHost {
     }
 
     /// Tries to install a plugin with one manifest key overridden.
-    pub fn try_install_manifest_key(&mut self, plugin: &str, key: &str, json: &str) -> Result<(), Diagnostic> {
+    pub fn try_install_manifest_key(
+        &mut self,
+        plugin: &str,
+        key: &str,
+        json: &str,
+    ) -> Result<(), Diagnostic> {
         unimplemented!("host::testing::life::LifeHost::try_install_manifest_key")
     }
 
@@ -342,7 +349,11 @@ impl LifeHost {
     }
 
     /// Connects a client that speaks an API version.
-    pub fn connect_client_with_api(&mut self, name: &str, api: &str) -> Result<String, PluginError> {
+    pub fn connect_client_with_api(
+        &mut self,
+        name: &str,
+        api: &str,
+    ) -> Result<String, PluginError> {
         unimplemented!("host::testing::life::LifeHost::connect_client_with_api")
     }
 
@@ -562,7 +573,14 @@ impl LifeHost {
     }
 
     /// Runs a timed call.
-    pub fn run_call(&mut self, plugin: &str, deadline_ms: u64, work_ms: u64, sync_host_ms: u64, async_wait_ms: u64) -> CallResult {
+    pub fn run_call(
+        &mut self,
+        plugin: &str,
+        deadline_ms: u64,
+        work_ms: u64,
+        sync_host_ms: u64,
+        async_wait_ms: u64,
+    ) -> CallResult {
         unimplemented!("host::testing::life::LifeHost::run_call")
     }
 

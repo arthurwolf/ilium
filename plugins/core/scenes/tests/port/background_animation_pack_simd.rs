@@ -9,7 +9,11 @@ fn port_runtime_threshold_packing_matches_scalar_for_cell_tails_and_non_finite_s
     for id in MANIFEST_SCENES {
         let first = fake_scene(id, 40, 10).frame(braille_frame(40, 10, 1500));
         let second = fake_scene(id, 40, 10).frame(braille_frame(40, 10, 1500));
-        assert_eq!(first.text(), second.text(), "{id}: identical input must give an identical frame");
+        assert_eq!(
+            first.text(),
+            second.text(),
+            "{id}: identical input must give an identical frame"
+        );
         assert_eq!((first.columns, first.rows), (40, 10));
     }
     let lit = lit_cells(&fake_scene("waves", 40, 10).frame(braille_frame(40, 10, 1500)));

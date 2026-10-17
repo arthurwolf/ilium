@@ -13,7 +13,10 @@ fn render(host: &mut FakeHost, width: u16) -> String {
 
 fn lines_fit(text: &str, width: u16) {
     for line in text.lines() {
-        assert!(line.chars().count() <= usize::from(width), "{line:?} wider than {width}");
+        assert!(
+            line.chars().count() <= usize::from(width),
+            "{line:?} wider than {width}"
+        );
     }
 }
 
@@ -25,7 +28,10 @@ fn tab_037_renders_inside_forty_eighty_and_one_hundred_twenty_columns() {
         let text = render(&mut host, width);
         assert!(!text.trim().is_empty(), "{width}");
         lines_fit(&text, width);
-        assert!(text.contains("Chatroom") && text.contains("Progress"), "{width}\n{text}");
+        assert!(
+            text.contains("Chatroom") && text.contains("Progress"),
+            "{width}\n{text}"
+        );
     }
 }
 
@@ -123,8 +129,14 @@ fn tab_037_the_hint_line_names_enter_and_r() {
 fn tab_037_the_tab_is_a_check_list_with_row_ids_of_the_form_block_bar_target() {
     let mut host = project_host();
     let ids = host.kernel_tab_row_ids(SURFACE);
-    assert!(ids.contains(&format!("progress|{CLAUDE_GLOBAL}")), "{ids:?}");
-    assert!(ids.contains(&format!("chatroom|{CODEX_PROJECT}")), "{ids:?}");
+    assert!(
+        ids.contains(&format!("progress|{CLAUDE_GLOBAL}")),
+        "{ids:?}"
+    );
+    assert!(
+        ids.contains(&format!("chatroom|{CODEX_PROJECT}")),
+        "{ids:?}"
+    );
 }
 
 /// REQ: F-063
@@ -163,7 +175,9 @@ fn tab_063_confirming_the_dialog_installs_the_block() {
     host.press_row(SURFACE, &format!("progress|{CLAUDE_GLOBAL}"));
     host.press_popup_button("Update");
     host.settle();
-    assert!(get(&mut host, claude_file()).expect("file").contains(PROGRESS_OPEN));
+    assert!(get(&mut host, claude_file())
+        .expect("file")
+        .contains(PROGRESS_OPEN));
 }
 
 /// REQ: F-063
@@ -191,7 +205,9 @@ fn tab_063_enter_on_a_project_row_installs_into_the_project_file_after_confirmin
     host.press_row(SURFACE, &format!("chatroom|{CLAUDE_PROJECT}"));
     host.press_popup_button("Install");
     host.settle();
-    assert!(get(&mut host, project_claude_file()).expect("file").contains(CHATROOM_OPEN));
+    assert!(get(&mut host, project_claude_file())
+        .expect("file")
+        .contains(CHATROOM_OPEN));
 }
 
 /// REQ: F-037
@@ -200,7 +216,10 @@ fn tab_037_a_disabled_plugin_shows_the_notice_and_keeps_the_values() {
     let mut host = project_host();
     host.disable_plugin();
     let text = render(&mut host, 80);
-    assert!(text.contains("Agent setup is disabled. Values are kept."), "{text}");
+    assert!(
+        text.contains("Agent setup is disabled. Values are kept."),
+        "{text}"
+    );
     assert!(text.contains("~/.claude/CLAUDE.md"), "{text}");
 }
 

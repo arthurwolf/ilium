@@ -52,8 +52,14 @@ fn reference_010_each_binding_is_a_label_leader_and_chord_label_row() {
     let label_end = line.find("Split vertically").unwrap() + "Split vertically".len();
     let chord_start = line.find("Prefix  %").unwrap();
     let between = &line[label_end..chord_start];
-    assert!(between.starts_with(' ') && between.ends_with(' '), "one blank cell each side: {between:?}");
-    assert!(between.trim().chars().all(|character| character == '…'), "{between:?}");
+    assert!(
+        between.starts_with(' ') && between.ends_with(' '),
+        "one blank cell each side: {between:?}"
+    );
+    assert!(
+        between.trim().chars().all(|character| character == '…'),
+        "{between:?}"
+    );
     assert!(between.trim().chars().count() >= 5, "{between:?}");
 }
 
@@ -121,7 +127,12 @@ fn reference_007_a_custom_prefix_letter_is_shown_in_upper_case() {
 fn reference_010_a_remap_appears_after_keymap_changed() {
     let mut host = ready_host();
     host.keymap().set_label("prefix+z", "Prefix  z");
-    host.keymap().set_bindings(vec![binding("Panes", "Split vertically", "prefix+z", false)]);
+    host.keymap().set_bindings(vec![binding(
+        "Panes",
+        "Split vertically",
+        "prefix+z",
+        false,
+    )]);
     host.deliver_one(Event::KeymapChanged);
     host.settle();
     let text = render_text(&mut host, 120, 14);
@@ -174,7 +185,10 @@ fn reference_010_a_binding_without_a_chord_is_left_out() {
     let mut host = ready_host();
     let mut unbound = binding("Tree", "Rename", "prefix+r", false);
     unbound.chords.clear();
-    host.keymap().set_bindings(vec![unbound, binding("Panes", "Split vertically", "prefix+%", true)]);
+    host.keymap().set_bindings(vec![
+        unbound,
+        binding("Panes", "Split vertically", "prefix+%", true),
+    ]);
     host.deliver_one(Event::KeymapChanged);
     host.settle();
     let text = render_text(&mut host, 80, 10);
@@ -232,7 +246,8 @@ fn reference_010_render_at_40_columns_keeps_label_and_chord_on_one_row() {
 fn reference_010_a_gap_shorter_than_five_cells_stays_blank_without_dots() {
     let mut host = ready_host();
     host.keymap().set_label("prefix+%", "Prefix  %");
-    host.keymap().set_bindings(vec![binding("Panes", "Split vertically", "prefix+%", true)]);
+    host.keymap()
+        .set_bindings(vec![binding("Panes", "Split vertically", "prefix+%", true)]);
     host.deliver_one(Event::KeymapChanged);
     host.settle();
     // 16 label cells, 9 chord cells and two borders leave a 3-cell gap at 30 columns.
@@ -245,12 +260,14 @@ fn reference_010_a_gap_shorter_than_five_cells_stays_blank_without_dots() {
 #[test]
 fn reference_010_the_command_palette_entry_show_keys_opens_this_panel() {
     let mut host = ready_host();
-    let submissions = host.deliver_one(Event::CommandInvoked(ilium_plugin_sdk::types::events::CommandInvokedEvent {
-        command: format!("{PLUGIN_ID}/show-keys"),
-        arguments_json: "{}".to_string(),
-        origin: ilium_plugin_sdk::types::events::CommandOrigin::Keybinding,
-        context: Default::default(),
-    }));
+    let submissions = host.deliver_one(Event::CommandInvoked(
+        ilium_plugin_sdk::types::events::CommandInvokedEvent {
+            command: format!("{PLUGIN_ID}/show-keys"),
+            arguments_json: "{}".to_string(),
+            origin: ilium_plugin_sdk::types::events::CommandOrigin::Keybinding,
+            context: Default::default(),
+        },
+    ));
     let opened: Vec<&ViewTarget> = submissions
         .iter()
         .filter_map(|submission| match &submission.intent {

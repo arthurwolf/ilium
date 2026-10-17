@@ -12,9 +12,9 @@ use ilium_plugin_api::{ProcessKind, Side, Tier};
 use ilium_plugin_host::calls::{deadline_ticks, ResolvedLimits};
 use ilium_plugin_host::cli::{run, CliEnv};
 use ilium_plugin_host::engine::{
-    clock_jump_detected, compile_cache_dir, config_fingerprint, embedded_artifacts, prune_stale_cache_dirs,
-    runtime_settings, select_allocator, store_settings, validate_component, AllocatorKind, EngineConfig,
-    LoadPath, PluginEngine, ValidationContext, WASMTIME_VERSION,
+    clock_jump_detected, compile_cache_dir, config_fingerprint, embedded_artifacts,
+    prune_stale_cache_dirs, runtime_settings, select_allocator, store_settings, validate_component,
+    AllocatorKind, EngineConfig, LoadPath, PluginEngine, ValidationContext, WASMTIME_VERSION,
 };
 use ilium_plugin_host::install::{Consent, ConsentDecision, ConsentRequest, Installer};
 use ilium_plugin_host::linker::{build_linker, linker_cache_key, World};
@@ -27,7 +27,11 @@ use ilium_plugin_host::testing::{wat_component, HostHarness};
 use crate::support::*;
 
 fn engine_config(cache_dir: Option<PathBuf>) -> EngineConfig {
-    EngineConfig { epoch_tick_ms: 10, cache_dir, process: ProcessKind::Server }
+    EngineConfig {
+        epoch_tick_ms: 10,
+        cache_dir,
+        process: ProcessKind::Server,
+    }
 }
 
 fn new_engine() -> PluginEngine {
@@ -110,7 +114,9 @@ fn tmp() -> tempfile::TempDir {
 fn wasmtime_requirement_line() -> String {
     let text = toml_of(&workspace_root().join("Cargo.toml"));
     text.lines()
-        .find(|line| line.trim_start().starts_with("wasmtime ") || line.trim_start().starts_with("wasmtime="))
+        .find(|line| {
+            line.trim_start().starts_with("wasmtime ") || line.trim_start().starts_with("wasmtime=")
+        })
         .unwrap_or("")
         .to_owned()
 }
@@ -122,7 +128,11 @@ fn wasmtime_lock_versions() -> Vec<String> {
     while let Some(line) = lines.next() {
         if line == "name = \"wasmtime\"" {
             if let Some(next) = lines.peek() {
-                versions.push(next.trim_start_matches("version = ").trim_matches('"').to_owned());
+                versions.push(
+                    next.trim_start_matches("version = ")
+                        .trim_matches('"')
+                        .to_owned(),
+                );
             }
         }
     }
@@ -138,7 +148,11 @@ fn host_dependency_features() -> Option<(bool, Vec<String>)> {
     let mut features: Vec<String> = table
         .get("features")
         .and_then(|v| v.as_array())
-        .map(|a| a.iter().filter_map(|f| f.as_str().map(str::to_owned)).collect())
+        .map(|a| {
+            a.iter()
+                .filter_map(|f| f.as_str().map(str::to_owned))
+                .collect()
+        })
         .unwrap_or_default();
     features.sort();
     Some((defaults_off, features))
@@ -150,7 +164,10 @@ fn host_dependency_features() -> Option<(bool, Vec<String>)> {
 #[test]
 fn hst_050_workspace_manifest_pins_wasmtime_with_equals_requirement() {
     let line = wasmtime_requirement_line();
-    assert!(line.contains("\"=49.0.2\""), "workspace wasmtime line was {line:?}");
+    assert!(
+        line.contains("\"=49.0.2\""),
+        "workspace wasmtime line was {line:?}"
+    );
 }
 
 /// REQ: HST-050
@@ -179,8 +196,20 @@ fn hst_050_doctor_output_shows_the_wasmtime_version() {
         false,
         Arc::new(NoFetch),
     );
-    let output = run(&["plugin".to_owned(), "doctor".to_owned(), "--json".to_owned()], &env);
-    let text = output.stdout_jsonl.iter().map(|v| v.to_string()).collect::<Vec<_>>().join("\n");
+    let output = run(
+        &[
+            "plugin".to_owned(),
+            "doctor".to_owned(),
+            "--json".to_owned(),
+        ],
+        &env,
+    );
+    let text = output
+        .stdout_jsonl
+        .iter()
+        .map(|v| v.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
     assert!(text.contains("49.0.2"), "doctor records were {text}");
 }
 
@@ -197,7 +226,10 @@ fn doc_hst_051_manual_states_14_and_7_day_security_windows() {
 fn doc_hst_051_release_checklist_records_advisory_to_release_time() {
     let checklist = workspace_root().join("tools/release_checklist.md");
     let text = std::fs::read_to_string(&checklist).unwrap_or_default();
-    assert!(text.contains("advisory-to-release"), "release checklist must record advisory-to-release time");
+    assert!(
+        text.contains("advisory-to-release"),
+        "release checklist must record advisory-to-release time"
+    );
 }
 
 /// REQ: HST-052
@@ -206,7 +238,10 @@ fn doc_hst_052_bump_gate_names_the_four_required_checks() {
     let script = workspace_root().join("tools/wasmtime_bump_gate.py");
     let text = std::fs::read_to_string(&script).unwrap_or_default();
     for needle in ["conformance", "bench", "cwasm", "safety"] {
-        assert!(text.contains(needle), "bump gate must run the {needle} check");
+        assert!(
+            text.contains(needle),
+            "bump gate must run the {needle} check"
+        );
     }
 }
 
@@ -222,9 +257,17 @@ fn doc_hst_052_manual_lists_the_safety_tests_under_errors_and_edge_cases() {
 #[test]
 fn hst_053_every_embedded_cwasm_header_matches_the_host_fingerprint() {
     let artifacts = embedded_artifacts();
-    assert!(!artifacts.is_empty(), "the release build embeds the bundled plugins");
+    assert!(
+        !artifacts.is_empty(),
+        "the release build embeds the bundled plugins"
+    );
     for artifact in artifacts {
-        assert_eq!(artifact.fingerprint, config_fingerprint(), "stale cwasm for {}", artifact.name);
+        assert_eq!(
+            artifact.fingerprint,
+            config_fingerprint(),
+            "stale cwasm for {}",
+            artifact.name
+        );
     }
 }
 
@@ -232,11 +275,15 @@ fn hst_053_every_embedded_cwasm_header_matches_the_host_fingerprint() {
 #[test]
 fn hst_053_a_stale_fingerprint_is_detected_by_the_build_check() {
     let mut artifacts = embedded_artifacts();
-    let first = artifacts.first_mut().expect("at least one embedded artifact");
+    let first = artifacts
+        .first_mut()
+        .expect("at least one embedded artifact");
     first.fingerprint = "0".repeat(64);
     assert_ne!(first.fingerprint, config_fingerprint());
     let engine = new_engine();
-    let path = engine.load_embedded(first).expect("a stale artifact falls back, never ships a crash");
+    let path = engine
+        .load_embedded(first)
+        .expect("a stale artifact falls back, never ships a crash");
     assert_eq!(path, LoadPath::Compiled);
 }
 
@@ -248,7 +295,13 @@ fn hst_054_wasmtime_is_built_with_exactly_the_documented_features() {
     let (defaults_off, features) = host_dependency_features().expect("host depends on wasmtime");
     assert!(defaults_off, "wasmtime must use default-features = false");
     let mut expected = vec![
-        "async", "cache", "component-model", "cranelift", "parallel-compilation", "runtime", "std",
+        "async",
+        "cache",
+        "component-model",
+        "cranelift",
+        "parallel-compilation",
+        "runtime",
+        "std",
     ]
     .into_iter()
     .map(str::to_owned)
@@ -268,8 +321,18 @@ fn hst_054_component_model_async_feature_is_not_enabled() {
 #[test]
 fn hst_054_unused_wasmtime_features_stay_off() {
     let (_, features) = host_dependency_features().expect("host depends on wasmtime");
-    for off in ["winch", "gc", "threads", "profiling", "coredump", "debug-builtins"] {
-        assert!(!features.iter().any(|f| f == off), "feature {off} must be off");
+    for off in [
+        "winch",
+        "gc",
+        "threads",
+        "profiling",
+        "coredump",
+        "debug-builtins",
+    ] {
+        assert!(
+            !features.iter().any(|f| f == off),
+            "feature {off} must be off"
+        );
     }
 }
 
@@ -310,7 +373,9 @@ fn hst_057_fingerprint_is_stable_across_calls() {
 fn hst_057_fingerprint_is_a_sha256_hex_digest() {
     let fingerprint = config_fingerprint();
     assert_eq!(fingerprint.len(), 64);
-    assert!(fingerprint.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
+    assert!(fingerprint
+        .chars()
+        .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
 }
 
 /// REQ: HST-057
@@ -370,7 +435,12 @@ fn hst_060_signals_based_traps_are_on() {
 /// REQ: HST-060
 #[test]
 fn hst_060_no_ilium_source_installs_a_segv_bus_or_ill_handler() {
-    for crate_dir in ["ilium-server/src", "ilium-client/src", "ilium/src", "ilium-plugin-host/src"] {
+    for crate_dir in [
+        "ilium-server/src",
+        "ilium-client/src",
+        "ilium/src",
+        "ilium-plugin-host/src",
+    ] {
         let mut stack = vec![workspace_root().join(crate_dir)];
         while let Some(dir) = stack.pop() {
             for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
@@ -380,7 +450,11 @@ fn hst_060_no_ilium_source_installs_a_segv_bus_or_ill_handler() {
                 } else if path.extension().is_some_and(|e| e == "rs") {
                     let text = std::fs::read_to_string(&path).unwrap_or_default();
                     for signal in ["SIGSEGV", "SIGBUS", "SIGILL"] {
-                        assert!(!text.contains(signal), "{} mentions {signal}", path.display());
+                        assert!(
+                            !text.contains(signal),
+                            "{} mentions {signal}",
+                            path.display()
+                        );
                     }
                 }
             }
@@ -417,7 +491,11 @@ fn hst_061_cache_dir_is_owner_only_once_the_engine_uses_it() {
     let dir = compile_cache_dir(base.path());
     let engine = PluginEngine::new(engine_config(Some(dir.clone()))).expect("engine");
     engine.compile(&empty_component()).expect("compile");
-    let mode = std::fs::metadata(&dir).expect("cache dir exists").permissions().mode() & 0o777;
+    let mode = std::fs::metadata(&dir)
+        .expect("cache dir exists")
+        .permissions()
+        .mode()
+        & 0o777;
     assert_eq!(mode, 0o700);
 }
 
@@ -441,7 +519,9 @@ fn hst_061_startup_deletes_cache_dirs_of_other_keys() {
 #[test]
 fn hst_061_prune_with_no_cache_root_removes_nothing() {
     let base = tmp();
-    assert!(prune_stale_cache_dirs(base.path()).expect("prune succeeds").is_empty());
+    assert!(prune_stale_cache_dirs(base.path())
+        .expect("prune succeeds")
+        .is_empty());
 }
 
 /// REQ: HST-062
@@ -453,9 +533,17 @@ fn hst_062_read_only_cache_dir_still_loads_and_logs_once() {
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o500)).unwrap();
     let engine = PluginEngine::new(engine_config(Some(dir.clone()))).expect("engine");
-    engine.compile(&empty_component()).expect("first load compiles in memory");
-    engine.compile(&empty_component()).expect("second load compiles in memory");
-    let lines = engine.log_lines().into_iter().filter(|l| l.contains("host.cache-unavailable")).count();
+    engine
+        .compile(&empty_component())
+        .expect("first load compiles in memory");
+    engine
+        .compile(&empty_component())
+        .expect("second load compiles in memory");
+    let lines = engine
+        .log_lines()
+        .into_iter()
+        .filter(|l| l.contains("host.cache-unavailable"))
+        .count();
     std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
     assert_eq!(lines, 1);
 }
@@ -467,17 +555,30 @@ fn hst_062_unusable_cache_path_is_a_file_and_load_still_works() {
     let file = base.path().join("not-a-dir");
     std::fs::write(&file, b"x").unwrap();
     let engine = PluginEngine::new(engine_config(Some(file))).expect("engine");
-    engine.compile(&empty_component()).expect("compiles in memory");
-    assert_eq!(engine.log_lines().iter().filter(|l| l.contains("host.cache-unavailable")).count(), 1);
+    engine
+        .compile(&empty_component())
+        .expect("compiles in memory");
+    assert_eq!(
+        engine
+            .log_lines()
+            .iter()
+            .filter(|l| l.contains("host.cache-unavailable"))
+            .count(),
+        1
+    );
 }
 
 /// REQ: HST-062
 #[test]
 fn hst_062_healthy_cache_logs_nothing() {
     let base = tmp();
-    let engine = PluginEngine::new(engine_config(Some(compile_cache_dir(base.path())))).expect("engine");
+    let engine =
+        PluginEngine::new(engine_config(Some(compile_cache_dir(base.path())))).expect("engine");
     engine.compile(&empty_component()).expect("compile");
-    assert!(engine.log_lines().iter().all(|l| !l.contains("host.cache-unavailable")));
+    assert!(engine
+        .log_lines()
+        .iter()
+        .all(|l| !l.contains("host.cache-unavailable")));
 }
 
 // ---------------------------------------------------------------- allocator
@@ -492,32 +593,50 @@ fn hst_063_default_allocator_is_on_demand() {
 #[test]
 fn hst_064_pooling_chosen_when_on_demand_misses_and_pooling_meets_both_within_rss() {
     // (host_start_ms, instantiate_median_ms), then pooling pair, then added RSS in MiB.
-    assert_eq!(select_allocator((200.0, 4.0), (100.0, 3.0), 16.0), AllocatorKind::Pooling);
+    assert_eq!(
+        select_allocator((200.0, 4.0), (100.0, 3.0), 16.0),
+        AllocatorKind::Pooling
+    );
 }
 
 /// REQ: HST-064
 #[test]
 fn hst_064_on_demand_kept_when_it_meets_both_budgets() {
-    assert_eq!(select_allocator((150.0, 5.0), (80.0, 2.0), 1.0), AllocatorKind::OnDemand);
+    assert_eq!(
+        select_allocator((150.0, 5.0), (80.0, 2.0), 1.0),
+        AllocatorKind::OnDemand
+    );
 }
 
 /// REQ: HST-064
 #[test]
 fn hst_064_on_demand_misses_only_instantiate_time_selects_pooling() {
-    assert_eq!(select_allocator((100.0, 5.1), (100.0, 4.0), 8.0), AllocatorKind::Pooling);
+    assert_eq!(
+        select_allocator((100.0, 5.1), (100.0, 4.0), 8.0),
+        AllocatorKind::Pooling
+    );
 }
 
 /// REQ: HST-064
 #[test]
 fn hst_064_pooling_adding_more_than_16_mib_keeps_on_demand() {
-    assert_eq!(select_allocator((200.0, 9.0), (100.0, 3.0), 16.5), AllocatorKind::OnDemand);
+    assert_eq!(
+        select_allocator((200.0, 9.0), (100.0, 3.0), 16.5),
+        AllocatorKind::OnDemand
+    );
 }
 
 /// REQ: HST-064
 #[test]
 fn hst_064_pooling_that_misses_one_budget_is_rejected() {
-    assert_eq!(select_allocator((200.0, 9.0), (160.0, 3.0), 4.0), AllocatorKind::OnDemand);
-    assert_eq!(select_allocator((200.0, 9.0), (100.0, 5.5), 4.0), AllocatorKind::OnDemand);
+    assert_eq!(
+        select_allocator((200.0, 9.0), (160.0, 3.0), 4.0),
+        AllocatorKind::OnDemand
+    );
+    assert_eq!(
+        select_allocator((200.0, 9.0), (100.0, 5.5), 4.0),
+        AllocatorKind::OnDemand
+    );
 }
 
 /// REQ: HST-064
@@ -549,8 +668,14 @@ fn hst_065_deserialize_call_sites_exist_only_in_the_embedded_loader() {
             }
         }
     }
-    assert!(!sites.is_empty(), "the embedded loader must call Component::deserialize");
-    assert!(sites.iter().all(|name| name.contains("embedded")), "call sites: {sites:?}");
+    assert!(
+        !sites.is_empty(),
+        "the embedded loader must call Component::deserialize"
+    );
+    assert!(
+        sites.iter().all(|name| name.contains("embedded")),
+        "call sites: {sites:?}"
+    );
 }
 
 /// REQ: HST-065
@@ -568,15 +693,26 @@ fn hst_066_every_embedded_cwasm_deserializes_on_the_host_engine() {
     let artifacts = embedded_artifacts();
     assert!(!artifacts.is_empty());
     for artifact in &artifacts {
-        let path = engine.load_embedded(artifact).unwrap_or_else(|e| panic!("{}: {e}", artifact.name));
-        assert_eq!(path, LoadPath::Deserialized, "{} took the fallback", artifact.name);
+        let path = engine
+            .load_embedded(artifact)
+            .unwrap_or_else(|e| panic!("{}: {e}", artifact.name));
+        assert_eq!(
+            path,
+            LoadPath::Deserialized,
+            "{} took the fallback",
+            artifact.name
+        );
     }
 }
 
 /// REQ: HST-066
 #[test]
 fn hst_066_embedded_set_has_exactly_the_30_core_plugins() {
-    assert_eq!(embedded_artifacts().len(), 30, "30 core plugins are bundled");
+    assert_eq!(
+        embedded_artifacts().len(),
+        30,
+        "30 core plugins are bundled"
+    );
 }
 
 /// REQ: HST-067
@@ -593,7 +729,8 @@ fn hst_067_t2_component_loads_with_component_new_and_no_deserialize() {
 #[test]
 fn hst_067_repeat_load_through_cache_still_uses_component_new_api() {
     let base = tmp();
-    let engine = PluginEngine::new(engine_config(Some(compile_cache_dir(base.path())))).expect("engine");
+    let engine =
+        PluginEngine::new(engine_config(Some(compile_cache_dir(base.path())))).expect("engine");
     engine.compile(&empty_component()).expect("first");
     engine.compile(&empty_component()).expect("second");
     assert_eq!(engine.stats().component_new_calls, 2);
@@ -604,14 +741,18 @@ fn hst_067_repeat_load_through_cache_still_uses_component_new_api() {
 #[test]
 fn hst_068_package_with_a_cwasm_file_is_refused_at_install() {
     let dir = tmp();
-    let installer = Installer::new(PackageStore { root: dir.path().to_path_buf() });
+    let installer = Installer::new(PackageStore {
+        root: dir.path().to_path_buf(),
+    });
     let bytes = write_package(&[
         ("manifest.json".to_owned(), b"{}".to_vec()),
         ("server.wasm".to_owned(), empty_component()),
         ("server.cwasm".to_owned(), vec![1, 2, 3]),
     ])
     .expect("package writes");
-    let error = installer.install(&bytes, &ApproveAll).expect_err("install is refused");
+    let error = installer
+        .install(&bytes, &ApproveAll)
+        .expect_err("install is refused");
     assert_eq!(error.code.as_str(), "package.precompiled-forbidden");
 }
 
@@ -619,22 +760,33 @@ fn hst_068_package_with_a_cwasm_file_is_refused_at_install() {
 #[test]
 fn hst_068_check_reports_the_cwasm_refusal_too() {
     let dir = tmp();
-    let installer = Installer::new(PackageStore { root: dir.path().to_path_buf() });
+    let installer = Installer::new(PackageStore {
+        root: dir.path().to_path_buf(),
+    });
     let bytes = write_package(&[
         ("manifest.json".to_owned(), b"{}".to_vec()),
         ("nested/client.cwasm".to_owned(), vec![9]),
     ])
     .expect("package writes");
     let report = installer.check(&bytes, ilium_plugin_api::manifest::CheckMode::Install);
-    assert!(report.diagnostics.iter().any(|d| d.code.as_str() == "package.precompiled-forbidden"));
+    assert!(report
+        .diagnostics
+        .iter()
+        .any(|d| d.code.as_str() == "package.precompiled-forbidden"));
 }
 
 /// REQ: HST-068
 #[test]
 fn hst_068_a_refused_package_installs_nothing() {
     let dir = tmp();
-    let installer = Installer::new(PackageStore { root: dir.path().to_path_buf() });
-    let bytes = write_package(&[("manifest.json".to_owned(), b"{}".to_vec()), ("a.cwasm".to_owned(), vec![0])]).unwrap();
+    let installer = Installer::new(PackageStore {
+        root: dir.path().to_path_buf(),
+    });
+    let bytes = write_package(&[
+        ("manifest.json".to_owned(), b"{}".to_vec()),
+        ("a.cwasm".to_owned(), vec![0]),
+    ])
+    .unwrap();
     let _ = installer.install(&bytes, &ApproveAll);
     assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
 }
@@ -677,8 +829,16 @@ fn hst_069_an_unchanged_grant_set_keeps_the_generation() {
 /// REQ: HST-070
 #[test]
 fn hst_070_equal_grant_sets_on_equal_sides_share_a_linker_key() {
-    let a = linker_cache_key(Side::Server, Tier::T2, &[grant("tree.read"), grant("tree.write")]);
-    let b = linker_cache_key(Side::Server, Tier::T2, &[grant("tree.write"), grant("tree.read")]);
+    let a = linker_cache_key(
+        Side::Server,
+        Tier::T2,
+        &[grant("tree.read"), grant("tree.write")],
+    );
+    let b = linker_cache_key(
+        Side::Server,
+        Tier::T2,
+        &[grant("tree.write"), grant("tree.read")],
+    );
     assert_eq!(a, b);
 }
 
@@ -686,7 +846,11 @@ fn hst_070_equal_grant_sets_on_equal_sides_share_a_linker_key() {
 #[test]
 fn hst_070_different_grant_sets_do_not_share() {
     let a = linker_cache_key(Side::Server, Tier::T2, &[grant("tree.read")]);
-    let b = linker_cache_key(Side::Server, Tier::T2, &[grant("tree.read"), grant("tree.write")]);
+    let b = linker_cache_key(
+        Side::Server,
+        Tier::T2,
+        &[grant("tree.read"), grant("tree.write")],
+    );
     assert_ne!(a, b);
 }
 
@@ -694,8 +858,14 @@ fn hst_070_different_grant_sets_do_not_share() {
 #[test]
 fn hst_070_side_and_tier_are_part_of_the_key() {
     let grants = [grant("tree.read")];
-    assert_ne!(linker_cache_key(Side::Server, Tier::T2, &grants), linker_cache_key(Side::Client, Tier::T2, &grants));
-    assert_ne!(linker_cache_key(Side::Server, Tier::T2, &grants), linker_cache_key(Side::Server, Tier::T3, &grants));
+    assert_ne!(
+        linker_cache_key(Side::Server, Tier::T2, &grants),
+        linker_cache_key(Side::Client, Tier::T2, &grants)
+    );
+    assert_ne!(
+        linker_cache_key(Side::Server, Tier::T2, &grants),
+        linker_cache_key(Side::Server, Tier::T3, &grants)
+    );
 }
 
 /// REQ: HST-070
@@ -703,8 +873,16 @@ fn hst_070_side_and_tier_are_part_of_the_key() {
 fn hst_070_key_is_a_sha256_hex_digest() {
     let key = linker_cache_key(Side::Server, Tier::T1, &[]);
     assert_eq!(key.len(), 64);
-    assert!(key.chars().all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)), "lowercase hex: {key}");
-    assert_eq!(key, linker_cache_key(Side::Server, Tier::T1, &[]), "deterministic");
+    assert!(
+        key.chars()
+            .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)),
+        "lowercase hex: {key}"
+    );
+    assert_eq!(
+        key,
+        linker_cache_key(Side::Server, Tier::T1, &[]),
+        "deterministic"
+    );
     // Exact SHA-256 value: see API_GAPS (needs the sha2 dev-dependency).
 }
 
@@ -718,7 +896,9 @@ fn hst_070_build_linker_serves_the_requested_world() {
 /// REQ: HST-071
 #[test]
 fn hst_071_declined_capability_returns_not_permitted_without_kernel_code() {
-    let kernel = Arc::new(ilium_plugin_host::testing::FakeKernel::new(ProcessKind::Server));
+    let kernel = Arc::new(ilium_plugin_host::testing::FakeKernel::new(
+        ProcessKind::Server,
+    ));
     let mut host = HostHarness::new()
         .kernel(kernel.clone())
         .grants(&[])
@@ -734,7 +914,11 @@ fn hst_071_declined_capability_returns_not_permitted_without_kernel_code() {
 /// REQ: HST-071
 #[test]
 fn hst_071_revoked_capability_returns_not_permitted_not_a_trap() {
-    let mut host = HostHarness::new().grants(&["tree.write"]).with_native_guest(Box::new(QuietGuest)).build().expect("host");
+    let mut host = HostHarness::new()
+        .grants(&["tree.write"])
+        .with_native_guest(Box::new(QuietGuest))
+        .build()
+        .expect("host");
     host.revoke("tree.write");
     let reply = host.call_import_json("ilium:host/tree", "set-name", "{\"node\":1,\"name\":\"x\"}");
     assert_eq!(reply.error_code(), Some("not-permitted"));
@@ -749,7 +933,10 @@ fn hst_072_unrequested_interface_import_is_refused_with_import_not_requested() {
         "ilium:api-version",
         &api_section(),
     );
-    assert_eq!(refusal_code(&bytes, &bare_context()), "manifest.import-not-requested");
+    assert_eq!(
+        refusal_code(&bytes, &bare_context()),
+        "manifest.import-not-requested"
+    );
 }
 
 /// REQ: HST-072
@@ -784,23 +971,37 @@ fn hst_072_refused_component_is_never_instantiated() {
         "ilium:api-version",
         &api_section(),
     );
-    assert_eq!(refusal_code(&bytes, &bare_context()), "component.wasi-forbidden");
+    assert_eq!(
+        refusal_code(&bytes, &bare_context()),
+        "component.wasi-forbidden"
+    );
     assert_eq!(engine.stats().instantiations, 0);
 }
 
 /// REQ: HST-073
 #[test]
 fn hst_073_unrequested_function_in_a_linked_interface_traps() {
-    let mut host = HostHarness::new().grants(&["fs.read:project"]).with_native_guest(Box::new(QuietGuest)).build().expect("host");
+    let mut host = HostHarness::new()
+        .grants(&["fs.read:project"])
+        .with_native_guest(Box::new(QuietGuest))
+        .build()
+        .expect("host");
     let reply = host.call_import_json("ilium:host/fs", "write", "{}");
-    assert_eq!(reply.trap_code(), Some("host.capability-not-requested".to_owned()));
+    assert_eq!(
+        reply.trap_code(),
+        Some("host.capability-not-requested".to_owned())
+    );
     let _ = &mut host;
 }
 
 /// REQ: HST-073
 #[test]
 fn hst_073_the_trap_counts_as_a_failure() {
-    let mut host = HostHarness::new().grants(&["fs.read:project"]).with_native_guest(Box::new(QuietGuest)).build().expect("host");
+    let mut host = HostHarness::new()
+        .grants(&["fs.read:project"])
+        .with_native_guest(Box::new(QuietGuest))
+        .build()
+        .expect("host");
     let _ = host.call_import_json("ilium:host/fs", "write", "{}");
     assert_eq!(host.failure_count(), 1);
     assert_eq!(host.state(), InstanceState::RestartScheduled);
@@ -809,8 +1010,16 @@ fn hst_073_the_trap_counts_as_a_failure() {
 /// REQ: HST-073
 #[test]
 fn hst_073_requested_function_does_not_trap() {
-    let host = HostHarness::new().grants(&["fs.read:project"]).with_native_guest(Box::new(QuietGuest)).build().expect("host");
-    let reply = host.call_import_json("ilium:host/fs", "read", "{\"path\":\"a.txt\",\"offset\":0,\"max-bytes\":1}");
+    let host = HostHarness::new()
+        .grants(&["fs.read:project"])
+        .with_native_guest(Box::new(QuietGuest))
+        .build()
+        .expect("host");
+    let reply = host.call_import_json(
+        "ilium:host/fs",
+        "read",
+        "{\"path\":\"a.txt\",\"offset\":0,\"max-bytes\":1}",
+    );
     assert_eq!(reply.trap_code(), None);
 }
 
@@ -840,7 +1049,10 @@ fn hst_074_store_traps_on_grow_failure() {
 fn hst_074_store_has_fixed_instance_table_and_memory_counts() {
     let resolved = ilium_plugin_api::limits::clamp(&Limits::default(), Tier::T3).expect("clamp");
     let settings = store_settings(&ResolvedLimits(resolved));
-    assert_eq!((settings.instances, settings.tables, settings.memories), (16, 8, 4));
+    assert_eq!(
+        (settings.instances, settings.tables, settings.memories),
+        (16, 8, 4)
+    );
 }
 
 /// REQ: HST-074
@@ -865,17 +1077,33 @@ fn hst_074_job_instance_uses_job_memory_mib() {
 /// REQ: HST-075
 #[test]
 fn hst_075_import_after_revoke_returns_revoked() {
-    let mut host = HostHarness::new().grants(&["fs.read:project"]).with_native_guest(Box::new(QuietGuest)).build().expect("host");
+    let mut host = HostHarness::new()
+        .grants(&["fs.read:project"])
+        .with_native_guest(Box::new(QuietGuest))
+        .build()
+        .expect("host");
     host.revoke_without_reactivation("fs.read:project");
-    let reply = host.call_import_json("ilium:host/fs", "read", "{\"path\":\"a.txt\",\"offset\":0,\"max-bytes\":1}");
+    let reply = host.call_import_json(
+        "ilium:host/fs",
+        "read",
+        "{\"path\":\"a.txt\",\"offset\":0,\"max-bytes\":1}",
+    );
     assert_eq!(reply.error_code(), Some("revoked"));
 }
 
 /// REQ: HST-075
 #[test]
 fn hst_075_import_with_current_epoch_does_not_return_revoked() {
-    let host = HostHarness::new().grants(&["fs.read:project"]).with_native_guest(Box::new(QuietGuest)).build().expect("host");
-    let reply = host.call_import_json("ilium:host/fs", "read", "{\"path\":\"a.txt\",\"offset\":0,\"max-bytes\":1}");
+    let host = HostHarness::new()
+        .grants(&["fs.read:project"])
+        .with_native_guest(Box::new(QuietGuest))
+        .build()
+        .expect("host");
+    let reply = host.call_import_json(
+        "ilium:host/fs",
+        "read",
+        "{\"path\":\"a.txt\",\"offset\":0,\"max-bytes\":1}",
+    );
     assert_ne!(reply.error_code(), Some("revoked"));
 }
 
@@ -906,7 +1134,10 @@ fn hst_075_instance_number_rises_with_each_new_instance() {
 fn hst_076_stdout_lines_reach_the_plugin_log_at_info() {
     let mut host = host_with_fixture("wasi-probe", Tier::T3);
     fail_once(&mut host);
-    assert!(host.logs().iter().any(|l| l.level == "info" && l.message.contains("stdout-line")));
+    assert!(host
+        .logs()
+        .iter()
+        .any(|l| l.level == "info" && l.message.contains("stdout-line")));
 }
 
 /// REQ: HST-076
@@ -914,7 +1145,10 @@ fn hst_076_stdout_lines_reach_the_plugin_log_at_info() {
 fn hst_076_stderr_lines_reach_the_plugin_log_at_warn() {
     let mut host = host_with_fixture("wasi-probe", Tier::T3);
     fail_once(&mut host);
-    assert!(host.logs().iter().any(|l| l.level == "warn" && l.message.contains("stderr-line")));
+    assert!(host
+        .logs()
+        .iter()
+        .any(|l| l.level == "warn" && l.message.contains("stderr-line")));
 }
 
 /// REQ: HST-076
@@ -956,7 +1190,11 @@ fn hst_076_without_an_fs_grant_the_preopen_list_is_empty() {
 #[test]
 fn hst_076_an_fs_grant_adds_exactly_its_scope_as_a_preopen() {
     let bytes = fixture_wasm("wasi-probe");
-    let mut host = HostHarness::new().grants(&["fs.read:project"]).with_wasm_bytes(&bytes).build().expect("host");
+    let mut host = HostHarness::new()
+        .grants(&["fs.read:project"])
+        .with_wasm_bytes(&bytes)
+        .build()
+        .expect("host");
     fail_once(&mut host);
     assert!(log_text(&host).contains("preopens=1"));
 }
@@ -969,7 +1207,10 @@ fn hst_077_component_importing_wasi_sockets_is_refused() {
         "ilium:api-version",
         &api_section(),
     );
-    assert_eq!(refusal_code(&bytes, &bare_context()), "component.wasi-forbidden");
+    assert_eq!(
+        refusal_code(&bytes, &bare_context()),
+        "component.wasi-forbidden"
+    );
 }
 
 /// REQ: HST-077
@@ -980,7 +1221,10 @@ fn hst_077_component_importing_wasi_http_is_refused() {
         "ilium:api-version",
         &api_section(),
     );
-    assert_eq!(refusal_code(&bytes, &bare_context()), "component.wasi-forbidden");
+    assert_eq!(
+        refusal_code(&bytes, &bare_context()),
+        "component.wasi-forbidden"
+    );
 }
 
 /// REQ: HST-077
@@ -1058,7 +1302,9 @@ fn ticker_threads() -> usize {
         .expect("procfs lists threads")
         .flatten()
         .filter(|entry| {
-            std::fs::read_to_string(entry.path().join("comm")).map(|name| name.trim() == "ilium-plugin-ep").unwrap_or(false)
+            std::fs::read_to_string(entry.path().join("comm"))
+                .map(|name| name.trim() == "ilium-plugin-ep")
+                .unwrap_or(false)
         })
         .count()
 }
@@ -1151,11 +1397,18 @@ fn hst_081_spinning_guest_with_a_20_ms_deadline_traps_between_20_and_40_ms() {
     limits.0.insert("event_deadline_ms".to_owned(), 20);
     let bytes = fixture_wasm("spin-loop");
     for _ in 0..20 {
-        let mut host = HostHarness::new().limits(limits.clone()).with_wasm_bytes(&bytes).build().expect("host");
+        let mut host = HostHarness::new()
+            .limits(limits.clone())
+            .with_wasm_bytes(&bytes)
+            .build()
+            .expect("host");
         let started = std::time::Instant::now();
         fail_once(&mut host);
         let elapsed = started.elapsed();
-        assert!(elapsed >= Duration::from_millis(20) && elapsed <= Duration::from_millis(40), "trapped after {elapsed:?}");
+        assert!(
+            elapsed >= Duration::from_millis(20) && elapsed <= Duration::from_millis(40),
+            "trapped after {elapsed:?}"
+        );
     }
 }
 
@@ -1163,7 +1416,10 @@ fn hst_081_spinning_guest_with_a_20_ms_deadline_traps_between_20_and_40_ms() {
 #[test]
 fn hst_081_guest_that_returns_at_19_ms_never_traps() {
     let bytes = fixture_wasm("sleep-19ms");
-    let host = HostHarness::new().with_wasm_bytes(&bytes).build().expect("host");
+    let host = HostHarness::new()
+        .with_wasm_bytes(&bytes)
+        .build()
+        .expect("host");
     for _ in 0..20 {
         host.deliver(one_event());
         host.pump(8);
@@ -1210,7 +1466,11 @@ fn hst_083_deadline_trap_carries_host_deadline_class_and_limit() {
     let mut limits = Limits::default();
     limits.0.insert("event_deadline_ms".to_owned(), 20);
     let bytes = fixture_wasm("spin-loop");
-    let mut host = HostHarness::new().limits(limits).with_wasm_bytes(&bytes).build().expect("host");
+    let mut host = HostHarness::new()
+        .limits(limits)
+        .with_wasm_bytes(&bytes)
+        .build()
+        .expect("host");
     fail_once(&mut host);
     let text = log_text(&host);
     assert!(text.contains("host.deadline"));
@@ -1222,7 +1482,10 @@ fn hst_083_deadline_trap_carries_host_deadline_class_and_limit() {
 #[test]
 fn hst_083_deadline_trap_is_logged_once() {
     let bytes = fixture_wasm("spin-loop");
-    let mut host = HostHarness::new().with_wasm_bytes(&bytes).build().expect("host");
+    let mut host = HostHarness::new()
+        .with_wasm_bytes(&bytes)
+        .build()
+        .expect("host");
     fail_once(&mut host);
     assert_eq!(log_count(&host, "host.deadline"), 1);
 }
@@ -1234,13 +1497,17 @@ fn hst_083_deadline_trap_is_logged_once() {
 fn hst_084_invalid_bytes_report_step_1_first() {
     let mut bytes = vec![0, 0x61, 0x73, 0x6d];
     bytes.extend_from_slice(b"junk");
-    assert_eq!(refusal_code(&bytes, &ValidationContext::new(World::Server, (0, 1, 0))), "component.invalid");
+    assert_eq!(
+        refusal_code(&bytes, &ValidationContext::new(World::Server, (0, 1, 0))),
+        "component.invalid"
+    );
 }
 
 /// REQ: HST-084
 #[test]
 fn hst_084_oversized_component_with_bad_api_section_reports_too_large() {
-    let mut bytes = with_custom_section(empty_component(), "ilium:api-version", &[9, 9, 9, 9, 9, 9]);
+    let mut bytes =
+        with_custom_section(empty_component(), "ilium:api-version", &[9, 9, 9, 9, 9, 9]);
     for _ in 0..9 {
         bytes = with_custom_section(bytes, "pad", &vec![0u8; 3 * 1024 * 1024 + 900 * 1024]);
     }
@@ -1256,7 +1523,10 @@ fn hst_084_wrong_api_section_and_forbidden_import_reports_api_version_first() {
         "ilium:api-version",
         &[0, 0, 0, 2, 0, 0],
     );
-    assert_eq!(refusal_code(&bytes, &bare_context()), "component.api-version-mismatch");
+    assert_eq!(
+        refusal_code(&bytes, &bare_context()),
+        "component.api-version-mismatch"
+    );
 }
 
 /// REQ: HST-084
@@ -1268,14 +1538,18 @@ fn hst_084_oversized_section_and_forbidden_import_reports_section_size_first() {
         &api_section(),
     );
     let bytes = with_custom_section(bytes, "big", &vec![0u8; 4 * 1024 * 1024 + 1024]);
-    assert_eq!(refusal_code(&bytes, &bare_context()), "component.custom-section-too-large");
+    assert_eq!(
+        refusal_code(&bytes, &bare_context()),
+        "component.custom-section-too-large"
+    );
 }
 
 /// REQ: HST-084
 #[test]
 fn hst_084_world_mismatch_is_reported_before_the_api_version() {
     let bytes = with_custom_section(empty_component(), "ilium:api-version", &[0, 0, 0, 2, 0, 0]);
-    let context = ValidationContext::new(World::Client, (0, 1, 0)).expecting_world_text("ilium:server");
+    let context =
+        ValidationContext::new(World::Client, (0, 1, 0)).expecting_world_text("ilium:server");
     assert_eq!(refusal_code(&bytes, &context), "component.world-mismatch");
 }
 
@@ -1293,7 +1567,10 @@ fn hst_084_unknown_interface_import_is_component_import_unknown() {
         "ilium:api-version",
         &api_section(),
     );
-    assert_eq!(refusal_code(&bytes, &bare_context()), "component.import-unknown");
+    assert_eq!(
+        refusal_code(&bytes, &bare_context()),
+        "component.import-unknown"
+    );
 }
 
 /// REQ: HST-085
@@ -1307,7 +1584,11 @@ fn hst_085_exact_six_bytes_equal_to_manifest_api_are_accepted() {
 fn hst_085_each_of_the_three_fields_must_match() {
     for wrong in [[0, 1, 0, 1, 0, 0], [0, 0, 0, 2, 0, 0], [0, 0, 0, 1, 0, 1]] {
         let bytes = with_custom_section(empty_component(), "ilium:api-version", &wrong);
-        assert_eq!(refusal_code(&bytes, &bare_context()), "component.api-version-mismatch", "bytes {wrong:?}");
+        assert_eq!(
+            refusal_code(&bytes, &bare_context()),
+            "component.api-version-mismatch",
+            "bytes {wrong:?}"
+        );
     }
 }
 
@@ -1316,22 +1597,36 @@ fn hst_085_each_of_the_three_fields_must_match() {
 fn hst_085_five_and_seven_byte_sections_are_refused() {
     for payload in [vec![0, 0, 0, 1, 0], vec![0, 0, 0, 1, 0, 0, 0]] {
         let bytes = with_custom_section(empty_component(), "ilium:api-version", &payload);
-        assert_eq!(refusal_code(&bytes, &bare_context()), "component.api-version-mismatch", "len {}", payload.len());
+        assert_eq!(
+            refusal_code(&bytes, &bare_context()),
+            "component.api-version-mismatch",
+            "len {}",
+            payload.len()
+        );
     }
 }
 
 /// REQ: HST-085
 #[test]
 fn hst_085_missing_section_is_refused() {
-    assert_eq!(refusal_code(&empty_component(), &bare_context()), "component.api-version-mismatch");
+    assert_eq!(
+        refusal_code(&empty_component(), &bare_context()),
+        "component.api-version-mismatch"
+    );
 }
 
 /// REQ: HST-085
 #[test]
 fn hst_085_fields_are_big_endian() {
     let bytes = with_custom_section(empty_component(), "ilium:api-version", &[1, 0, 0, 0, 0, 0]);
-    assert_eq!(refusal_code(&bytes, &ValidationContext::bare((256, 0, 0))), "accepted");
-    assert_eq!(refusal_code(&bytes, &bare_context()), "component.api-version-mismatch");
+    assert_eq!(
+        refusal_code(&bytes, &ValidationContext::bare((256, 0, 0))),
+        "accepted"
+    );
+    assert_eq!(
+        refusal_code(&bytes, &bare_context()),
+        "component.api-version-mismatch"
+    );
 }
 
 /// REQ: HST-086
@@ -1348,7 +1643,10 @@ fn hst_086_component_over_32_mib_is_refused() {
 #[test]
 fn hst_086_single_custom_section_over_4_mib_is_refused() {
     let bytes = with_custom_section(valid_bare(), "big", &vec![0u8; 4 * 1024 * 1024 + 1024]);
-    assert_eq!(refusal_code(&bytes, &bare_context()), "component.custom-section-too-large");
+    assert_eq!(
+        refusal_code(&bytes, &bare_context()),
+        "component.custom-section-too-large"
+    );
 }
 
 /// REQ: HST-086
@@ -1365,7 +1663,10 @@ fn hst_086_custom_sections_together_over_8_mib_are_refused() {
     for _ in 0..3 {
         bytes = with_custom_section(bytes, "part", &vec![0u8; 3 * 1024 * 1024]);
     }
-    assert_eq!(refusal_code(&bytes, &bare_context()), "component.custom-section-too-large");
+    assert_eq!(
+        refusal_code(&bytes, &bare_context()),
+        "component.custom-section-too-large"
+    );
 }
 
 /// REQ: HST-086
@@ -1392,9 +1693,17 @@ fn hst_086_small_component_is_accepted() {
 fn hst_087_precompile_tool_and_host_use_the_same_runtime_config_function() {
     let precompile = workspace_root().join("ilium-plugin-precompile/src/main.rs");
     let text = std::fs::read_to_string(&precompile).unwrap_or_default();
-    assert!(text.contains("runtime_config"), "precompile must call runtime_config()");
-    let host_engine = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/engine.rs")).unwrap_or_default();
-    assert!(host_engine.contains("runtime_config"), "host engine must call runtime_config()");
+    assert!(
+        text.contains("runtime_config"),
+        "precompile must call runtime_config()"
+    );
+    let host_engine =
+        std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/engine.rs"))
+            .unwrap_or_default();
+    assert!(
+        host_engine.contains("runtime_config"),
+        "host engine must call runtime_config()"
+    );
 }
 
 /// REQ: HST-087
@@ -1420,7 +1729,10 @@ fn hst_087_only_one_function_builds_a_wasmtime_config() {
 #[test]
 fn hst_088_artifact_with_another_fingerprint_falls_back_to_component_new() {
     let engine = new_engine();
-    let mut artifact = embedded_artifacts().into_iter().next().expect("one embedded artifact");
+    let mut artifact = embedded_artifacts()
+        .into_iter()
+        .next()
+        .expect("one embedded artifact");
     artifact.fingerprint = "f".repeat(64);
     let path = engine.load_embedded(&artifact).expect("fallback loads");
     assert_eq!(path, LoadPath::Compiled);
@@ -1432,19 +1744,34 @@ fn hst_088_artifact_with_another_fingerprint_falls_back_to_component_new() {
 #[test]
 fn hst_088_fallback_logs_host_cwasm_incompatible() {
     let engine = new_engine();
-    let mut artifact = embedded_artifacts().into_iter().next().expect("one embedded artifact");
+    let mut artifact = embedded_artifacts()
+        .into_iter()
+        .next()
+        .expect("one embedded artifact");
     artifact.fingerprint = "e".repeat(64);
     engine.load_embedded(&artifact).expect("fallback loads");
-    assert!(engine.log_lines().iter().any(|l| l.contains("host.cwasm-incompatible")));
+    assert!(engine
+        .log_lines()
+        .iter()
+        .any(|l| l.contains("host.cwasm-incompatible")));
 }
 
 /// REQ: HST-088
 #[test]
 fn hst_088_matching_fingerprint_deserializes_without_a_warning() {
     let engine = new_engine();
-    let artifact = embedded_artifacts().into_iter().next().expect("one embedded artifact");
-    assert_eq!(engine.load_embedded(&artifact).expect("loads"), LoadPath::Deserialized);
-    assert!(engine.log_lines().iter().all(|l| !l.contains("host.cwasm-incompatible")));
+    let artifact = embedded_artifacts()
+        .into_iter()
+        .next()
+        .expect("one embedded artifact");
+    assert_eq!(
+        engine.load_embedded(&artifact).expect("loads"),
+        LoadPath::Deserialized
+    );
+    assert!(engine
+        .log_lines()
+        .iter()
+        .all(|l| !l.contains("host.cwasm-incompatible")));
 }
 
 /// REQ: HST-088
@@ -1452,7 +1779,12 @@ fn hst_088_matching_fingerprint_deserializes_without_a_warning() {
 fn hst_088_no_bundled_plugin_takes_the_fallback_path() {
     let engine = new_engine();
     for artifact in embedded_artifacts() {
-        assert_eq!(engine.load_embedded(&artifact).expect("loads"), LoadPath::Deserialized, "{}", artifact.name);
+        assert_eq!(
+            engine.load_embedded(&artifact).expect("loads"),
+            LoadPath::Deserialized,
+            "{}",
+            artifact.name
+        );
     }
 }
 
@@ -1460,10 +1792,15 @@ fn hst_088_no_bundled_plugin_takes_the_fallback_path() {
 #[test]
 fn hst_088_artifact_without_embedded_wasm_and_other_fingerprint_is_refused() {
     let engine = new_engine();
-    let mut artifact = embedded_artifacts().into_iter().next().expect("one embedded artifact");
+    let mut artifact = embedded_artifacts()
+        .into_iter()
+        .next()
+        .expect("one embedded artifact");
     artifact.fingerprint = "d".repeat(64);
     artifact.wasm.clear();
-    let error = engine.load_embedded(&artifact).expect_err("no fallback available");
+    let error = engine
+        .load_embedded(&artifact)
+        .expect_err("no fallback available");
     assert_eq!(error.code().as_str(), "host.cwasm-incompatible");
 }
 

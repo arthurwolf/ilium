@@ -19,7 +19,11 @@ fn dev_140_a_damaged_package_fails_with_a_pipeline_code_before_any_plugin_code_r
     std::fs::write(&package, &bytes[..bytes.len() / 3]).expect("write");
     let output = run(&env, &["install", s(&package), "--allow-unsigned", "--yes"]);
     assert!(!recs(&output, "error").is_empty());
-    assert!(code(&output).expect("code").starts_with("package."), "{:?}", code(&output));
+    assert!(
+        code(&output).expect("code").starts_with("package."),
+        "{:?}",
+        code(&output)
+    );
     assert_eq!(session.started_plugin_count(), 0);
     assert_ne!(output.exit_code, 0);
 }
@@ -73,7 +77,10 @@ fn dev_141_yes_grants_requested_non_high_risk_grants() {
     assert_eq!(output.exit_code, 0);
     assert!(session.review_dialog_count() == 0, "no dialog with --yes");
     assert!(!session.granted("acme.demo").is_empty());
-    assert!(session.granted("acme.demo").iter().all(|grant| !session.is_high_risk(grant)));
+    assert!(session
+        .granted("acme.demo")
+        .iter()
+        .all(|grant| !session.is_high_risk(grant)));
 }
 
 /// REQ: DEV-141
@@ -84,7 +91,10 @@ fn dev_141_yes_does_not_grant_a_high_risk_grant_that_is_not_named() {
     let env = env_session(root.path(), &session);
     let (_, package) = packed_project_with_high_risk(&env, root.path());
     run(&env, &["install", s(&package), "--allow-unsigned", "--yes"]);
-    assert!(!session.granted("acme.demo").iter().any(|grant| session.is_high_risk(grant)));
+    assert!(!session
+        .granted("acme.demo")
+        .iter()
+        .any(|grant| session.is_high_risk(grant)));
 }
 
 /// REQ: DEV-141
@@ -94,8 +104,21 @@ fn dev_141_a_named_high_risk_grant_is_granted() {
     let session = MemorySession::new();
     let env = env_session(root.path(), &session);
     let (_, package) = packed_project_with_high_risk(&env, root.path());
-    run(&env, &["install", s(&package), "--allow-unsigned", "--yes", "--grant", HIGH_RISK_GRANT]);
-    assert!(session.granted("acme.demo").iter().any(|grant| grant == HIGH_RISK_GRANT));
+    run(
+        &env,
+        &[
+            "install",
+            s(&package),
+            "--allow-unsigned",
+            "--yes",
+            "--grant",
+            HIGH_RISK_GRANT,
+        ],
+    );
+    assert!(session
+        .granted("acme.demo")
+        .iter()
+        .any(|grant| grant == HIGH_RISK_GRANT));
 }
 
 /// REQ: DEV-141
@@ -117,8 +140,21 @@ fn dev_141_naming_a_grant_the_package_does_not_request_grants_nothing_extra() {
     let session = MemorySession::new();
     let env = env_session(root.path(), &session);
     let (_, package) = packed_project(&env, root.path());
-    run(&env, &["install", s(&package), "--allow-unsigned", "--yes", "--grant", HIGH_RISK_GRANT]);
-    assert!(!session.granted("acme.demo").iter().any(|grant| grant == HIGH_RISK_GRANT));
+    run(
+        &env,
+        &[
+            "install",
+            s(&package),
+            "--allow-unsigned",
+            "--yes",
+            "--grant",
+            HIGH_RISK_GRANT,
+        ],
+    );
+    assert!(!session
+        .granted("acme.demo")
+        .iter()
+        .any(|grant| grant == HIGH_RISK_GRANT));
 }
 
 /// REQ: DEV-142

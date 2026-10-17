@@ -1,8 +1,12 @@
 //! Page `reference-dependency-resolution.md`, part 2: service cycles, activation order, replaces,
 //! channels, pins and lock files (PKG-350 .. PKG-360, PKG-654). Expected values come from the page.
 
-use ilium_plugin_host::lifecycle::{shutdown_order, start_order, StartNode, MAX_CONCURRENT_ACTIVATIONS};
-use ilium_plugin_host::resolve::{resolve_plan, PlanAction, PlanPackage, ResolveInput, SourcePackage};
+use ilium_plugin_host::lifecycle::{
+    shutdown_order, start_order, StartNode, MAX_CONCURRENT_ACTIVATIONS,
+};
+use ilium_plugin_host::resolve::{
+    resolve_plan, PlanAction, PlanPackage, ResolveInput, SourcePackage,
+};
 use ilium_plugin_host::testing::FakeRegistry;
 use proptest::prelude::*;
 use serde_json::Value;
@@ -35,7 +39,10 @@ fn b(version: &str) -> Spec {
 
 fn reg_fx(packages: &[(&str, &str)]) -> Fx {
     let fx = Fx::new();
-    let list: Vec<(Spec, &str)> = packages.iter().map(|(version, channel)| (b(version), *channel)).collect();
+    let list: Vec<(Spec, &str)> = packages
+        .iter()
+        .map(|(version, channel)| (b(version), *channel))
+        .collect();
     serve_registry(&fx, &list);
     fx
 }
@@ -52,7 +59,8 @@ fn service_plugin(id: &str, provides: &str, requires: &[&str]) -> Spec {
         "contributes".to_owned(),
         format!("{{\"services\": {{\"provides\": [{{\"name\": \"{id}/{provides}\", \"version\": \"1.0.0\", \"schema\": \"schema.json\"}}]}}}}"),
     ));
-    spec.extra_files.push(("schema.json".to_owned(), b"{}".to_vec()));
+    spec.extra_files
+        .push(("schema.json".to_owned(), b"{}".to_vec()));
     spec
 }
 
@@ -60,10 +68,18 @@ fn service_plugin(id: &str, provides: &str, requires: &[&str]) -> Spec {
 #[test]
 fn pkg_654_two_plugin_service_cycle_is_refused_service_cycle() {
     let fx = Fx::new();
-    assert_eq!(fx.install(&service_plugin("example.a", "sa", &["example.b/sb"])).exit_code, 0);
+    assert_eq!(
+        fx.install(&service_plugin("example.a", "sa", &["example.b/sb"]))
+            .exit_code,
+        0
+    );
     let out = fx.install(&service_plugin("example.b", "sb", &["example.a/sa"]));
     assert_eq!(out.exit_code, 1);
-    assert!(out.has_error("manifest.service-cycle"), "{:?}", out.error_codes());
+    assert!(
+        out.has_error("manifest.service-cycle"),
+        "{:?}",
+        out.error_codes()
+    );
     assert!(fx.record("example.b").is_none());
 }
 
@@ -71,7 +87,11 @@ fn pkg_654_two_plugin_service_cycle_is_refused_service_cycle() {
 #[test]
 fn pkg_654_cycle_message_lists_names_starting_with_the_smallest() {
     let fx = Fx::new();
-    assert_eq!(fx.install(&service_plugin("example.b", "sb", &["example.a/sa"])).exit_code, 0);
+    assert_eq!(
+        fx.install(&service_plugin("example.b", "sb", &["example.a/sa"]))
+            .exit_code,
+        0
+    );
     let out = fx.install(&service_plugin("example.a", "sa", &["example.b/sb"]));
     let text = out.all_text();
     let first = text.find("example.a/sa").expect("smallest name listed");
@@ -83,22 +103,48 @@ fn pkg_654_cycle_message_lists_names_starting_with_the_smallest() {
 #[test]
 fn pkg_654_three_service_cycle_lists_all_names_smallest_first() {
     let fx = Fx::new();
-    assert_eq!(fx.install(&service_plugin("example.x", "sb", &["example.y/sc"])).exit_code, 0);
-    assert_eq!(fx.install(&service_plugin("example.y", "sc", &["example.z/sa"])).exit_code, 0);
+    assert_eq!(
+        fx.install(&service_plugin("example.x", "sb", &["example.y/sc"]))
+            .exit_code,
+        0
+    );
+    assert_eq!(
+        fx.install(&service_plugin("example.y", "sc", &["example.z/sa"]))
+            .exit_code,
+        0
+    );
     let out = fx.install(&service_plugin("example.z", "sa", &["example.x/sb"]));
-    assert!(out.has_error("manifest.service-cycle"), "{:?}", out.error_codes());
+    assert!(
+        out.has_error("manifest.service-cycle"),
+        "{:?}",
+        out.error_codes()
+    );
     let text = out.all_text();
     let smallest = text.find("example.x/sb").expect("example.x/sb");
-    assert!(smallest < text.find("example.y/sc").expect("example.y/sc"), "{text}");
-    assert!(smallest < text.find("example.z/sa").expect("example.z/sa"), "{text}");
+    assert!(
+        smallest < text.find("example.y/sc").expect("example.y/sc"),
+        "{text}"
+    );
+    assert!(
+        smallest < text.find("example.z/sa").expect("example.z/sa"),
+        "{text}"
+    );
 }
 
 /// REQ: PKG-654
 #[test]
 fn pkg_654_service_chain_without_a_cycle_installs() {
     let fx = Fx::new();
-    assert_eq!(fx.install(&service_plugin("example.a", "sa", &["example.b/sb"])).exit_code, 0);
-    assert_eq!(fx.install(&service_plugin("example.b", "sb", &[])).exit_code, 0);
+    assert_eq!(
+        fx.install(&service_plugin("example.a", "sa", &["example.b/sb"]))
+            .exit_code,
+        0
+    );
+    assert_eq!(
+        fx.install(&service_plugin("example.b", "sb", &[]))
+            .exit_code,
+        0
+    );
 }
 
 /// REQ: PKG-654
@@ -106,18 +152,30 @@ fn pkg_654_service_chain_without_a_cycle_installs() {
 fn pkg_654_cycle_inside_one_package_is_refused() {
     let fx = Fx::new();
     let out = fx.install(&service_plugin("example.a", "sa", &["example.a/sa"]));
-    assert!(out.has_error("manifest.service-cycle"), "{:?}", out.error_codes());
+    assert!(
+        out.has_error("manifest.service-cycle"),
+        "{:?}",
+        out.error_codes()
+    );
 }
 
 /// REQ: PKG-654
 #[test]
 fn pkg_654_check_reports_the_cycle_at_stage_10() {
     let fx = Fx::new();
-    assert_eq!(fx.install(&service_plugin("example.a", "sa", &["example.b/sb"])).exit_code, 0);
+    assert_eq!(
+        fx.install(&service_plugin("example.a", "sa", &["example.b/sb"]))
+            .exit_code,
+        0
+    );
     let spec = service_plugin("example.b", "sb", &["example.a/sa"]);
     let path = fx.write_file("b.iliumpkg", &spec.build());
     let out = fx.run(&["install", &path, "--allow-unsigned", "--yes", "--dry-run"]);
-    assert!(out.has_error("manifest.service-cycle"), "{:?}", out.error_codes());
+    assert!(
+        out.has_error("manifest.service-cycle"),
+        "{:?}",
+        out.error_codes()
+    );
 }
 
 // ---------------------------------------------------------------- PKG-350 / PKG-351 order
@@ -134,14 +192,22 @@ fn node(id: &str, tier: u8, plugins: &[&str], providers: &[&str]) -> StartNode {
 /// REQ: PKG-350
 #[test]
 fn pkg_350_independent_nodes_start_by_tier_then_id() {
-    let nodes = vec![node("b", 1, &[], &[]), node("a", 2, &[], &[]), node("a2", 1, &[], &[])];
+    let nodes = vec![
+        node("b", 1, &[], &[]),
+        node("a", 2, &[], &[]),
+        node("a2", 1, &[], &[]),
+    ];
     assert_eq!(start_order(&nodes).expect("order"), vec!["a2", "b", "a"]);
 }
 
 /// REQ: PKG-350
 #[test]
 fn pkg_350_same_tier_uses_byte_order_of_the_id() {
-    let nodes = vec![node("b", 1, &[], &[]), node("B", 1, &[], &[]), node("a", 1, &[], &[])];
+    let nodes = vec![
+        node("b", 1, &[], &[]),
+        node("B", 1, &[], &[]),
+        node("a", 1, &[], &[]),
+    ];
     assert_eq!(start_order(&nodes).expect("order"), vec!["B", "a", "b"]);
 }
 
@@ -155,15 +221,27 @@ fn pkg_350_plugin_dependency_starts_before_its_consumer_even_in_a_later_tier() {
 /// REQ: PKG-350
 #[test]
 fn pkg_350_service_edges_order_provider_first() {
-    let nodes = vec![node("a", 1, &[], &["m"]), node("m", 1, &[], &[]), node("b", 1, &[], &[])];
+    let nodes = vec![
+        node("a", 1, &[], &["m"]),
+        node("m", 1, &[], &[]),
+        node("b", 1, &[], &[]),
+    ];
     assert_eq!(start_order(&nodes).expect("order"), vec!["b", "m", "a"]);
 }
 
 /// REQ: PKG-350
 #[test]
 fn pkg_350_ready_node_with_smallest_key_is_taken_at_every_step() {
-    let nodes = vec![node("c", 1, &["d"], &[]), node("d", 3, &[], &[]), node("a", 2, &[], &[]), node("b", 1, &[], &[])];
-    assert_eq!(start_order(&nodes).expect("order"), vec!["b", "d", "c", "a"]);
+    let nodes = vec![
+        node("c", 1, &["d"], &[]),
+        node("d", 3, &[], &[]),
+        node("a", 2, &[], &[]),
+        node("b", 1, &[], &[]),
+    ];
+    assert_eq!(
+        start_order(&nodes).expect("order"),
+        vec!["b", "d", "c", "a"]
+    );
 }
 
 /// REQ: PKG-350
@@ -224,7 +302,12 @@ proptest! {
 /// REQ: PKG-351
 #[test]
 fn pkg_351_shutdown_is_the_exact_reverse_of_the_start_order() {
-    let nodes = vec![node("c", 1, &["d"], &[]), node("d", 3, &[], &[]), node("a", 2, &[], &[]), node("b", 1, &[], &[])];
+    let nodes = vec![
+        node("c", 1, &["d"], &[]),
+        node("d", 3, &[], &[]),
+        node("a", 2, &[], &[]),
+        node("b", 1, &[], &[]),
+    ];
     let mut start = start_order(&nodes).expect("order");
     start.reverse();
     assert_eq!(shutdown_order(&nodes).expect("order"), start);
@@ -233,8 +316,14 @@ fn pkg_351_shutdown_is_the_exact_reverse_of_the_start_order() {
 /// REQ: PKG-351
 #[test]
 fn pkg_351_consumer_stops_before_the_provider_it_requires() {
-    let nodes = vec![node("provider", 1, &[], &[]), node("consumer", 1, &[], &["provider"])];
-    assert_eq!(shutdown_order(&nodes).expect("order"), vec!["consumer", "provider"]);
+    let nodes = vec![
+        node("provider", 1, &[], &[]),
+        node("consumer", 1, &[], &["provider"]),
+    ];
+    assert_eq!(
+        shutdown_order(&nodes).expect("order"),
+        vec!["consumer", "provider"]
+    );
 }
 
 /// REQ: PKG-351
@@ -249,7 +338,8 @@ fn doc_pkg_351_page_states_reverse_order_and_serial_stops() {
 
 fn replacement(version: &str) -> Spec {
     let mut spec = Spec::new("example.new", version);
-    spec.extra_top_level.push(("replaces".to_owned(), "[\"example.old\"]".to_owned()));
+    spec.extra_top_level
+        .push(("replaces".to_owned(), "[\"example.old\"]".to_owned()));
     spec
 }
 
@@ -269,7 +359,11 @@ fn pkg_352_replacement_own_version_is_compared_with_the_range() {
     assert_eq!(fx.install(&replacement("2.0.0")).exit_code, 0);
     let out = fx.install(&Spec::new("example.a", "1.0.0").needs("example.old", "^1.0", false));
     assert_eq!(out.exit_code, 1);
-    assert!(out.has_error("dependency.unresolved") || out.has_error("dependency.conflict"), "{:?}", out.error_codes());
+    assert!(
+        out.has_error("dependency.unresolved") || out.has_error("dependency.conflict"),
+        "{:?}",
+        out.error_codes()
+    );
 }
 
 /// REQ: PKG-352
@@ -277,7 +371,11 @@ fn pkg_352_replacement_own_version_is_compared_with_the_range() {
 fn pkg_352_optional_dependency_on_the_old_series_is_fine() {
     let fx = Fx::new();
     assert_eq!(fx.install(&replacement("2.0.0")).exit_code, 0);
-    assert_eq!(fx.install(&Spec::new("example.a", "1.0.0").needs("example.old", "^1.0", true)).exit_code, 0);
+    assert_eq!(
+        fx.install(&Spec::new("example.a", "1.0.0").needs("example.old", "^1.0", true))
+            .exit_code,
+        0
+    );
 }
 
 /// REQ: PKG-352
@@ -288,7 +386,13 @@ fn pkg_352_disabled_replacement_does_not_satisfy_the_requirement() {
     assert_eq!(fx.run(&["disable", "example.new"]).exit_code, 0);
     let out = fx.install(&Spec::new("example.a", "1.0.0").needs("example.old", "^2.0", false));
     assert_eq!(out.exit_code, 1);
-    assert!(out.error_codes().iter().any(|code| code.starts_with("dependency.")), "{:?}", out.error_codes());
+    assert!(
+        out.error_codes()
+            .iter()
+            .any(|code| code.starts_with("dependency.")),
+        "{:?}",
+        out.error_codes()
+    );
 }
 
 // ---------------------------------------------------------------- PKG-353 channel membership
@@ -297,14 +401,18 @@ fn pkg_352_disabled_replacement_does_not_satisfy_the_requirement() {
 #[test]
 fn pkg_353_prerelease_version_belongs_to_beta() {
     let mut registry = FakeRegistry::new(REGISTRY_URL);
-    assert!(registry.try_publish(b("1.0.0-beta.1").build(), "beta").is_ok());
+    assert!(registry
+        .try_publish(b("1.0.0-beta.1").build(), "beta")
+        .is_ok());
 }
 
 /// REQ: PKG-353
 #[test]
 fn pkg_353_prerelease_version_cannot_be_published_to_stable() {
     let mut registry = FakeRegistry::new(REGISTRY_URL);
-    assert!(registry.try_publish(b("1.0.0-beta.1").build(), "stable").is_err());
+    assert!(registry
+        .try_publish(b("1.0.0-beta.1").build(), "stable")
+        .is_err());
 }
 
 /// REQ: PKG-353
@@ -328,8 +436,17 @@ fn pkg_353_a_version_has_exactly_one_channel_in_the_index() {
     let mut registry = FakeRegistry::new(REGISTRY_URL);
     registry.publish(b("1.0.0").build(), "stable");
     registry.publish(b("1.1.0-beta.1").build(), "beta");
-    let text: String = registry.documents().iter().map(|(_, body)| String::from_utf8_lossy(body).into_owned()).collect();
-    assert_eq!(text.matches("\"channel\": \"stable\"").count() + text.matches("\"channel\":\"stable\"").count(), 1, "{text}");
+    let text: String = registry
+        .documents()
+        .iter()
+        .map(|(_, body)| String::from_utf8_lossy(body).into_owned())
+        .collect();
+    assert_eq!(
+        text.matches("\"channel\": \"stable\"").count()
+            + text.matches("\"channel\":\"stable\"").count(),
+        1,
+        "{text}"
+    );
 }
 
 // ---------------------------------------------------------------- PKG-354 channel offers
@@ -356,7 +473,10 @@ fn pkg_354_beta_channel_offers_beta_and_stable_versions() {
 #[test]
 fn pkg_354_beta_channel_still_offers_a_stable_version_when_it_is_the_highest() {
     let fx = reg_fx(&[("1.3.0", "stable"), ("1.2.0", "beta")]);
-    assert_eq!(run_registry(&fx, &["install", "example.b@^1.0", "--channel", "beta"]).exit_code, 0);
+    assert_eq!(
+        run_registry(&fx, &["install", "example.b@^1.0", "--channel", "beta"]).exit_code,
+        0
+    );
     assert_eq!(fx.active_version("example.b").as_deref(), Some("1.3.0"));
 }
 
@@ -364,7 +484,10 @@ fn pkg_354_beta_channel_still_offers_a_stable_version_when_it_is_the_highest() {
 #[test]
 fn pkg_354_channel_command_sets_the_channel_of_one_plugin_for_later_updates() {
     let fx = reg_fx(&[("1.0.0", "stable")]);
-    assert_eq!(run_registry(&fx, &["install", "example.b@^1.0"]).exit_code, 0);
+    assert_eq!(
+        run_registry(&fx, &["install", "example.b@^1.0"]).exit_code,
+        0
+    );
     serve_registry(&fx, &[(b("1.0.0"), "stable"), (b("1.2.0"), "beta")]);
     assert_eq!(fx.run(&["channel", "example.b", "beta"]).exit_code, 0);
     let out = run_registry(&fx, &["update", "example.b"]);
@@ -376,7 +499,10 @@ fn pkg_354_channel_command_sets_the_channel_of_one_plugin_for_later_updates() {
 #[test]
 fn pkg_354_stable_plugin_is_not_offered_a_beta_update() {
     let fx = reg_fx(&[("1.0.0", "stable")]);
-    assert_eq!(run_registry(&fx, &["install", "example.b@^1.0"]).exit_code, 0);
+    assert_eq!(
+        run_registry(&fx, &["install", "example.b@^1.0"]).exit_code,
+        0
+    );
     serve_registry(&fx, &[(b("1.0.0"), "stable"), (b("1.2.0"), "beta")]);
     assert_eq!(fx.run(&["channel", "example.b", "stable"]).exit_code, 0);
     let _ = run_registry(&fx, &["update", "example.b"]);
@@ -387,7 +513,10 @@ fn pkg_354_stable_plugin_is_not_offered_a_beta_update() {
 #[test]
 fn pkg_354_channel_other_than_stable_or_beta_is_refused() {
     let fx = reg_fx(&[("1.0.0", "stable")]);
-    assert_eq!(run_registry(&fx, &["install", "example.b@^1.0"]).exit_code, 0);
+    assert_eq!(
+        run_registry(&fx, &["install", "example.b@^1.0"]).exit_code,
+        0
+    );
     assert_ne!(fx.run(&["channel", "example.b", "nightly"]).exit_code, 0);
     assert_ne!(fx.run(&["channel", "example.b", "dev"]).exit_code, 0);
 }
@@ -397,8 +526,15 @@ fn pkg_354_channel_other_than_stable_or_beta_is_refused() {
 fn pkg_354_default_channel_comes_from_the_plugins_section_of_the_config() {
     let fx = reg_fx(&[("1.0.0", "stable"), ("1.2.0", "beta")]);
     std::fs::create_dir_all(fx.config_dir()).expect("config dir");
-    std::fs::write(fx.config_dir().join("config.toml"), "[plugins]\nchannel = \"beta\"\n").expect("config");
-    assert_eq!(run_registry(&fx, &["install", "example.b@^1.0"]).exit_code, 0);
+    std::fs::write(
+        fx.config_dir().join("config.toml"),
+        "[plugins]\nchannel = \"beta\"\n",
+    )
+    .expect("config");
+    assert_eq!(
+        run_registry(&fx, &["install", "example.b@^1.0"]).exit_code,
+        0
+    );
     assert_eq!(fx.active_version("example.b").as_deref(), Some("1.2.0"));
 }
 
@@ -408,7 +544,12 @@ fn pkg_354_resolver_filters_sources_by_channel() {
     let mut beta = source_in("example.b", "1.2.0", "beta", "a2");
     beta.channel = "beta".to_owned();
     let stable = source_in("example.b", "1.0.0", "stable", "a1");
-    let mut request = request_for("example.a", "example.b", "^1.0", vec![stable.clone(), beta.clone()]);
+    let mut request = request_for(
+        "example.a",
+        "example.b",
+        "^1.0",
+        vec![stable.clone(), beta.clone()],
+    );
     request.channel = "stable".to_owned();
     assert_eq!(chosen_version(&request, "example.b"), "1.0.0");
     request.channel = "beta".to_owned();
@@ -417,7 +558,12 @@ fn pkg_354_resolver_filters_sources_by_channel() {
 
 fn source_in(id: &str, version: &str, channel: &str, sha: &str) -> SourcePackage {
     SourcePackage {
-        package: PlanPackage { id: id.to_owned(), version: version.to_owned(), needs: Vec::new(), host: None },
+        package: PlanPackage {
+            id: id.to_owned(),
+            version: version.to_owned(),
+            needs: Vec::new(),
+            host: None,
+        },
         sha256: sha.to_owned(),
         yanked: false,
         channel: channel.to_owned(),
@@ -425,7 +571,12 @@ fn source_in(id: &str, version: &str, channel: &str, sha: &str) -> SourcePackage
     }
 }
 
-fn request_for(consumer: &str, dependency: &str, range: &str, sources: Vec<SourcePackage>) -> ResolveInput {
+fn request_for(
+    consumer: &str,
+    dependency: &str,
+    range: &str,
+    sources: Vec<SourcePackage>,
+) -> ResolveInput {
     ResolveInput {
         incoming: vec![PlanPackage {
             id: consumer.to_owned(),
@@ -444,14 +595,25 @@ fn request_for(consumer: &str, dependency: &str, range: &str, sources: Vec<Sourc
 
 fn chosen_version(request: &ResolveInput, id: &str) -> String {
     let plan = resolve_plan(request).unwrap_or_else(|d| panic!("plan expected: {d:?}"));
-    plan.steps.into_iter().find(|step| step.id == id).map(|step| step.version).unwrap_or_default()
+    plan.steps
+        .into_iter()
+        .find(|step| step.id == id)
+        .map(|step| step.version)
+        .unwrap_or_default()
 }
 
 // ---------------------------------------------------------------- PKG-355 downgrades
 
 fn beta_then_stable_fx() -> Fx {
     let fx = reg_fx(&[("2.0.0-beta.1", "beta")]);
-    assert_eq!(run_registry(&fx, &["install", "example.b@2.0.0-beta.1", "--channel", "beta"]).exit_code, 0);
+    assert_eq!(
+        run_registry(
+            &fx,
+            &["install", "example.b@2.0.0-beta.1", "--channel", "beta"]
+        )
+        .exit_code,
+        0
+    );
     serve_registry(&fx, &[(b("2.0.0-beta.1"), "beta"), (b("1.9.0"), "stable")]);
     assert_eq!(fx.run(&["channel", "example.b", "stable"]).exit_code, 0);
     fx
@@ -462,14 +624,24 @@ fn beta_then_stable_fx() -> Fx {
 fn pkg_355_switch_to_stable_does_not_install_a_lower_version() {
     let fx = beta_then_stable_fx();
     let _ = run_registry(&fx, &["update", "example.b"]);
-    assert_eq!(fx.active_version("example.b").as_deref(), Some("2.0.0-beta.1"));
+    assert_eq!(
+        fx.active_version("example.b").as_deref(),
+        Some("2.0.0-beta.1")
+    );
 }
 
 /// REQ: PKG-355
 #[test]
 fn pkg_355_a_higher_stable_version_is_taken_after_the_switch() {
     let fx = beta_then_stable_fx();
-    serve_registry(&fx, &[(b("2.0.0-beta.1"), "beta"), (b("1.9.0"), "stable"), (b("2.0.0"), "stable")]);
+    serve_registry(
+        &fx,
+        &[
+            (b("2.0.0-beta.1"), "beta"),
+            (b("1.9.0"), "stable"),
+            (b("2.0.0"), "stable"),
+        ],
+    );
     assert_eq!(run_registry(&fx, &["update", "example.b"]).exit_code, 0);
     assert_eq!(fx.active_version("example.b").as_deref(), Some("2.0.0"));
 }
@@ -489,8 +661,15 @@ fn pkg_355_explicit_install_without_the_flag_is_refused_downgrade() {
     let fx = beta_then_stable_fx();
     let out = run_registry(&fx, &["install", "example.b@1.9.0"]);
     assert_eq!(out.exit_code, 1);
-    assert!(out.has_error("package.downgrade"), "{:?}", out.error_codes());
-    assert_eq!(fx.active_version("example.b").as_deref(), Some("2.0.0-beta.1"));
+    assert!(
+        out.has_error("package.downgrade"),
+        "{:?}",
+        out.error_codes()
+    );
+    assert_eq!(
+        fx.active_version("example.b").as_deref(),
+        Some("2.0.0-beta.1")
+    );
 }
 
 // ---------------------------------------------------------------- PKG-356 file installs
@@ -500,7 +679,10 @@ fn pkg_355_explicit_install_without_the_flag_is_refused_downgrade() {
 fn pkg_356_file_install_keeps_whatever_version_the_file_holds() {
     let fx = Fx::new();
     assert_eq!(fx.install(&b("3.0.0-rc.1")).exit_code, 0);
-    assert_eq!(fx.active_version("example.b").as_deref(), Some("3.0.0-rc.1"));
+    assert_eq!(
+        fx.active_version("example.b").as_deref(),
+        Some("3.0.0-rc.1")
+    );
 }
 
 /// REQ: PKG-356
@@ -516,7 +698,11 @@ fn pkg_356_file_install_records_channel_file() {
 fn pkg_356_file_install_ignores_a_stable_default_channel_for_prereleases() {
     let fx = Fx::new();
     std::fs::create_dir_all(fx.config_dir()).expect("config dir");
-    std::fs::write(fx.config_dir().join("config.toml"), "[plugins]\nchannel = \"stable\"\n").expect("config");
+    std::fs::write(
+        fx.config_dir().join("config.toml"),
+        "[plugins]\nchannel = \"stable\"\n",
+    )
+    .expect("config");
     assert_eq!(fx.install(&b("1.0.0-alpha.1")).exit_code, 0);
     assert_eq!(fx.record("example.b").expect("record")["channel"], "file");
 }
@@ -542,16 +728,35 @@ fn with_policy(fx: &Fx, toml: &str, args: &[&str]) -> ilium_plugin_host::cli::Cl
 }
 
 fn install_args() -> Vec<&'static str> {
-    vec!["install", "example.b@^1.0", "--channel", "beta", "--allow-unsigned", "--yes", "--registry", REGISTRY_URL]
+    vec![
+        "install",
+        "example.b@^1.0",
+        "--channel",
+        "beta",
+        "--allow-unsigned",
+        "--yes",
+        "--registry",
+        REGISTRY_URL,
+    ]
 }
 
 /// REQ: PKG-357
 #[test]
 fn pkg_357_policy_limited_to_stable_refuses_the_beta_channel() {
     let fx = reg_fx(&[("1.0.0", "stable"), ("1.2.0", "beta")]);
-    let out = with_policy(&fx, "version = 1\n[packages]\nallowed_channels = [\"stable\"]\n", &install_args());
+    let out = with_policy(
+        &fx,
+        "version = 1\n[packages]\nallowed_channels = [\"stable\"]\n",
+        &install_args(),
+    );
     assert_eq!(out.exit_code, 7, "{:?}", out.stdout_jsonl);
-    assert!(out.error_codes().iter().any(|code| code.starts_with("policy.")), "{:?}", out.error_codes());
+    assert!(
+        out.error_codes()
+            .iter()
+            .any(|code| code.starts_with("policy.")),
+        "{:?}",
+        out.error_codes()
+    );
     assert!(fx.record("example.b").is_none());
 }
 
@@ -559,8 +764,19 @@ fn pkg_357_policy_limited_to_stable_refuses_the_beta_channel() {
 #[test]
 fn pkg_357_policy_limited_to_stable_still_allows_stable() {
     let fx = reg_fx(&[("1.0.0", "stable"), ("1.2.0", "beta")]);
-    let args = ["install", "example.b@^1.0", "--allow-unsigned", "--yes", "--registry", REGISTRY_URL];
-    let out = with_policy(&fx, "version = 1\n[packages]\nallowed_channels = [\"stable\"]\n", &args);
+    let args = [
+        "install",
+        "example.b@^1.0",
+        "--allow-unsigned",
+        "--yes",
+        "--registry",
+        REGISTRY_URL,
+    ];
+    let out = with_policy(
+        &fx,
+        "version = 1\n[packages]\nallowed_channels = [\"stable\"]\n",
+        &args,
+    );
     assert_eq!(out.exit_code, 0, "{:?}", out.stdout_jsonl);
     assert_eq!(fx.active_version("example.b").as_deref(), Some("1.0.0"));
 }
@@ -633,12 +849,24 @@ fn pkg_358_resolver_treats_a_pin_as_the_only_allowed_version() {
         "example.a",
         "example.b",
         "^1.2",
-        vec![source_in("example.b", "1.2.0", "stable", "a2"), source_in("example.b", "1.0.0", "stable", "a1")],
+        vec![
+            source_in("example.b", "1.2.0", "stable", "a2"),
+            source_in("example.b", "1.0.0", "stable", "a1"),
+        ],
     );
-    request.installed = vec![PlanPackage { id: "example.b".to_owned(), version: "1.0.0".to_owned(), needs: Vec::new(), host: None }];
+    request.installed = vec![PlanPackage {
+        id: "example.b".to_owned(),
+        version: "1.0.0".to_owned(),
+        needs: Vec::new(),
+        host: None,
+    }];
     request.pins = vec!["example.b".to_owned()];
     let codes: Vec<String> = match resolve_plan(&request) {
-        Ok(plan) => plan.steps.iter().map(|step| format!("{:?}:{}", step.action, step.version)).collect(),
+        Ok(plan) => plan
+            .steps
+            .iter()
+            .map(|step| format!("{:?}:{}", step.action, step.version))
+            .collect(),
         Err(list) => list.iter().map(|d| d.code.as_str().to_owned()).collect(),
     };
     assert_eq!(codes, vec!["dependency.conflict".to_owned()]);
@@ -647,11 +875,24 @@ fn pkg_358_resolver_treats_a_pin_as_the_only_allowed_version() {
 /// REQ: PKG-358
 #[test]
 fn pkg_358_resolver_keeps_the_pinned_version_when_the_range_allows_it() {
-    let mut request = request_for("example.a", "example.b", "^1.0", vec![source_in("example.b", "1.2.0", "stable", "a2")]);
-    request.installed = vec![PlanPackage { id: "example.b".to_owned(), version: "1.0.0".to_owned(), needs: Vec::new(), host: None }];
+    let mut request = request_for(
+        "example.a",
+        "example.b",
+        "^1.0",
+        vec![source_in("example.b", "1.2.0", "stable", "a2")],
+    );
+    request.installed = vec![PlanPackage {
+        id: "example.b".to_owned(),
+        version: "1.0.0".to_owned(),
+        needs: Vec::new(),
+        host: None,
+    }];
     request.pins = vec!["example.b".to_owned()];
     let plan = resolve_plan(&request).expect("plan");
-    assert!(plan.steps.iter().any(|s| s.action == PlanAction::Keep && s.id == "example.b" && s.version == "1.0.0"));
+    assert!(plan
+        .steps
+        .iter()
+        .any(|s| s.action == PlanAction::Keep && s.id == "example.b" && s.version == "1.0.0"));
 }
 
 // ---------------------------------------------------------------- PKG-359 / PKG-360 lock files
@@ -662,10 +903,16 @@ fn locked_fx() -> (Fx, Value) {
         &fx,
         &[
             (b("1.0.0"), "stable"),
-            (Spec::new("example.a", "1.0.0").needs("example.b", "^1.0", false), "stable"),
+            (
+                Spec::new("example.a", "1.0.0").needs("example.b", "^1.0", false),
+                "stable",
+            ),
         ],
     );
-    assert_eq!(run_registry(&fx, &["install", "example.a@^1.0"]).exit_code, 0);
+    assert_eq!(
+        run_registry(&fx, &["install", "example.a@^1.0"]).exit_code,
+        0
+    );
     let out = fx.run(&["lock"]);
     assert_eq!(out.exit_code, 0, "{:?}", out.stdout_jsonl);
     let text = std::fs::read_to_string(fx.cwd.join("plugins.lock")).unwrap_or_default();
@@ -683,7 +930,10 @@ fn fresh_with_same_registry(source: &Fx) -> Fx {
         &fx,
         &[
             (b("1.0.0"), "stable"),
-            (Spec::new("example.a", "1.0.0").needs("example.b", "^1.0", false), "stable"),
+            (
+                Spec::new("example.a", "1.0.0").needs("example.b", "^1.0", false),
+                "stable",
+            ),
         ],
     );
     let _ = source;
@@ -698,7 +948,12 @@ fn pkg_359_lock_writes_the_documented_json_shape() {
     let plugins = lock["plugins"].as_array().expect("plugins array");
     assert_eq!(plugins.len(), 2);
     for entry in plugins {
-        let mut keys: Vec<&str> = entry.as_object().expect("object").keys().map(String::as_str).collect();
+        let mut keys: Vec<&str> = entry
+            .as_object()
+            .expect("object")
+            .keys()
+            .map(String::as_str)
+            .collect();
         keys.sort_unstable();
         assert_eq!(keys, vec!["id", "sha256", "source", "version"]);
         assert!(is_sha256_hex(entry["sha256"].as_str().unwrap_or("")));
@@ -709,7 +964,12 @@ fn pkg_359_lock_writes_the_documented_json_shape() {
 #[test]
 fn pkg_359_lock_entries_are_sorted_by_id() {
     let (_fx, lock) = locked_fx();
-    let ids: Vec<&str> = lock["plugins"].as_array().expect("plugins").iter().filter_map(|e| e["id"].as_str()).collect();
+    let ids: Vec<&str> = lock["plugins"]
+        .as_array()
+        .expect("plugins")
+        .iter()
+        .filter_map(|e| e["id"].as_str())
+        .collect();
     assert_eq!(ids, vec!["example.a", "example.b"]);
 }
 
@@ -719,7 +979,10 @@ fn pkg_359_lock_holds_installed_versions_and_hashes() {
     let (fx, lock) = locked_fx();
     let entry = &lock["plugins"][1];
     assert_eq!(entry["version"], "1.0.0");
-    assert_eq!(entry["sha256"], fx.record("example.b").expect("record")["package_sha256"]);
+    assert_eq!(
+        entry["sha256"],
+        fx.record("example.b").expect("record")["package_sha256"]
+    );
 }
 
 /// REQ: PKG-359
@@ -743,7 +1006,11 @@ fn pkg_359_locked_version_that_no_source_offers_is_unresolved() {
     let path = write_lock(&target, &lock);
     let out = run_registry(&target, &["install", "--locked", &path]);
     assert_eq!(out.exit_code, 1);
-    assert!(out.has_error("dependency.unresolved"), "{:?}", out.error_codes());
+    assert!(
+        out.has_error("dependency.unresolved"),
+        "{:?}",
+        out.error_codes()
+    );
     assert!(target.record("example.a").is_none());
 }
 
@@ -757,7 +1024,11 @@ fn pkg_359_resolution_that_differs_from_the_lock_is_a_lock_mismatch() {
     let path = write_lock(&target, &lock);
     let out = run_registry(&target, &["install", "--locked", &path]);
     assert_eq!(out.exit_code, 1);
-    assert!(out.has_error("dependency.lock-mismatch"), "{:?}", out.error_codes());
+    assert!(
+        out.has_error("dependency.lock-mismatch"),
+        "{:?}",
+        out.error_codes()
+    );
 }
 
 /// REQ: PKG-359
@@ -780,7 +1051,11 @@ fn pkg_360_lock_hash_that_differs_from_the_download_is_refused() {
     let path = write_lock(&target, &lock);
     let out = run_registry(&target, &["install", "--locked", &path]);
     assert_eq!(out.exit_code, 1);
-    assert!(out.has_error("registry.hash-mismatch"), "{:?}", out.error_codes());
+    assert!(
+        out.has_error("registry.hash-mismatch"),
+        "{:?}",
+        out.error_codes()
+    );
     assert!(target.record("example.b").is_none());
 }
 
@@ -791,14 +1066,21 @@ fn pkg_360_matching_hashes_install_without_a_mismatch() {
     let target = fresh_with_same_registry(&fx);
     let path = write_lock(&target, &lock);
     let out = run_registry(&target, &["install", "--locked", &path]);
-    assert!(!out.has_error("registry.hash-mismatch"), "{:?}", out.error_codes());
+    assert!(
+        !out.has_error("registry.hash-mismatch"),
+        "{:?}",
+        out.error_codes()
+    );
 }
 
 /// REQ: PKG-360
 #[test]
 fn pkg_360_a_one_character_hash_difference_is_enough() {
     let (fx, mut lock) = locked_fx();
-    let mut sha = lock["plugins"][0]["sha256"].as_str().unwrap_or("").to_owned();
+    let mut sha = lock["plugins"][0]["sha256"]
+        .as_str()
+        .unwrap_or("")
+        .to_owned();
     let last = if sha.ends_with('0') { '1' } else { '0' };
     sha.pop();
     sha.push(last);
@@ -806,5 +1088,9 @@ fn pkg_360_a_one_character_hash_difference_is_enough() {
     let target = fresh_with_same_registry(&fx);
     let path = write_lock(&target, &lock);
     let out = run_registry(&target, &["install", "--locked", &path]);
-    assert!(out.has_error("registry.hash-mismatch"), "{:?}", out.error_codes());
+    assert!(
+        out.has_error("registry.hash-mismatch"),
+        "{:?}",
+        out.error_codes()
+    );
 }

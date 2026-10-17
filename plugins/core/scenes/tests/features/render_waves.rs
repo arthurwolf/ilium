@@ -45,6 +45,9 @@ fn waves_096_pattern_is_periodic_with_the_sine_period() {
 fn waves_096_golden_at_three_widths() {
     for (columns, rows) in [(40u16, 10u16), (80, 24), (120, 30)] {
         let screen = fake_scene("waves", columns, rows).frame(braille_frame(columns, rows, 0));
-        ilium_plugin_sdk::testing::assert_golden(&format!("tests/features/golden/waves_{columns}x{rows}.txt"), &screen.text());
+        ilium_plugin_sdk::testing::assert_golden(
+            &format!("tests/features/golden/waves_{columns}x{rows}.txt"),
+            &screen.text(),
+        );
     }
 }

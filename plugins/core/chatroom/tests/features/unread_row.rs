@@ -1,8 +1,8 @@
 //! The Chatroom row of the tree and its unread count (chatroom-B16, F-062): `list-virtual-children`,
 //! `set-virtual-rows` and `set-expanded`.
 
-use ilium_plugin_sdk::VirtualRowsProvider;
 use ilium_plugin_sdk::types::intents::{ExpandTarget, Intent};
+use ilium_plugin_sdk::VirtualRowsProvider;
 
 use crate::common::*;
 
@@ -34,7 +34,10 @@ fn unread_b16_one_unread_message_shows_1_new() {
 #[test]
 fn unread_b16_three_unread_messages_show_3_new() {
     let mut host = server_host();
-    seed_room(&mut host, &[numbered_line(1), numbered_line(2), numbered_line(3)]);
+    seed_room(
+        &mut host,
+        &[numbered_line(1), numbered_line(2), numbered_line(3)],
+    );
     assert_eq!(last_title(&mut host), "Chatroom (3 new)");
 }
 
@@ -54,7 +57,10 @@ fn unread_b16_the_count_is_computed_for_the_reader_key_user() {
     let mut host = server_host();
     seed_room(&mut host, &[numbered_line(1), numbered_line(2)]);
     // Another reader's cursor does not change the count of `user`.
-    chat(&mut host, &["context", "--since-last-read", "--reader", "pane-9"]);
+    chat(
+        &mut host,
+        &["context", "--since-last-read", "--reader", "pane-9"],
+    );
     host.settle();
     assert_eq!(last_title(&mut host), "Chatroom (2 new)");
 }
@@ -92,10 +98,16 @@ fn unread_f062_list_virtual_children_answers_one_file_child() {
     let mut host = server_host();
     seed_room(&mut host, &[]);
     let plugin = host.instance_mut::<ilium_plugin_core_chatroom::ChatroomServer>();
-    let (children, cursor) = plugin.list_virtual_children("chatroom".into(), "chatroom".into(), None).expect("children");
+    let (children, cursor) = plugin
+        .list_virtual_children("chatroom".into(), "chatroom".into(), None)
+        .expect("children");
     assert_eq!(children.len(), 1);
     assert_eq!(children[0].id, "file");
-    let label: String = children[0].label.iter().map(|span| span.text.as_str()).collect();
+    let label: String = children[0]
+        .label
+        .iter()
+        .map(|span| span.text.as_str())
+        .collect();
     assert_eq!(label, "CHATROOM.md");
     assert_eq!(cursor, None);
 }
@@ -105,7 +117,9 @@ fn unread_f062_list_virtual_children_answers_one_file_child() {
 fn unread_f062_list_virtual_children_for_an_unknown_row_kind_is_not_found() {
     let mut host = server_host();
     let plugin = host.instance_mut::<ilium_plugin_core_chatroom::ChatroomServer>();
-    let error = plugin.list_virtual_children("other".into(), "x".into(), None).expect_err("unknown kind");
+    let error = plugin
+        .list_virtual_children("other".into(), "x".into(), None)
+        .expect_err("unknown kind");
     assert_eq!(error.code, ilium_plugin_sdk::types::ErrorCode::NotFound);
 }
 
@@ -115,7 +129,9 @@ fn unread_f062_list_virtual_children_answers_within_20_ms_of_fake_time() {
     let mut host = host_with_records(2000);
     let before = host.clock().now();
     let plugin = host.instance_mut::<ilium_plugin_core_chatroom::ChatroomServer>();
-    plugin.list_virtual_children("chatroom".into(), "chatroom".into(), None).expect("children");
+    plugin
+        .list_virtual_children("chatroom".into(), "chatroom".into(), None)
+        .expect("children");
     assert!(host.clock().now() - before <= 20);
 }
 
@@ -124,9 +140,15 @@ fn unread_f062_list_virtual_children_answers_within_20_ms_of_fake_time() {
 fn unread_f062_opening_the_row_sets_it_expanded() {
     let mut host = server_host();
     seed_room(&mut host, &[]);
-    let expanded = host.submitted().into_iter().any(|submission| match submission.intent {
-        Intent::SetExpanded(spec) => matches!(spec.target, ExpandTarget::VirtualRow(ref id) if id == "chatroom") && spec.expanded,
-        _ => false,
-    });
+    let expanded = host
+        .submitted()
+        .into_iter()
+        .any(|submission| match submission.intent {
+            Intent::SetExpanded(spec) => {
+                matches!(spec.target, ExpandTarget::VirtualRow(ref id) if id == "chatroom")
+                    && spec.expanded
+            }
+            _ => false,
+        });
     assert!(expanded);
 }

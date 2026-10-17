@@ -14,7 +14,10 @@ fn manifest_050_whole_manifest_equals_the_complete_manifest_block_of_the_page() 
 #[test]
 fn manifest_050_page_has_the_fragment_and_the_complete_block_in_that_order() {
     let blocks = json_blocks(&page_text());
-    assert!(blocks.len() >= 3, "fragment, complete manifest, extension example");
+    assert!(
+        blocks.len() >= 3,
+        "fragment, complete manifest, extension example"
+    );
     let fragment: Value = serde_json::from_str(&blocks[0]).expect("fragment");
     let complete: Value = serde_json::from_str(&blocks[1]).expect("complete");
     assert!(fragment.get("description").is_none());
@@ -26,7 +29,15 @@ fn manifest_050_page_has_the_fragment_and_the_complete_block_in_that_order() {
 fn manifest_050_every_fragment_key_has_the_same_value_in_the_complete_manifest() {
     let fragment = fragment_on_page();
     let complete = complete_manifest_on_page();
-    for key in ["api", "id", "name", "version", "publisher", "client", "contributes"] {
+    for key in [
+        "api",
+        "id",
+        "name",
+        "version",
+        "publisher",
+        "client",
+        "contributes",
+    ] {
         assert_eq!(fragment[key], complete[key], "{key}");
     }
 }
@@ -55,7 +66,10 @@ fn manifest_050_identity_fields_match_the_page() {
 /// REQ: COR-050
 #[test]
 fn manifest_050_description_states_id_side_and_purpose() {
-    let description = manifest_value()["description"].as_str().expect("description").to_string();
+    let description = manifest_value()["description"]
+        .as_str()
+        .expect("description")
+        .to_string();
     assert_eq!(
         description,
         "The Ambient look plugin (id ilium.core.ambient, side: client) is the plugin form of the shared look of animated backgrounds."
@@ -85,14 +99,25 @@ fn manifest_050_client_side_uses_the_base_world_and_exports_only_views() {
 #[test]
 fn manifest_050_client_grants_are_exactly_the_four_of_the_page_in_order() {
     let grants = strings(&manifest_value()["capabilities"]["client"]);
-    assert_eq!(grants, ["location.geocode", "media.video", "ui.panels", "settings.write-kernel:animations"]);
+    assert_eq!(
+        grants,
+        [
+            "location.geocode",
+            "media.video",
+            "ui.panels",
+            "settings.write-kernel:animations"
+        ]
+    );
 }
 
 /// REQ: COR-050, COR-030
 #[test]
 fn manifest_050_holds_write_kernel_for_exactly_one_tab_the_animations_tab() {
     let grants = strings(&manifest_value()["capabilities"]["client"]);
-    let kernel: Vec<&String> = grants.iter().filter(|grant| grant.starts_with("settings.write-kernel:")).collect();
+    let kernel: Vec<&String> = grants
+        .iter()
+        .filter(|grant| grant.starts_with("settings.write-kernel:"))
+        .collect();
     assert_eq!(kernel, ["settings.write-kernel:animations"]);
 }
 
@@ -106,7 +131,11 @@ fn manifest_050_activation_is_the_startup_trigger_only() {
 #[test]
 fn manifest_050_contributes_exactly_panels_and_settings() {
     let manifest = manifest_value();
-    let mut keys: Vec<&String> = manifest["contributes"].as_object().expect("object").keys().collect();
+    let mut keys: Vec<&String> = manifest["contributes"]
+        .as_object()
+        .expect("object")
+        .keys()
+        .collect();
     keys.sort();
     assert_eq!(keys, ["panels", "settings"]);
 }
@@ -115,7 +144,10 @@ fn manifest_050_contributes_exactly_panels_and_settings() {
 #[test]
 fn manifest_050_one_non_modal_panel_gallery_titled_scenes() {
     let panels = manifest_value()["contributes"]["panels"].clone();
-    assert_eq!(panels, json!([{ "id": "gallery", "title": "Scenes", "modal": false }]));
+    assert_eq!(
+        panels,
+        json!([{ "id": "gallery", "title": "Scenes", "modal": false }])
+    );
 }
 
 /// REQ: COR-050, F-093
@@ -137,8 +169,10 @@ fn manifest_050_one_settings_tab_animations_with_one_client_section_look() {
 /// REQ: COR-050, F-093, F-103
 #[test]
 fn manifest_050_rows_are_choice_preview_toggle_location_map_in_that_order() {
-    let types: Vec<String> =
-        manifest_rows().iter().map(|row| row["type"].as_str().expect("type").to_string()).collect();
+    let types: Vec<String> = manifest_rows()
+        .iter()
+        .map(|row| row["type"].as_str().expect("type").to_string())
+        .collect();
     assert_eq!(types, ["choice", "preview", "toggle", "location", "map"]);
 }
 
@@ -178,8 +212,12 @@ fn manifest_011_scene_options_are_within_the_two_to_sixty_four_limit() {
 #[test]
 fn manifest_011_scene_default_is_one_of_its_options() {
     let scene = row("scene");
-    let values: Vec<&str> =
-        scene["options"].as_array().expect("options").iter().map(|option| option["value"].as_str().expect("v")).collect();
+    let values: Vec<&str> = scene["options"]
+        .as_array()
+        .expect("options")
+        .iter()
+        .map(|option| option["value"].as_str().expect("v"))
+        .collect();
     assert_eq!(scene["default"], "stars");
     assert!(values.contains(&"stars"));
 }
@@ -187,8 +225,14 @@ fn manifest_011_scene_default_is_one_of_its_options() {
 /// REQ: F-093, F-094
 #[test]
 fn manifest_093_preview_row_is_live_four_rows_high_and_names_the_scene_preview_view() {
-    let preview = manifest_rows().into_iter().find(|row| row["type"] == "preview").expect("preview");
-    assert_eq!(preview, json!({ "type": "preview", "view": "scene-preview", "height": 4, "live": true }));
+    let preview = manifest_rows()
+        .into_iter()
+        .find(|row| row["type"] == "preview")
+        .expect("preview");
+    assert_eq!(
+        preview,
+        json!({ "type": "preview", "view": "scene-preview", "height": 4, "live": true })
+    );
 }
 
 /// A preview row height is 4 to 24 rows (reference-settings-rows.md, row 14).
@@ -196,7 +240,10 @@ fn manifest_093_preview_row_is_live_four_rows_high_and_names_the_scene_preview_v
 /// REQ: F-093
 #[test]
 fn manifest_093_preview_height_is_inside_four_to_twenty_four() {
-    let preview = manifest_rows().into_iter().find(|row| row["type"] == "preview").expect("preview");
+    let preview = manifest_rows()
+        .into_iter()
+        .find(|row| row["type"] == "preview")
+        .expect("preview");
     let height = preview["height"].as_u64().expect("height");
     assert!((4..=24).contains(&height));
 }
@@ -206,21 +253,30 @@ fn manifest_093_preview_height_is_inside_four_to_twenty_four() {
 /// REQ: F-093, F-094
 #[test]
 fn manifest_093_preview_view_names_a_panel_the_plugin_contributes() {
-    let preview = manifest_rows().into_iter().find(|row| row["type"] == "preview").expect("preview");
+    let preview = manifest_rows()
+        .into_iter()
+        .find(|row| row["type"] == "preview")
+        .expect("preview");
     let panels: Vec<String> = manifest_value()["contributes"]["panels"]
         .as_array()
         .expect("panels")
         .iter()
         .map(|panel| panel["id"].as_str().expect("id").to_string())
         .collect();
-    assert!(panels.contains(&preview["view"].as_str().expect("view").to_string()), "{panels:?}");
+    assert!(
+        panels.contains(&preview["view"].as_str().expect("view").to_string()),
+        "{panels:?}"
+    );
 }
 
 /// REQ: F-103
 #[test]
 fn manifest_103_semantic_row_is_a_toggle_off_by_default() {
     let semantic = row("semantic");
-    assert_eq!(semantic, json!({ "type": "toggle", "key": "semantic", "title": "Semantic animation", "default": false }));
+    assert_eq!(
+        semantic,
+        json!({ "type": "toggle", "key": "semantic", "title": "Semantic animation", "default": false })
+    );
 }
 
 /// REQ: F-093, F-094
@@ -232,7 +288,10 @@ fn manifest_093_observer_row_is_a_searchable_location_with_current_position_and_
     assert_eq!(observer["search"], true);
     assert_eq!(observer["allow_current"], true);
     assert_eq!(observer["precision"], 4);
-    assert_eq!(observer["default"], json!({ "lat": 38.7223, "lon": -9.1393, "label": "Lisbon" }));
+    assert_eq!(
+        observer["default"],
+        json!({ "lat": 38.7223, "lon": -9.1393, "label": "Lisbon" })
+    );
 }
 
 /// REQ: F-093
@@ -244,7 +303,14 @@ fn manifest_093_observer_precision_and_default_are_inside_the_location_row_limit
     let lon = observer["default"]["lon"].as_f64().expect("lon");
     assert!((-90.0..=90.0).contains(&lat));
     assert!((-180.0..=180.0).contains(&lon));
-    assert!(observer["default"]["label"].as_str().expect("label").chars().count() <= 120);
+    assert!(
+        observer["default"]["label"]
+            .as_str()
+            .expect("label")
+            .chars()
+            .count()
+            <= 120
+    );
 }
 
 /// `allow_current` needs `location.observer` on the client side (reference-settings-rows.md, row 13).
@@ -254,7 +320,10 @@ fn manifest_093_observer_precision_and_default_are_inside_the_location_row_limit
 fn manifest_093_allow_current_needs_the_location_observer_grant() {
     let grants = strings(&manifest_value()["capabilities"]["client"]);
     assert_eq!(row("observer")["allow_current"], true);
-    assert!(grants.iter().any(|grant| grant == "location.observer"), "{grants:?}");
+    assert!(
+        grants.iter().any(|grant| grant == "location.observer"),
+        "{grants:?}"
+    );
 }
 
 /// REQ: F-093, F-094
@@ -294,7 +363,11 @@ fn manifest_011_row_keys_are_unique_and_snake_case() {
     sorted.dedup();
     assert_eq!(sorted.len(), keys.len());
     for key in keys {
-        assert!(key.chars().all(|symbol| symbol.is_ascii_lowercase() || symbol == '_'), "{key}");
+        assert!(
+            key.chars()
+                .all(|symbol| symbol.is_ascii_lowercase() || symbol == '_'),
+            "{key}"
+        );
     }
 }
 
@@ -315,14 +388,20 @@ fn manifest_093_provides_both_extension_points_by_grant() {
 #[test]
 fn manifest_093_provides_the_look_service_by_grant() {
     let grants = strings(&manifest_value()["capabilities"]["client"]);
-    assert!(grants.contains(&"services.provide:ilium.core.ambient/look".to_string()), "{grants:?}");
+    assert!(
+        grants.contains(&"services.provide:ilium.core.ambient/look".to_string()),
+        "{grants:?}"
+    );
 }
 
 /// REQ: F-093
 #[test]
 fn manifest_093_declares_the_look_service_with_a_get_method() {
     let services = &manifest_value()["contributes"]["services"];
-    assert!(services["ilium.core.ambient/look"]["get"].is_object(), "{services}");
+    assert!(
+        services["ilium.core.ambient/look"]["get"].is_object(),
+        "{services}"
+    );
 }
 
 /// REQ: F-093
@@ -330,20 +409,29 @@ fn manifest_093_declares_the_look_service_with_a_get_method() {
 fn manifest_093_declares_the_look_changed_topic_it_publishes() {
     let manifest = manifest_value();
     let published = serde_json::to_string(&manifest["contributes"]["topics"]).expect("json");
-    assert!(published.contains("ilium.core.ambient/look-changed"), "{published}");
+    assert!(
+        published.contains("ilium.core.ambient/look-changed"),
+        "{published}"
+    );
 }
 
 /// REQ: F-093
 #[test]
 fn manifest_093_client_exports_include_the_service_provider_for_the_look_service() {
     let exports = strings(&manifest_value()["client"]["exports"]);
-    assert!(exports.contains(&"service-provider".to_string()), "{exports:?}");
+    assert!(
+        exports.contains(&"service-provider".to_string()),
+        "{exports:?}"
+    );
 }
 
 /// REQ: COR-050
 #[test]
 fn manifest_050_core_plugins_index_lists_ambient_look_as_a_client_plugin() {
-    let row = table_row(&page("core-plugins"), "[Ambient look](/pages/core-plugin-ambient/)");
+    let row = table_row(
+        &page("core-plugins"),
+        "[Ambient look](/pages/core-plugin-ambient/)",
+    );
     assert_eq!(
         row,
         [

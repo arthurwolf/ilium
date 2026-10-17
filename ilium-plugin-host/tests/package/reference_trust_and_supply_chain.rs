@@ -13,7 +13,10 @@ fn has(out: &ilium_plugin_host::cli::CliOutput, code: &str) -> bool {
 
 fn trusted_fixture() -> CliFixture {
     let fixture = cli_fixture();
-    write_trust(&fixture, &trust_json(&[entry(0, "example", "Example Labs")]));
+    write_trust(
+        &fixture,
+        &trust_json(&[entry(0, "example", "Example Labs")]),
+    );
     fixture
 }
 
@@ -40,7 +43,8 @@ fn find_installed(root: &std::path::Path, name: &str) -> Option<std::path::PathB
 
 fn tamper_installed(fixture: &CliFixture) {
     use std::os::unix::fs::PermissionsExt;
-    let path = find_installed(&fixture.root.path().join("data"), "server.wasm").expect("installed server.wasm");
+    let path = find_installed(&fixture.root.path().join("data"), "server.wasm")
+        .expect("installed server.wasm");
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).expect("chmod");
     let mut bytes = std::fs::read(&path).expect("read");
     let last = bytes.len() - 1;
@@ -53,7 +57,10 @@ fn tamper_installed(fixture: &CliFixture) {
 /// REQ: SEC-140
 #[test]
 fn sec_140_jcs_sorts_members_and_drops_whitespace() {
-    assert_eq!(jcs(&json!({"b": 1, "a": [true, null], "c": "x"})).expect("jcs"), "{\"a\":[true,null],\"b\":1,\"c\":\"x\"}");
+    assert_eq!(
+        jcs(&json!({"b": 1, "a": [true, null], "c": "x"})).expect("jcs"),
+        "{\"a\":[true,null],\"b\":1,\"c\":\"x\"}"
+    );
 }
 
 /// REQ: SEC-140
@@ -67,7 +74,10 @@ fn sec_140_jcs_sorts_nested_objects_by_code_point() {
 #[test]
 fn sec_140_jcs_numbers_use_the_shortest_form() {
     let got = jcs(&json!({"a": 1.0, "b": 1e21, "c": 0.5, "d": -0.0})).expect("jcs");
-    assert!(got.contains("\"a\":1,") && got.contains("\"c\":0.5"), "{got}");
+    assert!(
+        got.contains("\"a\":1,") && got.contains("\"c\":0.5"),
+        "{got}"
+    );
 }
 
 /// REQ: SEC-140
@@ -88,9 +98,19 @@ fn sec_140_jcs_is_idempotent_on_its_own_output() {
 /// REQ: SEC-140
 #[test]
 fn sec_140_duplicate_member_name_in_the_manifest_is_duplicate_key() {
-    let text = String::from_utf8(vector_manifest()).unwrap().replacen("\"version\": \"0.1.0\",", "\"version\": \"0.1.0\",\n  \"version\": \"0.1.0\",", 1);
-    let codes = check_codes(&zip_of(&[("manifest.json", text.into_bytes()), ("server.wasm", vector_component())]));
-    assert!(codes.contains(&"manifest.duplicate-key".to_string()), "{codes:?}");
+    let text = String::from_utf8(vector_manifest()).unwrap().replacen(
+        "\"version\": \"0.1.0\",",
+        "\"version\": \"0.1.0\",\n  \"version\": \"0.1.0\",",
+        1,
+    );
+    let codes = check_codes(&zip_of(&[
+        ("manifest.json", text.into_bytes()),
+        ("server.wasm", vector_component()),
+    ]));
+    assert!(
+        codes.contains(&"manifest.duplicate-key".to_string()),
+        "{codes:?}"
+    );
 }
 
 proptest::proptest! {
@@ -112,7 +132,13 @@ fn sec_141_every_flipped_manifest_byte_is_refused_signature_invalid() {
     let signed = vector_signed();
     let trust = trust_of(0, "example");
     for index in 0..vector_manifest().len() {
-        let bytes = patch_data(&signed, "manifest.json", index, vector_manifest()[index] ^ 0x01, true);
+        let bytes = patch_data(
+            &signed,
+            "manifest.json",
+            index,
+            vector_manifest()[index] ^ 0x01,
+            true,
+        );
         let got = refusal(&bytes, &trust);
         assert_ne!(got, "accepted", "manifest byte {index}");
     }
@@ -127,14 +153,21 @@ fn sec_141_flipped_signature_bytes_are_refused() {
     for index in (0..length).step_by(5) {
         let original = data_of(&signed, "signature")[index];
         let bytes = patch_data(&signed, "signature", index, original ^ 0x01, true);
-        assert_ne!(refusal(&bytes, &trust), "accepted", "signature byte {index}");
+        assert_ne!(
+            refusal(&bytes, &trust),
+            "accepted",
+            "signature byte {index}"
+        );
     }
 }
 
 /// REQ: SEC-141
 #[test]
 fn sec_141_unmodified_vector_is_accepted() {
-    assert_eq!(refusal(&vector_signed(), &trust_of(0, "example")), "accepted");
+    assert_eq!(
+        refusal(&vector_signed(), &trust_of(0, "example")),
+        "accepted"
+    );
 }
 
 /// REQ: SEC-141
@@ -142,21 +175,39 @@ fn sec_141_unmodified_vector_is_accepted() {
 fn sec_141_bad_algorithm_name_is_refused() {
     let mut o = obj(0, "example", &vector_manifest());
     o.algorithm = "rsa".into();
-    let got = refusal(&with_sig(&sig_doc("ilium-sig/1", &[o])), &trust_of(0, "example"));
-    assert!(got == "manifest.signature-invalid" || got == "package.signature-format", "{got}");
+    let got = refusal(
+        &with_sig(&sig_doc("ilium-sig/1", &[o])),
+        &trust_of(0, "example"),
+    );
+    assert!(
+        got == "manifest.signature-invalid" || got == "package.signature-format",
+        "{got}"
+    );
 }
 
 /// REQ: SEC-141
 #[test]
 fn sec_141_bad_version_is_refused() {
-    let got = refusal(&with_sig(&sig_doc("ilium-sig/9", &[obj(0, "example", &vector_manifest())])), &trust_of(0, "example"));
-    assert!(got == "manifest.signature-invalid" || got == "package.signature-format", "{got}");
+    let got = refusal(
+        &with_sig(&sig_doc(
+            "ilium-sig/9",
+            &[obj(0, "example", &vector_manifest())],
+        )),
+        &trust_of(0, "example"),
+    );
+    assert!(
+        got == "manifest.signature-invalid" || got == "package.signature-format",
+        "{got}"
+    );
 }
 
 // ---- SEC-142/143/145: pinning, rotation, downgrade ----
 
 fn newer(seed: u8, version: &str) -> Vec<u8> {
-    let manifest = String::from_utf8(vector_manifest()).unwrap().replace("\"0.1.0\"", &format!("\"{version}\"")).into_bytes();
+    let manifest = String::from_utf8(vector_manifest())
+        .unwrap()
+        .replace("\"0.1.0\"", &format!("\"{version}\""))
+        .into_bytes();
     signed_package(seed, "example", &manifest)
 }
 
@@ -165,7 +216,11 @@ fn newer(seed: u8, version: &str) -> Vec<u8> {
 fn sec_142_update_signed_by_a_second_key_is_publisher_key_changed() {
     let fixture = installed_fixture();
     let out = install(&fixture, &newer(2, "0.2.0"), &["--trust", &key_id_of(2)]);
-    assert!(has(&out, "package.publisher-key-changed"), "{}", all_text(&out));
+    assert!(
+        has(&out, "package.publisher-key-changed"),
+        "{}",
+        all_text(&out)
+    );
 }
 
 /// REQ: SEC-142
@@ -181,9 +236,19 @@ fn sec_142_update_signed_by_the_same_key_is_accepted() {
 fn sec_142_uninstall_discards_the_pin() {
     let fixture = installed_fixture();
     run_cli(&fixture, &["uninstall", "example.minimal"]);
-    write_trust(&fixture, &trust_json(&[entry(0, "example", "Example Labs"), entry(2, "example", "Example Labs")]));
+    write_trust(
+        &fixture,
+        &trust_json(&[
+            entry(0, "example", "Example Labs"),
+            entry(2, "example", "Example Labs"),
+        ]),
+    );
     let out = install(&fixture, &newer(2, "0.2.0"), &[]);
-    assert!(!has(&out, "package.publisher-key-changed"), "{}", all_text(&out));
+    assert!(
+        !has(&out, "package.publisher-key-changed"),
+        "{}",
+        all_text(&out)
+    );
 }
 
 /// REQ: SEC-142
@@ -193,7 +258,11 @@ fn sec_142_unsigned_first_install_pins_unsigned_and_a_signed_update_is_not_silen
     install(&fixture, &vector_unsigned(), &["--allow-unsigned"]);
     let out = install(&fixture, &newer(0, "0.2.0"), &[]);
     // Either accepted as a tier change that resets grants, or refused: never a crash.
-    assert!(out.exit_code == 0 || !all_codes(&out).is_empty(), "{}", all_text(&out));
+    assert!(
+        out.exit_code == 0 || !all_codes(&out).is_empty(),
+        "{}",
+        all_text(&out)
+    );
 }
 
 /// REQ: SEC-143
@@ -204,9 +273,17 @@ fn sec_143_rotation_in_the_package_with_future_issued_is_ignored_and_update_refu
         "version": 1, "plugin_id": "example.minimal", "old_key_id": key_id_of(0), "new_key_id": key_id_of(2),
         "issued": "2999-01-01T00:00:00Z", "signature": b64url(&[0u8; 64])
     });
-    let manifest = String::from_utf8(vector_manifest()).unwrap().replace("\"0.1.0\"", "\"0.2.0\"").into_bytes();
+    let manifest = String::from_utf8(vector_manifest())
+        .unwrap()
+        .replace("\"0.1.0\"", "\"0.2.0\"")
+        .into_bytes();
     let text = sig_doc("ilium-sig/1", &[obj(2, "example", &manifest)]);
-    let bytes = zip_of(&[("manifest.json", manifest), ("rotation.json", rotation.to_string().into_bytes()), ("server.wasm", vector_component()), ("signature", text.into_bytes())]);
+    let bytes = zip_of(&[
+        ("manifest.json", manifest),
+        ("rotation.json", rotation.to_string().into_bytes()),
+        ("server.wasm", vector_component()),
+        ("signature", text.into_bytes()),
+    ]);
     let out = install(&fixture, &bytes, &["--trust", &key_id_of(2)]);
     assert_ne!(out.exit_code, 0, "{}", all_text(&out));
 }
@@ -215,7 +292,9 @@ fn sec_143_rotation_in_the_package_with_future_issued_is_ignored_and_update_refu
 #[test]
 fn doc_sec_143_rotation_is_accepted_only_under_the_pinned_old_key_and_not_future() {
     let text = page("reference-trust-and-supply-chain.md");
-    assert!(text.contains("verifies under the pinned old key") && text.contains("is not in the future"));
+    assert!(
+        text.contains("verifies under the pinned old key") && text.contains("is not in the future")
+    );
 }
 
 /// REQ: SEC-145
@@ -224,7 +303,11 @@ fn sec_145_lower_version_is_refused_without_the_flag() {
     let fixture = trusted_fixture();
     install(&fixture, &newer(0, "0.2.0"), &[]);
     let out = install(&fixture, &vector_signed(), &[]);
-    assert!(has(&out, "package.downgrade") || has(&out, "install.downgrade"), "{}", all_text(&out));
+    assert!(
+        has(&out, "package.downgrade") || has(&out, "install.downgrade"),
+        "{}",
+        all_text(&out)
+    );
     assert_ne!(out.exit_code, 0);
 }
 
@@ -245,7 +328,11 @@ fn sec_145_allow_downgrade_installs_and_audits_both_versions() {
 fn sec_145_same_version_is_not_a_downgrade() {
     let fixture = installed_fixture();
     let out = install(&fixture, &vector_signed(), &[]);
-    assert!(!has(&out, "package.downgrade") && !has(&out, "install.downgrade"), "{}", all_text(&out));
+    assert!(
+        !has(&out, "package.downgrade") && !has(&out, "install.downgrade"),
+        "{}",
+        all_text(&out)
+    );
 }
 
 // ---- SEC-144: remove ----
@@ -265,7 +352,10 @@ fn sec_144_remove_by_fingerprint_with_force_keeps_the_plugin_installed_but_stopp
 fn sec_144_trusting_the_key_again_reactivates_the_plugin() {
     let fixture = installed_fixture();
     run_cli(&fixture, &["trust", "remove", VECTOR_KEY_ID, "--force"]);
-    write_trust(&fixture, &trust_json(&[entry(0, "example", "Example Labs")]));
+    write_trust(
+        &fixture,
+        &trust_json(&[entry(0, "example", "Example Labs")]),
+    );
     assert!(!all_text(&run_cli(&fixture, &["list", "--json"])).contains("disabled-untrusted"));
 }
 
@@ -273,7 +363,13 @@ fn sec_144_trusting_the_key_again_reactivates_the_plugin() {
 #[test]
 fn sec_144_one_publisher_name_may_have_several_keys() {
     let fixture = cli_fixture();
-    write_trust(&fixture, &trust_json(&[entry(0, "example", "Example Labs"), entry(2, "example", "Example Labs")]));
+    write_trust(
+        &fixture,
+        &trust_json(&[
+            entry(0, "example", "Example Labs"),
+            entry(2, "example", "Example Labs"),
+        ]),
+    );
     let out = run_cli(&fixture, &["trust", "list", "--json"]);
     assert!(all_text(&out).contains(&key_id_of(0)) && all_text(&out).contains(&key_id_of(2)));
 }
@@ -304,16 +400,25 @@ impl Config for CliFixture {
 #[test]
 fn doc_sec_146_release_blocklist_is_signed_and_not_editable() {
     let text = page("reference-trust-and-supply-chain.md");
-    assert!(text.contains("signed with the project's release key") && text.contains("cannot edit it"));
+    assert!(
+        text.contains("signed with the project's release key") && text.contains("cannot edit it")
+    );
 }
 
 /// REQ: SEC-147
 #[test]
 fn sec_147_policy_blocklist_names_a_file_and_blocks_a_matching_plugin() {
     let fixture = trusted_fixture();
-    policy_with_blocklist(&fixture, json!([{"kind": "plugin", "id": "example.minimal", "versions": "*", "reason": "test block"}]));
+    policy_with_blocklist(
+        &fixture,
+        json!([{"kind": "plugin", "id": "example.minimal", "versions": "*", "reason": "test block"}]),
+    );
     let out = install(&fixture, &vector_signed(), &[]);
-    assert!(has(&out, "package.blocked") || !has(&out, "trust.key-unknown"), "{}", all_text(&out));
+    assert!(
+        has(&out, "package.blocked") || !has(&out, "trust.key-unknown"),
+        "{}",
+        all_text(&out)
+    );
 }
 
 /// REQ: SEC-147
@@ -326,7 +431,10 @@ fn doc_sec_147_unsigned_policy_blocklist_needs_a_root_owned_policy_file() {
 #[test]
 fn sec_148_package_sha256_entry_matches_the_package_hash() {
     let fixture = trusted_fixture();
-    policy_with_blocklist(&fixture, json!([{"kind": "package-sha256", "value": VECTOR_SIGNED_SHA256, "reason": "known bad"}]));
+    policy_with_blocklist(
+        &fixture,
+        json!([{"kind": "package-sha256", "value": VECTOR_SIGNED_SHA256, "reason": "known bad"}]),
+    );
     let out = install(&fixture, &vector_signed(), &[]);
     assert!(has(&out, "package.blocked"), "{}", all_text(&out));
 }
@@ -335,16 +443,28 @@ fn sec_148_package_sha256_entry_matches_the_package_hash() {
 #[test]
 fn sec_148_publisher_key_entry_matches_the_signing_key() {
     let fixture = trusted_fixture();
-    policy_with_blocklist(&fixture, json!([{"kind": "publisher-key", "value": VECTOR_KEY_ID, "reason": "stolen key"}]));
-    assert!(has(&install(&fixture, &vector_signed(), &[]), "package.blocked"));
+    policy_with_blocklist(
+        &fixture,
+        json!([{"kind": "publisher-key", "value": VECTOR_KEY_ID, "reason": "stolen key"}]),
+    );
+    assert!(has(
+        &install(&fixture, &vector_signed(), &[]),
+        "package.blocked"
+    ));
 }
 
 /// REQ: SEC-148
 #[test]
 fn sec_148_plugin_entry_with_other_id_does_not_match() {
     let fixture = trusted_fixture();
-    policy_with_blocklist(&fixture, json!([{"kind": "plugin", "id": "example.other", "versions": "*", "reason": "x"}]));
-    assert!(!has(&install(&fixture, &vector_signed(), &[]), "package.blocked"));
+    policy_with_blocklist(
+        &fixture,
+        json!([{"kind": "plugin", "id": "example.other", "versions": "*", "reason": "x"}]),
+    );
+    assert!(!has(
+        &install(&fixture, &vector_signed(), &[]),
+        "package.blocked"
+    ));
 }
 
 /// REQ: SEC-148
@@ -353,15 +473,24 @@ fn sec_148_one_character_different_package_hash_does_not_match() {
     let fixture = trusted_fixture();
     let mut wrong = VECTOR_SIGNED_SHA256.to_string();
     wrong.replace_range(0..1, if wrong.starts_with('0') { "1" } else { "0" });
-    policy_with_blocklist(&fixture, json!([{"kind": "package-sha256", "value": wrong, "reason": "x"}]));
-    assert!(!has(&install(&fixture, &vector_signed(), &[]), "package.blocked"));
+    policy_with_blocklist(
+        &fixture,
+        json!([{"kind": "package-sha256", "value": wrong, "reason": "x"}]),
+    );
+    assert!(!has(
+        &install(&fixture, &vector_signed(), &[]),
+        "package.blocked"
+    ));
 }
 
 /// REQ: SEC-149
 #[test]
 fn sec_149_match_at_install_is_package_blocked_with_policy_exit_7() {
     let fixture = trusted_fixture();
-    policy_with_blocklist(&fixture, json!([{"kind": "plugin", "id": "example.minimal", "versions": "*", "reason": "bad"}]));
+    policy_with_blocklist(
+        &fixture,
+        json!([{"kind": "plugin", "id": "example.minimal", "versions": "*", "reason": "bad"}]),
+    );
     let out = install(&fixture, &vector_signed(), &[]);
     assert!(has(&out, "package.blocked"), "{}", all_text(&out));
     assert_eq!(out.exit_code, 7);
@@ -371,9 +500,15 @@ fn sec_149_match_at_install_is_package_blocked_with_policy_exit_7() {
 #[test]
 fn sec_149_installed_match_is_disabled_with_the_notice_and_data_kept() {
     let fixture = installed_fixture();
-    policy_with_blocklist(&fixture, json!([{"kind": "plugin", "id": "example.minimal", "versions": "*", "reason": "bad release"}]));
+    policy_with_blocklist(
+        &fixture,
+        json!([{"kind": "plugin", "id": "example.minimal", "versions": "*", "reason": "bad release"}]),
+    );
     let text = all_text(&run_cli(&fixture, &["list", "--json"]));
-    assert!(text.contains("Blocked: bad release") || text.contains("blocked"), "{text}");
+    assert!(
+        text.contains("Blocked: bad release") || text.contains("blocked"),
+        "{text}"
+    );
     assert!(text.contains("example.minimal"));
 }
 
@@ -381,8 +516,14 @@ fn sec_149_installed_match_is_disabled_with_the_notice_and_data_kept() {
 #[test]
 fn sec_149_a_blocked_plugin_cannot_be_enabled() {
     let fixture = installed_fixture();
-    policy_with_blocklist(&fixture, json!([{"kind": "plugin", "id": "example.minimal", "versions": "*", "reason": "bad"}]));
-    assert_ne!(run_cli(&fixture, &["enable", "example.minimal", "--accept-risk"]).exit_code, 0);
+    policy_with_blocklist(
+        &fixture,
+        json!([{"kind": "plugin", "id": "example.minimal", "versions": "*", "reason": "bad"}]),
+    );
+    assert_ne!(
+        run_cli(&fixture, &["enable", "example.minimal", "--accept-risk"]).exit_code,
+        0
+    );
 }
 
 /// REQ: SEC-149
@@ -390,7 +531,14 @@ fn sec_149_a_blocked_plugin_cannot_be_enabled() {
 fn sec_149_a_malformed_blocklist_is_ignored() {
     let fixture = trusted_fixture();
     write_file(&fixture.config().join("blocklist.json"), b"not json");
-    write_file(&fixture.config().join("policy.toml"), format!("[packages]\nblocklist_file = \"{}\"\n", fixture.config().join("blocklist.json").display()).as_bytes());
+    write_file(
+        &fixture.config().join("policy.toml"),
+        format!(
+            "[packages]\nblocklist_file = \"{}\"\n",
+            fixture.config().join("blocklist.json").display()
+        )
+        .as_bytes(),
+    );
     let out = install(&fixture, &vector_signed(), &[]);
     assert!(!has(&out, "package.blocked"), "{}", all_text(&out));
 }
@@ -398,7 +546,11 @@ fn sec_149_a_malformed_blocklist_is_ignored() {
 // ---- SEC-150/151: archive defects and limits ----
 
 fn entries_plus(extra: Z) -> Vec<Z> {
-    let mut v = vec![Z::new("manifest.json", &vector_manifest()), Z::new("server.wasm", &vector_component()), extra];
+    let mut v = vec![
+        Z::new("manifest.json", &vector_manifest()),
+        Z::new("server.wasm", &vector_component()),
+        extra,
+    ];
     v.sort_by(|a, b| a.name.cmp(&b.name));
     v
 }
@@ -429,16 +581,27 @@ fn sec_150_nul_byte_in_a_name_is_path_invalid() {
 fn sec_150_duplicate_name_is_path_duplicate() {
     let mut v = entries_plus(Z::new("server.wasm", &vector_component()));
     v.sort_by(|a, b| a.name.cmp(&b.name));
-    assert_eq!(first_error(&build(&v, &Tail::default())), "package.path-duplicate");
+    assert_eq!(
+        first_error(&build(&v, &Tail::default())),
+        "package.path-duplicate"
+    );
 }
 
 /// REQ: SEC-150
 #[test]
 fn sec_150_names_equal_after_nfc_are_path_duplicate() {
-    let mut v = vec![Z::new("manifest.json", &vector_manifest()), Z::new("server.wasm", &vector_component()), Z::new("assets/\u{e9}.png", b"a"), Z::new("assets/e\u{301}.png", b"b")];
+    let mut v = vec![
+        Z::new("manifest.json", &vector_manifest()),
+        Z::new("server.wasm", &vector_component()),
+        Z::new("assets/\u{e9}.png", b"a"),
+        Z::new("assets/e\u{301}.png", b"b"),
+    ];
     v.sort_by(|a, b| a.name.cmp(&b.name));
     let got = first_error(&build(&v, &Tail::default()));
-    assert!(got == "package.path-duplicate" || got == "package.path-case-collision", "{got}");
+    assert!(
+        got == "package.path-duplicate" || got == "package.path-case-collision",
+        "{got}"
+    );
 }
 
 /// REQ: SEC-150
@@ -449,7 +612,10 @@ fn sec_150_symlink_entry_is_entry_symlink() {
     link.made = 0x0314;
     let bytes = build(&entries_plus(link), &Tail::default());
     let got = first_error(&bytes);
-    assert!(got == "package.entry-symlink" || got == "package.entry-directory", "{got}");
+    assert!(
+        got == "package.entry-symlink" || got == "package.entry-directory",
+        "{got}"
+    );
 }
 
 /// REQ: SEC-150
@@ -458,7 +624,10 @@ fn sec_150_setuid_bit_is_refused() {
     let mut file = Z::new("assets/run", b"x");
     file.external = 0x89ED_0000;
     let got = first_error(&build(&entries_plus(file), &Tail::default()));
-    assert!(got == "package.entry-symlink" || got == "package.entry-directory", "{got}");
+    assert!(
+        got == "package.entry-symlink" || got == "package.entry-directory",
+        "{got}"
+    );
 }
 
 /// REQ: SEC-150
@@ -466,7 +635,10 @@ fn sec_150_setuid_bit_is_refused() {
 fn sec_150_encrypted_entry_is_zip_invalid() {
     let mut file = Z::new("assets/a", b"x");
     file.flags = 0x0801;
-    assert_eq!(first_error(&build(&entries_plus(file), &Tail::default())), "package.zip-invalid");
+    assert_eq!(
+        first_error(&build(&entries_plus(file), &Tail::default())),
+        "package.zip-invalid"
+    );
 }
 
 /// REQ: SEC-150
@@ -474,13 +646,22 @@ fn sec_150_encrypted_entry_is_zip_invalid() {
 fn sec_150_unsupported_compression_method_is_zip_invalid() {
     let mut file = Z::new("assets/a", b"x");
     file.method = 12;
-    assert_eq!(first_error(&build(&entries_plus(file), &Tail::default())), "package.zip-invalid");
+    assert_eq!(
+        first_error(&build(&entries_plus(file), &Tail::default())),
+        "package.zip-invalid"
+    );
 }
 
 /// REQ: SEC-150
 #[test]
 fn sec_150_trailing_data_after_the_end_record_is_zip_invalid() {
-    let bytes = build(&entries_plus(Z::new("assets/a", b"x")), &Tail { trailing: b"junk".to_vec(), ..Tail::default() });
+    let bytes = build(
+        &entries_plus(Z::new("assets/a", b"x")),
+        &Tail {
+            trailing: b"junk".to_vec(),
+            ..Tail::default()
+        },
+    );
     assert_eq!(first_error(&bytes), "package.zip-invalid");
 }
 
@@ -490,7 +671,10 @@ fn sec_150_local_header_name_differing_from_the_central_directory_is_refused() {
     let mut file = Z::new("assets/a", b"x");
     file.local_name = Some(b"assets/b".to_vec());
     let got = first_error(&build(&entries_plus(file), &Tail::default()));
-    assert!(got == "package.zip-invalid" || got == "package.header-mismatch", "{got}");
+    assert!(
+        got == "package.zip-invalid" || got == "package.header-mismatch",
+        "{got}"
+    );
 }
 
 /// REQ: SEC-150
@@ -499,7 +683,10 @@ fn sec_150_local_header_crc_differing_from_the_central_directory_is_refused() {
     let mut file = Z::new("assets/a", b"x");
     file.local_crc = Some(0x1234_5678);
     let got = first_error(&build(&entries_plus(file), &Tail::default()));
-    assert!(got == "package.zip-invalid" || got == "package.header-mismatch", "{got}");
+    assert!(
+        got == "package.zip-invalid" || got == "package.header-mismatch",
+        "{got}"
+    );
 }
 
 /// REQ: SEC-150
@@ -508,7 +695,10 @@ fn sec_150_overlapping_entries_are_refused() {
     let mut file = Z::new("assets/a", b"xxxxxxxx");
     file.offset = Some(10);
     let got = first_error(&build(&entries_plus(file), &Tail::default()));
-    assert!(got == "package.zip-invalid" || got == "package.header-mismatch", "{got}");
+    assert!(
+        got == "package.zip-invalid" || got == "package.header-mismatch",
+        "{got}"
+    );
 }
 
 /// REQ: SEC-150
@@ -521,7 +711,10 @@ fn sec_150_clean_archive_has_no_stage_one_error() {
 #[test]
 fn sec_151_entry_count_4096_is_not_refused_for_count_and_4097_is() {
     let build_with = |extra: usize| {
-        let mut v = vec![Z::new("manifest.json", &vector_manifest()), Z::new("server.wasm", &vector_component())];
+        let mut v = vec![
+            Z::new("manifest.json", &vector_manifest()),
+            Z::new("server.wasm", &vector_component()),
+        ];
         for i in 0..extra {
             v.push(Z::new(&format!("assets/f{i:05}"), b"x"));
         }
@@ -530,8 +723,14 @@ fn sec_151_entry_count_4096_is_not_refused_for_count_and_4097_is() {
     };
     let at_limit = stage1_codes(&build_with(4094));
     let over = stage1_codes(&build_with(4095));
-    assert!(!at_limit.contains(&"package.zip-invalid".to_string()), "{at_limit:?}");
-    assert!(over.contains(&"package.zip-invalid".to_string()), "{over:?}");
+    assert!(
+        !at_limit.contains(&"package.zip-invalid".to_string()),
+        "{at_limit:?}"
+    );
+    assert!(
+        over.contains(&"package.zip-invalid".to_string()),
+        "{over:?}"
+    );
 }
 
 /// REQ: SEC-151
@@ -539,25 +738,38 @@ fn sec_151_entry_count_4096_is_not_refused_for_count_and_4097_is() {
 fn sec_151_name_of_255_bytes_is_accepted_256_is_refused() {
     let ok = format!("assets/{}", "a".repeat(255 - 7));
     let long = format!("assets/{}", "a".repeat(256 - 7));
-    assert!(!stage1_codes(&build(&entries_plus(Z::new(&ok, b"x")), &Tail::default())).iter().any(|c| c == "package.zip-invalid"));
+    assert!(
+        !stage1_codes(&build(&entries_plus(Z::new(&ok, b"x")), &Tail::default()))
+            .iter()
+            .any(|c| c == "package.zip-invalid")
+    );
     let got = stage1_codes(&build(&entries_plus(Z::new(&long, b"x")), &Tail::default()));
-    assert!(got.contains(&"package.zip-invalid".to_string()) || got.contains(&"package.path-invalid".to_string()), "{got:?}");
+    assert!(
+        got.contains(&"package.zip-invalid".to_string())
+            || got.contains(&"package.path-invalid".to_string()),
+        "{got:?}"
+    );
 }
 
 /// REQ: SEC-151
 #[test]
 fn sec_151_declared_total_over_512_mib_is_zip_invalid() {
     let big = Z::claiming("assets/big", 512 * 1024 * 1024 + 1);
-    assert!(stage1_codes(&build(&entries_plus(big), &Tail::default())).contains(&"package.zip-invalid".to_string()));
+    assert!(stage1_codes(&build(&entries_plus(big), &Tail::default()))
+        .contains(&"package.zip-invalid".to_string()));
 }
 
 /// REQ: SEC-151
 #[test]
 fn sec_151_declared_total_exactly_512_mib_is_not_refused_for_size() {
-    let total = 512u32 * 1024 * 1024 - vector_manifest().len() as u32 - vector_component().len() as u32;
+    let total =
+        512u32 * 1024 * 1024 - vector_manifest().len() as u32 - vector_component().len() as u32;
     let big = Z::claiming("assets/big", total);
     let codes = stage1_codes(&build(&entries_plus(big), &Tail::default()));
-    assert!(!codes.contains(&"package.zip-invalid".to_string()), "{codes:?}");
+    assert!(
+        !codes.contains(&"package.zip-invalid".to_string()),
+        "{codes:?}"
+    );
 }
 
 /// REQ: SEC-151
@@ -576,7 +788,8 @@ fn sec_151_compression_ratio_above_200_to_1_is_refused() {
 #[test]
 fn sec_152_files_are_installed_read_only_in_a_0700_folder() {
     let fixture = installed_fixture();
-    let wasm = find_installed(&fixture.root.path().join("data"), "server.wasm").expect("installed file");
+    let wasm =
+        find_installed(&fixture.root.path().join("data"), "server.wasm").expect("installed file");
     assert_eq!(mode_of(&wasm), 0o400);
     assert_eq!(mode_of(wasm.parent().expect("version folder")), 0o700);
 }
@@ -585,8 +798,12 @@ fn sec_152_files_are_installed_read_only_in_a_0700_folder() {
 #[test]
 fn sec_152_install_path_ends_with_id_and_version() {
     let fixture = installed_fixture();
-    let wasm = find_installed(&fixture.root.path().join("data"), "server.wasm").expect("installed file");
-    let parts: Vec<String> = wasm.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect();
+    let wasm =
+        find_installed(&fixture.root.path().join("data"), "server.wasm").expect("installed file");
+    let parts: Vec<String> = wasm
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy().into_owned())
+        .collect();
     let tail = &parts[parts.len() - 3..];
     assert_eq!(tail, ["example.minimal", "0.1.0", "server.wasm"]);
 }
@@ -616,7 +833,10 @@ fn sec_153_edited_file_disables_the_plugin_and_audits_the_failure() {
     tamper_installed(&fixture);
     run_cli(&fixture, &["verify", "example.minimal"]);
     let list = all_text(&run_cli(&fixture, &["list", "--json"]));
-    assert!(list.contains("Files changed after install") || list.contains("disabled"), "{list}");
+    assert!(
+        list.contains("Files changed after install") || list.contains("disabled"),
+        "{list}"
+    );
     assert!(all_text(&run_cli(&fixture, &["audit", "--json"])).contains("integrity-failure"));
 }
 
@@ -651,7 +871,10 @@ fn sec_154_inspect_prints_manifest_file_signature_and_summary_lines() {
 fn sec_154_inspect_lists_each_file_with_size_and_hash() {
     let out = inspect(&vector_signed());
     let text = all_text(&out);
-    assert!(text.contains(VECTOR_COMPONENT_SHA256) && text.contains("server.wasm"), "{text}");
+    assert!(
+        text.contains(VECTOR_COMPONENT_SHA256) && text.contains("server.wasm"),
+        "{text}"
+    );
 }
 
 /// REQ: SEC-154
@@ -700,7 +923,10 @@ fn sec_155_an_unlisted_sbom_is_refused_file_unlisted() {
 fn sec_155_inspect_displays_the_provenance_entries() {
     let bytes = package_with(&[("provenance.json", b"{}"), ("sbom.spdx.json", b"{}")]);
     let text = all_text(&inspect(&bytes));
-    assert!(text.contains("provenance.json") && text.contains("sbom.spdx.json"), "{text}");
+    assert!(
+        text.contains("provenance.json") && text.contains("sbom.spdx.json"),
+        "{text}"
+    );
 }
 
 // ---- SEC-170..174: supply chain (review rows) ----
@@ -719,17 +945,31 @@ fn sec_170_cargo_lock_is_committed() {
 #[test]
 fn sec_170_the_wasmtime_version_is_pinned_exactly() {
     let lock = std::fs::read_to_string(workspace_root().join("Cargo.lock")).expect("Cargo.lock");
-    assert!(lock.contains("name = \"wasmtime\""), "wasmtime is not in Cargo.lock");
-    let manifest = std::fs::read_to_string(workspace_root().join("Cargo.toml")).expect("Cargo.toml");
-    let line = manifest.lines().find(|l| l.trim_start().starts_with("wasmtime")).expect("wasmtime dependency");
-    assert!(line.contains("\"=") || line.contains("version = \"="), "not an exact pin: {line}");
+    assert!(
+        lock.contains("name = \"wasmtime\""),
+        "wasmtime is not in Cargo.lock"
+    );
+    let manifest =
+        std::fs::read_to_string(workspace_root().join("Cargo.toml")).expect("Cargo.toml");
+    let line = manifest
+        .lines()
+        .find(|l| l.trim_start().starts_with("wasmtime"))
+        .expect("wasmtime dependency");
+    assert!(
+        line.contains("\"=") || line.contains("version = \"="),
+        "not an exact pin: {line}"
+    );
 }
 
 /// REQ: SEC-171
 #[test]
 fn doc_sec_171_advisory_response_times_are_14_days_and_48_hours() {
     let text = page("reference-trust-and-supply-chain.md");
-    assert!(text.contains("14 days") && text.contains("48 hours") && text.contains("runtime-vulnerable"));
+    assert!(
+        text.contains("14 days")
+            && text.contains("48 hours")
+            && text.contains("runtime-vulnerable")
+    );
 }
 
 /// REQ: SEC-172
@@ -773,7 +1013,10 @@ fn sec_177_fingerprint_is_sha256_of_the_32_byte_public_key() {
 fn sec_177_trust_list_shows_groups_of_four() {
     let fixture = trusted_fixture();
     let text = all_text(&run_cli(&fixture, &["trust", "list"]));
-    assert!(text.contains("5647 5aa7 5463 474c") || text.contains(VECTOR_KEY_ID), "{text}");
+    assert!(
+        text.contains("5647 5aa7 5463 474c") || text.contains(VECTOR_KEY_ID),
+        "{text}"
+    );
 }
 
 /// REQ: SEC-177
@@ -791,7 +1034,11 @@ fn sec_177_two_keys_with_one_short_form_are_refused_collision() {
     let path = put_package(&fixture, "c.pub", text.as_bytes());
     let out = run_cli(&fixture, &["trust", "add", path.as_str(), "--yes"]);
     assert_ne!(out.exit_code, 0);
-    assert!(has(&out, "trust.collision") || has(&out, "trust.key-malformed"), "{}", all_text(&out));
+    assert!(
+        has(&out, "trust.collision") || has(&out, "trust.key-malformed"),
+        "{}",
+        all_text(&out)
+    );
 }
 
 /// REQ: SEC-178
@@ -799,11 +1046,29 @@ fn sec_177_two_keys_with_one_short_form_are_refused_collision() {
 fn sec_178_keygen_writes_publisher_pub_with_the_algorithm_and_a_32_byte_key() {
     let fixture = cli_fixture();
     let target = fixture.work().join("k");
-    let out = run_cli(&fixture, &["keygen", "--out", &target.to_string_lossy(), "--publisher-id", "example", "--publisher", "Example Labs", "--no-passphrase"]);
+    let out = run_cli(
+        &fixture,
+        &[
+            "keygen",
+            "--out",
+            &target.to_string_lossy(),
+            "--publisher-id",
+            "example",
+            "--publisher",
+            "Example Labs",
+            "--no-passphrase",
+        ],
+    );
     assert_eq!(out.exit_code, 0, "{}", all_text(&out));
-    let value: serde_json::Value = serde_json::from_slice(&std::fs::read(target.join("publisher.pub")).expect("publisher.pub")).expect("json");
+    let value: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(target.join("publisher.pub")).expect("publisher.pub"),
+    )
+    .expect("json");
     assert_eq!(value["algorithm"], "ed25519");
-    assert_eq!(unb64url(value["public_key"].as_str().expect("public_key")).len(), 32);
+    assert_eq!(
+        unb64url(value["public_key"].as_str().expect("public_key")).len(),
+        32
+    );
 }
 
 /// REQ: SEC-178
@@ -811,16 +1076,46 @@ fn sec_178_keygen_writes_publisher_pub_with_the_algorithm_and_a_32_byte_key() {
 fn sec_178_publisher_key_file_has_mode_0600() {
     let fixture = cli_fixture();
     let target = fixture.work().join("k");
-    run_cli(&fixture, &["keygen", "--out", &target.to_string_lossy(), "--publisher-id", "example", "--publisher", "Example Labs", "--no-passphrase"]);
+    run_cli(
+        &fixture,
+        &[
+            "keygen",
+            "--out",
+            &target.to_string_lossy(),
+            "--publisher-id",
+            "example",
+            "--publisher",
+            "Example Labs",
+            "--no-passphrase",
+        ],
+    );
     assert_eq!(mode_of(&target.join("publisher.key")), 0o600);
 }
 
 /// REQ: SEC-178
 #[test]
-fn sec_178_keygen_without_no_passphrase_and_without_a_passphrase_source_does_not_write_a_bare_key() {
+fn sec_178_keygen_without_no_passphrase_and_without_a_passphrase_source_does_not_write_a_bare_key()
+{
     let fixture = cli_fixture();
     let target = fixture.work().join("k");
-    let out = run_env(&fixture, &["keygen", "--out", &target.to_string_lossy(), "--publisher-id", "example", "--publisher", "Example Labs"], &[]);
+    let out = run_env(
+        &fixture,
+        &[
+            "keygen",
+            "--out",
+            &target.to_string_lossy(),
+            "--publisher-id",
+            "example",
+            "--publisher",
+            "Example Labs",
+        ],
+        &[],
+    );
     let key = target.join("publisher.key");
-    assert!(out.exit_code != 0 || !std::fs::read_to_string(&key).unwrap_or_default().contains("BEGIN PRIVATE KEY"));
+    assert!(
+        out.exit_code != 0
+            || !std::fs::read_to_string(&key)
+                .unwrap_or_default()
+                .contains("BEGIN PRIVATE KEY")
+    );
 }

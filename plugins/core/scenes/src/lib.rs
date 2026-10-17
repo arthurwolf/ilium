@@ -4,14 +4,14 @@
 //! implementing the lifecycle, the handler and the exports its manifest lists. Every body is
 //! `unimplemented!` until the implementation phase moves the feature here.
 
-use ilium_plugin_sdk::{Lifecycle, NativeRenderer, Renderer, ilium_plugin};
-use ilium_plugin_sdk::plugin::NativeSurface;
 use ilium_plugin_sdk::generated::anim::renderer_types::FrameInput;
 use ilium_plugin_sdk::generated::anim::renderer_types::Readiness;
 use ilium_plugin_sdk::generated::anim::surface::FrameSurfaceHandle;
 use ilium_plugin_sdk::generated::exports::renderer::SceneRendererHandle;
+use ilium_plugin_sdk::plugin::NativeSurface;
 use ilium_plugin_sdk::types::Activation;
 use ilium_plugin_sdk::types::PluginError;
+use ilium_plugin_sdk::{ilium_plugin, Lifecycle, NativeRenderer, Renderer};
 
 /// The scene side of `ilium.core.scenes` (core-plugin-scenes.md, world `ilium:anim/base@0.1.0`).
 #[ilium_plugin(side = "scene", exports = [])]
@@ -49,15 +49,24 @@ impl Renderer for ScenesScene {
         unimplemented!("ilium.core.scenes: scene renderer.scene_renderer_uses_cell_colors")
     }
 
-    fn scene_renderer_render( &mut self, _handle: SceneRendererHandle, _frame: FrameInput, _surface: FrameSurfaceHandle, ) {
+    fn scene_renderer_render(
+        &mut self,
+        _handle: SceneRendererHandle,
+        _frame: FrameInput,
+        _surface: FrameSurfaceHandle,
+    ) {
         unimplemented!("ilium.core.scenes: scene renderer.scene_renderer_render")
     }
 
-    fn scene_renderer_set_palette( &mut self, _handle: SceneRendererHandle, _palette_rgb: Vec<u32>, ) {
+    fn scene_renderer_set_palette(&mut self, _handle: SceneRendererHandle, _palette_rgb: Vec<u32>) {
         unimplemented!("ilium.core.scenes: scene renderer.scene_renderer_set_palette")
     }
 
-    fn scene_renderer_reconfigure( &mut self, _handle: SceneRendererHandle, _settings_json: String, ) -> bool {
+    fn scene_renderer_reconfigure(
+        &mut self,
+        _handle: SceneRendererHandle,
+        _settings_json: String,
+    ) -> bool {
         unimplemented!("ilium.core.scenes: scene renderer.scene_renderer_reconfigure")
     }
 

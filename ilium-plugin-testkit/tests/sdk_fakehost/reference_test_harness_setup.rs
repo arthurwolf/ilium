@@ -5,9 +5,9 @@ use ilium_plugin_testkit::errors::codes;
 use ilium_plugin_testkit::{FakeHost, Mode};
 
 use crate::common::{
-    DEFAULT_CLOCK_MS, ERROR_CODE_NAMES, Spy, assert_fails_with, code_name, manifest_text,
-    outcome_code, sound, sound_keyed, spy, spy_reset, spy_script, strings, temp_dir, with_clean_env,
-    with_env, write_file,
+    assert_fails_with, code_name, manifest_text, outcome_code, sound, sound_keyed, spy, spy_reset,
+    spy_script, strings, temp_dir, with_clean_env, with_env, write_file, Spy, DEFAULT_CLOCK_MS,
+    ERROR_CODE_NAMES,
 };
 
 fn active_host() -> FakeHost {
@@ -19,7 +19,11 @@ fn active_host() -> FakeHost {
 
 fn manifest_host(server: &[&str], client: &[&str], label: &str) -> std::path::PathBuf {
     let dir = temp_dir(label);
-    write_file(&dir, "ilium-plugin.json", &manifest_text("example.demo", server, client))
+    write_file(
+        &dir,
+        "ilium-plugin.json",
+        &manifest_text("example.demo", server, client),
+    )
 }
 
 // ---- DEV-410 ---------------------------------------------------------------------------------
@@ -40,7 +44,10 @@ fn dev_410_builder_calls_chain_and_the_result_activates() {
             .build();
         host.activate::<Spy>();
         let log = spy();
-        assert_eq!(log.activations[0].granted, strings(&["agent.read", "tree.read", "ui.panels"]));
+        assert_eq!(
+            log.activations[0].granted,
+            strings(&["agent.read", "tree.read", "ui.panels"])
+        );
     });
 }
 
@@ -62,7 +69,8 @@ fn dev_410_each_builder_method_after_activate_fails_with_setup_closed() {
         for (name, call) in calls {
             let host = active_host();
             let result = crate::common::panic_text(move || call(host));
-            let text = result.unwrap_or_else(|| panic!("builder method {name} succeeded after activate"));
+            let text =
+                result.unwrap_or_else(|| panic!("builder method {name} succeeded after activate"));
             assert!(text.contains(codes::SETUP_CLOSED), "{name}: {text}");
         }
     });
@@ -91,7 +99,10 @@ fn dev_411_for_manifest_takes_the_grants_of_the_server_side_sorted() {
         let mut host = FakeHost::for_manifest(&path).expect("manifest loads");
         spy_reset();
         host.activate::<Spy>();
-        assert_eq!(spy().activations[0].granted, strings(&["agent.read", "tree.read"]));
+        assert_eq!(
+            spy().activations[0].granted,
+            strings(&["agent.read", "tree.read"])
+        );
         assert_eq!(spy().activations[0].plugin.0, "example.demo");
     });
 }
@@ -101,13 +112,18 @@ fn dev_411_for_manifest_takes_the_grants_of_the_server_side_sorted() {
 fn dev_411_for_manifest_with_the_client_side_takes_the_client_grants() {
     with_clean_env(|| {
         let path = manifest_host(&["tree.read"], &["notify.desktop", "ui.panels"], "m411b");
-        let mut host = FakeHost::for_manifest(&path).expect("manifest loads").side("client");
+        let mut host = FakeHost::for_manifest(&path)
+            .expect("manifest loads")
+            .side("client");
         spy_reset();
         host.activate::<Spy>();
         let log = spy();
         let activation = &log.activations[0];
         assert_eq!(activation.side, "client");
-        assert_eq!(activation.granted, strings(&["notify.desktop", "ui.panels"]));
+        assert_eq!(
+            activation.granted,
+            strings(&["notify.desktop", "ui.panels"])
+        );
     });
 }
 
@@ -129,7 +145,9 @@ fn dev_411_a_grant_not_in_the_manifest_is_refused_by_grant_now_with_grant_not_de
         let mut host = FakeHost::for_manifest(&path).expect("manifest loads");
         spy_reset();
         host.activate::<Spy>();
-        let error = host.grant_now("tree.write").expect_err("tree.write is not declared");
+        let error = host
+            .grant_now("tree.write")
+            .expect_err("tree.write is not declared");
         assert_eq!(error.code, codes::GRANT_NOT_DECLARED);
     });
 }
@@ -141,8 +159,12 @@ fn dev_411_new_accepts_any_grant_name_of_the_catalogue() {
         let mut host = FakeHost::new().grant("tree.write");
         spy_reset();
         host.activate::<Spy>();
-        host.grant_now("tree.decorate").expect("new() has no manifest to refuse it");
-        assert_eq!(spy().activations[1].granted, strings(&["tree.decorate", "tree.write"]));
+        host.grant_now("tree.decorate")
+            .expect("new() has no manifest to refuse it");
+        assert_eq!(
+            spy().activations[1].granted,
+            strings(&["tree.decorate", "tree.write"])
+        );
     });
 }
 
@@ -342,7 +364,10 @@ fn dev_416_an_intent_for_a_declined_capability_is_refused_not_permitted() {
         spy_script(vec![vec![sound(1)]]);
         host.deliver(crate::common::client_batch(1));
         host.settle();
-        assert_eq!(outcome_code(&host.outcomes()[0]), Some(ErrorCode::NotPermitted));
+        assert_eq!(
+            outcome_code(&host.outcomes()[0]),
+            Some(ErrorCode::NotPermitted)
+        );
     });
 }
 
@@ -373,7 +398,10 @@ fn dev_417_a_refusal_carries_one_of_the_15_enum_codes() {
         let code = outcome_code(&host.outcomes()[0]).expect("refused");
         let name = code_name(code);
         assert!(ERROR_CODE_NAMES.contains(&name.as_str()), "{name}");
-        assert!(!name.contains('.'), "dotted code in plugin-error.code: {name}");
+        assert!(
+            !name.contains('.'),
+            "dotted code in plugin-error.code: {name}"
+        );
     });
 }
 
@@ -390,7 +418,11 @@ fn dev_417_a_bad_dedup_key_uses_invalid_argument_and_not_a_dotted_code() {
         match &host.outcomes()[0] {
             Outcome::Refused(error) => {
                 assert_eq!(error.code, ErrorCode::InvalidArgument);
-                assert!(error.message.starts_with("dedup-key-invalid:"), "{}", error.message);
+                assert!(
+                    error.message.starts_with("dedup-key-invalid:"),
+                    "{}",
+                    error.message
+                );
                 assert!(!code_name(error.code).contains('.'));
             }
             other => panic!("expected refused, got {other:?}"),
@@ -420,7 +452,13 @@ fn dev_417_every_error_code_variant_serializes_to_one_of_the_15_names() {
         ErrorCode::Internal,
     ];
     let names: Vec<String> = all.iter().map(|code| code_name(*code)).collect();
-    assert_eq!(names, ERROR_CODE_NAMES.iter().map(|name| name.to_string()).collect::<Vec<_>>());
+    assert_eq!(
+        names,
+        ERROR_CODE_NAMES
+            .iter()
+            .map(|name| name.to_string())
+            .collect::<Vec<_>>()
+    );
     // Pair with the host so the check exercises the harness and not only the generated types.
     let host = active_host();
     assert_eq!(host.snapshot().instance, 1);

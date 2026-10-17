@@ -44,7 +44,10 @@ const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwx
 pub fn b64url(bytes: &[u8]) -> String {
     let mut out = String::new();
     for chunk in bytes.chunks(3) {
-        let n = chunk.iter().enumerate().fold(0u32, |acc, (i, b)| acc | (*b as u32) << (16 - 8 * i));
+        let n = chunk
+            .iter()
+            .enumerate()
+            .fold(0u32, |acc, (i, b)| acc | (*b as u32) << (16 - 8 * i));
         let digits = chunk.len() + 1;
         for i in 0..digits {
             out.push(ALPHABET[((n >> (18 - 6 * i)) & 63) as usize] as char);
@@ -58,7 +61,10 @@ pub fn unb64url(text: &str) -> Vec<u8> {
     let mut acc = 0u32;
     let mut bits = 0;
     for c in text.bytes() {
-        let v = ALPHABET.iter().position(|a| *a == c).expect("base64url character") as u32;
+        let v = ALPHABET
+            .iter()
+            .position(|a| *a == c)
+            .expect("base64url character") as u32;
         acc = acc << 6 | v;
         bits += 6;
         if bits >= 8 {
@@ -117,12 +123,19 @@ pub fn sig_doc(format: &str, objs: &[Obj]) -> String {
     if items.is_empty() {
         return format!("{{\n  \"format\": \"{format}\",\n  \"signatures\": []\n}}\n");
     }
-    format!("{{\n  \"format\": \"{format}\",\n  \"signatures\": [\n{}\n  ]\n}}\n", items.join(",\n"))
+    format!(
+        "{{\n  \"format\": \"{format}\",\n  \"signatures\": [\n{}\n  ]\n}}\n",
+        items.join(",\n")
+    )
 }
 
 /// The vector package with `signature` replaced by `text`, entries in bytewise path order.
 pub fn with_signature_text(manifest: &[u8], component: &[u8], text: &[u8]) -> Vec<u8> {
-    zip_of(&[("manifest.json", manifest.to_vec()), ("server.wasm", component.to_vec()), ("signature", text.to_vec())])
+    zip_of(&[
+        ("manifest.json", manifest.to_vec()),
+        ("server.wasm", component.to_vec()),
+        ("signature", text.to_vec()),
+    ])
 }
 
 pub fn with_sig(text: &str) -> Vec<u8> {
@@ -133,24 +146,37 @@ pub fn with_sig(text: &str) -> Vec<u8> {
 /// unchanged because the component is the same.
 pub fn manifest_for(id: &str, publisher: &str) -> Vec<u8> {
     let text = String::from_utf8(vector_manifest()).expect("utf8");
-    text.replace("example.minimal", id).replace("Example Labs", publisher).into_bytes()
+    text.replace("example.minimal", id)
+        .replace("Example Labs", publisher)
+        .into_bytes()
 }
 
 /// A package whose manifest is `manifest`, signed by key `n` as `publisher_id`.
 pub fn signed_package(n: u8, publisher_id: &str, manifest: &[u8]) -> Vec<u8> {
-    with_signature_text(manifest, &vector_component(), sig_doc("ilium-sig/1", &[obj(n, publisher_id, manifest)]).as_bytes())
+    with_signature_text(
+        manifest,
+        &vector_component(),
+        sig_doc("ilium-sig/1", &[obj(n, publisher_id, manifest)]).as_bytes(),
+    )
 }
 
 pub fn trust_of(n: u8, publisher_id: &str) -> TrustStore {
     TrustStore {
-        keys: vec![TrustedKey { key_id: key_id_of(n), publisher_id: publisher_id.into(), public_key: PublicKey(public_of(n)) }],
+        keys: vec![TrustedKey {
+            key_id: key_id_of(n),
+            publisher_id: publisher_id.into(),
+            public_key: PublicKey(public_of(n)),
+        }],
     }
 }
 
 /// First error code from reading then verifying, or "accepted".
 pub fn refusal(bytes: &[u8], trust: &TrustStore) -> String {
     match read_package(bytes) {
-        Err(diagnostics) => error_codes(&diagnostics).first().cloned().unwrap_or_else(|| "no-error-code".into()),
+        Err(diagnostics) => error_codes(&diagnostics)
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "no-error-code".into()),
         Ok(package) => match verify(&package, trust, now()) {
             Err(d) => d.code.as_str().to_string(),
             Ok(_) => "accepted".into(),
@@ -160,7 +186,10 @@ pub fn refusal(bytes: &[u8], trust: &TrustStore) -> String {
 
 pub fn read_refusal(bytes: &[u8]) -> String {
     match read_package(bytes) {
-        Err(diagnostics) => error_codes(&diagnostics).first().cloned().unwrap_or_else(|| "no-error-code".into()),
+        Err(diagnostics) => error_codes(&diagnostics)
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "no-error-code".into()),
         Ok(_) => "accepted".into(),
     }
 }
@@ -177,7 +206,14 @@ pub struct Entry {
 }
 
 pub fn entry(seed: u8, publisher_id: &'static str, publisher: &'static str) -> Entry {
-    Entry { seed, publisher_id, publisher, status: "trusted", revoked: None, added_by: "user" }
+    Entry {
+        seed,
+        publisher_id,
+        publisher,
+        status: "trusted",
+        revoked: None,
+        added_by: "user",
+    }
 }
 
 pub fn trust_json(entries: &[Entry]) -> String {
@@ -194,19 +230,27 @@ pub fn trust_json(entries: &[Entry]) -> String {
             )
         })
         .collect();
-    format!("{{\n  \"format\": \"ilium-trust/1\",\n  \"keys\": [\n{}\n  ]\n}}\n", items.join(",\n"))
+    format!(
+        "{{\n  \"format\": \"ilium-trust/1\",\n  \"keys\": [\n{}\n  ]\n}}\n",
+        items.join(",\n")
+    )
 }
 
 /// Writes the user trust store where either reading finds it (see API_GAPS.md).
 pub fn write_trust(fixture: &CliFixture, text: &str) {
     write_file(&fixture.state().join("trust.json"), text.as_bytes());
-    write_file(&fixture.state().join("ilium").join("trust.json"), text.as_bytes());
+    write_file(
+        &fixture.state().join("ilium").join("trust.json"),
+        text.as_bytes(),
+    );
 }
 
 pub fn read_trust(fixture: &CliFixture) -> Option<String> {
     let a = fixture.state().join("ilium").join("trust.json");
     let b = fixture.state().join("trust.json");
-    std::fs::read_to_string(&a).or_else(|_| std::fs::read_to_string(&b)).ok()
+    std::fs::read_to_string(&a)
+        .or_else(|_| std::fs::read_to_string(&b))
+        .ok()
 }
 
 pub fn put_package(fixture: &CliFixture, name: &str, bytes: &[u8]) -> String {
@@ -220,7 +264,10 @@ static ENV_LOCK: Mutex<()> = Mutex::new(());
 /// Runs the CLI with environment variables set, restoring them afterwards.
 pub fn run_env(fixture: &CliFixture, args: &[&str], vars: &[(&str, &str)]) -> CliOutput {
     let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let saved: Vec<(String, Option<String>)> = vars.iter().map(|(k, _)| (k.to_string(), std::env::var(k).ok())).collect();
+    let saved: Vec<(String, Option<String>)> = vars
+        .iter()
+        .map(|(k, _)| (k.to_string(), std::env::var(k).ok()))
+        .collect();
     for (k, v) in vars {
         std::env::set_var(k, v);
     }
@@ -280,11 +327,17 @@ pub fn write_key(path: &std::path::Path, n: u8, mode: u32) {
 
 pub fn mode_of(path: &std::path::Path) -> u32 {
     use std::os::unix::fs::PermissionsExt;
-    std::fs::metadata(path).expect("metadata").permissions().mode() & 0o777
+    std::fs::metadata(path)
+        .expect("metadata")
+        .permissions()
+        .mode()
+        & 0o777
 }
 
 /// Text of a manual page (page-text rows).
 pub fn page(name: &str) -> String {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../docs/plugins-manual/pages").join(name);
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../docs/plugins-manual/pages")
+        .join(name);
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
 }

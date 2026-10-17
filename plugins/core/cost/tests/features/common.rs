@@ -11,8 +11,8 @@ use ilium_plugin_sdk::exports::{ServiceCall, ServiceReply};
 use ilium_plugin_sdk::primitives::{TranscriptTurn, TurnRole};
 use ilium_plugin_sdk::testing::{FakeHost, TreeNode};
 use ilium_plugin_sdk::types::{
-    AgentActivity, AgentActivityEvent, AgentModel, AgentModelEvent, AgentView, Event, Intent, NodeClass,
-    NodeId, PluginId, SetDecorationSpec, Submission,
+    AgentActivity, AgentActivityEvent, AgentModel, AgentModelEvent, AgentView, Event, Intent,
+    NodeClass, NodeId, PluginId, SetDecorationSpec, Submission,
 };
 use serde_json::Value;
 
@@ -46,7 +46,9 @@ pub fn workspace_root() -> PathBuf {
 
 /// The text of a manual page by file stem, for example `core-plugin-cost`.
 pub fn page(stem: &str) -> String {
-    let path = workspace_root().join("docs/plugins-manual/pages").join(format!("{stem}.md"));
+    let path = workspace_root()
+        .join("docs/plugins-manual/pages")
+        .join(format!("{stem}.md"));
     std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("page {path:?}: {error}"))
 }
 
@@ -61,7 +63,10 @@ pub fn user_doc(name: &str) -> String {
 }
 
 pub fn golden_path(name: &str) -> String {
-    format!("{}/tests/features/golden/{name}", env!("CARGO_MANIFEST_DIR"))
+    format!(
+        "{}/tests/features/golden/{name}",
+        env!("CARGO_MANIFEST_DIR")
+    )
 }
 
 /// The bodies of the ```json fences of a page, in order.
@@ -70,7 +75,9 @@ pub fn json_blocks(page: &str) -> Vec<String> {
     let mut rest = page;
     while let Some(start) = rest.find("```json\n") {
         let after = &rest[start + "```json\n".len()..];
-        let Some(end) = after.find("\n```") else { break };
+        let Some(end) = after.find("\n```") else {
+            break;
+        };
         blocks.push(after[..end].to_string());
         rest = &after[end + 4..];
     }
@@ -83,7 +90,9 @@ pub fn term_blocks(page: &str) -> Vec<String> {
     let mut rest = page;
     while let Some(start) = rest.find("<pre class=\"term\">") {
         let after = &rest[start + "<pre class=\"term\">".len()..];
-        let Some(end) = after.find("</pre>") else { break };
+        let Some(end) = after.find("</pre>") else {
+            break;
+        };
         let mut text = String::new();
         let mut in_tag = false;
         for symbol in after[..end].chars() {
@@ -94,7 +103,10 @@ pub fn term_blocks(page: &str) -> Vec<String> {
                 _ => {}
             }
         }
-        let text = text.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">");
+        let text = text
+            .replace("&amp;", "&")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">");
         blocks.push(text.trim_end_matches('\n').to_string());
         rest = &after[end + 6..];
     }
@@ -110,22 +122,36 @@ pub fn table_row(text: &str, first_cell: &str) -> Vec<String> {
             cells.len() > 2 && cells[1] == first_cell
         })
         .unwrap_or_else(|| panic!("no table row starting with {first_cell}"));
-    let mut cells: Vec<String> = line.split('|').map(|cell| cell.trim().to_string()).collect();
+    let mut cells: Vec<String> = line
+        .split('|')
+        .map(|cell| cell.trim().to_string())
+        .collect();
     cells.remove(0);
     cells.pop();
     cells
 }
 
 pub fn strings(value: &Value) -> Vec<String> {
-    value.as_array().expect("array").iter().map(|item| item.as_str().expect("string").to_string()).collect()
+    value
+        .as_array()
+        .expect("array")
+        .iter()
+        .map(|item| item.as_str().expect("string").to_string())
+        .collect()
 }
 
 pub fn server_host() -> FakeHost {
-    FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("server").build()
+    FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("server")
+        .build()
 }
 
 pub fn client_host() -> FakeHost {
-    FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("client").build()
+    FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("client")
+        .build()
 }
 
 pub fn activated_server() -> FakeHost {
@@ -180,7 +206,13 @@ pub fn idle_event(pane: u64) -> Event {
 
 /// One assistant turn that carries `tokens`.
 pub fn assistant_turn(tokens: u32) -> TranscriptTurn {
-    TranscriptTurn { role: TurnRole::Assistant, text: String::new(), tool: None, at: None, tokens: Some(tokens) }
+    TranscriptTurn {
+        role: TurnRole::Assistant,
+        text: String::new(),
+        tool: None,
+        at: None,
+        tokens: Some(tokens),
+    }
 }
 
 /// Every `set-decoration` of the slot `cost` in `submissions`, in order.
@@ -200,9 +232,16 @@ pub fn decoration_text(spec: &SetDecorationSpec) -> String {
 }
 
 /// The latest `cost` decoration for `pane` among the submissions made after `already_seen`.
-pub fn latest_cost_decoration(host: &FakeHost, already_seen: usize, pane: u64) -> Option<SetDecorationSpec> {
+pub fn latest_cost_decoration(
+    host: &FakeHost,
+    already_seen: usize,
+    pane: u64,
+) -> Option<SetDecorationSpec> {
     let submitted = host.submitted();
-    cost_decorations(&submitted[already_seen..]).into_iter().filter(|spec| spec.node == NodeId(pane)).last()
+    cost_decorations(&submitted[already_seen..])
+        .into_iter()
+        .filter(|spec| spec.node == NodeId(pane))
+        .last()
 }
 
 /// Calls the usage service the way the host does: through the `service-provider` export.
@@ -242,7 +281,8 @@ pub fn feed_pane(host: &mut FakeHost, pane: u64, model: &str, tokens: u32) {
             source: "transcript".to_string(),
         },
     );
-    host.agents().set_transcript(pane, vec![assistant_turn(tokens)]);
+    host.agents()
+        .set_transcript(pane, vec![assistant_turn(tokens)]);
     host.deliver(vec![model_event(pane, model), idle_event(pane)]);
     host.settle();
 }

@@ -26,6 +26,9 @@ pub fn fuzz_events(_seed: u64, _count: u32) -> Vec<Event> {
 }
 
 /// Delivers `rounds` random batches to a fresh host of plugin type `P` (DEV-521).
-pub fn fuzz_run<P: ilium_plugin_sdk_core::NativeEntry + Default>(_seed: u64, _rounds: u32) -> Result<(), FuzzFailure> {
+pub fn fuzz_run<P: ilium_plugin_sdk_core::NativeEntry + Default>(
+    _seed: u64,
+    _rounds: u32,
+) -> Result<(), FuzzFailure> {
     unimplemented!("DEV-521")
 }

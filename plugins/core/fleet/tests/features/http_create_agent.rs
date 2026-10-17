@@ -4,12 +4,17 @@
 
 use ilium_plugin_sdk::testing::FakeHost;
 use ilium_plugin_sdk::types::{Intent, NodeId, Outcome};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::common::*;
 
 fn post(host: &mut FakeHost, call: u64, body: &Value) {
-    host.deliver_one(http_call(call, "POST", "/create_agent", body.to_string().as_bytes()));
+    host.deliver_one(http_call(
+        call,
+        "POST",
+        "/create_agent",
+        body.to_string().as_bytes(),
+    ));
     host.settle();
 }
 
@@ -18,8 +23,16 @@ fn good_body() -> Value {
 }
 
 fn reply_for(host: &FakeHost, call: u64) -> (u16, Vec<(String, String)>, Vec<u8>) {
-    let found: Vec<_> = host.http_replies().into_iter().filter(|(id, ..)| *id == call).collect();
-    assert_eq!(found.len(), 1, "exactly one reply for call {call}: {found:?}");
+    let found: Vec<_> = host
+        .http_replies()
+        .into_iter()
+        .filter(|(id, ..)| *id == call)
+        .collect();
+    assert_eq!(
+        found.len(),
+        1,
+        "exactly one reply for call {call}: {found:?}"
+    );
     let (_, status, headers, body) = found.into_iter().next().unwrap();
     (status, headers, body)
 }
@@ -56,8 +69,16 @@ fn http_058_a_valid_request_submits_one_create_pane_for_a_terminal() {
 fn http_058_the_agent_type_selects_the_agent_command() {
     for (agent, command) in [("claude", "claude"), ("codex", "codex")] {
         let mut host = server_host();
-        post(&mut host, 1, &json!({"agent_type": agent, "project": "/home/me/dev/app", "prompt": "go"}));
-        assert_eq!(creates(&host)[0].command, Some(vec![command.to_string()]), "{agent}");
+        post(
+            &mut host,
+            1,
+            &json!({"agent_type": agent, "project": "/home/me/dev/app", "prompt": "go"}),
+        );
+        assert_eq!(
+            creates(&host)[0].command,
+            Some(vec![command.to_string()]),
+            "{agent}"
+        );
     }
 }
 
@@ -66,7 +87,10 @@ fn http_058_the_agent_type_selects_the_agent_command() {
 fn http_058_the_prompt_becomes_the_initial_input() {
     let mut host = server_host();
     post(&mut host, 1, &good_body());
-    assert_eq!(creates(&host)[0].initial_input.as_deref(), Some("Fix the failing login test"));
+    assert_eq!(
+        creates(&host)[0].initial_input.as_deref(),
+        Some("Fix the failing login test")
+    );
 }
 
 /// REQ: F-058
@@ -110,7 +134,10 @@ fn http_058_the_reply_carries_the_new_pane_id_the_project_path_and_prompt_delive
     post(&mut host, 1, &good_body());
     finish_creation(&mut host, Outcome::OkNode(NodeId(42)));
     let (status, _, body) = reply_for(&host, 1);
-    assert!(status == 200 || status == 201, "success status, got {status}");
+    assert!(
+        status == 200 || status == 201,
+        "success status, got {status}"
+    );
     let value: Value = serde_json::from_slice(&body).expect("JSON");
     assert_eq!(value["pane_id"], 42);
     assert_eq!(value["project_path"], "/home/me/dev/app");
@@ -124,7 +151,13 @@ fn http_058_the_success_reply_is_json() {
     post(&mut host, 1, &good_body());
     finish_creation(&mut host, Outcome::OkNode(NodeId(42)));
     let (_, headers, _) = reply_for(&host, 1);
-    assert!(headers.iter().any(|(name, value)| name.eq_ignore_ascii_case("content-type") && value == "application/json"), "{headers:?}");
+    assert!(
+        headers
+            .iter()
+            .any(|(name, value)| name.eq_ignore_ascii_case("content-type")
+                && value == "application/json"),
+        "{headers:?}"
+    );
 }
 
 /// REQ: F-058
@@ -132,7 +165,11 @@ fn http_058_the_success_reply_is_json() {
 fn http_058_two_requests_get_their_own_replies() {
     let mut host = server_host();
     post(&mut host, 1, &good_body());
-    post(&mut host, 2, &json!({"agent_type": "codex", "project": "/home/me/dev/app", "prompt": "other"}));
+    post(
+        &mut host,
+        2,
+        &json!({"agent_type": "codex", "project": "/home/me/dev/app", "prompt": "other"}),
+    );
     let requests = host.pending_requests();
     assert_eq!(requests.len(), 2);
     host.complete(requests[0].clone(), Outcome::OkNode(NodeId(10)));
@@ -149,11 +186,14 @@ fn http_058_two_requests_get_their_own_replies() {
 fn http_058_a_failed_pane_creation_replies_500_with_an_error_body() {
     let mut host = server_host();
     post(&mut host, 1, &good_body());
-    finish_creation(&mut host, Outcome::Failed(ilium_plugin_sdk::types::PluginError {
-        code: ilium_plugin_sdk::types::ErrorCode::Io,
-        message: "spawn failed".to_string(),
-        retry_after_ms: None,
-    }));
+    finish_creation(
+        &mut host,
+        Outcome::Failed(ilium_plugin_sdk::types::PluginError {
+            code: ilium_plugin_sdk::types::ErrorCode::Io,
+            message: "spawn failed".to_string(),
+            retry_after_ms: None,
+        }),
+    );
     let (status, _, body) = reply_for(&host, 1);
     assert_eq!(status, 500);
     error_body(&body);
@@ -164,11 +204,14 @@ fn http_058_a_failed_pane_creation_replies_500_with_an_error_body() {
 fn http_058_a_refused_pane_creation_does_not_reply_success() {
     let mut host = server_host();
     post(&mut host, 1, &good_body());
-    finish_creation(&mut host, Outcome::Refused(ilium_plugin_sdk::types::PluginError {
-        code: ilium_plugin_sdk::types::ErrorCode::NotPermitted,
-        message: "refused".to_string(),
-        retry_after_ms: None,
-    }));
+    finish_creation(
+        &mut host,
+        Outcome::Refused(ilium_plugin_sdk::types::PluginError {
+            code: ilium_plugin_sdk::types::ErrorCode::NotPermitted,
+            message: "refused".to_string(),
+            retry_after_ms: None,
+        }),
+    );
     let (status, _, _) = reply_for(&host, 1);
     assert!(status >= 400, "{status}");
 }
@@ -197,7 +240,12 @@ fn http_058_another_method_on_the_route_is_404() {
 #[test]
 fn http_058_a_query_string_does_not_change_the_route() {
     let mut host = server_host();
-    host.deliver_one(http_call(4, "POST", "/create_agent?x=1", good_body().to_string().as_bytes()));
+    host.deliver_one(http_call(
+        4,
+        "POST",
+        "/create_agent?x=1",
+        good_body().to_string().as_bytes(),
+    ));
     host.settle();
     assert_eq!(creates(&host).len(), 1);
 }
@@ -206,7 +254,12 @@ fn http_058_a_query_string_does_not_change_the_route() {
 #[test]
 fn http_058_a_path_with_a_trailing_segment_is_404() {
     let mut host = server_host();
-    host.deliver_one(http_call(5, "POST", "/create_agent/extra", good_body().to_string().as_bytes()));
+    host.deliver_one(http_call(
+        5,
+        "POST",
+        "/create_agent/extra",
+        good_body().to_string().as_bytes(),
+    ));
     host.settle();
     assert_eq!(reply_for(&host, 5).0, 404);
 }
@@ -219,7 +272,10 @@ fn http_058_a_body_that_is_not_json_is_400_invalid_json() {
     host.settle();
     let (status, _, body) = reply_for(&host, 6);
     assert_eq!(status, 400);
-    assert_eq!(String::from_utf8(body).unwrap(), r#"{"error":"invalid json"}"#);
+    assert_eq!(
+        String::from_utf8(body).unwrap(),
+        r#"{"error":"invalid json"}"#
+    );
     assert!(creates(&host).is_empty());
 }
 
@@ -236,7 +292,11 @@ fn http_058_an_empty_body_is_400() {
 #[test]
 fn http_058_an_empty_prompt_is_400_and_creates_nothing() {
     let mut host = server_host();
-    post(&mut host, 1, &json!({"agent_type": "claude", "project": "/home/me/dev/app", "prompt": ""}));
+    post(
+        &mut host,
+        1,
+        &json!({"agent_type": "claude", "project": "/home/me/dev/app", "prompt": ""}),
+    );
     let (status, _, body) = reply_for(&host, 1);
     assert_eq!(status, 400);
     error_body(&body);
@@ -248,7 +308,11 @@ fn http_058_an_empty_prompt_is_400_and_creates_nothing() {
 fn http_058_a_whitespace_only_prompt_is_400() {
     for prompt in [" ", "\n", "\t \n"] {
         let mut host = server_host();
-        post(&mut host, 1, &json!({"agent_type": "claude", "project": "/home/me/dev/app", "prompt": prompt}));
+        post(
+            &mut host,
+            1,
+            &json!({"agent_type": "claude", "project": "/home/me/dev/app", "prompt": prompt}),
+        );
         assert_eq!(reply_for(&host, 1).0, 400, "{prompt:?}");
         assert!(creates(&host).is_empty());
     }
@@ -258,7 +322,11 @@ fn http_058_a_whitespace_only_prompt_is_400() {
 #[test]
 fn http_058_a_one_character_prompt_is_accepted() {
     let mut host = server_host();
-    post(&mut host, 1, &json!({"agent_type": "claude", "project": "/home/me/dev/app", "prompt": "x"}));
+    post(
+        &mut host,
+        1,
+        &json!({"agent_type": "claude", "project": "/home/me/dev/app", "prompt": "x"}),
+    );
     assert_eq!(creates(&host).len(), 1);
 }
 
@@ -266,7 +334,11 @@ fn http_058_a_one_character_prompt_is_accepted() {
 #[test]
 fn http_058_a_bare_project_name_that_matches_nothing_is_400() {
     let mut host = server_host();
-    post(&mut host, 1, &json!({"agent_type": "claude", "project": "no-such-project-anywhere", "prompt": "go"}));
+    post(
+        &mut host,
+        1,
+        &json!({"agent_type": "claude", "project": "no-such-project-anywhere", "prompt": "go"}),
+    );
     let (status, _, body) = reply_for(&host, 1);
     assert_eq!(status, 400);
     error_body(&body);
@@ -292,7 +364,11 @@ fn http_058_a_missing_field_is_400() {
 #[test]
 fn http_058_an_unknown_agent_type_is_400() {
     let mut host = server_host();
-    post(&mut host, 1, &json!({"agent_type": "emacs", "project": "/home/me/dev/app", "prompt": "go"}));
+    post(
+        &mut host,
+        1,
+        &json!({"agent_type": "emacs", "project": "/home/me/dev/app", "prompt": "go"}),
+    );
     assert_eq!(reply_for(&host, 1).0, 400);
     assert!(creates(&host).is_empty());
 }
@@ -301,7 +377,11 @@ fn http_058_an_unknown_agent_type_is_400() {
 #[test]
 fn http_058_a_workspace_with_a_branch_asks_the_worktrees_service() {
     let mut host = server_host();
-    host.stub_service("ilium.core.worktrees/create", "create", r#"{"path":"/home/me/dev/app.worktrees/agent-inspect"}"#);
+    host.stub_service(
+        "ilium.core.worktrees/create",
+        "create",
+        r#"{"path":"/home/me/dev/app.worktrees/agent-inspect"}"#,
+    );
     post(
         &mut host,
         1,
@@ -319,13 +399,20 @@ fn http_058_a_workspace_with_a_branch_asks_the_worktrees_service() {
 #[test]
 fn http_058_a_workspace_without_base_is_accepted() {
     let mut host = server_host();
-    host.stub_service("ilium.core.worktrees/create", "create", r#"{"path":"/home/me/dev/app.worktrees/agent-x"}"#);
+    host.stub_service(
+        "ilium.core.worktrees/create",
+        "create",
+        r#"{"path":"/home/me/dev/app.worktrees/agent-x"}"#,
+    );
     post(
         &mut host,
         1,
         &json!({"agent_type": "codex", "project": "/home/me/dev/app", "prompt": "go", "workspace": {"branch": "agent/x"}}),
     );
-    assert!(host.http_replies().iter().all(|(_, status, ..)| *status < 400));
+    assert!(host
+        .http_replies()
+        .iter()
+        .all(|(_, status, ..)| *status < 400));
 }
 
 /// REQ: F-058
@@ -347,7 +434,11 @@ fn http_058_a_workspace_with_a_path_key_is_rejected_with_400() {
 #[test]
 fn http_058_a_workspace_without_a_branch_is_400() {
     let mut host = server_host();
-    post(&mut host, 1, &json!({"agent_type": "codex", "project": "/home/me/dev/app", "prompt": "go", "workspace": {"base": "main"}}));
+    post(
+        &mut host,
+        1,
+        &json!({"agent_type": "codex", "project": "/home/me/dev/app", "prompt": "go", "workspace": {"base": "main"}}),
+    );
     assert_eq!(reply_for(&host, 1).0, 400);
 }
 
@@ -379,6 +470,9 @@ fn http_058_an_error_reply_never_creates_a_pane_intent() {
     let mut host = server_host();
     host.deliver_one(http_call(9, "POST", "/create_agent", b"[1,2,3]"));
     host.settle();
-    assert!(host.submitted().iter().all(|s| !matches!(s.intent, Intent::CreatePane(_))));
+    assert!(host
+        .submitted()
+        .iter()
+        .all(|s| !matches!(s.intent, Intent::CreatePane(_))));
     assert_eq!(reply_for(&host, 9).0, 400);
 }

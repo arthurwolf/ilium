@@ -22,14 +22,22 @@ fn hst_202_theme_and_keymap_coalesce_to_the_latest() {
 /// REQ: HST-202
 #[test]
 fn hst_202_tree_changed_and_pointer_coalesce() {
-    assert_eq!(event_queue_policy(&tree_changed(&[1])), QueuePolicy::Coalesce);
+    assert_eq!(
+        event_queue_policy(&tree_changed(&[1])),
+        QueuePolicy::Coalesce
+    );
     assert_eq!(event_queue_policy(&pointer()), QueuePolicy::Coalesce);
 }
 
 /// REQ: HST-202
 #[test]
 fn hst_202_user_input_kinds_drop_the_oldest() {
-    for event in [key_pressed(), key_released(), command_invoked(), ui_action()] {
+    for event in [
+        key_pressed(),
+        key_released(),
+        command_invoked(),
+        ui_action(),
+    ] {
         assert_eq!(event_queue_policy(&event), QueuePolicy::DropOldest);
     }
 }
@@ -37,7 +45,12 @@ fn hst_202_user_input_kinds_drop_the_oldest() {
 /// REQ: HST-202
 #[test]
 fn hst_202_correctness_kinds_are_never_dropped() {
-    for event in [message(), request_completed(), durable_timer(), input_uncertain()] {
+    for event in [
+        message(),
+        request_completed(),
+        durable_timer(),
+        input_uncertain(),
+    ] {
         assert_eq!(event_queue_policy(&event), QueuePolicy::NeverDrop);
     }
 }
@@ -61,7 +74,10 @@ fn hst_202_full_queue_drops_the_oldest_user_input() {
     scheduler.register_side(&who, 2);
     scheduler.push_event(&who, key_pressed());
     scheduler.push_event(&who, key_released());
-    assert_eq!(scheduler.push_event(&who, command_invoked()), EventPush::DroppedOldest);
+    assert_eq!(
+        scheduler.push_event(&who, command_invoked()),
+        EventPush::DroppedOldest
+    );
 }
 
 /// REQ: HST-202
@@ -71,7 +87,10 @@ fn hst_202_full_queue_of_pointer_discards_the_incoming_after_coalescing_fails() 
     let who = plugin("demo.queue");
     scheduler.register_side(&who, 1);
     scheduler.push_event(&who, message());
-    assert_eq!(scheduler.push_event(&who, pointer()), EventPush::DiscardedIncoming);
+    assert_eq!(
+        scheduler.push_event(&who, pointer()),
+        EventPush::DiscardedIncoming
+    );
 }
 
 /// REQ: HST-202
@@ -82,7 +101,10 @@ fn hst_202_never_dropped_event_into_a_full_queue_marks_the_side_stuck() {
     scheduler.register_side(&who, 2);
     scheduler.push_event(&who, message());
     scheduler.push_event(&who, durable_timer());
-    assert_eq!(scheduler.push_event(&who, request_completed()), EventPush::Stuck);
+    assert_eq!(
+        scheduler.push_event(&who, request_completed()),
+        EventPush::Stuck
+    );
 }
 
 /// REQ: HST-202
@@ -99,7 +121,10 @@ fn hst_202_one_below_capacity_never_overflows() {
 #[test]
 fn hst_202_stuck_side_counts_as_a_failure() {
     let kernel = kernel_with_nodes(1);
-    let handle = build_with(HostHarness::new().kernel(kernel), ScriptedGuest::new(Shared::new()));
+    let handle = build_with(
+        HostHarness::new().kernel(kernel),
+        ScriptedGuest::new(Shared::new()),
+    );
     handle.deliver((0..1_025).map(|_| message()).collect());
     assert!(handle.failure_count() >= 1);
 }
@@ -157,7 +182,10 @@ fn hst_203_257_events_make_a_batch_of_256_and_one_left() {
     }
     assert_eq!(builder.take_ready(0).map(|batch| batch.len()), Some(256));
     assert!(builder.take_ready(0).is_none());
-    assert_eq!(builder.take_ready(BATCH_FLUSH_MS).map(|batch| batch.len()), Some(1));
+    assert_eq!(
+        builder.take_ready(BATCH_FLUSH_MS).map(|batch| batch.len()),
+        Some(1)
+    );
 }
 
 /// REQ: HST-203
@@ -175,7 +203,10 @@ fn hst_203_events_inside_the_window_join_the_same_batch() {
     let mut builder = BatchBuilder::new();
     builder.push(theme(), 0, false);
     builder.push(keymap(), 1, false);
-    assert_eq!(builder.take_ready(BATCH_FLUSH_MS).map(|batch| batch.len()), Some(2));
+    assert_eq!(
+        builder.take_ready(BATCH_FLUSH_MS).map(|batch| batch.len()),
+        Some(2)
+    );
 }
 
 /// REQ: HST-203
@@ -294,16 +325,26 @@ fn rate_limited_scheduler() -> (Scheduler, PluginId) {
 #[test]
 fn hst_205_source_within_its_rate_is_queued() {
     let (scheduler, who) = rate_limited_scheduler();
-    assert_eq!(scheduler.push_event_from_source(&who, http_called(1)), Ok(EventPush::Queued));
-    assert_eq!(scheduler.push_event_from_source(&who, http_called(2)), Ok(EventPush::Queued));
+    assert_eq!(
+        scheduler.push_event_from_source(&who, http_called(1)),
+        Ok(EventPush::Queued)
+    );
+    assert_eq!(
+        scheduler.push_event_from_source(&who, http_called(2)),
+        Ok(EventPush::Queued)
+    );
 }
 
 /// REQ: HST-205
 #[test]
 fn hst_205_source_over_its_rate_is_refused_with_rate_limited() {
     let (scheduler, who) = rate_limited_scheduler();
-    scheduler.push_event_from_source(&who, http_called(1)).expect("first");
-    scheduler.push_event_from_source(&who, http_called(2)).expect("second");
+    scheduler
+        .push_event_from_source(&who, http_called(1))
+        .expect("first");
+    scheduler
+        .push_event_from_source(&who, http_called(2))
+        .expect("second");
     let refused = scheduler.push_event_from_source(&who, http_called(3));
     assert!(matches!(refused, Err(PluginError { code, .. }) if code.as_str() == "rate-limited"));
 }

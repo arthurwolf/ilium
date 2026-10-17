@@ -9,21 +9,30 @@ use crate::common::*;
 #[test]
 fn doc_cor_030_page_lists_the_animations_tab_with_its_config_table_and_reader() {
     let row = table_row(&page_text(), "`animations`");
-    assert_eq!(&row[1..], ["Animations", "project YAML `animation`", "Scenes"]);
+    assert_eq!(
+        &row[1..],
+        ["Animations", "project YAML `animation`", "Scenes"]
+    );
 }
 
 /// REQ: COR-030, F-093
 #[test]
 fn doc_cor_030_page_says_the_plugin_is_the_single_owner_with_write_kernel_for_each_tab() {
     let text = page_text();
-    assert!(text.contains("This plugin is the single owner of the following built-in Settings tabs."));
-    assert!(text.contains("It holds `settings.write-kernel:<tab>` for each one (T1 only, one holder per tab"));
+    assert!(
+        text.contains("This plugin is the single owner of the following built-in Settings tabs.")
+    );
+    assert!(text.contains(
+        "It holds `settings.write-kernel:<tab>` for each one (T1 only, one holder per tab"
+    ));
 }
 
 /// REQ: COR-033, F-093
 #[test]
 fn doc_cor_033_page_says_values_stay_in_the_same_tables_so_no_setting_moves() {
-    assert!(page_text().contains("The values stay in the same `config.toml` tables as before, so no user setting moves."));
+    assert!(page_text().contains(
+        "The values stay in the same `config.toml` tables as before, so no user setting moves."
+    ));
 }
 
 /// REQ: COR-030, F-093
@@ -32,7 +41,13 @@ fn doc_cor_030_migration_page_names_ambient_look_as_holder_of_the_animations_tab
     let row = table_row(&page("reference-config-and-data-migration"), "`animations`");
     assert_eq!(
         &row[1..],
-        ["Animations", "project YAML `animation`", "Ambient look", "Scenes", "project YAML `animation`"]
+        [
+            "Animations",
+            "project YAML `animation`",
+            "Ambient look",
+            "Scenes",
+            "project YAML `animation`"
+        ]
     );
 }
 
@@ -47,7 +62,14 @@ fn doc_cor_033_migration_page_keeps_the_animation_key_with_ambient_look_as_write
 #[test]
 fn doc_cor_030_settings_page_assigns_the_animations_tab_to_ambient_look() {
     let row = table_row(&page("core-plugin-settings"), "13");
-    assert_eq!(&row[1..], ["`animations`", "Animations", "[Ambient look](/pages/core-plugin-ambient/)"]);
+    assert_eq!(
+        &row[1..],
+        [
+            "`animations`",
+            "Animations",
+            "[Ambient look](/pages/core-plugin-ambient/)"
+        ]
+    );
 }
 
 /// REQ: COR-022, F-093
@@ -122,7 +144,9 @@ fn doc_cor_011_traceability_row_of_semantic_animation_is_plugin_wasm_on_both_sid
 #[test]
 fn doc_cor_050_boot_page_activates_ambient_look_at_startup_with_no_dependencies() {
     let boot = page("reference-kernel-and-boot");
-    assert!(boot.contains("| Ambient look | none | `startup` | The look is applied from the first frame |"));
+    assert!(boot.contains(
+        "| Ambient look | none | `startup` | The look is applied from the first frame |"
+    ));
 }
 
 /// REQ: COR-030, F-093
@@ -138,7 +162,10 @@ fn cor_030_activation_makes_no_kernel_settings_write() {
 #[test]
 fn cor_033_a_kernel_settings_event_for_the_animations_tab_writes_nothing_back() {
     let mut host = activated_client();
-    let event = Event::KernelSettingsChanged(KernelSettingsEvent { tab: "animations".to_string(), keys: vec!["kind".to_string()] });
+    let event = Event::KernelSettingsChanged(KernelSettingsEvent {
+        tab: "animations".to_string(),
+        keys: vec!["kind".to_string()],
+    });
     host.deliver(vec![event]);
     host.settle();
     assert!(kernel_writes(&mut host).is_empty());
@@ -148,7 +175,10 @@ fn cor_033_a_kernel_settings_event_for_the_animations_tab_writes_nothing_back() 
 #[test]
 fn cor_030_a_kernel_settings_event_for_another_tab_is_ignored() {
     let mut host = activated_client();
-    let event = Event::KernelSettingsChanged(KernelSettingsEvent { tab: "themes".to_string(), keys: vec!["theme".to_string()] });
+    let event = Event::KernelSettingsChanged(KernelSettingsEvent {
+        tab: "themes".to_string(),
+        keys: vec!["theme".to_string()],
+    });
     let submissions = host.deliver(vec![event]);
     host.settle();
     assert!(submissions.is_empty());
@@ -174,7 +204,10 @@ fn cor_030_kernel_writes_after_a_settings_change_only_target_the_animations_tab(
 /// REQ: COR-030
 #[test]
 fn cor_030_a_host_without_the_write_kernel_grant_still_activates_the_plugin_without_writes() {
-    let mut host = FakeHost::for_manifest(manifest_path()).expect("manifest").side("client").build();
+    let mut host = FakeHost::for_manifest(manifest_path())
+        .expect("manifest")
+        .side("client")
+        .build();
     host.revoke("settings.write-kernel:animations");
     host.activate::<ilium_plugin_core_ambient::AmbientClient>();
     assert!(kernel_writes(&mut host).is_empty());

@@ -8,7 +8,10 @@ use crate::common::{key, open_picker, status_contains};
 fn port_clipboard_framed_commands_preserve_unicode_and_order() {
     let mut host = open_picker(&["雪\u{1b}[31m", "second"]);
     host.deliver_one(key("1"));
-    assert_eq!(host.clipboard().last_text().as_deref(), Some("雪\u{1b}[31m"));
+    assert_eq!(
+        host.clipboard().last_text().as_deref(),
+        Some("雪\u{1b}[31m")
+    );
     host.deliver_one(key("2"));
     assert_eq!(host.clipboard().last_text().as_deref(), Some("second"));
 }
@@ -18,7 +21,10 @@ fn port_clipboard_framed_commands_preserve_unicode_and_order() {
 fn port_clipboard_original_text_is_written_exactly() {
     let mut host = open_picker(&["exact original α"]);
     host.deliver_one(key("1"));
-    assert_eq!(host.clipboard().last_text().as_deref(), Some("exact original α"));
+    assert_eq!(
+        host.clipboard().last_text().as_deref(),
+        Some("exact original α")
+    );
 }
 
 /// REQ: PORT:ilium-client/src/terminal_clipboard.rs::raw_write_protocol_remains_identical_and_bad_ack_is_not_success
@@ -82,7 +88,9 @@ fn port_selection_one_copy_reports_exactly_one_copied_status() {
     let out = host.deliver_one(key("1"));
     let copied = out
         .iter()
-        .filter(|submission| status_contains(std::slice::from_ref(*submission), "Copied 6 characters"))
+        .filter(|submission| {
+            status_contains(std::slice::from_ref(*submission), "Copied 6 characters")
+        })
         .count();
     assert_eq!(copied, 1);
     assert!(host.failures().is_empty());

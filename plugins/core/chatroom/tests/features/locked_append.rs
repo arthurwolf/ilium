@@ -17,7 +17,12 @@ fn lock_b17_a_cli_send_takes_the_exclusive_lock_on_the_room() {
     let mut host = host_with_room();
     send(&mut host, "locked");
     let locks = host.fs().lock_log();
-    assert!(locks.iter().any(|entry| entry.path == ROOM && entry.exclusive), "{locks:?}");
+    assert!(
+        locks
+            .iter()
+            .any(|entry| entry.path == ROOM && entry.exclusive),
+        "{locks:?}"
+    );
 }
 
 /// REQ: chatroom-B17
@@ -26,7 +31,11 @@ fn lock_b17_a_composer_post_takes_the_exclusive_lock_on_the_room() {
     let mut host = host_with_room();
     host.deliver_one(composer_message("locked"));
     host.settle();
-    assert!(host.fs().lock_log().iter().any(|entry| entry.path == ROOM && entry.exclusive));
+    assert!(host
+        .fs()
+        .lock_log()
+        .iter()
+        .any(|entry| entry.path == ROOM && entry.exclusive));
 }
 
 /// REQ: chatroom-B17
@@ -45,7 +54,10 @@ fn lock_b17_a_failed_append_still_releases_the_lock() {
     let mut host = host_with_room();
     host.inject_failure(
         "fs.write",
-        ilium_plugin_sdk::types::PluginError::new(ilium_plugin_sdk::types::ErrorCode::Io, "disk full"),
+        ilium_plugin_sdk::types::PluginError::new(
+            ilium_plugin_sdk::types::ErrorCode::Io,
+            "disk full",
+        ),
     );
     send(&mut host, "fails");
     assert!(host.fs().held_locks().is_empty());
@@ -87,7 +99,9 @@ fn lock_b17_fifty_cli_sends_and_fifty_composer_sends_produce_one_hundred_whole_r
     assert_eq!(records.len(), 100);
     let mut contents: Vec<String> = records.iter().map(|line| split_record(line).2).collect();
     contents.sort();
-    let mut expected: Vec<String> = (0..50).flat_map(|n| [format!("cli {n}"), format!("composer {n}")]).collect();
+    let mut expected: Vec<String> = (0..50)
+        .flat_map(|n| [format!("cli {n}"), format!("composer {n}")])
+        .collect();
     expected.sort();
     assert_eq!(contents, expected);
     for record in &records {
@@ -138,7 +152,12 @@ fn lock_b17_rotation_rewrites_the_file_only_under_the_lock() {
     let writes_before = host.fs().write_log().len();
     send(&mut host, "append");
     let new_writes = host.fs().write_log().split_off(writes_before);
-    assert!(new_writes.iter().all(|entry| entry.path != ROOM || entry.append), "{new_writes:?}");
+    assert!(
+        new_writes
+            .iter()
+            .all(|entry| entry.path != ROOM || entry.append),
+        "{new_writes:?}"
+    );
 }
 
 /// REQ: chatroom-B17
@@ -146,5 +165,8 @@ fn lock_b17_rotation_rewrites_the_file_only_under_the_lock() {
 fn lock_b17_the_composer_message_leaves_no_intent_besides_the_row_update() {
     let mut host = host_with_room();
     let submissions = host.deliver_one(composer_message("quiet"));
-    assert!(submissions.iter().all(|submission| matches!(submission.intent, Intent::SetVirtualRows(_) | Intent::SetExpanded(_) | Intent::Message(_))));
+    assert!(submissions.iter().all(|submission| matches!(
+        submission.intent,
+        Intent::SetVirtualRows(_) | Intent::SetExpanded(_) | Intent::Message(_)
+    )));
 }

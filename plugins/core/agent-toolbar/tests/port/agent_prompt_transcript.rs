@@ -57,12 +57,16 @@ fn port_agent_prompt_transcript_newer_event_user_supersedes_older_response_user(
 fn port_agent_prompt_transcript_oversized_suffix_record_is_an_error_not_partial_exact_evidence() {
     let oversized = " ".repeat(1024 * 1024 + 1);
     let reply = exact_prompt("codex", &oversized, 0);
-    assert!(text(&reply["error"]).contains("bounded evidence limits"), "reply: {reply}");
+    assert!(
+        text(&reply["error"]).contains("bounded evidence limits"),
+        "reply: {reply}"
+    );
 }
 
 /// REQ: PORT:ilium-client/src/agent_prompt_transcript.rs::repeated_identical_codex_prompt_is_new_evidence_and_keeps_trailing_text
 #[test]
-fn port_agent_prompt_transcript_repeated_identical_codex_prompt_is_new_evidence_and_keeps_trailing_text() {
+fn port_agent_prompt_transcript_repeated_identical_codex_prompt_is_new_evidence_and_keeps_trailing_text(
+) {
     let old = json!({"timestamp":"2026-10-02T20:00:01Z","type":"event_msg","payload":{"type":"user_message","message":"same  "}});
     let first = format!("{old}\n");
     let baseline = first.len();

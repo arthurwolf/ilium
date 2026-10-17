@@ -8,7 +8,10 @@ use crate::common::client;
 #[test]
 fn port_ui_late_modal_and_suspended_parent_withhold_scene_history() {
     let transparent = |mode: &str, stacked: Option<&str>| {
-        client("ui.late-layers-source-transparent", json!({ "mode": mode, "modal_stack": stacked.map(|mode| vec![mode]).unwrap_or_default() }))
+        client(
+            "ui.late-layers-source-transparent",
+            json!({ "mode": mode, "modal_stack": stacked.map(|mode| vec![mode]).unwrap_or_default() }),
+        )
     };
     assert_eq!(transparent("normal", None), json!(true));
     assert_eq!(transparent("help", None), json!(false));

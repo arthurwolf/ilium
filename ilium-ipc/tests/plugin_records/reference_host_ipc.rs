@@ -2,19 +2,23 @@
 //! stream records and the framing they travel in. Expected bytes come from reference-host-ipc.md
 //! (bincode, fixed-width little-endian integers, enum variants numbered in manual order).
 
-use ilium_ipc::{read_frame, write_frame, MAX_FRAME_LEN};
 use ilium_ipc::plugin::{
     ClientReplyBody, ClientRequestCall, ContributionDelta, ContributionOp, ControlBody, DeltaKind,
     EnvelopeBody, InstalledPlugin, OutcomeRecord, PluginEnvelope, PluginHello, PluginMessage,
     Rejection, SourcedEvent, Submission, MAX_DELTA_BYTES,
 };
+use ilium_ipc::{read_frame, write_frame, MAX_FRAME_LEN};
 use ilium_ipc::{ClientRequest, ServerEvent, PLUGIN_PROTOCOL_VERSION};
 use proptest::prelude::*;
 
 const PLUGIN: &str = "acme.demo";
 
 fn envelope(seq: u64, body: EnvelopeBody) -> PluginEnvelope {
-    PluginEnvelope { plugin: PLUGIN.to_owned(), seq, body }
+    PluginEnvelope {
+        plugin: PLUGIN.to_owned(),
+        seq,
+        body,
+    }
 }
 
 /// One body of every variant, in the order of the manual's `EnvelopeBody` listing.
@@ -30,14 +34,23 @@ fn every_body() -> Vec<EnvelopeBody> {
             dedup_key: "k1".into(),
             outcome_json: "{\"ok\":true}".into(),
         }),
-        EnvelopeBody::Message(PluginMessage { topic: "acme.topic".into(), payload: vec![1, 2, 3] }),
+        EnvelopeBody::Message(PluginMessage {
+            topic: "acme.topic".into(),
+            payload: vec![1, 2, 3],
+        }),
         EnvelopeBody::ClientRequest(ClientRequestCall {
             call_id: 9,
             name: "clipboard.read".into(),
             payload: vec![],
         }),
-        EnvelopeBody::ClientReply(ClientReplyBody { call_id: 9, payload: vec![7] }),
-        EnvelopeBody::Event(SourcedEvent { topic: "tree-changed".into(), payload: vec![0] }),
+        EnvelopeBody::ClientReply(ClientReplyBody {
+            call_id: 9,
+            payload: vec![7],
+        }),
+        EnvelopeBody::Event(SourcedEvent {
+            topic: "tree-changed".into(),
+            payload: vec![0],
+        }),
         EnvelopeBody::Control(ControlBody::Resync),
     ]
 }
@@ -91,14 +104,21 @@ async fn hst_100_server_event_contributions_round_trips_snapshot_and_increment()
     let snapshot = ServerEvent::Contributions(ContributionDelta {
         sequence: 1,
         kind: DeltaKind::Snapshot,
-        ops: vec![ContributionOp::Put { id: "status.a".into(), entry: vec![1, 2] }],
+        ops: vec![ContributionOp::Put {
+            id: "status.a".into(),
+            entry: vec![1, 2],
+        }],
     });
     let increment = ServerEvent::Contributions(ContributionDelta {
         sequence: 2,
         kind: DeltaKind::Increment,
         ops: vec![
-            ContributionOp::Remove { id: "status.a".into() },
-            ContributionOp::Clear { plugin: PLUGIN.into() },
+            ContributionOp::Remove {
+                id: "status.a".into(),
+            },
+            ContributionOp::Clear {
+                plugin: PLUGIN.into(),
+            },
         ],
     });
     assert_eq!(round_trip(&snapshot).await, snapshot);
@@ -120,7 +140,9 @@ async fn hst_100_server_event_rejected_round_trips_protocol_mismatch() {
 async fn hst_100_plugin_frame_is_length_prefix_then_bincode_body() {
     let request = ClientRequest::Plugin(envelope(1, EnvelopeBody::Control(ControlBody::Resync)));
     let mut framed: Vec<u8> = Vec::new();
-    write_frame(&mut framed, &request).await.expect("write frame");
+    write_frame(&mut framed, &request)
+        .await
+        .expect("write frame");
     let body = bincode::serialize(&request).expect("bincode body");
     let declared = u32::from_le_bytes(framed[..4].try_into().expect("four prefix bytes"));
     assert_eq!(declared as usize, body.len());
@@ -138,7 +160,9 @@ fn hst_100_frame_limit_stays_64_mib() {
 async fn hst_100_truncated_plugin_frame_is_refused() {
     let request = ClientRequest::Plugin(envelope(1, every_body().remove(0)));
     let mut framed: Vec<u8> = Vec::new();
-    write_frame(&mut framed, &request).await.expect("write frame");
+    write_frame(&mut framed, &request)
+        .await
+        .expect("write frame");
     framed.truncate(framed.len() - 3);
     let mut reader: &[u8] = framed.as_slice();
     let result = tokio::time::timeout(
@@ -189,9 +213,19 @@ fn hst_101_envelope_body_has_exactly_the_seven_manual_variants() {
     let names: Vec<&str> = every_body().iter().map(name).collect();
     assert_eq!(
         names,
-        ["Submit", "Outcome", "Message", "ClientRequest", "ClientReply", "Event", "Control"]
+        [
+            "Submit",
+            "Outcome",
+            "Message",
+            "ClientRequest",
+            "ClientReply",
+            "Event",
+            "Control"
+        ]
     );
-    assert!(names.iter().all(|variant| !variant.contains("Hook") && !variant.contains("Guest")));
+    assert!(names
+        .iter()
+        .all(|variant| !variant.contains("Hook") && !variant.contains("Guest")));
 }
 
 /// REQ: HST-101
@@ -215,10 +249,16 @@ fn hst_101_envelope_body_index_seven_is_refused_unknown_variant() {
 /// REQ: HST-103
 #[tokio::test]
 async fn hst_103_attach_carries_hello() {
-    let request = ClientRequest::Attach { session: "default".into(), hello: hello(1, "0.1.0") };
+    let request = ClientRequest::Attach {
+        session: "default".into(),
+        hello: hello(1, "0.1.0"),
+    };
     let decoded = round_trip(&request).await;
     match decoded {
-        ClientRequest::Attach { session, hello: received } => {
+        ClientRequest::Attach {
+            session,
+            hello: received,
+        } => {
             assert_eq!(session, "default");
             assert_eq!(received, hello(1, "0.1.0"));
         }
@@ -229,11 +269,16 @@ async fn hst_103_attach_carries_hello() {
 /// REQ: HST-103
 #[tokio::test]
 async fn hst_103_attach_interactive_carries_hello() {
-    let request =
-        ClientRequest::AttachInteractive { session: "default".into(), hello: hello(1, "0.1.0") };
+    let request = ClientRequest::AttachInteractive {
+        session: "default".into(),
+        hello: hello(1, "0.1.0"),
+    };
     let decoded = round_trip(&request).await;
     match decoded {
-        ClientRequest::AttachInteractive { session, hello: received } => {
+        ClientRequest::AttachInteractive {
+            session,
+            hello: received,
+        } => {
             assert_eq!(session, "default");
             assert_eq!(received.installed[0].content_hash, [0xAB; 32]);
             assert_eq!(received.installed[0].version, "1.2.3");
@@ -315,13 +360,21 @@ fn hst_107_delta_kind_snapshot_is_variant_zero_and_increment_one() {
 #[test]
 fn hst_107_contribution_op_variants_follow_manual_order() {
     let ops = [
-        ContributionOp::Put { id: "a".into(), entry: vec![] },
+        ContributionOp::Put {
+            id: "a".into(),
+            entry: vec![],
+        },
         ContributionOp::Remove { id: "a".into() },
-        ContributionOp::Clear { plugin: PLUGIN.into() },
+        ContributionOp::Clear {
+            plugin: PLUGIN.into(),
+        },
     ];
     for (expected, op) in ops.iter().enumerate() {
         let bytes = bincode::serialize(op).expect("encode");
-        assert_eq!(u32::from_le_bytes(bytes[..4].try_into().expect("index")) as usize, expected);
+        assert_eq!(
+            u32::from_le_bytes(bytes[..4].try_into().expect("index")) as usize,
+            expected
+        );
     }
 }
 

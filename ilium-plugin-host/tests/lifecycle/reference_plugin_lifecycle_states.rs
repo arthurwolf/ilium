@@ -16,11 +16,16 @@ fn id(text: &str) -> PluginId {
 fn lif_001_every_listed_plugin_has_exactly_one_package_state() {
     let mut host = one_plugin();
     host.install(PluginSpec::new(B));
-    host.plugins_api().set_enabled(id(B), false, String::new()).unwrap();
+    host.plugins_api()
+        .set_enabled(id(B), false, String::new())
+        .unwrap();
     let list = records(&mut host, &["plugin", "list", "--json"], "plugin");
     assert_eq!(list.len(), 2);
     for record in &list {
-        assert!(record["state"].is_string(), "one state per record: {record}");
+        assert!(
+            record["state"].is_string(),
+            "one state per record: {record}"
+        );
     }
 }
 
@@ -29,7 +34,9 @@ fn lif_001_every_listed_plugin_has_exactly_one_package_state() {
 fn lif_001_state_stays_single_valued_through_disable_and_enable() {
     let mut host = one_plugin();
     for enabled in [false, true, false] {
-        host.plugins_api().set_enabled(id(A), enabled, String::new()).unwrap();
+        host.plugins_api()
+            .set_enabled(id(A), enabled, String::new())
+            .unwrap();
         let list = records(&mut host, &["plugin", "list", "--json"], "plugin");
         assert_eq!(list.iter().filter(|r| r["id"] == A).count(), 1);
     }
@@ -42,7 +49,10 @@ fn lif_002_client_stop_keeps_package_enabled_and_server_running() {
     for _ in 0..3 {
         host.fail(A, Side::Client, &scope, FailureKind::Trap);
     }
-    assert_eq!(host.side(A, Side::Client, &scope).state, InstanceState::StoppedByFailure);
+    assert_eq!(
+        host.side(A, Side::Client, &scope).state,
+        InstanceState::StoppedByFailure
+    );
     assert_eq!(host.package_state(A), PackageState::InstalledEnabled);
     assert_eq!(state(&host, A), InstanceState::Active);
 }
@@ -55,7 +65,10 @@ fn lif_002_server_stop_does_not_stop_client() {
         trap(&mut host, A);
     }
     assert_eq!(state(&host, A), InstanceState::StoppedByFailure);
-    assert_eq!(host.side(A, Side::Client, &scope).state, InstanceState::Active);
+    assert_eq!(
+        host.side(A, Side::Client, &scope).state,
+        InstanceState::Active
+    );
     assert_eq!(host.package_state(A), PackageState::InstalledEnabled);
 }
 
@@ -110,9 +123,17 @@ fn lif_005_observed_transitions_are_all_in_the_table() {
     host.advance_ms(1000);
     trap(&mut host, A);
     host.advance_ms(5000);
-    host.plugins_api().set_enabled(id(A), false, String::new()).unwrap();
-    host.plugins_api().set_enabled(id(A), true, String::new()).unwrap();
-    for change in host.state_changes().iter().filter(|c| c.side == Side::Server) {
+    host.plugins_api()
+        .set_enabled(id(A), false, String::new())
+        .unwrap();
+    host.plugins_api()
+        .set_enabled(id(A), true, String::new())
+        .unwrap();
+    for change in host
+        .state_changes()
+        .iter()
+        .filter(|c| c.side == Side::Server)
+    {
         assert_ne!(change.from, change.to, "a change moves between states");
     }
 }
@@ -174,9 +195,16 @@ fn lif_007_enable_refused_at_load_not_permitted() {
     let mut host = LifeHost::new();
     host.install_refused(PluginSpec::new(A), "api.unsupported");
     host.start(StartMode::Normal);
-    let error = host.plugins_api().set_enabled(id(A), true, String::new()).unwrap_err();
+    let error = host
+        .plugins_api()
+        .set_enabled(id(A), true, String::new())
+        .unwrap_err();
     assert_eq!(error.code, ErrorCode::NotPermitted);
-    assert!(error.message.contains("api.unsupported"), "{}", error.message);
+    assert!(
+        error.message.contains("api.unsupported"),
+        "{}",
+        error.message
+    );
     assert_eq!(host.package_state(A), PackageState::RefusedAtLoad);
 }
 
@@ -187,7 +215,10 @@ fn lif_007_enable_disabled_by_policy_not_permitted_and_no_change() {
     host.install_policy_blocked(PluginSpec::new(A));
     host.start(StartMode::Normal);
     let events = host.state_changes().len();
-    let error = host.plugins_api().set_enabled(id(A), true, String::new()).unwrap_err();
+    let error = host
+        .plugins_api()
+        .set_enabled(id(A), true, String::new())
+        .unwrap_err();
     assert_eq!(error.code, ErrorCode::NotPermitted);
     assert_eq!(host.package_state(A), PackageState::DisabledByPolicy);
     assert_eq!(host.state_changes().len(), events);
@@ -201,7 +232,10 @@ fn lif_008_server_stop_by_failure_survives_restart() {
         trap(&mut host, A);
         host.advance_ms(1000);
     }
-    assert_eq!(host.installed_json()["plugins"][A]["failure_stopped"], serde_json::json!(["server"]));
+    assert_eq!(
+        host.installed_json()["plugins"][A]["failure_stopped"],
+        serde_json::json!(["server"])
+    );
     host.restart_server();
     assert_eq!(state(&host, A), InstanceState::StoppedByFailure);
 }
@@ -223,8 +257,12 @@ fn lif_009_enable_clears_window_so_next_failure_restarts_after_one_second() {
     trap(&mut host, A);
     host.advance_ms(1000);
     trap(&mut host, A);
-    host.plugins_api().set_enabled(id(A), false, String::new()).unwrap();
-    host.plugins_api().set_enabled(id(A), true, String::new()).unwrap();
+    host.plugins_api()
+        .set_enabled(id(A), false, String::new())
+        .unwrap();
+    host.plugins_api()
+        .set_enabled(id(A), true, String::new())
+        .unwrap();
     trap(&mut host, A);
     assert_eq!(restart_in_ms(&host, A), Some(1000));
 }
@@ -274,7 +312,10 @@ fn lif_011_pool_refusal_logs_host_capacity_reason() {
     let mut host = LifeHost::new().with_pool_mib(1);
     host.install(PluginSpec::new(A).memory_mib(32).startup());
     host.start(StartMode::Normal);
-    assert!(host.state_changes().iter().any(|c| c.plugin == A && c.reason == "capacity"));
+    assert!(host
+        .state_changes()
+        .iter()
+        .any(|c| c.plugin == A && c.reason == "capacity"));
 }
 
 /// REQ: LIF-012
@@ -300,7 +341,9 @@ fn lif_013_disable_during_scheduled_restart_cancels_timer() {
     let mut host = one_plugin();
     trap(&mut host, A);
     let begun = host.activations().len();
-    host.plugins_api().set_enabled(id(A), false, String::new()).unwrap();
+    host.plugins_api()
+        .set_enabled(id(A), false, String::new())
+        .unwrap();
     host.advance_ms(10_000);
     assert_eq!(host.activations().len(), begun);
 }
@@ -320,7 +363,9 @@ fn lif_013_uninstall_during_scheduled_restart_cancels_timer() {
 #[test]
 fn lif_014_disable_sends_one_deactivate_disabled() {
     let mut host = one_plugin();
-    host.plugins_api().set_enabled(id(A), false, String::new()).unwrap();
+    host.plugins_api()
+        .set_enabled(id(A), false, String::new())
+        .unwrap();
     assert_eq!(host.deactivations(A), vec![DeactivationReason::Disabled]);
 }
 
@@ -330,7 +375,10 @@ fn lif_014_update_and_shutdown_send_one_each_with_their_reason() {
     let mut host = one_plugin();
     host.update(A, "2.0.0");
     host.shutdown();
-    assert_eq!(host.deactivations(A), vec![DeactivationReason::Upgrade, DeactivationReason::Shutdown]);
+    assert_eq!(
+        host.deactivations(A),
+        vec![DeactivationReason::Upgrade, DeactivationReason::Shutdown]
+    );
 }
 
 /// REQ: LIF-015
@@ -338,7 +386,10 @@ fn lif_014_update_and_shutdown_send_one_each_with_their_reason() {
 fn lif_015_clean_detach_sends_shutdown_only() {
     let (mut host, _scope) = two_sided();
     host.detach_client("client-1");
-    assert_eq!(host.client_deactivations(A, "client-1"), vec![DeactivationReason::Shutdown]);
+    assert_eq!(
+        host.client_deactivations(A, "client-1"),
+        vec![DeactivationReason::Shutdown]
+    );
 }
 
 /// REQ: LIF-015
@@ -353,17 +404,25 @@ fn lif_015_killed_client_gets_no_call() {
 #[test]
 fn lif_016_one_event_per_change_in_order() {
     let mut host = one_plugin();
-    host.plugins_api().set_enabled(id(A), false, String::new()).unwrap();
-    host.plugins_api().set_enabled(id(A), true, String::new()).unwrap();
+    host.plugins_api()
+        .set_enabled(id(A), false, String::new())
+        .unwrap();
+    host.plugins_api()
+        .set_enabled(id(A), true, String::new())
+        .unwrap();
     trap(&mut host, A);
     let changes = host.state_changes();
-    let mut chain = changes.iter().filter(|c| c.plugin == A && c.side == Side::Server);
+    let mut chain = changes
+        .iter()
+        .filter(|c| c.plugin == A && c.side == Side::Server);
     let mut last = chain.next().unwrap().to;
     for change in chain {
         assert_eq!(change.from, last);
         last = change.to;
     }
-    assert!(changes.windows(2).all(|pair| pair[0].at_unix_ms <= pair[1].at_unix_ms));
+    assert!(changes
+        .windows(2)
+        .all(|pair| pair[0].at_unix_ms <= pair[1].at_unix_ms));
 }
 
 /// REQ: LIF-016
@@ -371,9 +430,26 @@ fn lif_016_one_event_per_change_in_order() {
 fn lif_016_reasons_come_from_the_documented_set() {
     let mut host = one_plugin();
     trap(&mut host, A);
-    host.plugins_api().set_enabled(id(A), false, String::new()).unwrap();
-    let allowed = ["user", "failure", "policy", "update", "uninstall", "trigger", "capacity", "server-start", "server-stop", "detach", "grant"];
-    assert!(host.state_changes().iter().all(|c| allowed.contains(&c.reason.as_str())));
+    host.plugins_api()
+        .set_enabled(id(A), false, String::new())
+        .unwrap();
+    let allowed = [
+        "user",
+        "failure",
+        "policy",
+        "update",
+        "uninstall",
+        "trigger",
+        "capacity",
+        "server-start",
+        "server-stop",
+        "detach",
+        "grant",
+    ];
+    assert!(host
+        .state_changes()
+        .iter()
+        .all(|c| allowed.contains(&c.reason.as_str())));
 }
 
 /// REQ: LIF-017
@@ -381,11 +457,18 @@ fn lif_016_reasons_come_from_the_documented_set() {
 fn lif_017_list_has_one_record_per_plugin_with_nineteen_fields_in_order() {
     let mut host = one_plugin();
     host.install(PluginSpec::new(B));
-    host.plugins_api().set_enabled(id(B), false, String::new()).unwrap();
+    host.plugins_api()
+        .set_enabled(id(B), false, String::new())
+        .unwrap();
     let list = host.plugins_api().list();
     assert_eq!(list.len(), 2);
     let json = serde_json::to_value(&list[0]).unwrap();
-    let keys: Vec<&str> = json.as_object().unwrap().keys().map(String::as_str).collect();
+    let keys: Vec<&str> = json
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
     assert_eq!(keys.len(), 19);
     assert_eq!(keys[0], "id");
 }
@@ -394,8 +477,15 @@ fn lif_017_list_has_one_record_per_plugin_with_nineteen_fields_in_order() {
 #[test]
 fn lif_017_disabled_record_reports_user_reason() {
     let mut host = one_plugin();
-    host.plugins_api().set_enabled(id(A), false, String::new()).unwrap();
-    let info = host.plugins_api().list().into_iter().find(|i| i.id.0 == A).unwrap();
+    host.plugins_api()
+        .set_enabled(id(A), false, String::new())
+        .unwrap();
+    let info = host
+        .plugins_api()
+        .list()
+        .into_iter()
+        .find(|i| i.id.0 == A)
+        .unwrap();
     assert_eq!(info.disabled_reason.as_deref(), Some("user"));
 }
 
@@ -416,7 +506,12 @@ fn lif_018_enabled_matches_package_state_rule() {
         let mut host = LifeHost::new();
         host.install(PluginSpec::new(A));
         host.force_package_state(A, package);
-        let info = host.plugins_api().list().into_iter().find(|i| i.id.0 == A).unwrap();
+        let info = host
+            .plugins_api()
+            .list()
+            .into_iter()
+            .find(|i| i.id.0 == A)
+            .unwrap();
         assert_eq!(info.enabled, enabled, "{package:?}");
     }
 }
@@ -429,7 +524,12 @@ fn lif_018_failed_is_true_when_any_side_is_stopped_by_failure() {
         trap(&mut host, A);
         host.advance_ms(1000);
     }
-    let info = host.plugins_api().list().into_iter().find(|i| i.id.0 == A).unwrap();
+    let info = host
+        .plugins_api()
+        .list()
+        .into_iter()
+        .find(|i| i.id.0 == A)
+        .unwrap();
     assert!(info.failed && info.enabled);
 }
 
@@ -438,11 +538,17 @@ fn lif_018_failed_is_true_when_any_side_is_stopped_by_failure() {
 fn lif_019_set_enabled_is_idempotent_without_event() {
     let mut host = one_plugin();
     let before = host.state_changes().len();
-    host.plugins_api().set_enabled(id(A), true, String::new()).unwrap();
+    host.plugins_api()
+        .set_enabled(id(A), true, String::new())
+        .unwrap();
     assert_eq!(host.state_changes().len(), before);
-    host.plugins_api().set_enabled(id(A), false, String::new()).unwrap();
+    host.plugins_api()
+        .set_enabled(id(A), false, String::new())
+        .unwrap();
     let mid = host.state_changes().len();
-    host.plugins_api().set_enabled(id(A), false, String::new()).unwrap();
+    host.plugins_api()
+        .set_enabled(id(A), false, String::new())
+        .unwrap();
     assert_eq!(host.state_changes().len(), mid);
 }
 
@@ -451,7 +557,9 @@ fn lif_019_set_enabled_is_idempotent_without_event() {
 fn lif_019_noop_changes_nothing_in_the_record() {
     let mut host = one_plugin();
     let before = host.plugins_api().list();
-    host.plugins_api().set_enabled(id(A), true, String::new()).unwrap();
+    host.plugins_api()
+        .set_enabled(id(A), true, String::new())
+        .unwrap();
     assert_eq!(host.plugins_api().list(), before);
 }
 
@@ -461,7 +569,11 @@ fn lif_020_disable_and_uninstall_run_one_after_the_other() {
     let mut host = one_plugin();
     host.race_disable_and_uninstall(A);
     let changes = host.state_changes();
-    let order: Vec<_> = changes.iter().filter(|c| c.plugin == A).map(|c| (c.from, c.to)).collect();
+    let order: Vec<_> = changes
+        .iter()
+        .filter(|c| c.plugin == A)
+        .map(|c| (c.from, c.to))
+        .collect();
     for pair in order.windows(2) {
         assert_eq!(pair[0].1, pair[1].0, "serialised: {order:?}");
     }
@@ -475,6 +587,11 @@ fn lif_020_other_plugins_are_not_blocked_by_a_slow_transition() {
     host.install(PluginSpec::new(B).startup());
     host.start(StartMode::Normal);
     let slow = host.begin_disable(A);
-    host.plugins_api().set_enabled(id(B), false, String::new()).unwrap();
-    assert!(!slow.finished(), "B finished while A was still deactivating");
+    host.plugins_api()
+        .set_enabled(id(B), false, String::new())
+        .unwrap();
+    assert!(
+        !slow.finished(),
+        "B finished while A was still deactivating"
+    );
 }

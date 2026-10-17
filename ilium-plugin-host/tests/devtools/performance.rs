@@ -11,7 +11,14 @@ use crate::common::*;
 const RUNS: usize = 5;
 
 fn best_of(mut work: impl FnMut()) -> Duration {
-    (0..RUNS).map(|_| { let start = Instant::now(); work(); start.elapsed() }).min().expect("runs")
+    (0..RUNS)
+        .map(|_| {
+            let start = Instant::now();
+            work();
+            start.elapsed()
+        })
+        .min()
+        .expect("runs")
 }
 
 fn batch() -> Vec<Event> {
@@ -24,33 +31,53 @@ fn one_batch(harness: &ilium_plugin_host::testing::HarnessHandle) {
 }
 
 fn component_harness() -> ilium_plugin_host::testing::HarnessHandle {
-    HostHarness::new().with_wat(&server_component_text(&[])).build().expect("build harness")
+    HostHarness::new()
+        .with_wat(&server_component_text(&[]))
+        .build()
+        .expect("build harness")
 }
 
 /// REQ: DEV-850
 #[test]
 fn dev_850_tracing_adds_at_most_5_percent_to_an_event_batch() {
     let plain = component_harness();
-    let traced = HostHarness::new().with_wat(&server_component_text(&[])).tracing(true).build().expect("build traced harness");
+    let traced = HostHarness::new()
+        .with_wat(&server_component_text(&[]))
+        .tracing(true)
+        .build()
+        .expect("build traced harness");
     let base = best_of(|| one_batch(&plain));
     let with_trace = best_of(|| one_batch(&traced));
-    assert!(with_trace.as_secs_f64() <= base.as_secs_f64() * 1.05, "{with_trace:?} vs {base:?}");
+    assert!(
+        with_trace.as_secs_f64() <= base.as_secs_f64() * 1.05,
+        "{with_trace:?} vs {base:?}"
+    );
 }
 
 /// REQ: DEV-850
 #[test]
 fn dev_850_profiling_changes_call_time_by_at_most_5_percent() {
     let plain = component_harness();
-    let profiled = HostHarness::new().with_wat(&server_component_text(&[])).profiling(true).build().expect("build profiled harness");
+    let profiled = HostHarness::new()
+        .with_wat(&server_component_text(&[]))
+        .profiling(true)
+        .build()
+        .expect("build profiled harness");
     let base = best_of(|| one_batch(&plain)).as_secs_f64();
     let with_profile = best_of(|| one_batch(&profiled)).as_secs_f64();
-    assert!((with_profile - base).abs() <= base * 0.05, "{with_profile} vs {base}");
+    assert!(
+        (with_profile - base).abs() <= base * 0.05,
+        "{with_profile} vs {base}"
+    );
 }
 
 /// REQ: DEV-851 WARN
 #[test]
 fn dev_851_native_mode_event_batch_finishes_under_10_ms() {
-    let harness = HostHarness::new().with_native_guest(Box::new(ilium_plugin_host::testing::NullGuest)).build().expect("build native harness");
+    let harness = HostHarness::new()
+        .with_native_guest(Box::new(ilium_plugin_host::testing::NullGuest))
+        .build()
+        .expect("build native harness");
     let elapsed = best_of(|| one_batch(&harness));
     assert!(elapsed < Duration::from_millis(10), "{elapsed:?}");
 }
@@ -69,8 +96,14 @@ fn dev_851_component_mode_event_batch_finishes_under_100_ms_after_load() {
 fn dev_852_check_of_a_10_mib_package_finishes_under_2_s() {
     let root = scratch();
     let env = env(root.path());
-    let file = write_package_file(root.path(), "big.ilp", &unsigned_package(&server_component_of_size(10 * 1024 * 1024 - 4096)));
-    let elapsed = best_of(|| { run(&env, &["check", &file, "--json"]); });
+    let file = write_package_file(
+        root.path(),
+        "big.ilp",
+        &unsigned_package(&server_component_of_size(10 * 1024 * 1024 - 4096)),
+    );
+    let elapsed = best_of(|| {
+        run(&env, &["check", &file, "--json"]);
+    });
     assert!(elapsed < Duration::from_secs(2), "{elapsed:?}");
 }
 
@@ -78,20 +111,28 @@ fn dev_852_check_of_a_10_mib_package_finishes_under_2_s() {
 #[test]
 fn dev_852_lint_of_a_project_finishes_under_5_s() {
     let (_root, env) = lint_env_with(|_| {});
-    let elapsed = best_of(|| { lint(&env, &[]); });
+    let elapsed = best_of(|| {
+        lint(&env, &[]);
+    });
     assert!(elapsed < Duration::from_secs(5), "{elapsed:?}");
 }
 
 /// REQ: DEV-853 WARN
 #[test]
 fn dev_853_dev_reload_budget_is_1_s_after_the_build() {
-    assert_eq!(ilium_plugin_host::cli::dev::RELOAD_BUDGET, Duration::from_secs(1));
+    assert_eq!(
+        ilium_plugin_host::cli::dev::RELOAD_BUDGET,
+        Duration::from_secs(1)
+    );
 }
 
 /// REQ: DEV-853 WARN
 #[test]
 fn dev_853_change_debounce_is_300_ms() {
-    assert_eq!(ilium_plugin_host::cli::dev::DEBOUNCE, Duration::from_millis(300));
+    assert_eq!(
+        ilium_plugin_host::cli::dev::DEBOUNCE,
+        Duration::from_millis(300)
+    );
 }
 
 /// REQ: DEV-853 WARN

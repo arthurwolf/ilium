@@ -52,7 +52,10 @@ pub struct UiWorkChannel<T> {
 impl<T> UiWorkChannel<T> {
     /// A channel that holds at most `capacity` items.
     pub fn new(capacity: usize) -> UiWorkChannel<T> {
-        UiWorkChannel { capacity, _items: PhantomData }
+        UiWorkChannel {
+            capacity,
+            _items: PhantomData,
+        }
     }
 
     /// Queues an item; a full channel hands it back (reference-host-architecture.md HST-182).
@@ -226,7 +229,13 @@ impl Scheduler {
     }
 
     /// Queues a call and returns its ticket (reference-host-architecture.md HST-185).
-    pub fn enqueue(&self, plugin: &PluginId, kind: CallKind, now: Instant, work: Box<dyn FnOnce() + Send>) -> u64 {
+    pub fn enqueue(
+        &self,
+        plugin: &PluginId,
+        kind: CallKind,
+        now: Instant,
+        work: Box<dyn FnOnce() + Send>,
+    ) -> u64 {
         unimplemented!("host::scheduler::Scheduler::enqueue")
     }
 
@@ -282,7 +291,11 @@ impl Scheduler {
 
     /// Pushes an event from a rate-limited source; over the rate it is refused `rate-limited`
     /// (reference-host-architecture.md HST-203).
-    pub fn push_event_from_source(&self, plugin: &PluginId, event: Event) -> Result<EventPush, PluginError> {
+    pub fn push_event_from_source(
+        &self,
+        plugin: &PluginId,
+        event: Event,
+    ) -> Result<EventPush, PluginError> {
         unimplemented!("host::scheduler::Scheduler::push_event_from_source")
     }
 

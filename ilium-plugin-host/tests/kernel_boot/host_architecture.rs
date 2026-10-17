@@ -18,11 +18,15 @@ use proptest::prelude::*;
 use crate::common::*;
 
 fn startup_plugin(id: &str) -> PluginSpec {
-    PluginSpec::new(id, Tier::T1).core().activation(&["startup"])
+    PluginSpec::new(id, Tier::T1)
+        .core()
+        .activation(&["startup"])
 }
 
 fn lazy_plugin(id: &str) -> PluginSpec {
-    PluginSpec::new(id, Tier::T1).core().activation(&["command:open"])
+    PluginSpec::new(id, Tier::T1)
+        .core()
+        .activation(&["command:open"])
 }
 
 fn crate_named(name: &str) -> CrateManifest {
@@ -37,8 +41,15 @@ fn crate_named(name: &str) -> CrateManifest {
 /// REQ: HST-001
 #[test]
 fn hst_001_workspace_contains_the_three_plugin_crates() {
-    let names: BTreeSet<String> = workspace_crates().into_iter().map(|krate| krate.name).collect();
-    for required in ["ilium-plugin-api", "ilium-plugin-host", "ilium-plugin-helper"] {
+    let names: BTreeSet<String> = workspace_crates()
+        .into_iter()
+        .map(|krate| krate.name)
+        .collect();
+    for required in [
+        "ilium-plugin-api",
+        "ilium-plugin-host",
+        "ilium-plugin-helper",
+    ] {
         assert!(names.contains(required), "workspace lacks {required}");
     }
 }
@@ -53,8 +64,15 @@ fn hst_001_api_crate_depends_on_no_runtime_or_io_crate() {
             "ilium-plugin-api depends on {forbidden}"
         );
     }
-    let ilium_edges: Vec<&String> = api.dependencies.iter().filter(|name| name.starts_with("ilium")).collect();
-    assert!(ilium_edges.is_empty(), "ilium-plugin-api has ilium edges: {ilium_edges:?}");
+    let ilium_edges: Vec<&String> = api
+        .dependencies
+        .iter()
+        .filter(|name| name.starts_with("ilium"))
+        .collect();
+    assert!(
+        ilium_edges.is_empty(),
+        "ilium-plugin-api has ilium edges: {ilium_edges:?}"
+    );
 }
 
 /// REQ: HST-001
@@ -63,7 +81,13 @@ fn hst_001_api_sources_name_no_runtime_or_io_paths() {
     let sources = rust_sources(&workspace_root().join("ilium-plugin-api/src"));
     assert!(!sources.is_empty());
     for (path, text) in sources {
-        for pattern in ["wasmtime::", "tokio::", "std::fs::", "std::net::", "std::process::"] {
+        for pattern in [
+            "wasmtime::",
+            "tokio::",
+            "std::fs::",
+            "std::net::",
+            "std::process::",
+        ] {
             assert!(!text.contains(pattern), "{path} contains {pattern}");
         }
     }
@@ -100,7 +124,11 @@ fn hst_002_real_workspace_has_no_forbidden_edge() {
 #[test]
 fn hst_002_host_to_core_transport_and_ipc_are_forbidden() {
     for target in ["ilium-core", "ilium-transport", "ilium-ipc"] {
-        let crates = [synthetic_crate("ilium-plugin-host", "ilium-plugin-host", &["ilium-plugin-api", target])];
+        let crates = [synthetic_crate(
+            "ilium-plugin-host",
+            "ilium-plugin-host",
+            &["ilium-plugin-api", target],
+        )];
         assert_eq!(
             forbidden_edges(&crates),
             vec![format!("ilium-plugin-host -> {target}")],
@@ -115,7 +143,12 @@ fn hst_002_host_to_api_execution_platform_logging_are_allowed() {
     let crates = [synthetic_crate(
         "ilium-plugin-host",
         "ilium-plugin-host",
-        &["ilium-plugin-api", "ilium-execution", "ilium-platform", "ilium-logging"],
+        &[
+            "ilium-plugin-api",
+            "ilium-execution",
+            "ilium-platform",
+            "ilium-logging",
+        ],
     )];
     assert!(forbidden_edges(&crates).is_empty());
 }
@@ -123,9 +156,20 @@ fn hst_002_host_to_api_execution_platform_logging_are_allowed() {
 /// REQ: HST-002
 #[test]
 fn hst_002_ipc_to_host_is_forbidden_and_ipc_to_api_is_allowed() {
-    let bad = [synthetic_crate("ilium-ipc", "ilium-ipc", &["ilium-plugin-host"])];
-    assert_eq!(forbidden_edges(&bad), vec!["ilium-ipc -> ilium-plugin-host".to_owned()]);
-    let good = [synthetic_crate("ilium-ipc", "ilium-ipc", &["ilium-plugin-api"])];
+    let bad = [synthetic_crate(
+        "ilium-ipc",
+        "ilium-ipc",
+        &["ilium-plugin-host"],
+    )];
+    assert_eq!(
+        forbidden_edges(&bad),
+        vec!["ilium-ipc -> ilium-plugin-host".to_owned()]
+    );
+    let good = [synthetic_crate(
+        "ilium-ipc",
+        "ilium-ipc",
+        &["ilium-plugin-api"],
+    )];
     assert!(forbidden_edges(&good).is_empty());
 }
 
@@ -133,29 +177,55 @@ fn hst_002_ipc_to_host_is_forbidden_and_ipc_to_api_is_allowed() {
 #[test]
 fn hst_002_server_client_and_cli_may_depend_on_the_host() {
     for name in ["ilium-server", "ilium-client", "ilium"] {
-        let crates = [synthetic_crate(name, name, &["ilium-plugin-host", "ilium-plugin-api"])];
-        assert!(forbidden_edges(&crates).is_empty(), "{name} -> host must be allowed");
+        let crates = [synthetic_crate(
+            name,
+            name,
+            &["ilium-plugin-host", "ilium-plugin-api"],
+        )];
+        assert!(
+            forbidden_edges(&crates).is_empty(),
+            "{name} -> host must be allowed"
+        );
     }
 }
 
 /// REQ: HST-002
 #[test]
 fn hst_002_plugin_crates_may_depend_only_on_the_sdk() {
-    let bad = [synthetic_crate("plugins/core/tree", "ilium-core-tree", &["ilium-plugin-sdk", "ilium-core"])];
-    assert_eq!(forbidden_edges(&bad), vec!["ilium-core-tree -> ilium-core".to_owned()]);
-    let good = [synthetic_crate("plugins/core/tree", "ilium-core-tree", &["ilium-plugin-sdk", "serde"])];
+    let bad = [synthetic_crate(
+        "plugins/core/tree",
+        "ilium-core-tree",
+        &["ilium-plugin-sdk", "ilium-core"],
+    )];
+    assert_eq!(
+        forbidden_edges(&bad),
+        vec!["ilium-core-tree -> ilium-core".to_owned()]
+    );
+    let good = [synthetic_crate(
+        "plugins/core/tree",
+        "ilium-core-tree",
+        &["ilium-plugin-sdk", "serde"],
+    )];
     assert!(forbidden_edges(&good).is_empty());
 }
 
 /// REQ: HST-002
 #[test]
 fn hst_002_sdk_family_may_not_reach_outside_the_family() {
-    let bad = [synthetic_crate("ilium-plugin-sdk-core", "ilium-plugin-sdk-core", &["ilium-plugin-api"])];
+    let bad = [synthetic_crate(
+        "ilium-plugin-sdk-core",
+        "ilium-plugin-sdk-core",
+        &["ilium-plugin-api"],
+    )];
     assert_eq!(
         forbidden_edges(&bad),
         vec!["ilium-plugin-sdk-core -> ilium-plugin-api".to_owned()]
     );
-    let good = [synthetic_crate("ilium-plugin-sdk", "ilium-plugin-sdk", &["ilium-plugin-sdk-core", "ilium-plugin-sdk-macros"])];
+    let good = [synthetic_crate(
+        "ilium-plugin-sdk",
+        "ilium-plugin-sdk",
+        &["ilium-plugin-sdk-core", "ilium-plugin-sdk-macros"],
+    )];
     assert!(forbidden_edges(&good).is_empty());
 }
 
@@ -176,15 +246,25 @@ proptest! {
 #[test]
 fn hst_003_core_depends_on_no_plugin_crate() {
     let core = crate_named("ilium-core");
-    let plugin_edges: Vec<&String> = core.dependencies.iter().filter(|name| name.starts_with("ilium-plugin")).collect();
-    assert!(plugin_edges.is_empty(), "ilium-core edges: {plugin_edges:?}");
+    let plugin_edges: Vec<&String> = core
+        .dependencies
+        .iter()
+        .filter(|name| name.starts_with("ilium-plugin"))
+        .collect();
+    assert!(
+        plugin_edges.is_empty(),
+        "ilium-core edges: {plugin_edges:?}"
+    );
 }
 
 /// REQ: HST-003
 #[test]
 fn hst_003_core_sources_name_no_plugin_crate() {
     for (path, text) in rust_sources(&workspace_root().join("ilium-core/src")) {
-        assert!(!text.contains("ilium_plugin"), "{path} names a plugin crate");
+        assert!(
+            !text.contains("ilium_plugin"),
+            "{path} names a plugin crate"
+        );
     }
 }
 
@@ -194,7 +274,10 @@ fn hst_003_detect_and_pty_depend_on_no_plugin_crate() {
     for name in ["ilium-detect", "ilium-pty"] {
         let krate = crate_named(name);
         assert!(
-            !krate.dependencies.iter().any(|dependency| dependency.starts_with("ilium-plugin")),
+            !krate
+                .dependencies
+                .iter()
+                .any(|dependency| dependency.starts_with("ilium-plugin")),
             "{name} depends on a plugin crate"
         );
     }
@@ -206,7 +289,10 @@ fn hst_003_detect_and_pty_depend_on_no_plugin_crate() {
 #[test]
 fn hst_004_ipc_depends_on_the_api_crate_and_not_on_the_host() {
     let ipc = crate_named("ilium-ipc");
-    assert!(ipc.dependencies.contains("ilium-plugin-api"), "ilium-ipc must carry api records");
+    assert!(
+        ipc.dependencies.contains("ilium-plugin-api"),
+        "ilium-ipc must carry api records"
+    );
     assert!(!ipc.dependencies.contains("ilium-plugin-host"));
     assert!(!ipc.dependencies.contains("wasmtime"));
 }
@@ -216,7 +302,10 @@ fn hst_004_ipc_depends_on_the_api_crate_and_not_on_the_host() {
 fn hst_004_ipc_sources_name_no_wasmtime_value() {
     for (path, text) in rust_sources(&workspace_root().join("ilium-ipc/src")) {
         assert!(!text.contains("wasmtime"), "{path} names wasmtime");
-        assert!(!text.contains("ilium_plugin_host"), "{path} names the host crate");
+        assert!(
+            !text.contains("ilium_plugin_host"),
+            "{path} names the host crate"
+        );
     }
 }
 
@@ -224,7 +313,10 @@ fn hst_004_ipc_sources_name_no_wasmtime_value() {
 #[test]
 fn hst_004_ipc_plugin_module_uses_api_record_types() {
     let text = read_text(&workspace_root().join("ilium-ipc/src/plugin.rs"));
-    assert!(text.contains("ilium_plugin_api"), "plugin traffic must be typed by the api crate");
+    assert!(
+        text.contains("ilium_plugin_api"),
+        "plugin traffic must be typed by the api crate"
+    );
 }
 
 // ---------------------------------------------------------------- HST-005
@@ -314,8 +406,14 @@ fn hst_015_scene_stores_are_separate_from_client_host_stores() {
         )
         .build();
     run.start();
-    let client_stores: BTreeSet<u64> = run.store_ids("ilium.core.scenes", Side::Client).into_iter().collect();
-    let scene_stores: BTreeSet<u64> = run.store_ids("ilium.core.scenes", Side::Scene).into_iter().collect();
+    let client_stores: BTreeSet<u64> = run
+        .store_ids("ilium.core.scenes", Side::Client)
+        .into_iter()
+        .collect();
+    let scene_stores: BTreeSet<u64> = run
+        .store_ids("ilium.core.scenes", Side::Scene)
+        .into_iter()
+        .collect();
     assert!(!client_stores.is_empty());
     assert!(!scene_stores.is_empty());
     assert!(client_stores.is_disjoint(&scene_stores));
@@ -446,7 +544,11 @@ fn hst_021_every_store_comes_from_the_one_engine() {
     let engine = run.engine_id();
     for plugin in ["ilium.core.titles", "ilium.core.cost"] {
         for store in run.store_ids(plugin, Side::Server) {
-            assert_eq!(run.engine_of_store(store), engine, "store {store} of {plugin}");
+            assert_eq!(
+                run.engine_of_store(store),
+                engine,
+                "store {store} of {plugin}"
+            );
         }
     }
 }
@@ -467,7 +569,11 @@ fn hst_021_a_restart_of_a_plugin_does_not_create_a_second_engine() {
 #[test]
 fn hst_021_the_cli_process_also_creates_exactly_one_engine() {
     let mut run = BootHarness::new(ProcessKind::Cli)
-        .plugin(PluginSpec::new("ilium.core.recap", Tier::T1).core().activation(&["cli:recap"]))
+        .plugin(
+            PluginSpec::new("ilium.core.recap", Tier::T1)
+                .core()
+                .activation(&["cli:recap"]),
+        )
         .build();
     let cli = run.run_cli("ilium.core.recap", "recap");
     assert_eq!(run.engine_count(), 1);
@@ -544,7 +650,10 @@ fn hst_023_a_second_writer_cannot_open_the_store_while_the_first_holds_it() {
     let second = GrantStore::open(&path);
     assert!(second.is_err(), "a second writer must be refused");
     drop(first);
-    assert!(GrantStore::open(&path).is_ok(), "the lock is released on drop");
+    assert!(
+        GrantStore::open(&path).is_ok(),
+        "the lock is released on drop"
+    );
 }
 
 /// REQ: HST-023
@@ -555,10 +664,14 @@ fn hst_023_the_store_file_is_replaced_atomically_and_owner_only() {
     let mut store = GrantStore::open(&path).expect("open");
     let plugin = ilium_plugin_api::ids::PluginId("ilium.core.tree".to_owned());
     store.set_granted(&plugin, &some_grants(2)).expect("write");
-    let mode = std::fs::metadata(&path).expect("file exists").permissions().mode() & 0o777;
+    let mode = std::fs::metadata(&path)
+        .expect("file exists")
+        .permissions()
+        .mode()
+        & 0o777;
     assert_eq!(mode, 0o600);
-    let parsed: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&path).expect("read")).expect("valid json after a write");
+    let parsed: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).expect("read"))
+        .expect("valid json after a write");
     assert!(parsed.is_object() || parsed.is_array());
 }
 
@@ -581,7 +694,9 @@ fn hst_023_a_reader_never_sees_a_partial_file_while_the_writer_replaces_it() {
         partial
     });
     for round in 0..60 {
-        store.set_granted(&plugin, &some_grants(1 + round % 4)).expect("write");
+        store
+            .set_granted(&plugin, &some_grants(1 + round % 4))
+            .expect("write");
     }
     assert_eq!(reader.join().expect("reader thread"), 0, "partial reads");
 }
@@ -651,12 +766,21 @@ fn hst_027_all_eager_steps_precede_the_first_activation() {
         .build();
     run.start();
     let trace = run.trace();
-    let first_activation = trace.iter().position(|entry| entry.starts_with("activate:")).expect("an activation");
+    let first_activation = trace
+        .iter()
+        .position(|entry| entry.starts_with("activate:"))
+        .expect("an activation");
     for plugin in ["ilium.core.titles", "ilium.core.cost", "ilium.core.recap"] {
         let verified = position_of(&trace, &format!("verify:{plugin}")).expect("verified");
         let registered = position_of(&trace, &format!("register:{plugin}")).expect("registered");
-        assert!(verified < first_activation, "{plugin} verified after the first activation");
-        assert!(registered < first_activation, "{plugin} registered after the first activation");
+        assert!(
+            verified < first_activation,
+            "{plugin} verified after the first activation"
+        );
+        assert!(
+            registered < first_activation,
+            "{plugin} registered after the first activation"
+        );
     }
 }
 
@@ -696,9 +820,16 @@ fn hst_028_a_two_plugin_cycle_leaves_both_disabled_with_requires_cycle() {
         .build();
     let report = run.start();
     for plugin in ["ilium.core.alpha", "ilium.core.beta"] {
-        assert_eq!(run.disabled_reason(plugin).as_deref(), Some("manifest.requires-cycle"), "{plugin}");
+        assert_eq!(
+            run.disabled_reason(plugin).as_deref(),
+            Some("manifest.requires-cycle"),
+            "{plugin}"
+        );
         assert_eq!(run.instantiations(plugin), 0);
-        assert!(report.failed.iter().any(|(id, code)| id == plugin && code == "manifest.requires-cycle"));
+        assert!(report
+            .failed
+            .iter()
+            .any(|(id, code)| id == plugin && code == "manifest.requires-cycle"));
     }
 }
 
@@ -725,7 +856,10 @@ fn hst_028_a_three_plugin_cycle_disables_all_three() {
         .build();
     run.start();
     for plugin in ["ilium.core.a1", "ilium.core.a2", "ilium.core.a3"] {
-        assert_eq!(run.disabled_reason(plugin).as_deref(), Some("manifest.requires-cycle"));
+        assert_eq!(
+            run.disabled_reason(plugin).as_deref(),
+            Some("manifest.requires-cycle")
+        );
     }
 }
 
@@ -748,7 +882,10 @@ fn hst_036_a_panic_in_an_import_traps_with_host_import_panic() {
 /// REQ: HST-036
 #[test]
 fn hst_036_the_dispatcher_stays_alive_after_an_import_panic() {
-    let handle = HostHarness::new().panic_in_import("tree.get").build().expect("build");
+    let handle = HostHarness::new()
+        .panic_in_import("tree.get")
+        .build()
+        .expect("build");
     handle.deliver(Vec::new());
     handle.pump(8);
     let second = handle.pump(4);
@@ -758,10 +895,16 @@ fn hst_036_the_dispatcher_stays_alive_after_an_import_panic() {
 /// REQ: HST-036
 #[test]
 fn hst_036_the_panic_is_logged_with_the_import_name() {
-    let handle = HostHarness::new().panic_in_import("tree.get").build().expect("build");
+    let handle = HostHarness::new()
+        .panic_in_import("tree.get")
+        .build()
+        .expect("build");
     handle.deliver(Vec::new());
     handle.pump(8);
-    assert!(handle.logs().iter().any(|line| line.message.contains("tree.get")));
+    assert!(handle
+        .logs()
+        .iter()
+        .any(|line| line.message.contains("tree.get")));
 }
 
 // ---------------------------------------------------------------- HST-037
@@ -786,7 +929,10 @@ fn hst_037_engine_failure_logs_host_engine_failed() {
         .fail_engine_creation()
         .build();
     run.start();
-    assert!(run.logs().iter().any(|line| line.message.contains("host.engine-failed")));
+    assert!(run
+        .logs()
+        .iter()
+        .any(|line| line.message.contains("host.engine-failed")));
 }
 
 /// REQ: HST-037
@@ -869,7 +1015,11 @@ fn hst_044_an_unreadable_grant_store_refuses_t2_and_t3_plugins() {
     run.start();
     for plugin in ["acme.t2plugin", "acme.t3plugin"] {
         assert_eq!(run.instantiations(plugin), 0, "{plugin}");
-        assert_eq!(run.disabled_reason(plugin).as_deref(), Some("host.grants-unreadable"), "{plugin}");
+        assert_eq!(
+            run.disabled_reason(plugin).as_deref(),
+            Some("host.grants-unreadable"),
+            "{plugin}"
+        );
     }
 }
 
@@ -886,7 +1036,10 @@ fn hst_044_an_unreadable_grant_store_grants_a_t1_plugin_only_its_defaults() {
         .build();
     run.start();
     assert_eq!(run.instantiations("ilium.core.titles"), 1);
-    assert_eq!(run.granted("ilium.core.titles"), vec!["tree.read".to_owned()]);
+    assert_eq!(
+        run.granted("ilium.core.titles"),
+        vec!["tree.read".to_owned()]
+    );
 }
 
 /// REQ: HST-044
@@ -926,8 +1079,14 @@ fn hst_045_the_load_refusal_is_package_corrupt_and_the_plugin_stays_disabled() {
         .tamper_package("acme.hashed")
         .build();
     let report = run.start();
-    assert!(report.failed.iter().any(|(id, code)| id == "acme.hashed" && code == "package.corrupt"));
-    assert_eq!(run.disabled_reason("acme.hashed").as_deref(), Some("package.corrupt"));
+    assert!(report
+        .failed
+        .iter()
+        .any(|(id, code)| id == "acme.hashed" && code == "package.corrupt"));
+    assert_eq!(
+        run.disabled_reason("acme.hashed").as_deref(),
+        Some("package.corrupt")
+    );
 }
 
 /// REQ: HST-045
@@ -946,7 +1105,10 @@ fn hst_045_an_unchanged_package_loads() {
 fn hst_045_the_install_time_hash_check_uses_manifest_file_hash() {
     // The requirements table names `manifest.file-hash` (a `files` entry whose SHA-256 differs);
     // the architecture page names `package.corrupt` for the load-time store check.
-    assert_eq!(ilium_plugin_api::codes::manifest::FILE_HASH, "manifest.file-hash");
+    assert_eq!(
+        ilium_plugin_api::codes::manifest::FILE_HASH,
+        "manifest.file-hash"
+    );
     assert_eq!(ilium_plugin_api::codes::package::CORRUPT, "package.corrupt");
     let mut run = BootHarness::new(ProcessKind::Server)
         .plugin(PluginSpec::new("acme.hashed", Tier::T3).activation(&["startup"]))

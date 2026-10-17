@@ -23,7 +23,11 @@ fn doc_cor_050_manifest_file_equals_complete_manifest_on_page() {
 /// REQ: COR-050, F-009
 #[test]
 fn doc_cor_050_page_has_fragment_complete_manifest_and_example_blocks() {
-    assert_eq!(json_blocks(&page_text()).len(), 3, "fragment, complete manifest and the issues example");
+    assert_eq!(
+        json_blocks(&page_text()).len(),
+        3,
+        "fragment, complete manifest and the issues example"
+    );
 }
 
 /// REQ: COR-050, F-009
@@ -31,7 +35,16 @@ fn doc_cor_050_page_has_fragment_complete_manifest_and_example_blocks() {
 fn doc_cor_050_fragment_contributions_equal_the_complete_manifest() {
     let fragment = fragment();
     let complete = page_manifest();
-    for key in ["api", "id", "version", "publisher", "server", "client", "capabilities", "contributes"] {
+    for key in [
+        "api",
+        "id",
+        "version",
+        "publisher",
+        "server",
+        "client",
+        "capabilities",
+        "contributes",
+    ] {
         assert_eq!(fragment[key], complete[key], "fragment key {key}");
     }
 }
@@ -40,7 +53,16 @@ fn doc_cor_050_fragment_contributions_equal_the_complete_manifest() {
 #[test]
 fn doc_cor_050_complete_manifest_carries_the_required_keys() {
     let manifest = manifest_value();
-    for key in ["api", "id", "name", "version", "publisher", "license", "description", "limits_tier"] {
+    for key in [
+        "api",
+        "id",
+        "name",
+        "version",
+        "publisher",
+        "license",
+        "description",
+        "limits_tier",
+    ] {
         assert!(manifest.get(key).is_some(), "missing key {key}");
     }
 }
@@ -86,20 +108,30 @@ fn search_009_has_a_client_side_with_the_views_export() {
 fn search_009_server_grants_are_exactly_the_five_of_the_page_in_order() {
     assert_eq!(
         strings(&manifest_value()["capabilities"]["server"]),
-        ["inference.embed", "tree.read", "terminal.read-screen", "fs.read:project", "jobs.run"]
+        [
+            "inference.embed",
+            "tree.read",
+            "terminal.read-screen",
+            "fs.read:project",
+            "jobs.run"
+        ]
     );
 }
 
 /// REQ: F-009
 #[test]
 fn search_009_client_grants_are_ui_panels_only() {
-    assert_eq!(strings(&manifest_value()["capabilities"]["client"]), ["ui.panels"]);
+    assert_eq!(
+        strings(&manifest_value()["capabilities"]["client"]),
+        ["ui.panels"]
+    );
 }
 
 /// REQ: F-009
 #[test]
 fn search_009_reads_terminal_screens_through_the_read_screen_grant() {
-    assert!(strings(&manifest_value()["capabilities"]["server"]).contains(&"terminal.read-screen".to_string()));
+    assert!(strings(&manifest_value()["capabilities"]["server"])
+        .contains(&"terminal.read-screen".to_string()));
     assert!(page_text().contains("`terminal.read-screen` grant"));
 }
 
@@ -116,35 +148,51 @@ fn search_009_activation_triggers_are_command_job_and_view() {
 #[test]
 fn search_009_contributes_one_open_command() {
     let commands = manifest_value()["contributes"]["commands"].clone();
-    assert_eq!(commands, json!([{ "id": "open", "title": "Search the workspace", "category": "Search" }]));
+    assert_eq!(
+        commands,
+        json!([{ "id": "open", "title": "Search the workspace", "category": "Search" }])
+    );
 }
 
 /// REQ: F-009
 #[test]
 fn search_009_binds_the_slash_chord_in_prefix_mode_to_the_open_command() {
     let keybindings = manifest_value()["contributes"]["keybindings"].clone();
-    assert_eq!(keybindings, json!([{ "command": "ilium.core.search/open", "chord": "/", "mode": "prefix" }]));
+    assert_eq!(
+        keybindings,
+        json!([{ "command": "ilium.core.search/open", "chord": "/", "mode": "prefix" }])
+    );
 }
 
 /// REQ: F-009
 #[test]
 fn search_009_contributes_one_modal_search_panel() {
     let panels = manifest_value()["contributes"]["panels"].clone();
-    assert_eq!(panels, json!([{ "id": "search", "title": "Search", "modal": true }]));
+    assert_eq!(
+        panels,
+        json!([{ "id": "search", "title": "Search", "modal": true }])
+    );
 }
 
 /// REQ: F-009
 #[test]
 fn search_009_contributes_the_scan_files_job_with_its_limits() {
     let jobs = manifest_value()["contributes"]["jobs"].clone();
-    assert_eq!(jobs, json!([{ "kind": "scan-files", "deadline_ms": 120000, "memory_mib": 128 }]));
+    assert_eq!(
+        jobs,
+        json!([{ "kind": "scan-files", "deadline_ms": 120000, "memory_mib": 128 }])
+    );
 }
 
 /// REQ: F-009
 #[test]
 fn search_009_contributes_only_commands_keybindings_panels_and_jobs() {
     let manifest = manifest_value();
-    let mut keys: Vec<&String> = manifest["contributes"].as_object().expect("contributes").keys().collect();
+    let mut keys: Vec<&String> = manifest["contributes"]
+        .as_object()
+        .expect("contributes")
+        .keys()
+        .collect();
     keys.sort();
     assert_eq!(keys, ["commands", "jobs", "keybindings", "panels"]);
 }
@@ -153,8 +201,13 @@ fn search_009_contributes_only_commands_keybindings_panels_and_jobs() {
 #[test]
 fn search_009_the_keybinding_command_is_a_contributed_command_of_the_plugin() {
     let manifest = manifest_value();
-    let command = manifest["contributes"]["keybindings"][0]["command"].as_str().expect("command").to_string();
-    let id = manifest["contributes"]["commands"][0]["id"].as_str().expect("id");
+    let command = manifest["contributes"]["keybindings"][0]["command"]
+        .as_str()
+        .expect("command")
+        .to_string();
+    let id = manifest["contributes"]["commands"][0]["id"]
+        .as_str()
+        .expect("id");
     assert_eq!(command, format!("{PLUGIN_ID}/{id}"));
 }
 
@@ -183,6 +236,12 @@ fn search_009_the_page_names_both_sides_in_its_first_paragraph() {
 fn search_009_the_search_example_uses_the_documented_manifest_for_the_issues_source() {
     let blocks = json_blocks(&page_text());
     let example: Value = serde_json::from_str(&blocks[2]).expect("example JSON");
-    assert_eq!(example["capabilities"]["server"], json!(["extensions.contribute:ilium.core.search/sources"]));
-    assert_eq!(example["contributes"]["extensions"][0]["point"], "ilium.core.search/sources");
+    assert_eq!(
+        example["capabilities"]["server"],
+        json!(["extensions.contribute:ilium.core.search/sources"])
+    );
+    assert_eq!(
+        example["contributes"]["extensions"][0]["point"],
+        "ilium.core.search/sources"
+    );
 }

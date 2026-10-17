@@ -38,7 +38,14 @@ fn tree_fixture(grants: &[&str]) -> (ImportsFixture, Nodes) {
     fixture.lock_node(locked_folder);
     (
         fixture,
-        Nodes { group, folder, claude_pane, plain_pane, locked_folder, codex_pane },
+        Nodes {
+            group,
+            folder,
+            claude_pane,
+            plain_pane,
+            locked_folder,
+            codex_pane,
+        },
     )
 }
 
@@ -89,7 +96,13 @@ fn tree_get_of_a_root_node_has_no_parent() {
 #[test]
 fn tree_get_of_a_locked_node_reports_locked() {
     let (mut fixture, nodes) = tree_fixture(READ);
-    assert!(fixture.tree().get(nodes.locked_folder).expect("node exists").locked);
+    assert!(
+        fixture
+            .tree()
+            .get(nodes.locked_folder)
+            .expect("node exists")
+            .locked
+    );
 }
 
 /// REQ: WIT:ilium:host/tree.get
@@ -112,8 +125,18 @@ fn tree_get_agent_is_none_without_the_agent_read_grant() {
 fn tree_get_agent_is_present_with_the_agent_read_grant() {
     let (mut fixture, nodes) = tree_fixture(READ_AGENT);
     let view = fixture.tree().get(nodes.claude_pane).expect("node exists");
-    assert_eq!(view.agent.map(|agent| agent.signature), Some("claude".to_owned()));
-    assert_eq!(fixture.tree().get(nodes.plain_pane).expect("node exists").agent, None);
+    assert_eq!(
+        view.agent.map(|agent| agent.signature),
+        Some("claude".to_owned())
+    );
+    assert_eq!(
+        fixture
+            .tree()
+            .get(nodes.plain_pane)
+            .expect("node exists")
+            .agent,
+        None
+    );
 }
 
 /// REQ: WIT:ilium:host/tree.get
@@ -121,14 +144,21 @@ fn tree_get_agent_is_present_with_the_agent_read_grant() {
 fn tree_get_without_tree_read_is_not_permitted() {
     let (mut fixture, nodes) = tree_fixture(&[]);
     assert_eq!(fixture.tree().get(nodes.plain_pane), None);
-    assert_eq!(fixture.last_import_error_code(), Some(ErrorCode::NotPermitted));
+    assert_eq!(
+        fixture.last_import_error_code(),
+        Some(ErrorCode::NotPermitted)
+    );
 }
 
 /// REQ: WIT:ilium:host/tree.get
 #[test]
 fn tree_get_a_title_change_moves_the_revision() {
     let (mut fixture, nodes) = tree_fixture(READ);
-    let before = fixture.tree().get(nodes.plain_pane).expect("node exists").revision;
+    let before = fixture
+        .tree()
+        .get(nodes.plain_pane)
+        .expect("node exists")
+        .revision;
     fixture.rename_node(nodes.plain_pane, "renamed");
     let after = fixture.tree().get(nodes.plain_pane).expect("node exists");
     assert_eq!(after.title, "renamed");
@@ -173,7 +203,10 @@ fn tree_children_of_an_unknown_node_is_empty() {
 fn tree_children_without_tree_read_is_not_permitted() {
     let (mut fixture, nodes) = tree_fixture(&[]);
     assert!(fixture.tree().children(nodes.folder).is_empty());
-    assert_eq!(fixture.last_import_error_code(), Some(ErrorCode::NotPermitted));
+    assert_eq!(
+        fixture.last_import_error_code(),
+        Some(ErrorCode::NotPermitted)
+    );
 }
 
 /// REQ: WIT:ilium:host/tree.children
@@ -193,7 +226,10 @@ fn tree_children_keeps_the_order_of_siblings_added_later() {
 #[test]
 fn tree_roots_returns_the_top_level_nodes_in_tree_order() {
     let (mut fixture, nodes) = tree_fixture(READ);
-    assert_eq!(fixture.tree().roots(), vec![nodes.group, nodes.locked_folder]);
+    assert_eq!(
+        fixture.tree().roots(),
+        vec![nodes.group, nodes.locked_folder]
+    );
 }
 
 /// REQ: WIT:ilium:host/tree.roots
@@ -217,7 +253,10 @@ fn tree_roots_does_not_list_nested_nodes() {
 fn tree_roots_without_tree_read_is_not_permitted() {
     let (mut fixture, _nodes) = tree_fixture(&[]);
     assert!(fixture.tree().roots().is_empty());
-    assert_eq!(fixture.last_import_error_code(), Some(ErrorCode::NotPermitted));
+    assert_eq!(
+        fixture.last_import_error_code(),
+        Some(ErrorCode::NotPermitted)
+    );
 }
 
 // ---- find --------------------------------------------------------------------------------------
@@ -228,7 +267,12 @@ fn tree_find_with_every_field_unset_returns_every_node_parent_before_children() 
     let (mut fixture, nodes) = tree_fixture(READ);
     let found = fixture.tree().find(NodeQuery::default());
     assert_eq!(found.len(), 6);
-    let position = |id: NodeId| found.iter().position(|candidate| *candidate == id).expect("listed");
+    let position = |id: NodeId| {
+        found
+            .iter()
+            .position(|candidate| *candidate == id)
+            .expect("listed")
+    };
     assert!(position(nodes.group) < position(nodes.folder));
     assert!(position(nodes.folder) < position(nodes.claude_pane));
     assert!(position(nodes.folder) < position(nodes.plain_pane));
@@ -243,7 +287,10 @@ fn tree_find_by_content_kind_matches_the_exact_string() {
         content_kind: Some("ilium.terminal".to_owned()),
         ..NodeQuery::default()
     });
-    assert_eq!(found, vec![nodes.claude_pane, nodes.plain_pane, nodes.codex_pane]);
+    assert_eq!(
+        found,
+        vec![nodes.claude_pane, nodes.plain_pane, nodes.codex_pane]
+    );
     let none = fixture.tree().find(NodeQuery {
         content_kind: Some("ilium.termin".to_owned()),
         ..NodeQuery::default()
@@ -292,7 +339,10 @@ fn tree_find_under_matches_strict_descendants_at_any_depth() {
         under: Some(nodes.group),
         ..NodeQuery::default()
     });
-    assert_eq!(found, vec![nodes.folder, nodes.claude_pane, nodes.plain_pane]);
+    assert_eq!(
+        found,
+        vec![nodes.folder, nodes.claude_pane, nodes.plain_pane]
+    );
 }
 
 /// REQ: WIT:ilium:host/tree.find
@@ -362,7 +412,10 @@ fn tree_find_returns_at_most_4096_ids() {
 fn tree_find_without_tree_read_is_not_permitted() {
     let (mut fixture, _nodes) = tree_fixture(&[]);
     assert!(fixture.tree().find(NodeQuery::default()).is_empty());
-    assert_eq!(fixture.last_import_error_code(), Some(ErrorCode::NotPermitted));
+    assert_eq!(
+        fixture.last_import_error_code(),
+        Some(ErrorCode::NotPermitted)
+    );
 }
 
 proptest! {
@@ -399,7 +452,10 @@ fn tree_metadata_is_none_when_nothing_is_stored() {
 fn tree_metadata_returns_the_bytes_that_set_metadata_stored() {
     let (mut fixture, nodes) = tree_fixture(META);
     expect_ok(fixture.tree().set_metadata(nodes.plain_pane, vec![1, 2, 3]));
-    assert_eq!(fixture.tree().metadata(nodes.plain_pane), Some(vec![1, 2, 3]));
+    assert_eq!(
+        fixture.tree().metadata(nodes.plain_pane),
+        Some(vec![1, 2, 3])
+    );
 }
 
 /// REQ: WIT:ilium:host/tree.metadata
@@ -432,7 +488,10 @@ fn tree_metadata_survives_a_rename_of_the_node() {
 fn tree_metadata_without_the_grant_is_not_permitted() {
     let (mut fixture, nodes) = tree_fixture(READ);
     assert_eq!(fixture.tree().metadata(nodes.plain_pane), None);
-    assert_eq!(fixture.last_import_error_code(), Some(ErrorCode::NotPermitted));
+    assert_eq!(
+        fixture.last_import_error_code(),
+        Some(ErrorCode::NotPermitted)
+    );
 }
 
 /// REQ: WIT:ilium:host/tree.metadata
@@ -464,14 +523,22 @@ fn tree_set_metadata_empty_write_leaves_some_empty_not_none() {
 #[test]
 fn tree_set_metadata_exactly_65536_bytes_accepted() {
     let (mut fixture, nodes) = tree_fixture(META);
-    expect_ok(fixture.tree().set_metadata(nodes.plain_pane, vec![7; 65_536]));
+    expect_ok(
+        fixture
+            .tree()
+            .set_metadata(nodes.plain_pane, vec![7; 65_536]),
+    );
 }
 
 /// REQ: WIT:ilium:host/tree.set-metadata
 #[test]
 fn tree_set_metadata_65537_bytes_quota_exceeded() {
     let (mut fixture, nodes) = tree_fixture(META);
-    let code = expect_code(fixture.tree().set_metadata(nodes.plain_pane, vec![7; 65_537]));
+    let code = expect_code(
+        fixture
+            .tree()
+            .set_metadata(nodes.plain_pane, vec![7; 65_537]),
+    );
     assert_eq!(code, ErrorCode::QuotaExceeded);
 }
 
@@ -480,7 +547,9 @@ fn tree_set_metadata_65537_bytes_quota_exceeded() {
 fn tree_set_metadata_refused_write_keeps_the_previous_bytes() {
     let (mut fixture, nodes) = tree_fixture(META);
     expect_ok(fixture.tree().set_metadata(nodes.plain_pane, vec![1]));
-    let _ = fixture.tree().set_metadata(nodes.plain_pane, vec![7; 65_537]);
+    let _ = fixture
+        .tree()
+        .set_metadata(nodes.plain_pane, vec![7; 65_537]);
     assert_eq!(fixture.tree().metadata(nodes.plain_pane), Some(vec![1]));
 }
 
@@ -532,10 +601,21 @@ fn tree_set_metadata_without_the_grant_not_permitted() {
 fn tree_set_metadata_changes_neither_the_revision_nor_the_events() {
     let (mut fixture, nodes) = tree_fixture(META);
     let _ = fixture.events();
-    let before = fixture.tree().get(nodes.plain_pane).expect("node exists").revision;
+    let before = fixture
+        .tree()
+        .get(nodes.plain_pane)
+        .expect("node exists")
+        .revision;
     expect_ok(fixture.tree().set_metadata(nodes.plain_pane, vec![1, 2]));
     fixture.pump();
-    assert_eq!(fixture.tree().get(nodes.plain_pane).expect("node exists").revision, before);
+    assert_eq!(
+        fixture
+            .tree()
+            .get(nodes.plain_pane)
+            .expect("node exists")
+            .revision,
+        before
+    );
     assert!(fixture.events().is_empty());
 }
 

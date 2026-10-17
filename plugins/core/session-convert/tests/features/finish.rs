@@ -21,13 +21,21 @@ fn converted_codex_to_claude() -> (FakeHost, u64, Vec<Submission>) {
 fn failed_codex_to_claude() -> (FakeHost, u64) {
     let (mut host, pane) = server_with_pane("codex", true);
     let request = run_until_job(&mut host, pane);
-    let error = PluginError { code: ErrorCode::Io, message: "rollout unreadable".into(), retry_after_ms: None };
+    let error = PluginError {
+        code: ErrorCode::Io,
+        message: "rollout unreadable".into(),
+        retry_after_ms: None,
+    };
     finish_job(&mut host, request, Err(error));
     (host, pane)
 }
 
 fn client_message(channel: &str, pane: u64) -> Event {
-    message_from(PluginSide::Client, channel, json!({"pane": pane}).to_string().as_bytes())
+    message_from(
+        PluginSide::Client,
+        channel,
+        json!({"pane": pane}).to_string().as_bytes(),
+    )
 }
 
 fn is_uuid(text: &str) -> bool {
@@ -38,7 +46,9 @@ fn is_uuid(text: &str) -> bool {
 }
 
 fn state_present(host: &FakeHost, pane: u64) -> bool {
-    host.storage().get(Bucket::Session, &format!("convert/{pane}")).is_some()
+    host.storage()
+        .get(Bucket::Session, &format!("convert/{pane}"))
+        .is_some()
 }
 
 /// REQ: F-077
@@ -119,7 +129,13 @@ fn f_077_a_new_conversion_may_start_after_a_success() {
             session_id: "second".into(),
         }),
     );
-    host.fs().write(ilium_plugin_sdk::types::FsPath { scope: "agent-sessions:claude".into(), path: "projects/p/second.jsonl".into() }, b"{}\n");
+    host.fs().write(
+        ilium_plugin_sdk::types::FsPath {
+            scope: "agent-sessions:claude".into(),
+            path: "projects/p/second.jsonl".into(),
+        },
+        b"{}\n",
+    );
     assert_ne!(pane, second);
     assert_eq!(frozen(&start_claude(&mut host, second)), [second]);
 }
@@ -131,7 +147,15 @@ fn f_077_resume_original_replaces_the_command_of_a_codex_pane_and_keeps_the_scro
     let submissions = host.deliver_one(client_message("resume", pane));
     assert_eq!(
         replaced(&submissions),
-        [(pane, vec!["codex".to_string(), "resume".to_string(), SOURCE_SESSION.to_string()], true)]
+        [(
+            pane,
+            vec![
+                "codex".to_string(),
+                "resume".to_string(),
+                SOURCE_SESSION.to_string()
+            ],
+            true
+        )]
     );
 }
 
@@ -142,7 +166,15 @@ fn f_077_resume_original_uses_the_claude_grammar_for_a_claude_pane() {
     let submissions = host.deliver_one(client_message("resume", pane));
     assert_eq!(
         replaced(&submissions),
-        [(pane, vec!["claude".to_string(), "--resume".to_string(), SOURCE_SESSION.to_string()], true)]
+        [(
+            pane,
+            vec![
+                "claude".to_string(),
+                "--resume".to_string(),
+                SOURCE_SESSION.to_string()
+            ],
+            true
+        )]
     );
 }
 
@@ -228,9 +260,17 @@ fn f_077_a_cancelled_conversion_ends_as_a_failure_that_offers_the_original_sessi
     let (mut host, pane) = server_with_pane("codex", true);
     let request = run_until_job(&mut host, pane);
     host.deliver_one(client_message("cancel", pane));
-    let error = PluginError { code: ErrorCode::Cancelled, message: "conversion cancelled".into(), retry_after_ms: None };
+    let error = PluginError {
+        code: ErrorCode::Cancelled,
+        message: "conversion cancelled".into(),
+        retry_after_ms: None,
+    };
     let submissions = finish_job(&mut host, request, Err(error));
-    let failed = messages(&submissions).into_iter().rev().find(|m| m.2 == "failed").expect("failed message");
+    let failed = messages(&submissions)
+        .into_iter()
+        .rev()
+        .find(|m| m.2 == "failed")
+        .expect("failed message");
     let payload: Value = serde_json::from_str(&failed.3).unwrap();
     assert_eq!(payload["can_resume"], true);
     assert!(created(&submissions).is_empty());

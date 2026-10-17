@@ -2,18 +2,23 @@
 //! (manual page reference-events-and-intents.md; EVT-001 .. EVT-050).
 
 use ilium_plugin_api::generated::types::{
-    ActionKind, ActionValue, DroppedCount, ErrorCode, Event, InputSource, InputSubmittedEvent,
-    Intent, NodeClass, NodeId, Outcome, PaneLifecycleEvent, PaneLifecycleState, PluginId,
-    SettingsChange, SettingsOrigin, PluginSide, TopicPublishedEvent, UiAction, ViewTarget,
-    UserLineEvent, ChildExitedEvent, ChildId, AgentActivity, PaneTitleChangedEvent, TitleOrigin,
-    DeactivationReason,
+    ActionKind, ActionValue, AgentActivity, ChildExitedEvent, ChildId, DeactivationReason,
+    DroppedCount, ErrorCode, Event, InputSource, InputSubmittedEvent, Intent, NodeClass, NodeId,
+    Outcome, PaneLifecycleEvent, PaneLifecycleState, PaneTitleChangedEvent, PluginId, PluginSide,
+    SettingsChange, SettingsOrigin, TitleOrigin, TopicPublishedEvent, UiAction, UserLineEvent,
+    ViewTarget,
 };
 use ilium_plugin_api::{Side, Tier};
 use proptest::prelude::*;
 
 use crate::common::*;
 
-const READ: &[&str] = &["tree.read", "panes.read", "agent.read", "terminal.output-filter"];
+const READ: &[&str] = &[
+    "tree.read",
+    "panes.read",
+    "agent.read",
+    "terminal.output-filter",
+];
 
 fn read_setup() -> Setup {
     Setup::new(READ)
@@ -32,7 +37,10 @@ fn evt_001_three_events_arrive_in_one_batch_in_order() {
         .filter(|batch| batch.iter().any(|event| event.case_name() == "pane-exited"))
         .collect();
     assert_eq!(with_exits.len(), 1, "one batch holds the three events");
-    assert_eq!(with_exits[0], vec![pane_exited(7), pane_exited(3), pane_exited(5)]);
+    assert_eq!(
+        with_exits[0],
+        vec![pane_exited(7), pane_exited(3), pane_exited(5)]
+    );
 }
 
 /// REQ: EVT-001
@@ -40,8 +48,14 @@ fn evt_001_three_events_arrive_in_one_batch_in_order() {
 fn evt_001_batch_holds_at_most_256_events_and_backlog_is_split() {
     let env = read_setup().build();
     env.deliver(exits(300));
-    let sizes: Vec<usize> = lock(&env.probe.batches).iter().map(|batch| batch.len()).collect();
-    assert!(sizes.iter().all(|size| *size <= 256), "batch sizes {sizes:?}");
+    let sizes: Vec<usize> = lock(&env.probe.batches)
+        .iter()
+        .map(|batch| batch.len())
+        .collect();
+    assert!(
+        sizes.iter().all(|size| *size <= 256),
+        "batch sizes {sizes:?}"
+    );
     assert_eq!(sizes.iter().sum::<usize>(), 300);
     assert_eq!(sizes[0], 256, "the first batch is full");
     assert_eq!(sizes[1], 44, "the rest follows in a second batch");
@@ -52,7 +66,10 @@ fn evt_001_batch_holds_at_most_256_events_and_backlog_is_split() {
 fn evt_001_exactly_256_events_fit_one_batch() {
     let env = read_setup().build();
     env.deliver(exits(256));
-    let sizes: Vec<usize> = lock(&env.probe.batches).iter().map(|batch| batch.len()).collect();
+    let sizes: Vec<usize> = lock(&env.probe.batches)
+        .iter()
+        .map(|batch| batch.len())
+        .collect();
     assert_eq!(sizes, vec![256]);
 }
 
@@ -61,7 +78,10 @@ fn evt_001_exactly_256_events_fit_one_batch() {
 fn evt_001_257_events_need_two_batches() {
     let env = read_setup().build();
     env.deliver(exits(257));
-    let sizes: Vec<usize> = lock(&env.probe.batches).iter().map(|batch| batch.len()).collect();
+    let sizes: Vec<usize> = lock(&env.probe.batches)
+        .iter()
+        .map(|batch| batch.len())
+        .collect();
     assert_eq!(sizes, vec![256, 1]);
 }
 
@@ -95,7 +115,12 @@ fn evt_001_per_node_order_created_exited_removed() {
         is_restored: false,
     });
     env.deliver(vec![created.clone(), pane_exited(8), node_removed(8)]);
-    let kinds: Vec<&str> = env.probe.events().iter().map(|event| event.case_name()).collect();
+    let kinds: Vec<&str> = env
+        .probe
+        .events()
+        .iter()
+        .map(|event| event.case_name())
+        .collect();
     assert_eq!(kinds, vec!["pane-created", "pane-exited", "node-removed"]);
 }
 
@@ -110,7 +135,12 @@ fn evt_001_agent_identified_precedes_activity_changed() {
         }),
         activity_changed(2, 1),
     ]);
-    let kinds: Vec<&str> = env.probe.events().iter().map(|event| event.case_name()).collect();
+    let kinds: Vec<&str> = env
+        .probe
+        .events()
+        .iter()
+        .map(|event| event.case_name())
+        .collect();
     assert_eq!(kinds, vec!["agent-identified", "agent-activity-changed"]);
 }
 
@@ -120,8 +150,14 @@ fn evt_001_one_call_at_a_time_batches_are_sequential() {
     let env = read_setup().build();
     env.deliver(exits(600));
     let sequence = lock(&env.probe.sequence).clone();
-    let calls = sequence.iter().filter(|name| name.as_str() == "on-events").count();
-    assert_eq!(calls, 3, "600 events are three sequential calls: {sequence:?}");
+    let calls = sequence
+        .iter()
+        .filter(|name| name.as_str() == "on-events")
+        .count();
+    assert_eq!(
+        calls, 3,
+        "600 events are three sequential calls: {sequence:?}"
+    );
 }
 
 proptest! {
@@ -145,7 +181,11 @@ proptest! {
 #[test]
 fn evt_002_without_panes_read_no_pane_events_arrive() {
     let env = Setup::new(&[]).build();
-    env.deliver(vec![pane_exited(2), pane_resized(2, 80), Event::PaneFocused(None)]);
+    env.deliver(vec![
+        pane_exited(2),
+        pane_resized(2, 80),
+        Event::PaneFocused(None),
+    ]);
     assert_eq!(env.probe.count_of("pane-exited"), 0);
     assert_eq!(env.probe.count_of("pane-resized"), 0);
     assert_eq!(env.probe.count_of("pane-focused"), 0);
@@ -328,7 +368,11 @@ fn evt_004_incoming_drop_oldest_is_discarded_and_counted_when_none_is_pending() 
         }]
     );
     assert_eq!(env.probe.count_of("output-matched"), 0);
-    assert_eq!(env.probe.activation_count(), 1, "no restart for a droppable event");
+    assert_eq!(
+        env.probe.activation_count(),
+        1,
+        "no restart for a droppable event"
+    );
 }
 
 /// REQ: EVT-004
@@ -351,7 +395,11 @@ fn evt_004_never_dropped_event_on_a_full_queue_without_droppable_restarts_the_in
     let mut events = exits(1024);
     events.push(pane_exited(2000));
     env.deliver(events);
-    assert_eq!(env.probe.activation_count(), before + 1, "the instance restarted");
+    assert_eq!(
+        env.probe.activation_count(),
+        before + 1,
+        "the instance restarted"
+    );
 }
 
 /// REQ: EVT-004
@@ -363,7 +411,10 @@ fn evt_004_the_new_instance_gets_tree_changed_for_every_node_after_the_restart()
     env.deliver(events);
     env.deliver(vec![trigger()]);
     let lists = tree_changed_lists(&env.probe.events());
-    assert!(lists.len() >= 2, "initial and restart tree-changed: {lists:?}");
+    assert!(
+        lists.len() >= 2,
+        "initial and restart tree-changed: {lists:?}"
+    );
     assert_eq!(lists.last().cloned(), Some(vec![1, 2, 3]));
 }
 
@@ -400,7 +451,9 @@ fn evt_005_pane_lifecycle_changed_is_never_dropped_on_a_full_queue() {
 /// REQ: EVT-005
 #[test]
 fn evt_005_freezing_a_pane_produces_one_event_with_state_frozen_and_by_set() {
-    let env = Setup::new(&["panes.read", "panes.lifecycle"]).tree(flat_tree(1)).build();
+    let env = Setup::new(&["panes.read", "panes.lifecycle"])
+        .tree(flat_tree(1))
+        .build();
     env.run(vec![sub(1, freeze(2))]);
     env.settle();
     let events = env.probe.events_of("pane-lifecycle-changed");
@@ -425,7 +478,10 @@ fn evt_005_every_lifecycle_state_is_carried_unchanged() {
         PaneLifecycleState::Restarting,
         PaneLifecycleState::Exited,
     ];
-    let sent: Vec<Event> = states.iter().map(|state| lifecycle_event(*state, None)).collect();
+    let sent: Vec<Event> = states
+        .iter()
+        .map(|state| lifecycle_event(*state, None))
+        .collect();
     env.deliver(sent.clone());
     assert_eq!(env.probe.events_of("pane-lifecycle-changed"), sent);
 }
@@ -456,11 +512,19 @@ fn evt_006_click_on_save_button_gives_ui_action_with_key_save() {
 fn evt_006_value_kinds_match_the_widget_kind() {
     let env = Setup::new(&[]).build();
     let sent = vec![
-        ui_action("name", ActionKind::Changed, Some(ActionValue::Text("abc".to_owned()))),
+        ui_action(
+            "name",
+            ActionKind::Changed,
+            Some(ActionValue::Text("abc".to_owned())),
+        ),
         ui_action("flag", ActionKind::Toggled, Some(ActionValue::Flag(true))),
         ui_action("list", ActionKind::Selected, Some(ActionValue::Index(2))),
         ui_action("size", ActionKind::Changed, Some(ActionValue::Number(1.5))),
-        ui_action("pick", ActionKind::Selected, Some(ActionValue::Ids(vec!["a".to_owned()]))),
+        ui_action(
+            "pick",
+            ActionKind::Selected,
+            Some(ActionValue::Ids(vec!["a".to_owned()])),
+        ),
     ];
     env.deliver(sent.clone());
     assert_eq!(env.probe.events_of("ui-action"), sent);
@@ -487,7 +551,11 @@ fn evt_006_scrolled_actions_for_one_key_coalesce_to_the_newest() {
     ]);
     assert_eq!(
         env.probe.events_of("ui-action"),
-        vec![ui_action("log", ActionKind::Scrolled, Some(ActionValue::Index(3)))]
+        vec![ui_action(
+            "log",
+            ActionKind::Scrolled,
+            Some(ActionValue::Index(3))
+        )]
     );
 }
 
@@ -516,7 +584,9 @@ fn evt_010_the_result_reaches_the_guest_as_request_completed() {
 #[test]
 fn evt_010_no_wit_host_interface_exposes_an_intent_as_a_function() {
     let host_dir = workspace_root().join("wit/host");
-    let entries = std::fs::read_dir(&host_dir).map(|dir| dir.count()).unwrap_or(0);
+    let entries = std::fs::read_dir(&host_dir)
+        .map(|dir| dir.count())
+        .unwrap_or(0);
     assert!(entries > 0, "wit/host is readable");
     for case in Intent::CASE_NAMES {
         for entry in std::fs::read_dir(&host_dir).expect("wit/host").flatten() {
@@ -545,7 +615,9 @@ fn evt_010_the_only_host_function_taking_a_submission_is_intents_host_submit() {
 #[test]
 fn evt_010_ten_intents_give_ten_results() {
     let env = Setup::new(&["tree.write"]).tree(flat_tree(10)).build();
-    let submissions = (0..10).map(|index| sub(index + 1, rename(index + 2, "t"))).collect();
+    let submissions = (0..10)
+        .map(|index| sub(index + 1, rename(index + 2, "t")))
+        .collect();
     env.run(submissions);
     assert_eq!(env.outcomes().len(), 10);
 }
@@ -559,7 +631,11 @@ fn evt_011_freeze_pane_with_a_non_pane_node_id_is_refused_invalid_argument() {
     nodes.push(folder(9, Some(1)));
     let env = Setup::new(&["panes.lifecycle"]).tree(nodes).build();
     env.run(vec![sub(1, freeze(9))]);
-    assert!(is_refused(&env.outcome(1), ErrorCode::InvalidArgument), "{:?}", env.outcome(1));
+    assert!(
+        is_refused(&env.outcome(1), ErrorCode::InvalidArgument),
+        "{:?}",
+        env.outcome(1)
+    );
 }
 
 /// REQ: EVT-011
@@ -567,16 +643,24 @@ fn evt_011_freeze_pane_with_a_non_pane_node_id_is_refused_invalid_argument() {
 fn evt_011_an_invalid_value_refuses_only_that_submission() {
     let mut nodes = flat_tree(2);
     nodes.push(folder(9, Some(1)));
-    let env = Setup::new(&["panes.lifecycle", "tree.write"]).tree(nodes).build();
+    let env = Setup::new(&["panes.lifecycle", "tree.write"])
+        .tree(nodes)
+        .build();
     env.run(vec![sub(1, freeze(9)), sub(2, rename(2, "ok"))]);
     assert!(is_refused(&env.outcome(1), ErrorCode::InvalidArgument));
-    assert!(is_ok(&env.outcome(2)), "the sibling is applied: {:?}", env.outcome(2));
+    assert!(
+        is_ok(&env.outcome(2)),
+        "the sibling is applied: {:?}",
+        env.outcome(2)
+    );
 }
 
 /// REQ: EVT-011
 #[test]
 fn evt_011_malformed_shape_is_the_lowest_index_offender_and_siblings_are_cancelled() {
-    let env = Setup::new(&["tree.write", "terminal.write"]).tree(flat_tree(2)).build();
+    let env = Setup::new(&["tree.write", "terminal.write"])
+        .tree(flat_tree(2))
+        .build();
     env.run(vec![
         sub(1, rename(2, "a")),
         sub(2, send_input(2, "x")),
@@ -585,13 +669,18 @@ fn evt_011_malformed_shape_is_the_lowest_index_offender_and_siblings_are_cancell
     assert!(is_refused(&env.outcome(2), ErrorCode::InvalidArgument));
     assert!(is_refused(&env.outcome(1), ErrorCode::Cancelled));
     assert!(is_refused(&env.outcome(3), ErrorCode::Cancelled));
-    assert!(env.applied().is_empty(), "nothing of a refused batch is applied");
+    assert!(
+        env.applied().is_empty(),
+        "nothing of a refused batch is applied"
+    );
 }
 
 /// REQ: EVT-011
 #[test]
 fn evt_011_siblings_complete_as_refused_cancelled_never_as_cancelled() {
-    let env = Setup::new(&["tree.write", "terminal.write"]).tree(flat_tree(2)).build();
+    let env = Setup::new(&["tree.write", "terminal.write"])
+        .tree(flat_tree(2))
+        .build();
     env.run(vec![sub(1, rename(2, "a")), sub(2, send_input(2, "x"))]);
     assert!(!matches!(env.outcome(1), Some(Outcome::Cancelled)));
     assert!(is_refused(&env.outcome(1), ErrorCode::Cancelled));
@@ -600,7 +689,9 @@ fn evt_011_siblings_complete_as_refused_cancelled_never_as_cancelled() {
 /// REQ: EVT-011
 #[test]
 fn evt_011_the_offender_is_at_index_zero() {
-    let env = Setup::new(&["tree.write", "terminal.write"]).tree(flat_tree(2)).build();
+    let env = Setup::new(&["tree.write", "terminal.write"])
+        .tree(flat_tree(2))
+        .build();
     env.run(vec![sub(1, send_input(2, "x")), sub(2, rename(2, "a"))]);
     assert!(is_refused(&env.outcome(1), ErrorCode::InvalidArgument));
     assert!(is_refused(&env.outcome(2), ErrorCode::Cancelled));
@@ -638,14 +729,22 @@ proptest! {
 fn evt_012_freeze_pane_without_panes_lifecycle_is_refused_not_permitted() {
     let env = Setup::new(&["tree.write"]).tree(flat_tree(1)).build();
     env.run(vec![sub(1, freeze(2))]);
-    assert!(is_refused(&env.outcome(1), ErrorCode::NotPermitted), "{:?}", env.outcome(1));
+    assert!(
+        is_refused(&env.outcome(1), ErrorCode::NotPermitted),
+        "{:?}",
+        env.outcome(1)
+    );
 }
 
 /// REQ: EVT-012
 #[test]
 fn evt_012_siblings_of_a_grant_offender_are_refused_cancelled_and_nothing_is_applied() {
     let env = Setup::new(&["tree.write"]).tree(flat_tree(2)).build();
-    env.run(vec![sub(1, rename(2, "a")), sub(2, freeze(3)), sub(3, rename(3, "b"))]);
+    env.run(vec![
+        sub(1, rename(2, "a")),
+        sub(2, freeze(3)),
+        sub(3, rename(3, "b")),
+    ]);
     assert!(is_refused(&env.outcome(2), ErrorCode::NotPermitted));
     assert!(is_refused(&env.outcome(1), ErrorCode::Cancelled));
     assert!(is_refused(&env.outcome(3), ErrorCode::Cancelled));
@@ -685,7 +784,11 @@ fn evt_012_a_shape_offender_at_a_lower_index_is_reported_before_a_grant_offender
 fn evt_013_rename_of_a_missing_node_is_failed_not_found() {
     let env = Setup::new(&["tree.write"]).tree(flat_tree(1)).build();
     env.run(vec![sub(1, rename(99, "x"))]);
-    assert!(is_failed(&env.outcome(1), ErrorCode::NotFound), "{:?}", env.outcome(1));
+    assert!(
+        is_failed(&env.outcome(1), ErrorCode::NotFound),
+        "{:?}",
+        env.outcome(1)
+    );
 }
 
 /// REQ: EVT-013
@@ -693,7 +796,11 @@ fn evt_013_rename_of_a_missing_node_is_failed_not_found() {
 fn evt_013_set_node_locked_of_a_missing_node_is_refused_not_found() {
     let env = Setup::new(&["tree.write"]).tree(flat_tree(1)).build();
     env.run(vec![sub(1, set_locked(99, true))]);
-    assert!(is_refused(&env.outcome(1), ErrorCode::NotFound), "{:?}", env.outcome(1));
+    assert!(
+        is_refused(&env.outcome(1), ErrorCode::NotFound),
+        "{:?}",
+        env.outcome(1)
+    );
 }
 
 /// REQ: EVT-013
@@ -702,7 +809,12 @@ fn evt_013_a_pane_intent_for_a_removed_node_reports_not_found() {
     let env = Setup::new(&["panes.lifecycle"]).tree(flat_tree(2)).build();
     env.kernel.set_tree(flat_tree(1));
     env.run(vec![sub(1, freeze(3))]);
-    assert_eq!(code_of(&env.outcome(1)), Some(ErrorCode::NotFound), "{:?}", env.outcome(1));
+    assert_eq!(
+        code_of(&env.outcome(1)),
+        Some(ErrorCode::NotFound),
+        "{:?}",
+        env.outcome(1)
+    );
 }
 
 /// REQ: EVT-013
@@ -720,7 +832,15 @@ fn evt_013_an_existing_node_is_not_reported_missing() {
 fn evt_014_outcome_has_exactly_the_seven_cases_in_order() {
     assert_eq!(
         Outcome::CASE_NAMES,
-        &["ok", "ok-node", "duplicate", "refused", "failed", "cancelled", "ok-epoch"]
+        &[
+            "ok",
+            "ok-node",
+            "duplicate",
+            "refused",
+            "failed",
+            "cancelled",
+            "ok-epoch"
+        ]
     );
 }
 
@@ -728,11 +848,21 @@ fn evt_014_outcome_has_exactly_the_seven_cases_in_order() {
 #[test]
 fn evt_014_wit_outcome_variant_lists_the_seven_cases() {
     let wit = wit_file("types/ilium-types.wit");
-    let start = wit.find("variant outcome").expect("variant outcome in the WIT");
+    let start = wit
+        .find("variant outcome")
+        .expect("variant outcome in the WIT");
     let body = &wit[start..];
     let end = body.find('}').expect("end of variant");
     let block = &body[..end];
-    for case in ["ok", "ok-node", "duplicate", "refused", "failed", "cancelled", "ok-epoch"] {
+    for case in [
+        "ok",
+        "ok-node",
+        "duplicate",
+        "refused",
+        "failed",
+        "cancelled",
+        "ok-epoch",
+    ] {
         let has_case = block.lines().skip(1).any(|line| {
             let trimmed = line.trim().trim_start_matches('/').trim();
             trimmed.starts_with(case)
@@ -764,7 +894,11 @@ fn evt_020_send_input_to_a_restored_pane_is_refused_pane_not_ready() {
     let env = Setup::new(&["terminal.write"]).tree(flat_tree(1)).build();
     env.kernel.set_pane_restored(NodeId(2), true);
     env.run(vec![keyed(1, "k:1", send_input(2, "x"))]);
-    assert!(is_refused(&env.outcome(1), ErrorCode::PaneNotReady), "{:?}", env.outcome(1));
+    assert!(
+        is_refused(&env.outcome(1), ErrorCode::PaneNotReady),
+        "{:?}",
+        env.outcome(1)
+    );
 }
 
 /// REQ: EVT-020
@@ -792,7 +926,9 @@ fn evt_020_signal_pane_to_a_restored_pane_is_also_pane_not_ready() {
 /// REQ: EVT-021
 #[test]
 fn evt_021_send_input_without_a_key_refuses_the_batch() {
-    let env = Setup::new(&["terminal.write", "tree.write"]).tree(flat_tree(2)).build();
+    let env = Setup::new(&["terminal.write", "tree.write"])
+        .tree(flat_tree(2))
+        .build();
     env.run(vec![sub(1, send_input(2, "x")), sub(2, rename(3, "a"))]);
     assert!(is_refused(&env.outcome(1), ErrorCode::InvalidArgument));
     assert!(is_refused(&env.outcome(2), ErrorCode::Cancelled));
@@ -801,8 +937,13 @@ fn evt_021_send_input_without_a_key_refuses_the_batch() {
 /// REQ: EVT-021
 #[test]
 fn evt_021_agent_action_without_a_key_refuses_the_batch() {
-    let env = Setup::new(&["agent.control", "tree.write"]).tree(flat_tree(2)).build();
-    env.run(vec![sub(1, agent_action(2, "approve")), sub(2, rename(3, "a"))]);
+    let env = Setup::new(&["agent.control", "tree.write"])
+        .tree(flat_tree(2))
+        .build();
+    env.run(vec![
+        sub(1, agent_action(2, "approve")),
+        sub(2, rename(3, "a")),
+    ]);
     assert!(is_refused(&env.outcome(1), ErrorCode::InvalidArgument));
     assert!(is_refused(&env.outcome(2), ErrorCode::Cancelled));
 }
@@ -830,7 +971,9 @@ fn evt_022_journal_entry_is_written_before_the_keys_reach_the_pane() {
     env.run(vec![keyed(1, "send:1", send_input_journaled(2, "x"))]);
     let steps = env.kernel.step_log();
     let journal = steps.iter().position(|step| step == "journal:send:1");
-    let write = steps.iter().position(|step| step.starts_with("pane-write:2"));
+    let write = steps
+        .iter()
+        .position(|step| step.starts_with("pane-write:2"));
     assert!(journal.is_some() && write.is_some(), "steps {steps:?}");
     assert!(journal < write, "journal before write: {steps:?}");
 }
@@ -841,11 +984,21 @@ fn evt_022_restart_between_journal_and_outcome_gives_input_uncertain_and_no_repl
     let mut env = Setup::new(&["terminal.write"]).tree(flat_tree(1)).build();
     env.kernel.interrupt_after_journal(NodeId(2), "send:1");
     env.run(vec![keyed(1, "send:1", send_input_journaled(2, "x"))]);
-    let writes_before = env.kernel.step_log().iter().filter(|s| s.starts_with("pane-write")).count();
+    let writes_before = env
+        .kernel
+        .step_log()
+        .iter()
+        .filter(|s| s.starts_with("pane-write"))
+        .count();
     env.host.restart_server();
     env.settle();
     assert_eq!(env.probe.count_of("input-uncertain"), 1);
-    let writes_after = env.kernel.step_log().iter().filter(|s| s.starts_with("pane-write")).count();
+    let writes_after = env
+        .kernel
+        .step_log()
+        .iter()
+        .filter(|s| s.starts_with("pane-write"))
+        .count();
     assert_eq!(writes_before, writes_after, "no replay");
 }
 
@@ -855,7 +1008,10 @@ fn evt_022_without_journal_true_no_journal_entry_is_written() {
     let env = Setup::new(&["terminal.write"]).tree(flat_tree(1)).build();
     env.run(vec![keyed(1, "send:1", send_input(2, "x"))]);
     let steps = env.kernel.step_log();
-    assert!(!steps.iter().any(|step| step.starts_with("journal:")), "{steps:?}");
+    assert!(
+        !steps.iter().any(|step| step.starts_with("journal:")),
+        "{steps:?}"
+    );
 }
 
 // ---- EVT-030, EVT-031 ------------------------------------------------------------------
@@ -943,7 +1099,10 @@ fn evt_031_cli_cancelled_is_a_distinct_event_from_a_child_exit_with_a_signal() {
     ]);
     assert_eq!(env.probe.count_of("cli-cancelled"), 1);
     assert_eq!(env.probe.count_of("child-exited"), 1);
-    assert_eq!(env.probe.events_of("cli-cancelled"), vec![Event::CliCancelled(5)]);
+    assert_eq!(
+        env.probe.events_of("cli-cancelled"),
+        vec![Event::CliCancelled(5)]
+    );
 }
 
 /// REQ: EVT-031
@@ -970,7 +1129,10 @@ fn evt_031_cli_cancelled_needs_cli_contribute() {
 #[test]
 fn evt_040_a_plugin_sent_prompt_fires_input_submitted_only() {
     let env = Setup::new(&["terminal.write", "agent.read-prompts"])
-        .tree(vec![node(1, None, NodeClass::Container, "root"), agent_pane(2, Some(1), AgentActivity::Idle)])
+        .tree(vec![
+            node(1, None, NodeClass::Container, "root"),
+            agent_pane(2, Some(1), AgentActivity::Idle),
+        ])
         .build();
     env.run(vec![keyed(1, "p:1", send_input(2, "do it\n"))]);
     env.settle();
@@ -987,21 +1149,31 @@ fn evt_040_a_plugin_sent_prompt_fires_input_submitted_only() {
 #[test]
 fn evt_040_a_user_typed_prompt_fires_input_submitted_then_user_line_submitted() {
     let env = Setup::new(&["agent.read-prompts"])
-        .tree(vec![node(1, None, NodeClass::Container, "root"), agent_pane(2, Some(1), AgentActivity::Idle)])
+        .tree(vec![
+            node(1, None, NodeClass::Container, "root"),
+            agent_pane(2, Some(1), AgentActivity::Idle),
+        ])
         .build();
-    env.kernel.emit_event(Event::InputSubmitted(InputSubmittedEvent {
-        node: NodeId(2),
-        text: "hi".to_owned(),
-        source: InputSource::User,
-        epoch: 1,
-    }));
-    env.kernel.emit_event(Event::UserLineSubmitted(UserLineEvent {
-        pane: NodeId(2),
-        text: "hi".to_owned(),
-        at: ilium_plugin_api::generated::types::EpochMs(1),
-    }));
+    env.kernel
+        .emit_event(Event::InputSubmitted(InputSubmittedEvent {
+            node: NodeId(2),
+            text: "hi".to_owned(),
+            source: InputSource::User,
+            epoch: 1,
+        }));
+    env.kernel
+        .emit_event(Event::UserLineSubmitted(UserLineEvent {
+            pane: NodeId(2),
+            text: "hi".to_owned(),
+            at: ilium_plugin_api::generated::types::EpochMs(1),
+        }));
     env.settle();
-    let kinds: Vec<&str> = env.probe.events().iter().map(|event| event.case_name()).collect();
+    let kinds: Vec<&str> = env
+        .probe
+        .events()
+        .iter()
+        .map(|event| event.case_name())
+        .collect();
     assert_eq!(kinds, vec!["input-submitted", "user-line-submitted"]);
 }
 
@@ -1025,11 +1197,17 @@ fn evt_040_scheduled_and_voice_prompts_fire_input_submitted_only() {
 #[test]
 fn evt_041_pending_tree_changed_loses_the_removed_node() {
     let env = read_setup().build();
-    env.host.deliver(vec![tree_changed(&[5, 3]), node_removed(5)]);
+    env.host
+        .deliver(vec![tree_changed(&[5, 3]), node_removed(5)]);
     env.settle();
     let lists = tree_changed_lists(&env.probe.events());
     assert!(lists.iter().all(|list| !list.contains(&5)), "{lists:?}");
-    let kinds: Vec<&str> = env.probe.events().iter().map(|event| event.case_name()).collect();
+    let kinds: Vec<&str> = env
+        .probe
+        .events()
+        .iter()
+        .map(|event| event.case_name())
+        .collect();
     assert!(kinds.contains(&"node-removed"));
 }
 
@@ -1040,7 +1218,10 @@ fn evt_041_no_tree_changed_follows_node_removed_for_that_node() {
     env.host.deliver(vec![node_removed(5), tree_changed(&[3])]);
     env.settle();
     let events = env.probe.events();
-    let removed = events.iter().position(|event| event.case_name() == "node-removed").expect("node-removed");
+    let removed = events
+        .iter()
+        .position(|event| event.case_name() == "node-removed")
+        .expect("node-removed");
     for event in &events[removed..] {
         if let Event::TreeChanged(ids) = event {
             assert!(!ids.contains(&NodeId(5)));
@@ -1072,7 +1253,8 @@ fn evt_041_pending_coalesced_events_keyed_by_the_node_are_discarded() {
 #[test]
 fn evt_041_other_nodes_keep_their_pending_events() {
     let env = read_setup().build();
-    env.host.deliver(vec![tree_changed(&[3, 4]), node_removed(4)]);
+    env.host
+        .deliver(vec![tree_changed(&[3, 4]), node_removed(4)]);
     env.settle();
     assert_eq!(tree_changed_lists(&env.probe.events()), vec![vec![3]]);
 }
@@ -1080,7 +1262,9 @@ fn evt_041_other_nodes_keep_their_pending_events() {
 /// REQ: EVT-042
 #[test]
 fn evt_042_a_title_set_by_the_plugin_is_delivered_back_to_it() {
-    let env = Setup::new(&["panes.read", "tree.write"]).tree(flat_tree(1)).build();
+    let env = Setup::new(&["panes.read", "tree.write"])
+        .tree(flat_tree(1))
+        .build();
     env.run(vec![sub(1, rename(2, "renamed"))]);
     env.settle();
     let titles = env.probe.events_of("pane-title-changed");
@@ -1097,7 +1281,9 @@ fn evt_042_a_title_set_by_the_plugin_is_delivered_back_to_it() {
 /// REQ: EVT-042
 #[test]
 fn evt_042_a_node_removed_by_the_plugin_is_reported_to_it() {
-    let env = Setup::new(&["tree.read", "tree.write"]).tree(flat_tree(1)).build();
+    let env = Setup::new(&["tree.read", "tree.write"])
+        .tree(flat_tree(1))
+        .build();
     env.run(vec![sub(1, close(2))]);
     env.settle();
     assert_eq!(env.probe.events_of("node-removed"), vec![node_removed(2)]);
@@ -1106,7 +1292,9 @@ fn evt_042_a_node_removed_by_the_plugin_is_reported_to_it() {
 /// REQ: EVT-042
 #[test]
 fn evt_042_a_freeze_by_the_plugin_is_reported_to_it() {
-    let env = Setup::new(&["panes.read", "panes.lifecycle"]).tree(flat_tree(1)).build();
+    let env = Setup::new(&["panes.read", "panes.lifecycle"])
+        .tree(flat_tree(1))
+        .build();
     env.run(vec![sub(1, freeze(2))]);
     env.settle();
     assert_eq!(env.probe.count_of("pane-lifecycle-changed"), 1);
@@ -1118,7 +1306,11 @@ fn evt_042_a_freeze_by_the_plugin_is_reported_to_it() {
 #[test]
 fn evt_043_2000_screen_changed_for_one_pane_give_one_event_with_the_newest_revision() {
     let env = Setup::new(&["terminal.read-cells"]).build();
-    env.deliver((0..2000).map(|revision| screen_changed(2, revision)).collect());
+    env.deliver(
+        (0..2000)
+            .map(|revision| screen_changed(2, revision))
+            .collect(),
+    );
     let events = env.probe.events_of("screen-changed");
     assert_eq!(events, vec![screen_changed(2, 1999)]);
     assert_eq!(env.probe.count_of("events-dropped"), 0);
@@ -1128,16 +1320,30 @@ fn evt_043_2000_screen_changed_for_one_pane_give_one_event_with_the_newest_revis
 #[test]
 fn evt_043_the_merged_event_sits_at_the_position_of_the_newest_occurrence() {
     let env = Setup::new(&["terminal.read-cells", "panes.read"]).build();
-    env.deliver(vec![screen_changed(2, 1), pane_exited(9), screen_changed(2, 2)]);
-    assert_eq!(env.probe.events(), vec![pane_exited(9), screen_changed(2, 2)]);
+    env.deliver(vec![
+        screen_changed(2, 1),
+        pane_exited(9),
+        screen_changed(2, 2),
+    ]);
+    assert_eq!(
+        env.probe.events(),
+        vec![pane_exited(9), screen_changed(2, 2)]
+    );
 }
 
 /// REQ: EVT-043
 #[test]
 fn evt_043_different_keys_do_not_merge() {
     let env = Setup::new(&["terminal.read-cells"]).build();
-    env.deliver(vec![screen_changed(2, 1), screen_changed(3, 1), screen_changed(2, 2)]);
-    assert_eq!(env.probe.events(), vec![screen_changed(3, 1), screen_changed(2, 2)]);
+    env.deliver(vec![
+        screen_changed(2, 1),
+        screen_changed(3, 1),
+        screen_changed(2, 2),
+    ]);
+    assert_eq!(
+        env.probe.events(),
+        vec![screen_changed(3, 1), screen_changed(2, 2)]
+    );
 }
 
 /// REQ: EVT-043
@@ -1148,7 +1354,10 @@ fn evt_043_merging_happens_whatever_the_queue_fill() {
     events.extend(outputs(1023));
     events.push(screen_changed(2, 2));
     env.deliver(events);
-    assert_eq!(env.probe.events_of("screen-changed"), vec![screen_changed(2, 2)]);
+    assert_eq!(
+        env.probe.events_of("screen-changed"),
+        vec![screen_changed(2, 2)]
+    );
     assert_eq!(env.probe.count_of("events-dropped"), 0);
 }
 
@@ -1156,7 +1365,11 @@ fn evt_043_merging_happens_whatever_the_queue_fill() {
 #[test]
 fn evt_044_agent_activity_changed_is_never_dropped_1024_all_arrive() {
     let env = Setup::new(&["agent.read"]).build();
-    env.deliver((0..1024).map(|revision| activity_changed(2, revision)).collect());
+    env.deliver(
+        (0..1024)
+            .map(|revision| activity_changed(2, revision))
+            .collect(),
+    );
     assert_eq!(env.probe.count_of("agent-activity-changed"), 1024);
     assert_eq!(env.probe.count_of("events-dropped"), 0);
 }
@@ -1165,9 +1378,18 @@ fn evt_044_agent_activity_changed_is_never_dropped_1024_all_arrive() {
 #[test]
 fn evt_044_1500_agent_activity_changed_never_drop_and_the_instance_restarts() {
     let env = Setup::new(&["agent.read"]).build();
-    env.deliver((0..1500).map(|revision| activity_changed(2, revision)).collect());
+    env.deliver(
+        (0..1500)
+            .map(|revision| activity_changed(2, revision))
+            .collect(),
+    );
     let dropped = dropped_records(&env.probe.events());
-    assert!(dropped.iter().all(|record| record.event != "agent-activity-changed"), "{dropped:?}");
+    assert!(
+        dropped
+            .iter()
+            .all(|record| record.event != "agent-activity-changed"),
+        "{dropped:?}"
+    );
     assert!(env.probe.activation_count() >= 2, "the instance restarted");
 }
 
@@ -1175,7 +1397,11 @@ fn evt_044_1500_agent_activity_changed_never_drop_and_the_instance_restarts() {
 #[test]
 fn evt_044_one_over_the_queue_restarts_the_instance() {
     let env = Setup::new(&["agent.read"]).build();
-    env.deliver((0..1025).map(|revision| activity_changed(2, revision)).collect());
+    env.deliver(
+        (0..1025)
+            .map(|revision| activity_changed(2, revision))
+            .collect(),
+    );
     assert_eq!(env.probe.activation_count(), 2);
 }
 
@@ -1185,10 +1411,20 @@ fn evt_045_dropping_output_matched_twice_gives_one_record_with_count_two() {
     let env = read_setup().build();
     env.deliver(outputs(1026));
     let events = env.probe.events();
-    assert_eq!(events.iter().filter(|event| event.case_name() == "events-dropped").count(), 1);
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.case_name() == "events-dropped")
+            .count(),
+        1
+    );
     assert_eq!(
         dropped_records(&events),
-        vec![DroppedCount { event: "output-matched".to_owned(), source: Some("f".to_owned()), count: 2 }]
+        vec![DroppedCount {
+            event: "output-matched".to_owned(),
+            source: Some("f".to_owned()),
+            count: 2
+        }]
     );
 }
 
@@ -1205,7 +1441,11 @@ fn evt_045_records_are_per_event_and_source_in_order_of_first_drop() {
     }
     env.deliver(events);
     let records = dropped_records(&env.probe.events());
-    assert_eq!(records.len(), 1, "all drops are of the older g events: {records:?}");
+    assert_eq!(
+        records.len(),
+        1,
+        "all drops are of the older g events: {records:?}"
+    );
     assert_eq!(records[0].source, Some("g".to_owned()));
     assert_eq!(records[0].count, 176);
 }
@@ -1217,7 +1457,9 @@ fn evt_045_events_dropped_sits_at_the_head_of_the_next_batch() {
     env.deliver(outputs(1030));
     let batches = lock(&env.probe.batches).clone();
     assert_eq!(batches[0][0].case_name(), "events-dropped");
-    assert!(batches[1..].iter().all(|batch| batch[0].case_name() != "events-dropped"));
+    assert!(batches[1..]
+        .iter()
+        .all(|batch| batch[0].case_name() != "events-dropped"));
 }
 
 /// REQ: EVT-045
@@ -1241,7 +1483,10 @@ fn received_outputs_after(env: &Env, count: u32) -> usize {
 /// REQ: EVT-046
 #[test]
 fn evt_046_t2_asking_for_4096_gets_1024_and_one_clamp_log_line() {
-    let env = Setup::new(&["terminal.output-filter"]).tier(Tier::T2).limit("event_queue", 4096).build();
+    let env = Setup::new(&["terminal.output-filter"])
+        .tier(Tier::T2)
+        .limit("event_queue", 4096)
+        .build();
     let received = received_outputs_after(&env, 5000);
     assert_eq!(received, 1024);
     assert_eq!(log_lines_containing(&env, "event_queue").len(), 1);
@@ -1250,7 +1495,10 @@ fn evt_046_t2_asking_for_4096_gets_1024_and_one_clamp_log_line() {
 /// REQ: EVT-046
 #[test]
 fn evt_046_t1_asking_for_4096_gets_4096_and_no_clamp_line() {
-    let env = Setup::new(&["terminal.output-filter"]).tier(Tier::T1).limit("event_queue", 4096).build();
+    let env = Setup::new(&["terminal.output-filter"])
+        .tier(Tier::T1)
+        .limit("event_queue", 4096)
+        .build();
     let received = received_outputs_after(&env, 5000);
     assert_eq!(received, 4096);
     assert!(log_lines_containing(&env, "event_queue").is_empty());
@@ -1259,7 +1507,10 @@ fn evt_046_t1_asking_for_4096_gets_4096_and_no_clamp_line() {
 /// REQ: EVT-046
 #[test]
 fn evt_046_t1_asking_for_4097_is_clamped_to_4096_and_logged() {
-    let env = Setup::new(&["terminal.output-filter"]).tier(Tier::T1).limit("event_queue", 4097).build();
+    let env = Setup::new(&["terminal.output-filter"])
+        .tier(Tier::T1)
+        .limit("event_queue", 4097)
+        .build();
     let received = received_outputs_after(&env, 5000);
     assert_eq!(received, 4096);
     assert_eq!(log_lines_containing(&env, "event_queue").len(), 1);
@@ -1268,7 +1519,9 @@ fn evt_046_t1_asking_for_4097_is_clamped_to_4096_and_logged() {
 /// REQ: EVT-046
 #[test]
 fn evt_046_t3_asking_for_1025_is_clamped_to_1024() {
-    let env = Setup::new(&["terminal.output-filter"]).limit("event_queue", 1025).build();
+    let env = Setup::new(&["terminal.output-filter"])
+        .limit("event_queue", 1025)
+        .build();
     let received = received_outputs_after(&env, 2000);
     assert_eq!(received, 1024);
     assert_eq!(log_lines_containing(&env, "event_queue").len(), 1);
@@ -1277,7 +1530,9 @@ fn evt_046_t3_asking_for_1025_is_clamped_to_1024() {
 /// REQ: EVT-046
 #[test]
 fn evt_046_the_default_queue_is_1024_without_a_request() {
-    let env = Setup::new(&["terminal.output-filter"]).tier(Tier::T1).build();
+    let env = Setup::new(&["terminal.output-filter"])
+        .tier(Tier::T1)
+        .build();
     let received = received_outputs_after(&env, 2000);
     assert_eq!(received, 1024);
     assert!(log_lines_containing(&env, "event_queue").is_empty());
@@ -1314,7 +1569,10 @@ fn evt_047_the_list_is_in_pre_order_not_in_id_order() {
     ];
     let env = Setup::new(&["tree.read"]).tree(nodes).build();
     env.deliver(vec![trigger()]);
-    assert_eq!(tree_changed_lists(&env.probe.events()), vec![vec![1, 5, 3, 2]]);
+    assert_eq!(
+        tree_changed_lists(&env.probe.events()),
+        vec![vec![1, 5, 3, 2]]
+    );
 }
 
 /// REQ: EVT-047
@@ -1437,7 +1695,8 @@ fn evt_049_changes_of_nodes_5_and_3_merge_into_one_event_3_5() {
         pane(5, Some(1)),
     ];
     let env = Setup::new(&["tree.read"]).tree(nodes).build();
-    env.host.deliver(vec![tree_changed(&[5]), tree_changed(&[3])]);
+    env.host
+        .deliver(vec![tree_changed(&[5]), tree_changed(&[3])]);
     env.settle();
     let lists = tree_changed_lists(&env.probe.events());
     assert_eq!(lists.last().cloned(), Some(vec![3, 5]));
@@ -1452,9 +1711,16 @@ fn evt_049_duplicates_are_removed_from_the_union() {
         pane(5, Some(1)),
     ];
     let env = Setup::new(&["tree.read"]).tree(nodes).build();
-    env.host.deliver(vec![tree_changed(&[5, 3]), tree_changed(&[3]), tree_changed(&[5])]);
+    env.host.deliver(vec![
+        tree_changed(&[5, 3]),
+        tree_changed(&[3]),
+        tree_changed(&[5]),
+    ]);
     env.settle();
-    assert_eq!(tree_changed_lists(&env.probe.events()).last().cloned(), Some(vec![3, 5]));
+    assert_eq!(
+        tree_changed_lists(&env.probe.events()).last().cloned(),
+        Some(vec![3, 5])
+    );
 }
 
 /// REQ: EVT-049
@@ -1463,7 +1729,8 @@ fn evt_049_pending_tree_changed_events_merge_into_exactly_one_event() {
     let env = Setup::new(&["tree.read"]).tree(flat_tree(4)).build();
     env.settle();
     let before = tree_changed_lists(&env.probe.events()).len();
-    env.host.deliver((2..6).map(|id| tree_changed(&[id])).collect());
+    env.host
+        .deliver((2..6).map(|id| tree_changed(&[id])).collect());
     env.settle();
     assert_eq!(tree_changed_lists(&env.probe.events()).len(), before + 1);
 }
@@ -1496,10 +1763,16 @@ proptest! {
 fn evt_050_25_refused_send_inputs_take_no_token_and_the_next_valid_one_is_accepted() {
     let env = Setup::new(&["terminal.write"]).tree(flat_tree(1)).build();
     env.kernel.set_pane_restored(NodeId(2), true);
-    let refused: Vec<_> = (1..=25).map(|n| keyed(n, &format!("r:{n}"), send_input(2, "x"))).collect();
+    let refused: Vec<_> = (1..=25)
+        .map(|n| keyed(n, &format!("r:{n}"), send_input(2, "x")))
+        .collect();
     env.run(refused);
     for n in 1..=25 {
-        assert!(is_refused(&env.outcome(n), ErrorCode::PaneNotReady), "send {n}: {:?}", env.outcome(n));
+        assert!(
+            is_refused(&env.outcome(n), ErrorCode::PaneNotReady),
+            "send {n}: {:?}",
+            env.outcome(n)
+        );
     }
     env.kernel.set_pane_restored(NodeId(2), false);
     env.run(vec![keyed(100, "valid:1", send_input(2, "x"))]);
@@ -1510,7 +1783,9 @@ fn evt_050_25_refused_send_inputs_take_no_token_and_the_next_valid_one_is_accept
 #[test]
 fn evt_050_20_valid_send_inputs_per_second_are_accepted() {
     let env = Setup::new(&["terminal.write"]).tree(flat_tree(1)).build();
-    let batch: Vec<_> = (1..=20).map(|n| keyed(n, &format!("v:{n}"), send_input(2, "x"))).collect();
+    let batch: Vec<_> = (1..=20)
+        .map(|n| keyed(n, &format!("v:{n}"), send_input(2, "x")))
+        .collect();
     env.run(batch);
     for n in 1..=20 {
         assert!(is_ok(&env.outcome(n)), "send {n}: {:?}", env.outcome(n));
@@ -1521,9 +1796,15 @@ fn evt_050_20_valid_send_inputs_per_second_are_accepted() {
 #[test]
 fn evt_050_the_21st_valid_send_input_in_one_second_is_rate_limited() {
     let env = Setup::new(&["terminal.write"]).tree(flat_tree(1)).build();
-    let batch: Vec<_> = (1..=21).map(|n| keyed(n, &format!("v:{n}"), send_input(2, "x"))).collect();
+    let batch: Vec<_> = (1..=21)
+        .map(|n| keyed(n, &format!("v:{n}"), send_input(2, "x")))
+        .collect();
     env.run(batch);
-    assert!(is_refused(&env.outcome(21), ErrorCode::RateLimited), "{:?}", env.outcome(21));
+    assert!(
+        is_refused(&env.outcome(21), ErrorCode::RateLimited),
+        "{:?}",
+        env.outcome(21)
+    );
 }
 
 /// REQ: EVT-050
@@ -1531,9 +1812,17 @@ fn evt_050_the_21st_valid_send_input_in_one_second_is_rate_limited() {
 fn evt_050_20_valid_after_25_refused_in_the_same_second_are_all_accepted() {
     let env = Setup::new(&["terminal.write"]).tree(flat_tree(1)).build();
     env.kernel.set_pane_restored(NodeId(2), true);
-    env.run((1..=25).map(|n| keyed(n, &format!("r:{n}"), send_input(2, "x"))).collect());
+    env.run(
+        (1..=25)
+            .map(|n| keyed(n, &format!("r:{n}"), send_input(2, "x")))
+            .collect(),
+    );
     env.kernel.set_pane_restored(NodeId(2), false);
-    env.run((101..=120).map(|n| keyed(n, &format!("v:{n}"), send_input(2, "x"))).collect());
+    env.run(
+        (101..=120)
+            .map(|n| keyed(n, &format!("v:{n}"), send_input(2, "x")))
+            .collect(),
+    );
     for n in 101..=120 {
         assert!(is_ok(&env.outcome(n)), "send {n}: {:?}", env.outcome(n));
     }

@@ -9,7 +9,10 @@ use crate::common::*;
 /// REQ: COR-050
 #[test]
 fn manifest_050_equals_the_complete_manifest_of_the_page() {
-    assert_eq!(manifest(), json_block_after(&page_text(), "### Complete manifest"));
+    assert_eq!(
+        manifest(),
+        json_block_after(&page_text(), "### Complete manifest")
+    );
 }
 
 /// REQ: COR-050
@@ -20,7 +23,10 @@ fn manifest_050_fragment_server_grants_equal_the_complete_manifest_server_grants
     let complete = json_block_after(&page, "### Complete manifest");
     assert_eq!(fragment["id"], complete["id"]);
     assert_eq!(fragment["api"], complete["api"]);
-    assert_eq!(fragment["capabilities"]["server"], complete["capabilities"]["server"]);
+    assert_eq!(
+        fragment["capabilities"]["server"],
+        complete["capabilities"]["server"]
+    );
 }
 
 /// REQ: COR-050
@@ -40,26 +46,44 @@ fn manifest_050_identity_and_api_version() {
 fn manifest_050_the_description_is_the_first_sentence_of_the_page() {
     let manifest = manifest();
     let description = manifest["description"].as_str().expect("description");
-    assert_eq!(description, "Notifications is the plugin form of Ilium's alerts.");
+    assert_eq!(
+        description,
+        "Notifications is the plugin form of Ilium's alerts."
+    );
     assert!(page_text().contains(description));
 }
 
 /// REQ: COR-050
 #[test]
 fn manifest_050_the_server_side_uses_the_base_server_world() {
-    assert_eq!(manifest()["server"], json!({"entry": "server.wasm", "world": "ilium:server/base@0.1.0"}));
+    assert_eq!(
+        manifest()["server"],
+        json!({"entry": "server.wasm", "world": "ilium:server/base@0.1.0"})
+    );
 }
 
 /// REQ: COR-050
 #[test]
 fn manifest_050_server_grants_are_the_five_alert_grants_in_order() {
-    assert_eq!(server_grants(), ["sound.play", "notify.desktop", "agent.read", "tree.read", "tree.attention"]);
+    assert_eq!(
+        server_grants(),
+        [
+            "sound.play",
+            "notify.desktop",
+            "agent.read",
+            "tree.read",
+            "tree.attention"
+        ]
+    );
 }
 
 /// REQ: COR-050
 #[test]
 fn manifest_050_client_grants_are_the_toast_grant_and_the_kernel_tab_grant() {
-    assert_eq!(manifest()["capabilities"]["client"], json!(["notify.toast", "settings.write-kernel:sound"]));
+    assert_eq!(
+        manifest()["capabilities"]["client"],
+        json!(["notify.toast", "settings.write-kernel:sound"])
+    );
 }
 
 /// REQ: COR-050
@@ -70,7 +94,10 @@ fn manifest_050_holds_no_grant_the_page_does_not_name() {
     for side in ["server", "client"] {
         for grant in manifest["capabilities"][side].as_array().expect("grants") {
             let grant = grant.as_str().expect("grant string");
-            assert!(page.contains(&format!("\"{grant}\"")), "grant {grant} is not on the page");
+            assert!(
+                page.contains(&format!("\"{grant}\"")),
+                "grant {grant} is not on the page"
+            );
         }
     }
 }
@@ -88,7 +115,8 @@ fn manifest_050_activates_at_startup_with_first_party_limits() {
 fn manifest_050_the_boot_table_activates_notifications_at_startup() {
     let boot = manual_page("reference-kernel-and-boot.md");
     assert!(
-        boot.lines().any(|line| line == "| Notifications | `startup` | none | Must catch the first state change |"),
+        boot.lines().any(|line| line
+            == "| Notifications | `startup` | none | Must catch the first state change |"),
         "boot table row missing"
     );
 }
@@ -98,8 +126,19 @@ fn manifest_050_the_boot_table_activates_notifications_at_startup() {
 fn manifest_050_has_no_unknown_top_level_key() {
     let manifest = manifest();
     let allowed = [
-        "api", "id", "name", "version", "publisher", "description", "license", "server", "client",
-        "capabilities", "activation", "contributes", "limits_tier",
+        "api",
+        "id",
+        "name",
+        "version",
+        "publisher",
+        "description",
+        "license",
+        "server",
+        "client",
+        "capabilities",
+        "activation",
+        "contributes",
+        "limits_tier",
     ];
     for key in manifest.as_object().expect("object").keys() {
         assert!(allowed.contains(&key.as_str()), "unexpected key {key}");
@@ -109,7 +148,10 @@ fn manifest_050_has_no_unknown_top_level_key() {
 /// REQ: COR-050
 #[test]
 fn manifest_050_a_host_takes_the_server_grants_from_the_manifest() {
-    let host = FakeHost::for_manifest(manifest_path()).expect("loads").side("server").build();
+    let host = FakeHost::for_manifest(manifest_path())
+        .expect("loads")
+        .side("server")
+        .build();
     drop(host);
 }
 

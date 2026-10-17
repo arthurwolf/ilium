@@ -205,7 +205,12 @@ pub struct RunResult {
 /// Runs built components for `ilium plugin test` (reference-plugin-cli.md DEV-030..033).
 pub trait ComponentRunner: Send + Sync {
     /// Runs one side's component against one fixture.
-    fn run_fixture(&self, side: &str, component: &[u8], fixture: &Value) -> Result<RunResult, String>;
+    fn run_fixture(
+        &self,
+        side: &str,
+        component: &[u8],
+        fixture: &Value,
+    ) -> Result<RunResult, String>;
     /// Runs the project's own `cargo test`; its exit code.
     fn run_project_tests(&self, project: &Path) -> i32;
 }
@@ -339,12 +344,28 @@ impl MemorySession {
 
     /// Installs a plugin with a state (`running`, `disabled`, `stopped`, `untrusted`) and
     /// grants as `(grant, risk, state)` triples.
-    pub fn add_plugin(&self, id: &str, version: &str, tier: &str, state: &str, dev: bool, grants: &[(&str, &str, &str)]) {
+    pub fn add_plugin(
+        &self,
+        id: &str,
+        version: &str,
+        tier: &str,
+        state: &str,
+        dev: bool,
+        grants: &[(&str, &str, &str)],
+    ) {
         unimplemented!("host::cli::MemorySession::add_plugin")
     }
 
     /// The same as `add_plugin`; kept for the tests that name the grants explicitly.
-    pub fn add_plugin_with_grants(&self, id: &str, version: &str, tier: &str, state: &str, dev: bool, grants: &[(&str, &str, &str)]) {
+    pub fn add_plugin_with_grants(
+        &self,
+        id: &str,
+        version: &str,
+        tier: &str,
+        state: &str,
+        dev: bool,
+        grants: &[(&str, &str, &str)],
+    ) {
         unimplemented!("host::cli::MemorySession::add_plugin_with_grants")
     }
 
@@ -619,7 +640,11 @@ pub mod dev {
     impl Debouncer {
         /// A debouncer with the given window.
         pub fn new(window: Duration) -> Debouncer {
-            Debouncer { window, last_change_ms: None, owed: 0 }
+            Debouncer {
+                window,
+                last_change_ms: None,
+                owed: 0,
+            }
         }
 
         /// Records a change at `at_millis`.

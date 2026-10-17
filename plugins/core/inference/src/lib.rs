@@ -4,14 +4,16 @@
 //! implementing the lifecycle, the handler and the exports its manifest lists. Every body is
 //! `unimplemented!` until the implementation phase moves the feature here.
 
-use ilium_plugin_sdk::{CatalogProvider, Handler, InferenceProvider, Lifecycle, Views, ilium_plugin};
 use ilium_plugin_sdk::exports::ProviderCall;
-use ilium_plugin_sdk::host::catalogs::{CatalogPage, CatalogQuery};
-use ilium_plugin_sdk::types::{Area, UiTree, ViewTarget};
 use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::generated::types::intents::Submission;
+use ilium_plugin_sdk::host::catalogs::{CatalogPage, CatalogQuery};
 use ilium_plugin_sdk::types::Activation;
 use ilium_plugin_sdk::types::PluginError;
+use ilium_plugin_sdk::types::{Area, UiTree, ViewTarget};
+use ilium_plugin_sdk::{
+    ilium_plugin, CatalogProvider, Handler, InferenceProvider, Lifecycle, Views,
+};
 
 /// The server side of `ilium.core.inference` (core-plugin-inference.md, world `ilium:server/base@0.1.0`).
 #[ilium_plugin(side = "server", exports = ["inference-provider", "catalog-provider"])]

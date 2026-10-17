@@ -10,11 +10,20 @@ fn has(out: &ilium_plugin_host::cli::CliOutput, code: &str) -> bool {
 
 fn trusted_fixture() -> CliFixture {
     let fixture = cli_fixture();
-    write_trust(&fixture, &trust_json(&[entry(0, "example", "Example Labs")]));
+    write_trust(
+        &fixture,
+        &trust_json(&[entry(0, "example", "Example Labs")]),
+    );
     fixture
 }
 
-fn pub_file(fixture: &CliFixture, name: &str, seed: u8, publisher_id: &str, publisher: &str) -> String {
+fn pub_file(
+    fixture: &CliFixture,
+    name: &str,
+    seed: u8,
+    publisher_id: &str,
+    publisher: &str,
+) -> String {
     let text = format!(
         "{{\n  \"format\": \"ilium-pub/1\",\n  \"publisher_id\": \"{publisher_id}\",\n  \"publisher\": \"{publisher}\",\n  \"algorithm\": \"ed25519\",\n  \"public_key\": \"{}\",\n  \"key_id\": \"{}\",\n  \"created\": \"2026-10-12 10:00:00\"\n}}\n",
         b64url(&public_of(seed)),
@@ -41,9 +50,16 @@ fn doc_pkg_222_system_store_is_etc_ilium_trust_json_and_read_only() {
 #[test]
 fn pkg_222_trust_commands_never_write_outside_the_user_store() {
     let fixture = trusted_fixture();
-    let before = std::fs::metadata("/etc/ilium/trust.json").ok().map(|m| m.len());
+    let before = std::fs::metadata("/etc/ilium/trust.json")
+        .ok()
+        .map(|m| m.len());
     run_cli(&fixture, &["trust", "remove", VECTOR_KEY_ID, "--force"]);
-    assert_eq!(std::fs::metadata("/etc/ilium/trust.json").ok().map(|m| m.len()), before);
+    assert_eq!(
+        std::fs::metadata("/etc/ilium/trust.json")
+            .ok()
+            .map(|m| m.len()),
+        before
+    );
 }
 
 /// REQ: PKG-223
@@ -69,8 +85,22 @@ fn pkg_223_a_key_revoked_in_the_user_store_is_not_effective() {
 #[test]
 fn pkg_223_two_keys_for_one_publisher_are_both_effective() {
     let fixture = cli_fixture();
-    write_trust(&fixture, &trust_json(&[entry(0, "example", "Example Labs"), entry(1, "example", "Example Labs")]));
-    let out = install(&fixture, &signed_package(1, "example", &manifest_for("example.minimal", "Example Labs")), &[]);
+    write_trust(
+        &fixture,
+        &trust_json(&[
+            entry(0, "example", "Example Labs"),
+            entry(1, "example", "Example Labs"),
+        ]),
+    );
+    let out = install(
+        &fixture,
+        &signed_package(
+            1,
+            "example",
+            &manifest_for("example.minimal", "Example Labs"),
+        ),
+        &[],
+    );
     assert!(!has(&out, "trust.key-unknown"), "{}", all_text(&out));
 }
 
@@ -100,10 +130,16 @@ fn pkg_224_same_key_under_another_publisher_refused_publisher_conflict() {
 fn pkg_224_two_keys_for_one_publisher_id_via_additional() {
     let fixture = trusted_fixture();
     let path = pub_file(&fixture, "second.pub", 1, "example", "Example Labs");
-    let out = run_cli(&fixture, &["trust", "add", "--additional", path.as_str(), "--yes"]);
+    let out = run_cli(
+        &fixture,
+        &["trust", "add", "--additional", path.as_str(), "--yes"],
+    );
     // Non-interactive sessions cannot type `replace`; both outcomes keep one key per entry.
     let store = read_trust(&fixture).expect("store");
-    assert_eq!(store.matches("\"key_id\"").count(), if out.exit_code == 0 { 2 } else { 1 });
+    assert_eq!(
+        store.matches("\"key_id\"").count(),
+        if out.exit_code == 0 { 2 } else { 1 }
+    );
 }
 
 /// REQ: PKG-224
@@ -134,7 +170,9 @@ fn pkg_225_trust_flag_with_the_exact_key_installs_and_stores_it() {
     let fixture = cli_fixture();
     let out = install(&fixture, &vector_signed(), &["--trust", VECTOR_KEY_ID]);
     assert_eq!(out.exit_code, 0, "{}", all_text(&out));
-    assert!(read_trust(&fixture).expect("store written").contains(VECTOR_KEY_ID));
+    assert!(read_trust(&fixture)
+        .expect("store written")
+        .contains(VECTOR_KEY_ID));
 }
 
 /// REQ: PKG-225
@@ -151,7 +189,11 @@ fn pkg_225_trust_flag_with_another_key_refused_key_unknown() {
 fn pkg_225_trust_flag_persists_for_later_installs() {
     let fixture = cli_fixture();
     install(&fixture, &vector_signed(), &["--trust", VECTOR_KEY_ID]);
-    let later = signed_package(0, "example", &manifest_for("example.minimal", "Example Labs"));
+    let later = signed_package(
+        0,
+        "example",
+        &manifest_for("example.minimal", "Example Labs"),
+    );
     let out = install(&fixture, &later, &[]);
     assert!(!has(&out, "trust.key-unknown"), "{}", all_text(&out));
 }
@@ -168,7 +210,10 @@ fn pkg_225_yes_alone_never_trusts_a_new_key() {
 /// REQ: PKG-225
 #[test]
 fn pkg_225_truncated_or_uppercase_trust_value_does_not_match() {
-    for value in [VECTOR_KEY_ID[..63].to_string(), VECTOR_KEY_ID.to_uppercase()] {
+    for value in [
+        VECTOR_KEY_ID[..63].to_string(),
+        VECTOR_KEY_ID.to_uppercase(),
+    ] {
         let fixture = cli_fixture();
         let out = install(&fixture, &vector_signed(), &["--trust", &value]);
         assert_ne!(out.exit_code, 0, "value {value}");
@@ -243,7 +288,13 @@ fn pkg_226_remove_of_an_unused_key_needs_no_force() {
 fn pkg_227_remove_with_force_keeps_plugin_data() {
     let fixture = installed_fixture();
     let data = fixture.root.path().join("data");
-    write_file(&data.join("plugins-data").join("example.minimal").join("keep.txt"), b"x");
+    write_file(
+        &data
+            .join("plugins-data")
+            .join("example.minimal")
+            .join("keep.txt"),
+        b"x",
+    );
     let count = |dir: &std::path::Path| walk(dir);
     let before = count(&data);
     run_cli(&fixture, &["trust", "remove", VECTOR_KEY_ID, "--force"]);
@@ -252,7 +303,18 @@ fn pkg_227_remove_with_force_keeps_plugin_data() {
 }
 
 fn walk(dir: &std::path::Path) -> usize {
-    std::fs::read_dir(dir).into_iter().flatten().flatten().map(|e| if e.path().is_dir() { walk(&e.path()) } else { 1 }).sum()
+    std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| {
+            if e.path().is_dir() {
+                walk(&e.path())
+            } else {
+                1
+            }
+        })
+        .sum()
 }
 
 /// REQ: PKG-227
@@ -274,21 +336,30 @@ fn doc_pkg_227_system_entry_removal_is_refused_with_system_entry() {
 
 fn tier_of_installed(fixture: &CliFixture) -> String {
     let out = list_json(fixture);
-    out.stdout_jsonl.iter().filter_map(|r| r.get("tier").map(|t| t.to_string())).next().unwrap_or_default()
+    out.stdout_jsonl
+        .iter()
+        .filter_map(|r| r.get("tier").map(|t| t.to_string()))
+        .next()
+        .unwrap_or_default()
 }
 
 /// REQ: PKG-228
 #[test]
 fn pkg_228_valid_trusted_signature_installs_as_t2() {
     let fixture = installed_fixture();
-    assert!(tier_of_installed(&fixture).contains("T2"), "{}", all_text(&list_json(&fixture)));
+    assert!(
+        tier_of_installed(&fixture).contains("T2"),
+        "{}",
+        all_text(&list_json(&fixture))
+    );
 }
 
 /// REQ: PKG-228
 #[test]
 fn pkg_228_verify_returns_tier_t2_for_the_vector() {
     let package = ilium_plugin_host::package::read_package(&vector_signed()).expect("package");
-    let verified = ilium_plugin_host::signing::verify(&package, &trust_of(0, "example"), now()).expect("verified");
+    let verified = ilium_plugin_host::signing::verify(&package, &trust_of(0, "example"), now())
+        .expect("verified");
     assert_eq!(verified.tier, ilium_plugin_api::Tier::T2);
     assert_eq!(verified.publisher_id, "example");
     assert_eq!(verified.key_id, VECTOR_KEY_ID);
@@ -298,9 +369,13 @@ fn pkg_228_verify_returns_tier_t2_for_the_vector() {
 #[test]
 fn pkg_228_two_valid_signatures_one_trusted_is_t2() {
     let manifest = vector_manifest();
-    let text = sig_doc("ilium-sig/1", &[obj(7, "example", &manifest), obj(0, "example", &manifest)]);
+    let text = sig_doc(
+        "ilium-sig/1",
+        &[obj(7, "example", &manifest), obj(0, "example", &manifest)],
+    );
     let package = ilium_plugin_host::package::read_package(&with_sig(&text)).expect("package");
-    let verified = ilium_plugin_host::signing::verify(&package, &trust_of(0, "example"), now()).expect("verified");
+    let verified = ilium_plugin_host::signing::verify(&package, &trust_of(0, "example"), now())
+        .expect("verified");
     assert_eq!(verified.tier, ilium_plugin_api::Tier::T2);
 }
 
@@ -319,7 +394,11 @@ fn pkg_229_unsigned_with_allow_unsigned_installs_as_t3() {
     let fixture = cli_fixture();
     let out = install(&fixture, &vector_unsigned(), &["--allow-unsigned"]);
     assert_eq!(out.exit_code, 0, "{}", all_text(&out));
-    assert!(tier_of_installed(&fixture).contains("T3"), "{}", all_text(&list_json(&fixture)));
+    assert!(
+        tier_of_installed(&fixture).contains("T3"),
+        "{}",
+        all_text(&list_json(&fixture))
+    );
 }
 
 /// REQ: PKG-229
@@ -342,7 +421,8 @@ fn pkg_230_unknown_key_non_interactive_without_trust_is_key_unknown() {
 fn pkg_230_trust_for_the_key_adds_it_with_added_by_user() {
     let fixture = cli_fixture();
     install(&fixture, &vector_signed(), &["--trust", VECTOR_KEY_ID]);
-    let value: serde_json::Value = serde_json::from_str(&read_trust(&fixture).expect("store")).expect("json");
+    let value: serde_json::Value =
+        serde_json::from_str(&read_trust(&fixture).expect("store")).expect("json");
     assert_eq!(value["keys"][0]["added_by"], "user");
     assert_eq!(value["keys"][0]["publisher_id"], "example");
 }
@@ -357,12 +437,26 @@ fn doc_pkg_230_declined_prompt_stops_with_declined() {
 #[test]
 fn pkg_231_invalid_signature_refused_whatever_the_flags() {
     let bytes = patch_data(&vector_signed(), "signature", 200, b'A', true);
-    let flag_sets: [&[&str]; 4] = [&[], &["--allow-unsigned"], &["--trust", VECTOR_KEY_ID], &["--allow-unsigned", "--allow-downgrade", "--trust", VECTOR_KEY_ID]];
+    let flag_sets: [&[&str]; 4] = [
+        &[],
+        &["--allow-unsigned"],
+        &["--trust", VECTOR_KEY_ID],
+        &[
+            "--allow-unsigned",
+            "--allow-downgrade",
+            "--trust",
+            VECTOR_KEY_ID,
+        ],
+    ];
     for flags in flag_sets {
         let fixture = trusted_fixture();
         let out = install(&fixture, &bytes, flags);
         assert_ne!(out.exit_code, 0, "flags {flags:?}");
-        assert!(has(&out, "manifest.signature-invalid") || has(&out, "package.signature-format"), "flags {flags:?}: {}", all_text(&out));
+        assert!(
+            has(&out, "manifest.signature-invalid") || has(&out, "package.signature-format"),
+            "flags {flags:?}: {}",
+            all_text(&out)
+        );
     }
 }
 
@@ -385,7 +479,11 @@ fn pkg_232_revoked_key_refused_for_every_reason() {
         e.revoked = Some((reason, "2026-10-12 10:05:00"));
         write_trust(&fixture, &trust_json(&[e]));
         let out = install(&fixture, &vector_signed(), &["--trust", VECTOR_KEY_ID]);
-        assert!(has(&out, "trust.key-revoked"), "reason {reason}: {}", all_text(&out));
+        assert!(
+            has(&out, "trust.key-revoked"),
+            "reason {reason}: {}",
+            all_text(&out)
+        );
     }
 }
 
@@ -405,7 +503,10 @@ fn pkg_232_trust_flag_does_not_override_a_revocation() {
 #[test]
 fn doc_pkg_233_bundled_tamper_disables_the_plugin() {
     let text = page("reference-signing-and-trust.md");
-    assert!(text.contains("trust.bundled-tampered") && text.contains("SHA-256 of each embedded component"));
+    assert!(
+        text.contains("trust.bundled-tampered")
+            && text.contains("SHA-256 of each embedded component")
+    );
 }
 
 /// REQ: PKG-234
@@ -413,7 +514,11 @@ fn doc_pkg_233_bundled_tamper_disables_the_plugin() {
 fn pkg_234_ilium_prefixed_id_refused_even_with_a_valid_signature() {
     let fixture = cli_fixture();
     write_trust(&fixture, &trust_json(&[entry(0, "ilium", "Example Labs")]));
-    let out = install(&fixture, &signed_package(0, "ilium", &manifest_for("ilium.thing", "Example Labs")), &[]);
+    let out = install(
+        &fixture,
+        &signed_package(0, "ilium", &manifest_for("ilium.thing", "Example Labs")),
+        &[],
+    );
     assert!(has(&out, "manifest.id-reserved"), "{}", all_text(&out));
 }
 
@@ -422,7 +527,10 @@ fn pkg_234_ilium_prefixed_id_refused_even_with_a_valid_signature() {
 fn pkg_234_ilium_prefixed_id_refused_unsigned_with_allow_unsigned() {
     let fixture = cli_fixture();
     let manifest = manifest_for("ilium.thing", "Example Labs");
-    let unsigned = zip_of(&[("manifest.json", manifest), ("server.wasm", vector_component())]);
+    let unsigned = zip_of(&[
+        ("manifest.json", manifest),
+        ("server.wasm", vector_component()),
+    ]);
     let out = install(&fixture, &unsigned, &["--allow-unsigned"]);
     assert!(has(&out, "manifest.id-reserved"), "{}", all_text(&out));
 }
@@ -432,7 +540,10 @@ fn pkg_234_ilium_prefixed_id_refused_unsigned_with_allow_unsigned() {
 fn pkg_234_an_id_that_only_resembles_the_reserved_prefix_is_not_reserved() {
     let fixture = cli_fixture();
     let manifest = manifest_for("iliumx.thing", "Example Labs");
-    let unsigned = zip_of(&[("manifest.json", manifest), ("server.wasm", vector_component())]);
+    let unsigned = zip_of(&[
+        ("manifest.json", manifest),
+        ("server.wasm", vector_component()),
+    ]);
     let out = install(&fixture, &unsigned, &["--allow-unsigned"]);
     assert!(!has(&out, "manifest.id-reserved"), "{}", all_text(&out));
 }
@@ -440,8 +551,15 @@ fn pkg_234_an_id_that_only_resembles_the_reserved_prefix_is_not_reserved() {
 /// REQ: PKG-235
 #[test]
 fn pkg_235_a_tier_key_in_the_manifest_is_not_accepted() {
-    let text = String::from_utf8(vector_manifest()).unwrap().replacen("{\n", "{\n  \"tier\": \"T1\",\n", 1);
-    let codes = check_codes(&zip_of(&[("manifest.json", text.into_bytes()), ("server.wasm", vector_component())]));
+    let text = String::from_utf8(vector_manifest()).unwrap().replacen(
+        "{\n",
+        "{\n  \"tier\": \"T1\",\n",
+        1,
+    );
+    let codes = check_codes(&zip_of(&[
+        ("manifest.json", text.into_bytes()),
+        ("server.wasm", vector_component()),
+    ]));
     assert!(!codes.is_empty(), "a manifest tier key must be refused");
 }
 
@@ -462,7 +580,10 @@ fn update_fixture() -> CliFixture {
 }
 
 fn newer(seed: u8) -> Vec<u8> {
-    let manifest = String::from_utf8(vector_manifest()).unwrap().replace("\"0.1.0\"", "\"0.2.0\"").into_bytes();
+    let manifest = String::from_utf8(vector_manifest())
+        .unwrap()
+        .replace("\"0.1.0\"", "\"0.2.0\"")
+        .into_bytes();
     signed_package(seed, "example", &manifest)
 }
 
@@ -470,9 +591,19 @@ fn newer(seed: u8) -> Vec<u8> {
 #[test]
 fn pkg_236_update_signed_by_another_trusted_key_of_the_same_publisher_continues() {
     let fixture = update_fixture();
-    write_trust(&fixture, &trust_json(&[entry(0, "example", "Example Labs"), entry(1, "example", "Example Labs")]));
+    write_trust(
+        &fixture,
+        &trust_json(&[
+            entry(0, "example", "Example Labs"),
+            entry(1, "example", "Example Labs"),
+        ]),
+    );
     let out = install(&fixture, &newer(1), &[]);
-    assert!(!has(&out, "package.publisher-key-changed"), "{}", all_text(&out));
+    assert!(
+        !has(&out, "package.publisher-key-changed"),
+        "{}",
+        all_text(&out)
+    );
 }
 
 /// REQ: PKG-236
@@ -480,7 +611,11 @@ fn pkg_236_update_signed_by_another_trusted_key_of_the_same_publisher_continues(
 fn pkg_236_update_with_the_same_key_continues() {
     let fixture = update_fixture();
     let out = install(&fixture, &newer(0), &[]);
-    assert!(!has(&out, "package.publisher-key-changed"), "{}", all_text(&out));
+    assert!(
+        !has(&out, "package.publisher-key-changed"),
+        "{}",
+        all_text(&out)
+    );
 }
 
 /// REQ: PKG-237
@@ -488,7 +623,11 @@ fn pkg_236_update_with_the_same_key_continues() {
 fn pkg_237_update_by_an_untrusted_new_key_refused_key_changed() {
     let fixture = update_fixture();
     let out = install(&fixture, &newer(1), &[]);
-    assert!(has(&out, "package.publisher-key-changed"), "{}", all_text(&out));
+    assert!(
+        has(&out, "package.publisher-key-changed"),
+        "{}",
+        all_text(&out)
+    );
 }
 
 /// REQ: PKG-237
@@ -497,7 +636,11 @@ fn pkg_237_message_names_both_fingerprints() {
     let fixture = update_fixture();
     let out = install(&fixture, &newer(1), &[]);
     let text = all_text(&out).replace(' ', "");
-    assert!(text.contains(&key_id_of(0)) && text.contains(&key_id_of(1)), "{}", all_text(&out));
+    assert!(
+        text.contains(&key_id_of(0)) && text.contains(&key_id_of(1)),
+        "{}",
+        all_text(&out)
+    );
 }
 
 /// REQ: PKG-237
@@ -505,7 +648,11 @@ fn pkg_237_message_names_both_fingerprints() {
 fn pkg_237_trust_flag_cannot_override_a_key_change() {
     let fixture = update_fixture();
     let out = install(&fixture, &newer(1), &["--trust", &key_id_of(1)]);
-    assert!(has(&out, "package.publisher-key-changed"), "{}", all_text(&out));
+    assert!(
+        has(&out, "package.publisher-key-changed"),
+        "{}",
+        all_text(&out)
+    );
 }
 
 /// REQ: PKG-237
@@ -535,7 +682,11 @@ fn rotation_text(old: u8, new: u8, signer: u8, publisher_id: &str) -> String {
 #[test]
 fn pkg_238_rotation_signed_by_the_old_key_is_accepted() {
     let fixture = trusted_fixture();
-    let path = put_package(&fixture, "rotation.json", rotation_text(0, 1, 0, "example").as_bytes());
+    let path = put_package(
+        &fixture,
+        "rotation.json",
+        rotation_text(0, 1, 0, "example").as_bytes(),
+    );
     let out = run_cli(&fixture, &["trust", "add", "--rotation", path.as_str()]);
     assert_eq!(out.exit_code, 0, "{}", all_text(&out));
 }
@@ -544,7 +695,11 @@ fn pkg_238_rotation_signed_by_the_old_key_is_accepted() {
 #[test]
 fn pkg_238_rotation_signed_by_another_key_refused_rotation_invalid() {
     let fixture = trusted_fixture();
-    let path = put_package(&fixture, "rotation.json", rotation_text(0, 1, 5, "example").as_bytes());
+    let path = put_package(
+        &fixture,
+        "rotation.json",
+        rotation_text(0, 1, 5, "example").as_bytes(),
+    );
     let out = run_cli(&fixture, &["trust", "add", "--rotation", path.as_str()]);
     assert!(has(&out, "trust.rotation-invalid"), "{}", all_text(&out));
 }
@@ -554,7 +709,10 @@ fn pkg_238_rotation_signed_by_another_key_refused_rotation_invalid() {
 fn pkg_238_rotation_for_another_publisher_in_the_message_refused_rotation_invalid() {
     let fixture = trusted_fixture();
     let mut text = rotation_text(0, 1, 0, "other");
-    text = text.replace("\"publisher_id\": \"other\"", "\"publisher_id\": \"example\"");
+    text = text.replace(
+        "\"publisher_id\": \"other\"",
+        "\"publisher_id\": \"example\"",
+    );
     let path = put_package(&fixture, "rotation.json", text.as_bytes());
     let out = run_cli(&fixture, &["trust", "add", "--rotation", path.as_str()]);
     assert!(has(&out, "trust.rotation-invalid"), "{}", all_text(&out));
@@ -576,19 +734,32 @@ fn pkg_238_rotation_with_another_format_value_is_refused() {
     let fixture = trusted_fixture();
     let text = rotation_text(0, 1, 0, "example").replace("ilium-rot/1", "ilium-rot/2");
     let path = put_package(&fixture, "rotation.json", text.as_bytes());
-    assert_ne!(run_cli(&fixture, &["trust", "add", "--rotation", path.as_str()]).exit_code, 0);
+    assert_ne!(
+        run_cli(&fixture, &["trust", "add", "--rotation", path.as_str()]).exit_code,
+        0
+    );
 }
 
 /// REQ: PKG-239
 #[test]
 fn pkg_239_valid_rotation_adds_the_new_key_and_keeps_the_old_one_trusted() {
     let fixture = trusted_fixture();
-    let path = put_package(&fixture, "rotation.json", rotation_text(0, 1, 0, "example").as_bytes());
+    let path = put_package(
+        &fixture,
+        "rotation.json",
+        rotation_text(0, 1, 0, "example").as_bytes(),
+    );
     run_cli(&fixture, &["trust", "add", "--rotation", path.as_str()]);
-    let value: serde_json::Value = serde_json::from_str(&read_trust(&fixture).expect("store")).expect("json");
+    let value: serde_json::Value =
+        serde_json::from_str(&read_trust(&fixture).expect("store")).expect("json");
     let keys = value["keys"].as_array().expect("keys");
     assert_eq!(keys.len(), 2);
-    let find = |id: String| keys.iter().find(|k| k["key_id"] == id.as_str()).expect("key").clone();
+    let find = |id: String| {
+        keys.iter()
+            .find(|k| k["key_id"] == id.as_str())
+            .expect("key")
+            .clone()
+    };
     assert_eq!(find(key_id_of(0))["status"], "trusted");
     assert_eq!(find(key_id_of(1))["added_by"], "user");
     assert_eq!(find(key_id_of(1))["publisher_id"], "example");
@@ -598,17 +769,29 @@ fn pkg_239_valid_rotation_adds_the_new_key_and_keeps_the_old_one_trusted() {
 #[test]
 fn pkg_239_after_rotation_the_update_signed_by_the_new_key_is_accepted() {
     let fixture = installed_fixture();
-    let path = put_package(&fixture, "rotation.json", rotation_text(0, 1, 0, "example").as_bytes());
+    let path = put_package(
+        &fixture,
+        "rotation.json",
+        rotation_text(0, 1, 0, "example").as_bytes(),
+    );
     run_cli(&fixture, &["trust", "add", "--rotation", path.as_str()]);
     let out = install(&fixture, &newer(1), &[]);
-    assert!(!has(&out, "package.publisher-key-changed"), "{}", all_text(&out));
+    assert!(
+        !has(&out, "package.publisher-key-changed"),
+        "{}",
+        all_text(&out)
+    );
 }
 
 /// REQ: PKG-239, PKG-241
 #[test]
 fn pkg_239_rotation_with_an_old_key_not_in_the_store_is_refused() {
     let fixture = cli_fixture();
-    let path = put_package(&fixture, "rotation.json", rotation_text(0, 1, 0, "example").as_bytes());
+    let path = put_package(
+        &fixture,
+        "rotation.json",
+        rotation_text(0, 1, 0, "example").as_bytes(),
+    );
     let out = run_cli(&fixture, &["trust", "add", "--rotation", path.as_str()]);
     assert_ne!(out.exit_code, 0);
 }
@@ -629,7 +812,14 @@ fn pkg_240_additional_non_interactive_without_typing_replace_adds_nothing() {
 fn pkg_240_additional_for_a_publisher_without_a_key_is_refused() {
     let fixture = cli_fixture();
     let path = pub_file(&fixture, "second.pub", 1, "example", "Example Labs");
-    assert_ne!(run_cli(&fixture, &["trust", "add", "--additional", path.as_str(), "--yes"]).exit_code, 0);
+    assert_ne!(
+        run_cli(
+            &fixture,
+            &["trust", "add", "--additional", path.as_str(), "--yes"]
+        )
+        .exit_code,
+        0
+    );
 }
 
 /// REQ: PKG-241
@@ -640,8 +830,15 @@ fn pkg_241_rotation_signed_by_a_revoked_old_key_is_refused() {
     e.status = "revoked";
     e.revoked = Some(("retired", "2026-10-12 10:05:00"));
     write_trust(&fixture, &trust_json(&[e]));
-    let path = put_package(&fixture, "rotation.json", rotation_text(0, 1, 0, "example").as_bytes());
-    assert_ne!(run_cli(&fixture, &["trust", "add", "--rotation", path.as_str()]).exit_code, 0);
+    let path = put_package(
+        &fixture,
+        "rotation.json",
+        rotation_text(0, 1, 0, "example").as_bytes(),
+    );
+    assert_ne!(
+        run_cli(&fixture, &["trust", "add", "--rotation", path.as_str()]).exit_code,
+        0
+    );
 }
 
 /// REQ: PKG-241
@@ -649,13 +846,26 @@ fn pkg_241_rotation_signed_by_a_revoked_old_key_is_refused() {
 fn pkg_241_rotation_signed_by_a_key_trusted_for_another_publisher_is_refused() {
     let fixture = cli_fixture();
     write_trust(&fixture, &trust_json(&[entry(0, "other", "Other Labs")]));
-    let path = put_package(&fixture, "rotation.json", rotation_text(0, 1, 0, "example").as_bytes());
-    assert_ne!(run_cli(&fixture, &["trust", "add", "--rotation", path.as_str()]).exit_code, 0);
+    let path = put_package(
+        &fixture,
+        "rotation.json",
+        rotation_text(0, 1, 0, "example").as_bytes(),
+    );
+    assert_ne!(
+        run_cli(&fixture, &["trust", "add", "--rotation", path.as_str()]).exit_code,
+        0
+    );
 }
 
 // ---- PKG-242..247: revocation ----
 
-fn revocation_text(publisher_id: &str, key: u8, reason: &str, effective: &str, signer: u8) -> String {
+fn revocation_text(
+    publisher_id: &str,
+    key: u8,
+    reason: &str,
+    effective: &str,
+    signer: u8,
+) -> String {
     let mut m = b"ilium-key-revocation-v1".to_vec();
     m.push(0);
     m.extend_from_slice(publisher_id.as_bytes());
@@ -673,10 +883,31 @@ fn revocation_text(publisher_id: &str, key: u8, reason: &str, effective: &str, s
 /// REQ: PKG-242
 #[test]
 fn pkg_242_revocation_statement_has_the_documented_shape() {
-    let value: serde_json::Value = serde_json::from_str(&revocation_text("example", 0, "retired", "2026-10-12 10:00:00", 0)).unwrap();
-    let keys: Vec<&str> = value.as_object().unwrap().keys().map(String::as_str).collect();
+    let value: serde_json::Value = serde_json::from_str(&revocation_text(
+        "example",
+        0,
+        "retired",
+        "2026-10-12 10:00:00",
+        0,
+    ))
+    .unwrap();
+    let keys: Vec<&str> = value
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
     assert_eq!(keys.len(), 6);
-    assert!(["format", "publisher_id", "key_id", "reason", "effective", "signature"].iter().all(|k| keys.contains(k)));
+    assert!([
+        "format",
+        "publisher_id",
+        "key_id",
+        "reason",
+        "effective",
+        "signature"
+    ]
+    .iter()
+    .all(|k| keys.contains(k)));
 }
 
 /// REQ: PKG-242
@@ -698,7 +929,11 @@ fn pkg_242_statement_signed_by_the_revoked_key_is_signature_verifiable() {
 #[test]
 fn pkg_242_statement_with_an_unknown_reason_is_refused() {
     let fixture = trusted_fixture();
-    let path = put_package(&fixture, "rev.json", revocation_text("example", 0, "bored", "2026-10-12 10:00:00", 0).as_bytes());
+    let path = put_package(
+        &fixture,
+        "rev.json",
+        revocation_text("example", 0, "bored", "2026-10-12 10:00:00", 0).as_bytes(),
+    );
     let out = run_cli(&fixture, &["trust", "import", path.as_str()]);
     assert_ne!(out.exit_code, 0);
 }
@@ -707,9 +942,13 @@ fn pkg_242_statement_with_an_unknown_reason_is_refused() {
 #[test]
 fn pkg_243_revoke_writes_the_key_as_revoked_with_the_reason() {
     let fixture = trusted_fixture();
-    let out = run_cli(&fixture, &["trust", "revoke", VECTOR_KEY_ID, "--reason", "retired"]);
+    let out = run_cli(
+        &fixture,
+        &["trust", "revoke", VECTOR_KEY_ID, "--reason", "retired"],
+    );
     assert_eq!(out.exit_code, 0, "{}", all_text(&out));
-    let value: serde_json::Value = serde_json::from_str(&read_trust(&fixture).expect("store")).expect("json");
+    let value: serde_json::Value =
+        serde_json::from_str(&read_trust(&fixture).expect("store")).expect("json");
     assert_eq!(value["keys"][0]["status"], "revoked");
     assert_eq!(value["keys"][0]["revoked"]["reason"], "retired");
 }
@@ -718,7 +957,10 @@ fn pkg_243_revoke_writes_the_key_as_revoked_with_the_reason() {
 #[test]
 fn pkg_243_revoke_of_an_unknown_key_is_not_found() {
     let fixture = cli_fixture();
-    let out = run_cli(&fixture, &["trust", "revoke", &key_id_of(4), "--reason", "retired"]);
+    let out = run_cli(
+        &fixture,
+        &["trust", "revoke", &key_id_of(4), "--reason", "retired"],
+    );
     assert_eq!(out.exit_code, 5, "{}", all_text(&out));
 }
 
@@ -726,14 +968,24 @@ fn pkg_243_revoke_of_an_unknown_key_is_not_found() {
 #[test]
 fn pkg_243_revoke_with_an_unknown_reason_fails() {
     let fixture = trusted_fixture();
-    assert_ne!(run_cli(&fixture, &["trust", "revoke", VECTOR_KEY_ID, "--reason", "bored"]).exit_code, 0);
+    assert_ne!(
+        run_cli(
+            &fixture,
+            &["trust", "revoke", VECTOR_KEY_ID, "--reason", "bored"]
+        )
+        .exit_code,
+        0
+    );
 }
 
 /// REQ: PKG-243
 #[test]
 fn pkg_243_revoke_without_a_reason_fails() {
     let fixture = trusted_fixture();
-    assert_ne!(run_cli(&fixture, &["trust", "revoke", VECTOR_KEY_ID]).exit_code, 0);
+    assert_ne!(
+        run_cli(&fixture, &["trust", "revoke", VECTOR_KEY_ID]).exit_code,
+        0
+    );
 }
 
 /// REQ: PKG-244
@@ -741,9 +993,16 @@ fn pkg_243_revoke_without_a_reason_fails() {
 fn pkg_244_new_installs_by_a_revoked_key_are_refused_for_each_reason() {
     for reason in ["compromised", "superseded", "retired"] {
         let fixture = trusted_fixture();
-        run_cli(&fixture, &["trust", "revoke", VECTOR_KEY_ID, "--reason", reason]);
+        run_cli(
+            &fixture,
+            &["trust", "revoke", VECTOR_KEY_ID, "--reason", reason],
+        );
         let out = install(&fixture, &vector_signed(), &[]);
-        assert!(has(&out, "trust.key-revoked"), "reason {reason}: {}", all_text(&out));
+        assert!(
+            has(&out, "trust.key-revoked"),
+            "reason {reason}: {}",
+            all_text(&out)
+        );
     }
 }
 
@@ -751,7 +1010,10 @@ fn pkg_244_new_installs_by_a_revoked_key_are_refused_for_each_reason() {
 #[test]
 fn pkg_245_compromised_revocation_blocks_installed_plugins() {
     let fixture = installed_fixture();
-    run_cli(&fixture, &["trust", "revoke", VECTOR_KEY_ID, "--reason", "compromised"]);
+    run_cli(
+        &fixture,
+        &["trust", "revoke", VECTOR_KEY_ID, "--reason", "compromised"],
+    );
     assert!(all_text(&list_json(&fixture)).contains("disabled-blocked"));
 }
 
@@ -759,7 +1021,10 @@ fn pkg_245_compromised_revocation_blocks_installed_plugins() {
 #[test]
 fn pkg_245_blocked_plugin_leaves_with_enable_accept_risk() {
     let fixture = installed_fixture();
-    run_cli(&fixture, &["trust", "revoke", VECTOR_KEY_ID, "--reason", "compromised"]);
+    run_cli(
+        &fixture,
+        &["trust", "revoke", VECTOR_KEY_ID, "--reason", "compromised"],
+    );
     let out = run_cli(&fixture, &["enable", "example.minimal", "--accept-risk"]);
     assert_eq!(out.exit_code, 0, "{}", all_text(&out));
 }
@@ -768,7 +1033,10 @@ fn pkg_245_blocked_plugin_leaves_with_enable_accept_risk() {
 #[test]
 fn pkg_245_plain_enable_does_not_unblock() {
     let fixture = installed_fixture();
-    run_cli(&fixture, &["trust", "revoke", VECTOR_KEY_ID, "--reason", "compromised"]);
+    run_cli(
+        &fixture,
+        &["trust", "revoke", VECTOR_KEY_ID, "--reason", "compromised"],
+    );
     let out = run_cli(&fixture, &["enable", "example.minimal"]);
     assert_ne!(out.exit_code, 0);
 }
@@ -778,9 +1046,15 @@ fn pkg_245_plain_enable_does_not_unblock() {
 fn pkg_246_retired_and_superseded_keep_plugins_at_t2_with_the_badge() {
     for reason in ["retired", "superseded"] {
         let fixture = installed_fixture();
-        run_cli(&fixture, &["trust", "revoke", VECTOR_KEY_ID, "--reason", reason]);
+        run_cli(
+            &fixture,
+            &["trust", "revoke", VECTOR_KEY_ID, "--reason", reason],
+        );
         let text = all_text(&list_json(&fixture));
-        assert!(!text.contains("disabled-blocked"), "reason {reason}: {text}");
+        assert!(
+            !text.contains("disabled-blocked"),
+            "reason {reason}: {text}"
+        );
         assert!(text.contains("key retired"), "reason {reason}: {text}");
     }
 }
@@ -789,7 +1063,10 @@ fn pkg_246_retired_and_superseded_keep_plugins_at_t2_with_the_badge() {
 #[test]
 fn pkg_246_update_after_retirement_must_come_from_another_trusted_key() {
     let fixture = installed_fixture();
-    run_cli(&fixture, &["trust", "revoke", VECTOR_KEY_ID, "--reason", "retired"]);
+    run_cli(
+        &fixture,
+        &["trust", "revoke", VECTOR_KEY_ID, "--reason", "retired"],
+    );
     let out = install(&fixture, &newer(0), &[]);
     assert_ne!(out.exit_code, 0);
 }
@@ -826,7 +1103,10 @@ fn pkg_247_the_effective_instant_itself_applies() {
     e.status = "revoked";
     e.revoked = Some(("retired", "2026-10-12 10:13:20"));
     write_trust(&fixture, &trust_json(&[e]));
-    assert!(has(&install(&fixture, &vector_signed(), &[]), "trust.key-revoked"));
+    assert!(has(
+        &install(&fixture, &vector_signed(), &[]),
+        "trust.key-revoked"
+    ));
 }
 
 /// REQ: PKG-247
@@ -837,7 +1117,10 @@ fn pkg_247_one_second_before_effective_does_not_apply() {
     e.status = "revoked";
     e.revoked = Some(("retired", "2026-10-12 10:13:21"));
     write_trust(&fixture, &trust_json(&[e]));
-    assert!(!has(&install(&fixture, &vector_signed(), &[]), "trust.key-revoked"));
+    assert!(!has(
+        &install(&fixture, &vector_signed(), &[]),
+        "trust.key-revoked"
+    ));
 }
 
 // ---- PKG-248..258: negative vectors ----
@@ -850,7 +1133,10 @@ fn vector_install(bytes: &[u8]) -> ilium_plugin_host::cli::CliOutput {
 #[test]
 fn pkg_248_manifest_byte_changed_with_crc_repaired_is_signature_invalid() {
     let bytes = patch_data(&vector_signed(), "manifest.json", 20, b'Z', true);
-    assert!(has(&vector_install(&bytes), "manifest.signature-invalid") || refusal(&bytes, &trust_of(0, "example")) == "manifest.signature-invalid");
+    assert!(
+        has(&vector_install(&bytes), "manifest.signature-invalid")
+            || refusal(&bytes, &trust_of(0, "example")) == "manifest.signature-invalid"
+    );
 }
 
 /// REQ: PKG-248, PKG-141
@@ -861,7 +1147,11 @@ fn pkg_248_every_manifest_byte_flip_is_refused() {
     for index in (0..length).step_by(7) {
         let flipped = vector_manifest()[index] ^ 0x01;
         let bytes = patch_data(&signed, "manifest.json", index, flipped, true);
-        assert_ne!(refusal(&bytes, &trust_of(0, "example")), "accepted", "index {index}");
+        assert_ne!(
+            refusal(&bytes, &trust_of(0, "example")),
+            "accepted",
+            "index {index}"
+        );
     }
 }
 
@@ -871,7 +1161,10 @@ fn pkg_249_component_byte_changed_is_file_hash_before_the_signature() {
     let bytes = patch_data(&vector_signed(), "server.wasm", 12, 0x7F, true);
     let report = check(&bytes);
     let codes = error_codes(&report.diagnostics);
-    assert_eq!(codes.first().map(String::as_str), Some("manifest.file-hash"));
+    assert_eq!(
+        codes.first().map(String::as_str),
+        Some("manifest.file-hash")
+    );
     assert!(!codes.contains(&"manifest.signature-invalid".to_string()));
 }
 
@@ -883,7 +1176,10 @@ fn pkg_250_signature_byte_changed_is_signature_invalid() {
     let mut bytes = doc.into_bytes();
     bytes[at] = if bytes[at] == b'A' { b'B' } else { b'A' };
     let package = with_signature_text(&vector_manifest(), &vector_component(), &bytes);
-    assert_eq!(refusal(&package, &trust_of(0, "example")), "manifest.signature-invalid");
+    assert_eq!(
+        refusal(&package, &trust_of(0, "example")),
+        "manifest.signature-invalid"
+    );
 }
 
 /// REQ: PKG-250
@@ -896,7 +1192,11 @@ fn pkg_250_each_of_the_first_64_signature_bits_matters() {
         let mut o = obj(0, "example", &vector_manifest());
         o.signature = b64url(&changed);
         let package = with_sig(&sig_doc("ilium-sig/1", &[o]));
-        assert_eq!(refusal(&package, &trust_of(0, "example")), "manifest.signature-invalid", "byte {byte}");
+        assert_eq!(
+            refusal(&package, &trust_of(0, "example")),
+            "manifest.signature-invalid",
+            "byte {byte}"
+        );
     }
 }
 
@@ -904,8 +1204,17 @@ fn pkg_250_each_of_the_first_64_signature_bits_matters() {
 #[test]
 fn pkg_251_prefix_v2_signature_is_signature_invalid() {
     let mut o = obj(0, "example", &vector_manifest());
-    o.signature = b64url(&sign_raw(0, &message("ilium-plugin-signature-v2", "example", &vector_manifest())));
-    assert_eq!(refusal(&with_sig(&sig_doc("ilium-sig/1", &[o])), &trust_of(0, "example")), "manifest.signature-invalid");
+    o.signature = b64url(&sign_raw(
+        0,
+        &message("ilium-plugin-signature-v2", "example", &vector_manifest()),
+    ));
+    assert_eq!(
+        refusal(
+            &with_sig(&sig_doc("ilium-sig/1", &[o])),
+            &trust_of(0, "example")
+        ),
+        "manifest.signature-invalid"
+    );
 }
 
 /// REQ: PKG-251
@@ -916,7 +1225,13 @@ fn pkg_251_message_without_the_separator_bytes_is_signature_invalid() {
     m.extend_from_slice(&sha256(&vector_manifest()));
     let mut o = obj(0, "example", &vector_manifest());
     o.signature = b64url(&sign_raw(0, &m));
-    assert_eq!(refusal(&with_sig(&sig_doc("ilium-sig/1", &[o])), &trust_of(0, "example")), "manifest.signature-invalid");
+    assert_eq!(
+        refusal(
+            &with_sig(&sig_doc("ilium-sig/1", &[o])),
+            &trust_of(0, "example")
+        ),
+        "manifest.signature-invalid"
+    );
 }
 
 /// REQ: PKG-252
@@ -924,7 +1239,13 @@ fn pkg_251_message_without_the_separator_bytes_is_signature_invalid() {
 fn pkg_252_signed_as_other_but_document_says_example_is_signature_invalid() {
     let mut o = obj(0, "example", &vector_manifest());
     o.signature = b64url(&sign_raw(0, &message(PREFIX, "other", &vector_manifest())));
-    assert_eq!(refusal(&with_sig(&sig_doc("ilium-sig/1", &[o])), &trust_of(0, "example")), "manifest.signature-invalid");
+    assert_eq!(
+        refusal(
+            &with_sig(&sig_doc("ilium-sig/1", &[o])),
+            &trust_of(0, "example")
+        ),
+        "manifest.signature-invalid"
+    );
 }
 
 /// REQ: PKG-253
@@ -932,7 +1253,11 @@ fn pkg_252_signed_as_other_but_document_says_example_is_signature_invalid() {
 fn pkg_253_document_publisher_other_with_plugin_id_example_is_id_publisher() {
     let fixture = cli_fixture();
     write_trust(&fixture, &trust_json(&[entry(0, "other", "Example Labs")]));
-    let out = install(&fixture, &signed_package(0, "other", &vector_manifest()), &[]);
+    let out = install(
+        &fixture,
+        &signed_package(0, "other", &vector_manifest()),
+        &[],
+    );
     assert!(has(&out, "manifest.id-publisher"), "{}", all_text(&out));
 }
 
@@ -941,7 +1266,10 @@ fn pkg_253_document_publisher_other_with_plugin_id_example_is_id_publisher() {
 fn pkg_254_format_ilium_sig_2_is_signature_format() {
     let text = sig_doc("ilium-sig/2", &[obj(0, "example", &vector_manifest())]);
     assert_eq!(read_refusal(&with_sig(&text)), "package.signature-format");
-    assert!(has(&vector_install(&with_sig(&text)), "package.signature-format"));
+    assert!(has(
+        &vector_install(&with_sig(&text)),
+        "package.signature-format"
+    ));
 }
 
 /// REQ: PKG-255
@@ -958,7 +1286,11 @@ fn pkg_256_store_display_name_other_labs_is_publisher_mismatch() {
     let fixture = cli_fixture();
     write_trust(&fixture, &trust_json(&[entry(0, "example", "Other Labs")]));
     let out = install(&fixture, &vector_signed(), &[]);
-    assert!(has(&out, "manifest.publisher-mismatch"), "{}", all_text(&out));
+    assert!(
+        has(&out, "manifest.publisher-mismatch"),
+        "{}",
+        all_text(&out)
+    );
 }
 
 /// REQ: PKG-257
@@ -978,7 +1310,11 @@ fn pkg_257_key_revoked_as_compromised_is_key_revoked() {
 fn pkg_258_installed_key_a_update_key_b_no_rotation_is_publisher_key_changed() {
     let fixture = update_fixture();
     let out = install(&fixture, &newer(1), &[]);
-    assert!(has(&out, "package.publisher-key-changed"), "{}", all_text(&out));
+    assert!(
+        has(&out, "package.publisher-key-changed"),
+        "{}",
+        all_text(&out)
+    );
     assert_ne!(out.exit_code, 0);
 }
 
@@ -986,7 +1322,14 @@ fn pkg_258_installed_key_a_update_key_b_no_rotation_is_publisher_key_changed() {
 #[test]
 fn pkg_258_with_the_rotation_imported_the_same_update_goes_through() {
     let fixture = update_fixture();
-    let path = put_package(&fixture, "rotation.json", rotation_text(0, 1, 0, "example").as_bytes());
+    let path = put_package(
+        &fixture,
+        "rotation.json",
+        rotation_text(0, 1, 0, "example").as_bytes(),
+    );
     run_cli(&fixture, &["trust", "add", "--rotation", path.as_str()]);
-    assert!(!has(&install(&fixture, &newer(1), &[]), "package.publisher-key-changed"));
+    assert!(!has(
+        &install(&fixture, &newer(1), &[]),
+        "package.publisher-key-changed"
+    ));
 }

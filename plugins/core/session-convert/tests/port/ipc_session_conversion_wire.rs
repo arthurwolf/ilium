@@ -14,11 +14,14 @@ fn port_session_conversion_wire_terminate_and_replace_intents_are_submitted_for_
     assert_eq!(terminated(&start), [pane]);
     answer_terminate(&mut host, &start, Outcome::Ok);
     let request = host.jobs().list().first().expect("job").request;
-    host.jobs().finish(request, Err(ilium_plugin_sdk::types::PluginError {
-        code: ilium_plugin_sdk::types::ErrorCode::Io,
-        message: "x".into(),
-        retry_after_ms: None,
-    }));
+    host.jobs().finish(
+        request,
+        Err(ilium_plugin_sdk::types::PluginError {
+            code: ilium_plugin_sdk::types::ErrorCode::Io,
+            message: "x".into(),
+            retry_after_ms: None,
+        }),
+    );
     host.settle();
     let resumed = host.deliver_one(client_message("resume", pane));
     assert_eq!(replaced(&resumed).len(), 1);
@@ -83,7 +86,11 @@ fn port_session_conversion_wire_an_antigravity_pane_is_never_converted_or_stoppe
     let (mut host, pane) = server_with_pane("antigravity", true);
     for target in ["codex", "claude"] {
         let submissions = host.deliver_one(start_message(pane, target));
-        assert!(submissions.is_empty() || (frozen(&submissions).is_empty() && terminated(&submissions).is_empty()), "{target}");
+        assert!(
+            submissions.is_empty()
+                || (frozen(&submissions).is_empty() && terminated(&submissions).is_empty()),
+            "{target}"
+        );
     }
 }
 

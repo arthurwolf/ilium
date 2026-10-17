@@ -30,9 +30,12 @@ fn visibility_adjust(display: &str) -> Value {
 /// REQ: PORT:ilium-client/src/cost_overlay.rs::default_settings_show_the_meter_only_while_hovered
 #[test]
 fn port_cost_overlay_default_settings_show_the_meter_only_while_hovered() {
-    let idle = segments(json!({ "row": row(2, 6.0), "settings": {}, "hovered": false, "is_group": false }));
+    let idle = segments(
+        json!({ "row": row(2, 6.0), "settings": {}, "hovered": false, "is_group": false }),
+    );
     assert_eq!(idle["texts"], json!([]));
-    let hovered = segments(json!({ "row": row(2, 6.0), "settings": {}, "hovered": true, "is_group": false }));
+    let hovered =
+        segments(json!({ "row": row(2, 6.0), "settings": {}, "hovered": true, "is_group": false }));
     assert_eq!(hovered["text"], json!("▰▰▰▱▱"));
 }
 
@@ -45,20 +48,39 @@ fn port_cost_overlay_detail_card_for_quota_shows_percent_and_explains_missing_da
         "quota_points": 7.5, "quota_burn_per_hour": 3.0, "has_quota": true, "model_costs": [],
         "reported_usd": null, "quota": [["primary", 41.0]], "spend_points": [],
     });
-    let page = client("overlay.detail-card", json!({ "cost": cost.clone(), "row": row(3, 7.5), "settings": settings.clone() }));
+    let page = client(
+        "overlay.detail-card",
+        json!({ "cost": cost.clone(), "row": row(3, 7.5), "settings": settings.clone() }),
+    );
     let page = page["text"].as_str().unwrap_or("").to_string();
     assert!(page.contains("Quota  7.5%"), "{page}");
     assert!(page.contains("3.0%/h"), "{page}");
     assert!(page.contains("$4.00 (API-equivalent estimate)"), "{page}");
-    assert!(page.contains("primary window 41% used account-wide"), "{page}");
+    assert!(
+        page.contains("primary window 41% used account-wide"),
+        "{page}"
+    );
     cost["has_quota"] = json!(false);
-    let page = client("overlay.detail-card", json!({ "cost": cost, "row": row(0, 0.0), "settings": settings }));
+    let page = client(
+        "overlay.detail-card",
+        json!({ "cost": cost, "row": row(0, 0.0), "settings": settings }),
+    );
     let page = page["text"].as_str().unwrap_or("").to_string();
     assert!(page.contains("not recorded by this agent's CLI"), "{page}");
 }
 
-fn draw(width: u64, background: Option<&str>, title: Option<&str>, start_col: u64, end_col: u64, texts: &[(&str, &str)]) -> Value {
-    let segs: Vec<Value> = texts.iter().map(|(text, fg)| json!({ "text": text, "fg": fg, "bold": false })).collect();
+fn draw(
+    width: u64,
+    background: Option<&str>,
+    title: Option<&str>,
+    start_col: u64,
+    end_col: u64,
+    texts: &[(&str, &str)],
+) -> Value {
+    let segs: Vec<Value> = texts
+        .iter()
+        .map(|(text, fg)| json!({ "text": text, "fg": fg, "bold": false }))
+        .collect();
     client(
         "overlay.draw-segments",
         json!({ "width": width, "background": background, "title": title, "row": 0, "start_col": start_col, "end_col": end_col, "segments": segs }),
@@ -70,10 +92,20 @@ fn draw(width: u64, background: Option<&str>, title: Option<&str>, start_col: u6
 fn port_cost_overlay_drawing_keeps_the_row_background_and_drops_leading_segments_to_fit() {
     // Room for 12 - 2 = 10 cells: sparkline + meter + dollars need 17 and meter + dollars need 11,
     // so only the dollars remain.
-    let reply = draw(12, Some("magenta"), None, 2, 12, &[("▁▃█▅▂", "red"), ("▰▰▱▱▱", "red"), ("$9.99", "red")]);
+    let reply = draw(
+        12,
+        Some("magenta"),
+        None,
+        2,
+        12,
+        &[("▁▃█▅▂", "red"), ("▰▰▱▱▱", "red"), ("$9.99", "red")],
+    );
     assert_eq!(reply["start"], json!(7));
     let rendered = reply["row_text"].as_str().unwrap_or("");
-    assert!(!rendered.contains('▁') && !rendered.contains('▰'), "{rendered}");
+    assert!(
+        !rendered.contains('▁') && !rendered.contains('▰'),
+        "{rendered}"
+    );
     assert!(rendered.contains("$9.99"));
     assert_eq!(reply["bg"]["11"], json!("magenta"));
     assert_eq!(reply["bg"]["7"], json!("magenta"));
@@ -82,7 +114,14 @@ fn port_cost_overlay_drawing_keeps_the_row_background_and_drops_leading_segments
 /// REQ: PORT:ilium-client/src/cost_overlay.rs::drawing_right_aligns_before_the_edge_and_overwrites_title_text
 #[test]
 fn port_cost_overlay_drawing_right_aligns_before_the_edge_and_overwrites_title_text() {
-    let reply = draw(30, None, Some("a-long-agent-title-that-runs-on"), 4, 26, &[("▰▰▱▱▱", "green")]);
+    let reply = draw(
+        30,
+        None,
+        Some("a-long-agent-title-that-runs-on"),
+        4,
+        26,
+        &[("▰▰▱▱▱", "green")],
+    );
     assert_eq!(reply["start"], json!(21));
     let rendered = reply["row_text"].as_str().unwrap_or("");
     assert_eq!(&rendered[..21], "a-long-agent-title-th");
@@ -95,7 +134,8 @@ fn port_cost_overlay_drawing_right_aligns_before_the_edge_and_overwrites_title_t
 /// REQ: PORT:ilium-client/src/cost_overlay.rs::group_rows_show_only_their_total_and_only_when_enabled
 #[test]
 fn port_cost_overlay_group_rows_show_only_their_total_and_only_when_enabled() {
-    let off = segments(json!({ "row": row(2, 6.0), "settings": {}, "hovered": true, "is_group": true }));
+    let off =
+        segments(json!({ "row": row(2, 6.0), "settings": {}, "hovered": true, "is_group": true }));
     assert_eq!(off["texts"], json!([]));
     let on = segments(json!({
         "row": row(2, 6.0), "settings": {}, "adjust": [display_adjust("group_totals")], "hovered": true, "is_group": true,
@@ -141,8 +181,13 @@ fn port_cost_overlay_options_compose_in_a_fixed_order_and_dollars_supersede_the_
     let mut spiking = row(3, 12.0);
     spiking["is_spike"] = json!(true);
     spiking["spark"] = json!("▁▃█");
-    let adjust: Vec<Value> = ["sparkline", "level_glyph", "level_dollars", "burn_marker"].iter().map(|d| display_adjust(d)).collect();
-    let reply = segments(json!({ "row": spiking.clone(), "settings": {}, "adjust": adjust.clone(), "hovered": true, "is_group": false }));
+    let adjust: Vec<Value> = ["sparkline", "level_glyph", "level_dollars", "burn_marker"]
+        .iter()
+        .map(|d| display_adjust(d))
+        .collect();
+    let reply = segments(
+        json!({ "row": spiking.clone(), "settings": {}, "adjust": adjust.clone(), "hovered": true, "is_group": false }),
+    );
     assert_eq!(reply["text"], json!("▁▃█ ▰▰▰▰▱ ▆ $12.0 ↑"));
     let reply = segments(json!({
         "row": spiking, "settings": { "level_dollars": { "enabled": false } }, "adjust": adjust,
@@ -155,22 +200,36 @@ fn port_cost_overlay_options_compose_in_a_fixed_order_and_dollars_supersede_the_
 #[test]
 fn port_cost_overlay_quota_rows_draw_percent_and_unavailable_rows_draw_nothing() {
     let settings = json!({ "metric": "quota" });
-    let adjust = json!([display_adjust("level_dollars"), visibility_adjust("level_dollars")]);
-    let reply = segments(json!({ "row": row(2, 6.2), "settings": settings.clone(), "adjust": adjust.clone(), "hovered": false, "is_group": false }));
+    let adjust = json!([
+        display_adjust("level_dollars"),
+        visibility_adjust("level_dollars")
+    ]);
+    let reply = segments(
+        json!({ "row": row(2, 6.2), "settings": settings.clone(), "adjust": adjust.clone(), "hovered": false, "is_group": false }),
+    );
     let texts = reply["texts"].as_array().cloned().unwrap_or_default();
     assert!(texts.contains(&json!("6.2%")), "{texts:?}");
-    assert!(!texts.iter().any(|text| text.as_str().unwrap_or("").contains('$')));
+    assert!(!texts
+        .iter()
+        .any(|text| text.as_str().unwrap_or("").contains('$')));
     let mut unavailable = row(0, 0.0);
     unavailable["level"] = Value::Null;
     unavailable["is_unavailable"] = json!(true);
-    let reply = segments(json!({ "row": unavailable, "settings": settings, "adjust": adjust, "hovered": true, "is_group": false }));
+    let reply = segments(
+        json!({ "row": unavailable, "settings": settings, "adjust": adjust, "hovered": true, "is_group": false }),
+    );
     assert_eq!(reply["texts"], json!([]));
 }
 
 /// REQ: PORT:ilium-client/src/cost_overlay.rs::title_suffix_follows_its_visibility_and_needs_agents
 #[test]
 fn port_cost_overlay_title_suffix_follows_its_visibility_and_needs_agents() {
-    let suffix = |overlay: Value, hovered: bool| client("overlay.title-suffix", json!({ "overlay": overlay, "hovered": hovered }));
+    let suffix = |overlay: Value, hovered: bool| {
+        client(
+            "overlay.title-suffix",
+            json!({ "overlay": overlay, "hovered": hovered }),
+        )
+    };
     let base = json!({ "agent_count": 2, "total_amount": 52.34, "settings": {} });
     // The header total is off by default.
     assert_eq!(suffix(base.clone(), true), Value::Null);
@@ -191,11 +250,18 @@ fn port_cost_overlay_title_suffix_follows_its_visibility_and_needs_agents() {
 /// REQ: PORT:ilium-client/src/cost_overlay.rs::visibility_is_decided_per_option
 #[test]
 fn port_cost_overlay_visibility_is_decided_per_option() {
-    let adjust = json!([display_adjust("level_dollars"), visibility_adjust("level_dollars")]);
-    let idle = segments(json!({ "row": row(1, 2.0), "settings": {}, "adjust": adjust.clone(), "hovered": false, "is_group": false }));
+    let adjust = json!([
+        display_adjust("level_dollars"),
+        visibility_adjust("level_dollars")
+    ]);
+    let idle = segments(
+        json!({ "row": row(1, 2.0), "settings": {}, "adjust": adjust.clone(), "hovered": false, "is_group": false }),
+    );
     assert_eq!(idle["level_dollars_visibility"], json!("always"));
     // The always-visible option shows without hover.
     assert_eq!(idle["text"], json!("▂ $2.00"));
-    let hovered = segments(json!({ "row": row(1, 2.0), "settings": {}, "adjust": adjust, "hovered": true, "is_group": false }));
+    let hovered = segments(
+        json!({ "row": row(1, 2.0), "settings": {}, "adjust": adjust, "hovered": true, "is_group": false }),
+    );
     assert_eq!(hovered["text"], json!("▰▰▱▱▱ ▂ $2.00"));
 }

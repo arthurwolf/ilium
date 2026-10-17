@@ -4,12 +4,12 @@
 //! implementing the lifecycle, the handler and the exports its manifest lists. Every body is
 //! `unimplemented!` until the implementation phase moves the feature here.
 
-use ilium_plugin_sdk::{Handler, Lifecycle, Views, ilium_plugin};
-use ilium_plugin_sdk::types::{Area, UiTree, ViewTarget};
 use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::generated::types::intents::Submission;
 use ilium_plugin_sdk::types::Activation;
 use ilium_plugin_sdk::types::PluginError;
+use ilium_plugin_sdk::types::{Area, UiTree, ViewTarget};
+use ilium_plugin_sdk::{ilium_plugin, Handler, Lifecycle, Views};
 
 /// The server side of `ilium.core.titles` (core-plugin-titles.md, world `ilium:server/base@0.1.0`).
 #[ilium_plugin(side = "server", exports = [])]

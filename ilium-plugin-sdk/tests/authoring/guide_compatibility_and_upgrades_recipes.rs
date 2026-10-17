@@ -11,8 +11,14 @@ fn aut_206_restore_bytes_of_the_previous_release_format_are_accepted() {
     let mut host = FakeHost::new();
     host.activate::<Versioned>();
     host.restart_with(vec![Versioned::PREVIOUS_FORMAT, 9]);
-    let saved = host.deactivate(DeactivationReason::Upgrade).expect("restore bytes");
-    assert_eq!(saved[0], Versioned::FORMAT, "the new release writes its own format byte");
+    let saved = host
+        .deactivate(DeactivationReason::Upgrade)
+        .expect("restore bytes");
+    assert_eq!(
+        saved[0],
+        Versioned::FORMAT,
+        "the new release writes its own format byte"
+    );
     assert_eq!(Versioned::load(&saved).value, 9);
 }
 
@@ -22,7 +28,9 @@ fn aut_206_unknown_format_byte_gives_defaults() {
     let mut host = FakeHost::new();
     host.activate::<Versioned>();
     host.restart_with(vec![0, 9]);
-    let saved = host.deactivate(DeactivationReason::Upgrade).expect("restore bytes");
+    let saved = host
+        .deactivate(DeactivationReason::Upgrade)
+        .expect("restore bytes");
     assert_eq!(Versioned::load(&saved).value, 0);
 }
 
@@ -43,7 +51,10 @@ fn aut_215_behaviour_does_not_depend_on_the_deactivate_reason() {
         host.restart_with(Versioned { value: 3 }.save());
         seen.push(host.deactivate(reason));
     }
-    assert!(seen.windows(2).all(|pair| pair[0] == pair[1]), "the saved bytes are the same for every reason");
+    assert!(
+        seen.windows(2).all(|pair| pair[0] == pair[1]),
+        "the saved bytes are the same for every reason"
+    );
 }
 
 /// REQ: AUT-215
@@ -60,11 +71,19 @@ fn aut_215_restart_with_counts_as_upgrade_and_is_not_a_failure() {
 /// REQ: AUT-207
 #[test]
 fn aut_207_data_in_storage_survives_a_restart_with_other_restore_bytes() {
-    let snapshot = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/authoring/fixtures/storage-v1.json");
-    let mut host = FakeHost::new().with_data_version(2).with_storage_snapshot(snapshot);
+    let snapshot = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/authoring/fixtures/storage-v1.json"
+    );
+    let mut host = FakeHost::new()
+        .with_data_version(2)
+        .with_storage_snapshot(snapshot);
     host.activate::<Versioned>();
     host.restart_with(vec![9, 9, 9]);
-    assert_eq!(host.snapshot().storage["global"]["notes"], b"notes".to_vec());
+    assert_eq!(
+        host.snapshot().storage["global"]["notes"],
+        b"notes".to_vec()
+    );
 }
 
 /// REQ: AUT-202

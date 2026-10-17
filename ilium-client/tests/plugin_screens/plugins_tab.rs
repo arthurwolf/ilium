@@ -14,9 +14,17 @@ fn usr_031_safe_mode_shows_the_banner_on_the_tree_and_on_the_plugins_tab() {
     rig.install_plugin("com.example.old", "T3");
     rig.start_client_safe_mode();
     let banner = "Safe mode: third-party plugins are off.";
-    assert!(rig.screen_text().contains(banner), "tree screen: {}", rig.screen_text());
+    assert!(
+        rig.screen_text().contains(banner),
+        "tree screen: {}",
+        rig.screen_text()
+    );
     rig.open_plugins_tab();
-    assert!(rig.screen_text().contains(banner), "plugins tab: {}", rig.screen_text());
+    assert!(
+        rig.screen_text().contains(banner),
+        "plugins tab: {}",
+        rig.screen_text()
+    );
 }
 
 /// REQ: USR-031
@@ -52,9 +60,13 @@ fn usr_031_the_banner_is_on_the_settings_screen_and_on_the_recovery_page_too() {
     let mut rig = ScreensRig::new(60, 24);
     rig.start_client_safe_mode();
     rig.open_settings();
-    assert!(rig.screen_text().contains("Safe mode: third-party plugins are off."));
+    assert!(rig
+        .screen_text()
+        .contains("Safe mode: third-party plugins are off."));
     rig.open_recovery_page();
-    assert!(rig.screen_text().contains("Safe mode: third-party plugins are off."));
+    assert!(rig
+        .screen_text()
+        .contains("Safe mode: third-party plugins are off."));
 }
 
 // ---- USR-041 ----
@@ -67,10 +79,16 @@ fn usr_041_space_on_a_protected_core_plugin_is_refused_with_a_reason() {
     rig.move_selection_to("ilium.core.tree");
     rig.press_space();
     let screen = rig.screen_text();
-    assert!(row_with(&screen, "ilium.core.tree").contains("On"), "{screen}");
+    assert!(
+        row_with(&screen, "ilium.core.tree").contains("On"),
+        "{screen}"
+    );
     let notice = rig.last_notice().expect("a refusal text");
     assert!(!notice.is_empty());
-    assert!(notice.to_lowercase().contains("cannot") || notice.to_lowercase().contains("always"), "{notice}");
+    assert!(
+        notice.to_lowercase().contains("cannot") || notice.to_lowercase().contains("always"),
+        "{notice}"
+    );
 }
 
 /// REQ: USR-041
@@ -92,8 +110,14 @@ fn usr_041_a_core_row_offers_no_remove_action() {
     rig.move_selection_to("ilium.core.editor");
     rig.open_details();
     let screen = rig.screen_text();
-    assert!(!screen.contains("Uninstall") && !screen.contains("Remove"), "{screen}");
-    assert!(!screen.contains("Install from file") || !has_row_with(&screen, "ilium.core.editor Install"));
+    assert!(
+        !screen.contains("Uninstall") && !screen.contains("Remove"),
+        "{screen}"
+    );
+    assert!(
+        !screen.contains("Install from file")
+            || !has_row_with(&screen, "ilium.core.editor Install")
+    );
 }
 
 // ---- USR-080 ----
@@ -102,8 +126,16 @@ fn usr_041_a_core_row_offers_no_remove_action() {
 #[test]
 fn usr_080_capabilities_tab_lists_ten_grants_with_wording_string_risk_and_state() {
     let grants = [
-        "tree.read", "tree.write", "panes.read", "notify.toast", "clipboard.write",
-        "clipboard.read", "terminal.write", "fs.read:project", "http:api.example.com", "process.run:git",
+        "tree.read",
+        "tree.write",
+        "panes.read",
+        "notify.toast",
+        "clipboard.write",
+        "clipboard.read",
+        "terminal.write",
+        "fs.read:project",
+        "http:api.example.com",
+        "process.run:git",
     ];
     let mut rig = ScreensRig::new(100, 40);
     rig.install_plugin_with_grants("com.example.ten", &grants);
@@ -113,7 +145,8 @@ fn usr_080_capabilities_tab_lists_ten_grants_with_wording_string_risk_and_state(
     let screen = rig.screen_text();
     for grant in grants {
         let row = row_with(&screen, grant);
-        let expected_high = ["clipboard.read", "terminal.write", "process.run:git"].contains(&grant);
+        let expected_high =
+            ["clipboard.read", "terminal.write", "process.run:git"].contains(&grant);
         assert_eq!(row.contains("HIGH"), expected_high, "{grant}: {row}");
     }
     assert!(row_with(&screen, "tree.read").contains("granted"));
@@ -121,7 +154,10 @@ fn usr_080_capabilities_tab_lists_ten_grants_with_wording_string_risk_and_state(
     assert!(row_with(&screen, "clipboard.read").contains("revoked"));
     for grant in grants {
         assert!(rig.plain_wording(grant).len() > 3);
-        assert!(screen.contains(&rig.plain_wording(grant)), "plain wording of {grant}");
+        assert!(
+            screen.contains(&rig.plain_wording(grant)),
+            "plain wording of {grant}"
+        );
     }
 }
 
@@ -156,9 +192,15 @@ fn usr_161_the_three_surfaces_use_the_same_row_words_for_each_state() {
         (RowState::Restarting, "Restarting"),
         (RowState::Failed, "Failed"),
         (RowState::Off, "Off"),
-        (RowState::WaitingFor("com.example.owner".into()), "Waiting for com.example.owner"),
+        (
+            RowState::WaitingFor("com.example.owner".into()),
+            "Waiting for com.example.owner",
+        ),
         (RowState::BlockedByPolicy, "Blocked by policy"),
-        (RowState::Refused("no sandbox".into()), "Refused: no sandbox"),
+        (
+            RowState::Refused("no sandbox".into()),
+            "Refused: no sandbox",
+        ),
     ];
     let mut rig = ScreensRig::new(100, 60);
     for (index, (state, _)) in states.iter().enumerate() {
@@ -208,7 +250,12 @@ fn usr_162_two_installs_give_32_rows_with_tier_badges_matching_the_cli_list() {
     assert!(row_with(&screen, "com.example.b").contains("T3"));
     assert!(row_with(&screen, "ilium.core.tree").contains("T1"));
     let list = rig.cli_list_text();
-    assert_eq!(list.lines().filter(|line| line.contains("com.example.") || line.contains("ilium.core.")).count(), 32);
+    assert_eq!(
+        list.lines()
+            .filter(|line| line.contains("com.example.") || line.contains("ilium.core."))
+            .count(),
+        32
+    );
 }
 
 /// REQ: USR-162
@@ -231,10 +278,21 @@ fn usr_163_forget_settings_asks_confirmation_resets_the_value_and_keeps_grants()
     rig.open_plugin_details("com.example.keep");
     assert!(rig.screen_text().contains("Forget settings"));
     rig.activate("Forget settings");
-    assert!(rig.screen_text().to_lowercase().contains("forget"), "a confirmation question is shown");
-    assert_eq!(rig.plugin_setting("com.example.keep", "density").as_deref(), Some("compact"), "nothing happens before the answer");
+    assert!(
+        rig.screen_text().to_lowercase().contains("forget"),
+        "a confirmation question is shown"
+    );
+    assert_eq!(
+        rig.plugin_setting("com.example.keep", "density").as_deref(),
+        Some("compact"),
+        "nothing happens before the answer"
+    );
     rig.confirm_yes();
-    assert_eq!(rig.plugin_setting("com.example.keep", "density"), None, "the default applies again");
+    assert_eq!(
+        rig.plugin_setting("com.example.keep", "density"),
+        None,
+        "the default applies again"
+    );
     assert_eq!(rig.grants_file_bytes(), grants_before);
 }
 
@@ -247,7 +305,10 @@ fn usr_163_declining_the_confirmation_keeps_the_values() {
     rig.open_plugin_details("com.example.keep");
     rig.activate("Forget settings");
     rig.confirm_no();
-    assert_eq!(rig.plugin_setting("com.example.keep", "density").as_deref(), Some("compact"));
+    assert_eq!(
+        rig.plugin_setting("com.example.keep", "density").as_deref(),
+        Some("compact")
+    );
 }
 
 /// REQ: USR-163
@@ -259,7 +320,10 @@ fn usr_163_project_scope_values_of_the_open_project_are_forgotten_too() {
     rig.open_plugin_details("com.example.keep");
     rig.activate("Forget settings");
     rig.confirm_yes();
-    assert_eq!(rig.plugin_setting_project("com.example.keep", "density"), None);
+    assert_eq!(
+        rig.plugin_setting_project("com.example.keep", "density"),
+        None
+    );
 }
 
 // ---- USR-164 ----
@@ -274,7 +338,10 @@ fn usr_164_the_footer_notice_and_the_row_use_the_same_state_words() {
     rig.open_plugins_tab();
     let row = row_with(&rig.screen_text(), "com.example.cursor");
     assert!(row.contains("Failed"));
-    assert!(footer.contains("Turn it on again in Settings > Plugins."), "{footer}");
+    assert!(
+        footer.contains("Turn it on again in Settings > Plugins."),
+        "{footer}"
+    );
     let list = rig.cli_list_text();
     assert!(row_with(&list, "com.example.cursor").contains("Failed"));
 }

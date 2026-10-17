@@ -24,7 +24,11 @@ fn lif_025_windows_are_per_side_and_scope() {
 #[test]
 fn lif_025_scene_and_client_sides_have_separate_windows() {
     let mut host = LifeHost::new();
-    host.install(PluginSpec::new(A).sides(&[Side::Client, Side::Scene]).startup());
+    host.install(
+        PluginSpec::new(A)
+            .sides(&[Side::Client, Side::Scene])
+            .startup(),
+    );
     host.start(StartMode::Normal);
     let scope = host.attach_client("c1");
     host.fail(A, Side::Scene, &scope, FailureKind::Trap);
@@ -39,8 +43,14 @@ fn lif_026_third_trap_on_client_a_leaves_client_b_and_server_running() {
     for _ in 0..3 {
         host.fail(A, Side::Client, &scope_a, FailureKind::Trap);
     }
-    assert_eq!(host.side(A, Side::Client, &scope_a).state, InstanceState::StoppedByFailure);
-    assert_eq!(host.side(A, Side::Client, &scope_b).state, InstanceState::Active);
+    assert_eq!(
+        host.side(A, Side::Client, &scope_a).state,
+        InstanceState::StoppedByFailure
+    );
+    assert_eq!(
+        host.side(A, Side::Client, &scope_b).state,
+        InstanceState::Active
+    );
     assert_eq!(state(&host, A), InstanceState::Active);
 }
 
@@ -193,7 +203,12 @@ fn lif_032_next_activation_not_earlier_than_delay() {
     trap(&mut host, A);
     let dropped_at = host.unix_ms();
     host.advance_ms(1000);
-    let last = host.activations().into_iter().filter(|r| r.plugin == A).last().unwrap();
+    let last = host
+        .activations()
+        .into_iter()
+        .filter(|r| r.plugin == A)
+        .last()
+        .unwrap();
     assert!(last.begin_ms >= dropped_at + 1000);
 }
 
@@ -204,7 +219,12 @@ fn lif_032_next_activation_begins_within_250_ms_after_delay() {
     trap(&mut host, A);
     let dropped_at = host.unix_ms();
     host.advance_ms(1250);
-    let last = host.activations().into_iter().filter(|r| r.plugin == A).last().unwrap();
+    let last = host
+        .activations()
+        .into_iter()
+        .filter(|r| r.plugin == A)
+        .last()
+        .unwrap();
     assert!(last.begin_ms <= dropped_at + 1250);
 }
 
@@ -250,7 +270,12 @@ fn lif_033_non_counting_rows_leave_the_window_empty() {
 #[test]
 fn lif_033_extension_handler_timeouts_count_only_toward_the_three_breach_stop() {
     let mut host = one_plugin();
-    host.fail(A, Side::Server, SERVER, FailureKind::ExtensionHandlerTimeout);
+    host.fail(
+        A,
+        Side::Server,
+        SERVER,
+        FailureKind::ExtensionHandlerTimeout,
+    );
     assert_eq!(failures(&host, A), 0);
     assert_eq!(state(&host, A), InstanceState::Active);
 }
@@ -261,9 +286,15 @@ fn lif_034_capacity_refusal_leaves_inactive_with_reason_and_no_failure() {
     let mut host = LifeHost::new().with_pool_mib(1);
     host.install(PluginSpec::new(A).memory_mib(32).startup());
     host.start(StartMode::Normal);
-    assert_eq!(host.side(A, Side::Server, SERVER).state, InstanceState::Inactive);
+    assert_eq!(
+        host.side(A, Side::Server, SERVER).state,
+        InstanceState::Inactive
+    );
     assert_eq!(failures(&host, A), 0);
-    assert!(host.state_changes().iter().any(|c| c.plugin == A && c.reason == "capacity"));
+    assert!(host
+        .state_changes()
+        .iter()
+        .any(|c| c.plugin == A && c.reason == "capacity"));
 }
 
 /// REQ: LIF-034
@@ -275,7 +306,9 @@ fn lif_034_retry_on_memory_release() {
     host.start(StartMode::Normal);
     host.trigger_activation(A);
     assert_eq!(state(&host, A), InstanceState::Inactive);
-    host.plugins_api().set_enabled(id(B), false, String::new()).unwrap();
+    host.plugins_api()
+        .set_enabled(id(B), false, String::new())
+        .unwrap();
     assert_eq!(state(&host, A), InstanceState::Active);
 }
 
@@ -294,7 +327,9 @@ fn lif_034_retry_schedule_is_1_5_30_then_every_60_seconds() {
             waits.push(host.unix_ms());
             last = now;
         }
-        if waits.len() == 5 { break; }
+        if waits.len() == 5 {
+            break;
+        }
     }
     let gaps: Vec<u64> = waits.windows(2).map(|w| w[1] - w[0]).collect();
     assert_eq!(waits[0], 1000);
@@ -320,8 +355,12 @@ fn lif_036_each_clearing_action_empties_the_window() {
         trap(&mut host, A);
         match action {
             "enable" => {
-                host.plugins_api().set_enabled(id(A), false, String::new()).unwrap();
-                host.plugins_api().set_enabled(id(A), true, String::new()).unwrap();
+                host.plugins_api()
+                    .set_enabled(id(A), false, String::new())
+                    .unwrap();
+                host.plugins_api()
+                    .set_enabled(id(A), true, String::new())
+                    .unwrap();
             }
             "cli-reset" => {
                 assert_eq!(host.cli(&["plugin", "reset-failures", A]).exit_code, 0);
@@ -367,7 +406,10 @@ fn lif_037_client_stop_is_gone_after_reattach() {
     }
     host.detach_client("client-1");
     let scope = host.attach_client("client-1");
-    assert_eq!(host.side(A, Side::Client, &scope).state, InstanceState::Active);
+    assert_eq!(
+        host.side(A, Side::Client, &scope).state,
+        InstanceState::Active
+    );
 }
 
 /// REQ: LIF-038
@@ -397,7 +439,9 @@ fn lif_039_disable_while_restart_pending_moves_to_disabled_by_user() {
     let mut host = one_plugin();
     trap(&mut host, A);
     let begun = host.activations().len();
-    host.plugins_api().set_enabled(id(A), false, String::new()).unwrap();
+    host.plugins_api()
+        .set_enabled(id(A), false, String::new())
+        .unwrap();
     host.advance_ms(6000);
     assert_eq!(host.package_state(A), PackageState::InstalledDisabledByUser);
     assert_eq!(host.activations().len(), begun);
@@ -417,13 +461,20 @@ fn lif_040_update_during_restart_activates_new_version_and_clears_window() {
 #[test]
 fn lif_041_revoke_during_restart_keeps_timer_and_shortens_granted() {
     let mut host = LifeHost::new();
-    host.install(PluginSpec::new(A).grants(&["fs.read", "net.http"]).startup());
+    host.install(
+        PluginSpec::new(A)
+            .grants(&["fs.read", "net.http"])
+            .startup(),
+    );
     host.start(StartMode::Normal);
     trap(&mut host, A);
     host.revoke(A, "net.http");
     assert_eq!(restart_in_ms(&host, A), Some(1000));
     host.advance_ms(1000);
-    assert_eq!(host.granted_of_last_activation(A), vec!["fs.read".to_owned()]);
+    assert_eq!(
+        host.granted_of_last_activation(A),
+        vec!["fs.read".to_owned()]
+    );
 }
 
 /// REQ: LIF-042
@@ -436,7 +487,10 @@ fn lif_042_essential_plugin_restarts_after_five_seconds_on_third_failure_with_ba
         trap(&mut host, "ilium.core.tree");
         host.advance_ms(5000);
     }
-    assert_ne!(state(&host, "ilium.core.tree"), InstanceState::StoppedByFailure);
+    assert_ne!(
+        state(&host, "ilium.core.tree"),
+        InstanceState::StoppedByFailure
+    );
     assert!(!host.banner().is_empty());
 }
 
@@ -450,7 +504,10 @@ fn lif_042_non_essential_t1_plugin_is_stopped() {
         trap(&mut host, "ilium.core.extra");
         host.advance_ms(1000);
     }
-    assert_eq!(state(&host, "ilium.core.extra"), InstanceState::StoppedByFailure);
+    assert_eq!(
+        state(&host, "ilium.core.extra"),
+        InstanceState::StoppedByFailure
+    );
 }
 
 /// REQ: LIF-043
@@ -461,10 +518,16 @@ fn lif_043_crash_restart_is_never_sent() {
     host.advance_ms(1000);
     host.update(A, "2.0.0");
     host.revoke(A, "fs.read");
-    host.plugins_api().set_enabled(id(A), false, String::new()).unwrap();
-    host.plugins_api().set_enabled(id(A), true, String::new()).unwrap();
+    host.plugins_api()
+        .set_enabled(id(A), false, String::new())
+        .unwrap();
+    host.plugins_api()
+        .set_enabled(id(A), true, String::new())
+        .unwrap();
     host.shutdown();
-    assert!(!host.deactivations(A).contains(&DeactivationReason::CrashRestart));
+    assert!(!host
+        .deactivations(A)
+        .contains(&DeactivationReason::CrashRestart));
 }
 
 /// REQ: LIF-043
@@ -496,16 +559,34 @@ fn lif_044_every_live_instance_gets_upgrade() {
     let (mut host, _scope) = two_sided();
     host.attach_client("client-2");
     host.update(A, "2.0.0");
-    assert_eq!(host.all_deactivations(A).iter().filter(|r| **r == DeactivationReason::Upgrade).count(), 3);
+    assert_eq!(
+        host.all_deactivations(A)
+            .iter()
+            .filter(|r| **r == DeactivationReason::Upgrade)
+            .count(),
+        3
+    );
 }
 
 /// REQ: LIF-045
 #[test]
 fn lif_045_providers_and_required_plugins_activate_first() {
     let mut host = LifeHost::new();
-    host.install(PluginSpec::new("c.consumer").requires_service("x:svc/api").startup());
-    host.install(PluginSpec::new("a.provider").provides_service("x:svc/api").startup());
-    host.install(PluginSpec::new("d.needs").requires_plugin("e.base").startup());
+    host.install(
+        PluginSpec::new("c.consumer")
+            .requires_service("x:svc/api")
+            .startup(),
+    );
+    host.install(
+        PluginSpec::new("a.provider")
+            .provides_service("x:svc/api")
+            .startup(),
+    );
+    host.install(
+        PluginSpec::new("d.needs")
+            .requires_plugin("e.base")
+            .startup(),
+    );
     host.install(PluginSpec::new("e.base").startup());
     host.start(StartMode::Normal);
     let order = host.start_order();
@@ -518,10 +599,17 @@ fn lif_045_providers_and_required_plugins_activate_first() {
 #[test]
 fn lif_045_optional_requirement_does_not_order() {
     let mut host = LifeHost::new();
-    host.install(PluginSpec::new("a.first").requires_optional_plugin("z.last").startup());
+    host.install(
+        PluginSpec::new("a.first")
+            .requires_optional_plugin("z.last")
+            .startup(),
+    );
     host.install(PluginSpec::new("z.last").startup());
     host.start(StartMode::Normal);
-    assert_eq!(host.start_order(), vec!["a.first".to_owned(), "z.last".to_owned()]);
+    assert_eq!(
+        host.start_order(),
+        vec!["a.first".to_owned(), "z.last".to_owned()]
+    );
 }
 
 /// REQ: LIF-046
@@ -559,11 +647,18 @@ proptest! {
 fn lif_047_at_most_four_concurrent_activations_per_side() {
     let mut host = LifeHost::new();
     for index in 0..12 {
-        host.install(PluginSpec::new(&format!("p{index:02}")).activate_delay_ms(50).startup());
+        host.install(
+            PluginSpec::new(&format!("p{index:02}"))
+                .activate_delay_ms(50)
+                .startup(),
+        );
     }
     host.start(StartMode::Normal);
     assert!(host.peak_concurrent_activations(Side::Server) <= 4);
-    assert!(host.peak_concurrent_activations(Side::Server) >= 2, "independent plugins may overlap");
+    assert!(
+        host.peak_concurrent_activations(Side::Server) >= 2,
+        "independent plugins may overlap"
+    );
 }
 
 /// REQ: LIF-047
@@ -571,7 +666,11 @@ fn lif_047_at_most_four_concurrent_activations_per_side() {
 fn lif_047_activations_begin_in_key_order() {
     let mut host = LifeHost::new();
     for index in (0..12).rev() {
-        host.install(PluginSpec::new(&format!("p{index:02}")).activate_delay_ms(50).startup());
+        host.install(
+            PluginSpec::new(&format!("p{index:02}"))
+                .activate_delay_ms(50)
+                .startup(),
+        );
     }
     host.start(StartMode::Normal);
     let begins: Vec<String> = host.activations().into_iter().map(|r| r.plugin).collect();
@@ -584,8 +683,18 @@ fn lif_047_activations_begin_in_key_order() {
 #[test]
 fn lif_048_service_cycle_refused_at_stage_10() {
     let mut host = LifeHost::new();
-    host.install(PluginSpec::new("a").requires_service("x:s/b").provides_service("x:s/a"));
-    let error = host.try_install(PluginSpec::new("b").requires_service("x:s/a").provides_service("x:s/b")).unwrap_err();
+    host.install(
+        PluginSpec::new("a")
+            .requires_service("x:s/b")
+            .provides_service("x:s/a"),
+    );
+    let error = host
+        .try_install(
+            PluginSpec::new("b")
+                .requires_service("x:s/a")
+                .provides_service("x:s/b"),
+        )
+        .unwrap_err();
     assert_eq!(error.code.as_str(), "manifest.service-cycle");
 }
 
@@ -594,7 +703,9 @@ fn lif_048_service_cycle_refused_at_stage_10() {
 fn lif_048_plugin_cycle_refused_with_dependency_cycle() {
     let mut host = LifeHost::new();
     host.install(PluginSpec::new("a").requires_plugin("b"));
-    let error = host.try_install(PluginSpec::new("b").requires_plugin("a")).unwrap_err();
+    let error = host
+        .try_install(PluginSpec::new("b").requires_plugin("a"))
+        .unwrap_err();
     assert_eq!(error.code.as_str(), "dependency.cycle");
 }
 
@@ -602,7 +713,9 @@ fn lif_048_plugin_cycle_refused_with_dependency_cycle() {
 #[test]
 fn lif_049_host_version_is_checked_only_through_requires_host() {
     let mut host = LifeHost::new();
-    let error = host.try_install(PluginSpec::new(A).requires_host(">=99.0.0")).unwrap_err();
+    let error = host
+        .try_install(PluginSpec::new(A).requires_host(">=99.0.0"))
+        .unwrap_err();
     assert_eq!(error.code.as_str(), "dependency.host-version");
 }
 
@@ -610,16 +723,30 @@ fn lif_049_host_version_is_checked_only_through_requires_host() {
 #[test]
 fn lif_049_engines_key_is_refused() {
     let mut host = LifeHost::new();
-    let error = host.try_install_manifest_key(A, "engines", "{}").unwrap_err();
-    assert!(error.code.as_str().starts_with("manifest."), "{}", error.code.as_str());
+    let error = host
+        .try_install_manifest_key(A, "engines", "{}")
+        .unwrap_err();
+    assert!(
+        error.code.as_str().starts_with("manifest."),
+        "{}",
+        error.code.as_str()
+    );
 }
 
 /// REQ: LIF-050
 #[test]
 fn lif_050_shutdown_runs_reverse_start_order_one_at_a_time() {
     let mut host = LifeHost::new();
-    host.install(PluginSpec::new("a.provider").provides_service("x:s/a").startup());
-    host.install(PluginSpec::new("b.consumer").requires_service("x:s/a").startup());
+    host.install(
+        PluginSpec::new("a.provider")
+            .provides_service("x:s/a")
+            .startup(),
+    );
+    host.install(
+        PluginSpec::new("b.consumer")
+            .requires_service("x:s/a")
+            .startup(),
+    );
     host.install(PluginSpec::new("c.other").startup());
     host.start(StartMode::Normal);
     let started = host.start_order();
@@ -643,8 +770,16 @@ fn lif_050_shutdown_order_ignores_completion_order_of_starts() {
 
 fn provider_consumer() -> LifeHost {
     let mut host = LifeHost::new();
-    host.install(PluginSpec::new("a.provider").provides_service("x:s/a").startup());
-    host.install(PluginSpec::new("b.consumer").requires_service("x:s/a").startup());
+    host.install(
+        PluginSpec::new("a.provider")
+            .provides_service("x:s/a")
+            .startup(),
+    );
+    host.install(
+        PluginSpec::new("b.consumer")
+            .requires_service("x:s/a")
+            .startup(),
+    );
     host.start(StartMode::Normal);
     host
 }
@@ -653,7 +788,9 @@ fn provider_consumer() -> LifeHost {
 #[test]
 fn lif_051_consumer_stays_active_when_provider_is_disabled() {
     let mut host = provider_consumer();
-    host.plugins_api().set_enabled(id("a.provider"), false, String::new()).unwrap();
+    host.plugins_api()
+        .set_enabled(id("a.provider"), false, String::new())
+        .unwrap();
     assert_eq!(state(&host, "b.consumer"), InstanceState::Active);
 }
 
@@ -682,18 +819,30 @@ fn lif_052_service_call_result_by_provider_state() {
 #[test]
 fn lif_052_stopped_disabled_and_uninstalled_provider_return_not_found() {
     let mut host = provider_consumer();
-    host.plugins_api().set_enabled(id("a.provider"), false, String::new()).unwrap();
-    assert_eq!(host.call_service("b.consumer", "x:s/a").unwrap_err().code, ErrorCode::NotFound);
+    host.plugins_api()
+        .set_enabled(id("a.provider"), false, String::new())
+        .unwrap();
+    assert_eq!(
+        host.call_service("b.consumer", "x:s/a").unwrap_err().code,
+        ErrorCode::NotFound
+    );
     host.uninstall("a.provider");
-    assert_eq!(host.call_service("b.consumer", "x:s/a").unwrap_err().code, ErrorCode::NotFound);
+    assert_eq!(
+        host.call_service("b.consumer", "x:s/a").unwrap_err().code,
+        ErrorCode::NotFound
+    );
 }
 
 /// REQ: LIF-053
 #[test]
 fn lif_053_availability_changes_are_sent_to_active_consumers() {
     let mut host = provider_consumer();
-    host.plugins_api().set_enabled(id("a.provider"), false, String::new()).unwrap();
-    host.plugins_api().set_enabled(id("a.provider"), true, String::new()).unwrap();
+    host.plugins_api()
+        .set_enabled(id("a.provider"), false, String::new())
+        .unwrap();
+    host.plugins_api()
+        .set_enabled(id("a.provider"), true, String::new())
+        .unwrap();
     let events = host.service_events("b.consumer");
     assert_eq!(events.len(), 2);
     assert!(!events[0].available && events[1].available);
@@ -706,7 +855,9 @@ fn lif_053_availability_changes_are_sent_to_active_consumers() {
 fn lif_053_unrelated_plugins_get_no_availability_event() {
     let mut host = provider_consumer();
     host.install(PluginSpec::new("c.unrelated").startup());
-    host.plugins_api().set_enabled(id("a.provider"), false, String::new()).unwrap();
+    host.plugins_api()
+        .set_enabled(id("a.provider"), false, String::new())
+        .unwrap();
     assert!(host.service_events("c.unrelated").is_empty());
 }
 
@@ -714,13 +865,24 @@ fn lif_053_unrelated_plugins_get_no_availability_event() {
 #[test]
 fn lif_054_cli_disable_prints_a_warning_per_dependant_and_still_disables() {
     let mut host = provider_consumer();
-    host.install(PluginSpec::new("c.consumer2").requires_service("x:s/a").startup());
+    host.install(
+        PluginSpec::new("c.consumer2")
+            .requires_service("x:s/a")
+            .startup(),
+    );
     host.start(StartMode::Normal);
     let out = host.cli(&["plugin", "disable", "a.provider"]);
     assert_eq!(out.exit_code, 0);
-    let warnings = out.stdout_jsonl.iter().filter(|l| l["type"] == "warning").count();
+    let warnings = out
+        .stdout_jsonl
+        .iter()
+        .filter(|l| l["type"] == "warning")
+        .count();
     assert_eq!(warnings, 2);
-    assert_eq!(host.package_state("a.provider"), PackageState::InstalledDisabledByUser);
+    assert_eq!(
+        host.package_state("a.provider"),
+        PackageState::InstalledDisabledByUser
+    );
 }
 
 /// REQ: LIF-054
@@ -735,7 +897,11 @@ fn lif_054_no_dependants_means_no_warning() {
 #[test]
 fn lif_055_owner_activates_before_contributors_and_lazy_contributors_follow() {
     let mut host = LifeHost::new();
-    host.install(PluginSpec::new("a.contrib").contributes_to("z.owner/point").startup());
+    host.install(
+        PluginSpec::new("a.contrib")
+            .contributes_to("z.owner/point")
+            .startup(),
+    );
     host.install(PluginSpec::new("z.owner").owns_point("point").startup());
     host.start(StartMode::Normal);
     let order: Vec<String> = host.activations().into_iter().map(|r| r.plugin).collect();
@@ -751,8 +917,16 @@ fn lif_055_lazy_contributor_is_activated_in_background_after_owner_activate() {
     host.install(PluginSpec::new("a.lazy").contributes_to("z.owner/point"));
     host.start(StartMode::Normal);
     host.advance_ms(1);
-    let owner = host.activations().into_iter().find(|r| r.plugin == "z.owner").unwrap();
-    let lazy = host.activations().into_iter().find(|r| r.plugin == "a.lazy").unwrap();
+    let owner = host
+        .activations()
+        .into_iter()
+        .find(|r| r.plugin == "z.owner")
+        .unwrap();
+    let lazy = host
+        .activations()
+        .into_iter()
+        .find(|r| r.plugin == "a.lazy")
+        .unwrap();
     assert!(lazy.begin_seq > owner.end_seq);
 }
 
@@ -761,11 +935,18 @@ fn lif_055_lazy_contributor_is_activated_in_background_after_owner_activate() {
 fn lif_056_hook_skips_not_ready_contributor_and_logs() {
     let mut host = LifeHost::new();
     host.install(PluginSpec::new("z.owner").owns_point("point").startup());
-    host.install(PluginSpec::new("a.slow").contributes_to("z.owner/point").activate_delay_ms(200));
+    host.install(
+        PluginSpec::new("a.slow")
+            .contributes_to("z.owner/point")
+            .activate_delay_ms(200),
+    );
     host.start(StartMode::Normal);
     let result = host.call_hook("z.owner", "point");
     assert_eq!(result.passes, 1);
-    assert!(host.log().iter().any(|l| l.code == "extension.contributor-not-ready"));
+    assert!(host
+        .log()
+        .iter()
+        .any(|l| l.code == "extension.contributor-not-ready"));
 }
 
 /// REQ: LIF-056
@@ -773,7 +954,11 @@ fn lif_056_hook_skips_not_ready_contributor_and_logs() {
 fn lif_056_hook_call_does_not_wait_for_the_contributor() {
     let mut host = LifeHost::new();
     host.install(PluginSpec::new("z.owner").owns_point("point").startup());
-    host.install(PluginSpec::new("a.slow").contributes_to("z.owner/point").activate_delay_ms(200));
+    host.install(
+        PluginSpec::new("a.slow")
+            .contributes_to("z.owner/point")
+            .activate_delay_ms(200),
+    );
     host.start(StartMode::Normal);
     let before = host.unix_ms();
     host.call_hook("z.owner", "point");
@@ -804,7 +989,11 @@ fn lif_057_messages_between_sides_are_not_blocked_by_a_version_difference() {
 fn lif_058_api_version_mismatch_names_both_versions() {
     let mut host = one_plugin();
     let error = host.connect_client_with_api("c", "0.2.0").unwrap_err();
-    assert!(error.message.contains("api-version mismatch"), "{}", error.message);
+    assert!(
+        error.message.contains("api-version mismatch"),
+        "{}",
+        error.message
+    );
     assert!(error.message.contains("0.2.0") && error.message.contains("0.1.0"));
 }
 
@@ -819,18 +1008,34 @@ fn lif_058_matching_api_version_is_accepted() {
 #[test]
 fn lif_059_first_frame_when_essential_active_or_one_second() {
     let mut host = LifeHost::new();
-    host.install(PluginSpec::new("ilium.core.tree").tier(Tier::T1).sides(&[Side::Client]).startup());
+    host.install(
+        PluginSpec::new("ilium.core.tree")
+            .tier(Tier::T1)
+            .sides(&[Side::Client])
+            .startup(),
+    );
     host.start(StartMode::Normal);
     host.attach_client("c");
     assert!(host.first_frame_ms("c") <= 1100);
-    assert!(host.first_frame_marks("c").iter().any(|m| m == "starting plugins") || host.essential_active("c"));
+    assert!(
+        host.first_frame_marks("c")
+            .iter()
+            .any(|m| m == "starting plugins")
+            || host.essential_active("c")
+    );
 }
 
 /// REQ: LIF-059 WARN
 #[test]
 fn lif_059_slow_plugin_does_not_hold_the_first_frame_past_a_second() {
     let mut host = LifeHost::new();
-    host.install(PluginSpec::new("ilium.core.tree").tier(Tier::T1).sides(&[Side::Client]).activate_delay_ms(5_000).startup());
+    host.install(
+        PluginSpec::new("ilium.core.tree")
+            .tier(Tier::T1)
+            .sides(&[Side::Client])
+            .activate_delay_ms(5_000)
+            .startup(),
+    );
     host.start(StartMode::Normal);
     host.attach_client("c");
     let frame = host.first_frame_ms("c");

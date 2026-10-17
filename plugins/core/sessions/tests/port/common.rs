@@ -20,7 +20,10 @@ pub fn manifest_path() -> PathBuf {
 }
 
 pub fn activated_server() -> FakeHost {
-    let mut host = FakeHost::for_manifest(manifest_path()).expect("manifest loads").side("server").build();
+    let mut host = FakeHost::for_manifest(manifest_path())
+        .expect("manifest loads")
+        .side("server")
+        .build();
     host.activate::<SessionsServer>();
     host
 }
@@ -40,7 +43,12 @@ pub fn add_agent(host: &mut FakeHost, name: &str, signature: &str) -> u64 {
     add_pane(
         host,
         name,
-        Some(AgentView { signature: signature.to_string(), activity: AgentActivity::Idle, objective: None, goal: None }),
+        Some(AgentView {
+            signature: signature.to_string(),
+            activity: AgentActivity::Idle,
+            objective: None,
+            goal: None,
+        }),
     )
 }
 
@@ -62,7 +70,11 @@ pub fn pane_created(pane: u64, is_restored: bool) -> Event {
 }
 
 pub fn lifecycle_event(pane: u64, state: PaneLifecycleState) -> Event {
-    Event::PaneLifecycleChanged(PaneLifecycleEvent { pane: NodeId(pane), state, by: None })
+    Event::PaneLifecycleChanged(PaneLifecycleEvent {
+        pane: NodeId(pane),
+        state,
+        by: None,
+    })
 }
 
 /// Delivers `pane-created` with `is_restored` for the panes and lets the host settle.
@@ -73,7 +85,9 @@ pub fn restore_panes(host: &mut FakeHost, panes: &[u64]) -> Vec<Submission> {
     submissions
 }
 
-pub fn replace_commands(submissions: &[Submission]) -> Vec<(ReplacePaneCommandSpec, Option<String>)> {
+pub fn replace_commands(
+    submissions: &[Submission],
+) -> Vec<(ReplacePaneCommandSpec, Option<String>)> {
     submissions
         .iter()
         .filter_map(|s| match &s.intent {
@@ -112,7 +126,12 @@ pub fn codex_template() -> Vec<String> {
 }
 
 pub fn signature(id: &str, resume: Option<Vec<String>>) -> SignatureSpec {
-    SignatureSpec { id: id.to_string(), process_names: vec![id.to_string()], resume, ..SignatureSpec::default() }
+    SignatureSpec {
+        id: id.to_string(),
+        process_names: vec![id.to_string()],
+        resume,
+        ..SignatureSpec::default()
+    }
 }
 
 pub fn session_ref(session_id: &str) -> SessionRef {
@@ -127,7 +146,12 @@ pub fn session_ref(session_id: &str) -> SessionRef {
 // Gap helpers: items missing from the skeleton testkit (see ../API_GAPS.md, part ports).
 // ---------------------------------------------------------------------------------------------
 
-pub fn verify_agent(host: &mut FakeHost, pane: u64, signature_spec: SignatureSpec, session_id: &str) {
+pub fn verify_agent(
+    host: &mut FakeHost,
+    pane: u64,
+    signature_spec: SignatureSpec,
+    session_id: &str,
+) {
     host.agents().add_signature(signature_spec);
     host.agents().set_session(pane, session_ref(session_id));
 }

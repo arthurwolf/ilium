@@ -127,6 +127,8 @@ pub fn start_order(nodes: &[StartNode]) -> Result<Vec<String>, Vec<ilium_plugin_
 }
 
 /// The shutdown order: the exact reverse of [`start_order`] (PKG-351).
-pub fn shutdown_order(nodes: &[StartNode]) -> Result<Vec<String>, Vec<ilium_plugin_api::Diagnostic>> {
+pub fn shutdown_order(
+    nodes: &[StartNode],
+) -> Result<Vec<String>, Vec<ilium_plugin_api::Diagnostic>> {
     unimplemented!("host::lifecycle::shutdown_order")
 }

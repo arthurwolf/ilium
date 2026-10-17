@@ -25,7 +25,11 @@ fn pmisc_compact_assignment_pointer_steps_both_directions_and_opens_catalog() {
     ] {
         host.icon_assignment_click(part, button);
         host.settle();
-        assert_eq!(host.icon_assignment_glyph(), suggestions[expected], "{part}");
+        assert_eq!(
+            host.icon_assignment_glyph(),
+            suggestions[expected],
+            "{part}"
+        );
         assert_eq!(host.icon_picker_open(), opens, "{part}");
     }
 }
@@ -37,8 +41,15 @@ fn pmisc_selected_row_extends_through_its_blank_tail_in_compact_and_expanded_sid
     host.tree().add_group("selected group");
     for width in [33u16, 65] {
         let cell = host.sidebar_last_list_cell(width, 8, "selected group");
-        assert_eq!(cell.symbol, " ", "selection tail was not materialized at width {width}");
-        assert_eq!(cell.background, host.accent_background(), "selection did not reach the right edge at width {width}");
+        assert_eq!(
+            cell.symbol, " ",
+            "selection tail was not materialized at width {width}"
+        );
+        assert_eq!(
+            cell.background,
+            host.accent_background(),
+            "selection did not reach the right edge at width {width}"
+        );
     }
 }
 
@@ -57,5 +68,8 @@ fn pmisc_active_codex_reset_watch_keeps_a_compact_label_at_typical_terminal_widt
     let mut host = client_host();
     host.set_codex_reset_watch_expiry(Duration::from_secs(2 * 86_400 + 3_600 + 60), "human");
     let line = host.status_bar_text(58);
-    assert!(line.contains("Possible Codex reset watch ends in 2d1h"), "{line}");
+    assert!(
+        line.contains("Possible Codex reset watch ends in 2d1h"),
+        "{line}"
+    );
 }

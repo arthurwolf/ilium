@@ -113,8 +113,9 @@ pub const COUNTER_NAMES: [&str; 16] = [
 
 /// Upper bounds of the duration histogram buckets in milliseconds; a 13th bucket is open-ended
 /// (reference-host-telemetry.md HST-352).
-pub const DURATION_BUCKET_BOUNDS_MS: [f64; 12] =
-    [0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0, 500.0, 1000.0];
+pub const DURATION_BUCKET_BOUNDS_MS: [f64; 12] = [
+    0.1, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0, 500.0, 1000.0,
+];
 
 /// The memory one side's telemetry may hold (reference-host-telemetry.md HST-351).
 pub const TELEMETRY_MAX_BYTES_PER_SIDE: usize = 64 * 1024;
@@ -351,7 +352,8 @@ pub struct Summary {
 /// All sides' telemetry of one host (reference-host-telemetry.md HST-356).
 #[derive(Debug, Default)]
 pub struct TelemetryRegistry {
-    sides: std::sync::Mutex<std::collections::BTreeMap<(String, Side), std::sync::Arc<SideTelemetry>>>,
+    sides:
+        std::sync::Mutex<std::collections::BTreeMap<(String, Side), std::sync::Arc<SideTelemetry>>>,
 }
 
 impl TelemetryRegistry {
@@ -404,7 +406,12 @@ pub struct HostLogLine {
 }
 
 /// Builds the host log line of a known condition id; unknown ids are refused (HST-358).
-pub fn host_line(plugin: &str, side: Side, id: &str, detail: &str) -> Result<HostLogLine, TelemetryError> {
+pub fn host_line(
+    plugin: &str,
+    side: Side,
+    id: &str,
+    detail: &str,
+) -> Result<HostLogLine, TelemetryError> {
     unimplemented!("host::telemetry::host_line")
 }
 
@@ -455,7 +462,14 @@ impl SlowCallReporter {
     }
 
     /// Records one call with its duration and deadline.
-    pub fn record(&mut self, side: Side, class: CallClass, took: Duration, deadline: Duration, now_ms: u64) {
+    pub fn record(
+        &mut self,
+        side: Side,
+        class: CallClass,
+        took: Duration,
+        deadline: Duration,
+        now_ms: u64,
+    ) {
         unimplemented!("host::telemetry::SlowCallReporter::record")
     }
 
@@ -485,18 +499,30 @@ pub struct Span {
     pub forwarded_imports: u32,
 }
 
-fn serialize_micros<S: serde::Serializer>(duration: &Duration, serializer: S) -> Result<S::Ok, S::Error> {
+fn serialize_micros<S: serde::Serializer>(
+    duration: &Duration,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
     serializer.serialize_u64(duration.as_micros() as u64)
 }
 
-fn serialize_class<S: serde::Serializer>(class: &CallClass, serializer: S) -> Result<S::Ok, S::Error> {
+fn serialize_class<S: serde::Serializer>(
+    class: &CallClass,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
     serializer.serialize_str(&format!("{class:?}").to_lowercase())
 }
 
 impl Span {
     /// The serialized field names, in order (HST-360).
-    pub const FIELD_NAMES: [&'static str; 6] =
-        ["plugin", "side", "class", "queue_time_us", "run_time_us", "forwarded_imports"];
+    pub const FIELD_NAMES: [&'static str; 6] = [
+        "plugin",
+        "side",
+        "class",
+        "queue_time_us",
+        "run_time_us",
+        "forwarded_imports",
+    ];
 }
 
 /// Records spans only when `ILIUM_PLUGIN_SPANS=1` (reference-host-telemetry.md HST-360).
@@ -583,8 +609,13 @@ pub enum LogLevel {
 
 impl LogLevel {
     /// Every level, lowest first.
-    pub const ALL: [LogLevel; 5] =
-        [LogLevel::Trace, LogLevel::Debug, LogLevel::Info, LogLevel::Warn, LogLevel::Error];
+    pub const ALL: [LogLevel; 5] = [
+        LogLevel::Trace,
+        LogLevel::Debug,
+        LogLevel::Info,
+        LogLevel::Warn,
+        LogLevel::Error,
+    ];
 
     /// The lowercase word of the level.
     pub fn as_str(self) -> &'static str {
@@ -613,7 +644,13 @@ impl LogSide {
 }
 
 /// One formatted log line with the fixed columns (DEV-650).
-pub fn format_log_line(at: &str, level: LogLevel, side: LogSide, plugin: &str, message: &str) -> String {
+pub fn format_log_line(
+    at: &str,
+    level: LogLevel,
+    side: LogSide,
+    plugin: &str,
+    message: &str,
+) -> String {
     unimplemented!("host::telemetry::format_log_line")
 }
 
@@ -639,7 +676,10 @@ pub struct LogConfig {
 
 impl Default for LogConfig {
     fn default() -> LogConfig {
-        LogConfig { threshold: LogLevel::Info, rate_per_second: 100 }
+        LogConfig {
+            threshold: LogLevel::Info,
+            rate_per_second: 100,
+        }
     }
 }
 
@@ -674,7 +714,14 @@ impl PluginLog {
     }
 
     /// Writes a plugin line; returns whether it was written (DEV-652, DEV-655).
-    pub fn write_plugin(&mut self, at: &str, now_ms: u64, side: Side, level: LogLevel, message: &str) -> bool {
+    pub fn write_plugin(
+        &mut self,
+        at: &str,
+        now_ms: u64,
+        side: Side,
+        level: LogLevel,
+        message: &str,
+    ) -> bool {
         unimplemented!("host::telemetry::PluginLog::write_plugin")
     }
 
@@ -690,7 +737,11 @@ impl PluginLog {
 }
 
 /// The effective threshold from a flag, the settings value and the dev flag (DEV-653).
-pub fn resolve_threshold(flag: Option<LogLevel>, setting: Option<&str>, dev_install: bool) -> LogLevel {
+pub fn resolve_threshold(
+    flag: Option<LogLevel>,
+    setting: Option<&str>,
+    dev_install: bool,
+) -> LogLevel {
     unimplemented!("host::telemetry::resolve_threshold")
 }
 
@@ -978,14 +1029,20 @@ pub struct DevLoop {
 
 impl std::fmt::Debug for DevLoop {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.debug_struct("DevLoop").field("running_version", &self.running_version).finish()
+        formatter
+            .debug_struct("DevLoop")
+            .field("running_version", &self.running_version)
+            .finish()
     }
 }
 
 impl DevLoop {
     /// A loop over a backend.
     pub fn new(backend: std::sync::Arc<dyn DevBackend>) -> DevLoop {
-        DevLoop { backend, running_version: None }
+        DevLoop {
+            backend,
+            running_version: None,
+        }
     }
 
     /// Starts the dev install of `id`; refused with `dev.id-installed` when a release install

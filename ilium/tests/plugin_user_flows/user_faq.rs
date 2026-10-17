@@ -28,7 +28,8 @@ fn doc_usr_110_faq_answers_which_systems_run_third_party_plugins() {
 fn doc_usr_110_faq_answers_what_declining_a_permission_does() {
     let page = faq();
     assert!(page.contains("What if I say no to a permission?"));
-    assert!(page.contains("The plugin still installs and runs. The calls that need the permission fail"));
+    assert!(page
+        .contains("The plugin still installs and runs. The calls that need the permission fail"));
 }
 
 /// REQ: USR-110

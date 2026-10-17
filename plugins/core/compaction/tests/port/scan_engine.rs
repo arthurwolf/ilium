@@ -9,7 +9,8 @@ use crate::fixtures::*;
 const CACHE: &str = "agent-homes:.ilium-test-cache/trace-cache.json";
 
 fn scan(host: &mut ilium_plugin_sdk::testing::FakeHost, agent: &str) -> Value {
-    host.scan_agent_homes(agent, Some(CACHE), None, None).expect("scan completes")
+    host.scan_agent_homes(agent, Some(CACHE), None, None)
+        .expect("scan completes")
 }
 
 fn summary(report: &Value) -> &Value {
@@ -21,7 +22,12 @@ fn traces(report: &Value) -> &Vec<Value> {
 }
 
 fn warnings(report: &Value) -> Vec<String> {
-    summary(report)["warnings"].as_array().unwrap().iter().map(|w| w.as_str().unwrap().to_owned()).collect()
+    summary(report)["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|w| w.as_str().unwrap().to_owned())
+        .collect()
 }
 
 /// REQ: PORT:ilium-client/src/compaction_scan/tests.rs::claude_listing_finds_main_subagent_and_workflow_transcripts
@@ -30,14 +36,31 @@ fn scan_claude_listing_finds_main_subagent_and_workflow_transcripts() {
     let mut host = server_host();
     let line = claude_session(&Process::claude(), 0, "l");
     put(&mut host, &claude_main_path("-p", "main"), &line);
-    put(&mut host, &claude_subagent_path("-p", "main", "agent-a"), &line);
-    put(&mut host, &claude_workflow_path("-p", "main", "wf-1"), &line);
-    put(&mut host, ".claude/projects/-p/notes.txt", "not a transcript");
+    put(
+        &mut host,
+        &claude_subagent_path("-p", "main", "agent-a"),
+        &line,
+    );
+    put(
+        &mut host,
+        &claude_workflow_path("-p", "main", "wf-1"),
+        &line,
+    );
+    put(
+        &mut host,
+        ".claude/projects/-p/notes.txt",
+        "not a transcript",
+    );
     put(&mut host, &claude_main_path("-p", "empty"), "");
     let listed = host.list_transcripts("claude");
     assert_eq!(listed.len(), 3, "{listed:?}");
-    assert_eq!(listed.iter().filter(|f| f["is_subagent"] == true).count(), 2);
-    assert!(listed.iter().all(|f| f["path"].as_str().unwrap().ends_with(".jsonl")));
+    assert_eq!(
+        listed.iter().filter(|f| f["is_subagent"] == true).count(),
+        2
+    );
+    assert!(listed
+        .iter()
+        .all(|f| f["path"].as_str().unwrap().ends_with(".jsonl")));
 }
 
 /// REQ: PORT:ilium-client/src/compaction_scan/tests.rs::codex_listing_finds_rollouts_and_archived_sessions_only
@@ -109,8 +132,15 @@ fn scan_only_the_listed_prefix_of_a_growing_file_is_read() {
     let first = codex_session(&Process::codex(), 0, "g");
     put(&mut host, &codex_path("grow"), &first);
     let listed_size = first.len() as u64;
-    let report = host.scan_agent_homes_growing("codex", &codex_path("grow"), "{\"type\":\"junk\"}\n").expect("scan");
-    assert_eq!(summary(&report)["bytes_read_max"].as_u64().unwrap_or(listed_size), listed_size);
+    let report = host
+        .scan_agent_homes_growing("codex", &codex_path("grow"), "{\"type\":\"junk\"}\n")
+        .expect("scan");
+    assert_eq!(
+        summary(&report)["bytes_read_max"]
+            .as_u64()
+            .unwrap_or(listed_size),
+        listed_size
+    );
     assert_eq!(traces(&report)[0]["lines_unparseable"], 0);
 }
 
@@ -118,8 +148,14 @@ fn scan_only_the_listed_prefix_of_a_growing_file_is_read() {
 #[test]
 fn scan_a_vanished_file_is_unreadable_and_progress_still_reaches_its_size() {
     let mut host = server_host();
-    put(&mut host, &codex_path("gone"), &codex_session(&Process::codex(), 0, "v"));
-    let report = host.scan_agent_homes_vanishing("codex", &codex_path("gone")).expect("scan");
+    put(
+        &mut host,
+        &codex_path("gone"),
+        &codex_session(&Process::codex(), 0, "v"),
+    );
+    let report = host
+        .scan_agent_homes_vanishing("codex", &codex_path("gone"))
+        .expect("scan");
     assert!(warnings(&report).iter().any(|w| w.contains("gone")));
     let progress = &report["progress"];
     assert_eq!(progress["bytes_done"], progress["bytes_total"]);
@@ -129,8 +165,14 @@ fn scan_a_vanished_file_is_unreadable_and_progress_still_reaches_its_size() {
 #[test]
 fn scan_a_shrunk_file_still_lets_progress_reach_the_listed_size() {
     let mut host = server_host();
-    put(&mut host, &codex_path("shrink"), &codex_session(&Process::codex(), 0, "s"));
-    let report = host.scan_agent_homes_shrinking("codex", &codex_path("shrink"), 100).expect("scan");
+    put(
+        &mut host,
+        &codex_path("shrink"),
+        &codex_session(&Process::codex(), 0, "s"),
+    );
+    let report = host
+        .scan_agent_homes_shrinking("codex", &codex_path("shrink"), 100)
+        .expect("scan");
     let progress = &report["progress"];
     assert_eq!(progress["bytes_done"], progress["bytes_total"]);
 }
@@ -158,9 +200,18 @@ fn scan_progress_is_reported_while_a_scan_runs() {
     write_claude_corpus(&mut host, 6);
     let reports = host.scan_progress_reports("claude");
     assert!(!reports.is_empty());
-    let done: Vec<u64> = reports.iter().map(|r| r["bytes_done"].as_u64().unwrap()).collect();
-    assert!(done.windows(2).all(|p| p[0] <= p[1]), "progress never goes backwards");
-    assert_eq!(reports.last().unwrap()["bytes_done"], reports.last().unwrap()["bytes_total"]);
+    let done: Vec<u64> = reports
+        .iter()
+        .map(|r| r["bytes_done"].as_u64().unwrap())
+        .collect();
+    assert!(
+        done.windows(2).all(|p| p[0] <= p[1]),
+        "progress never goes backwards"
+    );
+    assert_eq!(
+        reports.last().unwrap()["bytes_done"],
+        reports.last().unwrap()["bytes_total"]
+    );
 }
 
 /// REQ: PORT:ilium-client/src/compaction_scan/tests.rs::cross_file_duplicates_are_removed_once
@@ -171,8 +222,16 @@ fn scan_cross_file_duplicates_are_removed_once() {
     put(&mut host, &claude_main_path("-p", "one"), &text);
     put(&mut host, &claude_main_path("-p", "two"), &text);
     let report = scan(&mut host, "claude");
-    assert!(summary(&report)["duplicate_turns_removed"].as_u64().unwrap() > 100);
-    let total_turns: u64 = traces(&report).iter().map(|t| t["turns"].as_u64().unwrap()).sum();
+    assert!(
+        summary(&report)["duplicate_turns_removed"]
+            .as_u64()
+            .unwrap()
+            > 100
+    );
+    let total_turns: u64 = traces(&report)
+        .iter()
+        .map(|t| t["turns"].as_u64().unwrap())
+        .sum();
     let one = host.single_trace_turns("claude", &text);
     assert_eq!(total_turns, one, "the duplicate copy is removed once");
 }
@@ -182,11 +241,21 @@ fn scan_cross_file_duplicates_are_removed_once() {
 fn scan_codex_scan_parses_rollouts_and_archived_sessions() {
     let mut host = server_host();
     let process = Process::codex();
-    put(&mut host, &codex_path("live"), &codex_session(&process, 0, "a"));
-    put(&mut host, &codex_archived_path("old"), &codex_session(&process, 1, "b"));
+    put(
+        &mut host,
+        &codex_path("live"),
+        &codex_session(&process, 0, "a"),
+    );
+    put(
+        &mut host,
+        &codex_archived_path("old"),
+        &codex_session(&process, 1, "b"),
+    );
     let report = scan(&mut host, "codex");
     assert_eq!(traces(&report).len(), 2);
-    assert!(traces(&report).iter().all(|t| t["agent"] == "codex" && t["turns"].as_u64().unwrap() > 0));
+    assert!(traces(&report)
+        .iter()
+        .all(|t| t["agent"] == "codex" && t["turns"].as_u64().unwrap() > 0));
     assert_eq!(report["report"]["status"], "Complete");
 }
 
@@ -206,10 +275,15 @@ fn scan_a_codex_scan_runs_independently_and_reports_its_own_setting() {
 fn scan_a_current_setting_adds_the_three_way_comparison() {
     let mut host = server_host();
     write_claude_corpus(&mut host, 8);
-    let report = host.scan_agent_homes_with_current("claude", 250_000 + 33_000).expect("scan");
+    let report = host
+        .scan_agent_homes_with_current("claude", 250_000 + 33_000)
+        .expect("scan");
     let rows = report["report"]["comparison"].as_array().unwrap();
     assert_eq!(rows.len(), 3);
-    let current = rows.iter().find(|r| r["kind"] == "CurrentSetting").expect("current row");
+    let current = rows
+        .iter()
+        .find(|r| r["kind"] == "CurrentSetting")
+        .expect("current row");
     assert_eq!(current["trigger_tokens"], 217_000);
 }
 
@@ -219,7 +293,10 @@ fn scan_a_missing_home_gives_a_clear_no_sessions_report() {
     let mut host = server_host();
     let report = scan(&mut host, "claude");
     assert_eq!(report["report"]["status"], "NoSessionsFound");
-    assert!(report["report"]["status_message"].as_str().unwrap().contains("No sessions found"));
+    assert!(report["report"]["status_message"]
+        .as_str()
+        .unwrap()
+        .contains("No sessions found"));
 }
 
 /// REQ: PORT:ilium-client/src/compaction_scan/tests.rs::missing_home_and_empty_corpus_scan_to_empty_traces
@@ -238,8 +315,13 @@ fn scan_missing_home_and_empty_corpus_scan_to_empty_traces() {
 fn scan_without_a_client_the_scan_reports_unavailable() {
     let mut host = server_host();
     host.disable_inference_and_agent_access();
-    let error = host.scan_agent_homes("claude", None, None, None).expect_err("no access");
-    assert!(error.to_string().to_lowercase().contains("unavailable"), "{error}");
+    let error = host
+        .scan_agent_homes("claude", None, None, None)
+        .expect_err("no access");
+    assert!(
+        error.to_string().to_lowercase().contains("unavailable"),
+        "{error}"
+    );
 }
 
 /// REQ: PORT:ilium-client/src/compaction_scan/tests.rs::drain_events_delivers_a_claude_report_through_the_execution_client
@@ -250,7 +332,10 @@ fn scan_drain_events_delivers_a_claude_report_through_the_execution_client() {
     let events = host.scan_event_stream("claude");
     let last = events.last().expect("events");
     assert_eq!(last["type"], "Finished");
-    assert_eq!(last["report"]["setting_key"].as_str().unwrap_or(CLAUDE_KEY), CLAUDE_KEY);
+    assert_eq!(
+        last["report"]["setting_key"].as_str().unwrap_or(CLAUDE_KEY),
+        CLAUDE_KEY
+    );
     assert!(events.iter().any(|e| e["type"] == "Progress"));
 }
 
@@ -270,7 +355,9 @@ fn scan_a_stop_during_the_read_cancels_and_leaves_the_cache_untouched() {
     let mut host = server_host();
     write_claude_corpus(&mut host, 6);
     put(&mut host, ".ilium-test-cache/trace-cache.json", "sentinel");
-    let error = host.scan_agent_homes("claude", Some(CACHE), None, Some(2)).expect_err("cancelled");
+    let error = host
+        .scan_agent_homes("claude", Some(CACHE), None, Some(2))
+        .expect_err("cancelled");
     assert_eq!(error.code(), "cancelled");
     assert_eq!(read_text(&mut host, CACHE), "sentinel");
 }
@@ -324,7 +411,10 @@ fn scan_a_changed_size_or_mtime_invalidates_only_that_file() {
     assert_eq!(summary(&second)["files_parsed"], 1);
     assert_eq!(summary(&second)["files_from_cache"], 2);
     host.advance_clock(5_000);
-    host.touch("agent-homes", &claude_main_path("-synthetic-project", "session-02"));
+    host.touch(
+        "agent-homes",
+        &claude_main_path("-synthetic-project", "session-02"),
+    );
     let third = scan(&mut host, "claude");
     assert_eq!(summary(&third)["files_parsed"], 1);
 }
@@ -343,7 +433,11 @@ fn scan_a_cache_of_another_layout_or_agent_is_ignored() {
     ] {
         put(&mut host, ".ilium-test-cache/trace-cache.json", &mutated);
         let again = scan(&mut host, "claude");
-        assert_eq!(summary(&again)["files_from_cache"], 0, "a foreign cache is ignored");
+        assert_eq!(
+            summary(&again)["files_from_cache"],
+            0,
+            "a foreign cache is ignored"
+        );
         assert_eq!(summary(&again)["files_parsed"], 2);
     }
     let codex_report = scan(&mut host, "codex");
@@ -356,9 +450,16 @@ fn scan_a_cache_that_cannot_be_written_is_a_warning_not_a_failure() {
     let mut host = server_host();
     write_claude_corpus(&mut host, 2);
     let report = host
-        .scan_agent_homes("claude", Some("agent-homes:.claude/projects/-synthetic-project/session-00.jsonl/cache.json"), None, None)
+        .scan_agent_homes(
+            "claude",
+            Some("agent-homes:.claude/projects/-synthetic-project/session-00.jsonl/cache.json"),
+            None,
+            None,
+        )
         .expect("the scan still completes");
-    assert!(warnings(&report).iter().any(|w| w.contains("trace cache was not updated")));
+    assert!(warnings(&report)
+        .iter()
+        .any(|w| w.contains("trace cache was not updated")));
     assert_eq!(report["report"]["status"], "Complete");
 }
 
@@ -379,10 +480,17 @@ fn scan_the_retention_cap_keeps_the_most_recent_sessions() {
     let mut host = server_host();
     write_claude_corpus(&mut host, 6);
     let one = claude_session(&Process::claude(), 0, "c").len();
-    let report = host.scan_agent_homes("claude", Some(CACHE), Some(one * 3), None).expect("scan");
+    let report = host
+        .scan_agent_homes("claude", Some(CACHE), Some(one * 3), None)
+        .expect("scan");
     let kept = traces(&report).len();
     assert!(kept < 6 && kept >= 1, "{kept}");
-    assert_eq!(summary(&report)["sessions_dropped_for_cap"].as_u64().unwrap() as usize, 6 - kept);
+    assert_eq!(
+        summary(&report)["sessions_dropped_for_cap"]
+            .as_u64()
+            .unwrap() as usize,
+        6 - kept
+    );
 }
 
 /// REQ: PORT:ilium-client/src/compaction_scan/tests.rs::sessions_dropped_for_the_cap_stay_in_the_cache
@@ -391,8 +499,14 @@ fn scan_sessions_dropped_for_the_cap_stay_in_the_cache() {
     let mut host = server_host();
     write_claude_corpus(&mut host, 6);
     let one = claude_session(&Process::claude(), 0, "c").len();
-    let _ = host.scan_agent_homes("claude", Some(CACHE), Some(one * 3), None).expect("capped scan");
+    let _ = host
+        .scan_agent_homes("claude", Some(CACHE), Some(one * 3), None)
+        .expect("capped scan");
     let uncapped = scan(&mut host, "claude");
-    assert_eq!(summary(&uncapped)["files_parsed"], 0, "every file was served from the cache");
+    assert_eq!(
+        summary(&uncapped)["files_parsed"],
+        0,
+        "every file was served from the cache"
+    );
     assert_eq!(summary(&uncapped)["files_from_cache"], 6);
 }

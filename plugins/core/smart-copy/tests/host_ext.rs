@@ -11,7 +11,9 @@ pub struct Files<'a>(pub &'a mut FakeHost);
 
 impl Files<'_> {
     /// Marks `path` as an existing file.
-    pub fn add_existing(&mut self, _path: &str) { unimplemented!("smart-copy.files-add-existing") }
+    pub fn add_existing(&mut self, _path: &str) {
+        unimplemented!("smart-copy.files-add-existing")
+    }
 }
 
 /// Smart-copy-lane hooks. Implemented for `FakeHost`.

@@ -18,23 +18,42 @@ impl Fetcher for Offline {
 }
 
 fn page(name: &str) -> String {
-    std::fs::read_to_string(pages_dir().join(format!("{name}.md"))).unwrap_or_else(|e| panic!("{name}: {e}"))
+    std::fs::read_to_string(pages_dir().join(format!("{name}.md")))
+        .unwrap_or_else(|e| panic!("{name}: {e}"))
 }
 
 /// Cells of every table row after the header of the first table whose header starts with `first`.
 fn table_rows(text: &str, first: &str) -> (Vec<String>, Vec<Vec<String>>) {
-    let mut lines = text.lines().skip_while(|l| !l.starts_with(&format!("| {first}")));
-    let header: Vec<String> = lines.next().expect("header").trim_matches('|').split('|').map(|c| c.trim().to_owned()).collect();
+    let mut lines = text
+        .lines()
+        .skip_while(|l| !l.starts_with(&format!("| {first}")));
+    let header: Vec<String> = lines
+        .next()
+        .expect("header")
+        .trim_matches('|')
+        .split('|')
+        .map(|c| c.trim().to_owned())
+        .collect();
     let rows = lines
         .skip(1)
         .take_while(|l| l.starts_with('|'))
-        .map(|l| l.trim().trim_start_matches('|').trim_end_matches('|').split('|').map(|c| c.trim().to_owned()).collect())
+        .map(|l| {
+            l.trim()
+                .trim_start_matches('|')
+                .trim_end_matches('|')
+                .split('|')
+                .map(|c| c.trim().to_owned())
+                .collect()
+        })
         .collect();
     (header, rows)
 }
 
 fn column(header: &[String], name: &str) -> usize {
-    header.iter().position(|h| h == name).unwrap_or_else(|| panic!("column {name} in {header:?}"))
+    header
+        .iter()
+        .position(|h| h == name)
+        .unwrap_or_else(|| panic!("column {name} in {header:?}"))
 }
 
 fn core_plugin_pages() -> Vec<String> {
@@ -63,29 +82,53 @@ fn cor_002_traceability_has_116_rows_with_unique_ids_and_a_non_empty_owner() {
     let mut seen = BTreeMap::new();
     for row in &rows {
         *seen.entry(row[id].clone()).or_insert(0) += 1;
-        assert!(!row[owner].is_empty() && row[owner] != "none", "{} has no owner", row[id]);
+        assert!(
+            !row[owner].is_empty() && row[owner] != "none",
+            "{} has no owner",
+            row[id]
+        );
     }
-    assert!(seen.values().all(|count| *count == 1), "duplicate ids: {seen:?}");
+    assert!(
+        seen.values().all(|count| *count == 1),
+        "duplicate ids: {seen:?}"
+    );
 }
 
 /// REQ: COR-002
 #[test]
 fn cor_002_the_duplicates_section_lists_no_open_claim() {
     let text = page("reference-feature-traceability");
-    let section = text.split("### Resolved duplicates").nth(1).expect("section");
+    let section = text
+        .split("### Resolved duplicates")
+        .nth(1)
+        .expect("section");
     let section = section.split("\n## ").next().unwrap();
-    assert!(!section.to_lowercase().contains("open claim: yes") && !section.contains("TODO") && !section.contains("unresolved"));
+    assert!(
+        !section.to_lowercase().contains("open claim: yes")
+            && !section.contains("TODO")
+            && !section.contains("unresolved")
+    );
 }
 
 /// REQ: COR-003
 #[test]
 fn cor_003_native_kernel_rows_name_kernel_first_in_the_owner_cell() {
     let (header, rows) = table_rows(&page("reference-feature-traceability"), "Id");
-    let (id, kind, owner) = (column(&header, "Id"), column(&header, "Kind"), column(&header, "Owner"));
-    let kernel_rows: Vec<&Vec<String>> = rows.iter().filter(|r| r[kind] == "native-kernel").collect();
+    let (id, kind, owner) = (
+        column(&header, "Id"),
+        column(&header, "Kind"),
+        column(&header, "Owner"),
+    );
+    let kernel_rows: Vec<&Vec<String>> =
+        rows.iter().filter(|r| r[kind] == "native-kernel").collect();
     assert!(!kernel_rows.is_empty());
     for row in kernel_rows {
-        assert!(row[owner].starts_with("kernel"), "{}: {}", row[id], row[owner]);
+        assert!(
+            row[owner].starts_with("kernel"),
+            "{}: {}",
+            row[id],
+            row[owner]
+        );
     }
 }
 
@@ -96,8 +139,15 @@ fn cor_003_every_config_table_named_appears_in_the_migration_key_table() {
     let config = column(&header, "Config keys");
     let migration = page("reference-config-and-data-migration");
     for row in rows {
-        for token in row[config].split(|c: char| c == ',' || c == ' ').filter(|t| t.starts_with('[') && t.ends_with(']')) {
-            assert!(migration.contains(token), "{}: table {token} missing from the migration page", row[0]);
+        for token in row[config]
+            .split(|c: char| c == ',' || c == ' ')
+            .filter(|t| t.starts_with('[') && t.ends_with(']'))
+        {
+            assert!(
+                migration.contains(token),
+                "{}: table {token} missing from the migration page",
+                row[0]
+            );
         }
     }
 }
@@ -108,15 +158,41 @@ fn cor_043_every_core_plugin_complete_manifest_passes_check_without_manifest_err
     let pages = core_plugin_pages();
     assert_eq!(pages.len(), 30);
     for name in pages {
-        let manifest = complete_manifest(&page(&name)).unwrap_or_else(|| panic!("{name}: no parseable Complete manifest block"));
+        let manifest = complete_manifest(&page(&name))
+            .unwrap_or_else(|| panic!("{name}: no parseable Complete manifest block"));
         let root = tempfile::tempdir().unwrap();
         let project = root.path().join("project");
         std::fs::create_dir_all(&project).unwrap();
-        std::fs::write(project.join("ilium-plugin.json"), serde_json::to_string_pretty(&manifest).unwrap()).unwrap();
-        let env = CliEnv::new(root.path().join("d"), root.path().join("s"), root.path().join("c"), project.clone(), std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_893_499_200), true, Arc::new(Offline));
-        let args: Vec<String> = ["check", project.to_str().unwrap(), "--json"].iter().map(|s| (*s).to_owned()).collect();
+        std::fs::write(
+            project.join("ilium-plugin.json"),
+            serde_json::to_string_pretty(&manifest).unwrap(),
+        )
+        .unwrap();
+        let env = CliEnv::new(
+            root.path().join("d"),
+            root.path().join("s"),
+            root.path().join("c"),
+            project.clone(),
+            std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_893_499_200),
+            true,
+            Arc::new(Offline),
+        );
+        let args: Vec<String> = ["check", project.to_str().unwrap(), "--json"]
+            .iter()
+            .map(|s| (*s).to_owned())
+            .collect();
         let output = cli::run(&args, &env);
-        let bad: Vec<&Value> = output.stdout_jsonl.iter().filter(|r| r["type"] == "check" && r["severity"] == "error" && r["rule"].as_str().map_or(false, |rule| rule.starts_with("manifest."))).collect();
+        let bad: Vec<&Value> = output
+            .stdout_jsonl
+            .iter()
+            .filter(|r| {
+                r["type"] == "check"
+                    && r["severity"] == "error"
+                    && r["rule"]
+                        .as_str()
+                        .map_or(false, |rule| rule.starts_with("manifest."))
+            })
+            .collect();
         assert!(bad.is_empty(), "{name}: {bad:?}");
     }
 }
@@ -130,9 +206,26 @@ fn cor_043_a_page_with_a_broken_manifest_would_be_detected() {
     let project = root.path().join("project");
     std::fs::create_dir_all(&project).unwrap();
     std::fs::write(project.join("ilium-plugin.json"), manifest.to_string()).unwrap();
-    let env = CliEnv::new(root.path().join("d"), root.path().join("s"), root.path().join("c"), project.clone(), std::time::UNIX_EPOCH, true, Arc::new(Offline));
-    let args: Vec<String> = ["check", project.to_str().unwrap(), "--json"].iter().map(|s| (*s).to_owned()).collect();
-    assert!(cli::run(&args, &env).stdout_jsonl.iter().any(|r| r["severity"] == "error" && r["rule"].as_str().map_or(false, |rule| rule.starts_with("manifest."))));
+    let env = CliEnv::new(
+        root.path().join("d"),
+        root.path().join("s"),
+        root.path().join("c"),
+        project.clone(),
+        std::time::UNIX_EPOCH,
+        true,
+        Arc::new(Offline),
+    );
+    let args: Vec<String> = ["check", project.to_str().unwrap(), "--json"]
+        .iter()
+        .map(|s| (*s).to_owned())
+        .collect();
+    assert!(cli::run(&args, &env)
+        .stdout_jsonl
+        .iter()
+        .any(|r| r["severity"] == "error"
+            && r["rule"]
+                .as_str()
+                .map_or(false, |rule| rule.starts_with("manifest."))));
 }
 
 /// REQ: COR-050
@@ -156,10 +249,17 @@ fn cor_050_manifest_grants_appear_on_the_page_that_declares_them() {
         let text = page(&name);
         let manifest = complete_manifest(&text).unwrap_or_else(|| panic!("{name}: manifest"));
         for side in ["server", "client", "scene"] {
-            for grant in manifest["capabilities"][side].as_array().cloned().unwrap_or_default() {
+            for grant in manifest["capabilities"][side]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+            {
                 let grant = grant.as_str().unwrap();
                 let bare = grant.split(':').next().unwrap();
-                assert!(text.contains(bare), "{name}: grant {grant} is not described on the page");
+                assert!(
+                    text.contains(bare),
+                    "{name}: grant {grant} is not described on the page"
+                );
             }
         }
     }
@@ -169,7 +269,8 @@ fn cor_050_manifest_grants_appear_on_the_page_that_declares_them() {
 #[test]
 fn cor_050_manifest_id_matches_the_page_name() {
     for name in core_plugin_pages() {
-        let manifest = complete_manifest(&page(&name)).unwrap_or_else(|| panic!("{name}: manifest"));
+        let manifest =
+            complete_manifest(&page(&name)).unwrap_or_else(|| panic!("{name}: manifest"));
         let expected = format!("ilium.core.{}", name.trim_start_matches("core-plugin-"));
         assert_eq!(manifest["id"], expected.as_str(), "{name}");
     }
@@ -187,8 +288,16 @@ fn cor_060_every_wave_row_names_a_gate_test() {
     assert!(rows.len() >= 6);
     for row in rows {
         let cell = &row[gate];
-        assert!(cell.starts_with('`') && cell[1..].contains('`'), "wave {}: {cell:?}", row[0]);
-        assert!(cell.split('`').nth(1).unwrap().starts_with("wave-"), "wave {}: {cell:?}", row[0]);
+        assert!(
+            cell.starts_with('`') && cell[1..].contains('`'),
+            "wave {}: {cell:?}",
+            row[0]
+        );
+        assert!(
+            cell.split('`').nth(1).unwrap().starts_with("wave-"),
+            "wave {}: {cell:?}",
+            row[0]
+        );
     }
 }
 
@@ -197,7 +306,10 @@ fn cor_060_every_wave_row_names_a_gate_test() {
 fn cor_060_gate_test_names_are_unique_across_waves() {
     let (header, rows) = wave_rows();
     let gate = column(&header, "Gate test");
-    let mut names: Vec<String> = rows.iter().map(|r| r[gate].split('`').nth(1).unwrap().to_owned()).collect();
+    let mut names: Vec<String> = rows
+        .iter()
+        .map(|r| r[gate].split('`').nth(1).unwrap().to_owned())
+        .collect();
     let total = names.len();
     names.sort();
     names.dedup();
@@ -210,7 +322,11 @@ fn cor_061_every_wave_row_states_what_stays_native() {
     let (header, rows) = wave_rows();
     let native = column(&header, "What stays native");
     for row in rows {
-        assert!(!row[native].is_empty() && row[native] != "none", "wave {}", row[0]);
+        assert!(
+            !row[native].is_empty() && row[native] != "none",
+            "wave {}",
+            row[0]
+        );
     }
 }
 

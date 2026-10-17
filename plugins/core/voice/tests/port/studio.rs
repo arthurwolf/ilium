@@ -5,12 +5,16 @@
 
 use ilium_plugin_sdk::testing::FakeHost;
 use ilium_plugin_sdk::types::{ActionKind, ActionValue, ViewTarget};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::common::client_host;
 
 const PREVIEW_JOB: &str = "sound-preview";
-const NUMERIC_CONTROLS: [(&str, &str); 3] = [("pitch_hz", "Pitch"), ("sweep", "Sweep"), ("pulse_rate", "Pulse rate")];
+const NUMERIC_CONTROLS: [(&str, &str); 3] = [
+    ("pitch_hz", "Pitch"),
+    ("sweep", "Sweep"),
+    ("pulse_rate", "Pulse rate"),
+];
 
 fn step() -> ViewTarget {
     ViewTarget::OnboardingStep("sound".to_string())
@@ -21,11 +25,17 @@ fn studio_text(host: &mut FakeHost, columns: u16, rows: u16) -> String {
 }
 
 fn design(host: &mut FakeHost, key: &str) -> Option<Value> {
-    host.kernel_settings().get("sound", &format!("design.{key}"))
+    host.kernel_settings()
+        .get("sound", &format!("design.{key}"))
 }
 
 fn enter(host: &mut FakeHost, key: &str, text: &str) {
-    host.send_action(step(), key, ActionKind::Submitted, ActionValue::Text(text.to_string()));
+    host.send_action(
+        step(),
+        key,
+        ActionKind::Submitted,
+        ActionValue::Text(text.to_string()),
+    );
     host.settle();
 }
 
@@ -35,7 +45,11 @@ fn adjust(host: &mut FakeHost, key: &str, value: f64) {
 }
 
 fn preview_jobs(host: &mut FakeHost) -> Vec<ilium_plugin_sdk::testing::fakes::jobs::JobRecord> {
-    host.jobs().list().into_iter().filter(|job| job.kind == PREVIEW_JOB).collect()
+    host.jobs()
+        .list()
+        .into_iter()
+        .filter(|job| job.kind == PREVIEW_JOB)
+        .collect()
 }
 
 fn request_preview(host: &mut FakeHost) -> Value {
@@ -70,17 +84,29 @@ fn port_001_exact_studio_entries_keep_non_step_values_and_reject_invalid_input()
     assert_eq!(design(&mut host, "pulse_rate"), Some(json!(160)));
     for text in ["1.75", "NaN", "inf", "16.1", "-0.1"] {
         enter(&mut host, "pulse_rate", text);
-        assert_eq!(design(&mut host, "pulse_rate"), Some(json!(160)), "{text} must leave 16.0 unchanged");
+        assert_eq!(
+            design(&mut host, "pulse_rate"),
+            Some(json!(160)),
+            "{text} must leave 16.0 unchanged"
+        );
     }
     let waveform = design(&mut host, "waveform");
     enter(&mut host, "waveform", "1");
-    assert_eq!(design(&mut host, "waveform"), waveform, "a waveform is chosen, never typed");
+    assert_eq!(
+        design(&mut host, "waveform"),
+        waveform,
+        "a waveform is chosen, never typed"
+    );
     enter(&mut host, "pulse_rate", "0.0");
     assert_eq!(design(&mut host, "pulse_rate"), Some(json!(0)));
     for (key, _label) in NUMERIC_CONTROLS {
         let before = design(&mut host, key);
         enter(&mut host, key, "99999999999999999999999999999999999999999");
-        assert_eq!(design(&mut host, key), before, "{key} rejects a huge number");
+        assert_eq!(
+            design(&mut host, key),
+            before,
+            "{key} rejects a huge number"
+        );
     }
 }
 
@@ -97,11 +123,17 @@ fn port_002_a_preview_result_is_installed_only_for_the_current_revision_and_stud
 
     host.jobs().finish(old_request, Ok(vec![0u8; 64]));
     host.settle();
-    assert!(!studio_text(&mut host, 118, 33).contains("Preview ready"), "a stale revision is rejected");
+    assert!(
+        !studio_text(&mut host, 118, 33).contains("Preview ready"),
+        "a stale revision is rejected"
+    );
 
     host.jobs().finish(current_request, Ok(vec![0u8; 64]));
     host.settle();
-    assert!(studio_text(&mut host, 118, 33).contains("Preview ready"), "the current revision is accepted");
+    assert!(
+        studio_text(&mut host, 118, 33).contains("Preview ready"),
+        "the current revision is accepted"
+    );
 
     // A replaced studio (the step closed and opened again) refuses the earlier studio's preview.
     let before_close = request_preview(&mut host);
@@ -123,7 +155,11 @@ fn port_003_no_preview_is_synthesized_while_the_model_changes() {
     let initial = request_preview(&mut host);
     adjust(&mut host, "pitch_hz", 801.0);
     adjust(&mut host, "pitch_hz", 802.0);
-    assert_eq!(preview_jobs(&mut host).len(), 1, "changes alone start no synthesis");
+    assert_eq!(
+        preview_jobs(&mut host).len(),
+        1,
+        "changes alone start no synthesis"
+    );
     let current = request_preview(&mut host);
     assert_ne!(current["revision"], initial["revision"]);
     assert_eq!(preview_jobs(&mut host).len(), 2);
@@ -156,11 +192,19 @@ fn port_005_a_refused_preview_start_reports_no_request_and_the_retry_starts_exac
     host.inject_failure("jobs.start", busy_start());
     host.send_action(step(), "preview", ActionKind::Activated, ActionValue::None);
     host.settle();
-    assert_eq!(preview_jobs(&mut host).len(), 0, "the refused start admitted nothing");
+    assert_eq!(
+        preview_jobs(&mut host).len(),
+        0,
+        "the refused start admitted nothing"
+    );
     assert!(!studio_text(&mut host, 118, 33).contains("Preview ready"));
     host.send_action(step(), "preview", ActionKind::Activated, ActionValue::None);
     host.settle();
-    assert_eq!(preview_jobs(&mut host).len(), 1, "only the retry was admitted");
+    assert_eq!(
+        preview_jobs(&mut host).len(),
+        1,
+        "only the retry was admitted"
+    );
 }
 
 /// REQ: PORT:ilium-client/src/render_cache.rs::sound_preview_status_changes_only_after_server_completion
@@ -168,11 +212,17 @@ fn port_005_a_refused_preview_start_reports_no_request_and_the_retry_starts_exac
 fn port_006_the_preview_status_changes_only_when_the_job_completes() {
     let mut host = client_host();
     request_preview(&mut host);
-    assert!(!studio_text(&mut host, 118, 33).contains("Preview ready"), "requested is not ready");
+    assert!(
+        !studio_text(&mut host, 118, 33).contains("Preview ready"),
+        "requested is not ready"
+    );
     let failed = preview_jobs(&mut host).pop().expect("job").request;
     host.jobs().finish(failed, Err(busy_start()));
     host.settle();
-    assert!(!studio_text(&mut host, 118, 33).contains("Preview ready"), "a failed job is not ready");
+    assert!(
+        !studio_text(&mut host, 118, 33).contains("Preview ready"),
+        "a failed job is not ready"
+    );
     request_preview(&mut host);
     let played = preview_jobs(&mut host).pop().expect("second job").request;
     host.jobs().finish(played, Ok(vec![0u8; 64]));
@@ -192,12 +242,20 @@ fn port_007_a_newer_design_cancels_the_running_preview_and_only_the_latest_revis
     adjust(&mut host, "pitch_hz", 802.0);
     host.send_action(step(), "preview", ActionKind::Activated, ActionValue::None);
     host.settle();
-    assert!(host.jobs().cancelled().contains(&first_request), "the running preview is cancelled");
+    assert!(
+        host.jobs().cancelled().contains(&first_request),
+        "the running preview is cancelled"
+    );
     let revisions: Vec<Value> = preview_jobs(&mut host)
         .iter()
-        .map(|job| serde_json::from_slice::<Value>(&job.input).expect("JSON input")["revision"].clone())
+        .map(|job| {
+            serde_json::from_slice::<Value>(&job.input).expect("JSON input")["revision"].clone()
+        })
         .collect();
-    assert!(!revisions.contains(&json!(1)), "the intermediate revision coalesces away: {revisions:?}");
+    assert!(
+        !revisions.contains(&json!(1)),
+        "the intermediate revision coalesces away: {revisions:?}"
+    );
     assert_eq!(revisions.last(), Some(&json!(2)));
     let latest = preview_jobs(&mut host).pop().expect("latest job").request;
     host.jobs().finish(latest, Ok(vec![0u8; 64]));
@@ -210,14 +268,24 @@ fn port_007_a_newer_design_cancels_the_running_preview_and_only_the_latest_revis
 fn port_008_the_waveform_is_prepared_by_a_job_and_dropped_when_the_design_changes() {
     let mut host = client_host();
     request_preview(&mut host);
-    assert_eq!(preview_jobs(&mut host).len(), 1, "the waveform is prepared by a job, not inline");
-    assert!(!studio_text(&mut host, 118, 33).contains("Preview ready"), "nothing is ready before the job finishes");
+    assert_eq!(
+        preview_jobs(&mut host).len(),
+        1,
+        "the waveform is prepared by a job, not inline"
+    );
+    assert!(
+        !studio_text(&mut host, 118, 33).contains("Preview ready"),
+        "nothing is ready before the job finishes"
+    );
     let request = preview_jobs(&mut host).pop().expect("job").request;
     host.jobs().finish(request, Ok(vec![0u8; 64]));
     host.settle();
     assert!(studio_text(&mut host, 118, 33).contains("Preview ready"));
     adjust(&mut host, "pitch_hz", 801.0);
-    assert!(!studio_text(&mut host, 118, 33).contains("Preview ready"), "a changed design releases the retained waveform");
+    assert!(
+        !studio_text(&mut host, 118, 33).contains("Preview ready"),
+        "a changed design releases the retained waveform"
+    );
 }
 
 const SIZES: [(u16, u16); 4] = [(38, 9), (80, 16), (118, 33), (198, 53)];
@@ -225,7 +293,12 @@ const LABELS: [&str; 5] = ["Waveform", "Pitch", "Sweep", "Pulse rate", "Save"];
 
 /// Index of the first row of `lines` holding `needle` at or after `from`.
 fn row_of(lines: &[String], needle: &str, from: usize) -> Option<usize> {
-    lines.iter().enumerate().skip(from).find(|(_, line)| line.contains(needle)).map(|(index, _)| index)
+    lines
+        .iter()
+        .enumerate()
+        .skip(from)
+        .find(|(_, line)| line.contains(needle))
+        .map(|(index, _)| index)
 }
 
 /// REQ: PORT:ilium-client/src/onboarding/studio_ui.rs::compact_sound_studio_previews_keep_a_row_between_their_frames
@@ -234,9 +307,13 @@ fn port_005_compact_previews_keep_a_blank_row_between_their_frames() {
     let mut host = client_host();
     let lines = host.render(step(), 40, 16).lines();
     let waveform_top = row_of(&lines, "Waveform", 0).expect("the waveform frame");
-    let waveform_bottom = row_of(&lines, "\u{2570}", waveform_top).expect("the waveform frame closes");
+    let waveform_bottom =
+        row_of(&lines, "\u{2570}", waveform_top).expect("the waveform frame closes");
     let envelope_top = row_of(&lines, "Envelope", waveform_bottom).expect("the envelope frame");
-    assert!(envelope_top > waveform_bottom + 1, "rows {waveform_bottom} and {envelope_top}");
+    assert!(
+        envelope_top > waveform_bottom + 1,
+        "rows {waveform_bottom} and {envelope_top}"
+    );
     assert_eq!(lines[waveform_bottom + 1].trim(), "", "{lines:?}");
 }
 
@@ -261,7 +338,10 @@ fn port_006_every_control_is_reachable_at_minimum_and_wide_sizes() {
 
 /// The text of the row marked by the focus arrow, if any.
 fn focused_row(host: &mut FakeHost, columns: u16, rows: u16) -> Option<String> {
-    host.render(step(), columns, rows).lines().into_iter().find(|line| line.trim_start().starts_with('\u{25b8}'))
+    host.render(step(), columns, rows)
+        .lines()
+        .into_iter()
+        .find(|line| line.trim_start().starts_with('\u{25b8}'))
 }
 
 /// REQ: PORT:ilium-client/src/onboarding/studio_ui.rs::keyboard_focus_wraps_and_edits_use_the_real_control_step
@@ -269,23 +349,49 @@ fn focused_row(host: &mut FakeHost, columns: u16, rows: u16) -> Option<String> {
 fn port_007_keyboard_focus_wraps_and_edits_use_the_real_control_step() {
     let mut host = client_host();
     let (columns, rows) = (38, 9);
-    assert!(focused_row(&mut host, columns, rows).expect("a focus").contains("Waveform"));
+    assert!(focused_row(&mut host, columns, rows)
+        .expect("a focus")
+        .contains("Waveform"));
     host.key(step(), "Up");
-    assert!(focused_row(&mut host, columns, rows).expect("a focus").contains("Save"));
+    assert!(focused_row(&mut host, columns, rows)
+        .expect("a focus")
+        .contains("Save"));
     host.key(step(), "Down");
-    assert!(focused_row(&mut host, columns, rows).expect("a focus").contains("Waveform"));
+    assert!(focused_row(&mut host, columns, rows)
+        .expect("a focus")
+        .contains("Waveform"));
     // Move the focus to the pitch slider and take one keyboard step: 20 Hz.
     while !focused_row(&mut host, columns, rows).is_some_and(|row| row.contains("Pitch")) {
         host.key(step(), "Down");
     }
-    let before = design(&mut host, "pitch_hz").and_then(|value| value.as_i64()).expect("pitch");
+    let before = design(&mut host, "pitch_hz")
+        .and_then(|value| value.as_i64())
+        .expect("pitch");
     host.key(step(), "Right");
     host.settle();
     assert_eq!(design(&mut host, "pitch_hz"), Some(json!(before + 20)));
-    host.send_action(step(), "scroll", ActionKind::Scrolled, ActionValue::Number(f64::from(i32::MAX)));
-    assert!(host.render(step(), columns, rows).text().contains("Save"), "scrolling clamps at the end");
-    host.send_action(step(), "scroll", ActionKind::Scrolled, ActionValue::Number(f64::from(i32::MIN)));
-    assert!(host.render(step(), columns, rows).text().contains("Waveform"), "scrolling clamps at the start");
+    host.send_action(
+        step(),
+        "scroll",
+        ActionKind::Scrolled,
+        ActionValue::Number(f64::from(i32::MAX)),
+    );
+    assert!(
+        host.render(step(), columns, rows).text().contains("Save"),
+        "scrolling clamps at the end"
+    );
+    host.send_action(
+        step(),
+        "scroll",
+        ActionKind::Scrolled,
+        ActionValue::Number(f64::from(i32::MIN)),
+    );
+    assert!(
+        host.render(step(), columns, rows)
+            .text()
+            .contains("Waveform"),
+        "scrolling clamps at the start"
+    );
 }
 
 /// REQ: PORT:ilium-client/src/onboarding/studio_ui.rs::numeric_chrome_and_drag_track_use_separate_exact_hit_regions
@@ -295,9 +401,14 @@ fn port_008_numeric_chrome_and_drag_track_are_separate_hit_regions() {
         for (key, label) in NUMERIC_CONTROLS {
             let mut host = client_host();
             let screen = host.render(step(), columns, 28);
-            let (row, _) = screen.find(label).unwrap_or_else(|| panic!("{label} at {columns}"));
+            let (row, _) = screen
+                .find(label)
+                .unwrap_or_else(|| panic!("{label} at {columns}"));
             let text = screen.row(row);
-            let open = text.chars().position(|glyph| glyph == '*').unwrap_or_else(|| panic!("open glyph {label} at {columns}"));
+            let open = text
+                .chars()
+                .position(|glyph| glyph == '*')
+                .unwrap_or_else(|| panic!("open glyph {label} at {columns}"));
             // The open glyph opens the number editor and never moves the slider.
             let before = design(&mut host, key);
             assert!(host.click(step(), open as u16, row));
@@ -306,12 +417,24 @@ fn port_008_numeric_chrome_and_drag_track_are_separate_hit_regions() {
             let popups = host.popups();
             assert_eq!(popups.len(), 1, "{label} at {columns}: {popups:?}");
             assert!(popups[0].contains(label), "{popups:?}");
-            host.send_action(ViewTarget::Popup(label.to_string()), "cancel", ActionKind::Closed, ActionValue::None);
+            host.send_action(
+                ViewTarget::Popup(label.to_string()),
+                "cancel",
+                ActionKind::Closed,
+                ActionValue::None,
+            );
             // A click on the track sets a position and opens no editor.
-            let track = text.chars().position(|glyph| glyph == '\u{2501}').unwrap_or_else(|| panic!("track {label} at {columns}"));
+            let track = text
+                .chars()
+                .position(|glyph| glyph == '\u{2501}')
+                .unwrap_or_else(|| panic!("track {label} at {columns}"));
             assert!(host.click(step(), track as u16, row));
             host.settle();
-            assert_eq!(host.popups().len(), 1, "no second editor for {label} at {columns}");
+            assert_eq!(
+                host.popups().len(),
+                1,
+                "no second editor for {label} at {columns}"
+            );
         }
     }
 }
@@ -331,9 +454,13 @@ fn port_009_painted_controls_and_mouse_targets_share_rectangles() {
             found = host.render(step(), columns, rows).find(label);
         }
         let (row, column) = found.unwrap_or_else(|| panic!("{label} is painted"));
-        assert!(host.click(step(), column, row), "{label} is a mouse target where it is painted");
+        assert!(
+            host.click(step(), column, row),
+            "{label} is a mouse target where it is painted"
+        );
         host.settle();
-        let focused = focused_row(&mut host, columns, rows).unwrap_or_else(|| panic!("focus after clicking {label}"));
+        let focused = focused_row(&mut host, columns, rows)
+            .unwrap_or_else(|| panic!("focus after clicking {label}"));
         assert!(focused.contains(label), "{label}: {focused}");
     }
 }
@@ -360,14 +487,26 @@ fn port_011_slider_gestures_reach_the_endpoints_and_clamp_outside_the_track() {
     let mut host = client_host();
     for (key, label) in NUMERIC_CONTROLS {
         adjust(&mut host, key, -1.0e12);
-        let low = design(&mut host, key).and_then(|value| value.as_i64()).unwrap_or_else(|| panic!("{label} low"));
+        let low = design(&mut host, key)
+            .and_then(|value| value.as_i64())
+            .unwrap_or_else(|| panic!("{label} low"));
         adjust(&mut host, key, 1.0e12);
-        let high = design(&mut host, key).and_then(|value| value.as_i64()).unwrap_or_else(|| panic!("{label} high"));
+        let high = design(&mut host, key)
+            .and_then(|value| value.as_i64())
+            .unwrap_or_else(|| panic!("{label} high"));
         assert!(low < high, "{label}: {low} {high}");
         adjust(&mut host, key, -2.0e12);
-        assert_eq!(design(&mut host, key), Some(json!(low)), "{label} clamps below the track");
+        assert_eq!(
+            design(&mut host, key),
+            Some(json!(low)),
+            "{label} clamps below the track"
+        );
         adjust(&mut host, key, 2.0e12);
-        assert_eq!(design(&mut host, key), Some(json!(high)), "{label} clamps beyond the track");
+        assert_eq!(
+            design(&mut host, key),
+            Some(json!(high)),
+            "{label} clamps beyond the track"
+        );
         if key == "pulse_rate" {
             assert_eq!((low, high), (0, 160));
         }
@@ -381,10 +520,20 @@ fn port_012_previews_use_titled_rounded_frames_at_regular_and_compact_sizes() {
     for (columns, rows) in [(118u16, 33u16), (40, 16)] {
         let lines = host.render(step(), columns, rows).lines();
         for title in ["Waveform", "Envelope"] {
-            let top = row_of(&lines, title, 0).unwrap_or_else(|| panic!("{title} at {columns}x{rows}"));
-            assert!(lines[top].contains('\u{256d}') && lines[top].contains('\u{256e}'), "{title} top at {columns}x{rows}: {}", lines[top]);
-            let bottom = row_of(&lines, "\u{2570}", top).unwrap_or_else(|| panic!("{title} bottom at {columns}x{rows}"));
-            assert!(lines[bottom].contains('\u{256f}'), "{title} bottom at {columns}x{rows}: {}", lines[bottom]);
+            let top =
+                row_of(&lines, title, 0).unwrap_or_else(|| panic!("{title} at {columns}x{rows}"));
+            assert!(
+                lines[top].contains('\u{256d}') && lines[top].contains('\u{256e}'),
+                "{title} top at {columns}x{rows}: {}",
+                lines[top]
+            );
+            let bottom = row_of(&lines, "\u{2570}", top)
+                .unwrap_or_else(|| panic!("{title} bottom at {columns}x{rows}"));
+            assert!(
+                lines[bottom].contains('\u{256f}'),
+                "{title} bottom at {columns}x{rows}: {}",
+                lines[bottom]
+            );
         }
     }
 }

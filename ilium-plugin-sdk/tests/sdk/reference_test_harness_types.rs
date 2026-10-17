@@ -12,16 +12,29 @@ fn dev_563_mode_has_native_and_component() {
 #[test]
 fn dev_563_screen_and_cell_are_constructible_with_every_field() {
     let cell = Cell::default();
-    let screen = Screen { columns: 1, rows: 1, cells: vec![cell.clone()] };
+    let screen = Screen {
+        columns: 1,
+        rows: 1,
+        cells: vec![cell.clone()],
+    };
     assert_eq!(screen.cells[0], cell);
 }
 
 /// REQ: DEV-563
 #[test]
 fn dev_563_plugin_handle_diagnostic_and_restart_have_their_fields() {
-    let handle = PluginHandle { side: "server".into(), instance: 1 };
-    let diagnostic = Diagnostic { code: "x.y".into(), message: "m".into() };
-    let restart = Restart { at_ms: 5, delay_ms: 10 };
+    let handle = PluginHandle {
+        side: "server".into(),
+        instance: 1,
+    };
+    let diagnostic = Diagnostic {
+        code: "x.y".into(),
+        message: "m".into(),
+    };
+    let restart = Restart {
+        at_ms: 5,
+        delay_ms: 10,
+    };
     assert_eq!(handle.instance, 1);
     assert_eq!(diagnostic.code, "x.y");
     assert_eq!(restart.at_ms + u64::from(restart.delay_ms), 15);

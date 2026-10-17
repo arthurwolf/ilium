@@ -16,8 +16,12 @@ fn row_value(screen: &Screen, label: &str) -> Option<String> {
     for index in 0..screen.rows {
         let row = screen.row(index);
         let text = row.trim_start();
-        let Some(rest) = text.strip_prefix(label) else { continue };
-        let Some(after_gap) = rest.strip_prefix(' ') else { continue };
+        let Some(rest) = text.strip_prefix(label) else {
+            continue;
+        };
+        let Some(after_gap) = rest.strip_prefix(' ') else {
+            continue;
+        };
         if !after_gap.starts_with('\u{2026}') {
             continue;
         }
@@ -66,38 +70,57 @@ fn f_019_defaults_autosave_delay_1000() {
 /// REQ: F-019, F-021
 #[test]
 fn f_021_defaults_markdown_opens_in_source() {
-    assert_eq!(value_with(&[], "Markdown default").as_deref(), Some("Source"));
+    assert_eq!(
+        value_with(&[], "Markdown default").as_deref(),
+        Some("Source")
+    );
 }
 
 /// REQ: F-019
 #[test]
 fn f_019_line_display_wrap_is_shown() {
-    assert_eq!(value_with(&[("line_display", json!("wrap"))], "Long lines").as_deref(), Some("Wrap"));
+    assert_eq!(
+        value_with(&[("line_display", json!("wrap"))], "Long lines").as_deref(),
+        Some("Wrap")
+    );
 }
 
 /// REQ: F-019
 #[test]
 fn f_019_line_numbers_off_is_shown() {
-    assert_eq!(value_with(&[("show_line_numbers", json!(false))], "Line numbers").as_deref(), Some("Off"));
+    assert_eq!(
+        value_with(&[("show_line_numbers", json!(false))], "Line numbers").as_deref(),
+        Some("Off")
+    );
 }
 
 /// REQ: F-019
 #[test]
 fn f_019_minimap_off_is_shown() {
-    assert_eq!(value_with(&[("show_minimap", json!(false))], "Minimap").as_deref(), Some("Off"));
+    assert_eq!(
+        value_with(&[("show_minimap", json!(false))], "Minimap").as_deref(),
+        Some("Off")
+    );
 }
 
 /// REQ: F-019
 #[test]
 fn f_019_autosave_off_is_shown() {
-    assert_eq!(value_with(&[("autosave_enabled", json!(false))], "Autosave").as_deref(), Some("Off"));
+    assert_eq!(
+        value_with(&[("autosave_enabled", json!(false))], "Autosave").as_deref(),
+        Some("Off")
+    );
 }
 
 /// REQ: F-021
 #[test]
 fn f_021_markdown_rendered_by_default_is_shown() {
     assert_eq!(
-        value_with(&[("markdown_rendered_by_default", json!(true))], "Markdown default").as_deref(),
+        value_with(
+            &[("markdown_rendered_by_default", json!(true))],
+            "Markdown default"
+        )
+        .as_deref(),
         Some("Rendered")
     );
 }
@@ -105,27 +128,45 @@ fn f_021_markdown_rendered_by_default_is_shown() {
 /// REQ: F-019
 #[test]
 fn f_019_autosave_delay_below_the_range_is_clamped_to_250() {
-    assert_eq!(value_with(&[("autosave_delay_ms", json!(249))], "Autosave delay").as_deref(), Some("250"));
-    assert_eq!(value_with(&[("autosave_delay_ms", json!(0))], "Autosave delay").as_deref(), Some("250"));
+    assert_eq!(
+        value_with(&[("autosave_delay_ms", json!(249))], "Autosave delay").as_deref(),
+        Some("250")
+    );
+    assert_eq!(
+        value_with(&[("autosave_delay_ms", json!(0))], "Autosave delay").as_deref(),
+        Some("250")
+    );
 }
 
 /// REQ: F-019
 #[test]
 fn f_019_autosave_delay_at_the_lower_bound_is_kept() {
-    assert_eq!(value_with(&[("autosave_delay_ms", json!(250))], "Autosave delay").as_deref(), Some("250"));
+    assert_eq!(
+        value_with(&[("autosave_delay_ms", json!(250))], "Autosave delay").as_deref(),
+        Some("250")
+    );
 }
 
 /// REQ: F-019
 #[test]
 fn f_019_autosave_delay_at_the_upper_bound_is_kept() {
-    assert_eq!(value_with(&[("autosave_delay_ms", json!(5000))], "Autosave delay").as_deref(), Some("5000"));
+    assert_eq!(
+        value_with(&[("autosave_delay_ms", json!(5000))], "Autosave delay").as_deref(),
+        Some("5000")
+    );
 }
 
 /// REQ: F-019
 #[test]
 fn f_019_autosave_delay_above_the_range_is_clamped_to_5000() {
-    assert_eq!(value_with(&[("autosave_delay_ms", json!(5001))], "Autosave delay").as_deref(), Some("5000"));
-    assert_eq!(value_with(&[("autosave_delay_ms", json!(60000))], "Autosave delay").as_deref(), Some("5000"));
+    assert_eq!(
+        value_with(&[("autosave_delay_ms", json!(5001))], "Autosave delay").as_deref(),
+        Some("5000")
+    );
+    assert_eq!(
+        value_with(&[("autosave_delay_ms", json!(60000))], "Autosave delay").as_deref(),
+        Some("5000")
+    );
 }
 
 /// REQ: F-019
@@ -133,8 +174,18 @@ fn f_019_autosave_delay_above_the_range_is_clamped_to_5000() {
 fn f_019_every_documented_row_is_present_with_a_leader() {
     let mut host = active_host(&[]);
     let screen = settings_screen(&mut host);
-    for label in ["Long lines", "Line numbers", "Minimap", "Autosave", "Autosave delay", "Markdown default"] {
-        assert!(row_value(&screen, label).is_some(), "row {label} with a dotted leader");
+    for label in [
+        "Long lines",
+        "Line numbers",
+        "Minimap",
+        "Autosave",
+        "Autosave delay",
+        "Markdown default",
+    ] {
+        assert!(
+            row_value(&screen, label).is_some(),
+            "row {label} with a dotted leader"
+        );
     }
 }
 
@@ -144,7 +195,10 @@ fn f_019_settings_page_keeps_the_stored_values_after_a_reactivation() {
     let mut host = active_host(&[("autosave_delay_ms", json!(2000))]);
     host.deliver(Vec::new());
     let screen = settings_screen(&mut host);
-    assert_eq!(row_value(&screen, "Autosave delay").as_deref(), Some("2000"));
+    assert_eq!(
+        row_value(&screen, "Autosave delay").as_deref(),
+        Some("2000")
+    );
 }
 
 proptest! {

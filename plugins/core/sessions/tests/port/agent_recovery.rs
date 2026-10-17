@@ -25,7 +25,10 @@ fn port_unavailable_projection_does_not_present_a_historical_goal_or_turn_as_liv
         let mut host = activated_server();
         let pane = add_agent(&mut host, "unavailable", name);
         register_signature(&mut host, signature(name, Some(template)));
-        assert!(replace_commands(&restore_panes(&mut host, &[pane])).is_empty(), "{name}");
+        assert!(
+            replace_commands(&restore_panes(&mut host, &[pane])).is_empty(),
+            "{name}"
+        );
     }
 }
 
@@ -41,6 +44,14 @@ fn port_exit_labels_distinguish_observed_status_from_unknown_cause() {
 
     let mut verified = activated_server();
     let pane = add_agent(&mut verified, "a", "codex");
-    verify_agent(&mut verified, pane, signature("codex", Some(codex_template())), SESSION_ID);
-    assert_eq!(replace_commands(&restore_panes(&mut verified, &[pane])).len(), 1);
+    verify_agent(
+        &mut verified,
+        pane,
+        signature("codex", Some(codex_template())),
+        SESSION_ID,
+    );
+    assert_eq!(
+        replace_commands(&restore_panes(&mut verified, &[pane])).len(),
+        1
+    );
 }

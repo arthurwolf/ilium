@@ -4,8 +4,8 @@
 use crate::support::{active_host, open_file, render_pane};
 use ilium_plugin_sdk::generated::types::intents::Submission;
 use ilium_plugin_sdk::generated::types::{
-    BufferId, EditorPointerEvent, Event, Intent, NodeId, PointerButton, PointerKind, PointerModifiers,
-    TextPosition, ViewPointer,
+    BufferId, EditorPointerEvent, Event, Intent, NodeId, PointerButton, PointerKind,
+    PointerModifiers, TextPosition, ViewPointer,
 };
 use ilium_plugin_sdk::testing::host::{FakeHost, Screen};
 use serde_json::json;
@@ -30,7 +30,12 @@ pub fn click_event(line: u32, column: u32) -> Event {
 }
 
 /// A host with the minimap off and `text` open as `file` (language from the caller).
-pub fn plain_host(file: &str, language: Option<&str>, text: &str, extra: &[(&str, serde_json::Value)]) -> FakeHost {
+pub fn plain_host(
+    file: &str,
+    language: Option<&str>,
+    text: &str,
+    extra: &[(&str, serde_json::Value)],
+) -> FakeHost {
     let mut settings: Vec<(&str, serde_json::Value)> = vec![("show_minimap", json!(false))];
     settings.extend(extra.iter().cloned());
     let mut host = active_host(&settings);
@@ -40,7 +45,12 @@ pub fn plain_host(file: &str, language: Option<&str>, text: &str, extra: &[(&str
 
 /// A host showing `text` in the rendered Markdown view.
 pub fn rendered_host(text: &str) -> FakeHost {
-    plain_host("notes.md", Some("markdown"), text, &[("markdown_rendered_by_default", json!(true))])
+    plain_host(
+        "notes.md",
+        Some("markdown"),
+        text,
+        &[("markdown_rendered_by_default", json!(true))],
+    )
 }
 
 /// Renders the rendered-Markdown view of `text` at 60x16.
@@ -60,7 +70,9 @@ pub fn row_of(screen: &Screen, needle: &str) -> i32 {
 /// The edit a checkbox click submits as (start line, start column, end line, end column, text).
 pub fn single_edit(submissions: &[Submission]) -> Option<(u32, u32, u32, u32, String)> {
     let first = submissions.first()?;
-    let Intent::EditorApplyEdits(spec) = &first.intent else { return None };
+    let Intent::EditorApplyEdits(spec) = &first.intent else {
+        return None;
+    };
     let edit = spec.edits.first()?;
     Some((
         edit.range.start.line,

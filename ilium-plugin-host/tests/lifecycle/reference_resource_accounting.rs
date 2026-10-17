@@ -105,9 +105,24 @@ fn lif_141_a_reservation_one_mib_over_is_refused() {
 #[test]
 fn lif_142_core_t1_is_admitted_before_a_third_party_startup_plugin() {
     let mut host = LifeHost::new().with_pool_mib(64);
-    host.install(PluginSpec::new("aaa.third").tier(Tier::T3).memory_mib(32).startup());
-    host.install(PluginSpec::new("zzz.core").tier(Tier::T1).memory_mib(32).startup());
-    host.install(PluginSpec::new("yyy.core").tier(Tier::T1).memory_mib(32).startup());
+    host.install(
+        PluginSpec::new("aaa.third")
+            .tier(Tier::T3)
+            .memory_mib(32)
+            .startup(),
+    );
+    host.install(
+        PluginSpec::new("zzz.core")
+            .tier(Tier::T1)
+            .memory_mib(32)
+            .startup(),
+    );
+    host.install(
+        PluginSpec::new("yyy.core")
+            .tier(Tier::T1)
+            .memory_mib(32)
+            .startup(),
+    );
     host.start(StartMode::Normal);
     assert_eq!(state(&host, "zzz.core"), InstanceState::Active);
     assert_eq!(state(&host, "yyy.core"), InstanceState::Active);
@@ -119,7 +134,12 @@ fn lif_142_core_t1_is_admitted_before_a_third_party_startup_plugin() {
 fn lif_142_third_party_fits_when_the_pool_has_room_for_all() {
     let mut host = LifeHost::new().with_pool_mib(96);
     host.install(PluginSpec::new("aaa.third").memory_mib(32).startup());
-    host.install(PluginSpec::new("zzz.core").tier(Tier::T1).memory_mib(32).startup());
+    host.install(
+        PluginSpec::new("zzz.core")
+            .tier(Tier::T1)
+            .memory_mib(32)
+            .startup(),
+    );
     host.start(StartMode::Normal);
     assert_eq!(state(&host, "aaa.third"), InstanceState::Active);
 }
@@ -129,7 +149,10 @@ fn lif_142_third_party_fits_when_the_pool_has_room_for_all() {
 fn lif_143_ceiling_clamps_manifest_user_values() {
     let mut host = LifeHost::new();
     host.install(PluginSpec::new(A).memory_mib(200));
-    assert_eq!(host.effective_limit(A, LimitKey::MemoryMib), (128, LimitSource::Ceiling));
+    assert_eq!(
+        host.effective_limit(A, LimitKey::MemoryMib),
+        (128, LimitSource::Ceiling)
+    );
 }
 
 /// REQ: LIF-143
@@ -138,7 +161,10 @@ fn lif_143_user_value_below_ceiling_wins_and_above_ceiling_clamps() {
     let mut host = LifeHost::new();
     host.install(PluginSpec::new(A).memory_mib(200));
     host.set_user_limit(Some(A), LimitKey::MemoryMib, 64);
-    assert_eq!(host.effective_limit(A, LimitKey::MemoryMib), (64, LimitSource::User));
+    assert_eq!(
+        host.effective_limit(A, LimitKey::MemoryMib),
+        (64, LimitSource::User)
+    );
     host.set_user_limit(Some(A), LimitKey::MemoryMib, 256);
     assert_eq!(host.effective_limit(A, LimitKey::MemoryMib).0, 128);
 }
@@ -149,7 +175,10 @@ fn lif_143_zero_means_unset_and_the_next_source_applies() {
     let mut host = LifeHost::new();
     host.install(PluginSpec::new(A).memory_mib(48));
     host.set_user_limit(Some(A), LimitKey::MemoryMib, 0);
-    assert_eq!(host.effective_limit(A, LimitKey::MemoryMib), (48, LimitSource::Manifest));
+    assert_eq!(
+        host.effective_limit(A, LimitKey::MemoryMib),
+        (48, LimitSource::Manifest)
+    );
 }
 
 /// REQ: LIF-143
@@ -157,7 +186,10 @@ fn lif_143_zero_means_unset_and_the_next_source_applies() {
 fn lif_143_default_applies_when_nothing_else_is_set() {
     let mut host = LifeHost::new();
     host.install(PluginSpec::new(A));
-    assert_eq!(host.effective_limit(A, LimitKey::MemoryMib), (32, LimitSource::Default));
+    assert_eq!(
+        host.effective_limit(A, LimitKey::MemoryMib),
+        (32, LimitSource::Default)
+    );
 }
 
 /// REQ: LIF-144
@@ -167,7 +199,10 @@ fn lif_144_per_plugin_user_value_beats_the_global_user_value() {
     host.install(PluginSpec::new(A));
     host.set_user_limit(None, LimitKey::MemoryMib, 96);
     host.set_user_limit(Some(A), LimitKey::MemoryMib, 48);
-    assert_eq!(host.effective_limit(A, LimitKey::MemoryMib), (48, LimitSource::User));
+    assert_eq!(
+        host.effective_limit(A, LimitKey::MemoryMib),
+        (48, LimitSource::User)
+    );
 }
 
 /// REQ: LIF-144
@@ -205,7 +240,10 @@ fn lif_145_the_same_amount_is_charged_to_the_session_pool() {
 fn lif_146_stats_print_use_limit_and_source_for_four_resources() {
     let mut host = one_plugin();
     let lines = records(&mut host, &["plugin", "stats", A], "plugin-stat");
-    let resources: Vec<&str> = lines.iter().map(|l| l["resource"].as_str().unwrap()).collect();
+    let resources: Vec<&str> = lines
+        .iter()
+        .map(|l| l["resource"].as_str().unwrap())
+        .collect();
     for resource in ["memory", "execution", "storage", "disk"] {
         assert!(resources.contains(&resource), "{resource} in {resources:?}");
     }
@@ -223,6 +261,9 @@ fn lif_146_source_is_one_of_the_five_documented_values() {
     let lines = records(&mut host, &["plugin", "stats", A], "plugin-stat");
     for line in lines {
         let source = line["source"].as_str().unwrap();
-        assert!(["default", "manifest", "user", "ceiling", "fixed"].contains(&source), "{source}");
+        assert!(
+            ["default", "manifest", "user", "ceiling", "fixed"].contains(&source),
+            "{source}"
+        );
     }
 }

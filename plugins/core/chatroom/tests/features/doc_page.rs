@@ -40,14 +40,20 @@ fn doc_b03_limit_row_says_4000_characters() {
 /// REQ: chatroom-B04
 #[test]
 fn doc_b04_default_author_order_is_chatroom_author_agent_name_agent() {
-    assert!(behaviour_row("chatroom-B04")[2].contains("`$ILIUM_CHATROOM_AUTHOR`, then `$AGENT_NAME`, then `agent`"));
+    assert!(behaviour_row("chatroom-B04")[2]
+        .contains("`$ILIUM_CHATROOM_AUTHOR`, then `$AGENT_NAME`, then `agent`"));
 }
 
 /// REQ: chatroom-B05
 #[test]
 fn doc_b05_initial_file_row_names_title_marker_guidance_and_heading() {
     let row = behaviour_row("chatroom-B05");
-    for needle in ["# ILIUM CHATROOM", "<!-- ilium-chatroom: v1 -->", "agent/coordination-guidance", "## Messages"] {
+    for needle in [
+        "# ILIUM CHATROOM",
+        "<!-- ilium-chatroom: v1 -->",
+        "agent/coordination-guidance",
+        "## Messages",
+    ] {
         assert!(row[2].contains(needle), "{needle}");
     }
 }
@@ -118,7 +124,12 @@ fn doc_b12_hook_row_names_command_timeout_and_status() {
 #[test]
 fn doc_b13_context_row_names_the_four_templates() {
     let row = behaviour_row("chatroom-B13")[2].clone();
-    for needle in ["agent/chatroom-context", "agent/chatroom-empty-context", "agent/chatroom-omitted", "agent/chatroom-context-row"] {
+    for needle in [
+        "agent/chatroom-context",
+        "agent/chatroom-empty-context",
+        "agent/chatroom-omitted",
+        "agent/chatroom-context-row",
+    ] {
         assert!(row.contains(needle), "{needle}");
     }
 }
@@ -135,7 +146,10 @@ fn doc_b14_cap_row_names_160_bytes_the_marker_and_the_factor_4() {
 fn doc_b15_cursor_row_names_the_directory_the_hash_and_the_reader_keys() {
     let row = behaviour_row("chatroom-B15")[2].clone();
     assert!(row.contains(".ilium/chat-readers/<first 32 hex chars of sha256(reader key)>"));
-    assert!(row.contains("timestamp\\0author\\0content\\0") || row.contains("timestamp\0author\0content\0"));
+    assert!(
+        row.contains("timestamp\\0author\\0content\\0")
+            || row.contains("timestamp\0author\0content\0")
+    );
     assert!(row.contains("`--reader`, else `ILIUM_PANE_ID`"));
 }
 
@@ -153,7 +167,9 @@ fn doc_b16_unread_row_is_new_in_the_plugin_build_and_has_no_baseline_source() {
 fn doc_b17_locked_append_row_and_the_fifty_fifty_test_sentence() {
     let page = page_text();
     assert!(behaviour_row("chatroom-B17")[2].contains("exclusive advisory lock"));
-    assert!(page.contains("50 concurrent `ilium chat send` calls and 50 composer sends produce 100 records"));
+    assert!(page.contains(
+        "50 concurrent `ilium chat send` calls and 50 composer sends produce 100 records"
+    ));
 }
 
 /// REQ: F-062, F-064
@@ -161,7 +177,10 @@ fn doc_b17_locked_append_row_and_the_fifty_fifty_test_sentence() {
 fn doc_f062_traceability_rows_name_chatroom_as_owner() {
     let text = traceability_text();
     for id in ["F-062", "F-064"] {
-        let row = text.lines().find(|line| line.contains(id)).unwrap_or_else(|| panic!("row {id}"));
+        let row = text
+            .lines()
+            .find(|line| line.contains(id))
+            .unwrap_or_else(|| panic!("row {id}"));
         assert!(row.contains("chatroom"), "{row}");
     }
 }
@@ -170,7 +189,8 @@ fn doc_f062_traceability_rows_name_chatroom_as_owner() {
 #[test]
 fn doc_f064_the_page_says_agent_setup_owns_the_hooks_and_blocks() {
     let page = page_text();
-    assert!(page.contains("Agent setup owns the Setup tab, both instruction blocks and the hook entries."));
+    assert!(page
+        .contains("Agent setup owns the Setup tab, both instruction blocks and the hook entries."));
     assert!(page.contains("The plugin holds no `agent-config` grant"));
 }
 

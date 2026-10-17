@@ -86,7 +86,9 @@ fn feature_068_the_worktree_is_selectable_again_after_its_agent_pane_closed() {
     let mut host = host_with_worktree();
     start_existing(&mut host);
     host.deliver_one(pane_created(21, "docs-sweep"));
-    host.deliver_one(ilium_plugin_sdk::types::Event::NodeRemoved(ilium_plugin_sdk::types::NodeId(21)));
+    host.deliver_one(ilium_plugin_sdk::types::Event::NodeRemoved(
+        ilium_plugin_sdk::types::NodeId(21),
+    ));
     host.settle();
     let submitted = start_existing(&mut host);
     assert_eq!(create_panes(&submitted).len(), 2);

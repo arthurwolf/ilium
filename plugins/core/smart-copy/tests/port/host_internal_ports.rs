@@ -23,7 +23,10 @@ fn menu_context(pane: u64, selection: Option<&str>) -> MenuContext {
 }
 
 fn labels(host: &mut FakeHost, context: MenuContext) -> Vec<String> {
-    host.menu_items(context).into_iter().map(|entry| entry.label.to_lowercase()).collect()
+    host.menu_items(context)
+        .into_iter()
+        .map(|entry| entry.label.to_lowercase())
+        .collect()
 }
 
 /// Picks candidate `number` and returns what the pick submitted.
@@ -49,10 +52,17 @@ fn port_internal_menu_commands_name_the_pane_they_were_opened_on() {
     let mut host = client_host();
     let first = add_terminal_pane(&mut host, "one");
     let second = add_terminal_pane(&mut host, "two");
-    let ids: Vec<String> = host.menu_items(menu_context(second, None)).into_iter().map(|e| e.id).collect();
+    let ids: Vec<String> = host
+        .menu_items(menu_context(second, None))
+        .into_iter()
+        .map(|e| e.id)
+        .collect();
     assert_eq!(ids, ["copy", "copy-path", "smart-copy", "transfer"]);
     let out = host.deliver_one(menu_command("smart-copy", second, "smart-copy"));
-    assert!(!format!("{out:?}").contains(&format!("NodeId({first})")), "{out:?}");
+    assert!(
+        !format!("{out:?}").contains(&format!("NodeId({first})")),
+        "{out:?}"
+    );
     assert!(host.failures().is_empty());
 }
 
@@ -76,7 +86,9 @@ fn port_internal_editor_menu_opens_with_entries_for_the_captured_line() {
     context.menu = "editor".to_string();
     context.line = Some(41);
     let items = host.menu_items(context);
-    assert!(items.iter().all(|entry| !entry.id.is_empty() && !entry.label.is_empty()));
+    assert!(items
+        .iter()
+        .all(|entry| !entry.id.is_empty() && !entry.label.is_empty()));
     assert!(host.failures().is_empty());
 }
 
@@ -88,7 +100,9 @@ fn port_internal_editor_menu_on_an_existing_path_offers_open_externally() {
     host.files().add_existing("/tmp/ilium-port/readme.md");
     let mut context = menu_context(pane, Some("/tmp/ilium-port/readme.md"));
     context.menu = "editor".to_string();
-    assert!(labels(&mut host, context).iter().any(|label| label.contains("externally")));
+    assert!(labels(&mut host, context)
+        .iter()
+        .any(|label| label.contains("externally")));
 }
 
 /// REQ: PORT:ilium-client/src/app.rs::editor_right_click_on_an_existing_path_offers_open_externally
@@ -98,7 +112,9 @@ fn port_internal_editor_menu_on_a_missing_path_does_not_offer_open_externally() 
     let pane = add_editor_pane(&mut host, "main.rs");
     let mut context = menu_context(pane, Some("/tmp/ilium-port/missing.md"));
     context.menu = "editor".to_string();
-    assert!(!labels(&mut host, context).iter().any(|label| label.contains("externally")));
+    assert!(!labels(&mut host, context)
+        .iter()
+        .any(|label| label.contains("externally")));
 }
 
 /// REQ: PORT:ilium-client/src/app.rs::right_click_on_an_existing_file_offers_editor_and_external_open_actions
@@ -107,9 +123,18 @@ fn port_internal_terminal_menu_on_an_existing_file_offers_editor_and_external_op
     let mut host = client_host();
     let pane = add_terminal_pane(&mut host, "api");
     host.files().add_existing("/tmp/ilium-port/src/lib.rs");
-    let found = labels(&mut host, menu_context(pane, Some("/tmp/ilium-port/src/lib.rs")));
-    assert!(found.iter().any(|label| label.contains("editor")), "{found:?}");
-    assert!(found.iter().any(|label| label.contains("externally")), "{found:?}");
+    let found = labels(
+        &mut host,
+        menu_context(pane, Some("/tmp/ilium-port/src/lib.rs")),
+    );
+    assert!(
+        found.iter().any(|label| label.contains("editor")),
+        "{found:?}"
+    );
+    assert!(
+        found.iter().any(|label| label.contains("externally")),
+        "{found:?}"
+    );
 }
 
 /// REQ: PORT:ilium-client/src/app.rs::right_click_on_an_existing_file_offers_editor_and_external_open_actions
@@ -117,8 +142,16 @@ fn port_internal_terminal_menu_on_an_existing_file_offers_editor_and_external_op
 fn port_internal_terminal_menu_on_a_missing_file_offers_no_open_actions() {
     let mut host = client_host();
     let pane = add_terminal_pane(&mut host, "api");
-    let found = labels(&mut host, menu_context(pane, Some("/tmp/ilium-port/nothing.rs")));
-    assert!(!found.iter().any(|label| label.contains("externally") || label.contains("open in editor")), "{found:?}");
+    let found = labels(
+        &mut host,
+        menu_context(pane, Some("/tmp/ilium-port/nothing.rs")),
+    );
+    assert!(
+        !found
+            .iter()
+            .any(|label| label.contains("externally") || label.contains("open in editor")),
+        "{found:?}"
+    );
 }
 
 /// REQ: PORT:ilium-client/src/context_menu_layout.rs::empty_and_zero_height_menus_have_no_selectable_rows
@@ -156,7 +189,10 @@ fn port_internal_the_original_candidate_survives_until_the_copy_is_dispatched() 
     let mut host = open_picker(&["original keeps its lease"]);
     let out = pick(&mut host, 1);
     assert!(status_contains(&out, "Copied 24 characters"), "{out:?}");
-    assert_eq!(host.clipboard().last_text().as_deref(), Some("original keeps its lease"));
+    assert_eq!(
+        host.clipboard().last_text().as_deref(),
+        Some("original keeps its lease")
+    );
 }
 
 /// REQ: PORT:ilium-client/src/paste_cursor.rs::completed_replay_retires_original_input_on_the_cpu_bank
@@ -189,7 +225,12 @@ fn port_internal_a_long_candidate_is_copied_whole_in_one_turn() {
     let mut host = open_picker(&[long.as_str()]);
     let out = pick(&mut host, 1);
     assert!(status_contains(&out, "Copied 4096 characters"), "{out:?}");
-    assert_eq!(host.clipboard().last_text().map(|text| text.chars().count()), Some(4096));
+    assert_eq!(
+        host.clipboard()
+            .last_text()
+            .map(|text| text.chars().count()),
+        Some(4096)
+    );
 }
 
 /// REQ: PORT:ilium-client/src/paste_cursor.rs::retirement_refusal_preserves_the_untouched_original_paste
@@ -217,7 +258,10 @@ fn port_internal_an_empty_candidate_copies_zero_characters_without_another_event
 fn port_internal_unicode_and_crlf_candidates_are_copied_complete() {
     let mut host = open_picker(&["雪é\u{1f600}", "a\r\nb"]);
     pick(&mut host, 1);
-    assert_eq!(host.clipboard().last_text().as_deref(), Some("雪é\u{1f600}"));
+    assert_eq!(
+        host.clipboard().last_text().as_deref(),
+        Some("雪é\u{1f600}")
+    );
     pick(&mut host, 2);
     assert_eq!(host.clipboard().last_text().as_deref(), Some("a\r\nb"));
 }
@@ -264,7 +308,10 @@ fn port_internal_an_earlier_failure_does_not_poison_the_next_copy() {
     let first = pick(&mut host, 1);
     assert!(status_contains(&first, "Copy failed: Io"), "{first:?}");
     let second = pick(&mut host, 2);
-    assert!(status_contains(&second, "Copied 11 characters"), "{second:?}");
+    assert!(
+        status_contains(&second, "Copied 11 characters"),
+        "{second:?}"
+    );
     assert_eq!(host.clipboard().last_text().as_deref(), Some("candidate-2"));
 }
 
@@ -278,7 +325,11 @@ fn port_internal_nine_consecutive_failures_each_report_their_own_error_in_order(
         statuses.push(pick(&mut host, number));
     }
     for (index, out) in statuses.iter().enumerate() {
-        assert!(status_contains(out, "Copy failed: Io"), "pick {}: {out:?}", index + 1);
+        assert!(
+            status_contains(out, "Copy failed: Io"),
+            "pick {}: {out:?}",
+            index + 1
+        );
     }
     assert_eq!(host.clipboard().last_text(), None);
 }
@@ -336,7 +387,13 @@ fn port_internal_an_oversized_screen_makes_no_model_request_with_the_whole_captu
     host.inference().reply_text("w");
     ask(&mut host, pane);
     for request in host.inference().requests() {
-        let system_len: usize = request.1.messages.iter().filter(|m| m.role == "system").map(|m| m.content.len()).sum();
+        let system_len: usize = request
+            .1
+            .messages
+            .iter()
+            .filter(|m| m.role == "system")
+            .map(|m| m.content.len())
+            .sum();
         assert!(system_len + format!("{request:?}").len() < 400_000);
     }
     assert!(host.failures().is_empty());
@@ -396,7 +453,10 @@ fn port_internal_the_server_side_keeps_working_after_the_client_side_is_rebuilt(
     let mut rebuilt = client_host();
     rebuilt.deliver_one(candidates_message(&["src/lib.rs"]));
     pick(&mut rebuilt, 1);
-    assert_eq!(rebuilt.clipboard().last_text().as_deref(), Some("src/lib.rs"));
+    assert_eq!(
+        rebuilt.clipboard().last_text().as_deref(),
+        Some("src/lib.rs")
+    );
     assert_eq!(scan(&["src/lib.rs"]), before);
     assert!(server.failures().is_empty());
 }

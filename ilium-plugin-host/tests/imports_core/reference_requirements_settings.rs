@@ -69,7 +69,9 @@ fn set_005_six_plugin_sections_in_one_built_in_tab_all_drawn() {
     let manifests: Vec<String> = (0..6).map(section_plugin).collect();
     let fixture = fixture_with_plugins(&manifests);
     assert_eq!(fixture.drawn_plugin_sections("user-interface"), 6);
-    assert!(!fixture.load_warning_codes().contains(&"settings.section-dropped".to_owned()));
+    assert!(!fixture
+        .load_warning_codes()
+        .contains(&"settings.section-dropped".to_owned()));
 }
 
 /// REQ: SET-005
@@ -105,7 +107,9 @@ fn set_005_sixteen_plugin_tabs_all_in_the_rail() {
     let manifests: Vec<String> = (0..16).map(tab_plugin).collect();
     let fixture = fixture_with_plugins(&manifests);
     assert_eq!(fixture.drawn_plugin_tabs(), 16);
-    assert!(!fixture.load_warning_codes().contains(&"settings.tab-dropped".to_owned()));
+    assert!(!fixture
+        .load_warning_codes()
+        .contains(&"settings.tab-dropped".to_owned()));
 }
 
 /// REQ: SET-005
@@ -182,7 +186,10 @@ fn set_020_typed_number_above_max_refused_with_row_note_and_value_unchanged() {
 #[test]
 fn set_020_typed_number_at_max_is_saved() {
     let mut fixture = settings_fixture(Tier::T2);
-    assert_eq!(fixture.user_edit("count", "10", UserInput::Typed), UserSave::Pending);
+    assert_eq!(
+        fixture.user_edit("count", "10", UserInput::Typed),
+        UserSave::Pending
+    );
     fixture.advance(Duration::from_millis(600));
     assert_eq!(stored(&mut fixture)["count"], json!(10));
 }
@@ -229,7 +236,10 @@ fn set_021_user_save_runs_schema_validate_write_changed_in_order() {
         .settings_validate(Box::new(|_patch, _merged| Ok(())))
         .build();
     assert_eq!(fixture.user_save(r#"{"enabled": false}"#), UserSave::Saved);
-    assert_eq!(fixture.save_trace(), vec!["schema", "validate", "write", "changed"]);
+    assert_eq!(
+        fixture.save_trace(),
+        vec!["schema", "validate", "write", "changed"]
+    );
 }
 
 /// REQ: SET-021
@@ -252,7 +262,10 @@ fn set_021_validate_refusal_stops_before_write_and_changed() {
         .tier(Tier::T2)
         .manifest_json(&runtime_settings_manifest().to_string())
         .settings_validate(Box::new(|_patch, _merged| {
-            Err(vec![FieldError { key: "label".to_owned(), message: "no".to_owned() }])
+            Err(vec![FieldError {
+                key: "label".to_owned(),
+                message: "no".to_owned(),
+            }])
         }))
         .build();
     let result = fixture.user_save(r#"{"label": "x"}"#);
@@ -270,7 +283,9 @@ fn set_021_validate_receives_the_patch_and_the_merged_object() {
         .tier(Tier::T2)
         .manifest_json(&runtime_settings_manifest().to_string())
         .settings_validate(Box::new(move |patch, merged| {
-            sink.lock().unwrap().push((patch.to_owned(), merged.to_owned()));
+            sink.lock()
+                .unwrap()
+                .push((patch.to_owned(), merged.to_owned()));
             Ok(())
         }))
         .build();
@@ -297,7 +312,11 @@ fn set_021_settings_validate_runs_only_for_user_and_reset_origins_not_for_set_js
             Ok(())
         }))
         .build();
-    expect_ok(fixture.settings().set_json(r#"{"enabled": false}"#.to_owned()));
+    expect_ok(
+        fixture
+            .settings()
+            .set_json(r#"{"enabled": false}"#.to_owned()),
+    );
     assert_eq!(*calls.lock().unwrap(), 0);
     assert_eq!(fixture.user_save(r#"{"enabled": true}"#), UserSave::Saved);
     assert_eq!(*calls.lock().unwrap(), 1);
@@ -342,7 +361,10 @@ fn set_022_answer_in_exactly_100_ms_saves() {
 #[test]
 fn set_022_answer_in_101_ms_refuses_the_save() {
     let mut fixture = fixture_with_validate_latency(101);
-    assert!(matches!(fixture.user_save(r#"{"label": "new"}"#), UserSave::Refused(_)));
+    assert!(matches!(
+        fixture.user_save(r#"{"label": "new"}"#),
+        UserSave::Refused(_)
+    ));
 }
 
 /// REQ: SET-022
@@ -351,7 +373,10 @@ fn set_022_timeout_message_names_the_plugin_did_not_answer() {
     let mut fixture = fixture_with_validate_latency(150);
     match fixture.user_save(r#"{"label": "new"}"#) {
         UserSave::Refused(message) => {
-            assert!(message.starts_with("Could not check this value:"), "{message}");
+            assert!(
+                message.starts_with("Could not check this value:"),
+                "{message}"
+            );
             assert!(message.ends_with("did not answer."), "{message}");
         }
         other => panic!("expected a refusal, got {other:?}"),
@@ -477,7 +502,10 @@ fn size_manifest() -> String {
 }
 
 fn size_fixture() -> ImportsFixture {
-    ImportsFixture::builder().tier(Tier::T2).manifest_json(&size_manifest()).build()
+    ImportsFixture::builder()
+        .tier(Tier::T2)
+        .manifest_json(&size_manifest())
+        .build()
 }
 
 /// REQ: SET-024
@@ -493,7 +521,10 @@ fn set_024_text_value_of_4096_characters_accepted() {
 fn set_024_text_value_of_4097_characters_invalid_argument() {
     let mut fixture = size_fixture();
     let patch = json!({ "t": ascii(4097) }).to_string();
-    assert_eq!(expect_code(fixture.settings().set_json(patch)), ErrorCode::InvalidArgument);
+    assert_eq!(
+        expect_code(fixture.settings().set_json(patch)),
+        ErrorCode::InvalidArgument
+    );
 }
 
 /// REQ: SET-024
@@ -509,7 +540,10 @@ fn set_024_text_area_value_of_65536_characters_accepted() {
 fn set_024_text_area_value_of_65537_characters_invalid_argument() {
     let mut fixture = size_fixture();
     let patch = json!({ "a": ascii(65537) }).to_string();
-    assert_eq!(expect_code(fixture.settings().set_json(patch)), ErrorCode::InvalidArgument);
+    assert_eq!(
+        expect_code(fixture.settings().set_json(patch)),
+        ErrorCode::InvalidArgument
+    );
 }
 
 /// REQ: SET-024
@@ -521,7 +555,10 @@ fn set_024_all_values_of_one_plugin_over_256_kib_invalid_argument() {
         "a": ascii(65536), "b": ascii(65536), "c": ascii(65536), "d": ascii(65536), "e": ascii(65536)
     })
     .to_string();
-    assert_eq!(expect_code(fixture.settings().set_json(patch)), ErrorCode::InvalidArgument);
+    assert_eq!(
+        expect_code(fixture.settings().set_json(patch)),
+        ErrorCode::InvalidArgument
+    );
 }
 
 /// REQ: SET-024
@@ -537,7 +574,10 @@ fn set_024_three_full_text_areas_under_the_total_are_accepted() {
 fn set_024_refused_patch_stores_nothing() {
     let mut fixture = size_fixture();
     let patch = json!({ "t": "kept?", "a": ascii(65537) }).to_string();
-    assert_eq!(expect_code(fixture.settings().set_json(patch)), ErrorCode::InvalidArgument);
+    assert_eq!(
+        expect_code(fixture.settings().set_json(patch)),
+        ErrorCode::InvalidArgument
+    );
     assert_eq!(stored(&mut fixture)["t"], json!(""));
 }
 
@@ -578,15 +618,26 @@ fn call_rate_limited_group(fixture: &mut ImportsFixture, index: usize) -> Result
     // The limited calls share one budget; rotate through four of them.
     use ilium_plugin_api::generated::types::{MeterSegment, RowState, RowStateKind, Tone};
     match index % 4 {
-        0 => fixture.settings().set_info("status".to_owned(), "x".to_owned()),
-        1 => fixture.settings().set_row_note("count".to_owned(), Some("n".to_owned())),
+        0 => fixture
+            .settings()
+            .set_info("status".to_owned(), "x".to_owned()),
+        1 => fixture
+            .settings()
+            .set_row_note("count".to_owned(), Some("n".to_owned())),
         2 => fixture.settings().set_row_state(
             "count".to_owned(),
-            RowState { kind: RowStateKind::Idle, message: None },
+            RowState {
+                kind: RowStateKind::Idle,
+                message: None,
+            },
         ),
         _ => fixture.settings().set_meter(
             "usage".to_owned(),
-            vec![MeterSegment { label: "a".to_owned(), value: 0.1, tone: Tone::Info }],
+            vec![MeterSegment {
+                label: "a".to_owned(),
+                value: 0.1,
+                tone: Tone::Info,
+            }],
         ),
     }
 }
@@ -609,18 +660,29 @@ fn set_050_eleventh_call_in_a_second_rate_limited() {
     }
     let error = expect_error(call_rate_limited_group(&mut fixture, 10));
     assert_eq!(error.code, ErrorCode::RateLimited);
-    assert!(error.retry_after_ms.is_some(), "rate-limited carries retry-after-ms");
+    assert!(
+        error.retry_after_ms.is_some(),
+        "rate-limited carries retry-after-ms"
+    );
 }
 
 /// REQ: SET-050
 #[test]
 fn set_050_the_previous_state_stays_after_a_rate_limited_call() {
     let mut fixture = settings_fixture(Tier::T2);
-    expect_ok(fixture.settings().set_info("status".to_owned(), "first".to_owned()));
+    expect_ok(
+        fixture
+            .settings()
+            .set_info("status".to_owned(), "first".to_owned()),
+    );
     for index in 0..9 {
         expect_ok(call_rate_limited_group(&mut fixture, index + 1));
     }
-    let code = expect_code(fixture.settings().set_info("status".to_owned(), "second".to_owned()));
+    let code = expect_code(
+        fixture
+            .settings()
+            .set_info("status".to_owned(), "second".to_owned()),
+    );
     assert_eq!(code, ErrorCode::RateLimited);
     assert_eq!(fixture.info_text("status").as_deref(), Some("x"));
 }
@@ -632,7 +694,10 @@ fn set_050_budget_returns_after_one_second() {
     for index in 0..10 {
         expect_ok(call_rate_limited_group(&mut fixture, index));
     }
-    assert_eq!(expect_code(call_rate_limited_group(&mut fixture, 10)), ErrorCode::RateLimited);
+    assert_eq!(
+        expect_code(call_rate_limited_group(&mut fixture, 10)),
+        ErrorCode::RateLimited
+    );
     fixture.advance(Duration::from_millis(1000));
     expect_ok(call_rate_limited_group(&mut fixture, 11));
 }
@@ -642,12 +707,20 @@ fn set_050_budget_returns_after_one_second() {
 fn set_050_the_calls_share_one_budget_not_one_each() {
     let mut fixture = settings_fixture(Tier::T2);
     for _ in 0..5 {
-        expect_ok(fixture.settings().set_info("status".to_owned(), "x".to_owned()));
+        expect_ok(
+            fixture
+                .settings()
+                .set_info("status".to_owned(), "x".to_owned()),
+        );
     }
     for _ in 0..5 {
         expect_ok(fixture.settings().set_row_note("count".to_owned(), None));
     }
-    let code = expect_code(fixture.settings().set_info("status".to_owned(), "x".to_owned()));
+    let code = expect_code(
+        fixture
+            .settings()
+            .set_info("status".to_owned(), "x".to_owned()),
+    );
     assert_eq!(code, ErrorCode::RateLimited);
 }
 
@@ -658,7 +731,11 @@ fn set_050_set_json_is_not_part_of_the_row_update_budget() {
     for index in 0..10 {
         expect_ok(call_rate_limited_group(&mut fixture, index));
     }
-    expect_ok(fixture.settings().set_json(r#"{"enabled": false}"#.to_owned()));
+    expect_ok(
+        fixture
+            .settings()
+            .set_json(r#"{"enabled": false}"#.to_owned()),
+    );
 }
 
 // ---- SET-051: text length of set-info and set-row-note ---------------------------------------
@@ -689,14 +766,22 @@ fn set_051_set_info_119_characters_accepted() {
 #[test]
 fn set_051_set_row_note_120_characters_accepted() {
     let mut fixture = settings_fixture(Tier::T2);
-    expect_ok(fixture.settings().set_row_note("count".to_owned(), Some(ascii(120))));
+    expect_ok(
+        fixture
+            .settings()
+            .set_row_note("count".to_owned(), Some(ascii(120))),
+    );
 }
 
 /// REQ: SET-051
 #[test]
 fn set_051_set_row_note_121_characters_invalid_argument() {
     let mut fixture = settings_fixture(Tier::T2);
-    let code = expect_code(fixture.settings().set_row_note("count".to_owned(), Some(ascii(121))));
+    let code = expect_code(
+        fixture
+            .settings()
+            .set_row_note("count".to_owned(), Some(ascii(121))),
+    );
     assert_eq!(code, ErrorCode::InvalidArgument);
 }
 
@@ -705,8 +790,16 @@ fn set_051_set_row_note_121_characters_invalid_argument() {
 fn set_051_text_counts_characters_not_bytes() {
     let mut fixture = settings_fixture(Tier::T2);
     // 120 two-byte characters are 240 bytes but still 120 characters.
-    expect_ok(fixture.settings().set_info("status".to_owned(), "\u{00e9}".repeat(120)));
-    let code = expect_code(fixture.settings().set_info("status".to_owned(), "\u{00e9}".repeat(121)));
+    expect_ok(
+        fixture
+            .settings()
+            .set_info("status".to_owned(), "\u{00e9}".repeat(120)),
+    );
+    let code = expect_code(
+        fixture
+            .settings()
+            .set_info("status".to_owned(), "\u{00e9}".repeat(121)),
+    );
     assert_eq!(code, ErrorCode::InvalidArgument);
 }
 
@@ -714,7 +807,11 @@ fn set_051_text_counts_characters_not_bytes() {
 #[test]
 fn set_051_a_refused_long_text_leaves_the_previous_info_text() {
     let mut fixture = settings_fixture(Tier::T2);
-    expect_ok(fixture.settings().set_info("status".to_owned(), "before".to_owned()));
+    expect_ok(
+        fixture
+            .settings()
+            .set_info("status".to_owned(), "before".to_owned()),
+    );
     let _ = fixture.settings().set_info("status".to_owned(), ascii(121));
     assert_eq!(fixture.info_text("status").as_deref(), Some("before"));
 }

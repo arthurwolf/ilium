@@ -17,9 +17,11 @@ use serde_json::Value;
 use tempfile::TempDir;
 
 /// The 34-byte component of the minimal package vector (reference-package-format.md).
-pub const COMPONENT_HEX: &str = "0061736d0d000100001811696c69756d3a6170692d76657273696f6e000000010000";
+pub const COMPONENT_HEX: &str =
+    "0061736d0d000100001811696c69756d3a6170692d76657273696f6e000000010000";
 /// SHA-256 of [`COMPONENT_HEX`] (reference-package-format.md, minimal package vector).
-pub const COMPONENT_SHA256: &str = "028fb8ab3e154570597f3cc09ad59782ab44d9a6873f1834490da625ef3c6cd8";
+pub const COMPONENT_SHA256: &str =
+    "028fb8ab3e154570597f3cc09ad59782ab44d9a6873f1834490da625ef3c6cd8";
 /// 2026-10-12T09:14:04Z as Unix seconds.
 pub const NOW_SECS: u64 = 1_791_796_444;
 /// The `installed_at` text for [`NOW_SECS`].
@@ -90,7 +92,11 @@ impl Spec {
     }
 
     pub fn needs(mut self, id: &str, range: &str, optional: bool) -> Spec {
-        self.needs.push(Need { id: id.to_owned(), version: range.to_owned(), optional });
+        self.needs.push(Need {
+            id: id.to_owned(),
+            version: range.to_owned(),
+            optional,
+        });
         self
     }
 
@@ -129,16 +135,31 @@ impl Spec {
         text.push_str("  \"publisher\": \"Example Labs\",\n");
         text.push_str("  \"server\": {\n    \"entry\": \"server.wasm\",\n    \"world\": \"ilium:server/base@0.1.0\",\n    \"exports\": []\n  },\n");
         if !self.server_grants.is_empty() {
-            let grants: Vec<String> = self.server_grants.iter().map(|grant| json_string(grant)).collect();
-            text.push_str(&format!("  \"capabilities\": {{\n    \"server\": [{}]\n  }},\n", grants.join(", ")));
+            let grants: Vec<String> = self
+                .server_grants
+                .iter()
+                .map(|grant| json_string(grant))
+                .collect();
+            text.push_str(&format!(
+                "  \"capabilities\": {{\n    \"server\": [{}]\n  }},\n",
+                grants.join(", ")
+            ));
         }
-        if self.host_range.is_some() || !self.needs.is_empty() || !self.services.is_empty() || self.wait_ms.is_some() {
+        if self.host_range.is_some()
+            || !self.needs.is_empty()
+            || !self.services.is_empty()
+            || self.wait_ms.is_some()
+        {
             let mut parts: Vec<String> = Vec::new();
             if let Some(range) = &self.host_range {
                 parts.push(format!("\"host\": {}", json_string(range)));
             }
             if !self.services.is_empty() {
-                let services: Vec<String> = self.services.iter().map(|service| json_string(service)).collect();
+                let services: Vec<String> = self
+                    .services
+                    .iter()
+                    .map(|service| json_string(service))
+                    .collect();
                 parts.push(format!("\"services\": [{}]", services.join(", ")));
             }
             if !self.needs.is_empty() {
@@ -162,14 +183,20 @@ impl Spec {
             text.push_str(&format!("  \"requires\": {{ {} }},\n", parts.join(", ")));
         }
         for (key, raw) in &self.extra_top_level {
-            if key != "requires" || !(self.host_range.is_some() || !self.needs.is_empty() || !self.services.is_empty() || self.wait_ms.is_some()) {
+            if key != "requires"
+                || !(self.host_range.is_some()
+                    || !self.needs.is_empty()
+                    || !self.services.is_empty()
+                    || self.wait_ms.is_some())
+            {
                 text.push_str(&format!("  {}: {},\n", json_string(key), raw));
             }
         }
         if let Some(version) = self.data_version {
             text.push_str(&format!("  \"data_version\": {version},\n"));
         }
-        let mut entries: Vec<(String, Vec<u8>)> = vec![("server.wasm".to_owned(), component_bytes())];
+        let mut entries: Vec<(String, Vec<u8>)> =
+            vec![("server.wasm".to_owned(), component_bytes())];
         entries.extend(self.extra_files.iter().cloned());
         entries.sort_by(|left, right| left.0.cmp(&right.0));
         text.push_str("  \"files\": [\n");
@@ -193,12 +220,16 @@ impl Spec {
     /// The package file bytes.
     pub fn build(&self) -> Vec<u8> {
         let mut files: Vec<(String, Vec<u8>)> = vec![
-            ("manifest.json".to_owned(), self.manifest_text().into_bytes()),
+            (
+                "manifest.json".to_owned(),
+                self.manifest_text().into_bytes(),
+            ),
             ("server.wasm".to_owned(), component_bytes()),
         ];
         files.extend(self.extra_files.iter().cloned());
         files.sort_by(|left, right| left.0.cmp(&right.0));
-        write_package(&files).unwrap_or_else(|diagnostic| panic!("fixture package failed: {diagnostic:?}"))
+        write_package(&files)
+            .unwrap_or_else(|diagnostic| panic!("fixture package failed: {diagnostic:?}"))
     }
 }
 
@@ -209,17 +240,20 @@ fn json_string(text: &str) -> String {
 /// A small, dependency-free SHA-256 for fixture inventories.
 pub fn sha256_hex(data: &[u8]) -> String {
     const K: [u32; 64] = [
-        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
-        0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
-        0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
-        0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
-        0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
-        0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
-        0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4,
+        0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe,
+        0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f,
+        0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+        0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc,
+        0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
+        0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116,
+        0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7,
+        0xc67178f2,
     ];
     let mut state: [u32; 8] = [
-        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
+        0x5be0cd19,
     ];
     let mut message = data.to_vec();
     message.push(0x80);
@@ -230,22 +264,47 @@ pub fn sha256_hex(data: &[u8]) -> String {
     for block in message.chunks(64) {
         let mut w = [0u32; 64];
         for index in 0..16 {
-            w[index] = u32::from_be_bytes([block[index * 4], block[index * 4 + 1], block[index * 4 + 2], block[index * 4 + 3]]);
+            w[index] = u32::from_be_bytes([
+                block[index * 4],
+                block[index * 4 + 1],
+                block[index * 4 + 2],
+                block[index * 4 + 3],
+            ]);
         }
         for index in 16..64 {
-            let s0 = w[index - 15].rotate_right(7) ^ w[index - 15].rotate_right(18) ^ (w[index - 15] >> 3);
-            let s1 = w[index - 2].rotate_right(17) ^ w[index - 2].rotate_right(19) ^ (w[index - 2] >> 10);
-            w[index] = w[index - 16].wrapping_add(s0).wrapping_add(w[index - 7]).wrapping_add(s1);
+            let s0 = w[index - 15].rotate_right(7)
+                ^ w[index - 15].rotate_right(18)
+                ^ (w[index - 15] >> 3);
+            let s1 = w[index - 2].rotate_right(17)
+                ^ w[index - 2].rotate_right(19)
+                ^ (w[index - 2] >> 10);
+            w[index] = w[index - 16]
+                .wrapping_add(s0)
+                .wrapping_add(w[index - 7])
+                .wrapping_add(s1);
         }
         let mut v = state;
         for index in 0..64 {
             let s1 = v[4].rotate_right(6) ^ v[4].rotate_right(11) ^ v[4].rotate_right(25);
             let ch = (v[4] & v[5]) ^ (!v[4] & v[6]);
-            let t1 = v[7].wrapping_add(s1).wrapping_add(ch).wrapping_add(K[index]).wrapping_add(w[index]);
+            let t1 = v[7]
+                .wrapping_add(s1)
+                .wrapping_add(ch)
+                .wrapping_add(K[index])
+                .wrapping_add(w[index]);
             let s0 = v[0].rotate_right(2) ^ v[0].rotate_right(13) ^ v[0].rotate_right(22);
             let maj = (v[0] & v[1]) ^ (v[0] & v[2]) ^ (v[1] & v[2]);
             let t2 = s0.wrapping_add(maj);
-            v = [t1.wrapping_add(t2), v[0], v[1], v[2], v[3].wrapping_add(t1), v[4], v[5], v[6]];
+            v = [
+                t1.wrapping_add(t2),
+                v[0],
+                v[1],
+                v[2],
+                v[3].wrapping_add(t1),
+                v[4],
+                v[5],
+                v[6],
+            ];
         }
         for index in 0..8 {
             state[index] = state[index].wrapping_add(v[index]);
@@ -257,8 +316,14 @@ pub fn sha256_hex(data: &[u8]) -> String {
 /// One scripted answer of the fake fetcher.
 #[derive(Clone)]
 pub enum Served {
-    Body { bytes: Vec<u8>, content_type: Option<String>, declared_length: Option<u64> },
-    Redirect { location: String },
+    Body {
+        bytes: Vec<u8>,
+        content_type: Option<String>,
+        declared_length: Option<u64>,
+    },
+    Redirect {
+        location: String,
+    },
     Status(u16),
 }
 
@@ -278,18 +343,33 @@ impl FakeFetcher {
         self.serve_as(url, bytes, None, None);
     }
 
-    pub fn serve_as(&self, url: &str, bytes: Vec<u8>, content_type: Option<&str>, declared_length: Option<u64>) {
+    pub fn serve_as(
+        &self,
+        url: &str,
+        bytes: Vec<u8>,
+        content_type: Option<&str>,
+        declared_length: Option<u64>,
+    ) {
         if let Ok(mut routes) = self.routes.lock() {
             routes.insert(
                 url.to_owned(),
-                Served::Body { bytes, content_type: content_type.map(str::to_owned), declared_length },
+                Served::Body {
+                    bytes,
+                    content_type: content_type.map(str::to_owned),
+                    declared_length,
+                },
             );
         }
     }
 
     pub fn redirect(&self, from: &str, to: &str) {
         if let Ok(mut routes) = self.routes.lock() {
-            routes.insert(from.to_owned(), Served::Redirect { location: to.to_owned() });
+            routes.insert(
+                from.to_owned(),
+                Served::Redirect {
+                    location: to.to_owned(),
+                },
+            );
         }
     }
 
@@ -300,14 +380,20 @@ impl FakeFetcher {
     }
 
     pub fn calls(&self) -> Vec<String> {
-        self.calls.lock().map(|calls| calls.clone()).unwrap_or_default()
+        self.calls
+            .lock()
+            .map(|calls| calls.clone())
+            .unwrap_or_default()
     }
 
     fn lookup(&self, url: &str) -> Option<Served> {
         if let Ok(mut calls) = self.calls.lock() {
             calls.push(url.to_owned());
         }
-        self.routes.lock().ok().and_then(|routes| routes.get(url).cloned())
+        self.routes
+            .lock()
+            .ok()
+            .and_then(|routes| routes.get(url).cloned())
     }
 }
 
@@ -321,24 +407,31 @@ impl Fetcher for FakeFetcher {
     }
 
     // API gap: `Fetcher::get_response` and `FetchResponse` (see API_GAPS.md).
-    fn get_response(&self, url: &str) -> Result<ilium_plugin_host::registry_client::FetchResponse, FetchError> {
+    fn get_response(
+        &self,
+        url: &str,
+    ) -> Result<ilium_plugin_host::registry_client::FetchResponse, FetchError> {
         match self.lookup(url) {
-            Some(Served::Body { bytes, content_type, declared_length }) => {
+            Some(Served::Body {
+                bytes,
+                content_type,
+                declared_length,
+            }) => Ok(ilium_plugin_host::registry_client::FetchResponse {
+                status: 200,
+                location: None,
+                content_type,
+                content_length: declared_length.or(Some(bytes.len() as u64)),
+                body: bytes,
+            }),
+            Some(Served::Redirect { location }) => {
                 Ok(ilium_plugin_host::registry_client::FetchResponse {
-                    status: 200,
-                    location: None,
-                    content_type,
-                    content_length: declared_length.or(Some(bytes.len() as u64)),
-                    body: bytes,
+                    status: 302,
+                    location: Some(location),
+                    content_type: None,
+                    content_length: Some(0),
+                    body: Vec::new(),
                 })
             }
-            Some(Served::Redirect { location }) => Ok(ilium_plugin_host::registry_client::FetchResponse {
-                status: 302,
-                location: Some(location),
-                content_type: None,
-                content_length: Some(0),
-                body: Vec::new(),
-            }),
             Some(Served::Status(code)) => Err(FetchError::Status(code)),
             None => Err(FetchError::Unreachable),
         }
@@ -362,7 +455,12 @@ impl Fx {
         let dir = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir failed: {error}"));
         let cwd = dir.path().join("project");
         std::fs::create_dir_all(&cwd).unwrap_or_else(|error| panic!("mkdir failed: {error}"));
-        Fx { dir, fetcher: FakeFetcher::new(), platform, cwd }
+        Fx {
+            dir,
+            fetcher: FakeFetcher::new(),
+            platform,
+            cwd,
+        }
     }
 
     pub fn data_dir(&self) -> PathBuf {
@@ -446,7 +544,10 @@ impl Fx {
 
     /// Installs an unsigned file package with `--allow-unsigned --yes` plus extra flags.
     pub fn install_with(&self, spec: &Spec, extra: &[&str]) -> CliOutput {
-        let path = self.write_file(&format!("{}-{}.iliumpkg", spec.id, spec.version), &spec.build());
+        let path = self.write_file(
+            &format!("{}-{}.iliumpkg", spec.id, spec.version),
+            &spec.build(),
+        );
         let mut args: Vec<&str> = vec!["install", &path, "--allow-unsigned", "--yes"];
         args.extend_from_slice(extra);
         self.run(&args)
@@ -458,7 +559,10 @@ impl Fx {
 
     /// `update <file>` for a package file.
     pub fn update_with(&self, spec: &Spec, extra: &[&str]) -> CliOutput {
-        let path = self.write_file(&format!("{}-{}.iliumpkg", spec.id, spec.version), &spec.build());
+        let path = self.write_file(
+            &format!("{}-{}.iliumpkg", spec.id, spec.version),
+            &spec.build(),
+        );
         let mut args: Vec<&str> = vec!["update", &path, "--allow-unsigned", "--yes"];
         args.extend_from_slice(extra);
         self.run(&args)
@@ -483,7 +587,8 @@ impl Fx {
     }
 
     pub fn active_version(&self, id: &str) -> Option<String> {
-        self.record(id).and_then(|record| record["active_version"].as_str().map(str::to_owned))
+        self.record(id)
+            .and_then(|record| record["active_version"].as_str().map(str::to_owned))
     }
 
     /// Every file below a directory with its bytes, sorted; the install lock is left out because
@@ -497,13 +602,18 @@ impl Fx {
 }
 
 fn collect_files(base: &Path, current: &Path, found: &mut BTreeMap<String, Vec<u8>>) {
-    let Ok(entries) = std::fs::read_dir(current) else { return };
+    let Ok(entries) = std::fs::read_dir(current) else {
+        return;
+    };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
             collect_files(base, &path, found);
         } else if let Ok(bytes) = std::fs::read(&path) {
-            let relative = path.strip_prefix(base).map(|value| value.to_string_lossy().into_owned()).unwrap_or_default();
+            let relative = path
+                .strip_prefix(base)
+                .map(|value| value.to_string_lossy().into_owned())
+                .unwrap_or_default();
             found.insert(relative, bytes);
         }
     }
@@ -523,15 +633,25 @@ pub trait OutExt {
 
 impl OutExt for CliOutput {
     fn lines_of(&self, kind: &str) -> Vec<Value> {
-        self.stdout_jsonl.iter().filter(|line| line["type"] == kind).cloned().collect()
+        self.stdout_jsonl
+            .iter()
+            .filter(|line| line["type"] == kind)
+            .cloned()
+            .collect()
     }
 
     fn error_codes(&self) -> Vec<String> {
-        self.lines_of("error").iter().filter_map(|line| line["code"].as_str().map(str::to_owned)).collect()
+        self.lines_of("error")
+            .iter()
+            .filter_map(|line| line["code"].as_str().map(str::to_owned))
+            .collect()
     }
 
     fn warning_codes(&self) -> Vec<String> {
-        self.lines_of("warning").iter().filter_map(|line| line["code"].as_str().map(str::to_owned)).collect()
+        self.lines_of("warning")
+            .iter()
+            .filter_map(|line| line["code"].as_str().map(str::to_owned))
+            .collect()
     }
 
     fn has_error(&self, code: &str) -> bool {
@@ -570,7 +690,10 @@ impl OutExt for CliOutput {
 
 /// True when `text` is 64 lowercase hexadecimal characters.
 pub fn is_sha256_hex(text: &str) -> bool {
-    text.len() == 64 && text.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    text.len() == 64
+        && text
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 /// True when `text` is `YYYY-MM-DDTHH:MM:SSZ`.
@@ -583,14 +706,18 @@ pub fn is_utc_stamp(text: &str) -> bool {
         && bytes[13] == b':'
         && bytes[16] == b':'
         && bytes[19] == b'Z'
-        && bytes.iter().enumerate().all(|(index, byte)| matches!(index, 4 | 7 | 10 | 13 | 16 | 19) || byte.is_ascii_digit())
+        && bytes.iter().enumerate().all(|(index, byte)| {
+            matches!(index, 4 | 7 | 10 | 13 | 16 | 19) || byte.is_ascii_digit()
+        })
 }
 
 /// Absolute path of a manual page, honouring `ILIUM_PLUGIN_MANUAL_DIR`.
 pub fn manual_page(name: &str) -> String {
     let base = std::env::var("ILIUM_PLUGIN_MANUAL_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../docs/plugins-manual/pages"));
+        .unwrap_or_else(|_| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../docs/plugins-manual/pages")
+        });
     std::fs::read_to_string(base.join(name)).unwrap_or_default()
 }
 

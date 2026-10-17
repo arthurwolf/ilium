@@ -37,8 +37,16 @@ fn port_layout_every_terminal_menu_action_is_offered_once_in_order() {
 fn port_layout_asking_twice_returns_the_same_entries() {
     let mut host = client_host();
     let pane = add_terminal_pane(&mut host, "api");
-    let first: Vec<String> = host.menu_items(terminal_context(pane)).into_iter().map(|e| e.id).collect();
-    let second: Vec<String> = host.menu_items(terminal_context(pane)).into_iter().map(|e| e.id).collect();
+    let first: Vec<String> = host
+        .menu_items(terminal_context(pane))
+        .into_iter()
+        .map(|e| e.id)
+        .collect();
+    let second: Vec<String> = host
+        .menu_items(terminal_context(pane))
+        .into_iter()
+        .map(|e| e.id)
+        .collect();
     assert_eq!(first, second);
 }
 

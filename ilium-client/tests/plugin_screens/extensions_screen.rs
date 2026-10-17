@@ -5,8 +5,20 @@ use crate::support::*;
 fn rig_with_two_contributors() -> ScreensRig {
     let mut rig = ScreensRig::new(60, 30);
     rig.install_owner_with_point("com.example.owner", "Smart Copy", "After copy");
-    rig.install_contributor("com.example.first", "com.example.owner", "After copy", "strip_tokens", 10);
-    rig.install_contributor("com.example.second", "com.example.owner", "After copy", "mask_emails", 20);
+    rig.install_contributor(
+        "com.example.first",
+        "com.example.owner",
+        "After copy",
+        "strip_tokens",
+        10,
+    );
+    rig.install_contributor(
+        "com.example.second",
+        "com.example.owner",
+        "After copy",
+        "mask_emails",
+        20,
+    );
     rig
 }
 
@@ -35,7 +47,10 @@ fn usr_050_moving_the_second_row_up_swaps_the_numbers_and_wins_over_priority() {
     let screen = rig.screen_text();
     assert!(screen.find("mask_emails").unwrap() < screen.find("strip_tokens").unwrap());
     assert!(row_with(&screen, "mask_emails").contains(" 1 "));
-    assert_eq!(rig.run_order_of_point("com.example.owner", "After copy"), vec!["com.example.second", "com.example.first"]);
+    assert_eq!(
+        rig.run_order_of_point("com.example.owner", "After copy"),
+        vec!["com.example.second", "com.example.first"]
+    );
 }
 
 /// REQ: USR-050
@@ -93,7 +108,11 @@ fn usr_054_missing_owner_shows_waiting_for_owner_and_returns_to_active() {
     let mut rig = rig_with_two_contributors();
     rig.remove_plugin("com.example.owner");
     rig.open_extensions_contributor_view("com.example.first");
-    assert!(rig.screen_text().contains("waiting for com.example.owner"), "{}", rig.screen_text());
+    assert!(
+        rig.screen_text().contains("waiting for com.example.owner"),
+        "{}",
+        rig.screen_text()
+    );
     rig.install_owner_with_point("com.example.owner", "Smart Copy", "After copy");
     rig.open_extensions_contributor_view("com.example.first");
     assert!(!rig.screen_text().contains("waiting for"));

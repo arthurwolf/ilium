@@ -5,8 +5,14 @@ use crate::common::{manual_page, page_text, table_after, user_guide};
 
 fn row_of(text: &str, id: &str) -> Vec<String> {
     let prefix = format!("| {id} |");
-    let line = text.lines().find(|line| line.starts_with(&prefix)).unwrap_or_else(|| panic!("row {id}"));
-    line.trim_matches('|').split('|').map(|cell| cell.trim().to_string()).collect()
+    let line = text
+        .lines()
+        .find(|line| line.starts_with(&prefix))
+        .unwrap_or_else(|| panic!("row {id}"));
+    line.trim_matches('|')
+        .split('|')
+        .map(|cell| cell.trim().to_string())
+        .collect()
 }
 
 /// REQ: F-050
@@ -70,7 +76,10 @@ fn doc_053_the_onboarding_page_gives_voice_only_the_demo_step() {
 fn doc_030_the_plugin_owns_exactly_the_voice_control_tab() {
     let rows = table_after(&page_text(), "| Tab id | Label | Config table | Readers |");
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0], ["`voice-control`", "Voice control", "`[voice]`", "none"]);
+    assert_eq!(
+        rows[0],
+        ["`voice-control`", "Voice control", "`[voice]`", "none"]
+    );
 }
 
 /// REQ: COR-022
@@ -139,8 +148,22 @@ fn doc_052_the_error_code_table_has_the_ten_documented_codes_in_order() {
 #[test]
 fn doc_050_input_mode_table_describes_press_and_release_of_f8() {
     let rows = table_after(&user_guide(), "| Input mode | Press F8 | Release F8 |");
-    assert_eq!(rows[0], ["Semantic VAD (default)", "Toggles voice on or off", "nothing"]);
-    assert_eq!(rows[1], ["Push to talk", "Turns voice on if it is off and starts recording", "Stops recording and commits what you said"]);
+    assert_eq!(
+        rows[0],
+        [
+            "Semantic VAD (default)",
+            "Toggles voice on or off",
+            "nothing"
+        ]
+    );
+    assert_eq!(
+        rows[1],
+        [
+            "Push to talk",
+            "Turns voice on if it is off and starts recording",
+            "Stops recording and commits what you said"
+        ]
+    );
 }
 
 /// REQ: F-051

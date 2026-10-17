@@ -7,10 +7,12 @@
 
 use ilium_plugin_api::abi::{self, QueueModel};
 use ilium_plugin_api::generated::host::plugins::InstanceState;
-use ilium_plugin_api::generated::types::lifecycle::DeactivationReason;
-use ilium_plugin_api::generated::types::events::{Event, OutputMatchedEvent, PaneTitleChangedEvent};
+use ilium_plugin_api::generated::types::events::{
+    Event, OutputMatchedEvent, PaneTitleChangedEvent,
+};
 use ilium_plugin_api::generated::types::intents::Submission;
 use ilium_plugin_api::generated::types::layout::Area;
+use ilium_plugin_api::generated::types::lifecycle::DeactivationReason;
 use ilium_plugin_api::generated::types::ui::ViewTarget;
 use ilium_plugin_api::ids::NodeId;
 use ilium_plugin_api::limits::{self, LimitKey};
@@ -21,8 +23,8 @@ use proptest::prelude::*;
 use serde_json::json;
 
 use crate::common::{
-    deliver_and_pump, has_failure, harness_with, is_active, manifest_text, plugin_id, probe_harness,
-    refused_codes, results, timer_events, trap, play_sound, ScriptedGuest, BOUND,
+    deliver_and_pump, harness_with, has_failure, is_active, manifest_text, play_sound, plugin_id,
+    probe_harness, refused_codes, results, timer_events, trap, ScriptedGuest, BOUND,
 };
 use crate::gap;
 
@@ -83,7 +85,13 @@ fn conf_life_01_activate_runs_exactly_once_across_many_batches() {
         deliver_and_pump(&handle, vec![Event::ThemeChanged]);
     }
     let calls = recorder.lock().expect("recorder").calls.clone();
-    assert_eq!(calls.iter().filter(|call| call.as_str() == "activate").count(), 1);
+    assert_eq!(
+        calls
+            .iter()
+            .filter(|call| call.as_str() == "activate")
+            .count(),
+        1
+    );
     assert_eq!(calls.first().map(String::as_str), Some("activate"));
 }
 
@@ -128,7 +136,11 @@ fn conf_life_03_deactivate_burning_600_ms_is_cut_and_keeps_no_restore_bytes() {
     let failures_before = handle.failures().len();
     let _ = gap::deactivate(&mut handle, DeactivationReason::Shutdown);
     assert_eq!(gap::restore_bytes(&handle), None);
-    assert_eq!(handle.failures().len(), failures_before, "a cut deactivate is not a failure");
+    assert_eq!(
+        handle.failures().len(),
+        failures_before,
+        "a cut deactivate is not a failure"
+    );
 }
 
 /// REQ: CONF-LIFE-03
@@ -157,7 +169,9 @@ fn conf_life_03_restore_bytes_limit_is_one_mebibyte() {
 fn conf_life_04_activate_error_leaves_the_plugin_not_active() {
     let (mut guest, _recorder) = ScriptedGuest::quiet();
     guest.activate_error = Some(invalid_argument("settings: bad"));
-    let built = ilium_plugin_host::testing::HostHarness::new().with_native_guest(Box::new(guest)).build();
+    let built = ilium_plugin_host::testing::HostHarness::new()
+        .with_native_guest(Box::new(guest))
+        .build();
     match built {
         Ok(handle) => assert!(!is_active(&handle)),
         Err(_) => {}
@@ -173,7 +187,10 @@ fn conf_life_04_activate_error_code_is_logged() {
         .with_native_guest(Box::new(guest))
         .build()
         .expect("a failed activation still builds the harness");
-    let logged = handle.logs().iter().any(|line| line.message.contains("invalid-argument"));
+    let logged = handle
+        .logs()
+        .iter()
+        .any(|line| line.message.contains("invalid-argument"));
     assert!(logged, "logs: {:?}", handle.logs().len());
 }
 
@@ -187,7 +204,12 @@ fn conf_life_04_events_are_not_delivered_to_a_plugin_that_failed_to_activate() {
         .build()
         .expect("harness builds");
     deliver_and_pump(&handle, vec![Event::ThemeChanged]);
-    assert!(!recorder.lock().expect("recorder").calls.iter().any(|call| call == "on-events"));
+    assert!(!recorder
+        .lock()
+        .expect("recorder")
+        .calls
+        .iter()
+        .any(|call| call == "on-events"));
 }
 
 /// REQ: CONF-LIFE-05
@@ -206,7 +228,10 @@ fn conf_life_05_each_delivered_reason_reaches_the_plugin() {
         let expected = crate::common::reason_name(&reason);
         let _ = gap::deactivate(&mut handle, reason);
         let calls = recorder.lock().expect("recorder").calls.clone();
-        assert!(calls.contains(&format!("deactivate:{expected}")), "{expected}: {calls:?}");
+        assert!(
+            calls.contains(&format!("deactivate:{expected}")),
+            "{expected}: {calls:?}"
+        );
     }
 }
 
@@ -217,7 +242,10 @@ fn conf_life_05_crash_restart_is_never_delivered_after_a_trap() {
     let handle = harness_with(guest, &[]);
     deliver_and_pump(&handle, vec![Event::ThemeChanged]);
     let reasons = recorder.lock().expect("recorder").reasons.clone();
-    assert!(!reasons.contains(&DeactivationReason::CrashRestart), "{reasons:?}");
+    assert!(
+        !reasons.contains(&DeactivationReason::CrashRestart),
+        "{reasons:?}"
+    );
 }
 
 // ----------------------------------------------------------- Events and submissions
@@ -228,18 +256,33 @@ fn conf_evt_01_600_queued_events_arrive_in_three_batches() {
     let (guest, recorder) = ScriptedGuest::quiet();
     let handle = harness_with(guest, &[]);
     deliver_and_pump(&handle, timer_events(600));
-    assert_eq!(recorder.lock().expect("recorder").batch_sizes, vec![256, 256, 88]);
+    assert_eq!(
+        recorder.lock().expect("recorder").batch_sizes,
+        vec![256, 256, 88]
+    );
 }
 
 /// REQ: CONF-EVT-01
 #[test]
 fn conf_evt_01_batch_boundary_255_256_257() {
-    for (queued, expected) in [(255usize, vec![255usize]), (256, vec![256]), (257, vec![256, 1])] {
+    for (queued, expected) in [
+        (255usize, vec![255usize]),
+        (256, vec![256]),
+        (257, vec![256, 1]),
+    ] {
         let (guest, recorder) = ScriptedGuest::quiet();
         let handle = harness_with(guest, &[]);
         deliver_and_pump(&handle, timer_events(queued));
-        assert_eq!(recorder.lock().expect("recorder").batch_sizes, expected, "queued={queued}");
-        assert_eq!(abi::batch_sizes(queued), expected, "pure model queued={queued}");
+        assert_eq!(
+            recorder.lock().expect("recorder").batch_sizes,
+            expected,
+            "queued={queued}"
+        );
+        assert_eq!(
+            abi::batch_sizes(queued),
+            expected,
+            "pure model queued={queued}"
+        );
     }
 }
 
@@ -257,7 +300,9 @@ proptest! {
 /// REQ: CONF-EVT-02
 #[test]
 fn conf_evt_02_on_events_burning_25_ms_traps_deadline() {
-    let handle = probe_harness(json!({"burn_ms": {"on-events": 25}}), &[]).build().expect("builds");
+    let handle = probe_harness(json!({"burn_ms": {"on-events": 25}}), &[])
+        .build()
+        .expect("builds");
     deliver_and_pump(&handle, vec![Event::ThemeChanged]);
     assert!(has_failure(&handle, "trap.deadline"));
 }
@@ -265,7 +310,9 @@ fn conf_evt_02_on_events_burning_25_ms_traps_deadline() {
 /// REQ: CONF-EVT-02
 #[test]
 fn conf_evt_02_on_events_burning_15_ms_stays_under_the_20_ms_deadline() {
-    let handle = probe_harness(json!({"burn_ms": {"on-events": 15}}), &[]).build().expect("builds");
+    let handle = probe_harness(json!({"burn_ms": {"on-events": 15}}), &[])
+        .build()
+        .expect("builds");
     deliver_and_pump(&handle, vec![Event::ThemeChanged]);
     assert!(!has_failure(&handle, "trap.deadline"));
 }
@@ -284,7 +331,10 @@ fn conf_evt_02_event_deadline_is_20_ms_default_and_50_ms_ceiling_for_t1() {
 fn conf_evt_03_three_renames_of_one_node_arrive_as_one_event_with_the_last_name() {
     let (guest, recorder) = ScriptedGuest::quiet();
     let handle = harness_with(guest, &["panes.read"]);
-    deliver_and_pump(&handle, vec![pane_title(7, "a"), pane_title(7, "b"), pane_title(7, "c")]);
+    deliver_and_pump(
+        &handle,
+        vec![pane_title(7, "a"), pane_title(7, "b"), pane_title(7, "c")],
+    );
     let events = recorder.lock().expect("recorder").events.clone();
     assert_eq!(events, vec![pane_title(7, "c")]);
 }
@@ -306,7 +356,10 @@ fn conf_evt_04_1500_drop_oldest_events_into_a_1024_queue_count_477_dropped() {
         queue.push("output-matched", row);
     }
     assert_eq!(queue.dropped_total(), 477);
-    assert_eq!(queue.events_dropped_records(), vec![("output-matched".to_string(), 477)]);
+    assert_eq!(
+        queue.events_dropped_records(),
+        vec![("output-matched".to_string(), 477)]
+    );
 }
 
 /// REQ: CONF-EVT-04
@@ -328,7 +381,11 @@ fn conf_evt_04_next_batch_after_overflow_starts_with_events_dropped() {
     handle.deliver((0..1500).map(output_matched).collect());
     let _ = handle.pump(64);
     let events = recorder.lock().expect("recorder").events.clone();
-    assert!(matches!(events.first(), Some(Event::EventsDropped(_))), "{:?}", events.first());
+    assert!(
+        matches!(events.first(), Some(Event::EventsDropped(_))),
+        "{:?}",
+        events.first()
+    );
 }
 
 /// REQ: CONF-EVT-05
@@ -364,7 +421,9 @@ fn conf_evt_05_revoked_grant_stops_delivery_of_later_events() {
 #[test]
 fn conf_evt_06_257_submissions_trap_submission_batch() {
     let (guest, _recorder) = ScriptedGuest::answering(Box::new(|_| {
-        Ok((0..257u64).map(|n| play_sound(n + 1, None)).collect::<Vec<Submission>>())
+        Ok((0..257u64)
+            .map(|n| play_sound(n + 1, None))
+            .collect::<Vec<Submission>>())
     }));
     let handle = harness_with(guest, &["sound.play"]);
     deliver_and_pump(&handle, vec![Event::ThemeChanged]);
@@ -375,7 +434,9 @@ fn conf_evt_06_257_submissions_trap_submission_batch() {
 #[test]
 fn conf_evt_06_256_submissions_do_not_trap() {
     let (guest, _recorder) = ScriptedGuest::answering(Box::new(|_| {
-        Ok((0..256u64).map(|n| play_sound(n + 1, None)).collect::<Vec<Submission>>())
+        Ok((0..256u64)
+            .map(|n| play_sound(n + 1, None))
+            .collect::<Vec<Submission>>())
     }));
     let handle = harness_with(guest, &["sound.play"]);
     deliver_and_pump(&handle, vec![Event::ThemeChanged]);
@@ -422,10 +483,19 @@ fn conf_evt_07_third_submission_invalid_cancels_the_others_with_the_index_messag
 #[test]
 fn conf_evt_07_pure_batch_verdicts_name_the_zero_based_index_of_the_offender() {
     use abi::{BatchCheck, BatchVerdict};
-    let ok = BatchCheck { shape_ok: true, grant_ok: true };
-    let bad = BatchCheck { shape_ok: false, grant_ok: true };
+    let ok = BatchCheck {
+        shape_ok: true,
+        grant_ok: true,
+    };
+    let bad = BatchCheck {
+        shape_ok: false,
+        grant_ok: true,
+    };
     let verdicts = abi::batch_verdicts(&[ok, ok, bad, ok]);
-    assert_eq!(verdicts[0], BatchVerdict::Cancelled("batch refused: submission 2".to_string()));
+    assert_eq!(
+        verdicts[0],
+        BatchVerdict::Cancelled("batch refused: submission 2".to_string())
+    );
     assert!(matches!(verdicts[2], BatchVerdict::Refused(_)));
 }
 
@@ -433,8 +503,14 @@ fn conf_evt_07_pure_batch_verdicts_name_the_zero_based_index_of_the_offender() {
 #[test]
 fn conf_evt_07_a_batch_without_an_offender_proceeds() {
     use abi::{BatchCheck, BatchVerdict};
-    let ok = BatchCheck { shape_ok: true, grant_ok: true };
-    assert_eq!(abi::batch_verdicts(&[ok, ok]), vec![BatchVerdict::Proceed, BatchVerdict::Proceed]);
+    let ok = BatchCheck {
+        shape_ok: true,
+        grant_ok: true,
+    };
+    assert_eq!(
+        abi::batch_verdicts(&[ok, ok]),
+        vec![BatchVerdict::Proceed, BatchVerdict::Proceed]
+    );
     assert!(abi::batch_verdicts(&[]).is_empty());
 }
 
@@ -443,12 +519,18 @@ fn conf_evt_07_a_batch_without_an_offender_proceeds() {
 fn conf_evt_08_second_submission_with_the_same_dedup_key_is_a_duplicate() {
     use ilium_plugin_api::generated::types::requests::Outcome;
     let (guest, _recorder) = ScriptedGuest::answering(Box::new(|_| {
-        Ok(vec![play_sound(1, Some("once")), play_sound(2, Some("once"))])
+        Ok(vec![
+            play_sound(1, Some("once")),
+            play_sound(2, Some("once")),
+        ])
     }));
     let handle = harness_with(guest, &["sound.play"]);
     deliver_and_pump(&handle, vec![Event::ThemeChanged]);
     let outcomes = results(&handle);
-    let duplicates = outcomes.iter().filter(|r| matches!(r.outcome, Outcome::Duplicate(_))).count();
+    let duplicates = outcomes
+        .iter()
+        .filter(|r| matches!(r.outcome, Outcome::Duplicate(_)))
+        .count();
     assert_eq!(duplicates, 1);
 }
 
@@ -461,31 +543,41 @@ fn conf_evt_08_distinct_dedup_keys_are_not_duplicates() {
     }));
     let handle = harness_with(guest, &["sound.play"]);
     deliver_and_pump(&handle, vec![Event::ThemeChanged]);
-    assert!(!results(&handle).iter().any(|r| matches!(r.outcome, Outcome::Duplicate(_))));
+    assert!(!results(&handle)
+        .iter()
+        .any(|r| matches!(r.outcome, Outcome::Duplicate(_))));
 }
 
 /// REQ: CONF-EVT-08
 #[test]
 fn conf_evt_08_same_key_after_ten_minutes_is_not_a_duplicate() {
     use ilium_plugin_api::generated::types::requests::Outcome;
-    let (guest, _recorder) = ScriptedGuest::answering(Box::new(|_| Ok(vec![play_sound(1, Some("again"))])));
+    let (guest, _recorder) =
+        ScriptedGuest::answering(Box::new(|_| Ok(vec![play_sound(1, Some("again"))])));
     let mut handle = harness_with(guest, &["sound.play"]);
     deliver_and_pump(&handle, vec![Event::ThemeChanged]);
     handle.advance_clock(std::time::Duration::from_millis(600_001));
     deliver_and_pump(&handle, vec![Event::ThemeChanged]);
-    assert!(!results(&handle).iter().any(|r| matches!(r.outcome, Outcome::Duplicate(_))));
+    assert!(!results(&handle)
+        .iter()
+        .any(|r| matches!(r.outcome, Outcome::Duplicate(_))));
 }
 
 /// REQ: CONF-EVT-09
 #[test]
 fn conf_evt_09_dedup_key_with_a_space_is_refused_dedup_key_invalid() {
-    let (guest, _recorder) = ScriptedGuest::answering(Box::new(|_| Ok(vec![play_sound(1, Some("has space"))])));
+    let (guest, _recorder) =
+        ScriptedGuest::answering(Box::new(|_| Ok(vec![play_sound(1, Some("has space"))])));
     let handle = harness_with(guest, &["sound.play"]);
     deliver_and_pump(&handle, vec![Event::ThemeChanged]);
     let refused = refused_codes(&results(&handle));
     assert_eq!(refused.len(), 1);
     assert_eq!(refused[0].1, "invalid-argument");
-    assert!(refused[0].2.starts_with("dedup-key-invalid:"), "{}", refused[0].2);
+    assert!(
+        refused[0].2.starts_with("dedup-key-invalid:"),
+        "{}",
+        refused[0].2
+    );
 }
 
 proptest! {
@@ -525,7 +617,11 @@ fn conf_evt_10_the_plugin_receives_the_completion_as_an_event() {
     let handle = harness_with(guest, &["sound.play"]);
     deliver_and_pump(&handle, vec![Event::ThemeChanged]);
     let seen = recorder.lock().expect("recorder").events.clone();
-    assert!(seen.iter().any(|event| matches!(event, Event::RequestCompleted(_))), "{seen:?}");
+    assert!(
+        seen.iter()
+            .any(|event| matches!(event, Event::RequestCompleted(_))),
+        "{seen:?}"
+    );
 }
 
 // ------------------------------------------------------------------------- Grants
@@ -533,10 +629,16 @@ fn conf_evt_10_the_plugin_receives_the_completion_as_an_event() {
 /// REQ: CONF-GRANT-01
 #[test]
 fn conf_grant_01_declined_fs_read_import_returns_not_permitted() {
-    let handle = probe_harness(json!({"call": {"fs.read": {"scope": "project", "path": "a.txt"}}}), &[])
-        .build()
-        .expect("builds");
-    let logged = handle.logs().iter().any(|line| line.message.contains("not-permitted"));
+    let handle = probe_harness(
+        json!({"call": {"fs.read": {"scope": "project", "path": "a.txt"}}}),
+        &[],
+    )
+    .build()
+    .expect("builds");
+    let logged = handle
+        .logs()
+        .iter()
+        .any(|line| line.message.contains("not-permitted"));
     assert!(logged);
 }
 
@@ -549,7 +651,10 @@ fn conf_grant_01_granted_fs_read_import_is_not_refused() {
     )
     .build()
     .expect("builds");
-    assert!(!handle.logs().iter().any(|line| line.message.contains("not-permitted")));
+    assert!(!handle
+        .logs()
+        .iter()
+        .any(|line| line.message.contains("not-permitted")));
 }
 
 /// REQ: CONF-GRANT-02
@@ -570,7 +675,9 @@ fn conf_grant_02_without_a_revocation_the_same_submission_is_not_refused() {
     let (guest, _recorder) = ScriptedGuest::answering(Box::new(|_| Ok(vec![play_sound(1, None)])));
     let handle = harness_with(guest, &["sound.play"]);
     deliver_and_pump(&handle, vec![Event::ThemeChanged]);
-    assert!(refused_codes(&results(&handle)).iter().all(|(_, code, _)| code != "not-permitted"));
+    assert!(refused_codes(&results(&handle))
+        .iter()
+        .all(|(_, code, _)| code != "not-permitted"));
 }
 
 /// REQ: CONF-GRANT-03
@@ -582,7 +689,10 @@ fn conf_grant_03_grant_arguments_are_matched_exactly_project_does_not_cover_data
     )
     .build()
     .expect("builds");
-    assert!(handle.logs().iter().any(|line| line.message.contains("not-permitted")));
+    assert!(handle
+        .logs()
+        .iter()
+        .any(|line| line.message.contains("not-permitted")));
 }
 
 /// REQ: CONF-GRANT-03
@@ -594,32 +704,43 @@ fn conf_grant_03_exact_scope_match_is_allowed() {
     )
     .build()
     .expect("builds");
-    assert!(!handle.logs().iter().any(|line| line.message.contains("not-permitted")));
+    assert!(!handle
+        .logs()
+        .iter()
+        .any(|line| line.message.contains("not-permitted")));
 }
 
 /// REQ: CONF-GRANT-04
 #[test]
 fn conf_grant_04_grant_now_of_an_undeclared_grant_fails_harness_grant_not_declared() {
-    let mut host = ilium_plugin_testkit::FakeHost::for_manifest(crate::common::manifest_path("minimal.json"))
-        .expect("manifest loads");
-    let error = host.grant_now("fs.read:project").expect_err("not declared in the manifest");
+    let mut host =
+        ilium_plugin_testkit::FakeHost::for_manifest(crate::common::manifest_path("minimal.json"))
+            .expect("manifest loads");
+    let error = host
+        .grant_now("fs.read:project")
+        .expect_err("not declared in the manifest");
     assert_eq!(error.code, "harness.grant-not-declared");
 }
 
 /// REQ: CONF-GRANT-04
 #[test]
 fn conf_grant_04_grant_now_of_a_declared_grant_succeeds() {
-    let mut host = ilium_plugin_testkit::FakeHost::for_manifest(crate::common::manifest_path("minimal.json"))
-        .expect("manifest loads");
-    host.grant_now("sound.play").expect("declared in the manifest");
+    let mut host =
+        ilium_plugin_testkit::FakeHost::for_manifest(crate::common::manifest_path("minimal.json"))
+            .expect("manifest loads");
+    host.grant_now("sound.play")
+        .expect("declared in the manifest");
 }
 
 /// REQ: CONF-GRANT-05
 #[test]
 fn conf_grant_05_call_of_a_capability_never_requested_traps_import_not_requested() {
-    let handle = probe_harness(json!({"call": {"http.fetch": {"url": "https://example.test/"}}}), &[])
-        .build()
-        .expect("builds");
+    let handle = probe_harness(
+        json!({"call": {"http.fetch": {"url": "https://example.test/"}}}),
+        &[],
+    )
+    .build()
+    .expect("builds");
     assert!(has_failure(&handle, "trap.import-not-requested"));
 }
 
@@ -640,16 +761,37 @@ fn conf_grant_05_call_of_a_requested_capability_does_not_trap() {
 /// REQ: CONF-VIEW-01
 #[test]
 fn conf_view_01_render_burning_15_ms_keeps_the_last_good_render_and_counts_trap_deadline() {
-    let mut handle = probe_harness(json!({"burn_ms": {"render": 15}}), &[]).build().expect("builds");
-    let outcome = gap::render(&mut handle, ViewTarget::Panel("main".to_string()), Area { columns: 80, rows: 24 });
-    assert_eq!(outcome.expect_err("over the 10 ms deadline").code.as_str(), "trap.deadline");
+    let mut handle = probe_harness(json!({"burn_ms": {"render": 15}}), &[])
+        .build()
+        .expect("builds");
+    let outcome = gap::render(
+        &mut handle,
+        ViewTarget::Panel("main".to_string()),
+        Area {
+            columns: 80,
+            rows: 24,
+        },
+    );
+    assert_eq!(
+        outcome.expect_err("over the 10 ms deadline").code.as_str(),
+        "trap.deadline"
+    );
 }
 
 /// REQ: CONF-VIEW-01
 #[test]
 fn conf_view_01_render_burning_8_ms_stays_under_the_10_ms_deadline() {
-    let mut handle = probe_harness(json!({"burn_ms": {"render": 8}}), &[]).build().expect("builds");
-    let outcome = gap::render(&mut handle, ViewTarget::Panel("main".to_string()), Area { columns: 80, rows: 24 });
+    let mut handle = probe_harness(json!({"burn_ms": {"render": 8}}), &[])
+        .build()
+        .expect("builds");
+    let outcome = gap::render(
+        &mut handle,
+        ViewTarget::Panel("main".to_string()),
+        Area {
+            columns: 80,
+            rows: 24,
+        },
+    );
     assert!(outcome.is_ok());
 }
 
@@ -657,8 +799,15 @@ fn conf_view_01_render_burning_8_ms_stays_under_the_10_ms_deadline() {
 #[test]
 fn conf_view_02_rendering_twice_gives_equal_trees() {
     let mut handle = probe_harness(json!({}), &[]).build().expect("builds");
-    let area = Area { columns: 80, rows: 24 };
-    let first = gap::render(&mut handle, ViewTarget::Panel("main".to_string()), area.clone());
+    let area = Area {
+        columns: 80,
+        rows: 24,
+    };
+    let first = gap::render(
+        &mut handle,
+        ViewTarget::Panel("main".to_string()),
+        area.clone(),
+    );
     let second = gap::render(&mut handle, ViewTarget::Panel("main".to_string()), area);
     assert_eq!(first.expect("first"), second.expect("second"));
 }
@@ -668,9 +817,32 @@ fn conf_view_02_rendering_twice_gives_equal_trees() {
 fn conf_view_02_a_render_between_two_equal_renders_changes_nothing() {
     let mut handle = probe_harness(json!({}), &[]).build().expect("builds");
     let panel = ViewTarget::Panel("main".to_string());
-    let before = gap::render(&mut handle, panel.clone(), Area { columns: 80, rows: 24 }).expect("before");
-    let _ = gap::render(&mut handle, panel.clone(), Area { columns: 40, rows: 10 });
-    let after = gap::render(&mut handle, panel, Area { columns: 80, rows: 24 }).expect("after");
+    let before = gap::render(
+        &mut handle,
+        panel.clone(),
+        Area {
+            columns: 80,
+            rows: 24,
+        },
+    )
+    .expect("before");
+    let _ = gap::render(
+        &mut handle,
+        panel.clone(),
+        Area {
+            columns: 40,
+            rows: 10,
+        },
+    );
+    let after = gap::render(
+        &mut handle,
+        panel,
+        Area {
+            columns: 80,
+            rows: 24,
+        },
+    )
+    .expect("after");
     assert_eq!(before, after);
 }
 
@@ -678,17 +850,38 @@ fn conf_view_02_a_render_between_two_equal_renders_changes_nothing() {
 #[test]
 fn conf_view_03_4097_nodes_trap_invalid_ui_tree() {
     let tree = gap::ui_tree_with_nodes(4097);
-    let mut handle = probe_harness(json!({"render_tree": tree}), &[]).build().expect("builds");
-    let outcome = gap::render(&mut handle, ViewTarget::Panel("main".to_string()), Area { columns: 80, rows: 24 });
-    assert_eq!(outcome.expect_err("one node too many").code.as_str(), "trap.invalid-ui-tree");
+    let mut handle = probe_harness(json!({"render_tree": tree}), &[])
+        .build()
+        .expect("builds");
+    let outcome = gap::render(
+        &mut handle,
+        ViewTarget::Panel("main".to_string()),
+        Area {
+            columns: 80,
+            rows: 24,
+        },
+    );
+    assert_eq!(
+        outcome.expect_err("one node too many").code.as_str(),
+        "trap.invalid-ui-tree"
+    );
 }
 
 /// REQ: CONF-VIEW-03
 #[test]
 fn conf_view_03_4096_nodes_render() {
     let tree = gap::ui_tree_with_nodes(4096);
-    let mut handle = probe_harness(json!({"render_tree": tree}), &[]).build().expect("builds");
-    let outcome = gap::render(&mut handle, ViewTarget::Panel("main".to_string()), Area { columns: 80, rows: 24 });
+    let mut handle = probe_harness(json!({"render_tree": tree}), &[])
+        .build()
+        .expect("builds");
+    let outcome = gap::render(
+        &mut handle,
+        ViewTarget::Panel("main".to_string()),
+        Area {
+            columns: 80,
+            rows: 24,
+        },
+    );
     assert!(outcome.is_ok());
 }
 
@@ -696,8 +889,17 @@ fn conf_view_03_4096_nodes_render() {
 #[test]
 fn conf_view_03_4095_nodes_render() {
     let tree = gap::ui_tree_with_nodes(4095);
-    let mut handle = probe_harness(json!({"render_tree": tree}), &[]).build().expect("builds");
-    let outcome = gap::render(&mut handle, ViewTarget::Panel("main".to_string()), Area { columns: 80, rows: 24 });
+    let mut handle = probe_harness(json!({"render_tree": tree}), &[])
+        .build()
+        .expect("builds");
+    let outcome = gap::render(
+        &mut handle,
+        ViewTarget::Panel("main".to_string()),
+        Area {
+            columns: 80,
+            rows: 24,
+        },
+    );
     assert!(outcome.is_ok());
 }
 
@@ -705,20 +907,39 @@ fn conf_view_03_4095_nodes_render() {
 #[test]
 fn conf_view_04_an_action_key_the_view_never_set_is_not_delivered() {
     let mut handle = probe_harness(json!({}), &[]).build().expect("builds");
-    gap::click_action(&mut handle, ViewTarget::Panel("main".to_string()), "never-set");
+    gap::click_action(
+        &mut handle,
+        ViewTarget::Panel("main".to_string()),
+        "never-set",
+    );
     let _ = handle.pump(8);
     assert_eq!(handle.failures().len(), 0);
-    assert!(handle.logs().iter().all(|line| !line.message.contains("ui-action received")));
+    assert!(handle
+        .logs()
+        .iter()
+        .all(|line| !line.message.contains("ui-action received")));
 }
 
 /// REQ: CONF-VIEW-04
 #[test]
 fn conf_view_04_an_action_key_the_view_did_set_is_delivered() {
-    let mut handle = probe_harness(json!({"render_action_key": "go"}), &[]).build().expect("builds");
-    let _ = gap::render(&mut handle, ViewTarget::Panel("main".to_string()), Area { columns: 80, rows: 24 });
+    let mut handle = probe_harness(json!({"render_action_key": "go"}), &[])
+        .build()
+        .expect("builds");
+    let _ = gap::render(
+        &mut handle,
+        ViewTarget::Panel("main".to_string()),
+        Area {
+            columns: 80,
+            rows: 24,
+        },
+    );
     gap::click_action(&mut handle, ViewTarget::Panel("main".to_string()), "go");
     let _ = handle.pump(8);
-    assert!(handle.logs().iter().any(|line| line.message.contains("ui-action received")));
+    assert!(handle
+        .logs()
+        .iter()
+        .any(|line| line.message.contains("ui-action received")));
 }
 
 // ------------------------------------------------------- Storage, memory and state
@@ -750,12 +971,18 @@ fn conf_store_01_a_missing_key_reads_none_after_a_reopen() {
 /// REQ: CONF-STORE-01
 #[test]
 fn conf_store_01_a_value_survives_a_plugin_trap_and_restart() {
-    let handle = probe_harness(json!({"store": {"put": ["k", "v"]}, "trap_after": "on-events"}), &[])
-        .build()
-        .expect("builds");
+    let handle = probe_harness(
+        json!({"store": {"put": ["k", "v"]}, "trap_after": "on-events"}),
+        &[],
+    )
+    .build()
+    .expect("builds");
     deliver_and_pump(&handle, vec![Event::ThemeChanged]);
     assert!(has_failure(&handle, "trap.deadline") || handle.state() != InstanceState::Inactive);
-    assert!(handle.logs().iter().any(|line| line.message.contains("store.get k = v")));
+    assert!(handle
+        .logs()
+        .iter()
+        .any(|line| line.message.contains("store.get k = v")));
 }
 
 /// REQ: CONF-STORE-02
@@ -763,7 +990,9 @@ fn conf_store_01_a_value_survives_a_plugin_trap_and_restart() {
 fn conf_store_02_value_of_1_mebibyte_plus_one_byte_is_refused_quota_exceeded() {
     let dir = tempfile::tempdir().expect("tempdir");
     let mut storage = open_storage(dir.path());
-    let error = storage.put("state", "big", vec![0u8; VALUE_MAX_BYTES + 1]).expect_err("over the value limit");
+    let error = storage
+        .put("state", "big", vec![0u8; VALUE_MAX_BYTES + 1])
+        .expect_err("over the value limit");
     assert_eq!(error.code, ilium_plugin_api::ErrorCode::QuotaExceeded);
 }
 
@@ -772,8 +1001,12 @@ fn conf_store_02_value_of_1_mebibyte_plus_one_byte_is_refused_quota_exceeded() {
 fn conf_store_02_value_of_exactly_1_mebibyte_is_stored() {
     let dir = tempfile::tempdir().expect("tempdir");
     let mut storage = open_storage(dir.path());
-    storage.put("state", "edge", vec![0u8; VALUE_MAX_BYTES]).expect("at the limit");
-    storage.put("state", "under", vec![0u8; VALUE_MAX_BYTES - 1]).expect("under the limit");
+    storage
+        .put("state", "edge", vec![0u8; VALUE_MAX_BYTES])
+        .expect("at the limit");
+    storage
+        .put("state", "under", vec![0u8; VALUE_MAX_BYTES - 1])
+        .expect("under the limit");
 }
 
 /// REQ: CONF-STORE-02
@@ -789,9 +1022,13 @@ fn conf_store_03_a_bucket_over_16_mebibytes_is_refused_quota_exceeded() {
     let mut storage = open_storage(dir.path());
     let chunk = vec![0u8; VALUE_MAX_BYTES];
     for index in 0..16 {
-        storage.put("state", &format!("k{index}"), chunk.clone()).expect("within the bucket");
+        storage
+            .put("state", &format!("k{index}"), chunk.clone())
+            .expect("within the bucket");
     }
-    let error = storage.put("state", "one-more", vec![0u8; 1]).expect_err("17th mebibyte");
+    let error = storage
+        .put("state", "one-more", vec![0u8; 1])
+        .expect_err("17th mebibyte");
     assert_eq!(error.code, ilium_plugin_api::ErrorCode::QuotaExceeded);
 }
 
@@ -802,7 +1039,9 @@ fn conf_store_03_a_bucket_of_exactly_16_mebibytes_is_accepted() {
     let mut storage = open_storage(dir.path());
     let chunk = vec![0u8; VALUE_MAX_BYTES];
     for index in 0..16 {
-        storage.put("state", &format!("k{index}"), chunk.clone()).expect("within the bucket");
+        storage
+            .put("state", &format!("k{index}"), chunk.clone())
+            .expect("within the bucket");
     }
     assert_eq!(BUCKET_MAX_BYTES, 16 * 1024 * 1024);
 }
@@ -814,15 +1053,21 @@ fn conf_store_03_another_bucket_is_not_affected_by_a_full_bucket() {
     let mut storage = open_storage(dir.path());
     let chunk = vec![0u8; VALUE_MAX_BYTES];
     for index in 0..16 {
-        storage.put("state", &format!("k{index}"), chunk.clone()).expect("fill");
+        storage
+            .put("state", &format!("k{index}"), chunk.clone())
+            .expect("fill");
     }
-    storage.put("other", "k", vec![1]).expect("a second bucket has its own quota");
+    storage
+        .put("other", "k", vec![1])
+        .expect("a second bucket has its own quota");
 }
 
 /// REQ: CONF-MEM-01
 #[test]
 fn conf_mem_01_allocating_40_mib_with_the_default_32_traps_memory() {
-    let handle = probe_harness(json!({"alloc_mib": 40}), &[]).build().expect("builds");
+    let handle = probe_harness(json!({"alloc_mib": 40}), &[])
+        .build()
+        .expect("builds");
     deliver_and_pump(&handle, vec![Event::ThemeChanged]);
     assert!(has_failure(&handle, "trap.memory"));
 }
@@ -830,7 +1075,9 @@ fn conf_mem_01_allocating_40_mib_with_the_default_32_traps_memory() {
 /// REQ: CONF-MEM-01
 #[test]
 fn conf_mem_01_allocating_24_mib_with_the_default_32_does_not_trap() {
-    let handle = probe_harness(json!({"alloc_mib": 24}), &[]).build().expect("builds");
+    let handle = probe_harness(json!({"alloc_mib": 24}), &[])
+        .build()
+        .expect("builds");
     deliver_and_pump(&handle, vec![Event::ThemeChanged]);
     assert!(!has_failure(&handle, "trap.memory"));
 }
@@ -879,9 +1126,18 @@ proptest! {
 /// REQ: CONF-MEM-02
 #[test]
 fn conf_mem_02_manifest_with_memory_mib_256_installs_without_an_error_diagnostic() {
-    let text = std::fs::read_to_string(crate::common::manifest_path("limits-256.json")).expect("fixture");
-    let diagnostics = ilium_plugin_api::manifest::validate_json(&text, &validation_context(Tier::T2, CheckMode::Install));
-    assert!(diagnostics.iter().all(|d| d.severity != ilium_plugin_api::Severity::Error), "{diagnostics:?}");
+    let text =
+        std::fs::read_to_string(crate::common::manifest_path("limits-256.json")).expect("fixture");
+    let diagnostics = ilium_plugin_api::manifest::validate_json(
+        &text,
+        &validation_context(Tier::T2, CheckMode::Install),
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .all(|d| d.severity != ilium_plugin_api::Severity::Error),
+        "{diagnostics:?}"
+    );
 }
 
 // ----------------------------------------------------------------------- Package
@@ -890,7 +1146,10 @@ fn conf_mem_02_manifest_with_memory_mib_256_installs_without_an_error_diagnostic
 #[test]
 fn conf_pkg_01_packing_the_same_files_twice_gives_equal_bytes() {
     let files = vec![
-        ("manifest.json".to_string(), manifest_text("minimal.json").into_bytes()),
+        (
+            "manifest.json".to_string(),
+            manifest_text("minimal.json").into_bytes(),
+        ),
         ("server.wasm".to_string(), vec![0, 97, 115, 109, 1, 0, 0, 0]),
     ];
     let first = ilium_plugin_host::package::write_package(&files).expect("first pack");
@@ -901,9 +1160,13 @@ fn conf_pkg_01_packing_the_same_files_twice_gives_equal_bytes() {
 /// REQ: CONF-PKG-01
 #[test]
 fn conf_pkg_01_the_input_order_of_files_does_not_change_the_bytes() {
-    let a = ("manifest.json".to_string(), manifest_text("minimal.json").into_bytes());
+    let a = (
+        "manifest.json".to_string(),
+        manifest_text("minimal.json").into_bytes(),
+    );
     let b = ("server.wasm".to_string(), vec![0, 97, 115, 109, 1, 0, 0, 0]);
-    let forward = ilium_plugin_host::package::write_package(&[a.clone(), b.clone()]).expect("forward");
+    let forward =
+        ilium_plugin_host::package::write_package(&[a.clone(), b.clone()]).expect("forward");
     let backward = ilium_plugin_host::package::write_package(&[b, a]).expect("backward");
     assert_eq!(forward, backward);
 }
@@ -921,7 +1184,11 @@ fn conf_pkg_02_api_version_section_0_1_0_is_three_u16_big_endian() {
 fn conf_pkg_02_section_of_five_or_seven_bytes_is_refused_package_api_section_invalid() {
     for length in [0usize, 5, 7] {
         let error = ApiVersion::from_custom_section(&vec![0u8; length]).expect_err("wrong length");
-        assert_eq!(error.code.as_str(), "package.api-section-invalid", "length {length}");
+        assert_eq!(
+            error.code.as_str(),
+            "package.api-section-invalid",
+            "length {length}"
+        );
     }
 }
 
@@ -954,7 +1221,12 @@ fn conf_pkg_03_one_changed_byte_of_a_file_is_refused_manifest_file_hash() {
     let bad = pack_fixture(&manifest, &[0, 97, 115, 109, 1, 0, 0, 1]);
     assert_ne!(good, bad);
     let errors = ilium_plugin_host::package::read_package(&bad).expect_err("hash differs");
-    assert!(errors.iter().any(|d| d.code.as_str() == "manifest.file-hash"), "{errors:?}");
+    assert!(
+        errors
+            .iter()
+            .any(|d| d.code.as_str() == "manifest.file-hash"),
+        "{errors:?}"
+    );
 }
 
 /// REQ: CONF-PKG-03
@@ -963,31 +1235,53 @@ fn conf_pkg_03_an_entry_with_a_wrong_length_is_refused_manifest_file_length() {
     let manifest = manifest_text("minimal.json");
     let longer = pack_fixture(&manifest, &[0, 97, 115, 109, 1, 0, 0, 0, 9]);
     let errors = ilium_plugin_host::package::read_package(&longer).expect_err("length differs");
-    assert!(errors.iter().any(|d| d.code.as_str() == "manifest.file-length"), "{errors:?}");
+    assert!(
+        errors
+            .iter()
+            .any(|d| d.code.as_str() == "manifest.file-length"),
+        "{errors:?}"
+    );
 }
 
 /// REQ: CONF-PKG-04
 #[test]
 fn conf_pkg_04_an_unsigned_package_is_refused_trust_unsigned_without_allow_unsigned() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let package = pack_fixture(&manifest_text("minimal.json"), &[0, 97, 115, 109, 1, 0, 0, 0]);
+    let package = pack_fixture(
+        &manifest_text("minimal.json"),
+        &[0, 97, 115, 109, 1, 0, 0, 0],
+    );
     let file = dir.path().join("example.iliumpkg");
     std::fs::write(&file, package).expect("write package");
     let env = crate::common::cli_env(dir.path());
     let output = crate::common::run_cli(&env, &["install", file.to_str().expect("utf8"), "--yes"]);
     assert_eq!(output.exit_code, 2);
-    assert!(output.stdout_jsonl.iter().any(|r| r["code"] == "trust.unsigned"));
+    assert!(output
+        .stdout_jsonl
+        .iter()
+        .any(|r| r["code"] == "trust.unsigned"));
 }
 
 /// REQ: CONF-PKG-04
 #[test]
 fn conf_pkg_04_an_unsigned_package_installs_as_tier_t3_with_allow_unsigned() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let package = pack_fixture(&manifest_text("minimal.json"), &[0, 97, 115, 109, 1, 0, 0, 0]);
+    let package = pack_fixture(
+        &manifest_text("minimal.json"),
+        &[0, 97, 115, 109, 1, 0, 0, 0],
+    );
     let file = dir.path().join("example.iliumpkg");
     std::fs::write(&file, package).expect("write package");
     let env = crate::common::cli_env(dir.path());
-    let output = crate::common::run_cli(&env, &["install", file.to_str().expect("utf8"), "--allow-unsigned", "--yes"]);
+    let output = crate::common::run_cli(
+        &env,
+        &[
+            "install",
+            file.to_str().expect("utf8"),
+            "--allow-unsigned",
+            "--yes",
+        ],
+    );
     assert_eq!(output.exit_code, 0);
     let result = crate::common::records_of(&output, "result")[0].clone();
     assert_eq!(result["tier"], "T3");
@@ -996,9 +1290,16 @@ fn conf_pkg_04_an_unsigned_package_installs_as_tier_t3_with_allow_unsigned() {
 /// REQ: CONF-PKG-05
 #[test]
 fn conf_pkg_05_an_unknown_top_level_key_is_refused_manifest_unknown_key() {
-    let text = std::fs::read_to_string(crate::common::manifest_path("unknown-key.json")).expect("fixture");
-    let diagnostics = ilium_plugin_api::manifest::validate_json(&text, &validation_context(Tier::T3, CheckMode::Install));
-    let hit = diagnostics.iter().find(|d| d.code.as_str() == "manifest.unknown-key").expect("unknown key reported");
+    let text =
+        std::fs::read_to_string(crate::common::manifest_path("unknown-key.json")).expect("fixture");
+    let diagnostics = ilium_plugin_api::manifest::validate_json(
+        &text,
+        &validation_context(Tier::T3, CheckMode::Install),
+    );
+    let hit = diagnostics
+        .iter()
+        .find(|d| d.code.as_str() == "manifest.unknown-key")
+        .expect("unknown key reported");
     assert_eq!(hit.pointer, "/colour");
 }
 
@@ -1006,14 +1307,22 @@ fn conf_pkg_05_an_unknown_top_level_key_is_refused_manifest_unknown_key() {
 #[test]
 fn conf_pkg_05_the_known_manifest_has_no_unknown_key_diagnostic() {
     let text = manifest_text("minimal.json");
-    let diagnostics = ilium_plugin_api::manifest::validate_json(&text, &validation_context(Tier::T3, CheckMode::Install));
-    assert!(!diagnostics.iter().any(|d| d.code.as_str() == "manifest.unknown-key"));
+    let diagnostics = ilium_plugin_api::manifest::validate_json(
+        &text,
+        &validation_context(Tier::T3, CheckMode::Install),
+    );
+    assert!(!diagnostics
+        .iter()
+        .any(|d| d.code.as_str() == "manifest.unknown-key"));
 }
 
 /// REQ: CONF-PKG-05
 #[test]
 fn conf_pkg_05_a_bound_on_wall_time_applies_to_every_validation() {
     let started = std::time::Instant::now();
-    let _ = ilium_plugin_api::manifest::validate_json("{}", &validation_context(Tier::T3, CheckMode::Check));
+    let _ = ilium_plugin_api::manifest::validate_json(
+        "{}",
+        &validation_context(Tier::T3, CheckMode::Check),
+    );
     assert!(started.elapsed() < BOUND);
 }

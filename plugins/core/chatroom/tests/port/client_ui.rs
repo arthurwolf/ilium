@@ -12,7 +12,9 @@ fn panel() -> ViewTarget {
 
 fn feed_numbered(host: &mut FakeHost, count: usize, hour: u32, label: &str) {
     for index in 0..count {
-        host.deliver_one(topic_event(&format!("2026-07-26 {hour}:{index:02}:00 +02:00 | agent:codex | {label} {index:02}")));
+        host.deliver_one(topic_event(&format!(
+            "2026-07-26 {hour}:{index:02}:00 +02:00 | agent:codex | {label} {index:02}"
+        )));
     }
     host.settle();
 }
@@ -22,7 +24,12 @@ fn draw(host: &mut FakeHost, columns: u16, rows: u16) -> String {
 }
 
 fn scroll_to(host: &mut FakeHost, offset: f64) {
-    host.send_action(panel(), "scroll", ActionKind::Scrolled, ActionValue::Number(offset));
+    host.send_action(
+        panel(),
+        "scroll",
+        ActionKind::Scrolled,
+        ActionValue::Number(offset),
+    );
     host.settle();
 }
 
@@ -32,7 +39,10 @@ fn port_overflowing_room_draws_a_scrollbar_and_starts_at_the_live_tail() {
     let mut host = client_host();
     feed_numbered(&mut host, 20, 12, "unique chatroom message");
     let text = draw(&mut host, 100, 18);
-    assert!(text.contains('\u{2588}'), "a scrollbar thumb is drawn:\n{text}");
+    assert!(
+        text.contains('\u{2588}'),
+        "a scrollbar thumb is drawn:\n{text}"
+    );
     assert!(text.contains("unique chatroom message 19"));
     assert!(!text.contains("unique chatroom message 00"));
 }
@@ -44,7 +54,9 @@ fn port_a_room_that_fits_draws_no_scrollbar_thumb() {
     feed_numbered(&mut host, 2, 12, "unique chatroom message");
     let text = draw(&mut host, 100, 18);
     assert!(!text.contains('\u{2588}'), "{text}");
-    assert!(text.contains("unique chatroom message 00") && text.contains("unique chatroom message 01"));
+    assert!(
+        text.contains("unique chatroom message 00") && text.contains("unique chatroom message 01")
+    );
 }
 
 /// REQ: PORT:ilium-client/src/chatroom_ui.rs::composer_keeps_the_tail_of_a_long_draft_visible
@@ -52,18 +64,31 @@ fn port_a_room_that_fits_draws_no_scrollbar_thumb() {
 fn port_composer_keeps_the_tail_of_a_long_draft_visible() {
     let mut host = client_host();
     let draft = format!("{}TAIL-MARKER", "long draft padding ".repeat(20));
-    host.send_action(panel(), "composer", ActionKind::Changed, ActionValue::Text(draft));
+    host.send_action(
+        panel(),
+        "composer",
+        ActionKind::Changed,
+        ActionValue::Text(draft),
+    );
     host.settle();
     let text = draw(&mut host, 100, 18);
     assert!(text.contains("TAIL-MARKER"), "{text}");
-    assert!(!text.contains("long draft padding long draft"), "the scrolled-off head must not be drawn");
+    assert!(
+        !text.contains("long draft padding long draft"),
+        "the scrolled-off head must not be drawn"
+    );
 }
 
 /// REQ: PORT:ilium-client/src/chatroom_ui.rs::composer_keeps_the_tail_of_a_long_draft_visible
 #[test]
 fn port_composer_shows_a_short_draft_from_its_first_character() {
     let mut host = client_host();
-    host.send_action(panel(), "composer", ActionKind::Changed, ActionValue::Text("short draft".to_string()));
+    host.send_action(
+        panel(),
+        "composer",
+        ActionKind::Changed,
+        ActionValue::Text("short draft".to_string()),
+    );
     host.settle();
     assert!(draw(&mut host, 100, 18).contains("short draft"));
 }
@@ -121,7 +146,10 @@ fn port_wheel_and_scrollbar_drag_route_through_the_virtual_chatroom_view() {
     assert!(draw(&mut host, 100, 18).contains("mouse history message 29"));
     scroll_to(&mut host, 0.0);
     let top = draw(&mut host, 100, 18);
-    assert!(top.contains("mouse history message 00") && !top.contains("mouse history message 29"), "{top}");
+    assert!(
+        top.contains("mouse history message 00") && !top.contains("mouse history message 29"),
+        "{top}"
+    );
     // A drag to the bottom row ends at the newest message again.
     scroll_to(&mut host, 1_000_000.0);
     assert!(draw(&mut host, 100, 18).contains("mouse history message 29"));
@@ -137,5 +165,8 @@ fn port_scrolling_away_from_the_tail_and_back_restores_the_identical_live_tail_v
     scroll_to(&mut host, 0.0);
     scroll_to(&mut host, 1_000_000.0);
     let restored = draw(&mut host, 100, 18);
-    assert_eq!(restored, tail, "wheel up and back down returns to the identical live-tail view");
+    assert_eq!(
+        restored, tail,
+        "wheel up and back down returns to the identical live-tail view"
+    );
 }

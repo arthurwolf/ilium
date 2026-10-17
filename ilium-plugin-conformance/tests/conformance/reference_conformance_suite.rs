@@ -8,8 +8,8 @@ use ilium_plugin_host::cli::CliOutput;
 use proptest::prelude::*;
 
 use crate::common::{
-    cli_env, fixture_component, manifest_text, project_with_dist, records_of, run_cli, CATALOGUE,
-    CASE_WALL_LIMIT_MS,
+    cli_env, fixture_component, manifest_text, project_with_dist, records_of, run_cli,
+    CASE_WALL_LIMIT_MS, CATALOGUE,
 };
 
 /// Runs the conformance command in a project built from `manifest` and the subject fixture.
@@ -54,7 +54,11 @@ fn verdict_of(output: &CliOutput, case: &str) -> Option<String> {
 
 /// Catalogue ids whose subject column holds `subject` letter, in catalogue order.
 fn cases_for(subject: char) -> Vec<&'static str> {
-    CATALOGUE.iter().filter(|(_, subjects)| subjects.contains(subject)).map(|(id, _)| *id).collect()
+    CATALOGUE
+        .iter()
+        .filter(|(_, subjects)| subjects.contains(subject))
+        .map(|(id, _)| *id)
+        .collect()
 }
 
 // ---- DEV-600: subject plugin ----
@@ -66,7 +70,10 @@ fn dev_600_plugin_subject_runs_only_plugin_marked_cases() {
     let ran: Vec<String> = case_ids(&output);
     let allowed = cases_for('P');
     for id in &ran {
-        assert!(allowed.contains(&id.as_str()), "case {id} is not marked plugin");
+        assert!(
+            allowed.contains(&id.as_str()),
+            "case {id} is not marked plugin"
+        );
     }
     assert!(!ran.is_empty(), "no conformance record printed");
 }
@@ -137,9 +144,15 @@ fn dev_601_maintainer_switch_value_other_than_one_stays_refused_usage_subject_un
 #[test]
 fn dev_602_one_record_per_case_then_summary_last() {
     let output = run_in_project(&manifest_text("minimal.json"), &[]);
-    let kinds: Vec<&str> = output.stdout_jsonl.iter().filter_map(|r| r["type"].as_str()).collect();
+    let kinds: Vec<&str> = output
+        .stdout_jsonl
+        .iter()
+        .filter_map(|r| r["type"].as_str())
+        .collect();
     assert_eq!(kinds.last().copied(), Some("summary"));
-    assert!(kinds[..kinds.len() - 1].iter().all(|kind| *kind == "conformance"));
+    assert!(kinds[..kinds.len() - 1]
+        .iter()
+        .all(|kind| *kind == "conformance"));
     assert_eq!(kinds.iter().filter(|kind| **kind == "summary").count(), 1);
 }
 
@@ -151,7 +164,10 @@ fn dev_602_fail_verdict_exits_three() {
     if verdict_of(&output, "CONF-EVT-06").as_deref() == Some("fail") {
         assert_eq!(output.exit_code, 3);
     } else {
-        panic!("the subject fixture must make CONF-EVT-06 fail, got {:?}", verdict_of(&output, "CONF-EVT-06"));
+        panic!(
+            "the subject fixture must make CONF-EVT-06 fail, got {:?}",
+            verdict_of(&output, "CONF-EVT-06")
+        );
     }
 }
 
@@ -250,7 +266,10 @@ fn dev_605_default_seed_is_not_overridable_by_the_environment() {
     let first = run_in_project(&manifest_text("minimal.json"), &["--case", "CONF-EVT-03"]);
     std::env::remove_var("ILIUM_TEST_SEED");
     let second = run_in_project(&manifest_text("minimal.json"), &["--case", "CONF-EVT-03"]);
-    assert_eq!(verdict_of(&first, "CONF-EVT-03"), verdict_of(&second, "CONF-EVT-03"));
+    assert_eq!(
+        verdict_of(&first, "CONF-EVT-03"),
+        verdict_of(&second, "CONF-EVT-03")
+    );
 }
 
 // ---- DEV-606: 10,000 ms wall limit ----
@@ -260,9 +279,16 @@ fn dev_605_default_seed_is_not_overridable_by_the_environment() {
 fn dev_606_case_that_runs_long_fails_with_case_exceeded_10000_ms() {
     // The slow fixture spins in on-events; the suite must cut it at 10,000 ms of wall time.
     let root = tempfile::tempdir().expect("tempdir");
-    project_with_dist(root.path(), &manifest_text("minimal.json"), "conformance-slow");
+    project_with_dist(
+        root.path(),
+        &manifest_text("minimal.json"),
+        "conformance-slow",
+    );
     let env = cli_env(root.path());
-    let output = run_cli(&env, &["test", "--conformance", "--json", "--case", "CONF-EVT-01"]);
+    let output = run_cli(
+        &env,
+        &["test", "--conformance", "--json", "--case", "CONF-EVT-01"],
+    );
     let record = records_of(&output, "conformance")[0].clone();
     assert_eq!(record["verdict"], "fail");
     assert_eq!(record["reason"], "case exceeded 10000 ms");
@@ -296,7 +322,10 @@ fn dev_607_deadline_case_trap_deadline_does_not_depend_on_the_subject_plugin() {
     // CONF-EVT-02 subject H burns fuel in the probe; two different subject components agree.
     let first = run_in_project(&manifest_text("minimal.json"), &["--case", "CONF-EVT-02"]);
     let second = run_in_project(&manifest_text("fs-read.json"), &["--case", "CONF-EVT-02"]);
-    assert_eq!(verdict_of(&first, "CONF-EVT-02"), verdict_of(&second, "CONF-EVT-02"));
+    assert_eq!(
+        verdict_of(&first, "CONF-EVT-02"),
+        verdict_of(&second, "CONF-EVT-02")
+    );
 }
 
 /// REQ: DEV-607
@@ -329,7 +358,12 @@ fn dev_610_catalogue_has_thirty_nine_cases() {
 #[test]
 fn dev_612_limit_cases_check_the_value_under_and_over_the_limit() {
     // CONF-EVT-06 (256 vs 257) and CONF-VIEW-03 (4,096 vs 4,097) and CONF-STORE-02/03 pairs.
-    for id in ["CONF-EVT-06", "CONF-VIEW-03", "CONF-STORE-02", "CONF-STORE-03"] {
+    for id in [
+        "CONF-EVT-06",
+        "CONF-VIEW-03",
+        "CONF-STORE-02",
+        "CONF-STORE-03",
+    ] {
         let output = run_in_project(&manifest_text("minimal.json"), &["--case", id]);
         let record = records_of(&output, "conformance")[0].clone();
         let detail = format!("{}{}", record["expected"], record["actual"]);
@@ -344,7 +378,10 @@ fn dev_612_limit_boundaries_used_by_the_suite_match_the_manual() {
     assert_eq!(SUBMISSION_BATCH_LIMIT, 256);
     assert!(check_submission_count(255).is_ok());
     assert!(check_submission_count(256).is_ok());
-    assert_eq!(check_submission_count(257).unwrap_err().as_str(), "trap.submission-batch");
+    assert_eq!(
+        check_submission_count(257).unwrap_err().as_str(),
+        "trap.submission-batch"
+    );
 }
 
 // ---- DEV-613: skip reasons ----
@@ -352,7 +389,12 @@ fn dev_612_limit_boundaries_used_by_the_suite_match_the_manual() {
 /// REQ: DEV-613
 #[test]
 fn dev_613_every_skip_carries_one_of_the_four_reasons() {
-    let allowed = ["grant-not-requested", "side-not-built", "subject-mismatch", "needs-session"];
+    let allowed = [
+        "grant-not-requested",
+        "side-not-built",
+        "subject-mismatch",
+        "needs-session",
+    ];
     let output = run_in_project(&manifest_text("minimal.json"), &[]);
     for record in records_of(&output, "conformance") {
         if record["verdict"] == "skip" {
@@ -410,7 +452,10 @@ fn dev_621_sample_batch_returns_n_events() {
 fn dev_621_sample_batch_uses_the_fuzz_generator_with_the_host_seed() {
     crate::gap::case("PROJ-HOST-04", "sample batch seed", |host| {
         let batch = crate::gap::sample_batch(32);
-        assert_eq!(format!("{batch:?}"), format!("{:?}", host.fuzz_events(host.current_seed(), 32)));
+        assert_eq!(
+            format!("{batch:?}"),
+            format!("{:?}", host.fuzz_events(host.current_seed(), 32))
+        );
     });
 }
 
@@ -427,7 +472,9 @@ fn dev_621_sample_batch_twice_gives_equal_batches() {
 /// REQ: DEV-622
 #[test]
 fn dev_622_assert_within_budget_accepts_the_four_kinds() {
-    let host = ilium_plugin_testkit::FakeHost::new().mode(ilium_plugin_testkit::Mode::Component).build();
+    let host = ilium_plugin_testkit::FakeHost::new()
+        .mode(ilium_plugin_testkit::Mode::Component)
+        .build();
     for kind in ["event", "render", "activate", "deactivate"] {
         crate::gap::assert_within_budget(&host, kind, 20);
     }
@@ -436,7 +483,9 @@ fn dev_622_assert_within_budget_accepts_the_four_kinds() {
 /// REQ: DEV-622
 #[test]
 fn dev_622_assert_within_budget_fails_when_the_recorded_time_exceeds_millis() {
-    let host = ilium_plugin_testkit::FakeHost::new().mode(ilium_plugin_testkit::Mode::Component).build();
+    let host = ilium_plugin_testkit::FakeHost::new()
+        .mode(ilium_plugin_testkit::Mode::Component)
+        .build();
     let outcome = crate::gap::check_within_budget(&host, "event", 0);
     let error = outcome.expect_err("a recorded call of more than 0 ms must fail");
     assert_eq!(error.code, "harness.budget-exceeded");
@@ -445,17 +494,27 @@ fn dev_622_assert_within_budget_fails_when_the_recorded_time_exceeds_millis() {
 /// REQ: DEV-622
 #[test]
 fn dev_622_assert_within_budget_unknown_kind_refused_harness_invalid_kind() {
-    let host = ilium_plugin_testkit::FakeHost::new().mode(ilium_plugin_testkit::Mode::Component).build();
+    let host = ilium_plugin_testkit::FakeHost::new()
+        .mode(ilium_plugin_testkit::Mode::Component)
+        .build();
     let outcome = crate::gap::check_within_budget(&host, "paint", 20);
-    assert_eq!(outcome.expect_err("unknown kind").code, "harness.invalid-kind");
+    assert_eq!(
+        outcome.expect_err("unknown kind").code,
+        "harness.invalid-kind"
+    );
 }
 
 /// REQ: DEV-622
 #[test]
 fn dev_622_assert_within_budget_in_native_mode_is_skipped_needs_component() {
-    let host = ilium_plugin_testkit::FakeHost::new().mode(ilium_plugin_testkit::Mode::Native).build();
+    let host = ilium_plugin_testkit::FakeHost::new()
+        .mode(ilium_plugin_testkit::Mode::Native)
+        .build();
     let outcome = crate::gap::check_within_budget(&host, "event", 20);
-    assert_eq!(outcome.expect("native mode is a skip, not a failure"), Some("needs-component".to_string()));
+    assert_eq!(
+        outcome.expect("native mode is a skip, not a failure"),
+        Some("needs-component".to_string())
+    );
 }
 
 /// REQ: DEV-624
@@ -474,7 +533,11 @@ fn dev_624_case_passes_a_component_mode_host_with_the_default_seed() {
 #[test]
 fn dev_624_case_host_is_built_for_manifest_json_in_the_project() {
     let root = tempfile::tempdir().expect("tempdir");
-    std::fs::write(root.path().join("manifest.json"), manifest_text("minimal.json")).expect("write");
+    std::fs::write(
+        root.path().join("manifest.json"),
+        manifest_text("minimal.json"),
+    )
+    .expect("write");
     let mut runs = 0;
     crate::gap::case_in(root.path(), "PROJ-HOST-02", "manifest host", |_host| {
         runs += 1;
@@ -487,7 +550,10 @@ fn dev_624_case_host_is_built_for_manifest_json_in_the_project() {
 fn dev_624_case_without_manifest_json_fails_harness_manifest_missing() {
     let root = tempfile::tempdir().expect("tempdir");
     let outcome = crate::gap::try_case_in(root.path(), "PROJ-HOST-03", "no manifest", |_| {});
-    assert_eq!(outcome.expect_err("no manifest.json").code, "harness.manifest-missing");
+    assert_eq!(
+        outcome.expect_err("no manifest.json").code,
+        "harness.manifest-missing"
+    );
 }
 
 // ---- DEV-630: component mode only ----
@@ -513,7 +579,11 @@ fn dev_630_conformance_defaults_to_component_mode() {
 #[test]
 fn dev_630_debug_build_refused_usage_release_build_required() {
     let root = tempfile::tempdir().expect("tempdir");
-    project_with_dist(root.path(), &manifest_text("minimal.json"), "conformance-debug");
+    project_with_dist(
+        root.path(),
+        &manifest_text("minimal.json"),
+        "conformance-debug",
+    );
     let env = cli_env(root.path());
     let output = run_cli(&env, &["test", "--conformance", "--json"]);
     assert_eq!(output.exit_code, 2);
@@ -529,9 +599,15 @@ fn dev_640_fail_record_carries_expected_and_actual_strings_of_at_most_200_charac
     let record = records_of(&output, "conformance")[0].clone();
     assert_eq!(record["verdict"], "fail");
     for field in ["expected", "actual"] {
-        let text = record[field].as_str().unwrap_or_else(|| panic!("{field} is not a string"));
+        let text = record[field]
+            .as_str()
+            .unwrap_or_else(|| panic!("{field} is not a string"));
         assert!(!text.is_empty());
-        assert!(text.chars().count() <= 200, "{field} has {} characters", text.chars().count());
+        assert!(
+            text.chars().count() <= 200,
+            "{field} has {} characters",
+            text.chars().count()
+        );
     }
 }
 
@@ -550,11 +626,21 @@ fn dev_640_pass_record_has_no_expected_or_actual() {
 #[test]
 fn dev_640_long_difference_is_cut_to_exactly_200_characters() {
     let root = tempfile::tempdir().expect("tempdir");
-    project_with_dist(root.path(), &manifest_text("minimal.json"), "conformance-verbose");
+    project_with_dist(
+        root.path(),
+        &manifest_text("minimal.json"),
+        "conformance-verbose",
+    );
     let env = cli_env(root.path());
-    let output = run_cli(&env, &["test", "--conformance", "--json", "--case", "CONF-EVT-06"]);
+    let output = run_cli(
+        &env,
+        &["test", "--conformance", "--json", "--case", "CONF-EVT-06"],
+    );
     let record = records_of(&output, "conformance")[0].clone();
-    assert_eq!(record["actual"].as_str().expect("actual").chars().count(), 200);
+    assert_eq!(
+        record["actual"].as_str().expect("actual").chars().count(),
+        200
+    );
 }
 
 /// REQ: DEV-641
@@ -586,7 +672,11 @@ fn dev_641_summary_of_one_case_counts_exactly_one() {
 fn dev_642_case_records_follow_the_catalogue_order() {
     let output = run_in_project(&manifest_text("minimal.json"), &[]);
     let ran = case_ids(&output);
-    let expected: Vec<&str> = CATALOGUE.iter().map(|(id, _)| *id).filter(|id| ran.iter().any(|r| r == id)).collect();
+    let expected: Vec<&str> = CATALOGUE
+        .iter()
+        .map(|(id, _)| *id)
+        .filter(|id| ran.iter().any(|r| r == id))
+        .collect();
     let ran_refs: Vec<&str> = ran.iter().map(String::as_str).collect();
     assert_eq!(ran_refs, expected);
 }
@@ -596,7 +686,12 @@ fn dev_642_case_records_follow_the_catalogue_order() {
 fn dev_642_record_field_order_is_type_case_title_subject_verdict() {
     let output = run_in_project(&manifest_text("minimal.json"), &["--case", "CONF-LIFE-01"]);
     let record = records_of(&output, "conformance")[0].clone();
-    let keys: Vec<&str> = record.as_object().expect("object").keys().map(String::as_str).collect();
+    let keys: Vec<&str> = record
+        .as_object()
+        .expect("object")
+        .keys()
+        .map(String::as_str)
+        .collect();
     let head: Vec<&str> = keys.iter().copied().take(5).collect();
     assert_eq!(head, vec!["type", "case", "title", "subject", "verdict"]);
 }
@@ -606,9 +701,16 @@ fn dev_642_record_field_order_is_type_case_title_subject_verdict() {
 fn dev_643_case_that_cannot_reach_the_state_is_skip_subject_mismatch_never_pass() {
     // The inert fixture world has no way to run the probe batch for CONF-EVT-06.
     let root = tempfile::tempdir().expect("tempdir");
-    project_with_dist(root.path(), &manifest_text("minimal.json"), "conformance-inert");
+    project_with_dist(
+        root.path(),
+        &manifest_text("minimal.json"),
+        "conformance-inert",
+    );
     let env = cli_env(root.path());
-    let output = run_cli(&env, &["test", "--conformance", "--json", "--case", "CONF-EVT-06"]);
+    let output = run_cli(
+        &env,
+        &["test", "--conformance", "--json", "--case", "CONF-EVT-06"],
+    );
     let record = records_of(&output, "conformance")[0].clone();
     assert_eq!(record["verdict"], "skip");
     assert_eq!(record["reason"], "subject-mismatch");
@@ -618,9 +720,16 @@ fn dev_643_case_that_cannot_reach_the_state_is_skip_subject_mismatch_never_pass(
 #[test]
 fn dev_643_a_skip_is_not_counted_as_passed() {
     let root = tempfile::tempdir().expect("tempdir");
-    project_with_dist(root.path(), &manifest_text("minimal.json"), "conformance-inert");
+    project_with_dist(
+        root.path(),
+        &manifest_text("minimal.json"),
+        "conformance-inert",
+    );
     let env = cli_env(root.path());
-    let output = run_cli(&env, &["test", "--conformance", "--json", "--case", "CONF-EVT-06"]);
+    let output = run_cli(
+        &env,
+        &["test", "--conformance", "--json", "--case", "CONF-EVT-06"],
+    );
     let summary = records_of(&output, "summary")[0].clone();
     assert_eq!(summary["passed"], 0);
     assert_eq!(summary["skipped"], 1);

@@ -6,6 +6,6 @@ mod docs_user;
 mod extension_points;
 mod kernel_tab;
 mod manifest;
-mod settings_rows;
 mod semantic;
+mod settings_rows;
 mod views;

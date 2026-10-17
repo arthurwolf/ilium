@@ -131,7 +131,10 @@ fn lif_223_reload_steps_run_in_the_documented_order_with_two_clients() {
         "activate:client:c2:restored",
     ];
     let positions: Vec<usize> = order.iter().map(|step| position_of(&log, step)).collect();
-    assert!(positions.windows(2).all(|pair| pair[0] < pair[1]), "{log:?}");
+    assert!(
+        positions.windows(2).all(|pair| pair[0] < pair[1]),
+        "{log:?}"
+    );
 }
 
 /// REQ: LIF-223
@@ -141,7 +144,10 @@ fn lif_223_deactivations_during_a_reload_use_the_upgrade_reason() {
     let dev = rig.dev_start(&pkg(NOTES, "1.0.0"), &[]);
     rig.advance(secs(3));
     dev.reload(&pkg(NOTES, "1.0.1"));
-    assert_eq!(server.deactivations(NOTES).last(), Some(&DeactivationReason::Upgrade));
+    assert_eq!(
+        server.deactivations(NOTES).last(),
+        Some(&DeactivationReason::Upgrade)
+    );
 }
 
 /// REQ: LIF-224
@@ -181,7 +187,11 @@ fn lif_224_a_declined_high_risk_grant_is_not_granted_and_the_reload_continues() 
     let (rig, server) = dev_rig();
     let dev = rig.dev_start(&pkg(NOTES, "1.0.0").grant("fs.read"), &[]);
     dev.answer_prompts("n");
-    dev.reload(&pkg(NOTES, "1.0.1").grant("fs.read").high_risk_grant("process.spawn"));
+    dev.reload(
+        &pkg(NOTES, "1.0.1")
+            .grant("fs.read")
+            .high_risk_grant("process.spawn"),
+    );
     rig.advance(secs(3));
     assert_eq!(server.active_version(NOTES).as_deref(), Some("1.0.1"));
     assert!(server.granted(NOTES).contains(&"fs.read".to_owned()));
@@ -211,7 +221,9 @@ fn lif_225_added_contribution_is_registered_at_the_swap_and_extensions_changed_f
     let events = server.extension_events();
     assert!(events.len() > events_before);
     assert!(events.last().expect("event").contains("acme.points/source"));
-    assert!(server.contributions(NOTES).contains(&"acme.points/source".to_owned()));
+    assert!(server
+        .contributions(NOTES)
+        .contains(&"acme.points/source".to_owned()));
 }
 
 /// REQ: LIF-225
@@ -221,7 +233,10 @@ fn lif_225_a_changed_activation_trigger_is_re_registered_at_the_swap() {
     let dev = rig.dev_start(&pkg(NOTES, "1.0.0").activation_trigger("on-startup"), &[]);
     rig.advance(secs(3));
     dev.reload(&pkg(NOTES, "1.0.1").activation_trigger("on-command:acme.run"));
-    assert_eq!(server.triggers(NOTES), vec!["on-command:acme.run".to_owned()]);
+    assert_eq!(
+        server.triggers(NOTES),
+        vec!["on-command:acme.run".to_owned()]
+    );
 }
 
 /// REQ: LIF-225
@@ -247,7 +262,10 @@ fn lif_226_dev_mode_counts_failures_but_never_stops_the_plugin() {
     }
     assert!(!server.is_disabled_by_failure(NOTES));
     assert_eq!(server.failure_count(NOTES, Side::Server), 4);
-    assert_eq!(server.state_of(NOTES, Side::Server), ilium_plugin_api::generated::host::plugins::InstanceState::Active);
+    assert_eq!(
+        server.state_of(NOTES, Side::Server),
+        ilium_plugin_api::generated::host::plugins::InstanceState::Active
+    );
 }
 
 /// REQ: LIF-226
@@ -288,7 +306,11 @@ fn lif_227_build_error_keeps_the_running_instance_and_prints_one_build_error_lin
     rig.advance(secs(3));
     let deactivations = server.deactivations(NOTES).len();
     dev.reload_failing_build();
-    let errors: Vec<_> = dev.output_lines().into_iter().filter(|l| l["type"] == "build-error").collect();
+    let errors: Vec<_> = dev
+        .output_lines()
+        .into_iter()
+        .filter(|l| l["type"] == "build-error")
+        .collect();
     assert_eq!(errors.len(), 1);
     assert_eq!(server.active_version(NOTES).as_deref(), Some("1.0.0"));
     assert_eq!(server.deactivations(NOTES).len(), deactivations);
@@ -302,7 +324,11 @@ fn lif_227_manifest_error_keeps_the_running_instance_and_sends_no_deactivate() {
     rig.advance(secs(3));
     let deactivations = server.deactivations(NOTES).len();
     dev.reload(&pkg(NOTES, "1.0.1").bad_manifest());
-    let errors: Vec<_> = dev.output_lines().into_iter().filter(|l| l["type"] == "build-error").collect();
+    let errors: Vec<_> = dev
+        .output_lines()
+        .into_iter()
+        .filter(|l| l["type"] == "build-error")
+        .collect();
     assert_eq!(errors.len(), 1);
     assert_eq!(server.deactivations(NOTES).len(), deactivations);
 }
@@ -323,9 +349,16 @@ fn lif_228_restore_bytes_are_dropped_when_data_version_changes() {
     let (rig, server) = dev_rig();
     let dev = rig.dev_start(&pkg(NOTES, "1.0.0").data_version(1).restore_bytes(8), &[]);
     rig.advance(secs(3));
-    dev.reload(&pkg(NOTES, "1.0.1").data_version(2).restore_bytes(8).migrator_both());
+    dev.reload(
+        &pkg(NOTES, "1.0.1")
+            .data_version(2)
+            .restore_bytes(8)
+            .migrator_both(),
+    );
     assert_eq!(server.last_restored_len(NOTES), None);
-    assert!(server.log_codes().contains(&"restore.dropped-data-version".to_owned()));
+    assert!(server
+        .log_codes()
+        .contains(&"restore.dropped-data-version".to_owned()));
 }
 
 /// REQ: LIF-229
@@ -340,7 +373,8 @@ fn lif_229_dev_process_renews_the_lease_every_2_seconds() {
 
 /// REQ: LIF-229
 #[test]
-fn lif_229_killed_dev_process_loses_the_lease_and_the_installed_version_returns_within_10_seconds() {
+fn lif_229_killed_dev_process_loses_the_lease_and_the_installed_version_returns_within_10_seconds()
+{
     let rig = rig();
     install_ok(&rig, &pkg(NOTES, "1.0.0"));
     let server = rig.start_server("s1");
@@ -386,9 +420,7 @@ fn lif_271_a_trap_releases_the_input_lock_stream_and_child_process() {
     let rig = rig();
     install_ok(
         &rig,
-        &pkg(NOTES, "1.0.0")
-            .grant("process.spawn")
-            .grant("net.http"),
+        &pkg(NOTES, "1.0.0").grant("process.spawn").grant("net.http"),
     );
     let server = rig.start_server("s1");
     rig.advance(secs(3));
