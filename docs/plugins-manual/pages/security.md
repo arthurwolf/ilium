@@ -112,17 +112,17 @@ Bundled plugins keep working.
 
 ## Verifying a package
 
-Before any code runs, the loader checks the package. There is one ordered list of install checks, and each step has its error code. The list is the table in [Grant review and consent](/pages/reference-grant-review-and-consent/#the-install-pipeline) ([SEC-100]). The first failing step stops the install, and each refusal is written as one JSONL `error` line that carries its code. The operational pipeline of 12 steps in [Install, update and uninstall](/pages/reference-install-update-uninstall/#the-install-pipeline) wraps the same checks with locking, staging and commit. The table below says which check belongs to which step of each list.
+Before any code runs, the loader checks the package. There is one ordered list of install checks, and each step has its error code. The list is the table in [Grant review and consent](/pages/reference-grant-review-and-consent/#the-install-pipeline) ([SEC-100]). The first failing step stops the install, and each refusal is written as one JSONL `error` line that carries its code. The operational pipeline in [Install, update and uninstall](/pages/reference-install-update-uninstall/#the-install-pipeline) wraps the same checks with locking, staging and commit, and its step 2 runs the 11 validation stages of [Package format](/pages/reference-package-format/#the-validation-order). Those stages are numbered differently from SEC-100 (for example key trust is stage 8 there and step 7 here, and review is stage 11 there and step 10 here). The table below gives the SEC-100 step of each check.
 
-| Check order | What is checked | Error codes | Step in the 12-step pipeline |
+| Check order | What is checked | Error codes | SEC-100 step (of 11) |
 |---|---|---|---|
-| 1 to 3 | Archive, layout, API version, file inventory | `package.zip-*`, `manifest.api-version`, `manifest.unknown-key`, `manifest.file-*`, `manifest.asset-size` | 2, 4, 5 |
-| 4 | Signature (T2) and publisher match | `manifest.signature-invalid`, `manifest.publisher-mismatch` | 3 |
-| 5 and 6 | Blocklist and administrator policy | `package.blocked`, `policy.*` | 6 |
-| 7 | Key trust and key pinning | `trust.declined`, `package.publisher-key-changed` | 3 |
-| 8 and 9 | Grant strings, tier rules. A grant denied by policy is not an install failure: it is locked off in the dialog | `manifest.grant-*`, `manifest.limits-tier` | 5, 6 |
-| 10 | Review dialog | the user cancels | 7 |
-| 11 | Commit | `install.write-failed` | 8 to 11 |
+| 1 to 3 | Archive, layout, API version, file inventory | `package.zip-*`, `manifest.api-version`, `manifest.unknown-key`, `manifest.file-*`, `manifest.asset-size` | 1, 2, 3 |
+| 4 | Signature (T2) and publisher match | `manifest.signature-invalid`, `manifest.publisher-mismatch` | 4 |
+| 5 and 6 | Blocklist and administrator policy | `package.blocked`, `policy.*` | 5, 6, 9 |
+| 7 | Key trust and key pinning | `trust.declined`, `package.publisher-key-changed` | 7 |
+| 8 and 9 | Grant strings, tier rules. A grant denied by policy is not an install failure: it is locked off in the dialog | `manifest.grant-*`, `manifest.limits-tier` | 8 |
+| 10 | Review dialog | the user cancels | 10 |
+| 11 | Commit | `install.write-failed` | 11 |
 
 - [USR-170] Install, update and the Plugins screen MUST run the checks in the order of the table above, and MUST name the failing step's code in the error. Test: build one package for each failing check, install each, and assert the code and that nothing is written to the store.
 - [USR-171] The error text for a refused install MUST begin `Cannot install <name> <version>.` and MUST name the check in plain words after it. Test: assert the first line for a hash failure and for a tier failure.

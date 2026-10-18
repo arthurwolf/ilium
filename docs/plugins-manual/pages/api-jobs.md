@@ -416,13 +416,13 @@ The log lines are written by the plugin through the `log` import; the exact text
 
 | Where it appears | Code | Cause |
 |---|---|---|
-| Call to `start` | `invalid-argument` | The kind is not declared in `contributes.jobs`, or the input is over the job input limit. |
+| Call to `start` | `invalid-argument` | The kind is not declared in `contributes.jobs`, or the input is over `job_io_mib`. |
 | Call to `start` | `busy` | The job queue is full. |
 | Call to `start` | `not-permitted` | `jobs.run` is not granted. |
 | Call to `start` | `quota-exceeded` | The CPU budget of the execution group is spent. `retry-after-ms` is set. |
 | Completion | `failed(timed-out)` | The CPU or wall-clock deadline passed. |
 | Completion | `failed(quota-exceeded)` | The job reached its memory limit. |
-| Completion | `failed(invalid-argument)` | The output is over the job output limit. |
+| Completion | `failed(invalid-argument)` | The output is over `job_io_mib` (the limit applies to input and output each). |
 | Completion | `failed(internal)` | A trap in the job instance. The trap text is in `message`. |
 | Completion | `failed(<code>)` | `run` returned an error with that code. |
 | Completion | `cancelled` | A cancel was requested. |

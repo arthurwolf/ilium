@@ -353,7 +353,7 @@ Manifest mistakes stop the install. Each one is reported as a JSONL `error` line
 | `manifest.grant-dependency` | `capability "<grant>" also needs "<other>"` |
 | `manifest.grant-program` | `capability "<name>" takes a program name or an absolute path (got "<value>")` |
 | `manifest.import-not-requested` | `import "<interface>" is not unlocked by any capability requested on the <side> side` |
-| `manifest.settings-owner` | `kernel tab "<tab>" is already owned by "<plugin>"` |
+| `manifest.settings-owner` | `another plugin already owns the settings tab "<tab>"` |
 | `manifest.export-grant` | `export "<export>" needs capability "<grant>"` |
 
 `settings.write-all` without `settings.read-all` fails with `manifest.grant-dependency`, and so does `fs.pick` without `fs.read:picked` or `fs.write:picked`.

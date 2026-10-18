@@ -74,8 +74,8 @@ The body is the `views` export. Rust implements `fn render(&mut self, view: View
 -> UiTree`, and TypeScript exports `render(view, area)`. For a basic pane, `view` is
 `ViewTarget::Pane(node)`, or `{ tag: 'pane', val: node }` in TypeScript.
 
-The host calls `render` in four cases: when the pane's view first opens, after the plugin calls
-`ui::invalidate` for that pane, on a resize, and after a restore. It never calls `render` for each
+The host calls `render` in five cases: when the pane's view first opens, after the plugin calls
+`ui::invalidate` for that pane, on a resize, after a restore, and after a theme or font change. It never calls `render` for each
 frame. The render deadline is 10 ms by default. A render that runs longer traps the plugin instance.
 
 The pane's life follows this order:

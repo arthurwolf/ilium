@@ -140,14 +140,15 @@ The user always sees who added a section. A plugin tab shows its name and versio
 | Sections per plugin tab | 8 |
 | Sections per plugin, per built-in tab | 2 |
 | Plugin sections in one built-in tab, all plugins | 6 |
-| Rows per section (a group counts its children) | 24 |
+| Rows per section, children per group | 24 (a `group` counts as one row plus its children), and 12 |
 | Value keys per plugin | 128 |
 | Segments in a meter, entries in a map | 8 and 64 |
 | Choice options | 64 |
 | List items, and fields per item object | 64, and 8 |
 | Text value | 4,096 characters (text area: 65,536) |
 | All values of one plugin, serialized | 256 KiB |
-| Manifest titles, section titles, descriptions, info text, button labels | 48, 40, 200, 120 and 20 characters |
+| Tab titles, section titles, row titles | 32, 40 and 48 characters |
+| Descriptions, info text, button labels | 200, 120 and 20 characters |
 
 The caps above are the standard tier. A bundled T1 plugin whose id starts with `ilium.` and that sets `limits_tier: "first-party"` gets these higher caps instead (any other package is refused with `manifest.limits-tier`; see [design decisions](/pages/design-decisions/)):
 

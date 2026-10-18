@@ -106,7 +106,7 @@ Input is an intent, not a function. The plugin submits `send-input` with these f
 | `prompt_epoch` | Optional. Refuses with `conflict` when the pane's epoch has moved on. |
 | `dedup_key` | Mandatory, from 1 to 128 characters of `[A-Za-z0-9._:/-]`. The key is reserved for 10 minutes once the submission is accepted. |
 
-The rate is 20 submissions per second per pane per plugin. The checks run in this order: shape and key, grant, duplicate key, pane exists and is a terminal, pane restored, rate, prompt epoch, then the write. A refusal does not reserve the key, so a retry with the same key is valid after the cause is fixed.
+The rate is 20 submissions per second per pane per plugin. The checks run in this order: shape and key, grant, duplicate key, pane exists and is a terminal, pane restored, rate, prompt epoch, `if-current`, the input-lock check, then the write. A refusal does not reserve the key, so a retry with the same key is valid after the cause is fixed.
 
 The pane's `prompt_epoch` is a counter that the kernel raises each time it records a submitted prompt. Read it when the agent is idle, and submit with it. If the agent has moved to a newer prompt in the meantime, the input is refused, and nothing is typed into the wrong prompt.
 

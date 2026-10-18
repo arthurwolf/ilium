@@ -261,7 +261,7 @@ All commands print JSON lines when output is not a terminal, or when `--json` is
 
 | Command | Purpose |
 |---|---|
-| `ilium plugin install <source> [--allow-unsigned] [--allow-downgrade] [--trust <key_id>] [--channel stable\|beta\|dev] [--yes] [--grant <name>]... [--locked] [--unskip]` | Install or update from a package file, URL or registry id. `--unskip` clears the `skip` mark that a rollback set on that version. Full flag list: [Distribution commands](/pages/reference-plugin-distribution-cli/#install). |
+| `ilium plugin install <source> [--allow-unsigned] [--allow-downgrade] [--trust <key_id>] [--channel stable\|beta\|dev] [--yes] [--grant <name>]... [--locked] [--no-backup] [--unskip]` | Install or update from a package file, URL or registry id. `--unskip` clears the `skip` mark that a rollback set on that version. Full flag list: [Distribution commands](/pages/reference-plugin-distribution-cli/#install). |
 | `ilium plugin update <file>` | Same as install, but fails with `install.not-installed` when the id is not installed. |
 | `ilium plugin uninstall <id> [--purge] [--keep-data]` | Remove a plugin. The two flags exclude each other. |
 | `ilium plugin enable <id> [--scope <scope>] [--session <name>]` | Turn a plugin on. |
@@ -281,7 +281,7 @@ Exit codes are those of the one table in [Distribution commands](/pages/referenc
 JSON line examples:
 
 ```text
-{"type":"progress","step":2,"of":7,"message":"validating package"}
+{"type":"progress","step":"validate","message":"validating package","current":2,"total":7}
 {"type":"warning","code":"install.notify-failed","message":"session /home/u/proj not reached","session":"default"}
 {"type":"result","id":"com.example.notes","version":"0.3.1","previous":"0.3.0","state":"installed-enabled"}
 {"type":"error","code":"manifest.file-hash","message":"files/panel.wasm hash differs","path":"files/panel.wasm"}

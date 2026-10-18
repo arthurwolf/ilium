@@ -49,7 +49,7 @@ Two stores exist and they do not overlap.
 
 The rules for the kernel tables, which close the question of "who may write a kernel value" (this replaces the read-only wording of D13, see [design decisions](/pages/design-decisions/#d13-kernel-settings-are-readable-and-the-tab-owner-may-write)):
 
-- **[COR-030]** A kernel tab MUST have exactly one owner plugin when its feature is a core plugin. Only that plugin MAY hold `settings.write-kernel:<tab>`. A second plugin that declares the same grant fails to install with `manifest.settings-owner`.
+- **[COR-030]** A kernel tab MUST have at most one owner plugin. A tab whose owner is not installed has no owner: it stays readable and no install or boot step fails because of it. Only the owner plugin MAY hold `settings.write-kernel:<tab>`. A second plugin that declares the same grant fails to install with `manifest.settings-owner`.
 - **[COR-031]** `settings.write-kernel:<tab>` is a T1-only, high-risk grant. A T2 or T3 package that declares it fails with `manifest.grant-tier`. Any plugin, of any tier, MAY hold `settings.read-kernel:<tab>`.
 - The write goes through the same validator as the Settings screen. A value outside its range fails with `settings.invalid-value` and nothing is written. A write is atomic for the whole tab object: all keys in the call apply or none do.
 - The rows of a kernel tab stay drawn by the kernel from the [settings schema](/pages/reference-settings-schema/). The owner plugin does not draw them again. The owner uses the write grant for changes the user did not type on the row: an import, a migration, a price update, a reset to defaults.
@@ -144,6 +144,7 @@ auto_update = "notify"          # off, notify, install
 auto_update_interval_hours = 24
 channel = "stable"
 metered = false
+migration_backup_mib = 2048     # 0 disables the pre-migration backup, max 1048576
 
 [plugins.limits]
 event_queue = 2048

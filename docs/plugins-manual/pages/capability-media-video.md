@@ -62,7 +62,7 @@ The host does not pace frames. The plugin decides how often it calls `next-frame
 ### Frame format and limits
 
 - **Layout.** Each frame is packed `rgb8`: three bytes per pixel, row by row, top row first. The byte count is `width * height * 3`. A 320 by 180 frame is 172 800 bytes, and a 640 by 360 frame is 691 200 bytes.
-- **Size.** Each dimension must be at least 1. A frame larger than 3,840 by 2,160 pixels is refused with `invalid-argument`. The frame size should match the pixel size of the receiving `surface`. The host derives that size from the widget's `min-columns` and `min-rows` and from the sub-cell factor of the dither mode.
+- **Size.** Each dimension must be at least 1. A frame larger than 3,840 by 2,160 pixels is refused with `invalid-argument`. The frame size must match the pixel size of the receiving `surface`. The host derives that size from the widget's `min-columns` and `min-rows` and from the sub-cell factor of the dither mode.
 - **Buffer.** The host decodes frames ahead, as many as fit in the buffer of each open video, and always at least one. A call that finds a buffered frame returns at once.
 - **Open videos.** A plugin may hold open videos up to a count (below). A further `open-video` returns `quota-exceeded` until one is closed.
 

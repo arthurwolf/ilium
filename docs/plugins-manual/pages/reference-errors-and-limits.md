@@ -244,7 +244,7 @@ The table lists the per-plugin limits. The values belong to API version `ilium:p
 | `job_deadline_ms` (CPU) | 2,000 | 60,000 | 10,000 | `failed(timed-out)` |
 | `job_wall_ms` | 20,000 | 600,000 | 100,000 | `failed(timed-out)` |
 | `job_memory_mib` | 64 | 512 | 256 | `failed(quota-exceeded)` |
-| `job_io_mib` (input and output) | 16 | 64 | 16 | `invalid-argument` |
+| `job_io_mib` (input and output, each) | 16 | 64 | 16 | `invalid-argument` |
 | `concurrent_jobs` | 2 | 8 | 2 | Queued |
 | `job_queue` | 16 | 64 | 16 | `busy` |
 | `event_queue` | 1,024 | 4,096 | 1,024 | Stuck plugin is restarted |
@@ -300,15 +300,15 @@ Additional per-plugin key:
 |---|---|---|---|---|
 | `detector_deadline_ms` | 20 | 50 | 20 | Previous classification kept; third breach in a row traps |
 
-Limits that apply to a whole session (all plugins of one hosting process together). They are not manifest keys, the ceiling is the same for every tier, and a user can only lower them under `[plugins.limits]`. There are five session keys.
+Limits that apply to a whole session (all plugins of one hosting process together). They are not manifest keys, and a user can only lower them under `[plugins.limits]`; a higher user value is clamped to the current value with a logged warning [HST-406], so these keys have no ceiling column. There are five session keys.
 
-| Key | Default | Ceiling | Effect when reached |
-|---|---|---|---|
-| `session_memory_mib` | 1,024 | 4,096 | Activation refused with `session.memory-exceeded` ([Host helper](/pages/reference-host-helper/)); the side stays `inactive` with the reason `host-capacity`; no failure |
-| `session_helpers` | 16 | 32 | Activation refused with `helper.too-many` ([Host helper](/pages/reference-host-helper/)); no failure |
-| `session_processes` | 16 | 64 | `process.run` returns `busy` and `process.spawn` returns `quota-exceeded`; one count covers both kinds of child |
-| `session_http_streams` | 64 | 256 | `http.open-stream` returns `quota-exceeded` |
-| `session_decorations` | 65,536 | 262,144 | `refused(quota-exceeded)` |
+| Key | Default | Effect when reached |
+|---|---|---|
+| `session_memory_mib` | 1,024 | Activation refused with `session.memory-exceeded` ([Host helper](/pages/reference-host-helper/)); the side stays `inactive` with the reason `host-capacity`; no failure |
+| `session_helpers` | 16 | Activation refused with `helper.too-many` ([Host helper](/pages/reference-host-helper/)); no failure |
+| `session_processes` | 16 | `process.run` returns `busy` and `process.spawn` returns `quota-exceeded`; one count covers both kinds of child |
+| `session_http_streams` | 64 | `http.open-stream` returns `quota-exceeded` |
+| `session_decorations` | 65,536 | `refused(quota-exceeded)` |
 
 Counting a failure, in one list. A **failure** is one of: a trap; a hard deadline breach; an `activate` that returns an error or breaches; the restart of a stuck event queue; the death of the helper during a call, a hung helper, or a helper protocol error; and a soft deadline breach that reaches the streak limit of its call class (3 consecutive, or 30 consecutive for scene frames) or runs 100 ms past its deadline (grace). A hook-handler breach never counts as a failure; it disables that extension handler. Anything else is not a failure. In particular these never count: re-activation after `granted` or `revoked`, disable, upgrade, shutdown, a breach or trap in `deactivate`, a refusal for session memory, helper count or host capacity, a failed or timed-out job, and a late hook handler.
 
@@ -322,7 +322,7 @@ Restart delay, per side, within a window of 10 minutes: the first failure restar
 - **[HST-405]** The defaults MUST be the same for all tiers. The T1 values in brackets on other pages MUST be read as T1 ceilings.
 - **[HST-496]** `retry-after-ms` on a `quota-exceeded` from the `ilium-execution` group MUST equal max(100, ceil_10(-balance_ms * 2)) (`ceil_10` rounds up to the next 10 ms); a balance of -100 ms gives 200.
 - **[HST-497]** `session_processes` MUST allow 16 children per session, counting `process.run` and `process.spawn` children together; when it is full `process.run` MUST return `busy` and `process.spawn` MUST return `quota-exceeded`.
-- **[HST-498]** A soft deadline breach MUST trap and count as a failure when it reaches the streak limit of its call class (3, or 30 for scene frames) or runs 100 ms past its deadline; a hook-handler breach MUST NOT count as a failure and MUST disable that extension handler.
+- **[HST-498]** A soft deadline breach MUST trap and count as a failure when it reaches the streak limit of its call class (3, or 30 for scene frames) or runs 100 ms past its deadline; a hook-handler breach MUST NOT count as a failure and MUST count toward the extension stop, which follows the third consecutive breach per contributor, point and extension id; an accepted reply within its deadline resets the count, and the stop ends at a contributor restart or Reset [EXT-021].
 - **[HST-499]** The reply deadlines MUST be: command 30,000 ms, service 30,000 ms, sessions send reply 30,000 ms, inference completion 120,000 ms, HTTP API respond 30,000 ms, client request default 5,000 ms (settable 1 to 30,000) and job cancel grace 1,000 ms; each returns `timed-out` to the caller.
 - **[HST-406]** The host MUST enforce the five session keys `session_memory_mib`, `session_helpers`, `session_processes`, `session_http_streams` and `session_decorations`, and MUST apply a user value under `[plugins.limits]` for them only when it is lower than the current session value (the default, or the value already set); a higher value is clamped to the current session value and the host logs a warning.
 - **[HST-407]** A refusal because of `session_memory_mib` or `session_helpers` MUST leave the side `inactive` with the reason `host-capacity` and MUST retry the activation when capacity returns.
@@ -451,7 +451,7 @@ No new `error-code` case exists. The extended functions reuse the 15 codes. Code
 | `vector.top-k`, `remove-entries`, `drop-index` | `not-found` (unknown index id), `invalid-argument` | none |
 | `process.spawn` | `not-permitted`, `quota-exceeded` (`children`), `not-found` | exit status in `child-exited` |
 | `timers.at` | `invalid-argument` (past by more than 1 s), `quota-exceeded` | none |
-| `journal.log-event` | `quota-exceeded`, `rate-limited` | none |
+| `journal.log-event` | `rate-limited` | none |
 | `settings.set-row-state`, `set-item-states`, `set-choice-items`, `set-meter` | `not-found`, `invalid-argument`, `rate-limited` | none |
 | `kernel-settings.read` | `not-permitted`, `not-found` | none |
 | `terminal.read-cells`, `freeze-snapshot` (`read-cells` returns `none` and logs the code; only `freeze-snapshot` returns the error) | `pane-not-ready`, `not-found`, `quota-exceeded` | none |
@@ -538,7 +538,7 @@ Fixed caps. They are the same for every tier unless `limits_tier` is `first-part
 | Points per plugin, extensions per plugin | 16, 64 | `manifest.extension-limit` |
 | Entries per collect point, handlers per hook point | `max_entries` (at most 256), `max_handlers` (at most 8) | `extension.cap-exceeded` |
 | Extension entry, hook payload, hook reply | 16 KiB, 64 KiB, 64 KiB | `manifest.extension-entry-invalid`, `extension.cap-exceeded` |
-| Hook handler, whole hook chain | `deadline_ms` (5 to 50, default 20), 100 ms | counts as a pass, `extension.handler-timeout` |
+| Hook handler, whole hook chain | `deadline_ms` (5 to 50, default 20), 100 ms | counts as a pass, `extension.handler-timeout`; the third consecutive breach stops the extension (`extension.disabled`) |
 | Menu entries, submenu depth | 64, 2 | truncated with `… N more`, `manifest.menu-depth` |
 | Tooltip | 200 characters | truncated with `…` |
 | `send-input` stages, total stage delay | 16, 10 s | `invalid-argument` |
@@ -586,7 +586,6 @@ Fixed session caps. They count across every plugin of the session [API-070]. The
 | Pending requests | 4,096 | `busy` at the call |
 | Key grabs | 32 | `quota-exceeded` |
 | Input locks | one per pane | `conflict` |
-| Client session memory | `session_memory_mib` (default 1,024, ceiling 4,096; per hosting process) | the new instance is refused, logged, and not counted as a failure (state `inactive`, reason `host-capacity`) |
 
 `session_processes` is the single budget of 16 per session for `process.run` children (`busy` when full) and `process.spawn` children (`quota-exceeded` when full) together. It is not a manifest key.
 

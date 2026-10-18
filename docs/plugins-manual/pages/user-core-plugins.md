@@ -11,7 +11,7 @@ Everything Ilium does is done by a plugin. The 30 core plugins ship with Ilium, 
 Contract version: `ilium:plugin@0.1.0`. Requirement ids have the form `[USR-nnn]`, collected in [User and administrator requirements](/pages/reference-requirements-user-admin/).
 
 <div class="note">
-<p>The set is fixed: the plugins marked "no" in the column "Can you turn it off" below cannot be turned off. A core plugin never needs an install, and the kernel recovery page can never be turned off or replaced.</p>
+<p>The set is fixed: the plugins marked "no" in the column "Can you turn it off" below cannot be turned off with your switch. Two things still turn one off: safe mode in `all-optional` mode keeps only Tree, Layout, Settings and Sessions running, and a confirmed third-party plugin that declares `replaces` turns the built-in one off (see Replacing one). A core plugin never needs an install, and the kernel recovery page can never be turned off or replaced.</p>
 </div>
 
 ### Contents
@@ -39,7 +39,7 @@ Core plugins have ids of the form `ilium.core.<name>`. They appear in **Settings
 
 ### The 30 core plugins
 
-The column "Can you turn it off" lists the fixed set of plugins that stay on. "Replaceable" says whether a third-party plugin may take over the job with `replaces`.
+The column "Can you turn it off" lists the fixed set of plugins that your own switch cannot turn off (safe mode and a confirmed replacement are the only other ways). "Replaceable" says whether a third-party plugin may take over the job with `replaces`.
 
 #### Tree and panes
 

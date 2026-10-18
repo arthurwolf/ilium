@@ -206,7 +206,7 @@ Four features ask you at the moment of first use, because Ilium only knows the t
 | `open-external` | The first time a plugin opens a link to each website | The link does not open |
 | `http:setting:<key>` | When the setting holds a host the plugin has not used before | The request fails and the host is not contacted |
 | `location.geocode` | The first time a plugin looks up a place. The online service is Photon, with Nominatim as fallback | Calls return `not-permitted` |
-| Bundled plugin with HIGH rows | Once, at its first start | It runs without them. You are asked again at the next start, at most 3 more times |
+| Bundled plugin with HIGH rows | Once, at its first start | It runs without them. You are asked again at the next start, up to three **Not now** answers in total |
 
 - [USR-083] Ilium MUST ask the user before it opens a link from a plugin, for each target website and plugin, and MUST remember the answer. Test: open two links to the same site and one to another site and count prompts: two.
 - [USR-084] Ilium MUST NOT contact a host from a `http:setting` grant until the user has confirmed that host. Test: set a new host in a setting, call, and assert no connection before the answer.

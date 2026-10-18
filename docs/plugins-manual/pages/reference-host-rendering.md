@@ -85,8 +85,8 @@ A tree over a cap, or any other invalid tree, is a plugin bug. There is one outc
 
 | Code | Cause |
 |---|---|
-| `ui.invalid-tree` | Bad structure (a nonzero root, an out-of-range, backward or duplicated child index, an unreachable node), duplicate item ids, a prop out of range, more than 256 check-list items, more items than `max-items`, a bad validation regex, a tab title count that differs from the child count |
-| `ui.duplicate-key` | Two nodes in one tree share a `key` |
+| `ui.invalid-tree` | Bad structure (a nonzero root, an out-of-range, backward or duplicated child index, an unreachable node), a prop out of range, more than 256 check-list items, more items than `max-items`, a bad validation regex, a tab title count that differs from the child count |
+| `ui.duplicate-key` | Two nodes in one tree share a `key`, or two items in one widget share an item id |
 | `ui.too-deep` | A node at depth 33 or deeper (root = 1) |
 | `ui.too-large` | More than 4,096 nodes (`ui_tree_nodes`) or more than 1 MiB (`ui_tree_kib`) |
 | `ui.widget-not-allowed` | A menu, list-editor or other input widget outside the allowed subset in a settings page |
@@ -213,7 +213,7 @@ The client applies theme tokens and the accessibility settings to every plugin t
 | `ui.render-timeout` | Render over its deadline | Trap; counts as a failure |
 | `annotate.too-many` | More than 2,048 spans | Extra spans cut |
 | `rate-limited` | Update rate exceeded | Update refused |
-| `ui.duplicate-key` | Two nodes in one tree share a key | Trap; counts as a failure |
+| `ui.duplicate-key` | Two nodes in one tree share a key, or two items in one widget share an item id | Trap; counts as a failure |
 
 ## Edge cases
 

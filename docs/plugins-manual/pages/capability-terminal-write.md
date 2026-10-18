@@ -109,7 +109,7 @@ A plugin can lose track of whether a send worked, for example after a restart. S
 
 - The key is mandatory for `send-input` and `agent-action`. A submission without one is malformed.
 - The key has 1 to 128 characters from `[A-Za-z0-9._:/-]`. Another character makes the submission malformed.
-- The key is reserved for the pair of plugin id and key, for the 10-minute reservation window (a different window from the 24-hour dedup journal in the limits table). From Phase 5 of the [roadmap](/pages/roadmap/), the kernel also journals `send-input` keys in the session snapshot before the write. A server restart then does not repeat input. Before Phase 5, keys live in memory only.
+- The key is reserved for the pair of plugin id and key, for the 10-minute reservation window (a different window from the 24-hour dedup journal in the limits table at the end of this page). The kernel also journals `send-input` keys in the session snapshot before the write. A server restart then does not repeat input.
 - A submission whose key is reserved completes as `duplicate(original)`, where `original` names the submission that reserved the key. It has no effect.
 - A key is reserved only after every check passed. A refused submission keeps its key free, so a retry is valid. An accepted submission keeps its key reserved even if it later fails, so a retry of a failed send needs a new key.
 

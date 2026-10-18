@@ -24,7 +24,7 @@ A stream is an HTTP response that the plugin reads piece by piece while it is st
 ```wit
 // Excerpt of ilium:host/http in reference-wit
 enum stream-framing { raw, lines, server-sent-events, ndjson }
-record stream-request { request: http-request, framing: stream-framing, max-chunk-bytes: u32 }   // <= 1 MiB
+record stream-request { request: http-request, framing: stream-framing, max-chunk-bytes: u32 }   // <= 64 KiB
 type stream-id = u64;
 open-stream: func(request: stream-request) -> result<stream-id, plugin-error>;
 close-stream: func(stream: stream-id);
@@ -61,7 +61,7 @@ Framing decides what one `http-stream-data` chunk contains. With every framing e
 | `server-sent-events` | The payload of one event | The host does the SSE parsing, so the plugin sees records, not `data:` prefixes. |
 | `ndjson` | One JSON text line | The host does not parse the JSON. A blank line is skipped. |
 
-`max-chunk-bytes` is at most 1 MiB. A record longer than that is delivered in several chunks.
+`max-chunk-bytes` is a request parameter bounded by the fixed 64 KiB chunk cap. A record longer than that is delivered in several chunks.
 
 <figure>
 <svg viewBox="0 0 440 270" role="img" aria-label="Sequence of an HTTP stream from open to close">
@@ -303,7 +303,7 @@ The setting row itself looks like any text row, with leaders:
 |---|---|---|
 | `not-permitted` | `open-stream`, at once | Host not granted, not yet confirmed (setting host), or a redirect led to an ungranted host. |
 | `quota-exceeded` | `open-stream`, at once | `http_streams` reached for the plugin or the session. |
-| `invalid-argument` | `open-stream`, at once | `max-chunk-bytes` over 1 MiB, or the request rules of [http](/pages/api-http/) are broken. |
+| `invalid-argument` | `open-stream`, at once | `max-chunk-bytes` over 64 KiB, or the request rules of [http](/pages/api-http/) are broken. |
 | `unsupported` | `open-websocket` | The feature `websocket` is off. |
 | `network` | `http-stream-closed` | DNS, TLS or connect failure, or a dropped connection. |
 | `timed-out` | `http-stream-closed` | No byte arrived before `timeout_millis`. |

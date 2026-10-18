@@ -178,6 +178,7 @@ The manifest may request a limit. The host clamps the request to the ceiling for
 | `render_deadline_ms` | 10 | 20 | 10 | Trap |
 | `job_deadline_ms` (CPU) | 2,000 | 60,000 | 10,000 | `failed(timed-out)` |
 | `event_queue` | 1,024 | 4,096 | 1,024 | Stuck plugin restart |
+| `ui_tree_kib` | 1,024 | 4,096 | 1,024 | Trap |
 | `ui_tree_nodes` | 4,096 | 16,384 | 4,096 | Trap |
 | `storage_bucket_mib` | 16 | 256 | 16 | `quota-exceeded` |
 | `http_response_mib` | 8 | 64 | 8 | `failed(quota-exceeded)` |

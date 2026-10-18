@@ -54,7 +54,7 @@ The host calls the plugin's `render` function when the view first opens, after `
 | `bar-chart` | Bars in groups | `selected` (a bar) when focusable |
 | `chart` | Datasets on axes | `selected` (a point) when focusable |
 | `canvas` | Shapes in a coordinate space | `activated` with a cell when focusable |
-| `calendar` | One month (unstable) | `selected` (a day); focusable by default |
+| `calendar` | One month (unstable) | `selected` (a day) when focusable |
 | `progress-row` | The state of one job | `activated` |
 | `meter` | A segmented bar | `selected` (a segment) when focusable |
 | `minimap` | The shape of a long text | `activated`, `scrolled` |

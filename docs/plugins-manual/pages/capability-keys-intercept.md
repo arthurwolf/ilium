@@ -280,7 +280,7 @@ Every `u64` is a `bigint` in TypeScript, so the grab id and the pane id are `big
 | Chord the client cannot report | `invalid-argument`. With the legacy keyboard protocol, `ctrl` with `shift` on a letter, `super`, and `ctrl` on digits and most punctuation cannot be reported. |
 | `pane` names a node that is not a pane | `not-found`. |
 | Another plugin holds the same chord in the same scope | `conflict`. |
-| 8 active grabs for one plugin side, or 32 for the session | `quota-exceeded`. |
+| The per-plugin grab limit (`key_grabs`: 8 by default, 32 at most for tier 1, 8 for tiers 2 and 3), counted per plugin, or the session-wide cap of 32 across all plugins | `quota-exceeded`. |
 | Pane closes, plugin stops, or grant revoked | The grab ends. A revocation sends `deactivate(revoked)`. No event reports the end. |
 | Focus moves away from a pane grab | The grab is suspended until focus returns. An `until-release` grab ends. |
 | Kernel modal dialog open | A `pane: none` grab is inactive until the dialog closes. |

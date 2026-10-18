@@ -49,7 +49,7 @@ An event reaches a plugin only when the plugin holds the listed grant. Lazily ac
 | `input-submitted` | `node`, `text`, `source` (user, plugin, scheduled, voice), `epoch: u64` | `agent.read-prompts` | Never dropped |
 | `output-matched` | `node`, `filter-id`, `line`, `row` | `terminal.output-filter` | Drop oldest, counted |
 | `link-activated` | `node`, `detector-id`, `text` | own `link_detectors` | Never dropped |
-| `pointer` | `node`, `row`, `column`, `kind` (down, up, move, drag, wheel-up, wheel-down, wheel-left, wheel-right), `button` | `terminal.pointer`, while claimed | Coalesced (drag) |
+| `pointer` | `node`, `row`, `column`, `kind` (down, up, move, drag, wheel-up, wheel-down, wheel-left, wheel-right), `button` | `terminal.pointer`, while claimed | Coalesced (move and drag) |
 | `editor-opened`, `editor-closed` | `buffer-ref` | `editor.read` | Never dropped |
 | `editor-changed` | `buffer`, `revision`, `first-line`, `last-line` | `editor.read` | Coalesced by buffer, debounced 100 ms |
 | `editor-saved` | `buffer`, `path` | `editor.read` | Never dropped |
@@ -252,8 +252,8 @@ Every intent needs its grant. The outcome column lists the codes beyond `ok`.
 | `set-node-locked` | `node`, `locked` | `tree.write` | `refused(not-found)` |
 | `create-pane` | `parent`, `title`, `content-kind`, `cwd`, `command`, `initial-input` | `panes.create` (and `terminal.write` for `initial-input`) | `ok-node`; `refused(not-found)`, `failed(io)` |
 | `signal-pane` | `pane`, `signal` (interrupt, terminate, kill, hangup) | `panes.signal` | `refused(not-found)`, `refused(pane-not-ready)` |
-| `send-input` | `pane`, `text`, `delivery` (Typed, Submitted, Pasted), `prompt-epoch`, `stages` (at most 16, total delay at most 10 s), `raw` and `mouse` (need `terminal.raw-input`), `if-current`, `lock-user-input` (at most 2 s, needs `terminal.input-lock`), `journal` | `terminal.write` | `refused(pane-not-ready)`, `refused(rate-limited)`, `refused(conflict)` |
-| `agent-action` | `pane`, `action-id` | `agent.control` | `refused(unsupported)`, `refused(conflict)` |
+| `send-input` | `pane`, `text`, `delivery` (Typed, Submitted, Pasted), `prompt-epoch`, `stages` (at most 16, total delay at most 10 s), `raw` and `mouse` (need `terminal.raw-input`), `if-current`, `lock-user-input` (at most 2 s, needs `terminal.input-lock`), `journal` | `terminal.write` | `refused(not-found)`, `refused(unsupported)`, `refused(pane-not-ready)`, `refused(rate-limited)`, `refused(conflict)` |
+| `agent-action` | `pane`, `action-id` | `agent.control` | `refused(not-found)`, `refused(pane-not-ready)`, `refused(unsupported)`, `refused(conflict)`, `refused(rate-limited)` (20 per second per pane per plugin), `failed(code)` |
 | `set-decoration` | `node`, `slot`, `content`, `icon`, `sort-key`, `persist` | `tree.decorate` | `refused(not-found)`, `refused(invalid-argument)`, `refused(quota-exceeded)` |
 | `clear-decoration` | `node`, `slot` | `tree.decorate` | As `set-decoration` |
 | `set-virtual-rows` | `row-kind`, `rows` | `tree.decorate` | `refused(invalid-argument)` for an undeclared row kind |

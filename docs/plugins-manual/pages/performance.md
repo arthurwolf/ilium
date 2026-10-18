@@ -80,6 +80,7 @@ The contract also has nine requestable limits in the same form. They bound the h
 | `toasts_pending` | 3 | 3 | 3 | Oldest replaced |
 | `package_assets_mib` | 64 | 256 | 64 | `manifest.asset-size` |
 | `event_queue` | 1,024 | 4,096 | 1,024 | Stuck plugin is restarted |
+| `ui_tree_kib` | 1,024 | 4,096 | 1,024 | Trap (`ui.too-large`) |
 | `ui_tree_nodes` | 4,096 | 16,384 | 4,096 | Trap (`ui.too-large`) |
 | `table_elements` | 10,000 | 50,000 | 20,000 | Instance trapped |
 
@@ -107,11 +108,11 @@ These caps do not change. A value over a per-call cap that the plugin can know i
 | Popups per view | 4 | `quota-exceeded` |
 | Minimap marks per layer, meter segments | 4,096 / 8 | `invalid-argument` |
 | Catalogue page | 256 items | Clamped |
-| `read-cells` rows per call | 1,000 | `quota-exceeded` |
+| `read-cells` rows per call | 1,000 | `none`, and the host logs `quota-exceeded` |
 | `history-text` | 4 MiB, newest kept | Truncated |
 | `write-glyphs` cells per frame | 131,072 | `quota-exceeded` |
 | Pre-rendered scene loop | 30 fps, 3,600 frames, 128 MiB | `manifest.scene-prerender` |
-| HTTP stream chunk | 1 MiB | Split |
+| HTTP stream chunk | 64 KiB | Split (`max-chunk-bytes` is a request parameter bounded by this cap) |
 | `vector.embed` | 256 texts of at most 8 KiB | `invalid-argument` |
 
 ## Further deadlines and rates
@@ -274,7 +275,7 @@ The host has a fixed set of budgets and a benchmark for each. They are not rules
 | Rust component | Instance about 4 MiB, start under 5 ms. | The default choice for scenes and detectors. |
 | TypeScript component | Includes a JavaScript engine: a larger component and instance, and slower code than Rust. Budget it at several times the memory of a Rust plugin and measure your handlers. | Keep TypeScript handlers short. Put heavy loops in a job, or write them in Rust. Measure a TypeScript scene against its frame budget. |
 
-Memory counts against `memory_mib` for the plugin and, for T2 and T3, `memory_mib` plus 32 MiB against the session. See [Sandbox helper protocol](/pages/reference-host-helper/).
+Memory counts against `memory_mib` for the plugin and, for T2 and T3, the helper charges the sum of its hosted instances' `memory_mib` plus 32 MiB against `session_memory_mib`. See [Sandbox helper protocol](/pages/reference-host-helper/).
 
 These are the targets for the tools in [Debugging tools](/pages/reference-debugging-tools/) and [Test harness reference](/pages/reference-test-harness/). They apply to the test and profile tooling, not to a plugin.
 

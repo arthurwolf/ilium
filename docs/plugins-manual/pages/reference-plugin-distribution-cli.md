@@ -40,7 +40,9 @@ The table of [Plugin command line](/pages/reference-plugin-cli/#exit-codes) hold
 
 ## install
 
-`ilium plugin install <source> [--allow-unsigned] [--allow-downgrade] [--trust <key_id>] [--channel stable|beta|dev] [--yes] [--grant <grant>]... [--locked] [--dry-run] [--registry <url>] [--from-bundle <dir>] [--unskip]`
+`ilium plugin install <source> [--allow-unsigned] [--allow-downgrade] [--trust <key_id>] [--channel stable|beta|dev] [--yes] [--grant <grant>]... [--locked] [--dry-run] [--registry <url>] [--from-bundle <dir>] [--no-backup] [--unskip]`
+
+`--no-backup` skips the pre-migration backup copy of an update (LIF-107). Without the backup a failed `migrate` cannot be undone and the host logs `migration.no-backup-failed`. The size cap of the backup is the key `migration_backup_mib` of the `[plugins]` table.
 
 A source is a path to a `.iliumpkg` file, an `https://` URL, or a registry id with an optional range (`com.example.notes@^1.2`).
 

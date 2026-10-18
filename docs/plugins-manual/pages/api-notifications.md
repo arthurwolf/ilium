@@ -51,7 +51,7 @@ Every submission may carry a `dedup-key`. Rust sets it with `Submission::keyed(i
 
 - **Format.** From 1 to 128 characters from `A-Z`, `a-z`, `0-9`, `.`, `_`, `:`, `/` and `-`. A key over 128 characters or with any other character is refused as `refused(invalid-argument)` for the lowest-index offender of the batch; every other submission completes as `refused(cancelled)` with the message `batch refused: submission <index>` ([ABI-009]).
 - **Scope.** The pair of plugin id and key. The server and each client keep separate tables, so a server notice and a client notice with the same key do not suppress each other.
-- **Window.** 10 minutes from the moment the key is reserved. The table is kept in memory, so a restart clears it, except that from Phase 5 the keys of `send-input` and `agent-action` are journaled in the snapshot and survive.
+- **Window.** 10 minutes from the moment the key is reserved. The table is kept in memory, so a restart clears it, except that the keys of `send-input` and `agent-action` are journaled in the snapshot and survive.
 - **Outcome.** A repeat completes as `duplicate(original)`, where `original` names the submission that reserved the key. Nothing is shown or played. A duplicate is not an error.
 - **Reservation.** A key is reserved only after the submission passes its checks. A refused submission does not reserve its key, so a retry with the same key is valid.
 - **Batches.** The first submission in a batch that reserves a key blocks every later submission in the same batch with that key. Use a different key for the notice and for the sound, as the examples do.

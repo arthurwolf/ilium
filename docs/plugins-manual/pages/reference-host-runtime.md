@@ -77,7 +77,7 @@ Third-party components are compiled on first load. The host stores the compiled 
 
 | Property | Value |
 |---|---|
-| Location | `<cache dir>/ilium/plugin-compile/<wasmtime version>-<config fingerprint>/`, owner-only (mode 0700) |
+| Location | `<cache dir>/ilium/plugins/compile/<wasmtime version>-<config fingerprint>/`, owner-only (mode 0700); entries inside are keyed by the component hash, and the config fingerprint includes the CPU features |
 | Size cap | 1 GiB total (`files-total-size-soft-limit`), 4,096 files |
 | Eviction | Wasmtime's cleanup removes least recently used entries when a cap is reached |
 | Invalidation | The directory name contains the Wasmtime version and the config fingerprint. At startup the host deletes every sibling directory with another name |

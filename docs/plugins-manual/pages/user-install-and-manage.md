@@ -96,10 +96,10 @@ A signed (T2) package carries the signature of a publisher. A publisher is a per
 <figcaption>Rendered at 48 columns. Illustrative. The trust prompt for an unknown key.</figcaption>
 </figure>
 
-Choose **Details** to see the full fingerprint, 64 lowercase hexadecimal characters in 16 groups of 4. Choose **Cancel** and the install stops: nothing is installed. A trusted key is stored in your own trust list. You can manage the list with `ilium plugin trust list`, `ilium plugin trust add <publisher.pub>` and `ilium plugin trust remove <publisher>`. Removing a key does not remove the plugins that it signed. They stay installed and show `untrusted`; Ilium does not update them silently, because updates are always your decision.
+Choose **Details** to see the full fingerprint, 64 lowercase hexadecimal characters in 16 groups of 4. Choose **Cancel** and the install stops: nothing is installed. A trusted key is stored in your own trust list. You can manage the list with `ilium plugin trust list`, `ilium plugin trust add <publisher.pub>` and `ilium plugin trust remove <publisher>`. Removing a key does not remove the plugins that it signed. They stay installed, show `untrusted` and stop loading at the next activation; Ilium does not update them silently, because updates are always your decision.
 
 - [USR-120] Ilium MUST show the full key fingerprint (64 lowercase hexadecimal characters in groups of 4) in the prompt, and the short form (the first 8 characters) only beside a full form or in the trust list (SEC-177), and MUST NOT trust a key without an explicit user answer. Test: install a package signed by an unknown key and assert that the prompt appears and that declining installs nothing.
-- [USR-121] Removing a trusted key MUST NOT uninstall any plugin or change its files, grants or data. The plugins it signed stop loading at the next activation (SEC-144) and MUST be marked plugins that it signed as `untrusted` in `ilium plugin list`. Test: remove the key and list.
+- [USR-121] Removing a trusted key MUST NOT uninstall any plugin or change its files, grants or data. The plugins it signed stop loading at the next activation (SEC-144), and every plugin whose signature came from the removed key MUST show the state `untrusted` in `ilium plugin list`. Test: remove the key and list.
 - [USR-122] An update of a T2 plugin MUST be signed by a trusted key. A key that signed the installed version MUST NOT be replaced by a different key unless the old key endorsed it with a rotation statement (SEC-142); otherwise the update is refused with `package.publisher-key-changed`. Test: install version 1 signed by key A, then offer version 2 signed by unendorsed key B, and assert that the update is refused with `package.publisher-key-changed`.
 
 Unsigned packages (T3) carry no signature. They need `--allow-unsigned`. They get a `dev` badge in the list and the permissions of a T2 plugin at most. Install one only if you built it or reviewed it yourself.
@@ -230,7 +230,7 @@ or close this pane.
 | One plugin in detail | select it, `Enter` | `ilium plugin info <id>` |
 | Its permissions and their state | the Capabilities tab | `ilium plugin grants <id>` |
 | What it logged | the Log tab | `ilium plugin logs <id> --tail 50` |
-| How much it uses | the Details tab | `ilium plugin stats <id>` |
+| How much it uses | the Resources tab | `ilium plugin stats <id>` |
 
 `ilium plugin list` prints one line per plugin, with the id, version, tier, state and the count of permissions given. Add `--json` for scripts.
 

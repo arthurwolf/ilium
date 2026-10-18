@@ -216,14 +216,14 @@ The host sends one `ui-action` event for each user action on a keyed widget. The
 
 | Kind | Value | Sent by |
 |---|---|---|
-| `activated` | `none`, `index`, `text` or `cell` | `button`, lists, `table`, `tree-list`, `menu`, `markdown`, `surface`, `progress-row` |
+| `activated` | `none`, `index`, `text` or `cell` | `button`, lists, `table`, `tree-list`, `menu`, `markdown`, `surface`, `progress-row`, `canvas`, `minimap`, `image`, `video`, `terminal-view` |
 | `changed` | `text`, `number`, `flag`, `index`, `geo` or `ids` | `text-input`, `text-area`, `number`, `toggle`, `choice`, pickers, `check-list` |
 | `submitted` | `text` | `text-input` with `submit-on-enter` |
 | `selected` | `index` or `text` | `tabs`, lists, `table`, `tree-list`, charts and meters |
 | `toggled` | `text` | `tree-list` expand or collapse, `markdown` task click |
 | `scrolled` | `index` or `number` | Scrollable widgets (coalesced), `surface`, `minimap` |
 | `dropped` | `drop` | A `draggable` node dropped on a `drop-target` node |
-| `context-requested` | `pointer` | A right click on a node with `pointer-events` |
+| `context-requested` | `pointer` | A right click on any node with a `key`; the node does not need `pointer-events` |
 | `closed` | `none` | `popup`, `dialog`, `menu` |
 | `focus-gained`, `focus-lost` | `none` | Any focusable node |
 | `hover-enter`, `hover-leave` | `none` | A node with `hover-events` |

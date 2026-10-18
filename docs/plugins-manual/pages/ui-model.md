@@ -132,13 +132,15 @@ Each node carries one `widget` variant. There are 51 widgets in seven families. 
 | Text | `leader-row`, `key-hints` | nothing; `key-hints` runs its command on the host | [Text](/pages/widgets-text/) |
 | Text | `diff-view` | `selected`, `activated` with `index(u32)` (hunk or line) | [Text](/pages/widgets-text/) |
 | Collections | `%list`, `table`, `tree-list`, `menu`, `check-list`, `list-editor` | `selected`, `activated`, `toggled`, `changed`, `context-requested`, `closed` | [Collections](/pages/widgets-collections/) |
-| Data display | `gauge`, `line-gauge`, `sparkline`, `bar-chart`, `canvas`, `calendar`, `minimap` | nothing | [Data display](/pages/widgets-data-display/) |
-| Data display | `chart`, `progress-row`, `meter` | `selected` (focusable chart), `activated` (progress row) | [Data display](/pages/widgets-data-display/) |
+| Data display | `gauge`, `line-gauge`, `sparkline` | nothing | [Data display](/pages/widgets-data-display/) |
+| Data display | `chart`, `bar-chart`, `calendar`, `meter` | `selected` (when focusable) |
+| Data display | `canvas`, `progress-row` | `activated` (`canvas` with `cell` when focusable; progress row) |
+| Data display | `minimap` | `activated`, `scrolled` | [Data display](/pages/widgets-data-display/) |
 | Input | `button`, `toggle`, `choice`, `number`, `text-input`, `text-area`, `key-capture`, `color-picker`, `path-field`, `location-picker` | `activated`, `changed`, `submitted`, `filter-changed` | [Input](/pages/widgets-input/) |
 | Input | `schema-form` | nothing; the owning plugin receives `settings-changed` | [Input](/pages/widgets-input/) |
 | Status and feedback | `badge`, `spinner`, `notice`, `icon` | nothing; `notice` may send `closed` | [Widget catalogue](/pages/widgets-index/) |
-| Media and embedded | `surface`, `terminal-view`, `code-view` | `activated` with `cell`, `pointer`, `changed` | [Media and embedded](/pages/widgets-media-and-embedded/) |
-| Media and embedded | `image`, `video` | nothing | [Media and embedded](/pages/widgets-media-and-embedded/) |
+| Media and embedded | `surface`, `terminal-view`, `code-view` | `activated` with `cell`, `pointer`, `changed`; `surface` also `scrolled` on the wheel | [Media and embedded](/pages/widgets-media-and-embedded/) |
+| Media and embedded | `image`, `video` | `activated` (`image` when focusable; `video` play or pause) | [Media and embedded](/pages/widgets-media-and-embedded/) |
 
 The [widget input map](/pages/reference-widget-input-map/) gives the exact focus behaviour, keys, mouse actions, events, colour roles and stable-glyph substitutes of every widget. The family pages repeat it for their widgets.
 

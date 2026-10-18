@@ -16,7 +16,7 @@ The native editor provides this interface. The editor is a built-in pane kind, a
 |---|---|
 | `editor.read` | List buffers, read lines and selections, set decorations and gutter marks, receive editor events, and export an `annotator`. |
 | `editor.edit` | Create, load, save and close buffers, apply edits, and open files in the editor. It also reads buffers, so most edit plugins hold both grants. |
-| `fs.read` | Load a file with `load-file`, or open a path with `editor-open`. The grant applies to the file's scope. |
+| `fs.read` | Load a file with `load-file`, or open a path with `editor-open` (which needs both `editor.edit` and `fs.read`). The grant applies to the file's scope. |
 | `fs.write` | Save a buffer with `save-buffer`. The grant applies to the file's scope. |
 
 The grants take no argument. `editor.read` and `editor.edit` are valid, and `editor.read:project` is invalid. Files are reached through their scope, for example `project`. See [File access](/pages/file-access/).

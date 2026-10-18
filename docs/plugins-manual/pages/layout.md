@@ -351,7 +351,7 @@ export const { lifecycle, handler, views } = definePlugin({
 
 | Case | Result |
 |---|---|
-| Number of children differs from the number of constraints | The builder stops the render with a message that names the layout key. A hand-built invalid tree traps the instance. |
+| Number of children differs from the number of constraints | The render traps the instance, and the message names the layout key [WID-005]. The builder reports the mismatch before the tree leaves the plugin; a hand-built tree traps. |
 | `ratio` with a denominator of 0 | The tree is invalid and traps the instance with `ui.invalid-tree`. |
 | Constraints that need more cells than the area has | The solver follows ratatui's priority rules; trailing segments shrink, and a segment with 0 cells draws nothing. |
 | `percentage` above 100 | The segment is clamped to the available space. |

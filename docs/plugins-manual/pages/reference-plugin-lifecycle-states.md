@@ -30,7 +30,7 @@ A package state decides which instance states are allowed. An instance can be `a
 | `disabled-blocked` | `installed.json`, `state` | The signing key was revoked as `compromised`, or a registry takedown named this version. It leaves this state only with `enable <id> --accept-risk`, or with an update signed by another trusted key of the same publisher. |
 | `disabled-by-policy` | policy file, or the start flags | An administrator rule or safe mode forbids it for this run. Not written to `installed.json`. |
 | `refused-at-load` | recomputed at every load | The host checked the package and refused to run it. The reason is a code, for example `package.api-unsupported`, `trust.key-revoked`, `policy.tier-denied`, `package.corrupt` or `policy.blocked`. |
-| `update-staged` | `plugins/store/<id>/<version>/` | A newer version is unpacked and verified, and the swap has not happened. |
+| `update-staged` | `plugins/store/<id>/<version>/` | A newer version is unpacked and verified, and the swap has not happened. Used only when the new version asks for grants beyond those the user accepted; otherwise the update goes straight to the swap. |
 | `uninstall-pending` | `installed.json`, `state` | The user asked for removal and an instance is still stopping. |
 
 Rules for package states:

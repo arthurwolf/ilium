@@ -26,7 +26,7 @@ A third-party plugin can send data only to hosts you allowed in its install scre
 | What | Where (Linux) | Retention | How to delete |
 |---|---|---|---|
 | Plugin files | `~/.local/share/ilium/plugins/` | Until uninstall | `ilium plugin uninstall <id>` |
-| Plugin data and cache | Inside the plugin's own folder | Until uninstall or cache eviction | Uninstall, or Settings > Plugins > Clear data |
+| Plugin data and cache | Inside the plugin's own folder | Until uninstall or cache eviction | Uninstall, or the Data tab buttons Clear cache and Delete data |
 | Storage buckets | The plugin's data folder | Per bucket policy | Clear data |
 | Grants and consents | `~/.local/state/ilium/grants.json`, `consents.json` | Until you revoke or uninstall | Settings > Plugins |
 | Trusted publisher keys | `~/.local/state/ilium/trust.json` | Until you remove them | `ilium plugin trust remove` |

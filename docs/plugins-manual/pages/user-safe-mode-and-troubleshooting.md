@@ -38,7 +38,7 @@ The essential set is the core plugins that the screen needs to stay usable. A pl
 | `ilium.core.settings` | opens Settings and the recovery page |
 | `ilium.core.sessions` | writes the session snapshot |
 
-Core plugins that are not in this table can be disabled. See the column "Can be disabled" in [Core plugins](/pages/core-plugins/).
+Core plugins that are not in this table can be disabled. See the column "Can you turn it off" in [Core plugins](/pages/core-plugins/).
 
 - [LIF-183] The essential set MUST be exactly the four plugins above in 0.1.0, and MUST load in `all-optional` mode. Test: list running plugins in that mode.
 

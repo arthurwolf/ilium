@@ -10,7 +10,7 @@ Status widgets tell the user that something is happening, that something changed
 
 | Widget | Shows | Event |
 |---|---|---|
-| `badge` | A dot, a label or a count | `activated` when it has a `key` (a keyed badge is focusable) |
+| `badge` | A dot, a label or a count | `activated` when it has a `key` (a keyed badge needs `flags.focusable` to take focus) |
 | `spinner` | A moving frame set with an optional label | none |
 | `notice` | An inline banner with a tone, text and actions | `activated`, `closed` |
 | `icon` | One glyph from a slot or a literal | none |
@@ -35,7 +35,7 @@ A tone is one of `info`, `success`, `warning`, `danger` or `muted`. It sets the 
 
 #### badge
 
-**Purpose.** A small sign next to a name: an unread dot, a count, a short label. A dot is the smallest form. A count above 99 is drawn `99+`. A label is at most 12 cells. A badge with a `key` can take focus and send `activated`.
+**Purpose.** A small sign next to a name: an unread dot, a count, a short label. A dot is the smallest form. A count above 99 is drawn `99+`. A label is at most 12 cells. A badge with a `key` and `flags.focusable` can take focus and send `activated`.
 
 | Prop | Type | Default | Meaning |
 |---|---|---|---|

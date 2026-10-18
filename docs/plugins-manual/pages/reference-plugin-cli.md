@@ -330,7 +330,7 @@ Writes the `.iliumpkg` file.
 
 ## install, uninstall, enable, disable
 
-`ilium plugin install <source> [--allow-unsigned] [--allow-downgrade] [--trust <key_id>] [--channel stable|beta|dev] [--yes] [--grant <grant>]... [--locked] [--unskip]`
+`ilium plugin install <source> [--allow-unsigned] [--allow-downgrade] [--trust <key_id>] [--channel stable|beta|dev] [--yes] [--grant <grant>]... [--locked] [--dry-run] [--registry <url>] [--from-bundle <dir>] [--no-backup] [--unskip]`
 
 - **[DEV-140]** `install` MUST run the validation pipeline of [Package format](/pages/reference-package-format/#the-validation-order) before it runs any plugin code, print every failure as an `error` with the code of that pipeline, and exit with the code of [Distribution commands](/pages/reference-plugin-distribution-cli/#exit-codes). Sources other than a file are defined there.
 - **[DEV-141]** `install` MUST show the review dialog in the attached client unless `--yes` is given. With `--yes`, it MUST grant every requested grant whose risk is not high, and MUST grant a high-risk grant only when it is named with `--grant`.
