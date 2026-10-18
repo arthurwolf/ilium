@@ -34,7 +34,9 @@ fn draw_loaded_map(terminal: &mut Terminal<TestBackend>, app: &mut App) {
         terminal
             .draw(|frame| draw_at(frame, app, started.elapsed()))
             .expect("loaded map render");
-        if app
+        // The map is marked loaded before its braille glyphs reach the buffer
+        // on every draw under parallel load, so keep drawing until they appear.
+        let map_loaded = app
             .animation_frame
             .status()
             .is_some_and(|status| status.contains("Paris ·"))
@@ -42,16 +44,16 @@ fn draw_loaded_map(terminal: &mut Terminal<TestBackend>, app: &mut App) {
                 .animation_frame
                 .packed_cells()
                 .iter()
-                .any(|bits| *bits != 0)
-        {
-            assert!(whole_text(terminal.backend().buffer())
-                .chars()
-                .any(|glyph| ('\u{2801}'..='\u{28ff}').contains(&glyph)));
+                .any(|bits| *bits != 0);
+        let braille_visible = whole_text(terminal.backend().buffer())
+            .chars()
+            .any(|glyph| ('\u{2801}'..='\u{28ff}').contains(&glyph));
+        if map_loaded && braille_visible {
             return;
         }
         assert!(
             started.elapsed() < Duration::from_secs(15),
-            "offline map did not load"
+            "offline map did not render braille (loaded: {map_loaded}, braille visible: {braille_visible})"
         );
         std::thread::sleep(Duration::from_millis(20));
     }
@@ -158,7 +160,7 @@ fn settings_and_fullscreen_osm_credit_have_separate_hint_and_voice_rows() {
             animation_fullscreen: fullscreen,
             ..Default::default()
         };
-        app.mode = Mode::Settings(state);
+        app.mode = Mode::Settings(Box::new(state));
         let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("backend");
         draw_buffer(&mut terminal, &mut app);
         let buffer = terminal.backend().buffer();

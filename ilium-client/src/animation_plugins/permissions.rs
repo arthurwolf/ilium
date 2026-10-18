@@ -11,6 +11,7 @@ use ratatui::{
     Frame,
 };
 use serde::{Deserialize, Serialize};
+#[cfg(test)]
 use serde_json::Value;
 use std::collections::BTreeSet;
 
@@ -81,6 +82,9 @@ pub enum PackageOrigin {
     Unverified,
 }
 
+/// No production path constructs this; the test pins that a new package
+/// cannot inherit a remembered grant.
+#[cfg(test)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RememberedDecision {
@@ -91,6 +95,7 @@ pub struct RememberedDecision {
     pub allowed: bool,
 }
 
+#[cfg(test)]
 impl RememberedDecision {
     pub fn matches(&self, identity: &ReviewIdentity, request: &PermissionRequest) -> bool {
         self.package_digest == identity.package_digest
@@ -102,7 +107,6 @@ impl RememberedDecision {
 #[derive(Debug, Clone)]
 pub struct PermissionDecision {
     pub request_id: String,
-    pub capability: Capability,
     pub choice: PermissionChoice,
 }
 
@@ -193,6 +197,7 @@ impl PermissionReview {
         self.reviewed.iter().all(|reviewed| *reviewed)
     }
 
+    #[cfg(test)]
     pub fn required_denied(&self) -> bool {
         self.requests
             .iter()
@@ -221,7 +226,6 @@ impl PermissionReview {
             .zip(&self.choices)
             .map(|(request, choice)| PermissionDecision {
                 request_id: request.request_id.clone(),
-                capability: request.capability.clone(),
                 choice: *choice,
             })
             .collect())

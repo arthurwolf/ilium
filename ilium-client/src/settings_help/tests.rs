@@ -85,7 +85,7 @@ fn closing_help_restores_the_exact_settings_navigation_state() {
     };
 
     app.push_modal_over(
-        Mode::Settings(settings),
+        Mode::Settings(Box::new(settings)),
         Mode::SettingsHelp(super::dialog::SettingsHelpState::new(
             "VOICE-03",
             1,
@@ -370,10 +370,10 @@ STATUS_TAIL_64806_RECEIVED_NO_FIX",
             .render(&app.animation_settings, width, height, Duration::ZERO);
         let before = app.animation_settings.clone();
         app.push_modal_over(
-            Mode::Settings(SettingsState {
+            Mode::Settings(Box::new(SettingsState {
                 tab: SettingsTab::Animations,
                 ..Default::default()
-            }),
+            })),
             Mode::SettingsHelp(super::dialog::SettingsHelpState::new(
                 "AN-37",
                 1,

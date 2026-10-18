@@ -591,11 +591,11 @@ mod inference_value_receipt_tests {
                 )
             })
             .unwrap();
-        app.mode = Mode::Settings(crate::app::SettingsState {
+        app.mode = Mode::Settings(Box::new(crate::app::SettingsState {
             tab: crate::app::SettingsTab::Inference,
             selected_row: row,
             ..crate::app::SettingsState::default()
-        });
+        }));
         app.begin_settings_number_dialog(SettingsNumber::InferenceTokenBudget);
         app
     }

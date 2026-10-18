@@ -377,7 +377,7 @@ pub enum Mode {
     /// (see `crate::settings_ui`'s module doc comment for the UI/UX brief).
     /// Reached via `Action::Settings`, the tree footer's settings button, or
     /// `ContextMenuAction::Settings` (right-click the tree panel).
-    Settings(SettingsState),
+    Settings(Box<SettingsState>),
     /// Read-only explanation and animated specimen opened from a Settings row.
     /// The parent Settings state remains on the modal stack for exact return.
     SettingsHelp(crate::settings_help::dialog::SettingsHelpState),
@@ -6072,16 +6072,15 @@ impl App {
                 }
             }
         }
-        if self.pending_voice_interaction_requests.capacity() < 64 {
-            if self
+        if self.pending_voice_interaction_requests.capacity() < 64
+            && self
                 .pending_voice_interaction_requests
                 .try_reserve_exact(64 - self.pending_voice_interaction_requests.len())
                 .is_err()
-            {
-                self.status_message =
-                    Some("Voice push-to-talk allocation refused; edge not admitted".into());
-                return;
-            }
+        {
+            self.status_message =
+                Some("Voice push-to-talk allocation refused; edge not admitted".into());
+            return;
         }
         self.pending_voice_interaction_requests.push(request);
     }
@@ -8345,7 +8344,7 @@ impl App {
     /// every setting added to it) must keep matching.
     pub fn action_open_settings(&mut self) {
         self.refresh_agent_setup_statuses();
-        self.mode = Mode::Settings(SettingsState::new());
+        self.mode = Mode::Settings(Box::default());
     }
 
     /// Opens the full-screen workspace finder. Its index is intentionally
@@ -8954,9 +8953,7 @@ impl App {
                 issue_details,
             }
         };
-        if !model.issue_details.is_empty()
-            && !model.rows.iter().any(|row| *row == PluginPanelRow::Issues)
-        {
+        if !model.issue_details.is_empty() && !model.rows.contains(&PluginPanelRow::Issues) {
             model.rows.push(PluginPanelRow::Issues);
             model.labels.push(format!(
                 "{} package/runtime issue(s)",
@@ -9080,7 +9077,7 @@ impl App {
                         Ok(true)
                     });
                 }
-                Ok(PluginControlEdit::TextPrompt { .. }) => {}
+                Ok(PluginControlEdit::TextPrompt) => {}
                 Err(error) => self.status_message = Some(error),
             },
             _ => {}
@@ -9540,7 +9537,7 @@ impl App {
                 token: std::sync::Arc::clone(&token),
                 project_path: current,
                 candidate: picker.candidate.clone(),
-                location_storage: Some(std::sync::Arc::clone(&storage)),
+                _location_storage: Some(std::sync::Arc::clone(&storage)),
             };
             self.enqueue_animation_settings_with_storage(
                 settings,
@@ -10093,6 +10090,7 @@ impl App {
         }
         true
     }
+    #[cfg(test)]
     fn complete_smart_copy_capture(
         &mut self,
         pane_id: NodeId,
@@ -10372,10 +10370,10 @@ impl App {
         if self.smart_copy_light.is_none() && !retry {
             return;
         }
-        if !self
+        if self
             .smart_copy_session
             .as_ref()
-            .is_some_and(|session| session.selected_count() > 0)
+            .is_none_or(|session| session.selected_count() == 0)
         {
             self.exit_smart_copy();
             return;
@@ -10461,16 +10459,15 @@ impl App {
         }
         // Restoration is also CPU-owned; failed originals stay in order when
         // admission is refused, never clone plaintext or become inaccessible.
-        if !self.light_copy_shutdown {
-            if self
+        if !self.light_copy_shutdown
+            && self
                 .light_copy_recovery
                 .front()
                 .is_some_and(|original| original.original().is_some())
-            {
-                if let Some(original) = self.light_copy_recovery.pop_front() {
-                    if let Err(original) = owner.recover(original) {
-                        self.light_copy_recovery.push_front(original);
-                    }
+        {
+            if let Some(original) = self.light_copy_recovery.pop_front() {
+                if let Err(original) = owner.recover(original) {
+                    self.light_copy_recovery.push_front(original);
                 }
             }
         }
@@ -17211,17 +17208,21 @@ impl App {
         &mut self,
         pane_id: NodeId,
         event: crate::terminal_input_owner::InputEvent,
-    ) -> Result<(), crate::terminal_input_owner::InputFailure> {
+    ) -> Result<(), Box<crate::terminal_input_owner::InputFailure>> {
         if self.pending_native_paste.is_some() {
-            return Err(crate::terminal_input_owner::InputFailure::refused(
-                ilium_execution::RejectReason::QueueFull,
-                event,
+            return Err(Box::new(
+                crate::terminal_input_owner::InputFailure::refused(
+                    ilium_execution::RejectReason::QueueFull,
+                    event,
+                ),
             ));
         }
         let Some(PaneRuntime::Terminal(view)) = self.panes.get(&pane_id) else {
-            return Err(crate::terminal_input_owner::InputFailure::refused(
-                ilium_execution::RejectReason::Closed,
-                event,
+            return Err(Box::new(
+                crate::terminal_input_owner::InputFailure::refused(
+                    ilium_execution::RejectReason::Closed,
+                    event,
+                ),
             ));
         };
         self.last_tree_click = None;
@@ -17237,9 +17238,9 @@ impl App {
     /// while it is waiting; parser/IPC/presentation collectors remain active.
     pub(crate) fn retry_native_terminal_paste(
         &mut self,
-    ) -> Result<(), crate::terminal_input_owner::InputFailure> {
+    ) -> Result<(), Box<crate::terminal_input_owner::InputFailure>> {
         if let Some(failure) = self.native_paste_failure.take() {
-            return Err(failure);
+            return Err(Box::new(failure));
         }
         let Some(pending) = self.pending_native_paste.take() else {
             return Ok(());
@@ -17271,16 +17272,20 @@ impl App {
         if bytes > crate::terminal_input::MAX_BYTES
             || wire_bytes > ilium_ipc::MAX_FRAME_LEN as usize
         {
-            return Err(crate::terminal_input_owner::InputFailure::refused(
-                ilium_execution::RejectReason::InputBytes,
-                pending.event,
+            return Err(Box::new(
+                crate::terminal_input_owner::InputFailure::refused(
+                    ilium_execution::RejectReason::InputBytes,
+                    pending.event,
+                ),
             ));
         }
         if self.terminal_parsing.is_none() {
             let Some(client) = &self.outbound_admission else {
-                return Err(crate::terminal_input_owner::InputFailure::refused(
-                    ilium_execution::RejectReason::Closed,
-                    pending.event,
+                return Err(Box::new(
+                    crate::terminal_input_owner::InputFailure::refused(
+                        ilium_execution::RejectReason::Closed,
+                        pending.event,
+                    ),
                 ));
             };
             let reservation = match crate::ipc_preparation::reserve_request(
@@ -17295,9 +17300,11 @@ impl App {
                             | ilium_execution::RejectReason::InvalidCost
                             | ilium_execution::RejectReason::AccountingPoisoned
                     ) {
-                        return Err(crate::terminal_input_owner::InputFailure::refused(
-                            reason,
-                            pending.event,
+                        return Err(Box::new(
+                            crate::terminal_input_owner::InputFailure::refused(
+                                reason,
+                                pending.event,
+                            ),
                         ));
                     }
                     self.pending_native_paste = Some(pending);
@@ -17307,9 +17314,11 @@ impl App {
             let placeholder = match reservation.retain(()) {
                 Ok(placeholder) => placeholder,
                 Err(_) => {
-                    return Err(crate::terminal_input_owner::InputFailure::refused(
-                        ilium_execution::RejectReason::InvalidCost,
-                        pending.event,
+                    return Err(Box::new(
+                        crate::terminal_input_owner::InputFailure::refused(
+                            ilium_execution::RejectReason::InvalidCost,
+                            pending.event,
+                        ),
                     ));
                 }
             };
@@ -18645,10 +18654,10 @@ impl App {
     /// that is refused for budget can retry after this. Returns whether a pin
     /// was actually released.
     fn release_foreign_selection_pin(&mut self, pane_id: NodeId) -> bool {
-        if !self
+        if self
             .terminal_selection_source
             .as_ref()
-            .is_some_and(|(owner, _)| *owner != pane_id)
+            .is_none_or(|(owner, _)| *owner == pane_id)
         {
             return false;
         }
@@ -19208,57 +19217,6 @@ impl App {
             ToolbarAction::SaveAs => self.action_start_save_as(id),
         }
     }
-}
-
-/// If `position` lands on a markdown task-list checkbox glyph in `editor`'s
-/// Source-mode content, returns the buffer row, the checkbox's `[` char
-/// column, and its current checked state -- ready for
-/// `EditorPane::toggle_checkbox`. `content_area` must be the exact rect the
-/// `TextArea` widget itself was rendered into (`editor_chrome::compute`'s
-/// `content_area`), since column/row math is anchored to it.
-///
-/// Column mapping assumes no horizontal scroll (`ratatui_textarea` exposes
-/// no public way to read its actual horizontal scroll offset). A checkbox
-/// on a line long enough to have scrolled horizontally (rare for a short
-/// "- [ ] ..." item) simply won't be found rather than risk mutating the
-/// wrong character.
-#[cfg(test)]
-fn checkbox_at(
-    editor: &EditorPane,
-    content_area: Rect,
-    position: Position,
-) -> Option<(usize, usize, bool)> {
-    if !editor.is_markdown() || !content_area.contains(position) {
-        return None;
-    }
-
-    let clicked_row_on_screen = position.y - content_area.y;
-    let visual_row = editor.source_visual_row_at(
-        content_area.width,
-        editor.source_scroll_row() as usize + clicked_row_on_screen as usize,
-    )?;
-    let row = visual_row.source_row;
-    let line = editor.textarea.lines().get(row)?;
-    let (bracket_col, checked) = crate::markdown::checkbox::find_checkbox(line)?;
-    let bracket_byte = line.char_indices().nth(bracket_col)?.0;
-    if !(visual_row.start_byte..visual_row.end_byte).contains(&bracket_byte) {
-        return None;
-    }
-
-    let gutter_width = if editor.show_line_numbers {
-        usize::from(crate::editor_highlight::line_number_gutter_width(
-            editor.textarea.lines().len(),
-        ))
-    } else {
-        0
-    };
-    let clicked_col_on_screen = (position.x - content_area.x) as usize;
-    let expected_col = gutter_width
-        + unicode_width::UnicodeWidthStr::width(&line[visual_row.start_byte..bracket_byte]);
-    let checkbox_span = expected_col..expected_col + 3; // "[ ]" / "[x]"
-    checkbox_span
-        .contains(&clicked_col_on_screen)
-        .then_some((row, bracket_col, checked))
 }
 
 fn is_press(key: &crossterm::event::KeyEvent) -> bool {
@@ -20367,10 +20325,10 @@ mod tests {
                     app.animation_row_context().scene_status.as_deref(),
                     Some(report.as_str())
                 );
-                let parent = Mode::Settings(SettingsState {
+                let parent = Mode::Settings(Box::new(SettingsState {
                     tab: SettingsTab::Animations,
                     ..Default::default()
-                });
+                }));
                 let help = Mode::SettingsHelp(SettingsHelpState::new("AN-37", 1, MotionLevel::Off));
                 if use_parent_transition {
                     app.mode = Mode::Normal;
@@ -21581,11 +21539,11 @@ mod tests {
             .iter()
             .position(|row| *row == InferenceRow::Field(InferenceSettingField::OpenAiModel))
             .unwrap();
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Inference,
             selected_row: index,
             ..Default::default()
-        });
+        }));
         crate::keys::handle_event(
             &mut app,
             crossterm::event::Event::Key(crossterm::event::KeyEvent::new(
@@ -21652,7 +21610,7 @@ mod tests {
                 ) == Some((InferenceRow::Field(InferenceSettingField::OpenAiModel), 1))
             })
             .expect("model row has a real mouse hit target");
-        app.mode = Mode::Settings(state);
+        app.mode = Mode::Settings(Box::new(state));
         crate::mouse::handle_mouse_event(
             &mut app,
             crossterm::event::MouseEvent {

@@ -443,23 +443,25 @@ fn presentation_settles_two_pure_create_yields_before_procedural_replay() {
         &mut instance,
         &fixture.request,
         &fixture.quota,
-        fixture.resources.clone(),
-        Arc::clone(&fixture.state_root),
-        None,
-        fixture
-            .request
-            .settings
-            .plugin
-            .selected
-            .as_ref()
-            .is_some_and(|selected| selected.mode == AnimationMode::Live),
+        PresentationEnvironment {
+            resources: fixture.resources.clone(),
+            state_root: Arc::clone(&fixture.state_root),
+            selected_audio: None,
+            live_mode: fixture
+                .request
+                .settings
+                .plugin
+                .selected
+                .as_ref()
+                .is_some_and(|selected| selected.mode == AnimationMode::Live),
+            actor_wake: Arc::new({
+                let sender = fixture.wake_sender.clone();
+                move || {
+                    let _ = sender.send(());
+                }
+            }),
+        },
         CreateState::Pending,
-        Arc::new({
-            let sender = fixture.wake_sender.clone();
-            move || {
-                let _ = sender.send(());
-            }
-        }),
     )
     .unwrap();
     presentation.dispatch_requests(&mut instance).unwrap();
@@ -509,12 +511,14 @@ fn live_replay_freeze_acknowledges_an_explicit_empty_source_set() {
         &mut instance,
         &fixture.request,
         &fixture.quota,
-        fixture.resources.clone(),
-        Arc::clone(&fixture.state_root),
-        None,
-        true,
+        PresentationEnvironment {
+            resources: fixture.resources.clone(),
+            state_root: Arc::clone(&fixture.state_root),
+            selected_audio: None,
+            live_mode: true,
+            actor_wake: Arc::new(|| {}),
+        },
         resolution.accepted_creation().expect("accepted creation"),
-        Arc::new(|| {}),
     )
     .unwrap();
     for _ in 0..100 {
@@ -821,22 +825,26 @@ impl Fixture {
             instance,
             &self.request,
             &self.quota,
-            self.resources.clone(),
-            Arc::clone(&self.state_root),
-            None, // These image/cache fixtures declare no audio demand.
-            self.request
-                .settings
-                .plugin
-                .selected
-                .as_ref()
-                .is_some_and(|selected| selected.mode == AnimationMode::Live),
+            PresentationEnvironment {
+                resources: self.resources.clone(),
+                state_root: Arc::clone(&self.state_root),
+                // These image/cache fixtures declare no audio demand.
+                selected_audio: None,
+                live_mode: self
+                    .request
+                    .settings
+                    .plugin
+                    .selected
+                    .as_ref()
+                    .is_some_and(|selected| selected.mode == AnimationMode::Live),
+                actor_wake: Arc::new({
+                    let sender = self.wake_sender.clone();
+                    move || {
+                        let _ = sender.send(());
+                    }
+                }),
+            },
             creation,
-            Arc::new({
-                let sender = self.wake_sender.clone();
-                move || {
-                    let _ = sender.send(());
-                }
-            }),
         )
         .unwrap();
         for _ in 0..100 {

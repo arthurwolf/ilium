@@ -1060,10 +1060,10 @@ mod tests {
             .set_scene_control("wiki_render_mode", ilium_ambient::ControlValue::Index(1))
             .unwrap();
         app.animation_settings.wikipedia.scroll_tenths = 0;
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Animations,
             ..Default::default()
-        });
+        }));
         // A synthetic long article puts ink behind both chrome and the preview.
         let html = format!("<p>{}</p>", "article words ".repeat(2000));
         let document = std::sync::Arc::new(
@@ -1734,10 +1734,10 @@ mod tests {
         app.mode = Mode::Help;
         assert!(!ambient_is_visible(&app));
         assert_eq!(animation_frame_delay(&app, Duration::ZERO), None);
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Animations,
             ..SettingsState::default()
-        });
+        }));
         app.animation_settings.enabled = false;
         app.ui_settings.motion_level = MotionLevel::Off;
         assert!(
@@ -2065,10 +2065,10 @@ mod tests {
         let (mut app, probe, _project) = ambient_app();
         compose_at(&mut app, 0);
         assert_eq!(probe.constructed.load(Ordering::SeqCst), 1);
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Animations,
             ..SettingsState::default()
-        });
+        }));
         let preview = compose_at(&mut app, 1);
         assert!(braille_cells(&preview) > 0, "the preview shows the field");
         assert_eq!(
@@ -2082,10 +2082,10 @@ mod tests {
         assert_eq!(probe.constructed.load(Ordering::SeqCst), 1);
         // The preview alone (ambient disabled) also hosts exactly one scene.
         app.animation_settings.enabled = false;
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Animations,
             ..SettingsState::default()
-        });
+        }));
         compose_at(&mut app, 3);
         assert_eq!(probe.constructed.load(Ordering::SeqCst), 1);
         assert_eq!(probe.alive(), 1);
@@ -2095,10 +2095,10 @@ mod tests {
     fn preview_field_matches_the_screen_and_covers_it_entirely() {
         let (mut app, _probe, _project) = ambient_app();
         app.animation_settings.enabled = false;
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Animations,
             ..SettingsState::default()
-        });
+        }));
         let buffer = compose_at(&mut app, 2);
         assert_eq!(
             (app.animation_frame.width(), app.animation_frame.height()),

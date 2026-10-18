@@ -316,10 +316,10 @@ mod tests {
         let mut app = App::new("test".into(), project.path().to_path_buf());
         app.set_screen_area(Rect::new(0, 0, width, height));
         app.animation_settings.kind = AnimationKind::DitheredWaves;
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Animations,
             ..Default::default()
-        });
+        }));
         (app, project)
     }
 
@@ -380,6 +380,22 @@ mod tests {
             .draw(|frame| crate::ui::draw_at(frame, app, std::time::Duration::ZERO))
             .unwrap();
         terminal
+    }
+
+    /// Repeats a comparison frame until two consecutive draws agree. Background
+    /// frame publication can land between draws, so one warm-up draw is not enough.
+    fn settled_draw(app: &mut App, width: u16, height: u16) -> Terminal<TestBackend> {
+        let mut previous = screen_rows(&draw(app, width, height));
+        for _ in 0..100 {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            let terminal = draw(app, width, height);
+            let rows = screen_rows(&terminal);
+            if rows == previous {
+                return terminal;
+            }
+            previous = rows;
+        }
+        panic!("preview frame did not settle within 2 seconds");
     }
 
     fn screen_rows(terminal: &Terminal<TestBackend>) -> Vec<String> {
@@ -503,10 +519,9 @@ mod tests {
         let (mut app, _project) = backend_app(80, 24);
         let y = select_backend_row(&mut app);
         let content = content_area(&app);
-        // Preview composition initializes its visibility warning after painting.
-        // Establish that independent footer before comparing hover frames.
-        let _ = draw(&mut app, 80, 24);
-        let before = draw(&mut app, 80, 24);
+        // The preview's visibility notice follows the background frame publication,
+        // so the baseline must be drawn after the screen stops changing.
+        let before = settled_draw(&mut app, 80, 24);
         pointer(
             &mut app,
             MouseEventKind::Moved,

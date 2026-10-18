@@ -1179,11 +1179,11 @@ mod tests {
             app.config_dir = Some(directory.path().into());
             app.set_screen_area(Rect::new(0, 0, width, 60));
             app.terminal_settings.new_pane_directory = NewPaneDirectory::LastUsed;
-            app.mode = Mode::Settings(SettingsState {
+            app.mode = Mode::Settings(Box::new(SettingsState {
                 tab: SettingsTab::Terminal,
                 selected_row: 1,
                 ..SettingsState::default()
-            });
+            }));
             for (button, expected) in [
                 (MouseButton::Left, NewPaneDirectory::ProjectRoot),
                 (MouseButton::Right, NewPaneDirectory::LastUsed),
@@ -1322,11 +1322,11 @@ mod tests {
                         crate::config::LeftPanelSizingMode::Fixed;
                 }
                 app.set_screen_area(Rect::new(0, 0, width, 80));
-                app.mode = Mode::Settings(SettingsState {
+                app.mode = Mode::Settings(Box::new(SettingsState {
                     tab,
                     selected_row: 0,
                     ..SettingsState::default()
-                });
+                }));
                 for (button, expected) in [
                     (MouseButton::Left, expected_left),
                     (MouseButton::Right, expected_right),
@@ -1605,11 +1605,11 @@ mod tests {
                         .map(|row| (tab, row))
                 })
                 .unwrap_or_else(|| panic!("{field:?} must have a settings row"));
-            app.mode = Mode::Settings(SettingsState {
+            app.mode = Mode::Settings(Box::new(SettingsState {
                 tab: location.0,
                 selected_row: location.1,
                 ..SettingsState::default()
-            });
+            }));
             app.begin_settings_choice_dialog(field);
             let Mode::ValueDialog(host) = std::mem::replace(&mut app.mode, Mode::Normal) else {
                 panic!("{field:?} plus control must open a dialog");
@@ -1808,11 +1808,11 @@ mod tests {
         let mut app = App::new("choice-retry".into(), directory.path().into());
         app.config_dir = Some(directory.path().into());
         app.terminal_settings.scrollback_budget_mib = 17;
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Terminal,
             selected_row: 1,
             ..SettingsState::default()
-        });
+        }));
         app.begin_settings_choice_dialog(SettingsChoice::TerminalDirectory);
         let Mode::ValueDialog(host) = std::mem::replace(&mut app.mode, Mode::Normal) else {
             panic!("choice modal");
@@ -1913,11 +1913,11 @@ mod tests {
         let mut concurrent = previous;
         concurrent.backups_enabled = !previous.backups_enabled;
         crate::config::save_session_settings(directory.path(), &previous, &concurrent).unwrap();
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Session,
             selected_row: 0,
             ..SettingsState::default()
-        });
+        }));
         app.begin_settings_choice_dialog(SettingsChoice::SessionRecovery);
         let Mode::ValueDialog(host) = std::mem::replace(&mut app.mode, Mode::Normal) else {
             panic!("choice child");
@@ -1956,11 +1956,11 @@ mod tests {
         std::fs::create_dir(&config_path).unwrap();
         let mut app = App::new("synthetic-session-failure".into(), directory.path().into());
         app.config_dir = Some(directory.path().into());
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Session,
             selected_row: 0,
             ..SettingsState::default()
-        });
+        }));
         app.begin_settings_choice_dialog(SettingsChoice::SessionRecovery);
         let Mode::ValueDialog(host) = std::mem::replace(&mut app.mode, Mode::Normal) else {
             panic!("choice child");
@@ -2044,11 +2044,11 @@ mod tests {
             directory.path().into(),
         );
         app.config_dir = Some(directory.path().into());
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Session,
             selected_row: 0,
             ..SettingsState::default()
-        });
+        }));
         app.begin_settings_choice_dialog(SettingsChoice::SessionRecovery);
         let old = std::sync::Arc::new(());
         if let Mode::ValueDialog(host) = &mut app.mode {

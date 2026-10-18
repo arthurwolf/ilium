@@ -213,9 +213,7 @@ pub(crate) enum ReviewAction {
         review: PlanReview,
         answers: BTreeMap<String, UserChoice>,
     },
-    Cancel {
-        selection_revision: u64,
-    },
+    Cancel,
     Pick {
         selection_revision: u64,
         request_id: String,
@@ -333,36 +331,6 @@ impl ReviewBridge {
         if empty {
             (self.wake_worker)();
         }
-        Ok(())
-    }
-    /// Call for every original broker epoch/plan transition BEFORE publishing
-    /// new acquisition/frames. Root resolve checks its own broker again.
-    pub(crate) fn authority_changed(
-        &self,
-        selection: u64,
-        instance: u64,
-        revision: u64,
-        epoch: u64,
-    ) -> Result<()> {
-        let mut state = self
-            .state
-            .lock()
-            .map_err(|_| "Permission mailbox poisoned")?;
-        if state.selection != selection {
-            return Err("Native selection superseded".into());
-        }
-        if state.pending.as_ref().is_some_and(|pending| {
-            !pending
-                .envelope
-                .key
-                .matches_authority(instance, revision, epoch)
-        }) {
-            state.pending = None;
-            state.intent = None;
-            state.phase = ReviewPhase::Loading;
-        }
-        drop(state);
-        self.ui_ready.notify_one();
         Ok(())
     }
     /// Native owner has failed/invalidated its workflow. This discards UI
@@ -624,9 +592,7 @@ impl ReviewBridge {
             Intent::Cancel { .. } => {
                 // Cancellation is intent until the owning controller settles
                 // original teardown/invalidation; do not claim it completed.
-                Ok(Some(ReviewAction::Cancel {
-                    selection_revision: selection,
-                }))
+                Ok(Some(ReviewAction::Cancel))
             }
             Intent::Pick {
                 request_id, path, ..

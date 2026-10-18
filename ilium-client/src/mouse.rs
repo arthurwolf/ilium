@@ -237,7 +237,7 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
         let Mode::Settings(state) = std::mem::replace(&mut app.mode, Mode::Normal) else {
             unreachable!("just matched owned Animations slider gesture above");
         };
-        handle_settings_mouse(app, state, mouse);
+        handle_settings_mouse(app, *state, mouse);
         return;
     }
 
@@ -524,7 +524,7 @@ pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
         let Mode::Settings(state) = std::mem::replace(&mut app.mode, Mode::Normal) else {
             unreachable!("just matched Mode::Settings above");
         };
-        handle_settings_mouse(app, state, mouse);
+        handle_settings_mouse(app, *state, mouse);
         return;
     }
 
@@ -2279,13 +2279,13 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
         && app.optimization.pending_apply.is_some()
     {
         app.optimization_modal_mouse(mouse, app.layout.screen_area);
-        app.mode = Mode::Settings(state);
+        app.mode = Mode::Settings(Box::new(state));
         return;
     }
     if mouse.kind == MouseEventKind::Down(MouseButton::Left)
         && crate::settings_ui::onboarding_button_area(layout.header_area).contains(position)
     {
-        app.mode = Mode::Settings(state);
+        app.mode = Mode::Settings(Box::new(state));
         crate::onboarding::integration::open(app, true);
         return;
     }
@@ -2313,7 +2313,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                 (index + 1).min(fields.len() - 1)
             };
             state.selected_row = crate::instruction_settings::SELECTION_BASE + next;
-            app.mode = Mode::Settings(state);
+            app.mode = Mode::Settings(Box::new(state));
             return;
         }
         if panel.contains(position) && matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
@@ -2322,7 +2322,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                 crate::instruction_settings::scrollbar_selection_at(state.tab, panel, position)
             {
                 state.selected_row = selection;
-                app.mode = Mode::Settings(state);
+                app.mode = Mode::Settings(Box::new(state));
                 return;
             }
             if position.y >= panel.y.saturating_add(2) {
@@ -2337,7 +2337,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                     .copied()
                 {
                     state.selected_row = crate::instruction_settings::SELECTION_BASE + index;
-                    app.mode = Mode::Settings(state);
+                    app.mode = Mode::Settings(Box::new(state));
                     app.settings_open_instruction(field);
                     return;
                 }
@@ -2406,7 +2406,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                     }
                     _ => {}
                 }
-                app.mode = Mode::Settings(state);
+                app.mode = Mode::Settings(Box::new(state));
                 return;
             }
             if button == MouseButton::Right {
@@ -2421,7 +2421,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                             app.settings_cycle_icon(hit.target, -1)
                         }
                     }
-                    app.mode = Mode::Settings(state);
+                    app.mode = Mode::Settings(Box::new(state));
                     return;
                 }
             }
@@ -2433,7 +2433,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
         if matches!(mouse.kind, MouseEventKind::Down(_)) {
             state.animation_fullscreen = false;
         }
-        app.mode = Mode::Settings(state);
+        app.mode = Mode::Settings(Box::new(state));
         return;
     }
 
@@ -2468,7 +2468,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
             if !close {
                 state.plugin_editor = Some(editor);
             }
-            app.mode = Mode::Settings(state);
+            app.mode = Mode::Settings(Box::new(state));
             return;
         }
         if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
@@ -2482,7 +2482,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                 if tab == AnimationSourceTab::Plugin {
                     app.request_plugin_catalogue();
                 }
-                app.mode = Mode::Settings(state);
+                app.mode = Mode::Settings(Box::new(state));
                 return;
             }
         }
@@ -2541,11 +2541,11 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                                             model.rows.get(row)
                                         {
                                             let index = *index;
-                                            app.mode = Mode::Settings(state);
+                                            app.mode = Mode::Settings(Box::new(state));
                                             app.begin_animation_value_dialog(index);
                                             return;
                                         }
-                                        app.mode = Mode::Settings(state);
+                                        app.mode = Mode::Settings(Box::new(state));
                                         app.begin_plugin_value_dialog(row);
                                         return;
                                     }
@@ -2565,7 +2565,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                                     )
                                 ) {
                                     let index = *index;
-                                    app.mode = Mode::Settings(state);
+                                    app.mode = Mode::Settings(Box::new(state));
                                     app.begin_animation_value_dialog(index);
                                     return;
                                 }
@@ -2591,7 +2591,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                 _ => {}
             }
             app.clear_animation_hover();
-            app.mode = Mode::Settings(state);
+            app.mode = Mode::Settings(Box::new(state));
             return;
         }
     }
@@ -2614,7 +2614,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
         } else {
             state.keyboard_picker = Some(action);
         }
-        app.mode = Mode::Settings(state);
+        app.mode = Mode::Settings(Box::new(state));
         return;
     }
 
@@ -2632,7 +2632,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                 match control.hit(position, pointer) {
                     Some(ControlAction::OpenChoices) => {
                         state.icon_picker = Some(picker);
-                        app.mode = Mode::Settings(state);
+                        app.mode = Mode::Settings(Box::new(state));
                         app.begin_icon_column_dialog();
                         return;
                     }
@@ -2646,7 +2646,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                     _ => {}
                 }
                 state.icon_picker = Some(picker);
-                app.mode = Mode::Settings(state);
+                app.mode = Mode::Settings(Box::new(state));
                 return;
             }
         }
@@ -2675,7 +2675,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                 scroll_row: next_scroll.min(total_rows.saturating_sub(visible_rows)),
                 ..picker
             });
-            app.mode = Mode::Settings(state);
+            app.mode = Mode::Settings(Box::new(state));
             return;
         }
         let next_picker = if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
@@ -2716,7 +2716,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
             Some(picker)
         };
         state.icon_picker = next_picker;
-        app.mode = Mode::Settings(state);
+        app.mode = Mode::Settings(Box::new(state));
         return;
     }
 
@@ -2747,13 +2747,13 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                     Some(ControlAction::PreviousChoice) => app.step_keyboard_prefix(field, -1),
                     Some(ControlAction::NextChoice) => app.step_keyboard_prefix(field, 1),
                     Some(ControlAction::OpenChoices) => {
-                        app.mode = Mode::Settings(state);
+                        app.mode = Mode::Settings(Box::new(state));
                         app.begin_keyboard_prefix_dialog(field);
                         return;
                     }
                     _ => {}
                 }
-                app.mode = Mode::Settings(state);
+                app.mode = Mode::Settings(Box::new(state));
                 return;
             }
         }
@@ -2795,7 +2795,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                             }
                             _ => {}
                         }
-                        app.mode = Mode::Settings(state);
+                        app.mode = Mode::Settings(Box::new(state));
                         return;
                     }
                 }
@@ -2813,13 +2813,13 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                             }
                             Some(ControlAction::NextChoice) => app.step_settings_choice(field, 1),
                             Some(ControlAction::OpenChoices) => {
-                                app.mode = Mode::Settings(state);
+                                app.mode = Mode::Settings(Box::new(state));
                                 app.begin_settings_choice_dialog(field);
                                 return;
                             }
                             _ => {}
                         }
-                        app.mode = Mode::Settings(state);
+                        app.mode = Mode::Settings(Box::new(state));
                         return;
                     }
                 }
@@ -2839,13 +2839,13 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                     Some(ControlAction::Decrement) => app.step_settings_number(field, -1),
                     Some(ControlAction::Increment) => app.step_settings_number(field, 1),
                     Some(ControlAction::EditNumber) => {
-                        app.mode = Mode::Settings(state);
+                        app.mode = Mode::Settings(Box::new(state));
                         app.begin_settings_number_dialog(field);
                         return;
                     }
                     _ => {}
                 }
-                app.mode = Mode::Settings(state);
+                app.mode = Mode::Settings(Box::new(state));
                 return;
             }
         }
@@ -2877,12 +2877,12 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                     app.settings_adjust_animation_row(row, 1)
                 }
                 ControlAction::OpenChoices | ControlAction::EditNumber => {
-                    app.mode = Mode::Settings(state);
+                    app.mode = Mode::Settings(Box::new(state));
                     app.begin_animation_value_dialog(row);
                     return;
                 }
             }
-            app.mode = Mode::Settings(state);
+            app.mode = Mode::Settings(Box::new(state));
             return;
         }
         if button.is_some() {
@@ -2898,7 +2898,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
             }) {
                 state.selected_row = row;
                 state.animation_slider_drag = None;
-                app.mode = Mode::Settings(state);
+                app.mode = Mode::Settings(Box::new(state));
                 return;
             }
         }
@@ -2929,12 +2929,12 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                     app.settings_adjust_cost_row(row, 1)
                 }
                 ControlAction::OpenChoices | ControlAction::EditNumber => {
-                    app.mode = Mode::Settings(state);
+                    app.mode = Mode::Settings(Box::new(state));
                     app.begin_cost_value_dialog(row);
                     return;
                 }
             }
-            app.mode = Mode::Settings(state);
+            app.mode = Mode::Settings(Box::new(state));
             return;
         }
         if button.is_some() {
@@ -2949,7 +2949,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                     .iter()
                     .position(|row| *row == span.row)
                     .unwrap_or(state.selected_row);
-                app.mode = Mode::Settings(state);
+                app.mode = Mode::Settings(Box::new(state));
                 return;
             }
         }
@@ -2973,7 +2973,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                         topic.frames.len(),
                         app.ui_settings.motion_level,
                     );
-                    app.push_modal_over(Mode::Settings(state), Mode::SettingsHelp(help));
+                    app.push_modal_over(Mode::Settings(Box::new(state)), Mode::SettingsHelp(help));
                     return;
                 }
             }
@@ -3040,7 +3040,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                                 state.animation_fullscreen = true;
                             }
                             AnimationRowOutcome::LocationPicker => {
-                                app.mode = Mode::Settings(state);
+                                app.mode = Mode::Settings(Box::new(state));
                                 app.open_location_picker();
                                 return;
                             }
@@ -3050,7 +3050,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                                 hint,
                                 current,
                             } => {
-                                app.mode = Mode::Settings(state);
+                                app.mode = Mode::Settings(Box::new(state));
                                 app.begin_animation_text_prompt(control, label, hint, current);
                                 return;
                             }
@@ -3087,7 +3087,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                     if let Some(row) = app.agent_setup_rows().get(index).cloned() {
                         match row {
                             crate::app::AgentSetupRow::GlobalFile { feature, .. } => {
-                                app.mode = Mode::Settings(state);
+                                app.mode = Mode::Settings(Box::new(state));
                                 app.settings_open_agent_setup_path(feature);
                                 return;
                             }
@@ -3128,7 +3128,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                             crate::app::InferenceSettingField::AnthropicModel,
                         ) => app.settings_adjust_anthropic_model(direction),
                         crate::app::InferenceRow::Field(field) => {
-                            app.mode = Mode::Settings(state);
+                            app.mode = Mode::Settings(Box::new(state));
                             app.settings_open_inference_field(field);
                             return;
                         }
@@ -3146,7 +3146,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                     state.selected_row = index;
                     let editing_index =
                         (index < app.text_trigger_settings.triggers.len()).then_some(index);
-                    app.mode = Mode::Settings(state);
+                    app.mode = Mode::Settings(Box::new(state));
                     app.open_text_trigger_dialog(editing_index);
                     return;
                 }
@@ -3239,7 +3239,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                             }
                         }
                     }
-                    app.mode = Mode::Settings(state);
+                    app.mode = Mode::Settings(Box::new(state));
                     return;
                 }
             } else if state.tab == crate::app::SettingsTab::VoiceControl {
@@ -3251,7 +3251,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                 ) {
                     state.selected_row = index;
                     if let Some(row) = crate::voice_settings::VoiceRow::ALL.get(index).copied() {
-                        app.mode = Mode::Settings(state);
+                        app.mode = Mode::Settings(Box::new(state));
                         app.settings_adjust_voice_row(row, direction);
                         return;
                     }
@@ -3274,7 +3274,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                     app,
                 ) {
                     state.selected_row = hit.index;
-                    app.mode = Mode::Settings(state);
+                    app.mode = Mode::Settings(Box::new(state));
                     if app.cost_settings.number_spec(hit.row).is_none()
                         && !crate::value_cost::is_choice(hit.row)
                     {
@@ -3304,7 +3304,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                     state.selected_row = hit.index;
                     // A label/banner click only selects the row, but still
                     // retains the settings mode taken by the mouse dispatcher.
-                    app.mode = Mode::Settings(state);
+                    app.mode = Mode::Settings(Box::new(state));
                     if let crate::remote_compaction_settings_ui::HitAction::Adjust(direction) =
                         hit.action
                     {
@@ -3333,7 +3333,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                     3,
                 ) {
                     state.selected_row = index;
-                    app.mode = Mode::Settings(state);
+                    app.mode = Mode::Settings(Box::new(state));
                     app.settings_adjust_reset_planning_row(index);
                     return;
                 }
@@ -3359,7 +3359,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                     crate::app::ApiRow::ALL.len(),
                 ) {
                     state.selected_row = index;
-                    app.mode = Mode::Settings(state);
+                    app.mode = Mode::Settings(Box::new(state));
                     app.settings_open_api_port();
                     return;
                 }
@@ -3434,7 +3434,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
                                 | crate::app::GitRow::WorktreeLocationTemplate
                                 | crate::app::GitRow::SetupCommand
                         ) {
-                            app.mode = Mode::Settings(state);
+                            app.mode = Mode::Settings(Box::new(state));
                             app.settings_adjust_git_row(row, direction);
                             return;
                         }
@@ -3612,7 +3612,7 @@ fn handle_settings_mouse(app: &mut App, mut state: crate::app::SettingsState, mo
     state.scroll = state.scroll.min(max_scroll);
     app.optimization_sync_visibility(state.tab == crate::app::SettingsTab::Optimization);
     app.remote_compaction_sync_native(state.tab == crate::app::SettingsTab::RemoteCompaction);
-    app.mode = Mode::Settings(state);
+    app.mode = Mode::Settings(Box::new(state));
 }
 
 /// Routes a mouse event to the open file picker overlay -- the same
@@ -4754,7 +4754,7 @@ mod row_action_click_tests {
     #[test]
     fn bottom_right_voice_control_toggles_before_full_screen_mode_dispatch() {
         let mut app = test_app();
-        app.mode = Mode::Settings(crate::app::SettingsState::new());
+        app.mode = Mode::Settings(Box::default());
         let area = app.layout.voice_control_area;
 
         handle_mouse_event(
@@ -4859,7 +4859,7 @@ mod row_action_click_tests {
     #[test]
     fn appearance_sizing_cards_are_direct_mouse_targets() {
         let mut app = test_app();
-        app.mode = Mode::Settings(crate::app::SettingsState::new());
+        app.mode = Mode::Settings(Box::default());
         let content = crate::settings_ui::compute_layout(app.layout.screen_area).content_area;
         let width_dependent_column = content.right().saturating_sub(2);
         let card_row = content.y + 4;
@@ -4913,7 +4913,7 @@ mod row_action_click_tests {
 #[cfg(test)]
 mod shared_dialog_mouse_tests {
     use super::*;
-    use crate::app::{BoardStorageKind, CreateBoardState, SettingsState};
+    use crate::app::{BoardStorageKind, CreateBoardState};
     use crate::text_prompt::TextPromptState;
     use crossterm::event::KeyModifiers;
     use ilium_ipc::ClientRequest;
@@ -5025,7 +5025,7 @@ mod shared_dialog_mouse_tests {
     #[test]
     fn multiline_prompt_buttons_restore_the_exact_parent_and_apply_text() {
         let mut app = app();
-        app.mode = Mode::Settings(SettingsState::default());
+        app.mode = Mode::Settings(Box::default());
         app.push_modal(Mode::VoicePromptEditor(Box::new(
             crate::voice_settings::VoicePromptEditorState::new("Speak concisely."),
         )));
@@ -5512,10 +5512,10 @@ mod cost_settings_mouse_tests {
         let mut app = App::new("test-session".to_string(), directory.path().to_owned());
         app.config_dir = Some(directory.path().to_owned());
         app.set_screen_area(ratatui::layout::Rect::new(0, 0, 130, 260));
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Cost,
             ..SettingsState::default()
-        });
+        }));
         let Mode::Settings(state) = &app.mode else {
             panic!("cost settings fixture");
         };
@@ -5648,10 +5648,10 @@ mod settings_title_choice_mouse_tests {
         let mut app = App::new("title-choice-pointer".into(), directory.path().into());
         app.config_dir = Some(directory.path().into());
         app.set_screen_area(Rect::new(0, 0, 100, 32));
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Titles,
             ..SettingsState::default()
-        });
+        }));
 
         for (button, expected) in [
             (
@@ -5752,11 +5752,11 @@ mod text_trigger_mouse_tests {
     fn settings_app(scroll: u16) -> App {
         let mut app = App::new("trigger-test".to_owned(), std::env::temp_dir());
         app.set_screen_area(Rect::new(0, 0, 120, 40));
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::TextTriggers,
             scroll,
             ..SettingsState::default()
-        });
+        }));
         app
     }
 
@@ -5790,7 +5790,7 @@ mod text_trigger_mouse_tests {
                     let position =
                         Position::new(layout.tab_list_area.x + 1, layout.tab_list_area.y + 1);
                     assert!(layout.tab_list_area.contains(position));
-                    app.mode = Mode::Settings(state);
+                    app.mode = Mode::Settings(Box::new(state));
                     handle_mouse_event(
                         &mut app,
                         MouseEvent {
@@ -5850,7 +5850,7 @@ mod text_trigger_mouse_tests {
                 SettingsTab::ALL.last().copied().unwrap(),
                 "the bottom navigation track targets the final tab at {width}x{height}"
             );
-            app.mode = Mode::Settings(state);
+            app.mode = Mode::Settings(Box::new(state));
             handle_mouse_event(
                 &mut app,
                 MouseEvent {
@@ -5912,10 +5912,10 @@ mod text_trigger_mouse_tests {
             layout.content_scrollbar_area.x,
             layout.content_scrollbar_area.y + 1,
         );
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::TextTriggers,
             ..SettingsState::default()
-        });
+        }));
         handle_mouse_event(
             &mut app,
             MouseEvent {
@@ -5931,10 +5931,10 @@ mod text_trigger_mouse_tests {
         assert_eq!(after_wheel.scroll, 3);
 
         let bottom = layout.content_scrollbar_area.bottom() - 1;
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::TextTriggers,
             ..SettingsState::default()
-        });
+        }));
         handle_mouse_event(
             &mut app,
             MouseEvent {
@@ -5998,11 +5998,11 @@ mod text_trigger_mouse_tests {
                 assert!(!layout.content_area.contains(position));
                 assert!(!layout.tab_list_area.contains(position));
                 for kind in [MouseEventKind::ScrollUp, MouseEventKind::ScrollDown] {
-                    app.mode = Mode::Settings(SettingsState {
+                    app.mode = Mode::Settings(Box::new(SettingsState {
                         tab: initial.tab,
                         scroll: initial.scroll,
                         ..SettingsState::default()
-                    });
+                    }));
                     handle_mouse_event(
                         &mut app,
                         MouseEvent {
@@ -6119,7 +6119,7 @@ mod tree_pane_focus_release_tests {
     fn stale_release_keeps_completed_action_status_and_still_fences_new_press() {
         let mut app = App::new("release-status-fixture".into(), std::env::temp_dir());
         app.set_screen_area(Rect::new(0, 0, 120, 40));
-        app.mode = Mode::Settings(crate::app::SettingsState::default());
+        app.mode = Mode::Settings(Box::default());
         let emitted = app.capture_emitted_geometry(1);
         app.commit_emitted_geometry(emitted);
         // Completion closes the presented dialog before its queued release.
@@ -6261,7 +6261,7 @@ mod icon_assignment_control_tests {
             let Mode::Settings(next) = std::mem::replace(&mut app.mode, Mode::Normal) else {
                 panic!("Settings remains open after compact selector interaction")
             };
-            state = next;
+            state = *next;
             assert_eq!(state.icon_picker.is_some(), opens);
         }
         assert_eq!(state.icon_picker.unwrap().target, target);
@@ -6319,7 +6319,7 @@ mod icon_assignment_control_tests {
             let Mode::Settings(next) = std::mem::replace(&mut app.mode, Mode::Normal) else {
                 panic!("settings retained")
             };
-            state = next;
+            state = *next;
             assert_eq!(state.icon_picker.is_some(), opens);
         }
         assert_eq!(state.icon_picker.unwrap().target, target);
@@ -6380,7 +6380,7 @@ mod icon_assignment_control_tests {
         let Mode::Settings(next) = std::mem::replace(&mut app.mode, Mode::Normal) else {
             panic!("Icons settings remain open after cycling the frozen marker");
         };
-        state = next;
+        state = *next;
         assert_eq!(state.selected_row, row);
 
         let control = crate::settings_ui::icon_assignment_control(
@@ -6475,7 +6475,7 @@ mod agent_monitoring_icon_control_tests {
             let Mode::Settings(next) = std::mem::replace(&mut app.mode, Mode::Normal) else {
                 panic!("settings retained");
             };
-            state = next;
+            state = *next;
             assert_eq!(state.icon_picker.is_some(), opens);
         }
         assert_eq!(state.icon_picker.unwrap().target, target);
@@ -6550,7 +6550,7 @@ mod agent_monitoring_icon_control_tests {
         };
         handle_settings_mouse(
             &mut app,
-            state,
+            *state,
             MouseEvent {
                 kind: MouseEventKind::Down(MouseButton::Left),
                 column: label_position.x,

@@ -290,16 +290,20 @@ fn compute_layout_with_attribution(area: Rect, shows_osm: bool) -> SettingsLayou
     let content_inner = theme::block(true).inner(content_frame_area);
     let scrollbar_width = u16::from(content_inner.width >= 4);
     let help_width = if content_inner.width >= 12 { 3 } else { 0 };
+    // Labels and wrapped help text keep one breathing cell from the frame on
+    // each side of the text column; narrow frames give that cell back.
+    let content_padding = u16::from(content_inner.width >= 16);
+    let scrollbar_x = content_inner
+        .right()
+        .saturating_sub(scrollbar_width + help_width);
     let content_area = Rect::new(
-        content_inner.x,
+        content_inner.x + content_padding,
         content_inner.y,
-        content_inner
-            .width
-            .saturating_sub(scrollbar_width + help_width),
+        scrollbar_x.saturating_sub(content_inner.x + content_padding * 2),
         content_inner.height,
     );
     let content_scrollbar_area = Rect::new(
-        content_area.right(),
+        scrollbar_x,
         content_inner.y,
         scrollbar_width,
         content_inner.height,
@@ -1232,7 +1236,7 @@ fn tab_icon(tab: SettingsTab) -> &'static str {
         SettingsTab::KanbanBoard => "▥",
         SettingsTab::Animations => "▷",
         SettingsTab::Sound => "♪",
-        SettingsTab::VoiceControl => "🎙",
+        SettingsTab::VoiceControl => "◎",
         SettingsTab::ResetPlanning => "↻",
         SettingsTab::Inference => "⚡",
         SettingsTab::LlmInstructions => "≡",
@@ -1286,24 +1290,15 @@ fn render_tab_list(frame: &mut Frame, area: Rect, active: SettingsTab) {
         };
         let icon = tab_icon(tab);
         let icon_padding = " ".repeat(2_usize.saturating_sub(icon.width()));
-        let available_label_width = usize::from(label_area.width).saturating_sub(4);
-        let compact_label = compact_tab_label(tab);
-        let full_label = tab.label();
-        let label_source = if full_label.width() > available_label_width
-            && compact_label.width() <= available_label_width
-        {
-            compact_label
-        } else {
-            full_label
-        };
-        let label = if label_source.width() > available_label_width && available_label_width > 1 {
-            format!(
-                "{}…",
-                truncate_icon_text(label_source, available_label_width - 1)
-            )
-        } else {
-            truncate_icon_text(label_source, available_label_width)
-        };
+        // One cell stays free before the overflow scrollbar so labels never touch it.
+        let scrollbar_gap = usize::from(has_overflow);
+        let available_label_width = usize::from(label_area.width).saturating_sub(4 + scrollbar_gap);
+        // A label is shown whole or not at all: a cut word reads as a defect, while
+        // the icon still identifies the tab when no full label fits the column.
+        let label = [tab.label(), compact_tab_label(tab)]
+            .into_iter()
+            .find(|candidate| candidate.width() <= available_label_width)
+            .unwrap_or("");
         lines.push(Line::from(Span::styled(
             pad_icon_text(
                 &format!(" {icon}{icon_padding} {label}"),
@@ -2715,7 +2710,7 @@ pub fn icons_table_hit(area: Rect, scroll: u16, position: Position) -> Option<Ic
     }
 
     let row_offset = usize::from(position.y - table_inner.y - 1);
-    if row_offset % 2 != 0 {
+    if !row_offset.is_multiple_of(2) {
         return None;
     }
     let target_index = row_offset / 2 + usize::from(scroll);
@@ -4485,9 +4480,9 @@ fn appearance_row_label(row: AppearanceRow) -> &'static str {
 }
 
 fn format_duration(seconds: u64) -> String {
-    if seconds % 86_400 == 0 {
+    if seconds.is_multiple_of(86_400) {
         format!("{} days", seconds / 86_400)
-    } else if seconds % 3_600 == 0 {
+    } else if seconds.is_multiple_of(3_600) {
         format!("{} hours", seconds / 3_600)
     } else {
         format!("{} minutes", seconds / 60)
@@ -5082,7 +5077,7 @@ pub(crate) fn settings_status_icon_control(
         ControlSpec {
             kind: ControlKind::Choice,
             label: &label,
-            value: &value,
+            value,
             label_width,
             previous_enabled: true,
             next_enabled: true,
@@ -6050,7 +6045,6 @@ pub fn agent_monitoring_content_hit(
         .y
         .saturating_sub(content_area.y)
         .saturating_add(scroll);
-    let virtual_x = position.x.saturating_sub(content_area.x);
     let row = view
         .row_lines
         .into_iter()
@@ -6095,7 +6089,6 @@ pub fn appearance_content_hit(
         .y
         .saturating_sub(content_area.y)
         .saturating_add(scroll);
-    let virtual_x = position.x.saturating_sub(content_area.x);
     let row = view
         .row_lines
         .into_iter()
@@ -6740,7 +6733,7 @@ mod tests {
     #[test]
     fn settings_navigation_has_semantic_icons_for_every_tab() {
         let expected_icons = [
-            "◐", "▦", "◉", "¤", "↗", "⇥", "⌨", "❯", "✎", "▣", "⑂", "▥", "▷", "♪", "🎙", "↻", "⚡",
+            "◐", "▦", "◉", "¤", "↗", "⇥", "⌨", "❯", "✎", "▣", "⑂", "▥", "▷", "♪", "◎", "↻", "⚡",
             "≡", "≔", "⚑", "¶", "⌕", "⇄", "ⓘ", "⚙",
         ];
         assert_eq!(SettingsTab::ALL.len(), expected_icons.len());
@@ -7064,7 +7057,9 @@ mod tests {
             let screen = Rect::new(0, 0, width, height);
             let layout = compute_layout(screen);
             assert!(layout.tab_list_area.right() <= layout.content_area.x);
-            assert_eq!(layout.content_area.right(), layout.content_scrollbar_area.x);
+            // Text keeps one padding cell before the scrollbar on wide frames.
+            assert!(layout.content_area.right() <= layout.content_scrollbar_area.x);
+            assert!(layout.content_scrollbar_area.x - layout.content_area.right() <= 1);
             assert_eq!(
                 layout.content_scrollbar_area.right(),
                 layout.help_rail_area.x
@@ -7098,10 +7093,9 @@ mod tests {
             layout.tab_list_area.x.saturating_sub(1),
             layout.tab_list_area.y,
         );
-        let preceding_content = (
-            layout.content_area.x.saturating_sub(1),
-            layout.content_area.y,
-        );
+        // Content text starts after the frame border and one padding cell, so
+        // the border sits at the content frame's left edge.
+        let preceding_content = (layout.content_frame_area.x, layout.content_area.y);
         assert_eq!(buffer[preceding_navigation].symbol(), "│");
         assert_eq!(buffer[preceding_content].symbol(), "│");
         assert_eq!(
@@ -7147,12 +7141,12 @@ mod tests {
     }
 
     #[test]
-    fn compute_layout_leaves_no_border_gap_between_tabs_and_content() {
+    fn compute_layout_leaves_one_cell_gap_between_navigation_and_content_frames() {
         let layout = compute_layout(Rect::new(0, 0, 100, 40));
-        assert!(layout.content_area.x > layout.tab_list_area.right());
+        assert!(layout.content_frame_area.x > layout.navigation_frame_area.right());
         assert_eq!(
-            layout.content_area.x - layout.tab_list_area.right(),
-            GAP_WIDTH
+            layout.content_frame_area.x - layout.navigation_frame_area.right(),
+            GAP_WIDTH.saturating_sub(2)
         );
     }
 
@@ -9365,8 +9359,10 @@ mod tests {
 
     #[test]
     fn kilo_gateway_wrapped_warning_keeps_inference_rows_clickable() {
-        let mut settings = ilium_inference::InferenceSettings::default();
-        settings.selected_provider = ilium_inference::InferenceProviderKind::KiloGateway;
+        let settings = ilium_inference::InferenceSettings {
+            selected_provider: ilium_inference::InferenceProviderKind::KiloGateway,
+            ..Default::default()
+        };
         let project_directory = tempfile::tempdir().unwrap();
         let mut app = App::new(
             "kilo-warning-hit-layout-test".to_owned(),
@@ -9413,8 +9409,10 @@ mod tests {
 
     #[test]
     fn kilo_gateway_warning_wraps_without_dropping_its_privacy_notice() {
-        let mut settings = ilium_inference::InferenceSettings::default();
-        settings.selected_provider = ilium_inference::InferenceProviderKind::KiloGateway;
+        let settings = ilium_inference::InferenceSettings {
+            selected_provider: ilium_inference::InferenceProviderKind::KiloGateway,
+            ..Default::default()
+        };
         let expected = "Kilo Gateway is useful to try things out. Do not send secrets: requests may be used for LLM training.";
         for width in [10, 14, 22, 40, 80] {
             let expected = if width < 32 {

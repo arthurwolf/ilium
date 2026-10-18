@@ -40,6 +40,10 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 #[path = "ui_openstreetmap_tests.rs"]
 mod osm_attribution_tests;
 
+#[cfg(test)]
+#[path = "ui_polish_tests.rs"]
+mod polish_tests;
+
 /// Share the event loop's sampled animation time while retaining the public renderer.
 pub(crate) fn draw_at(frame: &mut Frame, app: &mut App, animation_elapsed: Duration) {
     draw_at_with_cursor(frame, app, animation_elapsed);
@@ -434,15 +438,21 @@ fn draw_worktree_tooltip(frame: &mut Frame, app: &App) {
         if let Some(explanation) = app.emitted_worktree_tooltip(hit.id) {
             crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, explanation);
         }
-        return;
     }
     #[cfg(test)]
-    if let Some(workspace) = app.tree.pane_workspace(hit.id) {
-        let explanation = crate::status_icons::workspace_explanation(
-            workspace,
-            app.workspace_git_statuses.get(&hit.id),
-        );
-        crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, &explanation);
+    if app.emitted_geometry.is_none() {
+        if let Some(workspace) = app.tree.pane_workspace(hit.id) {
+            let explanation = crate::status_icons::workspace_explanation(
+                workspace,
+                app.workspace_git_statuses.get(&hit.id),
+            );
+            crate::status_icons::render_tooltip(
+                frame,
+                app.layout.screen_area,
+                anchor,
+                &explanation,
+            );
+        }
     }
 }
 
@@ -457,11 +467,12 @@ fn draw_status_tooltip(frame: &mut Frame, app: &App) {
         if let Some(tooltip) = app.emitted_status_tooltip(node_id, slot) {
             crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, tooltip);
         }
-        return;
     }
     #[cfg(test)]
-    if let Some(tooltip) = status_tooltip_content(app, node_id, slot) {
-        crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, &tooltip);
+    if app.emitted_geometry.is_none() {
+        if let Some(tooltip) = status_tooltip_content(app, node_id, slot) {
+            crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, &tooltip);
+        }
     }
 }
 fn status_tooltip_content(
@@ -2430,8 +2441,14 @@ fn draw_pane_sources(
             ),
             _ => ("Terminal", "no pane selected"),
         };
-        let placeholder =
-            Paragraph::new(message).block(theme::block(false).title(theme::chrome_title(title)));
+        // Placeholder copy gets the same inner breathing room as the pane frames.
+        let placeholder = Paragraph::new(message)
+            .block(
+                theme::block(false)
+                    .title(theme::chrome_title(title))
+                    .padding(ratatui::widgets::Padding::new(2, 1, 1, 0)),
+            )
+            .style(Style::new().add_modifier(Modifier::DIM));
         frame.render_widget(placeholder, area);
         return Vec::new();
     }
@@ -3010,7 +3027,7 @@ fn draw_editor(frame: &mut Frame, area: Rect, editor: &EditorPane) {
                     editor.textarea.selection_range(),
                     current,
                 );
-                draw_source_scrollbar(frame, chrome.content_area, editor);
+                draw_source_scrollbar(frame, chrome.scrollbar_area, editor);
             } else {
                 frame.render_widget(
                     Paragraph::new(
@@ -3032,7 +3049,13 @@ fn draw_editor(frame: &mut Frame, area: Rect, editor: &EditorPane) {
                     editor.rendered_scroll,
                     editor.line_display,
                 );
-                draw_rendered_scrollbar(frame, chrome.content_area, document, editor);
+                draw_rendered_scrollbar(
+                    frame,
+                    chrome.content_area,
+                    chrome.scrollbar_area,
+                    document,
+                    editor,
+                );
             }
             None => {
                 frame.render_widget(
@@ -3096,12 +3119,14 @@ fn draw_source_scrollbar(frame: &mut Frame, area: Rect, editor: &EditorPane) {
 /// that already fits" rule.
 fn draw_rendered_scrollbar(
     frame: &mut Frame,
-    area: Rect,
+    text_area: Rect,
+    scrollbar_area: Rect,
     document: &markdown::render::RenderedDocument,
     editor: &EditorPane,
 ) {
-    let total_height = markdown::view::content_height(document, area.width, editor.line_display);
-    if total_height <= area.height {
+    let total_height =
+        markdown::view::content_height(document, text_area.width, editor.line_display);
+    if total_height <= text_area.height {
         return;
     }
     let mut scrollbar_state = ScrollbarState::new(usize::from(total_height))
@@ -3110,7 +3135,7 @@ fn draw_rendered_scrollbar(
         .begin_symbol(None)
         .end_symbol(None)
         .track_symbol(Some("│"));
-    frame.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
+    frame.render_stateful_widget(scrollbar, scrollbar_area, &mut scrollbar_state);
 }
 
 /// The source line the minimap should mark as "you are here": the cursor
@@ -4275,11 +4300,11 @@ mod tests {
     fn stacked_voice_credential_prompt_renders_over_live_settings() {
         let mut app = App::new("test".to_owned(), std::env::temp_dir());
         app.set_screen_area(Rect::new(0, 0, 120, 40));
-        app.mode = Mode::Settings(crate::app::SettingsState {
+        app.mode = Mode::Settings(Box::new(crate::app::SettingsState {
             tab: crate::app::SettingsTab::VoiceControl,
             selected_row: 1,
             ..crate::app::SettingsState::default()
-        });
+        }));
         app.settings_adjust_voice_row(crate::voice_settings::VoiceRow::ApiKey, 1);
         let mut terminal = Terminal::new(TestBackend::new(120, 40)).unwrap();
 
@@ -4798,7 +4823,14 @@ pub(crate) fn test_source_window_pixels(
     height: u16,
 ) -> ratatui::buffer::Buffer {
     editor.show_minimap = false;
-    let area = Rect::new(0, 0, width, height + crate::editor_chrome::TOOLBAR_HEIGHT);
+    // One extra column: the editor reserves it for the scrollbar, so the
+    // text window keeps the requested width.
+    let area = Rect::new(
+        0,
+        0,
+        width + 1,
+        height + crate::editor_chrome::TOOLBAR_HEIGHT,
+    );
     let content = crate::editor_chrome::compute(area, false).content_area;
     assert_eq!(content.width, width);
     assert_eq!(content.height, height);

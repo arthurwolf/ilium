@@ -824,6 +824,7 @@ pub fn apply_control_value(
     validate_settings(schema, &Value::Object(values)).map_err(|error| error.to_string())
 }
 
+#[cfg(test)]
 pub fn apply_choice(
     schema: &Value,
     authored: &Value,
@@ -848,11 +849,7 @@ pub fn apply_choice(
 #[derive(Debug, Clone)]
 pub enum PluginControlEdit {
     Values(Value),
-    TextPrompt {
-        id: String,
-        label: String,
-        current: String,
-    },
+    TextPrompt,
 }
 
 /// Keyboard arrows and pointer steppers use the same bounded calculation.
@@ -914,16 +911,7 @@ pub fn adjust_control(
             Value::Number(number)
         }
         PluginControlKind::Text { .. } => {
-            return Ok(PluginControlEdit::TextPrompt {
-                id: control.id.clone(),
-                label: control.label.clone(),
-                current: control
-                    .value
-                    .as_ref()
-                    .and_then(Value::as_str)
-                    .unwrap_or("")
-                    .to_owned(),
-            });
+            return Ok(PluginControlEdit::TextPrompt);
         }
     };
     Ok(PluginControlEdit::Values(apply_control_value(
@@ -972,6 +960,7 @@ pub struct PluginPanelModel {
 }
 
 impl PluginPanelModel {
+    #[cfg(test)]
     pub fn new(catalogue: &PluginCatalogue, preferences: &PluginPreferences) -> Self {
         Self::with_active(catalogue, preferences, None)
     }

@@ -1,7 +1,7 @@
 //! Revision-bound authored-source continuation using the SAME document bank.
 use crate::{
     document_preparation::PreparationKey,
-    source_stream::{Chunk, ContinueJob, FrameCustody, Stream, Viewport, CHUNK},
+    source_stream::{Chunk, ContinueJob, FrameCustody, Stream, StreamWindow, Viewport, CHUNK},
 };
 use ilium_core::NodeId;
 use ilium_execution::{
@@ -153,12 +153,14 @@ impl SourceWindowPreparation {
             let mut stream = Stream::new(
                 Arc::new(()),
                 lines.len(),
-                usize::from(key.width.saturating_sub(gutter).max(1)),
-                key.line_display == crate::config::LineDisplay::Clip,
-                left,
-                key.tab,
-                key.top,
-                key.height,
+                StreamWindow {
+                    width: usize::from(key.width.saturating_sub(gutter).max(1)),
+                    clip: key.line_display == crate::config::LineDisplay::Clip,
+                    left,
+                    tab: key.tab,
+                    top: key.top,
+                    height: key.height,
+                },
                 state,
                 frame,
                 frame_custody,

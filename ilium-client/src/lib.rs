@@ -1228,7 +1228,7 @@ async fn run_inner(
         }
         app.begin_editor_capture_turn();
         if let Err(failure) = app.retry_native_terminal_paste() {
-            input_failure = Some(failure);
+            input_failure = Some(*failure);
             break;
         }
         if advance_pending_key_paste(
@@ -1285,9 +1285,11 @@ async fn run_inner(
                 if let Some(failure) = dispatch_ready_input_events(
                     &mut app,
                     &mut empty_input,
-                    &mut naming_workers,
-                    &mut icon_search_workers,
-                    home_dir.as_deref(),
+                    ReadyInputWorkers {
+                        naming_workers: &mut naming_workers,
+                        icon_search_workers: &mut icon_search_workers,
+                        home_dir: home_dir.as_deref(),
+                    },
                     queued.original,
                     &mut no_deferred,
                     &mut editor_deferred_input,
@@ -1309,8 +1311,16 @@ async fn run_inner(
         {
             if let Some(event) = deferred_input.take_front() {
                 if let Some(failure) = dispatch_ready_input_events(
-                    &mut app, &mut input_rx, &mut naming_workers, &mut icon_search_workers,
-                    home_dir.as_deref(), event, &mut deferred_input, &mut editor_deferred_input,
+                    &mut app,
+                    &mut input_rx,
+                    ReadyInputWorkers {
+                        naming_workers: &mut naming_workers,
+                        icon_search_workers: &mut icon_search_workers,
+                        home_dir: home_dir.as_deref(),
+                    },
+                    event,
+                    &mut deferred_input,
+                    &mut editor_deferred_input,
                 ) {
                     input_failure = Some(failure);
                     break;
@@ -1475,9 +1485,11 @@ async fn run_inner(
                         if let Some(failure) = dispatch_ready_input_events(
                             &mut app,
                             &mut input_rx,
-                            &mut naming_workers,
-                            &mut icon_search_workers,
-                            home_dir.as_deref(),
+                            ReadyInputWorkers {
+                                naming_workers: &mut naming_workers,
+                                icon_search_workers: &mut icon_search_workers,
+                                home_dir: home_dir.as_deref(),
+                            },
                             event,
                             &mut deferred_input,
                             &mut editor_deferred_input,
@@ -1777,7 +1789,7 @@ async fn run_inner(
                 .expect("remote compaction owner is initialized before the event loop")
                 .spawn(job)
             {
-                app.apply_remote_compaction_worker_event(event);
+                app.apply_remote_compaction_worker_event(*event);
                 needs_redraw = true;
                 needs_immediate_redraw = true;
             }
@@ -2574,7 +2586,7 @@ async fn finish_input_retirement(
         if let Some(report) = retirement.try_complete() {
             return report
                 .into_result()
-                .map_err(crate::error::InputRetirementError::Failed);
+                .map_err(|failure| crate::error::InputRetirementError::Failed(*failure));
         }
         if tokio::time::Instant::now() >= deadline {
             return Err(crate::error::InputRetirementError::Deadline(
@@ -4188,6 +4200,15 @@ fn synchronize_debug_logging_from_server(app: &mut App, enabled: bool) {
     mark_debug_logging_pending(app);
 }
 
+/// The workers and launch context that `dispatch_ready_input_events` forwards
+/// to `dispatch_pending_app_work`, grouped to keep the dispatcher's argument
+/// list short.
+struct ReadyInputWorkers<'a> {
+    naming_workers: &'a mut NamingWorkers,
+    icon_search_workers: &'a mut IconSearchWorkers,
+    home_dir: Option<&'a std::path::Path>,
+}
+
 /// Applies one received input event and any immediately queued successors.
 /// Consecutive mouse-motion reports are coalesced to their newest position:
 /// only that position can determine the current hover state, while keeping
@@ -4195,9 +4216,7 @@ fn synchronize_debug_logging_from_server(app: &mut App, enabled: bool) {
 fn dispatch_ready_input_events<S>(
     app: &mut App,
     input_rx: &mut S,
-    naming_workers: &mut NamingWorkers,
-    icon_search_workers: &mut IconSearchWorkers,
-    home_dir: Option<&std::path::Path>,
+    workers: ReadyInputWorkers<'_>,
     first: Result<terminal_input_owner::InputEvent, terminal_input_owner::InputFailure>,
     deferred: &mut input_backlog::InputBacklog<
         Result<terminal_input_owner::InputEvent, terminal_input_owner::InputFailure>,
@@ -4209,6 +4228,11 @@ where
         Item = Result<terminal_input_owner::InputEvent, terminal_input_owner::InputFailure>,
     >,
 {
+    let ReadyInputWorkers {
+        naming_workers,
+        icon_search_workers,
+        home_dir,
+    } = workers;
     let mut failure = None;
     let mut overflow = None;
     let lookahead = {
@@ -4247,7 +4271,7 @@ where
                     ) {
                         Ok(()) => true,
                         Err(original) => {
-                            overflow = Some(original);
+                            overflow = Some(*original);
                             false
                         }
                     };
@@ -4264,7 +4288,7 @@ where
                     if let Some(pane_id) = destination {
                         if !crate::keys::intercept_event(app, event.view()) {
                             if let Err(error) = app.capture_native_terminal_paste(pane_id, event) {
-                                failure = Some(error);
+                                failure = Some(*error);
                             }
                         }
                         // Preserve App::handle_event's post-key layout sampling,
@@ -4406,7 +4430,7 @@ fn retain_interrupted_key_paste(
 
 trait InputBatchItem: Sized {
     fn view(&self) -> Option<&Event>;
-    fn coalesce_motion(self) -> Result<(), Self>;
+    fn coalesce_motion(self) -> Result<(), Box<Self>>;
 }
 
 impl InputBatchItem
@@ -4418,10 +4442,12 @@ impl InputBatchItem
             .map(terminal_input_owner::InputEvent::view)
     }
 
-    fn coalesce_motion(self) -> Result<(), Self> {
+    fn coalesce_motion(self) -> Result<(), Box<Self>> {
         match self {
-            Ok(event) => event.coalesce_motion().map_err(Ok),
-            Err(error) => Err(Err(error)),
+            Ok(event) => event
+                .coalesce_motion()
+                .map_err(|event| Box::new(Ok(*event))),
+            Err(error) => Err(Box::new(Err(error))),
         }
     }
 }
@@ -4455,11 +4481,11 @@ impl InputBatchItem for Event {
         Some(self)
     }
 
-    fn coalesce_motion(self) -> Result<(), Self> {
+    fn coalesce_motion(self) -> Result<(), Box<Self>> {
         if is_mouse_motion(Some(&self)) {
             Ok(())
         } else {
-            Err(self)
+            Err(Box::new(self))
         }
     }
 }
@@ -4541,7 +4567,7 @@ fn for_each_ready_input_event_until<S: ReadyInput>(
                     match newest_motion.coalesce_motion() {
                         Ok(()) => newest_motion = candidate,
                         Err(original) => {
-                            newest_motion = original;
+                            newest_motion = *original;
                             next = Some(candidate);
                             break;
                         }

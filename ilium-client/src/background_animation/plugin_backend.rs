@@ -158,14 +158,14 @@ struct Presentation {
 }
 enum SourceTerminal {
     Complete {
-        owner: SourceCompletion,
+        owner: Box<SourceCompletion>,
         state: SourcePublishState,
         feed_id: Option<String>,
-        feed_descriptor: Option<ProjectedFeedDescriptor>,
-        feed_registration: Option<PreparedFeedRegistration>,
+        feed_descriptor: Option<Box<ProjectedFeedDescriptor>>,
+        feed_registration: Option<Box<PreparedFeedRegistration>>,
     },
     Failed {
-        owner: SourceFailure,
+        owner: Box<SourceFailure>,
         state: SourcePublishState,
     },
 }
@@ -1323,7 +1323,7 @@ impl NativeSourceOwner {
                     self.terminal.insert(
                         id,
                         SourceTerminal::Complete {
-                            owner: completion,
+                            owner: Box::new(completion),
                             state: SourcePublishState::Pending,
                             feed_id,
                             feed_descriptor: None,
@@ -1336,7 +1336,7 @@ impl NativeSourceOwner {
                     self.terminal.insert(
                         id,
                         SourceTerminal::Failed {
-                            owner: failure,
+                            owner: Box::new(failure),
                             state: SourcePublishState::Pending,
                         },
                     );
@@ -1371,13 +1371,13 @@ impl NativeSourceOwner {
                             self.client.clone(),
                             Arc::new(SystemDns),
                             None,
-                            prepared,
+                            *prepared,
                         );
                         self.feeds.insert(
                             feed_id,
                             SourceFeedRecord {
                                 host,
-                                descriptor,
+                                descriptor: *descriptor,
                                 terminal: None,
                                 closing: None,
                                 closing_state: SourcePublishState::Pending,
@@ -1653,8 +1653,8 @@ impl NativeSourceOwner {
                                     return Err(error.to_string());
                                 }
                             };
-                        *feed_descriptor = Some(descriptor);
-                        *feed_registration = Some(prepared);
+                        *feed_descriptor = Some(Box::new(descriptor));
+                        *feed_registration = Some(Box::new(prepared));
                         (value, imported)
                     } else {
                         owner
@@ -1749,7 +1749,7 @@ impl NativeSourceOwner {
                     self.terminal.insert(
                         id,
                         SourceTerminal::Complete {
-                            owner: value,
+                            owner: Box::new(value),
                             state: SourcePublishState::Uncertain,
                             feed_id: None,
                             feed_descriptor: None,
@@ -1762,7 +1762,7 @@ impl NativeSourceOwner {
                     self.terminal.insert(
                         id,
                         SourceTerminal::Failed {
-                            owner: value,
+                            owner: Box::new(value),
                             state: SourcePublishState::Uncertain,
                         },
                     );
@@ -2283,12 +2283,14 @@ impl Job for PreRenderJob {
                     presentation.render_prepared(
                         &mut instance,
                         &self.request,
-                        sample,
-                        &mut preparation,
                         &self.quota,
                         &self.stop,
-                        self.spec.frozen_inputs(),
-                        self.spec.source_sequence().map(Arc::as_ref),
+                        ReplayFrame {
+                            sample,
+                            preparation: &mut preparation,
+                            frozen_inputs: self.spec.frozen_inputs(),
+                            source_sequence: self.spec.source_sequence().map(Arc::as_ref),
+                        },
                     )?;
                 }
                 stopped(&self.stop)?;
@@ -2417,12 +2419,14 @@ impl Job for PreRenderJob {
                 presentation.render_prepared(
                     &mut instance,
                     &self.request,
-                    sample,
-                    &mut preparation,
                     &self.quota,
                     &self.stop,
-                    self.spec.frozen_inputs(),
-                    self.spec.source_sequence().map(Arc::as_ref),
+                    ReplayFrame {
+                        sample,
+                        preparation: &mut preparation,
+                        frozen_inputs: self.spec.frozen_inputs(),
+                        source_sequence: self.spec.source_sequence().map(Arc::as_ref),
+                    },
                 )?;
             }
             stopped(&self.stop)?;
@@ -3043,18 +3047,20 @@ impl PluginBackend {
                     instance,
                     &workflow.request,
                     &self.quota,
-                    self.resources.clone(),
-                    Arc::clone(&workflow.state_root),
-                    workflow.qualified_audio.take(),
-                    workflow
-                        .request
-                        .settings
-                        .plugin
-                        .selected
-                        .as_ref()
-                        .is_some_and(|selected| selected.mode == AnimationMode::Live),
+                    PresentationEnvironment {
+                        resources: self.resources.clone(),
+                        state_root: Arc::clone(&workflow.state_root),
+                        selected_audio: workflow.qualified_audio.take(),
+                        live_mode: workflow
+                            .request
+                            .settings
+                            .plugin
+                            .selected
+                            .as_ref()
+                            .is_some_and(|selected| selected.mode == AnimationMode::Live),
+                        actor_wake: Arc::clone(&self.actor_wake),
+                    },
                     creation,
-                    Arc::clone(&self.actor_wake),
                 )?);
                 if let (Some(presentation), Some(runtime)) =
                     (workflow.presentation.as_mut(), self.saved_runtime.as_ref())
@@ -3987,18 +3993,38 @@ fn apply_before_creation(invalidation: &Invalidation) -> Result<(), String> {
     }
     Ok(())
 }
+/// Shared services and session facts a presentation is built against.
+struct PresentationEnvironment {
+    resources: ilium_ambient::resources::AmbientResources,
+    state_root: Arc<PinnedDirectory>,
+    selected_audio: Option<QualifiedCaptureBinding>,
+    live_mode: bool,
+    actor_wake: Arc<dyn Fn() + Send + Sync>,
+}
+
+/// One replay frame to render, with the frozen inputs it samples from.
+struct ReplayFrame<'a> {
+    sample: ilium_animation_js::replay::ReplaySample,
+    preparation: &'a mut ilium_animation_js::replay::ClipPreparation,
+    frozen_inputs: &'a FrozenInputs,
+    source_sequence: Option<&'a FrozenSourceSequence>,
+}
+
 impl Presentation {
     fn new(
         instance: &mut PackageInstance,
         request: &RenderRequest,
         quota: &QuotaGroup,
-        resources: ilium_ambient::resources::AmbientResources,
-        state_root: Arc<PinnedDirectory>,
-        selected_audio: Option<QualifiedCaptureBinding>,
-        live_mode: bool,
+        environment: PresentationEnvironment,
         creation: CreateState,
-        actor_wake: Arc<dyn Fn() + Send + Sync>,
     ) -> Result<Self, String> {
+        let PresentationEnvironment {
+            resources,
+            state_root,
+            selected_audio,
+            live_mode,
+            actor_wake,
+        } = environment;
         let request_bytes = instance
             .engine_limits()
             .pending_requests
@@ -4920,13 +4946,16 @@ impl Presentation {
         &mut self,
         instance: &mut PackageInstance,
         request: &RenderRequest,
-        sample: ilium_animation_js::replay::ReplaySample,
-        preparation: &mut ilium_animation_js::replay::ClipPreparation,
         quota: &QuotaGroup,
         stop: &StopToken,
-        frozen_inputs: &FrozenInputs,
-        source_sequence: Option<&FrozenSourceSequence>,
+        frame: ReplayFrame<'_>,
     ) -> Result<(), String> {
+        let ReplayFrame {
+            sample,
+            preparation,
+            frozen_inputs,
+            source_sequence,
+        } = frame;
         stopped(stop)?;
         // Retain one accepted native instance through asynchronous create. A
         // pending promise does not become a failure or launch a replacement.

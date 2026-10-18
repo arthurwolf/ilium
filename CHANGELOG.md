@@ -13,7 +13,16 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 
 ## [Unreleased]
 
+### Fixed
+- Settings tab labels keep a free cell before the overflow scrollbar, and the Settings content column keeps a one-cell inner margin from its frame.
+- Settings tab labels are shown whole or not at all: a narrow menu no longer cuts a label mid-word (for example "Optimi…"), and its icon still identifies the tab.
+- Clipped Settings labels, values and dialog titles end at a whole word when that still shows at least a third of the room, so "Top-level destination" clips to "Top-level…" instead of "Top-level destina…".
+- The Voice control Settings tab uses a single-width glyph, so its row no longer shifts the columns beside it.
+- The empty terminal placeholder uses the same inner padding and dimmed text as the pane frames.
+- Editor panes reserve a one-column strip beside the text for the scrollbar, so the scrollbar no longer draws over source lines or rendered markdown; the text width and the minimap position follow that strip.
+
 ### Changed
+- The Settings left menu shows a UTF-8 icon beside every tab, and its tab list and the content column each sit in a rounded frame with the same title style as the main UI, with a scrollbar when they overflow.
 - The progress-monitor instructions Ilium installs for agents (version 11) use a unit-test run as the example progress message instead of a release build, so agents are not nudged toward release builds; installed instruction blocks are refreshed automatically.
 - Codex session conversion now bounds app-server output records and queued reader events, clipping oversized diagnostics and failing closed on oversized protocol lines.
 - Live ambient data pollers and fleet-marker preparers now reserve persistent worker capacity from the host's shared quota before starting.

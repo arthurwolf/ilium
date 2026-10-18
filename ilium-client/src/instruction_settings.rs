@@ -278,10 +278,10 @@ mod tests {
     fn instruction_header_actions_are_not_field_click_targets() {
         let mut app = App::new("instruction-header-click".into(), std::env::temp_dir());
         app.set_screen_area(Rect::new(0, 0, 60, 20));
-        app.mode = crate::app::Mode::Settings(crate::app::SettingsState {
+        app.mode = crate::app::Mode::Settings(Box::new(crate::app::SettingsState {
             tab: SettingsTab::LlmInstructions,
             ..Default::default()
-        });
+        }));
         let layout = crate::settings_ui::compute_layout_for_mode(
             app.layout.screen_area,
             &app,
@@ -410,10 +410,10 @@ mod tests {
     fn instruction_scrollbar_click_selects_a_field_without_opening_its_editor() {
         let mut app = App::new("instruction-scrollbar-click".into(), std::env::temp_dir());
         app.set_screen_area(Rect::new(0, 0, 60, 20));
-        app.mode = crate::app::Mode::Settings(crate::app::SettingsState {
+        app.mode = crate::app::Mode::Settings(Box::new(crate::app::SettingsState {
             tab: SettingsTab::LlmInstructions,
             ..Default::default()
-        });
+        }));
         let layout = crate::settings_ui::compute_layout_for_mode(
             app.layout.screen_area,
             &app,
@@ -530,20 +530,20 @@ mod interaction_tests {
         let mut app = App::new("instructions".into(), directory.path().to_path_buf());
         app.config_dir = Some(directory.path().to_path_buf());
         app.layout.screen_area = Rect::new(0, 0, 80, 24);
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::LlmInstructions,
             selected_row: SELECTION_BASE + 1,
             ..Default::default()
-        });
+        }));
         key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
         key(&mut app, KeyCode::Char('X'), KeyModifiers::NONE);
         key(&mut app, KeyCode::Char('s'), KeyModifiers::CONTROL);
         assert_eq!(app.inference_settings.instructions.entry_naming, "X");
         assert!(matches!(&app.mode,Mode::Settings(s) if s.tab==SettingsTab::LlmInstructions));
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Titles,
             ..Default::default()
-        });
+        }));
         let area = crate::settings_ui::compute_layout(app.layout.screen_area).content_area;
         crate::mouse::handle_mouse_event(
             &mut app,
@@ -602,10 +602,10 @@ mod interaction_tests {
     fn wheel_reaches_the_last_shared_field_in_a_short_terminal() {
         let mut app = App::new("instructions".into(), std::env::temp_dir());
         app.layout.screen_area = Rect::new(0, 0, 60, 20);
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::LlmInstructions,
             ..Default::default()
-        });
+        }));
         let area = crate::settings_ui::compute_layout(app.layout.screen_area).content_area;
         for _ in 0..6 {
             crate::mouse::handle_mouse_event(

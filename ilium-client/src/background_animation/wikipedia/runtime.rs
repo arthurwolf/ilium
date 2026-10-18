@@ -89,8 +89,9 @@ impl WikipediaRuntime {
         elapsed: Duration,
         resources: Option<&AmbientResources>,
     ) {
-        #[cfg(not(test))]
-        if self.loader.is_none() && elapsed >= self.retry_after {
+        // Test builds compile the loader start path but never take it, so the
+        // resources parameter stays used and no HTTP starts from tests.
+        if !cfg!(test) && self.loader.is_none() && elapsed >= self.retry_after {
             let Some(resources) = resources else {
                 self.loading_status = "Wikipedia worker admission is not configured".into();
                 self.retry_after = elapsed.saturating_add(Duration::from_secs(30));

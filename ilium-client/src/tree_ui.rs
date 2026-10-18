@@ -3301,6 +3301,16 @@ mod tests {
         )
     }
 
+    /// Per-render annotations for the tree test helpers: the branch-line and
+    /// project-separator flags, the workspace git statuses behind the branch
+    /// line, and the agent model labels shown on agent rows.
+    struct TreeBufferAnnotations<'a> {
+        show_branch_line: bool,
+        workspace_git_statuses: &'a HashMap<NodeId, WorkspaceGitStatus>,
+        show_project_separators: bool,
+        agent_models: &'a HashMap<NodeId, String>,
+    }
+
     fn render_tree_buffer_with_branch_visibility(
         tree: &Tree,
         state: &mut TreeState<NodeId>,
@@ -3310,6 +3320,7 @@ mod tests {
         area: Rect,
         branch_rendering: (bool, &HashMap<NodeId, WorkspaceGitStatus>, bool),
     ) -> Buffer {
+        let (show_branch_line, workspace_git_statuses, show_project_separators) = branch_rendering;
         render_tree_buffer_with_models(
             tree,
             state,
@@ -3317,8 +3328,12 @@ mod tests {
             recently_created,
             elapsed_ms,
             area,
-            branch_rendering,
-            &HashMap::new(),
+            TreeBufferAnnotations {
+                show_branch_line,
+                workspace_git_statuses,
+                show_project_separators,
+                agent_models: &HashMap::new(),
+            },
         )
     }
 
@@ -3329,10 +3344,14 @@ mod tests {
         recently_created: &HashMap<NodeId, u128>,
         elapsed_ms: u128,
         area: Rect,
-        branch_rendering: (bool, &HashMap<NodeId, WorkspaceGitStatus>, bool),
-        agent_models: &HashMap<NodeId, String>,
+        annotations: TreeBufferAnnotations<'_>,
     ) -> Buffer {
-        let (show_branch_line, workspace_git_statuses, show_project_separators) = branch_rendering;
+        let TreeBufferAnnotations {
+            show_branch_line,
+            workspace_git_statuses,
+            show_project_separators,
+            agent_models,
+        } = annotations;
         let titles_loading = HashSet::new();
         let agent_identifiers = AgentIdentifierSettings::default();
         let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
@@ -3678,8 +3697,12 @@ mod tests {
             &HashMap::new(),
             0,
             Rect::new(0, 0, 64, 28),
-            (true, &HashMap::new(), false),
-            &models,
+            TreeBufferAnnotations {
+                show_branch_line: true,
+                workspace_git_statuses: &HashMap::new(),
+                show_project_separators: false,
+                agent_models: &models,
+            },
         );
 
         for (title, glyph) in rows {
@@ -3748,8 +3771,12 @@ mod tests {
             &HashMap::new(),
             0,
             Rect::new(0, 0, 64, 24),
-            (true, &HashMap::new(), false),
-            &models,
+            TreeBufferAnnotations {
+                show_branch_line: true,
+                workspace_git_statuses: &HashMap::new(),
+                show_project_separators: false,
+                agent_models: &models,
+            },
         );
 
         for (title, expected_glyph) in expected_rows {

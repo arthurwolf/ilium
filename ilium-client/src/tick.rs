@@ -687,12 +687,12 @@ mod tests {
         let config = tempfile::tempdir().unwrap();
         let mut app = App::new("budget-receipt-test".into(), project.path().to_path_buf());
         app.config_dir = Some(config.path().to_path_buf());
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Inference,
             selected_row: 2,
             scroll: 3,
             ..SettingsState::default()
-        });
+        }));
         app.settings_open_inference_field(InferenceSettingField::RestructurePromptTokenLimit);
         if let Mode::InferenceSettingPrompt(_, state) = &mut app.mode {
             state.buf = "234567".into();

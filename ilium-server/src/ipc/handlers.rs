@@ -7118,6 +7118,7 @@ where
     .await
 }
 
+#[allow(clippy::too_many_arguments)] // Probe, admission hook and PTY authorities stay explicit for the unlocked key path.
 async fn write_key_input_unlocked_with_probe_and_admission_hook<
     Probe,
     ProbeFuture,

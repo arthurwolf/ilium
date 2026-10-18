@@ -11,34 +11,24 @@ pub(crate) fn save_with_env(
     terminal: &Terminal<TestBackend>,
     directory_variable: &str,
 ) {
-    let directory = if let Some(directory) = std::env::var_os(directory_variable) {
-        std::path::PathBuf::from(directory)
-    } else if let Ok(job) = std::env::var("NI_BUILD_REMOTE_JOB") {
-        assert!(
-            job.len() == 32 && job.bytes().all(|byte| byte.is_ascii_hexdigit()),
-            "invalid ni-build capture job identity"
-        );
-        let expected =
-            std::path::PathBuf::from(format!("/data/ni-build-service/jobs/{job}/target"));
-        let target = std::env::var_os("CARGO_TARGET_DIR")
-            .map(std::path::PathBuf::from)
-            .expect("ni-build capture target");
-        assert_eq!(
-            target, expected,
-            "capture target must belong to the ni-build job"
-        );
-        target.join("ui-test-captures")
-    } else {
-        return;
-    };
+    assert!(name
+        .chars()
+        .all(|character| character.is_ascii_alphanumeric() || character == '-'));
+    if let Some(directory) = std::env::var_os(directory_variable) {
+        write_json_artifact(name, terminal, &std::path::PathBuf::from(directory));
+    } else if std::env::var_os("NI_BUILD_REMOTE_JOB").is_some() {
+        // ni-build returns the test log, not the cache slot the test binary runs from,
+        // so a remote capture is printed as text frames into that log instead.
+        print_text_frame(name, terminal);
+    }
+}
+
+fn write_json_artifact(name: &str, terminal: &Terminal<TestBackend>, directory: &std::path::Path) {
     assert!(
         directory.is_absolute(),
         "capture directory must be absolute"
     );
-    assert!(name
-        .chars()
-        .all(|character| character.is_ascii_alphanumeric() || character == '-'));
-    std::fs::create_dir_all(&directory).expect("create task-owned capture directory");
+    std::fs::create_dir_all(directory).expect("create task-owned capture directory");
     let buffer = terminal.backend().buffer();
     let cells: Vec<_> = buffer
         .content
@@ -66,4 +56,18 @@ pub(crate) fn save_with_env(
         "{}",
         json!({"type": "artifact", "path": path, "synthetic": true})
     );
+}
+
+fn print_text_frame(name: &str, terminal: &Terminal<TestBackend>) {
+    let buffer = terminal.backend().buffer();
+    let width = usize::from(buffer.area.width).max(1);
+    println!(
+        "ui-frame-begin {name} {}x{}",
+        buffer.area.width, buffer.area.height
+    );
+    for row in buffer.content.chunks(width) {
+        let line: String = row.iter().map(|cell| cell.symbol()).collect();
+        println!("{}", line.trim_end());
+    }
+    println!("ui-frame-end {name}");
 }

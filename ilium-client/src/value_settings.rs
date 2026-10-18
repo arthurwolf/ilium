@@ -890,11 +890,11 @@ mod tests {
                     }
                 }
 
-                app.mode = Mode::Settings(SettingsState {
+                app.mode = Mode::Settings(Box::new(SettingsState {
                     tab,
                     selected_row: row,
                     ..SettingsState::default()
-                });
+                }));
                 app.begin_settings_number_dialog(field);
                 let Mode::ValueDialog(host) = std::mem::replace(&mut app.mode, Mode::Normal) else {
                     panic!("{tab:?}/{row} must open its numeric dialog");
@@ -1098,11 +1098,11 @@ mod tests {
         std::fs::write(&path, "[editor\n").unwrap();
         let mut app = App::new("numeric-settings-test".into(), directory.path().into());
         app.config_dir = Some(directory.path().into());
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Editor,
             selected_row: 4,
             ..SettingsState::default()
-        });
+        }));
         app.begin_settings_number_dialog(SettingsNumber::EditorAutosaveDelay);
         let Mode::ValueDialog(mut host) = std::mem::replace(&mut app.mode, Mode::Normal) else {
             panic!("numeric editor");
@@ -1140,10 +1140,10 @@ mod tests {
     fn numeric_settings_validation_and_changed_parent_cannot_mutate_or_enqueue() {
         let mut app = App::new("numeric-settings-test".into(), std::env::temp_dir());
         app.config_dir = Some(std::env::temp_dir());
-        app.mode = Mode::Settings(SettingsState {
+        app.mode = Mode::Settings(Box::new(SettingsState {
             tab: SettingsTab::Terminal,
             ..SettingsState::default()
-        });
+        }));
         app.begin_settings_number_dialog(SettingsNumber::TerminalScrollback);
         let Mode::ValueDialog(mut host) = std::mem::replace(&mut app.mode, Mode::Normal) else {
             panic!("dialog");
