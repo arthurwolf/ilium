@@ -996,8 +996,8 @@ impl PluginPanelModel {
                 .map(|issue| {
                     format!(
                         "{}: {}",
-                        display_text(&issue.path.display().to_string(), 512),
-                        display_text(&issue.message, 512)
+                        display_text(&issue.path.display().to_string(), usize::MAX),
+                        display_text(&issue.message, usize::MAX)
                     )
                 })
                 .collect(),
@@ -1282,7 +1282,7 @@ mod tests {
     }
 
     #[test]
-    fn plugin_issue_report_bounds_package_paths() {
+    fn plugin_issue_report_retains_complete_package_paths() {
         let catalogue = PluginCatalogue {
             entries: Vec::new(),
             issues: vec![CatalogueIssue {
@@ -1294,7 +1294,7 @@ mod tests {
 
         assert_eq!(
             model.issue_details[0],
-            format!("{}: unreadable archive", "x".repeat(512))
+            format!("{}.iliumanim: unreadable archive", "x".repeat(600))
         );
     }
 

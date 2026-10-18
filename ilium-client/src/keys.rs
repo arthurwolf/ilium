@@ -27,6 +27,11 @@ use crate::scheduled_input::{ScheduledInputDialogState, ScheduledInputFocus};
 /// editor pane is temporarily owned by save preparation. `None` means the
 /// event is modal or otherwise cannot safely pass an earlier deferred event.
 pub(crate) fn editor_loan_event_target(app: &App, event: &Event) -> Option<Option<NodeId>> {
+    if app.diagnostic_view.is_some()
+        || matches!(event, Event::Key(key) if key.code == KeyCode::F(9) && crate::diagnostic::current_text(app).is_some())
+    {
+        return Some(None);
+    }
     if !matches!(event, Event::Key(_) | Event::Paste(_)) {
         return None;
     }
@@ -60,6 +65,9 @@ fn is_escape(event: &Event) -> bool {
 /// Existing protected input owners run before terminal capture or per-mode
 /// dispatch. This shared path preserves JS review, onboarding and dialog policy.
 pub(crate) fn intercept_event(app: &mut App, event: &Event) -> bool {
+    if crate::diagnostic::intercept_event(app, event) {
+        return true;
+    }
     if app.onboarding.is_none() && app.handle_plugin_permission_event(event) {
         return true;
     }

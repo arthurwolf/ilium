@@ -2395,6 +2395,7 @@ pub struct App {
     /// Set while Smart Copy light (no model call) owns [`Mode::SmartCopy`].
     pub smart_copy_light: Option<crate::smart_copy_light::SmartCopyLightState>,
     /// The "Preview" dialog shown for a second after a light selection is copied.
+    pub(crate) diagnostic_view: Option<crate::diagnostic::DiagnosticView>,
     pub smart_copy_preview: Option<crate::smart_copy_light::SmartCopyPreview>,
     pub(crate) light_copy_selection: Option<crate::smart_copy_selection::SelectionOwner>,
     pub(crate) light_copy_preview_generation: Option<u64>,
@@ -2992,6 +2993,7 @@ impl App {
             hovered_agent_toolbar_action: None,
             smart_copy_session: None,
             smart_copy_light: None,
+            diagnostic_view: None,
             smart_copy_preview: None,
             light_copy_selection: None,
             light_copy_preview_generation: None,
@@ -9197,7 +9199,6 @@ impl App {
                 let detail: String = error
                     .chars()
                     .filter(|character| !character.is_control())
-                    .take(512)
                     .collect();
                 model.issue_details.push(format!("Runtime: {detail}"));
                 if let Some(index) = model
@@ -19964,7 +19965,7 @@ mod tests {
     }
 
     #[test]
-    fn plugin_panel_exposes_sanitized_bounded_runtime_error_details() {
+    fn plugin_panel_exposes_sanitized_complete_runtime_error_details() {
         use crate::background_animation::test_support::{fake_host, FakeProbe};
 
         let mut app = app();
@@ -20002,7 +20003,7 @@ mod tests {
 
         assert_eq!(model.labels[issue_row], "1 package/runtime issue(s)");
         assert_eq!(model.issue_details.len(), 1);
-        assert_eq!(model.issue_details[0].len(), "Runtime: ".len() + 512);
+        assert!(model.issue_details[0].ends_with(&format!("{}[31m", "x".repeat(600))));
         assert!(model.issue_details[0].starts_with("Runtime: runtime failed"));
         assert!(!model.issue_details[0].contains('\n'));
         assert!(!model.issue_details[0].contains('\u{1b}'));
@@ -29596,7 +29597,9 @@ impl App {
             return true;
         }
         if let Err(error) = session.handle_key(&bridge, key.code) {
-            session.set_error(&error);
+            if let Err(admission_error) = session.set_error(&error) {
+                self.status_message = Some(admission_error);
+            }
         }
         true // Protected review consumes paste/keys instead of forwarding them.
     }
@@ -29612,7 +29615,9 @@ impl App {
             return true;
         };
         if let Err(error) = session.handle_mouse(&bridge, self.layout.screen_area, mouse) {
-            session.set_error(&error);
+            if let Err(admission_error) = session.set_error(&error) {
+                self.status_message = Some(admission_error);
+            }
         }
         true
     }
@@ -29639,7 +29644,10 @@ impl App {
                 return false;
             }
             self.animation_frame.occlude_composed(screen, rect);
-            frame.render_widget(ratatui::widgets::Paragraph::new(status.message()), rect);
+            frame.render_widget(
+                ratatui::widgets::Paragraph::new(format!("F9 details · {}", status.message())),
+                rect,
+            );
             return false;
         };
         self.animation_frame.discard_composed_receipt();

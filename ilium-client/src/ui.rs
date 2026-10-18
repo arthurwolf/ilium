@@ -149,6 +149,14 @@ pub(crate) fn draw_at_with_cursor(
     skip_vs16_continuation_cells(frame.buffer_mut(), layout.tree_area);
     if app.onboarding.is_none() && app.draw_plugin_permission_review(frame) {
         app.animation_frame.discard_composed_receipt();
+        if let Some(view) = &mut app.diagnostic_view {
+            crate::diagnostic::render(frame, view);
+        }
+        return None;
+    }
+    if let Some(view) = &mut app.diagnostic_view {
+        crate::diagnostic::render(frame, view);
+        app.animation_frame.discard_composed_receipt();
         return None;
     }
     cursor
@@ -418,12 +426,14 @@ fn draw_progress_tooltip(frame: &mut Frame, app: &App) {
         return;
     };
     let owner = app.progress_owner_label(pane_id);
-    let content = crate::progress_bar::details_tooltip(
+    crate::progress_popover::render(
+        frame,
+        app.layout.screen_area,
+        anchor,
         progress,
         app.progress_display_now_unix_millis(),
         owner.as_deref(),
     );
-    crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, &content);
 }
 
 fn draw_goal_resume_tooltip(frame: &mut Frame, app: &App) {
@@ -3128,12 +3138,11 @@ fn draw_editor(frame: &mut Frame, area: Rect, editor: &EditorPane) {
                 draw_source_scrollbar(frame, chrome.content_area, editor);
             } else {
                 frame.render_widget(
-                    Paragraph::new(
-                        editor
-                            .preparation_error
-                            .as_deref()
-                            .unwrap_or("Preparing source…"),
-                    ),
+                    Paragraph::new(editor.preparation_error.as_deref().map_or_else(
+                        || "Preparing source…".to_owned(),
+                        |error| format!("F9 details · {error}"),
+                    ))
+                    .wrap(ratatui::widgets::Wrap { trim: false }),
                     chrome.content_area,
                 );
             }
@@ -3151,7 +3160,11 @@ fn draw_editor(frame: &mut Frame, area: Rect, editor: &EditorPane) {
             }
             None => {
                 frame.render_widget(
-                    Paragraph::new(editor.preparation_error.as_deref().unwrap_or("Rendering…")),
+                    Paragraph::new(editor.preparation_error.as_deref().map_or_else(
+                        || "Rendering…".to_owned(),
+                        |error| format!("F9 details · {error}"),
+                    ))
+                    .wrap(ratatui::widgets::Wrap { trim: false }),
                     chrome.content_area,
                 );
             }
@@ -3403,10 +3416,10 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         // Borrow rather than `message.clone()` -- `app` outlives this
         // function's local `spans`, so there is no need to allocate a new
         // `String` copy of the status message on every render frame.
-        spans.push(Span::raw(message.as_str()));
+        spans.push(Span::raw(format!("F9 details · {message}")));
     } else if let Some(error) = app.semantic_animation_error() {
         spans.push(Span::raw("  —  "));
-        spans.push(Span::raw(error));
+        spans.push(Span::raw(format!("F9 details · {error}")));
     }
 
     let cap_style = theme::statusbar_cap_style();

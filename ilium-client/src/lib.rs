@@ -168,6 +168,7 @@ pub use smart_copy_selection::{
     RestoredSelection, SelectionCompletion, SelectionShutdownCustody, SelectionShutdownErrors,
 };
 pub mod agent_message_dialog;
+pub(crate) mod diagnostic;
 pub mod goal_resume_link;
 mod input_backlog;
 mod paste_cursor;
