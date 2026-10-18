@@ -2231,7 +2231,7 @@ mod tests {
     }
 
     #[test]
-    fn osc_pressure_retains_original_cursor_and_other_panes_continue() {
+    fn oversized_osc_remains_bounded_and_other_panes_continue() {
         let (_bank, parsing) = Bank::start();
         let mut first = TerminalView::new(4, 40);
         let mut second = TerminalView::new(4, 40);
@@ -2269,7 +2269,6 @@ mod tests {
         let mut bytes = b"\x1b]0;".to_vec();
         bytes.extend(std::iter::repeat_n(b'x', 512 * 1024));
         bytes.push(7);
-        let expected_bytes = bytes.clone();
         offer(
             &mut first,
             PaneCommand::Output {
@@ -2279,19 +2278,10 @@ mod tests {
                 track: false,
             },
         );
-        result(
-            &parsing,
-            |result| matches!(result, ParseResult::Error { target, message } if target.pane_id == NodeId(101) && message.contains("cursor")),
-        );
-        offer(
-            &mut first,
-            PaneCommand::Output {
-                first: 3,
-                sequence: 3,
-                bytes: b"after".to_vec(),
-                track: false,
-            },
-        );
+        result(&parsing, |result| {
+            matches!(result, ParseResult::Published { target, snapshot, .. }
+                if target.pane_id == NodeId(101) && snapshot.sequence == 2)
+        });
         offer(
             &mut second,
             PaneCommand::Output {
@@ -2309,21 +2299,15 @@ mod tests {
             unreachable!()
         };
         assert!(snapshot.visible.contents().contains("independent pane"));
-        let deadline = Instant::now() + Duration::from_secs(5);
-        let (pending, bytes) = loop {
-            if let Some(work) = parsing.pending_work() {
-                break work;
-            }
-            assert!(Instant::now() < deadline, "parser queue read stayed busy");
-            std::thread::yield_now();
-        };
-        assert!(pending >= 2);
-        assert!(bytes >= expected_bytes.len());
-        parsing
-            .shared
-            .state_limit
-            .store(MAX_STATE_BYTES, Ordering::Release);
-        parsing.shared.changed.notify_one();
+        offer(
+            &mut first,
+            PaneCommand::Output {
+                first: 3,
+                sequence: 3,
+                bytes: b"after".to_vec(),
+                track: false,
+            },
+        );
         let resumed = result(
             &parsing,
             |result| matches!(result, ParseResult::Published { target, snapshot, .. } if target.pane_id == NodeId(101) && snapshot.sequence == 3),
@@ -2331,10 +2315,8 @@ mod tests {
         let ParseResult::Published { snapshot, .. } = resumed else {
             unreachable!()
         };
-        let mut expected = b"ready".to_vec();
-        expected.extend_from_slice(&expected_bytes);
-        expected.extend_from_slice(b"after");
-        assert_eq!(snapshot.history.to_vec(), expected);
+        assert!(snapshot.history.to_vec().ends_with(b"after"));
+        assert!(snapshot.history.len() <= MIB);
         assert!(snapshot.visible.contents().contains("after"));
     }
     #[test]
@@ -2384,7 +2366,9 @@ mod tests {
             &parsing,
             |result| matches!(result, ParseResult::Published { target, snapshot, .. } if target.pane_id == second_id && snapshot.sequence == 1),
         );
-        parsing.shared.state_limit.store(MIB, Ordering::Release);
+        // Force genuine fixed-state exhaustion; OSC accumulation is bounded
+        // and optional raw history now reclaims itself instead of suspending.
+        parsing.shared.state_limit.store(1, Ordering::Release);
         let mut source = b"\x1b]0;".to_vec();
         source.extend(std::iter::repeat_n(b'x', 512 * 1024));
         offer(
@@ -3782,7 +3766,7 @@ mod tests {
         let mut panes = [(NodeId(9), TerminalView::new(3, 20))];
         attach(&parsing, panes[0].0, &mut panes[0].1);
         let mut initial = b"original\x1b]0;".to_vec();
-        initial.extend(std::iter::repeat_n(b'x', 256 * 1024));
+        initial.extend(std::iter::repeat_n(b'x', 2 * MIB));
         initial.push(7);
         offer(
             &mut panes[0].1,
