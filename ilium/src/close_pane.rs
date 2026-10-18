@@ -120,7 +120,7 @@ pub(crate) async fn close_pane(args: ClosePaneArgs) -> Result<(), CliError> {
     );
 
     let mut attached =
-        match pane_scan::attach_as(&identity.socket_path, &identity.session_name).await {
+        match pane_scan::attach_as(&identity.socket_path, &identity.session_name, None).await {
             Ok(attached) => attached,
             Err(reason) => {
                 print_error(request_id, Some(pane_id), "session-unreachable", &reason);

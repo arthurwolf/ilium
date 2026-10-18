@@ -51,6 +51,7 @@ pub mod ascii_chart;
 mod background_acceptance;
 pub mod background_animation;
 pub mod background_composition;
+mod blocking_errors;
 pub mod board;
 pub mod board_ui;
 pub mod chatroom;
@@ -110,6 +111,10 @@ mod normal_voice;
 pub mod onboarding;
 pub mod open_target;
 pub mod outbound_requests;
+pub mod padding;
+pub mod padding_app;
+pub mod padding_dialog;
+pub mod padding_ui;
 pub mod pane_title;
 pub mod paths;
 pub mod popover;
@@ -117,11 +122,14 @@ pub mod presentation;
 pub mod progress_bar;
 pub mod progress_display;
 pub mod progress_guard;
+pub mod progress_popover;
+pub mod progress_time;
 pub mod project_config;
 pub mod project_naming;
 pub mod prompt_queue;
 mod provider_admission; // Bounded IO preflight retains original request ownership.
 mod proxy_database;
+pub mod recap;
 pub mod release_animation;
 pub mod release_embedding;
 pub mod remote_compaction_app;
@@ -138,6 +146,7 @@ pub mod scheduled_input;
 pub mod screen_transfer;
 pub mod search_ui;
 pub mod search_workers;
+pub mod section_frame;
 mod semantic_animation;
 pub mod session_conversion;
 mod session_models;
@@ -159,6 +168,7 @@ pub use smart_copy_selection::{
     RestoredSelection, SelectionCompletion, SelectionShutdownCustody, SelectionShutdownErrors,
 };
 pub mod agent_message_dialog;
+pub(crate) mod diagnostic;
 pub mod goal_resume_link;
 mod input_backlog;
 mod paste_cursor;
@@ -630,6 +640,75 @@ struct PreparedStartup {
     startup_dialog: crate::startup_dialog::StartupDialog,
 }
 
+fn apply_presented_frame(
+    app: &mut App,
+    mut presented: crate::presentation::PresentedFrame,
+    animation_presentations: &mut std::collections::VecDeque<(u64, crate::app::EmittedGeometry)>,
+) -> Result<bool, ClientError> {
+    let mut redraw = false;
+    if let Some((frame_id, geometry)) = animation_presentations.pop_front() {
+        if frame_id != presented.frame.frame_id {
+            return Err(ClientError::TerminalSetup(std::io::Error::other(
+                "animation presentation identity mismatch",
+            )));
+        }
+        if let Some(reason) = &presented.uncertainty {
+            drop(geometry);
+            if let Some(animation) = presented.frame.take_animation() {
+                app.animation_frame.uncertain_output(animation, reason);
+            }
+            redraw = true;
+        } else if let Some(reason) = &presented.rejection {
+            drop(geometry);
+            drop(presented.frame.take_animation());
+            app.animation_frame.reject_output(reason);
+            redraw = true;
+        } else {
+            redraw |= app.commit_emitted_geometry(geometry);
+            if let Some(press) = app.take_deferred_pointer_press() {
+                crate::mouse::handle_mouse_event(app, press);
+                redraw = true;
+            }
+            if let Some(animation) = presented.frame.take_animation() {
+                let snapshot = animation.snapshot();
+                tracing::trace!(
+                    frame_id,
+                    animation_revision = snapshot.revision,
+                    animation_sequence = snapshot.sequence,
+                    composition_to_emission_us = presented
+                        .emitted_at
+                        .saturating_duration_since(animation.composed_at())
+                        .as_micros() as u64,
+                    request_to_emission_us = presented
+                        .emitted_at
+                        .saturating_duration_since(snapshot.requested_at)
+                        .as_micros() as u64,
+                    completed_frame_age_us = presented
+                        .emitted_at
+                        .saturating_duration_since(snapshot.completed_at)
+                        .as_micros() as u64,
+                    "animation frame emitted"
+                );
+                app.animation_frame
+                    .acknowledge(animation, presented.flush_proof.take());
+            }
+        }
+    }
+    if presented.rejection.is_none() && presented.uncertainty.is_none() {
+        tracing::trace!(
+            frame_id = presented.frame.frame_id,
+            layout_revision = presented.frame.layout_revision,
+            frame_age_us = presented
+                .emitted_at
+                .duration_since(presented.frame.prepared_at)
+                .as_micros() as u64,
+            emission_us = presented.emission_duration.as_micros() as u64,
+            "terminal frame emitted"
+        );
+    }
+    Ok(redraw)
+}
+
 async fn run_inner(
     options: &RunOptions,
     startup: PreparedStartup,
@@ -653,11 +732,13 @@ async fn run_inner(
     let execution = crate::execution::ClientExecution::start_async()
         .await
         .map_err(|error| ClientError::TerminalSetup(std::io::Error::other(error)))?;
-    let ambient_resources = execution.ambient_resources().map_err(|error| {
-        ClientError::TerminalSetup(std::io::Error::other(format!(
-            "ambient resources startup: {error:?}"
-        )))
-    })?;
+    let ambient_resources = crate::execution::retry_startup_busy(|| execution.ambient_resources())
+        .await
+        .map_err(|error| {
+            ClientError::TerminalSetup(std::io::Error::other(format!(
+                "ambient resources startup: {error:?}"
+            )))
+        })?;
     // Probe asynchronously under the same bounded quota as animation work.
     let mut gpu_probe = ilium_gpu::start_probe(ambient_resources.clone());
     startup_dialog.show(
@@ -666,7 +747,8 @@ async fn run_inner(
         Some(0.75),
     );
     let audio_client = execution
-        .client(crate::startup_audio::limits())
+        .client_when_ready(crate::startup_audio::limits())
+        .await
         .map_err(|error| {
             ClientError::TerminalSetup(std::io::Error::other(format!(
                 "startup audio client admission: {error:?}"
@@ -684,7 +766,8 @@ async fn run_inner(
     let mut app = App::new(options.session_name.clone(), options.session_cwd.clone());
     app.configure_paste_retirement(execution.retirement());
     let text_trigger_preview_client = execution
-        .client(crate::text_trigger_dialog::preview_limits())
+        .client_when_ready(crate::text_trigger_dialog::preview_limits())
+        .await
         .map_err(|error| {
             ClientError::TerminalSetup(std::io::Error::other(format!(
                 "text trigger preview startup: {error:?}"
@@ -693,7 +776,8 @@ async fn run_inner(
     let text_trigger_preview_notification =
         app.configure_text_trigger_preview(text_trigger_preview_client);
     let sound_preview_client = execution
-        .client(crate::onboarding::sound_preview::limits())
+        .client_when_ready(crate::onboarding::sound_preview::limits())
+        .await
         .map_err(|error| {
             ClientError::TerminalSetup(std::io::Error::other(format!(
                 "sound studio preview startup: {error:?}"
@@ -702,7 +786,8 @@ async fn run_inner(
     let sound_preview_notification = app.configure_sound_studio_preview(sound_preview_client);
 
     let outbound_admission = execution
-        .client(crate::ipc_preparation::request_limits())
+        .client_when_ready(crate::ipc_preparation::request_limits())
+        .await
         .map_err(|error| {
             ClientError::TerminalSetup(std::io::Error::other(format!(
                 "outbound admission startup: {error:?}"
@@ -711,12 +796,13 @@ async fn run_inner(
     app.outbound_admission = Some(outbound_admission.clone());
     app.location_search_client = Some(execution.location_search());
     let catalogue_client = execution
-        .client(ilium_execution::ClientLimits {
+        .client_when_ready(ilium_execution::ClientLimits {
             jobs: 1,
             service_jobs: 0,
             input_bytes: 4 * 1024 * 1024,
             result_bytes: 64 * 1024 * 1024,
         })
+        .await
         .map_err(|error| {
             ClientError::TerminalSetup(std::io::Error::other(format!(
                 "animation catalogue startup: {error:?}"
@@ -726,19 +812,22 @@ async fn run_inner(
         crate::animation_plugins::preparation::CataloguePreparation::new(catalogue_client);
     let catalogue_notification = catalogue_preparation.notification();
     app.plugin_catalogue_preparation = Some(catalogue_preparation);
-    let documents = execution.documents().map_err(|error| {
-        ClientError::TerminalSetup(std::io::Error::other(format!(
-            "document preparation startup: {error:?}"
-        )))
-    })?;
+    let documents = crate::execution::retry_startup_busy(|| execution.documents())
+        .await
+        .map_err(|error| {
+            ClientError::TerminalSetup(std::io::Error::other(format!(
+                "document preparation startup: {error:?}"
+            )))
+        })?;
     let document_notification = app.configure_document_preparation(documents);
     let context_client = execution
-        .client(ilium_execution::ClientLimits {
+        .client_when_ready(ilium_execution::ClientLimits {
             jobs: 4,
             service_jobs: 0,
             input_bytes: 384 * 1024 * 1024,
             result_bytes: 256 * 1024 * 1024,
         })
+        .await
         .map_err(|error| {
             ClientError::TerminalSetup(std::io::Error::other(format!(
                 "context preparation startup: {error:?}"
@@ -748,25 +837,26 @@ async fn run_inner(
         crate::terminal_context_preparation::TerminalContextPreparation::new(context_client);
     let context_notification = context_preparation.notification();
     app.terminal_context_preparation = Some(context_preparation);
-    let external_open_client =
-        execution
-            .client(crate::external_open::limits())
-            .map_err(|error| {
-                ClientError::TerminalSetup(std::io::Error::other(format!(
-                    "external opening client startup: {error:?}"
-                )))
-            })?;
+    let external_open_client = execution
+        .client_when_ready(crate::external_open::limits())
+        .await
+        .map_err(|error| {
+            ClientError::TerminalSetup(std::io::Error::other(format!(
+                "external opening client startup: {error:?}"
+            )))
+        })?;
     let external_open = crate::external_open::ExternalOpenService::start(external_open_client)
         .map_err(ClientError::TerminalSetup)?;
     let external_open_notification = external_open.notification();
     app.external_open = Some(external_open);
     let clipboard_client = execution
-        .client(ilium_execution::ClientLimits {
+        .client_when_ready(ilium_execution::ClientLimits {
             jobs: 8,
             service_jobs: 0,
             input_bytes: 64 * 1024 * 1024 + 64 * 1024,
             result_bytes: 128 * 1024 * 1024,
         })
+        .await
         .map_err(|error| {
             ClientError::TerminalSetup(std::io::Error::other(format!(
                 "clipboard client startup: {error:?}"
@@ -777,7 +867,8 @@ async fn run_inner(
     let clipboard_notification = clipboard.notification();
     app.terminal_clipboard = Some(clipboard);
     let selection_client = execution
-        .client(crate::smart_copy_selection::limits())
+        .client_when_ready(crate::smart_copy_selection::limits())
+        .await
         .map_err(|error| {
             ClientError::TerminalSetup(std::io::Error::other(format!(
                 "Light selection admission: {error:?}"
@@ -787,11 +878,13 @@ async fn run_inner(
     let selection_notification = selection.notification();
     app.light_copy_selection = Some(selection);
     let parsing = crate::terminal_parsing::TerminalParsing::start_with_storage(
-        execution.terminal_parser().map_err(|error| {
-            ClientError::TerminalSetup(std::io::Error::other(format!(
-                "terminal parser client: {error:?}"
-            )))
-        })?,
+        crate::execution::retry_startup_busy(|| execution.terminal_parser())
+            .await
+            .map_err(|error| {
+                ClientError::TerminalSetup(std::io::Error::other(format!(
+                    "terminal parser client: {error:?}"
+                )))
+            })?,
         execution.terminal_storage(),
         usize::try_from(app.terminal_settings.engine_memory_budget_mib)
             .unwrap_or(usize::MAX / (1024 * 1024))
@@ -801,24 +894,26 @@ async fn run_inner(
     let terminal_notification = parsing.notification();
     app.terminal_parsing = Some(parsing);
     let filesystem_client = execution
-        .client(ilium_execution::ClientLimits {
+        .client_when_ready(ilium_execution::ClientLimits {
             jobs: 16,
             service_jobs: 0,
             input_bytes: 384 * 1024 * 1024,
             result_bytes: 256 * 1024 * 1024,
         })
+        .await
         .map_err(|error| {
             ClientError::TerminalSetup(std::io::Error::other(format!(
                 "filesystem startup: {error:?}"
             )))
         })?;
     let statistics_client = execution
-        .client(ilium_execution::ClientLimits {
+        .client_when_ready(ilium_execution::ClientLimits {
             jobs: 24,
             service_jobs: 0,
             input_bytes: 384 * 1024 * 1024,
             result_bytes: 384 * 1024 * 1024,
         })
+        .await
         .map_err(|error| {
             ClientError::TerminalSetup(std::io::Error::other(format!(
                 "statistics startup: {error:?}"
@@ -885,12 +980,13 @@ async fn run_inner(
     let (naming_events_tx, mut naming_events_rx) = mpsc::channel(NAMING_EVENTS_CHANNEL_CAPACITY);
     let provider_notification = std::sync::Arc::new(tokio::sync::Notify::new());
     let provider_client = execution
-        .client(ilium_execution::ClientLimits {
+        .client_when_ready(ilium_execution::ClientLimits {
             jobs: 16,
             service_jobs: 0,
             input_bytes: 384 * 1024 * 1024,
             result_bytes: 256 * 1024 * 1024,
         })
+        .await
         .map_err(|error| {
             ClientError::TerminalSetup(std::io::Error::other(format!(
                 "provider work startup: {error:?}"
@@ -999,6 +1095,8 @@ async fn run_inner(
     app.keyboard_settings = config.keyboard;
     app.keybindings = config.keybindings;
     app.kanban_board_settings = config.kanban_board;
+    app.padding_settings = config.padding;
+    app.sync_padding();
     app.apply_sound_settings(config.sound);
     app.apply_notification_settings(config.notifications);
     app.apply_inference_settings(config.inference);
@@ -1064,12 +1162,12 @@ async fn run_inner(
     let conversion_notification = std::sync::Arc::new(tokio::sync::Notify::new());
     let conversion_wake = std::sync::Arc::clone(&conversion_notification);
     let conversion_client = execution
-        .client(ilium_execution::ClientLimits {
+        .client_when_ready(ilium_execution::ClientLimits {
             jobs: 1,
             service_jobs: 0,
             input_bytes: crate::session_conversion::CONVERSION_WORKING_BYTES,
             result_bytes: crate::session_conversion::CONVERSION_RESULT_BYTES,
-        })
+        }).await
         .map_err(|error| {
             ClientError::TerminalSetup(std::io::Error::other(format!(
                 "session conversion worker startup: {error:?}"
@@ -1083,12 +1181,12 @@ async fn run_inner(
     let compaction_notification = std::sync::Arc::new(tokio::sync::Notify::new());
     let remote_compaction_wake = std::sync::Arc::clone(&compaction_notification);
     let remote_compaction_client = execution
-        .client(ilium_execution::ClientLimits {
+        .client_when_ready(ilium_execution::ClientLimits {
             jobs: 1,
             service_jobs: 0,
             input_bytes: 512 * 1024 * 1024,
             result_bytes: 2 * 1024 * 1024,
-        })
+        }).await
         .map_err(|error| {
             ClientError::TerminalSetup(std::io::Error::other(format!(
                 "remote compaction worker startup: {error:?}"
@@ -1105,12 +1203,12 @@ async fn run_inner(
     let reset_notification = std::sync::Arc::new(tokio::sync::Notify::new());
     let reset_wake = std::sync::Arc::clone(&reset_notification);
     let reset_client = execution
-        .client(ilium_execution::ClientLimits {
+        .client_when_ready(ilium_execution::ClientLimits {
             jobs: 1,
             service_jobs: 0,
             input_bytes: 16 * 1024 * 1024,
             result_bytes: 64 * 1024,
-        })
+        }).await
         .map_err(|error| {
             ClientError::TerminalSetup(std::io::Error::other(format!(
                 "reset planning worker startup: {error:?}"
@@ -1119,7 +1217,7 @@ async fn run_inner(
         .with_completion_wake(move || {
             reset_wake.notify_one();
         });
-    let search_client = execution.client(ilium_execution::ClientLimits { jobs: 2, service_jobs: 0, input_bytes: 384 * 1024 * 1024, result_bytes: 64 * 1024 * 1024 })
+    let search_client = execution.client_when_ready(ilium_execution::ClientLimits { jobs: 2, service_jobs: 0, input_bytes: 384 * 1024 * 1024, result_bytes: 64 * 1024 * 1024 }).await
         .map_err(|error| ClientError::TerminalSetup(std::io::Error::other(format!("workspace search startup: {error:?}"))))?;
     let mut search_workers = SearchWorkers::new(search_client);
     let search_notification = search_workers.notification();
@@ -1133,9 +1231,9 @@ async fn run_inner(
         reset_client,
         reset_notification,
     );
-    let control_client = execution.client(ilium_execution::ClientLimits {
+    let control_client = execution.client_when_ready(ilium_execution::ClientLimits {
         jobs: 20, service_jobs: 0, input_bytes: 384 * 1024 * 1024, result_bytes: 256 * 1024 * 1024,
-    }).map_err(|error| ClientError::TerminalSetup(std::io::Error::other(format!("control preparation startup: {error:?}"))))?;
+    }).await.map_err(|error| ClientError::TerminalSetup(std::io::Error::other(format!("control preparation startup: {error:?}"))))?;
     let mut control_plane = crate::control::ControlPlane::new(control_client);
     let control_notification = control_plane.notification().ok_or_else(|| ClientError::TerminalSetup(std::io::Error::other("control preparation notification unavailable")))?;
     let demonstration_media = media_owner.demonstration();
@@ -1211,6 +1309,7 @@ async fn run_inner(
     let mut needs_redraw = true;
     let mut needs_immediate_redraw = true;
     let mut last_draw_at = Instant::now();
+    let mut detection_freshness_checked_at = crate::scheduled_input::unix_millis_now();
     let mut last_animation_frame_bucket = None;
     let mut last_onboarding_animation_active = false;
     let mut last_recorded_status_message = None;
@@ -1218,6 +1317,15 @@ async fn run_inner(
     let mut last_streamed_pane_order: Option<[Option<ilium_core::NodeId>; 4]> = None;
 
     'event_loop: while app.exit_reason.is_none() {
+        // A ready ACK proves which geometry reached the terminal. Consume it
+        // before routing native or deferred input against the previous frame.
+        while let Ok(acknowledgement) = presenter.acknowledgements.try_recv() {
+            needs_redraw |= apply_presented_frame(
+                &mut app,
+                acknowledgement.map_err(ClientError::TerminalSetup)?,
+                &mut animation_presentations,
+            )?;
+        }
         if remote_compaction_workers
             .as_mut()
             .expect("remote compaction owner is initialized before the event loop")
@@ -1306,6 +1414,8 @@ async fn run_inner(
         if app.pending_native_paste.is_none()
             && app.pending_key_paste.is_none()
             && deferred_event_fits_editor_custody
+            && deferred_input.front().is_none_or(|event| native_input_geometry_ready(&app, event))
+            && !app.board_input_backpressured()
         {
             if let Some(event) = deferred_input.take_front() {
                 if let Some(failure) = dispatch_ready_input_events(
@@ -1421,46 +1531,9 @@ async fn run_inner(
                 needs_immediate_redraw = true;
             }
             acknowledgement = presenter.acknowledgements.recv() => {
-                let mut presented = acknowledgement.ok_or_else(|| ClientError::TerminalSetup(std::io::Error::other("presentation owner exited")))?
+                let presented = acknowledgement.ok_or_else(|| ClientError::TerminalSetup(std::io::Error::other("presentation owner exited")))?
                     .map_err(ClientError::TerminalSetup)?;
-                if let Some((frame_id, geometry)) = animation_presentations.pop_front() {
-                    if frame_id != presented.frame.frame_id {
-                        return Err(ClientError::TerminalSetup(std::io::Error::other("animation presentation identity mismatch")));
-                    }
-                    if let Some(reason) = &presented.uncertainty {
-                        drop(geometry);
-                        if let Some(animation) = presented.frame.take_animation() {
-                            app.animation_frame.uncertain_output(animation, reason);
-                        }
-                        needs_redraw = true;
-                    } else if let Some(reason) = &presented.rejection {
-                        drop(geometry);
-                        drop(presented.frame.take_animation());
-                        app.animation_frame.reject_output(reason);
-                        needs_redraw = true;
-                    } else {
-                        needs_redraw |= app.commit_emitted_geometry(geometry);
-                        if let Some(press) = app.take_deferred_pointer_press() {
-                            crate::mouse::handle_mouse_event(&mut app, press);
-                            needs_redraw = true;
-                        }
-                        if let Some(animation) = presented.frame.take_animation() {
-                            let snapshot = animation.snapshot();
-                            tracing::trace!(frame_id, animation_revision = snapshot.revision,
-                                animation_sequence = snapshot.sequence,
-                                composition_to_emission_us = presented.emitted_at.saturating_duration_since(animation.composed_at()).as_micros() as u64,
-                                request_to_emission_us = presented.emitted_at.saturating_duration_since(snapshot.requested_at).as_micros() as u64,
-                                completed_frame_age_us = presented.emitted_at.saturating_duration_since(snapshot.completed_at).as_micros() as u64,
-                                "animation frame emitted");
-                            app.animation_frame.acknowledge(animation, presented.flush_proof.take());
-                        }
-                    }
-                }
-                if presented.rejection.is_none() && presented.uncertainty.is_none() {
-                    tracing::trace!(frame_id = presented.frame.frame_id, layout_revision = presented.frame.layout_revision,
-                        frame_age_us = presented.emitted_at.duration_since(presented.frame.prepared_at).as_micros() as u64,
-                        emission_us = presented.emission_duration.as_micros() as u64, "terminal frame emitted");
-                }
+                needs_redraw |= apply_presented_frame(&mut app, presented, &mut animation_presentations)?;
             }
             _ = animation_notification.notified() => {
                 needs_redraw |= app.animation_frame.collect();
@@ -1468,8 +1541,8 @@ async fn run_inner(
             _ = animation_admission_notification.notified() => {
                 needs_redraw |= app.animation_frame.collect();
             }
-            _ = tokio::task::yield_now(), if app.pending_key_paste.is_some() => {}
-            input_event = input_rx.recv(), if app.pending_native_paste.is_none() && app.pending_key_paste.is_none() && deferred_input.is_empty() && (!app.has_editor_model_loan() || !editor_deferred_input.is_full()) => {
+            _ = tokio::task::yield_now(), if app.pending_key_paste.is_some() && !app.board_input_backpressured() => {}
+            input_event = input_rx.recv(), if !app.board_input_backpressured() && app.pending_native_paste.is_none() && app.pending_key_paste.is_none() && deferred_input.is_empty() && (!app.has_editor_model_loan() || !editor_deferred_input.is_full()) => {
                 match input_event {
                     Some(event) => {
                         if let Some(failure) = dispatch_ready_input_events(
@@ -1893,6 +1966,13 @@ async fn run_inner(
         if animation_frame_bucket != last_animation_frame_bucket {
             needs_redraw = true;
         }
+        let freshness_now = crate::scheduled_input::unix_millis_now();
+        needs_redraw |= crate::status_icons::detection_freshness_expired_since(
+            &app.pane_detection_evidence,
+            detection_freshness_checked_at,
+            freshness_now,
+        );
+        detection_freshness_checked_at = freshness_now;
         let can_draw = output_redraw_is_due(needs_immediate_redraw, Instant::now(), last_draw_at);
         // Reserve before composition: graphics uploads and exact animation
         // receipts must follow the ordered frame that really reaches output.
@@ -2112,8 +2192,10 @@ async fn run_inner(
 
     // Finish logging transitions while the connection still owns its writer.
     // The local file receipt alone cannot prove the server request was emitted.
+    // File publication is an accepted local side effect. Its warning deadline
+    // must not be cancelled by the separate bounded network-request drain.
+    app.drain_filesystem().await.map_err(ClientError::TerminalSetup)?;
     let request_drain = async {
-        app.drain_filesystem().await.map_err(|error| crate::connection::ConnectionError::RequestDrain(ilium_ipc::IpcError::Io(error)))?;
         reconcile_debug_logging(&mut app);
         while app.debug_logging.is_pending() {
             let completion = app.debug_logging.next_completion().await;
@@ -2150,6 +2232,14 @@ async fn run_inner(
     while let Some(event) = deferred_input.take_front() {
         match event {
             Ok(event) => {
+                if app.exit_click_release.as_ref().is_some_and(|press| {
+                    terminal_input_owner::is_exit_click_release(event.view(), press)
+                }) {
+                    event.dispatch(|_| ());
+                    app.exit_click_release = None;
+                    continue;
+                }
+                app.exit_click_release = None;
                 input_failure = Some(terminal_input_owner::InputFailure::undispatched(
                     event,
                     input_failure.take(),
@@ -2166,6 +2256,14 @@ async fn run_inner(
     while let Some(queued) = editor_deferred_input.pop() {
         match queued.original {
             Ok(event) => {
+                if app.exit_click_release.as_ref().is_some_and(|press| {
+                    terminal_input_owner::is_exit_click_release(event.view(), press)
+                }) {
+                    event.dispatch(|_| ());
+                    app.exit_click_release = None;
+                    continue;
+                }
+                app.exit_click_release = None;
                 input_failure = Some(terminal_input_owner::InputFailure::undispatched(
                     event,
                     input_failure.take(),
@@ -2188,6 +2286,13 @@ async fn run_inner(
     while let Some(event) = app.take_undelivered_native_paste() {
         input_failure = Some(terminal_input_owner::InputFailure::undispatched(
             event,
+            input_failure.take(),
+        ));
+    }
+    while let Some(key) = app.take_undelivered_terminal_key() {
+        input_failure = Some(terminal_input_owner::InputFailure::terminal_key(
+            key,
+            None,
             input_failure.take(),
         ));
     }
@@ -2371,7 +2476,9 @@ async fn run_inner(
         .await
         .map_err(ClientError::TerminalSetup);
     let input_shutdown_result = match input_retirement {
-        Some(retirement) => finish_input_retirement(retirement, input_deadline).await,
+        Some(retirement) => {
+            finish_input_retirement(retirement, input_deadline, &mut app.exit_click_release).await
+        }
         None => Ok(()),
     };
     let media_shutdown_result = media_owner
@@ -2569,9 +2676,11 @@ async fn run_inner(
 async fn finish_input_retirement(
     mut retirement: terminal_input_owner::InputRetirement,
     deadline: tokio::time::Instant,
+    exit_click_release: &mut Option<crossterm::event::MouseEvent>,
 ) -> Result<(), crate::error::InputRetirementError> {
     loop {
-        if let Some(report) = retirement.try_complete() {
+        if let Some(mut report) = retirement.try_complete() {
+            report.complete_exit_click_release(exit_click_release);
             return report
                 .into_result()
                 .map_err(crate::error::InputRetirementError::Failed);
@@ -3864,6 +3973,18 @@ fn voice_text_offer_result_with_fifo(
 ) -> Option<ilium_ipc::VoiceTextResult> {
     use ilium_ipc::{VoiceTextAccepted, VoiceTextRejection, VoiceTextRejectionCode};
     let Some(commands) = commands else {
+        // --start owns an asynchronous preparation request. Preserve the
+        // original offer until startup either creates the actor or reports its
+        // real failure; absence of a handle during preparation is not failure.
+        if app.voice_settings.enabled
+            && app.voice_preparation.is_pending()
+            && !matches!(
+                app.voice_connection_state,
+                ilium_voice::VoiceConnectionState::Failed(_)
+            )
+        {
+            return None;
+        }
         return Some(Err(if app.voice_settings.enabled {
             let reason = match &app.voice_connection_state {
                 ilium_voice::VoiceConnectionState::Failed(error) => error.clone(),
@@ -4188,10 +4309,22 @@ fn synchronize_debug_logging_from_server(app: &mut App, enabled: bool) {
     mark_debug_logging_pending(app);
 }
 
+/// Retain the original mouse event until its live interaction surface has an
+/// actual matching output acknowledgement. Keeping it in native FIFO custody
+/// also preserves a drag's later motion/release instead of replaying only Down.
+fn native_input_geometry_ready(
+    app: &App,
+    event: &Result<terminal_input_owner::InputEvent, terminal_input_owner::InputFailure>,
+) -> bool {
+    !matches!(event, Ok(input) if matches!(input.view(), Event::Mouse(_)))
+        || app.pointer_geometry_is_current()
+}
+
 /// Applies one received input event and any immediately queued successors.
 /// Consecutive mouse-motion reports are coalesced to their newest position:
 /// only that position can determine the current hover state, while keeping
 /// every non-motion event in order preserves click, drag, and scroll input.
+#[allow(clippy::too_many_arguments)] // Keep the event-loop owners explicit at this dispatch boundary.
 fn dispatch_ready_input_events<S>(
     app: &mut App,
     input_rx: &mut S,
@@ -4217,6 +4350,27 @@ where
             upstream: input_rx,
         };
         for_each_ready_input_event_until(&mut ready, first, |event| {
+            if let Some(press) = app.exit_click_release.as_ref() {
+                if event.as_ref().is_ok_and(|event| {
+                    terminal_input_owner::is_exit_click_release(event.view(), press)
+                }) {
+                    if let Ok(event) = event {
+                        event.dispatch(|_| ());
+                        app.exit_click_release = None;
+                    }
+                    // Later input belongs to another action and stays in
+                    // upstream custody; Restart does not authorize losing it.
+                    return false;
+                }
+                overflow = Some(event);
+                return false;
+            }
+            if !native_input_geometry_ready(app, &event)
+                || (event.is_ok() && app.board_input_backpressured())
+            {
+                overflow = Some(event);
+                return false;
+            }
             if app.has_editor_model_loan() {
                 let classification = event.as_ref().ok().and_then(|input| {
                     let event = input.view();
@@ -4255,6 +4409,15 @@ where
             }
             match event {
                 Ok(event) => {
+                    let exit_was_unrequested = app.exit_reason.is_none();
+                    let mouse_press = match event.view() {
+                        Event::Mouse(mouse)
+                            if matches!(mouse.kind, crossterm::event::MouseEventKind::Down(_)) =>
+                        {
+                            Some(*mouse)
+                        }
+                        _ => None,
+                    };
                     let is_paste = matches!(event.view(), Event::Paste(_));
                     let destination = if is_paste {
                         app.native_terminal_paste_destination()
@@ -4292,6 +4455,9 @@ where
                                     crate::paste_cursor::PasteReplay::new_animation_text_prompt(
                                         event,
                                     )
+                                }
+                                Mode::AgentSetupPathPrompt(..) => {
+                                    crate::paste_cursor::PasteReplay::new_setup_path_prompt(event)
                                 }
                                 _ => crate::paste_cursor::PasteReplay::new(event),
                             };
@@ -4332,6 +4498,11 @@ where
                             )
                         });
                     }
+                    if exit_was_unrequested
+                        && app.exit_reason == Some(ClientExitReason::RestartRequested)
+                    {
+                        app.exit_click_release = mouse_press;
+                    }
                 }
                 Err(error) => failure = Some(error),
             }
@@ -4370,12 +4541,18 @@ fn advance_pending_key_paste(
     icon_search_workers: &mut IconSearchWorkers,
     home_dir: Option<&std::path::Path>,
 ) -> bool {
+    if app.board_input_backpressured() {
+        return false;
+    }
     let Some(mut replay) = app.pending_key_paste.take() else {
         return false;
     };
 
     for key in replay.next_keys(MAX_PASTE_KEYS_PER_TURN) {
         app.handle_event(Event::Key(key));
+    }
+    if replay.path_rejected() {
+        app.status_message = Some("The instruction-file path must be one line".into());
     }
     dispatch_pending_app_work(app, naming_workers, icon_search_workers, home_dir);
 
@@ -4465,8 +4642,8 @@ impl InputBatchItem for Event {
 }
 
 #[cfg(test)]
-impl ReadyInput for mpsc::Receiver<Event> {
-    type Item = Event;
+impl<T: InputBatchItem> ReadyInput for mpsc::Receiver<T> {
+    type Item = T;
 
     fn try_next(&mut self) -> Result<Self::Item, mpsc::error::TryRecvError> {
         self.try_recv()
@@ -4922,6 +5099,188 @@ mod responsiveness_tests {
         assert!(screen_updates_fit(MAX_MERGED_SCREEN_BYTES_PER_BATCH - 1, 1));
         assert!(!screen_updates_fit(MAX_MERGED_SCREEN_BYTES_PER_BATCH, 1));
         assert!(!screen_updates_fit(usize::MAX, usize::MAX));
+    }
+
+    #[test]
+    fn stale_mouse_geometry_keeps_press_drag_and_release_originals_until_ack() {
+        use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+        let mut app = App::new("mouse-custody".into(), std::env::temp_dir());
+        app.set_screen_area(ratatui::layout::Rect::new(0, 0, 80, 24));
+        app.commit_emitted_geometry(app.capture_emitted_geometry(1));
+        app.set_screen_area(ratatui::layout::Rect::new(0, 0, 100, 30));
+        let kinds = [
+            MouseEventKind::Down(MouseButton::Left),
+            MouseEventKind::Drag(MouseButton::Left),
+            MouseEventKind::Up(MouseButton::Left),
+        ];
+        let mut originals = Vec::new();
+        for kind in kinds {
+            let (input, quota) = terminal_input_owner::mouse_fixture(MouseEvent {
+                kind,
+                column: 10,
+                row: 10,
+                modifiers: KeyModifiers::NONE,
+            });
+            let input = Ok(input);
+            assert!(!native_input_geometry_ready(&app, &input));
+            assert!(quota.snapshot().worker_bytes > 0);
+            originals.push((input, quota));
+        }
+        app.commit_emitted_geometry(app.capture_emitted_geometry(2));
+        for ((input, quota), kind) in originals.into_iter().zip(kinds) {
+            assert!(native_input_geometry_ready(&app, &input));
+            let input = input.unwrap();
+            assert!(matches!(input.view(), Event::Mouse(mouse) if mouse.kind == kind));
+            assert!(quota.snapshot().worker_bytes > 0);
+            drop(input);
+            assert_eq!(quota.snapshot().worker_bytes, 0);
+        }
+    }
+
+    #[test]
+    fn accepted_restart_click_release_finishes_before_geometry_and_keeps_later_keys() {
+        use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+        let mut app = App::new("restart-release-custody".into(), std::env::temp_dir());
+        app.set_screen_area(ratatui::layout::Rect::new(0, 0, 80, 24));
+        app.commit_emitted_geometry(app.capture_emitted_geometry(1));
+        app.set_screen_area(ratatui::layout::Rect::new(0, 0, 100, 30));
+        let press = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 12,
+            row: 5,
+            modifiers: KeyModifiers::NONE,
+        };
+        assert!(app.request_client_exit(ClientExitReason::RestartRequested));
+        app.exit_click_release = Some(press);
+        let (release, quota) = terminal_input_owner::mouse_fixture(MouseEvent {
+            kind: MouseEventKind::Up(MouseButton::Left),
+            ..press
+        });
+        let release = Ok(release);
+        assert!(!native_input_geometry_ready(&app, &release));
+        let (key, key_quota) = terminal_input_owner::key_fixture(KeyEvent::new(
+            KeyCode::Char('x'),
+            KeyModifiers::NONE,
+        ));
+        let (tx, mut rx) = mpsc::channel(2);
+        tx.try_send(Ok(key)).unwrap();
+        let (naming_tx, _naming_rx) = mpsc::channel(8);
+        let mut naming =
+            NamingWorkers::new(naming_tx, &ilium_inference::InferenceSettings::default()).unwrap();
+        let mut icons = IconSearchWorkers::new();
+        let mut editor = crate::editor_input_backlog::EditorInputBacklog::begin(
+            crate::execution::test_client().quota_group(),
+        )
+        .unwrap();
+        let mut deferred = input_backlog::InputBacklog::default();
+        assert!(dispatch_ready_input_events(
+            &mut app,
+            &mut rx,
+            &mut naming,
+            &mut icons,
+            None,
+            release,
+            &mut deferred,
+            &mut editor
+        )
+        .is_none());
+        assert_eq!(quota.snapshot().worker_bytes, 0);
+        assert!(app.exit_click_release.is_none());
+        assert!(deferred.is_empty());
+        assert_eq!(
+            rx.len(),
+            1,
+            "the later key stays in original upstream custody"
+        );
+        assert!(key_quota.snapshot().worker_bytes > 0);
+    }
+
+    #[test]
+    fn stale_mouse_dispatch_restores_press_and_lookahead_before_upstream_release() {
+        use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+        let mut app = App::new("mouse-dispatch-custody".into(), std::env::temp_dir());
+        app.project_name = Some("fixture".into());
+        app.set_screen_area(ratatui::layout::Rect::new(0, 0, 80, 24));
+        app.commit_emitted_geometry(app.capture_emitted_geometry(1));
+        app.set_screen_area(ratatui::layout::Rect::new(0, 0, 100, 30));
+        let (naming_tx, _naming_rx) = mpsc::channel(8);
+        let mut naming =
+            NamingWorkers::new(naming_tx, &ilium_inference::InferenceSettings::default()).unwrap();
+        let mut icons = IconSearchWorkers::new();
+        let mut editor = crate::editor_input_backlog::EditorInputBacklog::begin(
+            crate::execution::test_client().quota_group(),
+        )
+        .unwrap();
+        let (tx, mut rx) = mpsc::channel(2);
+        let make = |kind| {
+            terminal_input_owner::mouse_fixture(MouseEvent {
+                kind,
+                column: 0,
+                row: 0,
+                modifiers: KeyModifiers::NONE,
+            })
+        };
+        let (press, press_quota) = make(MouseEventKind::Down(MouseButton::Left));
+        let (drag, drag_quota) = make(MouseEventKind::Drag(MouseButton::Left));
+        let (release, release_quota) = make(MouseEventKind::Up(MouseButton::Left));
+        tx.try_send(Ok(drag)).unwrap();
+        tx.try_send(Ok(release)).unwrap();
+        let mut deferred = input_backlog::InputBacklog::default();
+        assert!(dispatch_ready_input_events(
+            &mut app,
+            &mut rx,
+            &mut naming,
+            &mut icons,
+            None,
+            Ok(press),
+            &mut deferred,
+            &mut editor
+        )
+        .is_none());
+        let press = deferred.take_front().expect("original press retained");
+        assert!(
+            matches!(press.as_ref().unwrap().view(), Event::Mouse(mouse) if mouse.kind == MouseEventKind::Down(MouseButton::Left))
+        );
+        let lookahead = deferred.take_front();
+        assert!(
+            lookahead.is_none(),
+            "a stopped press does not read ahead into its gesture"
+        );
+        assert_eq!(
+            rx.len(),
+            2,
+            "drag and release retain their upstream FIFO order"
+        );
+        assert!(deferred.restore(Some(press), lookahead).is_ok());
+        assert!(press_quota.snapshot().worker_bytes > 0);
+        assert!(drag_quota.snapshot().worker_bytes > 0);
+        assert!(release_quota.snapshot().worker_bytes > 0);
+        assert!(
+            !rx.is_empty(),
+            "release remains upstream behind the retained gesture prefix"
+        );
+        app.commit_emitted_geometry(app.capture_emitted_geometry(2));
+        let first = deferred.take_front().unwrap();
+        assert!(dispatch_ready_input_events(
+            &mut app,
+            &mut rx,
+            &mut naming,
+            &mut icons,
+            None,
+            first,
+            &mut deferred,
+            &mut editor
+        )
+        .is_none());
+        assert!(deferred.is_empty());
+        assert!(rx.is_empty());
+        for quota in [press_quota, drag_quota, release_quota] {
+            assert_eq!(
+                quota.snapshot().worker_bytes,
+                0,
+                "every original released only after dispatch"
+            );
+        }
     }
 
     #[test]
@@ -5497,6 +5856,35 @@ mod responsiveness_tests {
             }
         }
         assert!(received.try_recv().is_err());
+    }
+
+    #[test]
+    fn typed_voice_offer_waits_for_owned_startup_preparation() {
+        let mut app = voice_text_app();
+        app.voice_settings.enabled = true;
+        app.voice_preparation
+            .configure(crate::execution::test_client());
+        let kind = crate::voice_preparation::PreparationKind::NormalStartup {
+            target: crate::control::VoiceTargetContext::capture(&app),
+        };
+        app.voice_preparation
+            .request(&app.voice_settings, kind)
+            .expect("owned startup preparation");
+        assert!(app.voice_preparation.is_pending());
+        let mut original = offer(&["hi"], true);
+        assert!(voice_text_offer_result(&mut app, None, &mut original).is_none());
+        assert_eq!(original.sentences, ["hi"]);
+        app.update_voice_connection_state(ilium_voice::VoiceConnectionState::Failed(
+            "synthetic startup failure".into(),
+        ));
+        let failure = voice_text_offer_result(&mut app, None, &mut original)
+            .unwrap()
+            .unwrap_err();
+        assert_eq!(
+            failure.code,
+            ilium_ipc::VoiceTextRejectionCode::VoiceUnavailable
+        );
+        assert_eq!(failure.message, "synthetic startup failure");
     }
 
     #[tokio::test]

@@ -619,6 +619,23 @@ pub struct WorktreeDialogLayout {
     pub hint_row: Rect,
 }
 
+impl WorktreeDialogState {
+    pub(crate) fn status_text(&self) -> String {
+        match &self.status {
+            WorktreeDialogStatus::Loading => "Checking repository…".to_string(),
+            WorktreeDialogStatus::Ready => self.validated_request().err().unwrap_or_default(),
+            WorktreeDialogStatus::Creating(stage) => match stage {
+                WorkspaceCreateStage::CreatingWorktree => "Creating worktree…",
+                WorkspaceCreateStage::Preparing => "Preparing files…",
+                WorkspaceCreateStage::RunningSetup => "Running setup…",
+                WorkspaceCreateStage::Starting => "Starting agent…",
+            }
+            .into(),
+            WorktreeDialogStatus::Error(error) => error.clone(),
+        }
+    }
+}
+
 pub fn dialog_layout(screen_area: Rect, state: &WorktreeDialogState) -> WorktreeDialogLayout {
     let existing_height = if state.mode == WorktreeDialogMode::Existing {
         3
@@ -626,7 +643,23 @@ pub fn dialog_layout(screen_area: Rect, state: &WorktreeDialogState) -> Worktree
         0
     };
     let advanced_height = if state.advanced { 3 } else { 0 };
-    let popup = modal::centered_fixed_rect(92, 18 + existing_height + advanced_height, screen_area);
+    let error_height = Paragraph::new(state.status_text())
+        .wrap(Wrap { trim: false })
+        .line_count(screen_area.width.min(92).saturating_sub(2).max(1))
+        .min(usize::from(
+            screen_area
+                .height
+                .saturating_sub(17 + existing_height + advanced_height)
+                .max(1),
+        )) as u16;
+    let popup = modal::centered_fixed_rect(
+        92,
+        18u16
+            .saturating_add(existing_height)
+            .saturating_add(advanced_height)
+            .saturating_add(error_height.saturating_sub(1)),
+        screen_area,
+    );
     let inner = Rect::new(
         popup.x.saturating_add(1),
         popup.y.saturating_add(1),
@@ -645,11 +678,11 @@ pub fn dialog_layout(screen_area: Rect, state: &WorktreeDialogState) -> Worktree
             Constraint::Length(if state.advanced { 1 } else { 0 }),
             Constraint::Length(if state.advanced { 1 } else { 0 }),
             Constraint::Length(if state.advanced { 1 } else { 0 }),
-            Constraint::Min(1),    // preview
-            Constraint::Length(2), // preparation reminders
-            Constraint::Length(1), // error or progress
-            Constraint::Length(1), // buttons
-            Constraint::Length(1), // hint
+            Constraint::Min(1),                      // preview
+            Constraint::Length(2),                   // preparation reminders
+            Constraint::Length(error_height.max(1)), // error or progress
+            Constraint::Length(1),                   // buttons
+            Constraint::Length(1),                   // hint
         ])
         .split(inner);
     let buttons = Layout::default()
@@ -869,19 +902,10 @@ pub fn draw_dialog(frame: &mut Frame, screen_area: Rect, state: &WorktreeDialogS
         Paragraph::new(state.preparation_reminders()).style(Style::new().fg(Color::Yellow)),
         layout.reminder_row,
     );
-    let status = match &state.status {
-        WorktreeDialogStatus::Loading => "Checking repository…".to_string(),
-        WorktreeDialogStatus::Ready => state.validated_request().err().unwrap_or_default(),
-        WorktreeDialogStatus::Creating(stage) => match stage {
-            WorkspaceCreateStage::CreatingWorktree => "Creating worktree…",
-            WorkspaceCreateStage::Preparing => "Preparing files…",
-            WorkspaceCreateStage::RunningSetup => "Running setup…",
-            WorkspaceCreateStage::Starting => "Starting agent…",
-        }
-        .into(),
-        WorktreeDialogStatus::Error(error) => error.clone(),
-    };
-    draw_line(frame, layout.error_row, status, false);
+    frame.render_widget(
+        Paragraph::new(state.status_text()).wrap(Wrap { trim: false }),
+        layout.error_row,
+    );
     frame.render_widget(
         Paragraph::new("[ Create agent ]")
             .alignment(Alignment::Center)
@@ -895,7 +919,9 @@ pub fn draw_dialog(frame: &mut Frame, screen_area: Rect, state: &WorktreeDialogS
         layout.cancel_button,
     );
     frame.render_widget(
-        Paragraph::new(if state.advanced && state.mode == WorktreeDialogMode::New {
+        Paragraph::new(if matches!(state.status, WorktreeDialogStatus::Error(_)) {
+            "F9 full error · Tab fields · Esc cancel"
+        } else if state.advanced && state.mode == WorktreeDialogMode::New {
             "Git checkout hooks and filters run on create · Esc cancel"
         } else {
             "Tab fields · arrows choose · Enter create · Ctrl+Enter create · Esc cancel"
@@ -988,6 +1014,43 @@ mod tests {
 
     fn dialog(mode: WorktreeDialogMode) -> WorktreeDialogState {
         WorktreeDialogState::new(NodeId(1), NodeId(2), BuiltinAgentProvider::Claude, mode)
+    }
+
+    #[test]
+    fn oversized_error_reserves_form_actions() {
+        let mut state = dialog(WorktreeDialogMode::New);
+        state.set_create_error("long failure ".repeat(2000));
+        let geometry = dialog_layout(Rect::new(0, 0, 60, 24), &state);
+        assert_eq!(geometry.create_button.height, 1);
+        assert_eq!(geometry.cancel_button.height, 1);
+        assert_eq!(geometry.hint_row.height, 1);
+        assert!(geometry.error_row.height < geometry.popup.height / 2);
+    }
+
+    #[test]
+    fn creation_error_grows_and_wraps_instead_of_losing_recovery_details() {
+        let reason = "Could not prepare the worktree because the setup command failed. Check the project setup command and its permissions, then retry. FINALDETAIL";
+        for width in [48, 100] {
+            let mut state = dialog(WorktreeDialogMode::New);
+            state.set_create_error(reason);
+            let screen = Rect::new(0, 0, width, 40);
+            let geometry = dialog_layout(screen, &state);
+            let mut terminal = Terminal::new(TestBackend::new(width, 40)).unwrap();
+            terminal
+                .draw(|frame| draw_dialog(frame, screen, &state))
+                .unwrap();
+            let buffer = terminal.backend().buffer();
+            let text: String = (geometry.error_row.y..geometry.error_row.bottom())
+                .flat_map(|y| {
+                    (geometry.error_row.x..geometry.error_row.right()).map(move |x| (x, y))
+                })
+                .map(|position| buffer[position].symbol())
+                .collect();
+            let actual: String = text.chars().filter(|c| !c.is_whitespace()).collect();
+            let expected: String = reason.chars().filter(|c| !c.is_whitespace()).collect();
+            assert_eq!(actual, expected);
+            assert!(geometry.error_row.height > 1);
+        }
     }
 
     #[test]

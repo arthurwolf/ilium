@@ -16,8 +16,12 @@ chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 clap = { version = "4.6.1", features = ["derive"] }
 directories = "6.0.0"
 sha2 = "0.10.9"
+ilium-agent-session = { version = "0.1.1", path = "../ilium-agent-session" }
 ilium-client = { version = "0.1.1", path = "../ilium-client" }
+ilium-inference = { version = "0.1.1", path = "../ilium-inference" }
+ilium-pty = { version = "0.1.1", path = "../ilium-pty" }
 ilium-core = { version = "0.1.1", path = "../ilium-core" }
+ilium-control = { version = "0.1.1", path = "../ilium-control" }
 ilium-ipc = { version = "0.1.1", path = "../ilium-ipc" }
 ilium-logging = { version = "0.1.1", path = "../ilium-logging" }
 ilium-transport = { version = "0.1.1", path = "../ilium-transport" }
@@ -25,12 +29,11 @@ ilium-platform = { version = "0.1.1", path = "../ilium-platform" }
 regex = "1.12.3"
 serde_json = "1.0.151"
 thiserror = "2.0.18"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "time"] }
 tracing = "0.1.44"
 
 [dev-dependencies]
 ilium-ambient = { version = "0.1.1", path = "../ilium-ambient" }
-ilium-pty = { version = "0.1.1", path = "../ilium-pty" }
 ilium-test-fixtures = { version = "0.1.1", path = "../ilium-test-fixtures" }
 sysinfo = "0.39.6"
 tempfile = "3.27.0"

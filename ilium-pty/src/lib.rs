@@ -29,6 +29,7 @@ mod mouse;
 mod owner;
 mod owner_queue;
 mod query;
+mod replay_text;
 mod screen_reader;
 mod session;
 
@@ -39,6 +40,7 @@ pub use delivery::{
 };
 pub use error::PtyError;
 pub use owner::{OwnerLimits, OwnerStatus, PtyInput, QueueLoad, ShutdownReport};
+pub use replay_text::{screen_text_from_replay, REPLAY_SCREEN_COLUMNS, REPLAY_SCREEN_ROWS};
 pub use screen_reader::ScreenReader;
 pub use session::{
     PtyChildExit, PtyCommand, PtyExitCause, PtyOutputChunk, PtyOutputRecovery,

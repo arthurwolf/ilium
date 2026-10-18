@@ -115,6 +115,7 @@ async fn create_pane(client: &mut SessionStream) -> ilium_core::NodeId {
     ilium_ipc::write_frame(
         client,
         &ClientRequest::NewPane {
+            request_id: 0,
             parent_group: ilium_core::ROOT_ID,
             kind: ilium_ipc::NewPaneKind::PlainShell,
             working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,

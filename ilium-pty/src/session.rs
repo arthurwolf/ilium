@@ -106,6 +106,7 @@ pub struct PtyCommand {
     rows: u16,
     cols: u16,
     env: Vec<(String, String)>,
+    automatic_terminal_query_replies: bool,
 }
 
 impl PtyCommand {
@@ -119,7 +120,17 @@ impl PtyCommand {
             rows,
             cols,
             env: Vec::new(),
+            automatic_terminal_query_replies: true,
         }
+    }
+
+    /// Selects whether the emulator answers terminal capability queries.
+    /// Defaults to true. Disable only when the caller owns manual replies or
+    /// intentionally models a silent terminal; parsing and input ordering stay unchanged.
+    #[must_use]
+    pub fn automatic_terminal_query_replies(mut self, enabled: bool) -> Self {
+        self.automatic_terminal_query_replies = enabled;
+        self
     }
 
     /// Appends one argument (builder-style).
@@ -901,7 +912,9 @@ impl PtySession {
             rows,
             cols,
             0,
-            TerminalQueryResponder::new(),
+            TerminalQueryResponder::with_automatic_replies(
+                command.automatic_terminal_query_replies,
+            ),
         )));
         let screen_generation = Arc::new(AtomicU64::new(0));
         let screen_reader = ScreenReader::new(Arc::clone(&parser), Arc::clone(&screen_generation));
@@ -1086,33 +1099,56 @@ impl PtySession {
     /// complete detection evidence. vt100 0.16 cells expose borrowed contents.
     pub fn screen_snapshot_with_limit(&self, limit: usize) -> std::io::Result<ScreenSnapshot> {
         self.screen_reader.with_frame(|screen, generation| {
-            let (rows, columns) = screen.size();
-            let cells = usize::from(rows).saturating_mul(usize::from(columns));
-            // Vec growth may retain twice the populated dim-cell count;
-            // String growth may retain twice the visible text bytes.
-            let mut bytes = cells
-                .saturating_mul(12)
-                .saturating_add(usize::from(rows).saturating_mul(2))
-                .saturating_add(std::mem::size_of::<ScreenSnapshot>());
-            if bytes > limit {
-                return Err(std::io::Error::other(
-                    "terminal evidence frame exceeds retained-byte limit",
-                ));
-            }
-            for row in 0..rows {
-                for column in 0..columns {
-                    if let Some(cell) = screen.cell(row, column) {
-                        bytes = bytes.saturating_add(cell.contents().len().saturating_mul(2));
-                        if bytes > limit {
-                            return Err(std::io::Error::other(
-                                "terminal evidence text exceeds retained-byte limit",
-                            ));
-                        }
+            Self::bounded_snapshot_from_screen(screen, generation, limit)
+        })
+    }
+
+    /// Capture current detection evidence without waiting for parser mutation.
+    /// A busy parser returns `Ok(None)`; retained presentation frames must not
+    /// renew an agent's successful-observation timestamp. Oversized evidence
+    /// returns an error before allocating a snapshot.
+    pub fn current_screen_snapshot_with_limit(
+        &self,
+        limit: usize,
+    ) -> std::io::Result<Option<ScreenSnapshot>> {
+        self.screen_reader
+            .try_with_frame(|screen, generation| {
+                Self::bounded_snapshot_from_screen(screen, generation, limit)
+            })
+            .transpose()
+    }
+
+    fn bounded_snapshot_from_screen(
+        screen: &vt100::Screen,
+        generation: u64,
+        limit: usize,
+    ) -> std::io::Result<ScreenSnapshot> {
+        let (rows, columns) = screen.size();
+        let cells = usize::from(rows).saturating_mul(usize::from(columns));
+        // Vec growth may retain twice the populated dim-cell count;
+        // String growth may retain twice the visible text bytes.
+        let mut bytes = cells
+            .saturating_mul(12)
+            .saturating_add(usize::from(rows).saturating_mul(2))
+            .saturating_add(std::mem::size_of::<ScreenSnapshot>());
+        if bytes > limit {
+            return Err(std::io::Error::other(
+                "terminal evidence frame exceeds retained-byte limit",
+            ));
+        }
+        for row in 0..rows {
+            for column in 0..columns {
+                if let Some(cell) = screen.cell(row, column) {
+                    bytes = bytes.saturating_add(cell.contents().len().saturating_mul(2));
+                    if bytes > limit {
+                        return Err(std::io::Error::other(
+                            "terminal evidence text exceeds retained-byte limit",
+                        ));
                     }
                 }
             }
-            Ok(Self::snapshot_from_screen(screen, generation))
-        })
+        }
+        Ok(Self::snapshot_from_screen(screen, generation))
     }
 
     /// Returns no frame when mutation is underway, instead of stale evidence.
@@ -1145,6 +1181,14 @@ impl PtySession {
     /// Returns the current visible-screen generation without cloning its text.
     pub fn screen_generation(&self) -> u64 {
         self.screen_generation.load(Ordering::Acquire)
+    }
+
+    /// Read the current generation only when the parser can be observed.
+    /// Cached detection evidence may be reused only after this current-frame
+    /// proof succeeds; an atomic generation alone cannot reveal parser mutation.
+    pub fn current_screen_generation(&self) -> Option<u64> {
+        self.screen_reader
+            .try_with_frame(|_, generation| generation)
     }
 
     /// OS pid of the directly-spawned child, `None` if the platform didn't
@@ -1491,6 +1535,44 @@ mod tests {
             .expect("complete frame");
         assert_eq!(frame.generation, session.screen_generation());
         assert_eq!(frame.text, session.screen_snapshot().text);
+        session.kill().expect("fixture cleanup");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn current_bounded_snapshot_never_renews_retained_evidence_while_parser_busy() {
+        let mut session = PtySession::spawn(
+            PtyCommand::new("/bin/sh", std::env::temp_dir(), 24, 80)
+                .arg("-c")
+                .arg("exec cat"),
+        )
+        .expect("isolated PTY");
+        let parser = Arc::clone(&session.parser);
+        let mut writer = parser.write().expect("parser guard");
+        writer.process(b"retained");
+        session.screen_generation.store(7, Ordering::Release);
+        session.screen_reader.retain_before_resize(writer.screen());
+        writer.process(b" current");
+        session.screen_generation.store(8, Ordering::Release);
+        assert_eq!(session.current_screen_generation(), None);
+        assert!(session
+            .current_screen_snapshot_with_limit(2 * 1024 * 1024)
+            .expect("busy is not an error")
+            .is_none());
+        let retained = session
+            .screen_snapshot_with_limit(2 * 1024 * 1024)
+            .expect("presentation fallback remains usable");
+        assert_eq!(retained.text, "retained");
+        assert_eq!(retained.generation, 7);
+        drop(writer);
+        let current = session
+            .current_screen_snapshot_with_limit(2 * 1024 * 1024)
+            .expect("bounded current frame")
+            .expect("parser is available");
+        assert_eq!(current.text, "retained current");
+        assert_eq!(current.generation, 8);
+        assert_eq!(session.current_screen_generation(), Some(8));
+        assert!(session.current_screen_snapshot_with_limit(1).is_err());
         session.kill().expect("fixture cleanup");
     }
 

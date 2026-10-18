@@ -8,6 +8,7 @@
 //! time and each connection is closed before the next opens, so one CLI
 //! process never owns more than one connection.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -41,6 +42,47 @@ impl AttachedSession {
             }
         }
         panes
+    }
+
+    /// Requests only selected shell screens; never subscribes to retained journals.
+    /// One request/reply at a time bounds memory and leaves per-pane failures explicit.
+    pub(crate) async fn collect_shell_screens(
+        &mut self,
+        pane_ids: &[NodeId],
+        evidence: &mut PaneEvidence,
+    ) {
+        for &pane_id in pane_ids.iter().take(64) {
+            let capture = tokio::time::timeout(Duration::from_secs(2), async {
+                self.connection
+                    .requests
+                    .send(ClientRequest::GetPaneRecapScreen { pane_id })
+                    .await
+                    .map_err(|_| "screen request unavailable".to_owned())?;
+                while let Some(event) = self.connection.events.recv().await {
+                    let (event, _retention) = event.into_parts();
+                    if let ServerEvent::PaneRecapScreen {
+                        pane_id: replied,
+                        result,
+                    } = event
+                    {
+                        if replied == pane_id {
+                            return result;
+                        }
+                    }
+                }
+                Err("screen connection closed".to_owned())
+            })
+            .await
+            .unwrap_or_else(|_| Err("screen capture timed out".to_owned()));
+            match capture {
+                Ok(text) => {
+                    evidence.screen_text.insert(pane_id, text);
+                }
+                Err(message) => {
+                    evidence.screen_errors.insert(pane_id, message);
+                }
+            }
+        }
     }
 
     pub(crate) async fn detach(self) {
@@ -78,12 +120,38 @@ pub(crate) fn live_sockets() -> Result<Vec<LiveSessionSocket>, CliError> {
     session::list_live_session_sockets()
 }
 
-/// Attaches to one live socket, trying each candidate session name until
-/// the server accepts one.
+/// Verified attach-time agent identities and selected current shell screens.
+/// No terminal journals are retained by one-shot recap consumers.
+#[derive(Default)]
+pub(crate) struct PaneEvidence {
+    pub(crate) session_ids: HashMap<NodeId, String>,
+    pub(crate) screen_text: HashMap<NodeId, String>,
+    pub(crate) screen_errors: HashMap<NodeId, String>,
+}
+
 pub(crate) async fn attach(socket: &LiveSessionSocket) -> Result<AttachedSession, String> {
+    attach_inner(socket, None).await
+}
+
+/// Like [`attach`], also returning the attach-time pane evidence.
+pub(crate) async fn attach_with_evidence(
+    socket: &LiveSessionSocket,
+) -> Result<(AttachedSession, PaneEvidence), String> {
+    let mut evidence = PaneEvidence::default();
+    let attached = attach_inner(socket, Some(&mut evidence)).await?;
+    Ok((attached, evidence))
+}
+
+async fn attach_inner(
+    socket: &LiveSessionSocket,
+    mut evidence: Option<&mut PaneEvidence>,
+) -> Result<AttachedSession, String> {
     let mut last_error = String::from("no session name candidates");
     for session_name in &socket.session_name_candidates {
-        match attach_as(&socket.socket_path, session_name).await {
+        if let Some(evidence) = evidence.as_deref_mut() {
+            *evidence = PaneEvidence::default();
+        }
+        match attach_as(&socket.socket_path, session_name, evidence.as_deref_mut()).await {
             Ok(attached) => return Ok(attached),
             Err(error) => last_error = error,
         }
@@ -94,6 +162,7 @@ pub(crate) async fn attach(socket: &LiveSessionSocket) -> Result<AttachedSession
 pub(crate) async fn attach_as(
     socket_path: &Path,
     session_name: &str,
+    mut evidence: Option<&mut PaneEvidence>,
 ) -> Result<AttachedSession, String> {
     let mut connection = Connection::connect(socket_path, session_name.to_owned())
         .await
@@ -112,6 +181,15 @@ pub(crate) async fn attach_as(
                         .ok_or_else(|| "session attach completed without a tree".to_owned());
                 }
                 ServerEvent::Error { message } => return Err(message),
+                ServerEvent::PaneSessionIdResolved {
+                    pane_id,
+                    session_id,
+                    ..
+                } => {
+                    if let Some(evidence) = evidence.as_deref_mut() {
+                        evidence.session_ids.insert(pane_id, session_id);
+                    }
+                }
                 _ => {}
             }
         }

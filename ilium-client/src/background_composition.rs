@@ -112,12 +112,30 @@ pub fn animation_frame_delay(app: &App, elapsed: Duration) -> Option<Duration> {
 
 /// Requests worker preparation and leases the latest valid immutable frame.
 /// Scene construction, cache preparation and rendering stay on the worker.
+/// How the field reaches the screen this tick.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FieldPresentation {
+    /// A fresh frame under a presentation lease; painted cells are credited.
+    Fresh,
+    /// The previously shown frame, repainted uncredited because no lease was
+    /// available this tick. One stale frame beats one dark frame.
+    Repeat,
+}
+
+/// A repeated frame credits nothing: it was never leased.
+fn finish_field(app: &mut App, presentation: FieldPresentation, painted_bits: Vec<u8>) {
+    match presentation {
+        FieldPresentation::Fresh => app.animation_frame.composed(painted_bits),
+        FieldPresentation::Repeat => app.animation_frame.discard_composed_receipt(),
+    }
+}
+
 fn render_field(
     app: &mut App,
     settings: &crate::background_animation::AnimationSettings,
     area: Rect,
     elapsed: Duration,
-) -> bool {
+) -> Option<FieldPresentation> {
     let pointer = app.animation_pointer(area);
     if let Err(error) =
         app.animation_frame
@@ -127,7 +145,12 @@ fn render_field(
     }
     app.animation_frame.collect();
     app.note_animation_field_settings();
-    app.animation_frame.begin_composition()
+    if app.animation_frame.begin_composition() {
+        return Some(FieldPresentation::Fresh);
+    }
+    app.animation_frame
+        .can_repeat_display(area.width, area.height)
+        .then_some(FieldPresentation::Repeat)
 }
 
 fn needs_screen_occupancy(settings: &crate::background_animation::AnimationSettings) -> bool {
@@ -186,12 +209,15 @@ pub fn compose(buffer: &mut Buffer, app: &mut App, elapsed: Duration) {
         } else {
             None
         });
-    if !render_field(app, &settings, buffer.area, elapsed) {
+    let Some(presentation) = render_field(app, &settings, buffer.area, elapsed) else {
         return;
-    }
+    };
     let area = buffer.area;
     let receipt_cells = usize::from(area.width) * usize::from(area.height);
-    let mut painted_bits = if !is_preview && receipt_cells <= MAX_RECEIPT_CELLS {
+    let mut painted_bits = if !is_preview
+        && presentation == FieldPresentation::Fresh
+        && receipt_cells <= MAX_RECEIPT_CELLS
+    {
         vec![0_u8; receipt_cells]
     } else {
         Vec::new()
@@ -208,12 +234,14 @@ pub fn compose(buffer: &mut Buffer, app: &mut App, elapsed: Duration) {
         && settings.kind == crate::background_animation::AnimationKind::Aurora;
     if is_preview {
         let area = buffer.area;
-        app.animation_frame.check_visibility(
-            buffer,
-            (red, green, blue),
-            app.ui_settings.color_scheme == crate::theme::ColorScheme::Light,
-            black_backdrop,
-        );
+        if presentation == FieldPresentation::Fresh {
+            app.animation_frame.check_visibility(
+                buffer,
+                (red, green, blue),
+                app.ui_settings.color_scheme == crate::theme::ColorScheme::Light,
+                black_backdrop,
+            );
+        }
         // Article letters in label whitespace become part of the UI wording.
         // Keep the same page coordinates, but leave Settings chrome opaque.
         let preview_area =
@@ -273,7 +301,7 @@ pub fn compose(buffer: &mut Buffer, app: &mut App, elapsed: Duration) {
     if !settings.panels.shows_right()
         || matches!(app.right_panel_target, RightPanelTarget::Chatroom { .. })
     {
-        app.animation_frame.composed(painted_bits);
+        finish_field(app, presentation, painted_bits);
         return;
     }
     let viewports = app.pane_viewports();
@@ -289,7 +317,7 @@ pub fn compose(buffer: &mut Buffer, app: &mut App, elapsed: Duration) {
             app.animation_frame.is_wikipedia(),
             &mut mark_painted,
         );
-        app.animation_frame.composed(painted_bits);
+        finish_field(app, presentation, painted_bits);
         return;
     }
     for viewport in viewports {
@@ -311,7 +339,7 @@ pub fn compose(buffer: &mut Buffer, app: &mut App, elapsed: Duration) {
             );
         });
     }
-    app.animation_frame.composed(painted_bits);
+    finish_field(app, presentation, painted_bits);
 }
 
 /// The Settings controls panel of the full-field preview, which stays opaque.

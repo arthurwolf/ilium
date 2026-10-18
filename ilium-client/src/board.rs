@@ -183,7 +183,16 @@ pub(crate) fn read_source(
     storage: BoardStorage,
     create_missing: bool,
 ) -> Result<BoardSource, String> {
-    let board = if storage.path().exists() {
+    // A dangling symlink is an existing user-owned entry. Loading it must
+    // fail rather than letting board creation replace the link atomically.
+    let exists = storage
+        .path()
+        .try_exists()
+        .map_err(|error| error.to_string())?;
+    if !exists && fs::symlink_metadata(storage.path()).is_ok() {
+        return Err("Board path is an existing entry whose target cannot be read".into());
+    }
+    let board = if exists {
         BoardPane::load(storage)?
     } else if create_missing {
         BoardPane::create(storage)?

@@ -89,6 +89,7 @@ impl EditorInputBacklog {
             .is_some_and(|total| total <= self.max_bytes)
     }
 
+    #[allow(clippy::result_large_err)] // The refusal hands the original input back unchanged; boxing would allocate on that path.
     pub(crate) fn push(
         &mut self,
         event: Result<InputEvent, InputFailure>,

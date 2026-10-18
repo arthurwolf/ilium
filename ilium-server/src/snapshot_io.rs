@@ -826,7 +826,15 @@ pub(crate) fn estimated_progress_bytes(progress: &ilium_core::PaneProgress) -> u
         .job_id
         .capacity()
         .saturating_add(progress.report.message.capacity())
+        .saturating_add(progress.report.details.capacity())
         .saturating_add(progress.report.error.as_ref().map_or(0, String::capacity))
+        .saturating_add(progress.timing.samples.capacity().saturating_mul(std::mem::size_of::<ilium_core::ProgressSample>()))
+        .saturating_add(progress.timing.checks.capacity().saturating_mul(std::mem::size_of::<ilium_core::ProgressCheck>()))
+        .saturating_add(match &progress.monitor_health {
+            ilium_core::ProgressMonitorHealth::Healthy => 0,
+            ilium_core::ProgressMonitorHealth::Degraded { last_error, .. }
+            | ilium_core::ProgressMonitorHealth::Failed { last_error, .. } => last_error.capacity(),
+        })
         .saturating_add(512)
 }
 pub(crate) fn estimated_debug_log_bytes(log: &ilium_agent_debug::PaneDebugLog) -> usize {
@@ -867,6 +875,30 @@ mod tests {
     use super::*;
     use ilium_core::{Tree, ROOT_ID};
     use std::time::Instant;
+
+    #[test]
+    fn progress_estimate_charges_retained_history_details_and_health_error() {
+        let report = ilium_core::ProgressTaskReport::new(
+            "estimate".into(), ilium_core::ProgressTaskStatus::Running, 20.0,
+            "Building".into(), String::new(), None,
+        ).unwrap();
+        let mut progress = ilium_core::PaneProgress::new(1, report, 100).unwrap();
+        let baseline = estimated_progress_bytes(&progress);
+        let old_checks_capacity = progress.timing.checks.capacity();
+        let old_samples_capacity = progress.timing.samples.capacity();
+        progress.report.details = String::with_capacity(4096);
+        progress.timing.checks.reserve(64);
+        progress.timing.samples.reserve(24);
+        let last_error = String::with_capacity(1024);
+        let error_capacity = last_error.capacity();
+        progress.monitor_health = ilium_core::ProgressMonitorHealth::Degraded {
+            consecutive_failures: 1, last_error,
+        };
+        assert_eq!(estimated_progress_bytes(&progress) - baseline,
+            progress.report.details.capacity() + error_capacity
+            + (progress.timing.checks.capacity() - old_checks_capacity) * std::mem::size_of::<ilium_core::ProgressCheck>()
+            + (progress.timing.samples.capacity() - old_samples_capacity) * std::mem::size_of::<ilium_core::ProgressSample>());
+    }
 
     #[test]
     fn snapshot_native_role_remains_charged_until_blocked_worker_is_joined() {

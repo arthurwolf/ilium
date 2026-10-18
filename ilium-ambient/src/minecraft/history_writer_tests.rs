@@ -42,6 +42,23 @@ fn submit(writer: &Writer, serial: u64, history: History) -> Admission {
         std::thread::yield_now();
     }
 }
+fn assert_stale(writer: &Writer, serial: u64, value: History) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        match writer.submit(serial, value) {
+            // Admission is explicitly nonblocking: the worker can hold its
+            // state lock before serial validation, even after receipt pickup.
+            Err(Error::Busy) => {
+                assert!(Instant::now() < deadline, "serial validation remained busy");
+                std::thread::yield_now();
+            }
+            result => {
+                assert_eq!(result, Err(Error::StaleSerial));
+                return;
+            }
+        }
+    }
+}
 #[test]
 fn accepted_snapshot_commits_and_reloads_actual_history() {
     let (_temporary, repository, _) = fixture();
@@ -70,11 +87,11 @@ fn own_sequential_commits_advance_expected_cas_without_self_conflict() {
 fn zero_duplicate_and_backwards_serials_never_replace_accepted_latest() {
     let (_temporary, repository, _) = fixture();
     let writer = Writer::start(repository.clone(), 0, &crate::resources::test_resources()).unwrap();
-    assert_eq!(writer.submit(0, history(0)), Err(Error::StaleSerial));
+    assert_stale(&writer, 0, history(0));
     submit(&writer, 3, history(3));
     receipt(&writer);
-    assert_eq!(writer.submit(3, history(9)), Err(Error::StaleSerial));
-    assert_eq!(writer.submit(2, history(9)), Err(Error::StaleSerial));
+    assert_stale(&writer, 3, history(9));
+    assert_stale(&writer, 2, history(9));
     assert_eq!(repository.load(&|| false).unwrap().history(), history(3));
 }
 #[test]
@@ -582,7 +599,8 @@ fn blocked_commit_keeps_its_independent_host_claim_after_writer_drop_until_join(
     ticket
         .join_until(Instant::now() + Duration::from_secs(5))
         .unwrap();
-    assert_eq!(quota.snapshot().worker_threads, 2);
+    assert_eq!(quota.snapshot().worker_threads, 1);
+    assert_eq!(quota.snapshot().worker_bytes, baseline);
     drop(ticket);
     assert_eq!(quota.snapshot().worker_threads, 1);
     assert_eq!(quota.snapshot().worker_bytes, baseline);

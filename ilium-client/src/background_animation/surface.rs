@@ -395,18 +395,26 @@ impl AnimationSurface {
             self.start();
         }
         self.flush();
+        if !self.receipts.is_empty() || !self.configurations.is_empty() {
+            // The worker holds its mailbox lock for microseconds; one yield
+            // usually frees it, so a receipt or configuration that lost the
+            // race lands this tick instead of blocking the next lease.
+            std::thread::yield_now();
+            self.flush();
+        }
         let Some(service) = &self.service else {
             return false;
         };
-        if let Some(status) = service.try_status() {
-            if status.error.is_some() {
-                self.error = status.error;
-            } else if !status.is_accepting {
-                self.error =
-                    Some("Animation worker stopped; pending execution was not accepted".into());
-            }
+        let Some((status, frame)) = service.try_collect() else {
+            return false;
+        };
+        if status.error.is_some() {
+            self.error = status.error;
+        } else if !status.is_accepting {
+            self.error =
+                Some("Animation worker stopped; pending execution was not accepted".into());
         }
-        let Some(frame) = service.try_snapshot() else {
+        let Some(frame) = frame else {
             return false;
         };
         if self.desired.is_none() || frame.revision != self.revision {
@@ -437,7 +445,13 @@ impl AnimationSurface {
         if self.desired.is_none() || frame.revision != self.revision {
             return false;
         }
-        match frame.begin_presentation() {
+        let mut attempt = frame.begin_presentation();
+        if matches!(attempt, Err(AdmissionError::Busy)) {
+            // Same microsecond race as flush(): one yield, one more try.
+            std::thread::yield_now();
+            attempt = frame.begin_presentation();
+        }
+        match attempt {
             Ok(lease) => {
                 self.composition = Some(lease);
                 true
@@ -671,6 +685,17 @@ impl AnimationSurface {
         self.visibility.warning()
     }
 
+    /// A composition was refused this tick (worker lock busy, a queued
+    /// configuration or receipt, a revision still in flight). The frame last
+    /// shown may be painted again, uncredited, so the field never goes dark
+    /// for one tick. It must match the screen exactly: field cells are
+    /// addressed in whole-buffer coordinates.
+    pub fn can_repeat_display(&self, width: u16, height: u16) -> bool {
+        self.display
+            .as_ref()
+            .is_some_and(|frame| frame.width == width && frame.height == height)
+    }
+
     pub fn width(&self) -> u16 {
         self.display.as_ref().map_or(0, |frame| frame.width)
     }
@@ -864,8 +889,13 @@ impl AnimationSurface {
             }
             assert!(
                 Instant::now() < deadline,
-                "Animation transition did not settle: {:?}",
-                self.status()
+                "Animation transition did not settle: status={:?}, requested={:?}, display={:?}, configurations={}, receipts={}, service_counts={:?}",
+                self.status(),
+                self.last_request,
+                self.display.as_ref().map(|frame| (frame.revision, frame.elapsed)),
+                self.configurations.len(),
+                self.receipts.len(),
+                self.service.as_ref().map(|service| (service.configuration_count(), service.presentation_count()))
             );
             std::thread::sleep(Duration::from_millis(1));
         }

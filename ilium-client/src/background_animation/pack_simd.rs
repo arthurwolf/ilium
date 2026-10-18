@@ -43,8 +43,8 @@ fn pack_scalar(
             let row_start = (cell_row * 4 + dy) * row_width;
             for (column, cell) in row_cells.iter_mut().enumerate() {
                 let index = row_start + column * 2;
-                *cell |= u8::from(dots[index] * density > thresholds[index]) * bits[0]
-                    | u8::from(dots[index + 1] * density > thresholds[index + 1]) * bits[1];
+                *cell |= (u8::from(dots[index] * density > thresholds[index]) * bits[0])
+                    | (u8::from(dots[index + 1] * density > thresholds[index + 1]) * bits[1]);
             }
         }
     }
@@ -107,13 +107,18 @@ unsafe fn pack_avx2_inner(
                 for lane_cell in 0..4 {
                     let pair = (mask >> (lane_cell * 2)) & 0b11;
                     row_cells[cell_group + lane_cell] |=
-                        (pair & 1) * bits[0] | ((pair >> 1) & 1) * bits[1];
+                        ((pair & 1) * bits[0]) | (((pair >> 1) & 1) * bits[1]);
                 }
             }
-            for column in vector_cells..width {
+            for (column, cell) in row_cells
+                .iter_mut()
+                .enumerate()
+                .take(width)
+                .skip(vector_cells)
+            {
                 let index = row_start + column * 2;
-                row_cells[column] |= u8::from(dots[index] * density > thresholds[index]) * bits[0]
-                    | u8::from(dots[index + 1] * density > thresholds[index + 1]) * bits[1];
+                *cell |= (u8::from(dots[index] * density > thresholds[index]) * bits[0])
+                    | (u8::from(dots[index + 1] * density > thresholds[index + 1]) * bits[1]);
             }
         }
     }
@@ -123,6 +128,7 @@ unsafe fn pack_avx2_inner(
 mod tests {
     use super::{pack_scalar, pack_thresholded};
 
+    #[allow(clippy::needless_range_loop)] // The scalar oracle spells out the braille bit layout by index.
     fn scalar_reference(
         dots: &[f32],
         thresholds: &[f32],
