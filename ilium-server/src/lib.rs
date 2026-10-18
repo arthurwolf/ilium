@@ -653,6 +653,7 @@ async fn restore_snapshot_data(
     let pane_count = snapshot.panes.len();
     let persisted_progress_monitors = std::mem::take(&mut snapshot.progress_monitors);
     let persisted_close_preferences = std::mem::take(&mut snapshot.workspace_close_preferences);
+    let persisted_recaps = std::mem::take(&mut snapshot.recaps);
     state.agent_debug.restore(snapshot.agent_debug_logs).await;
     #[cfg(test)]
     state.recovery.notify_restore_prepublication();
@@ -685,6 +686,15 @@ async fn restore_snapshot_data(
             }
         }
         drop(preferences);
+        {
+            let mut recaps = state.recaps.write().await;
+            recaps.clear();
+            for recap in persisted_recaps {
+                if tree.get(recap.pane_id).is_some() {
+                    recaps.insert(recap.pane_id, recap);
+                }
+            }
+        }
         // Presentation state contains the previous process's monitor IDs.
         // Clear it before respawning panes; each valid persisted registration
         // below receives a fresh process-local generation and republishes its
@@ -1162,6 +1172,7 @@ mod restore_tests {
                 agent_debug_logs: Vec::new(),
                 progress_monitors: vec![persisted_monitor.clone()],
                 workspace_close_preferences: Vec::new(),
+                recaps: Vec::new(),
             },
         )
         .await;
@@ -1279,6 +1290,7 @@ mod restore_tests {
                 agent_debug_logs: Vec::new(),
                 progress_monitors: Vec::new(),
                 workspace_close_preferences: Vec::new(),
+                recaps: Vec::new(),
             },
         )
         .await;
@@ -1469,6 +1481,7 @@ mod restore_tests {
             }],
             progress_monitors: Vec::new(),
             workspace_close_preferences: Vec::new(),
+            recaps: Vec::new(),
         };
         let json = serde_json::to_vec_pretty(&snapshot).expect("serialize snapshot fixture");
         tokio::fs::create_dir_all(snapshot_path.parent().expect("snapshot parent"))
@@ -1718,6 +1731,7 @@ mod restore_tests {
             agent_debug_logs: Vec::new(),
             progress_monitors: Vec::new(),
             workspace_close_preferences: Vec::new(),
+            recaps: Vec::new(),
         };
         restore_snapshot_data(&state, snapshot).await;
 
@@ -1829,6 +1843,7 @@ mod restore_tests {
             agent_debug_logs: Vec::new(),
             progress_monitors: Vec::new(),
             workspace_close_preferences: Vec::new(),
+            recaps: Vec::new(),
         };
         restore_snapshot_data(&state, snapshot).await;
 

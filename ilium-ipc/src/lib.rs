@@ -38,11 +38,12 @@ pub use protocol::{
     MouseModifiers, NewPaneKind, NewPaneWorkingDirectory, PaneDetectionEvidence,
     PaneTitleObservation, ProgressMonitorAccepted, ProgressMonitorPreflight,
     ProgressMonitorRejection, ProgressMonitorRejectionCode, ProgressMonitorStatus, ProgressWaitEnd,
-    ProgressWaitOutcome, PromptSubmissionSource, RepoFacts, ServerEvent, WorkspaceClosePolicy,
-    WorkspaceCreateSpec, WorkspaceCreateStage, WorkspaceDisposition, WorkspaceGitStatus,
-    WorkspaceGitVersion, WorkspaceInventory, WorkspaceInventoryEntry, WorkspaceInventoryOwner,
-    WorkspacePruneBranchOutcome, WorkspacePruneBranchPolicy, WorkspacePruneMode,
-    WorkspacePruneOutcome, WorkspacePruneResult, WorkspacePruneTarget, WorkspaceWorktreeFact,
+    ProgressWaitOutcome, PromptSubmissionSource, RecapTrigger, RepoFacts, ServerEvent,
+    WorkspaceClosePolicy, WorkspaceCreateSpec, WorkspaceCreateStage, WorkspaceDisposition,
+    WorkspaceGitStatus, WorkspaceGitVersion, WorkspaceInventory, WorkspaceInventoryEntry,
+    WorkspaceInventoryOwner, WorkspacePruneBranchOutcome, WorkspacePruneBranchPolicy,
+    WorkspacePruneMode, WorkspacePruneOutcome, WorkspacePruneResult, WorkspacePruneTarget,
+    WorkspaceWorktreeFact,
 };
 pub use startup::{
     clear_startup_progress, publish_startup_progress, read_startup_progress, startup_progress_path,
@@ -505,6 +506,22 @@ mod tests {
                 monitor_id: 7,
             },
             ClientRequest::GetPaneRecapScreen { pane_id: NodeId(2) },
+            ClientRequest::ApplyRecap {
+                pane_id: NodeId(2),
+                session_id: "95fd0645".to_string(),
+                recap_generation: 7,
+                trigger: RecapTrigger::Manual,
+                short: "Fixing the login test.".to_string(),
+                long: Some("Long recap".to_string()),
+            },
+            ClientRequest::ApplyRecap {
+                pane_id: NodeId(2),
+                session_id: String::new(),
+                recap_generation: 8,
+                trigger: RecapTrigger::Batch,
+                short: "Short only".to_string(),
+                long: None,
+            },
             ClientRequest::PasteTerminalText {
                 pane_id: NodeId(2),
                 text: "first line\nsecond line".to_string(),
@@ -781,6 +798,14 @@ mod tests {
             ServerEvent::PaneSessionTitleCleared {
                 pane_id: NodeId(2),
                 title_generation: 2,
+            },
+            ServerEvent::RecapUpdated {
+                pane_id: NodeId(2),
+                session_id: "95fd0645".to_string(),
+                recap_generation: 7,
+                trigger: RecapTrigger::Batch,
+                short: "Fixing the login test.".to_string(),
+                long: None,
             },
             ServerEvent::PaneEditorPathResolved {
                 pane_id: NodeId(2),
@@ -1166,6 +1191,10 @@ mod tests {
 
     #[tokio::test]
     async fn recap_screen_frames_round_trip_with_owned_allocation_accounting() {
+        fn variant_index<T: serde::Serialize>(value: &T) -> u32 {
+            let bytes = bincode::serialize(value).expect("serializable");
+            u32::from_le_bytes(bytes[..4].try_into().expect("four-byte variant index"))
+        }
         let request = ClientRequest::GetPaneRecapScreen {
             pane_id: NodeId(42),
         };
