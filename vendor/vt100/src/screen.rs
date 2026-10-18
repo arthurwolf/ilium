@@ -630,6 +630,31 @@ impl Screen {
         self.mode(MODE_ALTERNATE_SCREEN)
     }
 
+    /// Returns the DECSTBM scroll region as zero-based inclusive (top, bottom) rows.
+    #[must_use]
+    pub fn scroll_region(&self) -> (u16, u16) {
+        self.grid().scroll_region()
+    }
+
+    /// Returns whether origin mode (DECOM) is enabled.
+    #[must_use]
+    pub fn origin_mode(&self) -> bool {
+        self.grid().origin_mode()
+    }
+
+    /// Returns the cursor position saved by DECSC, zero-based (row, col).
+    #[must_use]
+    pub fn saved_cursor_position(&self) -> (u16, u16) {
+        let pos = self.grid().saved_pos();
+        (pos.row, pos.col)
+    }
+
+    /// Returns whether origin mode was enabled when the cursor was saved by DECSC.
+    #[must_use]
+    pub fn saved_origin_mode(&self) -> bool {
+        self.grid().saved_origin_mode()
+    }
+
     /// Returns whether the terminal should be in application keypad mode.
     #[must_use]
     pub fn application_keypad(&self) -> bool {

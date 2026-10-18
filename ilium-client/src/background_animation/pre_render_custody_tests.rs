@@ -756,8 +756,26 @@ impl Fixture {
         host_policy: Ceiling,
     ) -> VerifiedPreparation {
         let helper = std::env::var_os("ILIUM_ANIMATION_HELPER")
-            .expect("matching release helper must be supplied explicitly");
-        assert!(Path::new(&helper).is_absolute());
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                // Workspace tests build the matching helper beside the deps
+                // directory. Explicit paths still support release qualification.
+                std::env::current_exe()
+                    .unwrap()
+                    .parent()
+                    .unwrap()
+                    .parent()
+                    .unwrap()
+                    .join(format!(
+                        "ilium-animation-helper{}",
+                        std::env::consts::EXE_SUFFIX
+                    ))
+            });
+        assert!(
+            helper.is_absolute() && helper.is_file(),
+            "matching animation helper missing: {}",
+            helper.display()
+        );
         let verifier = TrustVerifier::from_release_inventory(Vec::new()).unwrap();
         let settings = json!({});
         let environment = json!({"cell_width":1,"cell_height":1,"dot_width":2,"dot_height":4});

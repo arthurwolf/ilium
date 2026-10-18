@@ -50,6 +50,17 @@ async fn select_and_measure(
     let title = format!("pool-{number:03}");
     let marker = format!("INNER-PANE-{number:03}");
     tui.write(b"\x02w").expect("focus isolated tree");
+    // Sidebar hover diagnostics can cover the next pane's title. Keep the
+    // pointer in the content area while locating rows, as a keyboard user can.
+    tui.write(&sgr_mouse_move(100, 40)).unwrap();
+    assert!(
+        wait_until(
+            || !tui.screen_text().contains("Plain terminal · F9 details"),
+            WAIT_TIMEOUT,
+        )
+        .await,
+        "sidebar hover diagnostic did not close before pane navigation"
+    );
     let mut row = None;
     for _ in 0..PANE_COUNT {
         row = tui.with_screen(|screen| {
@@ -62,6 +73,7 @@ async fn select_and_measure(
         }
         tui.write(&sgr_mouse_down(if backwards { 64 } else { 65 }, 8, 15))
             .expect("scroll isolated tree");
+        tui.write(&sgr_mouse_move(100, 40)).unwrap();
         tokio::time::sleep(Duration::from_millis(30)).await;
     }
     assert!(
@@ -252,8 +264,10 @@ async fn no_pool_release_renders_128_panes_and_measures_click_latency() {
     for number in 0..PANE_COUNT {
         let marker = format!("INNER-PANE-{number:03}");
         let script = if number == 0 {
+            // CAN terminates the deliberately unfinished escape run. A newline
+            // alone leaves ESC pending and consumes the marker's initial `I`.
             format!(
-                "while [ ! -e \"$1\" ]; do /bin/sleep 0.02; done; printf '\\n\\n\\n\\n\\n\\n\\n\\nFIRST-CONTENT-000\\n'; /usr/bin/head -c {} /dev/zero | /usr/bin/tr '\\000' '\\033'; printf '\\n\\n%s\\n' \"$2\"; /bin/sleep 0.1; : > \"$3\"; exec /bin/cat",
+                "while [ ! -e \"$1\" ]; do /bin/sleep 0.02; done; printf '\\n\\n\\n\\n\\n\\n\\n\\nFIRST-CONTENT-000\\n'; /usr/bin/head -c {} /dev/zero | /usr/bin/tr '\\000' '\\033'; printf '\\030\\n\\n%s\\n' \"$2\"; /bin/sleep 0.1; : > \"$3\"; exec /bin/cat",
                 LARGE_FIRST_PANE_NOISE_BYTES
             )
         } else {

@@ -8547,12 +8547,21 @@ mod progress_check_history_tests {
     use super::*;
 
     fn report(status: ProgressTaskStatus) -> ProgressTaskReport {
-        ProgressTaskReport::new("job".into(), status, 10.0, "Building".into(), String::new(), None).unwrap()
+        ProgressTaskReport::new(
+            "job".into(),
+            status,
+            10.0,
+            "Building".into(),
+            String::new(),
+            None,
+        )
+        .unwrap()
     }
 
     #[test]
     fn success_retains_failed_checks_and_status_transitions_count_as_progress() {
-        let mut previous = PaneProgress::new(1, report(ProgressTaskStatus::NotStartedYet), 100).unwrap();
+        let mut previous =
+            PaneProgress::new(1, report(ProgressTaskStatus::NotStartedYet), 100).unwrap();
         previous.timing.record_failed_check(200);
         let mut next = PaneProgress::new(1, report(ProgressTaskStatus::Running), 300).unwrap();
         next.carry_timing_from(&previous);
@@ -8560,7 +8569,10 @@ mod progress_check_history_tests {
         assert_eq!(next.timing.last_progress_unix_millis, Some(300));
         assert_eq!(next.timing.checks.len(), 3);
         assert_eq!(next.timing.checks[1].outcome, ProgressCheckOutcome::Failed);
-        assert_eq!(next.timing.checks[2].outcome, ProgressCheckOutcome::Progress);
+        assert_eq!(
+            next.timing.checks[2].outcome,
+            ProgressCheckOutcome::Progress
+        );
     }
 
     #[test]
@@ -8573,6 +8585,9 @@ mod progress_check_history_tests {
         next.carry_timing_from(&previous);
         assert_eq!(next.last_observed_unix_millis, 300);
         assert_eq!(next.timing.last_progress_unix_millis, Some(100));
-        assert_eq!(next.timing.checks[1].outcome, ProgressCheckOutcome::Heartbeat);
+        assert_eq!(
+            next.timing.checks[1].outcome,
+            ProgressCheckOutcome::Heartbeat
+        );
     }
 }

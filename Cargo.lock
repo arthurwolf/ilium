@@ -2781,6 +2781,7 @@ dependencies = [
  "ilium-agent-session",
  "ilium-ambient",
  "ilium-client",
+ "ilium-control",
  "ilium-core",
  "ilium-inference",
  "ilium-ipc",
@@ -2946,6 +2947,18 @@ dependencies = [
 name = "ilium-compaction-analysis"
 version = "0.1.1"
 dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "ilium-control"
+version = "0.1.1"
+dependencies = [
+ "ilium-core",
+ "ilium-ipc",
+ "ilium-sound",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -3494,6 +3507,7 @@ dependencies = [
  "ignore",
  "ilium-agent-debug",
  "ilium-agent-session",
+ "ilium-control",
  "ilium-core",
  "ilium-detect",
  "ilium-execution",
