@@ -18,6 +18,7 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 - Padding settings tab with Disabled, Size dependent (default threshold 200 columns, minimum 11) and Enabled cards, plus a Padding fine-tuning dialog with a live preview. Tree and right panels (terminals and agents, editors, boards) get independent 0 to 3 cell padding per side, optionally linked, saved under `[padding]`. Padding moves only the content inward; toolbars, banners and the progress footer stay full width.
 
 ### Fixed
+- The snapshot service waits a bounded time for a briefly busy worker-admission gate instead of failing session persistence on a transient `Busy`.
 - Release pipeline Linux tests use a delegated user systemd scope; slow-runner waits in background cache and image-query tests are polled with longer deadlines.
 - The PTY owner no longer sleeps until the write deadline when a writer completion lands between its poll and its wait (lost wake-up); native sandbox command building accepts Linux paths on any host; slow-runner and Windows-only test races in the PTY, terminal-parsing and release tests are handled.
 - Release pipeline: Linux native tests now enable the cpu, memory and pids controllers in their delegated cgroup so the animation sandbox tests can run; the board path picker smoke test no longer indexes a screen row that can repaint away.

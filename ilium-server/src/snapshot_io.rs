@@ -51,6 +51,8 @@ pub(crate) fn admission_error(
         source: SnapshotError::ResourceAdmission(message.into()),
     }
 }
+/// Upper bound (about two seconds) on waiting for a busy admission gate.
+const ADMISSION_GATE_RETRIES: u32 = 400;
 struct Budget {
     bytes: AtomicUsize,
 }
@@ -240,9 +242,26 @@ impl SnapshotIo {
             .and_then(|bytes| bytes.checked_add(path.capacity().saturating_mul(2)))
             .and_then(|bytes| bytes.checked_add(4096))
             .ok_or_else(|| io::Error::other("snapshot worker declaration overflow"))?;
-        let worker_slot =
-            ilium_execution::reserve_admitted_worker(quota, WORKER_STACK_BYTES, resident_bytes)
-                .map_err(io::Error::other)?;
+        // Busy only means another thread held the quota's admission gate for a
+        // moment (never that capacity is exhausted), so wait a bounded time for
+        // the gate instead of failing the whole snapshot service.
+        let mut gate_attempts = 0_u32;
+        let worker_slot = loop {
+            match ilium_execution::reserve_admitted_worker(
+                quota,
+                WORKER_STACK_BYTES,
+                resident_bytes,
+            ) {
+                Ok(slot) => break slot,
+                Err(ilium_execution::WorkerStartError::Rejected(
+                    ilium_execution::RejectReason::Busy,
+                )) if gate_attempts < ADMISSION_GATE_RETRIES => {
+                    gate_attempts += 1;
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                Err(error) => return Err(io::Error::other(error)),
+            }
+        };
         let (sender, receiver) = mpsc::sync_channel(MAX_COMMANDS);
         let worker_path = path.clone();
         let worker = worker_slot.spawn(
