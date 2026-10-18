@@ -1,5 +1,4 @@
 //! Shared helpers: a `ServerKernel` test world (gap constructors, see API_GAPS.md) and outcome readers.
-#![allow(dead_code)]
 
 use ilium_plugin_api::generated::types::{
     ErrorCode, Intent, NodeId, Outcome, PaneLifecycleState, PluginId,

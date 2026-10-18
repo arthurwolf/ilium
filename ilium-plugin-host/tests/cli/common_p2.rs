@@ -1,7 +1,6 @@
 //! Helpers of part 2 (install failures, uninstall, enable/disable, list, grants, dev, logs).
 //! Session fake methods that the skeleton lacks are listed in API_GAPS_p2.md.
 
-#![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

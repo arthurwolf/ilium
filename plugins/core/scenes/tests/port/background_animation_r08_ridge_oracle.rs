@@ -1,6 +1,5 @@
 //! Twins of the original tests of ilium-client/src/background_animation/r08_ridge_oracle.rs (ported through FakeScene / FakeSession).
 use crate::common::*;
-#[allow(unused_imports)]
 use serde_json::json;
 
 /// REQ: PORT:ilium-client/src/background_animation/r08_ridge_oracle.rs::r08_ridge_key_and_owner_lifecycle

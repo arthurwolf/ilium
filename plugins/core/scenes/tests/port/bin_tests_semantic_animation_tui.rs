@@ -1,6 +1,5 @@
 //! Twins of the original tests of ilium/tests/semantic_animation_tui.rs (ported through FakeScene / FakeSession).
 use crate::common::*;
-#[allow(unused_imports)]
 use serde_json::json;
 
 /// REQ: PORT:ilium/tests/semantic_animation_tui.rs::actual_saved_world_route_emits_selected_pack_frames_and_preserves_inputs

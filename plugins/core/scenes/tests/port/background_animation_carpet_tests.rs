@@ -1,6 +1,5 @@
 //! Twins of the original tests of ilium-client/src/background_animation/carpet_tests.rs (ported through FakeScene / FakeSession).
 use crate::common::*;
-#[allow(unused_imports)]
 use serde_json::json;
 
 /// REQ: PORT:ilium-client/src/background_animation/carpet_tests.rs::all_nine_carpet_modes_and_every_conditional_control_survive_real_project_reload

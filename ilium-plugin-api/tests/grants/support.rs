@@ -1,7 +1,6 @@
 //! Shared helpers of the api grants tests: manual readers, the parsed capability table of
 //! reference-capabilities.md, and a one-side manifest builder run through `validate_json`.
 
-#![allow(dead_code)]
 
 use std::path::PathBuf;
 

@@ -4,7 +4,6 @@
 //! output filters installed per rule, `output-matched` answered by one `send-input` with the dedup key
 //! `trigger-{filter}-{node}-{row}`, the 10 minute host dedup window, the rule-list settings of the kernel tab,
 //! the `test-rule` service and the rendered tab. Each module groups the twins of one original file.
-#![allow(dead_code)]
 
 #[path = "../features/common.rs"]
 mod common;

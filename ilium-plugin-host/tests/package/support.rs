@@ -2,7 +2,6 @@
 //! hostile variation of reference-package-format.md, CRC-32 and SHA-256 (so the tests need no
 //! extra dependency), the manual's test vectors, and small wrappers over the host API.
 //! Every wait is bounded; nothing here sleeps.
-#![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};

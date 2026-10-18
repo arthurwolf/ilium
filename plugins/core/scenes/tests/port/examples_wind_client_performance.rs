@@ -1,6 +1,5 @@
 //! Twins of the original tests of ilium-client/examples/wind_client_performance.rs (ported through FakeScene / FakeSession).
 use crate::common::*;
-#[allow(unused_imports)]
 use serde_json::json;
 
 /// REQ: PORT:ilium-client/examples/wind_client_performance.rs::accepts_only_relative_capture_subdirectories_without_parent_traversal

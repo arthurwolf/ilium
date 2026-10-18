@@ -1,5 +1,4 @@
 //! Port twins of the tests of `restructure.rs`.
-#![allow(unused_imports)]
 
 use ilium_plugin_sdk::types::*;
 use serde_json::json;

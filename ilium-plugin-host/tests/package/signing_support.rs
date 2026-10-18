@@ -1,7 +1,6 @@
 //! Helpers of the signing and trust tests (part 2). Custom signatures need a real Ed25519
 //! implementation in the test: the dev-dependency `ed25519-dalek` is listed in API_GAPS.md.
 
-#![allow(dead_code)]
 
 use super::support::*;
 use ed25519_dalek::Signer;

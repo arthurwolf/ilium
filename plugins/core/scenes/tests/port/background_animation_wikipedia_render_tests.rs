@@ -1,6 +1,5 @@
 //! Twins of the original tests of ilium-client/src/background_animation/wikipedia/render_tests.rs (ported through FakeScene / FakeSession).
 use crate::common::*;
-#[allow(unused_imports)]
 use serde_json::json;
 
 /// REQ: PORT:ilium-client/src/background_animation/wikipedia/render_tests.rs::a_cancelled_layout_is_blank_and_can_be_retried_without_reusing_failure

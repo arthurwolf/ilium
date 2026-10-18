@@ -1,6 +1,5 @@
 //! Twins of the original tests of ilium-core/src/animation_recommendation.rs (ported through FakeScene / FakeSession).
 use crate::common::*;
-#[allow(unused_imports)]
 use serde_json::json;
 
 /// REQ: PORT:ilium-core/src/animation_recommendation.rs::accepted_plan_preserves_authored_names_splits_and_newer_activity

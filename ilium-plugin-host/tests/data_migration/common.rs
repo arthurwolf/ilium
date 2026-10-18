@@ -1,7 +1,6 @@
 //! Shared helpers of the data-migration lane. Everything uses the skeleton or the items named in
 //! API_GAPS.md (the migration rig).
 
-#![allow(dead_code)]
 
 use std::collections::BTreeMap;
 

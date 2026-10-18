@@ -1,6 +1,5 @@
 //! Twins of the original tests of ilium-client/src/background_animation/wikipedia/settings_tests.rs (ported through FakeScene / FakeSession).
 use crate::common::*;
-#[allow(unused_imports)]
 use serde_json::json;
 
 /// REQ: PORT:ilium-client/src/background_animation/wikipedia/settings_tests.rs::wiki_color_mode_and_greyscale_apply_to_images_and_text

@@ -4,7 +4,6 @@
 //! `ILIUM_TEST_COMPONENT_SERVER`. A missing variable fails the test with `fixture.missing`, so these
 //! tests are red until the toolchain builds the fixtures.
 
-#![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

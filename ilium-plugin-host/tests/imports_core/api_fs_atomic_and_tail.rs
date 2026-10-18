@@ -492,5 +492,4 @@ proptest! {
     }
 }
 
-#[allow(dead_code)]
 fn _write_mode_is_used(_: WriteMode) {}

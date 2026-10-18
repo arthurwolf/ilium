@@ -1,5 +1,4 @@
 //! Shared helpers over the `testing::life` gap harness (see API_GAPS.md).
-#![allow(dead_code)]
 
 pub use ilium_plugin_api::generated::host::plugins::{HealthState, InstanceState, PackageState};
 pub use ilium_plugin_api::lifecycle::DeactivationReason;

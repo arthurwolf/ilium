@@ -2,7 +2,6 @@
 //! fixtures made with `ilium plugin new`, record selectors.
 //! Items missing from the skeleton are listed in API_GAPS.md.
 
-#![allow(dead_code)]
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

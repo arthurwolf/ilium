@@ -1,7 +1,6 @@
 //! Shared helpers of the render lane. Real types come from ilium-plugin-api; the rigs that drive
 //! the host render pipeline do not exist in the skeleton yet and are listed in API_GAPS.md.
 
-#![allow(dead_code)]
 
 use ilium_plugin_api::generated::types::{NodeFlags, UiNode, UiTree, Widget};
 use ilium_plugin_api::uitree::{check_ui_tree, UiCaps};

@@ -1,5 +1,4 @@
 //! Helpers of the port twins (lane core-ui, part ports).
-#![allow(dead_code)]
 use ilium_plugin_core_ambient::AmbientClient;
 use ilium_plugin_sdk::testing::FakeHost;
 use ilium_plugin_sdk::types::{

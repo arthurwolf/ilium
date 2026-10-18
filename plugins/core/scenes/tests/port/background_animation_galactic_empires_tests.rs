@@ -1,6 +1,5 @@
 //! Twins of the original tests of ilium-client/src/background_animation/galactic_empires_tests.rs (ported through FakeScene / FakeSession).
 use crate::common::*;
-#[allow(unused_imports)]
 use serde_json::json;
 
 /// REQ: PORT:ilium-client/src/background_animation/galactic_empires_tests.rs::galactic_empires_uses_live_host_and_project_settings

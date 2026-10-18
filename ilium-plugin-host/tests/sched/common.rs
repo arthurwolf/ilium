@@ -1,6 +1,5 @@
 //! Helpers shared by the host-sched test modules: ids, event builders, a scripted native guest
 //! and scheduler drivers. Every wait is bounded.
-#![allow(dead_code)]
 
 pub use std::sync::{Arc, Mutex};
 pub use std::time::{Duration, Instant};

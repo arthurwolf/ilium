@@ -1,5 +1,4 @@
 //! Helpers of the port twins. Every use of an item the skeleton lacks is in the gap section.
-#![allow(dead_code)]
 
 use ilium_plugin_sdk::testing::FakeHost;
 use ilium_plugin_sdk::types::{Intent, ViewTarget};

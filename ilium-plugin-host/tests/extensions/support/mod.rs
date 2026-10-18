@@ -2,7 +2,6 @@
 //! world and the manual reader. Every missing host item is referenced from here and from the test
 //! files through `use crate::support::*` (see API_GAPS.md).
 
-#![allow(dead_code)]
 
 use std::path::PathBuf;
 

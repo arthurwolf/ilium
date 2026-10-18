@@ -2,7 +2,6 @@
 //!
 //! Every use of a testkit item that the skeleton lacks lives in the "gap helpers" section at the
 //! end of this file (see ../API_GAPS.md), so a missing item breaks this file only.
-#![allow(dead_code)]
 
 use std::path::PathBuf;
 

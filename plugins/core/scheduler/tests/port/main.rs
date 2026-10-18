@@ -1,7 +1,6 @@
 //! FakeHost/FakeSession twins of the baseline tests that move with the scheduler feature
 //! (F-055 scheduled input, F-057 prompt queue). Each twin asserts the observable behaviour of
 //! its original on the manual's channels. Tags: `PORT:<file>::<test>`.
-#![allow(dead_code)]
 
 #[path = "../features/common.rs"]
 mod common;

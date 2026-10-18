@@ -1,5 +1,4 @@
 //! Helpers shared by the port twins.
-#![allow(dead_code)]
 
 use serde_json::{json, Value};
 

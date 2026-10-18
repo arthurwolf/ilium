@@ -1,5 +1,4 @@
 //! Helpers of the port twins. Every item the skeleton lacks is named in ../API_GAPS.md.
-#![allow(dead_code)]
 
 use std::path::PathBuf;
 

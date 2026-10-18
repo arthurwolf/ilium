@@ -1,6 +1,5 @@
 //! Shared helpers of the port twins. Items missing from the skeleton testkit are used only in the
 //! "gap helpers" section (see ../API_GAPS.md, part ports).
-#![allow(dead_code)]
 
 use std::path::PathBuf;
 

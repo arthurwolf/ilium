@@ -1,5 +1,4 @@
 //! Small helpers shared by the port twins.
-#![allow(dead_code)]
 
 use crate::support::{active_host, open_file, render_pane};
 use ilium_plugin_sdk::generated::types::intents::Submission;

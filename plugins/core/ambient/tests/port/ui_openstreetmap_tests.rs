@@ -1,9 +1,7 @@
 //! Twins of the tests of ilium-client/src/ui_openstreetmap_tests.rs.
 
 use crate::common::*;
-#[allow(unused_imports)]
 use ilium_plugin_sdk::types::{ErrorCode, ViewTarget};
-#[allow(unused_imports)]
 use serde_json::json;
 
 /// REQ: PORT:ilium-client/src/ui_openstreetmap_tests.rs::disabled_or_switched_scene_clears_credit_and_restores_workspace_height

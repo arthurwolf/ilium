@@ -1,6 +1,5 @@
 //! Twins of the original tests of ilium-client/src/background_animation/live_scene_tests.rs (ported through FakeScene / FakeSession).
 use crate::common::*;
-#[allow(unused_imports)]
 use serde_json::json;
 
 /// REQ: PORT:ilium-client/src/background_animation/live_scene_tests.rs::boat_source_choices_survive_project_save_reload_without_serializing_notices

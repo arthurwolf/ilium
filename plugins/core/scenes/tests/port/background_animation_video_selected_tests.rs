@@ -1,6 +1,5 @@
 //! Twins of the original tests of ilium-client/src/background_animation/video_selected_tests.rs (ported through FakeScene / FakeSession).
 use crate::common::*;
-#[allow(unused_imports)]
 use serde_json::json;
 
 /// REQ: PORT:ilium-client/src/background_animation/video_selected_tests.rs::actual_selected_video_picker_controller_replay_pixels_and_revocation

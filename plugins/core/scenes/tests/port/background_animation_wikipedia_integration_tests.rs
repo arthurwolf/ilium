@@ -1,6 +1,5 @@
 //! Twins of the original tests of ilium-client/src/background_animation/wikipedia/integration_tests.rs (ported through FakeScene / FakeSession).
 use crate::common::*;
-#[allow(unused_imports)]
 use serde_json::json;
 
 /// REQ: PORT:ilium-client/src/background_animation/wikipedia/integration_tests.rs::one_prepared_article_survives_background_and_preview_frames_until_release

@@ -1,9 +1,7 @@
 //! Twins of the tests of ilium-client/src/animation_rows.rs.
 
 use crate::common::*;
-#[allow(unused_imports)]
 use ilium_plugin_sdk::types::ErrorCode;
-#[allow(unused_imports)]
 use serde_json::json;
 
 /// REQ: PORT:ilium-client/src/animation_rows.rs::boat_information_is_exposed_as_full_text_prompt_values
