@@ -221,7 +221,7 @@ A plugin is a WebAssembly component that the host loads, checks and runs. It rea
 
 ### Internal decision ids
 
-Some pages cite short ids such as L2 to L6, AX5, E9, C78, A21 and X5. They come from the design notes. L2 to L6 are section labels in [Errors and limits reference](/pages/reference-errors-and-limits/), and AX5 is a decision in [Design decisions](/pages/design-decisions/). E9, C78, A21 and X5 have no page that defines them, and a reader can ignore them. The requirement ids written in square brackets with a prefix and a number are the ones that tests use.
+Some pages cite short ids such as L2 to L6, AX5, E9 and C78. They come from the design notes. L2 to L6 are section labels in [Errors and limits reference](/pages/reference-errors-and-limits/), and AX5 is a decision in [Design decisions](/pages/design-decisions/). E9 and C78 have no page that defines them, and a reader can ignore them. The requirement ids written in square brackets with a prefix and a number are the ones that tests use.
 
 ## For users
 

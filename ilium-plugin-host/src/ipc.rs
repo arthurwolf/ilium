@@ -54,8 +54,8 @@ impl IpcFault {
         &self.code
     }
 
-    /// The completion outcome a refused submission gets: `failed(too-large)` for a payload over
-    /// the cap, none otherwise (HST-124).
+    /// The error id a refused submission reports: `ipc.payload-too-large` for a payload over the
+    /// cap, refused before it is encoded, none otherwise (HST-124).
     pub fn completion_outcome(&self) -> Option<&'static str> {
         unimplemented!("host::ipc::IpcFault::completion_outcome")
     }
