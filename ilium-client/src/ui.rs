@@ -85,6 +85,8 @@ pub(crate) fn draw_at_with_cursor(
             || app.hovered_goal_resume.is_some()
             || app.hovered_tree_node.is_some()
             || app.stats_popover.is_some()
+            || app.recap_popover.is_some()
+            || app.hovered_recap_refresh.is_some()
             || popover_visible
         {
             // These late overlays own arbitrary blank pixels inside computed
@@ -96,6 +98,7 @@ pub(crate) fn draw_at_with_cursor(
         draw_goal_resume_tooltip(frame, app);
         draw_worktree_tooltip(frame, app);
         draw_stats_popover(frame, app);
+        draw_recap_tooltips(frame, app);
         if popover_visible {
             if let Some(popover) = &app.agent_popover {
                 if let Some(geometry) = crate::popover::layout(app.layout.tree_area, popover) {
@@ -658,6 +661,47 @@ fn draw_stats_popover(frame: &mut Frame, app: &mut App) {
         crate::session_stats_ui::render(frame, app.layout.pane_area, anchor, &mut popover, &view);
     }
     app.stats_popover = Some(popover);
+}
+
+/// Draws the recap popover and the refresh-icon tooltip. Both show cached
+/// text and the phase bar of a running recap.
+fn draw_recap_tooltips(frame: &mut Frame, app: &App) {
+    for (anchor, content) in [app.recap_popover_tooltip(), app.recap_refresh_tooltip()]
+        .into_iter()
+        .flatten()
+    {
+        crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, &content);
+    }
+}
+
+/// Styles the third header dot of an agent pane as the recap handle: accent
+/// while a recap is cached or running, filled while its popover is open.
+fn draw_recap_icon(frame: &mut Frame, app: &App, viewport: crate::split_layout::PaneViewport) {
+    if viewport.outer_area.width < 12 || !app.is_known_agent_pane(viewport.pane_id) {
+        return;
+    }
+    let is_open = app
+        .recap_popover
+        .as_ref()
+        .is_some_and(|popover| popover.pane_id == viewport.pane_id);
+    let style = if is_open {
+        theme::selected_style().add_modifier(Modifier::BOLD)
+    } else {
+        Style::new()
+            .fg(theme::accent_bg())
+            .add_modifier(Modifier::BOLD)
+    };
+    let cell = theme::chrome_recap_cell(viewport.outer_area);
+    frame.render_widget(
+        Paragraph::new(Span::styled(
+            app.ui_settings
+                .icons
+                .glyph(IconTarget::ChromeRecap)
+                .to_string(),
+            style,
+        )),
+        Rect::new(cell.x, cell.y, 1, 1),
+    );
 }
 
 /// Styles the second header icon of an agent pane as the popover's handle:
@@ -2681,6 +2725,7 @@ fn draw_pane_runtime(
     }
 
     draw_stats_icon(frame, app, viewport);
+    draw_recap_icon(frame, app, viewport);
 
     if let Some(toolbar_area) = viewport.toolbar_area {
         if matches!(runtime, PaneRuntime::Terminal(_)) {

@@ -138,6 +138,7 @@ fn context(
     roots: Vec<PathBuf>,
 ) -> RecapContext {
     RecapContext {
+        progress: None,
         provider,
         options: RecapOptions {
             lengths: vec![RecapLength::Short, RecapLength::Long],

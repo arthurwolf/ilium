@@ -3960,11 +3960,13 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
     let context_card_border = tui.with_screen(|screen| {
         let border_row = context_card_row.saturating_sub(1);
         let columns = screen.size().1;
+        // The theme draws rounded panel corners (`BorderType::Rounded`), so the
+        // card's top-left corner is `╭`, not the square `┌`.
         let border_start = (25..columns)
             .find(|column| {
                 screen
                     .cell(border_row, *column)
-                    .is_some_and(|cell| cell.contents() == "┌")
+                    .is_some_and(|cell| cell.contents() == "╭")
             })
             .expect("find Context task card border");
         (border_start..border_start.saturating_add(20).min(columns))

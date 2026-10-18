@@ -14,6 +14,9 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 ## [Unreleased]
 
 ### Added
+- Agent panes show a recap icon in the pane border: hover shows the short recap, a click pins the long recap. The refresh icon on an agent row runs the title worker and the recap worker together, with a phase-based progress bar.
+- Restructuring stores a short recap for each agent pane it sees in the same model call, within a budget that scales with the number of agents. Recaps are stored by the server per session and survive a server restart.
+- Restructuring logs a debug-level comparison of each pane's title with its batch recap (shared words and coverage). It only measures; titles do not change until the comparison results justify adopting the goal-aware digest for titles.
 - `ilium recap` writes a short (at most 40 words) and a long (at most 250 words) factual recap of each selected agent or shell pane, using the same selection options as `ilium panes` and `ilium broadcast`. Agent recaps read only the transcript bound to the pane's own session and project; shell recaps read bounded screen text. Output is JSONL or Markdown, with explicit states (`summarized`, `idle`, `denied`, `unavailable`, `stale`, `failed`), evidence age, validated file pointers, and goal state read from the transcript rather than written by the model.
 
 ### Changed

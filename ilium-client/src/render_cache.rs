@@ -625,6 +625,26 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
         }
         // One-shot recap consumers own this direct reply; it is not UI state.
         ServerEvent::PaneRecapScreen { .. } => None,
+        ServerEvent::RecapUpdated {
+            pane_id,
+            session_id,
+            recap_generation,
+            trigger,
+            short,
+            long,
+        } => {
+            app.recap.observe_update(
+                pane_id,
+                crate::recap_state::StoredRecap {
+                    session_id,
+                    recap_generation,
+                    trigger,
+                    short,
+                    long,
+                },
+            );
+            None
+        }
         ServerEvent::AntigravityStatuslineCompleted { .. } => None,
         ServerEvent::VoiceTextOffered {
             request_id,

@@ -472,6 +472,7 @@ pub fn apply_naming_worker_event(
                 result.map_err(|error| error.to_string()),
             );
         }
+        NamingWorkerEvent::Recap(outcome) => app.finish_recap_worker(outcome),
         NamingWorkerEvent::Restructure(outcome) => {
             let crate::naming_workers::RestructureWorkerResult {
                 project_id,
@@ -479,6 +480,8 @@ pub fn apply_naming_worker_event(
                 title_observations,
                 automatic_ai_decision,
                 result,
+                recaps,
+                recap_stamps,
             } = outcome;
             workers.restructure_worker_finished(project_id);
             if app.onboarding.is_some()
@@ -499,12 +502,16 @@ pub fn apply_naming_worker_event(
             if let Err(error) = &result {
                 tracing::debug!(?project_id, error = %error, error_debug = ?error, "project restructure inference failure details");
             }
+            let is_plan_ready = result.is_ok();
             app.finish_project_restructure(
                 project_id,
                 &inference_activity_revisions,
                 &title_observations,
                 result,
             );
+            if is_plan_ready {
+                app.apply_batch_recaps(recaps, &recap_stamps);
+            }
         }
         NamingWorkerEvent::ExactPrepared {
             result,

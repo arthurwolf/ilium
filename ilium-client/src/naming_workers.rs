@@ -103,6 +103,7 @@ pub enum NamingWorkerEvent {
         result: anyhow::Result<Vec<String>>,
     },
     Restructure(RestructureWorkerResult),
+    Recap(crate::recap_worker::RecapWorkerResult),
     LastPromptTranscript(LastPromptTranscriptWorkerResult),
     ExactPrepared {
         result: ExactAgentPromptTranscriptResult,
@@ -154,6 +155,10 @@ pub struct RestructureWorkerResult {
     pub inference_activity_revisions: Vec<ilium_core::NodeActivityRevision>,
     pub automatic_ai_decision: AutomaticAiDecision,
     pub result: anyhow::Result<ilium_core::animation_recommendation::RecommendedRestructurePlan>,
+    /// Batch short recaps that rode in the same reply, with the stamps
+    /// captured when the request was built.
+    pub recaps: Vec<crate::restructure::BatchRecap>,
+    pub recap_stamps: std::collections::HashMap<ilium_core::NodeId, (String, u64)>,
 }
 
 /// Immutable inputs for one last-prompt-from-transcript check -- see
@@ -555,6 +560,7 @@ impl NamingWorkers {
             NamingKind::InferenceTest => (3, None),
             NamingKind::Models(_) => (4, None),
             NamingKind::Restructure(input, _) => (5, Some(input.project_id)),
+            NamingKind::Recap(_) => (7, None),
             #[cfg(test)]
             NamingKind::LastPrompt(_) => (6, None),
         };
@@ -753,6 +759,16 @@ impl NamingWorkers {
         self.enqueue_finite(NamingKind::TerminalTitle(Box::new(input), trigger))?;
         self.terminal_title_in_flight.insert(pane_id);
         Ok(())
+    }
+
+    /// Spawns a manual recap worker. Per-pane dedupe lives in
+    /// `App::recap` (`begin_manual`), so no in-flight set is kept here.
+    pub(crate) fn spawn_recap_worker(
+        &mut self,
+        request: crate::recap_worker::RecapWorkerRequest,
+    ) -> Result<(), Box<ilium_execution::Rejected<NamingRequest>>> {
+        self.enqueue_finite(NamingKind::Recap(Box::new(request)))
+            .map(|_| ())
     }
 
     pub fn terminal_title_worker_finished(&mut self, pane_id: NodeId) {

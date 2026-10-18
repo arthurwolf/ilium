@@ -82,10 +82,12 @@ pub enum IconTarget {
     AgentToolbarExit,
     AgentToolbarFast,
     AgentToolbarSelection,
+    /// The small dot in a pane's header that opens the recap popover.
+    ChromeRecap,
 }
 
 impl IconTarget {
-    pub const ALL: [Self; 67] = [
+    pub const ALL: [Self; 68] = [
         Self::Group,
         Self::TopLevel,
         Self::Project,
@@ -153,6 +155,7 @@ impl IconTarget {
         Self::AgentToolbarExit,
         Self::AgentToolbarFast,
         Self::AgentToolbarSelection,
+        Self::ChromeRecap,
     ];
 
     pub const fn label(self) -> &'static str {
@@ -224,6 +227,7 @@ impl IconTarget {
             Self::AgentToolbarExit => "Agent toolbar: exit",
             Self::AgentToolbarFast => "Agent toolbar: fast",
             Self::AgentToolbarSelection => "Agent toolbar: text selection toggle",
+            Self::ChromeRecap => "Pane header: recap dot",
         }
     }
 
@@ -296,6 +300,7 @@ impl IconTarget {
             Self::AgentToolbarExit => "agent_toolbar_exit",
             Self::AgentToolbarFast => "agent_toolbar_fast",
             Self::AgentToolbarSelection => "agent_toolbar_selection",
+            Self::ChromeRecap => "chrome_recap",
         }
     }
 
@@ -372,6 +377,7 @@ impl IconTarget {
             Self::AgentToolbarExit => "🚪",
             Self::AgentToolbarFast => "⚡",
             Self::AgentToolbarSelection => "🖱️",
+            Self::ChromeRecap => "·",
         }
     }
 
@@ -469,6 +475,7 @@ impl IconTarget {
             Self::AgentToolbarExit => &["🚪", "⏏️", "👋", "⛔"],
             Self::AgentToolbarFast => &["⚡", "🚀", "💨", "🏃"],
             Self::AgentToolbarSelection => &["🖱️", "◫", "▧", "Ⓢ"],
+            Self::ChromeRecap => &["·", "•", "◦", "∙"],
         }
     }
 }
@@ -547,6 +554,7 @@ pub struct IconSettings {
     pub agent_toolbar_exit: String,
     pub agent_toolbar_fast: String,
     pub agent_toolbar_selection: String,
+    pub chrome_recap: String,
 }
 
 impl Default for IconSettings {
@@ -626,6 +634,7 @@ impl IconSettings {
             agent_toolbar_exit: value(IconTarget::AgentToolbarExit),
             agent_toolbar_fast: value(IconTarget::AgentToolbarFast),
             agent_toolbar_selection: value(IconTarget::AgentToolbarSelection),
+            chrome_recap: value(IconTarget::ChromeRecap),
         }
     }
 
@@ -698,6 +707,7 @@ impl IconSettings {
             IconTarget::AgentToolbarExit => &self.agent_toolbar_exit,
             IconTarget::AgentToolbarFast => &self.agent_toolbar_fast,
             IconTarget::AgentToolbarSelection => &self.agent_toolbar_selection,
+            IconTarget::ChromeRecap => &self.chrome_recap,
         }
     }
 
@@ -779,6 +789,7 @@ impl IconSettings {
             IconTarget::AgentToolbarExit => &mut self.agent_toolbar_exit,
             IconTarget::AgentToolbarFast => &mut self.agent_toolbar_fast,
             IconTarget::AgentToolbarSelection => &mut self.agent_toolbar_selection,
+            IconTarget::ChromeRecap => &mut self.chrome_recap,
         };
         *slot = glyph;
     }
@@ -1275,6 +1286,23 @@ mod tests {
 
         icons.set(IconTarget::FrozenAgent, "❅".to_string());
         assert_eq!(icons.glyph(IconTarget::FrozenAgent), "❅");
+        assert_eq!(icons.glyph(IconTarget::Lock), "🔒");
+    }
+
+    #[test]
+    fn chrome_recap_dot_is_a_configurable_pane_header_target() {
+        let mut icons = IconSettings::default();
+
+        assert!(IconTarget::ALL.contains(&IconTarget::ChromeRecap));
+        assert_eq!(IconTarget::ChromeRecap.key(), "chrome_recap");
+        assert_eq!(IconTarget::ChromeRecap.default_glyph(), "·");
+        assert_eq!(
+            IconTarget::from_key("chrome_recap"),
+            Some(IconTarget::ChromeRecap)
+        );
+        assert_eq!(icons.glyph(IconTarget::ChromeRecap), "·");
+        icons.set(IconTarget::ChromeRecap, "•".to_string());
+        assert_eq!(icons.glyph(IconTarget::ChromeRecap), "•");
         assert_eq!(icons.glyph(IconTarget::Lock), "🔒");
     }
 

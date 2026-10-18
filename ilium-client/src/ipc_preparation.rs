@@ -490,6 +490,7 @@ pub(crate) fn request_retained_bytes(request: &ilium_ipc::ClientRequest) -> usiz
         | R::UpdateDebugLogging { .. }
         | R::UpdateAgentDebugMenu { .. }
         | R::GetPaneRecapScreen { .. }
+        | R::ApplyRecap { .. }
         | R::GetPaneDebugLog { .. }
         | R::SetNodeBookmarked { .. }
         | R::RecordNodeActivity { .. }

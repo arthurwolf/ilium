@@ -11,6 +11,7 @@ All AI-driven features need an inference provider; see [Inference and privacy](i
 - [Manual names are protected](#manual-names-are-protected)
 - [Title style](#title-style)
 - [Triggering titles manually](#triggering-titles-manually)
+- [Pane recaps](#pane-recaps)
 - [Custom instructions](#custom-instructions)
 - [The seven instruction inputs](#the-seven-instruction-inputs)
 - [Editing instructions step by step](#editing-instructions-step-by-step)
@@ -78,6 +79,17 @@ Labeling rules in short:
 - Voice: ask the assistant to retitle an entry or restructure a project.
 
 Manual requests follow the same task checks as automatic ones.
+
+## Pane recaps
+
+Each agent pane shows a small recap dot in its header. Hover it for a short factual recap of what the agent is doing. Click it to pin the longer recap in a popover.
+
+- **Short recap** (up to 40 words) appears on hover. Ilium writes it during a restructure, in the same AI call that plans the tree, so it costs no extra request.
+- **Long recap** (up to 250 words) appears when the popover is pinned. It is written only by a manual refresh.
+- **Refresh icon** on an agent row reruns the title and the long recap. A progress bar shows the current phase. Shell panes have no transcript, so they are not recapped this way.
+- Recaps are stored per agent session and kept across Ilium restarts. A recap from an earlier session is hidden once the pane runs a different session. The server stores recap text only; it never calls an AI provider.
+
+The dot and refresh icon are configurable under Settings -> Icons (`chrome_recap`).
 
 ## Custom instructions
 

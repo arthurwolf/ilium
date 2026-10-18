@@ -15,6 +15,7 @@ fn context() -> LeafContext {
         filename: None,
         content_extract: "Working on Paris public transport maps".into(),
         automatic_content_fingerprint: 0,
+        recap_evidence: String::new(),
         agent_lookup: None,
     }
 }
@@ -128,6 +129,7 @@ fn parse_value(value: &serde_json::Value) -> anyhow::Result<RecommendedRestructu
         TitleStyle::Summarization,
         &RecommendationContext::default(),
     )
+    .map(|inference| inference.plan)
 }
 #[test]
 fn semantic_contract_resolves_project_group_and_leaf() {
@@ -228,7 +230,8 @@ fn semantic_contract_preserves_fixed_groups_and_split_paths() {
         TitleStyle::Summarization,
         &context,
     )
-    .unwrap();
+    .unwrap()
+    .plan;
     assert_eq!(plan.expected_animation_generation, 7);
     assert_eq!(
         plan.entries
