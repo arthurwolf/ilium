@@ -216,9 +216,11 @@ How it works in one paragraph: the job (or an agent on its behalf) registers a *
 
 ### Timing box and popover
 
-To the right of each gauge, after a dim `│` divider, a box shows how long ago the task **started** and an **ETA** (`started 13 minutes ago · ETA in 8 minutes`). Times use at most two units (`3 days, 12 hours`). The ETA blends the whole-run pace with the pace of the last ten minutes; it reads `ETA —` until progress has been measured. When a running task makes no progress (the percent does not rise and the one-line message does not change) for ten probe intervals, and at least ten minutes, the ETA is replaced by a `⚠ stalled 25 minutes` marker. On narrow panes the box drops the ETA first, then disappears; the bar never shrinks below ten cells for it.
+To the right of each gauge, after a dim `│` divider, a box shows how long ago the task **started** and an **ETA** (`started 13 minutes ago · ETA in 8 minutes`). Times use at most two units. The ETA blends whole-run pace with the last ten minutes; it reads `ETA —` until progress has been measured. After ten configured probe intervals and at least ten minutes without a meaningful percentage change, status transition or message change, the marker reads **no progress reported**. This describes the probe's report, not a dead or frozen job. A healthy probe can keep reporting the same compilation phase. On narrow panes the box drops lower-priority information to preserve the warning when it fits.
 
-Hovering the footer opens a popover that adds the exact start time, the time of the last progress, elapsed time (total time once the task has finished), the current rate in percent per minute, the ETA range when the recent and whole-run paces disagree, probe health (interval, last check, consecutive failures) and the owning agent and pane.
+Hovering the footer opens a split popover. The left side retains timing, rate, health and owner diagnostics. The right side shows the **latest successful check data** as a structured UTF-8 tree, including the check timestamp and every accepted report field. An observation failure retains that successful report and timestamp; its failure appears separately in health and check history. Compact terminals stack the sections.
+
+The adaptive timeline distinguishes successful unchanged checks, reported progress and failed observations, with gaps where no check was recorded. Its time window is at least ten minutes and expands for slow probe intervals; a separate strip shows the last ten checks. History is bounded to the latest 64 checks and survives snapshots. Older snapshots start with unavailable history rather than invented activity. A successful check proves that the probe ran and returned an accepted report; it does not independently verify job liveness.
 
 ### Requirements
 
@@ -324,23 +326,15 @@ Probes run with no stdin, and descendants left behind by the probe are killed wh
 
 **Use absolute paths.** The probe is started by the Ilium **server**, not by your shell. It does not inherit your pane's current directory, your shell's `cd`, exported variables or aliases. It starts in the server's working directory, which is the session's project root, for the lifetime of the server. A relative path that works in your shell silently reads the wrong place (the classic symptom is a monitor stuck at 0 percent while the job is fine). Use absolute paths or begin the command with an explicit `cd /absolute/path &&`.
 
+**Report the real phase.** Use `not-started-yet` while queued and describe compilation, linking or waiting in the message. When no measurable total exists, say progress is indeterminate in `details` and keep the last defensible percentage. Use actual completed/total counters when available. Do not add clocks or heartbeat counters to the message to hide a no-reported-progress warning; changes to details or ETA alone do not reset it.
+
+**Verify the actual job.** Read its final exit/result record first. Local checks need boot identity plus process start/command identity to guard PID reuse. Recheck the result after finding a vanished process, before reporting an error. Remote probes must verify the remote worker and result source: a live local SSH wrapper cannot prove a remote compiler is running. An inaccessible job is an observation failure, not evidence of success or a known task failure. Ilium cannot infer these facts from an arbitrary shell command; the probe owns this contract.
+
 **Keep it cheap.** A new shell is started on every tick. Prefer reading a small state or log file the job writes, over recursive directory scans, network calls or heavy subprocesses. If the check is inherently expensive, raise `--interval-seconds`.
 
 **Write for a stranger.** The person glancing at the footer has not read your session. Make `message` stand alone: what is being done, to which thing, and the current step with a count, for example `Building the release binaries of the ilium terminal app - compiling crate 14 of 22`. On `done` or `error` it states the outcome. Use `details` (3 to 8 short lines, with labels such as `What:`, `Why:`, `Now:`, `Next:`, `Watch:`) for the longer explanation, and update both on every poll so they track the real step.
 
-A minimal probe script that reads a state file the job maintains:
-
-```sh
-#!/bin/sh
-# /home/me/bin/build-progress.sh - cheap, absolute paths only.
-state=/home/me/build/.progress
-done_count=$(cat "$state/done" 2>/dev/null || echo 0)
-total=$(cat "$state/total" 2>/dev/null || echo 1)
-percent=$(( done_count * 100 / total ))
-if [ -f "$state/finished" ]; then status=done; else status=running; fi
-printf '{"job_id":"release-build-2026-10-04","status":"%s","percent":%s,"message":"Building the release binaries - crate %s of %s","details":"What: release build of the project\\nNow: compiling crate %s of %s\\nNext: install and verify"}\n' \
-  "$status" "$percent" "$done_count" "$total" "$done_count" "$total"
-```
+The job should atomically publish its accepted report to a small state file after checking actual work counters and process/result identity. A probe that simply reads that file is suitable only when the producer's disappearance is checked too. A fixed `running` file or a missing completion file alone can otherwise report running forever. Test a probe against successful completion, failed completion, a vanished worker and an inaccessible remote host before registering it.
 
 Check it, then register it:
 

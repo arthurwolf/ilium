@@ -3996,6 +3996,7 @@ pub(crate) async fn restore_persisted_progress_monitor(
         Arc::clone(&runtime.progress_effect_gate)
     };
     let monitor_id = state.allocate_progress_monitor_id();
+    let mut preflight_attempted = false;
     let (fresh_preflight, restoration_failure) = if persisted.requires_probe_before_restore()
         && !state.is_progress_monitor_enabled()
     {
@@ -4007,6 +4008,7 @@ pub(crate) async fn restore_persisted_progress_monitor(
             Some(crate::progress_watchdog::OBSERVATION_DISABLED.to_string()),
         )
     } else if persisted.requires_probe_before_restore() {
+        preflight_attempted = true;
         match crate::progress_monitor::preflight(&persisted.command).await {
             Ok(preflight) if persisted.accepts_restored_preflight(&preflight) => {
                 (Some(preflight), None)
@@ -4044,6 +4046,15 @@ pub(crate) async fn restore_persisted_progress_monitor(
         registration.initial_progress = restored;
     } else if let Some(restoration_failure) = restoration_failure.as_deref() {
         let mut failed_progress = registration.initial_progress.clone();
+        if preflight_attempted {
+            let checked_at = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis()
+                .try_into()
+                .unwrap_or(u64::MAX);
+            failed_progress.timing.record_failed_check(checked_at);
+        }
         failed_progress.monitor_health = ilium_core::ProgressMonitorHealth::Failed {
             consecutive_failures: crate::progress_monitor::MAXIMUM_CONSECUTIVE_OBSERVATION_FAILURES,
             last_error: bounded_restoration_failure(restoration_failure),
@@ -12133,6 +12144,10 @@ mod tests {
             "restore must allocate a fresh fence"
         );
         assert_eq!(progress.report.job_id, "persisted-job");
+        assert_eq!(progress.timing.checks.len(), 2);
+        assert_eq!(progress.timing.checks[1].outcome, ilium_core::ProgressCheckOutcome::Failed);
+        assert_eq!(progress.last_observed_unix_millis, progress.timing.checks[0].unix_millis);
+
         assert!(matches!(
             delivery,
             crate::pane::ProgressDeliveryState::Queued
@@ -12146,6 +12161,25 @@ mod tests {
             std::slice::from_ref(&progress)
         );
 
+        teardown_state_panes(&state);
+    }
+
+    #[tokio::test]
+    async fn disabled_restore_does_not_fabricate_a_failed_probe_check() {
+        let (state, pane_id, _directory) =
+            state_with_one_terminal_pane("progress-monitor-disabled-restore-history").await;
+        state.set_progress_monitor_enabled(false);
+        let persisted = persisted_running_progress_monitor(
+            pane_id,
+            crate::progress_monitor::test_probes::stderr_then_exit_seven(),
+        );
+        let original_checks = persisted.latest_progress.timing.checks.clone();
+        restore_persisted_progress_monitor(&state, persisted).await.unwrap();
+        let tree = state.tree.read().await;
+        let progress = &tree.pane_progress(pane_id)[0];
+        assert!(progress.monitor_health.is_failed());
+        assert_eq!(progress.timing.checks, original_checks);
+        drop(tree);
         teardown_state_panes(&state);
     }
 

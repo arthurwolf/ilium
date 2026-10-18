@@ -16,7 +16,9 @@ pub mod agent_recovery;
 pub mod animation_recommendation;
 pub mod option_compatible_list;
 pub mod progress_timing;
-pub use progress_timing::{EtaEstimate, ProgressRate, ProgressSample, ProgressTiming};
+pub use progress_timing::{
+    EtaEstimate, ProgressCheck, ProgressCheckOutcome, ProgressRate, ProgressSample, ProgressTiming,
+};
 
 pub use agent_recovery::{AgentAvailability, AgentExitOutcome, AgentProcessKey, AgentRecovery};
 
@@ -261,12 +263,13 @@ impl PaneProgress {
     /// Continues `previous`'s timing history with this newer observation of
     /// the same task, so start time and rate samples survive each probe.
     pub fn carry_timing_from(&mut self, previous: &PaneProgress) {
-        let message_changed = previous.report.message != self.report.message;
+        let phase_changed = previous.report.message != self.report.message
+            || previous.report.status != self.report.status;
         let mut timing = previous.timing.clone();
         timing.observe(
             self.last_observed_unix_millis,
             self.report.percent,
-            message_changed,
+            phase_changed,
         );
         timing.set_reported_eta(self.last_observed_unix_millis, self.report.eta_seconds);
         self.timing = timing;
@@ -8536,5 +8539,40 @@ mod title_undo_preservation_tests {
         assert_eq!(restored.short_name.as_deref(), Some("M"));
         assert_eq!(restored.inferred_icon.as_deref(), Some("pin"));
         assert!(restored.is_name_fixed);
+    }
+}
+
+#[cfg(test)]
+mod progress_check_history_tests {
+    use super::*;
+
+    fn report(status: ProgressTaskStatus) -> ProgressTaskReport {
+        ProgressTaskReport::new("job".into(), status, 10.0, "Building".into(), String::new(), None).unwrap()
+    }
+
+    #[test]
+    fn success_retains_failed_checks_and_status_transitions_count_as_progress() {
+        let mut previous = PaneProgress::new(1, report(ProgressTaskStatus::NotStartedYet), 100).unwrap();
+        previous.timing.record_failed_check(200);
+        let mut next = PaneProgress::new(1, report(ProgressTaskStatus::Running), 300).unwrap();
+        next.carry_timing_from(&previous);
+        assert_eq!(next.timing.started_at_unix_millis, Some(100));
+        assert_eq!(next.timing.last_progress_unix_millis, Some(300));
+        assert_eq!(next.timing.checks.len(), 3);
+        assert_eq!(next.timing.checks[1].outcome, ProgressCheckOutcome::Failed);
+        assert_eq!(next.timing.checks[2].outcome, ProgressCheckOutcome::Progress);
+    }
+
+    #[test]
+    fn details_and_eta_do_not_turn_healthy_heartbeats_into_progress() {
+        let previous = PaneProgress::new(1, report(ProgressTaskStatus::Running), 100).unwrap();
+        let mut updated_report = previous.report.clone();
+        updated_report.details = "elapsed: 20 seconds".into();
+        updated_report.eta_seconds = Some(100);
+        let mut next = PaneProgress::new(1, updated_report, 300).unwrap();
+        next.carry_timing_from(&previous);
+        assert_eq!(next.last_observed_unix_millis, 300);
+        assert_eq!(next.timing.last_progress_unix_millis, Some(100));
+        assert_eq!(next.timing.checks[1].outcome, ProgressCheckOutcome::Heartbeat);
     }
 }

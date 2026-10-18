@@ -525,9 +525,43 @@ pub fn render(frame: &mut Frame, screen: Rect, state: &WorktreeManagerState) {
             );
         }
     }
-    let detail = match &state.view {
+    let detail = state.detail_text();
+    frame.render_widget(
+        Paragraph::new(format!("F9 details · {detail}")).wrap(Wrap { trim: false }),
+        areas.detail,
+    );
+    if let Some(control) = branch_control(screen, state) {
+        control.render(
+            frame,
+            crate::value_control::ControlStyles {
+                value: theme::selected_style(),
+                button: theme::selected_style(),
+                ..Default::default()
+            },
+        );
+    }
+    let actions = match &state.view {
+        ManagerView::Browsing => "[S] Safe remove  [D] Discard files  [R] Refresh  [Esc] Close",
+        ManagerView::ConfirmSafe { .. } => "[B] Branch choice  [Y] Confirm  [Esc] Cancel",
+        ManagerView::ConfirmDiscard { .. } => "[Tab] Branch choice  [Enter] Confirm  [Esc] Cancel",
+        ManagerView::Result { result } if result.outcome == WorkspacePruneOutcome::Uncertain => {
+            "Outcome uncertain. Inspect exact path and Git state. [R] Refresh  [Esc] Close"
+        }
+        ManagerView::Result { .. } | ManagerView::Error(_) => "[R] Refresh  [Esc] Close",
+        ManagerView::Pruning => "Removal is running. [Esc] Close; result appears in status",
+        ManagerView::Loading => "Please wait…",
+    };
+    frame.render_widget(
+        Paragraph::new(actions).style(Style::new().add_modifier(Modifier::BOLD)),
+        areas.actions,
+    );
+}
+
+impl WorktreeManagerState {
+    pub(crate) fn detail_text(&self) -> String {
+        match &self.view {
         ManagerView::Loading => "Loading inventory…".to_owned(),
-        ManagerView::Browsing => state.selected_entry().map_or_else(
+        ManagerView::Browsing => self.selected_entry().map_or_else(
             || "No worktrees in this repository".to_owned(),
             |row| {
                 let mut parts = vec![format!(
@@ -579,36 +613,8 @@ pub fn render(frame: &mut Frame, screen: Rect, state: &WorktreeManagerState) {
             result.reasons.join("; ")
         ),
         ManagerView::Error(error) => format!("Inventory error: {error}"),
-    };
-    frame.render_widget(
-        Paragraph::new(detail).wrap(Wrap { trim: false }),
-        areas.detail,
-    );
-    if let Some(control) = branch_control(screen, state) {
-        control.render(
-            frame,
-            crate::value_control::ControlStyles {
-                value: theme::selected_style(),
-                button: theme::selected_style(),
-                ..Default::default()
-            },
-        );
     }
-    let actions = match &state.view {
-        ManagerView::Browsing => "[S] Safe remove  [D] Discard files  [R] Refresh  [Esc] Close",
-        ManagerView::ConfirmSafe { .. } => "[B] Branch choice  [Y] Confirm  [Esc] Cancel",
-        ManagerView::ConfirmDiscard { .. } => "[Tab] Branch choice  [Enter] Confirm  [Esc] Cancel",
-        ManagerView::Result { result } if result.outcome == WorkspacePruneOutcome::Uncertain => {
-            "Outcome uncertain. Inspect exact path and Git state. [R] Refresh  [Esc] Close"
-        }
-        ManagerView::Result { .. } | ManagerView::Error(_) => "[R] Refresh  [Esc] Close",
-        ManagerView::Pruning => "Removal is running. [Esc] Close; result appears in status",
-        ManagerView::Loading => "Please wait…",
-    };
-    frame.render_widget(
-        Paragraph::new(actions).style(Style::new().add_modifier(Modifier::BOLD)),
-        areas.actions,
-    );
+    }
 }
 
 #[cfg(test)]

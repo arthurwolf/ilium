@@ -203,7 +203,17 @@ impl App {
                     "{} — {}: {}",
                     safe_tooltip_text(label),
                     safe_tooltip_text(&error.operation),
-                    safe_tooltip_text(&error.message)
+                    error
+                        .message
+                        .chars()
+                        .map(|character| {
+                            if character.is_control() && character != '\n' && character != '\t' {
+                                '�'
+                            } else {
+                                character
+                            }
+                        })
+                        .collect::<String>()
                 );
                 if !messages.contains(&message) {
                     messages.push(message);

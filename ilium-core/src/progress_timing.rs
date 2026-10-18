@@ -27,6 +27,26 @@ pub struct ProgressSample {
     pub percent: f32,
 }
 
+/// Actual probe attempts retained for the recent activity timeline.
+pub const MAXIMUM_PROGRESS_CHECKS: usize = 64;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ProgressCheckOutcome {
+    Progress,
+    Heartbeat,
+    Failed,
+}
+
+/// A successful check's percent or a failed observation, independently of
+/// the task's own reported status. Failures never replace the last good data.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ProgressCheck {
+    pub unix_millis: u64,
+    pub outcome: ProgressCheckOutcome,
+    pub percent: Option<f32>,
+}
+
 /// When a monitored task started and last moved. `None` fields mean the
 /// value was never recorded (a monitor restored from an older snapshot), and
 /// the presentation shows them as unknown rather than inventing a time.
@@ -44,6 +64,8 @@ pub struct ProgressTiming {
     pub probe_interval_millis: Option<u64>,
     #[serde(default)]
     pub samples: Vec<ProgressSample>,
+    #[serde(default)]
+    pub checks: Vec<ProgressCheck>,
     /// Absolute time the probe's latest report expects the task to finish
     /// (report time plus its `eta_seconds`). Cleared when a report omits it.
     #[serde(default)]
@@ -88,6 +110,11 @@ impl ProgressTiming {
                 unix_millis: now,
                 percent,
             }],
+            checks: vec![ProgressCheck {
+                unix_millis: now,
+                outcome: ProgressCheckOutcome::Heartbeat,
+                percent: Some(percent),
+            }],
             reported_finish_unix_millis: None,
         }
     }
@@ -99,11 +126,33 @@ impl ProgressTiming {
                 self.samples.len()
             ));
         }
+        if self.checks.len() > MAXIMUM_PROGRESS_CHECKS {
+            return Err(format!("progress history exceeds {MAXIMUM_PROGRESS_CHECKS} checks"));
+        }
         let finite = |value: f32| value.is_finite() && (0.0..=100.0).contains(&value);
         if !finite(self.started_percent) || !self.samples.iter().all(|s| finite(s.percent)) {
             return Err("progress timing holds a percent outside 0 to 100".into());
         }
+        if self.checks.iter().any(|check| match check.outcome {
+            ProgressCheckOutcome::Failed => check.percent.is_some(),
+            _ => !check.percent.is_some_and(finite),
+        }) {
+            return Err("progress history holds an invalid check percent".into());
+        }
         Ok(())
+    }
+
+    /// Records a failed actual probe, without refreshing successful-check or
+    /// substantive-progress timestamps. Watchdog reconciliation is not a probe.
+    pub fn record_failed_check(&mut self, now: u64) {
+        self.push_check(ProgressCheck { unix_millis: now, outcome: ProgressCheckOutcome::Failed, percent: None });
+    }
+
+    fn push_check(&mut self, check: ProgressCheck) {
+        self.checks.push(check);
+        if self.checks.len() > MAXIMUM_PROGRESS_CHECKS {
+            self.checks.drain(..self.checks.len() - MAXIMUM_PROGRESS_CHECKS);
+        }
     }
 
     /// Records one probe result. Progress is a rise in percent or a changed
@@ -136,6 +185,11 @@ impl ProgressTiming {
             let excess = self.samples.len() - MAXIMUM_PROGRESS_SAMPLES;
             self.samples.drain(..excess);
         }
+        self.push_check(ProgressCheck {
+            unix_millis: now,
+            outcome: if made_progress { ProgressCheckOutcome::Progress } else { ProgressCheckOutcome::Heartbeat },
+            percent: Some(percent),
+        });
         if made_progress && self.started_at_unix_millis.is_some() {
             self.last_progress_unix_millis = Some(now);
         }
@@ -391,6 +445,41 @@ mod tests {
         assert_eq!(timing.last_progress_unix_millis, None);
         assert!(!timing.is_stalled(u64::MAX));
         assert_eq!(timing.elapsed_millis(10), None);
+    }
+
+    #[test]
+    fn checks_distinguish_heartbeat_progress_and_failed_observations() {
+        let mut timing = ProgressTiming::started(100, 20.0);
+        timing.observe(200, 20.0, false);
+        timing.record_failed_check(300);
+        timing.observe(400, 21.0, false);
+        assert_eq!(timing.checks.iter().map(|check| check.outcome).collect::<Vec<_>>(), vec![
+            ProgressCheckOutcome::Heartbeat,
+            ProgressCheckOutcome::Heartbeat,
+            ProgressCheckOutcome::Failed,
+            ProgressCheckOutcome::Progress,
+        ]);
+        assert_eq!(timing.checks[2].percent, None);
+        assert_eq!(timing.last_progress_unix_millis, Some(400));
+        timing.record_failed_check(500);
+        assert_eq!(timing.last_progress_unix_millis, Some(400));
+        assert!(timing.validate().is_ok());
+    }
+
+    #[test]
+    fn check_history_is_bounded_and_validated() {
+        let mut timing = ProgressTiming::started(0, 10.0);
+        for now in 1..=100 {
+            timing.observe(now, 10.0, false);
+        }
+        assert_eq!(timing.checks.len(), MAXIMUM_PROGRESS_CHECKS);
+        assert_eq!(timing.checks[0].unix_millis, 37);
+        assert!(timing.validate().is_ok());
+        timing.checks[0].percent = Some(f32::NAN);
+        assert!(timing.validate().is_err());
+        timing.checks[0].percent = Some(10.0);
+        timing.checks.push(timing.checks[0]);
+        assert!(timing.validate().is_err());
     }
 
     #[test]

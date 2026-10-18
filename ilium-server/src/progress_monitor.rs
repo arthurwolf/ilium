@@ -296,6 +296,7 @@ async fn record_observation_failure(
     if !fence.is_current() {
         return Some(ProgressMonitorOutcome::Cleared);
     }
+    latest.timing.record_failed_check(unix_millis());
     *consecutive_failures = consecutive_failures.saturating_add(1);
     let last_error = bounded_monitor_error(&error.message);
     latest.monitor_health = if *consecutive_failures >= MAXIMUM_CONSECUTIVE_OBSERVATION_FAILURES {
@@ -786,6 +787,32 @@ pub(crate) mod test_probes {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn restored_progress_preserves_checks_and_last_successful_data() {
+        let report = ProgressTaskReport::new(
+            "restore-checks".into(), ProgressTaskStatus::Running, 20.0,
+            "Compiling".into(), "step: linking".into(), None,
+        ).unwrap();
+        let mut previous = PaneProgress::new(1, report.clone(), 100).unwrap();
+        previous.timing.record_failed_check(200);
+        let encoded = serde_json::to_string(&previous).unwrap();
+        let restored: PaneProgress = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(restored.report, report);
+        assert_eq!(restored.last_observed_unix_millis, 100);
+        assert_eq!(restored.timing.checks, previous.timing.checks);
+        let mut next = PaneProgress::new(1, report, 300).unwrap();
+        next.carry_timing_from(&restored);
+        assert_eq!(next.timing.checks.len(), 3);
+        assert_eq!(next.timing.checks[1].outcome, ilium_core::ProgressCheckOutcome::Failed);
+        assert_eq!(next.timing.last_progress_unix_millis, Some(100));
+
+        let mut legacy = serde_json::to_value(&previous).unwrap();
+        legacy["timing"].as_object_mut().unwrap().remove("checks");
+        let restored: PaneProgress = serde_json::from_value(legacy).unwrap();
+        assert!(restored.timing.checks.is_empty());
+        assert!(restored.validate().is_ok());
+    }
 
     #[cfg(unix)]
     #[tokio::test]

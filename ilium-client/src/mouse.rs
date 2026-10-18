@@ -29,7 +29,10 @@ use crate::tree_ui::{self, TreeRowAction, TreeToolbarAction};
 /// geometry. Until those conditions are fully represented in the input
 /// snapshot contract, mouse events are deliberately ambiguous to an editor
 /// loan and must form the ordered custody barrier.
-pub(crate) fn editor_loan_event_target(_app: &App, _event: &Event) -> Option<Option<NodeId>> {
+pub(crate) fn editor_loan_event_target(app: &App, _event: &Event) -> Option<Option<NodeId>> {
+    if app.diagnostic_view.is_some() {
+        return Some(None);
+    }
     None
 }
 
@@ -37,6 +40,9 @@ pub(crate) fn editor_loan_event_target(_app: &App, _event: &Event) -> Option<Opt
 /// that was actually emitted is still current. This stamp is used solely to
 /// fence replay; it does not claim that overlays will dispatch to that pane.
 pub(crate) fn editor_input_hit_pane(app: &App, event: &Event) -> Option<NodeId> {
+    if app.diagnostic_view.is_some() {
+        return None;
+    }
     let Event::Mouse(mouse) = event else {
         return None;
     };
@@ -131,6 +137,11 @@ fn trace_mouse_event(app: &App, mouse: &MouseEvent) {
 
 /// Top-level mouse dispatch, called for every `Event::Mouse`.
 pub fn handle_mouse_event(app: &mut App, mouse: MouseEvent) {
+    if app.diagnostic_view.is_some()
+        && crate::diagnostic::intercept_event(app, &crossterm::event::Event::Mouse(mouse))
+    {
+        return;
+    }
     trace_mouse_event(app, &mouse);
     if !app.pointer_geometry_is_current() {
         // A completed menu action changes mode before its matching release.

@@ -826,7 +826,7 @@ pub fn render_tooltip(
         return;
     }
     let title = Line::from(Span::styled(
-        explanation.title().to_string(),
+        format!("{} · F9 details", explanation.title()),
         Style::new().add_modifier(Modifier::BOLD),
     ));
     let mut body_lines = crate::last_prompt_banner::wrap_lines(explanation.body(), text_width);

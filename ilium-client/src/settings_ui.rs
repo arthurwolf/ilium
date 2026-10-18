@@ -5599,7 +5599,7 @@ fn reset_planning_lines(app: &App, selected: usize) -> Vec<Line<'static>> {
         }
         let status = app.reset_monitor_state.provider(provider);
         if let Some(error) = &status.last_error {
-            return format!("On · check failed: {error}");
+            return format!("On · F9 details · check failed: {error}");
         }
         if status.last_checked.is_none() {
             return "On · checking…".to_owned();

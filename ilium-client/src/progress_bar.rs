@@ -434,7 +434,25 @@ fn truncate_to_width(text: &str, width: usize) -> String {
 /// Hover content for a report's long description: the compact message as the
 /// header, the multi-line details as the body, and the machine identity as
 /// the dim reason line.
+/// Complete text for the scrollable F9 diagnostic view, including all retained check data.
 pub fn details_tooltip(
+    progress: &PaneProgress,
+    now_unix_millis: u64,
+    owner: Option<&str>,
+) -> crate::status_icons::TooltipContent {
+    let mut content = summary_tooltip(progress, now_unix_millis, owner);
+    content.body.push_str("\n\nLatest successful check data\n");
+    content
+        .body
+        .push_str(&crate::progress_popover::report_lines(progress).join("\n"));
+    content.body.push_str("\n\n");
+    content.body.push_str(
+        &crate::progress_popover::timeline_lines(progress, now_unix_millis, 60).join("\n"),
+    );
+    content
+}
+
+pub fn summary_tooltip(
     progress: &PaneProgress,
     now_unix_millis: u64,
     owner: Option<&str>,
@@ -446,11 +464,21 @@ pub fn details_tooltip(
         progress.report.message.clone()
     };
     let timing = crate::progress_time::popover_lines(progress, now_unix_millis, owner).join("\n");
-    let body = if progress.report.details.is_empty() {
+    let mut body = if progress.report.details.is_empty() {
         timing
     } else {
         format!("{}\n\n{timing}", progress.report.details)
     };
+    if let Some(error) = &progress.report.error {
+        body.push_str(&format!("\nTask error: {error}"));
+    }
+    match &progress.monitor_health {
+        ProgressMonitorHealth::Healthy => {}
+        ProgressMonitorHealth::Degraded { last_error, .. }
+        | ProgressMonitorHealth::Failed { last_error, .. } => {
+            body.push_str(&format!("\nMonitor error: {last_error}"))
+        }
+    }
     crate::status_icons::TooltipContent {
         title,
         body,
@@ -872,6 +900,25 @@ mod tests {
     }
 
     #[test]
+    fn full_progress_details_keep_task_and_monitor_errors() {
+        let message = format!("{} FINALDETAIL", "failure ".repeat(100));
+        let mut progress = progress(
+            ProgressTaskStatus::Error,
+            50.0,
+            "Task failed",
+            Some(&message),
+        )
+        .unwrap();
+        progress.monitor_health = ProgressMonitorHealth::Failed {
+            consecutive_failures: 3,
+            last_error: "probe unavailable FINALPROBE".into(),
+        };
+        let tooltip = details_tooltip(&progress, TEST_NOW, None);
+        assert!(tooltip.body.contains(&message));
+        assert!(tooltip.body.contains("FINALPROBE"));
+    }
+
+    #[test]
     fn hover_tooltip_carries_message_details_and_identity() {
         let progress = progress_with_details(
             "Building the app - crate 4 of 10",
@@ -974,7 +1021,7 @@ mod tests {
         let row: String = (0..100)
             .map(|x| terminal.backend().buffer()[(x, 0)].symbol())
             .collect();
-        assert!(row.contains("stalled"), "{row}");
+        assert!(row.contains("no progress reported"), "{row}");
         assert!(!row.contains("ETA"), "{row}");
     }
 
