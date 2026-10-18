@@ -10,6 +10,7 @@ mod support;
 mod guide_enterprise_deployment;
 mod reference_admin_policy;
 mod reference_audit_log;
+mod reference_licence_notice;
 mod reference_network_egress;
 mod reference_secrets;
 mod reference_security_response;

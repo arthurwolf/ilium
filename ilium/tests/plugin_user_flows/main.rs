@@ -3,6 +3,7 @@
 //! the `ilium plugin` command functions and a user-profile rig. One module per manual page.
 //! Red tests derived from docs/plugins-manual; every test carries a requirement tag line.
 
+mod blocked_state_guidance;
 mod guide_administration;
 mod lifecycle_and_security;
 mod reference_plugin_files;

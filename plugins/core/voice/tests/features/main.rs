@@ -7,6 +7,7 @@
 mod cli_say;
 mod common;
 mod confirmations;
+mod data_flow;
 mod devices;
 mod doc_page;
 mod extension_points;

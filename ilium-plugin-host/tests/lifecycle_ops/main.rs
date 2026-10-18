@@ -11,6 +11,7 @@ mod common;
 mod core_plugins;
 mod extending_core_plugins;
 mod lifecycle;
+mod plugin_data_export;
 mod reference_install_update_uninstall;
 mod reference_manifest;
 mod reference_offline_and_low_disk;

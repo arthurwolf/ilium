@@ -23,4 +23,5 @@ mod api_ui;
 mod api_vector;
 mod api_workspace;
 mod capability_sound_play;
+mod sound_notify_a11y;
 mod common;

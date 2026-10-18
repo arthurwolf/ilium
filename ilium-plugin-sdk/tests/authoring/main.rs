@@ -9,6 +9,7 @@ mod docs_consistency;
 mod errors_and_limits;
 mod guide_compatibility_and_upgrades;
 mod guide_compatibility_and_upgrades_recipes;
+mod guide_capability_text_l10n;
 mod guide_internationalisation;
 mod guide_patterns_cookbook;
 mod guide_patterns_cookbook_recipes;
