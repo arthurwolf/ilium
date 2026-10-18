@@ -13,6 +13,9 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 
 ## [Unreleased]
 
+### Fixed
+- Keep the terminal parser's bounded metadata buffer on the heap so pane startup does not exhaust debug worker stacks.
+
 ### Changed
 - Progress diagnostics distinguish successful checks from reported task progress, retain a bounded check timeline, and show the latest successful report as a structured tree beside timing and health details. Quiet tasks say “no progress reported”; probe guidance requires actual local/remote job identity and final results.
 - Scanner readers accept the expanded versioned 20-text/10-image benchmark; large-context selection requires five completed questions with measured inputs of at least 200,000 tokens. Previous scanner publications remain readable during rollout.

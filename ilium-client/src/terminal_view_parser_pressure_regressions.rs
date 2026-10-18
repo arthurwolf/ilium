@@ -227,8 +227,8 @@ fn frozen_history_pressure_preserves_chosen_rows_and_keeps_output_progressing() 
             false,
             &mut cursor,
             |state, bytes| {
-                state.prepare_input(bytes, 512 * 1024);
-                assert!(state.input_peak_bytes(bytes) <= 512 * 1024);
+                state.prepare_input(bytes, 768 * 1024);
+                assert!(state.input_peak_bytes(bytes) <= 768 * 1024);
                 Ok(())
             },
         )
@@ -293,4 +293,98 @@ fn tiny_appends_with_held_history_snapshots_allocate_proportionally() {
             >= state.retained_allocation_bytes()
                 + state.history_segments.capacity() * 2 * std::mem::size_of::<HistorySegment>()
     );
+}
+
+#[test]
+fn allocation_caches_follow_segment_growth_rotation_replay_and_link_eviction() {
+    fn assert_exact(state: &TerminalState) {
+        assert_eq!(
+            state.history_allocation_bytes,
+            state
+                .history_segments
+                .iter()
+                .map(|segment| segment.bytes.capacity())
+                .sum::<usize>()
+        );
+        assert_eq!(
+            state.osc8_link_allocation_bytes,
+            state
+                .osc8_links
+                .iter()
+                .map(|(label, target)| label.capacity() + target.capacity())
+                .sum::<usize>()
+        );
+    }
+    let mut state = TerminalState::new(4, 80);
+    let mut held = Vec::new();
+    for index in 0..300 {
+        state.append_history_for_benchmark(&vec![b'x'; index + 1]);
+        held.push(state.searchable_history_snapshot());
+        state.observe_osc8_links(
+            format!("\x1b]8;;https://example.test/{index}\x07label{index}\x1b]8;;\x07").as_bytes(),
+        );
+        assert_exact(&state);
+    }
+    state.history_budget_bytes = 1024;
+    state.trim_history_to_budget();
+    assert_exact(&state);
+    state.fit_to_allocation_limit(0);
+    assert_exact(&state);
+    state.apply_replay(b"fresh", 1, true);
+    assert_exact(&state);
+    assert_eq!(state.osc8_link_allocation_bytes, 0);
+    assert_eq!(held.first().unwrap().to_vec(), b"x");
+}
+
+#[test]
+fn inert_escape_runs_use_bounded_quanta_without_executing_pending_commands() {
+    let mut state = TerminalState::new(4, 80);
+    let mut expected = TerminalState::new(4, 80);
+    // Each prefix leaves a different incomplete command. ESC must cancel it,
+    // rather than completing a scroll, OSC, UTF-8 codepoint or alternate entry.
+    for prefix in [
+        b"\x1b[999999".as_slice(),
+        b"\x1b]8;;uri",
+        b"\xe2\x82",
+        b"\x1b[?1049",
+    ] {
+        state.parser.process(prefix);
+        expected.parser.process(prefix);
+        let bytes = vec![0x1b; 1024 * 1024];
+        let mut admissions = 0;
+        let mut cursor = OrderedOutputCursor::default();
+        let sequence = state.output_sequence() + 1;
+        state
+            .apply_ordered_output(
+                sequence,
+                sequence,
+                &bytes,
+                false,
+                &mut cursor,
+                |state, chunk| {
+                    admissions += 1;
+                    assert!(chunk.len() <= 16 * 1024);
+                    // No viewport-sized allocation allowance for inert escape bytes.
+                    assert!(
+                        state.input_peak_bytes(chunk)
+                            < state.retained_allocation_bytes() + 512 * 1024
+                    );
+                    Ok(())
+                },
+            )
+            .unwrap();
+        assert_eq!(admissions, 64);
+        expected.parser.process(&bytes);
+        state.parser.process(b"[2;3Hdone");
+        expected.parser.process(b"[2;3Hdone");
+        assert_eq!(
+            state.parser.screen().contents_formatted(),
+            expected.parser.screen().contents_formatted()
+        );
+        assert_eq!(
+            state.parser.screen().cursor_position(),
+            expected.parser.screen().cursor_position()
+        );
+        assert_eq!(state.output_sequence(), sequence);
+    }
 }
