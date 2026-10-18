@@ -16,6 +16,7 @@ interface surface {
   resource frame-surface {
     /// Width and height in pixels.
     size: func() -> tuple<u32, u32>;
+    /// Rows are top to bottom. Rows that fall at or past the height are ignored.
     /// Rows are top to bottom. first-row plus the rows written must be within the height.
     /// Errors: invalid-argument for a format the scene did not declare, empty data, or first-row at or past the height. A partial trailing row is dropped, not an error.
     write-rows: func(first-row: u32, format: pixel-format, data: list<u8>) -> result<_, plugin-error>;

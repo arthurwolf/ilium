@@ -1022,7 +1022,7 @@ fn doc_pkg_385_publisher_id_forms() {
     assert!(
         row.contains("reverse-DNS")
             && row.contains("`user.<name>`")
-            && row.contains("3 to 32 characters of `[a-z0-9-]`"),
+            && row.contains("3 to 32 characters and matches the segment grammar of PKG-217"),
         "{row}"
     );
 }

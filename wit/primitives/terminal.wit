@@ -46,5 +46,6 @@ interface terminal {
   take-matches: func(request: request-id) -> option<list<history-match>>;
   /// terminal.input-lock. millis at most 2,000. User keys are queued, not lost.
   lock-input: func(pane: node-id, millis: u16) -> result<_, plugin-error>;
+  /// Releases this plugin's lock. No result: a no-op when no lock is held or the pane is missing.
   unlock-input: func(pane: node-id);
 }

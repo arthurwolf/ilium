@@ -21,6 +21,7 @@ interface ui-host {
   display-width: func(text: string) -> u16;
   theme: func() -> theme-tokens;
   theme-extras: func() -> theme-extras;
+  /// Rows are top to bottom. Rows that fall at or past the surface height are ignored.
   /// Rows are top to bottom. first-row plus the rows written must be within the surface height.
   /// Errors: not-found for a key with no surface, invalid-argument for a bad length.
   write-surface: func(view: view-target, key: string, first-row: u32, format: pixel-format, data: list<u8>) -> result<_, plugin-error>;

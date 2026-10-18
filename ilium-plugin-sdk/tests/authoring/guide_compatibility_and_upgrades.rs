@@ -75,7 +75,10 @@ fn doc_aut_207_durable_data_converted_by_migrator() {
     assert_rule(
         "AUT-207",
         "MUST",
-        &["`migrator`", "dropped when the `data_version` differs"],
+        &[
+            "`migrator`",
+            "restore bytes are delivered only when the `data_version` matches",
+        ],
     );
 }
 

@@ -34,7 +34,10 @@ fn doc_pkg_490_plugin_id_must_start_with_the_publisher_id() {
     assert_row(
         PAGE,
         "PKG-490",
-        &["MUST match the publisher id", "`manifest.id-publisher`"],
+        &[
+            "MUST start with `<publisher_id>.`",
+            "`manifest.id-publisher`",
+        ],
     );
 }
 
