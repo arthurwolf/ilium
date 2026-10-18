@@ -1302,17 +1302,17 @@ mod tests {
     fn kilo_model_setting_accepts_only_discovered_free_choices() {
         let mut app = App::new("default".to_owned(), PathBuf::from("/tmp/project"));
         app.kilo_gateway_models
-            .push("stepfun/step-5-preview-free".to_string());
+            .push("dots-studio/dots-3-note-preview:free".to_string());
 
         set_setting(
             &mut app,
             "inference.kilo_gateway.model",
-            json!("stepfun/step-5-preview-free"),
+            json!("dots-studio/dots-3-note-preview:free"),
         )
         .unwrap();
         assert_eq!(
             app.inference_settings.kilo_gateway.model,
-            "stepfun/step-5-preview-free"
+            "dots-studio/dots-3-note-preview:free"
         );
         assert!(set_setting(
             &mut app,

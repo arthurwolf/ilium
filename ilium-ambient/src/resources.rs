@@ -90,8 +90,8 @@ impl<T> Stored<T> {
     }
 }
 
-/// One explicit isolated composition for ambient unit fixtures. Pure scene
-/// environments share it rather than starting an execution per constructor.
+/// One explicit composition for an ambient test thread. Constructors within
+/// the test share it; unrelated parallel tests must not spend its credits.
 #[cfg(test)]
 fn create_test_resources() -> (ilium_execution::Execution, AmbientResources) {
     create_test_resources_with_limits(256, 16 * 1024 * 1024 * 1024)
@@ -159,9 +159,10 @@ pub(crate) fn isolated_test_resources() -> (ilium_execution::Execution, AmbientR
 
 #[cfg(test)]
 pub(crate) fn test_resources() -> AmbientResources {
-    static FIXTURE: std::sync::OnceLock<(ilium_execution::Execution, AmbientResources)> =
-        std::sync::OnceLock::new();
-    FIXTURE.get_or_init(create_test_resources).1.clone()
+    thread_local! {
+        static FIXTURE: (ilium_execution::Execution, AmbientResources) = create_test_resources();
+    }
+    FIXTURE.with(|fixture| fixture.1.clone())
 }
 
 #[cfg(test)]
@@ -175,6 +176,31 @@ mod tests {
         sync::mpsc,
         time::{Duration, Instant},
     };
+
+    #[test]
+    fn parallel_fixture_allocations_do_not_spend_another_tests_credits() {
+        let resources = test_resources();
+        let quota = resources.finite().quota_group();
+        let baseline = quota.snapshot().worker_bytes;
+        let rendezvous = Arc::new(std::sync::Barrier::new(2));
+        std::thread::scope(|scope| {
+            let rendezvous_other = Arc::clone(&rendezvous);
+            scope.spawn(move || {
+                let resources = test_resources();
+                let allocation = resources.reserve_storage(1024).unwrap();
+                rendezvous_other.wait();
+                rendezvous_other.wait();
+                drop(allocation);
+            });
+            rendezvous.wait();
+            assert_eq!(quota.snapshot().worker_bytes, baseline);
+            rendezvous.wait();
+        });
+        let allocation = resources.reserve_storage(1024).unwrap();
+        assert_eq!(quota.snapshot().worker_bytes, baseline + 1024);
+        drop(allocation);
+        assert_eq!(quota.snapshot().worker_bytes, baseline);
+    }
 
     fn isolated() -> (Execution, AmbientResources, QuotaGroup) {
         let quota = QuotaGroup::new(QuotaLimits {
@@ -254,9 +280,10 @@ mod tests {
         ticket
             .join_until(Instant::now() + Duration::from_secs(5))
             .unwrap();
-        // The actual join is complete; the explicitly retained ticket still
-        // owns the supervisor wake state and its original physical claim.
-        assert_eq!(quota.snapshot().worker_threads, 2);
+        // A completed ticket observes retirement without retaining the native
+        // thread's physical claim. Blocked-worker custody is checked above.
+        assert_eq!(quota.snapshot().worker_threads, 1);
+        assert_eq!(quota.snapshot().worker_bytes, baseline);
         drop(ticket);
         assert_eq!(quota.snapshot().worker_threads, 1);
         assert_eq!(quota.snapshot().worker_bytes, baseline);

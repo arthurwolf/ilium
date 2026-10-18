@@ -192,7 +192,8 @@ impl InputEvent {
     }
     /// Existing hover-motion coalescing is an explicit disposition. Other
     /// original input cannot pass through this method or be discarded by it.
-    pub(crate) fn coalesce_motion(self) -> Result<(), Box<Self>> {
+    #[allow(clippy::result_large_err)] // The refusal hands the original value back unchanged; boxing would allocate on that path.
+    pub(crate) fn coalesce_motion(self) -> Result<(), Self> {
         if !matches!(
             self.view(),
             Event::Mouse(crossterm::event::MouseEvent {
@@ -237,6 +238,11 @@ pub struct InputFailure {
     kind: InputFailureKind,
 }
 enum InputFailureKind {
+    TerminalKey {
+        original: crossterm::event::KeyEvent,
+        reason: Option<RejectReason>,
+        previous: Option<Box<InputFailure>>,
+    },
     Read {
         source: io::Error,
         _storage: Arc<InputStorage>,
@@ -261,6 +267,32 @@ enum InputFailureKind {
     },
 }
 impl InputFailure {
+    pub(crate) fn terminal_key(
+        original: crossterm::event::KeyEvent,
+        reason: Option<RejectReason>,
+        previous: Option<Self>,
+    ) -> Self {
+        Self {
+            kind: InputFailureKind::TerminalKey {
+                original,
+                reason,
+                previous: previous.map(Box::new),
+            },
+        }
+    }
+    /// Inline keys transfer from the native envelope into the bounded terminal
+    /// FIFO without allocating payloads; exceptional shutdown retains the value.
+    /// Traverse `additional_failure` to inspect separately retained keys; this
+    /// accessor returns the key in this failure (or the first combined failure).
+    pub fn terminal_key_original(&self) -> Option<&crossterm::event::KeyEvent> {
+        match &self.kind {
+            InputFailureKind::TerminalKey { original, .. } => Some(original),
+            InputFailureKind::Combined { first, next } => first
+                .terminal_key_original()
+                .or_else(|| next.terminal_key_original()),
+            _ => None,
+        }
+    }
     pub(crate) fn combine(first: Option<Self>, next: Self) -> Self {
         match first {
             Some(first) => Self {
@@ -275,7 +307,8 @@ impl InputFailure {
     pub fn additional_failure(&self) -> Option<&Self> {
         match &self.kind {
             InputFailureKind::Combined { next, .. } => Some(next),
-            InputFailureKind::Undispatched { previous, .. } => previous.as_deref(),
+            InputFailureKind::Undispatched { previous, .. }
+            | InputFailureKind::TerminalKey { previous, .. } => previous.as_deref(),
             _ => None,
         }
     }
@@ -314,6 +347,7 @@ impl InputFailure {
     pub fn rejection_reason(&self) -> Option<RejectReason> {
         match &self.kind {
             InputFailureKind::Refused { reason, .. } => Some(*reason),
+            InputFailureKind::TerminalKey { reason, .. } => *reason,
             InputFailureKind::NativeRead {
                 source: NativeReadError::Admission(_),
                 custody,
@@ -329,7 +363,8 @@ impl InputFailure {
                 first.native_custody().or_else(|| next.native_custody())
             }
             InputFailureKind::Shutdown(report) => report.native_custody(),
-            InputFailureKind::Undispatched { previous, .. } => {
+            InputFailureKind::Undispatched { previous, .. }
+            | InputFailureKind::TerminalKey { previous, .. } => {
                 previous.as_deref().and_then(Self::native_custody)
             }
             _ => None,
@@ -371,6 +406,8 @@ impl InputFailure {
 impl fmt::Display for InputFailure {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.kind {
+            InputFailureKind::TerminalKey { reason, previous, .. } => write!(formatter,
+                "terminal input retained an undelivered inline key; refusal={reason:?}; previous failure={}", previous.is_some()),
             InputFailureKind::Combined { first, .. } => write!(
                 formatter,
                 "{first}; another original input failure remains in custody"
@@ -433,7 +470,8 @@ impl std::error::Error for InputFailure {
             InputFailureKind::Combined { first, .. } => Some(first.as_ref()),
             InputFailureKind::Shutdown(report) => report.failure.as_deref().map(|error| error as _),
             InputFailureKind::Refused { .. } => None,
-            InputFailureKind::Undispatched { previous, .. } => {
+            InputFailureKind::Undispatched { previous, .. }
+            | InputFailureKind::TerminalKey { previous, .. } => {
                 previous.as_deref().map(|error| error as _)
             }
         }
@@ -1471,7 +1509,38 @@ pub struct InputShutdownReport {
     native: Option<NativeInputCustody>,
     _storage: Arc<InputStorage>,
 }
+
+pub(crate) fn is_exit_click_release(event: &Event, press: &crossterm::event::MouseEvent) -> bool {
+    use crossterm::event::MouseEventKind;
+    matches!((press.kind, event),
+        (MouseEventKind::Down(button), Event::Mouse(release))
+        if release.kind == MouseEventKind::Up(button)
+            && release.column == press.column
+            && release.row == press.row
+            && release.modifiers == press.modifiers)
+}
+
 impl InputShutdownReport {
+    /// Complete only the FIFO head belonging to the accepted exit click.
+    /// Other keys, gestures, reader failures and native custody remain errors.
+    pub(crate) fn complete_exit_click_release(
+        &mut self,
+        press: &mut Option<crossterm::event::MouseEvent>,
+    ) {
+        let matching = press.as_ref().is_some_and(|press| {
+            self.pending
+                .front()
+                .is_some_and(|event| is_exit_click_release(event.view(), press))
+        });
+        if matching {
+            if let Some(event) = self.pending.pop_front() {
+                // The press already committed Restart. Releasing its button
+                // has no new UI action and must not hit-test the closed menu.
+                event.dispatch(|_| ());
+                *press = None;
+            }
+        }
+    }
     pub fn native_custody(&self) -> Option<&NativeInputCustody> {
         self.native.as_ref().or_else(|| {
             self.failure
@@ -1485,7 +1554,8 @@ impl InputShutdownReport {
     pub fn failure(&self) -> Option<&InputFailure> {
         self.failure.as_deref()
     }
-    pub fn into_result(self) -> Result<(), Box<InputFailure>> {
+    #[allow(clippy::result_large_err)] // The refusal hands the original value back unchanged; boxing would allocate on that path.
+    pub fn into_result(self) -> Result<(), InputFailure> {
         if self.exit == WorkerExit::Joined
             && self.pending.is_empty()
             && self.failure.is_none()
@@ -1645,6 +1715,92 @@ mod tests {
                 _admission: admission,
             }),
         }
+    }
+
+    #[test]
+    fn accepted_exit_click_retires_only_its_exact_release_at_shutdown() {
+        use crossterm::event::{
+            KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+        };
+        let press = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 12,
+            row: 5,
+            modifiers: KeyModifiers::NONE,
+        };
+        let (release, release_quota) = mouse_fixture(MouseEvent {
+            kind: MouseEventKind::Up(MouseButton::Left),
+            ..press
+        });
+        let (key, key_quota) = key_fixture(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE));
+        let shared = query_test_shared();
+        let mut report = InputShutdownReport {
+            exit: WorkerExit::Joined,
+            pending: VecDeque::from([release, key]),
+            failure: None,
+            _queue_excess: None,
+            native: None,
+            _storage: Arc::clone(&shared.storage),
+        };
+        let mut expected = Some(press);
+        report.complete_exit_click_release(&mut expected);
+        assert!(expected.is_none());
+        assert_eq!(release_quota.snapshot().worker_bytes, 0);
+        assert!(key_quota.snapshot().worker_bytes > 0);
+        assert_eq!(report.pending_events().count(), 1);
+        assert!(
+            report.into_result().is_err(),
+            "unrelated key original prevents successful shutdown"
+        );
+    }
+
+    #[test]
+    fn accepted_exit_click_cannot_consume_another_gesture_or_skip_a_fifo_head() {
+        use crossterm::event::{
+            KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+        };
+        let press = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 12,
+            row: 5,
+            modifiers: KeyModifiers::NONE,
+        };
+        assert!(!is_exit_click_release(
+            &Event::Mouse(MouseEvent {
+                kind: MouseEventKind::Up(MouseButton::Right),
+                ..press
+            }),
+            &press
+        ));
+        assert!(!is_exit_click_release(
+            &Event::Mouse(MouseEvent {
+                kind: MouseEventKind::Up(MouseButton::Left),
+                column: 13,
+                ..press
+            }),
+            &press
+        ));
+        let (key, quota) = key_fixture(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE));
+        let (release, release_quota) = mouse_fixture(MouseEvent {
+            kind: MouseEventKind::Up(MouseButton::Left),
+            ..press
+        });
+        let shared = query_test_shared();
+        let mut report = InputShutdownReport {
+            exit: WorkerExit::Joined,
+            pending: VecDeque::from([key, release]),
+            failure: None,
+            _queue_excess: None,
+            native: None,
+            _storage: Arc::clone(&shared.storage),
+        };
+        let mut expected = Some(press);
+        report.complete_exit_click_release(&mut expected);
+        assert_eq!(expected, Some(press));
+        assert_eq!(report.pending_events().count(), 2);
+        assert!(quota.snapshot().worker_bytes > 0);
+        assert!(release_quota.snapshot().worker_bytes > 0);
+        assert!(report.into_result().is_err());
     }
 
     #[test]
@@ -1838,6 +1994,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    #[allow(clippy::await_holding_lock)] // Serial test guard only; the current-thread runtime never contends it.
     async fn full_queue_preserves_every_paste_and_its_original_allocation() {
         let _serial = INPUT_TEST_LOCK.lock().await;
         let quota = quota();
@@ -2024,6 +2181,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    #[allow(clippy::await_holding_lock)] // Serial test guard only; the current-thread runtime never contends it.
     async fn read_failure_is_delivered_once_and_does_not_become_normal_end_of_stream() {
         let _serial = INPUT_TEST_LOCK.lock().await;
         let quota = quota();

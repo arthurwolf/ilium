@@ -133,6 +133,25 @@ pub enum TreeToolbarAction {
 }
 
 impl TreeToolbarAction {
+    /// One distinct bit per button, for the compact pending-spinner set.
+    pub(crate) fn pending_bit(self) -> u16 {
+        1 << match self {
+            Self::Search => 0,
+            Self::Shell => 1,
+            Self::Agent(BuiltinAgentProvider::Claude) => 2,
+            Self::Agent(BuiltinAgentProvider::Codex) => 3,
+            Self::Agent(BuiltinAgentProvider::Antigravity) => 4,
+            Self::Editor => 5,
+            Self::Board => 6,
+            Self::Group => 7,
+            Self::Project => 8,
+            Self::Split => 9,
+            Self::Folder => 10,
+            Self::Restructure => 11,
+            Self::Settings => 12,
+        }
+    }
+
     /// Ordered left-aligned creation actions. Settings is intentionally not
     /// part of this list because its geometry is anchored independently.
     const LEFT_ALIGNED: [Self; 11] = [
@@ -429,7 +448,7 @@ impl PaintedTreeRows {
             SidebarDensity::Comfortable => 2,
         };
         let mut rows = Vec::with_capacity(usize::from(list.height));
-        // Moving/removed presentation rows have no stable semantic target.
+        // A removal presentation uses an old tree with different row identities.
         if options
             .transitions
             .presentation_tree(options.elapsed_ms)
@@ -439,13 +458,10 @@ impl PaintedTreeRows {
                 let Some(id) = path.last().copied() else {
                     continue;
                 };
-                if options
-                    .transitions
-                    .row_motion(id, options.elapsed_ms)
-                    .is_some()
-                {
-                    continue;
-                }
+                // Entry motion translates live rows horizontally; their Y
+                // coordinate and full-row semantic identity already match the
+                // emitted frame. Only the old removal presentation above has
+                // different row identities and must withhold semantic targets.
                 let depth = u16::try_from(path.len().saturating_sub(1)).unwrap_or(u16::MAX);
                 let label = list
                     .x
@@ -476,6 +492,9 @@ impl PaintedTreeRows {
             action: None,
         }
     }
+    pub(crate) fn rows_for_trace(&self) -> (Rect, Vec<TreeNodeHit>) {
+        (self.list, self.rows.iter().map(|(hit, _)| *hit).collect())
+    }
     pub(crate) fn node_ids(&self) -> impl Iterator<Item = NodeId> + '_ {
         self.rows
             .iter()
@@ -484,6 +503,45 @@ impl PaintedTreeRows {
     }
     pub(crate) fn retain_values(&mut self, values: Vec<PaintedRowValues>) {
         self.values = values;
+    }
+    /// Paint into the same status cells whose tooltip ownership was retained
+    /// for this frame. Identity icons and row widths remain unchanged.
+    pub(crate) fn paint_blocking_errors(&self, frame: &mut Frame, blocked: &HashSet<NodeId>) {
+        use crate::status_icons::{NOW_COLUMN_WIDTH, OBJECTIVE_COLUMN_WIDTH};
+        for (hit, label) in &self.rows {
+            if hit.line != 0 || !blocked.contains(&hit.id) {
+                continue;
+            }
+            let attention =
+                self.monitoring_mode == crate::agent_monitoring::AgentMonitoringMode::Attention;
+            let has_objective = self
+                .values
+                .iter()
+                .any(|value| value.node_id == hit.id && value.status[1].is_some());
+            let column = if attention {
+                label
+                    .saturating_add(OBJECTIVE_SLOT_OFFSET)
+                    .saturating_add(if has_objective {
+                        OBJECTIVE_COLUMN_WIDTH as u16
+                    } else {
+                        0
+                    })
+            } else {
+                label.saturating_add(NOW_SLOT_OFFSET)
+            };
+            let width = if attention && !has_objective {
+                OBJECTIVE_COLUMN_WIDTH
+            } else {
+                NOW_COLUMN_WIDTH
+            } as u16;
+            if column >= self.list.right() || hit.row >= self.list.bottom() {
+                continue;
+            }
+            frame.render_widget(
+                Paragraph::new(Span::styled("⚠", Style::new().fg(Color::Yellow))),
+                Rect::new(column, hit.row, width.min(self.list.right() - column), 1),
+            );
+        }
     }
     pub(crate) fn cost_card_target(
         &self,
@@ -642,6 +700,9 @@ pub struct TreeHoverState {
     /// `toolbar_hovered` because the pointer can sit in the toolbar strip's
     /// dead space (past the last button) without targeting one.
     pub toolbar_action: Option<TreeToolbarAction>,
+    /// Bit set (see `TreeToolbarAction::pending_bit`) of buttons whose accepted
+    /// click is still waiting for the server; they draw a spinner.
+    pub pending_toolbar: u16,
 }
 
 /// All transient presentation state for one tree render. Grouping it keeps
@@ -652,8 +713,10 @@ pub struct TreeRenderOptions<'a> {
     /// Real animation-clock offset even when decorative motion is disabled.
     /// Activity-window expiry must not freeze merely because its glyph does.
     pub terminal_activity_elapsed_ms: u128,
-    /// Current wall-clock time used only for durable absolute countdowns.
+    /// Wall-clock time for durable countdowns and observation freshness.
     pub current_unix_millis: u64,
+    /// The live renderer supplies evidence; geometry-only builders can omit it.
+    pub detection_evidence: Option<&'a HashMap<NodeId, ilium_ipc::PaneDetectionEvidence>>,
     pub project_name: Option<&'a str>,
     pub project_icon: Option<&'a str>,
     pub is_project_name_loading: bool,
@@ -717,6 +780,7 @@ struct TreeItemBuildContext<'a> {
     elapsed_ms: u128,
     terminal_activity_elapsed_ms: u128,
     current_unix_millis: u64,
+    detection_evidence: Option<&'a HashMap<NodeId, ilium_ipc::PaneDetectionEvidence>>,
     titles_loading: &'a HashSet<NodeId>,
     recently_created: &'a HashMap<NodeId, u128>,
     terminal_activity: &'a TerminalActivityTracker,
@@ -1045,6 +1109,30 @@ fn build_item(
                     attention_running_indicator: context.attention_running_indicator,
                 },
             );
+            let label = if context.detection_evidence.is_some_and(|evidence| {
+                crate::status_icons::detection_freshness_warning(
+                    status,
+                    evidence.get(&node.id),
+                    context.current_unix_millis,
+                )
+                .is_some()
+            }) {
+                // Rebuild the slots rather than overwriting cells: Attention can
+                // omit the live slot, so its title must move to make room.
+                let identity = label.spans[0].clone();
+                let objective = label.spans[1].clone();
+                let now = Span::styled("⚠", Style::new().fg(Color::Yellow));
+                let text = label.spans[3].clone();
+                if context.agent_monitoring_mode
+                    == crate::agent_monitoring::AgentMonitoringMode::Attention
+                {
+                    attention_row_label(identity, objective, now, text)
+                } else {
+                    status_row_label(identity, objective, now, text)
+                }
+            } else {
+                label
+            };
             let label = apply_unread_title_bold(
                 label,
                 should_apply_unread_title_bold(
@@ -2009,24 +2097,43 @@ fn agent_title(class: &AgentClass, title: &str, mode: AgentIdentifierMode) -> St
     }
 }
 
+/// Splits the tree panel's interior into the list, the frame rule above the
+/// toolbar (zero rows when frames are off or the panel is too short), and the
+/// toolbar. The single source for `list_area`, `toolbar_rule_area` and
+/// `toolbar_area`, so drawing and hit testing cannot disagree.
+fn vertical_sections(area: Rect) -> [Rect; 3] {
+    // Padding moves the list, rule and toolbar in from the border together.
+    let inner = crate::padding::tree_padding().inset(theme::block(false).inner(area));
+    let rule_rows = u16::from(
+        theme::section_frames_enabled() && inner.height >= TOOLBAR_HEIGHT.saturating_add(3),
+    );
+    let [list, rule, toolbar] = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(1),
+            Constraint::Length(rule_rows),
+            Constraint::Length(TOOLBAR_HEIGHT),
+        ])
+        .areas(inner);
+    [list, rule, toolbar]
+}
+
 /// Returns the interior list region, excluding the persistent two-row hover
 /// toolbar. Labels use this complete width; row actions temporarily overlay
 /// only the hovered row's trailing cells.
 pub fn list_area(area: Rect) -> Rect {
-    let inner = theme::block(false).inner(area);
-    Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(TOOLBAR_HEIGHT)])
-        .split(inner)[0]
+    vertical_sections(area)[0]
+}
+
+/// The full-outer-width row of the frame rule above the toolbar, if drawn.
+pub fn toolbar_rule_area(area: Rect) -> Option<Rect> {
+    let rule = vertical_sections(area)[1];
+    (rule.height > 0).then(|| Rect::new(area.x, rule.y, area.width, 1))
 }
 
 /// Returns the bottom two rows that reveal creation icons on hover.
 pub fn toolbar_area(area: Rect) -> Rect {
-    let inner = theme::block(false).inner(area);
-    Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(TOOLBAR_HEIGHT)])
-        .split(inner)[1]
+    vertical_sections(area)[2]
 }
 
 /// Returns the toolbar action at a terminal coordinate, if any.
@@ -2324,6 +2431,7 @@ impl TreeItemCache {
                     elapsed_ms: 0,
                     terminal_activity_elapsed_ms: 0,
                     current_unix_millis: 0,
+                    detection_evidence: None,
                     titles_loading: &HashSet::new(),
                     recently_created: &HashMap::new(),
                     terminal_activity: &TerminalActivityTracker::default(),
@@ -2393,6 +2501,7 @@ pub(crate) fn render(
             elapsed_ms: options.elapsed_ms,
             terminal_activity_elapsed_ms: options.terminal_activity_elapsed_ms,
             current_unix_millis: options.current_unix_millis,
+            detection_evidence: options.detection_evidence,
             titles_loading: options.titles_loading,
             recently_created: options.recently_created,
             terminal_activity: options.terminal_activity,
@@ -2456,6 +2565,7 @@ pub(crate) fn render(
                 elapsed_ms: options.elapsed_ms,
                 terminal_activity_elapsed_ms: options.terminal_activity_elapsed_ms,
                 current_unix_millis: options.current_unix_millis,
+                detection_evidence: options.detection_evidence,
                 titles_loading: options.titles_loading,
                 recently_created: options.recently_created,
                 terminal_activity: options.terminal_activity,
@@ -2575,8 +2685,18 @@ pub(crate) fn render(
             options.use_stable_glyphs,
         );
     }
+    if let Some(rule) = toolbar_rule_area(area) {
+        crate::section_frame::render_rule(frame, rule, None, options.focused);
+    }
     if is_toolbar_visible(options.focused, options.hover.toolbar_hovered) {
-        draw_toolbar(frame, area, options.hover.toolbar_action, options.icons);
+        draw_toolbar(
+            frame,
+            area,
+            options.hover.toolbar_action,
+            options.hover.pending_toolbar,
+            options.terminal_activity_elapsed_ms,
+            options.icons,
+        );
     }
     painted
 }
@@ -2913,6 +3033,8 @@ fn draw_toolbar(
     frame: &mut Frame,
     area: Rect,
     hovered: Option<TreeToolbarAction>,
+    pending: u16,
+    spinner_elapsed_ms: u128,
     icons: &IconSettings,
 ) {
     let toolbar = toolbar_area(area);
@@ -2928,10 +3050,14 @@ fn draw_toolbar(
         } else {
             Style::new().fg(action.accent())
         };
-        let button = Paragraph::new(Line::from(Span::styled(
-            format!(" {} ", action.glyph(icons)),
-            style,
-        )));
+        let glyph = if pending & action.pending_bit() != 0 {
+            let frame_index =
+                (spinner_elapsed_ms / SPINNER_FRAME_MS) as usize % SPINNER_FRAMES.len();
+            SPINNER_FRAMES[frame_index].to_string()
+        } else {
+            action.glyph(icons).to_string()
+        };
+        let button = Paragraph::new(Line::from(Span::styled(format!(" {glyph} "), style)));
         frame.render_widget(button, button_area);
     }
 
@@ -2948,6 +3074,68 @@ fn draw_toolbar(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn blocking_caution_preserves_identity_and_owns_the_hovered_status_cell() {
+        use crate::agent_monitoring::AgentMonitoringMode;
+        use crate::status_icons::{StatusSlot, TooltipContent};
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        for mode in [AgentMonitoringMode::Normal, AgentMonitoringMode::Attention] {
+            for has_objective in [false, true] {
+                let area = Rect::new(0, 0, 40, 4);
+                let error = TooltipContent {
+                    title: "Cannot start agent".into(),
+                    body: "Repository admission failed".into(),
+                    reason: None,
+                };
+                let rows = PaintedTreeRows {
+                    list: area,
+                    area,
+                    toolbar: false,
+                    rows: vec![(
+                        TreeNodeHit {
+                            id: ROOT_ID,
+                            row: 1,
+                            line: 0,
+                        },
+                        2,
+                    )],
+                    monitoring_mode: mode,
+                    values: vec![PaintedRowValues {
+                        node_id: ROOT_ID,
+                        status: [
+                            None,
+                            has_objective.then(|| error.clone()),
+                            Some(error.clone()),
+                        ],
+                        worktree: None,
+                        cost_title: String::new(),
+                        cost_card: None,
+                    }],
+                    cost_option: Default::default(),
+                    selected_node: None,
+                    action: None,
+                    _metadata: None,
+                };
+                let mut terminal = Terminal::new(TestBackend::new(40, 4)).unwrap();
+                let frame = terminal
+                    .draw(|frame| {
+                        frame.buffer_mut()[(2, 1)].set_symbol("◆");
+                        rows.paint_blocking_errors(frame, &HashSet::from([ROOT_ID]));
+                    })
+                    .unwrap();
+                assert_eq!(frame.buffer[(2, 1)].symbol(), "◆");
+                let column = (0..40)
+                    .find(|column| frame.buffer[(*column, 1)].symbol() == "⚠")
+                    .expect("blocking failure must have a visible caution");
+                let (node_id, slot, anchor) = rows.status_at(Position::new(column, 1)).unwrap();
+                assert_eq!((node_id, slot), (ROOT_ID, StatusSlot::Now));
+                assert_eq!(anchor, Position::new(column, 1));
+                assert_eq!(rows.status_tooltip(ROOT_ID, slot), Some(&error));
+            }
+        }
+    }
     use ratatui::backend::TestBackend;
     use ratatui::buffer::Buffer;
     use ratatui::Terminal;
@@ -2979,6 +3167,52 @@ mod tests {
         TERMINAL_ACTIVITY_FAST_FRAME_MS, TERMINAL_ACTIVITY_SLOW_FRAME_MS,
     };
     use ilium_core::GoalState;
+
+    #[test]
+    fn pending_toolbar_button_renders_a_braille_frame_instead_of_its_icon() {
+        let area = Rect::new(0, 0, 60, 8);
+        let (action, button) = toolbar_button_rects(area)
+            .into_iter()
+            .find(|(action, _)| matches!(action, TreeToolbarAction::Agent(_)))
+            .expect("agent button exists");
+        let render_cell = |pending: u16, elapsed_ms: u128| {
+            let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
+            terminal
+                .draw(|frame| {
+                    draw_toolbar(
+                        frame,
+                        area,
+                        None,
+                        pending,
+                        elapsed_ms,
+                        &IconSettings::default(),
+                    )
+                })
+                .unwrap();
+            let buffer = terminal.backend().buffer().clone();
+            let mut text = String::new();
+            for x in button.x..button.x + button.width {
+                text.push_str(buffer[(x, button.y)].symbol());
+            }
+            text
+        };
+        let idle = render_cell(0, 0);
+        assert!(
+            !idle.chars().any(|c| SPINNER_FRAMES.contains(&c)),
+            "{idle:?}"
+        );
+        let first = render_cell(action.pending_bit(), 0);
+        let later = render_cell(action.pending_bit(), SPINNER_FRAME_MS * 3);
+        assert!(
+            first.chars().any(|c| SPINNER_FRAMES.contains(&c)),
+            "{first:?}"
+        );
+        assert!(
+            later.chars().any(|c| SPINNER_FRAMES.contains(&c)),
+            "{later:?}"
+        );
+        assert_ne!(first, later, "the spinner animates between frames");
+    }
 
     #[test]
     fn painted_row_targets_remain_bound_to_original_rows_and_action_strip() {
@@ -3301,16 +3535,6 @@ mod tests {
         )
     }
 
-    /// Per-render annotations for the tree test helpers: the branch-line and
-    /// project-separator flags, the workspace git statuses behind the branch
-    /// line, and the agent model labels shown on agent rows.
-    struct TreeBufferAnnotations<'a> {
-        show_branch_line: bool,
-        workspace_git_statuses: &'a HashMap<NodeId, WorkspaceGitStatus>,
-        show_project_separators: bool,
-        agent_models: &'a HashMap<NodeId, String>,
-    }
-
     fn render_tree_buffer_with_branch_visibility(
         tree: &Tree,
         state: &mut TreeState<NodeId>,
@@ -3320,7 +3544,6 @@ mod tests {
         area: Rect,
         branch_rendering: (bool, &HashMap<NodeId, WorkspaceGitStatus>, bool),
     ) -> Buffer {
-        let (show_branch_line, workspace_git_statuses, show_project_separators) = branch_rendering;
         render_tree_buffer_with_models(
             tree,
             state,
@@ -3328,15 +3551,20 @@ mod tests {
             recently_created,
             elapsed_ms,
             area,
-            TreeBufferAnnotations {
-                show_branch_line,
-                workspace_git_statuses,
-                show_project_separators,
-                agent_models: &HashMap::new(),
-            },
+            branch_rendering,
+            &HashMap::new(),
+            None,
         )
     }
 
+    #[derive(Clone, Copy)]
+    struct DetectionRenderInput<'a> {
+        evidence: &'a HashMap<NodeId, ilium_ipc::PaneDetectionEvidence>,
+        now: u64,
+        mode: crate::agent_monitoring::AgentMonitoringMode,
+    }
+
+    #[allow(clippy::too_many_arguments)] // Test renderer takes every tree model input explicitly.
     fn render_tree_buffer_with_models(
         tree: &Tree,
         state: &mut TreeState<NodeId>,
@@ -3344,14 +3572,11 @@ mod tests {
         recently_created: &HashMap<NodeId, u128>,
         elapsed_ms: u128,
         area: Rect,
-        annotations: TreeBufferAnnotations<'_>,
+        branch_rendering: (bool, &HashMap<NodeId, WorkspaceGitStatus>, bool),
+        agent_models: &HashMap<NodeId, String>,
+        detection: Option<DetectionRenderInput<'_>>,
     ) -> Buffer {
-        let TreeBufferAnnotations {
-            show_branch_line,
-            workspace_git_statuses,
-            show_project_separators,
-            agent_models,
-        } = annotations;
+        let (show_branch_line, workspace_git_statuses, show_project_separators) = branch_rendering;
         let titles_loading = HashSet::new();
         let agent_identifiers = AgentIdentifierSettings::default();
         let mut terminal = Terminal::new(TestBackend::new(area.width, area.height)).unwrap();
@@ -3366,7 +3591,8 @@ mod tests {
                         focused: false,
                         elapsed_ms,
                         terminal_activity_elapsed_ms: elapsed_ms,
-                        current_unix_millis: 0,
+                        current_unix_millis: detection.map_or(0, |input| input.now),
+                        detection_evidence: detection.map(|input| input.evidence),
                         project_name: None,
                         project_icon: None,
                         is_project_name_loading: false,
@@ -3384,7 +3610,10 @@ mod tests {
                         show_project_separators,
                         sidebar_density: SidebarDensity::default(),
                         use_stable_glyphs: false,
-                        agent_monitoring_mode: crate::agent_monitoring::AgentMonitoringMode::Normal,
+                        agent_monitoring_mode: detection.map_or(
+                            crate::agent_monitoring::AgentMonitoringMode::Normal,
+                            |input| input.mode,
+                        ),
                         attention_progress_reports: true,
                         attention_running_indicator:
                             crate::agent_monitoring::AttentionRunningIndicator::default(),
@@ -3406,6 +3635,118 @@ mod tests {
         (buffer.area.x..buffer.area.right())
             .map(|column| buffer[(column, row)].symbol())
             .collect()
+    }
+
+    #[test]
+    fn detection_freshness_renders_expiry_recovery_unknown_and_retains_goal_and_unread() {
+        use crate::agent_monitoring::AgentMonitoringMode;
+        let mut tree = Tree::new();
+        let group = tree.add_group(ROOT_ID, "work").unwrap();
+        let pane = tree
+            .add_pane(
+                group,
+                "freshness probe",
+                ilium_core::PaneContentKind::Terminal,
+            )
+            .unwrap();
+        let working = PaneStatus::from_activity(
+            AgentClass::Codex,
+            AgentActivity::Working,
+            Some(GoalState::Active),
+        );
+        tree.set_pane_status(pane, working.clone()).unwrap();
+        let observed = 1_700_000_000_000;
+        let mut evidence = HashMap::from([(
+            pane,
+            ilium_ipc::PaneDetectionEvidence {
+                applied_status: working.clone(),
+                observed_at_unix_millis: observed,
+                stale_after_millis: 30_000,
+                identity: None,
+                activity: None,
+                goal: None,
+            },
+        )]);
+        let render_row = |tree: &Tree,
+                          evidence: &HashMap<NodeId, ilium_ipc::PaneDetectionEvidence>,
+                          now,
+                          mode| {
+            let mut state = TreeState::default();
+            state.open(vec![group]);
+            let buffer = render_tree_buffer_with_models(
+                tree,
+                &mut state,
+                &TreeTransitions::default(),
+                &HashMap::new(),
+                0,
+                Rect::new(0, 0, 80, 10),
+                (false, &HashMap::new(), false),
+                &HashMap::new(),
+                Some(DetectionRenderInput {
+                    evidence,
+                    now,
+                    mode,
+                }),
+            );
+            (0..buffer.area.height)
+                .map(|row| buffer_row_text(&buffer, row))
+                .find(|row| row.contains("freshness probe"))
+                .unwrap()
+        };
+        for mode in [AgentMonitoringMode::Normal, AgentMonitoringMode::Attention] {
+            let fresh = render_row(&tree, &evidence, observed + 29_999, mode);
+            assert!(!fresh.contains('⚠'), "{fresh}");
+            assert_eq!(
+                fresh.contains("🎯"),
+                mode == AgentMonitoringMode::Normal,
+                "Attention's working priority intentionally hides the goal slot: {fresh}"
+            );
+            let stale = render_row(&tree, &evidence, observed + 30_000, mode);
+            assert!(stale.contains('⚠'), "{stale}");
+            assert_eq!(
+                stale.contains("🎯"),
+                mode == AgentMonitoringMode::Normal,
+                "Freshness must preserve the selected monitoring projection: {stale}"
+            );
+            assert!(
+                matches!(&tree.get(pane).unwrap().kind, NodeKind::Pane { status, .. } if status == &working)
+            );
+            assert!(!stale.chars().any(|glyph| SPINNER_FRAMES.contains(&glyph)));
+            assert!(crate::status_icons::detection_freshness_expired_since(
+                &evidence,
+                observed + 29_999,
+                observed + 30_000
+            ));
+        }
+        evidence.get_mut(&pane).unwrap().observed_at_unix_millis = observed + 30_000;
+        assert!(!render_row(
+            &tree,
+            &evidence,
+            observed + 30_001,
+            AgentMonitoringMode::Normal
+        )
+        .contains('⚠'));
+        assert!(render_row(
+            &tree,
+            &HashMap::new(),
+            observed,
+            AgentMonitoringMode::Normal
+        )
+        .contains('⚠'));
+        let done = PaneStatus::from_activity(
+            AgentClass::Codex,
+            AgentActivity::Done,
+            Some(GoalState::Active),
+        );
+        tree.set_pane_status(pane, done.clone()).unwrap();
+        let unread = render_row(&tree, &evidence, observed, AgentMonitoringMode::Normal);
+        assert!(
+            unread.contains('⚠') && unread.contains("[done]") && unread.contains("🎯"),
+            "{unread}"
+        );
+        assert!(
+            matches!(&tree.get(pane).unwrap().kind, NodeKind::Pane { status, .. } if status == &done)
+        );
     }
 
     #[test]
@@ -3697,12 +4038,9 @@ mod tests {
             &HashMap::new(),
             0,
             Rect::new(0, 0, 64, 28),
-            TreeBufferAnnotations {
-                show_branch_line: true,
-                workspace_git_statuses: &HashMap::new(),
-                show_project_separators: false,
-                agent_models: &models,
-            },
+            (true, &HashMap::new(), false),
+            &models,
+            None,
         );
 
         for (title, glyph) in rows {
@@ -3771,12 +4109,9 @@ mod tests {
             &HashMap::new(),
             0,
             Rect::new(0, 0, 64, 24),
-            TreeBufferAnnotations {
-                show_branch_line: true,
-                workspace_git_statuses: &HashMap::new(),
-                show_project_separators: false,
-                agent_models: &models,
-            },
+            (true, &HashMap::new(), false),
+            &models,
+            None,
         );
 
         for (title, expected_glyph) in expected_rows {
@@ -4424,6 +4759,7 @@ mod tests {
                         elapsed_ms: 0,
                         terminal_activity_elapsed_ms: 0,
                         current_unix_millis: 0,
+                        detection_evidence: None,
                         project_name: None,
                         project_icon: None,
                         is_project_name_loading: false,
@@ -4478,6 +4814,7 @@ mod tests {
                         elapsed_ms: 0,
                         terminal_activity_elapsed_ms: 0,
                         current_unix_millis: 0,
+                        detection_evidence: None,
                         project_name: None,
                         project_icon: None,
                         is_project_name_loading: false,
@@ -4560,6 +4897,7 @@ mod tests {
                         elapsed_ms: 0,
                         terminal_activity_elapsed_ms: 0,
                         current_unix_millis: 0,
+                        detection_evidence: None,
                         project_name: None,
                         project_icon: None,
                         is_project_name_loading: false,
@@ -4848,7 +5186,7 @@ mod tests {
         let last_project = tree
             .add_project(PathBuf::from("/tmp/last-project"))
             .unwrap();
-        let area = Rect::new(0, 0, 40, 9);
+        let area = Rect::new(0, 0, 40, 9 + u16::from(theme::section_frames_enabled()));
         let list = list_area(area);
         let mut state = TreeState::default();
         state.open(vec![first_project]);
@@ -5104,7 +5442,7 @@ mod tests {
         // consuming the flag; the next renderer must paint the same rows.
         state.set_item_offset(0);
         state.select(vec![projects[2], panes[2]]);
-        let short_area = Rect::new(0, 0, 48, 7);
+        let short_area = Rect::new(0, 0, 48, 7 + u16::from(theme::section_frames_enabled()));
         let short_list = list_area(short_area);
         assert_eq!(short_list.height, 3);
         assert_eq!(
@@ -5156,7 +5494,7 @@ mod tests {
         let items = cache.get_or_build(&tree, 1, TreeOrder::Manual, state.opened());
         // Project B fits; the two-line agent and its bar do not fit after it.
         state.set_item_offset(2);
-        let area = Rect::new(0, 0, 48, 7);
+        let area = Rect::new(0, 0, 48, 7 + u16::from(theme::section_frames_enabled()));
         let list = list_area(area);
         let buffer = render_tree_buffer_in_area(
             &tree,
@@ -5321,6 +5659,7 @@ mod tests {
                 elapsed_ms: 0,
                 terminal_activity_elapsed_ms: 0,
                 current_unix_millis: 0,
+                detection_evidence: None,
                 titles_loading: &HashSet::new(),
                 recently_created: &HashMap::new(),
                 terminal_activity: &TerminalActivityTracker::default(),
@@ -5479,6 +5818,7 @@ mod tests {
                 elapsed_ms: 0,
                 terminal_activity_elapsed_ms: 0,
                 current_unix_millis: 0,
+                detection_evidence: None,
                 titles_loading: &HashSet::new(),
                 recently_created: &HashMap::new(),
                 terminal_activity: &TerminalActivityTracker::default(),
@@ -5518,6 +5858,7 @@ mod tests {
                 elapsed_ms: 0,
                 terminal_activity_elapsed_ms: 0,
                 current_unix_millis: 0,
+                detection_evidence: None,
                 titles_loading: &HashSet::new(),
                 recently_created: &HashMap::new(),
                 terminal_activity: &TerminalActivityTracker::default(),
@@ -5557,6 +5898,7 @@ mod tests {
                 elapsed_ms: 0,
                 terminal_activity_elapsed_ms: 0,
                 current_unix_millis: 0,
+                detection_evidence: None,
                 titles_loading: &HashSet::new(),
                 recently_created: &HashMap::new(),
                 terminal_activity: &TerminalActivityTracker::default(),
@@ -5619,6 +5961,7 @@ mod tests {
                 elapsed_ms: 0,
                 terminal_activity_elapsed_ms: 0,
                 current_unix_millis: 0,
+                detection_evidence: None,
                 titles_loading: &HashSet::new(),
                 recently_created: &HashMap::new(),
                 terminal_activity: &TerminalActivityTracker::default(),
@@ -5874,6 +6217,7 @@ mod tests {
                 elapsed_ms: 0,
                 terminal_activity_elapsed_ms: 0,
                 current_unix_millis: 0,
+                detection_evidence: None,
                 titles_loading: &HashSet::new(),
                 recently_created: &recently_created,
                 terminal_activity: &TerminalActivityTracker::default(),
@@ -6167,6 +6511,7 @@ mod tests {
                 elapsed_ms: 0,
                 terminal_activity_elapsed_ms: 0,
                 current_unix_millis: 0,
+                detection_evidence: None,
                 titles_loading: &HashSet::new(),
                 recently_created: &HashMap::new(),
                 terminal_activity: &TerminalActivityTracker::default(),
@@ -6421,6 +6766,7 @@ mod cost_indicator_tests {
                         elapsed_ms: 0,
                         terminal_activity_elapsed_ms: 0,
                         current_unix_millis: 0,
+                        detection_evidence: None,
                         project_name: None,
                         project_icon: None,
                         is_project_name_loading: false,

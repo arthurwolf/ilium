@@ -109,10 +109,11 @@ fn closing_help_restores_the_exact_settings_navigation_state() {
 fn expected_ids() -> BTreeSet<String> {
     let mut ids = BTreeSet::new();
     add_range(&mut ids, "AP", 1, 26);
+    ids.insert("AP-33".to_owned());
     for id in crate::animation_rows::help_ids() {
         ids.insert(id);
     }
-    add_range(&mut ids, "AM", 1, 24);
+    add_range(&mut ids, "AM", 1, 25);
     add_range(&mut ids, "IC", 1, 48);
     add_range(&mut ids, "KEY", 1, 38);
     add_range(&mut ids, "TERM", 1, 3);
@@ -120,6 +121,7 @@ fn expected_ids() -> BTreeSet<String> {
     add_range(&mut ids, "SES", 1, 2);
     add_range(&mut ids, "GIT", 1, 7);
     add_range(&mut ids, "KAN", 1, 2);
+    add_range(&mut ids, "PAD", 1, 3);
     add_range(&mut ids, "SND", 1, 9);
     add_range(&mut ids, "VOICE", 1, 14);
     add_range(&mut ids, "RESET", 1, 3);
@@ -237,6 +239,8 @@ fn animation_help_covers_shared_palette_and_all_named_scene_controls() {
             "AN-81".to_owned()
         } else if kind == AnimationKind::AlmostTouching {
             "AN-82".to_owned()
+        } else if kind == AnimationKind::Growth {
+            "AN-84".to_owned()
         } else if kind == AnimationKind::HiddenWheel {
             "AN-83".to_owned()
         } else if kind == AnimationKind::Semantic {

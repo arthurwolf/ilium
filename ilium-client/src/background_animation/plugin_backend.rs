@@ -156,16 +156,17 @@ struct Presentation {
     _surface_storage: StorageAdmission,
     _request_storage: StorageAdmission,
 }
+#[allow(clippy::large_enum_variant)] // Short-lived completion value moved once; boxing would allocate on every source completion.
 enum SourceTerminal {
     Complete {
-        owner: Box<SourceCompletion>,
+        owner: SourceCompletion,
         state: SourcePublishState,
         feed_id: Option<String>,
-        feed_descriptor: Option<Box<ProjectedFeedDescriptor>>,
-        feed_registration: Option<Box<PreparedFeedRegistration>>,
+        feed_descriptor: Option<ProjectedFeedDescriptor>,
+        feed_registration: Option<PreparedFeedRegistration>,
     },
     Failed {
-        owner: Box<SourceFailure>,
+        owner: SourceFailure,
         state: SourcePublishState,
     },
 }
@@ -413,14 +414,18 @@ fn source_clock() -> Result<SourceClock, String> {
     })
 }
 impl NativeSourceOwner {
-    fn new(client: ilium_execution::Client, quota: QuotaGroup) -> Result<Self, String> {
+    fn new(
+        client: ilium_execution::Client,
+        quota: QuotaGroup,
+        cadence_owner: &crate::execution::NativeSourceCadenceOwner,
+    ) -> Result<Self, String> {
         if !client.quota_group().shares_root(&quota) {
             return Err("Foreign native source client".into());
         }
         let metadata = quota
             .reserve_external_storage(128 * 1024)
             .map_err(|error| format!("Native source owner admission: {error:?}"))?;
-        let cadence = crate::execution::native_source_cadence()?;
+        let cadence = crate::execution::native_source_cadence(cadence_owner, &quota)?;
         if !cadence.shares_root(&quota) {
             return Err("Foreign native source cadence".into());
         }
@@ -1323,7 +1328,7 @@ impl NativeSourceOwner {
                     self.terminal.insert(
                         id,
                         SourceTerminal::Complete {
-                            owner: Box::new(completion),
+                            owner: completion,
                             state: SourcePublishState::Pending,
                             feed_id,
                             feed_descriptor: None,
@@ -1336,7 +1341,7 @@ impl NativeSourceOwner {
                     self.terminal.insert(
                         id,
                         SourceTerminal::Failed {
-                            owner: Box::new(failure),
+                            owner: failure,
                             state: SourcePublishState::Pending,
                         },
                     );
@@ -1371,13 +1376,13 @@ impl NativeSourceOwner {
                             self.client.clone(),
                             Arc::new(SystemDns),
                             None,
-                            *prepared,
+                            prepared,
                         );
                         self.feeds.insert(
                             feed_id,
                             SourceFeedRecord {
                                 host,
-                                descriptor: *descriptor,
+                                descriptor,
                                 terminal: None,
                                 closing: None,
                                 closing_state: SourcePublishState::Pending,
@@ -1653,8 +1658,8 @@ impl NativeSourceOwner {
                                     return Err(error.to_string());
                                 }
                             };
-                        *feed_descriptor = Some(Box::new(descriptor));
-                        *feed_registration = Some(Box::new(prepared));
+                        *feed_descriptor = Some(descriptor);
+                        *feed_registration = Some(prepared);
                         (value, imported)
                     } else {
                         owner
@@ -1749,7 +1754,7 @@ impl NativeSourceOwner {
                     self.terminal.insert(
                         id,
                         SourceTerminal::Complete {
-                            owner: Box::new(value),
+                            owner: value,
                             state: SourcePublishState::Uncertain,
                             feed_id: None,
                             feed_descriptor: None,
@@ -1762,7 +1767,7 @@ impl NativeSourceOwner {
                     self.terminal.insert(
                         id,
                         SourceTerminal::Failed {
-                            owner: Box::new(value),
+                            owner: value,
                             state: SourcePublishState::Uncertain,
                         },
                     );
@@ -2283,14 +2288,12 @@ impl Job for PreRenderJob {
                     presentation.render_prepared(
                         &mut instance,
                         &self.request,
+                        sample,
+                        &mut preparation,
                         &self.quota,
                         &self.stop,
-                        ReplayFrame {
-                            sample,
-                            preparation: &mut preparation,
-                            frozen_inputs: self.spec.frozen_inputs(),
-                            source_sequence: self.spec.source_sequence().map(Arc::as_ref),
-                        },
+                        self.spec.frozen_inputs(),
+                        self.spec.source_sequence().map(Arc::as_ref),
                     )?;
                 }
                 stopped(&self.stop)?;
@@ -2419,14 +2422,12 @@ impl Job for PreRenderJob {
                 presentation.render_prepared(
                     &mut instance,
                     &self.request,
+                    sample,
+                    &mut preparation,
                     &self.quota,
                     &self.stop,
-                    ReplayFrame {
-                        sample,
-                        preparation: &mut preparation,
-                        frozen_inputs: self.spec.frozen_inputs(),
-                        source_sequence: self.spec.source_sequence().map(Arc::as_ref),
-                    },
+                    self.spec.frozen_inputs(),
+                    self.spec.source_sequence().map(Arc::as_ref),
                 )?;
             }
             stopped(&self.stop)?;
@@ -2511,6 +2512,7 @@ pub(super) struct PluginBackend {
     workflow: Option<Workflow>,
     failure: Option<(u64, String)>,
     quota: QuotaGroup,
+    cadence_owner: Arc<crate::execution::NativeSourceCadenceOwner>,
     resources: ilium_ambient::resources::AmbientResources,
     review: Arc<ReviewBridge>,
     actor_wake: Arc<dyn Fn() + Send + Sync>,
@@ -2582,6 +2584,7 @@ impl PluginBackend {
     }
     pub(super) fn new(
         quota: QuotaGroup,
+        cadence_owner: Arc<crate::execution::NativeSourceCadenceOwner>,
         resources: ilium_ambient::resources::AmbientResources,
         review: Arc<ReviewBridge>,
         actor_wake: Arc<dyn Fn() + Send + Sync>,
@@ -2593,6 +2596,7 @@ impl PluginBackend {
             workflow: None,
             failure: None,
             quota,
+            cadence_owner,
             resources,
             review,
             actor_wake,
@@ -3047,20 +3051,19 @@ impl PluginBackend {
                     instance,
                     &workflow.request,
                     &self.quota,
-                    PresentationEnvironment {
-                        resources: self.resources.clone(),
-                        state_root: Arc::clone(&workflow.state_root),
-                        selected_audio: workflow.qualified_audio.take(),
-                        live_mode: workflow
-                            .request
-                            .settings
-                            .plugin
-                            .selected
-                            .as_ref()
-                            .is_some_and(|selected| selected.mode == AnimationMode::Live),
-                        actor_wake: Arc::clone(&self.actor_wake),
-                    },
+                    &self.cadence_owner,
+                    self.resources.clone(),
+                    Arc::clone(&workflow.state_root),
+                    workflow.qualified_audio.take(),
+                    workflow
+                        .request
+                        .settings
+                        .plugin
+                        .selected
+                        .as_ref()
+                        .is_some_and(|selected| selected.mode == AnimationMode::Live),
                     creation,
+                    Arc::clone(&self.actor_wake),
                 )?);
                 if let (Some(presentation), Some(runtime)) =
                     (workflow.presentation.as_mut(), self.saved_runtime.as_ref())
@@ -3993,38 +3996,20 @@ fn apply_before_creation(invalidation: &Invalidation) -> Result<(), String> {
     }
     Ok(())
 }
-/// Shared services and session facts a presentation is built against.
-struct PresentationEnvironment {
-    resources: ilium_ambient::resources::AmbientResources,
-    state_root: Arc<PinnedDirectory>,
-    selected_audio: Option<QualifiedCaptureBinding>,
-    live_mode: bool,
-    actor_wake: Arc<dyn Fn() + Send + Sync>,
-}
-
-/// One replay frame to render, with the frozen inputs it samples from.
-struct ReplayFrame<'a> {
-    sample: ilium_animation_js::replay::ReplaySample,
-    preparation: &'a mut ilium_animation_js::replay::ClipPreparation,
-    frozen_inputs: &'a FrozenInputs,
-    source_sequence: Option<&'a FrozenSourceSequence>,
-}
-
 impl Presentation {
+    #[allow(clippy::too_many_arguments)] // Each package, surface and storage authority stays an explicit input.
     fn new(
         instance: &mut PackageInstance,
         request: &RenderRequest,
         quota: &QuotaGroup,
-        environment: PresentationEnvironment,
+        cadence_owner: &crate::execution::NativeSourceCadenceOwner,
+        resources: ilium_ambient::resources::AmbientResources,
+        state_root: Arc<PinnedDirectory>,
+        selected_audio: Option<QualifiedCaptureBinding>,
+        live_mode: bool,
         creation: CreateState,
+        actor_wake: Arc<dyn Fn() + Send + Sync>,
     ) -> Result<Self, String> {
-        let PresentationEnvironment {
-            resources,
-            state_root,
-            selected_audio,
-            live_mode,
-            actor_wake,
-        } = environment;
         let request_bytes = instance
             .engine_limits()
             .pending_requests
@@ -4050,7 +4035,7 @@ impl Presentation {
         )
         .map_err(|error| error.to_string())?;
         let gpu = NativeGpuHost::new(quota.clone()).map_err(|error| error.to_string())?;
-        let sources = NativeSourceOwner::new(source_client, quota.clone())?;
+        let sources = NativeSourceOwner::new(source_client, quota.clone(), cadence_owner)?;
 
         let shape = shape(instance.plan(), request.width, request.height)?;
         let layout = shape.layout().map_err(|error| error.to_string())?;
@@ -4942,20 +4927,18 @@ impl Presentation {
             world_provenance,
         }))
     }
+    #[allow(clippy::too_many_arguments)] // Each frame authority and fence stays an explicit input.
     fn render_prepared(
         &mut self,
         instance: &mut PackageInstance,
         request: &RenderRequest,
+        sample: ilium_animation_js::replay::ReplaySample,
+        preparation: &mut ilium_animation_js::replay::ClipPreparation,
         quota: &QuotaGroup,
         stop: &StopToken,
-        frame: ReplayFrame<'_>,
+        frozen_inputs: &FrozenInputs,
+        source_sequence: Option<&FrozenSourceSequence>,
     ) -> Result<(), String> {
-        let ReplayFrame {
-            sample,
-            preparation,
-            frozen_inputs,
-            source_sequence,
-        } = frame;
         stopped(stop)?;
         // Retain one accepted native instance through asynchronous create. A
         // pending promise does not become a failure or launch a replacement.
@@ -5641,6 +5624,70 @@ mod tests {
     use ilium_animation_js::surface::{ColourSpace, Update};
     use std::io::Cursor;
 
+    #[test]
+    fn admitted_plugin_native_source_keeps_origin_cadence_on_worker_thread() {
+        let finite = crate::execution::test_client();
+        let quota = finite.quota_group();
+        let cadence_owner = crate::execution::native_source_cadence_owner(&quota)
+            .expect("capture the original source cadence identity");
+        let ready = Arc::new(tokio::sync::Notify::new());
+        let review = ReviewBridge::new(quota.clone(), Arc::clone(&ready), Box::new(|| {}))
+            .expect("actual review mailbox admission");
+        let backend = PluginBackend::new(
+            quota.clone(),
+            Arc::clone(&cadence_owner),
+            AmbientResources::new(finite),
+            review,
+            Arc::new(|| {}),
+            ready,
+        );
+        let worker_threads_before = quota.snapshot().worker_threads;
+        let physical = quota
+            .reserve_external_worker(1, 2 * 1024 * 1024)
+            .expect("native plugin worker admission");
+        let reservation =
+            ilium_platform::owned_worker::reserve_owned_worker(Some(2 * 1024 * 1024), physical)
+                .expect("original worker reservation");
+        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+        let worker = reservation
+            .spawn(
+                "ilium-native-source-test",
+                ilium_platform::owned_worker::WorkerKind::Cooperative,
+                StopToken::default(),
+                || {},
+                move |_| {
+                    let source = NativeSourceOwner::new(
+                        backend.resources.finite().clone(),
+                        backend.quota.clone(),
+                        &backend.cadence_owner,
+                    );
+                    let _ = sender.send(source.map(|source| Arc::clone(&source.cadence)));
+                },
+            )
+            .expect("actual admitted native worker starts");
+        let cadence = receiver
+            .recv_timeout(Duration::from_secs(5))
+            .expect("native source owner completes")
+            .expect("native source admission uses the original root");
+        let ticket = worker.ticket();
+        drop(worker);
+        ticket
+            .join_until(Instant::now() + Duration::from_secs(5))
+            .expect("native worker physically retires");
+        assert_eq!(quota.snapshot().worker_threads, worker_threads_before);
+        assert!(cadence.shares_root(&quota));
+        let retained = crate::execution::native_source_cadence(&cadence_owner, &quota)
+            .expect("sequential native owners share cadence identity");
+        assert!(Arc::ptr_eq(&cadence, &retained));
+        let foreign = QuotaGroup::new(quota.snapshot().limits);
+        assert_eq!(
+            crate::execution::native_source_cadence(&cadence_owner, &foreign)
+                .err()
+                .as_deref(),
+            Some("Foreign native source cadence")
+        );
+    }
+
     fn archive_test_quota(worker_bytes: usize) -> QuotaGroup {
         QuotaGroup::new(ilium_execution::QuotaLimits {
             clients: 0,
@@ -5787,7 +5834,9 @@ mod tests {
             {"id":"source-feed-1", "kind":"sources.chess"}
         ]);
         let mut too_many_frames = valid.clone();
-        too_many_frames["max_frames"] = json!(12);
+        // Samples include time zero and exclude the duration endpoint:
+        // twelve seconds at 1 Hz needs exactly twelve frames.
+        too_many_frames["max_frames"] = json!(11);
         let mut unknown_kind = valid.clone();
         unknown_kind["sources"][0]["kind"] = json!("worlds.frame");
         let mut malformed_id = valid.clone();
@@ -5808,6 +5857,12 @@ mod tests {
         ] {
             assert!(ReplaySequenceCaptureOptions::parse(&invalid).is_err());
         }
+        let exact_capacity = json!({
+            "sources": [{"id":"source-feed-1", "kind":"sources.chess"}],
+            "duration_ms": 12_000, "sample_hz": 1,
+            "max_frames": 12, "max_bytes": 8_000_000
+        });
+        assert!(ReplaySequenceCaptureOptions::parse(&exact_capacity).is_ok());
     }
 
     #[test]

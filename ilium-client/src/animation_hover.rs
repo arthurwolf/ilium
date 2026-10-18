@@ -382,22 +382,6 @@ mod tests {
         terminal
     }
 
-    /// Repeats a comparison frame until two consecutive draws agree. Background
-    /// frame publication can land between draws, so one warm-up draw is not enough.
-    fn settled_draw(app: &mut App, width: u16, height: u16) -> Terminal<TestBackend> {
-        let mut previous = screen_rows(&draw(app, width, height));
-        for _ in 0..100 {
-            std::thread::sleep(std::time::Duration::from_millis(20));
-            let terminal = draw(app, width, height);
-            let rows = screen_rows(&terminal);
-            if rows == previous {
-                return terminal;
-            }
-            previous = rows;
-        }
-        panic!("preview frame did not settle within 2 seconds");
-    }
-
     fn screen_rows(terminal: &Terminal<TestBackend>) -> Vec<String> {
         let buffer = terminal.backend().buffer();
         (0..buffer.area.height)
@@ -519,9 +503,13 @@ mod tests {
         let (mut app, _project) = backend_app(80, 24);
         let y = select_backend_row(&mut app);
         let content = content_area(&app);
-        // The preview's visibility notice follows the background frame publication,
-        // so the baseline must be drawn after the screen stops changing.
-        let before = settled_draw(&mut app, 80, 24);
+        // Preview preparation is asynchronous even with a fixed scene clock.
+        // Complete the submitted frame before establishing its independent
+        // visibility footer; hover timing is the only changing state below.
+        let _ = draw(&mut app, 80, 24);
+        app.animation_frame
+            .wait_for_frame_for_test(std::time::Duration::ZERO);
+        let before = draw(&mut app, 80, 24);
         pointer(
             &mut app,
             MouseEventKind::Moved,

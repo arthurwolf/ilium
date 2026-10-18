@@ -31,8 +31,9 @@ fn draw_loaded_map(terminal: &mut Terminal<TestBackend>, app: &mut App) {
     let started = Instant::now();
     loop {
         app.animation_frame.settle_for_test();
+        let elapsed = started.elapsed();
         terminal
-            .draw(|frame| draw_at(frame, app, started.elapsed()))
+            .draw(|frame| draw_at(frame, app, elapsed))
             .expect("loaded map render");
         // The map is marked loaded before its braille glyphs reach the buffer
         // on every draw under parallel load, so keep drawing until they appear.
@@ -44,11 +45,21 @@ fn draw_loaded_map(terminal: &mut Terminal<TestBackend>, app: &mut App) {
                 .animation_frame
                 .packed_cells()
                 .iter()
-                .any(|bits| *bits != 0);
-        let braille_visible = whole_text(terminal.backend().buffer())
-            .chars()
-            .any(|glyph| ('\u{2801}'..='\u{28ff}').contains(&glyph));
-        if map_loaded && braille_visible {
+                .any(|bits| *bits != 0)
+        {
+            // status()/packed_cells() may collect a completed surface after
+            // the draw above. Compose that exact loaded display before judging
+            // final terminal pixels; do not advance its simulation clock.
+            terminal
+                .draw(|frame| draw_at(frame, app, elapsed))
+                .expect("compose loaded map display");
+            assert!(
+                whole_text(terminal.backend().buffer())
+                    .chars()
+                    .any(|glyph| ('\u{2801}'..='\u{28ff}').contains(&glyph)),
+                "loaded map pixels must appear in final composed cells: {}",
+                whole_text(terminal.backend().buffer())
+            );
             return;
         }
         assert!(
@@ -175,7 +186,11 @@ fn settings_and_fullscreen_osm_credit_have_separate_hint_and_voice_rows() {
                 panic!("settings mode survives drawing");
             };
             let settings = crate::settings_ui::compute_layout_for_mode(buffer.area, &app, state);
-            assert_eq!(settings.content_area.bottom(), credit_area.top());
+            assert_eq!(settings.content_frame_area.bottom(), credit_area.top());
+            assert_eq!(
+                settings.content_area.bottom() + 1,
+                settings.content_frame_area.bottom()
+            );
             let model = app.animation_row_model();
             assert!(crate::animation_settings_ui::hit(
                 settings.content_area,

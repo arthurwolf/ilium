@@ -224,6 +224,18 @@ pub struct LocationPickerState {
 }
 
 impl LocationPickerState {
+    pub(crate) fn diagnostic_text(&self) -> Option<&str> {
+        self.coordinate_dialog
+            .as_ref()
+            .and_then(|(_, dialog)| dialog.error.as_deref())
+            .or_else(|| {
+                self.entry_dialog
+                    .as_ref()
+                    .and_then(|dialog| dialog.notice.as_deref())
+            })
+            .or(self.status.as_deref())
+    }
+
     pub fn new(current: GeoLocation, search_client: Option<Client>) -> Self {
         Self::with_searcher_and_client(
             current,
@@ -342,17 +354,17 @@ impl LocationPickerState {
     }
 
     fn step_entry_mode(&mut self, direction: i32) {
-        let mode = match (self.entry_mode, direction.signum()) {
-            (PickerEntryMode::Address, 1) | (PickerEntryMode::Coordinates, -1) => {
-                PickerEntryMode::Coordinates
-            }
-            (PickerEntryMode::Address, -1) | (PickerEntryMode::Coordinates, 1) => {
-                PickerEntryMode::Address
-            }
-            (_, 0) => return,
-            _ => unreachable!("signum is -1, 0, or 1"),
+        if direction == 0 {
+            return;
+        }
+        // Both directions wrap through the two-option catalog. Keep focus on
+        // the selector so the next key continues changing the entry mode.
+        let mode = match self.entry_mode {
+            PickerEntryMode::Address => PickerEntryMode::Coordinates,
+            PickerEntryMode::Coordinates => PickerEntryMode::Address,
         };
         self.set_entry_mode(mode);
+        self.focus = PickerFocus::EntryMode;
     }
 
     pub fn set_coordinate(&mut self, axis: CoordinateAxis, value: f64) -> Result<(), String> {
@@ -1330,9 +1342,10 @@ pub fn render_cursor(
 
     // Results list.
     let results = picker_layout.result_content_area(picker.results.len());
-    if picker.entry_mode == PickerEntryMode::Coordinates {
-        frame.render_widget(Clear, picker_layout.results);
-    } else if picker.results.is_empty() {
+    // Coordinate controls occupy the results region and were painted above.
+    // Clearing that region here would erase their visible controls while
+    // leaving their pointer targets active.
+    if picker.entry_mode == PickerEntryMode::Address && picker.results.is_empty() {
         frame.render_widget(
             Paragraph::new(if picker.is_searching() {
                 "Searching\u{2026}"
@@ -1342,7 +1355,7 @@ pub fn render_cursor(
             .style(Style::new().add_modifier(Modifier::DIM)),
             results,
         );
-    } else {
+    } else if picker.entry_mode == PickerEntryMode::Address {
         let first = picker_layout.visible_result_start(picker.selected_result);
         for (offset, result) in picker
             .results
@@ -1373,7 +1386,10 @@ pub fn render_cursor(
         }
     }
 
-    if results.width < picker_layout.results.width && results.height > 0 {
+    if picker.entry_mode == PickerEntryMode::Address
+        && results.width < picker_layout.results.width
+        && results.height > 0
+    {
         let track = Rect::new(results.right(), results.y, 1, results.height);
         let mut scrollbar = ratatui::widgets::ScrollbarState::new(picker.results.len())
             .position(picker_layout.visible_result_start(picker.selected_result))
@@ -1451,7 +1467,7 @@ pub fn render_cursor(
             },
         ),
     );
-    let hint = picker.status.clone().unwrap_or_else(|| {
+    let hint = picker.status.as_ref().map(|status| format!("F9 details · {status}")).unwrap_or_else(|| {
         "Tab switches field \u{b7} arrows move the crosshair (Shift: big steps) \u{b7} click the map"
             .to_owned()
     });
@@ -2423,6 +2439,8 @@ mod tests {
         let mut picker = picker_with(offline());
         assert_eq!(picker.focus, PickerFocus::Input);
         press(&mut picker, KeyCode::Tab);
+        assert_eq!(picker.focus, PickerFocus::EntryMode);
+        press(&mut picker, KeyCode::Tab);
         assert_eq!(
             picker.focus,
             PickerFocus::Map,
@@ -2432,6 +2450,7 @@ mod tests {
         press(&mut picker, KeyCode::BackTab);
         assert_eq!(picker.focus, PickerFocus::Results);
         press(&mut picker, KeyCode::Tab);
+        assert_eq!(picker.focus, PickerFocus::Map);
         press(&mut picker, KeyCode::Tab);
         assert_eq!(picker.focus, PickerFocus::Input);
         type_text(&mut picker, "Rome");
@@ -2825,7 +2844,7 @@ mod tests {
             token,
             project_path: project.path().to_path_buf(),
             candidate: picker.candidate.clone(),
-            _location_storage: None, // synthetic receipt: no accepted write
+            location_storage: None, // synthetic receipt: no accepted write
         };
         app.finish_animation_picker_save(&save, Err("disk refused".into()));
         let Mode::LocationPicker(picker) = &mut app.mode else {

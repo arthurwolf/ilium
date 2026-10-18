@@ -82,8 +82,6 @@ pub enum PackageOrigin {
     Unverified,
 }
 
-/// No production path constructs this; the test pins that a new package
-/// cannot inherit a remembered grant.
 #[cfg(test)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -107,6 +105,11 @@ impl RememberedDecision {
 #[derive(Debug, Clone)]
 pub struct PermissionDecision {
     pub request_id: String,
+    #[expect(
+        dead_code,
+        reason = "Recorded with the decision for the future permission-audit consumer"
+    )]
+    pub capability: Capability,
     pub choice: PermissionChoice,
 }
 

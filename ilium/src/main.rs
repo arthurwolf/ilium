@@ -23,10 +23,12 @@
 use ilium::session;
 
 mod broadcast;
+mod ctl;
 mod pane_filter;
 mod pane_scan;
 mod panes;
 mod progress_wait;
+mod recap;
 mod voice;
 
 use std::ffi::OsString;
@@ -174,12 +176,20 @@ enum Command {
     /// all projects, that pass the pane selection options. Shows exactly
     /// which panes `broadcast` would address. Output is JSONL.
     Panes(panes::PanesArgs),
+    /// Factual short and long recaps of selected agent and shell panes.
+    /// Agent recaps read only the transcript bound to the pane's session;
+    /// shell recaps read bounded screen text. Output is JSONL by default.
+    Recap(recap::RecapArgs),
     /// Send a message to every running agent, across all projects and
     /// sessions on this machine, that passes the pane selection options.
     /// The message is typed into each agent and submitted, as the client's
     /// "Send message to all" does. The pane running this command is skipped
     /// unless --include-self is given. Output is JSONL.
     Broadcast(broadcast::BroadcastArgs),
+    /// Full remote control of a running session for agents and scripts: read
+    /// the tree, project or pane as JSON/YAML/Markdown; create, rename, move,
+    /// close and drive panes; manage worktrees. Start with `ilium ctl guide`.
+    Ctl(ctl::CtlArgs),
 }
 
 /// Local chatroom operations intentionally avoid the detached server: agents
@@ -304,7 +314,9 @@ enum ProgressCommand {
     /// `.claude/settings.local.json`). Reads the hook payload on stdin and,
     /// inside an Ilium pane, refuses a foreground Bash call with a tool
     /// timeout above three minutes that is not an `ilium progress` command:
-    /// exit 0 with a deny decision on stdout. Otherwise exits 0. Listed in
+    /// exit 0 with a deny decision on stdout. A background Bash call in a
+    /// pane passes with a reminder (`additionalContext`) to register a monitor
+    /// for long tasks. Otherwise exits 0. Listed in
     /// help on purpose: the project hook runs it only when `ilium progress
     /// --help` names `guard`.
     Guard,
@@ -312,13 +324,18 @@ enum ProgressCommand {
     Status,
     /// Stops a monitor and clears its retained progress. Without
     /// `--monitor-id`, clears the pane's only monitor; with several, pass
-    /// `--monitor-id` or `--all`.
+    /// `--monitor-id` or `--all`. A monitor that is still running is refused
+    /// unless `--running` is given: on a pane shared by several agents, an
+    /// agent that guesses an ID would otherwise stop another agent's task.
     Clear {
         #[arg(long, conflicts_with = "all")]
         monitor_id: Option<u64>,
         /// Clear every monitor of this pane.
         #[arg(long)]
         all: bool,
+        /// Also clear the monitor when its task is still running.
+        #[arg(long, requires = "monitor_id")]
+        running: bool,
     },
 }
 
@@ -545,7 +562,9 @@ async fn dispatch(cli: Cli) -> Result<(), CliError> {
         }
         Some(Command::Voice { command }) => voice::voice(command, &cli.cwd).await,
         Some(Command::Panes(args)) => panes::panes(args, &cli.cwd).await,
+        Some(Command::Recap(args)) => recap::recap(args, &cli.cwd).await,
         Some(Command::Broadcast(args)) => broadcast::broadcast(args, &cli.cwd).await,
+        Some(Command::Ctl(args)) => ctl::ctl(args, &cli.cwd).await,
     }
 }
 
@@ -854,9 +873,17 @@ async fn progress(command: ProgressCommand) -> Result<(), CliError> {
             },
             ExpectedProgressResponse::Status,
         ),
-        ProgressCommand::Clear { monitor_id, all } => {
+        ProgressCommand::Clear {
+            monitor_id,
+            all,
+            running,
+        } => {
             if monitor_id.is_none() && !all {
                 refuse_ambiguous_clear(&mut connection, identity.pane_id, request_id).await?;
+            }
+            if let (Some(monitor_id), false) = (monitor_id, running) {
+                refuse_running_clear(&mut connection, identity.pane_id, monitor_id, request_id)
+                    .await?;
             }
             (
                 ilium_ipc::ClientRequest::ClearPaneProgressMonitor {
@@ -1006,6 +1033,48 @@ fn print_monitor_ambiguous(
 
 /// `clear` without an ID must not silently stop several monitors, some of
 /// which may belong to another agent sharing this pane.
+/// Whether `monitor_id` is on the pane and its task is still being observed
+/// as not finished. A failed monitor is not running: its task outcome is
+/// unknown and clearing it is the documented recovery.
+fn is_running_monitor(monitors: &[ilium_core::PaneProgress], monitor_id: u64) -> bool {
+    monitors.iter().any(|progress| {
+        progress.monitor_id == monitor_id
+            && !progress.report.status.is_terminal()
+            && !matches!(
+                progress.monitor_health,
+                ilium_core::ProgressMonitorHealth::Failed { .. }
+            )
+    })
+}
+
+/// `clear --monitor-id <id>` on a running monitor: refuses unless `--running`
+/// was given. Live demo agents sharing a pane picked the first ID from
+/// `ilium progress status` to clear their own finished monitor; on a shared
+/// pane that ID can be another agent's running task.
+async fn refuse_running_clear(
+    connection: &mut ilium_client::connection::Connection,
+    pane_id: ilium_core::NodeId,
+    monitor_id: u64,
+    request_id: u64,
+) -> Result<(), CliError> {
+    let monitors = read_pane_monitors(connection, pane_id, "clear", request_id).await?;
+    if !is_running_monitor(&monitors, monitor_id) {
+        return Ok(());
+    }
+    println!(
+        "{{\"type\":\"progress_rejected\",\"operation\":\"clear\",\"request_id\":{request_id},\"pane_id\":{},\"code\":\"monitor-running\",\"monitor_id\":{monitor_id},\"message\":{}}}",
+        pane_id.0,
+        json_string(&format!(
+            "progress monitor {monitor_id} is still running and may belong to another agent; clear only the ID your own `ilium progress set` printed, or pass --running to stop a running monitor on purpose"
+        ))
+    );
+    let _ = connection
+        .requests
+        .send(ilium_ipc::ClientRequest::Detach)
+        .await;
+    Err(CliError::ExitStatus(2))
+}
+
 async fn refuse_ambiguous_clear(
     connection: &mut ilium_client::connection::Connection,
     pane_id: ilium_core::NodeId,
@@ -1180,9 +1249,9 @@ async fn wait_for_progress_response(
                 ));
             }
         }
-        Err(CliError::ServerReportedError(
-            "connection closed before the correlated progress response arrived".to_string(),
-        ))
+        Err(CliError::ServerReportedError(format!(
+            "connection closed before the correlated progress response arrived; {SERVER_BUILD_MISMATCH_HINT}"
+        )))
     })
     .await
     .map_err(|_| {
@@ -1370,6 +1439,15 @@ const fn progress_rejection_code_name(
         ilium_ipc::ProgressMonitorRejectionCode::TooManyMonitors => "too-many-monitors",
     }
 }
+
+/// Appended when the server closes a progress connection without answering. The server drops a
+/// connection whose request it cannot decode, which is what happens when this binary and the
+/// running server come from different builds (new binaries installed, Ilium not restarted yet).
+/// Without this, agents only see an opaque transport failure and retry blindly.
+pub(crate) const SERVER_BUILD_MISMATCH_HINT: &str =
+    "the running ilium server is probably a different build than this ilium command (for \
+     example new binaries installed without restarting Ilium), so restart Ilium or use the \
+     matching ilium binary";
 
 fn json_string(value: &str) -> String {
     let mut encoded = String::with_capacity(value.len() + 2);
@@ -1900,7 +1978,7 @@ async fn new_pane(
         Ok(None)
     })
     .await;
-    let baseline_pane_count = match baseline_wait {
+    let _baseline_pane_count = match baseline_wait {
         Ok(Ok(count)) => count,
         Ok(Err(message)) => return Err(message),
         Err(_elapsed) => None,
@@ -1915,6 +1993,7 @@ async fn new_pane(
     connection
         .requests
         .send(ilium_ipc::ClientRequest::NewPane {
+            request_id: 1,
             parent_group: ilium_core::ROOT_ID,
             kind,
             // The non-interactive CLI has no focused client-side terminal
@@ -1937,15 +2016,11 @@ async fn new_pane(
                         _event_retention,
                     )));
                 }
-                ilium_ipc::ServerEvent::TreeSnapshot(tree) => {
-                    let grew =
-                        baseline_pane_count.is_none_or(|baseline| tree.panes().count() > baseline);
-                    if grew {
-                        return Some(Ok(()));
-                    }
-                    // A `TreeSnapshot` that didn't grow the pane count is
-                    // some other client's unrelated mutation racing on the
-                    // same session -- keep waiting for our own.
+                ilium_ipc::ServerEvent::PaneCreateFinished {
+                    request_id: 1,
+                    result,
+                } => {
+                    return Some(result.map(|_| ()).map_err(CliError::ServerReportedError));
                 }
                 _ => {}
             }
@@ -2451,7 +2526,8 @@ mod tests {
             Some(Command::Progress {
                 command: ProgressCommand::Clear {
                     monitor_id: None,
-                    all: false
+                    all: false,
+                    running: false
                 }
             })
         ));
@@ -2463,7 +2539,8 @@ mod tests {
             Some(Command::Progress {
                 command: ProgressCommand::Clear {
                     monitor_id: Some(99),
-                    all: false
+                    all: false,
+                    running: false
                 }
             })
         ));
@@ -2474,7 +2551,8 @@ mod tests {
             Some(Command::Progress {
                 command: ProgressCommand::Clear {
                     monitor_id: None,
-                    all: true
+                    all: true,
+                    running: false
                 }
             })
         ));
@@ -2482,6 +2560,79 @@ mod tests {
             Cli::try_parse_from(["ilium", "progress", "clear", "--all", "--monitor-id", "99"])
                 .is_err()
         );
+        let running = Cli::try_parse_from([
+            "ilium",
+            "progress",
+            "clear",
+            "--monitor-id",
+            "99",
+            "--running",
+        ])
+        .unwrap();
+        assert!(matches!(
+            running.command,
+            Some(Command::Progress {
+                command: ProgressCommand::Clear {
+                    monitor_id: Some(99),
+                    all: false,
+                    running: true
+                }
+            })
+        ));
+        assert!(Cli::try_parse_from(["ilium", "progress", "clear", "--running"]).is_err());
+    }
+
+    #[test]
+    fn only_an_unfinished_healthy_monitor_counts_as_running_for_clear() {
+        let progress = |monitor_id, status, monitor_health| ilium_core::PaneProgress {
+            monitor_id,
+            report: ilium_core::ProgressTaskReport {
+                job_id: format!("job-{monitor_id}"),
+                status,
+                percent: 50.0,
+                message: String::new(),
+                details: String::new(),
+                error: None,
+                eta_seconds: None,
+            },
+            monitor_health,
+            last_observed_unix_millis: 0,
+            timing: Default::default(),
+            attention: Default::default(),
+        };
+        let failed = ilium_core::ProgressMonitorHealth::Failed {
+            consecutive_failures: 3,
+            last_error: "probe exited 1".to_string(),
+        };
+        let monitors = vec![
+            progress(
+                1,
+                ilium_core::ProgressTaskStatus::Running,
+                ilium_core::ProgressMonitorHealth::Healthy,
+            ),
+            progress(
+                2,
+                ilium_core::ProgressTaskStatus::NotStartedYet,
+                ilium_core::ProgressMonitorHealth::Healthy,
+            ),
+            progress(
+                3,
+                ilium_core::ProgressTaskStatus::Done,
+                ilium_core::ProgressMonitorHealth::Healthy,
+            ),
+            progress(
+                4,
+                ilium_core::ProgressTaskStatus::Error,
+                ilium_core::ProgressMonitorHealth::Healthy,
+            ),
+            progress(5, ilium_core::ProgressTaskStatus::Running, failed),
+        ];
+        assert!(super::is_running_monitor(&monitors, 1));
+        assert!(super::is_running_monitor(&monitors, 2));
+        assert!(!super::is_running_monitor(&monitors, 3));
+        assert!(!super::is_running_monitor(&monitors, 4));
+        assert!(!super::is_running_monitor(&monitors, 5));
+        assert!(!super::is_running_monitor(&monitors, 6));
     }
 
     #[test]

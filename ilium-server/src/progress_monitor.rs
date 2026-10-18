@@ -251,8 +251,10 @@ pub fn spawn(
                         };
                     consecutive_failures = 0;
                     previous_status = report.status;
+                    let previous = latest;
                     latest = PaneProgress::new(registration.monitor_id, report, unix_millis())
                         .expect("validated report and ID form valid progress");
+                    latest.carry_timing_from(&previous);
                     if !publish_progress(&state, registration.pane_id, &fence, &latest).await {
                         return if fence.is_current() {
                             ProgressMonitorOutcome::PaneUnavailable
@@ -294,6 +296,7 @@ async fn record_observation_failure(
     if !fence.is_current() {
         return Some(ProgressMonitorOutcome::Cleared);
     }
+    latest.timing.record_failed_check(unix_millis());
     *consecutive_failures = consecutive_failures.saturating_add(1);
     let last_error = bounded_monitor_error(&error.message);
     latest.monitor_health = if *consecutive_failures >= MAXIMUM_CONSECUTIVE_OBSERVATION_FAILURES {
@@ -403,6 +406,9 @@ struct RawProgressReport {
     details: String,
     #[serde(default)]
     error: Option<String>,
+    /// Optional probe-side estimate of the seconds still needed.
+    #[serde(default)]
+    eta_seconds: Option<u64>,
 }
 
 async fn run_probe(
@@ -562,6 +568,7 @@ async fn run_probe(
         raw.details,
         raw.error,
     )
+    .and_then(|report| report.with_eta_seconds(raw.eta_seconds))
     .map_err(|error| {
         probe_error(
             ProgressProbeFailureKind::InvalidReport,
@@ -781,6 +788,40 @@ pub(crate) mod test_probes {
 mod tests {
     use super::*;
 
+    #[test]
+    fn restored_progress_preserves_checks_and_last_successful_data() {
+        let report = ProgressTaskReport::new(
+            "restore-checks".into(),
+            ProgressTaskStatus::Running,
+            20.0,
+            "Compiling".into(),
+            "step: linking".into(),
+            None,
+        )
+        .unwrap();
+        let mut previous = PaneProgress::new(1, report.clone(), 100).unwrap();
+        previous.timing.record_failed_check(200);
+        let encoded = serde_json::to_string(&previous).unwrap();
+        let restored: PaneProgress = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(restored.report, report);
+        assert_eq!(restored.last_observed_unix_millis, 100);
+        assert_eq!(restored.timing.checks, previous.timing.checks);
+        let mut next = PaneProgress::new(1, report, 300).unwrap();
+        next.carry_timing_from(&restored);
+        assert_eq!(next.timing.checks.len(), 3);
+        assert_eq!(
+            next.timing.checks[1].outcome,
+            ilium_core::ProgressCheckOutcome::Failed
+        );
+        assert_eq!(next.timing.last_progress_unix_millis, Some(100));
+
+        let mut legacy = serde_json::to_value(&previous).unwrap();
+        legacy["timing"].as_object_mut().unwrap().remove("checks");
+        let restored: PaneProgress = serde_json::from_value(legacy).unwrap();
+        assert!(restored.timing.checks.is_empty());
+        assert!(restored.validate().is_ok());
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn preflight_timestamps_successful_observation_after_probe_execution() {
@@ -844,6 +885,23 @@ mod tests {
     }
 
     #[cfg(unix)]
+    #[tokio::test]
+    async fn probe_carries_an_optional_eta_in_seconds() {
+        let with_eta =
+            r#"{"job_id":"job","status":"running","percent":40,"message":"m","eta_seconds":300}"#;
+        let parsed = preflight(&test_probes::emit_text(with_eta)).await.unwrap();
+        assert_eq!(parsed.report.eta_seconds, Some(300));
+        let without = r#"{"job_id":"job","status":"running","percent":40,"message":"m"}"#;
+        assert_eq!(
+            preflight(&test_probes::emit_text(without))
+                .await
+                .unwrap()
+                .report
+                .eta_seconds,
+            None
+        );
+    }
+
     #[tokio::test]
     async fn probe_carries_multi_line_details_alongside_the_compact_message() {
         let json = r#"{"job_id":"job","status":"running","percent":40,"message":"Building the app - crate 4 of 10","details":"What: build\nWhy: release"}"#;

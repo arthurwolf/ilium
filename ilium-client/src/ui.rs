@@ -153,6 +153,14 @@ pub(crate) fn draw_at_with_cursor(
     skip_vs16_continuation_cells(frame.buffer_mut(), layout.tree_area);
     if app.onboarding.is_none() && app.draw_plugin_permission_review(frame) {
         app.animation_frame.discard_composed_receipt();
+        if let Some(view) = &mut app.diagnostic_view {
+            crate::diagnostic::render(frame, view);
+        }
+        return None;
+    }
+    if let Some(view) = &mut app.diagnostic_view {
+        crate::diagnostic::render(frame, view);
+        app.animation_frame.discard_composed_receipt();
         return None;
     }
     cursor
@@ -236,7 +244,18 @@ fn draw_smart_copy_preview(frame: &mut Frame, area: Rect, app: &App) {
         height,
     );
     frame.render_widget(Clear, dialog);
-    let block = theme::block(true).title(theme::chrome_title("Preview"));
+    let chrome = theme::chrome_title("Preview");
+    // At the supported twelve-cell minimum, the title and decorative chrome
+    // cannot both fit. Keep the identifying label first; retain the ordinary
+    // UTF-8 chrome after it, where the border renderer can clip decoration.
+    let title = if chrome.width() > usize::from(dialog.width.saturating_sub(2)) {
+        let mut title = Line::from(" Preview ");
+        title.spans.extend(theme::chrome_title("").spans);
+        title
+    } else {
+        chrome
+    };
+    let block = theme::block(true).title(title);
     let inner = block.inner(dialog);
     frame.render_widget(block, dialog);
     if inner.height < 2 {
@@ -410,8 +429,15 @@ fn draw_progress_tooltip(frame: &mut Frame, app: &App) {
     let Some(progress) = app.progress_monitor_at(pane_id, progress_area, anchor) else {
         return;
     };
-    let content = crate::progress_bar::details_tooltip(progress);
-    crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, &content);
+    let owner = app.progress_owner_label(pane_id);
+    crate::progress_popover::render(
+        frame,
+        app.layout.screen_area,
+        anchor,
+        progress,
+        app.progress_display_now_unix_millis(),
+        owner.as_deref(),
+    );
 }
 
 fn draw_goal_resume_tooltip(frame: &mut Frame, app: &App) {
@@ -429,6 +455,7 @@ fn draw_goal_resume_tooltip(frame: &mut Frame, app: &App) {
     crate::status_icons::render_tooltip(frame, app.layout.screen_area, anchor, &content);
 }
 
+#[cfg_attr(not(test), allow(clippy::needless_return))] // The return guards the test-only fallback below.
 fn draw_worktree_tooltip(frame: &mut Frame, app: &App) {
     let Some(hit) = app.hovered_tree_node.filter(|hit| hit.line == 1) else {
         return;
@@ -459,6 +486,7 @@ fn draw_worktree_tooltip(frame: &mut Frame, app: &App) {
 /// Explains the tree-row state glyph under the pointer. The slot's signal is
 /// retained with the actually emitted row; newer server evidence cannot
 /// change its explanation until that row's next frame is acknowledged.
+#[cfg_attr(not(test), allow(clippy::needless_return))] // The return guards the test-only fallback below.
 fn draw_status_tooltip(frame: &mut Frame, app: &App) {
     let Some((node_id, slot, anchor)) = app.hovered_status_slot else {
         return;
@@ -484,6 +512,11 @@ fn status_tooltip_content(
         identity_explanation, now_explanation, objective_explanation, StatusSlot,
     };
 
+    if slot == StatusSlot::Now {
+        if let Some(error) = app.blocking_error_tooltip(node_id) {
+            return Some(error);
+        }
+    }
     let node = app.tree.get(node_id)?;
     if slot == StatusSlot::Identity {
         let structural = match &node.kind {
@@ -538,6 +571,23 @@ fn status_tooltip_content(
     // The tree row shows one glyph for all of the pane's monitors; explain
     // the monitor that glyph represents.
     let progress = ilium_core::representative_progress(progress_monitors);
+    if slot == StatusSlot::Now {
+        if let Some(warning) = crate::status_icons::detection_freshness_warning(
+            status,
+            app.pane_detection_evidence.get(&node_id),
+            crate::scheduled_input::unix_millis_now(),
+        ) {
+            let last_activity = now_explanation(signals.now).map_or(
+                "Not shown by the current monitoring preference",
+                |explanation| explanation.title,
+            );
+            return Some(crate::status_icons::TooltipContent {
+                title: "Agent activity needs a fresh check".to_string(),
+                body: format!("{warning} Last known activity: {last_activity}."),
+                reason: Some("Why: observation freshness affects only this display; the server's activity, goal and unread completion are retained.".to_string()),
+            });
+        }
+    }
     let explanation = match slot {
         StatusSlot::Identity => Some(identity_explanation(status)),
         StatusSlot::Objective => objective_explanation(signals.objective),
@@ -745,6 +795,8 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) -> Option<Posit
     let focused_pane_id = app.focused_pane_id();
     let tree_order = app.effective_tree_order();
     let agent_models = app.current_tree_models();
+    // Read before `render` takes `&mut app.tree_state`; the hover state only needs the mask.
+    let pending_toolbar = app.pending_toolbar_mask();
     let mut painted_rows = tree_ui::render(
         frame,
         layout.tree_area,
@@ -762,6 +814,7 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) -> Option<Posit
             },
             terminal_activity_elapsed_ms: app.started_at.elapsed().as_millis(),
             current_unix_millis: crate::scheduled_input::unix_millis_now(),
+            detection_evidence: Some(&app.pane_detection_evidence),
             project_name: app.project_name.as_deref(),
             project_icon: app.project_icon.as_deref(),
             is_project_name_loading: app.is_project_name_loading,
@@ -790,6 +843,7 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) -> Option<Posit
                 node: app.hovered_tree_node,
                 toolbar_hovered: app.tree_toolbar_hovered,
                 toolbar_action: app.hovered_tree_toolbar_action,
+                pending_toolbar,
                 show_management_actions: app.ui_settings.show_tree_row_management_controls,
             },
             sidebar_files: &app.sidebar_snapshot,
@@ -830,6 +884,11 @@ fn draw_base_layer(frame: &mut Frame, area: Rect, app: &mut App) -> Option<Posit
         })
         .collect();
     painted_rows.retain_values(values);
+    let blocked = painted_rows
+        .node_ids()
+        .filter(|node_id| app.blocking_error_tooltip(*node_id).is_some())
+        .collect();
+    painted_rows.paint_blocking_errors(frame, &blocked);
     app.record_composed_tree_rows(painted_rows);
     draw_cost_card(frame, app);
     draw_status_bar(frame, layout.status_area, app);
@@ -2482,6 +2541,26 @@ fn draw_screen_transfer_controls(frame: &mut Frame, app: &App) {
     }
 }
 
+fn blocking_terminal_error(error: &crate::status_icons::TooltipContent) -> String {
+    match error.reason.as_deref() {
+        Some(reason) => format!("{}\n{reason}", error.body),
+        None => error.body.clone(),
+    }
+}
+
+fn initial_terminal_error(
+    term: &terminal_view::TerminalView,
+    blocking_error: Option<&crate::status_icons::TooltipContent>,
+) -> Option<String> {
+    if let Some(error) = blocking_error {
+        return Some(blocking_terminal_error(error));
+    }
+    term.admission_error.clone().or_else(|| {
+        (term.frontend.is_some() && !term.has_initial_display())
+            .then(|| "waiting for initial terminal state".to_string())
+    })
+}
+
 fn draw_pane_runtime(
     frame: &mut Frame,
     app: &App,
@@ -2493,10 +2572,16 @@ fn draw_pane_runtime(
     let pane_title = pane_title(app, viewport.pane_id);
     let completed_agent_close_action = app.completed_agent_close_action(viewport);
     let Some(runtime) = app.panes.get(&viewport.pane_id) else {
+        let blocking_error = app
+            .blocking_error_tooltip(viewport.pane_id)
+            .map(|error| blocking_terminal_error(&error));
         let placeholder = Paragraph::new(
-            app.editor_load_error(viewport.pane_id)
+            blocking_error
+                .as_deref()
+                .or_else(|| app.editor_load_error(viewport.pane_id))
                 .unwrap_or("pane is loading"),
         )
+        .wrap(ratatui::widgets::Wrap { trim: true })
         .block(theme::block(pane_focused).title(theme::chrome_title(&pane_title)));
         frame.render_widget(placeholder, viewport.outer_area);
         if let Some(action) = completed_agent_close_action {
@@ -2559,11 +2644,11 @@ fn draw_pane_runtime(
                 });
             } else {
                 term.render_screen(terminal_area, frame.buffer_mut());
-                let display_error = term.admission_error.as_deref().or_else(|| {
-                    (term.frontend.is_some() && !term.has_initial_display())
-                        .then_some("waiting for initial terminal state")
-                });
-                if let Some(error) = display_error {
+                let blocking_error = (!term.has_initial_display())
+                    .then(|| app.blocking_error_tooltip(viewport.pane_id))
+                    .flatten();
+                let display_error = initial_terminal_error(term, blocking_error.as_ref());
+                if let Some(error) = display_error.as_deref() {
                     use crate::terminal_parsing::ParserPressure;
 
                     let message = match term.parser_pressure() {
@@ -2743,6 +2828,10 @@ fn draw_pane_runtime(
         }
     }
 
+    if matches!(runtime, PaneRuntime::Terminal(_)) {
+        draw_section_rules(frame, app, viewport, pane_focused);
+    }
+
     if let Some(last_prompt_area) = viewport.last_prompt_area {
         if matches!(runtime, PaneRuntime::Terminal(_))
             && app.shows_last_prompt_banner(viewport.pane_id)
@@ -2767,12 +2856,48 @@ fn draw_pane_runtime(
                 &app.visible_progress_monitors(viewport.pane_id),
                 app.ui_settings.progress_max_lines.into(),
                 app.ui_settings.color_scheme,
+                app.progress_display_now_unix_millis(),
             );
         }
     }
 
     if let Some(action) = completed_agent_close_action {
         draw_completed_agent_close_action(frame, action.button_area);
+    }
+}
+
+/// Frame rules around the toolbar, prompt banner and progress footer. Each
+/// rule is drawn only when its section has something to show; an empty
+/// reserved slot stays blank, exactly as it did before frames existed.
+fn draw_section_rules(
+    frame: &mut Frame,
+    app: &App,
+    viewport: crate::split_layout::PaneViewport,
+    focused: bool,
+) {
+    let pane_id = viewport.pane_id;
+    let prompt_shown = app.shows_last_prompt_banner(pane_id);
+    if let Some(rule) = viewport.toolbar_rule {
+        if app.shows_agent_toolbar(pane_id) {
+            let title = prompt_shown.then_some("\u{276f} last prompt");
+            crate::section_frame::render_rule(frame, rule, title, focused);
+        }
+    }
+    if let Some(rule) = viewport.last_prompt_bottom_rule {
+        if prompt_shown {
+            crate::section_frame::render_rule(frame, rule, None, focused);
+        }
+    }
+    if let Some(rule) = viewport.progress_rule {
+        let monitors = app.visible_progress_monitors(pane_id).len();
+        if monitors > 0 {
+            let title = if monitors == 1 {
+                "progress".to_string()
+            } else {
+                format!("progress \u{b7} {monitors} tasks")
+            };
+            crate::section_frame::render_rule(frame, rule, Some(&title), focused);
+        }
     }
 }
 
@@ -3030,12 +3155,11 @@ fn draw_editor(frame: &mut Frame, area: Rect, editor: &EditorPane) {
                 draw_source_scrollbar(frame, chrome.scrollbar_area, editor);
             } else {
                 frame.render_widget(
-                    Paragraph::new(
-                        editor
-                            .preparation_error
-                            .as_deref()
-                            .unwrap_or("Preparing source…"),
-                    ),
+                    Paragraph::new(editor.preparation_error.as_deref().map_or_else(
+                        || "Preparing source…".to_owned(),
+                        |error| format!("F9 details · {error}"),
+                    ))
+                    .wrap(ratatui::widgets::Wrap { trim: false }),
                     chrome.content_area,
                 );
             }
@@ -3059,7 +3183,11 @@ fn draw_editor(frame: &mut Frame, area: Rect, editor: &EditorPane) {
             }
             None => {
                 frame.render_widget(
-                    Paragraph::new(editor.preparation_error.as_deref().unwrap_or("Rendering…")),
+                    Paragraph::new(editor.preparation_error.as_deref().map_or_else(
+                        || "Rendering…".to_owned(),
+                        |error| format!("F9 details · {error}"),
+                    ))
+                    .wrap(ratatui::widgets::Wrap { trim: false }),
                     chrome.content_area,
                 );
             }
@@ -3297,15 +3425,26 @@ fn draw_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         spans.push(Span::raw("  —  "));
         spans.push(Span::raw(status));
     }
+    if let Some(activity) = app.pending_menu_activity_text(std::time::Instant::now()) {
+        spans.push(Span::raw("  —  "));
+        spans.push(Span::styled(
+            activity,
+            bar_style.add_modifier(Modifier::BOLD),
+        ));
+    }
+    if let Some(notice) = app.request_refusal_notice(std::time::Instant::now()) {
+        spans.push(Span::raw("  —  "));
+        spans.push(Span::styled(notice, bar_style.add_modifier(Modifier::BOLD)));
+    }
     if let Some(message) = &app.status_message {
         spans.push(Span::raw("  —  "));
         // Borrow rather than `message.clone()` -- `app` outlives this
         // function's local `spans`, so there is no need to allocate a new
         // `String` copy of the status message on every render frame.
-        spans.push(Span::raw(message.as_str()));
+        spans.push(Span::raw(format!("F9 details · {message}")));
     } else if let Some(error) = app.semantic_animation_error() {
         spans.push(Span::raw("  —  "));
-        spans.push(Span::raw(error));
+        spans.push(Span::raw(format!("F9 details · {error}")));
     }
 
     let cap_style = theme::statusbar_cap_style();
@@ -3574,6 +3713,25 @@ mod tests {
     use std::path::PathBuf;
 
     #[test]
+    fn terminal_placeholder_prioritizes_concrete_blocking_failure() {
+        let mut term = TerminalView::new(24, 80);
+        term.admission_error = Some("parser allocation unavailable".into());
+        let error = crate::status_icons::TooltipContent {
+            title: "Cannot start terminal".into(),
+            body: "villainess-study: start agent: git exited 128".into(),
+            reason: Some("fatal: malformed gitfile\nFix the repository metadata".into()),
+        };
+        let placeholder = initial_terminal_error(&term, Some(&error)).unwrap();
+        assert!(placeholder.contains("git exited 128"));
+        assert!(placeholder.contains("fatal: malformed gitfile"));
+        assert!(!placeholder.contains("waiting for initial terminal state"));
+        assert_eq!(
+            initial_terminal_error(&term, None).as_deref(),
+            Some("parser allocation unavailable")
+        );
+    }
+
+    #[test]
     fn status_tooltip_values_advance_only_after_the_original_row_is_emitted() {
         let mut app = App::new("painted-tooltip".into(), std::env::temp_dir());
         let group = app.tree.add_group(ROOT_ID, "work").unwrap();
@@ -3638,16 +3796,37 @@ mod tests {
             .tree
             .add_pane(group, "waiting agent", PaneContentKind::Terminal)
             .unwrap();
-        app.tree
-            .set_pane_status(
-                pane_id,
-                PaneStatus::from_activity(
-                    AgentClass::Codex,
-                    AgentActivity::WaitingApproval,
-                    Some(GoalState::Blocked),
-                ),
-            )
-            .unwrap();
+        let status = PaneStatus::from_activity(
+            AgentClass::Codex,
+            AgentActivity::WaitingApproval,
+            Some(GoalState::Blocked),
+        );
+        app.tree.set_pane_status(pane_id, status.clone()).unwrap();
+        // This test exercises the fresh approval projection; unchecked agents
+        // intentionally display a freshness warning instead of live approval.
+        app.pane_detection_evidence.insert(
+            pane_id,
+            ilium_ipc::PaneDetectionEvidence {
+                applied_status: status,
+                observed_at_unix_millis: crate::scheduled_input::unix_millis_now(),
+                stale_after_millis: 30_000,
+                identity: None,
+                activity: Some(ilium_ipc::DetectionReason {
+                    rule: "approval prompt".to_string(),
+                    observed: Some(
+                        include_str!(
+                            "../../ilium-detect/tests/fixtures/codex_awaiting_approval.txt"
+                        )
+                        .lines()
+                        .next()
+                        .unwrap()
+                        .to_string(),
+                    ),
+                    context: "Captured Codex approval fixture".to_string(),
+                }),
+                goal: None,
+            },
+        );
         app.ui_settings.agent_monitoring_mode =
             crate::agent_monitoring::AgentMonitoringMode::Attention;
         app.set_screen_area(Rect::new(0, 0, 100, 24));
@@ -3692,7 +3871,12 @@ mod tests {
         let rendered = rendered.split_whitespace().collect::<Vec<_>>().join(" ");
         assert!(rendered.contains("Needs your approval"));
         assert!(rendered.contains("Attention selection rule:"));
-        assert!(rendered.contains("Attention priority 1:"));
+        // Terminal wrapping can split a word inside the provenance text.
+        let unwrapped: String = rendered
+            .chars()
+            .filter(|ch| !ch.is_whitespace() && *ch != '│')
+            .collect();
+        assert!(unwrapped.contains("Attentionpriority1:"), "{rendered}");
     }
 
     #[test]

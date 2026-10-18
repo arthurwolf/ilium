@@ -1731,13 +1731,10 @@ fn fluid_pixels(
         .collect()
 }
 
+// Length is MAX_TRANSLUCENT_LAYERS (12) + 1; the constant is private to surface_raster.
 fn pixel_signature(
     pixel: &PixelResult,
-) -> (
-    LinearRgba,
-    Option<FaceOwner>,
-    [Option<FaceOwner>; MAX_TRANSLUCENT_LAYERS as usize + 1],
-) {
+) -> (LinearRgba, Option<FaceOwner>, [Option<FaceOwner>; 13]) {
     (pixel.color, pixel.front_owner, pixel.contributors)
 }
 

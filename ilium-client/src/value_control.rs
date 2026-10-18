@@ -135,9 +135,7 @@ impl ValueControl {
         let geometry = &mut prepared.geometry;
         geometry.label = Rect::new(row.x, row.y, label_width, 1);
         prepared.label_text = clip_cells(spec.label, label_width);
-        let number_needs_compact_layout =
-            spec.kind == ControlKind::Number && control_width < 2 * step_width + 4;
-        if control_width < 2 * step_width + 2 || number_needs_compact_layout {
+        if control_width < 2 * step_width + 2 {
             geometry.open = Rect::new(control_x + control_width - 1, row.y, 1, 1);
             geometry.value_slot = Rect::new(control_x, row.y, control_width - 1, 1);
         } else {
@@ -475,6 +473,27 @@ mod tests {
     }
 
     #[test]
+    fn four_cells_keep_each_numeric_action_distinct() {
+        let control = ValueControl::new(Rect::new(0, 0, 4, 1), spec(ControlKind::Number, "7"));
+        let mut terminal = Terminal::new(TestBackend::new(4, 1)).unwrap();
+        terminal
+            .draw(|frame| control.render(frame, ControlStyles::default()))
+            .unwrap();
+        for (x, glyph, action) in [
+            (0, NUMBER_DECREMENT_GLYPH, ControlAction::Decrement),
+            (1, "7", ControlAction::EditNumber),
+            (2, NUMBER_INCREMENT_GLYPH, ControlAction::Increment),
+            (3, "*", ControlAction::EditNumber),
+        ] {
+            assert_eq!(terminal.backend().buffer()[(x, 0)].symbol(), glyph);
+            assert_eq!(
+                control.hit(Position::new(x, 0), PointerButton::Left),
+                Some(action)
+            );
+        }
+    }
+
+    #[test]
     fn five_cells_keep_all_numeric_controls_visible() {
         let control = ValueControl::new(Rect::new(0, 0, 5, 1), spec(ControlKind::Number, "7"));
         let geometry = control.geometry();
@@ -632,7 +651,7 @@ mod tests {
                     "width {width}"
                 );
             }
-            if width < 6 {
+            if width < 4 {
                 assert_eq!(geometry.previous.width, 0, "width {width}");
                 assert_eq!(geometry.next.width, 0, "width {width}");
             } else {

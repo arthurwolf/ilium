@@ -208,6 +208,9 @@ fn stepped_optional_device(
 /// this only ever trims genuinely abandoned entries, never a live request.
 const MAX_PENDING_EDITOR_OPENS: usize = 64;
 
+/// How long a successful footer-popover repository check is reused.
+const POPOVER_REPO_OK_TTL: Duration = Duration::from_secs(30);
+
 /// Which side of the UI currently has keyboard focus.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FocusTarget {
@@ -268,6 +271,7 @@ pub struct ChatroomViewState {
 
 /// The input-handling mode. Most keys are dispatched differently
 /// depending on this; see `crate::keys`.
+#[allow(clippy::large_enum_variant)] // One long-lived Mode lives on App; boxing Settings adds a heap hop to every key dispatch.
 pub enum Mode {
     Normal,
     LeaderPending,
@@ -467,6 +471,8 @@ pub enum SettingsTab {
     TextTriggers,
     Icons,
     Appearance,
+    /// Panel padding modes and fine-tuning.
+    Padding,
     Animations,
     Terminal,
     Editor,
@@ -647,8 +653,9 @@ impl InferenceTestState {
 
 impl SettingsTab {
     /// Every tab, in the order the tab list renders them.
-    pub const ALL: [SettingsTab; 25] = [
+    pub const ALL: [SettingsTab; 26] = [
         Self::Appearance,
+        Self::Padding,
         Self::Icons,
         Self::AgentMonitoring,
         Self::Cost,
@@ -685,6 +692,7 @@ impl SettingsTab {
             Self::TextTriggers => "Text Triggers",
             Self::Icons => "Icons",
             Self::Appearance => "User Interface",
+            Self::Padding => "Padding",
             Self::Animations => "Animations",
             Self::Terminal => "Terminal",
             Self::Editor => "Editor",
@@ -748,6 +756,7 @@ pub enum AppearanceRow {
     ContextMenuIcons,
     AgentToolbar,
     ShowToolbarLabels,
+    SectionFrames,
     LastPrompt,
     LastPromptMaxLines,
     ProgressMonitor,
@@ -765,7 +774,7 @@ pub enum AppearanceRow {
 }
 
 impl AppearanceRow {
-    const GENERAL: [AppearanceRow; 24] = [
+    const GENERAL: [AppearanceRow; 25] = [
         Self::TreeOrder,
         Self::ProjectSeparators,
         Self::TreeRowManagementControls,
@@ -779,6 +788,7 @@ impl AppearanceRow {
         Self::ContextMenuIcons,
         Self::AgentToolbar,
         Self::ShowToolbarLabels,
+        Self::SectionFrames,
         Self::LastPrompt,
         Self::LastPromptMaxLines,
         Self::TerminalTextSelection,
@@ -1120,6 +1130,8 @@ pub struct SettingsState {
     /// keyboard. It is separate from `selected_row`: a picker may be opened
     /// from a scrolled table row without changing table navigation.
     pub keyboard_picker: Option<Action>,
+    /// Hover, threshold editing and the fine-tuning dialog of the Padding tab.
+    pub padding: crate::padding_ui::PaddingUiState,
     /// Horizontal chip cursor in the selected Triggers event. Zero is None;
     /// later positions follow that event's available action registry.
     pub trigger_action_cursor: usize,
@@ -1246,6 +1258,7 @@ impl SettingsState {
             icons_preview_real: false,
             icon_picker: None,
             keyboard_picker: None,
+            padding: crate::padding_ui::PaddingUiState::default(),
             trigger_action_cursor: 0,
         }
     }
@@ -2033,6 +2046,8 @@ pub(crate) struct FrozenDialogLayout {
 }
 
 pub(crate) const FROZEN_DIALOG_BUTTON_LABEL: &str = "      [ Unfreeze agent ]      ";
+/// Shown while an unfreeze replacement is in flight; cleared once the replacement pane takes its tree slot.
+pub(crate) const UNFREEZING_AGENT_STATUS: &str = "Unfreezing agent…";
 
 pub struct App {
     /// The session this client is attached to (used to resolve the UDS
@@ -2077,6 +2092,8 @@ pub struct App {
     antigravity_statusline_generation: u64,
     antigravity_disable_pending_generation: Option<u64>,
     pub(crate) outbound_admission: Option<ilium_execution::Client>,
+    #[cfg(test)]
+    _test_request_execution: ilium_execution::Execution,
     pub(crate) location_search_client: Option<ilium_execution::Client>,
     pending_input_retention: Option<ilium_execution::Retention>,
     pub tree_state: TreeState<NodeId>,
@@ -2107,6 +2124,8 @@ pub struct App {
     /// `None` keeps rendering; the concrete reason controls whether the CLI
     /// exits normally or re-execs a fresh client binary afterward.
     pub exit_reason: Option<ClientExitReason>,
+    /// The sole release allowed to finish an already accepted Restart click.
+    pub(crate) exit_click_release: Option<crossterm::event::MouseEvent>,
     /// Stable reference for purely visual animations in the tree.
     pub started_at: Instant,
     pub animation_settings: crate::background_animation::AnimationSettings,
@@ -2171,6 +2190,8 @@ pub struct App {
     pub keybindings: Vec<KeyBinding>,
     /// Live card-preview settings shared by every board pane in this client.
     pub kanban_board_settings: KanbanBoardSettings,
+    /// Panel padding (see [`crate::padding`]).
+    pub padding_settings: crate::padding::PaddingSettings,
     /// Live user-global sound choices and the catalogue discovered once on
     /// the shared I/O bank before the interactive loop starts.
     pub sound_settings: ilium_sound::SoundSettings,
@@ -2325,6 +2346,20 @@ pub struct App {
     pub(crate) statistics_diagnostic: Option<String>,
     pub tree_toolbar_hovered: bool,
     pub hovered_tree_toolbar_action: Option<TreeToolbarAction>,
+    /// Toolbar buttons whose click was accepted but whose server-side work
+    /// (spawning a pane, creating a worktree) has not been confirmed yet.
+    /// The button shows a spinner meanwhile so a slow creation is visible.
+    pending_toolbar_actions: Vec<(TreeToolbarAction, Instant, Option<usize>)>,
+    pub(crate) pending_pane_creations: HashMap<u64, crate::blocking_errors::PendingPaneCreation>,
+    pub blocking_errors: HashMap<NodeId, Vec<ilium_ipc::BlockingError>>,
+    pub(crate) local_blocking_errors: HashMap<NodeId, Vec<ilium_ipc::BlockingError>>,
+    /// Menu actions (close, move, rename, ...) waiting for the server: label,
+    /// start, and the `tree_version` seen when the request was admitted.
+    pending_menu_actions: Vec<(&'static str, Instant, u64, Duration)>,
+    /// When the last request was refused for lack of admission credit; the
+    /// status bar keeps a notice visible for a few seconds because hover
+    /// messages overwrite `status_message` almost immediately.
+    request_refusal_at: Option<Instant>,
     /// The footer agent icon's hover or pinned worktree actions.
     pub agent_popover: Option<AgentPopover>,
     agent_popover_last_visible: bool,
@@ -2336,6 +2371,10 @@ pub struct App {
     active_workspace_dialog_query: Option<(u64, NodeId)>,
     active_workspace_menu_query: Option<(u64, NodeId)>,
     active_workspace_popover_query: Option<(u64, NodeId)>,
+    /// Project whose repository check last succeeded for a footer popover, and
+    /// when. A hover within `POPOVER_REPO_OK_TTL` reuses it instead of queuing
+    /// another slow Git snapshot; creating a worktree still revalidates.
+    popover_repo_ok: Option<(NodeId, Instant)>,
     active_workspace_create_request_id: Option<u64>,
     /// Panes ever observed with a detected agent status. Once a pane's
     /// toolbar row is reserved it stays reserved for that pane's lifetime,
@@ -2356,6 +2395,7 @@ pub struct App {
     /// Set while Smart Copy light (no model call) owns [`Mode::SmartCopy`].
     pub smart_copy_light: Option<crate::smart_copy_light::SmartCopyLightState>,
     /// The "Preview" dialog shown for a second after a light selection is copied.
+    pub(crate) diagnostic_view: Option<crate::diagnostic::DiagnosticView>,
     pub smart_copy_preview: Option<crate::smart_copy_light::SmartCopyPreview>,
     pub(crate) light_copy_selection: Option<crate::smart_copy_selection::SelectionOwner>,
     pub(crate) light_copy_preview_generation: Option<u64>,
@@ -2742,6 +2782,8 @@ impl App {
     /// Does no host I/O, so it stays usable from tests without a terminal.
     pub fn new(session_name: String, session_cwd: PathBuf) -> Self {
         let started_at = Instant::now();
+        #[cfg(test)]
+        let (test_request_execution, test_request_client) = crate::execution::test_request_bank();
         Self {
             session_name,
             tree: Tree::new(),
@@ -2763,13 +2805,15 @@ impl App {
             outbound_admission: {
                 #[cfg(test)]
                 {
-                    Some(crate::execution::test_client())
+                    Some(test_request_client)
                 }
                 #[cfg(not(test))]
                 {
                     None
                 }
             },
+            #[cfg(test)]
+            _test_request_execution: test_request_execution,
             location_search_client: {
                 #[cfg(test)]
                 {
@@ -2799,6 +2843,7 @@ impl App {
             pending_terminal_link: None,
             pending_terminal_link_storage: None,
             exit_reason: None,
+            exit_click_release: None,
             started_at,
             animation_settings: Default::default(),
             committed_animation_settings: None,
@@ -2833,6 +2878,7 @@ impl App {
             keyboard_settings: KeyboardSettings::default(),
             keybindings: keymap::LEADER_BINDINGS.to_vec(),
             kanban_board_settings: KanbanBoardSettings::default(),
+            padding_settings: crate::padding::PaddingSettings::default(),
             sound_settings: ilium_sound::SoundSettings::default(),
             notification_settings: ilium_sound::NotificationSettings::default(),
             sound_discovery: ilium_sound::SoundDiscovery::default(),
@@ -2926,6 +2972,12 @@ impl App {
             statistics_diagnostic: None,
             tree_toolbar_hovered: false,
             hovered_tree_toolbar_action: None,
+            pending_toolbar_actions: Vec::new(),
+            pending_pane_creations: HashMap::new(),
+            blocking_errors: HashMap::new(),
+            local_blocking_errors: HashMap::new(),
+            pending_menu_actions: Vec::new(),
+            request_refusal_at: None,
             agent_popover: None,
             agent_popover_last_visible: false,
             animation_hover: None,
@@ -2934,12 +2986,14 @@ impl App {
             active_workspace_dialog_query: None,
             active_workspace_menu_query: None,
             active_workspace_popover_query: None,
+            popover_repo_ok: None,
             active_workspace_create_request_id: None,
             agent_toolbar_latched_panes: HashSet::new(),
             agent_toolbar_effort: HashMap::new(),
             hovered_agent_toolbar_action: None,
             smart_copy_session: None,
             smart_copy_light: None,
+            diagnostic_view: None,
             smart_copy_preview: None,
             light_copy_selection: None,
             light_copy_preview_generation: None,
@@ -3897,15 +3951,116 @@ impl App {
         )
     }
 
-    pub(crate) fn queue_request(&mut self, request: ClientRequest) -> bool {
+    pub(crate) fn queue_request(&mut self, mut request: ClientRequest) -> bool {
+        let creation = self.prepare_pane_creation(&mut request);
+        if let Some((request_id, pending)) = &creation {
+            if self.pending_pane_creations.len() >= 16 {
+                self.record_local_blocking_error(pending.parent_group, &format!("Create pane request {request_id}"), "Too many creations await confirmation; wait for their outcomes before retrying");
+                self.show_request_admission_error();
+                return false;
+            }
+        }
+        let menu_label = Self::slow_menu_request_label(&request);
         if self.try_queue_terminal_request(request).is_err() {
             self.show_request_admission_error();
+            if let Some((request_id, pending)) = creation {
+                self.record_local_blocking_error(
+                    pending.parent_group,
+                    &format!("Create pane request {request_id}"),
+                    "Request queue refused creation; retry when pending work completes",
+                );
+            }
             return false;
+        }
+        if let Some((request_id, pending)) = creation {
+            self.pending_pane_creations.insert(request_id, pending);
+        }
+        if let Some((label, cap)) = menu_label {
+            self.begin_pending_menu_action(label, cap);
         }
         true
     }
 
+    /// Requests behind menu entries that wait on the server and have no
+    /// toolbar button to spin; creation requests use the toolbar spinners.
+    pub(crate) fn slow_menu_request_label(
+        request: &ClientRequest,
+    ) -> Option<(&'static str, Duration)> {
+        // Tree-changing requests end on the next tree change; the others
+        // change no tree node, so a short cap ends them instead.
+        let tree_change = Self::PENDING_TOOLBAR_TIMEOUT;
+        let quick = Duration::from_secs(10);
+        Some(match request {
+            ClientRequest::ClosePane { .. }
+            | ClientRequest::ClosePaneWithWorkspaceDisposition { .. } => ("Closing", tree_change),
+            ClientRequest::MoveNode { .. } | ClientRequest::ReparentNode { .. } => {
+                ("Moving", tree_change)
+            }
+            ClientRequest::ReplacePaneWithCommand { .. } => ("Restarting pane", tree_change),
+            ClientRequest::ApplyRestructurePlan { .. }
+            | ClientRequest::ApplyProjectRestructurePlan { .. }
+            | ClientRequest::ApplyRecommendedProjectRestructurePlan { .. } => {
+                ("Applying restructure", tree_change)
+            }
+            ClientRequest::RevertLastRestructure
+            | ClientRequest::RevertProjectRestructure { .. } => {
+                ("Reverting restructure", tree_change)
+            }
+            ClientRequest::RenameNode { .. } => ("Renaming", tree_change),
+            ClientRequest::RemoveWorkspace { .. } => ("Removing worktree", tree_change),
+            ClientRequest::ChangeProjectFolder { .. } => ("Changing project folder", tree_change),
+            ClientRequest::PruneWorkspace { .. } => ("Cleaning worktree", quick),
+            ClientRequest::QueryWorkspaceInventory { .. } => ("Checking worktrees", quick),
+            ClientRequest::QueryWorkspaceCloseOffer { .. } => ("Checking worktree", quick),
+            ClientRequest::TerminatePaneProcess { .. } => ("Stopping process", quick),
+            ClientRequest::FreezePane { .. } => ("Freezing pane", quick),
+            ClientRequest::UnfreezePane { .. } => ("Resuming pane", quick),
+            _ => return None,
+        })
+    }
+
+    pub(crate) fn begin_pending_menu_action(&mut self, label: &'static str, cap: Duration) {
+        if self.pending_menu_actions.len() >= 16 {
+            self.pending_menu_actions.remove(0);
+        }
+        self.pending_menu_actions
+            .push((label, Instant::now(), self.tree_version, cap));
+    }
+
+    /// Status-line text for the oldest menu action still waiting after
+    /// 0.5 s; quicker actions never flash a spinner.
+    pub(crate) fn pending_menu_activity_text(&self, now: Instant) -> Option<String> {
+        let (label, started, _, _) = self.pending_menu_actions.first()?;
+        let elapsed = now.saturating_duration_since(*started);
+        if elapsed < Duration::from_millis(500) {
+            return None;
+        }
+        let frames = crate::tree_ui::SPINNER_FRAMES;
+        let frame =
+            (elapsed.as_millis() / crate::tree_ui::SPINNER_FRAME_MS) as usize % frames.len();
+        Some(format!("{} {label}…", frames[frame]))
+    }
+
+    /// Sticky notice for a refused request, shown for 8 s after the refusal.
+    pub(crate) fn request_refusal_notice(&self, now: Instant) -> Option<&'static str> {
+        let refused = self.request_refusal_at?;
+        (now.saturating_duration_since(refused) < Duration::from_secs(8))
+            .then_some("Last action was not sent: the UI is busy, try again")
+    }
+
+    /// Drops menu spinners once the tree changed or the wait timed out.
+    pub fn tick_pending_menu_actions(&mut self, now: Instant) -> bool {
+        let before = self.pending_menu_actions.len();
+        let version = self.tree_version;
+        self.pending_menu_actions
+            .retain(|(_, started, baseline, cap)| {
+                now.saturating_duration_since(*started) < *cap && *baseline == version
+            });
+        before != self.pending_menu_actions.len()
+    }
+
     fn show_request_admission_error(&mut self) {
+        self.request_refusal_at = Some(Instant::now());
         self.status_message = Some(
             "Request rejected before admission: bounded request/input credits are unavailable; retry after pending work completes"
                 .into(),
@@ -4460,7 +4615,7 @@ impl App {
                 }
                 // Reserve before interaction: metadata changes only redraw these slots.
                 let viewport = if self.ui_settings.agent_toolbar_enabled {
-                    viewport.with_agent_toolbar_reserved()
+                    viewport.with_agent_toolbar_reserved(self.ui_settings.section_frames_enabled)
                 } else {
                     viewport
                 };
@@ -4481,17 +4636,37 @@ impl App {
                             .height
                             .saturating_sub(1 + minimum_progress_rows),
                     );
-                    viewport.with_last_prompt_reserved(prompt_rows)
+                    viewport.with_last_prompt_reserved(
+                        prompt_rows,
+                        // Footer rows plus its frame rule stay available.
+                        if minimum_progress_rows > 0 {
+                            minimum_progress_rows + 1
+                        } else {
+                            0
+                        },
+                        self.ui_settings.section_frames_enabled,
+                    )
                 } else {
                     viewport
                 };
                 if self.ui_settings.progress_monitor_enabled {
-                    viewport.with_progress_reserved(crate::progress_bar::reserved_height(
-                        self.ui_settings.progress_max_lines.into(),
-                    ))
+                    viewport.with_progress_reserved(
+                        crate::progress_bar::reserved_height(
+                            self.ui_settings.progress_max_lines.into(),
+                        ),
+                        self.ui_settings.section_frames_enabled,
+                    )
                 } else {
                     viewport
                 }
+            })
+            .map(|mut viewport| {
+                // Padding applies last and only to the content itself: the
+                // toolbar, prompt banner, progress slots and frame rules were
+                // already carved out above and keep their full width.
+                let panel = self.padding_panel_for_pane(viewport.pane_id);
+                viewport.content_area = self.padding_for(panel).inset(viewport.content_area);
+                viewport
             })
             .collect()
     }
@@ -4578,17 +4753,49 @@ impl App {
         visible.get(index).copied()
     }
 
-    /// Hides expired result text without resizing or mutating retained data.
+    /// The clock the progress footer renders its relative times against.
+    pub(crate) fn progress_display_now_unix_millis(&self) -> u64 {
+        self.progress_display_now_unix_millis
+    }
+
+    /// Who owns the monitors on `pane_id`, for the progress popover: the
+    /// agent (or plain terminal) running in the pane and the pane's name.
+    pub(crate) fn progress_owner_label(&self, pane_id: NodeId) -> Option<String> {
+        let node = self.tree.get(pane_id)?;
+        let NodeKind::Pane { status, .. } = &node.kind else {
+            return None;
+        };
+        let who = match status.agent_state().map(|state| &state.class) {
+            Some(ilium_core::AgentClass::Claude) => "Claude Code".to_string(),
+            Some(ilium_core::AgentClass::Codex) => "Codex".to_string(),
+            Some(ilium_core::AgentClass::Antigravity) => "Antigravity".to_string(),
+            Some(ilium_core::AgentClass::Other(name)) => name.clone(),
+            None => "terminal".to_string(),
+        };
+        Some(format!("{who} in pane \"{}\"", node.name))
+    }
+
+    /// Advances the footer clock. Reports whether anything visible changed:
+    /// a footer appearing or expiring, or (at most once a second) the
+    /// relative times of a monitor that is still running.
     pub(crate) fn tick_completed_progress_display(&mut self, now_unix_millis: u64) -> bool {
         let previous = self
             .displayed_pane_ids()
             .into_iter()
             .map(|pane_id| (pane_id, self.shows_progress_footer(pane_id)))
             .collect::<Vec<_>>();
+        let second_changed = now_unix_millis / 1000 != self.progress_display_now_unix_millis / 1000;
         self.progress_display_now_unix_millis = now_unix_millis;
-        previous
-            .into_iter()
-            .any(|(pane_id, was_visible)| was_visible != self.shows_progress_footer(pane_id))
+        let visibility_changed = previous
+            .iter()
+            .any(|(pane_id, was_visible)| *was_visible != self.shows_progress_footer(*pane_id));
+        visibility_changed
+            || (second_changed
+                && previous.iter().any(|(pane_id, _)| {
+                    self.visible_progress_monitors(*pane_id)
+                        .iter()
+                        .any(|progress| !progress.is_terminal())
+                }))
     }
 
     /// The provider driving `pane_id`'s toolbar buttons right now, or `None`
@@ -4779,6 +4986,14 @@ impl App {
     }
 
     pub(crate) fn commit_emitted_geometry(&mut self, geometry: EmittedGeometry) -> bool {
+        // A late physical-output acknowledgement must not move pointer hit
+        // testing back to an older frame. Revisions are checked-add monotonic.
+        if self
+            .emitted_layout_revision()
+            .is_some_and(|revision| revision >= geometry.revision)
+        {
+            return false;
+        }
         // The card reads acknowledged sources. Request one replacement paint
         // when its source changes, including the first acknowledged tree.
         // Buffer-only acknowledgements must not create a redraw feedback loop.
@@ -5452,6 +5667,7 @@ impl App {
             return;
         }
         self.layout = layout;
+        self.sync_padding();
         self.resize_displayed_panes(resize_cause);
 
         // Markdown parsing and rasterization can be materially more
@@ -5490,6 +5706,7 @@ impl App {
     /// `crate::config::load`) and again by every settings-screen control
     /// that changes a value (see `apply_and_persist_ui_settings`).
     pub fn apply_ui_settings(&mut self, ui: UiSettings) {
+        crate::theme::set_section_frames_enabled(ui.section_frames_enabled);
         let model_icons_enabled = ui.agent_tree_model_icons;
         let model_icons_were_enabled = self.ui_settings.agent_tree_model_icons;
         if model_icons_enabled != model_icons_were_enabled {
@@ -6511,18 +6728,23 @@ impl App {
         target: crate::icon_settings::IconTarget,
         direction: i32,
     ) {
-        let choices = target.suggestions();
+        let choices = crate::icon_settings::all_picker_search_results();
         let current = self.ui_settings.icons.glyph(target);
-        let index = choices
-            .iter()
-            .position(|glyph| *glyph == current)
+        let index = (0..choices.entry_count)
+            .position(|index| {
+                choices
+                    .entry(index)
+                    .is_some_and(|entry| entry.glyph == current)
+            })
             .unwrap_or(0);
         let next = if direction < 0 {
-            (index + choices.len() - 1) % choices.len()
+            (index + choices.entry_count - 1) % choices.entry_count
         } else {
-            (index + 1) % choices.len()
+            (index + 1) % choices.entry_count
         };
-        self.settings_set_icon(target, choices[next].to_string());
+        if let Some(entry) = choices.entry(next) {
+            self.settings_set_icon(target, entry.glyph.to_string());
+        }
     }
 
     /// Applies a validated shortcut base immediately and persists it without
@@ -8977,7 +9199,6 @@ impl App {
                 let detail: String = error
                     .chars()
                     .filter(|character| !character.is_control())
-                    .take(512)
                     .collect();
                 model.issue_details.push(format!("Runtime: {detail}"));
                 if let Some(index) = model
@@ -9537,7 +9758,7 @@ impl App {
                 token: std::sync::Arc::clone(&token),
                 project_path: current,
                 candidate: picker.candidate.clone(),
-                _location_storage: Some(std::sync::Arc::clone(&storage)),
+                location_storage: Some(std::sync::Arc::clone(&storage)),
             };
             self.enqueue_animation_settings_with_storage(
                 settings,
@@ -9788,6 +10009,15 @@ impl App {
         let mut ui = self.ui_settings.clone();
         ui.show_toolbar_labels = !ui.show_toolbar_labels;
         self.apply_and_persist_ui_settings(ui);
+    }
+
+    /// Switches the frame rules around the toolbar, prompt banner and progress
+    /// footer. The rules occupy reserved rows, so the PTYs must be resized.
+    pub fn settings_toggle_section_frames(&mut self) {
+        let mut ui = self.ui_settings.clone();
+        ui.section_frames_enabled = !ui.section_frames_enabled;
+        self.apply_and_persist_ui_settings(ui);
+        self.resize_displayed_panes(PaneResizeCause::UserInterfaceSettings);
     }
 
     /// Switches the last-prompt banner on or off. Toggling it on or off
@@ -10090,7 +10320,7 @@ impl App {
         }
         true
     }
-    #[cfg(test)]
+    #[cfg(test)] // Production completes through collect_emitted_smart_copy_capture.
     fn complete_smart_copy_capture(
         &mut self,
         pane_id: NodeId,
@@ -10848,6 +11078,7 @@ impl App {
             AppearanceRow::ContextMenuIcons => self.settings_toggle_context_menu_icons(),
             AppearanceRow::AgentToolbar => self.settings_toggle_agent_toolbar(),
             AppearanceRow::ShowToolbarLabels => self.settings_toggle_toolbar_labels(),
+            AppearanceRow::SectionFrames => self.settings_toggle_section_frames(),
             AppearanceRow::LastPrompt => self.settings_toggle_last_prompt(),
             AppearanceRow::LastPromptMaxLines => {
                 self.settings_adjust_last_prompt_max_lines(direction)
@@ -11125,6 +11356,17 @@ impl App {
                     Duration::from_millis(100),
                 );
             }
+        }
+
+        if !self.pending_toolbar_actions.is_empty()
+            || !self.pending_menu_actions.is_empty()
+            || self.restructure_in_progress()
+        {
+            requirements.is_active = true;
+            retain_minimum_delay(
+                &mut requirements.next_semantic_delay,
+                Duration::from_millis(90),
+            );
         }
 
         if self.smart_copy_preview.is_some() {
@@ -11949,6 +12191,10 @@ impl App {
             return changed;
         };
         let displayed: Vec<NodeId> = self.displayed_pane_slots().into_iter().flatten().collect();
+        // Voice/control can target a valid terminal which has never been
+        // displayed. Its accepted FIFO still needs a parser to publish the
+        // ordered negotiated-mode barrier before terminal delivery.
+        let input_targets = self.terminal_input.pending_panes();
         let focused = self
             .focused_pane_id()
             .filter(|pane_id| displayed.contains(pane_id));
@@ -11960,7 +12206,7 @@ impl App {
         let mut engines_held = 0_usize;
         for (id, pane) in &mut self.panes {
             if let PaneRuntime::Terminal(view) = pane {
-                let is_wanted = displayed.contains(id);
+                let is_wanted = displayed.contains(id) || input_targets.contains(id);
                 if view.frontend.is_some() || is_wanted {
                     if let Err(error) = parsing.attach(*id, view) {
                         view.admission_error = Some(error);
@@ -12000,6 +12246,7 @@ impl App {
                 .iter()
                 .filter(|(id, pane)| {
                     !displayed.contains(id)
+                        && !input_targets.contains(id)
                         && matches!(pane, PaneRuntime::Terminal(view) if view.can_evict_parser())
                 })
                 .min_by_key(|(id, _)| {
@@ -12076,6 +12323,11 @@ impl App {
             .retain(|mode| !matches!(mode, Mode::TerminalPaneContextMenu(_) | Mode::SmartCopy));
     }
 
+    #[cfg(test)]
+    pub(crate) fn terminal_input_pending_count(&self) -> usize {
+        self.terminal_input.pending_count()
+    }
+
     pub(crate) fn terminal_pending_work(&self) -> (usize, usize, Option<(usize, usize)>) {
         let frontend = self
             .panes
@@ -12114,6 +12366,25 @@ impl App {
             self.status_message = Some(format!(
                 "Cancelled {cancelled} queued terminal inputs after confirmed pane removal/replacement"
             ));
+        }
+        if self.terminal_parsing.is_none() {
+            for (pane_id, identity) in self.terminal_input.needs_barriers() {
+                let Some(PaneRuntime::Terminal(view)) = self.panes.get(&pane_id) else {
+                    continue;
+                };
+                let modes = (
+                    view.wants_mouse_protocol(),
+                    view.wants_bracketed_paste(),
+                    0,
+                    0,
+                );
+                let Some(generation) = self.terminal_input.next_generation() else {
+                    continue;
+                };
+                self.terminal_input.barrier_started(pane_id, generation);
+                self.terminal_input
+                    .record_ready_barrier(pane_id, &identity, generation, modes);
+            }
         }
         let mut changed = cancelled != 0;
         for pane_id in self.terminal_input.ready_panes() {
@@ -12233,6 +12504,7 @@ impl App {
             InputIntent::AdmittedRequest(request) => {
                 self.queue_terminal_request_after_barrier(request)
             }
+            InputIntent::Key(key) => self.forward_terminal_key(pane_id, key),
             InputIntent::LinkProbe {
                 id,
                 request,
@@ -12692,16 +12964,140 @@ impl App {
         }
     }
 
+    /// Longest a toolbar spinner may show without a server confirmation.
+    const PENDING_TOOLBAR_TIMEOUT: Duration = Duration::from_secs(120);
+
+    pub(crate) fn begin_pending_toolbar_action(&mut self, action: TreeToolbarAction) {
+        if self
+            .pending_pane_creations
+            .values()
+            .any(|pending| pending.action == action)
+        {
+            return;
+        }
+        if self.pending_toolbar_actions.len() >= 16 {
+            self.pending_toolbar_actions.remove(0);
+        }
+        // Group/project/folder creation has no pane to match a confirmation
+        // to, so the spinner ends when the mirrored tree gains a node.
+        let baseline = matches!(
+            action,
+            TreeToolbarAction::Group
+                | TreeToolbarAction::Project
+                | TreeToolbarAction::Folder
+                | TreeToolbarAction::Board
+                | TreeToolbarAction::Editor
+                | TreeToolbarAction::Split
+        )
+        .then(|| self.tree.all_ids().count());
+        self.pending_toolbar_actions
+            .push((action, Instant::now(), baseline));
+    }
+
+    /// Ends the oldest pending spinner for `action` (one click, one spinner).
+    #[cfg(test)]
+    pub(crate) fn finish_pending_toolbar_action(&mut self, action: TreeToolbarAction) {
+        if let Some(index) = self
+            .pending_toolbar_actions
+            .iter()
+            .position(|(pending, _, _)| *pending == action)
+        {
+            self.pending_toolbar_actions.remove(index);
+        }
+    }
+
+    /// Ends the oldest pending shell or agent spinner: a confirmed new
+    /// terminal pane cannot be attributed to one button more precisely.
+    fn finish_oldest_pending_terminal_toolbar_action(&mut self) {
+        if let Some(index) = self
+            .pending_toolbar_actions
+            .iter()
+            .position(|(pending, _, _)| {
+                matches!(
+                    pending,
+                    TreeToolbarAction::Shell | TreeToolbarAction::Agent(_)
+                )
+            })
+        {
+            self.pending_toolbar_actions.remove(index);
+        }
+    }
+
+    fn clear_pending_workspace_toolbar_actions(&mut self) {
+        if let Some(index) = self
+            .pending_toolbar_actions
+            .iter()
+            .position(|(pending, _, _)| matches!(pending, TreeToolbarAction::Agent(_)))
+        {
+            self.pending_toolbar_actions.remove(index);
+        }
+    }
+
+    pub(crate) fn pending_toolbar_mask(&self) -> u16 {
+        let restructure_bit = if self.restructure_in_progress() {
+            TreeToolbarAction::Restructure.pending_bit()
+        } else {
+            0
+        };
+        let creation_mask = self
+            .pending_pane_creations
+            .values()
+            .filter(|pending| !pending.uncertainty_reported)
+            .fold(restructure_bit, |mask, pending| {
+                mask | pending.action.pending_bit()
+            });
+        self.pending_toolbar_actions
+            .iter()
+            .fold(creation_mask, |mask, (action, _, _)| {
+                mask | action.pending_bit()
+            })
+    }
+
+    /// True while any project restructure LLM job is queued, running or applying.
+    pub(crate) fn restructure_in_progress(&self) -> bool {
+        self.project_restructure_jobs.values().any(|job| {
+            matches!(
+                job.state,
+                ProjectRestructureState::Queued
+                    | ProjectRestructureState::Running
+                    | ProjectRestructureState::Applying
+            )
+        })
+    }
+
+    /// Drops spinners whose confirmation never arrived.
+    pub fn tick_pending_toolbar_actions(&mut self, now: Instant) -> bool {
+        let expired_creations = self.expire_pending_pane_creations(now);
+        let before = self.pending_toolbar_actions.len();
+        let node_count = self.tree.all_ids().count();
+        self.pending_toolbar_actions
+            .retain(|(_, started, baseline)| {
+                now.saturating_duration_since(*started) < Self::PENDING_TOOLBAR_TIMEOUT
+                    && baseline.is_none_or(|baseline| node_count <= baseline)
+            });
+        expired_creations || before != self.pending_toolbar_actions.len()
+    }
+
+    /// The toolbar button a `NewPane` command line belongs to.
+    pub(crate) fn toolbar_action_for_command(command_line: &str) -> TreeToolbarAction {
+        BuiltinAgentProvider::ALL
+            .into_iter()
+            .find(|provider| provider.command_line() == command_line)
+            .map_or(TreeToolbarAction::Shell, TreeToolbarAction::Agent)
+    }
+
     /// Queues a `NewPane` request for a plain shell under `parent_group`
     /// (the caller resolves that group -- see `group_for_new_node`).
     pub fn request_new_terminal(&mut self, parent_group: NodeId) -> bool {
         let admitted = self.queue_request(ClientRequest::NewPane {
+            request_id: 0,
             parent_group,
             kind: ilium_ipc::NewPaneKind::PlainShell,
             working_directory: self.new_pane_working_directory(),
         });
         if admitted {
             self.record_pending_pane_focus(parent_group, PaneContentKind::Terminal, "shell".into());
+            self.begin_pending_toolbar_action(TreeToolbarAction::Shell);
         }
         admitted
     }
@@ -12710,13 +13106,16 @@ impl App {
     /// `claude`, `codex`, `agy`) under `parent_group`.
     pub fn request_new_command_pane(&mut self, parent_group: NodeId, command_line: String) -> bool {
         let pending_title = command_line.clone();
+        let toolbar_action = Self::toolbar_action_for_command(&command_line);
         let admitted = self.queue_request(ClientRequest::NewPane {
+            request_id: 0,
             parent_group,
             kind: ilium_ipc::NewPaneKind::Command(command_line),
             working_directory: self.new_pane_working_directory(),
         });
         if admitted {
             self.record_pending_pane_focus(parent_group, PaneContentKind::Terminal, pending_title);
+            self.begin_pending_toolbar_action(toolbar_action);
         }
         admitted
     }
@@ -12731,7 +13130,9 @@ impl App {
         initial_input: String,
     ) -> bool {
         let pending_title = command_line.clone();
+        let toolbar_action = Self::toolbar_action_for_command(&command_line);
         let admitted = self.queue_request(ClientRequest::NewPane {
+            request_id: 0,
             parent_group,
             kind: ilium_ipc::NewPaneKind::CommandWithInitialInput {
                 command_line,
@@ -12741,6 +13142,7 @@ impl App {
         });
         if admitted {
             self.record_pending_pane_focus(parent_group, PaneContentKind::Terminal, pending_title);
+            self.begin_pending_toolbar_action(toolbar_action);
         }
         admitted
     }
@@ -12764,6 +13166,7 @@ impl App {
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| path.to_string_lossy().into_owned());
         if !self.queue_request(ClientRequest::NewPane {
+            request_id: 0,
             parent_group,
             kind: ilium_ipc::NewPaneKind::Editor(path.clone()),
             working_directory: self.new_pane_working_directory(),
@@ -12784,6 +13187,7 @@ impl App {
             column,
         });
         self.record_pending_pane_focus(parent_group, PaneContentKind::Editor, basename);
+        self.begin_pending_toolbar_action(TreeToolbarAction::Editor);
         true
     }
 
@@ -13008,15 +13412,27 @@ impl App {
         } else {
             name
         };
-        self.queue_request(ClientRequest::NewGroup { parent_group, name })
+        let admitted = self.queue_request(ClientRequest::NewGroup { parent_group, name });
+        if admitted {
+            self.begin_pending_toolbar_action(TreeToolbarAction::Group);
+        }
+        admitted
     }
 
     pub fn request_new_folder(&mut self, parent_group: NodeId, path: PathBuf) -> bool {
-        self.queue_request(ClientRequest::NewFolder { parent_group, path })
+        let admitted = self.queue_request(ClientRequest::NewFolder { parent_group, path });
+        if admitted {
+            self.begin_pending_toolbar_action(TreeToolbarAction::Folder);
+        }
+        admitted
     }
 
     pub fn request_new_project(&mut self, path: PathBuf) -> bool {
-        self.queue_request(ClientRequest::NewProject { path })
+        let admitted = self.queue_request(ClientRequest::NewProject { path });
+        if admitted {
+            self.begin_pending_toolbar_action(TreeToolbarAction::Project);
+        }
+        admitted
     }
 
     pub fn request_change_project_folder(&mut self, project_id: NodeId, path: PathBuf) -> bool {
@@ -13614,6 +14030,7 @@ impl App {
         });
         if admitted {
             self.mode = Mode::Normal;
+            self.begin_pending_toolbar_action(TreeToolbarAction::Split);
         }
         admitted
     }
@@ -13657,8 +14074,14 @@ impl App {
             hover_candidate: None,
         });
         let project = self.tree.project_ancestor(target).unwrap_or(ROOT_ID);
-        let request_id = self.request_workspace_repo_facts(project);
+        let (request_id, admitted) = self.request_workspace_repo_facts(project);
         self.active_workspace_menu_query = Some((request_id, project));
+        if !admitted {
+            if let Mode::ContextMenu(menu) = &mut self.mode {
+                menu.worktree_unavailable_reason =
+                    Some("Git check was rejected because the UI is busy; reopen the menu".into());
+            }
+        }
     }
 
     pub(crate) fn next_workspace_request_id(&mut self) -> u64 {
@@ -13667,13 +14090,15 @@ impl App {
         request_id
     }
 
-    fn request_workspace_repo_facts(&mut self, project: NodeId) -> u64 {
+    /// Returns the request id and whether the request was admitted; a refused
+    /// query will never be answered, so callers must surface that.
+    fn request_workspace_repo_facts(&mut self, project: NodeId) -> (u64, bool) {
         let request_id = self.next_workspace_request_id();
-        self.queue_request(ClientRequest::QueryRepoFacts {
+        let admitted = self.queue_request(ClientRequest::QueryRepoFacts {
             request_id,
             project,
         });
-        request_id
+        (request_id, admitted)
     }
 
     /// Opens the same prompt-first form from a tree menu, footer icon, or
@@ -13705,8 +14130,15 @@ impl App {
                 mode,
                 self.git_settings.clone(),
             )));
-        let request_id = self.request_workspace_repo_facts(project);
+        let (request_id, admitted) = self.request_workspace_repo_facts(project);
         self.active_workspace_dialog_query = Some((request_id, project));
+        if !admitted {
+            if let Mode::CreateAgentWorkspace(state) = &mut self.mode {
+                state.set_create_error(
+                    "Git check was rejected because the UI is busy; close and reopen this dialog",
+                );
+            }
+        }
     }
 
     pub fn submit_create_agent_workspace(&mut self, mut state: Box<WorktreeDialogState>) {
@@ -13768,6 +14200,7 @@ impl App {
             return;
         }
         self.active_workspace_create_request_id = Some(request_id);
+        self.begin_pending_toolbar_action(TreeToolbarAction::Agent(provider));
         state.set_stage(ilium_ipc::WorkspaceCreateStage::CreatingWorktree);
         self.mode = Mode::CreateAgentWorkspace(state);
     }
@@ -13828,6 +14261,22 @@ impl App {
         event: &ilium_ipc::ServerEvent,
     ) -> Option<usize> {
         match event {
+            ilium_ipc::ServerEvent::BlockingErrorsSnapshot { errors } => Some(
+                errors
+                    .iter()
+                    .fold(0usize, |bytes, error| {
+                        bytes
+                            .saturating_add(error.operation.len())
+                            .saturating_add(error.message.len())
+                            .saturating_add(128)
+                    })
+                    .saturating_mul(2),
+            ),
+            ilium_ipc::ServerEvent::PaneCreateFinished { result, .. } => {
+                Some(result.as_ref().err().map_or(64, |message| {
+                    message.len().saturating_add(64).saturating_mul(2)
+                }))
+            }
             ilium_ipc::ServerEvent::RepoFactsReported {
                 request_id,
                 project,
@@ -13944,6 +14393,7 @@ impl App {
         }
         if self.active_workspace_popover_query == Some((request_id, project)) {
             self.active_workspace_popover_query = None;
+            self.popover_repo_ok = result.is_ok().then(|| (project, Instant::now()));
             if let Some(popover) = &mut self.agent_popover {
                 popover.enabled = result.is_ok();
                 popover.unavailable_reason = result.err();
@@ -13973,6 +14423,7 @@ impl App {
             return;
         }
         self.active_workspace_create_request_id = None;
+        self.clear_pending_workspace_toolbar_actions();
         self.mode = Mode::Normal;
         self.status_message = Some(format!("Agent started in worktree (pane {})", pane_id.0));
         if self.tree.get(pane_id).is_some() {
@@ -13985,6 +14436,7 @@ impl App {
             return;
         }
         self.active_workspace_create_request_id = None;
+        self.clear_pending_workspace_toolbar_actions();
         if let Mode::CreateAgentWorkspace(state) = &mut self.mode {
             state.set_create_error(error);
             state.status_retention = self.processing_event_retention.clone();
@@ -14100,28 +14552,33 @@ impl App {
                 return;
             }
         }
-        self.agent_popover = Some(if pin {
-            AgentPopover::pinned(
-                provider,
-                anchor,
-                now,
-                false,
-                Some("Checking Git repository…".into()),
-            )
-        } else {
-            AgentPopover::hover(
-                provider,
-                anchor,
-                now,
-                false,
-                Some("Checking Git repository…".into()),
-            )
-        });
-        self.agent_popover_last_visible = pin;
         let parent_group = self.group_for_new_node();
         let project = self.tree.project_ancestor(parent_group).unwrap_or(ROOT_ID);
-        let request_id = self.request_workspace_repo_facts(project);
+        let known_good = self.popover_repo_ok.is_some_and(|(known, checked)| {
+            known == project && now.saturating_duration_since(checked) < POPOVER_REPO_OK_TTL
+        });
+        let (enabled, reason) = if known_good {
+            (true, None)
+        } else {
+            (false, Some("Checking Git repository…".into()))
+        };
+        self.agent_popover = Some(if pin {
+            AgentPopover::pinned(provider, anchor, now, enabled, reason)
+        } else {
+            AgentPopover::hover(provider, anchor, now, enabled, reason)
+        });
+        self.agent_popover_last_visible = pin;
+        if known_good {
+            return;
+        }
+        let (request_id, admitted) = self.request_workspace_repo_facts(project);
         self.active_workspace_popover_query = Some((request_id, project));
+        if !admitted {
+            if let Some(popover) = &mut self.agent_popover {
+                popover.unavailable_reason =
+                    Some("Git check rejected: UI is busy; move away and hover again".into());
+            }
+        }
     }
 
     pub fn update_agent_popover_pointer(&mut self, position: Position, now: Instant) {
@@ -15566,6 +16023,14 @@ impl App {
         {
             return Err("Agent destination is no longer available; draft remains editable".into());
         }
+        if self.pending_pane_creations.len() >= 16 {
+            self.record_local_blocking_error(
+                state.parent_group,
+                "Create pane",
+                "Too many unconfirmed creation requests; check the project before retrying.",
+            );
+            return Err("Too many unconfirmed creation requests; draft remains editable".into());
+        }
         let command = state.agent_type.command_line();
         let prompt_bytes = state
             .prompt
@@ -15590,7 +16055,9 @@ impl App {
                 format!("Agent request not admitted: {reason:?}; draft remains editable")
             })?;
         // All owned prompt/command copies start after the finite reservation.
+        let request_id = self.next_workspace_request_id();
         let request = ClientRequest::NewPane {
+            request_id,
             parent_group: state.parent_group,
             kind: ilium_ipc::NewPaneKind::CommandWithInitialInput {
                 command_line: command.to_owned(),
@@ -15612,6 +16079,15 @@ impl App {
             )
         })?;
         self.queue_terminal_request_after_barrier(admitted);
+        self.pending_pane_creations.insert(
+            request_id,
+            crate::blocking_errors::PendingPaneCreation {
+                parent_group: state.parent_group,
+                action: Self::toolbar_action_for_command(command),
+                started: Instant::now(),
+                uncertainty_reported: false,
+            },
+        );
         self.record_pending_pane_focus(
             state.parent_group,
             PaneContentKind::Terminal,
@@ -15827,7 +16303,9 @@ impl App {
             ContextMenuAction::ToggleGroup => {
                 self.toggle_selected_tree_node();
             }
-            ContextMenuAction::NewTerminal => self.action_new_terminal(),
+            ContextMenuAction::NewTerminal => {
+                self.action_new_terminal();
+            }
             ContextMenuAction::NewAgent(provider) => {
                 self.action_new_command_pane(provider.command_line());
             }
@@ -15997,7 +16475,7 @@ impl App {
         self.queue_terminal_request_after_barrier(unfreeze_request);
         // Carry focus across the server's new pane ID at the same tree slot.
         self.remember_replacement_focus(pane_id);
-        self.status_message = Some("Unfreezing agent…".to_string());
+        self.status_message = Some(UNFREEZING_AGENT_STATUS.to_string());
     }
 
     pub(crate) fn tick_auto_freeze(&mut self, now: Instant) -> bool {
@@ -16288,9 +16766,9 @@ impl App {
 
     /// Creates a plain shell pane under the currently targeted group and
     /// focuses the create-group/normal dialog back to `Normal`.
-    pub fn action_new_terminal(&mut self) {
+    pub fn action_new_terminal(&mut self) -> bool {
         let parent = self.group_for_new_node();
-        self.request_new_terminal(parent);
+        self.request_new_terminal(parent)
     }
 
     fn request_new_terminal_in_worktree(&mut self, pane_id: NodeId) {
@@ -16301,6 +16779,7 @@ impl App {
         let parent_group = self.tree.parent_of(pane_id).unwrap_or(ROOT_ID);
         self.record_pending_pane_focus(parent_group, PaneContentKind::Terminal, "shell".into());
         self.queue_request(ClientRequest::NewPane {
+            request_id: 0,
             parent_group,
             kind: ilium_ipc::NewPaneKind::PlainShell,
             working_directory: ilium_ipc::NewPaneWorkingDirectory::WorkspacePane(pane_id),
@@ -16783,13 +17262,37 @@ impl App {
     /// Called on every mouse-move over the tree panel, so the underlying
     /// `TreeItem` list is served from `tree_hit_test_cache` rather than
     /// rebuilt (see that field's doc comment).
+    pub(crate) fn emitted_tree_hit_for_trace(&self, position: Position) -> Option<TreeNodeHit> {
+        self.emitted_geometry
+            .as_ref()?
+            .tree_rows
+            .as_ref()?
+            .node_at(position)
+    }
+
+    pub(crate) fn emitted_tree_rows_for_trace(&self) -> Option<(Rect, Vec<TreeNodeHit>)> {
+        Some(
+            self.emitted_geometry
+                .as_ref()?
+                .tree_rows
+                .as_ref()?
+                .rows_for_trace(),
+        )
+    }
+
     pub fn tree_node_at(&mut self, position: Position) -> Option<TreeNodeHit> {
         if let Some(geometry) = &self.emitted_geometry {
             return geometry
                 .tree_rows
                 .as_ref()?
                 .node_at(position)
-                .filter(|hit| self.tree.get(hit.id).is_some());
+                .filter(|hit| {
+                    self.tree.get(hit.id).is_some()
+                        || tree_ui::folder_entry(&self.tree, hit.id, &self.sidebar_snapshot)
+                            .is_some()
+                        || tree_ui::chatroom_project(&self.tree, hit.id, &self.chatroom_projects)
+                            .is_some()
+                });
         }
         if !cfg!(test) {
             return None;
@@ -16852,6 +17355,7 @@ impl App {
             return false;
         };
         self.pending_pane_focuses.remove(index);
+        self.finish_oldest_pending_terminal_toolbar_action();
         true
     }
 
@@ -16941,6 +17445,16 @@ impl App {
     /// other key that *does* forward also resets the view back to the live tail,
     /// matching how an ordinary terminal emulator returns you to the prompt
     /// the moment you type.
+    /// Board edits own one full durable snapshot at a time. Keep native events
+    /// in their existing guarded backlog until the previous write completes;
+    /// otherwise the bounded writer correctly refuses and rolls edits back.
+    pub(crate) fn board_input_backpressured(&self) -> bool {
+        self.active_pane_id().is_some_and(|pane_id| {
+            matches!(self.panes.get(&pane_id), Some(PaneRuntime::Board(board))
+                if board.is_detail_panel_open && board.pending_writes() != 0)
+        })
+    }
+
     pub fn handle_pane_key(&mut self, key: crossterm::event::KeyEvent) {
         use crossterm::event::{KeyCode, KeyModifiers};
         if matches!(self.right_panel_target, RightPanelTarget::Chatroom { .. }) {
@@ -16956,7 +17470,6 @@ impl App {
             .unwrap_or(self.layout.pane_content_area);
         let editor_content_area = self.editor_content_area(id);
         let mut pending_key_input = None;
-        let mut is_enter_press = false;
         let mut did_change_client_content = false;
         match self.panes.get_mut(&id) {
             Some(PaneRuntime::Terminal(view)) => {
@@ -16971,10 +17484,8 @@ impl App {
                         KeyCode::End => view.scroll_to_bottom(),
                         _ => unreachable!("is_scrollback_key only matches PageUp/PageDown/End"),
                     }
-                } else if let Some(bytes) = encode_key_for_terminal(&key) {
-                    view.scroll_to_bottom();
-                    is_enter_press = bytes == b"\r";
-                    pending_key_input = Some(bytes);
+                } else {
+                    pending_key_input = Some(key);
                 }
             }
             Some(PaneRuntime::Editor(editor)) if editor.view_mode == EditorViewMode::Source => {
@@ -17152,32 +17663,71 @@ impl App {
             }
             None => {}
         }
-        if let Some(bytes) = pending_key_input {
-            let prompt_epoch = is_enter_press.then(|| uuid::Uuid::new_v4().to_string());
-            let submitted_after = chrono::Utc::now();
-            // Capture immutable identity now; the finite I/O owner holds
-            // this Enter and later same-pane input until its baseline completes.
-            if let Some(epoch) = &prompt_epoch {
-                if let Err(error) = self.capture_terminal_baseline(id, epoch, submitted_after) {
-                    self.status_message = Some(error);
-                    return;
-                }
-            }
-            let admitted = self.queue_request(ClientRequest::UserKeyInput {
-                pane_id: id,
-                bytes,
-                submission: is_enter_press.then_some(PromptSubmissionSource::Keyboard),
-                prompt_epoch: prompt_epoch.clone(),
-            });
-            if !admitted {
-                if let (Some(files), Some(epoch)) = (&mut self.terminal_baselines, &prompt_epoch) {
-                    files.forget(epoch);
-                }
-            }
+        if let Some(key) = pending_key_input {
+            self.forward_terminal_key(id, key);
         }
         if did_change_client_content {
             self.record_client_node_activity(id);
         }
+    }
+
+    /// Transfer an inline key into the existing bounded ordered owner before
+    /// attempting outbound admission. No encoded heap payload exists yet.
+    fn forward_terminal_key(&mut self, pane_id: NodeId, key: crossterm::event::KeyEvent) {
+        if self.pending_input_retention.is_none() {
+            let Some(PaneRuntime::Terminal(view)) = self.panes.get(&pane_id) else {
+                return;
+            };
+            let identity = view.identity.clone();
+            if self
+                .terminal_input
+                .admit(
+                    pane_id,
+                    identity.clone(),
+                    crate::terminal_input::InputIntent::Key(key),
+                )
+                .is_err()
+            {
+                self.show_request_admission_error();
+                self.native_paste_failure =
+                    Some(crate::terminal_input_owner::InputFailure::terminal_key(
+                        key,
+                        Some(ilium_execution::RejectReason::QueueFull),
+                        self.native_paste_failure.take(),
+                    ));
+                return;
+            }
+            if self.terminal_parsing.is_none() {
+                self.publish_ready_terminal_inputs();
+            }
+            return;
+        }
+        let Some(bytes) = encode_key_for_terminal(&key) else {
+            return;
+        };
+        let is_enter_press = bytes == b"\r";
+        if let Some(PaneRuntime::Terminal(view)) = self.panes.get_mut(&pane_id) {
+            view.scroll_to_bottom();
+        }
+        let prompt_epoch = is_enter_press.then(|| uuid::Uuid::new_v4().to_string());
+        if let Some(epoch) = &prompt_epoch {
+            if let Err(error) = self.capture_terminal_baseline(pane_id, epoch, chrono::Utc::now()) {
+                self.status_message = Some(error);
+                self.native_paste_failure =
+                    Some(crate::terminal_input_owner::InputFailure::terminal_key(
+                        key,
+                        None,
+                        self.native_paste_failure.take(),
+                    ));
+                return;
+            }
+        }
+        self.queue_preflighted_terminal_request(ClientRequest::UserKeyInput {
+            pane_id,
+            bytes,
+            submission: is_enter_press.then_some(PromptSubmissionSource::Keyboard),
+            prompt_epoch,
+        });
     }
 
     /// Forwards one host clipboard operation to the active terminal as one
@@ -17190,6 +17740,10 @@ impl App {
     ) -> Option<crate::terminal_input_owner::InputFailure> {
         self.native_paste_failure.take()
     }
+    pub(crate) fn take_undelivered_terminal_key(&mut self) -> Option<crossterm::event::KeyEvent> {
+        self.terminal_input.take_key()
+    }
+
     pub(crate) fn take_undelivered_native_paste(
         &mut self,
     ) -> Option<crate::terminal_input_owner::InputEvent> {
@@ -17204,6 +17758,7 @@ impl App {
             .filter(|pane_id| matches!(self.panes.get(pane_id), Some(PaneRuntime::Terminal(_))))
     }
 
+    #[allow(clippy::result_large_err)] // The refusal hands the original value back unchanged; boxing would allocate on that path.
     pub(crate) fn capture_native_terminal_paste(
         &mut self,
         pane_id: NodeId,
@@ -17236,6 +17791,7 @@ impl App {
 
     /// Retry only this captured original. No later native event is dispatched
     /// while it is waiting; parser/IPC/presentation collectors remain active.
+    #[allow(clippy::result_large_err)] // The refusal hands the original value back unchanged; boxing would allocate on that path.
     pub(crate) fn retry_native_terminal_paste(
         &mut self,
     ) -> Result<(), Box<crate::terminal_input_owner::InputFailure>> {
@@ -19294,6 +19850,96 @@ mod tests {
     }
 
     #[test]
+    fn terminal_keys_wait_for_outbound_capacity_in_original_order() {
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "keys").unwrap();
+        let pane_id = app
+            .tree
+            .add_pane(group, "terminal", PaneContentKind::Terminal)
+            .unwrap();
+        app.panes.insert(
+            pane_id,
+            PaneRuntime::Terminal(Box::new(TerminalView::new(24, 80))),
+        );
+        app.focus_pane(pane_id);
+        app.take_outbound_requests();
+        let client = app.outbound_admission.as_ref().unwrap().clone();
+        let held: Vec<_> = (0..crate::ipc_preparation::request_limits().jobs)
+            .map(|_| crate::ipc_preparation::reserve_request(&client, 4096).unwrap())
+            .collect();
+        for character in ['a', 'b'] {
+            app.handle_pane_key(crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Char(character),
+                crossterm::event::KeyModifiers::NONE,
+            ));
+        }
+        assert!(app.take_outbound_requests().is_empty());
+        assert_eq!(app.terminal_input.pending_count(), 2);
+        drop(held);
+        let mut bytes = Vec::new();
+        for _ in 0..2 {
+            assert!(app.publish_ready_terminal_inputs());
+            for request in app.take_outbound_requests() {
+                let ClientRequest::UserKeyInput {
+                    pane_id: destination,
+                    bytes: key,
+                    ..
+                } = request
+                else {
+                    panic!("expected retained key input");
+                };
+                assert_eq!(destination, pane_id);
+                bytes.extend(key);
+            }
+        }
+        assert_eq!(bytes, b"ab");
+        assert_eq!(app.terminal_input.pending_count(), 0);
+    }
+
+    #[test]
+    fn inline_terminal_key_shutdown_preserves_value_and_unsupported_keys_are_noops() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let mut app = app();
+        let group = app.tree.add_group(ROOT_ID, "keys").unwrap();
+        let pane = app
+            .tree
+            .add_pane(group, "terminal", PaneContentKind::Terminal)
+            .unwrap();
+        app.panes.insert(
+            pane,
+            PaneRuntime::Terminal(Box::new(TerminalView::new(24, 80))),
+        );
+        app.focus_pane(pane);
+        app.take_outbound_requests();
+        app.handle_pane_key(KeyEvent::new(KeyCode::F(1), KeyModifiers::NONE));
+        assert!(app.take_outbound_requests().is_empty());
+        assert_eq!(app.terminal_input.pending_count(), 0);
+        let client = app.outbound_admission.as_ref().unwrap().clone();
+        let held: Vec<_> = (0..crate::ipc_preparation::request_limits().jobs)
+            .map(|_| crate::ipc_preparation::reserve_request(&client, 4096).unwrap())
+            .collect();
+        let original = KeyEvent::new(KeyCode::Char('界'), KeyModifiers::NONE);
+        app.handle_pane_key(original);
+        assert_eq!(app.terminal_input.pending_count(), 1);
+        let key = app
+            .take_undelivered_terminal_key()
+            .expect("shutdown retains inline original");
+        let failure = crate::terminal_input_owner::InputFailure::terminal_key(key, None, None);
+        assert_eq!(failure.terminal_key_original(), Some(&original));
+        assert_eq!(app.terminal_input.pending_count(), 0);
+        assert!(app.take_outbound_requests().is_empty());
+        drop(held);
+        for key in [
+            original,
+            KeyEvent::new(KeyCode::End, KeyModifiers::CONTROL),
+            KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+        ] {
+            let bytes = encode_key_for_terminal(&key).unwrap();
+            assert!(bytes.capacity() <= 6, "key encoder's largest fixed payload remains covered by 4096-byte preflight overhead");
+        }
+    }
+
+    #[test]
     fn icon_arrows_cycle_the_full_catalog_in_both_directions() {
         use crate::icon_settings::{all_picker_search_results, IconTarget};
 
@@ -19331,7 +19977,7 @@ mod tests {
     }
 
     #[test]
-    fn plugin_panel_exposes_sanitized_bounded_runtime_error_details() {
+    fn plugin_panel_exposes_sanitized_complete_runtime_error_details() {
         use crate::background_animation::test_support::{fake_host, FakeProbe};
 
         let mut app = app();
@@ -19346,6 +19992,20 @@ mod tests {
             Some(format!("runtime failed\n{}\u{1b}[31m", "x".repeat(600)));
         *app.animation_frame.host_mut() = fake_host(&probe);
 
+        // Runtime status belongs to a completed surface receipt, not the
+        // unrendered injection adapter. Use the real service publication path.
+        app.animation_frame.render(
+            &crate::background_animation::AnimationSettings {
+                enabled: true,
+                kind: crate::background_animation::AnimationKind::Pipes,
+                ..Default::default()
+            },
+            80,
+            24,
+            Duration::ZERO,
+        );
+        app.committed_animation_settings = Some(app.animation_settings.clone());
+
         let model = app.plugin_panel_model();
         let issue_row = model
             .rows
@@ -19355,7 +20015,7 @@ mod tests {
 
         assert_eq!(model.labels[issue_row], "1 package/runtime issue(s)");
         assert_eq!(model.issue_details.len(), 1);
-        assert_eq!(model.issue_details[0].len(), "Runtime: ".len() + 512);
+        assert!(model.issue_details[0].ends_with(&format!("{}[31m", "x".repeat(600))));
         assert!(model.issue_details[0].starts_with("Runtime: runtime failed"));
         assert!(!model.issue_details[0].contains('\n'));
         assert!(!model.issue_details[0].contains('\u{1b}'));
@@ -19386,9 +20046,24 @@ mod tests {
             .map(|cell| cell.symbol())
             .collect();
         assert!(rendered.contains("Plugin issue details"));
-        assert!(rendered.contains("Runtime: runtime failed"));
+        // Narrow side popovers wrap the prefix and error across physical
+        // rows; keep real painted-word coverage alongside exact model checks.
+        for word in ["Runtime:", "runtime", "failed"] {
+            assert!(
+                rendered.contains(word),
+                "missing rendered runtime error word {word}: {rendered}"
+            );
+        }
 
         app.animation_settings.source = crate::animation_plugins::AnimationSourceTab::Native;
+        assert!(
+            !app.plugin_panel_model().issue_details.is_empty(),
+            "an authored choice cannot retire the still-committed runtime"
+        );
+        let path = app
+            .animation_write_path()
+            .expect("fixture animation configuration path");
+        app.acknowledge_animation_settings(&path, app.animation_settings.clone(), None);
         assert!(app.plugin_panel_model().issue_details.is_empty());
     }
 
@@ -19554,6 +20229,7 @@ mod tests {
             assert_eq!(
                 app.take_outbound_requests(),
                 vec![ClientRequest::NewPane {
+                    request_id: 1,
                     parent_group: parent,
                     kind: ilium_ipc::NewPaneKind::CommandWithInitialInput {
                         command_line: "codex".into(),
@@ -20247,6 +20923,108 @@ mod tests {
     }
 
     #[test]
+    fn emitted_entering_rows_keep_exact_live_node_targets() {
+        let mut app = app();
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        let previous = app.tree.clone();
+        let group = app.tree.add_group(ROOT_ID, "entering-group").unwrap();
+        app.started_at = Instant::now();
+        app.tree_transitions
+            .observe_snapshot_change(&previous, &app.tree, 0);
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+        terminal
+            .draw(|frame| crate::ui::draw(frame, &mut app))
+            .unwrap();
+        app.commit_emitted_geometry(app.capture_emitted_geometry(1));
+        let list = crate::tree_ui::list_area(app.layout.tree_area);
+        let pointer = (list.y..list.bottom())
+            .map(|row| Position::new(list.x, row))
+            .find(|position| {
+                app.tree_node_at(*position)
+                    .is_some_and(|hit| hit.id == group)
+            })
+            .expect("horizontally entering row keeps its emitted live node identity");
+        assert!(app
+            .tree_transitions
+            .is_active(app.started_at.elapsed().as_millis()));
+        assert!(app.tick_tree_transitions(
+            app.started_at
+                + Duration::from_millis(crate::tree_transitions::TREE_ENTRY_TRANSITION_MS as u64,)
+        ));
+        terminal
+            .draw(|frame| crate::ui::draw(frame, &mut app))
+            .unwrap();
+        app.commit_emitted_geometry(app.capture_emitted_geometry(2));
+        assert_eq!(
+            app.tree_node_at(pointer).unwrap().id,
+            group,
+            "entry motion never changes row identity"
+        );
+        app.tree.remove_node(group).unwrap();
+        assert!(
+            app.tree_node_at(pointer).is_none(),
+            "removed live node cannot inherit an emitted target"
+        );
+    }
+
+    #[test]
+    fn emitted_virtual_folder_hit_resolves_current_root_and_rejects_removed_entry() {
+        let mut app = app();
+        app.set_screen_area(Rect::new(0, 0, 120, 40));
+        let directory = tempfile::tempdir().unwrap();
+        let group = app.tree.add_group(ROOT_ID, "files").unwrap();
+        let root_path = directory.path().join("root");
+        let root = app.tree.add_folder(group, root_path.clone()).unwrap();
+        let path = root_path.join("nested");
+        let virtual_id = crate::tree_ui::virtual_folder_node_id(root, &path);
+        app.sidebar_snapshot.roots.insert(root, root_path.clone());
+        app.sidebar_snapshot.directories.insert(
+            (root, root_path),
+            vec![crate::filesystem::sidebar::SidebarEntry {
+                name: "nested".into(),
+                path: path.clone(),
+                is_directory: true,
+            }],
+        );
+        app.sidebar_snapshot.rows.insert(
+            virtual_id,
+            crate::tree_ui::FolderEntry {
+                root_id: root,
+                path,
+                is_directory: true,
+                identifier_path: vec![group, root, virtual_id],
+            },
+        );
+        app.tree_state.open(vec![group]);
+        app.tree_state.open(vec![group, root]);
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(120, 40)).unwrap();
+        terminal
+            .draw(|frame| crate::ui::draw(frame, &mut app))
+            .unwrap();
+        let geometry = app.capture_emitted_geometry(1);
+        app.commit_emitted_geometry(geometry);
+        let area = app.layout.tree_area;
+        let position = (area.y..area.bottom())
+            .map(|row| Position::new(area.x + 12, row))
+            .find(|position| {
+                app.tree_node_at(*position)
+                    .is_some_and(|hit| hit.id == virtual_id)
+            })
+            .expect("painted virtual directory must remain actionable after emission");
+        assert!(
+            app.tree.get(virtual_id).is_none(),
+            "fixture exercises a virtual row"
+        );
+        app.sidebar_snapshot.rows.remove(&virtual_id);
+        assert!(
+            app.tree_node_at(position).is_none(),
+            "removed virtual entries must not inherit an emitted hit"
+        );
+    }
+
+    #[test]
     fn stale_presentation_ack_cannot_replace_newer_emitted_geometry() {
         let mut app = app();
         app.layout = UiLayout::from_screen_area(Rect::new(0, 0, 80, 24));
@@ -20550,6 +21328,7 @@ mod tests {
                 message: "retained expiry footer marker".to_owned(),
                 details: String::new(),
                 error: None,
+                eta_seconds: None,
             },
             1000,
         )
@@ -20639,6 +21418,7 @@ mod tests {
                         message: "retained split result".into(),
                         details: String::new(),
                         error: None,
+                        eta_seconds: None,
                     },
                     1000,
                 )
@@ -21717,7 +22497,7 @@ mod tests {
             ilium_inference::InferenceProviderKind::KiloGateway,
             ilium_inference::kilo_gateway_model_catalog_url(),
             Duration::from_millis(100),
-            Ok(vec!["stepfun/step-5-preview-free".to_string()]),
+            Ok(vec!["dots-studio/dots-3-note-preview:free".to_string()]),
         );
         app.settle_model_catalog_for_test();
 
@@ -21727,7 +22507,7 @@ mod tests {
         );
         assert!(app
             .kilo_gateway_models
-            .contains(&"stepfun/step-5-preview-free".to_string()));
+            .contains(&"dots-studio/dots-3-note-preview:free".to_string()));
         app.settings_adjust_kilo_gateway_model(1);
         assert_eq!(app.inference_settings.kilo_gateway.model, "kilo-auto/free");
     }
@@ -22183,7 +22963,7 @@ mod tests {
             .iter()
             .any(|request| matches!(request,
             ClientRequest::NewPane { parent_group, kind: ilium_ipc::NewPaneKind::PlainShell,
-                working_directory: ilium_ipc::NewPaneWorkingDirectory::WorkspacePane(source) }
+                working_directory: ilium_ipc::NewPaneWorkingDirectory::WorkspacePane(source), .. }
                 if *parent_group == group && *source == pane)));
     }
 
@@ -23720,7 +24500,7 @@ mod tests {
         );
 
         assert!(!app.agent_session_ids.contains_key(&pane_id));
-        assert_eq!(app.status_message.as_deref(), Some("Unfreezing agent…"));
+        assert_eq!(app.status_message.as_deref(), Some(UNFREEZING_AGENT_STATUS));
         assert!(app
             .pending_replacement_focus
             .is_some_and(|pending| { pending.old_pane_id == pane_id && pending.was_focused }));
@@ -24805,10 +25585,18 @@ mod tests {
                 _ => None,
             })
             .collect::<Vec<_>>();
+        // The toolbar, prompt and footer sections each add a rule row.
+        let expected_rows = 27 - 3 * u16::from(crate::theme::section_frames_enabled());
         assert_eq!(resize_requests.len(), 2);
+        assert!(
+            resize_requests
+                .iter()
+                .all(|(_, rows, _, _)| *rows == expected_rows),
+            "unexpected rows: {resize_requests:?}"
+        );
         assert!(resize_requests
             .iter()
-            .all(|(_, rows, cols, cause)| *rows == 27
+            .all(|(_, rows, cols, cause)| *rows == expected_rows
                 && *cols == (120 - crate::layout::DEFAULT_UNFOCUSED_TREE_WIDTH - 4) / 2
                 && *cause == PaneResizeCause::HostTerminal));
         assert!(!resize_requests
@@ -26651,7 +27439,11 @@ mod tests {
         assert!(!app.shows_agent_toolbar(pane_id));
         let restored = app.pane_viewport(pane_id).unwrap();
         assert_eq!(restored.toolbar_area, None);
-        assert_eq!(restored.content_area.height, shrunk_height + 1);
+        // The toolbar row and its rule row are both released.
+        assert_eq!(
+            restored.content_area.height,
+            shrunk_height + 1 + u16::from(crate::theme::section_frames_enabled())
+        );
         let resize = app
             .take_outbound_requests()
             .into_iter()
@@ -26736,6 +27528,7 @@ mod tests {
                 .into_iter()
                 .find(|request| matches!(request, ClientRequest::NewPane { .. })),
             Some(ClientRequest::NewPane {
+                request_id: 1,
                 parent_group: group,
                 kind: ilium_ipc::NewPaneKind::Editor(resolved_path.clone()),
                 working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
@@ -27136,7 +27929,7 @@ mod tests {
         assert!(app
             .status_message
             .as_deref()
-            .is_some_and(|message| { message.starts_with("Saving agent debug log to") }));
+            .is_some_and(|message| { message.starts_with("Saved agent debug log to") }));
         let saved = std::fs::read_to_string(directory.path().join("exports/codex.log")).unwrap();
         assert!(saved.contains("ILIUM AGENT DEBUG LOG"));
         assert!(saved.contains("Pane: Codex audit"));
@@ -27376,6 +28169,7 @@ mod tests {
         assert_eq!(
             app.take_outbound_requests(),
             vec![ClientRequest::NewPane {
+                request_id: 1,
                 parent_group: group,
                 kind: ilium_ipc::NewPaneKind::Editor(target_path.clone()),
                 working_directory: ilium_ipc::NewPaneWorkingDirectory::ProjectRoot,
@@ -27476,6 +28270,7 @@ mod tests {
         assert_eq!(
             app.take_outbound_requests(),
             vec![ClientRequest::NewPane {
+                request_id: 1,
                 parent_group: group,
                 kind: ilium_ipc::NewPaneKind::CommandWithInitialInput {
                     command_line: "codex".to_string(),
@@ -27489,7 +28284,8 @@ mod tests {
 
     #[test]
     fn settings_tabs_cycle_through_inference_and_every_existing_tab() {
-        assert_eq!(SettingsTab::Appearance.next(), SettingsTab::Icons);
+        assert_eq!(SettingsTab::Appearance.next(), SettingsTab::Padding);
+        assert_eq!(SettingsTab::Padding.next(), SettingsTab::Icons);
         assert_eq!(SettingsTab::Animations.next(), SettingsTab::Sound);
         assert_eq!(SettingsTab::Icons.next(), SettingsTab::AgentMonitoring);
         assert_eq!(SettingsTab::AgentMonitoring.next(), SettingsTab::Cost);
@@ -28813,7 +29609,9 @@ impl App {
             return true;
         }
         if let Err(error) = session.handle_key(&bridge, key.code) {
-            session.set_error(&error);
+            if let Err(admission_error) = session.set_error(&error) {
+                self.status_message = Some(admission_error);
+            }
         }
         true // Protected review consumes paste/keys instead of forwarding them.
     }
@@ -28829,7 +29627,9 @@ impl App {
             return true;
         };
         if let Err(error) = session.handle_mouse(&bridge, self.layout.screen_area, mouse) {
-            session.set_error(&error);
+            if let Err(admission_error) = session.set_error(&error) {
+                self.status_message = Some(admission_error);
+            }
         }
         true
     }
@@ -28856,7 +29656,10 @@ impl App {
                 return false;
             }
             self.animation_frame.occlude_composed(screen, rect);
-            frame.render_widget(ratatui::widgets::Paragraph::new(status.message()), rect);
+            frame.render_widget(
+                ratatui::widgets::Paragraph::new(format!("F9 details · {}", status.message())),
+                rect,
+            );
             return false;
         };
         self.animation_frame.discard_composed_receipt();
@@ -29609,6 +30412,81 @@ mod text_trigger_receipt_tests {
         assert!(
             state.preview_revision() > 0,
             "semantic edit must also fence preview publication"
+        );
+    }
+}
+
+#[cfg(test)]
+mod pending_dialog_submit_spinner_tests {
+    use super::*;
+
+    #[test]
+    fn editor_and_split_submits_start_their_toolbar_spinner_once_admitted() {
+        let mut app = App::new("dialog-submit-spinners".into(), std::env::temp_dir());
+        app.outbound_admission = Some(crate::execution::test_document_client());
+        assert!(app.request_new_editor(ROOT_ID, std::env::temp_dir().join("note.txt")));
+        assert_eq!(
+            app.pending_toolbar_mask(),
+            TreeToolbarAction::Editor.pending_bit()
+        );
+        assert!(app.queue_create_split(ROOT_ID, SplitOrientation::Vertical, Vec::new()));
+        assert_eq!(
+            app.pending_toolbar_mask(),
+            TreeToolbarAction::Editor.pending_bit() | TreeToolbarAction::Split.pending_bit()
+        );
+    }
+}
+
+#[cfg(test)]
+mod request_refusal_notice_tests {
+    use super::*;
+
+    #[test]
+    fn refused_request_leaves_a_notice_that_outlives_status_overwrites() {
+        let mut app = App::new("refusal-notice".into(), std::env::temp_dir());
+        app.outbound_admission = None;
+        assert!(app.request_refusal_notice(Instant::now()).is_none());
+        assert!(!app.queue_request(ClientRequest::ClosePane { pane_id: ROOT_ID }));
+        app.status_message = Some("hover text".into());
+        let now = Instant::now();
+        assert!(app.request_refusal_notice(now).is_some());
+        assert!(app
+            .request_refusal_notice(now + Duration::from_secs(9))
+            .is_none());
+    }
+}
+
+#[cfg(test)]
+mod popover_repo_reuse_tests {
+    use super::*;
+
+    #[test]
+    fn a_recent_successful_repo_check_opens_the_popover_enabled_without_a_new_query() {
+        let mut app = App::new("popover-reuse".into(), std::env::temp_dir());
+        app.outbound_admission = Some(crate::execution::test_document_client());
+        let anchor = Rect::new(2, 2, 3, 1);
+        let provider = BuiltinAgentProvider::Claude;
+        let now = Instant::now();
+        app.hover_agent_popover(provider, anchor, now, false);
+        assert!(app.agent_popover.as_ref().is_some_and(|p| !p.enabled));
+        let queued = app.take_outbound_requests().len();
+        assert_eq!(queued, 1, "first hover asks the server");
+
+        let group = app.group_for_new_node();
+        let project = app.tree.project_ancestor(group).unwrap_or(ROOT_ID);
+        app.popover_repo_ok = Some((project, now));
+        app.agent_popover = None;
+        app.hover_agent_popover(provider, anchor, now + Duration::from_secs(5), false);
+        assert!(app.agent_popover.as_ref().is_some_and(|p| p.enabled));
+        assert!(app.take_outbound_requests().is_empty(), "no second query");
+
+        app.agent_popover = None;
+        app.hover_agent_popover(provider, anchor, now + Duration::from_secs(31), false);
+        assert!(app.agent_popover.as_ref().is_some_and(|p| !p.enabled));
+        assert_eq!(
+            app.take_outbound_requests().len(),
+            1,
+            "stale check asks again"
         );
     }
 }

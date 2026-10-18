@@ -135,11 +135,29 @@ pub fn reserved_height(max_lines: u16) -> u16 {
     max_lines.max(1)
 }
 
+/// Columns left of the text: one blank, the quote gutter, one blank.
+const TEXT_INSET_LEFT: u16 = 3;
+const TEXT_INSET_RIGHT: u16 = 2;
+/// Left-aligned quarter block drawn as the blockquote gutter.
+const QUOTE_GUTTER: &str = "\u{258e}";
+
+/// Columns the text wraps to inside `area_width`. Areas too narrow for the
+/// insets use the whole width so tiny panes still show their prompt.
+fn text_width(area_width: u16) -> u16 {
+    let inset = TEXT_INSET_LEFT + TEXT_INSET_RIGHT;
+    if area_width > inset + 8 {
+        area_width - inset
+    } else {
+        area_width
+    }
+}
+
 /// Renders the last-prompt banner into `area`: a background fill spanning
 /// the whole reserved region (see [`theme::last_prompt_style`]), with
 /// `prompt` -- when present -- wrapped and middle-truncated via [`layout`]
-/// using `area`'s own width and `max_lines`. `None` (no exact submission
-/// recorded yet for this pane) renders only the background fill.
+/// inside breathing room on both sides, behind an accent-coloured quote
+/// gutter on every row. `None` (no exact submission recorded yet for this
+/// pane) renders only the background fill.
 pub fn render(
     frame: &mut Frame,
     area: Rect,
@@ -150,27 +168,80 @@ pub fn render(
     if area.height == 0 {
         return;
     }
-    let lines: Vec<Line> = prompt
-        .map(|prompt| {
-            layout(prompt, area.width, max_lines.min(area.height))
-                .into_iter()
-                .map(|(line, is_seam)| {
-                    if is_seam {
-                        Line::from(Span::styled(line, Style::new().add_modifier(Modifier::DIM)))
-                    } else {
-                        Line::from(line)
-                    }
-                })
-                .collect()
+    frame.render_widget(
+        Paragraph::new("").style(theme::last_prompt_style(scheme)),
+        area,
+    );
+    let Some(prompt) = prompt else {
+        return;
+    };
+    let framed = text_width(area.width) != area.width;
+    let (inset_left, inset_right) = if framed {
+        (TEXT_INSET_LEFT, TEXT_INSET_RIGHT)
+    } else {
+        (0, 0)
+    };
+    let text_area = Rect::new(
+        area.x + inset_left,
+        area.y,
+        area.width - inset_left - inset_right,
+        area.height,
+    );
+    let rows = layout(prompt, text_area.width, max_lines.min(area.height));
+    let gutter_style = Style::new()
+        .fg(theme::accent_bg())
+        .bg(theme::muted_accent_bg(scheme));
+    for (index, (_, is_seam)) in rows.iter().enumerate() {
+        if framed {
+            let gutter = if *is_seam {
+                gutter_style.add_modifier(Modifier::DIM)
+            } else {
+                gutter_style
+            };
+            frame.render_widget(
+                Paragraph::new(Span::styled(QUOTE_GUTTER, gutter)),
+                Rect::new(area.x + 1, area.y + index as u16, 1, 1),
+            );
+        }
+    }
+    let lines: Vec<Line> = rows
+        .into_iter()
+        .map(|(line, is_seam)| {
+            if is_seam {
+                Line::from(Span::styled(line, Style::new().add_modifier(Modifier::DIM)))
+            } else {
+                Line::from(line)
+            }
         })
-        .unwrap_or_default();
-    let paragraph = Paragraph::new(lines).style(theme::last_prompt_style(scheme));
-    frame.render_widget(paragraph, area);
+        .collect();
+    frame.render_widget(
+        Paragraph::new(lines).style(theme::last_prompt_style(scheme)),
+        text_area,
+    );
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wide_banner_draws_a_quote_gutter_and_indents_the_text() {
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(40, 3)).unwrap();
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                render(frame, area, Some("hello world"), 3, ColorScheme::Dark);
+            })
+            .unwrap();
+        let buffer = terminal.backend().buffer();
+        let row: String = (0..40).map(|x| buffer[(x, 0)].symbol()).collect();
+        let gutter_x = row.chars().position(|c| c == '\u{258e}');
+        let text_x = row.find("hello").map(|byte| row[..byte].chars().count());
+        let (gutter_x, text_x) = (gutter_x.expect("gutter"), text_x.expect("text"));
+        assert!(gutter_x < text_x);
+        assert!(text_x >= usize::from(TEXT_INSET_LEFT));
+    }
 
     #[test]
     fn small_prompt_slot_retains_the_end_of_the_prompt() {

@@ -581,7 +581,8 @@ async fn voice_say_reaches_a_terminal_through_the_real_voice_pipeline() {
             WAIT_TIMEOUT
         )
         .await,
-        "the pane never received the text; screen: {:?}",
+        "the pane never received the text; tool outputs: {:?}; screen: {:?}",
+        mock.function_call_outputs(),
         tui.screen_text()
     );
     assert!(

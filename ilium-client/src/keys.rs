@@ -27,6 +27,11 @@ use crate::scheduled_input::{ScheduledInputDialogState, ScheduledInputFocus};
 /// editor pane is temporarily owned by save preparation. `None` means the
 /// event is modal or otherwise cannot safely pass an earlier deferred event.
 pub(crate) fn editor_loan_event_target(app: &App, event: &Event) -> Option<Option<NodeId>> {
+    if app.diagnostic_view.is_some()
+        || matches!(event, Event::Key(key) if key.code == KeyCode::F(9) && crate::diagnostic::current_text(app).is_some())
+    {
+        return Some(None);
+    }
     if !matches!(event, Event::Key(_) | Event::Paste(_)) {
         return None;
     }
@@ -60,6 +65,9 @@ fn is_escape(event: &Event) -> bool {
 /// Existing protected input owners run before terminal capture or per-mode
 /// dispatch. This shared path preserves JS review, onboarding and dialog policy.
 pub(crate) fn intercept_event(app: &mut App, event: &Event) -> bool {
+    if crate::diagnostic::intercept_event(app, event) {
+        return true;
+    }
     if app.onboarding.is_none() && app.handle_plugin_permission_event(event) {
         return true;
     }
@@ -135,6 +143,10 @@ pub(crate) fn handle_event_after_intercept(app: &mut App, event: Event) {
     // replayed through its existing key contract so enabling the host mode
     // cannot silently disable paste in names, paths, searches, or editors.
     if let Event::Paste(pasted) = &event {
+        if app.native_terminal_paste_destination().is_some() {
+            app.handle_terminal_paste(pasted);
+            return;
+        }
         if requires_key_paste_replay(app) {
             replay_pasted_text_as_keys(app, pasted);
             return;
@@ -335,7 +347,11 @@ pub(crate) fn requires_key_paste_replay(app: &App) -> bool {
 /// The event loop also owns modes whose atomic-paste semantics need a
 /// specialized replay policy instead of the synchronous fallback above.
 pub(crate) fn requires_bounded_key_paste_replay(app: &App) -> bool {
-    requires_key_paste_replay(app) || matches!(&app.mode, Mode::AnimationTextPrompt(..))
+    requires_key_paste_replay(app)
+        || matches!(
+            &app.mode,
+            Mode::AnimationTextPrompt(..) | Mode::AgentSetupPathPrompt(..)
+        )
 }
 
 #[cfg(test)]
@@ -933,7 +949,9 @@ fn handle_search_event(app: &mut App, mut state: Box<SearchState>, event: &Event
 /// Runs one leader-key action.
 fn execute_action(app: &mut App, action: Action) {
     match action {
-        Action::NewTerminal => app.action_new_terminal(),
+        Action::NewTerminal => {
+            app.action_new_terminal();
+        }
         Action::NewAgentWorktree => app.open_create_agent_workspace_dialog(
             ilium_core::BuiltinAgentProvider::Claude,
             app.selected_node_id().unwrap_or(ilium_core::ROOT_ID),
@@ -2511,6 +2529,19 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
     }
     state.animation_slider_drag = None;
     app.clear_animation_hover();
+
+    // The fine-tuning dialog owns every key while open.
+    if state.padding.dialog.is_some() {
+        if matches!(key.code, KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q')) {
+            state.padding.dialog = None;
+        }
+        app.mode = Mode::Settings(state);
+        return;
+    }
+    if state.tab == SettingsTab::Padding && crate::padding_ui::handle_key(app, &mut state, *key) {
+        app.mode = Mode::Settings(state);
+        return;
+    }
 
     // The Optimization tab owns its keys (scroll, sub-tabs, scan/apply/revert)
     // and, while its Apply confirmation is open, every key.

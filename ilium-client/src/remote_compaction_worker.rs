@@ -200,11 +200,8 @@ impl RemoteCompactionWorkers {
         }
     }
 
-    /// The refusal event is boxed: it is large and this Result is returned on every spawn.
-    pub fn spawn(
-        &mut self,
-        job: RemoteCompactionJob,
-    ) -> Result<(), Box<RemoteCompactionWorkerEvent>> {
+    #[allow(clippy::result_large_err)] // The refusal hands the original value back unchanged; boxing would allocate on that path.
+    pub fn spawn(&mut self, job: RemoteCompactionJob) -> Result<(), RemoteCompactionWorkerEvent> {
         if self.active.is_some() {
             return Err(Box::new(failure_event(
                 &job,

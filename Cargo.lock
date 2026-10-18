@@ -2708,9 +2708,12 @@ dependencies = [
  "clap",
  "directories",
  "futures-util",
+ "ilium-agent-session",
  "ilium-ambient",
  "ilium-client",
+ "ilium-control",
  "ilium-core",
+ "ilium-inference",
  "ilium-ipc",
  "ilium-logging",
  "ilium-platform",
@@ -2874,6 +2877,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "ilium-control"
+version = "0.1.1"
+dependencies = [
+ "ilium-core",
+ "ilium-ipc",
+ "ilium-sound",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "ilium-core"
 version = "0.1.1"
 dependencies = [
@@ -2967,6 +2982,7 @@ dependencies = [
 name = "ilium-kilo-gateway"
 version = "0.1.1"
 dependencies = [
+ "directories",
  "ilium-http",
  "ilium-logging",
  "rand 0.10.2",
@@ -3058,6 +3074,7 @@ dependencies = [
  "ignore",
  "ilium-agent-debug",
  "ilium-agent-session",
+ "ilium-control",
  "ilium-core",
  "ilium-detect",
  "ilium-execution",

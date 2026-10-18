@@ -138,6 +138,7 @@ pub(crate) struct StreamWindow {
     pub(crate) height: u16,
 }
 impl Stream {
+    #[allow(clippy::too_many_arguments)] // Each stream identity, storage admission and limit stays explicit.
     pub fn new(
         identity: Arc<()>,
         physical_count: usize,

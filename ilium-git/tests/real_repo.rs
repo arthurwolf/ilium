@@ -1,7 +1,8 @@
 use ilium_git::{
     branch_facts, branch_tip, create_worktree, default_base_ref, delete_branch_if_merged,
-    delete_branch_if_tip, discover, head_paths, head_probe, is_worktree_pristine_including_ignored,
-    list_branches, list_worktrees, remove_worktree, resolve_commit, status, GitError,
+    delete_branch_if_tip, discover, discover_optional, head_paths, head_probe,
+    is_worktree_pristine_including_ignored, list_branches, list_worktrees, remove_worktree,
+    resolve_commit, status, GitError,
 };
 use std::path::Path;
 use std::process::Command;
@@ -60,6 +61,15 @@ async fn discovers_same_common_directory_from_nested_and_linked_worktrees() {
     assert_eq!(linked_facts.worktree_root, linked);
     assert_eq!(linked_facts.project_subpath, Path::new(""));
     assert!(!root.is_bare);
+    assert_eq!(discover_optional(main).await.unwrap(), Some(root.clone()));
+    assert_eq!(
+        discover_optional(&nested).await.unwrap(),
+        Some(nested_facts)
+    );
+    assert_eq!(
+        discover_optional(&linked).await.unwrap(),
+        Some(linked_facts)
+    );
 
     let worktrees = list_worktrees(main).await.expect("list worktrees");
     assert_eq!(worktrees.len(), 2);
@@ -226,4 +236,34 @@ async fn resolves_selected_base_and_compare_deletes_only_the_expected_tip() {
         .await
         .expect("compare-delete owned branch");
     assert_eq!(branch_tip(main, "agent/rollback").await.unwrap(), None);
+}
+
+#[tokio::test]
+async fn optional_discovery_allows_an_ordinary_directory() {
+    let temporary = TempDir::new().expect("ordinary directory");
+    assert!(discover_optional(temporary.path()).await.unwrap().is_none());
+    // Reproduce the live failure: an empty .git above the launch directory
+    // made the server's handwritten presence scan demand a repository.
+    std::fs::create_dir(temporary.path().join(".git")).unwrap();
+    let launch = temporary.path().join("project");
+    std::fs::create_dir(&launch).unwrap();
+    assert!(discover_optional(&launch).await.unwrap().is_none());
+    std::fs::remove_dir(temporary.path().join(".git")).unwrap();
+    std::fs::write(temporary.path().join(".git"), "invalid gitfile\n").unwrap();
+    assert!(discover_optional(&launch).await.is_err());
+    assert!(discover(&launch).await.is_err());
+}
+
+#[tokio::test]
+async fn optional_discovery_preserves_real_and_bare_repositories() {
+    let temporary = repository();
+    let directory = temporary.path();
+    assert_eq!(
+        discover_optional(directory).await.unwrap(),
+        Some(discover(directory).await.unwrap())
+    );
+    let bare = TempDir::new().unwrap();
+    git(bare.path(), &["init", "--bare", "-q"]);
+    let repository = discover_optional(bare.path()).await.unwrap().unwrap();
+    assert!(repository.is_bare);
 }
