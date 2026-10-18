@@ -312,11 +312,6 @@ impl WriterQueues {
         unimplemented!("host::ipc::WriterQueues::push_plugin")
     }
 
-    /// The next item to write: `PTY_FRAMES_PER_PLUGIN_ENVELOPE` PTY frames per plugin record.
-    pub fn next(&mut self) -> Option<Written> {
-        unimplemented!("host::ipc::WriterQueues::next")
-    }
-
     /// Whether the plugin queue overflowed its soft cap.
     pub fn resync_flagged(&self) -> bool {
         self.resync_flagged
@@ -330,5 +325,14 @@ impl WriterQueues {
     /// Records queued in the plugin queue.
     pub fn plugin_queued_records(&self) -> usize {
         self.plugin.len()
+    }
+}
+
+impl Iterator for WriterQueues {
+    type Item = Written;
+
+    /// The next item to write: `PTY_FRAMES_PER_PLUGIN_ENVELOPE` PTY frames per plugin record.
+    fn next(&mut self) -> Option<Written> {
+        unimplemented!("host::ipc::WriterQueues::next")
     }
 }

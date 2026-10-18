@@ -30,6 +30,9 @@ use crate::fakes::tree::FakeTree;
 use crate::fuzz::FuzzFailure;
 use crate::replay::ReplayMismatch;
 
+/// One HTTP reply delivered to the plugin: `(request, status, headers, body)`.
+pub type HttpReply = (u64, u16, Vec<(String, String)>, Vec<u8>);
+
 /// How the plugin runs: as a native library or as a built component (reference-test-harness.md "Modes").
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Mode {
@@ -855,7 +858,7 @@ impl FakeHost {
     }
 
     /// HTTP replies delivered to the plugin: `(request, status, headers, body)` (reference-test-harness.md "Fakes").
-    pub fn http_replies(&self) -> Vec<(u64, u16, Vec<(String, String)>, Vec<u8>)> {
+    pub fn http_replies(&self) -> Vec<HttpReply> {
         unimplemented!("harness.http-replies")
     }
 

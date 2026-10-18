@@ -24,3 +24,7 @@ proptest = "1"
 # Component mode: runs the built .wasm under Wasmtime instead of the native library (reference-test-harness.md "Modes").
 # The implementation phase adds the optional wasmtime dependency here, with the code that uses it.
 component = []
+# Gates of the host-call, session and view harness tests that wait for their implementation.
+plugin_host_calls = []
+plugin_session = []
+plugin_views = []
