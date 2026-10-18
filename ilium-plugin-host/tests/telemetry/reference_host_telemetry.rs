@@ -202,7 +202,7 @@ fn collect_keys(value: &serde_json::Value, keys: &mut Vec<String>) {
 fn hst_353_serialized_bucket_schema_has_no_payload_fields() {
     let telemetry = SideTelemetry::new();
     telemetry.record_call(CallClass::Event, ms(1), ms(20), 5);
-    telemetry.record_trap("host.deadline", 6);
+    telemetry.record_trap("trap.deadline", 6);
     let buckets = telemetry.snapshot(10);
     let value = serde_json::to_value(&buckets).expect("buckets serialize");
     let mut keys = Vec::new();
@@ -319,8 +319,8 @@ fn hst_354_breaches_are_keyed_by_class_and_kind() {
 #[test]
 fn hst_354_traps_events_and_other_counters_are_kept() {
     let telemetry = SideTelemetry::new();
-    telemetry.record_trap("host.deadline", 1);
-    telemetry.record_trap("host.deadline", 2);
+    telemetry.record_trap("trap.deadline", 1);
+    telemetry.record_trap("trap.deadline", 2);
     telemetry.record_trap("host.stack-overflow", 3);
     telemetry.record_queue_depth(7, 4);
     telemetry.record_queue_depth(3, 5);
@@ -335,7 +335,7 @@ fn hst_354_traps_events_and_other_counters_are_kept() {
     telemetry.record_restart("trap", 14);
     telemetry.record_failure("trap", 15);
     let bucket = &telemetry.snapshot(20)[0];
-    assert_eq!(bucket.traps("host.deadline"), 2);
+    assert_eq!(bucket.traps("trap.deadline"), 2);
     assert_eq!(bucket.traps("host.stack-overflow"), 1);
     assert_eq!(bucket.queue_depth_high_water(), 7);
     assert_eq!(bucket.events_dropped("node-renamed"), 4);
@@ -592,7 +592,7 @@ fn hst_357_summary_line_carries_the_call_count() {
 const HOST_LINE_TABLE: [(&str, &str); 11] = [
     ("instance.started", "info"),
     ("instance.ended", "info"),
-    ("host.deadline", "warn"),
+    ("trap.deadline", "warn"),
     ("host.late", "warn"),
     ("host.queue-timeout", "warn"),
     ("events.dropped", "warn"),
@@ -626,7 +626,7 @@ fn hst_358_unknown_condition_id_is_refused() {
 fn hst_358_twenty_lines_per_minute_are_admitted() {
     let mut limiter = HostLogLimiter::new();
     let admitted = (0..20)
-        .filter(|n| limiter.admit(Side::Server, "host.deadline", 1_000 + n))
+        .filter(|n| limiter.admit(Side::Server, "trap.deadline", 1_000 + n))
         .count();
     assert_eq!(admitted, 20);
 }
@@ -636,9 +636,9 @@ fn hst_358_twenty_lines_per_minute_are_admitted() {
 fn hst_358_the_21st_line_in_a_minute_is_suppressed() {
     let mut limiter = HostLogLimiter::new();
     for n in 0..20 {
-        assert!(limiter.admit(Side::Server, "host.deadline", 1_000 + n));
+        assert!(limiter.admit(Side::Server, "trap.deadline", 1_000 + n));
     }
-    assert!(!limiter.admit(Side::Server, "host.deadline", 1_500));
+    assert!(!limiter.admit(Side::Server, "trap.deadline", 1_500));
 }
 
 /// REQ: HST-358
@@ -646,9 +646,9 @@ fn hst_358_the_21st_line_in_a_minute_is_suppressed() {
 fn hst_358_budget_returns_after_a_minute() {
     let mut limiter = HostLogLimiter::new();
     for n in 0..25 {
-        limiter.admit(Side::Server, "host.deadline", 1_000 + n);
+        limiter.admit(Side::Server, "trap.deadline", 1_000 + n);
     }
-    assert!(limiter.admit(Side::Server, "host.deadline", 61_001));
+    assert!(limiter.admit(Side::Server, "trap.deadline", 61_001));
 }
 
 /// REQ: HST-358
@@ -656,11 +656,11 @@ fn hst_358_budget_returns_after_a_minute() {
 fn hst_358_budget_is_per_side_and_per_kind() {
     let mut limiter = HostLogLimiter::new();
     for n in 0..20 {
-        assert!(limiter.admit(Side::Server, "host.deadline", 1_000 + n));
+        assert!(limiter.admit(Side::Server, "trap.deadline", 1_000 + n));
     }
-    assert!(limiter.admit(Side::Client, "host.deadline", 1_100));
+    assert!(limiter.admit(Side::Client, "trap.deadline", 1_100));
     assert!(limiter.admit(Side::Server, "host.late", 1_100));
-    assert!(!limiter.admit(Side::Server, "host.deadline", 1_100));
+    assert!(!limiter.admit(Side::Server, "trap.deadline", 1_100));
 }
 
 /// REQ: HST-358
@@ -668,12 +668,12 @@ fn hst_358_budget_is_per_side_and_per_kind() {
 fn hst_358_suppressed_lines_are_summarised_in_one_line() {
     let mut limiter = HostLogLimiter::new();
     for n in 0..25 {
-        limiter.admit(Side::Server, "host.deadline", 1_000 + n);
+        limiter.admit(Side::Server, "trap.deadline", 1_000 + n);
     }
-    let summary = limiter.take_suppressed_summary(Side::Server, "host.deadline", 61_001);
+    let summary = limiter.take_suppressed_summary(Side::Server, "trap.deadline", 61_001);
     assert_eq!(summary.as_deref(), Some("5 similar lines suppressed"));
     assert_eq!(
-        limiter.take_suppressed_summary(Side::Server, "host.deadline", 61_002),
+        limiter.take_suppressed_summary(Side::Server, "trap.deadline", 61_002),
         None
     );
 }
@@ -682,9 +682,9 @@ fn hst_358_suppressed_lines_are_summarised_in_one_line() {
 #[test]
 fn hst_358_no_summary_when_nothing_was_suppressed() {
     let mut limiter = HostLogLimiter::new();
-    limiter.admit(Side::Server, "host.deadline", 1_000);
+    limiter.admit(Side::Server, "trap.deadline", 1_000);
     assert_eq!(
-        limiter.take_suppressed_summary(Side::Server, "host.deadline", 61_001),
+        limiter.take_suppressed_summary(Side::Server, "trap.deadline", 61_001),
         None
     );
 }

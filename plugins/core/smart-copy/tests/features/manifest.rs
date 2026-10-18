@@ -129,18 +129,15 @@ fn manifest_050_context_menu_contributes_one_terminal_entry_for_the_smart_copy_c
 
 /// REQ: COR-050
 #[test]
-fn manifest_050_activation_is_the_service_and_the_command_trigger_of_the_boot_table() {
+fn manifest_050_activation_is_the_command_trigger_of_the_boot_table() {
     let manifest = manifest();
-    assert_eq!(
-        manifest["activation"],
-        json!(["service:copy", "command:smart-copy"])
-    );
+    assert_eq!(manifest["activation"], json!(["command:smart-copy"]));
     let boot = manual_page("reference-kernel-and-boot.md");
     let row = boot
         .lines()
         .find(|line| line.starts_with("| Smart copy |"))
         .expect("boot table row");
-    assert!(row.contains("`service:copy`"));
+    assert!(!row.contains("service:copy"));
     assert!(row.contains("`command:smart-copy`"));
 }
 

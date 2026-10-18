@@ -11,5 +11,4 @@ Each line: crate | signature | id | why.
 - ilium-plugin-sdk (testing) | `FakeHost::contribute_entry(point, id, json)`, `published(topic) -> Vec<String>`, `settle()`, `failures()`, `activate::<P>()`, `deliver_one(Event) -> Vec<Submission>` | F-065, F-066 | collect points, topic, async settle
 - ilium-plugin-sdk | `Key::named(&str) -> Key`; `MenuEntry` fields `shortcut`, `separator_before`, `disabled_reason`, `is_submenu`, `parent` | F-016 | key events and menu assertions
 - ilium-plugin-sdk (testing) | `ErrorCode` returned by `settings().set` for invalid values with loader message | COR-011 | settings validation
-- Manual: after-copy risk is "standard" on the page but "high" in reference-extension-security.md | SEC-293 | two tests are red for this reason
 - ilium-plugin-sdk | `types::Key` (see Key::named line above) and `types::Event::Key(Key)` variant | F-016 | key events

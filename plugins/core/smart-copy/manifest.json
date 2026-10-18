@@ -28,7 +28,6 @@
     ]
   },
   "activation": [
-    "service:copy",
     "command:smart-copy"
   ],
   "contributes": {

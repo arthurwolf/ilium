@@ -64,7 +64,7 @@ fn doc_aut_206_restore_layout_first_byte_identifies_format() {
         "MUST",
         &[
             "first byte identifies the format",
-            "format of the previous release",
+            "fall back to defaults when the first byte is not a format it knows",
         ],
     );
 }

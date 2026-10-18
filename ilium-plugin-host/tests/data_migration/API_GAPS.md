@@ -18,3 +18,4 @@ The rig is the contract these tests ask the skeleton to provide, in `ilium_plugi
 - Assumption: LIF-107 cap 0 is ambiguous in the manual; only the no-backup outcome is asserted.
 - Assumption: `attempts` is 0 at first interruption, 1 after the second start, per LIF-110.
 - Assumption: free-space tests use a one MiB tolerance around 2 x data + 100 MiB.
+- ilium-plugin-host: `MigrationRig::config_text() -> String`, `MigServer::{is_running() -> bool, write_setting(tab, key, value)}`; COR-090.

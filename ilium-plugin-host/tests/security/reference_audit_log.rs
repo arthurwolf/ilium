@@ -448,7 +448,7 @@ fn sec_225_a_failed_write_keeps_the_server_running_and_retries_every_10_seconds(
 
 /// REQ: SEC-225
 #[test]
-fn sec_225_queue_holds_1000_records_and_drops_the_low_priority_ones_first() {
+fn sec_225_queue_holds_1000_records_and_drops_the_refusal_records_first() {
     let rig = t3(&[]);
     rig.host.fail_audit_writes(true);
     for index in 0..10 {

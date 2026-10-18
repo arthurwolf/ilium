@@ -114,7 +114,7 @@ fn doc_030_polling_defaults_are_ten_and_forty_five_seconds() {
 fn doc_027_one_poll_cycle_spends_at_most_fifty_milliseconds_on_detectors() {
     let page = page_text();
     assert!(page.contains("One poll cycle spends at most 50 ms on detector calls."));
-    assert!(page.contains("the third breach in a row restarts this plugin side"));
+    assert!(page.contains("A third breach in a row traps the call"));
 }
 
 /// REQ: F-030

@@ -250,7 +250,7 @@ fn sec_053_epoch_interruption_traps_a_missed_deadline() {
     });
     assert_eq!(
         result.expect("call result").trap.as_deref(),
-        Some("host.deadline")
+        Some("trap.deadline")
     );
 }
 

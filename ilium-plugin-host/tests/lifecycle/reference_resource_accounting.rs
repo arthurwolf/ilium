@@ -192,6 +192,17 @@ fn lif_143_default_applies_when_nothing_else_is_set() {
     );
 }
 
+/// REQ: LIF-143
+#[test]
+fn lif_143_session_key_raised_above_its_current_value_is_clamped() {
+    let defaults = ilium_plugin_host::session::SessionLimits::default();
+    let raised = ilium_plugin_host::session::SessionLimits::from_user(&[(
+        "session_memory_mib",
+        defaults.session_memory_mib + 1,
+    )]);
+    assert_eq!(raised.session_memory_mib, defaults.session_memory_mib);
+}
+
 /// REQ: LIF-144
 #[test]
 fn lif_144_per_plugin_user_value_beats_the_global_user_value() {

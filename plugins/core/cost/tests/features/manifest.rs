@@ -103,11 +103,11 @@ fn doc_cor_050_server_side_has_entry_world_and_the_service_provider_export() {
 
 /// REQ: COR-050, F-031
 #[test]
-fn doc_cor_050_client_side_has_entry_and_world_and_no_exports_key() {
+fn doc_cor_050_client_side_has_entry_world_and_the_views_export() {
     let manifest = manifest_value();
     assert_eq!(
         manifest["client"],
-        json!({"entry": "client.wasm", "world": "ilium:client/base@0.1.0"})
+        json!({"entry": "client.wasm", "world": "ilium:client/base@0.1.0", "exports": ["views"]})
     );
 }
 

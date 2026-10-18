@@ -47,6 +47,13 @@
         "icon": "robot"
       }
     ],
+    "panels": [
+      {
+        "id": "panel",
+        "title": "Agent detection",
+        "modal": false
+      }
+    ],
     "decoration_slots": [
       {
         "id": "activity",

@@ -125,7 +125,7 @@ fn doc_063_the_traceability_table_assigns_both_features_to_the_agent_setup_plugi
         .find(|line| line.starts_with("| F-063 "))
         .expect("F-063 row");
     assert!(
-        f037.contains("agent-setup plugin") && f037.contains("fs.write-scoped"),
+        f037.contains("agent-setup plugin") && f037.contains("fs.write:agent-config"),
         "{f037}"
     );
     assert!(

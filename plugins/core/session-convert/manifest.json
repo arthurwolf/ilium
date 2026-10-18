@@ -22,6 +22,9 @@
       "menu-provider"
     ]
   },
+  "unstable": [
+    "plugin-services"
+  ],
   "capabilities": {
     "server": [
       "panes.read",

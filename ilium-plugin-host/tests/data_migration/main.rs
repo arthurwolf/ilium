@@ -8,4 +8,5 @@
 mod api_storage;
 mod common;
 mod guide_data_migration;
+mod reference_config_and_data_migration;
 mod wit_migrator;

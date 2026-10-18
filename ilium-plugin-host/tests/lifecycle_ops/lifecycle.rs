@@ -14,11 +14,11 @@ fn dev_rig() -> (OpsRig, ServerHandle) {
 
 /// REQ: LIF-220
 #[test]
-fn lif_220_dev_with_no_server_exits_2_with_dev_no_server() {
+fn lif_220_dev_with_no_server_exits_6_with_session_unreachable() {
     let rig = rig();
     let output = rig.dev_cli(&["--cwd", "/nonexistent-project"]);
-    assert_eq!(output.exit_code, 2);
-    assert_eq!(error_codes(&output), vec!["dev.no-server".to_owned()]);
+    assert_eq!(output.exit_code, 6);
+    assert_eq!(error_codes(&output), vec!["session.unreachable".to_owned()]);
 }
 
 /// REQ: LIF-220
@@ -43,11 +43,11 @@ fn lif_220_dev_with_session_flag_attaches_to_the_named_session() {
 
 /// REQ: LIF-220
 #[test]
-fn lif_220_start_server_flag_starts_a_server_when_none_runs() {
+fn lif_220_dev_never_starts_a_server_when_none_runs() {
     let rig = rig();
-    let session = rig.dev_start(&pkg(NOTES, "1.0.0"), &["--start-server"]);
-    assert!(session.exit_code().is_none());
-    assert!(rig.server_running("s1"));
+    let output = rig.dev_cli(&["--cwd", "/nonexistent-project"]);
+    assert_eq!(output.exit_code, 6);
+    assert!(!rig.server_running("s1"));
 }
 
 /// REQ: LIF-221

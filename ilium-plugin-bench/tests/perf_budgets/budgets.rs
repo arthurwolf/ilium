@@ -888,10 +888,10 @@ fn b21_helper_start_is_record_only() {
 /// REQ: B21
 #[test]
 #[ignore = "budget: run on the reference machine"]
-fn b21_helper_start_2mib_component_recorded_median_under_80ms() {
+fn b21_helper_start_2mib_component_records_median_without_threshold() {
     let result = run_benchmark("B21").expect("benchmark runs");
     let median = *result.metrics.get("median_ms").expect("metric recorded");
-    assert!(median < 80.0, "median_ms={median}");
+    assert_eq!(judge("B21", "median_ms", median), Verdict::Recorded);
 }
 
 /// REQ: B2

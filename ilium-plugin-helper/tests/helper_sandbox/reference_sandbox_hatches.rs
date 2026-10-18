@@ -73,7 +73,7 @@ fn sec_031_process_spawn_is_forwarded_like_process_run() {
 #[test]
 fn doc_sec_031_bare_names_resolve_against_a_fixed_system_path() {
     let text = page(PAGE);
-    for dir in ["`/usr/bin`", "`/bin`", "`/usr/local/bin`"] {
+    for dir in ["`/usr/bin`", "`/bin`"] {
         assert!(text.contains(dir));
     }
     assert_page_has(
@@ -460,10 +460,10 @@ fn sec_046_patterns_of_1023_1024_and_1025_bytes_are_forwarded_for_registration_c
 
 /// REQ: SEC-046
 #[test]
-fn sec_046_backreference_and_lookaround_patterns_get_regex_unsupported() {
+fn sec_046_backreference_and_lookaround_patterns_get_invalid_argument() {
     for pattern in [&b"(a)\\1"[..], &b"(?=a)b"[..], &b"(?<=a)b"[..]] {
-        let outcome = hostile_call("register-regex", pattern, Some("regex.unsupported"));
-        assert_eq!(outcome.result, "regex.unsupported");
+        let outcome = hostile_call("register-regex", pattern, Some("invalid-argument"));
+        assert_eq!(outcome.result, "invalid-argument");
     }
 }
 
@@ -483,7 +483,7 @@ fn doc_sec_046_limits_and_codes() {
         PAGE,
         "A pattern is at most 1,024 bytes, and its compiled automaton is at most 256 KiB",
     );
-    assert_page_has(PAGE, "`regex.too-large` or `regex.unsupported`");
+    assert_page_has(PAGE, "is refused with `invalid-argument` at registration");
     assert_page_has(PAGE, "no backreferences and no lookaround");
 }
 

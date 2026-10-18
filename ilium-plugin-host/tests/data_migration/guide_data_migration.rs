@@ -944,10 +944,7 @@ fn lif_107_backup_too_large_message_names_size_and_limit() {
         message.starts_with("The data of com.example.notes is "),
         "{message}"
     );
-    assert!(
-        message.ends_with("Pass --no-backup or raise migration_backup_mib."),
-        "{message}"
-    );
+    assert!(message.ends_with("Pass --no-backup."), "{message}");
 }
 
 // ---------------------------------------------------------------------------------------------

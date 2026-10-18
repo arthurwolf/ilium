@@ -7,7 +7,7 @@ use crate::support::{page, Versioned};
 
 /// REQ: AUT-206
 #[test]
-fn aut_206_restore_bytes_of_the_previous_release_format_are_accepted() {
+fn aut_206_known_older_format_byte_is_read_when_the_data_version_matches() {
     let mut host = FakeHost::new();
     host.activate::<Versioned>();
     host.restart_with(vec![Versioned::PREVIOUS_FORMAT, 9]);

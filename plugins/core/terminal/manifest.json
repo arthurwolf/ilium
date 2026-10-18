@@ -4,7 +4,7 @@
   "name": "Terminal",
   "version": "0.1.0",
   "publisher": "Ilium",
-  "description": "The Terminal plugin (ilium.core.terminal, side both) owns terminal panes as plugins see them: pane processes and their signals, screen reads, scrollback history, typed and pasted input, clickable links, pane titles from the terminal and scr",
+  "description": "The Terminal plugin (ilium.core.terminal, side both) owns terminal panes as plugins see them: pane processes and signals, screen reads, scrollback history, input, clickable links, pane titles and screen transfer.",
   "license": "MIT",
   "server": {
     "entry": "server.wasm",

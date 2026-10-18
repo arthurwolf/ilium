@@ -72,11 +72,11 @@ fn manifest_050_both_sides_declare_their_entry_and_world() {
     let manifest = manifest();
     assert_eq!(
         manifest["server"],
-        json!({"entry": "server.wasm", "world": "ilium:server/base@0.1.0"})
+        json!({"entry": "server.wasm", "world": "ilium:server/base@0.1.0", "exports": ["virtual-rows-provider"]})
     );
     assert_eq!(
         manifest["client"],
-        json!({"entry": "client.wasm", "world": "ilium:client/base@0.1.0"})
+        json!({"entry": "client.wasm", "world": "ilium:client/base@0.1.0", "exports": ["views"]})
     );
 }
 

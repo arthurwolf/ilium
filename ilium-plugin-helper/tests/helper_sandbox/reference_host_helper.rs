@@ -595,7 +595,7 @@ fn hst_161_slow_host_call_inside_a_call_makes_it_miss_the_deadline() {
         (Vec::new(), None)
     });
     let result = result.expect("call result");
-    assert_eq!(result.trap.as_deref(), Some("host.deadline"));
+    assert_eq!(result.trap.as_deref(), Some("trap.deadline"));
     assert!(started.elapsed() < Duration::from_millis(100 + 500));
 }
 
@@ -625,7 +625,7 @@ fn hst_161_round_trips_add_up_inside_one_deadline() {
     });
     assert_eq!(
         result.expect("call result").trap.as_deref(),
-        Some("host.deadline")
+        Some("trap.deadline")
     );
 }
 
@@ -642,7 +642,7 @@ fn hst_162_runaway_guest_traps_in_the_helper_with_host_deadline() {
     });
     assert_eq!(
         result.expect("call result").trap.as_deref(),
-        Some("host.deadline")
+        Some("trap.deadline")
     );
 }
 
@@ -672,7 +672,7 @@ fn hst_162_trap_does_not_arrive_before_the_deadline() {
     });
     assert_eq!(
         result.expect("call result").trap.as_deref(),
-        Some("host.deadline")
+        Some("trap.deadline")
     );
     assert!(started.elapsed() >= Duration::from_millis(200));
 }

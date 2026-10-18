@@ -100,10 +100,10 @@ fn usr_082_a_long_argument_is_never_cut_silently() {
 
 /// REQ: USR-014
 #[test]
-fn usr_014_not_now_four_times_then_the_fifth_start_shows_no_prompt() {
+fn usr_014_not_now_three_times_then_the_fourth_start_shows_no_prompt() {
     let mut rig = ScreensRig::new(80, 30);
     rig.set_bundled_first_start("ilium.core.voice", &["audio.capture"]);
-    for start in 1..=4 {
+    for start in 1..=3 {
         rig.start_client();
         assert!(
             rig.screen_text().contains("First start"),
@@ -115,7 +115,7 @@ fn usr_014_not_now_four_times_then_the_fifth_start_shows_no_prompt() {
     rig.start_client();
     assert!(
         !rig.screen_text().contains("First start"),
-        "start 5 shows no prompt"
+        "start 4 shows no prompt"
     );
 }
 
@@ -136,7 +136,7 @@ fn usr_014_at_most_one_prompt_per_start_and_other_plugins_are_not_blocked() {
 
 /// REQ: USR-014
 #[test]
-fn usr_014_allow_selected_ends_the_prompts_and_not_now_three_times_still_asks_once_more() {
+fn usr_014_allow_selected_ends_the_prompts_and_not_now_three_times_stops_them() {
     let mut allowed = ScreensRig::new(80, 30);
     allowed.set_bundled_first_start("ilium.core.voice", &["audio.capture"]);
     allowed.start_client();
@@ -153,8 +153,8 @@ fn usr_014_allow_selected_ends_the_prompts_and_not_now_three_times_still_asks_on
     }
     declined.start_client();
     assert!(
-        declined.screen_text().contains("First start"),
-        "the fourth start is the last that asks"
+        !declined.screen_text().contains("First start"),
+        "the third Not now answer is the last ask"
     );
 }
 

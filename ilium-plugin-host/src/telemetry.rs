@@ -394,7 +394,7 @@ pub struct HostLogLine {
     pub plugin: String,
     /// The side.
     pub side: Side,
-    /// The stable condition id, such as `host.deadline`.
+    /// The stable condition id, such as `trap.deadline`.
     pub id: String,
     /// The level word: `info`, `warn` or `error`.
     pub level: String,

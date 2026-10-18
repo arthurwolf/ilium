@@ -1484,7 +1484,7 @@ fn hst_083_deadline_trap_carries_host_deadline_class_and_limit() {
         .expect("host");
     fail_once(&mut host);
     let text = log_text(&host);
-    assert!(text.contains("host.deadline"));
+    assert!(text.contains("trap.deadline"));
     assert!(text.contains("event"));
     assert!(text.contains("20"));
 }
@@ -1498,7 +1498,7 @@ fn hst_083_deadline_trap_is_logged_once() {
         .build()
         .expect("host");
     fail_once(&mut host);
-    assert_eq!(log_count(&host, "host.deadline"), 1);
+    assert_eq!(log_count(&host, "trap.deadline"), 1);
 }
 
 // ---------------------------------------------------------------- component validation

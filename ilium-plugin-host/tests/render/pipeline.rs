@@ -69,6 +69,18 @@ fn hst_251_invalidate_resize_and_theme_each_trigger_a_render() {
 
 /// REQ: HST-251
 #[test]
+fn hst_251_user_action_in_the_view_triggers_one_render() {
+    let mut rig = rig_t2();
+    let view = rig.open_view("main");
+    rig.advance_ms(50);
+    let base = rig.render_calls(view);
+    rig.user_action(view);
+    rig.advance_ms(50);
+    assert_eq!(rig.render_calls(view), base + 1);
+}
+
+/// REQ: HST-251
+#[test]
 fn hst_251_scrolling_or_focus_does_not_trigger_a_render() {
     let mut rig = rig_t2();
     let view = rig.open_view("main");

@@ -29,8 +29,8 @@ fn doc_aut_402_release_passes_deny_warnings_with_reasoned_suppressions() {
 fn doc_aut_403_release_lists_no_unstable_feature() {
     assert_rule(
         "AUT-403",
-        "SHOULD NOT",
-        &["SHOULD NOT list an `unstable` feature"],
+        "MUST NOT",
+        &["MUST NOT list an `unstable` feature"],
     );
 }
 

@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 /// REQ: USR-200
 #[test]
-fn usr_200_install_writes_only_below_the_three_xdg_folders() {
+fn usr_200_install_writes_only_below_the_four_xdg_folders() {
     let mut rig = UserRig::new_with_xdg_isolation();
     install_ok(
         &mut rig,
@@ -45,6 +45,11 @@ fn usr_200_the_roots_come_from_the_project_name_ilium() {
         rig.cache_dir().ends_with("ilium"),
         "{}",
         rig.cache_dir().display()
+    );
+    assert!(
+        rig.state_dir().ends_with("ilium"),
+        "{}",
+        rig.state_dir().display()
     );
 }
 

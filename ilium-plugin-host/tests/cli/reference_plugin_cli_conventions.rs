@@ -1133,7 +1133,7 @@ fn dev_023_check_never_uses_info() {
 
 /// REQ: DEV-024
 #[test]
-fn dev_024_test_case_status_is_pass_fail_trap_or_skip() {
+fn dev_024_test_case_status_is_pass_fail_trap_or_skipped() {
     let root = scratch();
     let env = env(root.path());
     let dir = server_project(&env, root.path());
@@ -1143,7 +1143,8 @@ fn dev_024_test_case_status_is_pass_fail_trap_or_skip() {
     assert!(!cases.is_empty());
     for record in cases {
         assert!(
-            ["pass", "fail", "trap", "skip"].contains(&record["status"].as_str().expect("status")),
+            ["pass", "fail", "trap", "skipped"]
+                .contains(&record["status"].as_str().expect("status")),
             "{record}"
         );
     }

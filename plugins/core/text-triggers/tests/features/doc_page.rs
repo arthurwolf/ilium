@@ -82,7 +82,7 @@ fn doc_056_traceability_row_assigns_the_feature_to_this_plugin_on_the_server() {
         .expect("F-056 row");
     assert_eq!(
         row,
-        "| F-056 | Text triggers | `automation` | primitive-extended | text-triggers plugin | server | terminal.watch | [text_triggers] | none | 4a | COR-011 |"
+        "| F-056 | Text triggers | `automation` | primitive-extended | text-triggers plugin | server | terminal.output-filter, terminal.write | [text_triggers] | none | 4a | COR-011 |"
     );
 }
 

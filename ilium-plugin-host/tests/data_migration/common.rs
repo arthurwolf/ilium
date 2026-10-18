@@ -1,7 +1,6 @@
 //! Shared helpers of the data-migration lane. Everything uses the skeleton or the items named in
 //! API_GAPS.md (the migration rig).
 
-
 use std::collections::BTreeMap;
 
 use ilium_plugin_api::manifest::{validate_json, CheckMode, Diagnostic, ValidationContext};
