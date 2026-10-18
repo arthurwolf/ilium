@@ -12,7 +12,6 @@ pub struct AgentFiles<'a>(pub &'a mut FakeHost);
 impl AgentFiles<'_> {
     /// Writes a file.
     pub fn write(&mut self, _path: &str, _bytes: &[u8]) {
-        let _host = &self.0;
         unimplemented!("compaction.agent-files-write")
     }
 

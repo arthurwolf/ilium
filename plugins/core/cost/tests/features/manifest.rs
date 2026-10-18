@@ -422,3 +422,13 @@ fn doc_cor_050_core_plugins_index_lists_cost_on_both_sides() {
     assert_eq!(row[1], "`ilium.core.cost`");
     assert_eq!(row[2], "both");
 }
+
+/// REQ: F-020
+#[test]
+fn doc_f_020_token_provider_page_defines_the_forty_line_margin() {
+    let text = page("api-token-provider");
+    assert!(
+        text.contains("visible lines plus a margin of 40 lines above and below"),
+        "api-token-provider.md must define the 40-line margin"
+    );
+}

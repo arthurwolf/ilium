@@ -20,7 +20,6 @@ pub struct Realtime<'a>(pub &'a mut FakeHost);
 impl Realtime<'_> {
     /// Tools currently offered to the model.
     pub fn tools(&self) -> Vec<RealtimeTool> {
-        let _host = &self.0;
         unimplemented!("voice.realtime-tools")
     }
     /// Calls a tool with JSON arguments.
@@ -80,7 +79,6 @@ pub struct OnboardingDemo<'a>(pub &'a mut FakeHost, pub String);
 impl OnboardingDemo<'_> {
     /// Tool names of the demo.
     pub fn tools(&self) -> Vec<String> {
-        let _demo = (&self.0, &self.1);
         unimplemented!("voice.onboarding-demo-tools")
     }
     /// Calls a demo tool: `(call_id, name, arguments_json)`.

@@ -8,6 +8,9 @@ use ilium_plugin_sdk::generated::exports::service_provider::ServiceCall;
 use ilium_plugin_sdk::generated::exports::service_provider::ServiceReply;
 use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::generated::types::intents::Submission;
+use ilium_plugin_sdk::generated::types::layout::Area;
+use ilium_plugin_sdk::generated::types::ui::UiTree;
+use ilium_plugin_sdk::generated::types::ui::ViewTarget;
 use ilium_plugin_sdk::types::Activation;
 use ilium_plugin_sdk::types::PluginError;
 use ilium_plugin_sdk::{ilium_plugin, Handler, Lifecycle, ServiceProvider};
@@ -36,7 +39,7 @@ impl ServiceProvider for CostServer {
 }
 
 /// The client side of `ilium.core.cost` (core-plugin-cost.md, world `ilium:client/base@0.1.0`).
-#[ilium_plugin(side = "client", exports = [])]
+#[ilium_plugin(side = "client", exports = ["views"])]
 #[derive(Default)]
 pub struct CostClient;
 
@@ -49,5 +52,11 @@ impl Lifecycle for CostClient {
 impl Handler for CostClient {
     fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
         unimplemented!("ilium.core.cost: client handler.on_events")
+    }
+}
+
+impl Views for CostClient {
+    fn render(&mut self, _view: ViewTarget, _area: Area) -> UiTree {
+        unimplemented!("ilium.core.cost: client views.render")
     }
 }

@@ -7,9 +7,12 @@
 use ilium_plugin_sdk::exports::VirtualRowChild;
 use ilium_plugin_sdk::generated::types::events::Event;
 use ilium_plugin_sdk::generated::types::intents::Submission;
+use ilium_plugin_sdk::generated::types::layout::Area;
+use ilium_plugin_sdk::generated::types::ui::UiTree;
+use ilium_plugin_sdk::generated::types::ui::ViewTarget;
 use ilium_plugin_sdk::types::Activation;
 use ilium_plugin_sdk::types::PluginError;
-use ilium_plugin_sdk::{ilium_plugin, Handler, Lifecycle, VirtualRowsProvider};
+use ilium_plugin_sdk::{ilium_plugin, Handler, Lifecycle, Views, VirtualRowsProvider};
 
 /// The server side of `ilium.core.chatroom` (core-plugin-chatroom.md, world `ilium:server/base@0.1.0`).
 #[ilium_plugin(side = "server", exports = ["virtual-rows-provider"])]
@@ -41,7 +44,7 @@ impl VirtualRowsProvider for ChatroomServer {
 }
 
 /// The client side of `ilium.core.chatroom` (core-plugin-chatroom.md, world `ilium:client/base@0.1.0`).
-#[ilium_plugin(side = "client", exports = [])]
+#[ilium_plugin(side = "client", exports = ["views"])]
 #[derive(Default)]
 pub struct ChatroomClient;
 
@@ -54,5 +57,11 @@ impl Lifecycle for ChatroomClient {
 impl Handler for ChatroomClient {
     fn on_events(&mut self, _batch: Vec<Event>) -> Vec<Submission> {
         unimplemented!("ilium.core.chatroom: client handler.on_events")
+    }
+}
+
+impl Views for ChatroomClient {
+    fn render(&mut self, _view: ViewTarget, _area: Area) -> UiTree {
+        unimplemented!("ilium.core.chatroom: client views.render")
     }
 }
