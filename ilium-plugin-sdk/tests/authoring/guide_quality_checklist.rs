@@ -40,7 +40,7 @@ fn doc_aut_404_smallest_grant_set_explained_in_readme() {
     assert_rule(
         "AUT-404",
         "MUST",
-        &["exercised by a tested call path", "explained in the README"],
+        &["explained in the README with the feature that needs it"],
     );
 }
 

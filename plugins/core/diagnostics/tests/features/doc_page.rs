@@ -43,9 +43,9 @@ fn doc_the_five_log_levels_are_listed_in_order() {
 /// REQ: COR-050
 #[test]
 fn doc_the_report_holds_at_most_64_kibibytes_for_each_section() {
-    assert!(
-        page_text().contains("one section for each contributor, at most 64 KiB for each section")
-    );
+    assert!(page_text().contains(
+        "one section for each contributor, at most 64 KiB (65,536 bytes) for each section"
+    ));
 }
 
 /// REQ: COR-050

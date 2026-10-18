@@ -7,10 +7,7 @@ fn doc_aut_301_package_file_is_the_certain_publishing_route() {
     assert_rule(
         "AUT-301",
         "MUST",
-        &[
-            "only publishing route that is certain to work",
-            "MAY add a registry",
-        ],
+        &["base route that needs no registry", "MAY add a registry"],
     );
 }
 

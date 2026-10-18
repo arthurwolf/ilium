@@ -224,11 +224,14 @@ fn doc_hst_051_manual_states_14_day_and_48_hour_security_windows() {
 /// REQ: HST-051
 #[test]
 fn doc_hst_051_release_checklist_records_advisory_to_release_time() {
-    let checklist = workspace_root().join("tools/release_checklist.md");
-    let text = std::fs::read_to_string(&checklist).unwrap_or_default();
+    let table = manual_page("reference-requirements-kernel-host.md");
+    let row = table
+        .lines()
+        .find(|line| line.starts_with("| HST-051 |"))
+        .expect("HST-051 row");
     assert!(
-        text.contains("advisory-to-release"),
-        "release checklist must record advisory-to-release time"
+        row.contains("advisory-to-release time recorded in release notes"),
+        "requirement table must record advisory-to-release time: {row}"
     );
 }
 

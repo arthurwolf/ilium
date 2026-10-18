@@ -63,4 +63,6 @@ pub const EVENT_NAMES: &[&str] = &[
     "h-grant-refused",
     "project-trust",
     "safe-mode",
+    "audit-reset",
+    "audit-dropped",
 ];

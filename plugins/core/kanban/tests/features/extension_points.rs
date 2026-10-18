@@ -133,7 +133,7 @@ fn points_024_the_core_plugin_is_replaceable_with_a_replaces_list() {
 #[test]
 fn points_024_the_example_package_observes_card_moved_with_a_handler() {
     let page = page_text();
-    let example = json_block_after(&page, "#### Example: Posts a toast");
+    let example = json_block_after(&page, "#### Example: Observes every card move");
     assert_eq!(example["exports"], serde_json::json!(["hook-handler"]));
     assert_eq!(
         example["capabilities"]["client"],

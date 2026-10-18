@@ -1,5 +1,4 @@
 ╭ Ask for update ─────────────────────────────╮
-│ To……………………………………………………… All agents (3)      │
 │ Message…… What is your status in one line?  │
 │                                             │
 │                  [ Send ]   [ Cancel ]      │

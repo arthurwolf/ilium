@@ -118,7 +118,7 @@ fn doc_293_before_fire_is_high_risk_on_the_page_and_in_the_corrected_table() {
     assert_eq!(row[4], "high");
     let security = manual_page("reference-extension-security.md");
     assert!(security
-        .contains("| `ilium.core.text-triggers/before-fire` | high | Existing | Existing |"));
+        .contains("| `ilium.core.text-triggers/before-fire` | high | Can stop a rule that is about to send text to a terminal |"));
 }
 
 /// REQ: SEC-293

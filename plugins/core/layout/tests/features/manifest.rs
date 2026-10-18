@@ -65,11 +65,16 @@ fn doc_cor_050_both_sides_have_entry_and_world() {
 
 /// REQ: COR-050, F-003
 #[test]
-fn doc_cor_050_server_capabilities_are_panes_read_panes_lifecycle_tree_restructure() {
+fn doc_cor_050_server_capabilities_are_panes_read_panes_lifecycle_panes_create_tree_restructure() {
     let manifest = manifest_value();
     assert_eq!(
         strings(&manifest["capabilities"]["server"]),
-        ["panes.read", "panes.lifecycle", "tree.restructure"]
+        [
+            "panes.read",
+            "panes.lifecycle",
+            "panes.create",
+            "tree.restructure"
+        ]
     );
 }
 

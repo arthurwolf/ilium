@@ -141,6 +141,7 @@ fn manifest_050_has_no_unlisted_top_level_key() {
             "api",
             "capabilities",
             "client",
+            "contributes",
             "description",
             "id",
             "license",

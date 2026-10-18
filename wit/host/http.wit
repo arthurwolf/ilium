@@ -7,7 +7,7 @@ interface http {
   record http-request { method: string, url: string, headers: list<header>, body: option<list<u8>>, timeout-millis: u32 }
   record http-response { status: u16, headers: list<header>, body: list<u8> }
   enum stream-framing { raw, lines, server-sent-events, ndjson }
-  /// max-chunk-bytes at most 1 MiB.
+  /// max-chunk-bytes at most 64 KiB.
   record stream-request { request: http-request, framing: stream-framing, max-chunk-bytes: u32 }
   /// Async, take-response. Body at most 8 MiB by default. Errors: network, timed-out.
   fetch: func(request: http-request) -> result<request-id, plugin-error>;

@@ -95,9 +95,12 @@ fn doc_113_the_dialog_figure_has_message_field_send_and_cancel() {
 #[test]
 fn doc_113_the_dialog_figure_leaders_are_ellipsis_with_one_blank_on_each_side() {
     let figure = &figures(&page_text())[1];
-    let to_row = figure.lines().nth(1).expect("To row");
-    assert!(to_row.contains("To…"), "{to_row}");
-    assert!(to_row.contains("… All agents (3)"), "{to_row}");
+    let message_row = figure.lines().nth(1).expect("Message row");
+    assert!(message_row.contains("Message…"), "{message_row}");
+    assert!(
+        message_row.contains("… What is your status"),
+        "{message_row}"
+    );
 }
 
 /// REQ: F-110

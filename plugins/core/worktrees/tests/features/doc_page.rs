@@ -46,7 +46,7 @@ fn feature_070_before_remove_is_a_veto_hook_over_path_branch_dirty_and_merged() 
 fn feature_067_the_service_create_returns_a_path_and_the_topic_changed_carries_path_and_state() {
     let text = page_text();
     assert!(text.contains(
-        "- `ilium.core.worktrees/create`: create: create a worktree and return its path"
+        "- `ilium.core.worktrees/create`: request `{ repo, branch, base?, agent? }`, response `{ path, branch }`."
     ));
     assert!(text.contains("- `ilium.core.worktrees/changed`: { path, state }"));
 }

@@ -682,7 +682,7 @@ fn hst_162_trap_does_not_arrive_before_the_deadline() {
 fn doc_hst_162_manual_states_the_500_ms_kill_and_one_failure() {
     assert_page_has(
         PAGE,
-        "No `CallResult` arrives within 500 ms after the deadline | The host sends SIGKILL",
+        "No `CallResult` arrives within 500 ms after the deadline | The host terminates the helper (SIGTERM, then SIGKILL after 2 s",
     );
     assert_page_has(PAGE, "One failure is counted");
 }

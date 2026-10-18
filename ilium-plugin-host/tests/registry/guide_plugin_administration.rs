@@ -49,7 +49,7 @@ fn doc_pkg_460_company_only_uses_publishers_allow_and_allowed_sources() {
 /// REQ: PKG-460 WARN
 #[test]
 fn pkg_460_traced_in_the_requirement_table_as_should() {
-    assert_traced("PKG-460", SLUG, "SHOULD");
+    assert_traced("PKG-460", SLUG, "MUST");
 }
 
 /// REQ: PKG-460 WARN
@@ -92,7 +92,7 @@ fn doc_pkg_461_bundled_only_uses_allow_third_party_false() {
 /// REQ: PKG-461 WARN
 #[test]
 fn pkg_461_traced_in_the_requirement_table_as_should() {
-    assert_traced("PKG-461", SLUG, "SHOULD");
+    assert_traced("PKG-461", SLUG, "MUST");
 }
 
 /// REQ: PKG-461 WARN
@@ -124,7 +124,7 @@ fn doc_pkg_462_one_plugin_is_blocked_by_deny_ids() {
 /// REQ: PKG-462 WARN
 #[test]
 fn pkg_462_traced_in_the_requirement_table_as_should() {
-    assert_traced("PKG-462", SLUG, "SHOULD");
+    assert_traced("PKG-462", SLUG, "MUST");
 }
 
 /// REQ: PKG-462 WARN
@@ -164,7 +164,7 @@ fn doc_pkg_463_risky_grant_is_blocked_by_grants_deny() {
 /// REQ: PKG-463 WARN
 #[test]
 fn pkg_463_traced_in_the_requirement_table_as_should() {
-    assert_traced("PKG-463", SLUG, "SHOULD");
+    assert_traced("PKG-463", SLUG, "MUST");
 }
 
 /// REQ: PKG-463 WARN
@@ -202,7 +202,7 @@ fn doc_pkg_464_beta_builds_are_stopped_by_allowed_channels() {
 /// REQ: PKG-464 WARN
 #[test]
 fn pkg_464_traced_in_the_requirement_table_as_should() {
-    assert_traced("PKG-464", SLUG, "SHOULD");
+    assert_traced("PKG-464", SLUG, "MUST");
 }
 
 /// REQ: PKG-464 WARN, PKG-472 WARN
@@ -302,7 +302,7 @@ fn doc_pkg_466_a_trusted_key_never_overrides_a_revocation() {
 /// REQ: PKG-466 WARN
 #[test]
 fn pkg_466_traced_in_the_requirement_table_as_should() {
-    assert_traced("PKG-466", SLUG, "SHOULD");
+    assert_traced("PKG-466", SLUG, "never overrides a revocation");
 }
 
 /// REQ: PKG-466 WARN
@@ -470,7 +470,7 @@ fn doc_pkg_469_root_rotation_document_is_signed_by_old_and_new_key() {
 /// REQ: PKG-469 WARN
 #[test]
 fn pkg_469_traced_in_the_requirement_table_as_should() {
-    assert_traced("PKG-469", SLUG, "SHOULD");
+    assert_traced("PKG-469", SLUG, "MUST");
 }
 
 // ---- Policy keys (PKG-470..472, 475, 476) ---------------------------------------------------
@@ -491,19 +491,19 @@ fn doc_pkg_470_to_472_policy_key_names_are_listed_with_their_ids() {
 /// REQ: PKG-470 WARN
 #[test]
 fn pkg_470_traced_in_the_requirement_table_as_should() {
-    assert_traced("PKG-470", SLUG, "SHOULD");
+    assert_traced("PKG-470", SLUG, "is refused with `policy.blocked`");
 }
 
 /// REQ: PKG-471 WARN
 #[test]
 fn pkg_471_traced_in_the_requirement_table_as_should() {
-    assert_traced("PKG-471", SLUG, "SHOULD");
+    assert_traced("PKG-471", SLUG, "is refused with `policy.blocked`");
 }
 
 /// REQ: PKG-472 WARN
 #[test]
 fn pkg_472_traced_in_the_requirement_table_as_should() {
-    assert_traced("PKG-472", SLUG, "SHOULD");
+    assert_traced("PKG-472", SLUG, "is refused with `policy.blocked`");
 }
 
 /// REQ: PKG-470 WARN

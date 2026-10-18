@@ -281,16 +281,13 @@ fn actions_011_the_help_action_is_bound_to_the_question_mark_in_all_columns() {
 
 /// REQ: COR-011, F-007
 #[test]
-fn actions_011_the_manifest_default_chord_equals_the_help_key() {
+fn actions_011_the_manifest_chord_is_f1_and_the_settings_default_equals_the_help_key() {
     let rows = action_rows();
     let help = rows
         .iter()
         .find(|row| row.name == "Help")
         .expect("Help row");
-    assert_eq!(
-        manifest()["contributes"]["keybindings"][0]["chord"],
-        help.default.as_str()
-    );
+    assert_eq!(manifest()["contributes"]["keybindings"][0]["chord"], "F1");
     assert_eq!(
         manifest()["contributes"]["settings"][0]["rows"][0]["default"],
         help.default.as_str()

@@ -175,7 +175,7 @@ fn ext_055_the_requirement_row_exempts_typed_keystrokes_from_the_chain() {
 fn ext_052_the_service_and_the_topic_are_listed_with_the_page_text() {
     let text = page_text();
     assert!(text.contains("`ilium.core.terminal/transfer`: send-screen: copy the visible screen of one pane to another pane"));
-    assert!(text.contains("`ilium.core.terminal/screen-changed`: { pane, rows } when visible rows change, at most 10 per second"));
+    assert!(text.contains("`ilium.core.terminal/screen-changed`: { pane, first-row, last-row, revision } when visible rows change, at most 10 per second"));
     assert!(text.contains("**Replaceable:** yes."));
 }
 

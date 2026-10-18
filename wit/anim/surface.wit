@@ -17,7 +17,7 @@ interface surface {
     /// Width and height in pixels.
     size: func() -> tuple<u32, u32>;
     /// Rows are top to bottom. first-row plus the rows written must be within the height.
-    /// Errors: invalid-argument for a bad length or a format the scene did not declare.
+    /// Errors: invalid-argument for a format the scene did not declare, empty data, or first-row at or past the height. A partial trailing row is dropped, not an error.
     write-rows: func(first-row: u32, format: pixel-format, data: list<u8>) -> result<_, plugin-error>;
     /// Needs uses-cell-colors. One 0xRRGGBB value per cell, row by row.
     write-cell-colors: func(first-row: u32, colors: list<u32>) -> result<_, plugin-error>;

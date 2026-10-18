@@ -30,6 +30,7 @@ fn plugins_161_the_state_table_has_the_eight_row_words_in_order() {
             "Off",
             "Waiting for <owner>",
             "Blocked by policy",
+            "Blocked",
             "Refused: <reason>",
         ]
     );
@@ -50,6 +51,7 @@ fn plugins_161_each_word_maps_to_one_package_state_and_health() {
             "`installed-disabled-by-user`, `disabled`",
             "`dormant`",
             "`disabled-by-policy`, `disabled`",
+            "`blocked`, `disabled`",
             "`refused-at-load`, `refused`",
         ]
     );
@@ -61,7 +63,7 @@ fn plugins_161_no_two_states_share_a_row_word() {
     let mut words: Vec<String> = state_rows().into_iter().map(|row| row[0].clone()).collect();
     words.sort();
     words.dedup();
-    assert_eq!(words.len(), 8);
+    assert_eq!(words.len(), 9);
 }
 
 /// REQ: USR-161, F-090
@@ -90,7 +92,11 @@ fn plugins_161_what_the_user_can_do_per_state() {
     assert_eq!(actions[4], "Turn on");
     assert_eq!(actions[5], "Turn on or install the owner");
     assert_eq!(actions[6], "Nothing; ask the administrator");
-    assert_eq!(actions[7], "Remove, or reinstall a fixed package");
+    assert_eq!(
+        actions[7],
+        "`ilium plugin enable <id> --accept-risk`, or install an update signed by another trusted key"
+    );
+    assert_eq!(actions[8], "Remove, or reinstall a fixed package");
 }
 
 /// REQ: USR-161, F-090

@@ -146,6 +146,8 @@ pub mod manifest {
     pub const SETTINGS_GLYPH: &str = "manifest.settings-glyph";
     /// `manifest.settings-source`.
     pub const SETTINGS_SOURCE: &str = "manifest.settings-source";
+    /// `manifest.sound-format`.
+    pub const SOUND_FORMAT: &str = "manifest.sound-format";
     /// `manifest.sound-id-taken`.
     pub const SOUND_ID_TAKEN: &str = "manifest.sound-id-taken";
     /// `manifest.entry-invalid`.
@@ -388,8 +390,6 @@ pub mod install {
     pub const SCOPE_UNSUPPORTED: &str = "install.scope-unsupported";
     /// `install.unsigned`.
     pub const UNSIGNED: &str = "install.unsigned";
-    /// `install.downgrade`.
-    pub const DOWNGRADE: &str = "install.downgrade";
     /// `install.review-required`.
     pub const REVIEW_REQUIRED: &str = "install.review-required";
     /// `install.review-declined`.
@@ -592,8 +592,6 @@ pub mod trap {
     pub const SUBMISSION_BATCH: &str = "trap.submission-batch";
     /// `trap.invalid-ui-tree`.
     pub const INVALID_UI_TREE: &str = "trap.invalid-ui-tree";
-    /// `trap.import-not-requested`.
-    pub const IMPORT_NOT_REQUESTED: &str = "trap.import-not-requested";
     /// `trap.abi`.
     pub const ABI: &str = "trap.abi";
     /// `trap.panic`.
@@ -707,6 +705,7 @@ pub const ALL: &[&str] = &[
     manifest::SETTINGS_COMMAND,
     manifest::SETTINGS_GLYPH,
     manifest::SETTINGS_SOURCE,
+    manifest::SOUND_FORMAT,
     manifest::SOUND_ID_TAKEN,
     manifest::ENTRY_INVALID,
     manifest::GRANT_UNKNOWN,
@@ -834,7 +833,6 @@ pub const ALL: &[&str] = &[
     install::BUNDLED,
     install::SCOPE_UNSUPPORTED,
     install::UNSIGNED,
-    install::DOWNGRADE,
     install::REVIEW_REQUIRED,
     install::REVIEW_DECLINED,
     install::NEEDS_INPUT,
@@ -909,7 +907,6 @@ pub const ALL: &[&str] = &[
     trap::TABLE,
     trap::SUBMISSION_BATCH,
     trap::INVALID_UI_TREE,
-    trap::IMPORT_NOT_REQUESTED,
     trap::ABI,
     trap::PANIC,
     settings::SECTION_DROPPED,

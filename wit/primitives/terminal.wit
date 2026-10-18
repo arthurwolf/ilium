@@ -17,7 +17,7 @@ interface terminal {
   record foreground-process { name: string, command-line: list<string>, cwd: option<string> }
   record history-match { row: u32, column: u16, length: u16 }
 
-  /// terminal.read-screen. Sync. max-rows at most 1,000.
+  /// terminal.read-screen. Sync. max-rows is clamped to 10,000.
   read-screen: func(pane: node-id, part: screen-part, max-rows: u32) -> option<screen>;
   selection: func(pane: node-id) -> option<selection>;
   /// terminal.output-filter. regex is a bounded RE2-style expression. At most 8 filters per pane per plugin.

@@ -265,7 +265,13 @@ fn doc_abi_016_wit_names_are_kebab_case() {
             text.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '%'));
         for word in words {
             let word = word.trim_start_matches('%');
-            if word.is_empty() || word == "_" || word.chars().all(|c| c.is_ascii_digit()) {
+            // A bare run of dashes is the `->` arrow of a function result, not a name.
+            let is_arrow = word.chars().all(|c| c == '-');
+            if word.is_empty()
+                || is_arrow
+                || word == "_"
+                || word.chars().all(|c| c.is_ascii_digit())
+            {
                 continue;
             }
             if !is_kebab(word) {

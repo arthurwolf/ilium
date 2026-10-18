@@ -57,7 +57,7 @@ fn doc_progress_b01_exit_statuses_match_the_cli_reference_table() {
     let value = &row("progress-B01")[2];
     assert_eq!(
         value,
-        "0 done, 2 usage or rejected (for example `monitor-ambiguous`), 3 task error, 4 monitor failed (outcome unknown), 5 monitor replaced or cleared, 6 `--timeout-seconds` elapsed"
+        "0 done, 2 usage or rejected (for example `monitor-ambiguous`), 3 task error, 4 monitor failed (outcome unknown), 5 monitor replaced or cleared, 6 `--timeout-seconds` elapsed while the task is still running (`outcome` `still-running`)"
     );
     let reference = user_doc("cli-reference.md");
     for line in [
@@ -256,7 +256,10 @@ fn doc_059_the_four_settings_have_the_documented_defaults_and_ranges() {
     assert_eq!(rows[2][0], "`[ui] completed_progress_hide_after_seconds`");
     assert_eq!(rows[2][1], "60");
     assert_eq!(rows[3][0], "`[ui] task_progress_frames`");
-    assert_eq!(rows[3][1], "a preset");
+    assert_eq!(
+        rows[3][1],
+        "the built-in preset 0 of the Agent Monitoring tab frame picker (the client default; the other presets are bars, moon phases and quarter circles)"
+    );
     assert_eq!(
         rows[3][2],
         "2 to 13 printable frames, all one cell wide or all two cells wide"

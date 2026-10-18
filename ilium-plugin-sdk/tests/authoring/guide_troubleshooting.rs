@@ -17,10 +17,7 @@ fn doc_aut_802_install_error_code_read_before_changing_anything() {
     assert_rule(
         "AUT-802",
         "MUST",
-        &[
-            "MUST read the code in an install error before changing anything",
-            "each code names one cause",
-        ],
+        &["the code in an install error", "each code names one cause"],
     );
 }
 

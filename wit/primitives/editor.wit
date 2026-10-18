@@ -27,6 +27,7 @@ interface editor {
   take-buffer: func(request: request-id) -> option<buffer-id>;
   /// editor.edit plus fs.write. Async, request-completed ok.
   save-buffer: func(buffer: buffer-id, path: option<fs-path>) -> result<request-id, plugin-error>;
+  /// Grant: editor.edit. Closes a buffer and frees its quota slot.
   close-buffer: func(buffer: buffer-id);
   viewport: func(pane: node-id) -> option<editor-viewport>;
   /// At most 4,096 marks per layer.

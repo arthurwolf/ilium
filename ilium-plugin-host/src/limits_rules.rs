@@ -64,6 +64,8 @@ pub enum ReplyKind {
     ClientRequestDefault,
     /// The grace after a job cancel.
     JobCancelGrace,
+    /// A `sessions.send` reply.
+    SessionsSend,
 }
 
 /// The deadline of a reply kind in milliseconds (reference-errors-and-limits.md).

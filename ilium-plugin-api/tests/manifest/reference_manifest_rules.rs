@@ -1093,9 +1093,7 @@ fn pkg_073_ceilings_are_never_below_the_defaults() {
 #[test]
 fn pkg_074_doc_effective_value_formula_is_stated() {
     let text = page("reference-manifest.md");
-    assert!(text.contains(
-        "min(ceiling, first set of [plugins.\"<id>\".limits] value, [plugins.limits] value, manifest value, default)"
-    ));
+    assert!(text.contains("min(ceiling, v)"));
 }
 
 /// REQ: PKG-074

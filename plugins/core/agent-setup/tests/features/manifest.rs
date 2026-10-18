@@ -68,13 +68,18 @@ fn manifest_050_fragment_contributions_equal_the_complete_manifest() {
 
 /// REQ: COR-050, COR-030
 #[test]
-fn manifest_050_the_complete_manifest_adds_only_the_kernel_tab_grant_to_the_fragment_client_grants()
-{
+fn manifest_050_the_fragment_client_grants_already_hold_the_kernel_tab_grant_once() {
     let page = page_text();
     let fragment = json_block_after(&page, "### Manifest");
     let complete = json_block_after(&page, "### Complete manifest");
-    let mut expected = strings(&fragment["capabilities"]["client"]);
-    expected.push("settings.write-kernel:setup".to_string());
+    let expected = strings(&fragment["capabilities"]["client"]);
+    assert_eq!(
+        expected
+            .iter()
+            .filter(|grant| grant.as_str() == "settings.write-kernel:setup")
+            .count(),
+        1
+    );
     assert_eq!(strings(&complete["capabilities"]["client"]), expected);
 }
 

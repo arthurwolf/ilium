@@ -91,7 +91,7 @@ fn doc_076_snapshot_sections_is_a_standard_collect_point() {
     );
     assert_eq!(
         row[3],
-        "entry: id, max_bytes (the plugin answers `snapshot` and `restore` messages)"
+        "entry: id, max_bytes (the plugin answers the `snapshot-section` and `restore-section` requests in its handler)"
     );
     assert_eq!(row[4], "standard");
 }
