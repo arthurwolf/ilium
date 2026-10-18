@@ -72,7 +72,7 @@ The plugin ships with Ilium as a first-party (T1) package. The server side runs 
     "client": ["open-external", "ui.panels"]
   },
   "contributes": {
-    "jobs": [{ "kind": "compact", "deadline_ms": 300000, "memory_mib": 256 }],
+    "jobs": [{ "kind": "compact", "deadline_ms": 60000, "memory_mib": 256 }],
     "commands": [{ "id": "compact", "title": "Compact this agent" }],
     "panels": [{ "id": "optimizer", "title": "Compaction", "modal": false }]
   }
@@ -131,7 +131,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     "jobs": [
       {
         "kind": "compact",
-        "deadline_ms": 300000,
+        "deadline_ms": 60000,
         "memory_mib": 256
       }
     ],

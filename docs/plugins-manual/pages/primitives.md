@@ -77,7 +77,7 @@ A plugin declares a pane kind under `pane_kinds` in its manifest. Its body is th
 
 | Field | Meaning |
 |---|---|
-| `id` | Local id. The content kind of its panes is `<plugin-id>/<id>`, here `com.example.notes/notes`. |
+| `id` | Local id. The content kind of its panes is `<plugin-id>.<id>`, here `com.example.notes.notes`. |
 | `primitive` | Always `"basic"`. |
 | `wants_keys` | When true, keys the focused widget does not use arrive as `key-pressed` for the pane. |
 | `persist` | Required, no default. `metadata` keeps state in node metadata. `storage` keeps it in session-bucket keys under `pane/<node-id>/`, deleted when the pane closes. `none` recreates the pane empty after a restart. |
@@ -105,7 +105,7 @@ use ilium_plugin_sdk::prelude::*;
 use ilium_plugin_sdk::primitives::basic;
 use ilium_plugin_sdk::types::tree::PaneInfo;
 
-const NOTES_KIND: &str = "com.example.notes/notes";
+const NOTES_KIND: &str = "com.example.notes.notes";
 
 #[ilium_plugin(side = "client")]
 #[derive(Default)]

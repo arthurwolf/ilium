@@ -63,7 +63,7 @@ Payloads use WIT types. Capabilities are the grant strings from the manifest.
 | `input-submitted` | `node`, `text`, `source` (user, plugin, scheduled, voice), `epoch` | `agent.read-prompts` | never dropped |
 | `output-matched` | `node`, `filter-id`, `line`, `row` | `terminal.output-filter` | drop oldest, counted |
 | `link-activated` | `node`, `detector-id`, `text` | own `link_detectors` | never dropped |
-| `pointer` | `node`, `row`, `column`, `kind` (down, up, move, drag, wheel-up, wheel-down, wheel-left, wheel-right), `button`, plus `sub-x`, `sub-y`, `modifiers` | `terminal.pointer` while claimed | coalesced (drag) |
+| `pointer` | `node`, `row`, `column`, `kind` (down, up, move, drag, wheel-up, wheel-down, wheel-left, wheel-right), `button`, plus `sub-x`, `sub-y`, `modifiers` | `terminal.pointer` while claimed | coalesced (move and drag) |
 | `editor-opened`, `editor-closed` | `buffer-ref` | `editor.read` | never dropped |
 | `editor-changed` | `buffer`, `revision`, `first-line`, `last-line` | `editor.read` | coalesced by buffer, debounced 100 ms |
 | `editor-saved` | `buffer`, `path` | `editor.read` | never dropped |

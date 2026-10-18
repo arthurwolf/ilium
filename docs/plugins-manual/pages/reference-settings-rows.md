@@ -1337,7 +1337,7 @@ The Settings screen draws these controls. Each is a style or a variant of one of
 | Number | `number` | the entry dialog opens on `*` or Enter |
 | Choice | `choice` | `← value → +`, with the dialog on `+` |
 | Dither | `choice` with `source: { "catalog": "ilium.dithers" }` | 15 algorithms with pattern previews |
-| Palette | `choice` with `source: { "catalog": "ilium.palettes" }` | 38 presets with swatch previews |
+| Palette | `choice` with `source: { "catalog": "ilium.palettes" }` | at least 38 presets with swatch previews |
 | Colour | `color` | hex field, swatches and a hue strip |
 | Key chord | `keybinding`, `list` with `item_format: "chord"` | the capture dialog |
 | Glob list and URL list | `list` with `item_format: "glob"` or `"url"` | invalid items show `✗` and the reason |

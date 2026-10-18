@@ -73,7 +73,7 @@ Payloads use the WIT types of the API. Names in the Rust and TypeScript SDKs fol
 | `input-submitted` | `node`, `text`, `source` (user, plugin, scheduled, voice), `epoch: u64` | `agent.read-prompts` | never dropped |
 | `output-matched` | `node`, `filter-id`, `line`, `row` | `terminal.output-filter` | drop oldest, counted |
 | `link-activated` | `node`, `detector-id`, `text` | own `link_detectors` | never dropped |
-| `pointer` | `node`, `row`, `column`, `kind` (down, up, move, drag, wheel-up, wheel-down, wheel-left, wheel-right), `button: option` | `terminal.pointer`, while claimed | coalesced (drag) |
+| `pointer` | `node`, `row`, `column`, `kind` (down, up, move, drag, wheel-up, wheel-down, wheel-left, wheel-right), `button: option` | `terminal.pointer`, while claimed | coalesced (move and drag) |
 | `editor-opened`, `editor-closed` | `buffer-ref` | `editor.read` | never dropped |
 | `editor-changed` | `buffer`, `revision`, `first-line`, `last-line` | `editor.read` | coalesced by buffer, debounced 100 ms |
 | `editor-saved` | `buffer`, `path` | `editor.read` | never dropped |
@@ -251,8 +251,8 @@ A batch is refused as a whole in two cases: a malformed submission (wrong shape,
 | `set-node-locked` | `node`, `locked: bool` | `tree.write` | `refused(not-found)` |
 | `create-pane` | `parent: option`, `title`, `content-kind`, `cwd`, `command`, `initial-input` | `panes.create`, plus `terminal.write` with `initial-input` | `ok-node`; `failed(io)` when spawning fails |
 | `signal-pane` | `pane`, `signal` (interrupt, terminate, kill, hangup) | `panes.signal` | `refused(pane-not-ready)` for a restored pane |
-| `send-input` | `pane`, `text`, `delivery` (typed, submitted, pasted), `prompt-epoch: option<u64>` | `terminal.write` | `refused(pane-not-ready)`; `refused(conflict)` on a stale epoch |
-| `agent-action` | `pane`, `action-id` | `agent.control` | `refused(unsupported)`; `refused(conflict)` when the activity is not allowed |
+| `send-input` | `pane`, `text`, `delivery` (typed, submitted, pasted), `prompt-epoch: option<u64>` | `terminal.write` | `refused(not-found)`; `refused(unsupported)`; `refused(pane-not-ready)`; `refused(rate-limited)` (20 per second per pane); `refused(conflict)` on a stale epoch |
+| `agent-action` | `pane`, `action-id` | `agent.control` | `refused(not-found)`; `refused(pane-not-ready)`; `refused(unsupported)`; `refused(conflict)` when the activity is not allowed; `refused(rate-limited)` (20 per second per pane) |
 | `set-decoration` | `node`, `slot`, `content`, `icon`, `sort-key`, `persist` | `tree.decorate` | `refused(invalid-argument)` for an undeclared slot |
 | `clear-decoration` | `node`, `slot` | `tree.decorate` | none beyond the common codes |
 | `set-virtual-rows` | `row-kind`, `rows` | `tree.decorate` | `refused(invalid-argument)` for an undeclared kind |
@@ -439,7 +439,7 @@ The manifest grants `panes.read` and `notify.desktop` on the `client` side. Ever
 
 When a plugin is disabled, the tree footer and Settings > Plugins show:
 
-`Plugin <name> stopped after 3 failures in 10 minutes: <export> <code or trap> (<view>).`
+`Plugin <name> stopped after 3 failures in 10 minutes: <export> <code or trap> (<view>). Turn it on again in Settings > Plugins.`
 
 The view part appears only when the failing export was `views.render`. Refused submissions are written to the plugin log at level warn. The `ilium plugin trace` command shows the last events and the outcome of each submission.
 

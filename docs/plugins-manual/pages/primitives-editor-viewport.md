@@ -60,7 +60,7 @@ The minimap is the narrow strip at the right of an editor pane; the host draws i
 
 ### Token provider
 
-A language plugin implements `tokens`. The host calls it for the visible lines plus a margin, with `state-in` from the previous block so multi-line constructs such as block comments work, and stores the returned state for the next call. The deadline is 10 ms per call. After a timeout the lines stay plain and the host retries later. The plugin chooses a `token-kind`; it never picks colours, because the theme maps kinds to colours.
+A language plugin implements `tokens`. The host calls it for the visible lines plus a margin, with `state-in` from the previous block so multi-line constructs such as block comments work, and stores the returned state for the next call. The deadline is 10 ms per call. After a timeout the lines stay plain and the host calls again only at the next change of the buffer or viewport (no timer, no retry limit). The plugin chooses a `token-kind`; it never picks colours, because the theme maps kinds to colours.
 
 <figure>
 <svg viewBox="0 0 420 140" role="img" aria-label="Host asks token-provider for visible lines with carried state">

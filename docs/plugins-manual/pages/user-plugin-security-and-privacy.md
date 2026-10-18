@@ -31,7 +31,7 @@ A third-party plugin can send data only to hosts you allowed in its install scre
 | Grants and consents | `~/.local/state/ilium/grants.json`, `consents.json` | Until you revoke or uninstall | Settings > Plugins |
 | Trusted publisher keys | `~/.local/state/ilium/trust.json` | Until you remove them | `ilium plugin trust remove` |
 | Secrets | OS keyring, or `~/.local/state/ilium/secrets.json` | Until you forget them | Settings > Plugins > Secrets > Forget |
-| Plugin logs | Ilium's log folder | Rotated; the newest 10 MiB per plugin | `ilium plugin logs --clear <id>` |
+| Plugin logs | Ilium's log folder | Rotates at 1 MiB; at most three rotated files; rotated files older than 14 days deleted at server start | `ilium plugin logs --clear <id>` |
 | Audit log | `~/.local/state/ilium/audit/` | 365 days or 64 MiB | Delete the folder; the next start begins a new chain |
 | Privacy log | `~/.local/state/ilium/privacy/inference.jsonl` | 90 days or 16 MiB | Settings > Privacy > Clear |
 | Pane journal | Ilium state folder, per session | Newest entries only | Closes with the session |

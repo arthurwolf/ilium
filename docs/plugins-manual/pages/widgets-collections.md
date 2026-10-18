@@ -29,7 +29,7 @@ Collections draw many items and let the user pick, toggle or edit them. The fami
 |---|---|---|---|
 | `%list` | selected index, scroll offset, filter text, multi-selection | `selected`, `offset`, `text`, `ids` | `selected`, `offset`, `text`, `ids` |
 | `table` | selected row, scroll offset, sort, multi-selection | `selected`, `offset`, `ids` | `selected`, `offset`, `ids` |
-| `tree-list` | selected item, expansion, scroll offset | `selected`, `ids` | `selected`, `expanded`, `ids` |
+| `tree-list` | selected item, expansion, scroll offset | `selected`, `expanded`, `ids` | `selected`, `expanded`, `ids` |
 | `check-list` | the state of each item | `tri` | `tri` |
 | `list-editor` | the item being edited and its draft text | `selected` | `selected` |
 
@@ -206,7 +206,7 @@ The items form a flat list in display order. `depth` places an item, and `expand
 | `activated` | `text(id)` | Enter or double click. |
 | `toggled` | `text(id)` | An item is expanded or collapsed. |
 | `changed` | `ids(list<string>)` | The multi-selection changes. |
-| `dropped` | `text(target id)` | A draggable item is dropped on a drop target. |
+| `dropped` | `drop(drop-value)`; `target-key` is the target item id | A draggable item is dropped on a drop target. |
 
 | Input | Behaviour |
 |---|---|
@@ -263,7 +263,7 @@ const files = treeList([
 | `entries` | `list<menu-entry>` | required | `id`, `label`, `icon`, `shortcut`, `parent`, `is-submenu`, `separator-before`, `checked`, `disabled-reason` (up to 40 characters), `tooltip`, `danger`. |
 | `items` | `list<menu-item>` | none | `entries` replaces it when present. |
 
-A menu has at most 64 entries and two levels of submenu. An entry names its submenu with `parent`.
+A menu has at most 64 entries and two levels of submenu. This is a display cap: the host shows the first 64 and truncates the rest, and nothing traps. An entry names its submenu with `parent`.
 
 | Event | Value | Sent when |
 |---|---|---|
@@ -385,7 +385,7 @@ const members = checkList([
 
 #### list-editor
 
-**Purpose.** Edits a list of strings, for example globs, URLs, hosts or chords, or a list of objects with up to eight fields. It is the widget behind the `list` rows of Settings. A checked format (`glob`, `url`, `host`, `path`, `regex`, `chord`) draws an invalid item with `✗` and the reason, and the item is not written.
+**Purpose.** Edits a list of strings, for example globs, URLs, hosts or chords, or a list of objects with up to eight fields. It is the widget behind the `list` rows of Settings. A checked format (`glob`, `url`, `host`, `path`, `regex`, `chord`) draws an invalid item with `✗` and the reason, and the item is not written. The `changed` array omits the invalid item; the other items are sent.
 
 | Prop | Type | Default | Meaning |
 |---|---|---|---|
@@ -399,7 +399,7 @@ const members = checkList([
 
 | Event | Value | Sent when |
 |---|---|---|
-| `changed` | `text(json array)` | An edit is committed. The whole array is sent. |
+| `changed` | `text(json array)` | An edit is committed. The whole array is sent, without any invalid item. |
 | `selected` | `index(u32)` | The highlight moves. |
 
 | Input | Behaviour |

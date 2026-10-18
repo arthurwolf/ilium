@@ -281,9 +281,9 @@ Exit codes are those of the one table in [Distribution commands](/pages/referenc
 JSON line examples:
 
 ```text
-{"type":"progress","step":"validate","message":"validating package","current":2,"total":7}
+{"type":"progress","step":"validate","message":"validating package","current":3,"total":7}
 {"type":"warning","code":"install.notify-failed","message":"session /home/u/proj not reached","session":"default"}
-{"type":"result","id":"com.example.notes","version":"0.3.1","previous":"0.3.0","state":"installed-enabled"}
+{"type":"result","id":"com.example.notes","version":"0.3.1","previous":"0.3.0","state":"installed-enabled","tier":"T2","action":"updated","active_from":"now"}
 {"type":"error","code":"manifest.file-hash","message":"files/panel.wasm hash differs","path":"files/panel.wasm"}
 {"type":"summary","ok":false,"errors":1,"warnings":0}
 ```

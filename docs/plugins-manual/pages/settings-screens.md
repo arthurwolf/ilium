@@ -321,7 +321,7 @@ Other rules that affect a page:
 
 - A `secret` value is returned to its owner. `get-plugin-json` returns it as an empty string to every other plugin, and the page shows the field masked.
 - A schema form for another plugin's rows is drawn only when the rendering plugin has `settings.write-all`. Otherwise the widget shows the muted text `Settings page not available`.
-- A plugin whose custom page fails shows this tree footer notice after the third failure: `Plugin <name> stopped after 3 failures in 10 minutes: <export> <code or trap> (<view>)`.
+- A plugin whose custom page fails shows this tree footer notice after the third failure: `Plugin <name> stopped after 3 failures in 10 minutes: <export> <code or trap> (<view>). Turn it on again in Settings > Plugins.`.
 - A disabled plugin keeps its values. Its rows are dimmed and read-only, with a link to the recovery page. See [Lifecycle](/pages/lifecycle/).
 
 <div class="warn">

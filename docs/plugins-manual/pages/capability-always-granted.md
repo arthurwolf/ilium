@@ -267,7 +267,7 @@ the universal codes (`not-permitted` for a path escape, `revoked`, `internal`) a
 | `codec.decode-image` | more than 67,108,864 pixels | `invalid-argument` |
 | `fs.read` | synchronous read over 1 MiB | `invalid-argument` |
 | `fs.write` | one call over 16 MiB | `invalid-argument` |
-| `fs.*` | folder over 256 MiB (`data` and `cache` together) | `failed(quota-exceeded)` |
+| `fs.*` | folder over the `disk_mib` limit (`data` and `cache` together; 256 MiB default, 4,096 MiB ceiling at T1, 256 MiB at T2/T3) | `failed(quota-exceeded)` |
 | `messages` | payload over 1 MiB | `refused(invalid-argument)` |
 | `ui.invalidate` | view not declared by the plugin | ignored, one warn line |
 

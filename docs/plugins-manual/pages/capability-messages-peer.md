@@ -15,7 +15,7 @@ A plugin reaches its own other side without any grant. A server half sends to it
 - A grant `messages.peer:<plugin-id>` for each other plugin that the sending side messages. Grants are per side, so the grant goes in `capabilities.server` or `capabilities.client`, whichever side sends.
 - The id of the receiving plugin, exactly as its manifest `id` writes it.
 - The Rust crate `ilium-plugin-sdk` or the npm package `@ilium/plugin-sdk`, both for `ilium:plugin@0.1.0`.
-- On the receiver, no grant, but its manifest must list the sending plugin in `accepts_messages_from` ([PKG-579]). A message from an id not on that list, or to a plugin that declares none, is dropped and the sender gets `not-permitted`.
+- On the receiver, no grant, but its manifest must list the sending plugin in `accepts_messages_from` ([PKG-579]). A message from an id not on that list, or to a plugin that declares none, is refused at send with `refused(not-permitted)` and is never queued.
 
 The receiver must be installed and enabled. If it is installed but not active, the host activates it first and delivers the message after `activate` returns.
 

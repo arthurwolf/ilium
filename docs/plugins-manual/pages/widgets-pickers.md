@@ -287,7 +287,7 @@ The palette, dither and icon pickers are not separate widgets. They are a `choic
 
 #### Palette picker
 
-The palette catalogue `ilium.palettes` holds 38 presets. Each item has a `swatch` preview of 1 to 16 colours, drawn as a strip of half blocks coloured with the stops of the palette. A scene or widget that uses colour reads the chosen palette and recolours itself. The first item keeps the scene colours.
+The palette catalogue `ilium.palettes` holds at least 38 presets. Each item has a `swatch` preview of 1 to 16 colours, drawn as a strip of half blocks coloured with the stops of the palette. A scene or widget that uses colour reads the chosen palette and recolours itself. The first item keeps the scene colours.
 
 <figure>
 <pre class="term">╭  ≡ ● · Palette───────────────────────────────────────────╮

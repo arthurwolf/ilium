@@ -156,7 +156,7 @@ With cgroup v2 delegated, the kernel enforces `memory.max`. Without it, the help
 
 ## Helper count
 
-The number of helpers per session is capped by `session_helpers`: default 16, ceiling 32. A helper that is idle (the plugin has no calls and no work for 60 s) is shut down with `Shutdown` and restarted on demand; its Store is dropped after a `deactivate` with state saved.
+The number of helpers per session is capped by `session_helpers`: default 16; a user may only lower it under `[plugins.limits]` (HST-406). A helper that is idle (the plugin has no calls and no work for 60 s) is shut down with `Shutdown` and restarted on demand; its Store is dropped after a `deactivate` with state saved.
 
 When the cap is reached, the host refuses a further activation with `helper.too-many`. This refusal does not count as a failure, because the plugin did nothing wrong. The plugin shows as `installed-not-running` with the reason, and it activates when a helper is free.
 

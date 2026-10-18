@@ -12,7 +12,7 @@ The rows follow the format and the observation channels of the [requirements ind
 
 | Id | Requirement | Source | Observable test |
 |---|---|---|---|
-| [PRI-001] | A screen read MUST need terminal.read-screen. read-cells is a separate grant, terminal.read-cells, and MUST accept at most 1,000 rows per call and return quota-exceeded above that. | [edge cases and errors](/pages/primitives-terminal/#edge-cases-and-errors) | (sync-return) read-cells with 1,001 rows -> quota-exceeded. |
+| [PRI-001] | A screen read MUST need terminal.read-screen. read-cells is a separate grant, terminal.read-cells, and MUST accept at most 1,000 rows per call and above that return none and log quota-exceeded. | [edge cases and errors](/pages/primitives-terminal/#edge-cases-and-errors) | (sync-return) read-cells with 1,001 rows -> none and a logged quota-exceeded. |
 | [PRI-002] | history-text over 4 MiB MUST keep the newest 4 MiB. | [requestable limits](/pages/reference-errors-and-limits/#requestable-limits) | (sync-return) read history of 5 MiB -> 4 MiB, the newest. |
 | [PRI-003] | send-input MUST accept at most 16 stages, a total stage delay of 10 s and 64 KiB of raw bytes. Above any of them it MUST refuse with invalid-argument. | [primitives terminal input](/pages/primitives-terminal-input/) | (completion) 17 stages -> refused(invalid-argument). |
 | [PRI-004] | Check order for send-input MUST be: capability, stage and size rules, if-current precondition, then the lock. A failed precondition MUST refuse the intent before any lock is taken. | [capability terminal input lock](/pages/capability-terminal-input-lock/) | (completion) stale if-current on a locked pane -> refused(conflict) and the lock unchanged. |

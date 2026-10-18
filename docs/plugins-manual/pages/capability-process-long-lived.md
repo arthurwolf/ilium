@@ -151,6 +151,7 @@ Keep the handle in plugin state. Dropping it ends the child, which is also the c
 | Grant missing or declined | `not-permitted` | Use a one-shot `process.run` if granted. |
 | Program not covered by `process.run:<program>` | `not-permitted` | Add the matching grant. |
 | More than 16 per session (`session_processes`), shared by `process.run` (`busy`) and `process.spawn` (`quota-exceeded`) | `quota-exceeded` | Reuse one child. |
+| More than `children` children of this plugin (default 2, T1 ceiling 8, T2/T3 ceiling 2; see `reference-errors-and-limits.md`) | `quota-exceeded` | Reuse one child. |
 | Program not found | `not-found` | Check the path or tell the user. |
 | Child exits on its own | `child-exited` event | Restart only on user action. |
 | Plugin stops | child gets SIGTERM, then SIGKILL after 2 s | Nothing. |

@@ -57,7 +57,7 @@ flags node-flags { focusable, draggable, drop-target, hidden, hover-events, poin
 record ui-tree { version: u32, nodes: list<ui-node>, root: u32 }
 ```
 
-- `root` must be 0. The field stays for the shape of later versions and must equal 0. Every child index must be greater than its parent's index and less than `nodes.len()`. Every node except the root must appear exactly once, in exactly one `children` list. A nonzero root, an out-of-range index, an unreachable node, a node with two parents or a backward index traps the instance with `ui.invalid-tree`.
+- `root` must be 0. The field stays for the shape of later versions and must equal 0. Every child index must be greater than its parent's index and less than `nodes.len()`. Every node except the root must appear exactly once, in exactly one `children` list. A nonzero root, an out-of-range index, an unreachable node, a node with two parents or a backward index traps the instance with `trap.invalid-ui-tree` (detail reason `ui.invalid-tree`).
 - Each `key` must be unique across the whole view, not only among siblings. A duplicate key anywhere in one `ui-tree` traps with `ui.duplicate-key`. The host matches nodes by key across the whole view, so a keyed node that moves to another parent keeps its host-owned state.
 - The depth is at most 32, and the root is depth 1. A node at depth 33 traps with `ui.too-deep`.
 - A `layout` needs one child per constraint, and a `ratio` with denominator 0 is invalid (`ui.invalid-tree`).
@@ -128,19 +128,19 @@ Each node carries one `widget` variant. There are 51 widgets in seven families. 
 | Layout and containers | `dialog` | `activated` with `text(button id)`, `closed` | [Layout and containers](/pages/widgets-layout-and-containers/) |
 | Layout and containers | `scroll-view`, `scrollbar` | `scrolled` with `index(u32)` | [Layout and containers](/pages/widgets-layout-and-containers/) |
 | Text | `paragraph` | `scrolled` when scrollable; `activated` for clickable spans | [Text](/pages/widgets-text/) |
-| Text | `markdown` | `activated` with `text(target)` without `link-command` | [Text](/pages/widgets-text/) |
+| Text | `markdown` | `activated` with `text(target)` without `link-command`; `toggled` with `number(line)` (one-based line number of a task-click) | [Text](/pages/widgets-text/) |
 | Text | `leader-row`, `key-hints` | nothing; `key-hints` runs its command on the host | [Text](/pages/widgets-text/) |
 | Text | `diff-view` | `selected`, `activated` with `index(u32)` (hunk or line) | [Text](/pages/widgets-text/) |
 | Collections | `%list`, `table`, `tree-list`, `menu`, `check-list`, `list-editor` | `selected`, `activated`, `toggled`, `changed`, `context-requested`, `closed` | [Collections](/pages/widgets-collections/) |
 | Data display | `gauge`, `line-gauge`, `sparkline` | nothing | [Data display](/pages/widgets-data-display/) |
-| Data display | `chart`, `bar-chart`, `calendar`, `meter` | `selected` (when focusable) |
-| Data display | `canvas`, `progress-row` | `activated` (`canvas` with `cell` when focusable; progress row) |
+| Data display | `chart`, `bar-chart`, `calendar`, `meter` | `selected` (when focusable) | [Data display](/pages/widgets-data-display/) |
+| Data display | `canvas`, `progress-row` | `activated` (`canvas` with `cell` when focusable; progress row) | [Data display](/pages/widgets-data-display/) |
 | Data display | `minimap` | `activated`, `scrolled` | [Data display](/pages/widgets-data-display/) |
 | Input | `button`, `toggle`, `choice`, `number`, `text-input`, `text-area`, `key-capture`, `color-picker`, `path-field`, `location-picker` | `activated`, `changed`, `submitted`, `filter-changed` | [Input](/pages/widgets-input/) |
 | Input | `schema-form` | nothing; the owning plugin receives `settings-changed` | [Input](/pages/widgets-input/) |
 | Status and feedback | `badge`, `spinner`, `notice`, `icon` | nothing; `notice` may send `closed` | [Widget catalogue](/pages/widgets-index/) |
 | Media and embedded | `surface`, `terminal-view`, `code-view` | `activated` with `cell`, `pointer`, `changed`; `surface` also `scrolled` on the wheel | [Media and embedded](/pages/widgets-media-and-embedded/) |
-| Media and embedded | `image`, `video` | `activated` (`image` when focusable; `video` play or pause) | [Media and embedded](/pages/widgets-media-and-embedded/) |
+| Media and embedded | `image`, `video` | `activated` (`image` when focusable; `video` play or pause; `video` also sends `changed` on seek, value = position in ms) | [Media and embedded](/pages/widgets-media-and-embedded/) |
 
 The [widget input map](/pages/reference-widget-input-map/) gives the exact focus behaviour, keys, mouse actions, events, colour roles and stable-glyph substitutes of every widget. The family pages repeat it for their widgets.
 
@@ -509,7 +509,7 @@ const list = listWidget(items, { key: 'list', tabIndex: 3 });
 
 A `draggable` node dropped on a `drop-target` node produces one `dropped` action. Its value is `drop(drop-value)` (a record with `source-key`, `target-key` and `index`), with `index` as the insertion position. The event `key` is the target key. The host does not move data; the plugin moves its own.
 
-While a drag hovers a drop target, the host sends `drag-over` with `drag-over-value { source-key, target-key, index, accept }` once each time the target changes. The host decides the position from the pointer row inside the target's area, and `accept` carries the result: `before`, `after`, `inside` or `none`. For a `tree-item` with `expandable` set, the top third is `before`, the middle third is `inside` and the bottom third is `after`, with rows rounded down. For any other target, the top half is `before` and the bottom half is `after`. A target with `drop-target` unset accepts nothing. A drop sends `dropped` to the target key with the position in the `drop` value, and for a `tree-list` the target item id as `text`. The host draws the insertion line or the inside highlight, and scrolls the list when the pointer is near an edge.
+While a drag hovers a drop target, the host sends `drag-over` with `drag-over-value { source-key, target-key, index, accept }` once each time the target changes. The host decides the position from the pointer row inside the target's area, and `accept` carries the result: `before`, `after`, `inside` or `none`. For a `tree-item` with `expandable` set, the top third is `before`, the middle third is `inside` and the bottom third is `after`, with rows rounded down. For any other target, the top half is `before` and the bottom half is `after`. A target with `drop-target` unset accepts nothing. A drop sends `dropped` to the target key with the position in the `drop` value, and for a `tree-list` the target item id is `target-key`. The host draws the insertion line or the inside highlight, and scrolls the list when the pointer is near an edge.
 
 ## Settings views
 

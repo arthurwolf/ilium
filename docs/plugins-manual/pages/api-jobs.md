@@ -51,7 +51,7 @@ The JSON helpers `jobs::start_json(kind, &value)` in Rust and `startJson(kind, v
 
 A job instance is not activated. Its `activate` never runs and it has no event handler. It may call `log`, `clock`, `codec`, `fs`, `http`, `process`, `inference`, `storage.get`, `storage.keys`, `report-progress`, `is-cancelled` and `wait-request`, with the grants of its side. Every other import, including `jobs.start`, returns `unsupported`. Imports without a result do nothing.
 
-The host keeps a pool of job instances for each plugin, at most `concurrent_jobs`, and reuses them between jobs. A job never shares memory with the instance that started it, so the only data that cross are the input bytes, the output bytes and the progress value.
+The host reuses job instances between jobs. The live instances of one plugin side never exceed `concurrent_jobs` ([HST-018]); the worker threads that run them are one shared bank per server or client ([HST-182]). A job never shares memory with the instance that started it, so the only data that cross are the input bytes, the output bytes and the progress value.
 
 ### Manifest and limits
 

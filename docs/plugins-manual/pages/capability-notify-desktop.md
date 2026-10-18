@@ -207,7 +207,7 @@ The `correlation` value is a `bigint` in TypeScript. It names the submission, so
 | Sound id not in the catalogue | `refused(not-found)`; no notice is shown | Call `sound.catalog()` first, or omit the sound. |
 | `title` empty or over 256 characters | `refused(invalid-argument)` | Fix the text. |
 | `body` over 2,048 characters | `refused(invalid-argument)` | Shorten the text. |
-| `dedup-key` with a disallowed character or over 128 characters | The batch is refused as malformed (`invalid-argument`) | Fix the key. |
+| `dedup-key` with a disallowed character or over 128 characters | `refused(invalid-argument)` for the lowest-index offender; every other submission completes as `refused(cancelled)` ([ABI-009]) | Fix the key. |
 | Same key within 10 minutes | `duplicate(original)`; no second notice | Nothing. The first notice stands. |
 | More than 6 notices per minute | `refused(rate-limited)` for the extra ones | Wait a minute, or merge the notices. |
 | Grant revoked later | Later submissions are `refused(not-permitted)`; queued notices stay | Re-read the grant on activation. |

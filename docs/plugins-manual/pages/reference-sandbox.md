@@ -22,7 +22,7 @@ Terms. A **helper** is a separate operating-system process that hosts the WebAss
 
 Consequences accepted by this decision:
 
-- Memory use grows with the number of third-party plugins. Each helper has a fixed memory floor of about 20 MiB plus the plugin's `memory_mib`.
+- Memory use grows with the number of third-party plugins. Each helper adds a 32 MiB overhead to the sum of its plugins' `memory_mib`; that sum plus the overhead is what the cgroup and `session_memory_mib` count.
 - Start-up takes one process start per plugin side. Lazy activation (D6) keeps this off the start path.
 - Plugin to plugin calls (services, peer messages) go through the server, never directly between helpers.
 

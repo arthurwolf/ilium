@@ -166,7 +166,7 @@ The limits of a plugin are spread over several pages. This table puts the ones t
 | Budget | Default | Ceiling, T1 | Ceiling, T2 and T3 | When exceeded |
 |---|---|---|---|---|
 | `memory_mib` (one instance) | 32 | 256 | 128 | Trap, counts as a failure |
-| Session memory pool (all instances) | 1,024 MiB | 4,096 MiB, all tiers (user config only) | same, no per-tier ceiling | The new instance is refused with `session.memory-exceeded`; no failure. Each instance reserves its `memory_mib` at activation |
+| Session memory pool (all instances) | 1,024 MiB | no ceiling; a user can only lower it under `[plugins.limits]` [HST-406] | same, no per-tier ceiling | The new instance is refused with `session.memory-exceeded`; no failure. Each instance reserves its `memory_mib` at activation |
 | `storage_bucket_mib` (one bucket) | 16 | 256 | 16 | `put` fails with `quota-exceeded` |
 | Restore bytes from `deactivate` | 1 MiB | 1 MiB | 1 MiB | Dropped, one warn line |
 | `deactivate_deadline_ms` | 500 | 1,000 | 500 | Instance dropped, no restore bytes |

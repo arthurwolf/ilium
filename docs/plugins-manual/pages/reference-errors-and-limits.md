@@ -125,7 +125,7 @@ A trap ends the instance. The plugin is restarted under the restart rule below. 
 - Calling a function of a capability the manifest never requested, in an interface that the plugin linked because it requested another capability of it. An interface that no requested capability unlocks is refused at install with `manifest.import-not-requested` and never links. A function of a requested capability that the user declined is not a trap: it returns `not-permitted`. See [Host runtime](/pages/reference-host-runtime/).
 - An invalid `ui-tree`: an index out of range, a graph that is not a tree, a duplicate `key` in one tree, more nodes than the effective `ui_tree_nodes` limit (4,096 by default), or a `layout` whose child count differs from its constraint count.
 - Returning more than 256 submissions from one `on-events` call.
-- A hard deadline breach in `activate`, `on-events` or `views.render`. A breach in `deactivate` is not a trap: the instance is dropped and no restore bytes are kept. A soft deadline breach traps and counts as a failure when it reaches the streak limit of its call class (3 consecutive, or 30 consecutive for scene frames) or when the call runs 100 ms past its deadline (grace). A hook-handler breach never counts as a failure; it disables that extension handler. The call classes are in [Host scheduling](/pages/reference-host-scheduling/).
+- A hard deadline breach in `activate`, `on-events` or `views.render`. A breach in `deactivate` is not a trap: the instance is dropped and no restore bytes are kept. A soft deadline breach traps and counts as a failure when it reaches the streak limit of its call class (3 consecutive, or 30 consecutive for scene frames) or when the call runs 100 ms past its deadline (grace). A hook-handler breach never counts as a failure; it counts toward the extension stop, which follows the third consecutive breach (`extension.disabled`). The call classes are in [Host scheduling](/pages/reference-host-scheduling/).
 - Exceeding the linear memory or table limits.
 - A Rust panic or an uncaught TypeScript exception in such an export.
 
@@ -208,7 +208,7 @@ The rule applies to each plugin on each side. A client counts its own failures s
 |---|---|
 | First failure in a 10-minute window | Restart after 1 s |
 | Second failure in the window | Restart after 5 s |
-| Third failure in the window | Disable the plugin on that side and show a notice |
+| Third failure in the window | Disable the plugin on that side and show a notice (an essential core plugin restarts after 5 s instead, LIF-042) |
 | A failure when all earlier failures are older than 10 minutes | Counts as a first failure: restart after 1 s. No 30 s step exists |
 
 Test vectors. Times are measured from the first failure. Failures at 0, 2 and 4 minutes: restart after 1 s, restart after 5 s, disabled. Failures at 0 and 11 minutes: both restart after 1 s, because the first failure has expired. Failures at 0, 6 and 11 minutes: restart 1 s, restart 5 s, restart 5 s (the failure at 0 has expired, the one at 6 minutes counts), never disabled. A scene, view or inference-provider failure counts as a failure of the whole plugin on that side. The client and the server keep independent counts. A user turn-off persists across restarts of Ilium; re-enabling in Settings resets the count to zero.
@@ -310,11 +310,11 @@ Limits that apply to a whole session (all plugins of one hosting process togethe
 | `session_http_streams` | 64 | `http.open-stream` returns `quota-exceeded` |
 | `session_decorations` | 65,536 | `refused(quota-exceeded)` |
 
-Counting a failure, in one list. A **failure** is one of: a trap; a hard deadline breach; an `activate` that returns an error or breaches; the restart of a stuck event queue; the death of the helper during a call, a hung helper, or a helper protocol error; and a soft deadline breach that reaches the streak limit of its call class (3 consecutive, or 30 consecutive for scene frames) or runs 100 ms past its deadline (grace). A hook-handler breach never counts as a failure; it disables that extension handler. Anything else is not a failure. In particular these never count: re-activation after `granted` or `revoked`, disable, upgrade, shutdown, a breach or trap in `deactivate`, a refusal for session memory, helper count or host capacity, a failed or timed-out job, and a late hook handler.
+Counting a failure, in one list. A **failure** is one of: a trap; a hard deadline breach; an `activate` that returns an error or breaches; the restart of a stuck event queue; the death of the helper during a call, a hung helper, or a helper protocol error; and a soft deadline breach that reaches the streak limit of its call class (3 consecutive, or 30 consecutive for scene frames) or runs 100 ms past its deadline (grace). A hook-handler breach never counts as a failure; it counts toward the extension stop, which follows the third consecutive breach (`extension.disabled`). Anything else is not a failure. In particular these never count: re-activation after `granted` or `revoked`, disable, upgrade, shutdown, a breach or trap in `deactivate`, a refusal for session memory, helper count or host capacity, a failed or timed-out job, and a late hook handler.
 
 Restart delay, per side, within a window of 10 minutes: the first failure restarts after 1 s, the second after 5 s, and the third disables the side. There is no 30 s step. A failure expires 10 minutes after it happened.
 
-- **[HST-400]** The host MUST apply the restart rule per plugin per side: 1 s after the first failure, 5 s after the second, disabled at the third failure inside 10 minutes, and MUST NOT insert any other step.
+- **[HST-400]** The host MUST apply the restart rule per plugin per side: 1 s after the first failure, 5 s after the second, disabled at the third failure inside 10 minutes, and MUST NOT insert any other step. An essential core plugin is never disabled: its third and later failures restart after 5 s [LIF-042].
 - **[HST-401]** The host MUST count as failures exactly the list above and MUST NOT count the listed non-failures.
 - **[HST-402]** A failure MUST expire 10 minutes after it happened, and a successful run MUST NOT clear it sooner.
 - **[HST-403]** A breach or trap in `deactivate` MUST drop the instance, discard its restore bytes, and MUST NOT count as a failure.
@@ -579,7 +579,7 @@ Fixed caps. They are the same for every tier unless `limits_tier` is `first-part
 
 Deadlines: `query-catalog`, `menu-items` and `list-virtual-children` take 20 ms, and `tokens` takes 10 ms per call. The timeout of `client-requests.request` is 1 to 30,000 ms. A breach counts like any deadline breach. `menu-items` and `tokens` fall back to static content and do not fail the user action.
 
-Fixed session caps. They count across every plugin of the session [API-070]. They are not keys and a user cannot change them. The five session keys (`session_memory_mib`, `session_helpers`, `session_processes`, `session_http_streams`, `session_decorations`) are in the table under "Host rules for limits and restarts".
+Fixed session caps. They count across every plugin of the session [API-070]. They are not manifest keys; a user may only lower the five session keys under `[plugins.limits]` (HST-406). The five session keys (`session_memory_mib`, `session_helpers`, `session_processes`, `session_http_streams`, `session_decorations`) are in the table under "Host rules for limits and restarts".
 
 | Cap | Value | Over the limit |
 |---|---|---|
@@ -778,7 +778,7 @@ A refusal carries one reason word from this closed list. For the codes `not-perm
 
 ### What the user sees
 
-- A failed plugin shows a notice in the tree footer: `Plugin <name> stopped after 3 failures in 10 minutes: <export> <code or trap> (<view>)`. The view part appears only when a `views.render` call failed.
+- A failed plugin shows a notice in the tree footer: `Plugin <name> stopped after 3 failures in 10 minutes: <export> <code or trap> (<view>). Turn it on again in Settings > Plugins.`. The view part appears only when a `views.render` call failed.
 - Settings > Plugins lists the disabled plugin. Turn it on there to clear the failure count.
 - `ilium plugin logs <plugin-id>` shows refusals and traps, with the interface and function.
 

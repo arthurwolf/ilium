@@ -94,7 +94,7 @@ The pane's life follows this order:
 | `pane-created` | `pane-info` | Never dropped. |
 | `pane-resized` | `node`, `columns`, `rows` | Coalesced by node. |
 | `pane-title-changed` | `node`, `title`, `source` | Coalesced by node. `source` is `osc`, `manual` or `inferred`. |
-| `ui-action` | `view`, `key`, `kind`, `value` | Never dropped. `kind` is `submitted` on Enter in a `text-input`. |
+| `ui-action` | `view`, `key`, `action-id`, `kind`, `value` | Never dropped. `action-id` is a copy of `key` in 0.1.0. `kind` is `submitted` on Enter in a `text-input`. |
 | `key-pressed` | `grab`, `pane`, `chord`, `repeat` | Only when `wants_keys` is `true`. Never dropped. |
 
 The widget `key` is the action id that the plugin matches on, so give every interactive widget a

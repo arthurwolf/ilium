@@ -74,7 +74,7 @@ This block is a fragment. It lists the contributions. The whole manifest is in [
       { "command": "ilium.core.search/open", "chord": "/", "mode": "prefix" }
     ],
     "panels": [{ "id": "search", "title": "Search", "modal": true }],
-    "jobs": [{ "kind": "scan-files", "deadline_ms": 120000, "memory_mib": 128 }]
+    "jobs": [{ "kind": "scan-files", "deadline_ms": 60000, "memory_mib": 128 }]
   }
 }
 ```
@@ -147,7 +147,7 @@ This is the whole manifest of the plugin at `ilium:plugin@0.1.0`. The Manifest s
     "jobs": [
       {
         "kind": "scan-files",
-        "deadline_ms": 120000,
+        "deadline_ms": 60000,
         "memory_mib": 128
       }
     ]
