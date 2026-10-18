@@ -848,7 +848,7 @@ class PipelineTests(unittest.TestCase):
 
         with patch.object(pipeline.platform, 'system', return_value='Darwin'), \
                 patch.object(pipeline.platform, 'machine', return_value='arm64'), \
-                patch.object(pipeline.os, 'nice'), \
+                patch.object(pipeline.os, 'nice', create=True), \
                 patch.object(pipeline, 'logged', side_effect=capture_rustup_install):
             with self.assertRaises(ReachedRustupInstall):
                 pipeline.native(arguments)
@@ -890,7 +890,7 @@ class PipelineTests(unittest.TestCase):
 
         with patch.object(pipeline.platform, 'system', return_value='Windows'), \
                 patch.object(pipeline.platform, 'machine', return_value='AMD64'), \
-                patch.object(pipeline.os, 'nice'), \
+                patch.object(pipeline.os, 'nice', create=True), \
                 patch.object(pipeline, 'download', side_effect=lambda _url, path, _digest: Path(path).write_bytes(b'fixture')), \
                 patch.object(pipeline, 'logged', side_effect=capture_logged):
             with self.assertRaises(ReachedPesterSetup):

@@ -9,6 +9,7 @@ import hashlib
 import json
 from pathlib import Path, PureWindowsPath
 import platform
+import posixpath
 
 import release_tool
 import native_sandbox_runner as sandbox
@@ -100,9 +101,9 @@ def validate_native_sandbox_receipt(receipt, artifact, artifact_sha256, target, 
                 'native sandbox command is absent')
         helper_prefix = '--setenv=ILIUM_NATIVE_HELPER_TEST_BINARY='
         require(command[1].startswith(helper_prefix) and
-                Path(command[1][len(helper_prefix):]).is_absolute(),
+                posixpath.isabs(command[1][len(helper_prefix):]),
                 'native sandbox helper path is absent')
-        expected = sandbox.test_command(Path(command[-6]), case, unit[:-8])
+        expected = sandbox.test_command(command[-6], case, unit[:-8])
         expected[1:1] = [command[1],
                         '--setenv=ILIUM_NATIVE_HELPER_TEST_SHA256=' + artifact['helper_sha256']]
         require(command == expected, 'native sandbox command differs')

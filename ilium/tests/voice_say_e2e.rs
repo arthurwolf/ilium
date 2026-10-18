@@ -657,8 +657,8 @@ async fn voice_say_reaches_a_terminal_through_the_real_voice_pipeline() {
             WAIT_TIMEOUT
         )
         .await,
-        "the footer shows the live session, got: {:?}",
-        tui.screen_text()
+        "the footer shows the live session; {}",
+        failure_diagnostics(&dirs, &mock, &tui)
     );
 
     // Voice already on: no --start needed, and stdin sentences follow the

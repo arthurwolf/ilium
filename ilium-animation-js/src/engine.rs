@@ -5244,10 +5244,20 @@ mod pure_source_contracts {
             return false;
         })()"#).unwrap();
         assert_eq!(refused, json!(true));
+        // The refused call's garbage can be collected after the snapshot, which
+        // frees worker bytes again; top the fill back up so the observation
+        // still has exactly one byte less than its scratch need.
+        let current = quota.snapshot();
+        let remaining = current.limits.worker_bytes - current.worker_bytes;
+        let top_up = (remaining >= PURE_SOURCE_SCRATCH_BYTES)
+            .then(|| quota.reserve_external_storage(remaining - PURE_SOURCE_SCRATCH_BYTES + 1))
+            .transpose()
+            .unwrap();
         let observed = engine.evaluate_json(
             "__ilium_host.sources.astronomy.observe({epoch_ms:1700000000000,latitude:0,longitude:0})"
         ).unwrap();
         assert_eq!(observed["ok"], false);
+        drop(top_up);
         assert_eq!(observed["error"]["code"], "budget_exceeded");
         drop(fill);
         engine.evaluate_json("globalThis.kept=__ilium_host.sources.astronomy.observe({epoch_ms:1700000000000,latitude:0,longitude:0});kept.ok").unwrap();
