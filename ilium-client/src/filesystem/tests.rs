@@ -489,12 +489,14 @@ fn isolated_editor_save_execution() -> (ilium_execution::Execution, ilium_execut
     use ilium_execution::{
         ClientLimits, Execution, ExecutionConfig, LaneConfig, QuotaGroup, QuotaLimits,
     };
+    // Match the production general input tenant: frozen serialization retains
+    // up to two128 MiB generations while its ordered write is also admitted.
     let quota = QuotaGroup::new(QuotaLimits {
         clients: 1,
         jobs: 8,
         service_jobs: 0,
-        input_bytes: 192 * 1024 * 1024,
-        result_bytes: 128 * 1024 * 1024,
+        input_bytes: 512 * 1024 * 1024,
+        result_bytes: 768 * 1024 * 1024,
         worker_threads: 2,
         worker_bytes: 32 * 1024 * 1024,
     });
@@ -523,8 +525,8 @@ fn isolated_editor_save_execution() -> (ilium_execution::Execution, ilium_execut
         .client(ClientLimits {
             jobs: 8,
             service_jobs: 0,
-            input_bytes: 192 * 1024 * 1024,
-            result_bytes: 128 * 1024 * 1024,
+            input_bytes: 512 * 1024 * 1024,
+            result_bytes: 768 * 1024 * 1024,
         })
         .unwrap();
     (owner, client)

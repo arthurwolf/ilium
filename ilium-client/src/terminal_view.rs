@@ -1190,7 +1190,7 @@ pub(crate) struct PreparationSnapshot {
 /// Exact terminal source retained with one composed frame and installed only
 /// after actual output acknowledgement. Clones share its existing allocation.
 #[derive(Clone)]
-pub(crate) struct PaintedTerminal {
+pub struct PaintedTerminal {
     pub identity: Arc<()>,
     pub ordinal: u64,
     snapshot: Arc<TerminalSnapshot>,
@@ -1199,6 +1199,11 @@ pub(crate) struct PaintedTerminal {
 }
 impl PaintedTerminal {
     pub(crate) fn from_frozen_bytes(bytes: &[u8]) -> Result<Self, String> {
+        // Bound parsing work before feeding potentially hostile stored bytes
+        // into vt100, even when the declared viewport itself is small.
+        if bytes.len() > crate::terminal_parsing::MAX_STATE_BYTES {
+            return Err("frozen terminal snapshot exceeds its byte limit".to_string());
+        }
         if bytes.len() < 4 {
             return Err("frozen terminal snapshot is truncated".to_string());
         }
@@ -1503,6 +1508,50 @@ impl TerminalState {
         self.refresh_visible_text_fingerprint();
         Ok(())
     }
+    /// Recovers an engine whose retained allocation exceeds `limit` so its
+    /// completed command can publish instead of being deferred forever (which
+    /// fenced the pane and, through the shared parser queue, the whole client).
+    /// First compacts raw history to exact capacity (Vec growth can double it),
+    /// then lowers this pane's history budget until the total fits.
+    /// Returns true when `retained_allocation_bytes() <= limit` afterwards.
+    pub(crate) fn fit_to_allocation_limit(&mut self, limit: usize) -> bool {
+        if self.retained_allocation_bytes() <= limit {
+            return true;
+        }
+        self.compact_history();
+        let total = self.retained_allocation_bytes();
+        if total <= limit {
+            return true;
+        }
+        // Shed the overshoot plus headroom so the next trim is not immediate,
+        // but only this once: the configured budget is restored, so history
+        // regrows normally and is trimmed again if it ever re-crosses the cap.
+        let excess = (total - limit).saturating_add(limit / 8);
+        let target = self
+            .history_retained_len
+            .saturating_sub(excess)
+            .max(1024 * 1024);
+        let configured_budget = self.history_budget_bytes;
+        self.history_budget_bytes = configured_budget.min(target);
+        self.trim_history_to_budget();
+        self.history_budget_bytes = configured_budget;
+        self.compact_history();
+        self.retained_allocation_bytes() <= limit
+    }
+
+    /// Rewrites the raw-history journal as one exactly sized segment.
+    fn compact_history(&mut self) {
+        let mut retained = self.collect_retained_history();
+        retained.shrink_to_fit();
+        self.history_segments.clear();
+        self.history_segments.push_back(HistorySegment {
+            bytes: Arc::new(retained),
+            start: 0,
+        });
+        self.history_segments.shrink_to_fit();
+        self.history_origin = Arc::new(());
+    }
+
     pub(crate) fn retained_allocation_bytes(&self) -> usize {
         // Installed vt100 0.16.2 cells are fixed 32 bytes. Charge twice that
         // for retained Vec growth, plus row/deque metadata and parser scratch.

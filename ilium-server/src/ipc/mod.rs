@@ -2,7 +2,7 @@
 //! (see [`connection`]), dispatching requests through [`handlers`].
 
 mod connection;
-mod direct_events;
+pub(crate) mod direct_events;
 pub(crate) use direct_events::DirectEventSender;
 pub(crate) use direct_events::EventReply;
 // `pub(crate)`, not private: `crate::run`'s crash-recovery restore path
@@ -189,6 +189,14 @@ mod tests {
                 agent_debug_menu_enabled: false,
                 progress_monitor_enabled: true,
             }));
+            // Production starts the execution bank and ordered journal before
+            // the accept loop. Without them `connection::handle` rejects each
+            // accepted stream before the registry behavior is exercised.
+            let execution = crate::execution::ServerExecution::start()
+                .expect("isolated listener execution bank");
+            let journal_quota = execution.quota_group();
+            assert!(state.execution.set(execution).is_ok());
+            assert!(state.events.initialize_journal(journal_quota));
             let loop_state = Arc::clone(&state);
             // Mirrors `run`'s outer shutdown select: a saturated accept loop
             // must remain cancellable even though it does not call accept.
@@ -315,10 +323,26 @@ mod tests {
                 "cycle {cycle} lost or reordered its first request"
             );
             let remaining = read_attach_events(&mut queued).await;
-            assert!(matches!(
-                remaining.first(),
-                Some(ServerEvent::PaneStateSnapshot { .. })
-            ));
+            // The rejected first request also broadcasts retained session
+            // feedback. It may precede the subsequent valid attach snapshot.
+            let snapshot_index = remaining
+                .iter()
+                .position(|event| matches!(event, ServerEvent::PaneStateSnapshot { .. }))
+                .expect("valid attach must establish its authoritative tree");
+            assert!(
+                remaining[..snapshot_index].iter().all(
+                    |event| matches!(event, ServerEvent::BlockingErrorsSnapshot { errors }
+                    if errors.iter().any(|error| error.message.contains(wrong_session.as_str())))
+                ),
+                "only visible feedback for the refused request may precede attachment"
+            );
+            assert!(
+                remaining[snapshot_index..].iter().any(
+                    |event| matches!(event, ServerEvent::BlockingErrorsSnapshot { errors }
+                    if errors.iter().any(|error| error.message.contains(wrong_session.as_str())))
+                ),
+                "attachment must replay the retained request failure"
+            );
             assert_eq!(
                 listener.tracked_count(),
                 1,
@@ -369,27 +393,18 @@ mod tests {
             "the aborted owner remains tracked until admission reaps its handle"
         );
 
-        // The old listener is gone, so bind a replacement endpoint with the
-        // same state. The old aborted JoinHandle must be reaped before a new
-        // stream gets the only slot; no test-side registry clearing helps it.
+        // Shutdown closes the ordered journal, so this state cannot serve a
+        // replacement Attach. Reap the aborted original without clearing the
+        // registry by hand. The separate Detach test covers live reacceptance.
         drop(admitted);
         drop(queued);
-        let replacement = listener.endpoint.bind().await.expect("rebind endpoint");
-        let replacement_state = Arc::clone(&listener.state);
-        listener.accept_task = tokio::spawn(async move {
-            accept_loop_with_limit(replacement_state, replacement, 1).await;
-        });
-        let mut fresh = listener.connect().await;
-        let fresh_attach = attach(&mut fresh).await;
-        assert!(matches!(
-            fresh_attach.first(),
-            Some(ServerEvent::PaneStateSnapshot { .. })
-        ));
+        tokio::time::timeout(TEST_DEADLINE, wait_for_connection_slot(&listener.state, 1))
+            .await
+            .expect("aborted connection did not retire");
         assert_eq!(
             listener.tracked_count(),
-            1,
-            "aborted handle was not reaped before replacement admission"
+            0,
+            "aborted connection handle was not reaped"
         );
-        assert!(listener.state.has_terminal_subscribers(NodeId(999)));
     }
 }

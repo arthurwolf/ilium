@@ -234,8 +234,7 @@ pub fn render(
     if !geometry.compact {
         frame.render_widget(theme::block(false), geometry.area);
         frame.render_widget(
-            Paragraph::new(format!("Click icon: new {} here", popover.provider.label()))
-                .style(Style::new().fg(label_color(scheme))),
+            Paragraph::new(header_text(popover)).style(Style::new().fg(label_color(scheme))),
             geometry.header,
         );
     }
@@ -248,7 +247,14 @@ pub fn render(
         };
         let selected = popover.hovered == Some(PopoverHit::Choice(choice));
         let style = if !popover.enabled {
-            Style::new().fg(disabled_color(scheme))
+            // Still answer the pointer: a greyed button that ignores hover looks
+            // broken. The header says why it cannot be used yet.
+            let dim = Style::new().fg(disabled_color(scheme));
+            if selected {
+                dim.add_modifier(Modifier::UNDERLINED)
+            } else {
+                dim
+            }
         } else if selected {
             Style::new()
                 .fg(theme::accent_fg())
@@ -259,6 +265,17 @@ pub fn render(
         };
         frame.render_widget(Paragraph::new(label).style(style), area);
     }
+}
+
+/// Header line: the launch hint, or why the worktree choices are not usable.
+fn header_text(popover: &AgentPopover) -> String {
+    if popover.enabled {
+        return format!("Click icon: new {} here", popover.provider.label());
+    }
+    popover
+        .unavailable_reason
+        .clone()
+        .unwrap_or_else(|| "Worktrees are unavailable".to_string())
 }
 
 fn label_color(scheme: ColorScheme) -> Color {
@@ -374,5 +391,39 @@ mod tests {
         assert!(state.is_visible(start));
         state.pointer_moved(Position::new(80, 10), Rect::new(0, 0, 80, 24), start);
         assert!(!state.should_close(start + Duration::from_secs(2)));
+    }
+
+    #[test]
+    fn disabled_popover_explains_itself_and_underlines_the_hovered_choice() {
+        use ratatui::{backend::TestBackend, Terminal};
+        let bounds = Rect::new(0, 0, 80, 24);
+        let mut state = AgentPopover::hover(
+            BuiltinAgentProvider::Claude,
+            Rect::new(14, 22, 3, 2),
+            Instant::now(),
+            false,
+            Some("Checking Git repository…".into()),
+        );
+        let geometry = layout(bounds, &state).expect("popover fits");
+        let (choice, area) = geometry.choices[0];
+        state.hovered = Some(PopoverHit::Choice(choice));
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("backend");
+        terminal
+            .draw(|frame| render(frame, &geometry, &state, ColorScheme::Dark))
+            .expect("draw");
+        let buffer = terminal.backend().buffer();
+        let header: String = (0..geometry.header.width)
+            .map(|dx| {
+                buffer[(geometry.header.x + dx, geometry.header.y)]
+                    .symbol()
+                    .to_string()
+            })
+            .collect();
+        assert!(header.contains("Checking Git repository"), "{header:?}");
+        let hovered = &buffer[(area.x, area.y)];
+        assert!(hovered.modifier.contains(Modifier::UNDERLINED));
+        let (_, other_area) = geometry.choices[1];
+        let other = &buffer[(other_area.x, other_area.y)];
+        assert!(!other.modifier.contains(Modifier::UNDERLINED));
     }
 }

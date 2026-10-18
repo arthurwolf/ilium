@@ -67,6 +67,8 @@ pub struct ClientConfig {
     pub notifications: NotificationSettings,
     /// Board presentation settings shown in the Kanban Board tab.
     pub kanban_board: KanbanBoardSettings,
+    /// Panel padding shown in the Padding tab.
+    pub padding: crate::padding::PaddingSettings,
     /// Provider selection and credentials used only by client-owned naming workers.
     pub inference: InferenceSettings,
     /// Automatic event-to-LLM-action mappings shown in the Triggers tab.
@@ -109,6 +111,7 @@ impl Default for ClientConfig {
             sound: SoundSettings::default(),
             notifications: NotificationSettings::default(),
             kanban_board: KanbanBoardSettings::default(),
+            padding: crate::padding::PaddingSettings::default(),
             inference: InferenceSettings::default(),
             triggers: TriggerSettings::default(),
             text_triggers: TextTriggerSettings::default(),
@@ -1065,6 +1068,11 @@ pub struct UiSettings {
     /// (compact/clear/model/effort/etc). Closing it from its own X button or
     /// toggling it off here are the same action -- this one flag drives both.
     pub agent_toolbar_enabled: bool,
+    /// Draws the rounded frame rules that separate the agent toolbar, the
+    /// last-prompt banner, the progress footer and the left panel's toolbar
+    /// from the content around them. Off restores the unframed layout and
+    /// gives the rows the rules occupied back to the terminal.
+    pub section_frames_enabled: bool,
     /// Shows a short text label after every agent-toolbar icon, turning the
     /// compact icon row into a traditional, easier-to-read text menu.
     pub show_toolbar_labels: bool,
@@ -1144,6 +1152,7 @@ impl Default for UiSettings {
             agent_debug_menu_enabled: false,
             show_context_menu_icons: true,
             agent_toolbar_enabled: true,
+            section_frames_enabled: true,
             show_toolbar_labels: true,
             last_prompt_enabled: true,
             last_prompt_max_lines: DEFAULT_LAST_PROMPT_MAX_LINES,
@@ -1194,6 +1203,8 @@ struct RawClientConfig {
     notifications: NotificationSettings,
     #[serde(default)]
     kanban_board: RawKanbanBoardConfig,
+    #[serde(default)]
+    padding: crate::padding::PaddingSettings,
     #[serde(default)]
     inference: InferenceSettings,
     #[serde(default)]
@@ -1265,6 +1276,7 @@ struct RawUiConfig {
     agent_debug_menu_enabled: Option<bool>,
     show_context_menu_icons: Option<bool>,
     agent_toolbar_enabled: Option<bool>,
+    section_frames_enabled: Option<bool>,
     show_toolbar_labels: Option<bool>,
     last_prompt_enabled: Option<bool>,
     last_prompt_max_lines: Option<u8>,
@@ -1441,6 +1453,9 @@ pub enum ConfigLoadError {
         "kanban_board.minimum_column_width = {0} must be between {MIN_BOARD_COLUMN_WIDTH} and {MAX_BOARD_COLUMN_WIDTH}"
     )]
     InvalidBoardColumnWidth(u16),
+    /// A `[padding]` value is outside its supported range.
+    #[error("{0}")]
+    InvalidPadding(String),
     /// `ui.last_prompt_max_lines` is outside the supported range.
     #[error(
         "ui.last_prompt_max_lines = {0} must be between {MIN_LAST_PROMPT_MAX_LINES} and {MAX_LAST_PROMPT_MAX_LINES}"
@@ -1519,6 +1534,12 @@ pub fn load(config_dir: &Path) -> Result<ClientConfig, ClientError> {
             path: path.clone(),
             source,
         })?;
+    raw.padding
+        .validate()
+        .map_err(|message| ClientError::ConfigLoad {
+            path: path.clone(),
+            source: ConfigLoadError::InvalidPadding(message),
+        })?;
     let terminal = merge_terminal(raw.terminal).map_err(|source| ClientError::ConfigLoad {
         path: path.clone(),
         source,
@@ -1557,6 +1578,7 @@ pub fn load(config_dir: &Path) -> Result<ClientConfig, ClientError> {
         sound: raw.sound,
         notifications: raw.notifications.normalized(),
         kanban_board,
+        padding: raw.padding,
         inference: raw.inference,
         triggers: raw.triggers.normalized(),
         text_triggers: raw.text_triggers,
@@ -1766,6 +1788,9 @@ fn merge_ui(raw: RawUiConfig) -> Result<UiSettings, ConfigLoadError> {
         agent_toolbar_enabled: raw
             .agent_toolbar_enabled
             .unwrap_or(defaults.agent_toolbar_enabled),
+        section_frames_enabled: raw
+            .section_frames_enabled
+            .unwrap_or(defaults.section_frames_enabled),
         show_toolbar_labels: raw
             .show_toolbar_labels
             .unwrap_or(defaults.show_toolbar_labels),
@@ -2438,6 +2463,24 @@ pub fn save_kanban_board_settings(
     write_toml_document(&path, &document)
 }
 
+/// Persists `[padding]` while preserving every unrelated config table.
+pub fn save_padding_settings(
+    config_dir: &Path,
+    padding: &crate::padding::PaddingSettings,
+) -> Result<(), ClientError> {
+    let path = config_dir.join("config.toml");
+    let mut document = read_toml_document(&path)?;
+    let table = document
+        .as_table_mut()
+        .expect("a TOML document's root is always a table");
+    let value = toml::Value::try_from(padding).map_err(|source| ClientError::ConfigSave {
+        path: path.clone(),
+        source: Box::new(ConfigSaveError::Serialize(source)),
+    })?;
+    table.insert("padding".to_string(), value);
+    write_toml_document(&path, &document)
+}
+
 /// Persists the complete `[sound]` table without replacing settings owned by
 /// either the client or server. The server receives the same typed value over
 /// IPC for immediate application; this file is the restart/global-session
@@ -2979,6 +3022,10 @@ fn ui_settings_to_toml(ui: &UiSettings) -> toml::Value {
     table.insert(
         "agent_toolbar_enabled".to_string(),
         toml::Value::Boolean(ui.agent_toolbar_enabled),
+    );
+    table.insert(
+        "section_frames_enabled".to_string(),
+        toml::Value::Boolean(ui.section_frames_enabled),
     );
     table.insert(
         "show_toolbar_labels".to_string(),
@@ -3551,7 +3598,7 @@ mod tests {
             restructure_prompt_token_limit: 345_678,
             selected_provider: ilium_inference::InferenceProviderKind::KiloGateway,
             kilo_gateway: ilium_inference::KiloGatewaySettings {
-                model: "stepfun/step-5-preview-free".to_string(),
+                model: "dots-studio/dots-3-note-preview:free".to_string(),
                 ..ilium_inference::KiloGatewaySettings::default()
             },
             openrouter: ilium_inference::OpenRouterSettings {
@@ -4549,6 +4596,7 @@ mod tests {
             agent_debug_menu_enabled: true,
             show_context_menu_icons: false,
             agent_toolbar_enabled: false,
+            section_frames_enabled: false,
             show_toolbar_labels: false,
             last_prompt_enabled: false,
             last_prompt_max_lines: 7,

@@ -52,7 +52,11 @@ fn render_loaded(
 ) -> (Raster, Vec<[u8; 3]>) {
     for _ in 0..500 {
         let frame = render(scene, seconds, columns, rows);
-        if scene.current.is_some() {
+        if scene
+            .current
+            .as_ref()
+            .is_some_and(|loaded| loaded.id == scene.desired_world(seconds))
+        {
             return frame;
         }
         std::thread::sleep(Duration::from_millis(10));
@@ -109,9 +113,14 @@ fn mars_has_its_big_volcano_and_deep_basin() {
 #[test]
 fn world_loading_retries_after_shared_worker_capacity_returns() {
     let (mut execution, resources) = crate::resources::isolated_test_resources();
+    let quota = resources.finite().quota_group();
+    let baseline = quota.snapshot();
+    // Bank threads and their metadata are already charged. Fill exactly the
+    // remaining physical budget instead of assuming the banks cost only stacks.
     let pressure = resources
-        .reserve_storage(2304 * 1024 * 1024)
+        .reserve_storage(baseline.limits.worker_bytes - baseline.worker_bytes)
         .expect("fill the isolated fixture's physical allocation budget");
+    assert_eq!(quota.snapshot().worker_bytes, baseline.limits.worker_bytes);
     let env = SceneEnv::for_test(std::env::temp_dir(), resources);
     let mut scene = TopographicMapsScene::new(&settings_for(WorldId::Mars), &env);
 
@@ -121,6 +130,7 @@ fn world_loading_retries_after_shared_worker_capacity_returns() {
     assert!(scene.status().unwrap().contains("worker capacity"));
 
     drop(pressure);
+    assert_eq!(quota.snapshot().worker_bytes, baseline.worker_bytes);
     scene.advance_loading(0.0);
     assert!(
         scene.loading.is_some(),
@@ -519,7 +529,7 @@ fn settings_survive_serde() {
 #[test]
 fn status_names_the_world_and_spacing() {
     let mut scene = scene(&settings_for(WorldId::Moon));
-    assert_eq!(scene.status(), None);
+    assert_eq!(scene.status().as_deref(), Some("Loading world…"));
     render(&mut scene, 0.0, 40, 12);
     assert!(scene
         .status()

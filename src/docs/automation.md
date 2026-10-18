@@ -214,6 +214,12 @@ The progress monitor lets a long-running job report percentage and status to the
 
 How it works in one paragraph: the job (or an agent on its behalf) registers a **probe**, a shell command that prints one JSON object describing the job. The **server** runs the probe on an interval, validates the output and updates a footer in that pane. When the job reaches `done` or `error`, the result goes to whoever is waiting for it: an `ilium progress wait` command that is still running gets it as its output and exit status; otherwise Ilium types a short result message into the pane when its composer is ready. After registration nobody needs to poll.
 
+### Timing box and popover
+
+To the right of each gauge, after a dim `│` divider, a box shows how long ago the task **started** and an **ETA** (`started 13 minutes ago · ETA in 8 minutes`). Times use at most two units (`3 days, 12 hours`). The ETA blends the whole-run pace with the pace of the last ten minutes; it reads `ETA —` until progress has been measured. When a running task makes no progress (the percent does not rise and the one-line message does not change) for ten probe intervals, and at least ten minutes, the ETA is replaced by a `⚠ stalled 25 minutes` marker. On narrow panes the box drops the ETA first, then disappears; the bar never shrinks below ten cells for it.
+
+Hovering the footer opens a popover that adds the exact start time, the time of the last progress, elapsed time (total time once the task has finished), the current rate in percent per minute, the ETA range when the recent and whole-run paces disagree, probe health (interval, last check, consecutive failures) and the owning agent and pane.
+
 ### Requirements
 
 - The `ilium progress` commands must be run **from inside an Ilium terminal pane**. Ilium sets `ILIUM_PANE_ID`, `ILIUM_SESSION_NAME` and `ILIUM_SESSION_SOCKET` in each pane's environment and the command uses them to find the right pane and server. Outside a pane the command fails with a message naming the missing variable.
@@ -230,7 +236,7 @@ Every command prints **one JSONL record** to stdout on success (one JSON object 
 | `ilium progress set --command '<probe>' [--interval-seconds N] [--wait [--timeout-seconds S]] [--replace]` | Validate, then atomically add a monitor to this pane. Waits for a server acknowledgement that contains the monitor id and the accepted first report. With `--wait`, then blocks exactly like `ilium progress wait` and prints a second line. Other monitors of the pane keep running; `--replace` clears all of them first. | `progress_set` (then `progress_wait`) |
 | `ilium progress wait [MONITOR_ID] [--timeout-seconds S]` | Block until the monitor reports `done` or `error`, fails or is cleared. Without an id it picks the pane's only unsettled monitor (else its only monitor) and refuses with `monitor-ambiguous` (exit 2) when there are several. `ilium wait` is the same command. | `progress_wait` |
 | `ilium progress status` | Every monitor of this pane: registration, latest report and monitor health (`monitor_count`, `running`, `monitors`). | `progress_status` |
-| `ilium progress clear [--monitor-id ID \| --all]` | Stop a monitor and clear its retained progress. With `--monitor-id`, only that exact monitor. Without it, the pane's only monitor; with several, it refuses with `monitor-ambiguous` unless `--all` is given. | (clear result) |
+| `ilium progress clear [--monitor-id ID \| --all]` | Stop a monitor and clear its retained progress. With `--monitor-id`, only that exact monitor, refused with `monitor-running` while its task still runs unless `--running` is given. Without it, the pane's only monitor; with several, it refuses with `monitor-ambiguous` unless `--all` is given. | (clear result) |
 
 
 ### Waiting for a monitor
@@ -249,7 +255,7 @@ Every command prints **one JSONL record** to stdout on success (one JSON object 
 
 The record also carries `composer_notice`: `suppressed` means the server did not, and will not, type a result message for this monitor, because this command delivered it. `may-also-arrive` means a message was already typed (or may be) and is a duplicate of this record. If the wait command is killed or the agent stops it, the server falls back to typing the message, so nothing is lost.
 
-Without `--timeout-seconds` the command waits as long as the job takes. Agent tools that limit a command's run time either move it to the background (Claude Code) or need a timeout that fits the tool: pick a `--timeout-seconds` below the tool's limit and run the command again on exit status 6.
+Without `--timeout-seconds` the command waits as long as the job takes, which is what agents should use: one wait that ends only when the task ends. Agent tools that limit a command's run time should run it with their longest wait (Claude Code: as a background command; Codex: `yield_time_ms` equal to `background_terminal_max_timeout`) instead of looping on short timeouts.
 
 The usual way to run a long job is one command that registers the monitor and waits for it:
 
@@ -291,6 +297,7 @@ The probe is any command line. On Linux and macOS Ilium runs it as `$SHELL -c "<
 | `percent` | number | Required, finite, 0 to 100. For `done` Ilium forces exactly 100. |
 | `message` | string | Optional, may be empty, at most 2048 bytes, no control characters. The compact line always shown in the pane footer. |
 | `details` | string | Optional, at most 8192 bytes. Multi-line; newline, carriage return and tab are allowed, other control characters are not. Shown when you hover the footer. |
+| `eta_seconds` | integer | Optional, whole seconds the task still needs, at most 315360000 (ten years). Measured from this report; the footer ETA counts down from it, and the measured pace only supplies the confidence range in the hover popover. Omit it when the task cannot know; Ilium then estimates from the measured pace. |
 | `error` | string | **Required when `status` is `error`** (at most 4096 bytes); **forbidden otherwise**. An empty string counts as absent. |
 
 Unknown fields are rejected, so a typo cannot be silently ignored.
@@ -450,7 +457,7 @@ The guidance deliberately discourages chatter. Agents are told to read recent co
 
 ## Agent setup
 
-Ilium ships two short instruction blocks for agents: **Chatroom** (when and how to use the room) and **Progress** (hand any task expected to take three minutes or more to the progress monitor, and never poll). To be effective they have to be in the files Claude Code and Codex read at start-up, so Ilium maintains them for you.
+Ilium ships two short instruction blocks for agents: **Chatroom** (when and how to use the room) and **Progress** (hand any task expected to take three minutes or more to the progress monitor, never poll, and treat each monitor result as one attempt: verify a success, inspect and retry a failure, check the task directly when the outcome is unknown, then continue the request; after a reboot or Ilium restart, find the restored monitor by its job id and check the task once). To be effective they have to be in the files Claude Code and Codex read at start-up, so Ilium maintains them for you.
 
 ### What gets edited
 
@@ -468,7 +475,7 @@ Edits are **marker-delimited blocks**, so only text between Ilium's own markers 
 <!-- /ilium-agent-feature: chatroom -->
 ```
 
-The Progress block also carries a schema version (`<!-- ilium-agent-feature: progress version=9 -->`), which lets Ilium upgrade an older block and leave a newer one alone. Text around the block is preserved. If a file already contains wording that looks like the Ilium instruction but has no markers, Ilium reports it as "Instruction detected" and does **not** treat it as its own or delete it. Files larger than 512 KiB are not modified. A symlinked instruction file stays a symlink after an update (for example `AGENTS.md` linking to `CLAUDE.md`).
+The Progress block also carries a schema version (`<!-- ilium-agent-feature: progress version=13 -->`), which lets Ilium upgrade an older block and leave a newer one alone. Text around the block is preserved. If a file already contains wording that looks like the Ilium instruction but has no markers, Ilium reports it as "Instruction detected" and does **not** treat it as its own or delete it. Files larger than 512 KiB are not modified. A symlinked instruction file stays a symlink after an update (for example `AGENTS.md` linking to `CLAUDE.md`).
 
 Ilium installs and refreshes the global blocks automatically when it attaches to a session and when projects open; it does not wait for you to visit Settings. The global files already apply to every project, so Ilium never adds project copies on its own: they would repeat the same text, and a new project `AGENTS.md` would stop Codex from reading that project's `CLAUDE.md`. Treat the instruction files as managed by Ilium for these two blocks. Write your own instructions anywhere outside the markers.
 
@@ -543,6 +550,10 @@ Success response:
 The request waits until the agent's prompt is ready, then submits the prompt, so a slow-starting agent delays the response. Errors return a JSON body `{"error": "..."}`: status 400 for an empty prompt, an unresolved or ambiguous project, or an invalid worktree request; 500 for a failure creating the pane or worktree; 503 if the session is shutting down. If the HTTP client disconnects while a worktree is being created, creation continues under server control and is rolled back at safe points. See [Worktrees](worktrees.md) for what the worktree option does.
 
 ---
+
+### Remote control routes
+
+Beyond `/create_agent`, the API serves `/v1/*`: read the tree, a project or a pane, and apply any operation `ilium ctl` offers. See [`ilium ctl`](cli-reference.md#ilium-ctl) for the commands; the routes mirror them one to one (`GET /v1/tree`, `GET /v1/panes/{id}`, `POST /v1/ops`, `POST /v1/panes/{id}/input`, `POST /v1/voice`, ...). `GET /v1/guide` returns the essentials.
 
 ## Reset forecasts
 

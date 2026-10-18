@@ -1467,6 +1467,16 @@ pub(crate) async fn create_agent_in_workspace(
     .await
     {
         Ok(()) => {}
+        Err(RegisterPaneError::Admission(reason)) => {
+            state
+                .workspace_close_preferences
+                .write()
+                .await
+                .remove(&pane_id);
+            return Err(format!(
+                "worktree retained: pane admission refused: {reason}"
+            ));
+        }
         Err(RegisterPaneError::NodeRemoved(_)) => {
             state
                 .workspace_close_preferences

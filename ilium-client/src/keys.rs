@@ -135,6 +135,10 @@ pub(crate) fn handle_event_after_intercept(app: &mut App, event: Event) {
     // replayed through its existing key contract so enabling the host mode
     // cannot silently disable paste in names, paths, searches, or editors.
     if let Event::Paste(pasted) = &event {
+        if app.native_terminal_paste_destination().is_some() {
+            app.handle_terminal_paste(pasted);
+            return;
+        }
         if requires_key_paste_replay(app) {
             replay_pasted_text_as_keys(app, pasted);
             return;
@@ -335,7 +339,11 @@ pub(crate) fn requires_key_paste_replay(app: &App) -> bool {
 /// The event loop also owns modes whose atomic-paste semantics need a
 /// specialized replay policy instead of the synchronous fallback above.
 pub(crate) fn requires_bounded_key_paste_replay(app: &App) -> bool {
-    requires_key_paste_replay(app) || matches!(&app.mode, Mode::AnimationTextPrompt(..))
+    requires_key_paste_replay(app)
+        || matches!(
+            &app.mode,
+            Mode::AnimationTextPrompt(..) | Mode::AgentSetupPathPrompt(..)
+        )
 }
 
 #[cfg(test)]
@@ -933,7 +941,9 @@ fn handle_search_event(app: &mut App, mut state: Box<SearchState>, event: &Event
 /// Runs one leader-key action.
 fn execute_action(app: &mut App, action: Action) {
     match action {
-        Action::NewTerminal => app.action_new_terminal(),
+        Action::NewTerminal => {
+            app.action_new_terminal();
+        }
         Action::NewAgentWorktree => app.open_create_agent_workspace_dialog(
             ilium_core::BuiltinAgentProvider::Claude,
             app.selected_node_id().unwrap_or(ilium_core::ROOT_ID),
@@ -2511,6 +2521,19 @@ fn handle_settings_event(app: &mut App, mut state: SettingsState, event: &Event)
     }
     state.animation_slider_drag = None;
     app.clear_animation_hover();
+
+    // The fine-tuning dialog owns every key while open.
+    if state.padding.dialog.is_some() {
+        if matches!(key.code, KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q')) {
+            state.padding.dialog = None;
+        }
+        app.mode = Mode::Settings(state);
+        return;
+    }
+    if state.tab == SettingsTab::Padding && crate::padding_ui::handle_key(app, &mut state, *key) {
+        app.mode = Mode::Settings(state);
+        return;
+    }
 
     // The Optimization tab owns its keys (scroll, sub-tabs, scan/apply/revert)
     // and, while its Apply confirmation is open, every key.

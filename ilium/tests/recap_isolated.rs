@@ -3,7 +3,7 @@
 use std::{
     io::{Read, Write},
     net::TcpListener,
-    path::{Path, PathBuf},
+    path::PathBuf,
     process::{Command, Output},
     sync::mpsc,
     time::{Duration, Instant},
@@ -108,16 +108,18 @@ fn fake_provider() -> (String, mpsc::Receiver<String>, std::thread::JoinHandle<(
 
 #[tokio::test]
 async fn recap_selected_shell_screen_reaches_fake_inference_with_matching_binaries() {
-    // Short, isolated runtime paths are required by Unix socket length bounds.
-    let scratch = if Path::new("/data").is_dir() {
-        "/data"
-    } else {
-        "/media/arthur/build"
-    };
-    let root = tempfile::Builder::new()
-        .prefix("ilium-recap-")
-        .tempdir_in(scratch)
-        .unwrap();
+    // Prefer the build hosts' scratch disks. Unix CI falls back to /tmp;
+    // Keep the prefix short for both session and log-relay sockets; macOS's
+    // default temporary directory can also exceed Unix socket path limits.
+    let root = ["/data", "/media/arthur/build", "/tmp"]
+        .into_iter()
+        .find_map(|scratch| {
+            tempfile::Builder::new()
+                .prefix("ir-")
+                .tempdir_in(scratch)
+                .ok()
+        })
+        .expect("a writable short test scratch directory");
     std::fs::write(root.path().join(".scratch-reaper"), "").unwrap();
     let (endpoint, requests, worker) = fake_provider();
     let binary = std::env::var_os("ILIUM_PTY_SMOKE_BINARY")

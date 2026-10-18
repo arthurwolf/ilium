@@ -775,7 +775,7 @@ mod tests {
         screen_text_at(state, banner, 100, 44)
     }
 
-    const PRIVACY_NOTICE: &str = "Remote compaction sends this session's transcript (your prompts, code and tool output, possibly including secrets) to Kilo Gateway / stepfun/step-5-preview-free as currently configured in the Inference tab. That is a privacy decision.";
+    const PRIVACY_NOTICE: &str = "Remote compaction sends this session's transcript (your prompts, code and tool output, possibly including secrets) to Kilo Gateway / dots-studio/dots-3-note-preview:free as currently configured in the Inference tab. That is a privacy decision.";
 
     #[test]
     fn events_update_steps_progress_tokens_and_log() {
@@ -876,6 +876,13 @@ mod tests {
         dialog.fail("Synthetic provider failure: the session can be resumed safely".to_string());
         for (width, height) in [(40, 12), (60, 20), (80, 24), (120, 40)] {
             let text = screen_text_at(&dialog, Some(PRIVACY_NOTICE), width, height);
+            // Match prose across terminal wrapping while retaining every
+            // disclosure and action assertion, including the original screen.
+            let prose = text
+                .replace('│', " ")
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ");
             for expected in [
                 "Privacy decision",
                 "[x]",
@@ -884,7 +891,7 @@ mod tests {
                 "tool output",
                 "secrets",
                 "Kilo Gateway",
-                "stepfun/step-5-preview-free",
+                "dots-studio/dots-3-note-preview:free",
                 "Failed:",
                 "safely",
                 "Enter resume",
@@ -892,7 +899,7 @@ mod tests {
                 "x hide",
             ] {
                 assert!(
-                    text.contains(expected),
+                    prose.contains(expected),
                     "{width}x{height}: missing {expected:?} in\n{text}"
                 );
             }

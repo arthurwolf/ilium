@@ -83,3 +83,31 @@ fn releasing_the_shared_active_history_segment_resumes_the_same_output_cursor() 
         b"seed copy-on-write"
     );
 }
+
+#[test]
+fn oversized_pane_sheds_history_to_fit_instead_of_deferring_forever() {
+    // A 64 MiB history budget plus Vec doubling and render scrollback once
+    // pushed one pane past the 128 MiB cap, wedging the whole client.
+    let mut state = TerminalState::with_scrollback_budget_mib(24, 200, 96);
+    let chunk = vec![b'x'; 1024 * 1024];
+    for _ in 0..90 {
+        state.append_history_for_benchmark(&chunk);
+    }
+    let limit = state.retained_allocation_bytes() / 2;
+    assert!(state.retained_allocation_bytes() > limit);
+    assert!(state.fit_to_allocation_limit(limit));
+    assert!(state.retained_allocation_bytes() <= limit);
+    assert!(state
+        .searchable_history_snapshot()
+        .to_vec()
+        .iter()
+        .all(|byte| *byte == b'x'));
+
+    // The configured budget must survive: more history can be appended and is
+    // retained up to that budget instead of the shrunken post-trim size.
+    let trimmed_len = state.searchable_history_snapshot().len();
+    for _ in 0..4 {
+        state.append_history_for_benchmark(&chunk);
+    }
+    assert!(state.searchable_history_snapshot().len() >= trimmed_len + 4 * chunk.len());
+}

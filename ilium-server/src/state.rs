@@ -258,6 +258,10 @@ impl WorkspaceClosePreference {
 }
 
 pub struct ServerState {
+    pub blocking_errors: std::sync::Mutex<Vec<ilium_ipc::BlockingError>>,
+    blocking_error_generations:
+        std::sync::Mutex<std::collections::HashMap<(Option<NodeId>, String), u64>>,
+    blocking_error_next_generation: std::sync::atomic::AtomicU64,
     pub session_name: String,
     /// Canonical project boundary shared by every pane in this server.
     pub session_cwd: PathBuf,
@@ -528,6 +532,9 @@ impl ServerState {
         tree.ensure_launch_project(options.session_cwd.clone())
             .expect("a new tree always accepts its launch project");
         Self {
+            blocking_errors: std::sync::Mutex::new(Vec::new()),
+            blocking_error_generations: std::sync::Mutex::new(std::collections::HashMap::new()),
+            blocking_error_next_generation: std::sync::atomic::AtomicU64::new(1),
             session_name: options.session_name,
             session_cwd: options.session_cwd,
             home_dir: options.home_dir,
@@ -755,7 +762,156 @@ impl ServerState {
     /// Best-effort broadcast: an `Err` here only ever means there are
     /// currently zero attached clients, which is a normal state (no
     /// terminal attached right now), not a failure worth logging.
+    pub(crate) fn begin_error_operation(&self, node_id: Option<NodeId>, operation: &str) -> u64 {
+        let mut generations = self
+            .blocking_error_generations
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let generation = self
+            .blocking_error_next_generation
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if generations.len() >= 8192 {
+            if let Some(key) = generations.keys().next().cloned() {
+                generations.remove(&key);
+            }
+        }
+        generations.insert((node_id, operation.to_string()), generation);
+        generation
+    }
+
+    pub(crate) fn record_current_blocking_error(
+        &self,
+        node_id: Option<NodeId>,
+        operation: &str,
+        generation: u64,
+        message: &str,
+    ) {
+        let generations = self
+            .blocking_error_generations
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        if generations.get(&(node_id, operation.to_string())) == Some(&generation) {
+            self.record_blocking_error(node_id, operation, message);
+        }
+    }
+
+    pub(crate) fn clear_current_blocking_error(
+        &self,
+        node_id: Option<NodeId>,
+        operation: &str,
+        generation: u64,
+    ) {
+        let generations = self
+            .blocking_error_generations
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        if generations.get(&(node_id, operation.to_string())) == Some(&generation) {
+            self.clear_blocking_error(node_id, operation);
+        }
+    }
+
+    pub(crate) fn prune_blocking_errors(&self, tree: &Tree) {
+        let mut errors = self
+            .blocking_errors
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let previous = errors.len();
+        errors.retain(|error| {
+            error
+                .node_id
+                .is_none_or(|node_id| tree.get(node_id).is_some())
+        });
+        if errors.len() == previous {
+            return;
+        }
+        // Publishing under the short store lock preserves snapshot order:
+        // an older failure cannot overtake a newer successful recovery.
+        let snapshot = errors.clone();
+        self.events
+            .publish(ServerEvent::BlockingErrorsSnapshot { errors: snapshot });
+    }
+
+    /// Bounded, deduplicated active failures. Retry success clears its own scope.
+    pub(crate) fn record_blocking_error(
+        &self,
+        node_id: Option<NodeId>,
+        operation: &str,
+        message: &str,
+    ) {
+        let mut errors = self
+            .blocking_errors
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        if errors.iter().any(|error| {
+            error.node_id == node_id && error.operation == operation && error.message == message
+        }) {
+            return;
+        }
+        // Keep the latest actionable failure per operation, without evicting
+        // another node's failure during repeated restore retries.
+        errors.retain(|error| error.node_id != node_id || error.operation != operation);
+        if errors.len() >= 4095 {
+            errors.remove(0);
+            if !errors
+                .iter()
+                .any(|error| error.operation == "error_capacity")
+            {
+                errors.push(ilium_ipc::BlockingError {
+                    node_id: None,
+                    operation: "error_capacity".to_string(),
+                    message: "Too many unresolved errors; older messages were discarded. Resolve errors and retry affected operations.".to_string(),
+                });
+            }
+        }
+        let mut message = message.to_string();
+        if message.len() > 8192 {
+            let mut end = 8192;
+            while !message.is_char_boundary(end) {
+                end -= 1;
+            }
+            message.truncate(end);
+            message.push_str(" … (message truncated)");
+        }
+        errors.push(ilium_ipc::BlockingError {
+            node_id,
+            operation: operation.to_string(),
+            message,
+        });
+        // Publishing under the short store lock preserves snapshot order:
+        // an older failure cannot overtake a newer successful recovery.
+        let snapshot = errors.clone();
+        self.events
+            .publish(ServerEvent::BlockingErrorsSnapshot { errors: snapshot });
+    }
+
+    pub(crate) fn clear_blocking_error(&self, node_id: Option<NodeId>, operation: &str) {
+        let mut errors = self
+            .blocking_errors
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        let previous = errors.len();
+        errors.retain(|error| error.node_id != node_id || error.operation != operation);
+        if errors.len() == previous {
+            return;
+        }
+        // Publishing under the short store lock preserves snapshot order:
+        // an older failure cannot overtake a newer successful recovery.
+        let snapshot = errors.clone();
+        self.events
+            .publish(ServerEvent::BlockingErrorsSnapshot { errors: snapshot });
+    }
+
+    pub(crate) fn blocking_errors_snapshot(&self) -> Vec<ilium_ipc::BlockingError> {
+        self.blocking_errors
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .clone()
+    }
+
     pub fn broadcast(&self, event: ServerEvent) {
+        if let ServerEvent::Error { message } = &event {
+            self.record_blocking_error(None, "session", message);
+        }
         self.events.publish(event);
     }
 
@@ -1053,7 +1209,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn slow_subscriber_preserves_prompt_after_replaceable_state_burst() {
+    async fn slow_subscriber_detects_lag_then_receives_latest_state_and_prompt() {
         let events = ServerEvents::new();
         let mut subscriber = events.subscribe_shared();
         let pane_id = NodeId(19);
@@ -1069,13 +1225,23 @@ mod tests {
             source: ilium_ipc::PromptSubmissionSource::Keyboard,
         });
 
+        assert!(
+            matches!(
+                subscriber.recv().await,
+                Err(broadcast::error::RecvError::Lagged(2))
+            ),
+            "the bounded ring must explicitly signal two overwritten state events"
+        );
+        // A connection repairs replaceable state from the authoritative
+        // snapshot after Lagged, then drains this retained tail. The prompt
+        // is semantic and must remain after the burst in this tail.
         let mut latest_activity_revision = None;
         let mut prompt_seen = false;
-        for _ in 0..=EVENT_CHANNEL_CAPACITY {
+        for _ in 0..EVENT_CHANNEL_CAPACITY {
             let event = subscriber
                 .recv()
                 .await
-                .expect("slow subscriber must not lose an accepted semantic event");
+                .expect("retained tail is readable after lag repair");
             match event.as_ref() {
                 ServerEvent::NodeActivityChanged {
                     activity_revision, ..
@@ -1171,4 +1337,46 @@ mod tests {
     // itself, in `crate::snapshot_state`: it is a property of that one
     // atomic, and testing it there needs neither a tempdir nor a whole
     // `ServerState` per iteration.
+    #[tokio::test]
+    async fn blocking_error_generations_reject_stale_recovery_and_scope_clears() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = test_state(&directory);
+        let first = state.begin_error_operation(Some(NodeId(4)), "new_pane");
+        state.record_current_blocking_error(Some(NodeId(4)), "new_pane", first, "first failure");
+        let second = state.begin_error_operation(Some(NodeId(4)), "new_pane");
+        state.record_current_blocking_error(Some(NodeId(4)), "new_pane", second, "latest failure");
+        state.record_blocking_error(Some(NodeId(5)), "launch", "another pane");
+        state.clear_current_blocking_error(Some(NodeId(4)), "new_pane", first);
+        assert_eq!(state.blocking_errors_snapshot().len(), 2);
+        assert_eq!(
+            state.blocking_errors_snapshot()[0].message,
+            "latest failure"
+        );
+        state.clear_current_blocking_error(Some(NodeId(4)), "new_pane", second);
+        assert_eq!(state.blocking_errors_snapshot().len(), 1);
+        state.clear_blocking_error(Some(NodeId(5)), "launch");
+        assert!(state.blocking_errors_snapshot().is_empty());
+    }
+
+    #[tokio::test]
+    async fn blocking_errors_bound_unicode_and_report_capacity_loss() {
+        let directory = tempfile::tempdir().unwrap();
+        let state = test_state(&directory);
+        state.record_blocking_error(None, "unicode", &"界".repeat(3000));
+        let errors = state.blocking_errors_snapshot();
+        assert!(errors[0].message.ends_with("(message truncated)"));
+        for number in 0..4100 {
+            state.record_blocking_error(Some(NodeId(number)), "launch", "failed");
+        }
+        let errors = state.blocking_errors_snapshot();
+        assert!(errors.len() <= 4096);
+        assert!(errors
+            .iter()
+            .any(|error| error.operation == "error_capacity"));
+        state.prune_blocking_errors(&Tree::new());
+        assert!(state
+            .blocking_errors_snapshot()
+            .iter()
+            .all(|error| error.node_id.is_none()));
+    }
 }

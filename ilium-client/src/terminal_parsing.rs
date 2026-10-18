@@ -41,6 +41,8 @@ pub(crate) struct ParserMemoryGovernor {
     quota: QuotaGroup,
     normal_bytes: Arc<AtomicUsize>,
     normal_limit: usize,
+    #[cfg(test)]
+    frame_busy_once: AtomicBool,
 }
 
 impl ParserMemoryGovernor {
@@ -58,6 +60,8 @@ impl ParserMemoryGovernor {
             }),
             normal_bytes: Arc::new(AtomicUsize::new(0)),
             normal_limit: total_limit - replacement_headroom,
+            #[cfg(test)]
+            frame_busy_once: AtomicBool::new(false),
         })
     }
 
@@ -78,6 +82,10 @@ impl ParserMemoryGovernor {
         bytes: usize,
         allow_replacement_headroom: bool,
     ) -> Result<ParserStorageLease, RejectReason> {
+        #[cfg(test)]
+        if self.frame_busy_once.swap(false, Ordering::AcqRel) {
+            return Err(RejectReason::Busy);
+        }
         self.reserve(bytes, allow_replacement_headroom)
     }
 
@@ -1173,7 +1181,7 @@ impl Job for ParserJob {
             let result: Result<(), String> = (|| {
                 if command.publication_pending {
                     // A completed mutation must only retry immutable publication.
-                    return publish_command(&shared, &engines, &mut command, &context);
+                    return publish_command(&shared, &mut engines, &mut command, &context);
                     // Preserve its exact ordinal, cursor, and saved semantic evidence.
                 }
                 if let PaneCommand::Register { rows, cols, budget } = &command.body {
@@ -1398,7 +1406,7 @@ impl Job for ParserJob {
                 }
                 command.evidence = evidence; // Keep the completed operation's bounded semantic samples while its snapshot waits.
                 command.publication_pending = true; // Every retry after this point must skip all mutable terminal operations.
-                publish_command(&shared, &engines, &mut command, &context) // Attempt publication once and return control to the owner on pressure.
+                publish_command(&shared, &mut engines, &mut command, &context) // Attempt publication once and return control to the owner on pressure.
             })();
             if voluntarily_yielded {
                 // A consumed byte quantum retains its original command without reporting memory pressure.
@@ -1445,6 +1453,15 @@ impl Job for ParserJob {
                         .target
                         .suspended_output
                         .store(true, Ordering::Release);
+                }
+                if blocked.pressure == ParserPressure::StorageBusy {
+                    // A contested admission mutex holds no capacity. The
+                    // retained command retries on the owner's bounded sweep;
+                    // publishing an error here would report an ordinary race
+                    // as a failed terminal operation.
+                    command.reported_blocked = None;
+                    deferred.push_back(command);
+                    continue;
                 }
                 if command.reported_blocked != Some(blocked.pressure) {
                     // Report each changed admission class once while preserving the original command.
@@ -1541,7 +1558,7 @@ fn publish_progress_preview(shared: &Shared, engine: &Engine, target: &PaneTarge
 }
 fn publish_command(
     shared: &Shared,
-    engines: &HashMap<NodeId, Engine>,
+    engines: &mut HashMap<NodeId, Engine>,
     command: &mut Command,
     context: &JobContext,
 ) -> Result<(), String> {
@@ -1550,8 +1567,10 @@ fn publish_command(
         return Err("terminal publication cancelled before acknowledgement".into());
     }
     let engine = engines
-        .get(&command.target.pane_id)
+        .get_mut(&command.target.pane_id)
         .ok_or("terminal state disappeared")?; // The deferred command fences later mutations of this engine.
+    engine.state.fit_to_allocation_limit(MAX_STATE_BYTES); // Shed oldest history now: a deferral is never retried and would stall every pane.
+    let engine = &*engine;
     let bytes = engine.state.retained_allocation_bytes(); // Charge the conservative immutable allocation before cloning it.
     if bytes > MAX_STATE_BYTES {
         // Preserve the independent per-generation bound in both parser modes.
@@ -1936,6 +1955,9 @@ mod tests {
         drop(first);
         let deadline = Instant::now() + Duration::from_secs(5);
         while parsing.engine_claims() != 0 && Instant::now() < deadline {
+            // A published mailbox result owns its exact PaneTarget claim until
+            // collected, even after the frontend and mutable engine retire.
+            drop(parsing.collect());
             std::thread::sleep(Duration::from_millis(5));
         }
         assert_eq!(
@@ -2089,6 +2111,57 @@ mod tests {
         }
     }
     #[test]
+    fn transient_frame_accounting_busy_retries_without_error_or_cursor_loss() {
+        let (_bank, parsing) = Bank::start_with_budget(0);
+        let pane_id = NodeId(103);
+        let mut view = TerminalView::new(4, 40);
+        attach(&parsing, pane_id, &mut view);
+        offer(
+            &mut view,
+            PaneCommand::Output {
+                first: 1,
+                sequence: 1,
+                bytes: b"ready".to_vec(),
+                track: false,
+            },
+        );
+        result(&parsing, |result| {
+            matches!(result, ParseResult::Published { target, snapshot, .. }
+                if target.pane_id == pane_id && snapshot.sequence == 1)
+        });
+
+        parsing
+            .shared
+            .storage
+            .frame_busy_once
+            .store(true, Ordering::Release);
+        offer(
+            &mut view,
+            PaneCommand::Output {
+                first: 2,
+                sequence: 2,
+                bytes: b" after".to_vec(),
+                track: false,
+            },
+        );
+        let publication = result(&parsing, |result| {
+            matches!(result, ParseResult::Published { target, snapshot, .. }
+                if target.pane_id == pane_id && snapshot.sequence == 2)
+        });
+        let ParseResult::Published { snapshot, .. } = publication else {
+            unreachable!()
+        };
+        assert_eq!(snapshot.history.to_vec(), b"ready after");
+        assert!(snapshot.visible.contents().contains("ready after"));
+        assert!(!parsing
+            .shared
+            .storage
+            .frame_busy_once
+            .load(Ordering::Acquire));
+        assert_eq!(view.parser_pressure(), None);
+    }
+
+    #[test]
     fn osc_pressure_retains_original_cursor_and_other_panes_continue() {
         let (_bank, parsing) = Bank::start();
         let mut first = TerminalView::new(4, 40);
@@ -2167,7 +2240,14 @@ mod tests {
             unreachable!()
         };
         assert!(snapshot.visible.contents().contains("independent pane"));
-        let (pending, bytes) = parsing.pending_work().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let (pending, bytes) = loop {
+            if let Some(work) = parsing.pending_work() {
+                break work;
+            }
+            assert!(Instant::now() < deadline, "parser queue read stayed busy");
+            std::thread::yield_now();
+        };
         assert!(pending >= 2);
         assert!(bytes >= expected_bytes.len());
         parsing
@@ -2665,9 +2745,45 @@ mod tests {
             },
         );
         offer(&mut new, PaneCommand::Capture { generation: 14 });
-        let capture = result(&parsing, |result| {
-            matches!(result, ParseResult::Capture { generation: 14, .. })
-        });
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let capture = loop {
+            let mut capture = None;
+            for outcome in parsing.collect() {
+                match outcome {
+                    outcome @ ParseResult::Capture { generation: 14, .. } => {
+                        assert!(capture.replace(outcome).is_none(), "duplicate capture");
+                    }
+                    ParseResult::Error { target, message } => {
+                        // The old frontend may close after its command was selected.
+                        // Only that exact retired generation may report cancellation.
+                        assert!(
+                            Arc::ptr_eq(&old_identity, &target.identity)
+                                && !target.alive.load(Ordering::Acquire)
+                                && matches!(
+                                    message.as_str(),
+                                    "terminal command cancelled by pane closure/shutdown"
+                                        | "terminal publication cancelled before acknowledgement"
+                                ),
+                            "unexpected parser error: {message}"
+                        );
+                    }
+                    ParseResult::CaptureFailed {
+                        generation: 14,
+                        message,
+                        ..
+                    } => panic!("replacement capture failed: {message}"),
+                    _ => {}
+                }
+            }
+            if let Some(capture) = capture {
+                break capture;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "replacement capture did not arrive"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        };
         let ParseResult::Capture {
             snapshot, target, ..
         } = capture
@@ -2675,6 +2791,7 @@ mod tests {
             unreachable!()
         };
         assert!(!Arc::ptr_eq(&old_identity, &target.identity));
+        assert!(new.accepts_parser_target(&target));
         assert!(snapshot.screen.contents().contains("new"));
         assert!(!snapshot.screen.contents().contains("old"));
     }

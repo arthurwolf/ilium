@@ -251,8 +251,10 @@ pub fn spawn(
                         };
                     consecutive_failures = 0;
                     previous_status = report.status;
+                    let previous = latest;
                     latest = PaneProgress::new(registration.monitor_id, report, unix_millis())
                         .expect("validated report and ID form valid progress");
+                    latest.carry_timing_from(&previous);
                     if !publish_progress(&state, registration.pane_id, &fence, &latest).await {
                         return if fence.is_current() {
                             ProgressMonitorOutcome::PaneUnavailable
@@ -403,6 +405,9 @@ struct RawProgressReport {
     details: String,
     #[serde(default)]
     error: Option<String>,
+    /// Optional probe-side estimate of the seconds still needed.
+    #[serde(default)]
+    eta_seconds: Option<u64>,
 }
 
 async fn run_probe(
@@ -562,6 +567,7 @@ async fn run_probe(
         raw.details,
         raw.error,
     )
+    .and_then(|report| report.with_eta_seconds(raw.eta_seconds))
     .map_err(|error| {
         probe_error(
             ProgressProbeFailureKind::InvalidReport,
@@ -844,6 +850,23 @@ mod tests {
     }
 
     #[cfg(unix)]
+    #[tokio::test]
+    async fn probe_carries_an_optional_eta_in_seconds() {
+        let with_eta =
+            r#"{"job_id":"job","status":"running","percent":40,"message":"m","eta_seconds":300}"#;
+        let parsed = preflight(&test_probes::emit_text(with_eta)).await.unwrap();
+        assert_eq!(parsed.report.eta_seconds, Some(300));
+        let without = r#"{"job_id":"job","status":"running","percent":40,"message":"m"}"#;
+        assert_eq!(
+            preflight(&test_probes::emit_text(without))
+                .await
+                .unwrap()
+                .report
+                .eta_seconds,
+            None
+        );
+    }
+
     #[tokio::test]
     async fn probe_carries_multi_line_details_alongside_the_compact_message() {
         let json = r#"{"job_id":"job","status":"running","percent":40,"message":"Building the app - crate 4 of 10","details":"What: build\nWhy: release"}"#;

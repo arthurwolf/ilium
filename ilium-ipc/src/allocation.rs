@@ -109,6 +109,8 @@ impl ServerEvent {
 impl HeapBytes for PaneDetectionEvidence {
     fn heap_bytes(&self) -> usize {
         let PaneDetectionEvidence {
+            observed_at_unix_millis: _,
+            stale_after_millis: _,
             applied_status,
             identity,
             activity,
@@ -545,6 +547,8 @@ impl HeapBytes for ServerEvent {
             Self::PaneStatusChanged { pane_id, status } => 0usize
                 .saturating_add(pane_id.heap_bytes())
                 .saturating_add(status.heap_bytes()),
+            Self::BlockingErrorsSnapshot { errors } => errors.heap_bytes(),
+            Self::PaneCreateFinished { result, .. } => result.heap_bytes(),
             Self::Error { message } | Self::PaneResizeRejected { message, .. } => {
                 0usize.saturating_add(message.heap_bytes())
             }
@@ -990,6 +994,14 @@ impl HeapBytes for PaneResizeCause {
             Self::RightPanelPresentation => 0usize,
             Self::UserInterfaceSettings => 0usize,
         }
+    }
+}
+
+impl HeapBytes for BlockingError {
+    fn heap_bytes(&self) -> usize {
+        self.operation
+            .heap_bytes()
+            .saturating_add(self.message.heap_bytes())
     }
 }
 
