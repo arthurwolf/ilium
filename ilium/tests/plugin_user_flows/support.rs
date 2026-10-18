@@ -1,7 +1,6 @@
 //! Shared helpers of the user-admin lane (ilium side). The rig types below do not exist in the
 //! skeleton yet and are listed in API_GAPS.md.
 
-
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 

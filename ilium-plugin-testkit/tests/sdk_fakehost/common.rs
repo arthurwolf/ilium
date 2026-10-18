@@ -3,7 +3,6 @@
 //! Part 2 of the lane extends this file. Keep every helper here free of assertions about a specific
 //! requirement; the section modules own the REQ tags.
 
-
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::panic::{catch_unwind, AssertUnwindSafe};

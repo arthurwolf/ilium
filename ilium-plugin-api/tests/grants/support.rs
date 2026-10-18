@@ -1,7 +1,6 @@
 //! Shared helpers of the api grants tests: manual readers, the parsed capability table of
 //! reference-capabilities.md, and a one-side manifest builder run through `validate_json`.
 
-
 use std::path::PathBuf;
 
 use ilium_plugin_api::manifest::{validate_json, CheckMode, Diagnostic, ValidationContext};

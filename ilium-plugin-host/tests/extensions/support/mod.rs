@@ -2,7 +2,6 @@
 //! world and the manual reader. Every missing host item is referenced from here and from the test
 //! files through `use crate::support::*` (see API_GAPS.md).
 
-
 use std::path::PathBuf;
 
 pub use ilium_plugin_api::generated::exports::hook_handler::HookCall;
