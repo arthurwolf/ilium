@@ -27,7 +27,7 @@ pub const DEFAULT_OPENROUTER_MODEL: &str = "openrouter/free";
 /// router's 1,000,000-token context window rejects that with HTTP 400
 /// (`context_length_exceeded`, observed 2026-09-26), which would make the
 /// default-on AI titling and restructuring fail on first boot.
-pub const DEFAULT_KILO_GATEWAY_SELECTED_MODEL: &str = "stepfun/step-5-preview-free";
+pub const DEFAULT_KILO_GATEWAY_SELECTED_MODEL: &str = "dots-studio/dots-3-note-preview:free";
 pub const DEFAULT_PROXY_DATABASE_URI: &str = "mongodb://127.0.0.1:27017";
 pub const DEFAULT_PROXY_DATABASE_NAME: &str = "money";
 pub const DEFAULT_PROXY_COLLECTION_NAME: &str = "paid_proxies";

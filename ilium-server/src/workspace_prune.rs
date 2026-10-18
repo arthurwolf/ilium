@@ -98,6 +98,9 @@ pub(crate) async fn spawn_repository_admission(
     if canonical_cwd != cwd {
         return Err("launch directory is not canonical".into());
     }
+    // Keep plain directories usable without a Git installation. Entry
+    // presence is only a hint: Git may ignore empty metadata or stop discovery
+    // before the candidate, so it must not itself demand a repository.
     let mut git_boundary_present = false;
     for ancestor in canonical_cwd.ancestors() {
         match std::fs::symlink_metadata(ancestor.join(".git")) {
@@ -109,16 +112,19 @@ pub(crate) async fn spawn_repository_admission(
             Err(error) => {
                 return Err(format!(
                     "cannot inspect launch repository boundary: {error}"
-                ));
+                ))
             }
         }
     }
     if !git_boundary_present {
         return Ok(None);
     }
-    let repository = ilium_git::discover(&canonical_cwd)
+    let repository = ilium_git::discover_optional(&canonical_cwd)
         .await
         .map_err(|error| format!("launch repository cannot be verified: {error}"))?;
+    let Some(repository) = repository else {
+        return Ok(None);
+    };
     let repository_guard = state
         .workspace_repository_lock(&repository.common_dir)
         .await
@@ -546,6 +552,12 @@ pub(crate) async fn directory_users(
         .map_err(|error| format!("worktree process scan job failed: {error}"))
 }
 
+/// Confirms the process scan can run without requiring an empty user list.
+/// Used before stopping an owned pane, whose own process is still a user.
+async fn worktree_scan_available(client: &ExecutionClient, root: &Path) -> Result<(), String> {
+    directory_users(client, root).await.map(drop)
+}
+
 /// This observation never kills an unrelated process and force never bypasses failure.
 async fn unused_directory(client: &ExecutionClient, root: &Path) -> Result<(), String> {
     let retained = directory_users(client, root).await?;
@@ -968,7 +980,7 @@ async fn execute_locked(
         Ok(client) => client,
         Err(error) => return (blocked(error), false),
     };
-    if let Err(error) = unused_directory(client, &target.worktree_root).await {
+    if let Err(error) = worktree_scan_available(client, &target.worktree_root).await {
         return (blocked(error), false);
     }
     let pane_closed = if let Some(pane_id) = permitted_pane {

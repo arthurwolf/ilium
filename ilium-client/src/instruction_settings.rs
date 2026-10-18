@@ -153,7 +153,7 @@ pub fn scrollbar_selection_at(tab: SettingsTab, area: Rect, position: Position) 
     let maximum_first = field_count.saturating_sub(visible_fields);
     let track_height = usize::from(area.height.saturating_sub(2)).max(1);
     let track_row = usize::from(position.y.saturating_sub(area.y.saturating_add(2)));
-    let first = track_row.saturating_mul(maximum_first) / track_height;
+    let first = track_row.saturating_mul(maximum_first) / track_height.saturating_sub(1).max(1);
     Some(SELECTION_BASE + first + visible_fields.saturating_sub(1))
 }
 
@@ -393,7 +393,10 @@ mod tests {
         .expect("bottom of overflowing track");
 
         assert_eq!(first_visible(tab, area, top), 0);
-        assert_eq!(first_visible(tab, area, bottom), 5);
+        assert_eq!(
+            first_visible(tab, area, bottom),
+            fields(tab).len() - visible_field_count(area)
+        );
         assert_eq!(
             scrollbar_selection_at(tab, area, Position::new(area.right() - 2, area.y + 5),),
             None,
@@ -544,13 +547,18 @@ mod interaction_tests {
             tab: SettingsTab::Titles,
             ..Default::default()
         });
-        let area = crate::settings_ui::compute_layout(app.layout.screen_area).content_area;
+        let Mode::Settings(state) = &app.mode else {
+            unreachable!()
+        };
+        let area = crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, &app, state)
+            .content_area;
         crate::mouse::handle_mouse_event(
             &mut app,
             MouseEvent {
                 kind: MouseEventKind::Down(MouseButton::Left),
                 column: area.x + 1,
-                row: area.y + 1,
+                // Two panel heading rows precede the first instruction field.
+                row: area.y + 2,
                 modifiers: KeyModifiers::NONE,
             },
         );

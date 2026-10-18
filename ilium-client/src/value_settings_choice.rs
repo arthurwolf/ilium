@@ -1327,6 +1327,33 @@ mod tests {
                     selected_row: 0,
                     ..SettingsState::default()
                 });
+                // Wide Settings screens show the sizing policy as cards, not as
+                // this selector; the card clicks have their own test below.
+                let selector_present = {
+                    let Mode::Settings(state) = &app.mode else {
+                        panic!("settings mode");
+                    };
+                    let mut layout = crate::settings_ui::compute_layout_for_mode(
+                        app.layout.screen_area,
+                        &app,
+                        state,
+                    );
+                    let instructions =
+                        crate::instruction_settings::panel_height(state.tab, layout.content_area);
+                    layout.content_area.y += instructions;
+                    layout.content_area.height =
+                        layout.content_area.height.saturating_sub(instructions);
+                    crate::settings_ui::settings_choice_control(layout.content_area, &app, state, 0)
+                        .is_some()
+                };
+                if !selector_present {
+                    assert_eq!(
+                        field,
+                        SettingsChoice::LeftPanelSizingMode,
+                        "{tab:?} {width}"
+                    );
+                    continue;
+                }
                 for (button, expected) in [
                     (MouseButton::Left, expected_left),
                     (MouseButton::Right, expected_right),
@@ -1334,11 +1361,16 @@ mod tests {
                     let Mode::Settings(state) = &app.mode else {
                         panic!("settings mode");
                     };
-                    let layout = crate::settings_ui::compute_layout_for_mode(
+                    let mut layout = crate::settings_ui::compute_layout_for_mode(
                         app.layout.screen_area,
                         &app,
                         state,
                     );
+                    let instructions =
+                        crate::instruction_settings::panel_height(state.tab, layout.content_area);
+                    layout.content_area.y += instructions;
+                    layout.content_area.height =
+                        layout.content_area.height.saturating_sub(instructions);
                     let (_, control) = crate::settings_ui::settings_choice_control(
                         layout.content_area,
                         &app,
@@ -1356,19 +1388,29 @@ mod tests {
                             modifiers: KeyModifiers::NONE,
                         },
                     );
+                    app.settle_filesystem_for_test();
                     let (options, selected) = field.options(&app);
-                    assert_eq!(selected, expected, "{tab:?} {width}");
+                    assert_eq!(
+                        selected, expected,
+                        "{tab:?} {width} {button:?}: {:?}",
+                        app.status_message
+                    );
                     assert_eq!(options.len(), expected_options, "{tab:?} {width}");
                 }
 
                 let Mode::Settings(state) = &app.mode else {
                     panic!("settings mode");
                 };
-                let layout = crate::settings_ui::compute_layout_for_mode(
+                let mut layout = crate::settings_ui::compute_layout_for_mode(
                     app.layout.screen_area,
                     &app,
                     state,
                 );
+                let instructions =
+                    crate::instruction_settings::panel_height(state.tab, layout.content_area);
+                layout.content_area.y += instructions;
+                layout.content_area.height =
+                    layout.content_area.height.saturating_sub(instructions);
                 let (_, control) = crate::settings_ui::settings_choice_control(
                     layout.content_area,
                     &app,
@@ -1657,6 +1699,74 @@ mod tests {
             ilium_inference::TitleStyle::Summarization
         );
         assert_eq!(loaded.inference.selected_provider, provider);
+    }
+
+    #[test]
+    fn clicking_a_wide_sizing_card_persists_its_mode_and_keeps_the_selector_hidden() {
+        use crate::config::LeftPanelSizingMode;
+        use crate::settings_ui::{appearance_content_hit, AppearanceContentHit};
+        use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+        use ratatui::layout::{Position, Rect};
+
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = App::new("sizing-card-click".into(), directory.path().into());
+        app.config_dir = Some(directory.path().into());
+        app.ui_settings.left_panel_sizing.mode = LeftPanelSizingMode::Fixed;
+        app.set_screen_area(Rect::new(0, 0, 200, 80));
+        app.mode = Mode::Settings(SettingsState {
+            tab: SettingsTab::Appearance,
+            selected_row: 0,
+            ..SettingsState::default()
+        });
+        let content = {
+            let Mode::Settings(state) = &app.mode else {
+                panic!("settings mode");
+            };
+            let layout =
+                crate::settings_ui::compute_layout_for_mode(app.layout.screen_area, &app, state);
+            assert!(
+                crate::settings_ui::settings_choice_control(layout.content_area, &app, state, 0)
+                    .is_none(),
+                "cards replace the selector row"
+            );
+            layout.content_area
+        };
+        assert!(content.width >= crate::settings_ui::SIZING_CARDS_MINIMUM_CONTENT_WIDTH);
+
+        for target in [
+            LeftPanelSizingMode::FocusDependent,
+            LeftPanelSizingMode::TerminalWidthDependent,
+            LeftPanelSizingMode::Fixed,
+        ] {
+            let position = (content.y..content.y + content.height)
+                .flat_map(|y| (content.x..content.x + content.width).map(move |x| (x, y)))
+                .map(|(x, y)| Position::new(x, y))
+                .find(|position| {
+                    appearance_content_hit(content, 0, *position, &app.ui_settings)
+                        == Some(AppearanceContentHit::Mode(target))
+                })
+                .expect("every card is visible in the content area");
+            crate::mouse::handle_mouse_event(
+                &mut app,
+                MouseEvent {
+                    kind: MouseEventKind::Down(MouseButton::Left),
+                    column: position.x,
+                    row: position.y,
+                    modifiers: KeyModifiers::NONE,
+                },
+            );
+            app.settle_filesystem_for_test();
+            assert_eq!(app.ui_settings.left_panel_sizing.mode, target);
+            assert_eq!(
+                crate::config::load(directory.path())
+                    .unwrap()
+                    .ui
+                    .left_panel_sizing
+                    .mode,
+                target
+            );
+            assert!(matches!(app.mode, Mode::Settings(_)));
+        }
     }
 
     #[test]

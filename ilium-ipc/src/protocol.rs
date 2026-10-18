@@ -89,7 +89,7 @@ pub enum NewPaneKind {
 /// Server-side starting-directory strategy for a newly spawned terminal.
 /// The client chooses the policy from its persisted settings, while the
 /// server resolves live process cwd information it alone owns.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NewPaneWorkingDirectory {
     ProjectRoot,
     FocusedTerminal,
@@ -97,6 +97,11 @@ pub enum NewPaneWorkingDirectory {
     /// Resolve the recorded launch directory of this workspace pane on the
     /// server, so a context-menu action never trusts a client-supplied path.
     WorkspacePane(NodeId),
+    /// Start in this exact directory, chosen by a program driving the session
+    /// (`ilium ctl new-pane --cwd`, the HTTP API). The server canonicalizes it
+    /// and refuses anything that is not an existing directory. Appended so
+    /// every earlier bincode variant index stays stable.
+    Directory(PathBuf),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -480,6 +485,7 @@ pub enum ClientRequest {
     },
     /// Create a new pane as a child of `parent_group`.
     NewPane {
+        request_id: u64,
         parent_group: NodeId,
         kind: NewPaneKind,
         working_directory: NewPaneWorkingDirectory,
@@ -1021,6 +1027,12 @@ pub enum ClientRequest {
         pane_id: NodeId,
         text: String,
     },
+    /// Read one current screen for recap, without subscribing to terminal journals.
+    /// Server bounds text at 64 KiB and reports busy/oversized/replaced panes explicitly.
+    /// Appended to preserve all prior request discriminants.
+    GetPaneRecapScreen {
+        pane_id: NodeId,
+    },
 }
 
 impl ClientRequest {
@@ -1029,6 +1041,7 @@ impl ClientRequest {
     /// decision instead of silently disappearing from the major-action trail.
     pub const fn diagnostic_name(&self) -> &'static str {
         match self {
+            Self::GetPaneRecapScreen { .. } => "get_pane_recap_screen",
             Self::Attach { .. } => "attach",
             Self::UserKeyInput { .. } => "user_key_input",
             Self::ReportAgentPromptFromTranscript { .. } => "report_agent_prompt_from_transcript",
@@ -1151,10 +1164,22 @@ pub struct DetectionReason {
 /// state while an incremental status event and its evidence cross IPC.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PaneDetectionEvidence {
+    /// Time of the last successful server-applied classification, not receipt time.
+    pub observed_at_unix_millis: u64,
+    /// Maximum age for presenting this observation as current.
+    pub stale_after_millis: u64,
     pub applied_status: PaneStatus,
     pub identity: Option<DetectionReason>,
     pub activity: Option<DetectionReason>,
     pub goal: Option<DetectionReason>,
+}
+
+/// An unresolved blocking failure, attributed to a tree node or the session.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BlockingError {
+    pub node_id: Option<NodeId>,
+    pub operation: String,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1517,4 +1542,17 @@ pub enum ServerEvent {
     /// panes the session holds. Structural changes still send a snapshot.
     /// Appended to preserve existing bincode discriminants.
     PaneNodeChanged(Box<ilium_core::Node>),
+    /// Direct, bounded reply to GetPaneRecapScreen; no retained journal is read.
+    /// Appended to preserve all prior event discriminants.
+    PaneRecapScreen {
+        pane_id: NodeId,
+        result: Result<String, String>,
+    },
+    /// Authoritative unresolved errors, replayed on attachment and recovery.
+    BlockingErrorsSnapshot { errors: Vec<BlockingError> },
+    /// Exactly one terminal outcome for an admitted pane creation request.
+    PaneCreateFinished {
+        request_id: u64,
+        result: Result<NodeId, String>,
+    },
 }

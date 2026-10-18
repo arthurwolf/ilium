@@ -33,6 +33,14 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             app.pane_detection_evidence = detection_evidence.into_iter().collect();
             None
         }
+        ServerEvent::BlockingErrorsSnapshot { errors } => {
+            app.replace_blocking_errors(errors);
+            None
+        }
+        ServerEvent::PaneCreateFinished { request_id, result } => {
+            app.receive_pane_create_finished(request_id, result);
+            None
+        }
         ServerEvent::AgentDetectionSettingsChanged { request_id, result } => {
             if let Some(request_id) = request_id {
                 app.receive_detection_number_reply(request_id, result);
@@ -623,6 +631,8 @@ pub fn apply(app: &mut App, event: ServerEvent) -> Option<TriggerOccurrence> {
             app.receive_workspace_close_offer(request_id, pane_id, can_offer);
             None
         }
+        // One-shot recap consumers own this direct reply; it is not UI state.
+        ServerEvent::PaneRecapScreen { .. } => None,
         ServerEvent::AntigravityStatuslineCompleted { .. } => None,
         ServerEvent::VoiceTextOffered {
             request_id,
@@ -1024,6 +1034,8 @@ mod tests {
         let status = PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Idle, None);
         tree.set_pane_status(pane_id, status.clone()).unwrap();
         let evidence = |rule: &str| ilium_ipc::PaneDetectionEvidence {
+            observed_at_unix_millis: 1_700_000_000_000,
+            stale_after_millis: 30_000,
             applied_status: status.clone(),
             identity: Some(ilium_ipc::DetectionReason {
                 rule: rule.to_string(),
@@ -1054,6 +1066,17 @@ mod tests {
                 .unwrap()
                 .rule,
             "new process"
+        );
+        let received_evidence = &app.pane_detection_evidence[&pane_id];
+        assert_eq!(received_evidence.observed_at_unix_millis, 1_700_000_000_000);
+        assert!(
+            crate::status_icons::detection_freshness_warning(
+                &status,
+                Some(received_evidence),
+                1_700_000_030_001,
+            )
+            .is_some(),
+            "reattach must preserve the age of a stale server observation"
         );
         apply(
             &mut app,
@@ -1181,6 +1204,8 @@ mod tests {
         apply(&mut app, ServerEvent::TreeSnapshot(tree));
         let status = PaneStatus::from_activity(AgentClass::Codex, AgentActivity::Working, None);
         let evidence = ilium_ipc::PaneDetectionEvidence {
+            observed_at_unix_millis: 1_700_000_000_000,
+            stale_after_millis: 30_000,
             applied_status: status.clone(),
             identity: Some(ilium_ipc::DetectionReason {
                 rule: "exact codex process".to_string(),

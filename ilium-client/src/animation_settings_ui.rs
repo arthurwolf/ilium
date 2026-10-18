@@ -388,10 +388,9 @@ fn credit_footer_rows(area: Rect, model: &RowModel) -> u16 {
         .max()
         .unwrap_or(0);
     if area.height < 16
+        || urls.is_empty()
         || area.width.saturating_sub(layout(area).panel.width) as usize >= longest.max(16)
     {
-        0
-    } else if urls.is_empty() {
         0
     } else {
         urls.len() as u16 + 1
@@ -463,7 +462,7 @@ pub fn follow_selection(area: Rect, model: &RowModel, row: usize, scrolls: Scrol
         let position = model.visual_row(row).unwrap_or(0);
         let current = scrolls.get(region);
         // Include the section heading above the row when scrolling up to it.
-        let top = if region == Region::Scenes {
+        let top = if region == Region::Scenes || visible == 1 {
             position
         } else {
             position.saturating_sub(1)
@@ -688,6 +687,29 @@ pub fn value_control(
     ))
 }
 
+// Every row occupies one visual line inside exactly one disjoint region.
+// Resolve that line before preparing a control: rebuilding the full layout
+// for every row on every pointer cell made both interaction and the complete
+// control matrix unnecessarily expensive.
+fn row_at(
+    layout: &AnimationLayout,
+    model: &RowModel,
+    scrolls: Scrolls,
+    position: Position,
+) -> Option<usize> {
+    for region in [Region::Scenes, Region::Global, Region::Controls] {
+        let rows = window(layout, region);
+        if rows.width <= 1 || !rows.contains(position) {
+            continue;
+        }
+        let visual = scrolls.get(region).checked_add(position.y - rows.y)?;
+        return model
+            .region_rows(region)
+            .find(|&row| model.visual_row(row) == Some(visual));
+    }
+    None
+}
+
 pub fn value_hit(
     area: Rect,
     model: &RowModel,
@@ -695,11 +717,11 @@ pub fn value_hit(
     position: Position,
     button: crate::value_control::PointerButton,
 ) -> Option<(usize, crate::value_control::ControlAction)> {
-    (0..model.len()).find_map(|row| {
-        value_control(area, model, row, scrolls)?
-            .hit(position, button)
-            .map(|action| (row, action))
-    })
+    let layout = geometry(area, model);
+    let row = row_at(&layout, model, scrolls, position)?;
+    value_control(area, model, row, scrolls)?
+        .hit(position, button)
+        .map(|action| (row, action))
 }
 
 fn value_styles(style: Style) -> crate::value_control::ControlStyles {
@@ -781,9 +803,7 @@ pub fn hit(
             return Some(AnimationHit::ScrollTo(region, target as u16));
         }
     }
-    let row = (0..model.len()).find(|&row| {
-        row_rect(area, model, row, scrolls).is_some_and(|rect| rect.contains(position))
-    })?;
+    let row = row_at(&layout, model, scrolls, position)?;
     let rect = row_rect(area, model, row, scrolls)?;
     if let Some(geometry) = slider_geometry(area, model, row, scrolls) {
         if geometry.track.contains(position) {
@@ -1219,12 +1239,10 @@ fn render_plugin_editor(
     }
     if inner.height >= 2 {
         frame.render_widget(
-            Paragraph::new(
-                editor
-                    .error
-                    .as_deref()
-                    .unwrap_or("Enter applies · Esc cancels"),
-            )
+            Paragraph::new(editor.error.as_deref().map_or_else(
+                || "Enter applies · Esc cancels".to_owned(),
+                |error| format!("F9 details · {error}"),
+            ))
             .style(ink),
             Rect::new(inner.x, action_row.y.saturating_sub(1), inner.width, 1),
         );
@@ -1484,7 +1502,17 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, state: &SettingsState) {
         .or(app.status_message.as_deref())
         .unwrap_or(generic_saved_status);
     frame.render_widget(
-        Paragraph::new(fit(status_message, usize::from(panel.width))).style(ink),
+        Paragraph::new(fit(
+            &if app.status_message.as_deref() == Some(status_message)
+                || semantic_error.as_deref() == Some(status_message)
+            {
+                format!("F9 details · {status_message}")
+            } else {
+                status_message.to_owned()
+            },
+            usize::from(panel.width),
+        ))
+        .style(ink),
         Rect::new(panel.x, status_y, panel.width, 1),
     );
     let instructions = if activity_visible {
@@ -1843,13 +1871,58 @@ mod tests {
     }
 
     #[test]
+    fn pointer_row_lookup_matches_prepared_control_scan_with_scroll_and_gaps() {
+        use crate::value_control::PointerButton;
+        for kind in [AnimationKind::default(), AnimationKind::Semantic] {
+            let settings = AnimationSettings {
+                kind,
+                ..Default::default()
+            };
+            let model = RowModel::new(&settings, &RowContext::default());
+            for (width, height) in [(80, 24), (120, 40)] {
+                let area = Rect::new(0, 0, width, height);
+                for scrolls in [
+                    Scrolls::default(),
+                    Scrolls {
+                        scenes: 3,
+                        global: 5,
+                        controls: 2,
+                    },
+                ] {
+                    let controls: Vec<_> = (0..model.len())
+                        .filter_map(|row| {
+                            value_control(area, &model, row, scrolls).map(|control| (row, control))
+                        })
+                        .collect();
+                    for y in 0..=height {
+                        for x in [0, width / 3, width / 2, width.saturating_sub(1), width] {
+                            let position = Position::new(x, y);
+                            for button in [PointerButton::Left, PointerButton::Right] {
+                                let expected = controls.iter().find_map(|(row, control)| {
+                                    control.hit(position, button).map(|action| (*row, action))
+                                });
+                                assert_eq!(
+                                    value_hit(area, &model, scrolls, position, button),
+                                    expected,
+                                    "{kind:?} {width}x{height} {scrolls:?} {position:?} {button:?}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn every_native_choice_and_number_paints_and_hits_at_supported_sizes() {
         use crate::value_control::{cell_width, ControlAction, ControlStyles, PointerButton};
 
         let mut checked_choices = 0;
         let mut checked_numbers = 0;
         for kind in AnimationKind::ALL {
-            for variant in conditional_scene_variants(kind) {
+            for (variant_index, variant) in conditional_scene_variants(kind).into_iter().enumerate()
+            {
                 for playback_mode in [AnimationPlaybackMode::Loop, AnimationPlaybackMode::Live] {
                     for scene_uses_cell_colors in [false, true] {
                         for color_mode in [
@@ -1868,12 +1941,28 @@ mod tests {
                                 vec![None]
                             };
                             for effective_kind in effective_kinds {
+                                // Each effective kind changes which rows exist, not how a row is
+                                // drawn or hit-tested: cross it with one playback/colour combination
+                                // only, otherwise Semantic multiplies the whole matrix by the kind
+                                // count and the test runs for tens of minutes.
+                                // Playback and colour mode only add or remove shared rows, which
+                                // the first variant of each kind already exercises in every
+                                // combination; later variants differ in scene rows alone.
+                                if (variant_index > 0 || effective_kind.is_some())
+                                    && (playback_mode != AnimationPlaybackMode::Loop
+                                        || scene_uses_cell_colors
+                                        || color_mode != ilium_ambient::style::ColorMode::Color)
+                                {
+                                    continue;
+                                }
                                 let context = RowContext {
                                     effective_kind,
                                     scene_uses_cell_colors,
                                     ..Default::default()
                                 };
                                 let model = RowModel::new(&settings, &context);
+                                // Conditional scene controls must retain responsive coverage at
+                                // every supported size, including later variants.
                                 for (width, height) in [(80, 24), (120, 40), (160, 50)] {
                                     let area = Rect::new(0, 0, width, height);
                                     let mut terminal =
@@ -2321,7 +2410,9 @@ mod tests {
             )
         };
         assert!(expected_labels.len() > 10);
-        assert!(expected_labels.iter().any(|label| label == "Chicago"));
+        assert!(expected_labels
+            .iter()
+            .any(|label| label == "Chicago street grid"));
 
         let _ = draw(&mut app, 140, 120);
         pointer(
@@ -2331,10 +2422,10 @@ mod tests {
             open.y,
         );
         let screen = app.layout.screen_area;
-        let Mode::ValueDialog(host) = &app.mode else {
+        let Mode::ValueDialog(host) = &mut app.mode else {
             panic!("the OSM destination + control should open its catalogue")
         };
-        let crate::value_dialog::ValueDialogState::Choice(dialog) = &host.dialog else {
+        let crate::value_dialog::ValueDialogState::Choice(dialog) = &mut host.dialog else {
             panic!("the OSM destination catalogue should be a choice dialog")
         };
         let dialog_labels = dialog
@@ -2345,13 +2436,20 @@ mod tests {
         assert_eq!(dialog_labels, expected_labels);
         let chicago_index = dialog_labels
             .iter()
-            .position(|label| label == "Chicago")
+            .position(|label| label == "Chicago street grid")
             .expect("Chicago remains individually listed");
         let layout = crate::value_dialog::dialog_layout(screen);
-        let selection = Position::new(
-            layout.document.x + 1,
-            layout.document.y + chicago_index as u16,
-        );
+        let chicago_id = dialog.options()[chicago_index].id.clone();
+        dialog.highlighted_id = Some(chicago_id.clone());
+        dialog.reveal_highlight(screen);
+        let prepared = crate::value_dialog::PreparedValueDialog::new(screen, &host.dialog);
+        let selection = (layout.document.top()..layout.document.bottom())
+            .map(|y| Position::new(layout.document.x + 1, y))
+            .find(|position| {
+                matches!(prepared.hit(*position),
+                crate::value_dialog::DialogHit::Choice(id) if id == chicago_id)
+            })
+            .expect("Chicago has a visible catalogue row, including wrapped descriptions");
         pointer(
             &mut app,
             MouseEventKind::Down(MouseButton::Left),
@@ -2623,8 +2721,8 @@ mod tests {
         let control_rect = row_rect(area, &model, control, none).unwrap();
         assert_eq!(
             control_rect.y,
-            area.y + 2,
-            "right column starts under its heading and section"
+            columns.controls_rows.y + 1,
+            "right column starts after its introduction and section heading"
         );
         assert!(
             control_rect.x >= columns.scenes.right(),
@@ -4600,6 +4698,26 @@ mod tests {
             screen_text(&terminal)[usize::from(row)].contains("Atlantic dusk"),
             "the selected scene must be rendered in the list, not only in the heading"
         );
+    }
+
+    #[test]
+    fn one_row_control_window_keeps_selected_row_visible_when_walking_up() {
+        let model = RowModel::new(&AnimationSettings::default(), &RowContext::default());
+        let (area, row) = (3..40)
+            .find_map(|height| {
+                let area = Rect::new(0, 0, 80, height);
+                (visible_rows(area, &model, Region::Controls) == 1)
+                    .then(|| (area, model.first_control_index()))
+            })
+            .expect("compact layout has a one-row control window");
+        let position = model.visual_row(row).unwrap();
+        let scrolls = Scrolls {
+            controls: position + 1,
+            ..Scrolls::default()
+        };
+        let followed = follow_selection(area, &model, row, scrolls);
+        assert_eq!(followed.controls, position);
+        assert!(row_rect(area, &model, row, followed).is_some());
     }
 
     #[test]

@@ -663,10 +663,13 @@ fn intact_large_output_publishes_visible_progress_before_its_final_snapshot() {
     drop(results_guard);
 
     fixture.wait_sequence(pane, 2);
+    // The later 234 KiB legitimately scroll the early preview out of the
+    // visible viewport. Its bytes must still survive in the final history.
     assert!(fixture.snapshots[&pane]
-        .visible
-        .contents()
-        .contains("PREVIEW-AT-QUANTUM"));
+        .history
+        .to_vec()
+        .windows(marker.len())
+        .any(|window| window == marker));
     assert_eq!(
         fixture
             .completed
@@ -810,13 +813,17 @@ fn parser_receipt_must_be_released_before_execution_shutdown_completes() {
     let (mut execution, mut parsing) = ParserFixture::start_parts();
     parsing.cancel();
     execution.request_shutdown(ShutdownMode::Cancel);
-    let held = execution.join_until_background(Instant::now() + TEST_WAIT).unwrap();
+    let held = execution
+        .join_until_background(Instant::now() + TEST_WAIT)
+        .unwrap();
     assert_eq!(held.remaining_workers, 0, "parser worker did not retire");
     assert!(
         !held.shutdown_complete,
         "a live parser receipt must keep its Service claim charged"
     );
     drop(parsing);
-    let released = execution.join_until_background(Instant::now() + TEST_WAIT).unwrap();
+    let released = execution
+        .join_until_background(Instant::now() + TEST_WAIT)
+        .unwrap();
     assert!(released.shutdown_complete, "{:?}", released.health.lanes);
 }

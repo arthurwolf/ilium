@@ -20,7 +20,41 @@ use crate::state::ServerState;
 /// Delivers one currently queued prompt after a verified agent completion.
 /// A queue mutation and the write/ack pair share one transaction, so Clear
 /// cannot race a just-completed agent into sending a prompt the user removed.
+#[cfg(test)]
 pub(crate) async fn deliver_next_after_completion(state: &ServerState, pane_id: NodeId) {
+    deliver_completion(state, pane_id, None).await;
+}
+
+pub(crate) async fn deliver_detection_completion(
+    state: &ServerState,
+    pane_id: NodeId,
+    generation: u64,
+    input: &ilium_pty::PtyInput,
+    epoch: u64,
+) {
+    deliver_completion(state, pane_id, Some((generation, input, epoch))).await;
+}
+
+async fn deliver_completion(
+    state: &ServerState,
+    pane_id: NodeId,
+    expected: Option<(u64, &ilium_pty::PtyInput, u64)>,
+) {
+    deliver_completion_with_barrier(
+        state,
+        pane_id,
+        expected,
+        crate::persistence::await_snapshot_durability_barrier(state),
+    )
+    .await;
+}
+
+async fn deliver_completion_with_barrier(
+    state: &ServerState,
+    pane_id: NodeId,
+    expected: Option<(u64, &ilium_pty::PtyInput, u64)>,
+    barrier: impl std::future::Future<Output = Result<(), crate::error::ServerError>>,
+) {
     let input_gate = {
         let panes = state.panes.read().await;
         let Some(PaneResource::Terminal(runtime)) = panes.get(&pane_id) else {
@@ -29,6 +63,17 @@ pub(crate) async fn deliver_next_after_completion(state: &ServerState, pane_id: 
         std::sync::Arc::clone(&runtime.input_gate)
     };
     let _input_guard = input_gate.lock().await;
+    if let Some((generation, input, epoch)) = expected {
+        let panes = state.panes.read().await;
+        if !matches!(panes.get(&pane_id), Some(PaneResource::Terminal(runtime))
+            if runtime.agent_generation == generation
+                && runtime.session.input_handle().same_session(input)
+                && runtime.detection_completion.is_available(epoch)
+                && std::sync::Arc::ptr_eq(&input_gate, &runtime.input_gate))
+        {
+            return;
+        }
+    }
     // Held only across peek -> write -> acknowledge, matching the drop point
     // `handle_enqueue_prompt`/`handle_clear_prompt_queue` use in
     // `ipc/handlers.rs`. The slow follow-up work below (PTY write aside,
@@ -38,6 +83,15 @@ pub(crate) async fn deliver_next_after_completion(state: &ServerState, pane_id: 
     let _transaction = state.prompt_queue_transaction.lock().await;
     let prompt = {
         let tree = state.tree.read().await;
+        // Detection followups run independently of the observation loop. A
+        // delayed completion must not submit a queued prompt into a newer turn.
+        if expected.is_some() && !tree.get(pane_id).is_some_and(|node| matches!(
+            &node.kind,
+            ilium_core::NodeKind::Pane { status, .. }
+                if status.agent_state().is_some_and(|agent| agent.turn == ilium_core::AgentTurn::Idle)
+        )) {
+            return;
+        }
         match tree.next_queued_prompt(pane_id) {
             Ok(prompt) => prompt.cloned(),
             Err(error) => {
@@ -74,21 +128,56 @@ pub(crate) async fn deliver_next_after_completion(state: &ServerState, pane_id: 
             return;
         }
     }
-    if let Err(error) = crate::persistence::await_snapshot_durability_barrier(state).await {
+    if let Err(error) = barrier.await {
         // No byte has been submitted. Retaining the in-memory bit is a safe
         // fence if an earlier snapshot writer happened to persist it.
         tracing::error!("could not persist queued prompt attempt for pane {pane_id:?}: {error}");
         return;
     }
-    if let Err(error) = submit_terminal_text_locked(
-        state,
-        pane_id,
-        &prompt.text,
-        PromptSubmissionSource::QueuedPrompt,
-        &input_gate,
-    )
-    .await
-    {
+    let submitted = if let Some((generation, input, epoch)) = expected {
+        // The barrier can wait arbitrarily long. Check the exact completion
+        // again afterward and claim it once, independently of the queue head.
+        // A stale, proven-unsent attempt remains fenced rather than replayed.
+        let tree = state.tree.read().await;
+        let mut panes = state.panes.write().await;
+        let Some(PaneResource::Terminal(runtime)) = panes.get_mut(&pane_id) else {
+            return;
+        };
+        let idle = tree.get(pane_id).is_some_and(|node| matches!(
+            &node.kind,
+            ilium_core::NodeKind::Pane { status, .. }
+                if status.agent_state().is_some_and(|agent| agent.turn == ilium_core::AgentTurn::Idle)
+        ));
+        if !idle
+            || runtime.agent_generation != generation
+            || !runtime.session.input_handle().same_session(input)
+            || !std::sync::Arc::ptr_eq(&input_gate, &runtime.input_gate)
+            || !runtime.detection_completion.claim(epoch)
+        {
+            return;
+        }
+        drop(panes);
+        drop(tree);
+        crate::ipc::handlers::submit_detection_completion_text_locked(
+            state,
+            pane_id,
+            &prompt.text,
+            &input_gate,
+            generation,
+            epoch,
+        )
+        .await
+    } else {
+        submit_terminal_text_locked(
+            state,
+            pane_id,
+            &prompt.text,
+            PromptSubmissionSource::QueuedPrompt,
+            &input_gate,
+        )
+        .await
+    };
+    if let Err(error) = submitted {
         // Delivery is ambiguous; the attempted head remains durably fenced.
         drop(_transaction);
         tracing::error!("queued prompt delivery failed for pane {pane_id:?}: {error}");
@@ -159,3 +248,6 @@ fn acknowledge_delivery(
 ) -> Result<bool, ilium_core::TreeError> {
     tree.acknowledge_queued_prompt(pane_id, prompt)
 }
+
+#[cfg(test)]
+mod tests;

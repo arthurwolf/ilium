@@ -64,6 +64,37 @@ impl ScreenReader {
         self.try_with_frame(|screen, _| f(screen))
     }
 
+    /// Nonblocking current-only text, with a preflight before allocation.
+    /// Oversized or busy screens stay unavailable rather than becoming partial evidence.
+    pub fn try_text_with_limit(&self, limit: usize) -> Option<Result<String, &'static str>> {
+        self.try_with_screen(|screen| {
+            let (rows, columns) = screen.size();
+            if usize::from(rows).saturating_mul(usize::from(columns)) > limit {
+                return Err("terminal evidence geometry exceeds limit");
+            }
+            // Blank cells may become spaces between populated cells. Charge
+            // geometry as well as UTF-8 contents before contents() allocates.
+            let mut bytes = usize::from(rows)
+                .saturating_mul(usize::from(columns))
+                .saturating_add(usize::from(rows));
+            for row in 0..rows {
+                for column in 0..columns {
+                    if let Some(cell) = screen.cell(row, column) {
+                        bytes = bytes.saturating_add(cell.contents().len());
+                        if bytes > limit {
+                            return Err("terminal evidence text exceeds limit");
+                        }
+                    }
+                }
+            }
+            let text = screen.contents();
+            if text.len() > limit {
+                return Err("terminal evidence text exceeds limit");
+            }
+            Ok(text)
+        })
+    }
+
     /// Reads current screen geometry and its session-local resize epoch under
     /// the same guard. Every successful resize, including a same-size resize,
     /// advances this epoch; ordinary output does not. A busy parser returns
@@ -109,6 +140,29 @@ impl ScreenReader {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recap_text_is_current_bounded_and_never_uses_retained_resize_frame() {
+        let parser = Arc::new(RwLock::new(Parser::new_with_callbacks(
+            4,
+            20,
+            0,
+            TerminalQueryResponder::new(),
+        )));
+        let reader = ScreenReader::new(Arc::clone(&parser), Arc::new(AtomicU64::new(0)));
+        assert!(reader.try_text_with_limit(1).unwrap().is_err());
+        let mut writer = parser.write().unwrap();
+        writer.process(b"selected marker");
+        reader.retain_before_resize(writer.screen());
+        writer.process(b" current");
+        assert!(reader.try_text_with_limit(1024).is_none());
+        drop(writer);
+        assert!(reader
+            .try_text_with_limit(1024)
+            .unwrap()
+            .unwrap()
+            .contains("selected marker curr"));
+    }
 
     #[test]
     fn retained_frame_stays_consistent_and_current_reads_fail_closed() {

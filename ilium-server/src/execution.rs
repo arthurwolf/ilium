@@ -41,7 +41,15 @@ fn pty_quota_limits() -> QuotaLimits {
 // for backpressured PTY/direct replies. These are declared allocation limits,
 // not an RSS estimate. They are shared across connections, never per client.
 const ADMISSION_WAIT_REPORT: std::time::Duration = std::time::Duration::from_secs(2);
-const GENERAL_INPUT_BYTES: usize = 512 * MIB;
+// Library tests create many independent banks concurrently, but all native
+// joins use one process-wide supervisor. Keep the physical-completion proof
+// bounded without treating its cross-test retirement queue as a leaked worker.
+#[cfg(test)]
+pub(crate) const PHYSICAL_JOIN_TEST_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
+pub(crate) const DETECTION_INPUT_BYTES: usize = 576 * MIB;
+pub(crate) const DETECTION_RESULT_BYTES: usize = 96 * MIB;
+const DETECTION_WORKER_BYTES: usize = 64 * MIB;
+pub(crate) const GENERAL_INPUT_BYTES: usize = 512 * MIB;
 pub(crate) const GENERAL_RESULT_BYTES: usize = 128 * MIB;
 const PROCESS_INPUT_BYTES: usize = GENERAL_INPUT_BYTES + 4 * 128 * MIB + 2 * 128 * MIB;
 const PROCESS_RESULT_BYTES: usize = GENERAL_RESULT_BYTES + 4 * 192 * MIB + 2 * 192 * MIB;
@@ -132,6 +140,8 @@ pub(crate) struct ServerExecution {
     // This owner is retained until the State drops. Its destructor signals
     // cancellation without synchronously joining blocked native callbacks.
     _owner: Execution,
+    detection_owner: Execution,
+    pub(crate) detection: ExecutionClient,
     pub(crate) client: ExecutionClient,
     pub(crate) visible_recovery: ExecutionClient,
     pub(crate) decoder: ExecutionClient,
@@ -210,6 +220,48 @@ impl ServerExecution {
             priority: Some(ilium_execution::WorkerPriority::BelowNormal),
             resident_bytes_per_thread,
         };
+        // Reserve before general workloads can retain any storage. This does
+        // not raise process limits or reduce codec/PTY capacity gates.
+        let detection_quota = quota
+            .reserved_partition(QuotaLimits {
+                clients: 2,
+                jobs: 12,
+                service_jobs: 0,
+                input_bytes: DETECTION_INPUT_BYTES,
+                result_bytes: DETECTION_RESULT_BYTES,
+                worker_threads: 2,
+                worker_bytes: DETECTION_WORKER_BYTES,
+            })
+            .map_err(|error| io::Error::other(format!("detection capacity: {error:?}")))?;
+        let detection_owner = Execution::start(
+            detection_quota.clone(),
+            ExecutionConfig {
+                cpu: LaneConfig {
+                    queue_slots: 12,
+                    ..lane(1, 32 * MIB)
+                },
+                io: LaneConfig {
+                    queue_slots: 12,
+                    ..lane(1, 0)
+                },
+                service: lane(0, 0),
+            },
+        )
+        .map_err(|error| io::Error::other(format!("detection bank: {error:?}")))?;
+        let wake = Arc::clone(&completed);
+        let detection = ExecutionClient {
+            foundation: detection_owner
+                .client(ClientLimits {
+                    jobs: 12,
+                    service_jobs: 0,
+                    input_bytes: DETECTION_INPUT_BYTES,
+                    result_bytes: DETECTION_RESULT_BYTES,
+                })
+                .map_err(|error| io::Error::other(format!("detection client: {error:?}")))?
+                .with_completion_wake(move || wake.notify_waiters()),
+            quota: detection_quota,
+            completed: Arc::clone(&completed),
+        };
         let owner = Execution::start(
             quota.clone(),
             ExecutionConfig {
@@ -260,6 +312,8 @@ impl ServerExecution {
         };
         Ok(Self {
             _owner: owner,
+            detection_owner,
+            detection,
             client: ExecutionClient {
                 foundation,
                 quota,
@@ -281,10 +335,16 @@ impl ServerExecution {
         &mut self,
         deadline: std::time::Instant,
     ) -> Result<ilium_execution::JoinReport, ilium_execution::JoinUseError> {
-        self._owner.join_until_background(deadline)
+        let detection = self.detection_owner.join_until_background(deadline)?;
+        let mut general = self._owner.join_until_background(deadline)?;
+        general.remaining_workers += detection.remaining_workers;
+        general.shutdown_complete &= detection.shutdown_complete;
+        general.observations.extend(detection.observations);
+        Ok(general)
     }
 
     pub(crate) fn request_shutdown(&self) {
+        self.detection_owner.request_shutdown(ShutdownMode::Cancel);
         self._owner.request_shutdown(ShutdownMode::Cancel);
         self.client.completed.notify_waiters();
     }
@@ -847,3 +907,6 @@ mod tests {
         owner.request_shutdown();
     }
 }
+
+#[cfg(test)]
+mod freshness_tests;

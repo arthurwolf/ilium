@@ -202,12 +202,6 @@ fn cancelling_a_build_retires_its_owned_worker_before_release_is_reported() {
     let baseline_quota = quota.snapshot();
     let mut cache =
         AnimationLoopCache::new(ilium_ambient::resources::AmbientResources::new(client));
-    // ClientExecution bootstrap owns several platform workers; snapshot only
-    // after that shared test fixture exists so this test measures its delta.
-    let before = ilium_platform::owned_worker::supervisor_status()
-        .expect("the shared test client initializes the worker supervisor");
-    let baseline_registered = before.registered_workers;
-    let baseline_reserved = before.reserved_workers;
     let settings = AnimationSettings {
         kind: AnimationKind::Kelp,
         loop_seconds: 120,
@@ -223,14 +217,7 @@ fn cancelling_a_build_retires_its_owned_worker_before_release_is_reported() {
     );
     let launch_deadline = Instant::now() + Duration::from_secs(5);
     loop {
-        let current = ilium_platform::owned_worker::supervisor_status()
-            .expect("the worker supervisor remains installed after launch");
-        if current.registered_workers > baseline_registered {
-            assert_eq!(
-                current.registered_workers,
-                baseline_registered + 1,
-                "isolated cache fixture must add exactly one owned worker"
-            );
+        if cache.build.is_some() {
             let admitted = quota.snapshot();
             assert_eq!(
                 admitted.worker_threads,
@@ -258,16 +245,21 @@ fn cancelling_a_build_retires_its_owned_worker_before_release_is_reported() {
         std::thread::sleep(Duration::from_millis(1));
     }
 
+    // A process-wide supervisor count includes unrelated parallel tests.
+    // Observe this exact native worker while retaining its ticket through join.
+    let ticket = cache
+        .build
+        .as_ref()
+        .unwrap()
+        .worker
+        .join_observer()
+        .unwrap();
     cache.pause();
     assert_eq!(cache.status().resident_bytes, 0);
     let retirement_deadline = Instant::now() + Duration::from_secs(10);
     loop {
-        let current = ilium_platform::owned_worker::supervisor_status()
-            .expect("the worker supervisor remains installed after cancellation");
         let quota_now = quota.snapshot();
-        if current.registered_workers == baseline_registered
-            && current.reserved_workers == baseline_reserved
-            && current.joining_worker == before.joining_worker
+        if ticket.exit() == Some(ilium_platform::owned_worker::WorkerExit::Joined)
             && quota_now.worker_threads == baseline_quota.worker_threads
             && quota_now.worker_bytes == baseline_quota.worker_bytes
         {

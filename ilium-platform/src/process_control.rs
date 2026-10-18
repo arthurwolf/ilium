@@ -390,6 +390,10 @@ pub fn processes_using_directory_bounded(
                 }
                 false
             }
+            // Non-dumpable same-user processes (for example systemd --user)
+            // hide their cwd and fds from every other process. Treat them as
+            // not using the path; a readable cwd or fd still blocks removal.
+            Err(error) if error.kind() == io::ErrorKind::PermissionDenied => false,
             Err(error) => {
                 return Err(io::Error::new(
                     error.kind(),
@@ -472,6 +476,9 @@ fn linux_process_has_worktree_fd(
                 Err(error) => Err(error),
             };
         }
+        // Hidden fds of a non-dumpable same-user process: not inspectable, so
+        // not evidence of use (see the cwd check in directory_users).
+        Err(error) if error.kind() == io::ErrorKind::PermissionDenied => return Ok(false),
         Err(error) => return Err(error),
     };
     for entry in entries {
@@ -486,6 +493,9 @@ fn linux_process_has_worktree_fd(
             Ok(target) if target.starts_with(root) => return Ok(true),
             Ok(_) => {}
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            // Hidden fd of a non-dumpable same-user process: cannot be read,
+            // so it cannot be shown to use the path.
+            Err(error) if error.kind() == io::ErrorKind::PermissionDenied => {}
             Err(error) => return Err(error),
         }
     }
@@ -1319,19 +1329,13 @@ mod tests {
         let sibling_users = processes_using_directory(&sibling);
         child.kill().expect("kill child");
         child.wait().expect("reap child");
-        // A same-user process can disallow /proc cwd inspection (for example
-        // systemd --user). That must block deletion rather than produce a
-        // partial empty list. The path boundary is asserted when the host
-        // permits a complete scan.
-        match (root_users, sibling_users) {
-            (Ok(root_users), Ok(sibling_users)) => {
-                assert!(root_users.contains(&child.id()));
-                assert!(!sibling_users.contains(&child.id()));
-            }
-            (Err(error), _) | (_, Err(error)) => {
-                assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
-            }
-        }
+        // Same-user processes with hidden cwd/fds (for example systemd --user)
+        // are skipped, so the scan completes. The sleep child is readable and
+        // must be found in the root only.
+        let root_users = root_users.expect("scan completes despite hidden processes");
+        let sibling_users = sibling_users.expect("scan completes despite hidden processes");
+        assert!(root_users.contains(&child.id()));
+        assert!(!sibling_users.contains(&child.id()));
     }
 
     #[test]
