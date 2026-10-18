@@ -1029,7 +1029,7 @@ fn dev_100_pack_prints_no_signature_artifact() {
 
 /// REQ: DEV-101
 #[test]
-fn dev_101_a_package_over_300_mib_fails_size_cap() {
+fn dev_101_a_package_over_300_mib_fails_package_size_limit() {
     let root = scratch();
     let env = env(root.path());
     let dir = server_project(&env, root.path());
@@ -1038,7 +1038,7 @@ fn dev_101_a_package_over_300_mib_fails_size_cap() {
     std::fs::create_dir_all(dir.join("assets")).expect("create");
     std::fs::write(dir.join("assets/blob.bin"), &big).expect("write");
     let output = run_in(&env, &dir, &["pack"]);
-    assert_eq!(code(&output).as_deref(), Some("pack.size-cap"));
+    assert_eq!(code(&output).as_deref(), Some("package.size-limit"));
 }
 
 /// REQ: DEV-101

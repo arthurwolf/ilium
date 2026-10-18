@@ -303,11 +303,7 @@ fn sec_145_lower_version_is_refused_without_the_flag() {
     let fixture = trusted_fixture();
     install(&fixture, &newer(0, "0.2.0"), &[]);
     let out = install(&fixture, &vector_signed(), &[]);
-    assert!(
-        has(&out, "package.downgrade") || has(&out, "install.downgrade"),
-        "{}",
-        all_text(&out)
-    );
+    assert!(has(&out, "package.downgrade"), "{}", all_text(&out));
     assert_ne!(out.exit_code, 0);
 }
 
@@ -328,11 +324,7 @@ fn sec_145_allow_downgrade_installs_and_audits_both_versions() {
 fn sec_145_same_version_is_not_a_downgrade() {
     let fixture = installed_fixture();
     let out = install(&fixture, &vector_signed(), &[]);
-    assert!(
-        !has(&out, "package.downgrade") && !has(&out, "install.downgrade"),
-        "{}",
-        all_text(&out)
-    );
+    assert!(!has(&out, "package.downgrade"), "{}", all_text(&out));
 }
 
 // ---- SEC-144: remove ----

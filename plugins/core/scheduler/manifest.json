@@ -26,6 +26,11 @@
       "ui.panels"
     ]
   },
+  "contributes": {
+    "panels": [
+      { "id": "scheduler.queue", "title": "Scheduler queue", "modal": false }
+    ]
+  },
   "activation": [
     "startup",
     "view:scheduler.queue"

@@ -132,13 +132,13 @@ fn manifest_050_activation_triggers_are_startup_and_topic_chatroom() {
 fn manifest_050_the_cli_contribution_is_chat_with_text_output_no_stdin_and_no_server() {
     assert_eq!(
         manifest()["contributes"]["cli"],
-        json!({
+        json!([{
             "name": "chat",
             "summary": "Project chatroom: init, send, context, tail",
             "output": "text",
             "stdin": "none",
             "requires_server": false
-        })
+        }])
     );
 }
 

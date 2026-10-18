@@ -151,14 +151,14 @@ fn doc_cor_050_contributes_has_exactly_the_six_documented_kinds() {
 fn doc_cor_050_cli_contribution_is_recap_jsonl_requires_server_with_pane_selector() {
     assert_eq!(
         manifest_value()["contributes"]["cli"],
-        json!({
+        json!([{
             "name": "recap",
             "summary": "Print short and long recaps of the selected panes",
             "output": "jsonl",
             "stdin": "none",
             "requires_server": true,
             "argument_groups": ["pane-selector"]
-        })
+        }])
     );
 }
 
@@ -209,7 +209,7 @@ fn doc_cor_050_no_settings_commands_keybindings_menus_or_panels_are_contributed(
 #[test]
 fn recap_050_every_activation_trigger_names_a_declared_cli_name() {
     let manifest = manifest_value();
-    let cli_name = manifest["contributes"]["cli"]["name"]
+    let cli_name = manifest["contributes"]["cli"][0]["name"]
         .as_str()
         .expect("name");
     for trigger in strings(&manifest["activation"]) {

@@ -278,7 +278,7 @@ fn wid_020_check_list_256_items_accepted_257_traps() {
     assert!(rig
         .log_lines()
         .iter()
-        .any(|(_, m)| m.contains("invalid-argument")));
+        .any(|(_, m)| m.contains("ui.invalid-tree")));
 }
 
 /// REQ: WID-020
@@ -295,7 +295,7 @@ fn wid_020_list_editor_64_items_for_third_party_tier() {
     assert!(rig
         .log_lines()
         .iter()
-        .any(|(_, m)| m.contains("invalid-argument")));
+        .any(|(_, m)| m.contains("ui.invalid-tree")));
 }
 
 /// REQ: WID-020
@@ -312,7 +312,7 @@ fn wid_020_list_editor_1024_items_for_first_party_tier() {
     assert!(rig
         .log_lines()
         .iter()
-        .any(|(_, m)| m.contains("invalid-argument")));
+        .any(|(_, m)| m.contains("ui.invalid-tree")));
 }
 
 /// REQ: WID-021
@@ -325,7 +325,7 @@ fn wid_021_meter_8_segments_accepted_9_traps() {
     assert!(rig
         .log_lines()
         .iter()
-        .any(|(_, m)| m.contains("invalid-argument")));
+        .any(|(_, m)| m.contains("ui.invalid-tree")));
 }
 
 /// REQ: WID-021
@@ -340,7 +340,7 @@ fn wid_021_minimap_4096_marks_accepted_4097_traps() {
     assert!(rig
         .log_lines()
         .iter()
-        .any(|(_, m)| m.contains("invalid-argument")));
+        .any(|(_, m)| m.contains("ui.invalid-tree")));
 }
 
 /// REQ: WID-021
@@ -353,7 +353,7 @@ fn wid_021_spinner_16_custom_frames_accepted_17_traps() {
     assert!(rig
         .log_lines()
         .iter()
-        .any(|(_, m)| m.contains("invalid-argument")));
+        .any(|(_, m)| m.contains("ui.invalid-tree")));
 }
 
 /// REQ: WID-001

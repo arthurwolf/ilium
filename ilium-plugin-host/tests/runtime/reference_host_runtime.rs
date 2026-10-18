@@ -215,10 +215,10 @@ fn hst_050_doctor_output_shows_the_wasmtime_version() {
 
 /// REQ: HST-051
 #[test]
-fn doc_hst_051_manual_states_14_and_7_day_security_windows() {
+fn doc_hst_051_manual_states_14_day_and_48_hour_security_windows() {
     let page = manual_page("reference-host-runtime.md");
-    assert!(page.contains("within 14 days of the Wasmtime announcement"));
-    assert!(page.contains("within 7 days when the advisory rates it critical or high"));
+    assert!(page.contains("within 14 days of the upstream fix"));
+    assert!(page.contains("within 48 hours when the vulnerability is exploited in the wild"));
 }
 
 /// REQ: HST-051

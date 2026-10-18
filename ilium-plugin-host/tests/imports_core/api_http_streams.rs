@@ -54,18 +54,18 @@ fn http_open_stream_returns_a_stream_id_and_delivers_chunks_to_events() {
 
 /// REQ: WIT:ilium:host/http.open-stream
 #[test]
-fn http_open_stream_max_chunk_bytes_of_exactly_1_mib_accepted_and_one_more_invalid_argument() {
+fn http_open_stream_max_chunk_bytes_of_exactly_64_kib_accepted_and_one_more_invalid_argument() {
     let (_listener, port) = listener();
     let mut fixture = granted(Tier::T2, port);
     assert!(fixture
         .http()
-        .open_stream(stream_request(port, StreamFraming::Raw, MIB as u32))
+        .open_stream(stream_request(port, StreamFraming::Raw, 64 * 1024))
         .is_ok());
     assert_eq!(
         expect_code(fixture.http().open_stream(stream_request(
             port,
             StreamFraming::Raw,
-            MIB as u32 + 1
+            64 * 1024 + 1
         ))),
         ErrorCode::InvalidArgument
     );

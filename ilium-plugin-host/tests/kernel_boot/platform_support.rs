@@ -101,7 +101,7 @@ fn hst_383_without_a_matching_cwasm_the_host_compiles_the_wasm_and_logs_the_fall
     let chosen = select_precompiled("x86_64-unknown-linux-gnu", &available);
     assert_eq!(chosen.artifact, WasmArtifact::wasm());
     assert!(chosen.logged_fallback);
-    assert_eq!(chosen.log_code, "cwasm.fallback");
+    assert_eq!(chosen.log_code, "host.cwasm-incompatible");
 }
 
 /// REQ: HST-383

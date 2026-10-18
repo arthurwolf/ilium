@@ -3,8 +3,8 @@ Built to target/plugin-fixtures/conformance-probe.wasm (reference-conformance-su
 
 The tests start it with a JSON object as the activation settings. All keys are optional.
 
-  burn_ms.<export>   fuel-burn milliseconds inside that export: activate, deactivate, on-events,
-                     render. The probe calls the host import conformance_hooks::fuel_burn.
+  burn_ms.<export>   busy-wait milliseconds inside that export: activate, deactivate, on-events,
+                     render. The probe calls the host import conformance_hooks::busy_wait_ms.
   restore            base64 bytes returned from deactivate as restore bytes.
   alloc_mib          mebibytes of linear memory allocated in on-events (CONF-MEM-01).
   call.<import>      one import call made in on-events with the given arguments, for example

@@ -14,7 +14,7 @@ pub const MIN_MEASURED_ITERATIONS: u32 = 1000;
 
 /// The benchmark ids whose budgets gate a release (reference-host-budgets.md HST-306).
 pub const RELEASE_GATE_IDS: &[&str] = &[
-    "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B9", "B16", "B17", "B18", "B19", "B20",
+    "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B9", "B16", "B17", "B18", "B19", "B20", "B23",
 ];
 
 /// How many iterations one benchmark run performs (reference-host-budgets.md HST-300).

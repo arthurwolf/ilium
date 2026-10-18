@@ -85,7 +85,7 @@ fn dev_143_lower_version_without_allow_downgrade_fails_downgrade() {
     let env = env_session(root.path(), &session);
     let (_, package) = packed_project(&env, root.path());
     let output = run(&env, &["install", s(&package), "--allow-unsigned", "--yes"]);
-    assert_eq!(code(&output).as_deref(), Some("install.downgrade"));
+    assert_eq!(code(&output).as_deref(), Some("package.downgrade"));
     assert_eq!(output.exit_code, 1);
     assert_eq!(
         session.plugin_version("acme.demo").as_deref(),

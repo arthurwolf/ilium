@@ -332,6 +332,11 @@ impl ImportsFixture {
         unimplemented!("host::testing::imports_fixture::ImportsFixture::row_note")
     }
 
+    /// Whether a settings row currently shows the `Saving…` marker.
+    pub fn row_saving(&self, _key: &str) -> bool {
+        unimplemented!("host::testing::imports_fixture::ImportsFixture::row_saving")
+    }
+
     /// The text of a live info row.
     pub fn info_text(&self, _key: &str) -> Option<String> {
         unimplemented!("host::testing::imports_fixture::ImportsFixture::info_text")

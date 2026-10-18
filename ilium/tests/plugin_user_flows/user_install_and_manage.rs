@@ -221,12 +221,11 @@ fn usr_120_unknown_key_prompts_with_short_fingerprint_and_decline_installs_nothi
 
 /// REQ: USR-120
 #[test]
-fn usr_120_short_fingerprint_is_first_four_ellipsis_last_four() {
+fn usr_120_short_fingerprint_is_the_first_eight_digits() {
     let key = KeyPair::generate("Example Publisher");
     let full = key.fingerprint();
     let short = key.short_fingerprint();
-    let expected = format!("{}\u{2026}{}", &full[..4], &full[full.len() - 4..]);
-    assert_eq!(short, expected);
+    assert_eq!(short, full[..8]);
 }
 
 /// REQ: USR-120
@@ -245,7 +244,7 @@ fn usr_120_trust_list_shows_the_full_fingerprint_on_request() {
 
 /// REQ: USR-121, USR-128
 #[test]
-fn usr_121_removing_a_key_keeps_the_plugin_and_marks_it_untrusted() {
+fn usr_121_removing_a_key_keeps_the_plugin_installed_and_marks_it_untrusted() {
     let mut rig = UserRig::new();
     let key = KeyPair::generate("Example Publisher");
     rig.trust(&key);
@@ -259,13 +258,13 @@ fn usr_121_removing_a_key_keeps_the_plugin_and_marks_it_untrusted() {
     assert_eq!(result_exit_code(&removed), 0);
     let after = list_row(&mut rig, "com.example.signed");
     assert_eq!(after.version, before.version);
-    assert_eq!(after.state, before.state, "the plugin keeps running");
+    assert_ne!(after.state, before.state, "the plugin stops loading");
     assert!(after.untrusted, "list marks the plugin untrusted");
 }
 
 /// REQ: USR-121, USR-128
 #[test]
-fn usr_128_untrusted_plugin_keeps_running_after_a_server_restart() {
+fn usr_128_untrusted_plugin_does_not_load_after_a_server_restart() {
     let mut rig = UserRig::new();
     let key = KeyPair::generate("Example Publisher");
     rig.trust(&key);
@@ -276,7 +275,7 @@ fn usr_128_untrusted_plugin_keeps_running_after_a_server_restart() {
     let _ = rig.cli(&["trust", "remove", &key.fingerprint()]);
     rig.start_server();
     rig.restart_server();
-    assert_eq!(list_row(&mut rig, "com.example.signed").state, "On");
+    assert_ne!(list_row(&mut rig, "com.example.signed").state, "On");
 }
 
 /// REQ: USR-128
@@ -304,7 +303,7 @@ fn usr_128_update_after_key_removal_asks_for_trust_again() {
 
 /// REQ: USR-122, USR-126
 #[test]
-fn usr_122_update_with_another_key_prompts_naming_both_fingerprints() {
+fn usr_122_update_with_an_unendorsed_key_is_refused() {
     let mut rig = UserRig::new();
     let key_a = KeyPair::generate("Publisher A");
     let key_b = KeyPair::generate("Publisher B");
@@ -318,13 +317,10 @@ fn usr_122_update_with_another_key_prompts_naming_both_fingerprints() {
         &spec("com.example.signed", "2.0.0", &[]).signed_with(&key_b),
         &["--yes"],
     );
-    assert_eq!(rig.trust_prompts().len(), 1, "key change is never silent");
-    let prompt = &rig.trust_prompts()[0];
-    assert!(
-        prompt.contains(&key_a.short_fingerprint()) && prompt.contains(&key_b.short_fingerprint()),
-        "{prompt}"
+    assert_eq!(
+        error_codes(&output),
+        vec!["package.publisher-key-changed".to_string()]
     );
-    assert_eq!(error_codes(&output), vec!["trust.declined".to_string()]);
     assert_eq!(list_row(&mut rig, "com.example.signed").version, "1.0.0");
 }
 

@@ -85,7 +85,7 @@ fn cor_050_client_capabilities_are_exactly_the_five_of_the_page() {
 fn cor_050_activation_triggers_are_screen_changed_event_and_startup() {
     assert_eq!(
         strings(&manifest_json()["activation"]),
-        ["event:terminal-screen-changed", "startup"]
+        ["event:screen-changed", "startup"]
     );
 }
 

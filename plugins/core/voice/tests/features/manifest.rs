@@ -136,12 +136,13 @@ fn manifest_050_activation_is_the_toggle_command_and_the_cli_trigger_in_order() 
 
 /// REQ: COR-050, F-052
 #[test]
-fn manifest_050_contributes_one_jsonl_cli_command_that_needs_a_server() {
+fn manifest_050_contributes_the_toggle_command_and_one_jsonl_cli_command_that_needs_a_server() {
     let manifest = manifest();
     assert_eq!(
         manifest["contributes"],
         json!({
-            "cli": { "name": "voice", "summary": "Voice control: say", "output": "jsonl", "requires_server": true },
+            "commands": [{ "id": "voice.toggle", "title": "Toggle voice control" }],
+            "cli": [{ "name": "voice", "summary": "Voice control: say", "output": "jsonl", "requires_server": true }],
             "jobs": [{ "kind": "transcribe", "deadline_ms": 30000, "memory_mib": 512 }],
         })
     );
@@ -156,6 +157,18 @@ fn manifest_050_contributes_no_settings_page_because_the_tab_is_a_kernel_tab() {
         manifest["contributes"].get("keybindings").is_none(),
         "F8 is a kernel keybinding of voice.toggle"
     );
+}
+
+/// REQ: COR-050
+#[test]
+fn manifest_050_declares_the_voice_toggle_command_named_by_its_activation() {
+    let commands = manifest()["contributes"]["commands"]
+        .as_array()
+        .expect("commands array")
+        .clone();
+    assert!(commands
+        .iter()
+        .any(|command| command["id"] == "voice.toggle"));
 }
 
 /// REQ: COR-050

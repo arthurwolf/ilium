@@ -27,11 +27,7 @@ fn manifest(dir: &str) -> serde_json::Value {
 
 fn declared_cli_names(manifest: &serde_json::Value) -> Vec<String> {
     let cli = &manifest["contributes"]["cli"];
-    let items: Vec<&serde_json::Value> = match cli {
-        serde_json::Value::Array(items) => items.iter().collect(),
-        serde_json::Value::Null => vec![],
-        single => vec![single],
-    };
+    let items = cli.as_array().expect("contributes.cli is an array");
     items
         .iter()
         .filter_map(|item| item["name"].as_str().map(str::to_owned))
@@ -105,10 +101,7 @@ fn cor_040_declared_output_modes_match_the_baseline_formats() {
     for (dir, _, _) in OWNERS {
         let m = manifest(dir);
         let cli = &m["contributes"]["cli"];
-        let items: Vec<&serde_json::Value> = cli
-            .as_array()
-            .map(|a| a.iter().collect())
-            .unwrap_or_else(|| vec![cli]);
+        let items = cli.as_array().expect("contributes.cli is an array");
         for item in items {
             let name = item["name"].as_str().expect("name");
             let want = expected

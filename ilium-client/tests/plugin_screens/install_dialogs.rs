@@ -162,16 +162,20 @@ fn usr_014_allow_selected_ends_the_prompts_and_not_now_three_times_still_asks_on
 
 /// REQ: USR-120
 #[test]
-fn usr_120_trust_prompt_shows_the_short_fingerprint_and_offers_the_full_one() {
+fn usr_120_trust_prompt_shows_the_full_fingerprint_with_the_short_form_beside_it() {
     let mut rig = ScreensRig::new(80, 30);
     let full = "3f2a".to_string() + &"0".repeat(56) + "9c01";
     rig.open_trust_prompt("Example Publisher", &full);
     let screen = rig.screen_text();
-    assert!(screen.contains("3f2a\u{2026}9c01"), "{screen}");
-    assert!(!screen.contains(&full), "the short form is the default");
-    rig.press_key('f');
-    assert!(rig.screen_text().contains("3f2a"), "full form on request");
-    assert!(rig.screen_text().replace(' ', "").contains(&full));
+    assert!(screen.replace(' ', "").contains(&full), "{screen}");
+    assert!(
+        screen.contains("3f2a0000"),
+        "short form beside the full form: {screen}"
+    );
+    assert!(
+        !screen.contains("3f2a\u{2026}9c01"),
+        "no 4+4 form: {screen}"
+    );
 }
 
 /// REQ: USR-120
@@ -197,7 +201,7 @@ fn usr_122_update_prompt_names_the_old_and_the_new_fingerprint() {
     let new = "2222".to_string() + &"0".repeat(56) + "bbbb";
     rig.open_key_change_prompt("com.example.signed", &old, &new);
     let screen = rig.screen_text();
-    assert!(screen.contains("1111\u{2026}aaaa"), "{screen}");
+    assert!(screen.contains("11110000"), "{screen}");
     assert!(screen.contains("2222\u{2026}bbbb"), "{screen}");
 }
 

@@ -259,6 +259,12 @@ fn hst_499_fixed_reply_deadlines() {
 
 /// REQ: HST-499
 #[test]
+fn hst_499_sessions_send_reply_deadline() {
+    assert_eq!(reply_deadline_ms(ReplyKind::SessionsSend), 30_000);
+}
+
+/// REQ: HST-499
+#[test]
 fn hst_499_client_request_timeout_zero_is_clamped_to_one() {
     assert_eq!(client_request_timeout_ms(0), 1);
 }

@@ -33,12 +33,15 @@
   ],
   "limits_tier": "first-party",
   "contributes": {
-    "cli": {
+    "commands": [
+      { "id": "voice.toggle", "title": "Toggle voice control" }
+    ],
+    "cli": [{
       "name": "voice",
       "summary": "Voice control: say",
       "output": "jsonl",
       "requires_server": true
-    },
+    }],
     "jobs": [
       { "kind": "transcribe", "deadline_ms": 30000, "memory_mib": 512 }
     ]

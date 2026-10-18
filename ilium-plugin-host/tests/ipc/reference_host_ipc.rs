@@ -1270,9 +1270,9 @@ fn hst_124_an_item_within_the_cap_is_encoded_once() {
 
 /// REQ: HST-124
 #[test]
-fn hst_124_the_senders_call_completes_as_failed_too_large() {
+fn hst_124_the_senders_call_returns_payload_too_large() {
     let fault = check_payload(PayloadKind::SurfaceWrite, 16 * MIB + 1).expect_err("too large");
-    assert_eq!(fault.completion_outcome(), Some("failed(too-large)"));
+    assert_eq!(fault.code(), SLASH_ERR);
 }
 
 /// REQ: HST-124

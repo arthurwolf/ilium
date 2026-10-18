@@ -78,10 +78,10 @@ fn f_108_wait_with_several_monitors_and_no_id_is_refused_with_monitor_ambiguous(
 fn f_108_the_alias_is_declared_by_the_plugin_and_not_by_a_second_entry() {
     let manifest = manifest_value();
     assert_eq!(
-        manifest["contributes"]["cli"]["aliases"],
+        manifest["contributes"]["cli"][0]["aliases"],
         serde_json::json!(["wait"])
     );
-    assert_eq!(manifest["contributes"]["cli"]["name"], "progress");
+    assert_eq!(manifest["contributes"]["cli"][0]["name"], "progress");
 }
 
 /// REQ: F-108

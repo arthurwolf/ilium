@@ -223,7 +223,7 @@ fn command_f062_help_lists_the_four_subcommands_in_the_summary() {
         serde_json::from_str(&std::fs::read_to_string(manifest_path()).expect("manifest"))
             .expect("json");
     assert_eq!(
-        manifest["contributes"]["cli"]["summary"],
+        manifest["contributes"]["cli"][0]["summary"],
         "Project chatroom: init, send, context, tail"
     );
 }
@@ -235,7 +235,7 @@ fn command_f062_send_while_the_server_side_is_the_only_one_running_needs_no_clie
     let manifest: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(manifest_path()).expect("manifest"))
             .expect("json");
-    assert_eq!(manifest["contributes"]["cli"]["requires_server"], false);
+    assert_eq!(manifest["contributes"]["cli"][0]["requires_server"], false);
     let mut host = host_with_room();
     assert_eq!(send(&mut host, "no client").code, Some(0));
 }

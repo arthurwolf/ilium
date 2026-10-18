@@ -49,7 +49,7 @@
     "cli:recap"
   ],
   "contributes": {
-    "cli": {
+    "cli": [{
       "name": "recap",
       "summary": "Print short and long recaps of the selected panes",
       "output": "jsonl",
@@ -58,7 +58,7 @@
       "argument_groups": [
         "pane-selector"
       ]
-    },
+    }],
     "jobs": [
       {
         "kind": "recap-pane",

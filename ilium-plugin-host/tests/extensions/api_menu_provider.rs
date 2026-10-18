@@ -1,4 +1,4 @@
-//! api-menu-provider.md: parallel provider calls, the 25 ms opening, static entries and
+//! api-menu-provider.md: parallel provider calls, the 20 ms opening, static entries and
 //! providers that are not running (HST-476, HST-477, HST-478, WIT menu-provider.menu-items).
 
 use crate::support::menu::*;
@@ -48,31 +48,31 @@ fn hst_476_menu_opens_when_every_provider_has_answered() {
 
 /// REQ: HST-476
 #[test]
-fn hst_476_menu_opens_after_25_ms_when_a_provider_is_late() {
+fn hst_476_menu_opens_after_20_ms_when_a_provider_is_late() {
     let mut harness = MenuHarness::new();
     harness.add_provider("com.example.a", 3, vec![entry("a1")]);
     harness.add_provider("com.example.late", 60, vec![entry("late1")]);
     let opening = harness.open(context());
-    assert_eq!(opening.opened_at_ms, 25);
+    assert_eq!(opening.opened_at_ms, 20);
 }
 
 /// REQ: HST-476
 #[test]
-fn hst_476_provider_answering_at_exactly_25_ms_is_in_the_menu() {
+fn hst_476_provider_answering_at_exactly_20_ms_is_in_the_menu() {
     let mut harness = MenuHarness::new();
-    harness.add_provider("com.example.edge", 25, vec![entry("edge1")]);
+    harness.add_provider("com.example.edge", 20, vec![entry("edge1")]);
     let opening = harness.open(context());
     assert_eq!(opening.frames[0], vec!["edge1"]);
 }
 
 /// REQ: HST-476
 #[test]
-fn hst_476_provider_answering_at_26_ms_is_dropped_for_that_opening() {
+fn hst_476_provider_answering_at_21_ms_is_dropped_for_that_opening() {
     let mut harness = MenuHarness::new();
-    harness.add_provider("com.example.late", 26, vec![entry("late1")]);
+    harness.add_provider("com.example.late", 21, vec![entry("late1")]);
     harness.add_provider("com.example.a", 1, vec![entry("a1")]);
     let opening = harness.open(context());
-    assert_eq!(opening.opened_at_ms, 25);
+    assert_eq!(opening.opened_at_ms, 20);
     assert_eq!(opening.frames[0], vec!["a1"]);
 }
 
@@ -129,7 +129,7 @@ fn hst_478_opening_does_not_wait_for_the_activation_of_a_provider_that_is_not_ru
     harness.static_entries(vec![entry("copy")]);
     harness.add_stopped_provider("com.example.cold", 500, vec![entry("cold1")]);
     let opening = harness.open(context());
-    assert!(opening.opened_at_ms <= 25);
+    assert!(opening.opened_at_ms <= 20);
     assert!(opening.activations_waited_for.is_empty());
     assert_eq!(opening.frames[0], vec!["copy"]);
 }

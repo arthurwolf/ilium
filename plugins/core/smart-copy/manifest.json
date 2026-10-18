@@ -4,7 +4,7 @@
   "name": "Smart copy",
   "version": "0.1.0",
   "publisher": "Ilium",
-  "description": "The Smart Copy plugin (ilium.core.smart-copy, side both) owns selection and copying in terminal panes: mouse selection of regions, the terminal right-click menu, Smart Copy light (paths, commands and hashes recognised from cell styles) and ",
+  "description": "The Smart Copy plugin (ilium.core.smart-copy, side both) owns selection and copying in terminal panes: mouse selection of regions, the terminal right-click menu, Smart Copy light (paths, commands and hashes recognised from cell styles) and Smart Copy with the inference model choosing semantic regions.",
   "license": "MIT",
   "server": {
     "entry": "server.wasm",

@@ -44,7 +44,7 @@ fn display_form(key_id: &str) -> String {
 }
 
 fn short_form(key_id: &str) -> String {
-    format!("{}…{}", &key_id[..4], &key_id[60..])
+    key_id[..8].to_owned()
 }
 
 fn s(path: &std::path::Path) -> &str {

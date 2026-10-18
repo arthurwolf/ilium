@@ -765,7 +765,7 @@ fn sec_082_stream_ends_after_256_mib_with_stream_size() {
     let id = rig
         .value(
             "ilium:host/http.open-stream",
-            json!({ "request": { "request": request_json("GET", "https://example.com/s", &[], None), "framing": "raw", "max-chunk-bytes": 1048576 } }),
+            json!({ "request": { "request": request_json("GET", "https://example.com/s", &[], None), "framing": "raw", "max-chunk-bytes": 65536 } }),
         )
         .expect("stream opens");
     rig.host.pump(64);
@@ -789,7 +789,7 @@ fn sec_082_a_stream_read_is_at_most_8_mib() {
     let id = rig
         .value(
             "ilium:host/http.open-stream",
-            json!({ "request": { "request": request_json("GET", "https://example.com/s", &[], None), "framing": "raw", "max-chunk-bytes": 1048576 } }),
+            json!({ "request": { "request": request_json("GET", "https://example.com/s", &[], None), "framing": "raw", "max-chunk-bytes": 65536 } }),
         )
         .expect("stream opens");
     rig.host.pump(8);

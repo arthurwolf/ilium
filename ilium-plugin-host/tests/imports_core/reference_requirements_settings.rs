@@ -383,6 +383,19 @@ fn set_022_timeout_message_names_the_plugin_did_not_answer() {
     }
 }
 
+// ---- SET-032: saving state ---------------------------------------------------------------------
+
+/// REQ: SET-032
+#[test]
+fn set_032_saving_marker_shows_until_the_debounced_write_completes() {
+    let mut fixture = settings_fixture(Tier::T2);
+    fixture.user_edit("label", "\"abc\"", UserInput::Typed);
+    assert!(fixture.row_saving("label"));
+    fixture.advance(Duration::from_millis(600));
+    assert!(!fixture.row_saving("label"));
+    assert_eq!(stored(&mut fixture)["label"], json!("abc"));
+}
+
 // ---- SET-023: write timing -------------------------------------------------------------------
 
 fn count_changed(fixture: &ImportsFixture) -> usize {

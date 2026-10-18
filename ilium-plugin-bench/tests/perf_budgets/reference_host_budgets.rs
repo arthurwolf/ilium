@@ -272,8 +272,12 @@ fn hst_305_no_program_outside_b1_to_b24() {
 
 /// REQ: HST-306
 #[test]
-fn hst_306_release_gate_ids_are_b1_to_b9_and_b16_to_b20() {
-    let mut expected: Vec<String> = (1..=9).chain(16..=20).map(|n| format!("B{n}")).collect();
+fn hst_306_release_gate_ids_are_b1_to_b9_b16_to_b20_and_b23() {
+    let mut expected: Vec<String> = (1..=9)
+        .chain(16..=20)
+        .chain(23..=23)
+        .map(|n| format!("B{n}"))
+        .collect();
     let mut actual: Vec<String> = RELEASE_GATE_IDS.iter().map(|s| s.to_string()).collect();
     expected.sort();
     actual.sort();
@@ -289,9 +293,9 @@ fn hst_306_gate_fails_when_any_gated_budget_is_missed() {
 
 /// REQ: HST-306
 #[test]
-fn hst_306_gate_excludes_b10_to_b15_and_b21_to_b24() {
+fn hst_306_gate_excludes_b10_to_b15_b21_b22_and_b24() {
     for id in [
-        "B10", "B11", "B12", "B13", "B14", "B15", "B21", "B22", "B23", "B24",
+        "B10", "B11", "B12", "B13", "B14", "B15", "B21", "B22", "B24",
     ] {
         assert!(
             !RELEASE_GATE_IDS.contains(&id),

@@ -166,7 +166,7 @@ impl KeyPair {
         unimplemented!("host::testing::user_rig::KeyPair::fingerprint")
     }
 
-    /// The short fingerprint (first four, an ellipsis, last four).
+    /// The short fingerprint (the first 8 digits of the fingerprint).
     pub fn short_fingerprint(&self) -> String {
         unimplemented!("host::testing::user_rig::KeyPair::short_fingerprint")
     }

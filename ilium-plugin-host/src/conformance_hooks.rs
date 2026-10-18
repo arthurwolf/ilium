@@ -1,6 +1,6 @@
 //! Probe imports and budget probes used by `ilium-plugin-conformance` (reference-conformance-suite.md).
 
-/// Burns a given amount of fuel-equivalent work in the guest (the `fuel-burn` probe import).
-pub fn fuel_burn(_units: u64) {
-    unimplemented!("host::conformance_hooks::fuel_burn")
+/// Busy-waits for the given number of wall-clock milliseconds in the guest (the `busy-wait` probe import; deadlines are epoch-based and fuel is off).
+pub fn busy_wait_ms(_millis: u64) {
+    unimplemented!("host::conformance_hooks::busy_wait_ms")
 }

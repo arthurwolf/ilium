@@ -33,7 +33,7 @@
     ]
   },
   "activation": [
-    "event:terminal-screen-changed",
+    "event:screen-changed",
     "startup"
   ],
   "contributes": {

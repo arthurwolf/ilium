@@ -46,7 +46,7 @@ fn doc_aut_604_display_width_not_called_per_character() {
         "AUT-604",
         "SHOULD NOT",
         &[
-            "SHOULD NOT call it once per character for a long text",
+            "SHOULD NOT call `display-width` once per character for a long text",
             "Measure once",
         ],
     );
@@ -120,7 +120,11 @@ fn doc_aut_609_manifest_titles_one_language_translation_in_own_views() {
 /// REQ: AUT-610
 #[test]
 fn doc_aut_610_identifiers_not_translated() {
-    assert_rule("AUT-610", "MUST NOT", &["MUST NOT translate them"]);
+    assert_rule(
+        "AUT-610",
+        "MUST NOT",
+        &["MUST NOT translate command ids, setting keys, error codes and event names"],
+    );
 }
 
 /// REQ: AUT-611
@@ -142,7 +146,10 @@ fn doc_aut_612_absolute_times_use_yyyy_mm_dd_hh_mm_ss() {
     assert_rule(
         "AUT-612",
         "SHOULD",
-        &["SHOULD use it for absolute times", "`YYYY-MM-DD HH:mm:ss`"],
+        &[
+            "SHOULD use `YYYY-MM-DD HH:mm:ss` for absolute times",
+            "`YYYY-MM-DD HH:mm:ss`",
+        ],
     );
 }
 

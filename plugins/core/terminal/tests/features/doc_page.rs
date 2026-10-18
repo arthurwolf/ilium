@@ -109,7 +109,7 @@ fn cor_050_the_kernel_boot_page_activates_terminal_on_the_first_frame() {
     let boot = page("reference-kernel-and-boot.md");
     let row = boot
         .lines()
-        .find(|line| line.starts_with("| Terminal | `event:terminal-screen-changed`"))
+        .find(|line| line.starts_with("| Terminal | `event:screen-changed`"))
         .expect("activation row");
     assert!(
         row.contains("`startup`")

@@ -40,7 +40,7 @@ fn manifest_050_fragment_cli_entry_equals_the_complete_manifest() {
 /// REQ: COR-040, F-060
 #[test]
 fn manifest_040_declares_the_progress_subcommand() {
-    let cli = &manifest_value()["contributes"]["cli"];
+    let cli = &manifest_value()["contributes"]["cli"][0];
     assert_eq!(cli["name"], "progress");
     assert_eq!(cli["summary"], "Progress monitors");
     assert_eq!(cli["output"], "jsonl");
@@ -50,7 +50,7 @@ fn manifest_040_declares_the_progress_subcommand() {
 /// REQ: COR-040, F-108
 #[test]
 fn manifest_040_declares_wait_as_the_only_alias() {
-    let cli = &manifest_value()["contributes"]["cli"];
+    let cli = &manifest_value()["contributes"]["cli"][0];
     assert_eq!(cli["aliases"], json!(["wait"]));
 }
 
@@ -69,13 +69,14 @@ fn manifest_050_contributes_only_a_cli_entry() {
 
 /// REQ: COR-050, F-059
 #[test]
-fn manifest_050_server_grants_are_exactly_the_four_of_the_page() {
+fn manifest_050_server_grants_are_exactly_the_five_of_the_page() {
     assert_eq!(
         strings(&manifest_value()["capabilities"]["server"]),
         [
             "cli.contribute",
             "process.run:sh",
             "process.long-lived",
+            "http-api.route:/progress.json",
             "settings.read-kernel:agent-monitoring"
         ]
     );

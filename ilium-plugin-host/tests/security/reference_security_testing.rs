@@ -407,21 +407,18 @@ fn sec_345_a_fork_bomb_gets_eagain_and_the_helper_stays_responsive() {
 
 /// REQ: SEC-345
 #[test]
-fn sec_345_allocating_beyond_memory_max_kills_the_helper_with_limit_exceeded_memory() {
+fn sec_345_allocating_beyond_memory_max_kills_the_helper_with_trap_memory() {
     let rig = t3(&[]);
     assert_eq!(
         rig.host
             .run_hostile_probe("guest", "allocate-beyond-memory-max"),
         "helper-killed"
     );
-    // manual does not pin the Trap variant name; its debug form must name limit-exceeded memory.
+    // manual does not pin the Trap variant name; its debug form must name trap.memory.
     let failures = rig.host.failures();
     assert_eq!(failures.len(), 1, "{failures:?}");
     let trap = format!("{:?}", failures[0]);
-    assert!(
-        trap.contains("limit-exceeded") && trap.contains("memory"),
-        "{trap}"
-    );
+    assert!(trap.contains("trap.memory"), "{trap}");
 }
 
 /// REQ: SEC-345

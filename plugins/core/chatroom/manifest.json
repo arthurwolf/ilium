@@ -36,12 +36,12 @@
   ],
   "limits_tier": "first-party",
   "contributes": {
-    "cli": {
+    "cli": [{
       "name": "chat",
       "summary": "Project chatroom: init, send, context, tail",
       "output": "text",
       "stdin": "none",
       "requires_server": false
-    }
+    }]
   }
 }

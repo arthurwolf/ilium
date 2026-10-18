@@ -96,6 +96,16 @@ fn f_060_another_path_is_not_answered_with_progress() {
 
 /// REQ: F-060
 #[test]
+fn f_060_another_method_on_the_route_is_answered_405() {
+    let mut host = activated_server();
+    call(&mut host, 5, "POST", "/progress.json");
+    let replies = replies_to(&host, 5);
+    assert_eq!(replies.len(), 1);
+    assert_eq!(replies[0].0, 405);
+}
+
+/// REQ: F-060
+#[test]
 fn f_060_each_call_is_answered_exactly_once_even_when_many_arrive() {
     let mut host = activated_server();
     for id in 10..15 {

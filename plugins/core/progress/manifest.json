@@ -19,6 +19,7 @@
       "cli.contribute",
       "process.run:sh",
       "process.long-lived",
+      "http-api.route:/progress.json",
       "settings.read-kernel:agent-monitoring"
     ],
     "client": [
@@ -30,13 +31,13 @@
     "startup"
   ],
   "contributes": {
-    "cli": {
+    "cli": [{
       "name": "progress",
       "summary": "Progress monitors",
       "output": "jsonl",
       "requires_server": true,
       "aliases": ["wait"]
-    }
+    }]
   },
   "limits_tier": "first-party"
 }

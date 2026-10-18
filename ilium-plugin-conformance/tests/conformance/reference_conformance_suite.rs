@@ -307,7 +307,7 @@ fn dev_606_no_passing_case_reports_more_than_the_wall_limit() {
     }
 }
 
-// ---- DEV-607: fuel units and the probe ----
+// ---- DEV-607: wall-clock units and the probe ----
 
 /// REQ: DEV-607
 #[test]
@@ -320,7 +320,7 @@ fn dev_607_deadline_cases_use_the_probe_component_not_the_subject() {
 /// REQ: DEV-607
 #[test]
 fn dev_607_deadline_case_trap_deadline_does_not_depend_on_the_subject_plugin() {
-    // CONF-EVT-02 subject H burns fuel in the probe; two different subject components agree.
+    // CONF-EVT-02 subject H busy-waits in the probe; two different subject components agree.
     let first = run_in_project(&manifest_text("minimal.json"), &["--case", "CONF-EVT-02"]);
     let second = run_in_project(&manifest_text("fs-read.json"), &["--case", "CONF-EVT-02"]);
     assert_eq!(
@@ -331,8 +331,8 @@ fn dev_607_deadline_case_trap_deadline_does_not_depend_on_the_subject_plugin() {
 
 /// REQ: DEV-607
 #[test]
-fn dev_607_probe_fuel_burn_import_is_exported_by_the_host_hooks() {
-    ilium_plugin_host::conformance_hooks::fuel_burn(1);
+fn dev_607_probe_busy_wait_import_is_exported_by_the_host_hooks() {
+    ilium_plugin_host::conformance_hooks::busy_wait_ms(1);
 }
 
 // ---- DEV-610: the catalogue is the minimum ----
@@ -401,12 +401,13 @@ fn dev_612_limit_boundaries_used_by_the_suite_match_the_manual() {
 
 /// REQ: DEV-613
 #[test]
-fn dev_613_every_skip_carries_one_of_the_four_reasons() {
+fn dev_613_every_skip_carries_one_of_the_five_reasons() {
     let allowed = [
         "grant-not-requested",
         "side-not-built",
         "subject-mismatch",
         "needs-session",
+        "needs-component",
     ];
     let output = run_in_project(&manifest_text("minimal.json"), &[]);
     for record in records_of(&output, "conformance") {
