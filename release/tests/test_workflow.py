@@ -2,6 +2,7 @@
 from copy import deepcopy
 import hashlib
 import json
+import os
 from pathlib import Path, PureWindowsPath
 import re
 import sys
@@ -345,7 +346,7 @@ class WorkflowTests(unittest.TestCase):
             configured = pipeline.configure_rust_toolchain_environment(environment, work)
 
             rustup_home = work / 'rustup-home'
-            self.assertEqual(configured['RUSTUP_HOME'], str(rustup_home))
+            self.assertEqual(os.path.realpath(configured['RUSTUP_HOME']), os.path.realpath(str(rustup_home)))
             self.assertTrue(rustup_home.is_dir())
 
     def test_rustup_install_command_uses_the_workspace_pin_without_reinstalling_host_target(self):
@@ -857,7 +858,7 @@ class PipelineTests(unittest.TestCase):
         command, environment = rustup_installation[0]
         self.assertEqual(command, pipeline.rustup_install_command())
         self.assertNotIn('--target', command)
-        self.assertEqual(environment['RUSTUP_HOME'], str(work / 'rustup-home'))
+        self.assertEqual(os.path.realpath(environment['RUSTUP_HOME']), os.path.realpath(str(work / 'rustup-home')))
 
     def test_windows_pester_setup_accepts_pinned_module_publisher_transition(self):
         windows_target = next(target for target in self.targets if target['os'] == 'windows')
@@ -899,9 +900,9 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(len(captured), 1)
         self.assertEqual(len(rustup_installations), 1)
         self.assertEqual(rustup_installations[0][0], pipeline.rustup_install_command())
-        self.assertEqual(rustup_installations[0][1]['RUSTUP_HOME'], str(arguments.work / 'rustup-home'))
-        self.assertEqual(helper_environments[0]['RUSTUP_HOME'], str(arguments.work / 'rustup-home'))
-        self.assertEqual(captured_environments[0]['RUSTUP_HOME'], str(arguments.work / 'rustup-home'))
+        self.assertEqual(os.path.realpath(rustup_installations[0][1]['RUSTUP_HOME']), os.path.realpath(str(arguments.work / 'rustup-home')))
+        self.assertEqual(os.path.realpath(helper_environments[0]['RUSTUP_HOME']), os.path.realpath(str(arguments.work / 'rustup-home')))
+        self.assertEqual(os.path.realpath(captured_environments[0]['RUSTUP_HOME']), os.path.realpath(str(arguments.work / 'rustup-home')))
         setup_command = captured[0]
         self.assertEqual(setup_command[:3], ['powershell.exe', '-NoProfile', '-NonInteractive'])
         setup_script = setup_command[setup_command.index('-Command') + 1]

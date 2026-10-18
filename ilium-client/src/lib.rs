@@ -3641,6 +3641,7 @@ async fn collect_normal_voice_retirement(
                     tracing::error!(
                         cancelled_commands = cancelled,
                         undelivered_stop_outputs = final_outputs,
+                        actor_exit = ?exit,
                         "Original voice actor stopped; consumed provider delivery may be uncertain"
                     );
                     app.status_message = Some(format!(

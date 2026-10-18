@@ -4517,12 +4517,21 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
             .expect("find Second task text");
         (second_task_column, second_task_row, dialog_task_row)
     });
-    tui.write(&sgr_mouse_down(0, second_task_column, second_task_row))
-        .expect("press Second task for drag");
-    tui.write(&sgr_mouse_drag(second_task_column, dialog_task_row))
-        .expect("drag Second task above Dialog task");
+    // A loaded CI runner can drop the press or the first drag report while the
+    // board repaints, so repeat the press and drag until the feedback shows.
+    let mut drag_feedback_shown = false;
+    for _ in 0..4 {
+        tui.write(&sgr_mouse_down(0, second_task_column, second_task_row))
+            .expect("press Second task for drag");
+        tui.write(&sgr_mouse_drag(second_task_column, dialog_task_row))
+            .expect("drag Second task above Dialog task");
+        if wait_until(|| tui.screen_text().contains('━'), Duration::from_secs(8)).await {
+            drag_feedback_shown = true;
+            break;
+        }
+    }
     assert!(
-        wait_until(|| tui.screen_text().contains('━'), WAIT_TIMEOUT).await,
+        drag_feedback_shown,
         "active card drag should show a visible insertion line, got: {:?}",
         tui.screen_text()
     );

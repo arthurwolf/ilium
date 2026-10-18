@@ -3,7 +3,7 @@ from __future__ import annotations  # Keep imports portable; native operations r
 import hashlib  # Bind fixtures, source and recovered output to exact bytes.
 import json  # Serialize retained observations without emitting extra stdout records.
 import os  # Inspect kernel identity and enforce the root fixture boundary.
-from pathlib import Path  # Confine writable data to a fresh private directory.
+from pathlib import Path, PurePosixPath  # Confine writable data to a fresh private directory.
 import platform  # Reject cross-architecture execution.
 import re  # Validate daemon, unit and cgroup identities.
 import select  # Detect exit through a retained pidfd.
@@ -255,18 +255,18 @@ def validate_record(record: dict, kind: str, image: str, arch: str, expected_sou
     host = record.get('host_admission', {})  # Host-side corroboration is mandatory.
     guest_ns, host_ns = namespace.get('namespaces', {}), host.get('host_namespaces', {})  # Compare the independently recorded views.
     require(set(guest_ns) == set(host_ns) == set(namespace_names) and host.get('namespaces') == guest_ns and all(type(guest_ns[key]) is int and type(host_ns[key]) is int and guest_ns[key] != host_ns[key] for key in namespace_names) and host.get('pidfd_live_at_admission') is True, 'container namespace admission differs')  # Missing and host-reused namespaces fail closed.
-    unit_group = Path(str(host.get('owned_unit_cgroup', '')))  # Validate containment without relying on current-machine paths.
-    visible = Path(str(host.get('visible_cgroup_root', '')))  # The retained inode maps this visible root to the owned service.
-    require(Path('/sys/fs/cgroup') in unit_group.parents and '..' not in unit_group.parts and '..' not in visible.parts and type(host.get('init_pid')) is int and host['init_pid'] > 1, 'invalid host unit or init identity')  # Reject traversal and non-kernel resource paths.
+    unit_group = PurePosixPath(str(host.get('owned_unit_cgroup', '')))  # Validate containment without relying on current-machine paths.
+    visible = PurePosixPath(str(host.get('visible_cgroup_root', '')))  # The retained inode maps this visible root to the owned service.
+    require(PurePosixPath('/sys/fs/cgroup') in unit_group.parents and '..' not in unit_group.parts and '..' not in visible.parts and type(host.get('init_pid')) is int and host['init_pid'] > 1, 'invalid host unit or init identity')  # Reject traversal and non-kernel resource paths.
     require(unit_group.is_absolute() and unit_group.name == record['unit'] and (visible == unit_group or unit_group in visible.parents) and namespace.get('cgroup_mount_inode') == host.get('visible_cgroup_inode') and type(host.get('visible_cgroup_inode')) is int and namespace.get('cgroup_mount_root') == '/' and namespace.get('cgroup_filesystem') == 'cgroup2' and namespace.get('cgroup_writable') is True and namespace.get('controllers') == ['cpu', 'memory', 'pids'] and namespace.get('caller_delegate') is False, 'container cgroup topology or caller authority differs')  # A flag or path string alone is insufficient.
     uid_map = namespace.get('uid_map')  # Require the actual isolated mapping retained during boot.
     require(isinstance(uid_map, list) and len(uid_map) == 1 and isinstance(uid_map[0], list) and len(uid_map[0]) == 3 and all(type(value) is int for value in uid_map[0]) and uid_map[0][0] == 0 and uid_map[0][1] >= 524288 and uid_map[0][2] == 65536 and namespace.get('gid_map') == uid_map, 'container user mapping differs')  # Refuse identity maps and missing group isolation.
-    require(host.get('uid_map') == uid_map and host.get('gid_map') == uid_map and Path(str(namespace.get('caller_cgroup', ''))).name == 'ilium-container-acceptance.service', 'host mapping or ordinary caller evidence differs')  # Bind both independent views and the exact caller leaf.
+    require(host.get('uid_map') == uid_map and host.get('gid_map') == uid_map and PurePosixPath(str(namespace.get('caller_cgroup', ''))).name == 'ilium-container-acceptance.service', 'host mapping or ordinary caller evidence differs')  # Bind both independent views and the exact caller leaf.
     delegated = guest.get('delegation', {})  # The capability probe must exercise real non-root control writes and child retirement.
     expected_limits = {'memory.max': str(limits['untrusted_memory_bytes']), 'memory.swap.max': '0', 'memory.oom.group': '1', 'pids.max': str(limits['untrusted_tasks']), 'cpu.max': '100000 100000'}  # Keep the child ceilings immutable.
     require(delegated.get('uid') == delegated.get('owner_uid') == 65534 and delegated.get('unit') == 'ilium-fixture-probe-' + nonce + '.service' and delegated.get('controllers') == ['cpu', 'memory', 'pids'] and delegated.get('limits') == expected_limits and all(delegated.get(key) is True for key in ('limited_child_started', 'limited_child_reaped', 'limited_cgroup_absent', 'bwrap_namespaces', 'unit_retired')), 'user delegation capability evidence is incomplete')  # Do not accept a manager-version check in its place.
-    manager_group = Path(str(guest.get('manager_cgroup', '')))  # Retain the dedicated user-manager ownership boundary.
-    delegated_group = Path(str(delegated.get('cgroup', '')))  # Read the actual non-root capability service path.
+    manager_group = PurePosixPath(str(guest.get('manager_cgroup', '')))  # Retain the dedicated user-manager ownership boundary.
+    delegated_group = PurePosixPath(str(delegated.get('cgroup', '')))  # Read the actual non-root capability service path.
     require(manager_group.is_absolute() and manager_group.name == 'ilium-container-user.service' and manager_group in delegated_group.parents and delegated_group.name == delegated['unit'], 'user capability cgroup escaped its manager')  # Reject a prepared ancestor outside the dedicated manager.
     require(record.get('runtime') == {'Result': 'success', 'ExecMainCode': '1', 'ExecMainStatus': '0'} and record.get('cleanup') == {'unit_retired': True, 'cgroup_absent': True, 'docker_removed': True, 'state_removed': True}, 'container completion or cleanup differs')  # No forced cleanup can erase failed package execution.
     require(record.get('stdout_sha256') == guest.get('case.stdout_sha256') and record.get('stderr_sha256') == guest.get('case.stderr_sha256'), 'recovered application streams differ')  # The caller also checks the actual recovered stream bytes.
