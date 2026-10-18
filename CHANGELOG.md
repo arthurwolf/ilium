@@ -14,6 +14,12 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 ## [Unreleased]
 
 ### Changed
+- Voxel Landscape saved Minecraft worlds: the first viewport step, which collects the model requirements of every chunk in view, runs on several worker threads with one model compiler each (it ran on one thread), so the first frame of a large camera view starts sooner. Results are merged in chunk order and the rendered output is unchanged.
+- Voxel Landscape saved Minecraft worlds: camera-route windows span up to 15 by 15 chunks, one saved map merges up to three windows (1,152 chunks), and the storage charge per window is 64 MiB. A save with no window of the requested size falls back to 11 by 11 chunks.
+- Voxel Landscape saved-world routes may pass through chunks that were never generated; those cells draw as holes instead of refusing the route.
+- Voxel Landscape saved Minecraft worlds: a camera view may cover up to 1,024 saved chunks (was 512), and its projected route read loads all of them (retained-storage charge 384 MiB, was 192 MiB; the saved-scene working budget and the shared Voxel Landscape working-bytes ceiling are 2 GiB, were 1 GiB), so larger terminals (for example 160 by 50 cells) find routes instead of failing with no candidate.
+- The Voxel Landscape saved-maps route builds its viewport tiles on up to eight worker threads, each with its own model compiler; tiles are merged in chunk order, so the rendered output is unchanged while the first frame of a large save arrives sooner.
+- A resource-pack folder selected in the Voxel Landscape animation is snapshotted when it loads: Ilium reads every file once into memory and renders from that copy, so edits made to the folder during a route no longer change the route, and the immutable definition cache applies to folders as it already did to ZIPs. A folder larger than the 256 MiB archive cap now fails to load with a limit error instead of loading partly.
 - The progress-monitor instructions Ilium installs for agents (version 11) use a unit-test run as the example progress message instead of a release build, so agents are not nudged toward release builds; installed instruction blocks are refreshed automatically.
 - Codex session conversion now bounds app-server output records and queued reader events, clipping oversized diagnostics and failing closed on oversized protocol lines.
 - Live ambient data pollers and fleet-marker preparers now reserve persistent worker capacity from the host's shared quota before starting.
@@ -50,6 +56,8 @@ development period. Dates are commit dates (`YYYY-MM-DD`).
 - `ilium progress guard` is a Claude Code `PreToolUse` hook that Ilium installs into each chatroom project's `.claude/settings.local.json`. Inside an Ilium pane it refuses a foreground Bash call with a timeout over three minutes unless the call is an `ilium progress` or `ilium wait` command or runs in the background. Outside a pane, and for malformed hook input, it allows the call.
 
 ### Fixed
+- Saved Java worlds in the Voxel Landscape animation: camera-route search keeps a margin inside the saved area, and tiny saves keep their full area so they still propose routes.
+- Saved Java worlds in the Voxel Landscape animation: the camera-route survey no longer stops at the first unfinished chunks, so it keeps searching for routes that qualify.
 - `ilium new-pane --worktree` now places new worktrees at the Settings -> Git "Worktree location" template, as the TUI dialog already did, instead of always using a sibling `<repo>.worktrees` directory.
 - Pane progress monitors survive a server restart: the restored server keeps the same monitor ID and keeps observing the task instead of reporting it as lost.
 - Anthropic requests send each model's documented output-token maximum instead of the 1,000,000-token fallback, so `claude-haiku-5-5` and other Claude models no longer reject requests with "max_tokens ... exceeds the maximum allowed number of output tokens".

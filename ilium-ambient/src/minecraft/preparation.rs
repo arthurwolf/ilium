@@ -23,8 +23,8 @@ impl Default for Limits {
     fn default() -> Self {
         Self {
             surface: surface::Limits {
-                max_chunks: 128,
-                max_columns: 32_768,
+                max_chunks: super::loader::MAX_CHUNKS,
+                max_columns: 65_536,
                 max_owned_bytes: 16_384,
             },
             evidence: evidence::Limits::default(),
@@ -186,7 +186,9 @@ fn load_candidates_directory(
     if source.generation == 0 {
         return Err(Error::InvalidGeneration);
     }
-    if loading.max_storage_charge == 0 || loading.max_storage_charge > 32 << 20 {
+    if loading.max_storage_charge == 0
+        || loading.max_storage_charge > super::loader::SAVED_WINDOW_STORAGE_CHARGE
+    {
         return Err(Error::Loader(loader::Error::StorageLimit));
     }
     if limits.summary_bytes == 0 || limits.summary_bytes > 2 << 20 {
@@ -225,7 +227,7 @@ fn load_candidates_with(
         candidates,
         MAX_WINDOWS_PER_SAVE,
         Limits::default().summary_bytes,
-        MAX_WINDOWS_PER_SAVE * (32 << 20),
+        MAX_WINDOWS_PER_SAVE * super::loader::SAVED_WINDOW_STORAGE_CHARGE,
         MAX_WINDOWS_PER_SAVE * Limits::default().work_units,
         cancelled,
         prepare,
@@ -592,7 +594,7 @@ fn load_candidate_directory(
         return Err(Error::InvalidCandidate);
     }
     let requested = &candidate.requested;
-    if requested.len() > loading.max_chunks.min(128) {
+    if requested.len() > loading.max_chunks.min(super::loader::MAX_CHUNKS) {
         return Err(loader::Error::Limit.into());
     }
     let minimum = [
@@ -621,7 +623,7 @@ fn load_candidate_directory(
     });
     let side = widths[0] / 16;
     if widths[0] != widths[1]
-        || side > 11
+        || side > 2 * i64::from(super::windows::MAX_RADIUS_CHUNKS) + 1
         || side % 2 != 1
         || side * side != requested.len() as i64
         || [0, 1].into_iter().any(|axis| {
@@ -677,7 +679,7 @@ pub fn finish_window(
             halo,
             loaded.chunks.values().map(Arc::as_ref),
             surface::Limits {
-                max_chunks: limits.surface.max_chunks.min(128),
+                max_chunks: limits.surface.max_chunks.min(super::loader::MAX_CHUNKS),
                 ..limits.surface
             },
             &mut work,

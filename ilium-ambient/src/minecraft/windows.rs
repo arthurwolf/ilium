@@ -2,6 +2,12 @@
 use super::surface::Bounds;
 use std::collections::BTreeSet;
 
+/// Largest window radius in chunks. A 15-by-15 window (240 blocks a side, 57,600
+/// columns) is the largest square the surface builder's 65,536-column ceiling admits.
+pub const MAX_RADIUS_CHUNKS: u8 = 7;
+/// Radius that a sparse save falls back to when no window of the requested radius fits.
+const FALLBACK_RADIUS_CHUNKS: u8 = 5;
+
 #[derive(Clone, Copy, Debug)]
 pub struct Limits {
     pub radius_chunks: u8,
@@ -79,10 +85,32 @@ pub fn search_with_progress(
     cancelled: &dyn Fn() -> bool,
     progress: &mut dyn FnMut(usize, usize),
 ) -> Result<Search, Error> {
+    let result = search_at_radius(allocated, anchor, recent, limits, cancelled, progress)?;
+    // Large windows sit on a coarser grid and need a wholly allocated square, so a
+    // sparse save may hold none. Fall back to the proven smaller radius instead of
+    // reporting no window at all.
+    if !result.candidates.is_empty() || limits.radius_chunks <= FALLBACK_RADIUS_CHUNKS {
+        return Ok(result);
+    }
+    let fallback = Limits {
+        radius_chunks: FALLBACK_RADIUS_CHUNKS,
+        ..limits
+    };
+    search_at_radius(allocated, anchor, recent, fallback, cancelled, progress)
+}
+
+fn search_at_radius(
+    allocated: &BTreeSet<[i32; 2]>,
+    anchor: [i32; 2],
+    recent: &[[i32; 2]],
+    limits: Limits,
+    cancelled: &dyn Fn() -> bool,
+    progress: &mut dyn FnMut(usize, usize),
+) -> Result<Search, Error> {
     if cancelled() {
         return Err(Error::Cancelled);
     }
-    if limits.radius_chunks > 5
+    if limits.radius_chunks > MAX_RADIUS_CHUNKS
         || limits.candidates == 0
         || limits.candidates > 16
         || limits.spread_candidates > limits.candidates

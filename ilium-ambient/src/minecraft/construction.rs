@@ -2,7 +2,7 @@
 //! Eight-block window spacing lets one 16x16 support mask straddle any chunk seam.
 use super::*;
 
-const MAX_WINDOWS: usize = 1024;
+pub(super) const MAX_WINDOWS: usize = 1024;
 const MATERIAL_PLANK: u8 = 1;
 const MATERIAL_FENCE: u8 = 2;
 const MATERIAL_STAIR: u8 = 4;
