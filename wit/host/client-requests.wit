@@ -1,0 +1,11 @@
+package ilium:host@0.1.0;
+
+interface client-requests {
+  use ilium:types/ids@0.1.0.{client-id, request-id};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  /// Server side. Async, take-answer. timeout-millis 1 to 30,000.
+  request: func(client: client-id, kind: string, payload-json: string, timeout-millis: u32) -> result<request-id, plugin-error>;
+  take-answer: func(request: request-id) -> option<string>;
+  /// Client side. Errors: not-found for an unknown call id.
+  respond: func(call: u64, outcome: result<string, plugin-error>) -> result<_, plugin-error>;
+}

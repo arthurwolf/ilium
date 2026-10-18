@@ -1,0 +1,23 @@
+package ilium:host@0.1.0;
+
+interface extensions {
+  use ilium:types/ids@0.1.0.{plugin-id, request-id};
+  record extension-entry {
+    /// Contributor-chosen id, unique per contributor and point.
+    extension: string,
+    contributor: plugin-id,
+    priority: u8,
+    /// The validated entry.
+    entry-json: string,
+  }
+  /// A payload-less enum: the error model of this interface is the code only.
+  enum extension-error { unknown-point, not-granted, schema-mismatch, cap-exceeded, reentrant, not-dynamic, not-found }
+  // owner side
+  list: func(point: string) -> result<list<extension-entry>, extension-error>;
+  /// Async, take-reply.
+  run-hook: func(point: string, payload-json: string) -> result<request-id, extension-error>;
+  take-reply: func(request: request-id) -> option<string>;
+  // contributor side, collect points with dynamic true
+  register: func(point: string, extension: string, priority: u8, entry-json: string) -> result<_, extension-error>;
+  unregister: func(point: string, extension: string) -> result<_, extension-error>;
+}

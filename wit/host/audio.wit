@@ -1,0 +1,15 @@
+package ilium:host@0.1.0;
+
+interface audio {
+  use ilium:types/ids@0.1.0.{request-id};
+  use ilium:types/errors@0.1.0.{plugin-error};
+  record audio-device { id: string, name: string, is-input: bool, is-default: bool }
+  /// Needs any audio grant; with none held it returns an empty list (no error code).
+  devices: func() -> list<audio-device>;
+  /// Delivers audio-frames. sample-rate 8,000 to 48,000. channels 1 or 2.
+  open-capture: func(device: option<string>, sample-rate: u32, channels: u8) -> result<u64, plugin-error>;
+  open-loopback: func(sample-rate: u32, channels: u8) -> result<u64, plugin-error>;
+  close-capture: func(capture: u64);
+  /// Async. request-completed ok when playback ends.
+  play: func(samples: list<s16>, sample-rate: u32, channels: u8) -> result<request-id, plugin-error>;
+}

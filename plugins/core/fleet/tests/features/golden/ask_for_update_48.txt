@@ -1,0 +1,5 @@
+╭ Ask for update ─────────────────────────────╮
+│ Message…… What is your status in one line?  │
+│                                             │
+│                  [ Send ]   [ Cancel ]      │
+╰─────────────────────────────────────────────╯

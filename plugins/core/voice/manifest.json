@@ -1,0 +1,49 @@
+{
+  "api": "ilium:plugin@0.1.0",
+  "id": "ilium.core.voice",
+  "name": "Voice",
+  "version": "0.1.0",
+  "publisher": "Ilium",
+  "description": "Voice is the plugin form of Ilium's voice control.",
+  "license": "MIT",
+  "server": {
+    "entry": "server.wasm",
+    "world": "ilium:server/base@0.1.0"
+  },
+  "client": {
+    "entry": "client.wasm",
+    "world": "ilium:client/base@0.1.0"
+  },
+  "capabilities": {
+    "server": [
+      "cli.contribute"
+    ],
+    "client": [
+      "audio.microphone",
+      "keys.intercept",
+      "commands.invoke:*",
+      "inference",
+      "jobs.run",
+      "settings.write-kernel:voice-control"
+    ]
+  },
+  "activation": [
+    "command:voice.toggle",
+    "cli:voice"
+  ],
+  "limits_tier": "first-party",
+  "contributes": {
+    "commands": [
+      { "id": "voice.toggle", "title": "Toggle voice control" }
+    ],
+    "cli": [{
+      "name": "voice",
+      "summary": "Voice control: say",
+      "output": "jsonl",
+      "requires_server": true
+    }],
+    "jobs": [
+      { "kind": "transcribe", "deadline_ms": 30000, "memory_mib": 512 }
+    ]
+  }
+}

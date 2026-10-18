@@ -137,6 +137,7 @@ async fn stalled_input_current_thread_helper() {
         &mut stalled_client,
         &ClientRequest::Attach {
             session: session_name.to_owned(),
+            hello: Default::default(),
         },
     )
     .await
@@ -177,6 +178,7 @@ async fn stalled_input_current_thread_helper() {
         &mut healthy_client,
         &ClientRequest::Attach {
             session: session_name.to_owned(),
+            hello: Default::default(),
         },
     )
     .await

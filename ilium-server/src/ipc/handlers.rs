@@ -202,6 +202,11 @@ async fn handle_scoped_request(
     direct_tx: &DirectEventSender,
 ) -> bool {
     match request {
+        // Plugin envelopes are routed by the plugin kernel once it exists (skeleton: ignored).
+        ClientRequest::Plugin(_) => {
+            tracing::debug!("plugin envelope ignored: plugin kernel not implemented");
+            false
+        }
         ClientRequest::GetPaneRecapScreen { pane_id } => {
             let captured = {
                 let panes = state.panes.read().await;
@@ -230,11 +235,11 @@ async fn handle_scoped_request(
             send_direct(direct_tx, ServerEvent::PaneRecapScreen { pane_id, result }).await;
             false
         }
-        ClientRequest::Attach { session } => {
+        ClientRequest::Attach { session, .. } => {
             handle_attach(state, &session, direct_tx, true).await;
             false
         }
-        ClientRequest::AttachInteractive { session } => {
+        ClientRequest::AttachInteractive { session, .. } => {
             handle_attach(state, &session, direct_tx, false).await;
             false
         }

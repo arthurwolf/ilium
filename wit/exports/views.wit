@@ -1,0 +1,8 @@
+package ilium:exports@0.1.0;
+
+interface views {
+  use ilium:types/ui@0.1.0.{view-target, ui-tree};
+  use ilium:types/layout@0.1.0.{area};
+  /// Pure with respect to the host: no intents are accepted from here.
+  render: func(view: view-target, area: area) -> ui-tree;
+}
