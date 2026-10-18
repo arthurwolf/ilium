@@ -2606,6 +2606,19 @@ fn prepare_selection(
                     );
                 }
                 let Some(plan) = selection.plan else {
+                    progress.record(&format!(
+                        "No route in tier {choice:?} {maximum_length}: reason {:?}, chunks {}, desired {}",
+                        selection.unavailable,
+                        selection.audit.chunks,
+                        selection.audit.desired,
+                    ));
+                    progress.record(&format!(
+                        "Line search tier {choice:?} {maximum_length}: queries {}, usable {}, coverage rejected {}, repeats {}",
+                        selection.audit.line_queries,
+                        selection.audit.usable_lines,
+                        selection.audit.source_coverage_rejections,
+                        selection.audit.immediate_repeats,
+                    ));
                     return Ok(SurveyStep::EmptyTier);
                 };
                 // The exclusion and map-attempt count belong to the selected
