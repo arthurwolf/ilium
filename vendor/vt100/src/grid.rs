@@ -13,6 +13,7 @@ pub struct Grid {
     scrollback: std::collections::VecDeque<crate::row::Row>,
     scrollback_len: usize,
     scrollback_offset: usize,
+    row_allocation_bytes: usize,
 }
 
 impl Grid {
@@ -29,16 +30,39 @@ impl Grid {
             scrollback: std::collections::VecDeque::new(),
             scrollback_len,
             scrollback_offset: 0,
+            row_allocation_bytes: 0,
         }
     }
 
     pub fn allocate_rows(&mut self) {
         if self.rows.is_empty() {
+            self.rows.reserve_exact(usize::from(self.size.rows));
             self.rows.extend(
                 std::iter::repeat_with(|| crate::row::Row::new(self.size.cols))
                     .take(usize::from(self.size.rows)),
             );
         }
+        self.refresh_row_allocation_bytes();
+    }
+
+    fn refresh_row_allocation_bytes(&mut self) {
+        self.row_allocation_bytes = self
+            .rows
+            .iter()
+            .chain(self.scrollback.iter())
+            .map(crate::row::Row::heap_allocation_bytes)
+            .sum();
+    }
+
+    fn remove_row(&mut self, index: usize) -> crate::row::Row {
+        let row = self.rows.remove(index);
+        self.row_allocation_bytes -= row.heap_allocation_bytes();
+        row
+    }
+
+    fn insert_row(&mut self, index: usize, row: crate::row::Row) {
+        self.row_allocation_bytes += row.heap_allocation_bytes();
+        self.rows.insert(index, row);
     }
 
     fn new_row(&self) -> crate::row::Row {
@@ -73,10 +97,22 @@ impl Grid {
         }
 
         self.size = size;
-        for row in &mut self.rows {
-            row.resize(size.cols, crate::Cell::new());
+        // A dormant alternate screen stays unallocated until it is entered.
+        // Merely resizing must not consume its pending activation allocation.
+        if !self.rows.is_empty() {
+            // Discard rows that cannot survive before widening retained rows.
+            // Widening first creates an old-height × new-width allocation spike.
+            self.rows.truncate(usize::from(size.rows));
+            self.rows.shrink_to_fit();
+            for row in &mut self.rows {
+                row.resize(size.cols, crate::Cell::new());
+            }
+            let needed = usize::from(size.rows).saturating_sub(self.rows.len());
+            self.rows.reserve_exact(needed);
+            self.rows
+                .resize_with(usize::from(size.rows), || crate::row::Row::new(size.cols));
+            self.refresh_row_allocation_bytes();
         }
-        self.rows.resize(usize::from(size.rows), self.new_row());
 
         if self.scroll_bottom >= size.rows {
             self.scroll_bottom = size.rows - 1;
@@ -208,12 +244,68 @@ impl Grid {
         self.scrollback_offset = rows.min(self.scrollback.len());
     }
 
+    pub fn pending_screen_allocation_bytes(&self) -> usize {
+        if !self.rows.is_empty() {
+            return 0;
+        }
+        let rows = usize::from(self.size.rows);
+        let cells = rows
+            .saturating_mul(usize::from(self.size.cols))
+            .saturating_mul(std::mem::size_of::<crate::Cell>());
+        let row_storage = rows
+            .saturating_sub(self.rows.capacity())
+            .saturating_mul(std::mem::size_of::<crate::row::Row>());
+        cells.saturating_add(row_storage)
+    }
+
+    pub fn heap_allocation_bytes(&self) -> usize {
+        let row_storage = self
+            .rows
+            .capacity()
+            .saturating_add(self.scrollback.capacity())
+            .saturating_mul(std::mem::size_of::<crate::row::Row>());
+        row_storage.saturating_add(self.row_allocation_bytes)
+    }
+
+    /// Retains only history contributing to the currently visible viewport.
+    /// Rows move by ownership inside the deque; no cell buffers are cloned.
+    pub fn retain_visible_scrollback(&mut self) {
+        let first = self.scrollback.len() - self.scrollback_offset;
+        let visible = self.scrollback_offset.min(self.rows.len());
+        self.scrollback.truncate(first + visible);
+        self.scrollback.drain(..first);
+        self.scrollback_offset = visible;
+        self.trim_scrollback(visible);
+    }
+
+    /// Drops oldest history without touching drawing state or future retention.
+    pub fn trim_scrollback(&mut self, rows: usize) {
+        let discarded = self.scrollback.len().saturating_sub(rows);
+        self.scrollback.drain(..discarded);
+        self.scrollback_offset = self.scrollback_offset.min(self.scrollback.len());
+        // A formerly wide terminal can otherwise retain its peak allocation
+        // after narrowing, even when its current row count fits the budget.
+        for row in &mut self.scrollback {
+            row.shrink_to_fit();
+        }
+        for row in &mut self.rows {
+            row.shrink_to_fit();
+        }
+        self.scrollback.shrink_to_fit();
+        self.rows.shrink_to_fit();
+        self.refresh_row_allocation_bytes();
+    }
+
+    pub fn set_scrollback_limit(&mut self, rows: usize) {
+        self.scrollback_len = rows;
+        self.trim_scrollback(rows);
+    }
+
     /// Purges every retained row and returns the visible viewport to the live
     /// offset. Xterm assigns this behavior to erase-display mode 3 (`CSI 3 J`);
     /// unlike mode 2, it deliberately leaves the visible screen untouched.
     pub fn clear_scrollback(&mut self) {
-        self.scrollback.clear();
-        self.scrollback_offset = 0;
+        self.trim_scrollback(0);
     }
 
     pub fn write_contents(&self, contents: &mut String) {
@@ -481,27 +573,9 @@ impl Grid {
     }
 
     pub fn insert_cells(&mut self, count: u16) {
-        let size = self.size;
         let pos = self.pos;
-        let wide = pos.col < size.cols
-            && self
-                .drawing_cell(pos)
-                // we assume self.pos.row is always valid, and we know we are
-                // not off the end of a row because we just checked pos.col <
-                // size.cols
-                .unwrap()
-                .is_wide_continuation();
-        let row = self.current_row_mut();
-        for _ in 0..count {
-            if wide {
-                row.get_mut(pos.col).unwrap().set_wide_continuation(false);
-            }
-            row.insert(pos.col, crate::Cell::new());
-            if wide {
-                row.get_mut(pos.col).unwrap().set_wide_continuation(true);
-            }
-        }
-        row.truncate(size.cols);
+        let count = count.min(self.size.cols.saturating_sub(pos.col));
+        self.current_row_mut().insert_blank_cells(pos.col, count);
     }
 
     pub fn delete_cells(&mut self, count: u16) {
@@ -524,38 +598,42 @@ impl Grid {
     }
 
     pub fn insert_lines(&mut self, count: u16) {
-        for _ in 0..count {
-            self.rows.remove(usize::from(self.scroll_bottom));
-            self.rows.insert(usize::from(self.pos.row), self.new_row());
-            // self.scroll_bottom is maintained to always be a valid row
+        if !self.in_scroll_region() {
+            return;
+        }
+        for _ in 0..count.min(self.scroll_bottom - self.pos.row + 1) {
+            self.remove_row(usize::from(self.scroll_bottom));
+            self.insert_row(usize::from(self.pos.row), self.new_row());
             self.rows[usize::from(self.scroll_bottom)].wrap(false);
         }
     }
 
     pub fn delete_lines(&mut self, count: u16) {
-        for _ in 0..(count.min(self.size.rows - self.pos.row)) {
-            self.rows
-                .insert(usize::from(self.scroll_bottom) + 1, self.new_row());
-            self.rows.remove(usize::from(self.pos.row));
+        if !self.in_scroll_region() {
+            return;
+        }
+        for _ in 0..count.min(self.scroll_bottom - self.pos.row + 1) {
+            self.remove_row(usize::from(self.pos.row));
+            self.insert_row(usize::from(self.scroll_bottom), self.new_row());
         }
     }
 
     pub fn scroll_up(&mut self, count: u16) {
-        for _ in 0..(count.min(self.size.rows - self.scroll_top)) {
-            self.rows
-                .insert(usize::from(self.scroll_bottom) + 1, self.new_row());
-            let removed = self.rows.remove(usize::from(self.scroll_top));
-            // A top-anchored region is the main terminal viewport with
-            // reserved rows below it (typically an agent input/status area).
-            // Lines leaving row zero are real terminal history even when the
-            // region's bottom margin stops above the physical screen bottom.
-            // Regions that begin below row zero remain application-internal
-            // widgets and must not leak their rotating rows into scrollback.
+        for _ in 0..count.min(self.scroll_bottom - self.scroll_top + 1) {
+            let removed = self.remove_row(usize::from(self.scroll_top));
+            self.insert_row(usize::from(self.scroll_bottom), self.new_row());
+            // Only rows leaving the top of the terminal are terminal history;
+            // internal scrolling widgets must not leak into scrollback.
             if self.scrollback_len > 0 && self.scroll_top == 0 {
-                self.scrollback.push_back(removed);
-                while self.scrollback.len() > self.scrollback_len {
-                    self.scrollback.pop_front();
+                // Evict before insertion so a full deque never doubles its
+                // backing allocation just to discard that oldest row.
+                if self.scrollback.len() == self.scrollback_len {
+                    if let Some(oldest) = self.scrollback.pop_front() {
+                        self.row_allocation_bytes -= oldest.heap_allocation_bytes();
+                    }
                 }
+                self.row_allocation_bytes += removed.heap_allocation_bytes();
+                self.scrollback.push_back(removed);
                 if self.scrollback_offset > 0 {
                     self.scrollback_offset = self.scrollback.len().min(self.scrollback_offset + 1);
                 }
@@ -564,11 +642,9 @@ impl Grid {
     }
 
     pub fn scroll_down(&mut self, count: u16) {
-        for _ in 0..count {
-            self.rows.remove(usize::from(self.scroll_bottom));
-            self.rows
-                .insert(usize::from(self.scroll_top), self.new_row());
-            // self.scroll_bottom is maintained to always be a valid row
+        for _ in 0..count.min(self.scroll_bottom - self.scroll_top + 1) {
+            self.remove_row(usize::from(self.scroll_bottom));
+            self.insert_row(usize::from(self.scroll_top), self.new_row());
             self.rows[usize::from(self.scroll_bottom)].wrap(false);
         }
     }
@@ -722,4 +798,87 @@ pub struct Size {
 pub struct Pos {
     pub row: u16,
     pub col: u16,
+}
+
+#[cfg(test)]
+mod retention_tests {
+    use super::{Grid, Size};
+
+    fn assert_cache_matches_storage(grid: &Grid) {
+        let cells: usize = grid
+            .rows
+            .iter()
+            .chain(grid.scrollback.iter())
+            .map(crate::row::Row::heap_allocation_bytes)
+            .sum();
+        assert_eq!(grid.row_allocation_bytes, cells);
+    }
+
+    #[test]
+    fn allocation_cache_tracks_scroll_insert_delete_resize_and_trim() {
+        let mut grid = Grid::new(Size { rows: 3, cols: 10 }, 2);
+        grid.allocate_rows();
+        assert_cache_matches_storage(&grid);
+        for _ in 0..10 {
+            grid.scroll_up(u16::MAX);
+            assert_cache_matches_storage(&grid);
+            grid.scroll_down(u16::MAX);
+            assert_cache_matches_storage(&grid);
+            grid.insert_lines(u16::MAX);
+            assert_cache_matches_storage(&grid);
+            grid.delete_lines(u16::MAX);
+            assert_cache_matches_storage(&grid);
+            grid.insert_cells(u16::MAX);
+            assert_cache_matches_storage(&grid);
+            grid.delete_cells(u16::MAX);
+            assert_cache_matches_storage(&grid);
+        }
+        grid.set_size(Size { rows: 50, cols: 2 });
+        assert_cache_matches_storage(&grid);
+        grid.set_size(Size { rows: 2, cols: 50 });
+        assert_cache_matches_storage(&grid);
+        grid.set_scrollback(usize::MAX);
+        grid.retain_visible_scrollback();
+        assert_cache_matches_storage(&grid);
+        grid.trim_scrollback(0);
+        assert_cache_matches_storage(&grid);
+    }
+
+    #[test]
+    fn trim_releases_wide_row_capacity_after_narrowing() {
+        let mut grid = Grid::new(
+            Size {
+                rows: 3,
+                cols: 1000,
+            },
+            100,
+        );
+        grid.allocate_rows();
+        // Historical rows keep their authored width; dropping them must free
+        // those allocations. Live rows shrink physically after a resize.
+        for _ in 0..20 {
+            grid.scrollback.push_back(crate::row::Row::new(1000));
+        }
+        grid.set_size(Size { rows: 3, cols: 10 });
+        grid.set_scrollback(20);
+        grid.set_scrollback_limit(2);
+        assert_eq!(grid.scrollback.len(), 2);
+        assert_eq!(grid.scrollback_offset, 2);
+        assert_eq!(grid.scrollback.capacity(), 2);
+        for row in &grid.rows {
+            assert_eq!(row.allocated_cells(), 10);
+        }
+        grid.trim_scrollback(0);
+        assert_eq!(grid.scrollback.capacity(), 0);
+        assert_eq!(grid.scrollback_offset, 0);
+        assert_eq!(grid.scrollback_len(), 2);
+        grid.set_size(Size {
+            rows: 3,
+            cols: 1000,
+        });
+        grid.trim_scrollback(0);
+        for row in &grid.rows {
+            assert_eq!(row.allocated_cells(), 1000);
+        }
+    }
 }
