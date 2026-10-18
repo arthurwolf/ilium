@@ -950,8 +950,10 @@ fn open_storage(dir: &std::path::Path) -> PluginStorage {
 #[test]
 fn conf_store_01_a_stored_value_survives_closing_and_reopening() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let mut storage = open_storage(dir.path());
-    storage.put("state", "k", b"v".to_vec()).expect("put");
+    {
+        let mut storage = open_storage(dir.path());
+        storage.put("state", "k", b"v".to_vec()).expect("put");
+    }
     let storage = open_storage(dir.path());
     assert_eq!(storage.get("state", "k").expect("get"), Some(b"v".to_vec()));
 }

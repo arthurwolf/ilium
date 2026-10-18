@@ -645,10 +645,12 @@ fn some_grants(count: usize) -> Vec<ilium_plugin_api::grants::Grant> {
 #[test]
 fn hst_023_a_second_writer_cannot_open_the_store_while_the_first_holds_it() {
     let (_dir, path) = temp_grant_path();
-    let _first = GrantStore::open(&path).expect("first writer opens");
-    let second = GrantStore::open(&path);
-    // manual does not pin the lock-refusal error code, so only the refusal is asserted.
-    assert!(second.is_err(), "a second writer must be refused");
+    {
+        let _first = GrantStore::open(&path).expect("first writer opens");
+        let second = GrantStore::open(&path);
+        // manual does not pin the lock-refusal error code, so only the refusal is asserted.
+        assert!(second.is_err(), "a second writer must be refused");
+    }
     assert!(
         GrantStore::open(&path).is_ok(),
         "the lock is released on drop"

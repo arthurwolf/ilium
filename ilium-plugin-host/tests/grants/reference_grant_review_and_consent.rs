@@ -348,11 +348,13 @@ fn sec_113_corrupt_store_is_renamed_and_a_fresh_one_starts() {
 #[test]
 fn sec_114_external_edit_of_the_store_is_recorded_in_the_audit_log() {
     let dir = scratch();
-    let mut store = GrantStore::open(dir.path()).expect("opens");
-    store
-        .set("test.plugin", "key-a", "T2", &[grant("tree.read")])
-        .expect("set");
-    let path = store.path().to_owned();
+    let path = {
+        let mut store = GrantStore::open(dir.path()).expect("opens");
+        store
+            .set("test.plugin", "key-a", "T2", &[grant("tree.read")])
+            .expect("set");
+        store.path().to_owned()
+    };
     std::fs::write(&path, br#"{"version":1,"plugins":{"test.plugin":{"key":"key-a","tier":"T2","grants":["fs.read:home"]}}}"#)
         .expect("external edit");
     let _ = GrantStore::open(dir.path()).expect("reopens");
