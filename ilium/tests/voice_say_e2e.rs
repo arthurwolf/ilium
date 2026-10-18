@@ -710,8 +710,18 @@ async fn voice_say_reaches_a_terminal_through_the_real_voice_pipeline() {
     .await;
     assert!(again.success, "{} / {}", again.stdout, again.stderr);
     let again_result = records(&again).last().cloned().unwrap();
-    assert_eq!(again_result["started_voice"], false);
-    assert_eq!(mock.connection_count(), 1, "one session, never restarted");
+    assert_eq!(
+        again_result["started_voice"],
+        false,
+        "the voice session must still be running: {}",
+        failure_diagnostics(&dirs, &mock, &tui)
+    );
+    assert_eq!(
+        mock.connection_count(),
+        1,
+        "one session, never restarted: {}",
+        failure_diagnostics(&dirs, &mock, &tui)
+    );
 
     // A malformed request never reaches the model.
     let invalid = run_ilium(&dirs, &project_dir, &["voice", "say", "   "], None).await;

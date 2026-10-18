@@ -2751,7 +2751,12 @@ async fn right_click_restart_reloads_only_the_client_and_preserves_the_server() 
     );
 
     let kill_output = run_one_shot(&xdg, &project_dir, &["kill-session", SESSION_NAME]).await;
-    assert!(kill_output.status.success(), "kill-session should succeed");
+    assert!(
+        kill_output.status.success(),
+        "kill-session should succeed: {:?} / {}",
+        String::from_utf8_lossy(&kill_output.stdout),
+        session_state_report(&xdg)
+    );
     cleanup_guard.already_cleaned_up = true;
     let exited = wait_until(|| tui.has_exited(), WAIT_TIMEOUT).await;
     if !exited {
@@ -3085,7 +3090,9 @@ async fn split_view_renders_two_live_panes_and_routes_input_to_each_active_slot(
     let kill_output = run_one_shot(&xdg, &project_dir, &["kill-session", SESSION_NAME]).await;
     assert!(
         kill_output.status.success(),
-        "split test session cleanup failed"
+        "split test session cleanup failed: {:?} / {}",
+        String::from_utf8_lossy(&kill_output.stdout),
+        session_state_report(&xdg)
     );
     cleanup_guard.already_cleaned_up = true;
     let exited = wait_until(|| tui.has_exited(), WAIT_TIMEOUT).await;
@@ -3977,7 +3984,12 @@ async fn editor_line_context_menu_creates_selected_agent_and_submits_the_prompt(
     );
 
     let kill_output = run_one_shot(&xdg, &project_dir, &["kill-session", SESSION_NAME]).await;
-    assert!(kill_output.status.success(), "kill-session should succeed");
+    assert!(
+        kill_output.status.success(),
+        "kill-session should succeed: {:?} / {}",
+        String::from_utf8_lossy(&kill_output.stdout),
+        session_state_report(&xdg)
+    );
     cleanup_guard.already_cleaned_up = true;
     let exited = wait_until(|| tui.has_exited(), WAIT_TIMEOUT).await;
     if !exited {
@@ -4676,7 +4688,12 @@ async fn existing_markdown_creates_populated_boards_from_tree_and_dialog() {
     );
 
     let kill_output = run_one_shot(&xdg, &project_dir, &["kill-session", SESSION_NAME]).await;
-    assert!(kill_output.status.success(), "kill-session should succeed");
+    assert!(
+        kill_output.status.success(),
+        "kill-session should succeed: {:?} / {}",
+        String::from_utf8_lossy(&kill_output.stdout),
+        session_state_report(&xdg)
+    );
     cleanup_guard.already_cleaned_up = true;
     let exited = wait_until(|| tui.has_exited(), WAIT_TIMEOUT).await;
     if !exited {
@@ -4845,7 +4862,12 @@ async fn terminal_context_menu_schedules_countdown_and_delivers_input() {
     );
 
     let kill_output = run_one_shot(&xdg, &project_dir, &["kill-session", SESSION_NAME]).await;
-    assert!(kill_output.status.success(), "kill-session should succeed");
+    assert!(
+        kill_output.status.success(),
+        "kill-session should succeed: {:?} / {}",
+        String::from_utf8_lossy(&kill_output.stdout),
+        session_state_report(&xdg)
+    );
     cleanup_guard.already_cleaned_up = true;
     let exited = wait_until(|| tui.has_exited(), WAIT_TIMEOUT).await;
     if !exited {
@@ -5032,7 +5054,12 @@ async fn clicking_up_on_a_boundary_pane_exits_its_nested_group() {
     );
 
     let kill_output = run_one_shot(&xdg, &project_dir, &["kill-session", SESSION_NAME]).await;
-    assert!(kill_output.status.success(), "kill-session should succeed");
+    assert!(
+        kill_output.status.success(),
+        "kill-session should succeed: {:?} / {}",
+        String::from_utf8_lossy(&kill_output.stdout),
+        session_state_report(&xdg)
+    );
     cleanup_guard.already_cleaned_up = true;
     let exited = wait_until(|| tui.has_exited(), WAIT_TIMEOUT).await;
     if !exited {
@@ -5219,7 +5246,12 @@ async fn folder_browser_expands_nested_directories_and_opens_a_deep_file() {
     );
 
     let kill_output = run_one_shot(&xdg, &project_dir, &["kill-session", SESSION_NAME]).await;
-    assert!(kill_output.status.success(), "kill-session should succeed");
+    assert!(
+        kill_output.status.success(),
+        "kill-session should succeed: {:?} / {}",
+        String::from_utf8_lossy(&kill_output.stdout),
+        session_state_report(&xdg)
+    );
     cleanup_guard.already_cleaned_up = true;
     let exited = wait_until(|| tui.has_exited(), WAIT_TIMEOUT).await;
     if !exited {
@@ -5633,7 +5665,12 @@ async fn agent_debug_log_filters_panel_resizes_and_saves_the_active_view() {
     assert!(!process_log.contains("[redacted: available in Agent debug journal]"));
 
     let kill_output = run_one_shot(&xdg, &project_dir, &["kill-session", SESSION_NAME]).await;
-    assert!(kill_output.status.success(), "kill-session should succeed");
+    assert!(
+        kill_output.status.success(),
+        "kill-session should succeed: {:?} / {}",
+        String::from_utf8_lossy(&kill_output.stdout),
+        session_state_report(&xdg)
+    );
     cleanup_guard.already_cleaned_up = true;
     let exited = wait_until(|| tui.has_exited(), WAIT_TIMEOUT).await;
     if !exited {
@@ -5811,7 +5848,12 @@ async fn last_prompt_banner_splits_a_bracketed_paste_on_lone_carriage_returns() 
     );
 
     let kill_output = run_one_shot(&xdg, &project_dir, &["kill-session", SESSION_NAME]).await;
-    assert!(kill_output.status.success(), "kill-session should succeed");
+    assert!(
+        kill_output.status.success(),
+        "kill-session should succeed: {:?} / {}",
+        String::from_utf8_lossy(&kill_output.stdout),
+        session_state_report(&xdg)
+    );
     cleanup_guard.already_cleaned_up = true;
     let exited = wait_until(|| tui.has_exited(), WAIT_TIMEOUT).await;
     if !exited {
@@ -5986,7 +6028,12 @@ async fn last_prompt_banner_updates_from_ordinary_typed_keystrokes_with_a_correc
     );
 
     let kill_output = run_one_shot(&xdg, &project_dir, &["kill-session", SESSION_NAME]).await;
-    assert!(kill_output.status.success(), "kill-session should succeed");
+    assert!(
+        kill_output.status.success(),
+        "kill-session should succeed: {:?} / {}",
+        String::from_utf8_lossy(&kill_output.stdout),
+        session_state_report(&xdg)
+    );
     cleanup_guard.already_cleaned_up = true;
     let exited = wait_until(|| tui.has_exited(), WAIT_TIMEOUT).await;
     if !exited {
@@ -6107,7 +6154,12 @@ async fn last_prompt_banner_keeps_fixed_slot_for_a_short_prompt() {
     );
 
     let kill_output = run_one_shot(&xdg, &project_dir, &["kill-session", SESSION_NAME]).await;
-    assert!(kill_output.status.success(), "kill-session should succeed");
+    assert!(
+        kill_output.status.success(),
+        "kill-session should succeed: {:?} / {}",
+        String::from_utf8_lossy(&kill_output.stdout),
+        session_state_report(&xdg)
+    );
     cleanup_guard.already_cleaned_up = true;
     let exited = wait_until(|| tui.has_exited(), WAIT_TIMEOUT).await;
     if !exited {
@@ -6357,7 +6409,12 @@ async fn agent_stats_popover_previews_on_hover_pins_on_click_and_closes() {
     );
 
     let kill_output = run_one_shot(&xdg, &project_dir, &["kill-session", SESSION_NAME]).await;
-    assert!(kill_output.status.success(), "kill-session should succeed");
+    assert!(
+        kill_output.status.success(),
+        "kill-session should succeed: {:?} / {}",
+        String::from_utf8_lossy(&kill_output.stdout),
+        session_state_report(&xdg)
+    );
     cleanup_guard.already_cleaned_up = true;
     let exited = wait_until(|| tui.has_exited(), WAIT_TIMEOUT).await;
     if !exited {
