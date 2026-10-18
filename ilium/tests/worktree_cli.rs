@@ -342,9 +342,16 @@ fn ensure_server_binary() -> PathBuf {
     let built_binary = String::from_utf8_lossy(&output.stdout)
         .lines()
         .filter_map(|line| serde_json::from_str::<Value>(line).ok())
-        .filter(|message| message["reason"] == "compiler-artifact" && message["target"]["name"] == "ilium-server")
+        .filter(|message| {
+            message["reason"] == "compiler-artifact" && message["target"]["name"] == "ilium-server"
+        })
         .find_map(|message| message["executable"].as_str().map(PathBuf::from))
-        .unwrap_or_else(|| panic!("cargo reported no executable for ilium-server:\n{}", String::from_utf8_lossy(&output.stderr)));
+        .unwrap_or_else(|| {
+            panic!(
+                "cargo reported no executable for ilium-server:\n{}",
+                String::from_utf8_lossy(&output.stderr)
+            )
+        });
     assert!(
         built_binary.is_file(),
         "cargo reported {} but the file is missing",
